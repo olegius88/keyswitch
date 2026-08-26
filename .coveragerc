@@ -3,6 +3,9 @@ branch = True
 source = src/keyswitch
 
 [report]
+exclude_also =
+    class .*\bProtocol\):
+    @overload
 fail_under = 100
 precision = 0
 show_missing = True
