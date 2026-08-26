@@ -22,28 +22,97 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v7
 
-      - name: Install package validation tools
+      - name: Install runtime, test and package validation tools
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends desktop-file-utils lintian
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential \
+            ccache \
+            dbus-x11 \
+            desktop-file-utils \
+            file \
+            gir1.2-adw-1 \
+            gir1.2-gtk-4.0 \
+            hunspell-en-us \
+            hunspell-ru \
+            libglib2.0-bin \
+            libhunspell-1.7-0 \
+            libx11-6 \
+            libxkbcommon0 \
+            libxtst6 \
+            lintian \
+            onboard-data \
+            patch \
+            patchelf \
+            python3-coverage \
+            python3-dbus \
+            python3-dev \
+            python3-gi \
+            python3-pip \
+            x11-xkb-utils \
+            xauth \
+            xvfb
 
-      - name: Run unit tests
-        run: PYTHONPATH=src python3 -m unittest discover -s tests -v
+      - name: Install static typing tools
+        run: ./tools/install-typing-tools.sh "$RUNNER_TEMP/keyswitch-typing"
+
+      - name: Install pinned native build tools
+        run: ./tools/install-build-tools.sh "$RUNNER_TEMP/keyswitch-nuitka"
+
+      - name: Run maximum strict Python type checking
+        env:
+          KEYSWITCH_TYPING_ROOT: ${{ runner.temp }}/keyswitch-typing
+        run: ./tools/typecheck.sh
+
+      - name: Run unit and GTK interaction tests with 100% branch coverage
+        run: >-
+          dbus-run-session --
+          xvfb-run -a -s "-screen 0 1280x800x24"
+          ./tests/run_coverage.sh
+
+      - name: Run real X11 RECORD/XTEST end-to-end test
+        run: |
+          dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24 -noreset" \
+            bash -c 'setxkbmap -layout us,ru && GTK_A11Y=none PYTHONPATH=src python3 tests/e2e_x11.py'
+
+      - name: Run real StatusNotifierItem and DBusMenu integration test
+        run: dbus-run-session -- env PYTHONPATH=src python3 tests/e2e_tray_menu.py
+
+      - name: Enforce detector quality gates
+        run: >-
+          PYTHONPATH=src tools/evaluate_detector.py
+          --sample 10000 --dictionary-sample 10000 --strict
 
       - name: Build Debian package
+        env:
+          KEYSWITCH_NUITKA_ROOT: ${{ runner.temp }}/keyswitch-nuitka
         run: ./packaging/build-deb.sh
 
-      - name: Validate package metadata
+      - name: Validate native package metadata and contents
         run: |
-          test "$(dpkg-deb --field dist/*.deb Package)" = "keyswitch"
-          test "$(dpkg-deb --field dist/*.deb Architecture)" = "all"
+          package_version="$(sed -nE 's/^version = "([^"]+)"/\1/p' pyproject.toml | head -n 1)"
+          architecture="$(dpkg --print-architecture)"
+          package="dist/keyswitch_${package_version}_${architecture}.deb"
+          test -f "$package"
+          ./tools/verify-native-deb.sh "$package"
           desktop-file-validate packaging/io.github.olegius88.KeySwitch.desktop
-          lintian --fail-on error dist/*.deb
+          lintian --fail-on error "$package"
+
+      - name: Run packaged native executable X11 and tray E2E
+        run: |
+          package_version="$(sed -nE 's/^version = "([^"]+)"/\1/p' pyproject.toml | head -n 1)"
+          architecture="$(dpkg --print-architecture)"
+          package="dist/keyswitch_${package_version}_${architecture}.deb"
+          dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24 -noreset" \
+            bash -c 'setxkbmap -layout us,ru && GTK_USE_PORTAL=0 ./tools/run-native-e2e.sh "$1"' \
+            _ "$package"
 
       - name: Create checksum
         run: |
+          package_version="$(sed -nE 's/^version = "([^"]+)"/\1/p' pyproject.toml | head -n 1)"
+          architecture="$(dpkg --print-architecture)"
           cd dist
-          sha256sum ./*.deb > SHA256SUMS
+          sha256sum "keyswitch_${package_version}_${architecture}.deb" > SHA256SUMS
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v7
@@ -59,14 +128,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          package_version="$(dpkg-deb --field dist/*.deb Version)"
+          package_version="$(sed -nE 's/^version = "([^"]+)"/\1/p' pyproject.toml | head -n 1)"
+          architecture="$(dpkg --print-architecture)"
+          package="dist/keyswitch_${package_version}_${architecture}.deb"
           test "$GITHUB_REF_NAME" = "v$package_version"
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $GITHUB_REF_NAME already exists; keeping its published assets."
             exit 0
           fi
           gh release create "$GITHUB_REF_NAME" \
-            dist/*.deb dist/SHA256SUMS \
+            "$package" dist/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --title "KeySwitch $package_version" \

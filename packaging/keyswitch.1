@@ -1,4 +1,4 @@
-.TH KEYSWITCH 1 "August 2026" "KeySwitch 0.1.0" "User Commands"
+.TH KEYSWITCH 1 "August 2026" "KeySwitch 0.2.0" "User Commands"
 .SH NAME
 keyswitch \- automatic keyboard layout correction for Ubuntu X11
 .SH SYNOPSIS
@@ -11,7 +11,8 @@ the wrong English or Russian layout, changes the XKB group and replaces the
 mistyped word.
 .PP
 Settings, exclusions, hotkeys, history and diagnostics are available from the
-application window and its desktop indicator.
+application window. Left-clicking the desktop indicator opens its native menu
+with correction toggles, settings, history, exclusions, about and quit actions.
 .SH OPTIONS
 .TP
 .B \-\-hidden
@@ -33,6 +34,12 @@ User settings.
 .I ~/.local/share/keyswitch/history.jsonl
 Correction history, when enabled.
 .TP
+.I ~/.local/share/keyswitch/learning.json
+Explicitly learned conversions and rejected automatic corrections.
+.TP
+.I ~/.local/share/keyswitch/dictionaries/
+Optional per-user Hunspell dictionaries.
+.TP
 .I ~/.local/share/keyswitch/keyswitch.log
 Application log.
 .SH ENVIRONMENT
@@ -42,6 +49,9 @@ X11 display used for global input observation and correction.
 .TP
 .B XDG_SESSION_TYPE
 Must identify an X11 session for the global backend.
+.TP
+.B KEYSWITCH_HUNSPELL_PATH
+Optional colon-separated list of Hunspell dictionary directories.
 .SH SEE ALSO
 .BR setxkbmap (1)
 .SH BUGS

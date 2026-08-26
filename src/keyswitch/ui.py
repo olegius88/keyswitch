@@ -4,26 +4,113 @@ from __future__ import annotations
 
 import os
 import platform
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Protocol
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
+gi.require_version("Gio", "2.0")
+gi.require_version("Pango", "1.0")
 
-from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from . import __version__
 from .config import SettingsStore
-from .engine import EngineSnapshot, KeySwitchEngine
+from .engine import EngineSnapshot
 from .history import HistoryStore
+from .learning import LearningStore
 from .system import AutostartManager
+from .x11_backend import BackendProbe
 
 
 RESOURCE_DIR = Path(__file__).resolve().parent / "resources"
+
+
+@dataclass(frozen=True)
+class ApplicationChoice:
+    name: str
+    identifier: str
+    desktop_id: str
+    icon: Gio.Icon | None
+
+    @property
+    def search_text(self) -> str:
+        return f"{self.name} {self.identifier} {self.desktop_id}".casefold()
+
+
+class _NavigationRow(Gtk.ListBoxRow):
+    def __init__(self, page_name: str) -> None:
+        super().__init__()
+        self.page_name = page_name
+
+
+class _ApplicationRow(Adw.ActionRow):
+    def __init__(self, choice: ApplicationChoice) -> None:
+        super().__init__(
+            title=choice.name,
+            subtitle=f"{choice.identifier} · {choice.desktop_id}",
+        )
+        self.choice = choice
+
+
+class _UiLanguageModel(Protocol):
+    @property
+    def frequencies(self) -> dict[str, int]: ...
+
+    @property
+    def source(self) -> str: ...
+
+
+class _UiBackend(Protocol):
+    def active_application(self) -> str: ...
+
+    def probe(self) -> BackendProbe: ...
+
+
+class _UiEngine(Protocol):
+    @property
+    def backend(self) -> _UiBackend: ...
+
+    @property
+    def learning(self) -> LearningStore: ...
+
+    @property
+    def models(self) -> Mapping[int, _UiLanguageModel]: ...
+
+    def subscribe(self, callback: Callable[[EngineSnapshot], None]) -> None: ...
+
+
+def installed_application_choices() -> list[ApplicationChoice]:
+    """Return visible desktop applications with the best WM_CLASS candidate."""
+
+    choices: dict[str, ApplicationChoice] = {}
+    for application in Gio.AppInfo.get_all():
+        try:
+            if not application.should_show():
+                continue
+            desktop_id = (application.get_id() or "").removesuffix(".desktop")
+            startup_class = ""
+            if hasattr(application, "get_string"):
+                startup_class = application.get_string("StartupWMClass") or ""
+            executable = Path(application.get_executable() or "").name
+            identifier = (startup_class or executable or desktop_id).strip()
+            name = (application.get_display_name() or application.get_name() or identifier).strip()
+            if not identifier or not name:
+                continue
+            key = identifier.casefold()
+            choices.setdefault(
+                key,
+                ApplicationChoice(name, identifier, desktop_id, application.get_icon()),
+            )
+        except (GLib.Error, OSError, ValueError):
+            continue
+    return sorted(choices.values(), key=lambda item: (item.name.casefold(), item.identifier.casefold()))
 
 
 class MainWindow(Adw.ApplicationWindow):
@@ -43,7 +130,7 @@ class MainWindow(Adw.ApplicationWindow):
         application: Adw.Application,
         settings: SettingsStore,
         history: HistoryStore,
-        engine: KeySwitchEngine,
+        engine: _UiEngine,
         on_close_request: Callable[[], bool],
     ) -> None:
         super().__init__(application=application, title="KeySwitch")
@@ -54,6 +141,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._close_handler = on_close_request
         self._text_save_sources: dict[str, int] = {}
         self._settings_controls: dict[str, object] = {}
+        self._application_choices: list[ApplicationChoice] | None = None
+        self._application_rows: list[Adw.ActionRow] = []
+        self._app_picker_dialog: Adw.Dialog | None = None
         self.set_default_size(1040, 720)
         self.set_size_request(850, 600)
         self.add_css_class("keyswitch-window")
@@ -61,8 +151,11 @@ class MainWindow(Adw.ApplicationWindow):
         self._build()
         self.connect("close-request", self._on_close_request)
         self.engine.subscribe(self._engine_update_from_thread)
-        self.history.subscribe(lambda: GLib.idle_add(self.refresh_history))
+        self.history.subscribe(self._history_changed)
         self.settings.subscribe(self._setting_update_from_thread)
+
+    def _history_changed(self) -> None:
+        GLib.idle_add(self.refresh_history)
 
     def _install_css(self) -> None:
         provider = Gtk.CssProvider()
@@ -107,9 +200,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._add_diagnostics_page()
         self.nav_list.select_row(self.nav_list.get_row_at_index(0))
 
-    def _header_menu(self):
-        from gi.repository import Gio
-
+    def _header_menu(self) -> Gio.Menu:
         menu = Gio.Menu()
         menu.append("Показать обзор", "app.show")
         menu.append("Приостановить / продолжить", "app.toggle")
@@ -146,7 +237,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar_status_title.add_css_class("heading")
         self.sidebar_status_detail = Gtk.Label(label="Запуск…", xalign=0)
         self.sidebar_status_detail.add_css_class("muted")
-        self.sidebar_status_detail.set_ellipsize(3)
+        self.sidebar_status_detail.set_ellipsize(Pango.EllipsizeMode.END)
         status_text.append(self.sidebar_status_title)
         status_text.append(self.sidebar_status_detail)
         status_text.set_hexpand(True)
@@ -162,8 +253,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.nav_list.add_css_class("navigation-list")
         self.nav_list.connect("row-selected", self._navigation_selected)
         for name, label, icon_name in self.NAVIGATION:
-            row = Gtk.ListBoxRow()
-            row.page_name = name
+            row = _NavigationRow(name)
             content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
             content.add_css_class("navigation-row")
             content.append(Gtk.Image(icon_name=icon_name))
@@ -227,7 +317,7 @@ class MainWindow(Adw.ApplicationWindow):
         hero.append(top)
         self.hero_action = Gtk.Label(label="Ожидание ввода", xalign=0)
         self.hero_action.add_css_class("hero-word")
-        self.hero_action.set_ellipsize(3)
+        self.hero_action.set_ellipsize(Pango.EllipsizeMode.END)
         hero.append(self.hero_action)
         page.append(hero)
 
@@ -284,6 +374,7 @@ class MainWindow(Adw.ApplicationWindow):
         minimum.set_subtitle("Короткие фрагменты чаще бывают командами и сокращениями")
         minimum.set_value(float(self.settings.get("detection.minimum_length", 3)))
         minimum.connect("notify::value", lambda row, _p: self.settings.set("detection.minimum_length", int(row.get_value())))
+        self._settings_controls["detection.minimum_length"] = minimum
         behavior.add(minimum)
         confidence = Adw.SpinRow.new_with_range(0.5, 8.0, 0.5)
         confidence.set_title("Порог уверенности")
@@ -291,9 +382,41 @@ class MainWindow(Adw.ApplicationWindow):
         confidence.set_digits(1)
         confidence.set_value(float(self.settings.get("detection.confidence", 2.0)))
         confidence.connect("notify::value", lambda row, _p: self.settings.set("detection.confidence", float(row.get_value())))
+        self._settings_controls["detection.confidence"] = confidence
         behavior.add(confidence)
         behavior.add(self._switch_row("detection.aggressive", "Агрессивное распознавание", "Разрешить исправлять незнакомые слова по характерным сочетаниям букв"))
+        behavior.add(self._switch_row("detection.context_aware", "Учитывать контекст", "Предыдущее слово и язык в текущем приложении помогают разрешать сомнения; контекст хранится только в памяти"))
+        behavior.add(self._switch_row("detection.protect_code", "Защищать код и сокращения", "Не трогать URL, пути, слова с цифрами, ALL-CAPS и camelCase"))
         page.append(behavior)
+
+        learning = Adw.PreferencesGroup(
+            title="Самообучение",
+            description="KeySwitch сохраняет только слова, которые вы преобразовали вручную или вернули после ложного исправления.",
+        )
+        learning.add(self._switch_row("detection.learning", "Учиться на моих действиях", "Ручные преобразования создают правила, а отмена запрещает повторять ошибку"))
+        confirmations = Adw.SpinRow.new_with_range(1, 5, 1)
+        confirmations.set_title("Подтверждений для нового правила")
+        confirmations.set_subtitle("Два одинаковых ручных преобразования защищают от случайного обучения")
+        confirmations.set_value(float(self.settings.get("detection.learning_confirmations", 2)))
+        confirmations.connect(
+            "notify::value",
+            lambda row, _parameter: self.settings.set(
+                "detection.learning_confirmations", int(row.get_value())
+            ),
+        )
+        self._settings_controls["detection.learning_confirmations"] = confirmations
+        learning.add(confirmations)
+        rules, rejections = self.engine.learning.counts()
+        self.learning_status_row = Adw.ActionRow(
+            title="Локальная модель пользователя",
+            subtitle=self._learning_summary(rules, rejections),
+        )
+        clear_learning = Gtk.Button(label="Очистить", valign=Gtk.Align.CENTER)
+        clear_learning.add_css_class("destructive-action")
+        clear_learning.connect("clicked", lambda _button: self._confirm_clear_learning())
+        self.learning_status_row.add_suffix(clear_learning)
+        learning.add(self.learning_status_row)
+        page.append(learning)
 
         triggers = Adw.PreferencesGroup(title="Исправлять после")
         triggers.add(self._switch_row("detection.correct_on_space", "Пробела", "Основной и самый предсказуемый триггер"))
@@ -400,21 +523,43 @@ class MainWindow(Adw.ApplicationWindow):
             "Исключения и приватность",
             "Отключите исправления для отдельных приложений или слов, где раскладка намеренно необычна.",
         )
-        active = Adw.PreferencesGroup(title="Текущее приложение")
-        self.active_app_row = Adw.ActionRow(title="Окно с фокусом", subtitle="Нажмите кнопку, чтобы перечитать WM_CLASS")
-        active_button = Gtk.Button(label="Определить", valign=Gtk.Align.CENTER)
-        active_button.connect("clicked", lambda _b: self._detect_active_application())
-        self.active_app_row.add_suffix(active_button)
-        active.add(self.active_app_row)
-        page.append(active)
-
-        apps_group = Adw.PreferencesGroup(
-            title="Не исправлять в приложениях",
-            description="По одному имени WM_CLASS на строку; совпадение без учёта регистра и допускает часть имени.",
+        picker = Adw.PreferencesGroup(
+            title="Добавить приложение",
+            description="Выберите окно прицелом, найдите установленное приложение в каталоге или укажите WM_CLASS вручную.",
         )
-        self.apps_view = self._text_editor("exclusions.applications", 110)
-        apps_group.add(self._editor_row(self.apps_view))
-        page.append(apps_group)
+        self.active_app_row = Adw.ActionRow(
+            title="Выбор приложения",
+            subtitle="При выборе окна KeySwitch скроется на 2,5 секунды — переключитесь в нужное приложение.",
+        )
+        catalog_button = Gtk.Button(label="Из списка…", valign=Gtk.Align.CENTER)
+        catalog_button.connect("clicked", lambda _button: self._show_application_picker())
+        capture_button = Gtk.Button(label="Выбрать окно", valign=Gtk.Align.CENTER)
+        capture_button.add_css_class("suggested-action")
+        capture_button.connect("clicked", lambda _button: self._start_active_application_capture())
+        self.active_app_row.add_suffix(catalog_button)
+        self.active_app_row.add_suffix(capture_button)
+        picker.add(self.active_app_row)
+
+        manual_row = Adw.ActionRow(
+            title="Добавить вручную",
+            subtitle="Имя WM_CLASS или executable, например code, firefox или telegram-desktop",
+        )
+        self.manual_app_entry = Gtk.Entry(placeholder_text="WM_CLASS", width_chars=22)
+        self.manual_app_entry.set_valign(Gtk.Align.CENTER)
+        self.manual_app_entry.connect("activate", lambda _entry: self._add_manual_application())
+        manual_button = Gtk.Button(label="Добавить", valign=Gtk.Align.CENTER)
+        manual_button.connect("clicked", lambda _button: self._add_manual_application())
+        manual_row.add_suffix(self.manual_app_entry)
+        manual_row.add_suffix(manual_button)
+        picker.add(manual_row)
+        page.append(picker)
+
+        self.apps_group = Adw.PreferencesGroup(
+            title="Приложения-исключения",
+            description="KeySwitch не исправляет ввод, если WM_CLASS активного окна содержит одно из этих имён.",
+        )
+        page.append(self.apps_group)
+        self._refresh_application_exclusions()
 
         words_group = Adw.PreferencesGroup(
             title="Игнорируемые слова",
@@ -439,7 +584,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _text_editor(self, path: str, height: int) -> Gtk.TextView:
         view = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, top_margin=10, bottom_margin=10, left_margin=10, right_margin=10)
         view.set_size_request(-1, height)
-        values = self.settings.get(path, [])
+        values: list[str] = self.settings.get(path, [])
         view.get_buffer().set_text("\n".join(values))
         view.get_buffer().connect("changed", lambda buffer: self._debounce_text_save(path, buffer))
         return view
@@ -481,7 +626,25 @@ class MainWindow(Adw.ApplicationWindow):
         theme.set_selected(keys.index(current) if current in keys else 0)
         theme.connect("notify::selected", lambda row, _p: self._set_theme(keys[row.get_selected()]))
         appearance.add(theme)
-        appearance.add(self._switch_row("appearance.show_indicator", "Значок в системной панели", "Щелчок открывает окно, средняя кнопка ставит движок на паузу"))
+        appearance.add(self._switch_row("appearance.show_indicator", "Значок в системной панели", "Щелчок открывает меню быстрых действий, средняя кнопка ставит движок на паузу"))
+        indicator_style = Adw.ComboRow(
+            title="Вид индикатора раскладки",
+            subtitle="Показывать EN/RU или флаги США и России, как в Punto Switcher",
+        )
+        indicator_style.set_model(Gtk.StringList.new(["EN / RU", "Флаги стран"]))
+        indicator_keys = ["letters", "flags"]
+        current_indicator = str(self.settings.get("appearance.indicator_style", "letters"))
+        indicator_style.set_selected(
+            indicator_keys.index(current_indicator) if current_indicator in indicator_keys else 0
+        )
+        indicator_style.connect(
+            "notify::selected",
+            lambda row, _parameter: self.settings.set(
+                "appearance.indicator_style", indicator_keys[row.get_selected()]
+            ),
+        )
+        self._settings_controls["appearance.indicator_style"] = indicator_style
+        appearance.add(indicator_style)
         appearance.add(self._switch_row("general.close_to_tray", "Сворачивать при закрытии окна", "Фоновая коррекция продолжит работать"))
         page.append(appearance)
 
@@ -506,7 +669,10 @@ class MainWindow(Adw.ApplicationWindow):
         page.append(maintenance)
 
     def _autostart_row(self) -> Adw.SwitchRow:
-        row = Adw.SwitchRow(title="Запускать вместе с системой", subtitle="Создаёт запись XDG Autostart только для текущего пользователя")
+        row = Adw.SwitchRow(
+            title="Запускать после входа в систему",
+            subtitle="После перезагрузки KeySwitch запустится при следующем входе в рабочий стол",
+        )
         row.set_active(self.autostart.enabled())
         row.connect("notify::active", self._autostart_toggled)
         return row
@@ -556,6 +722,7 @@ class MainWindow(Adw.ApplicationWindow):
         locations = Adw.PreferencesGroup(title="Локальные данные")
         locations.add(Adw.ActionRow(title="Настройки", subtitle=str(self.settings.path)))
         locations.add(Adw.ActionRow(title="История", subtitle=str(self.history.path)))
+        locations.add(Adw.ActionRow(title="Самообучение", subtitle=str(self.engine.learning.path)))
         page.append(locations)
 
         copy_button = Gtk.Button(label="Скопировать диагностику", icon_name="edit-copy-symbolic", halign=Gtk.Align.START)
@@ -579,11 +746,21 @@ class MainWindow(Adw.ApplicationWindow):
     def _service_toggled(self, switch: Gtk.Switch, _parameter: object) -> None:
         self.settings.set("enabled", switch.get_active())
 
+    def show_page(self, page_name: str) -> bool:
+        for index in range(len(self.NAVIGATION)):
+            row = self.nav_list.get_row_at_index(index)
+            if isinstance(row, _NavigationRow) and row.page_name == page_name:
+                self.nav_list.select_row(row)
+                return True
+        return False
+
     def _navigation_selected(self, _listbox: Gtk.ListBox, row: Gtk.ListBoxRow | None) -> None:
-        if row is not None:
+        if isinstance(row, _NavigationRow):
             self.stack.set_visible_child_name(row.page_name)
             if row.page_name == "history":
                 self.refresh_history()
+            elif row.page_name == "automation" and hasattr(self, "learning_status_row"):
+                self._refresh_learning_status()
 
     def _engine_update_from_thread(self, snapshot: EngineSnapshot) -> None:
         GLib.idle_add(self._apply_engine_snapshot, snapshot)
@@ -613,6 +790,15 @@ class MainWindow(Adw.ApplicationWindow):
         control = self._settings_controls.get(path)
         if isinstance(control, Adw.SwitchRow) and control.get_active() != bool(value):
             control.set_active(bool(value))
+        if isinstance(control, Adw.SpinRow) and isinstance(value, (int, float)):
+            if abs(control.get_value() - float(value)) > 1e-9:
+                control.set_value(float(value))
+        if path == "appearance.indicator_style" and isinstance(control, Adw.ComboRow):
+            selected = 1 if value == "flags" else 0
+            if control.get_selected() != selected:
+                control.set_selected(selected)
+        if path == "exclusions.applications" and hasattr(self, "apps_group"):
+            self._refresh_application_exclusions()
         if path == "enabled" and self.service_switch.get_active() != bool(value):
             self.service_switch.set_active(bool(value))
         return GLib.SOURCE_REMOVE
@@ -664,13 +850,159 @@ class MainWindow(Adw.ApplicationWindow):
             word = "записей"
         return f"{count} {word}"
 
-    def _detect_active_application(self) -> None:
-        application = self.engine.backend.active_application() or "Не удалось определить"
-        self.active_app_row.set_subtitle(application)
+    def _application_catalog(self) -> list[ApplicationChoice]:
+        if self._application_choices is None:
+            self._application_choices = installed_application_choices()
+        return self._application_choices
+
+    def _refresh_application_exclusions(self) -> None:
+        for row in self._application_rows:
+            self.apps_group.remove(row)
+        self._application_rows.clear()
+        catalog = {item.identifier.casefold(): item for item in self._application_catalog()}
+        applications: list[str] = self.settings.get(
+            "exclusions.applications", []
+        )
+        if not applications:
+            row = Adw.ActionRow(
+                title="Исключений пока нет",
+                subtitle="Добавьте приложение одним из способов выше.",
+            )
+            row.add_prefix(Gtk.Image(icon_name="emblem-ok-symbolic"))
+            self.apps_group.add(row)
+            self._application_rows.append(row)
+            return
+        for identifier in applications:
+            choice = catalog.get(str(identifier).casefold())
+            row = Adw.ActionRow(
+                title=choice.name if choice else str(identifier),
+                subtitle=f"WM_CLASS / executable: {identifier}",
+            )
+            if choice and choice.icon:
+                row.add_prefix(Gtk.Image.new_from_gicon(choice.icon))
+            else:
+                row.add_prefix(Gtk.Image(icon_name="application-x-executable-symbolic"))
+            remove = Gtk.Button(
+                icon_name="list-remove-symbolic",
+                tooltip_text=f"Удалить {identifier} из исключений",
+                valign=Gtk.Align.CENTER,
+            )
+            remove.connect(
+                "clicked", lambda _button, value=str(identifier): self._remove_application_exclusion(value)
+            )
+            row.add_suffix(remove)
+            self.apps_group.add(row)
+            self._application_rows.append(row)
+
+    def _add_application_exclusion(self, identifier: str, display_name: str = "") -> None:
+        value = identifier.strip()
+        if not value:
+            self.toast("Не удалось определить имя приложения")
+            return
+        current: list[str] = self.settings.get("exclusions.applications", [])
+        applications = [str(item) for item in current]
+        if any(item.casefold() == value.casefold() for item in applications):
+            self.toast(f"{display_name or value} уже находится в исключениях")
+            return
+        applications.append(value)
+        self.settings.set("exclusions.applications", applications)
+        self.toast(f"Добавлено в исключения: {display_name or value}")
+
+    def _remove_application_exclusion(self, identifier: str) -> None:
+        current: list[str] = self.settings.get("exclusions.applications", [])
+        applications = [
+            str(item)
+            for item in current
+            if str(item).casefold() != identifier.casefold()
+        ]
+        self.settings.set("exclusions.applications", applications)
+        self.toast(f"Удалено из исключений: {identifier}")
+
+    def _add_manual_application(self) -> None:
+        value = self.manual_app_entry.get_text().strip()
+        self._add_application_exclusion(value)
+        if value:
+            self.manual_app_entry.set_text("")
+
+    def _start_active_application_capture(self) -> None:
+        self.active_app_row.set_subtitle("Переключитесь в нужное приложение — захват через 2,5 секунды…")
+        self.toast("KeySwitch скрыт: активируйте окно, которое нужно исключить")
+        self.set_visible(False)
+        GLib.timeout_add(2500, self._finish_active_application_capture)
+
+    def _finish_active_application_capture(self) -> bool:
+        application = self.engine.backend.active_application().strip()
+        self.present()
+        if not application or application.casefold() == "keyswitch":
+            self.active_app_row.set_subtitle("Окно не выбрано. Повторите и переключитесь в другое приложение.")
+            self.toast("Не удалось выбрать внешнее приложение")
+            return GLib.SOURCE_REMOVE
+        self.active_app_row.set_subtitle(f"Выбрано окно: {application}")
+        self._add_application_exclusion(application)
+        return GLib.SOURCE_REMOVE
+
+    def _show_application_picker(self) -> None:
+        dialog = Adw.Dialog()
+        dialog.set_content_width(620)
+        dialog.set_content_height(620)
+        toolbar = Adw.ToolbarView()
+        header = Adw.HeaderBar()
+        title = Gtk.Label(label="Выберите приложение")
+        title.add_css_class("heading")
+        header.set_title_widget(title)
+        close = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Закрыть")
+        close.connect("clicked", lambda _button: dialog.close())
+        header.pack_start(close)
+        toolbar.add_top_bar(header)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        content.set_margin_top(12)
+        content.set_margin_bottom(12)
+        content.set_margin_start(12)
+        content.set_margin_end(12)
+        search = Gtk.SearchEntry(placeholder_text="Поиск по названию, WM_CLASS или executable")
+        content.append(search)
+        applications = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
+        applications.add_css_class("boxed-list")
+        for choice in self._application_catalog():
+            row = _ApplicationRow(choice)
+            if choice.icon:
+                row.add_prefix(Gtk.Image.new_from_gicon(choice.icon))
+            applications.append(row)
+
+        def matches_search(row: Gtk.ListBoxRow) -> bool:
+            return isinstance(row, _ApplicationRow) and (
+                search.get_text().strip().casefold() in row.choice.search_text
+            )
+
+        applications.set_filter_func(matches_search)
+        search.connect("search-changed", lambda _entry: applications.invalidate_filter())
+
+        def selected(_listbox: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
+            if not isinstance(row, _ApplicationRow):
+                return
+            choice = row.choice
+            self._add_application_exclusion(choice.identifier, choice.name)
+            dialog.close()
+
+        applications.connect("row-activated", selected)
+        scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+        scroll.set_vexpand(True)
+        scroll.set_child(applications)
+        content.append(scroll)
+        toolbar.set_content(content)
+        dialog.set_child(toolbar)
+        dialog.connect("closed", lambda _dialog: setattr(self, "_app_picker_dialog", None))
+        self._app_picker_dialog = dialog
+        dialog.present(self)
+        search.grab_focus()
 
     def _autostart_toggled(self, row: Adw.SwitchRow, _parameter: object) -> None:
         try:
-            self.autostart.set_enabled(row.get_active())
+            self.autostart.set_enabled(
+                row.get_active(),
+                start_hidden=bool(self.settings.get("general.start_hidden", True)),
+            )
             self.settings.set("general.autostart", row.get_active())
             self.toast("Автозапуск включён" if row.get_active() else "Автозапуск выключен")
         except OSError as error:
@@ -705,6 +1037,38 @@ class MainWindow(Adw.ApplicationWindow):
             self.history.clear()
             self.toast("История очищена")
 
+    @staticmethod
+    def _learning_summary(rules: int, rejections: int) -> str:
+        return f"Подтверждённых правил: {rules} · запретов после отмены: {rejections}"
+
+    def _refresh_learning_status(self) -> None:
+        rules, rejections = self.engine.learning.counts()
+        self.learning_status_row.set_subtitle(
+            self._learning_summary(rules, rejections)
+        )
+
+    def _confirm_clear_learning(self) -> None:
+        dialog = Adw.AlertDialog(
+            heading="Очистить самообучение?",
+            body="Будут удалены выученные правила и запомненные ложные срабатывания. Обычные настройки и история не изменятся.",
+        )
+        dialog.add_response("cancel", "Отмена")
+        dialog.add_response("clear", "Очистить")
+        dialog.set_response_appearance("clear", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        dialog.connect(
+            "response", lambda _dialog, response: self._clear_learning_response(response)
+        )
+        dialog.present(self)
+
+    def _clear_learning_response(self, response: str) -> None:
+        if response != "clear":
+            return
+        self.engine.learning.clear()
+        self._refresh_learning_status()
+        self.toast("Самообучение очищено")
+
     def _confirm_reset(self) -> None:
         dialog = Adw.AlertDialog(
             heading="Сбросить настройки?",
@@ -719,11 +1083,14 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _reset_response(self, response: str) -> None:
         if response == "reset":
-            self.autostart.set_enabled(False)
             self.settings.reset()
+            self.autostart.set_enabled(
+                bool(self.settings.get("general.autostart", True)),
+                start_hidden=bool(self.settings.get("general.start_hidden", True)),
+            )
             self.toast("Настройки сброшены; перезапустите окно для обновления всех полей")
 
-    def _copy_diagnostics(self, probe) -> None:
+    def _copy_diagnostics(self, probe: BackendProbe) -> None:
         text = "\n".join(
             (
                 f"KeySwitch {__version__}",
@@ -737,7 +1104,11 @@ class MainWindow(Adw.ApplicationWindow):
                 f"Backend error: {probe.error or 'none'}",
             )
         )
-        clipboard = Gdk.Display.get_default().get_clipboard()
+        display = Gdk.Display.get_default()
+        if display is None:
+            self.toast("Буфер обмена недоступен")
+            return
+        clipboard = display.get_clipboard()
         clipboard.set(text)
         self.toast("Диагностика скопирована")
 

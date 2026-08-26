@@ -1,0 +1,3 @@
+# The standalone executable intentionally bundles CPython. Ubuntu's libpython
+# contains its internal expat copy and ships the same narrowly scoped override.
+keyswitch binary: embedded-library expat [usr/lib/keyswitch/libpython*.so.*]

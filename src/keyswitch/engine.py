@@ -5,14 +5,16 @@ from __future__ import annotations
 import queue
 import threading
 import time
-from dataclasses import dataclass, replace
-from typing import Callable
+from dataclasses import dataclass
+from collections.abc import Callable, Iterable
+from typing import Protocol
 
 from .config import SettingsStore
 from .detector import DetectionDecision, LanguageDetector
 from .history import HistoryEntry, HistoryStore
 from .language_model import LanguageModel
-from .x11_backend import KeyEvent, X11Backend
+from .learning import LearningStore
+from .x11_backend import BackendProbe, KeyEvent, X11Backend
 
 
 MODIFIER_KEYS = {
@@ -51,6 +53,37 @@ class EngineSnapshot:
     last_error: str = ""
 
 
+@dataclass(frozen=True)
+class LanguageContext:
+    group: int
+    words: dict[int, str]
+    updated_at: float
+
+
+class InputBackend(Protocol):
+    """Backend operations used by the engine and diagnostics UI."""
+
+    def start(self, listener: Callable[[KeyEvent], None]) -> None: ...
+
+    def stop(self) -> None: ...
+
+    def close(self) -> None: ...
+
+    def current_group(self) -> int: ...
+
+    def active_application(self) -> str: ...
+
+    def probe(self) -> BackendProbe: ...
+
+    def inject_correction(
+        self,
+        strokes: Iterable[KeyEvent],
+        target_group: int,
+        boundary: KeyEvent | None,
+        source_group: int | None = None,
+    ) -> None: ...
+
+
 class Hotkey:
     MODIFIERS = {"ctrl", "control", "alt", "shift", "super", "meta"}
 
@@ -84,17 +117,23 @@ class KeySwitchEngine:
         self,
         settings: SettingsStore,
         history: HistoryStore,
-        backend: X11Backend | None = None,
+        backend: InputBackend | None = None,
+        learning: LearningStore | None = None,
     ) -> None:
         self.settings = settings
         self.history = history
-        locales = settings.get("detection.language_models", ["en_US", "ru_RU"])
+        locales: list[str] = settings.get(
+            "detection.language_models", ["en_US", "ru_RU"]
+        )
         self.models = {
             index: LanguageModel.load(locale)
             for index, locale in enumerate(locales[:2])
         }
         self.detector = LanguageDetector(self.models)
-        self.backend = backend or X11Backend(group_count=len(self.models))
+        self.backend: InputBackend = backend or X11Backend(
+            group_count=len(self.models)
+        )
+        self.learning = learning or LearningStore(history.path.with_name("learning.json"))
         self._events: queue.Queue[KeyEvent | None] = queue.Queue(maxsize=4096)
         self._worker: threading.Thread | None = None
         self._running = threading.Event()
@@ -106,6 +145,8 @@ class KeySwitchEngine:
         self._pending_trigger_keycode = -1
         self._last_committed: CorrectionPlan | None = None
         self._last_correction: CorrectionPlan | None = None
+        self._pending_learning_action: tuple[str, int, str, int] | None = None
+        self._contexts: dict[str, LanguageContext] = {}
         self._snapshot = EngineSnapshot(
             enabled=bool(settings.get("enabled", True)),
             correction_count=len(history.read()),
@@ -178,6 +219,7 @@ class KeySwitchEngine:
             try:
                 event = self._events.get(timeout=0.5)
             except queue.Empty:
+                self._poll_current_group()
                 continue
             if event is None:
                 break
@@ -188,6 +230,8 @@ class KeySwitchEngine:
                 self._update(last_error=str(error), last_action="Ошибка обработки ввода")
 
     def _handle(self, event: KeyEvent) -> None:
+        if 0 <= event.group < len(self.models) and event.group != self.snapshot.current_group:
+            self._update(current_group=event.group)
         if event.pressed:
             self._pressed.add(event.keycode)
         else:
@@ -221,7 +265,10 @@ class KeySwitchEngine:
                 self._strokes.pop()
                 self._update(current_word=self._text_for_group(self._strokes, self._source_group))
             return
-        if event.character and event.character.isalpha():
+        if self._is_layout_letter(event):
+            if not event.character.isalpha() and self._ambiguous_key_is_boundary(event):
+                self._commit_word(event)
+                return
             if self._source_group not in (-1, event.group):
                 self._clear_word()
             self._source_group = event.group
@@ -263,23 +310,138 @@ class KeySwitchEngine:
         )
         self._last_committed = plan
         should_analyze = bool(self.settings.get("enabled", True)) and self._boundary_enabled(boundary)
-        if should_analyze and not self._application_excluded(application):
-            decision = self.detector.decide(
-                original,
-                alternatives,
-                source_group,
-                minimum_length=int(self.settings.get("detection.minimum_length", 3)),
-                confidence_threshold=float(self.settings.get("detection.confidence", 2.0)),
-                ignored_words=set(self.settings.get("exclusions.words", [])),
-                aggressive=bool(self.settings.get("detection.aggressive", False)),
+        excluded = self._application_excluded(application)
+        if should_analyze and not excluded:
+            decision = self._decide_word(
+                original, alternatives, source_group, application
             )
             if decision.should_convert:
                 plan = self._plan_from_decision(strokes, boundary, application, decision)
                 self._pending = plan
+                self._pending_learning_action = None
                 self._pending_trigger_keycode = boundary.keycode
+            else:
+                self._remember_context(application, source_group, strokes)
+        else:
+            self._remember_context(application, source_group, strokes)
         self._strokes = []
         self._source_group = -1
         self._update(current_word="", current_group=boundary.group)
+
+    @staticmethod
+    def _is_layout_letter(event: KeyEvent) -> bool:
+        return any(character.isalpha() for character in event.characters)
+
+    def _ambiguous_key_is_boundary(self, event: KeyEvent) -> bool:
+        """Resolve a key that is punctuation here but a letter in another layout.
+
+        If the word accumulated before this key is already recognisable, the
+        key is punctuation and can safely trigger a correction. Otherwise it is
+        retained as a physical stroke (for example `,fpf` -> `база`).
+        """
+
+        if not self._strokes or self._source_group < 0:
+            return False
+        if event.character in {"'", "-"}:
+            return False
+        if any(
+            not stroke.character.isalpha() and self._is_layout_letter(stroke)
+            for stroke in self._strokes
+        ):
+            return False
+        strokes = tuple(self._strokes)
+        original = self._text_for_group(strokes, self._source_group)
+        alternatives = {
+            group: self._text_for_group(strokes, group)
+            for group in self.models
+            if group != self._source_group
+        }
+        application = self.backend.active_application()
+        decision = self._decide_word(
+            original, alternatives, self._source_group, application
+        )
+        effective_length = max(
+            len(LanguageModel.normalize(original)),
+            *(len(LanguageModel.normalize(value)) for value in alternatives.values()),
+        )
+        protected_boundary = bool(
+            self.settings.get("detection.protect_code", True)
+        ) and self.detector.is_protected_token(original)
+        ignored_words: list[str] = self.settings.get("exclusions.words", [])
+        ignored_boundary = self.detector.token_key(original) in {
+            self.detector.token_key(word)
+            for word in ignored_words
+        }
+        natural_source_boundary = (
+            effective_length >= 4 and decision.source_score.ngram_score >= -0.25
+        )
+        return decision.should_convert or protected_boundary or ignored_boundary or (
+            decision.source_score.known
+            and effective_length
+            >= int(self.settings.get("detection.minimum_length", 3))
+        ) or natural_source_boundary
+
+    def _decide_word(
+        self,
+        original: str,
+        alternatives: dict[int, str],
+        source_group: int,
+        application: str,
+    ) -> DetectionDecision:
+        context_words, context_group = self._context_for(application)
+        context_aware = bool(self.settings.get("detection.context_aware", True))
+        learning_enabled = bool(self.settings.get("detection.learning", True))
+        confirmations = int(self.settings.get("detection.learning_confirmations", 2))
+        ignored_words: list[str] = self.settings.get("exclusions.words", [])
+        return self.detector.decide(
+            original,
+            alternatives,
+            source_group,
+            minimum_length=int(self.settings.get("detection.minimum_length", 3)),
+            confidence_threshold=float(self.settings.get("detection.confidence", 2.0)),
+            ignored_words=set(ignored_words),
+            aggressive=bool(self.settings.get("detection.aggressive", False)),
+            protect_code=bool(self.settings.get("detection.protect_code", True)),
+            previous_words=context_words if context_aware else {},
+            context_group=context_group if context_aware else None,
+            forced_target_group=(
+                self.learning.forced_target(source_group, original, confirmations)
+                if learning_enabled
+                else None
+            ),
+            rejected_targets=(
+                self.learning.rejected_targets(source_group, original)
+                if learning_enabled
+                else set()
+            ),
+        )
+
+    def _context_for(self, application: str) -> tuple[dict[int, str], int | None]:
+        if not application.strip():
+            return {}, None
+        key = application.casefold()
+        context = self._contexts.get(key)
+        if context is None or time.monotonic() - context.updated_at > 45.0:
+            return {}, None
+        return dict(context.words), context.group
+
+    def _remember_context(
+        self,
+        application: str,
+        group: int,
+        strokes: tuple[KeyEvent, ...] | list[KeyEvent],
+    ) -> None:
+        if group not in self.models or not strokes or not application.strip():
+            return
+        words = {
+            candidate_group: self._text_for_group(strokes, candidate_group)
+            for candidate_group in self.models
+        }
+        key = application.casefold()
+        self._contexts.pop(key, None)
+        self._contexts[key] = LanguageContext(group, words, time.monotonic())
+        while len(self._contexts) > 32:
+            self._contexts.pop(next(iter(self._contexts)))
 
     @staticmethod
     def _plan_from_decision(
@@ -329,6 +491,12 @@ class KeySwitchEngine:
             application,
             False,
         )
+        self._pending_learning_action = (
+            "manual",
+            source_group,
+            self._text_for_group(strokes, source_group),
+            target,
+        )
         self._pending_trigger_keycode = trigger_keycode
         self._strokes = []
         self._source_group = -1
@@ -349,6 +517,16 @@ class KeySwitchEngine:
             previous.application,
             False,
         )
+        self._pending_learning_action = (
+            (
+                "reject",
+                previous.source_group,
+                previous.original,
+                previous.target_group,
+            )
+            if previous.automatic
+            else None
+        )
         self._pending_trigger_keycode = trigger_keycode
 
     def _maybe_execute_pending(self, event: KeyEvent) -> None:
@@ -359,15 +537,39 @@ class KeySwitchEngine:
         if self._pending_trigger_keycode != -1 or self._modifier_keycodes:
             return
         plan, self._pending = self._pending, None
+        learning_action, self._pending_learning_action = self._pending_learning_action, None
         try:
-            self.backend.inject_correction(plan.strokes, plan.target_group, plan.boundary)
+            self.backend.inject_correction(
+                plan.strokes,
+                plan.target_group,
+                plan.boundary,
+                plan.source_group,
+            )
         except Exception as error:
             self._update(last_error=str(error), last_action="Исправление не выполнено")
             return
         self._last_correction = plan
         self._last_correction_time = time.monotonic()
+        self._remember_context(plan.application, plan.target_group, plan.strokes)
+        learned_rule = False
+        rejected_rule = False
+        if learning_action is not None and bool(self.settings.get("detection.learning", True)):
+            action, source_group, word, target_group = learning_action
+            if action == "manual":
+                confirmations = self.learning.record_manual(
+                    source_group, word, target_group
+                )
+                required = int(self.settings.get("detection.learning_confirmations", 2))
+                learned_rule = confirmations >= required
+            elif action == "reject":
+                self.learning.reject(source_group, word, target_group)
+                rejected_rule = True
         count = self.snapshot.correction_count + (1 if plan.automatic else 0)
         action = f"{plan.original} → {plan.replacement}"
+        if learned_rule:
+            action += " · правило выучено"
+        elif rejected_rule:
+            action += " · ложное срабатывание запомнено"
         self._update(
             current_group=plan.target_group,
             correction_count=count,
@@ -403,9 +605,12 @@ class KeySwitchEngine:
 
     def _application_excluded(self, application: str) -> bool:
         normalized = application.casefold()
+        applications: list[str] = self.settings.get(
+            "exclusions.applications", []
+        )
         return any(
             item.casefold() in normalized
-            for item in self.settings.get("exclusions.applications", [])
+            for item in applications
             if item.strip()
         )
 
@@ -417,18 +622,55 @@ class KeySwitchEngine:
         self._strokes = []
         self._source_group = -1
         self._pending = None
-        updates: dict[str, object] = {"current_word": ""}
-        if action is not None:
-            updates["last_action"] = action
-        self._update(**updates)
+        self._pending_learning_action = None
+        if action is None:
+            self._update(current_word="")
+        else:
+            self._update(current_word="", last_action=action)
 
     def _settings_changed(self, path: str, value: object) -> None:
         if path == "enabled":
             self._update(enabled=bool(value))
 
-    def _update(self, **changes: object) -> None:
+    def _poll_current_group(self) -> None:
+        group = self.backend.current_group()
+        if 0 <= group < len(self.models) and group != self.snapshot.current_group:
+            self._update(current_group=group)
+
+    def _update(
+        self,
+        *,
+        running: bool | None = None,
+        enabled: bool | None = None,
+        backend: str | None = None,
+        current_group: int | None = None,
+        current_word: str | None = None,
+        correction_count: int | None = None,
+        last_action: str | None = None,
+        last_error: str | None = None,
+    ) -> None:
         with self._lock:
-            self._snapshot = replace(self._snapshot, **changes)
+            current = self._snapshot
+            self._snapshot = EngineSnapshot(
+                running=current.running if running is None else running,
+                enabled=current.enabled if enabled is None else enabled,
+                backend=current.backend if backend is None else backend,
+                current_group=(
+                    current.current_group if current_group is None else current_group
+                ),
+                current_word=(
+                    current.current_word if current_word is None else current_word
+                ),
+                correction_count=(
+                    current.correction_count
+                    if correction_count is None
+                    else correction_count
+                ),
+                last_action=(
+                    current.last_action if last_action is None else last_action
+                ),
+                last_error=current.last_error if last_error is None else last_error,
+            )
             callbacks = tuple(self._callbacks)
             snapshot = self._snapshot
         for callback in callbacks:

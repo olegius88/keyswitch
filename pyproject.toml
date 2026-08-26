@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "keyswitch"
-version = "0.1.0"
+version = "0.2.0"
 description = "Automatic keyboard layout correction for Ubuntu X11"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,6 +14,12 @@ authors = [{name = "Oleg Shevchuk", email = "sh.oleg@list.ru"}]
 [project.scripts]
 keyswitch = "keyswitch.app:main"
 
+[project.optional-dependencies]
+typing = [
+    "mypy==2.3.1",
+    "PyGObject-stubs==2.17.0",
+]
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 include-package-data = true
@@ -22,4 +28,29 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-keyswitch = ["resources/*"]
+keyswitch = ["py.typed", "resources/*"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src", "tests", "tools"]
+mypy_path = "typings"
+strict = true
+disallow_any_decorated = true
+disallow_any_explicit = true
+disallow_any_unimported = true
+extra_checks = true
+warn_unreachable = true
+warn_unused_configs = true
+show_error_codes = true
+pretty = true
+enable_error_code = [
+    "deprecated",
+    "exhaustive-match",
+    "ignore-without-code",
+    "mutable-override",
+    "possibly-undefined",
+    "redundant-expr",
+    "truthy-bool",
+    "truthy-iterable",
+    "unused-awaitable",
+]

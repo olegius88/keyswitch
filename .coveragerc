@@ -1,0 +1,8 @@
+[run]
+branch = True
+source = src/keyswitch
+
+[report]
+fail_under = 100
+precision = 0
+show_missing = True

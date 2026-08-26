@@ -40,13 +40,24 @@ class AutostartManager:
         if not self.path.is_file():
             return False
         try:
-            return "Hidden=true" not in self.path.read_text(encoding="utf-8")
+            fields = {}
+            for line in self.path.read_text(encoding="utf-8").splitlines():
+                key, separator, value = line.partition("=")
+                if separator:
+                    fields[key.strip().casefold()] = value.strip().casefold()
+            return (
+                fields.get("hidden", "false") != "true"
+                and fields.get("x-gnome-autostart-enabled", "true") != "false"
+            )
         except OSError:
             return False
 
-    def set_enabled(self, enabled: bool) -> None:
+    def set_enabled(self, enabled: bool, *, start_hidden: bool = True) -> None:
         if enabled:
             self.path.parent.mkdir(parents=True, exist_ok=True)
+            command = launcher_command()
+            if start_hidden:
+                command = f"{command} --hidden"
             self.path.write_text(
                 "\n".join(
                     (
@@ -54,12 +65,12 @@ class AutostartManager:
                         "Type=Application",
                         f"Name={APP_NAME}",
                         "Comment=Автоматическое исправление раскладки клавиатуры",
-                        f"Exec={launcher_command()}",
+                        f"Exec={command}",
                         "Icon=keyswitch",
                         "Terminal=false",
                         "StartupNotify=false",
+                        "Hidden=false",
                         "X-GNOME-Autostart-enabled=true",
-                        "OnlyShowIn=GNOME;XFCE;Unity;MATE;Cinnamon;",
                         "",
                     )
                 ),

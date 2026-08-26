@@ -8,6 +8,7 @@ import logging
 import signal
 import sys
 from pathlib import Path
+from typing import Protocol
 
 import gi
 
@@ -19,15 +20,41 @@ from gi.repository import Adw, Gdk, Gio, GLib  # noqa: E402
 
 from . import __version__
 from .config import SettingsStore
-from .engine import CorrectionPlan, KeySwitchEngine
+from .engine import CorrectionPlan, EngineSnapshot, KeySwitchEngine
 from .history import HistoryStore, data_dir
-from .system import APP_ID
+from .system import APP_ID, AutostartManager
 from .tray import StatusNotifierItem
 from .ui import MainWindow, RESOURCE_DIR
 from .x11_backend import X11Backend
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+class _WindowController(Protocol):
+    def present(self) -> None: ...
+
+    def toast(self, message: str) -> None: ...
+
+    def set_visible(self, visible: bool) -> None: ...
+
+    def get_visible(self) -> bool: ...
+
+    def show_page(self, page_name: str) -> bool: ...
+
+
+class _TrayController(Protocol):
+    def set_indicator_style(self, style: object) -> None: ...
+
+    def set_layout(self, group: int) -> None: ...
+
+    def set_enabled(self, enabled: bool) -> None: ...
+
+    def set_sound_enabled(self, enabled: bool) -> None: ...
+
+    def set_notifications_enabled(self, enabled: bool) -> None: ...
+
+    def close(self) -> None: ...
 
 
 def configure_logging() -> None:
@@ -46,10 +73,11 @@ class KeySwitchApplication(Adw.Application):
         self.hidden = hidden
         self.no_engine = no_engine
         self.settings = SettingsStore()
+        self.autostart = AutostartManager()
         self.history = HistoryStore(limit=int(self.settings.get("history.limit", 200)))
         self.engine = KeySwitchEngine(self.settings, self.history)
-        self.window: MainWindow | None = None
-        self.tray: StatusNotifierItem | None = None
+        self.window: _WindowController | None = None
+        self.tray: _TrayController | None = None
         self._initialized = False
         self._held = False
 
@@ -64,6 +92,7 @@ class KeySwitchApplication(Adw.Application):
             action.connect("activate", callback)
             self.add_action(action)
         self._apply_theme(str(self.settings.get("appearance.theme", "system")))
+        self._sync_autostart()
         self.settings.subscribe(self._settings_changed)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, self._signal_quit)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, self._signal_quit)
@@ -92,7 +121,8 @@ class KeySwitchApplication(Adw.Application):
                 engine_error = str(error)
                 LOGGER.exception("Не удалось запустить движок")
         self._sync_tray()
-        should_hide = self.hidden or bool(self.settings.get("general.start_hidden", False))
+        self.engine.subscribe(self._engine_snapshot_from_thread)
+        should_hide = self.hidden
         if not should_hide or engine_error:
             self.window.present()
         if engine_error:
@@ -103,8 +133,36 @@ class KeySwitchApplication(Adw.Application):
             self.window.present()
         return GLib.SOURCE_REMOVE
 
+    def _show_page(self, page_name: str) -> bool:
+        if self.window is not None:
+            self.window.show_page(page_name)
+            self.window.present()
+        return GLib.SOURCE_REMOVE
+
+    def show_history(self) -> bool:
+        return self._show_page("history")
+
+    def show_exceptions(self) -> bool:
+        return self._show_page("exceptions")
+
+    def show_about(self) -> bool:
+        return self._show_page("diagnostics")
+
     def toggle_engine(self) -> bool:
         self.settings.set("enabled", not bool(self.settings.get("enabled", True)))
+        return GLib.SOURCE_REMOVE
+
+    def toggle_sound(self) -> bool:
+        self.settings.set(
+            "general.sound", not bool(self.settings.get("general.sound", False))
+        )
+        return GLib.SOURCE_REMOVE
+
+    def toggle_notifications(self) -> bool:
+        self.settings.set(
+            "general.notifications",
+            not bool(self.settings.get("general.notifications", True)),
+        )
         return GLib.SOURCE_REMOVE
 
     def _window_close_requested(self) -> bool:
@@ -123,8 +181,24 @@ class KeySwitchApplication(Adw.Application):
                     self.show_window,
                     self.toggle_engine,
                     RESOURCE_DIR,
+                    on_sound_toggle=self.toggle_sound,
+                    on_notifications_toggle=self.toggle_notifications,
+                    on_history=self.show_history,
+                    on_exceptions=self.show_exceptions,
+                    on_about=self.show_about,
+                    on_quit=self.quit_application,
                 )
-                self.tray.set_enabled(bool(self.settings.get("enabled", True)))
+                self.tray.set_indicator_style(
+                    self.settings.get("appearance.indicator_style", "letters")
+                )
+                self.tray.set_layout(self.engine.snapshot.current_group)
+                self.tray.set_enabled(self.engine.snapshot.enabled)
+                self.tray.set_sound_enabled(
+                    bool(self.settings.get("general.sound", False))
+                )
+                self.tray.set_notifications_enabled(
+                    bool(self.settings.get("general.notifications", True))
+                )
             except Exception as error:
                 LOGGER.warning("Системный индикатор недоступен: %s", error)
                 self.tray = None
@@ -140,11 +214,37 @@ class KeySwitchApplication(Adw.Application):
     def _apply_setting(self, path: str, value: object) -> bool:
         if path == "enabled" and self.tray is not None:
             self.tray.set_enabled(bool(value))
+        elif path == "general.sound" and self.tray is not None:
+            self.tray.set_sound_enabled(bool(value))
+        elif path == "general.notifications" and self.tray is not None:
+            self.tray.set_notifications_enabled(bool(value))
         elif path == "appearance.show_indicator":
             self._sync_tray()
+        elif path == "appearance.indicator_style" and self.tray is not None:
+            self.tray.set_indicator_style(value)
         elif path == "appearance.theme":
             self._apply_theme(str(value))
+        elif path in {"general.autostart", "general.start_hidden"}:
+            self._sync_autostart()
         return GLib.SOURCE_REMOVE
+
+    def _engine_snapshot_from_thread(self, snapshot: EngineSnapshot) -> None:
+        GLib.idle_add(self._apply_engine_snapshot, snapshot)
+
+    def _apply_engine_snapshot(self, snapshot: EngineSnapshot) -> bool:
+        if self.tray is not None:
+            self.tray.set_layout(snapshot.current_group)
+            self.tray.set_enabled(snapshot.enabled)
+        return GLib.SOURCE_REMOVE
+
+    def _sync_autostart(self) -> None:
+        try:
+            self.autostart.set_enabled(
+                bool(self.settings.get("general.autostart", True)),
+                start_hidden=bool(self.settings.get("general.start_hidden", True)),
+            )
+        except OSError as error:
+            LOGGER.warning("Не удалось синхронизировать XDG Autostart: %s", error)
 
     @staticmethod
     def _apply_theme(theme: str) -> None:

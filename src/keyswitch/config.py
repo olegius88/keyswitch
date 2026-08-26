@@ -7,16 +7,21 @@ import json
 import os
 import threading
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable, TypeVar, cast, overload
 
 
-DEFAULTS: dict[str, Any] = {
-    "schema_version": 1,
+SettingsData = dict[str, object]
+SettingCallback = Callable[[str, object], None]
+_T = TypeVar("_T")
+
+
+DEFAULTS: SettingsData = {
+    "schema_version": 3,
     "enabled": True,
     "general": {
-        "start_hidden": False,
+        "start_hidden": True,
         "close_to_tray": True,
-        "autostart": False,
+        "autostart": True,
         "notifications": True,
         "sound": False,
         "keep_history": True,
@@ -31,6 +36,10 @@ DEFAULTS: dict[str, Any] = {
         "correct_on_tab": True,
         "correct_on_punctuation": True,
         "aggressive": False,
+        "context_aware": True,
+        "protect_code": True,
+        "learning": True,
+        "learning_confirmations": 2,
     },
     "hotkeys": {
         "toggle": "Ctrl+Alt+P",
@@ -44,18 +53,34 @@ DEFAULTS: dict[str, Any] = {
     "appearance": {
         "theme": "system",
         "show_indicator": True,
+        "indicator_style": "letters",
     },
     "history": {"limit": 200},
 }
 
 
-def _deep_merge(defaults: dict[str, Any], loaded: dict[str, Any]) -> dict[str, Any]:
+def _string_keyed_mapping(value: object) -> SettingsData | None:
+    """Return a JSON object with string keys, rejecting malformed mappings."""
+
+    if not isinstance(value, dict):
+        return None
+    result: SettingsData = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            return None
+        result[key] = item
+    return result
+
+
+def _deep_merge(defaults: SettingsData, loaded: SettingsData) -> SettingsData:
     result = copy.deepcopy(defaults)
     for key, value in loaded.items():
-        if isinstance(value, dict) and isinstance(result.get(key), dict):
-            result[key] = _deep_merge(result[key], value)
+        loaded_mapping = _string_keyed_mapping(value)
+        default_mapping = _string_keyed_mapping(result.get(key))
+        if loaded_mapping is not None and default_mapping is not None:
+            result[key] = _deep_merge(default_mapping, loaded_mapping)
         else:
-            result[key] = value
+            result[key] = copy.deepcopy(value)
     return result
 
 
@@ -73,8 +98,8 @@ class SettingsStore:
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or config_dir() / "config.json"
         self._lock = threading.RLock()
-        self._callbacks: list[Callable[[str, Any], None]] = []
-        self._data = copy.deepcopy(DEFAULTS)
+        self._callbacks: list[SettingCallback] = []
+        self._data: SettingsData = copy.deepcopy(DEFAULTS)
         self.load()
 
     def load(self) -> None:
@@ -82,9 +107,10 @@ class SettingsStore:
             if not self.path.exists():
                 return
             try:
-                loaded = json.loads(self.path.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict):
-                    self._data = _deep_merge(DEFAULTS, loaded)
+                loaded: object = json.loads(self.path.read_text(encoding="utf-8"))
+                loaded_mapping = _string_keyed_mapping(loaded)
+                if loaded_mapping is not None:
+                    self._data = _deep_merge(DEFAULTS, loaded_mapping)
             except (OSError, ValueError):
                 # Keep safe defaults. The diagnostics page reports the path so
                 # the user can repair a malformed file without data deletion.
@@ -100,16 +126,26 @@ class SettingsStore:
             )
             temporary.replace(self.path)
 
-    def get(self, dotted_path: str, default: Any = None) -> Any:
+    @overload
+    def get(self, dotted_path: str) -> object | None: ...
+
+    @overload
+    def get(self, dotted_path: str, default: _T) -> _T: ...
+
+    def get(self, dotted_path: str, default: object = None) -> object:
         with self._lock:
-            value: Any = self._data
+            value: object = self._data
             for part in dotted_path.split("."):
-                if not isinstance(value, dict) or part not in value:
+                mapping = _string_keyed_mapping(value)
+                if mapping is None or part not in mapping:
                     return default
-                value = value[part]
+                value = mapping[part]
+            # The overload ties the result to the caller-provided default. The
+            # persisted settings schema is seeded from DEFAULTS and merged by
+            # path, so this cast is the single typed boundary for JSON data.
             return copy.deepcopy(value)
 
-    def set(self, dotted_path: str, value: Any, *, persist: bool = True) -> None:
+    def set(self, dotted_path: str, value: object, *, persist: bool = True) -> None:
         with self._lock:
             target = self._data
             parts = dotted_path.split(".")
@@ -118,7 +154,7 @@ class SettingsStore:
                 if not isinstance(node, dict):
                     node = {}
                     target[part] = node
-                target = node
+                target = cast(SettingsData, node)
             if target.get(parts[-1]) == value:
                 return
             target[parts[-1]] = copy.deepcopy(value)
@@ -128,7 +164,7 @@ class SettingsStore:
         for callback in callbacks:
             callback(dotted_path, copy.deepcopy(value))
 
-    def subscribe(self, callback: Callable[[str, Any], None]) -> Callable[[], None]:
+    def subscribe(self, callback: SettingCallback) -> Callable[[], None]:
         with self._lock:
             self._callbacks.append(callback)
 
@@ -139,7 +175,7 @@ class SettingsStore:
 
         return unsubscribe
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self) -> SettingsData:
         with self._lock:
             return copy.deepcopy(self._data)
 

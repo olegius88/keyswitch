@@ -1,0 +1,16 @@
+--- a/gi/overrides/GLib.py
++++ b/gi/overrides/GLib.py
+@@ -1086,4 +1086,9 @@
+-if hasattr(GLibPlatform, "signal_add"):
+-    deprecated_attr(
+-        "GLib", "unix_signal_add_full", f"{GLibPlatform._namespace}.signal_add"
+-    )
++if hasattr(GLibPlatform, "signal_add"):
++    # Nuitka cannot expose a name written only through globals() while loading
++    # this override. Keep the compatibility alias explicit for frozen builds.
++    unix_signal_add_full = GLibPlatform.signal_add
++    if "unix_signal_add_full" not in __all__:
++        __all__.append("unix_signal_add_full")
++        deprecated_attr(
++            "GLib", "unix_signal_add_full", f"{GLibPlatform._namespace}.signal_add"
++        )

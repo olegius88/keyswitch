@@ -1,5 +1,9 @@
 keyswitch (@VERSION@) unstable; urgency=medium
 
-  * Initial public release for Ubuntu X11.
+  * Add ensemble layout detection, explicit local learning and false-positive
+    guards.
+  * Add application picker, default autostart and live EN/RU or flag indicator.
+  * Compile an architecture-specific standalone executable with Nuitka and
+    validate the packaged binary through real X11 and DBusMenu integration.
 
- -- Oleg Shevchuk <sh.oleg@list.ru>  Wed, 26 Aug 2026 19:00:00 +0600
+ -- Oleg Shevchuk <sh.oleg@list.ru>  Thu, 27 Aug 2026 01:25:00 +0500

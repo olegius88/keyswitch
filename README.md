@@ -3,6 +3,7 @@
 [**Русский**](README.md) · [English](README.en.md)
 
 [![GitHub release](https://img.shields.io/github/v/release/olegius88/keyswitch)](https://github.com/olegius88/keyswitch/releases/latest)
+[![Tests](https://github.com/olegius88/keyswitch/actions/workflows/tests.yml/badge.svg)](https://github.com/olegius88/keyswitch/actions/workflows/tests.yml)
 [![Debian package](https://github.com/olegius88/keyswitch/actions/workflows/release.yml/badge.svg)](https://github.com/olegius88/keyswitch/actions/workflows/release.yml)
 [![License: GPL v3+](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
@@ -16,15 +17,24 @@ Punto Switcher и EveryLang, но работает локально и испо�
 - глобальное наблюдение за вводом во всех обычных X11-приложениях;
 - автоматическое распознавание английского и русского слова после пробела,
   Enter, Tab или знака препинания;
+- ансамблевое распознавание по частотному словарю, морфологии Hunspell,
+  символьным n-граммам и недавнему контексту;
+- консервативная защита URL, путей, кода, аббревиатур, неоднозначных слов и
+  распространённых технических терминов;
+- локальное самообучение: повторное ручное преобразование создаёт правило, а
+  отмена ложного исправления запоминает запрет;
 - переключение XKB-группы и исправление уже напечатанного слова;
 - сохранение регистра: `Ghbdtn` превращается в `Привет`;
 - ручное преобразование последнего слова (`Pause`);
 - отмена последнего исправления за 10 секунд (`Ctrl+Alt+Z`);
 - глобальная пауза (`Ctrl+Alt+P`);
-- исключения по `WM_CLASS` приложения и по словам;
+- выбор приложений-исключений прицелом по активному окну, из каталога
+  установленных приложений или вручную по `WM_CLASS`;
 - локальная история только выполненных исправлений;
 - уведомления, звук, светлая/тёмная тема, XDG Autostart;
-- системный индикатор StatusNotifier в панели XFCE/KDE-совместимого окружения;
+- живой системный индикатор раскладки `EN/RU` или флагами стран; щелчок левой
+  кнопкой открывает меню с настройками, паузой, звуком, уведомлениями, историей,
+  исключениями, сведениями о программе и выходом;
 - полное окно настроек с обзором, тестовым полем и диагностикой backend.
 
 Полный поток клавиатуры не записывается. В памяти находится текущее слово, а в
@@ -54,14 +64,19 @@ cd keyswitch
 
 ## Установка DEB-пакета
 
-Скачайте `keyswitch_0.1.0_all.deb` со страницы
+Скачайте `keyswitch_0.2.0_amd64.deb` со страницы
 [последнего выпуска](https://github.com/olegius88/keyswitch/releases/latest), затем:
 
 ```bash
-sudo apt install ./keyswitch_0.1.0_all.deb
+sudo apt install ./keyswitch_0.2.0_amd64.deb
 ```
 
 Пакет установит системные зависимости и добавит KeySwitch в меню приложений.
+Приложение внутри пакета скомпилировано Nuitka в архитектурный ELF-бинарник:
+в `/usr/lib/keyswitch` нет исходных `.py` или байткода `.pyc`, а пакет не
+зависит от системного интерпретатора Python. В состав нативного runtime входит
+`libpython`, поэтому пакет для `amd64` нельзя устанавливать на другую
+архитектуру.
 
 ## Установка из исходников для текущего пользователя
 
@@ -71,8 +86,9 @@ keyswitch
 ```
 
 Установщик не требует root: он размещает приложение, launcher, desktop-файл и
-иконки внутри `~/.local`. Автозапуск не включается сам — его можно включить в
-разделе «Внешний вид и система».
+иконки внутри `~/.local`. После первого запуска XDG Autostart включён по
+умолчанию: после перезагрузки KeySwitch стартует при следующем входе в рабочий
+стол. Это можно изменить в разделе «Внешний вид и система».
 
 Удаление программы (настройки и история сохраняются):
 
@@ -87,7 +103,8 @@ keyswitch
 
 ```bash
 sudo apt install python3-gi python3-dbus gir1.2-gtk-4.0 gir1.2-adw-1 \
-  libx11-6 libxtst6 libxkbcommon0 onboard-data
+  libx11-6 libxtst6 libxkbcommon0 libhunspell-1.7-0 \
+  hunspell-en-us hunspell-ru onboard-data
 ```
 
 Активную пару XKB можно проверить командой:
@@ -104,6 +121,10 @@ setxkbmap -query
 
 - настройки: `~/.config/keyswitch/config.json`;
 - история: `~/.local/share/keyswitch/history.jsonl`;
+- явно выученные правила и отменённые исправления:
+  `~/.local/share/keyswitch/learning.json`;
+- необязательные пользовательские словари Hunspell:
+  `~/.local/share/keyswitch/dictionaries/<locale>.aff/.dic`;
 - журнал ошибок/запуска: `~/.local/share/keyswitch/keyswitch.log`;
 - автозапуск: `~/.config/autostart/io.github.olegius88.KeySwitch.desktop`.
 
@@ -114,10 +135,38 @@ setxkbmap -query
 
 ## Разработка и проверка
 
-Unit-тесты:
+Весь Python-код приложения, тестов и утилит проходит усиленный профиль
+`mypy --strict`: запрещены нетипизированные определения, явные `Any`, `Any` из
+неописанных импортов и нетипизированные декораторы; дополнительно проверяются
+недостижимые ветви, потенциально неопределённые значения и неиспользованные
+awaitable. Локальный запуск на Ubuntu:
 
 ```bash
-PYTHONPATH=src python3 -m unittest discover -s tests -v
+sudo apt install python3-pip
+./tools/install-typing-tools.sh .typing
+KEYSWITCH_TYPING_ROOT=.typing ./tools/typecheck.sh
+```
+
+Чтобы не ослаблять проверку на границе `dbus-python`, репозиторий содержит
+узкий типовой контракт только используемой части API в `typings/dbus`.
+
+Полный набор unit- и GTK interaction-тестов с обязательным 100% line/branch
+coverage (для GTK нужен активный X11 display или Xvfb):
+
+```bash
+./tests/run_coverage.sh
+```
+
+Для headless-запуска используется та же команда внутри `dbus-run-session` и
+`xvfb-run`; именно так набор выполняется в GitHub Actions. Отчёт не позволит
+сборке продолжиться, если покрытие опустится ниже 100%.
+
+Воспроизводимый прогон 40 000 частых и широких словарных слов, а также сложных
+защитных случаев:
+
+```bash
+PYTHONPATH=src tools/evaluate_detector.py \
+  --sample 10000 --dictionary-sample 10000 --strict
 ```
 
 Настоящий сквозной тест в активной X11-сессии:
@@ -126,18 +175,42 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 PYTHONPATH=src python3 tests/e2e_x11.py
 ```
 
-Успешный тест печатает `E2E_OK` после двух фактических исправлений внутри GTK
-Entry. Архитектура и критерии описаны в [DESIGN.md](DESIGN.md).
-
-Сборка DEB-пакета:
+Успешный тест печатает `E2E_OK` после четырёх фактических исправлений внутри GTK
+Entry. Отдельный интеграционный тест поднимает настоящий StatusNotifierItem и
+DBusMenu в изолированной сессии D-Bus:
 
 ```bash
-./packaging/build-deb.sh
-dpkg-deb --info dist/keyswitch_0.1.0_all.deb
+dbus-run-session -- env PYTHONPATH=src python3 tests/e2e_tray_menu.py
 ```
 
-При отправке тега `v*` workflow GitHub Actions повторяет unit-тесты, собирает
-пакет, формирует `SHA256SUMS` и публикует оба файла в GitHub Release.
+Успешный тест печатает `TRAY_MENU_E2E_OK` после регистрации индикатора, чтения
+всех пунктов меню и активации команды «Настройки». Архитектура и критерии
+описаны в [DESIGN.md](DESIGN.md), а сравнение с
+существующими решениями и обоснование модели — в
+[обзоре механизма распознавания](docs/detection-research.md).
+
+Для воспроизводимой нативной сборки DEB-пакета:
+
+```bash
+sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
+./tools/install-build-tools.sh .nuitka
+KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
+package="dist/keyswitch_0.2.0_$(dpkg --print-architecture).deb"
+./tools/verify-native-deb.sh "$package"
+```
+
+После остановки уже запущенного экземпляра полный E2E именно бинарника из
+пакета можно выполнить в активной X11-сессии:
+
+```bash
+dbus-run-session -- ./tools/run-native-e2e.sh "$package"
+```
+
+Он проверяет четыре реальные коррекции в GTK Entry, смену XKB-группы, историю,
+регистрацию StatusNotifierItem и состав всплывающего DBusMenu. При отправке
+тега `v*` GitHub Actions запускает coverage, детекторные барьеры, исходный и
+запакованный нативный E2E под Xvfb, проверяет пакет через `lintian`, формирует
+`SHA256SUMS` и публикует оба файла в GitHub Release.
 
 ## Ограничения
 
@@ -165,4 +238,8 @@ KeySwitch распространяется на условиях
   — пользовательский файл `~/.config/autostart/*.desktop`;
 - [Freedesktop StatusNotifierItem](https://specifications.freedesktop.org/status-notifier-item/latest-single/)
   — интеграция значка с панелью;
+- [Canonical DBusMenu interface](https://sources.debian.org/src/libdbusmenu/18.10.20180917~bzr492%2Brepack1-2/libdbusmenu-glib/dbus-menu.xml/)
+  — нативное всплывающее меню системного индикатора;
+- [Nuitka User Manual](https://nuitka.net/user-documentation/user-manual.html)
+  — компиляция приложения в standalone-бинарник;
 - [официальные release notes Ubuntu 26.04 LTS](https://documentation.ubuntu.com/release-notes/26.04/).

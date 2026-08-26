@@ -1,10 +1,29 @@
-"""Conservative decision logic for automatic layout correction."""
+"""Precision-first ensemble for automatic keyboard-layout correction."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import unicodedata
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
+from pathlib import Path
+from typing import Protocol
 
 from .language_model import LanguageModel, WordScore
+
+
+def _load_protected_tokens() -> frozenset[str]:
+    path = Path(__file__).resolve().parent / "resources" / "protected_tokens.txt"
+    try:
+        return frozenset(
+            line.strip().casefold()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        )
+    except OSError:
+        return frozenset()
+
+
+PROTECTED_TOKENS = _load_protected_tokens()
 
 
 @dataclass(frozen=True)
@@ -20,11 +39,29 @@ class DetectionDecision:
     target_score: WordScore
 
 
+class LanguageScorer(Protocol):
+    """Structural contract consumed by the detector."""
+
+    def score(self, word: str) -> WordScore: ...
+
+    def context_score(self, previous: str, word: str) -> float: ...
+
+    def best_single_deletion(self, word: str) -> WordScore: ...
+
+
 class LanguageDetector:
-    def __init__(self, models: dict[int, LanguageModel]) -> None:
+    """Fuse lexicons, morphology, character statistics and recent context.
+
+    False corrections are deliberately more expensive than missed ones: an
+    ambiguous token stays untouched and is always available to the manual
+    conversion hotkey. Explicit learned rules are evaluated before statistical
+    heuristics.
+    """
+
+    def __init__(self, models: Mapping[int, LanguageScorer]) -> None:
         if len(models) < 2:
             raise ValueError("At least two language models are required")
-        self.models = models
+        self.models = dict(models)
 
     def decide(
         self,
@@ -36,8 +73,14 @@ class LanguageDetector:
         confidence_threshold: float = 2.0,
         ignored_words: set[str] | None = None,
         aggressive: bool = False,
+        protect_code: bool = True,
+        previous_words: dict[int, str] | None = None,
+        context_group: int | None = None,
+        forced_target_group: int | None = None,
+        rejected_targets: set[int] | None = None,
     ) -> DetectionDecision:
-        ignored = {word.casefold() for word in (ignored_words or set())}
+        ignored = {self.token_key(word) for word in (ignored_words or set())}
+        rejected_groups = rejected_targets or set()
         source_model = self.models[source_group]
         source_score = source_model.score(original)
         rejected = DetectionDecision(
@@ -51,44 +94,159 @@ class LanguageDetector:
             source_score,
             source_score,
         )
-        normalized = LanguageModel.normalize(original)
-        if len(normalized) < minimum_length:
-            return DetectionDecision(**{**rejected.__dict__, "reason": "короткое слово"})
-        if normalized in ignored:
-            return DetectionDecision(**{**rejected.__dict__, "reason": "исключение пользователя"})
-        if any(character.isdigit() for character in original) or "_" in original:
-            return DetectionDecision(**{**rejected.__dict__, "reason": "код или число"})
-        candidates: list[tuple[float, int, str, WordScore]] = []
+        scored: list[tuple[float, int, str, WordScore]] = []
+        previous = previous_words or {}
         for group, candidate in alternatives.items():
             if group == source_group or group not in self.models or candidate == original:
                 continue
-            score = self.models[group].score(candidate)
-            candidates.append((score.value - source_score.value, group, candidate, score))
-        if not candidates:
-            return DetectionDecision(**{**rejected.__dict__, "reason": "нет другой раскладки"})
-        delta, group, replacement, target_score = max(candidates, key=lambda item: item[0])
-        safe_candidate = target_score.known and not source_score.known
-        both_known_but_clear = (
-            target_score.known
-            and source_score.known
-            and delta >= confidence_threshold + 2.5
+            target_score = self.models[group].score(candidate)
+            delta = target_score.value - source_score.value
+            delta += self._context_delta(
+                source_group,
+                group,
+                original,
+                candidate,
+                previous,
+                context_group,
+            )
+            scored.append((delta, group, candidate, target_score))
+        if not scored:
+            return replace(rejected, reason="нет другой раскладки")
+
+        delta, group, replacement, target_score = max(scored, key=lambda item: item[0])
+        normalized = LanguageModel.normalize(original)
+        original_key = self.token_key(original)
+        replacement_normalized = LanguageModel.normalize(replacement)
+        effective_length = max(
+            [len(normalized), len(replacement_normalized)]
+            + [len(LanguageModel.normalize(candidate)) for candidate in alternatives.values()]
         )
-        pattern_candidate = aggressive and target_score.gram_ratio >= 0.82 and delta >= confidence_threshold
-        should_convert = delta >= confidence_threshold and (
-            safe_candidate or both_known_but_clear or pattern_candidate
+        if effective_length < minimum_length:
+            return replace(rejected, reason="короткое слово")
+        if original_key in ignored:
+            return replace(rejected, reason="исключение пользователя")
+        if group in rejected_groups:
+            return replace(rejected, reason="отклонённое пользователем исправление")
+
+        if forced_target_group is not None:
+            forced = next(
+                (item for item in scored if item[1] == forced_target_group),
+                None,
+            )
+            if forced is not None:
+                forced_delta, forced_group, forced_text, forced_score = forced
+                return DetectionDecision(
+                    True,
+                    original,
+                    forced_text,
+                    source_group,
+                    forced_group,
+                    max(20.0, forced_delta),
+                    "подтверждённое правило пользователя",
+                    source_score,
+                    forced_score,
+                )
+
+        if protect_code and self._looks_like_protected_token(original):
+            return replace(rejected, reason="код, адрес или аббревиатура")
+
+        # A valid source token is the strongest false-positive guard. When
+        # both decodings are valid, leave the inherently ambiguous word alone.
+        if source_score.known:
+            return replace(
+                rejected,
+                reason=(
+                    "обе раскладки дают допустимое слово"
+                    if target_score.known
+                    else "исходное слово допустимо"
+                ),
+            )
+
+        if target_score.known:
+            length_relief = min(1.0, max(0, effective_length - 3) * 0.18)
+            required = max(0.65, confidence_threshold - length_relief)
+            if target_score.spell_known and not target_score.exact:
+                required += 0.15
+            context_supports_target = context_group == group
+            # A Hunspell hit is already strong morphological evidence. The
+            # n-gram score is clamped at -4 for valid but very rare forms, so
+            # accept that floor while still requiring an invalid source and a
+            # clear total-score margin.
+            morphology_is_plausible = (
+                target_score.ngram_score >= -4.0 or context_supports_target
+            )
+            should_convert = delta >= required and morphology_is_plausible
+            if target_score.exact:
+                reason = "слово найдено только в целевом частотном словаре"
+            elif should_convert:
+                reason = "словоформа подтверждена морфологическим словарём"
+            elif not morphology_is_plausible:
+                reason = "редкая словоформа без достаточного контекста"
+            else:
+                reason = "недостаточный перевес целевой словоформы"
+            return DetectionDecision(
+                should_convert,
+                original,
+                replacement,
+                source_group,
+                group,
+                delta,
+                reason,
+                source_score,
+                target_score,
+            )
+
+        # One accidental extra character should not erase otherwise decisive
+        # dictionary evidence. This does not correct the typo itself; it only
+        # chooses the layout of the original physical sequence.
+        if effective_length >= 5:
+            target_without_one = self.models[group].best_single_deletion(replacement)
+            source_without_one = source_model.best_single_deletion(original)
+            typo_delta = target_without_one.value - max(
+                source_score.value, source_without_one.value
+            )
+            if (
+                target_without_one.known
+                and not source_without_one.known
+                and typo_delta >= confidence_threshold + 0.5
+            ):
+                return DetectionDecision(
+                    True,
+                    original,
+                    replacement,
+                    source_group,
+                    group,
+                    max(delta, typo_delta),
+                    "целевая раскладка подтверждается после удаления одной опечатки",
+                    source_score,
+                    target_score,
+                )
+
+        # Unknown words can still be recognised by smoothed character n-grams,
+        # but only when the source looks distinctly unnatural. The required
+        # margin decreases with length because longer sequences carry more
+        # independent evidence.
+        length_relief = min(2.0, max(0, effective_length - 4) * 0.32)
+        required = confidence_threshold + 2.4 - length_relief
+        if aggressive:
+            required -= 0.75
+        required = max(confidence_threshold + 0.25, required)
+        source_is_unlikely = source_score.ngram_score <= (-0.65 if aggressive else -1.1)
+        target_is_plausible = target_score.ngram_score >= (-2.0 if aggressive else -1.25)
+        should_convert = (
+            effective_length >= (4 if aggressive else 5)
+            and source_is_unlikely
+            and target_is_plausible
+            and delta >= required
         )
-        if safe_candidate:
-            reason = "слово найдено только в целевом языке"
-        elif both_known_but_clear:
-            reason = "целевая форма существенно вероятнее"
-        elif pattern_candidate:
-            reason = "характерная последовательность букв"
-        elif source_score.known:
-            reason = "исходное слово допустимо"
-        elif not target_score.known:
-            reason = "целевая форма не найдена"
+        if should_convert:
+            reason = "устойчивый перевес символьной языковой модели"
+        elif not source_is_unlikely:
+            reason = "исходная последовательность похожа на допустимое слово"
+        elif not target_is_plausible:
+            reason = "целевая последовательность тоже нетипична"
         else:
-            reason = "недостаточная уверенность"
+            reason = "недостаточная уверенность статистической модели"
         return DetectionDecision(
             should_convert,
             original,
@@ -100,3 +258,65 @@ class LanguageDetector:
             source_score,
             target_score,
         )
+
+    def _context_delta(
+        self,
+        source_group: int,
+        target_group: int,
+        source_word: str,
+        target_word: str,
+        previous_words: dict[int, str],
+        context_group: int | None,
+    ) -> float:
+        source_context = self.models[source_group].context_score(
+            previous_words.get(source_group, ""), source_word
+        )
+        target_context = self.models[target_group].context_score(
+            previous_words.get(target_group, ""), target_word
+        )
+        delta = 1.75 * (target_context - source_context)
+        if context_group == target_group:
+            delta += 0.55
+        elif context_group == source_group:
+            delta -= 0.3
+        return delta
+
+    @staticmethod
+    def token_key(token: str) -> str:
+        """Case-insensitive identity that keeps layout-significant punctuation."""
+
+        return token.strip().casefold()
+
+    @staticmethod
+    def is_protected_token(token: str) -> bool:
+        """Expose the structural guard to the physical-token boundary logic."""
+
+        return LanguageDetector._looks_like_protected_token(token)
+
+    @staticmethod
+    def _looks_like_protected_token(token: str) -> bool:
+        if len(token) > 64:
+            return True
+        lowered = token.casefold()
+        if lowered in PROTECTED_TOKENS:
+            return True
+        if any(marker in lowered for marker in ("http://", "https://", "www.", "@")):
+            return True
+        if any(character.isdigit() for character in token):
+            return True
+        if any(character in "_/\\=:" for character in token):
+            return True
+        letters = [character for character in token if character.isalpha()]
+        if len(letters) >= 2 and all(character.isupper() for character in letters):
+            return True
+        if any(character.isupper() for character in letters[1:]):
+            return True
+        if any(lowered[index : index + 4] == lowered[index] * 4 for index in range(max(0, len(lowered) - 3))):
+            return True
+        scripts = {
+            "CYRILLIC" if "CYRILLIC" in unicodedata.name(character, "") else "LATIN"
+            for character in letters
+            if "CYRILLIC" in unicodedata.name(character, "")
+            or "LATIN" in unicodedata.name(character, "")
+        }
+        return len(scripts) > 1

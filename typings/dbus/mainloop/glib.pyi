@@ -1,0 +1,3 @@
+from dbus.mainloop import NativeMainLoop
+
+def DBusGMainLoop(set_as_default: bool = ...) -> NativeMainLoop: ...

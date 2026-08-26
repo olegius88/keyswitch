@@ -16,7 +16,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Protocol, cast
 
 
 LOGGER = logging.getLogger(__name__)
@@ -24,8 +24,10 @@ LOGGER = logging.getLogger(__name__)
 KEY_PRESS = 2
 KEY_RELEASE = 3
 XRECORD_FROM_SERVER = 0
+XRECORD_START_OF_DATA = 4
 XRECORD_ALL_CLIENTS = 3
 XKB_USE_CORE_KBD = 0x0100
+XRECORD_START_TIMEOUT = 5.0
 
 SHIFT_MASK = 1 << 0
 LOCK_MASK = 1 << 1
@@ -35,19 +37,19 @@ MOD4_MASK = 1 << 6
 
 
 class XRecordRange8(ctypes.Structure):
-    _fields_ = [("first", ctypes.c_ubyte), ("last", ctypes.c_ubyte)]
+    _fields_ = [("first", ctypes.c_ubyte), ("last", ctypes.c_ubyte)]  # type: ignore[mutable-override]
 
 
 class XRecordRange16(ctypes.Structure):
-    _fields_ = [("first", ctypes.c_ushort), ("last", ctypes.c_ushort)]
+    _fields_ = [("first", ctypes.c_ushort), ("last", ctypes.c_ushort)]  # type: ignore[mutable-override]
 
 
 class XRecordExtRange(ctypes.Structure):
-    _fields_ = [("ext_major", XRecordRange8), ("ext_minor", XRecordRange16)]
+    _fields_ = [("ext_major", XRecordRange8), ("ext_minor", XRecordRange16)]  # type: ignore[mutable-override]
 
 
 class XRecordRange(ctypes.Structure):
-    _fields_ = [
+    _fields_ = [  # type: ignore[mutable-override]
         ("core_requests", XRecordRange8),
         ("core_replies", XRecordRange8),
         ("ext_requests", XRecordExtRange),
@@ -61,7 +63,7 @@ class XRecordRange(ctypes.Structure):
 
 
 class XRecordInterceptData(ctypes.Structure):
-    _fields_ = [
+    _fields_ = [  # type: ignore[mutable-override]
         ("id_base", ctypes.c_ulong),
         ("server_time", ctypes.c_ulong),
         ("client_seq", ctypes.c_ulong),
@@ -73,7 +75,7 @@ class XRecordInterceptData(ctypes.Structure):
 
 
 class XkbStateRec(ctypes.Structure):
-    _fields_ = [
+    _fields_ = [  # type: ignore[mutable-override]
         ("group", ctypes.c_ubyte),
         ("locked_group", ctypes.c_ubyte),
         ("base_group", ctypes.c_ushort),
@@ -92,7 +94,16 @@ class XkbStateRec(ctypes.Structure):
 
 
 class XClassHint(ctypes.Structure):
-    _fields_ = [("res_name", ctypes.c_void_p), ("res_class", ctypes.c_void_p)]
+    _fields_ = [("res_name", ctypes.c_void_p), ("res_class", ctypes.c_void_p)]  # type: ignore[mutable-override]
+
+
+class _RecordCallback(Protocol):
+    def __call__(
+        self,
+        closure: int | None,
+        data_pointer: ctypes._Pointer[XRecordInterceptData],
+        /,
+    ) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -286,11 +297,13 @@ class X11Backend:
         self._control: int | None = None
         self._record: int | None = None
         self._context = 0
-        self._range: ctypes.POINTER(XRecordRange) | None = None
-        self._record_callback = None
+        self._range: ctypes._Pointer[XRecordRange] | None = None
+        self._record_callback: _RecordCallback | None = None
         self._thread: threading.Thread | None = None
         self._listener: Callable[[KeyEvent], None] | None = None
         self._running = threading.Event()
+        self._capture_ready = threading.Event()
+        self._capture_start_finished = threading.Event()
         self._expected: deque[tuple[bool, int]] = deque()
         self._expected_deadline = 0.0
         self._expected_lock = threading.Lock()
@@ -399,10 +412,28 @@ class X11Backend:
         if not self._context:
             self.close()
             raise X11Error("Не удалось создать контекст XRecord")
-        self._record_callback = self._libraries.record_callback_type(self._handle_record_data)
+        # XRecord uses a separate data connection. Flush the context creation
+        # on the control connection before the data connection enables it.
+        self._libraries.x11.XSync(self._control, 0)
+        self._record_callback = cast(
+            _RecordCallback,
+            self._libraries.record_callback_type(self._handle_record_data),
+        )
+        self._capture_ready.clear()
+        self._capture_start_finished.clear()
         self._running.set()
-        self._thread = threading.Thread(target=self._record_loop, name="keyswitch-xrecord", daemon=True)
+        self._thread = threading.Thread(
+            target=self._record_loop,
+            name="keyswitch-xrecord",
+            daemon=True,
+        )
         self._thread.start()
+        if not self._capture_start_finished.wait(XRECORD_START_TIMEOUT):
+            self.close()
+            raise X11Error("XRecord не подтвердил запуск за 5 секунд")
+        if not self._capture_ready.is_set():
+            self.close()
+            raise X11Error("XRecord завершился до подтверждения запуска")
 
     def _record_loop(self) -> None:
         try:
@@ -416,12 +447,18 @@ class X11Backend:
             LOGGER.exception("Ошибка цикла XRecord")
         finally:
             self._running.clear()
+            self._capture_start_finished.set()
 
     def _handle_record_data(
-        self, _closure: int, data_pointer: ctypes.POINTER(XRecordInterceptData)
+        self,
+        _closure: int | None,
+        data_pointer: ctypes._Pointer[XRecordInterceptData],
     ) -> None:
         try:
             data = data_pointer.contents
+            if data.category == XRECORD_START_OF_DATA:
+                self._capture_ready.set()
+                self._capture_start_finished.set()
             if (
                 data.category != XRECORD_FROM_SERVER
                 or data.client_swapped
@@ -538,6 +575,7 @@ class X11Backend:
         strokes: Iterable[KeyEvent],
         target_group: int,
         boundary: KeyEvent | None,
+        source_group: int | None = None,
     ) -> None:
         if not self._control:
             raise X11Error("X11 backend не запущен")
@@ -548,24 +586,65 @@ class X11Backend:
             raise X11Error("X-сервер не вернул keycode для BackSpace/Shift")
         sequence: list[tuple[bool, int]] = []
 
-        def tap(keycode: int, shifted: bool = False) -> None:
+        def tap(
+            target: list[tuple[bool, int]], keycode: int, shifted: bool = False
+        ) -> None:
             if shifted:
-                sequence.append((True, shift_keycode))
-            sequence.extend(((True, keycode), (False, keycode)))
+                target.append((True, shift_keycode))
+            target.extend(((True, keycode), (False, keycode)))
             if shifted:
-                sequence.append((False, shift_keycode))
+                target.append((False, shift_keycode))
 
         delete_count = len(stroke_list) + (1 if boundary is not None else 0)
         for _ in range(delete_count):
-            tap(backspace_keycode)
+            tap(sequence, backspace_keycode)
         for stroke in stroke_list:
-            tap(stroke.keycode, stroke.shift)
-        if boundary is not None:
-            tap(boundary.keycode, boundary.shift)
+            tap(sequence, stroke.keycode, stroke.shift)
+        rendered_source_group = (
+            source_group
+            if source_group is not None
+            else stroke_list[0].group if stroke_list else target_group
+        )
+        preserve_boundary_layout = bool(
+            boundary is not None
+            and rendered_source_group != target_group
+            and boundary.character
+            and boundary.character_for(target_group) != boundary.character
+        )
+        # Keep boundary events immutable and inject them separately. This also
+        # avoids a Nuitka 4.1/Python 3.14 list-mutation compiler regression.
+        boundary_sequence: tuple[tuple[bool, int], ...] = ()
+        if boundary is not None and boundary.shift:
+            boundary_sequence = (
+                (True, shift_keycode),
+                (True, boundary.keycode),
+                (False, boundary.keycode),
+                (False, shift_keycode),
+            )
+        elif boundary is not None:
+            boundary_sequence = (
+                (True, boundary.keycode),
+                (False, boundary.keycode),
+            )
+        target_boundary_sequence = (
+            () if preserve_boundary_layout else boundary_sequence
+        )
+        source_boundary_sequence = (
+            boundary_sequence if preserve_boundary_layout else ()
+        )
+        expected_count = (
+            len(sequence)
+            + len(target_boundary_sequence)
+            + len(source_boundary_sequence)
+        )
         with self._inject_lock:
             with self._expected_lock:
                 self._expected.extend(sequence)
-                self._expected_deadline = time.monotonic() + max(1.0, len(sequence) * 0.02)
+                self._expected.extend(target_boundary_sequence)
+                self._expected.extend(source_boundary_sequence)
+                self._expected_deadline = time.monotonic() + max(
+                    1.0, expected_count * 0.02
+                )
             self._libraries.xtst.XTestGrabControl(self._control, 1)
             try:
                 if not self._libraries.x11.XkbLockGroup(
@@ -577,6 +656,30 @@ class X11Backend:
                         self._control, keycode, int(pressed), 0
                     ):
                         raise X11Error(f"XTest отклонил keycode {keycode}")
+                for pressed, keycode in target_boundary_sequence:
+                    if not self._libraries.xtst.XTestFakeKeyEvent(
+                        self._control, keycode, int(pressed), 0
+                    ):
+                        raise X11Error(f"XTest отклонил keycode {keycode}")
+                if source_boundary_sequence:
+                    if not self._libraries.x11.XkbLockGroup(
+                        self._control, XKB_USE_CORE_KBD, rendered_source_group
+                    ):
+                        raise X11Error(
+                            "Не удалось временно включить "
+                            f"XKB-группу {rendered_source_group}"
+                        )
+                    for pressed, keycode in source_boundary_sequence:
+                        if not self._libraries.xtst.XTestFakeKeyEvent(
+                            self._control, keycode, int(pressed), 0
+                        ):
+                            raise X11Error(f"XTest отклонил keycode {keycode}")
+                    if not self._libraries.x11.XkbLockGroup(
+                        self._control, XKB_USE_CORE_KBD, target_group
+                    ):
+                        raise X11Error(
+                            f"Не удалось восстановить XKB-группу {target_group}"
+                        )
                 self._libraries.x11.XSync(self._control, 0)
             except Exception:
                 with self._expected_lock:
@@ -621,7 +724,7 @@ class X11Backend:
                 ctypes.byref(count),
             ):
                 break
-            if children:
+            if ctypes.cast(children, ctypes.c_void_p).value is not None:
                 self._libraries.x11.XFree(children)
             if not parent.value or parent.value == current:
                 break

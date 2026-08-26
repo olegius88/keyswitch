@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <clipPath id="rounded-ru"><rect x="5" y="5" width="118" height="118" rx="25"/></clipPath>
+  </defs>
+  <g clip-path="url(#rounded-ru)">
+    <rect x="5" y="5" width="118" height="40" fill="#fff"/>
+    <rect x="5" y="45" width="118" height="39" fill="#2855a5"/>
+    <rect x="5" y="84" width="118" height="39" fill="#d52b3f"/>
+  </g>
+  <rect x="7" y="7" width="114" height="114" rx="23" fill="none" stroke="#667085" stroke-width="4"/>
+</svg>

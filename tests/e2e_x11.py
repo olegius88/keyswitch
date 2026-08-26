@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import ctypes
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import gi
@@ -15,7 +16,17 @@ from gi.repository import GLib, Gtk
 from keyswitch.config import SettingsStore
 from keyswitch.engine import KeySwitchEngine
 from keyswitch.history import HistoryStore
-from keyswitch.x11_backend import X11Backend, _Libraries
+from keyswitch.x11_backend import KeyEvent, X11Backend, _Libraries
+
+
+@dataclass
+class E2EResult:
+    exit_code: int = 1
+    observed: list[tuple[str, str, int]] = field(default_factory=list)
+    events: int = 0
+    sample: list[tuple[str, str, tuple[str, ...], int]] = field(
+        default_factory=list
+    )
 
 
 class PhysicalTyper:
@@ -52,7 +63,19 @@ def main() -> int:
     engine = KeySwitchEngine(settings, history, backend)
     typer = PhysicalTyper()
     loop = GLib.MainLoop()
-    result = {"exit": 1, "first": "", "second": ""}
+    original_group = -1
+    result = E2EResult()
+    cases = (
+        ("EN keys to Russian", 0, "ghbdtn ", "привет ", 1),
+        ("RU keys to English", 1, "hello ", "hello ", 0),
+        ("punctuation key is a Russian letter", 0, ",fpf ", "база ", 1),
+        ("punctuation boundary keeps its glyph", 0, "ghbdtn,", "привет,", 1),
+    )
+
+    def abort_on_timeout() -> bool:
+        print("E2E_TIMEOUT")
+        loop.quit()
+        return GLib.SOURCE_REMOVE
 
     window = Gtk.Window(title="KeySwitch E2E")
     window.set_default_size(520, 120)
@@ -65,53 +88,76 @@ def main() -> int:
     window.present()
     entry.grab_focus()
     engine.start()
+    engine_listener = backend._listener
 
-    def type_first() -> bool:
-        backend.switch_group(0)
+    def observe(event: KeyEvent) -> None:
+        result.events += 1
+        if event.pressed and len(result.sample) < 12:
+            result.sample.append(
+                (event.key_name, event.character, event.characters, event.group)
+            )
+        assert engine_listener is not None
+        engine_listener(event)
+
+    backend._listener = observe
+    original_group = backend.current_group()
+    GLib.timeout_add_seconds(20, abort_on_timeout)
+
+    def type_case(index: int) -> bool:
+        _name, group, physical, _expected_text, _expected_group = cases[index]
+        backend.switch_group(group)
         backend._libraries.x11.XSync(backend._control, 0)
         entry.set_text("")
         entry.grab_focus()
-        typer.type("ghbdtn ")
-        GLib.timeout_add(900, verify_first)
+        typer.type(physical)
+        GLib.timeout_add(900, verify_case, index)
         return GLib.SOURCE_REMOVE
 
-    def verify_first() -> bool:
-        result["first"] = entry.get_text()
-        entry.set_text("")
-        backend.switch_group(1)
-        backend._libraries.x11.XSync(backend._control, 0)
-        entry.grab_focus()
-        typer.type("hello ")
-        GLib.timeout_add(900, verify_second)
-        return GLib.SOURCE_REMOVE
-
-    def verify_second() -> bool:
-        result["second"] = entry.get_text()
-        entries = history.read()
-        ok = (
-            result["first"] == "привет "
-            and result["second"] == "hello "
-            and len(entries) == 2
-            and backend.current_group() == 0
+    def verify_case(index: int) -> bool:
+        name, _group, _physical, expected_text, expected_group = cases[index]
+        actual_text = entry.get_text()
+        actual_group = backend.current_group()
+        result.observed.append((name, actual_text, actual_group))
+        print(
+            f"case={name!r} text={actual_text!r} group={actual_group} "
+            f"expected={expected_text!r}/{expected_group} events={result.events} "
+            f"backend_running={backend.running} engine={engine.snapshot.last_action!r}"
         )
-        print(f"first={result['first']!r}")
-        print(f"second={result['second']!r}")
-        print(f"history={[(item.original, item.replacement) for item in entries]!r}")
-        print(f"final_group={backend.current_group()}")
+        if actual_text != expected_text or actual_group != expected_group:
+            print(f"event_sample={result.sample!r}")
+            print("E2E_FAILED")
+            loop.quit()
+            return GLib.SOURCE_REMOVE
+        if index + 1 < len(cases):
+            GLib.timeout_add(200, type_case, index + 1)
+            return GLib.SOURCE_REMOVE
+        entries = history.read()
+        expected_history = [
+            ("ghbdtn", "привет"),
+            ("руддщ", "hello"),
+            (",fpf", "база"),
+            ("ghbdtn", "привет"),
+        ]
+        actual_history = [(item.original, item.replacement) for item in entries]
+        ok = actual_history == expected_history
+        print(f"history={actual_history!r}")
         print("E2E_OK" if ok else "E2E_FAILED")
-        result["exit"] = 0 if ok else 1
+        result.exit_code = 0 if ok else 1
         loop.quit()
         return GLib.SOURCE_REMOVE
 
-    GLib.timeout_add(450, type_first)
+    GLib.timeout_add(450, type_case, 0)
     try:
         loop.run()
     finally:
+        if original_group >= 0:
+            backend.switch_group(original_group)
+            backend._libraries.x11.XSync(backend._control, 0)
         engine.stop()
         typer.close()
         window.destroy()
         temporary.cleanup()
-    return int(result["exit"])
+    return result.exit_code
 
 
 if __name__ == "__main__":
