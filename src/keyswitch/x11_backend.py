@@ -1,0 +1,659 @@
+"""X11 RECORD/XKB/XTEST backend implemented against the system libraries.
+
+The module intentionally has no python-xlib dependency. ctypes declarations
+mirror the X11 headers shipped by Ubuntu and are covered by a live probe in the
+diagnostics command.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import ctypes.util
+import logging
+import os
+import struct
+import threading
+import time
+from collections import deque
+from dataclasses import dataclass
+from typing import Callable, Iterable
+
+
+LOGGER = logging.getLogger(__name__)
+
+KEY_PRESS = 2
+KEY_RELEASE = 3
+XRECORD_FROM_SERVER = 0
+XRECORD_ALL_CLIENTS = 3
+XKB_USE_CORE_KBD = 0x0100
+
+SHIFT_MASK = 1 << 0
+LOCK_MASK = 1 << 1
+CONTROL_MASK = 1 << 2
+MOD1_MASK = 1 << 3
+MOD4_MASK = 1 << 6
+
+
+class XRecordRange8(ctypes.Structure):
+    _fields_ = [("first", ctypes.c_ubyte), ("last", ctypes.c_ubyte)]
+
+
+class XRecordRange16(ctypes.Structure):
+    _fields_ = [("first", ctypes.c_ushort), ("last", ctypes.c_ushort)]
+
+
+class XRecordExtRange(ctypes.Structure):
+    _fields_ = [("ext_major", XRecordRange8), ("ext_minor", XRecordRange16)]
+
+
+class XRecordRange(ctypes.Structure):
+    _fields_ = [
+        ("core_requests", XRecordRange8),
+        ("core_replies", XRecordRange8),
+        ("ext_requests", XRecordExtRange),
+        ("ext_replies", XRecordExtRange),
+        ("delivered_events", XRecordRange8),
+        ("device_events", XRecordRange8),
+        ("errors", XRecordRange8),
+        ("client_started", ctypes.c_int),
+        ("client_died", ctypes.c_int),
+    ]
+
+
+class XRecordInterceptData(ctypes.Structure):
+    _fields_ = [
+        ("id_base", ctypes.c_ulong),
+        ("server_time", ctypes.c_ulong),
+        ("client_seq", ctypes.c_ulong),
+        ("category", ctypes.c_int),
+        ("client_swapped", ctypes.c_int),
+        ("data", ctypes.POINTER(ctypes.c_ubyte)),
+        ("data_len", ctypes.c_ulong),
+    ]
+
+
+class XkbStateRec(ctypes.Structure):
+    _fields_ = [
+        ("group", ctypes.c_ubyte),
+        ("locked_group", ctypes.c_ubyte),
+        ("base_group", ctypes.c_ushort),
+        ("latched_group", ctypes.c_ushort),
+        ("mods", ctypes.c_ubyte),
+        ("base_mods", ctypes.c_ubyte),
+        ("latched_mods", ctypes.c_ubyte),
+        ("locked_mods", ctypes.c_ubyte),
+        ("compat_state", ctypes.c_ubyte),
+        ("grab_mods", ctypes.c_ubyte),
+        ("compat_grab_mods", ctypes.c_ubyte),
+        ("lookup_mods", ctypes.c_ubyte),
+        ("compat_lookup_mods", ctypes.c_ubyte),
+        ("ptr_buttons", ctypes.c_ushort),
+    ]
+
+
+class XClassHint(ctypes.Structure):
+    _fields_ = [("res_name", ctypes.c_void_p), ("res_class", ctypes.c_void_p)]
+
+
+@dataclass(frozen=True)
+class KeyEvent:
+    pressed: bool
+    keycode: int
+    key_name: str
+    character: str
+    characters: tuple[str, ...]
+    group: int
+    state: int
+    timestamp: int
+    synthetic: bool = False
+
+    @property
+    def shift(self) -> bool:
+        return bool(self.state & SHIFT_MASK)
+
+    @property
+    def caps_lock(self) -> bool:
+        return bool(self.state & LOCK_MASK)
+
+    @property
+    def control(self) -> bool:
+        return bool(self.state & CONTROL_MASK)
+
+    @property
+    def alt(self) -> bool:
+        return bool(self.state & MOD1_MASK)
+
+    @property
+    def super_key(self) -> bool:
+        return bool(self.state & MOD4_MASK)
+
+    def character_for(self, group: int) -> str:
+        return self.characters[group] if 0 <= group < len(self.characters) else ""
+
+
+@dataclass(frozen=True)
+class BackendProbe:
+    available: bool
+    session_type: str
+    display: str
+    record_version: str
+    xtest_version: str
+    xkb_version: str
+    current_group: int
+    error: str = ""
+
+
+class X11Error(RuntimeError):
+    pass
+
+
+class _Libraries:
+    _initialized = False
+    _lock = threading.Lock()
+
+    def __init__(self) -> None:
+        x11_name = ctypes.util.find_library("X11")
+        xtst_name = ctypes.util.find_library("Xtst")
+        xkb_name = ctypes.util.find_library("xkbcommon")
+        if not x11_name or not xtst_name or not xkb_name:
+            raise X11Error("Не найдены системные библиотеки X11, Xtst или xkbcommon")
+        self.x11 = ctypes.CDLL(x11_name)
+        self.xtst = ctypes.CDLL(xtst_name)
+        self.xkb = ctypes.CDLL(xkb_name)
+        self._declare()
+        with self._lock:
+            if not self.__class__._initialized:
+                if not self.x11.XInitThreads():
+                    raise X11Error("XInitThreads завершился ошибкой")
+                self.__class__._initialized = True
+
+    def _declare(self) -> None:
+        x11, xtst, xkb = self.x11, self.xtst, self.xkb
+        x11.XInitThreads.argtypes = []
+        x11.XInitThreads.restype = ctypes.c_int
+        x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        x11.XOpenDisplay.restype = ctypes.c_void_p
+        x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+        x11.XCloseDisplay.restype = ctypes.c_int
+        x11.XFlush.argtypes = [ctypes.c_void_p]
+        x11.XFlush.restype = ctypes.c_int
+        x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        x11.XSync.restype = ctypes.c_int
+        x11.XFree.argtypes = [ctypes.c_void_p]
+        x11.XFree.restype = ctypes.c_int
+        x11.XkbKeycodeToKeysym.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_ubyte,
+            ctypes.c_int,
+            ctypes.c_int,
+        ]
+        x11.XkbKeycodeToKeysym.restype = ctypes.c_ulong
+        x11.XkbQueryExtension.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+        ]
+        x11.XkbQueryExtension.restype = ctypes.c_int
+        x11.XkbLockGroup.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint]
+        x11.XkbLockGroup.restype = ctypes.c_int
+        x11.XkbGetState.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.POINTER(XkbStateRec)]
+        x11.XkbGetState.restype = ctypes.c_int
+        x11.XKeysymToString.argtypes = [ctypes.c_ulong]
+        x11.XKeysymToString.restype = ctypes.c_char_p
+        x11.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        x11.XKeysymToKeycode.restype = ctypes.c_ubyte
+        x11.XGetInputFocus.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_ulong),
+            ctypes.POINTER(ctypes.c_int),
+        ]
+        x11.XGetInputFocus.restype = ctypes.c_int
+        x11.XGetClassHint.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(XClassHint)]
+        x11.XGetClassHint.restype = ctypes.c_int
+        x11.XQueryTree.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_ulong,
+            ctypes.POINTER(ctypes.c_ulong),
+            ctypes.POINTER(ctypes.c_ulong),
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_ulong)),
+            ctypes.POINTER(ctypes.c_uint),
+        ]
+        x11.XQueryTree.restype = ctypes.c_int
+
+        xtst.XRecordQueryVersion.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+        ]
+        xtst.XRecordQueryVersion.restype = ctypes.c_int
+        xtst.XRecordAllocRange.argtypes = []
+        xtst.XRecordAllocRange.restype = ctypes.POINTER(XRecordRange)
+        xtst.XRecordCreateContext.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_ulong),
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.POINTER(XRecordRange)),
+            ctypes.c_int,
+        ]
+        xtst.XRecordCreateContext.restype = ctypes.c_ulong
+        self.record_callback_type = ctypes.CFUNCTYPE(
+            None, ctypes.c_void_p, ctypes.POINTER(XRecordInterceptData)
+        )
+        xtst.XRecordEnableContext.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_ulong,
+            self.record_callback_type,
+            ctypes.c_void_p,
+        ]
+        xtst.XRecordEnableContext.restype = ctypes.c_int
+        xtst.XRecordDisableContext.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        xtst.XRecordDisableContext.restype = ctypes.c_int
+        xtst.XRecordFreeContext.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        xtst.XRecordFreeContext.restype = ctypes.c_int
+        xtst.XRecordFreeData.argtypes = [ctypes.POINTER(XRecordInterceptData)]
+        xtst.XRecordFreeData.restype = None
+        xtst.XTestQueryExtension.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+        ]
+        xtst.XTestQueryExtension.restype = ctypes.c_int
+        xtst.XTestFakeKeyEvent.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint,
+            ctypes.c_int,
+            ctypes.c_ulong,
+        ]
+        xtst.XTestFakeKeyEvent.restype = ctypes.c_int
+        xtst.XTestGrabControl.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        xtst.XTestGrabControl.restype = ctypes.c_int
+        xkb.xkb_keysym_to_utf32.argtypes = [ctypes.c_uint32]
+        xkb.xkb_keysym_to_utf32.restype = ctypes.c_uint32
+
+
+class X11Backend:
+    """Observe all core keyboard events and inject deterministic corrections."""
+
+    def __init__(self, group_count: int = 2) -> None:
+        self.group_count = max(2, min(group_count, 4))
+        self._libraries = _Libraries()
+        self._control: int | None = None
+        self._record: int | None = None
+        self._context = 0
+        self._range: ctypes.POINTER(XRecordRange) | None = None
+        self._record_callback = None
+        self._thread: threading.Thread | None = None
+        self._listener: Callable[[KeyEvent], None] | None = None
+        self._running = threading.Event()
+        self._expected: deque[tuple[bool, int]] = deque()
+        self._expected_deadline = 0.0
+        self._expected_lock = threading.Lock()
+        self._inject_lock = threading.Lock()
+        self._xkb_version = "—"
+
+    @property
+    def running(self) -> bool:
+        return self._running.is_set()
+
+    def _open(self) -> None:
+        if os.environ.get("XDG_SESSION_TYPE", "x11").casefold() == "wayland":
+            raise X11Error("Активна Wayland-сессия; backend этой версии работает через X11")
+        display_name = os.environ.get("DISPLAY")
+        if not display_name:
+            raise X11Error("Переменная DISPLAY не задана")
+        encoded = display_name.encode()
+        self._control = self._libraries.x11.XOpenDisplay(encoded)
+        self._record = self._libraries.x11.XOpenDisplay(encoded)
+        if not self._control or not self._record:
+            self.close()
+            raise X11Error(f"Не удалось открыть X11 display {display_name}")
+        opcode, event, error = ctypes.c_int(), ctypes.c_int(), ctypes.c_int()
+        major, minor = ctypes.c_int(1), ctypes.c_int(0)
+        if not self._libraries.x11.XkbQueryExtension(
+            self._control,
+            ctypes.byref(opcode),
+            ctypes.byref(event),
+            ctypes.byref(error),
+            ctypes.byref(major),
+            ctypes.byref(minor),
+        ):
+            self.close()
+            raise X11Error("Расширение XKB недоступно или несовместимо")
+        self._xkb_version = f"{major.value}.{minor.value}"
+
+    def probe(self) -> BackendProbe:
+        temporary = not self._control
+        try:
+            if temporary:
+                self._open()
+            assert self._control
+            major, minor = ctypes.c_int(), ctypes.c_int()
+            if not self._libraries.xtst.XRecordQueryVersion(
+                self._control, ctypes.byref(major), ctypes.byref(minor)
+            ):
+                raise X11Error("Расширение XRecord недоступно")
+            event_base, error_base = ctypes.c_int(), ctypes.c_int()
+            xtest_major, xtest_minor = ctypes.c_int(), ctypes.c_int()
+            if not self._libraries.xtst.XTestQueryExtension(
+                self._control,
+                ctypes.byref(event_base),
+                ctypes.byref(error_base),
+                ctypes.byref(xtest_major),
+                ctypes.byref(xtest_minor),
+            ):
+                raise X11Error("Расширение XTEST недоступно")
+            return BackendProbe(
+                True,
+                os.environ.get("XDG_SESSION_TYPE", "x11"),
+                os.environ.get("DISPLAY", ""),
+                f"{major.value}.{minor.value}",
+                f"{xtest_major.value}.{xtest_minor.value}",
+                self._xkb_version,
+                self.current_group(),
+            )
+        except Exception as error:
+            return BackendProbe(
+                False,
+                os.environ.get("XDG_SESSION_TYPE", "неизвестно"),
+                os.environ.get("DISPLAY", ""),
+                "—",
+                "—",
+                "—",
+                -1,
+                str(error),
+            )
+        finally:
+            if temporary:
+                self.close()
+
+    def start(self, listener: Callable[[KeyEvent], None]) -> None:
+        if self.running:
+            return
+        self._listener = listener
+        if not self._control or not self._record:
+            self._open()
+        assert self._control and self._record
+        major, minor = ctypes.c_int(), ctypes.c_int()
+        if not self._libraries.xtst.XRecordQueryVersion(
+            self._control, ctypes.byref(major), ctypes.byref(minor)
+        ):
+            self.close()
+            raise X11Error("XRecord не поддерживается X-сервером")
+        self._range = self._libraries.xtst.XRecordAllocRange()
+        if not self._range:
+            self.close()
+            raise X11Error("XRecordAllocRange не выделил диапазон событий")
+        self._range.contents.device_events.first = KEY_PRESS
+        self._range.contents.device_events.last = KEY_RELEASE
+        clients = (ctypes.c_ulong * 1)(XRECORD_ALL_CLIENTS)
+        ranges = (ctypes.POINTER(XRecordRange) * 1)(self._range)
+        self._context = self._libraries.xtst.XRecordCreateContext(
+            self._control, 0, clients, 1, ranges, 1
+        )
+        if not self._context:
+            self.close()
+            raise X11Error("Не удалось создать контекст XRecord")
+        self._record_callback = self._libraries.record_callback_type(self._handle_record_data)
+        self._running.set()
+        self._thread = threading.Thread(target=self._record_loop, name="keyswitch-xrecord", daemon=True)
+        self._thread.start()
+
+    def _record_loop(self) -> None:
+        try:
+            assert self._record and self._record_callback
+            status = self._libraries.xtst.XRecordEnableContext(
+                self._record, self._context, self._record_callback, None
+            )
+            if self._running.is_set() and not status:
+                LOGGER.error("XRecordEnableContext завершился ошибкой")
+        except Exception:
+            LOGGER.exception("Ошибка цикла XRecord")
+        finally:
+            self._running.clear()
+
+    def _handle_record_data(
+        self, _closure: int, data_pointer: ctypes.POINTER(XRecordInterceptData)
+    ) -> None:
+        try:
+            data = data_pointer.contents
+            if (
+                data.category != XRECORD_FROM_SERVER
+                or data.client_swapped
+                or not data.data
+                or not data.data_len
+            ):
+                return
+            payload = ctypes.string_at(data.data, data.data_len * 4)
+            for offset in range(0, len(payload) - 31, 32):
+                event = self._decode_event(payload[offset : offset + 32])
+                if event is not None and self._listener is not None:
+                    self._listener(event)
+        except Exception:
+            LOGGER.exception("Не удалось разобрать событие XRecord")
+        finally:
+            self._libraries.xtst.XRecordFreeData(data_pointer)
+
+    def _decode_event(self, payload: bytes) -> KeyEvent | None:
+        (
+            event_type,
+            keycode,
+            _sequence,
+            timestamp,
+            _root,
+            _event,
+            _child,
+            _root_x,
+            _root_y,
+            _event_x,
+            _event_y,
+            state,
+            _same_screen,
+            _pad,
+        ) = struct.unpack("=BBHIIIIhhhhHBB", payload)
+        event_type &= 0x7F
+        if event_type not in (KEY_PRESS, KEY_RELEASE):
+            return None
+        pressed = event_type == KEY_PRESS
+        group = (state >> 13) & 0x3
+        characters = tuple(
+            self._character_for_keycode(keycode, candidate_group, state)
+            for candidate_group in range(self.group_count)
+        )
+        character = characters[group] if group < len(characters) else ""
+        key_name = self._key_name(keycode)
+        if key_name == "Return":
+            character = "\n"
+        elif key_name in {"Tab", "ISO_Left_Tab"}:
+            character = "\t"
+        synthetic = self._consume_expected(pressed, keycode)
+        return KeyEvent(
+            pressed,
+            keycode,
+            key_name,
+            character,
+            characters,
+            group,
+            state,
+            timestamp,
+            synthetic,
+        )
+
+    def _character_for_keycode(self, keycode: int, group: int, state: int) -> str:
+        if not self._control:
+            return ""
+        shift = bool(state & SHIFT_MASK)
+        caps = bool(state & LOCK_MASK)
+        keysym = self._libraries.x11.XkbKeycodeToKeysym(
+            self._control, keycode, group, 1 if shift else 0
+        )
+        codepoint = self._libraries.xkb.xkb_keysym_to_utf32(keysym)
+        if not codepoint or codepoint > 0x10FFFF:
+            return ""
+        character = chr(codepoint)
+        if caps and character.isalpha():
+            character = character.lower() if shift else character.upper()
+        return character if character.isprintable() or character in "\t\n" else ""
+
+    def _key_name(self, keycode: int) -> str:
+        if not self._control:
+            return ""
+        keysym = self._libraries.x11.XkbKeycodeToKeysym(self._control, keycode, 0, 0)
+        name = self._libraries.x11.XKeysymToString(keysym)
+        return name.decode("ascii", "replace") if name else ""
+
+    def _consume_expected(self, pressed: bool, keycode: int) -> bool:
+        with self._expected_lock:
+            now = time.monotonic()
+            if self._expected and now > self._expected_deadline:
+                self._expected.clear()
+            if self._expected and self._expected[0] == (pressed, keycode):
+                self._expected.popleft()
+                return True
+            return False
+
+    def current_group(self) -> int:
+        if not self._control:
+            return -1
+        state = XkbStateRec()
+        result = self._libraries.x11.XkbGetState(
+            self._control, XKB_USE_CORE_KBD, ctypes.byref(state)
+        )
+        return int(state.group) if result == 0 else -1
+
+    def switch_group(self, group: int) -> None:
+        if not self._control:
+            raise X11Error("X11 backend не запущен")
+        if not self._libraries.x11.XkbLockGroup(self._control, XKB_USE_CORE_KBD, group):
+            raise X11Error(f"Не удалось переключить XKB-группу на {group}")
+        self._libraries.x11.XFlush(self._control)
+
+    def inject_correction(
+        self,
+        strokes: Iterable[KeyEvent],
+        target_group: int,
+        boundary: KeyEvent | None,
+    ) -> None:
+        if not self._control:
+            raise X11Error("X11 backend не запущен")
+        stroke_list = list(strokes)
+        backspace_keycode = int(self._libraries.x11.XKeysymToKeycode(self._control, 0xFF08))
+        shift_keycode = int(self._libraries.x11.XKeysymToKeycode(self._control, 0xFFE1))
+        if not backspace_keycode or not shift_keycode:
+            raise X11Error("X-сервер не вернул keycode для BackSpace/Shift")
+        sequence: list[tuple[bool, int]] = []
+
+        def tap(keycode: int, shifted: bool = False) -> None:
+            if shifted:
+                sequence.append((True, shift_keycode))
+            sequence.extend(((True, keycode), (False, keycode)))
+            if shifted:
+                sequence.append((False, shift_keycode))
+
+        delete_count = len(stroke_list) + (1 if boundary is not None else 0)
+        for _ in range(delete_count):
+            tap(backspace_keycode)
+        for stroke in stroke_list:
+            tap(stroke.keycode, stroke.shift)
+        if boundary is not None:
+            tap(boundary.keycode, boundary.shift)
+        with self._inject_lock:
+            with self._expected_lock:
+                self._expected.extend(sequence)
+                self._expected_deadline = time.monotonic() + max(1.0, len(sequence) * 0.02)
+            self._libraries.xtst.XTestGrabControl(self._control, 1)
+            try:
+                if not self._libraries.x11.XkbLockGroup(
+                    self._control, XKB_USE_CORE_KBD, target_group
+                ):
+                    raise X11Error(f"Не удалось включить XKB-группу {target_group}")
+                for pressed, keycode in sequence:
+                    if not self._libraries.xtst.XTestFakeKeyEvent(
+                        self._control, keycode, int(pressed), 0
+                    ):
+                        raise X11Error(f"XTest отклонил keycode {keycode}")
+                self._libraries.x11.XSync(self._control, 0)
+            except Exception:
+                with self._expected_lock:
+                    self._expected.clear()
+                raise
+            finally:
+                self._libraries.xtst.XTestGrabControl(self._control, 0)
+                self._libraries.x11.XFlush(self._control)
+
+    def active_application(self) -> str:
+        if not self._control:
+            return ""
+        window, revert = ctypes.c_ulong(), ctypes.c_int()
+        if not self._libraries.x11.XGetInputFocus(
+            self._control, ctypes.byref(window), ctypes.byref(revert)
+        ):
+            return ""
+        current = window.value
+        for _ in range(16):
+            if not current:
+                break
+            hint = XClassHint()
+            if self._libraries.x11.XGetClassHint(self._control, current, ctypes.byref(hint)):
+                try:
+                    class_name = ctypes.string_at(hint.res_class).decode("utf-8", "replace") if hint.res_class else ""
+                    resource_name = ctypes.string_at(hint.res_name).decode("utf-8", "replace") if hint.res_name else ""
+                    return class_name or resource_name
+                finally:
+                    if hint.res_name:
+                        self._libraries.x11.XFree(hint.res_name)
+                    if hint.res_class:
+                        self._libraries.x11.XFree(hint.res_class)
+            root, parent = ctypes.c_ulong(), ctypes.c_ulong()
+            children = ctypes.POINTER(ctypes.c_ulong)()
+            count = ctypes.c_uint()
+            if not self._libraries.x11.XQueryTree(
+                self._control,
+                current,
+                ctypes.byref(root),
+                ctypes.byref(parent),
+                ctypes.byref(children),
+                ctypes.byref(count),
+            ):
+                break
+            if children:
+                self._libraries.x11.XFree(children)
+            if not parent.value or parent.value == current:
+                break
+            current = parent.value
+        return ""
+
+    def stop(self) -> None:
+        if self._running.is_set() and self._control and self._context:
+            self._running.clear()
+            self._libraries.xtst.XRecordDisableContext(self._control, self._context)
+            self._libraries.x11.XSync(self._control, 0)
+        if self._thread and self._thread is not threading.current_thread():
+            self._thread.join(timeout=2.0)
+        self._thread = None
+
+    def close(self) -> None:
+        self.stop()
+        if self._context and self._control:
+            self._libraries.xtst.XRecordFreeContext(self._control, self._context)
+            self._context = 0
+        if self._range:
+            self._libraries.x11.XFree(self._range)
+            self._range = None
+        if self._record:
+            self._libraries.x11.XCloseDisplay(self._record)
+            self._record = None
+        if self._control:
+            self._libraries.x11.XCloseDisplay(self._control)
+            self._control = None
+
+    def __enter__(self) -> "X11Backend":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()

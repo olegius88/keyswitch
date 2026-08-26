@@ -1,0 +1,65 @@
+name: Build Debian package and release
+
+"on":
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Test, build and publish
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install package validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends desktop-file-utils lintian
+
+      - name: Run unit tests
+        run: PYTHONPATH=src python3 -m unittest discover -s tests -v
+
+      - name: Build Debian package
+        run: ./packaging/build-deb.sh
+
+      - name: Validate package metadata
+        run: |
+          test "$(dpkg-deb --field dist/*.deb Package)" = "keyswitch"
+          test "$(dpkg-deb --field dist/*.deb Architecture)" = "all"
+          desktop-file-validate packaging/io.github.olegius88.KeySwitch.desktop
+          lintian --fail-on error dist/*.deb
+
+      - name: Create checksum
+        run: |
+          cd dist
+          sha256sum ./*.deb > SHA256SUMS
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: keyswitch-debian-package
+          path: |
+            dist/*.deb
+            dist/SHA256SUMS
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          package_version="$(dpkg-deb --field dist/*.deb Version)"
+          test "$GITHUB_REF_NAME" = "v$package_version"
+          gh release create "$GITHUB_REF_NAME" \
+            dist/*.deb dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "KeySwitch $package_version" \
+            --notes-file RELEASE_NOTES.md

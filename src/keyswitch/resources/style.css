@@ -1,0 +1,133 @@
+.keyswitch-window {
+  background: @window_bg_color;
+}
+
+.keyswitch-sidebar {
+  background: alpha(@card_bg_color, .78);
+  border-right: 1px solid alpha(@borders, .65);
+}
+
+.brand-mark {
+  background: linear-gradient(135deg, #7c5cff, #3b82f6);
+  border-radius: 13px;
+  color: white;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.brand-title {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.brand-caption, .muted {
+  opacity: .68;
+}
+
+.sidebar-status {
+  margin: 8px 12px 14px;
+  padding: 12px;
+  border-radius: 14px;
+  background: alpha(@accent_bg_color, .10);
+  border: 1px solid alpha(@accent_bg_color, .22);
+}
+
+.navigation-list {
+  background: transparent;
+}
+
+.navigation-list row {
+  margin: 2px 10px;
+  border-radius: 10px;
+}
+
+.navigation-list row:selected {
+  background: alpha(@accent_bg_color, .15);
+  color: @accent_color;
+}
+
+.navigation-row {
+  padding: 10px 12px;
+}
+
+.page-content {
+  padding: 26px 32px 40px;
+}
+
+.page-title {
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.page-subtitle {
+  opacity: .68;
+  font-size: 14px;
+}
+
+.hero-card {
+  background: linear-gradient(135deg, alpha(#7c5cff, .96), alpha(#3478f6, .96));
+  color: white;
+  border-radius: 20px;
+  padding: 24px;
+  box-shadow: 0 8px 28px alpha(#111827, .14);
+}
+
+.hero-title {
+  font-size: 25px;
+  font-weight: 800;
+}
+
+.hero-subtitle {
+  color: alpha(white, .82);
+}
+
+.hero-word {
+  font-size: 20px;
+  font-weight: 700;
+  font-family: monospace;
+}
+
+.status-pill {
+  background: alpha(white, .18);
+  border: 1px solid alpha(white, .25);
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-weight: 700;
+}
+
+.stat-card {
+  background: @card_bg_color;
+  border: 1px solid alpha(@borders, .6);
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: 0 2px 8px alpha(#111827, .05);
+}
+
+.stat-value {
+  font-size: 25px;
+  font-weight: 800;
+}
+
+.section-heading {
+  font-size: 17px;
+  font-weight: 750;
+}
+
+.history-pair {
+  font-weight: 700;
+  font-family: monospace;
+}
+
+.privacy-card {
+  background: alpha(@success_bg_color, .10);
+  border: 1px solid alpha(@success_bg_color, .25);
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.error-card {
+  background: alpha(@error_bg_color, .11);
+  border: 1px solid alpha(@error_bg_color, .3);
+  border-radius: 14px;
+  padding: 14px;
+}

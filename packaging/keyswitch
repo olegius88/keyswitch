@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+
+PYTHONPATH=/usr/lib/keyswitch${PYTHONPATH:+:$PYTHONPATH}
+export PYTHONPATH
+
+exec /usr/bin/python3 -m keyswitch "$@"

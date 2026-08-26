@@ -1,0 +1,48 @@
+.TH KEYSWITCH 1 "August 2026" "KeySwitch 0.1.0" "User Commands"
+.SH NAME
+keyswitch \- automatic keyboard layout correction for Ubuntu X11
+.SH SYNOPSIS
+.B keyswitch
+.RI [ options ]
+.SH DESCRIPTION
+.B KeySwitch
+observes keyboard events in the current X11 session, detects words entered in
+the wrong English or Russian layout, changes the XKB group and replaces the
+mistyped word.
+.PP
+Settings, exclusions, hotkeys, history and diagnostics are available from the
+application window and its desktop indicator.
+.SH OPTIONS
+.TP
+.B \-\-hidden
+Start without presenting the main window.
+.TP
+.B \-\-diagnose
+Probe the X11 RECORD, XTEST and XKB backend, print JSON and exit.
+.TP
+.B \-\-version
+Print the installed KeySwitch version and exit.
+.TP
+.BR \-h , " \-\-help"
+Show command-line help and exit.
+.SH FILES
+.TP
+.I ~/.config/keyswitch/config.json
+User settings.
+.TP
+.I ~/.local/share/keyswitch/history.jsonl
+Correction history, when enabled.
+.TP
+.I ~/.local/share/keyswitch/keyswitch.log
+Application log.
+.SH ENVIRONMENT
+.TP
+.B DISPLAY
+X11 display used for global input observation and correction.
+.TP
+.B XDG_SESSION_TYPE
+Must identify an X11 session for the global backend.
+.SH SEE ALSO
+.BR setxkbmap (1)
+.SH BUGS
+Report issues at https://github.com/olegius88/keyswitch/issues.

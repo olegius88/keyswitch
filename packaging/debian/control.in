@@ -1,0 +1,15 @@
+Package: keyswitch
+Version: @VERSION@
+Section: utils
+Priority: optional
+Architecture: all
+Maintainer: Oleg Shevchuk <sh.oleg@list.ru>
+Depends: python3 (>= 3.10), python3-gi, python3-dbus, gir1.2-gtk-4.0, gir1.2-adw-1, libx11-6, libxtst6, libxkbcommon0, onboard-data
+Homepage: https://github.com/olegius88/keyswitch
+Description: automatic EN/RU keyboard layout correction for Ubuntu X11
+ KeySwitch detects words entered using the wrong English or Russian keyboard
+ layout, switches the XKB group and replaces the already typed word.
+ .
+ It includes a GTK 4 and Libadwaita settings interface, global hotkeys,
+ application and word exclusions, correction history, autostart integration
+ and a desktop status indicator.

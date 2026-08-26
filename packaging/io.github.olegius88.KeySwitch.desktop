@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=KeySwitch
+Name[ru]=KeySwitch — умная раскладка
+Comment=Automatic keyboard layout correction
+Comment[ru]=Автоматическое исправление раскладки клавиатуры
+Exec=keyswitch
+Icon=keyswitch
+Terminal=false
+Categories=Utility;GTK;
+Keywords=keyboard;layout;language;switcher;клавиатура;раскладка;
+StartupNotify=true
