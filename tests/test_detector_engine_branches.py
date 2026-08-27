@@ -316,6 +316,10 @@ class EngineBranchTests(unittest.TestCase):
         self.settings.set("enabled", False)
         self.settings.set("appearance.theme", "dark")
         self.assertFalse(self.engine.snapshot.enabled)
+        self.engine._manual_layout_group = 1
+        self.settings.reset()
+        self.assertTrue(self.engine.snapshot.enabled)
+        self.assertIsNone(self.engine._manual_layout_group)
         self.engine._update(last_action="updated")
         self.assertEqual(snapshots[-1].last_action, "updated")
 

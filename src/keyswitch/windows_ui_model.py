@@ -1,0 +1,213 @@
+"""Declarative settings catalogue shared by the Windows UI and tests."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Literal
+
+
+ControlKind = Literal["bool", "choice", "int", "float", "text"]
+
+
+@dataclass(frozen=True)
+class SettingSpec:
+    path: str
+    title: str
+    description: str
+    kind: ControlKind
+    choices: tuple[tuple[str, str], ...] = ()
+    minimum: float = 0.0
+    maximum: float = 100.0
+    step: float = 1.0
+
+
+AUTOCORRECTION_SETTINGS = (
+    SettingSpec(
+        "enabled",
+        "Автоматически исправлять раскладку",
+        "Анализировать завершённые слова и исправлять уверенные ошибки.",
+        "bool",
+    ),
+    SettingSpec(
+        "detection.minimum_length",
+        "Минимальная длина слова",
+        "Короткие последовательности остаются без изменений.",
+        "int",
+        minimum=2,
+        maximum=12,
+    ),
+    SettingSpec(
+        "detection.confidence",
+        "Порог уверенности",
+        "Большее значение уменьшает число автоматических исправлений.",
+        "float",
+        minimum=0.5,
+        maximum=10.0,
+        step=0.1,
+    ),
+    SettingSpec(
+        "detection.respect_manual_layout",
+        "Учитывать ручную смену языка",
+        "Не исправлять первое слово после выбранной пользователем раскладки.",
+        "bool",
+    ),
+    SettingSpec(
+        "detection.context_aware",
+        "Учитывать предыдущие слова",
+        "Использовать недавний языковой контекст текущего приложения.",
+        "bool",
+    ),
+    SettingSpec(
+        "detection.protect_code",
+        "Защищать код, URL и сокращения",
+        "Оставлять технические токены и адреса без автокоррекции.",
+        "bool",
+    ),
+    SettingSpec(
+        "detection.aggressive",
+        "Расширенное распознавание",
+        "Исправлять больше неизвестных слов по символьной модели.",
+        "bool",
+    ),
+    SettingSpec(
+        "detection.learning",
+        "Локальное обучение",
+        "Создавать правила после повторных ручных преобразований.",
+        "bool",
+    ),
+    SettingSpec(
+        "detection.learning_confirmations",
+        "Подтверждений для правила",
+        "Сколько ручных преобразований требуется для автоматического правила.",
+        "int",
+        minimum=1,
+        maximum=10,
+    ),
+)
+
+
+TRIGGER_SETTINGS = (
+    SettingSpec(
+        "detection.correct_on_space",
+        "Пробел",
+        "Проверять слово перед пробелом.",
+        "bool",
+    ),
+    SettingSpec(
+        "detection.correct_on_enter",
+        "Enter",
+        "Проверять слово перед переводом строки.",
+        "bool",
+    ),
+    SettingSpec(
+        "detection.correct_on_tab",
+        "Tab",
+        "Проверять слово перед переходом к следующему полю.",
+        "bool",
+    ),
+    SettingSpec(
+        "detection.correct_on_punctuation",
+        "Знаки препинания",
+        "Проверять слово перед точкой, запятой и другими разделителями.",
+        "bool",
+    ),
+)
+
+
+HOTKEY_SETTINGS = (
+    SettingSpec(
+        "hotkeys.toggle",
+        "Включить или приостановить",
+        "Глобальная пауза автоматического переключения.",
+        "text",
+    ),
+    SettingSpec(
+        "hotkeys.convert_last",
+        "Преобразовать последнее слово",
+        "Ручная смена раскладки уже введённого слова.",
+        "text",
+    ),
+    SettingSpec(
+        "hotkeys.undo",
+        "Отменить исправление",
+        "Вернуть последнее автоматическое исправление в течение 10 секунд.",
+        "text",
+    ),
+)
+
+
+SYSTEM_SETTINGS = (
+    SettingSpec(
+        "general.autostart",
+        "Запускать вместе с Windows",
+        "Стартовать после входа пользователя в систему.",
+        "bool",
+    ),
+    SettingSpec(
+        "general.start_hidden",
+        "Запускать свёрнутым в трей",
+        "Не показывать окно настроек после автоматического запуска.",
+        "bool",
+    ),
+    SettingSpec(
+        "general.close_to_tray",
+        "Закрывать окно в трей",
+        "Кнопка закрытия скрывает окно, а движок продолжает работать.",
+        "bool",
+    ),
+    SettingSpec(
+        "appearance.show_indicator",
+        "Показывать индикатор в области уведомлений",
+        "Иконка показывает текущую раскладку и открывает меню KeySwitch.",
+        "bool",
+    ),
+    SettingSpec(
+        "appearance.indicator_style",
+        "Вид индикатора",
+        "Двухбуквенное обозначение или флаг страны.",
+        "choice",
+        choices=(("letters", "EN / RU"), ("flags", "Флаги стран")),
+    ),
+    SettingSpec(
+        "appearance.theme",
+        "Тема окна",
+        "Системная, светлая или тёмная цветовая схема.",
+        "choice",
+        choices=(("system", "Системная"), ("light", "Светлая"), ("dark", "Тёмная")),
+    ),
+    SettingSpec(
+        "general.notifications",
+        "Уведомления об исправлениях",
+        "Показывать исходное и исправленное слово.",
+        "bool",
+    ),
+    SettingSpec(
+        "general.sound",
+        "Звук исправления",
+        "Воспроизводить системный сигнал после замены.",
+        "bool",
+    ),
+    SettingSpec(
+        "general.keep_history",
+        "Сохранять историю",
+        "Записывать локально только пары исправленных слов.",
+        "bool",
+    ),
+    SettingSpec(
+        "history.limit",
+        "Размер истории",
+        "Максимальное число локально сохранённых исправлений.",
+        "int",
+        minimum=10,
+        maximum=5000,
+        step=10,
+    ),
+)
+
+
+ALL_SETTING_SPECS = (
+    *AUTOCORRECTION_SETTINGS,
+    *TRIGGER_SETTINGS,
+    *HOTKEY_SETTINGS,
+    *SYSTEM_SETTINGS,
+)

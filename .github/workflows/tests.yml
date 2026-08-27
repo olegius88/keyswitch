@@ -15,6 +15,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  windows-models:
+    name: Prepare licensed EN/RU models for Windows
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Install Onboard language models
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends onboard-data
+
+      - name: Stage models and their license
+        run: |
+          mkdir -p windows-models/models
+          cp /usr/share/onboard/models/en_US.lm windows-models/models/
+          cp /usr/share/onboard/models/ru_RU.lm windows-models/models/
+          cp /usr/share/doc/onboard-data/copyright windows-models/COPYRIGHT.onboard-data
+
+      - name: Upload Windows model input
+        uses: actions/upload-artifact@v7
+        with:
+          name: keyswitch-windows-models
+          path: windows-models
+          if-no-files-found: error
+
   verify:
     name: Coverage, detector, X11 and native package E2E
     runs-on: ubuntu-24.04
@@ -106,3 +130,99 @@ jobs:
           dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24 -noreset" \
             bash -c 'setxkbmap -layout us,ru && GTK_USE_PORTAL=0 ./tools/run-native-e2e.sh "$1"' \
             _ "$package"
+
+  windows:
+    name: Strict Win32 tests and native installer
+    needs: windows-models
+    runs-on: windows-2025
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Download licensed language models
+        uses: actions/download-artifact@v8
+        with:
+          name: keyswitch-windows-models
+          path: build/windows-models
+
+      - name: Install pinned typing, runtime and build dependencies
+        run: |
+          python -m pip install coverage==7.15.4 mypy==2.3.1 Nuitka==4.2 ordered-set==4.1.0 pystray==0.19.5 Pillow==12.3.0
+          python -m pip install --no-deps PyGObject-stubs==2.17.0
+
+      - name: Configure the EN and RU keyboard layouts for the E2E
+        shell: powershell
+        run: |
+          $languages = New-WinUserLanguageList -Language "en-US"
+          $languages.Add("ru-RU")
+          Set-WinUserLanguageList -LanguageList $languages -Force
+          $configured = Get-WinUserLanguageList
+          $inputMethods = @($configured | ForEach-Object { $_.InputMethodTips })
+          if (-not ($inputMethods -contains "0409:00000409") -or -not ($inputMethods -contains "0419:00000419")) {
+            throw "The Windows runner did not apply the EN/RU keyboard layouts"
+          }
+
+      - name: Run maximum strict Python type checking on Windows
+        run: python -m mypy --config-file pyproject.toml
+
+      - name: Run Win32 unit tests with 100% branch coverage
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m coverage erase
+          python -m coverage run --branch --source=src/keyswitch -m unittest discover -s tests -p test_windows_backend.py -v
+          python -m coverage report --fail-under=100 --include="*/windows_app.py,*/windows_backend.py,*/windows_instance.py,*/windows_system.py,*/windows_tray.py,*/windows_ui_model.py"
+
+      - name: Run bidirectional WH_KEYBOARD_LL, SendInput and Tk correction E2E
+        env:
+          KEYSWITCH_MODEL_PATH: build/windows-models/models
+          PYTHONPATH: src
+        run: python tests/e2e_windows.py
+
+      - name: Build native ZIP and Inno Setup installer
+        shell: pwsh
+        run: >-
+          ./packaging/build-windows.ps1
+          -ModelDirectory build/windows-models/models
+          -ModelLicense build/windows-models/COPYRIGHT.onboard-data
+
+      - name: Smoke-test a silent per-user installation
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path pyproject.toml -Pattern '^version = "([^"]+)"$').Matches.Groups[1].Value
+          $installer = "dist/KeySwitch-Setup-$version-x64.exe"
+          $installRoot = Join-Path $env:RUNNER_TEMP "KeySwitch-installed"
+          $install = Start-Process -FilePath $installer -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$installRoot" -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Installer exited with $($install.ExitCode)" }
+          $env:KEYSWITCH_CONFIG_DIR = Join-Path $env:RUNNER_TEMP "KeySwitch-smoke-config"
+          $env:KEYSWITCH_DATA_DIR = Join-Path $env:RUNNER_TEMP "KeySwitch-smoke-data"
+          New-Item -ItemType Directory -Force $env:KEYSWITCH_CONFIG_DIR | Out-Null
+          '{"general":{"autostart":false},"appearance":{"show_indicator":false}}' | Set-Content -Path (Join-Path $env:KEYSWITCH_CONFIG_DIR "config.json") -Encoding utf8NoBOM
+          $smoke = Start-Process -FilePath (Join-Path $installRoot "KeySwitch.exe") -ArgumentList "--smoke-ui" -Wait -PassThru
+          if ($smoke.ExitCode -ne 0) { throw "Installed executable exited with $($smoke.ExitCode)" }
+          $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+          New-Item -Path $runKey -Force | Out-Null
+          New-ItemProperty -Path $runKey -Name "KeySwitch" -Value (Join-Path $installRoot "KeySwitch.exe") -PropertyType String -Force | Out-Null
+          $uninstaller = Get-ChildItem -Path $installRoot -Filter "unins*.exe" | Select-Object -First 1
+          if (-not $uninstaller) { throw "The installed uninstaller is missing" }
+          $uninstall = Start-Process -FilePath $uninstaller.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "Uninstaller exited with $($uninstall.ExitCode)" }
+          if (Test-Path (Join-Path $installRoot "KeySwitch.exe")) { throw "Uninstaller left KeySwitch.exe behind" }
+          $runProperties = Get-ItemProperty -Path $runKey
+          if ($runProperties.PSObject.Properties.Name -contains "KeySwitch") { throw "Uninstaller left the KeySwitch autostart value behind" }
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: keyswitch-windows-package
+          path: |
+            dist/KeySwitch-Setup-*-x64.exe
+            dist/KeySwitch-*-windows-x64.zip
+          if-no-files-found: error

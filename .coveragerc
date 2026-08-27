@@ -1,6 +1,12 @@
 [run]
 branch = True
 source = src/keyswitch
+omit =
+    src/keyswitch/windows_native.py
+    src/keyswitch/windows_instance_native.py
+    src/keyswitch/windows_registry.py
+    src/keyswitch/windows_tray_native.py
+    src/keyswitch/windows_ui.py
 
 [report]
 exclude_also =

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 import statistics
 from collections import Counter
 from dataclasses import dataclass
@@ -14,9 +15,19 @@ from .spellcheck import HunspellDictionary
 
 
 MODEL_ROOTS = (
+    Path(__file__).resolve().parent / "resources" / "models",
     Path("/usr/share/onboard/models"),
     Path("/usr/local/share/onboard/models"),
 )
+
+
+def model_roots() -> tuple[Path, ...]:
+    override = tuple(
+        Path(item)
+        for item in os.environ.get("KEYSWITCH_MODEL_PATH", "").split(os.pathsep)
+        if item
+    )
+    return override + MODEL_ROOTS
 
 LOCALE_FALLBACKS: dict[str, tuple[str, ...]] = {
     "en_US": (
@@ -102,7 +113,11 @@ class LanguageModel:
     @lru_cache(maxsize=16)
     def _load_cached(locale: str, extra_words: tuple[str, ...]) -> "LanguageModel":
         path = next(
-            (root / f"{locale}.lm" for root in MODEL_ROOTS if (root / f"{locale}.lm").is_file()),
+            (
+                root / f"{locale}.lm"
+                for root in model_roots()
+                if (root / f"{locale}.lm").is_file()
+            ),
             None,
         )
         frequencies: dict[str, int] = {}

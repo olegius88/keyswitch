@@ -1,7 +1,7 @@
 keyswitch (@VERSION@) unstable; urgency=medium
 
-  * Respect manual XKB layout changes for the next completed word.
-  * Add an autocorrection setting for the manual-layout guard.
-  * Extend source and packaged X11 end-to-end coverage for this behavior.
+  * Share the typed keyboard-backend contract with the new Windows target.
+  * Keep manual layout protection and all existing X11 behavior intact.
+  * Extend unit coverage and cross-platform release automation.
 
  -- Oleg Shevchuk <sh.oleg@list.ru>  Thu, 27 Aug 2026 01:25:00 +0500

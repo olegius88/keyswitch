@@ -246,6 +246,11 @@ class LanguageModelBranchTests(unittest.TestCase):
             fake_speller = SimpleNamespace(available=False, source="", check=lambda _word: False)
             with (
                 patch.object(language_model, "MODEL_ROOTS", (root,)),
+                patch.dict(
+                    os.environ,
+                    {"KEYSWITCH_MODEL_PATH": str(root / "missing")},
+                    clear=True,
+                ),
                 patch.object(language_model, "LOCALE_FALLBACKS", {"xx_XX": ("fallback",)}),
                 patch("keyswitch.language_model.HunspellDictionary", return_value=fake_speller),
             ):

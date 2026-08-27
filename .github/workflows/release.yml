@@ -1,4 +1,4 @@
-name: Build Debian package and release
+name: Build Linux and Windows packages and release
 
 "on":
   push:
@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   package:
-    name: Test, build and publish
+    name: Test and build native Debian package
     runs-on: ubuntu-24.04
 
     steps:
@@ -107,38 +107,158 @@ jobs:
             bash -c 'setxkbmap -layout us,ru && GTK_USE_PORTAL=0 ./tools/run-native-e2e.sh "$1"' \
             _ "$package"
 
-      - name: Create checksum
-        run: |
-          package_version="$(sed -nE 's/^version = "([^"]+)"/\1/p' pyproject.toml | head -n 1)"
-          architecture="$(dpkg --print-architecture)"
-          cd dist
-          sha256sum "keyswitch_${package_version}_${architecture}.deb" > SHA256SUMS
-
-      - name: Upload workflow artifact
+      - name: Upload Debian release artifact
         uses: actions/upload-artifact@v7
         with:
-          name: keyswitch-debian-package
-          path: |
-            dist/*.deb
-            dist/SHA256SUMS
+          name: keyswitch-release-linux
+          path: dist/*.deb
           if-no-files-found: error
 
-      - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Stage licensed language models for Windows
+        run: |
+          mkdir -p windows-models/models
+          cp /usr/share/onboard/models/en_US.lm windows-models/models/
+          cp /usr/share/onboard/models/ru_RU.lm windows-models/models/
+          cp /usr/share/doc/onboard-data/copyright windows-models/COPYRIGHT.onboard-data
+
+      - name: Upload Windows model input
+        uses: actions/upload-artifact@v7
+        with:
+          name: keyswitch-windows-models
+          path: windows-models
+          if-no-files-found: error
+
+  windows:
+    name: Test and build native Windows installer
+    needs: package
+    runs-on: windows-2025
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Download licensed language models
+        uses: actions/download-artifact@v8
+        with:
+          name: keyswitch-windows-models
+          path: build/windows-models
+
+      - name: Install pinned typing, runtime and build dependencies
+        run: |
+          python -m pip install coverage==7.15.4 mypy==2.3.1 Nuitka==4.2 ordered-set==4.1.0 pystray==0.19.5 Pillow==12.3.0
+          python -m pip install --no-deps PyGObject-stubs==2.17.0
+
+      - name: Configure the EN and RU keyboard layouts for the E2E
+        shell: powershell
+        run: |
+          $languages = New-WinUserLanguageList -Language "en-US"
+          $languages.Add("ru-RU")
+          Set-WinUserLanguageList -LanguageList $languages -Force
+          $configured = Get-WinUserLanguageList
+          $inputMethods = @($configured | ForEach-Object { $_.InputMethodTips })
+          if (-not ($inputMethods -contains "0409:00000409") -or -not ($inputMethods -contains "0419:00000419")) {
+            throw "The Windows runner did not apply the EN/RU language list"
+          }
+
+      - name: Run strict type checking and Win32 unit tests
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m mypy --config-file pyproject.toml
+          python -m coverage erase
+          python -m coverage run --branch --source=src/keyswitch -m unittest discover -s tests -p test_windows_backend.py -v
+          python -m coverage report --fail-under=100 --include="*/windows_app.py,*/windows_backend.py,*/windows_instance.py,*/windows_system.py,*/windows_tray.py,*/windows_ui_model.py"
+
+      - name: Run bidirectional WH_KEYBOARD_LL, SendInput and Tk correction E2E
+        env:
+          KEYSWITCH_MODEL_PATH: build/windows-models/models
+          PYTHONPATH: src
+        run: python tests/e2e_windows.py
+
+      - name: Build native ZIP and Inno Setup installer
+        shell: pwsh
+        run: >-
+          ./packaging/build-windows.ps1
+          -ModelDirectory build/windows-models/models
+          -ModelLicense build/windows-models/COPYRIGHT.onboard-data
+
+      - name: Smoke-test a silent per-user installation
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path pyproject.toml -Pattern '^version = "([^"]+)"$').Matches.Groups[1].Value
+          $installer = "dist/KeySwitch-Setup-$version-x64.exe"
+          $installRoot = Join-Path $env:RUNNER_TEMP "KeySwitch-installed"
+          $install = Start-Process -FilePath $installer -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$installRoot" -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Installer exited with $($install.ExitCode)" }
+          $env:KEYSWITCH_CONFIG_DIR = Join-Path $env:RUNNER_TEMP "KeySwitch-smoke-config"
+          $env:KEYSWITCH_DATA_DIR = Join-Path $env:RUNNER_TEMP "KeySwitch-smoke-data"
+          New-Item -ItemType Directory -Force $env:KEYSWITCH_CONFIG_DIR | Out-Null
+          '{"general":{"autostart":false},"appearance":{"show_indicator":false}}' | Set-Content -Path (Join-Path $env:KEYSWITCH_CONFIG_DIR "config.json") -Encoding utf8NoBOM
+          $smoke = Start-Process -FilePath (Join-Path $installRoot "KeySwitch.exe") -ArgumentList "--smoke-ui" -Wait -PassThru
+          if ($smoke.ExitCode -ne 0) { throw "Installed executable exited with $($smoke.ExitCode)" }
+          $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+          New-Item -Path $runKey -Force | Out-Null
+          New-ItemProperty -Path $runKey -Name "KeySwitch" -Value (Join-Path $installRoot "KeySwitch.exe") -PropertyType String -Force | Out-Null
+          $uninstaller = Get-ChildItem -Path $installRoot -Filter "unins*.exe" | Select-Object -First 1
+          if (-not $uninstaller) { throw "The installed uninstaller is missing" }
+          $uninstall = Start-Process -FilePath $uninstaller.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "Uninstaller exited with $($uninstall.ExitCode)" }
+          if (Test-Path (Join-Path $installRoot "KeySwitch.exe")) { throw "Uninstaller left KeySwitch.exe behind" }
+          $runProperties = Get-ItemProperty -Path $runKey
+          if ($runProperties.PSObject.Properties.Name -contains "KeySwitch") { throw "Uninstaller left the KeySwitch autostart value behind" }
+
+      - name: Upload Windows release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: keyswitch-release-windows
+          path: |
+            dist/KeySwitch-Setup-*-x64.exe
+            dist/KeySwitch-*-windows-x64.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [package, windows]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Download all platform packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: keyswitch-release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create unified checksums
+        run: |
+          cd release-assets
+          sha256sum * > SHA256SUMS
+
+      - name: Publish or refresh GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           package_version="$(sed -nE 's/^version = "([^"]+)"/\1/p' pyproject.toml | head -n 1)"
-          architecture="$(dpkg --print-architecture)"
-          package="dist/keyswitch_${package_version}_${architecture}.deb"
           test "$GITHUB_REF_NAME" = "v$package_version"
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $GITHUB_REF_NAME already exists; keeping its published assets."
-            exit 0
+            gh release upload "$GITHUB_REF_NAME" release-assets/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              release-assets/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "KeySwitch $package_version" \
+              --notes-file RELEASE_NOTES.md
           fi
-          gh release create "$GITHUB_REF_NAME" \
-            "$package" dist/SHA256SUMS \
-            --repo "$GITHUB_REPOSITORY" \
-            --verify-tag \
-            --title "KeySwitch $package_version" \
-            --notes-file RELEASE_NOTES.md

@@ -1,3 +1,8 @@
 # CPython's pyexpat.c contains Expat error strings that Lintian misattributes
 # to an embedded library. The standalone location differs by Python build.
 keyswitch binary: embedded-library expat [usr/lib/keyswitch/*]
+
+# Frozen CPython extension modules resolve Python C API symbols against the
+# embedded interpreter, so they intentionally have no DT_NEEDED entries.
+keyswitch binary: shared-library-lacks-prerequisites [usr/lib/keyswitch/_asyncio.so]
+keyswitch binary: shared-library-lacks-prerequisites [usr/lib/keyswitch/_interpqueues.so]

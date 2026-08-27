@@ -14,6 +14,8 @@ import os
 import threading
 from pathlib import Path
 
+from .history import data_dir
+
 
 DEFAULT_DICTIONARY_ROOTS = (
     Path("/usr/share/hunspell"),
@@ -114,13 +116,9 @@ class HunspellDictionary:
     def _dictionary_roots() -> tuple[Path, ...]:
         override = os.environ.get("KEYSWITCH_HUNSPELL_PATH", "")
         custom = tuple(Path(item) for item in override.split(os.pathsep) if item)
-        data_home = Path(
-            os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")
-        )
-        user_roots = (
-            data_home / "keyswitch" / "dictionaries",
-            data_home / "hunspell",
-        )
+        xdg_data = os.environ.get("XDG_DATA_HOME")
+        xdg_root = Path(xdg_data) if xdg_data else Path.home() / ".local" / "share"
+        user_roots = (data_dir() / "dictionaries", xdg_root / "hunspell")
         return custom + user_roots + DEFAULT_DICTIONARY_ROOTS
 
     @classmethod

@@ -4,17 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "keyswitch"
-version = "0.2.1"
-description = "Automatic keyboard layout correction for Ubuntu X11"
+version = "0.3.0"
+description = "Automatic EN/RU keyboard layout correction for Linux and Windows"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "GPL-3.0-or-later"}
 authors = [{name = "Oleg Shevchuk", email = "sh.oleg@list.ru"}]
 
 [project.scripts]
-keyswitch = "keyswitch.app:main"
+keyswitch = "keyswitch.launcher:main"
 
 [project.optional-dependencies]
+windows = [
+    "Pillow==12.3.0",
+    "pystray==0.19.5",
+]
 typing = [
     "mypy==2.3.1",
     "PyGObject-stubs==2.17.0",
@@ -28,7 +32,7 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-keyswitch = ["py.typed", "resources/*"]
+keyswitch = ["py.typed", "resources/*", "resources/models/*"]
 
 [tool.mypy]
 python_version = "3.10"

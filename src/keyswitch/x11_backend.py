@@ -15,8 +15,17 @@ import struct
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass
 from typing import Callable, Iterable, Protocol, cast
+
+from .backend import (
+    ALT_MASK,
+    CONTROL_MASK as CONTROL_MASK,
+    LOCK_MASK as LOCK_MASK,
+    SHIFT_MASK as SHIFT_MASK,
+    SUPER_MASK,
+    BackendProbe as BackendProbe,
+    KeyEvent as KeyEvent,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -29,11 +38,8 @@ XRECORD_ALL_CLIENTS = 3
 XKB_USE_CORE_KBD = 0x0100
 XRECORD_START_TIMEOUT = 5.0
 
-SHIFT_MASK = 1 << 0
-LOCK_MASK = 1 << 1
-CONTROL_MASK = 1 << 2
-MOD1_MASK = 1 << 3
-MOD4_MASK = 1 << 6
+MOD1_MASK = ALT_MASK
+MOD4_MASK = SUPER_MASK
 
 
 class XRecordRange8(ctypes.Structure):
@@ -104,54 +110,6 @@ class _RecordCallback(Protocol):
         data_pointer: ctypes._Pointer[XRecordInterceptData],
         /,
     ) -> None: ...
-
-
-@dataclass(frozen=True)
-class KeyEvent:
-    pressed: bool
-    keycode: int
-    key_name: str
-    character: str
-    characters: tuple[str, ...]
-    group: int
-    state: int
-    timestamp: int
-    synthetic: bool = False
-
-    @property
-    def shift(self) -> bool:
-        return bool(self.state & SHIFT_MASK)
-
-    @property
-    def caps_lock(self) -> bool:
-        return bool(self.state & LOCK_MASK)
-
-    @property
-    def control(self) -> bool:
-        return bool(self.state & CONTROL_MASK)
-
-    @property
-    def alt(self) -> bool:
-        return bool(self.state & MOD1_MASK)
-
-    @property
-    def super_key(self) -> bool:
-        return bool(self.state & MOD4_MASK)
-
-    def character_for(self, group: int) -> str:
-        return self.characters[group] if 0 <= group < len(self.characters) else ""
-
-
-@dataclass(frozen=True)
-class BackendProbe:
-    available: bool
-    session_type: str
-    display: str
-    record_version: str
-    xtest_version: str
-    xkb_version: str
-    current_group: int
-    error: str = ""
 
 
 class X11Error(RuntimeError):

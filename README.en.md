@@ -4,17 +4,18 @@
 
 [![GitHub release](https://img.shields.io/github/v/release/olegius88/keyswitch)](https://github.com/olegius88/keyswitch/releases/latest)
 [![Tests](https://github.com/olegius88/keyswitch/actions/workflows/tests.yml/badge.svg)](https://github.com/olegius88/keyswitch/actions/workflows/tests.yml)
-[![Debian package](https://github.com/olegius88/keyswitch/actions/workflows/release.yml/badge.svg)](https://github.com/olegius88/keyswitch/actions/workflows/release.yml)
+[![Native packages](https://github.com/olegius88/keyswitch/actions/workflows/release.yml/badge.svg)](https://github.com/olegius88/keyswitch/actions/workflows/release.yml)
 [![License: GPL v3+](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
-KeySwitch is a desktop application for Ubuntu and Xubuntu that automatically
-corrects words typed using the wrong keyboard layout. It serves a similar
-purpose to Punto Switcher and EveryLang, while running entirely locally and
-using the active pair of system XKB layouts.
+KeySwitch is a desktop application for Windows 10/11 x64 and Ubuntu/Xubuntu
+X11 that automatically corrects words typed using the wrong keyboard layout.
+It serves a similar purpose to Punto Switcher and EveryLang, while running
+entirely locally and using the active EN/RU system layout pair.
 
 ## Features
 
-- global input observation in regular X11 applications;
+- global input observation through `WH_KEYBOARD_LL` on Windows and XRecord in
+  regular Linux X11 applications;
 - automatic English and Russian word detection after Space, Enter, Tab or
   punctuation;
 - ensemble detection using frequency lexicons, Hunspell morphology, character
@@ -23,7 +24,8 @@ using the active pair of system XKB layouts.
   and common technical terms;
 - local explicit learning: repeated manual conversion creates a rule, while
   undoing a false correction records a rejection;
-- XKB group switching together with correction of the already typed word;
+- system layout switching and correction of the already typed word through
+  Win32 `SendInput` or XTEST;
 - respect for manual layout selection: the first completed word after the user
   switches languages is left unchanged; this behavior can be disabled;
 - case preservation: `Ghbdtn` becomes `Привет`;
@@ -31,19 +33,47 @@ using the active pair of system XKB layouts.
 - undo of the last correction for 10 seconds with `Ctrl+Alt+Z`;
 - global pause with `Ctrl+Alt+P`;
 - application exclusions selected from the active window, the installed
-  application catalog or entered manually by `WM_CLASS`, plus word exclusions;
+  application catalog, a Windows `.exe` picker or entered manually, plus word
+  exclusions;
 - local history containing only completed corrections;
-- notifications, sound, light/dark themes and XDG Autostart integration;
-- a live `EN/RU` or country-flag StatusNotifier layout indicator; a left click
+- notifications, sound, light/dark themes and startup after OS login;
+- a live `EN/RU` or country-flag layout indicator; either a left or right click
   opens settings, pause, sound, notifications, history, exclusions, about and
   quit actions;
-- a complete settings window with overview, test field and backend diagnostics.
+- a native full settings window with overview, test field, automatic
+  correction, hotkeys, exclusions, history and backend diagnostics;
+- single-instance protection: launching KeySwitch again activates the existing
+  application window.
 
 KeySwitch does not record the complete keystroke stream. Only the current word
 is kept in memory. When history is enabled, it stores correction pairs such as
 `ghbdtn → привет` and nothing else.
 
-## Quick start
+## Install on Windows
+
+Download `KeySwitch-Setup-0.3.0-x64.exe` from the
+[latest release](https://github.com/olegius88/keyswitch/releases/latest) and run
+it. The per-user installation goes to `%LOCALAPPDATA%\Programs\KeySwitch` and
+does not require administrator privileges. The release also includes the
+portable `KeySwitch-0.3.0-windows-x64.zip` archive.
+
+After launch, KeySwitch appears in the notification area. Left- or right-click
+the `EN/RU` or flag icon to open its menu. Startup, start minimized, indicator,
+sound and notifications can be changed on the Appearance and System page.
+
+To run from source on Windows:
+
+```powershell
+py -m venv .venv
+.venv\Scripts\python -m pip install -e ".[windows]"
+.venv\Scripts\keyswitch
+```
+
+For the complete detection model when running from source, point
+`KEYSWITCH_MODEL_PATH` to a directory containing Onboard's `en_US.lm` and
+`ru_RU.lm`. The Setup EXE and portable ZIP bundle these models automatically.
+
+## Quick start on Ubuntu
 
 The currently verified environment is Ubuntu 26.04.1 LTS with XFCE, X11 and
 the `us,ru` system layouts.
@@ -67,12 +97,12 @@ Probe the system backend without opening the application window:
 
 ## Install the Debian package
 
-Download `keyswitch_0.2.1_amd64.deb` from the
+Download `keyswitch_0.3.0_amd64.deb` from the
 [latest release](https://github.com/olegius88/keyswitch/releases/latest), then
 install it with:
 
 ```bash
-sudo apt install ./keyswitch_0.2.1_amd64.deb
+sudo apt install ./keyswitch_0.3.0_amd64.deb
 ```
 
 The package installs the required system dependencies and adds KeySwitch to the
@@ -123,6 +153,16 @@ language models in the settings are currently bound to the EN, RU order.
 
 ## Settings and data
 
+On Windows:
+
+- settings: `%APPDATA%\KeySwitch\config.json`;
+- history, learning data, custom dictionaries and log:
+  `%LOCALAPPDATA%\KeySwitch`;
+- autostart: the per-user
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` registry key.
+
+On Linux:
+
 - settings: `~/.config/keyswitch/config.json`;
 - correction history: `~/.local/share/keyswitch/history.jsonl`;
 - explicitly learned rules and rejected corrections:
@@ -132,10 +172,10 @@ language models in the settings are currently bound to the EN, RU order.
 - application and error log: `~/.local/share/keyswitch/keyswitch.log`;
 - autostart entry: `~/.config/autostart/io.github.olegius88.KeySwitch.desktop`.
 
-`KeePassXC`, `1Password` and `Bitwarden` are excluded by default. X11 does not
-provide the global observer with the semantics of an individual input field,
-so other sensitive applications should be added by their `WM_CLASS` on the
-Exclusions settings page.
+`KeePassXC`, `1Password` and `Bitwarden` are excluded by default. A global
+observer does not know the semantics of an individual input field, so other
+sensitive applications should be added by `.exe` name on Windows or by
+`WM_CLASS` on Linux using the Exclusions settings page.
 
 ## Development and verification
 
@@ -163,6 +203,15 @@ and branch coverage gate (GTK needs an active X11 display or Xvfb):
 For headless execution, run the same command inside `dbus-run-session` and
 `xvfb-run`; GitHub Actions uses that exact setup. The report stops the build if
 coverage drops below 100%.
+
+On Windows, a separate E2E starts a real `WH_KEYBOARD_LL` hook, types scan codes
+through `SendInput` into a Tk field and verifies both `ghbdtn → привет` and
+`руддщ → hello`, including the final layout and history:
+
+```powershell
+$env:PYTHONPATH = "src"
+py tests/e2e_windows.py
+```
 
 Run the reproducible 40,000-word frequency/broad-dictionary corpus and
 defensive cases with:
@@ -199,9 +248,22 @@ Build the reproducible native Debian package with:
 sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
 ./tools/install-build-tools.sh .nuitka
 KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package="dist/keyswitch_0.2.1_$(dpkg --print-architecture).deb"
+package="dist/keyswitch_0.3.0_$(dpkg --print-architecture).deb"
 ./tools/verify-native-deb.sh "$package"
 ```
+
+Build the native Windows artifacts on Windows with Python, Nuitka and Inno
+Setup:
+
+```powershell
+./packaging/build-windows.ps1 `
+  -ModelDirectory build/windows-models/models `
+  -ModelLicense build/windows-models/COPYRIGHT.onboard-data
+```
+
+This produces a standalone `KeySwitch.exe` without application `.py` files, a
+portable ZIP and a per-user Setup EXE. The `en_US.lm` and `ru_RU.lm` files come
+from the Onboard package together with its license.
 
 After stopping any already running instance, test the executable extracted
 from the package in an active X11 session with:
@@ -212,20 +274,24 @@ dbus-run-session -- ./tools/run-native-e2e.sh "$package"
 
 It verifies six real corrections, a manually selected layout left unchanged
 for one word, XKB group changes, history, StatusNotifierItem registration and
-the popup DBusMenu contents. Pushing a
-`v*` tag makes GitHub Actions run coverage and detector gates plus both source
-and packaged-native E2E under Xvfb, validate the package with `lintian`, create
-`SHA256SUMS` and publish both files in a GitHub Release.
+the popup DBusMenu contents. Pushing a `v*` tag makes GitHub Actions validate
+Linux and Windows independently, build the DEB, Windows Setup EXE and portable
+ZIP, silently install and smoke-test the installed application, create one
+`SHA256SUMS` file and publish all artifacts in a GitHub Release.
 
 ## Limitations
 
-- The current backend is designed for X11. In a native Wayland session,
-  KeySwitch reports an explicit diagnostic error instead of pretending that
-  global correction is available.
+- The Linux backend is designed for X11. In a native Wayland session, KeySwitch
+  reports an explicit diagnostic error instead of pretending that global
+  correction is available.
 - The default automatic language models target the EN/RU layout pair.
 - Applications with custom input handling and remote desktops may process
-  synthetic XTEST events differently; these applications can be added to the
+  synthetic events differently; these applications can be added to the
   exclusions list.
+- On Windows, UIPI prevents a regular process from injecting input into a
+  window running at a higher integrity level. KeySwitch needs a matching level
+  for that target window.
+- The Windows 0.3.0 Setup EXE is not yet signed with a publisher certificate.
 
 ## License
 
@@ -234,6 +300,14 @@ KeySwitch is distributed under the
 
 ## Primary specifications
 
+- [Microsoft LowLevelKeyboardProc](https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc)
+  — low-level keyboard hook and required message loop;
+- [Microsoft SendInput](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput)
+  — synthetic input and the UIPI limitation;
+- [Microsoft ToUnicodeEx](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-tounicodeex)
+  — translating a virtual key with a selected layout;
+- [Microsoft Run and RunOnce keys](https://learn.microsoft.com/en-us/windows/win32/setupapi/run-and-runonce-registry-keys)
+  — per-user startup after Windows login;
 - [X.Org RECORD Extension Library](https://www.x.org/releases/current/doc/libXtst/recordlib.pdf)
   — context creation and event capture;
 - [X.Org XTEST Extension Library](https://www.x.org/releases/current/doc/libXtst/xtestlib.pdf)

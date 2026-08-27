@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -15,8 +16,17 @@ def data_dir() -> Path:
     override = os.environ.get("KEYSWITCH_DATA_DIR")
     if override:
         return Path(override)
-    base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    if _running_on_windows():
+        local = os.environ.get("LOCALAPPDATA")
+        base = Path(local) if local else Path.home() / "AppData" / "Local"
+        return base / "KeySwitch"
+    xdg_data = os.environ.get("XDG_DATA_HOME")
+    base = Path(xdg_data) if xdg_data else Path.home() / ".local" / "share"
     return base / "keyswitch"
+
+
+def _running_on_windows() -> bool:
+    return sys.platform == "win32"
 
 
 @dataclass(frozen=True)

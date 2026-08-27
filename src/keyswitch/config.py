@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import sys
 import threading
 from pathlib import Path
 from typing import Callable, TypeVar, cast, overload
@@ -89,8 +90,17 @@ def config_dir() -> Path:
     override = os.environ.get("KEYSWITCH_CONFIG_DIR")
     if override:
         return Path(override)
-    base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    if _running_on_windows():
+        roaming = os.environ.get("APPDATA")
+        base = Path(roaming) if roaming else Path.home() / "AppData" / "Roaming"
+        return base / "KeySwitch"
+    xdg_config = os.environ.get("XDG_CONFIG_HOME")
+    base = Path(xdg_config) if xdg_config else Path.home() / ".config"
     return base / "keyswitch"
+
+
+def _running_on_windows() -> bool:
+    return sys.platform == "win32"
 
 
 class SettingsStore:

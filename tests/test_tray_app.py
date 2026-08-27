@@ -22,6 +22,7 @@ from unittest.mock import Mock, call, patch
 import dbus
 
 from keyswitch import app as app_module
+from keyswitch import launcher as launcher_module
 from keyswitch import tray as tray_module
 from keyswitch.app import KeySwitchApplication
 from keyswitch.engine import CorrectionPlan, EngineSnapshot
@@ -722,13 +723,30 @@ class ApplicationGlueTests(unittest.TestCase):
 class ApplicationEntrypointTests(unittest.TestCase):
     def test_package_main_module_delegates_and_exits(self) -> None:
         imported = importlib.import_module("keyswitch.__main__")
-        self.assertIs(imported.main, app_module.main)
-        with patch("keyswitch.app.main", return_value=17) as main:
+        self.assertIs(imported.main, launcher_module.main)
+        with patch("keyswitch.launcher.main", return_value=17) as main:
             with warnings.catch_warnings(), self.assertRaises(SystemExit) as stopped:
                 warnings.simplefilter("ignore", RuntimeWarning)
                 runpy.run_module("keyswitch.__main__", run_name="__main__")
         self.assertEqual(stopped.exception.code, 17)
         main.assert_called_once_with()
+
+    def test_platform_launcher_selects_linux_and_windows_frontends(self) -> None:
+        with (
+            patch("keyswitch.launcher._running_on_windows", return_value=False),
+            patch("keyswitch.app.main", return_value=5) as linux_main,
+        ):
+            self.assertEqual(launcher_module.main(["--version"]), 5)
+        linux_main.assert_called_once_with(["--version"])
+
+        from keyswitch import windows_app
+
+        with (
+            patch("keyswitch.launcher._running_on_windows", return_value=True),
+            patch("keyswitch.windows_app.main", return_value=6) as windows_main,
+        ):
+            self.assertEqual(launcher_module.main(["--hidden"]), 6)
+        windows_main.assert_called_once_with(["--hidden"])
 
     def test_app_module_direct_execution_uses_diagnostic_exit_code(self) -> None:
         probe = BackendProbe(True, "x11", ":1", "1.13", "2.2", "1.0", 0)

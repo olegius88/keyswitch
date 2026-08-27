@@ -6,15 +6,14 @@ import queue
 import threading
 import time
 from dataclasses import dataclass
-from collections.abc import Callable, Iterable
-from typing import Protocol
+from collections.abc import Callable
 
+from .backend import InputBackend, KeyEvent
 from .config import SettingsStore
 from .detector import DetectionDecision, LanguageDetector
 from .history import HistoryEntry, HistoryStore
 from .language_model import LanguageModel
 from .learning import LearningStore
-from .x11_backend import BackendProbe, KeyEvent, X11Backend
 
 
 MODIFIER_KEYS = {
@@ -26,6 +25,14 @@ NAVIGATION_KEYS = {
     "Escape", "Delete", "Insert",
 }
 PUNCTUATION = set(".,!?;:()[]{}—–-…\"«»")
+
+
+def _default_backend(group_count: int) -> InputBackend:
+    """Load the Linux backend only when no platform backend was supplied."""
+
+    from .x11_backend import X11Backend
+
+    return X11Backend(group_count=group_count)
 
 
 @dataclass(frozen=True)
@@ -58,30 +65,6 @@ class LanguageContext:
     group: int
     words: dict[int, str]
     updated_at: float
-
-
-class InputBackend(Protocol):
-    """Backend operations used by the engine and diagnostics UI."""
-
-    def start(self, listener: Callable[[KeyEvent], None]) -> None: ...
-
-    def stop(self) -> None: ...
-
-    def close(self) -> None: ...
-
-    def current_group(self) -> int: ...
-
-    def active_application(self) -> str: ...
-
-    def probe(self) -> BackendProbe: ...
-
-    def inject_correction(
-        self,
-        strokes: Iterable[KeyEvent],
-        target_group: int,
-        boundary: KeyEvent | None,
-        source_group: int | None = None,
-    ) -> None: ...
 
 
 class Hotkey:
@@ -119,6 +102,7 @@ class KeySwitchEngine:
         history: HistoryStore,
         backend: InputBackend | None = None,
         learning: LearningStore | None = None,
+        backend_label: str = "X11 RECORD + XTEST",
     ) -> None:
         self.settings = settings
         self.history = history
@@ -130,9 +114,8 @@ class KeySwitchEngine:
             for index, locale in enumerate(locales[:2])
         }
         self.detector = LanguageDetector(self.models)
-        self.backend: InputBackend = backend or X11Backend(
-            group_count=len(self.models)
-        )
+        self.backend: InputBackend = backend or _default_backend(len(self.models))
+        self.backend_label = backend_label
         self.learning = learning or LearningStore(history.path.with_name("learning.json"))
         self._events: queue.Queue[KeyEvent | None] = queue.Queue(maxsize=4096)
         self._worker: threading.Thread | None = None
@@ -181,7 +164,7 @@ class KeySwitchEngine:
             self.backend.start(self.enqueue)
             self._update(
                 running=True,
-                backend="X11 RECORD + XTEST",
+                backend=self.backend_label,
                 current_group=self.backend.current_group(),
                 last_error="",
             )
@@ -647,7 +630,10 @@ class KeySwitchEngine:
             self._update(current_word="", last_action=action)
 
     def _settings_changed(self, path: str, value: object) -> None:
-        if path == "enabled":
+        if path == "*":
+            self._update(enabled=bool(self.settings.get("enabled", True)))
+            self._manual_layout_group = None
+        elif path == "enabled":
             self._update(enabled=bool(value))
         elif path == "detection.respect_manual_layout" and not bool(value):
             self._manual_layout_group = None

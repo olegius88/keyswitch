@@ -7,7 +7,7 @@ version="$(sed -nE 's/^version = "([^"]+)"/\1/p' "$project_dir/pyproject.toml" |
 module_version="$(sed -nE 's/^__version__ = "([^"]+)"/\1/p' "$project_dir/src/keyswitch/__init__.py" | head -n 1)"
 architecture="${DEB_HOST_ARCH:-$(dpkg --print-architecture)}"
 nuitka_root="${KEYSWITCH_NUITKA_ROOT:-$project_dir/.nuitka}"
-nuitka_version="4.1.3"
+nuitka_version="4.2"
 export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-1787749200}"
 
 if [[ -z "$version" || "$version" != "$module_version" ]]; then
@@ -66,8 +66,8 @@ python3 -m nuitka \
     --lto=no \
     --output-dir="$native_output" \
     --output-filename=keyswitch-bin \
-    --include-package=keyswitch \
     --include-package-data=keyswitch \
+    --nofollow-import-to='keyswitch.windows_*' \
     --nofollow-import-to=tests \
     --noinclude-dlls='libbz2.so*' \
     --noinclude-dlls='libcrypto.so*' \

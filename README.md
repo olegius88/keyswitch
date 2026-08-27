@@ -4,17 +4,18 @@
 
 [![GitHub release](https://img.shields.io/github/v/release/olegius88/keyswitch)](https://github.com/olegius88/keyswitch/releases/latest)
 [![Tests](https://github.com/olegius88/keyswitch/actions/workflows/tests.yml/badge.svg)](https://github.com/olegius88/keyswitch/actions/workflows/tests.yml)
-[![Debian package](https://github.com/olegius88/keyswitch/actions/workflows/release.yml/badge.svg)](https://github.com/olegius88/keyswitch/actions/workflows/release.yml)
+[![Native packages](https://github.com/olegius88/keyswitch/actions/workflows/release.yml/badge.svg)](https://github.com/olegius88/keyswitch/actions/workflows/release.yml)
 [![License: GPL v3+](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
-KeySwitch — настольное приложение для Ubuntu/Xubuntu, которое автоматически
-исправляет слово, набранное в неверной раскладке. По назначению оно похоже на
-Punto Switcher и EveryLang, но работает локально и использует системную пару
-раскладок XKB.
+KeySwitch — настольное приложение для Windows 10/11 x64 и Ubuntu/Xubuntu X11,
+которое автоматически исправляет слово, набранное в неверной раскладке. По
+назначению оно похоже на Punto Switcher и EveryLang, но работает локально и
+использует системную пару раскладок EN/RU.
 
 ## Что уже работает
 
-- глобальное наблюдение за вводом во всех обычных X11-приложениях;
+- глобальное наблюдение за вводом через `WH_KEYBOARD_LL` в Windows и XRecord в
+  обычных X11-приложениях Linux;
 - автоматическое распознавание английского и русского слова после пробела,
   Enter, Tab или знака препинания;
 - ансамблевое распознавание по частотному словарю, морфологии Hunspell,
@@ -23,7 +24,8 @@ Punto Switcher и EveryLang, но работает локально и испо�
   распространённых технических терминов;
 - локальное самообучение: повторное ручное преобразование создаёт правило, а
   отмена ложного исправления запоминает запрет;
-- переключение XKB-группы и исправление уже напечатанного слова;
+- переключение системной раскладки и исправление уже напечатанного слова через
+  Win32 `SendInput` либо XTEST;
 - уважение к ручной смене раскладки: первое завершённое слово после выбора
   языка пользователем остаётся без автокоррекции; поведение можно отключить;
 - сохранение регистра: `Ghbdtn` превращается в `Привет`;
@@ -31,18 +33,45 @@ Punto Switcher и EveryLang, но работает локально и испо�
 - отмена последнего исправления за 10 секунд (`Ctrl+Alt+Z`);
 - глобальная пауза (`Ctrl+Alt+P`);
 - выбор приложений-исключений прицелом по активному окну, из каталога
-  установленных приложений или вручную по `WM_CLASS`;
+  установленных приложений, через пикер `.exe` в Windows или вручную;
 - локальная история только выполненных исправлений;
-- уведомления, звук, светлая/тёмная тема, XDG Autostart;
+- уведомления, звук, светлая/тёмная тема и автозагрузка после входа в ОС;
 - живой системный индикатор раскладки `EN/RU` или флагами стран; щелчок левой
-  кнопкой открывает меню с настройками, паузой, звуком, уведомлениями, историей,
-  исключениями, сведениями о программе и выходом;
-- полное окно настроек с обзором, тестовым полем и диагностикой backend.
+  или правой кнопкой открывает меню с настройками, паузой, звуком,
+  уведомлениями, историей, исключениями, сведениями о программе и выходом;
+- нативное для платформы полное окно настроек с обзором, тестовым полем,
+  автокоррекцией, горячими клавишами, исключениями, историей и диагностикой;
+- защита от запуска второго экземпляра: повторный запуск активирует уже
+  открытое окно KeySwitch.
 
 Полный поток клавиатуры не записывается. В памяти находится текущее слово, а в
 историю при включённой опции попадают только пары вида `ghbdtn → привет`.
 
-## Быстрый запуск
+## Установка в Windows
+
+Скачайте `KeySwitch-Setup-0.3.0-x64.exe` со страницы
+[последнего выпуска](https://github.com/olegius88/keyswitch/releases/latest) и
+запустите его. Установка выполняется для текущего пользователя в
+`%LOCALAPPDATA%\Programs\KeySwitch` и не требует прав администратора. В выпуск
+также входит переносимый архив `KeySwitch-0.3.0-windows-x64.zip`.
+
+После запуска KeySwitch появится в области уведомлений. Левый или правый щелчок
+по `EN/RU` либо флагу открывает меню. В разделе «Внешний вид и система» можно
+отключить автозагрузку, запуск свёрнутым, индикатор, звук и уведомления.
+
+Для запуска из исходников в Windows:
+
+```powershell
+py -m venv .venv
+.venv\Scripts\python -m pip install -e ".[windows]"
+.venv\Scripts\keyswitch
+```
+
+Для полной модели распознавания при запуске из исходников задайте
+`KEYSWITCH_MODEL_PATH` равным каталогу с `en_US.lm` и `ru_RU.lm` из пакета
+Onboard. В Setup EXE и переносимый ZIP эти модели включаются автоматически.
+
+## Быстрый запуск в Ubuntu
 
 Текущая проверенная среда: Ubuntu 26.04.1 LTS, XFCE, X11, системные раскладки
 `us,ru`.
@@ -66,11 +95,11 @@ cd keyswitch
 
 ## Установка DEB-пакета
 
-Скачайте `keyswitch_0.2.1_amd64.deb` со страницы
+Скачайте `keyswitch_0.3.0_amd64.deb` со страницы
 [последнего выпуска](https://github.com/olegius88/keyswitch/releases/latest), затем:
 
 ```bash
-sudo apt install ./keyswitch_0.2.1_amd64.deb
+sudo apt install ./keyswitch_0.3.0_amd64.deb
 ```
 
 Пакет установит системные зависимости и добавит KeySwitch в меню приложений.
@@ -121,6 +150,16 @@ setxkbmap -query
 
 ## Настройки и данные
 
+В Windows:
+
+- настройки: `%APPDATA%\KeySwitch\config.json`;
+- история, обучение, пользовательские словари и журнал:
+  `%LOCALAPPDATA%\KeySwitch`;
+- автозапуск: пользовательский ключ реестра
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+
+В Linux:
+
 - настройки: `~/.config/keyswitch/config.json`;
 - история: `~/.local/share/keyswitch/history.jsonl`;
 - явно выученные правила и отменённые исправления:
@@ -131,9 +170,9 @@ setxkbmap -query
 - автозапуск: `~/.config/autostart/io.github.olegius88.KeySwitch.desktop`.
 
 Менеджеры паролей `KeePassXC`, `1Password` и `Bitwarden` добавлены в исключения
-по умолчанию. X11 не сообщает глобальному наблюдателю семантику конкретного
-поля, поэтому для других чувствительных приложений следует добавить их
-`WM_CLASS` на странице «Исключения».
+по умолчанию. Глобальный наблюдатель не знает семантику конкретного поля, поэтому
+другие чувствительные приложения следует добавить по имени `.exe` в Windows
+или `WM_CLASS` в Linux на странице «Исключения».
 
 ## Разработка и проверка
 
@@ -162,6 +201,15 @@ coverage (для GTK нужен активный X11 display или Xvfb):
 Для headless-запуска используется та же команда внутри `dbus-run-session` и
 `xvfb-run`; именно так набор выполняется в GitHub Actions. Отчёт не позволит
 сборке продолжиться, если покрытие опустится ниже 100%.
+
+В Windows отдельный E2E запускает настоящий `WH_KEYBOARD_LL`, вводит scan-коды
+через `SendInput` в поле Tk и проверяет обе замены: `ghbdtn → привет` и
+`руддщ → hello`, включая итоговую раскладку и историю:
+
+```powershell
+$env:PYTHONPATH = "src"
+py tests/e2e_windows.py
+```
 
 Воспроизводимый прогон 40 000 частых и широких словарных слов, а также сложных
 защитных случаев:
@@ -198,9 +246,21 @@ dbus-run-session -- env PYTHONPATH=src python3 tests/e2e_tray_menu.py
 sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
 ./tools/install-build-tools.sh .nuitka
 KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package="dist/keyswitch_0.2.1_$(dpkg --print-architecture).deb"
+package="dist/keyswitch_0.3.0_$(dpkg --print-architecture).deb"
 ./tools/verify-native-deb.sh "$package"
 ```
+
+Нативные Windows-артефакты собираются на Windows с Python, Nuitka и Inno Setup:
+
+```powershell
+./packaging/build-windows.ps1 `
+  -ModelDirectory build/windows-models/models `
+  -ModelLicense build/windows-models/COPYRIGHT.onboard-data
+```
+
+Команда создаёт standalone `KeySwitch.exe` без исходных `.py`, переносимый ZIP
+и per-user Setup EXE. Файлы моделей `en_US.lm` и `ru_RU.lm` берутся из пакета
+Onboard вместе с его лицензией.
 
 После остановки уже запущенного экземпляра полный E2E именно бинарника из
 пакета можно выполнить в активной X11-сессии:
@@ -211,19 +271,23 @@ dbus-run-session -- ./tools/run-native-e2e.sh "$package"
 
 Он проверяет шесть реальных коррекций, одно слово после ручной смены без
 исправления, смену XKB-группы, историю, регистрацию StatusNotifierItem и состав
-всплывающего DBusMenu. При отправке
-тега `v*` GitHub Actions запускает coverage, детекторные барьеры, исходный и
-запакованный нативный E2E под Xvfb, проверяет пакет через `lintian`, формирует
-`SHA256SUMS` и публикует оба файла в GitHub Release.
+всплывающего DBusMenu. При отправке тега `v*` GitHub Actions независимо
+проверяет Linux и Windows, собирает DEB, Windows Setup EXE и переносимый ZIP,
+выполняет тихую установку и smoke-тест установленного приложения, формирует
+единый `SHA256SUMS` и публикует артефакты в GitHub Release.
 
 ## Ограничения
 
-- Backend текущей версии предназначен для X11. В нативной Wayland-сессии
-  приложение покажет явную ошибку диагностики и не будет имитировать поддержку.
+- Linux-backend предназначен для X11. В нативной Wayland-сессии приложение
+  покажет явную ошибку диагностики и не будет имитировать поддержку.
 - Автоматические языковые модели по умолчанию рассчитаны на пару EN/RU.
 - Приложения с собственным нестандартным вводом или удалённые рабочие столы
-  могут по-разному обрабатывать синтетические XTEST-события; их удобно добавить
-  в исключения.
+  могут по-разному обрабатывать синтетические события; их удобно добавить в
+  исключения.
+- В Windows механизм UIPI не позволяет обычному процессу вводить текст в окно,
+  запущенное с более высоким уровнем целостности. Для такого окна KeySwitch
+  также должен быть запущен с сопоставимыми правами.
+- Windows Setup EXE версии 0.3.0 пока не подписан сертификатом издателя.
 
 ## Лицензия
 
@@ -232,6 +296,14 @@ KeySwitch распространяется на условиях
 
 ## Первичные спецификации
 
+- [Microsoft LowLevelKeyboardProc](https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc)
+  — низкоуровневый клавиатурный hook и обязательный цикл сообщений;
+- [Microsoft SendInput](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput)
+  — синтетический ввод и ограничение UIPI;
+- [Microsoft ToUnicodeEx](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-tounicodeex)
+  — преобразование виртуальной клавиши с выбранной раскладкой;
+- [Microsoft Run and RunOnce keys](https://learn.microsoft.com/en-us/windows/win32/setupapi/run-and-runonce-registry-keys)
+  — пользовательский автозапуск после входа в Windows;
 - [X.Org RECORD Extension Library](https://www.x.org/releases/current/doc/libXtst/recordlib.pdf)
   — создание контекста и получение событий;
 - [X.Org XTEST Extension Library](https://www.x.org/releases/current/doc/libXtst/xtestlib.pdf)

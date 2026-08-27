@@ -26,7 +26,7 @@ from .engine import EngineSnapshot
 from .history import HistoryStore
 from .learning import LearningStore
 from .system import AutostartManager
-from .x11_backend import BackendProbe
+from .backend import BackendProbe
 
 
 RESOURCE_DIR = Path(__file__).resolve().parent / "resources"
