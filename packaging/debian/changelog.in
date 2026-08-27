@@ -1,9 +1,7 @@
 keyswitch (@VERSION@) unstable; urgency=medium
 
-  * Add ensemble layout detection, explicit local learning and false-positive
-    guards.
-  * Add application picker, default autostart and live EN/RU or flag indicator.
-  * Compile an architecture-specific standalone executable with Nuitka and
-    validate the packaged binary through real X11 and DBusMenu integration.
+  * Respect manual XKB layout changes for the next completed word.
+  * Add an autocorrection setting for the manual-layout guard.
+  * Extend source and packaged X11 end-to-end coverage for this behavior.
 
  -- Oleg Shevchuk <sh.oleg@list.ru>  Thu, 27 Aug 2026 01:25:00 +0500

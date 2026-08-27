@@ -24,6 +24,8 @@ using the active pair of system XKB layouts.
 - local explicit learning: repeated manual conversion creates a rule, while
   undoing a false correction records a rejection;
 - XKB group switching together with correction of the already typed word;
+- respect for manual layout selection: the first completed word after the user
+  switches languages is left unchanged; this behavior can be disabled;
 - case preservation: `Ghbdtn` becomes `Привет`;
 - manual conversion of the last word with `Pause`;
 - undo of the last correction for 10 seconds with `Ctrl+Alt+Z`;
@@ -65,12 +67,12 @@ Probe the system backend without opening the application window:
 
 ## Install the Debian package
 
-Download `keyswitch_0.2.0_amd64.deb` from the
+Download `keyswitch_0.2.1_amd64.deb` from the
 [latest release](https://github.com/olegius88/keyswitch/releases/latest), then
 install it with:
 
 ```bash
-sudo apt install ./keyswitch_0.2.0_amd64.deb
+sudo apt install ./keyswitch_0.2.1_amd64.deb
 ```
 
 The package installs the required system dependencies and adds KeySwitch to the
@@ -176,9 +178,10 @@ Run the real end-to-end test in an active X11 session with:
 PYTHONPATH=src python3 tests/e2e_x11.py
 ```
 
-A successful run prints `E2E_OK` after four real corrections inside a GTK Entry.
-An additional integration test exports a real StatusNotifierItem and DBusMenu
-on an isolated session bus:
+A successful run prints `E2E_OK` after six real corrections and verifies the
+one-word guard following a manual layout switch inside a GTK Entry. An
+additional integration test exports a real StatusNotifierItem and DBusMenu on
+an isolated session bus:
 
 ```bash
 dbus-run-session -- env PYTHONPATH=src python3 tests/e2e_tray_menu.py
@@ -196,7 +199,7 @@ Build the reproducible native Debian package with:
 sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
 ./tools/install-build-tools.sh .nuitka
 KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package="dist/keyswitch_0.2.0_$(dpkg --print-architecture).deb"
+package="dist/keyswitch_0.2.1_$(dpkg --print-architecture).deb"
 ./tools/verify-native-deb.sh "$package"
 ```
 
@@ -207,8 +210,9 @@ from the package in an active X11 session with:
 dbus-run-session -- ./tools/run-native-e2e.sh "$package"
 ```
 
-It verifies four real corrections in a GTK Entry, XKB group changes, history,
-StatusNotifierItem registration and the popup DBusMenu contents. Pushing a
+It verifies six real corrections, a manually selected layout left unchanged
+for one word, XKB group changes, history, StatusNotifierItem registration and
+the popup DBusMenu contents. Pushing a
 `v*` tag makes GitHub Actions run coverage and detector gates plus both source
 and packaged-native E2E under Xvfb, validate the package with `lintian`, create
 `SHA256SUMS` and publish both files in a GitHub Release.

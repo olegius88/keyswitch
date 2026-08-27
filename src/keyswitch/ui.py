@@ -369,6 +369,13 @@ class MainWindow(Adw.ApplicationWindow):
         )
         behavior = Adw.PreferencesGroup(title="Распознавание")
         behavior.add(self._switch_row("enabled", "Автоматически исправлять раскладку", "Главный выключатель фонового движка"))
+        behavior.add(
+            self._switch_row(
+                "detection.respect_manual_layout",
+                "Доверять ручной смене раскладки",
+                "Не исправлять первое завершённое слово после переключения раскладки пользователем",
+            )
+        )
         minimum = Adw.SpinRow.new_with_range(2, 12, 1)
         minimum.set_title("Минимальная длина слова")
         minimum.set_subtitle("Короткие фрагменты чаще бывают командами и сокращениями")

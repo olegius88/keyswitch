@@ -241,6 +241,13 @@ class MainWindowInteractionTests(unittest.TestCase):
         assert isinstance(switch, Adw.SwitchRow)
         switch.set_active(True)
         self.assertTrue(self.settings.get("detection.aggressive"))
+        manual_layout = self.window._settings_controls[
+            "detection.respect_manual_layout"
+        ]
+        assert isinstance(manual_layout, Adw.SwitchRow)
+        self.assertTrue(manual_layout.get_active())
+        manual_layout.set_active(False)
+        self.assertFalse(self.settings.get("detection.respect_manual_layout"))
         indicator = self.window._settings_controls["appearance.indicator_style"]
         assert isinstance(indicator, Adw.ComboRow)
         indicator.set_selected(1)

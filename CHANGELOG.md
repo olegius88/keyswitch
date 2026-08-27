@@ -2,6 +2,11 @@
 
 All notable changes to KeySwitch are documented in this file.
 
+## 0.2.1 — 2026-08-27
+
+- Respect a manual XKB layout change by leaving the next completed word
+  unchanged, with an opt-out switch in the autocorrection settings.
+
 ## 0.2.0 — 2026-08-27
 
 - Enable XDG Autostart by default and keep its desktop entry synchronized.

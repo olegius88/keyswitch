@@ -35,6 +35,7 @@ DEFAULTS: SettingsData = {
         "correct_on_enter": True,
         "correct_on_tab": True,
         "correct_on_punctuation": True,
+        "respect_manual_layout": True,
         "aggressive": False,
         "context_aware": True,
         "protect_code": True,

@@ -103,6 +103,7 @@ class SettingsTests(unittest.TestCase):
             self.assertEqual(store.get("appearance.indicator_style"), "letters")
             self.assertTrue(store.get("detection.context_aware"))
             self.assertTrue(store.get("detection.protect_code"))
+            self.assertTrue(store.get("detection.respect_manual_layout"))
             self.assertTrue(store.get("detection.learning"))
             self.assertEqual(store.get("detection.learning_confirmations"), 2)
             store.set("enabled", False)
@@ -266,6 +267,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(self.engine.snapshot.last_action, "ghbdtn → привет")
 
     def test_layout_letter_on_punctuation_key_is_kept_inside_word(self) -> None:
+        self.settings.set("detection.respect_manual_layout", False)
         for expected, physical in (("база", ",fpf"), ("общих", "j,ob[")):
             with self.subTest(expected=expected):
                 self.backend.injections.clear()
@@ -341,6 +343,47 @@ class EngineTests(unittest.TestCase):
         self.backend.group = 1
         self.engine._poll_current_group()
         self.assertEqual(self.engine.snapshot.current_group, 1)
+        self.assertIsNone(self.engine._manual_layout_group)
+
+        self.backend.group = 0
+        self.engine._poll_current_group()
+        self.assertEqual(self.engine.snapshot.current_group, 0)
+        self.assertEqual(self.engine._manual_layout_group, 0)
+        self.assertIn("Ручная смена", self.engine.snapshot.last_action)
+
+    def test_manual_layout_switch_protects_exactly_the_next_word(self) -> None:
+        self.engine._update(current_group=1)
+        for index, character in enumerate("ghbdtn", start=30):
+            self.engine._handle(letter_event(character, index, 0, self.pair))
+        self.engine._handle(boundary_event(True))
+        self.engine._handle(boundary_event(False))
+
+        self.assertEqual(self.backend.injections, [])
+        self.assertIsNone(self.engine._manual_layout_group)
+        self.assertEqual(
+            self.engine.snapshot.last_action,
+            "Ручная раскладка сохранена: ghbdtn",
+        )
+
+        for index, character in enumerate("ghbdtn", start=70):
+            self.engine._handle(letter_event(character, index, 0, self.pair))
+        self.engine._handle(boundary_event(True))
+        self.engine._handle(boundary_event(False))
+        self.assertEqual(len(self.backend.injections), 1)
+        self.assertEqual(self.backend.injections[0][1], 1)
+
+    def test_manual_layout_protection_can_be_disabled(self) -> None:
+        self.engine._manual_layout_group = 0
+        self.settings.set("detection.respect_manual_layout", False)
+        self.assertIsNone(self.engine._manual_layout_group)
+        self.engine._update(current_group=1)
+
+        for index, character in enumerate("ghbdtn", start=30):
+            self.engine._handle(letter_event(character, index, 0, self.pair))
+        self.engine._handle(boundary_event(True))
+        self.engine._handle(boundary_event(False))
+        self.assertEqual(len(self.backend.injections), 1)
+        self.assertEqual(self.backend.injections[0][1], 1)
 
     def test_context_is_not_shared_when_application_is_unknown(self) -> None:
         strokes = tuple(
@@ -367,6 +410,7 @@ class EngineTests(unittest.TestCase):
         self.assertIsNotNone(boundary)
 
     def test_two_manual_conversions_create_an_automatic_rule(self) -> None:
+        self.settings.set("detection.respect_manual_layout", False)
         for _attempt in range(2):
             self.backend.group = 0
             for index, character in enumerate("qwerty", start=30):

@@ -139,6 +139,7 @@ class KeySwitchEngine:
         self._running = threading.Event()
         self._strokes: list[KeyEvent] = []
         self._source_group = -1
+        self._manual_layout_group: int | None = None
         self._pressed: set[int] = set()
         self._modifier_keycodes: set[int] = set()
         self._pending: CorrectionPlan | None = None
@@ -230,8 +231,7 @@ class KeySwitchEngine:
                 self._update(last_error=str(error), last_action="Ошибка обработки ввода")
 
     def _handle(self, event: KeyEvent) -> None:
-        if 0 <= event.group < len(self.models) and event.group != self.snapshot.current_group:
-            self._update(current_group=event.group)
+        self._observe_group(event.group)
         if event.pressed:
             self._pressed.add(event.keycode)
         else:
@@ -309,7 +309,17 @@ class KeySwitchEngine:
             False,
         )
         self._last_committed = plan
-        should_analyze = bool(self.settings.get("enabled", True)) and self._boundary_enabled(boundary)
+        manual_layout_selected = (
+            bool(self.settings.get("detection.respect_manual_layout", True))
+            and self._manual_layout_group == source_group
+        )
+        if manual_layout_selected:
+            self._manual_layout_group = None
+        should_analyze = (
+            bool(self.settings.get("enabled", True))
+            and self._boundary_enabled(boundary)
+            and not manual_layout_selected
+        )
         excluded = self._application_excluded(application)
         if should_analyze and not excluded:
             decision = self._decide_word(
@@ -326,7 +336,15 @@ class KeySwitchEngine:
             self._remember_context(application, source_group, strokes)
         self._strokes = []
         self._source_group = -1
-        self._update(current_word="", current_group=boundary.group)
+        self._update(
+            current_word="",
+            current_group=boundary.group,
+            last_action=(
+                f"Ручная раскладка сохранена: {original}"
+                if manual_layout_selected
+                else None
+            ),
+        )
 
     @staticmethod
     def _is_layout_letter(event: KeyEvent) -> bool:
@@ -631,11 +649,28 @@ class KeySwitchEngine:
     def _settings_changed(self, path: str, value: object) -> None:
         if path == "enabled":
             self._update(enabled=bool(value))
+        elif path == "detection.respect_manual_layout" and not bool(value):
+            self._manual_layout_group = None
+
+    def _observe_group(self, group: int) -> None:
+        current_group = self.snapshot.current_group
+        if not 0 <= group < len(self.models) or group == current_group:
+            return
+        if current_group >= 0 and bool(
+            self.settings.get("detection.respect_manual_layout", True)
+        ):
+            self._manual_layout_group = group
+            self._update(
+                current_group=group,
+                last_action=(
+                    "Ручная смена раскладки · следующее слово без автокоррекции"
+                ),
+            )
+            return
+        self._update(current_group=group)
 
     def _poll_current_group(self) -> None:
-        group = self.backend.current_group()
-        if 0 <= group < len(self.models) and group != self.snapshot.current_group:
-            self._update(current_group=group)
+        self._observe_group(self.backend.current_group())
 
     def _update(
         self,

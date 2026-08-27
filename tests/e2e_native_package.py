@@ -183,7 +183,10 @@ def main() -> int:
         ("EN keys to Russian", 0, "ghbdtn ", "привет ", 1),
         ("RU keys to English", 1, "hello ", "hello ", 0),
         ("punctuation key is a Russian letter", 0, ",fpf ", "база ", 1),
+        ("return to EN before punctuation test", 1, "hello ", "hello ", 0),
         ("punctuation boundary keeps its glyph", 0, "ghbdtn,", "привет,", 1),
+        ("manual layout switch protects next word", 0, "ghbdtn ", "ghbdtn ", 0),
+        ("manual protection is consumed once", 0, "ghbdtn ", "привет ", 1),
     )
     window = Gtk.Window(title="KeySwitch native package E2E")
     window.set_default_size(520, 120)
@@ -287,6 +290,8 @@ def main() -> int:
             ("ghbdtn", "привет"),
             ("руддщ", "hello"),
             (",fpf", "база"),
+            ("руддщ", "hello"),
+            ("ghbdtn", "привет"),
             ("ghbdtn", "привет"),
         ]
         if actual_history != expected_history:

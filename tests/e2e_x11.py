@@ -69,7 +69,10 @@ def main() -> int:
         ("EN keys to Russian", 0, "ghbdtn ", "привет ", 1),
         ("RU keys to English", 1, "hello ", "hello ", 0),
         ("punctuation key is a Russian letter", 0, ",fpf ", "база ", 1),
+        ("return to EN before punctuation test", 1, "hello ", "hello ", 0),
         ("punctuation boundary keeps its glyph", 0, "ghbdtn,", "привет,", 1),
+        ("manual layout switch protects next word", 0, "ghbdtn ", "ghbdtn ", 0),
+        ("manual protection is consumed once", 0, "ghbdtn ", "привет ", 1),
     )
 
     def abort_on_timeout() -> bool:
@@ -136,6 +139,8 @@ def main() -> int:
             ("ghbdtn", "привет"),
             ("руддщ", "hello"),
             (",fpf", "база"),
+            ("руддщ", "hello"),
+            ("ghbdtn", "привет"),
             ("ghbdtn", "привет"),
         ]
         actual_history = [(item.original, item.replacement) for item in entries]

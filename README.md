@@ -24,6 +24,8 @@ Punto Switcher и EveryLang, но работает локально и испо�
 - локальное самообучение: повторное ручное преобразование создаёт правило, а
   отмена ложного исправления запоминает запрет;
 - переключение XKB-группы и исправление уже напечатанного слова;
+- уважение к ручной смене раскладки: первое завершённое слово после выбора
+  языка пользователем остаётся без автокоррекции; поведение можно отключить;
 - сохранение регистра: `Ghbdtn` превращается в `Привет`;
 - ручное преобразование последнего слова (`Pause`);
 - отмена последнего исправления за 10 секунд (`Ctrl+Alt+Z`);
@@ -64,11 +66,11 @@ cd keyswitch
 
 ## Установка DEB-пакета
 
-Скачайте `keyswitch_0.2.0_amd64.deb` со страницы
+Скачайте `keyswitch_0.2.1_amd64.deb` со страницы
 [последнего выпуска](https://github.com/olegius88/keyswitch/releases/latest), затем:
 
 ```bash
-sudo apt install ./keyswitch_0.2.0_amd64.deb
+sudo apt install ./keyswitch_0.2.1_amd64.deb
 ```
 
 Пакет установит системные зависимости и добавит KeySwitch в меню приложений.
@@ -175,8 +177,9 @@ PYTHONPATH=src tools/evaluate_detector.py \
 PYTHONPATH=src python3 tests/e2e_x11.py
 ```
 
-Успешный тест печатает `E2E_OK` после четырёх фактических исправлений внутри GTK
-Entry. Отдельный интеграционный тест поднимает настоящий StatusNotifierItem и
+Успешный тест печатает `E2E_OK` после шести фактических исправлений и проверки
+защиты слова после ручной смены раскладки внутри GTK Entry. Отдельный
+интеграционный тест поднимает настоящий StatusNotifierItem и
 DBusMenu в изолированной сессии D-Bus:
 
 ```bash
@@ -195,7 +198,7 @@ dbus-run-session -- env PYTHONPATH=src python3 tests/e2e_tray_menu.py
 sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
 ./tools/install-build-tools.sh .nuitka
 KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package="dist/keyswitch_0.2.0_$(dpkg --print-architecture).deb"
+package="dist/keyswitch_0.2.1_$(dpkg --print-architecture).deb"
 ./tools/verify-native-deb.sh "$package"
 ```
 
@@ -206,8 +209,9 @@ package="dist/keyswitch_0.2.0_$(dpkg --print-architecture).deb"
 dbus-run-session -- ./tools/run-native-e2e.sh "$package"
 ```
 
-Он проверяет четыре реальные коррекции в GTK Entry, смену XKB-группы, историю,
-регистрацию StatusNotifierItem и состав всплывающего DBusMenu. При отправке
+Он проверяет шесть реальных коррекций, одно слово после ручной смены без
+исправления, смену XKB-группы, историю, регистрацию StatusNotifierItem и состав
+всплывающего DBusMenu. При отправке
 тега `v*` GitHub Actions запускает coverage, детекторные барьеры, исходный и
 запакованный нативный E2E под Xvfb, проверяет пакет через `lintian`, формирует
 `SHA256SUMS` и публикует оба файла в GitHub Release.
