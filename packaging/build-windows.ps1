@@ -47,8 +47,8 @@ if (-not $ModelLicense) {
 
 $PyProject = Get-Content (Join-Path $ProjectDirectory "pyproject.toml") -Raw
 $Module = Get-Content (Join-Path $ProjectDirectory "src\keyswitch\__init__.py") -Raw
-$VersionMatch = [regex]::Match($PyProject, '(?m)^version = "([^"]+)"$')
-$ModuleMatch = [regex]::Match($Module, '(?m)^__version__ = "([^"]+)"$')
+$VersionMatch = [regex]::Match($PyProject, '(?m)^version = "([^"]+)"\r?$')
+$ModuleMatch = [regex]::Match($Module, '(?m)^__version__ = "([^"]+)"\r?$')
 if (-not $VersionMatch.Success -or -not $ModuleMatch.Success) {
     throw "Cannot read KeySwitch version"
 }
