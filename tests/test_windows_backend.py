@@ -248,6 +248,8 @@ class WindowsBackendHelperTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(WindowsBackendError, "английская и русская"):
             select_layout_pair((ENGLISH_LAYOUT,))
+        with self.assertRaisesRegex(WindowsBackendError, "английская и русская"):
+            select_layout_pair((RUSSIAN_LAYOUT,))
         self.assertEqual(key_name(VK_BACK), "BackSpace")
         self.assertEqual(key_name(ord("A")), "a")
         self.assertEqual(key_name(ord("7")), "7")
