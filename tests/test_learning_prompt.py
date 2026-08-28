@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import ClassVar
 from unittest.mock import Mock, patch
 
+import dbus
 import gi
 
 gi.require_version("Atspi", "2.0")
@@ -44,8 +45,58 @@ class FakePromptBackend:
 
 
 class AccessibilityAnchorTests(unittest.TestCase):
+    def test_accessibility_bus_detection_is_safe(self) -> None:
+        with (
+            patch.dict(os.environ, {"GTK_A11Y": "none"}),
+            patch.object(dbus, "SessionBus") as session_bus,
+        ):
+            self.assertFalse(prompt_module._accessibility_bus_available())
+        session_bus.assert_not_called()
+
+        bus = Mock()
+        bus.name_has_owner.return_value = True
+        with (
+            patch.dict(os.environ, {"GTK_A11Y": ""}),
+            patch.object(dbus, "SessionBus", return_value=bus),
+        ):
+            self.assertTrue(prompt_module._accessibility_bus_available())
+        bus.list_activatable_names.assert_not_called()
+
+        bus.name_has_owner.return_value = False
+        bus.list_activatable_names.return_value = ["org.example.Service", "org.a11y.Bus"]
+        with (
+            patch.dict(os.environ, {"GTK_A11Y": ""}),
+            patch.object(dbus, "SessionBus", return_value=bus),
+        ):
+            self.assertTrue(prompt_module._accessibility_bus_available())
+        bus.list_activatable_names.return_value = []
+        with (
+            patch.dict(os.environ, {"GTK_A11Y": ""}),
+            patch.object(dbus, "SessionBus", return_value=bus),
+        ):
+            self.assertFalse(prompt_module._accessibility_bus_available())
+        with (
+            patch.dict(os.environ, {"GTK_A11Y": ""}),
+            patch.object(
+                dbus,
+                "SessionBus",
+                side_effect=RuntimeError("session bus unavailable"),
+            ),
+        ):
+            self.assertFalse(prompt_module._accessibility_bus_available())
+
     def test_no_desktop_empty_tree_and_failure_return_no_anchor(self) -> None:
-        with patch.object(Atspi, "get_desktop_count", return_value=0):
+        with (
+            patch.object(prompt_module, "_accessibility_bus_available", return_value=False),
+            patch.object(Atspi, "get_desktop_count") as desktop_count,
+        ):
+            self.assertIsNone(focused_caret_anchor())
+        desktop_count.assert_not_called()
+
+        with (
+            patch.object(prompt_module, "_accessibility_bus_available", return_value=True),
+            patch.object(Atspi, "get_desktop_count", return_value=0),
+        ):
             self.assertIsNone(focused_caret_anchor())
 
         root = Mock()
@@ -53,15 +104,16 @@ class AccessibilityAnchorTests(unittest.TestCase):
         root.get_text_iface.return_value = None
         root.get_child_count.return_value = 0
         with (
+            patch.object(prompt_module, "_accessibility_bus_available", return_value=True),
             patch.object(Atspi, "get_desktop_count", return_value=1),
             patch.object(Atspi, "get_desktop", return_value=root),
         ):
             self.assertIsNone(focused_caret_anchor())
 
         with patch.object(
-            Atspi,
-            "get_desktop_count",
-            side_effect=RuntimeError("a11y unavailable"),
+            prompt_module, "_accessibility_bus_available", return_value=True
+        ), patch.object(
+            Atspi, "get_desktop_count", side_effect=RuntimeError("a11y unavailable")
         ):
             self.assertIsNone(focused_caret_anchor())
 
@@ -75,6 +127,7 @@ class AccessibilityAnchorTests(unittest.TestCase):
             x=100, y=200, width=9, height=18
         )
         with (
+            patch.object(prompt_module, "_accessibility_bus_available", return_value=True),
             patch.object(Atspi, "get_desktop_count", return_value=1),
             patch.object(Atspi, "get_desktop", return_value=root),
         ):
@@ -97,6 +150,7 @@ class AccessibilityAnchorTests(unittest.TestCase):
         root.get_child_count.return_value = 2
         root.get_child_at_index.side_effect = [None, child]
         with (
+            patch.object(prompt_module, "_accessibility_bus_available", return_value=True),
             patch.object(Atspi, "get_desktop_count", return_value=1),
             patch.object(Atspi, "get_desktop", return_value=root),
         ):
@@ -108,6 +162,7 @@ class AccessibilityAnchorTests(unittest.TestCase):
         loop.get_child_count.return_value = 1
         loop.get_child_at_index.return_value = loop
         with (
+            patch.object(prompt_module, "_accessibility_bus_available", return_value=True),
             patch.object(Atspi, "get_desktop_count", return_value=1),
             patch.object(Atspi, "get_desktop", return_value=loop),
         ):

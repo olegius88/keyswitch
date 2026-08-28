@@ -146,7 +146,7 @@ The required components may already be present on a standard current Ubuntu
 installation. If the installer reports missing dependencies, install them with:
 
 ```bash
-sudo apt install python3-gi python3-dbus gir1.2-gtk-4.0 gir1.2-adw-1 \
+sudo apt install at-spi2-core python3-gi python3-dbus gir1.2-gtk-4.0 gir1.2-adw-1 \
   gir1.2-atspi-2.0 \
   libx11-6 libxtst6 libxkbcommon0 libhunspell-1.7-0 \
   hunspell-en-us hunspell-ru onboard-data

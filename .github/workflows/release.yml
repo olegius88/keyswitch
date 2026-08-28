@@ -26,6 +26,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
+            at-spi2-core \
             build-essential \
             ccache \
             dbus-x11 \

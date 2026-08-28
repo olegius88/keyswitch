@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import os
+from collections.abc import Callable, Iterable
 from typing import Protocol, cast
 
+import dbus
 import gi
 
 gi.require_version("Atspi", "2.0")
@@ -18,6 +20,9 @@ from .backend import ScreenAnchor
 from .engine import LearningPrompt
 
 
+ACCESSIBILITY_BUS_NAME = "org.a11y.Bus"
+
+
 class PromptBackend(Protocol):
     def input_anchor(self) -> ScreenAnchor | None: ...
 
@@ -26,9 +31,17 @@ class PromptBackend(Protocol):
     def restore_window(self, window: int | None) -> bool: ...
 
 
+class AccessibilityBusProbe(Protocol):
+    def name_has_owner(self, name: str) -> bool: ...
+
+    def list_activatable_names(self) -> Iterable[object]: ...
+
+
 def focused_caret_anchor() -> ScreenAnchor | None:
     """Return the focused accessible text caret in screen coordinates."""
 
+    if not _accessibility_bus_available():
+        return None
     try:
         if Atspi.get_desktop_count() <= 0:
             return None
@@ -55,6 +68,23 @@ def focused_caret_anchor() -> ScreenAnchor | None:
     except Exception:
         return None
     return None
+
+
+def _accessibility_bus_available() -> bool:
+    """Avoid fatal libatspi calls when the desktop accessibility bus is absent."""
+
+    if os.environ.get("GTK_A11Y", "").strip().lower() == "none":
+        return False
+    try:
+        bus = cast(AccessibilityBusProbe, dbus.SessionBus())
+        if bool(bus.name_has_owner(ACCESSIBILITY_BUS_NAME)):
+            return True
+        return any(
+            str(name) == ACCESSIBILITY_BUS_NAME
+            for name in bus.list_activatable_names()
+        )
+    except Exception:
+        return False
 
 
 class LearningPromptWindow(Gtk.Window):
