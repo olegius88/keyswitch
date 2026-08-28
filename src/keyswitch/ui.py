@@ -329,7 +329,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         check_group = Adw.PreferencesGroup(
             title="Проверить сейчас",
-            description="Выберите EN, напечатайте ghbdtn и нажмите пробел — должно появиться «привет ». Затем попробуйте руддщ в RU.",
+            description="Выберите EN и напечатайте ghbdtn: после паузы появится «привет». Можно также нажать пробел. Затем попробуйте руддщ в RU.",
         )
         test_row = Adw.ActionRow(title="Тестовое поле", subtitle="Глобальный перехват работает и внутри этого окна")
         self.test_entry = Gtk.Entry(placeholder_text="Начните печатать здесь…")
@@ -400,10 +400,10 @@ class MainWindow(Adw.ApplicationWindow):
             title="Самообучение",
             description="KeySwitch сохраняет только слова, которые вы преобразовали вручную или вернули после ложного исправления.",
         )
-        learning.add(self._switch_row("detection.learning", "Учиться на моих действиях", "Ручные преобразования создают правила, а отмена запрещает повторять ошибку"))
+        learning.add(self._switch_row("detection.learning", "Учиться на моих действиях", "После Pause/Break предложить правило: Enter подтверждает, Esc отклоняет"))
         confirmations = Adw.SpinRow.new_with_range(1, 5, 1)
         confirmations.set_title("Подтверждений для нового правила")
-        confirmations.set_subtitle("Два одинаковых ручных преобразования защищают от случайного обучения")
+        confirmations.set_subtitle("Порог повторов действует, если предложение не подтверждено клавишей Enter")
         confirmations.set_value(float(self.settings.get("detection.learning_confirmations", 2)))
         confirmations.connect(
             "notify::value",
@@ -426,6 +426,13 @@ class MainWindow(Adw.ApplicationWindow):
         page.append(learning)
 
         triggers = Adw.PreferencesGroup(title="Исправлять после")
+        triggers.add(
+            self._switch_row(
+                "detection.correct_on_pause",
+                "Паузы в наборе",
+                "Проверять текущее слово после 1,5 секунды без ввода",
+            )
+        )
         triggers.add(self._switch_row("detection.correct_on_space", "Пробела", "Основной и самый предсказуемый триггер"))
         triggers.add(self._switch_row("detection.correct_on_enter", "Enter", "Работает в обычных многострочных полях"))
         triggers.add(self._switch_row("detection.correct_on_tab", "Tab", "Удобно при заполнении форм"))

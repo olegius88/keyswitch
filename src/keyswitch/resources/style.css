@@ -131,3 +131,16 @@
   border-radius: 14px;
   padding: 14px;
 }
+
+window.learning-prompt {
+  background: alpha(@window_bg_color, .98);
+  border: 1px solid alpha(@accent_color, .75);
+  border-radius: 12px;
+  box-shadow: 0 8px 28px alpha(black, .32);
+}
+
+.learning-prompt-word {
+  color: @accent_color;
+  font-weight: 700;
+  font-size: 1.08em;
+}

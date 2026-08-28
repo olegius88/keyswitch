@@ -16,14 +16,17 @@ entirely locally and using the active EN/RU system layout pair.
 
 - global input observation through `WH_KEYBOARD_LL` on Windows and XRecord in
   regular Linux X11 applications;
-- automatic English and Russian word detection after Space, Enter, Tab or
-  punctuation;
+- automatic English and Russian word detection after 1.5 seconds without
+  input, as well as after Space, Enter, Tab or punctuation; idle correction
+  can be disabled independently in settings;
 - ensemble detection using frequency lexicons, Hunspell morphology, character
   n-grams and recent context;
 - conservative guards for URLs, paths, code, abbreviations, ambiguous words
   and common technical terms;
-- local explicit learning: repeated manual conversion creates a rule, while
-  undoing a false correction records a rejection;
+- local explicit learning: after manual conversion with `Pause/Break`, a prompt
+  appears above the input field; `Enter` immediately adds the word to the
+  rules, `Esc` rejects the offer, and undoing a false correction records a
+  rejection;
 - system layout switching and correction of the already typed word through
   Win32 `SendInput` or XTEST;
 - respect for manual layout selection: the first completed word after the user
@@ -51,11 +54,11 @@ is kept in memory. When history is enabled, it stores correction pairs such as
 
 ## Install on Windows
 
-Download `KeySwitch-Setup-0.3.0-x64.exe` from the
+Download `KeySwitch-Setup-0.4.0-x64.exe` from the
 [latest release](https://github.com/olegius88/keyswitch/releases/latest) and run
 it. The per-user installation goes to `%LOCALAPPDATA%\Programs\KeySwitch` and
 does not require administrator privileges. The release also includes the
-portable `KeySwitch-0.3.0-windows-x64.zip` archive.
+portable `KeySwitch-0.4.0-windows-x64.zip` archive.
 
 After launch, KeySwitch appears in the notification area. Left- or right-click
 the `EN/RU` or flag icon to open its menu. Startup, start minimized, indicator,
@@ -85,9 +88,16 @@ cd keyswitch
 ```
 
 The application window includes a test field. Switch to EN, type `ghbdtn` and
-press Space: the field should contain `привет `. For the reverse test, switch
-to RU and type `hello` using the same physical keys: the resulting `руддщ `
-will be replaced with `hello `.
+stop: after about 1.5 seconds the field should contain `привет` and the active
+layout should be RU. You can also press Space for an immediate check. For the
+reverse direction, switch to RU and type `hello` using the same physical keys.
+
+To teach KeySwitch a personal exception, type the word and press `Pause/Break`.
+After the manual replacement, a prompt above the input position asks whether
+to add the word to switching rules. Pressing `Enter` activates the rule
+immediately; `Esc` dismisses it. The Local learning switch disables the whole
+mechanism. If the prompt is not confirmed, a rule can still become active after
+the configured number of repeated manual conversions.
 
 Probe the system backend without opening the application window:
 
@@ -97,12 +107,12 @@ Probe the system backend without opening the application window:
 
 ## Install the Debian package
 
-Download `keyswitch_0.3.0_amd64.deb` from the
+Download `keyswitch_0.4.0_amd64.deb` from the
 [latest release](https://github.com/olegius88/keyswitch/releases/latest), then
 install it with:
 
 ```bash
-sudo apt install ./keyswitch_0.3.0_amd64.deb
+sudo apt install ./keyswitch_0.4.0_amd64.deb
 ```
 
 The package installs the required system dependencies and adds KeySwitch to the
@@ -137,6 +147,7 @@ installation. If the installer reports missing dependencies, install them with:
 
 ```bash
 sudo apt install python3-gi python3-dbus gir1.2-gtk-4.0 gir1.2-adw-1 \
+  gir1.2-atspi-2.0 \
   libx11-6 libxtst6 libxkbcommon0 libhunspell-1.7-0 \
   hunspell-en-us hunspell-ru onboard-data
 ```
@@ -205,8 +216,9 @@ For headless execution, run the same command inside `dbus-run-session` and
 coverage drops below 100%.
 
 On Windows, a separate E2E starts a real `WH_KEYBOARD_LL` hook, types scan codes
-through `SendInput` into a Tk field and verifies both `ghbdtn → привет` and
-`руддщ → hello`, including the final layout and history:
+through `SendInput` into a Tk field and verifies both directions, the learning
+prompt, `Enter` confirmation, automatic reuse of the learned rule, the final
+layout and history:
 
 ```powershell
 $env:PYTHONPATH = "src"
@@ -227,8 +239,9 @@ Run the real end-to-end test in an active X11 session with:
 PYTHONPATH=src python3 tests/e2e_x11.py
 ```
 
-A successful run prints `E2E_OK` after six real corrections and verifies the
-one-word guard following a manual layout switch inside a GTK Entry. An
+A successful run prints `E2E_OK` after real corrections, `Pause/Break` +
+`Enter` learning and verification of the one-word guard following a manual
+layout switch inside a GTK Entry. An
 additional integration test exports a real StatusNotifierItem and DBusMenu on
 an isolated session bus:
 
@@ -248,7 +261,7 @@ Build the reproducible native Debian package with:
 sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
 ./tools/install-build-tools.sh .nuitka
 KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package="dist/keyswitch_0.3.0_$(dpkg --print-architecture).deb"
+package="dist/keyswitch_0.4.0_$(dpkg --print-architecture).deb"
 ./tools/verify-native-deb.sh "$package"
 ```
 
@@ -291,7 +304,7 @@ ZIP, silently install and smoke-test the installed application, create one
 - On Windows, UIPI prevents a regular process from injecting input into a
   window running at a higher integrity level. KeySwitch needs a matching level
   for that target window.
-- The Windows 0.3.0 Setup EXE is not yet signed with a publisher certificate.
+- The Windows 0.4.0 Setup EXE is not yet signed with a publisher certificate.
 
 ## License
 

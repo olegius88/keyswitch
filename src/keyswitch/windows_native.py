@@ -14,7 +14,14 @@ import threading
 from collections.abc import Callable
 from typing import Protocol, cast
 
-from .backend import ALT_MASK, CONTROL_MASK, LOCK_MASK, SHIFT_MASK, SUPER_MASK
+from .backend import (
+    ALT_MASK,
+    CONTROL_MASK,
+    LOCK_MASK,
+    SHIFT_MASK,
+    SUPER_MASK,
+    ScreenAnchor,
+)
 from .windows_backend import (
     VK_CAPITAL,
     VK_CONTROL,
@@ -66,6 +73,29 @@ class KBDLLHOOKSTRUCT(ctypes.Structure):
 
 class POINT(ctypes.Structure):
     _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]  # type: ignore[mutable-override]
+
+
+class RECT(ctypes.Structure):
+    _fields_ = [  # type: ignore[mutable-override]
+        ("left", ctypes.c_long),
+        ("top", ctypes.c_long),
+        ("right", ctypes.c_long),
+        ("bottom", ctypes.c_long),
+    ]
+
+
+class GUITHREADINFO(ctypes.Structure):
+    _fields_ = [  # type: ignore[mutable-override]
+        ("cbSize", ctypes.c_ulong),
+        ("flags", ctypes.c_ulong),
+        ("hwndActive", ctypes.c_void_p),
+        ("hwndFocus", ctypes.c_void_p),
+        ("hwndCapture", ctypes.c_void_p),
+        ("hwndMenuOwner", ctypes.c_void_p),
+        ("hwndMoveSize", ctypes.c_void_p),
+        ("hwndCaret", ctypes.c_void_p),
+        ("rcCaret", RECT),
+    ]
 
 
 class MSG(ctypes.Structure):
@@ -219,6 +249,15 @@ class CtypesWindowsAPI:
             ctypes.POINTER(ctypes.c_ulong),
         ]
         user32.GetWindowThreadProcessId.restype = ctypes.c_ulong
+        user32.GetGUIThreadInfo.argtypes = [
+            ctypes.c_ulong,
+            ctypes.POINTER(GUITHREADINFO),
+        ]
+        user32.GetGUIThreadInfo.restype = ctypes.c_int
+        user32.ClientToScreen.argtypes = [ctypes.c_void_p, ctypes.POINTER(POINT)]
+        user32.ClientToScreen.restype = ctypes.c_int
+        user32.GetCursorPos.argtypes = [ctypes.POINTER(POINT)]
+        user32.GetCursorPos.restype = ctypes.c_int
         user32.PostMessageW.argtypes = [
             ctypes.c_void_p,
             ctypes.c_uint,
@@ -294,6 +333,33 @@ class CtypesWindowsAPI:
         root = self.user32.GetAncestor(handle, GA_ROOT) or handle
         self.user32.ShowWindow(root, SW_RESTORE)
         return bool(self.user32.SetForegroundWindow(root))
+
+    def input_anchor(self) -> ScreenAnchor | None:
+        window = int(self.user32.GetForegroundWindow() or 0)
+        thread_id = (
+            int(
+                self.user32.GetWindowThreadProcessId(
+                    ctypes.c_void_p(window), None
+                )
+            )
+            if window
+            else 0
+        )
+        info = GUITHREADINFO()
+        info.cbSize = ctypes.sizeof(GUITHREADINFO)
+        if thread_id and self.user32.GetGUIThreadInfo(
+            thread_id, ctypes.byref(info)
+        ):
+            caret = int(info.hwndCaret or 0)
+            point = POINT(info.rcCaret.left, info.rcCaret.bottom)
+            if caret and self.user32.ClientToScreen(
+                ctypes.c_void_p(caret), ctypes.byref(point)
+            ):
+                return ScreenAnchor(int(point.x), int(point.y), window or None)
+        point = POINT()
+        if self.user32.GetCursorPos(ctypes.byref(point)):
+            return ScreenAnchor(int(point.x), int(point.y), window or None)
+        return None
 
     def request_layout(self, layout: int) -> bool:
         window = self.user32.GetForegroundWindow()

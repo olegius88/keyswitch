@@ -1,54 +1,61 @@
-# KeySwitch 0.3.0
+# KeySwitch 0.4.0
 
-Первый кроссплатформенный выпуск KeySwitch: к проверенному Ubuntu X11 backend
-добавлена нативная версия для 64-битной Windows.
+## Русский
 
-## Windows
+В этом выпуске автокоррекция стала ближе к EveryLang и Punto Switcher.
 
-- Глобальный ввод обрабатывается через `WH_KEYBOARD_LL`, символы обеих
-  раскладок вычисляются через `ToUnicodeEx`, а исправление выполняется
-  физическими scan-кодами через `SendInput` без буфера обмена.
-- Поддерживается та же логика EN/RU: автоматическое исправление, ручное
-  преобразование, отмена, локальное обучение, контекст и защита первого слова
-  после самостоятельной смены языка.
-- Добавлено полноценное окно настроек с девятью разделами, тестовым полем,
-  историей и диагностикой Win32 backend.
-- Исключения выбираются прицелом по активному окну, через системный `.exe`-пикер,
-  из списка зарегистрированных приложений или вручную.
-- Автозагрузка выполняется после входа пользователя в Windows. Индикатор в
-  области уведомлений показывает `EN/RU` либо флаги; левый и правый щелчок
-  открывают полное меню быстрых действий.
-- Повторный запуск не создаёт второй экземпляр, а активирует уже открытое окно;
-  удаление программы очищает её запись автозагрузки текущего пользователя.
-- Выпуск содержит устанавливаемый `KeySwitch-Setup-0.3.0-x64.exe` и переносимый
-  `KeySwitch-0.3.0-windows-x64.zip`. Оба варианта собраны Nuitka без исходных
-  `.py` и байткода `.pyc`.
+- Неверно набранное слово теперь может исправиться уже через 1,5 секунды паузы,
+  не дожидаясь пробела или знака препинания. Эту проверку можно отдельно
+  отключить в настройках.
+- После ручного преобразования слова клавишей `Pause/Break` над местом ввода
+  появляется вопрос о добавлении слова в правила. `Enter` подтверждает правило,
+  `Esc`, посторонний ввод или тайм-аут закрывают предложение.
+- Подсказка располагается у текстового курсора, когда приложение предоставляет
+  его координаты; после закрытия фокус возвращается исходному окну.
+- В Windows флаги EN/RU занимают максимально доступную площадь значка в области
+  уведомлений и больше не имеют фиолетовой рамки.
+- Сохранено обучение по повторным ручным преобразованиям как настраиваемый
+  резервный механизм.
 
-## Проверка и поставка
+Пакеты выпуска проходят строгую проверку типов, 100% покрытия строк и ветвей,
+реальные X11/Win32 E2E, проверку нативного DEB и тихую установку Windows Setup.
 
-- Общий unit/GTK-набор содержит более 150 тестов и сохраняет обязательные 100%
-  покрытия строк и ветвей для тестируемого кроссплатформенного ядра.
-- Linux- и Windows-артефакты собираются закреплённой стабильной Nuitka 4.2;
-  эта версия официально поддерживает Python 3.14 текущей Ubuntu.
-- Windows job отдельно выполняет строгий mypy, Win32 unit-тесты, настоящий
-  двунаправленный `WH_KEYBOARD_LL` + `SendInput` E2E в поле Tk, сборку и тихую
-  установку готового Setup-пакета.
-- GitHub Release публикуется только после успешной сборки Debian и Windows и
-  содержит единый `SHA256SUMS`.
+### Установка
 
-## Установка
+- Windows 10/11 x64: `KeySwitch-Setup-0.4.0-x64.exe` или переносимый
+  `KeySwitch-0.4.0-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.4.0_amd64.deb`.
 
-Windows 10/11 x64: скачайте `KeySwitch-Setup-0.3.0-x64.exe`, запустите установщик
-и затем KeySwitch из меню «Пуск». В системе должны быть добавлены английская и
-русская раскладки. Установщик 0.3.0 пока не подписан сертификатом издателя.
+Windows Setup пока не подписан сертификатом издателя. Нативная Wayland-сессия
+Linux пока не поддерживается.
 
-Ubuntu 26.04 x64/X11:
+## English
 
-```bash
-sudo apt install ./keyswitch_0.3.0_amd64.deb
-```
+This release brings automatic correction closer to EveryLang and Punto
+Switcher.
 
-На Linux нативная Wayland-сессия пока не поддерживается. В Windows `SendInput`
-не может исправлять текст в приложении, запущенном с более высоким уровнем
-прав, — такое приложение следует запускать без повышения либо добавить в
-исключения.
+- A likely wrong-layout word can now be corrected after 1.5 seconds of idle
+  time, before a separator is typed. Idle correction has its own settings
+  switch.
+- After a manual `Pause/Break` conversion, a prompt above the input position
+  offers to add the word to switching rules. `Enter` confirms it; `Esc`,
+  unrelated input or a timeout dismisses it.
+- The prompt follows the text caret when its coordinates are available and
+  restores focus to the original target after closing.
+- Windows EN/RU flag icons now fill the available notification-area icon canvas
+  and no longer have the purple frame.
+- Repeated manual conversions remain available as a configurable fallback
+  learning mechanism.
+
+Release packages pass strict type checking, 100% line and branch coverage,
+real X11/Win32 E2E tests, native DEB verification and a silent Windows Setup
+installation test.
+
+### Installation
+
+- Windows 10/11 x64: `KeySwitch-Setup-0.4.0-x64.exe` or the portable
+  `KeySwitch-0.4.0-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.4.0_amd64.deb`.
+
+The Windows installer is not yet signed with a publisher certificate. Native
+Linux Wayland sessions are not supported yet.

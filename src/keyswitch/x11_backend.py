@@ -25,6 +25,7 @@ from .backend import (
     SUPER_MASK,
     BackendProbe as BackendProbe,
     KeyEvent as KeyEvent,
+    ScreenAnchor,
 )
 
 
@@ -37,6 +38,8 @@ XRECORD_START_OF_DATA = 4
 XRECORD_ALL_CLIENTS = 3
 XKB_USE_CORE_KBD = 0x0100
 XRECORD_START_TIMEOUT = 5.0
+REVERT_TO_PARENT = 2
+CURRENT_TIME = 0
 
 MOD1_MASK = ALT_MASK
 MOD4_MASK = SUPER_MASK
@@ -180,6 +183,38 @@ class _Libraries:
             ctypes.POINTER(ctypes.c_int),
         ]
         x11.XGetInputFocus.restype = ctypes.c_int
+        x11.XSetInputFocus.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_ulong,
+            ctypes.c_int,
+            ctypes.c_ulong,
+        ]
+        x11.XSetInputFocus.restype = ctypes.c_int
+        x11.XDefaultScreen.argtypes = [ctypes.c_void_p]
+        x11.XDefaultScreen.restype = ctypes.c_int
+        x11.XRootWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        x11.XRootWindow.restype = ctypes.c_ulong
+        x11.XQueryPointer.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_ulong,
+            ctypes.POINTER(ctypes.c_ulong),
+            ctypes.POINTER(ctypes.c_ulong),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_uint),
+        ]
+        x11.XQueryPointer.restype = ctypes.c_int
+        x11.XMoveWindow.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_ulong,
+            ctypes.c_int,
+            ctypes.c_int,
+        ]
+        x11.XMoveWindow.restype = ctypes.c_int
+        x11.XRaiseWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        x11.XRaiseWindow.restype = ctypes.c_int
         x11.XGetClassHint.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(XClassHint)]
         x11.XGetClassHint.restype = ctypes.c_int
         x11.XQueryTree.argtypes = [
@@ -520,6 +555,54 @@ class X11Backend:
             self._control, XKB_USE_CORE_KBD, ctypes.byref(state)
         )
         return int(state.group) if result == 0 else -1
+
+    def input_anchor(self) -> ScreenAnchor | None:
+        if not self._control:
+            return None
+        screen = int(self._libraries.x11.XDefaultScreen(self._control))
+        root = int(self._libraries.x11.XRootWindow(self._control, screen))
+        root_return = ctypes.c_ulong()
+        child_return = ctypes.c_ulong()
+        root_x = ctypes.c_int()
+        root_y = ctypes.c_int()
+        window_x = ctypes.c_int()
+        window_y = ctypes.c_int()
+        mask = ctypes.c_uint()
+        if not self._libraries.x11.XQueryPointer(
+            self._control,
+            root,
+            ctypes.byref(root_return),
+            ctypes.byref(child_return),
+            ctypes.byref(root_x),
+            ctypes.byref(root_y),
+            ctypes.byref(window_x),
+            ctypes.byref(window_y),
+            ctypes.byref(mask),
+        ):
+            return None
+        focus = ctypes.c_ulong()
+        revert = ctypes.c_int()
+        self._libraries.x11.XGetInputFocus(
+            self._control, ctypes.byref(focus), ctypes.byref(revert)
+        )
+        return ScreenAnchor(root_x.value, root_y.value, int(focus.value) or None)
+
+    def position_window(self, window: int, x: int, y: int) -> bool:
+        if not self._control or not window:
+            return False
+        self._libraries.x11.XMoveWindow(self._control, window, x, y)
+        self._libraries.x11.XRaiseWindow(self._control, window)
+        self._libraries.x11.XFlush(self._control)
+        return True
+
+    def restore_window(self, window: int | None) -> bool:
+        if not self._control or window is None:
+            return False
+        self._libraries.x11.XSetInputFocus(
+            self._control, window, REVERT_TO_PARENT, CURRENT_TIME
+        )
+        self._libraries.x11.XFlush(self._control)
+        return True
 
     def switch_group(self, group: int) -> None:
         if not self._control:

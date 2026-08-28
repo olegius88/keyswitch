@@ -72,13 +72,13 @@ AUTOCORRECTION_SETTINGS = (
     SettingSpec(
         "detection.learning",
         "Локальное обучение",
-        "Создавать правила после повторных ручных преобразований.",
+        "Предлагать правило после Pause/Break и запоминать подтверждение Enter.",
         "bool",
     ),
     SettingSpec(
         "detection.learning_confirmations",
         "Подтверждений для правила",
-        "Сколько ручных преобразований требуется для автоматического правила.",
+        "Сколько повторов нужно, если предложение не подтверждено клавишей Enter.",
         "int",
         minimum=1,
         maximum=10,
@@ -87,6 +87,12 @@ AUTOCORRECTION_SETTINGS = (
 
 
 TRIGGER_SETTINGS = (
+    SettingSpec(
+        "detection.correct_on_pause",
+        "Пауза в наборе",
+        "Проверять текущее слово после 1,5 секунды без ввода.",
+        "bool",
+    ),
     SettingSpec(
         "detection.correct_on_space",
         "Пробел",

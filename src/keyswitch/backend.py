@@ -65,6 +65,15 @@ class BackendProbe:
     error: str = ""
 
 
+@dataclass(frozen=True)
+class ScreenAnchor:
+    """A screen position captured before a learning prompt takes focus."""
+
+    x: int
+    y: int
+    window: int | None = None
+
+
 class InputBackend(Protocol):
     """Operations required by the correction engine and diagnostics UI."""
 

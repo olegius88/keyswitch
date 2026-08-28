@@ -130,16 +130,19 @@ class PystrayWindowsAdapter:
     def _render(cls, state: WindowsTrayState) -> Image.Image:
         image = Image.new("RGBA", (ICON_SIZE, ICON_SIZE), (0, 0, 0, 0))
         draw = ImageDraw.Draw(image)
-        if not state.enabled:
-            background = (105, 105, 105, 255)
-        elif state.group == 1:
-            background = (194, 42, 55, 255)
-        else:
-            background = (27, 92, 180, 255)
-        draw.rounded_rectangle((2, 2, 61, 61), radius=13, fill=background)
-        if state.indicator_style == "flags" and state.group in (0, 1):
+        flag_indicator = (
+            state.indicator_style == "flags" and state.group in (0, 1)
+        )
+        if flag_indicator:
             cls._draw_flag(draw, state.group)
         else:
+            if not state.enabled:
+                background = (105, 105, 105, 255)
+            elif state.group == 1:
+                background = (194, 42, 55, 255)
+            else:
+                background = (27, 92, 180, 255)
+            draw.rounded_rectangle((2, 2, 61, 61), radius=13, fill=background)
             text = state.label if state.group >= 0 else "?"
             font = cls._font(27)
             bounds = draw.textbbox((0, 0), text, font=font)
@@ -157,29 +160,41 @@ class PystrayWindowsAdapter:
 
     @staticmethod
     def _draw_flag(draw: ImageDraw.ImageDraw, group: int) -> None:
-        left, top, right, bottom = 9, 16, 55, 48
+        left, top, right, bottom = 0, 0, ICON_SIZE - 1, ICON_SIZE - 1
         if group == 1:
-            height = (bottom - top) // 3
-            draw.rectangle((left, top, right, top + height), fill="white")
+            first_edge = ICON_SIZE // 3
+            second_edge = ICON_SIZE * 2 // 3
+            draw.rectangle((left, top, right, first_edge - 1), fill="white")
             draw.rectangle(
-                (left, top + height, right, top + height * 2),
-                fill=(33, 71, 156, 255),
+                (left, first_edge, right, second_edge - 1),
+                fill=(0, 57, 166, 255),
             )
             draw.rectangle(
-                (left, top + height * 2, right, bottom),
+                (left, second_edge, right, bottom),
                 fill=(213, 43, 30, 255),
             )
             return
-        stripe_height = max(2, (bottom - top) // 7)
-        for index in range(7):
-            color = (190, 10, 48, 255) if index % 2 == 0 else "white"
+        for index in range(13):
+            stripe_top = index * ICON_SIZE // 13
+            stripe_bottom = (index + 1) * ICON_SIZE // 13 - 1
+            color = (178, 34, 52, 255) if index % 2 == 0 else "white"
             draw.rectangle(
-                (
-                    left,
-                    top + index * stripe_height,
-                    right,
-                    min(bottom, top + (index + 1) * stripe_height),
-                ),
+                (left, stripe_top, right, stripe_bottom),
                 fill=color,
             )
-        draw.rectangle((left, top, left + 20, top + 18), fill=(0, 40, 104, 255))
+        canton_right = ICON_SIZE * 2 // 5 - 1
+        canton_bottom = ICON_SIZE * 7 // 13 - 1
+        draw.rectangle(
+            (left, top, canton_right, canton_bottom),
+            fill=(60, 59, 110, 255),
+        )
+        for row in range(5):
+            stars_in_row = 4 if row % 2 == 0 else 3
+            offset = 3 if stars_in_row == 4 else 6
+            for column in range(stars_in_row):
+                center_x = offset + column * 6
+                center_y = 3 + row * 6
+                draw.ellipse(
+                    (center_x - 1, center_y - 1, center_x + 1, center_y + 1),
+                    fill="white",
+                )

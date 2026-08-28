@@ -17,6 +17,7 @@ from .backend import (
     SUPER_MASK,
     BackendProbe,
     KeyEvent,
+    ScreenAnchor,
 )
 
 
@@ -107,6 +108,10 @@ class WindowsAPI(Protocol):
     def send_inputs(self, inputs: tuple[NativeInput, ...]) -> int: ...
 
     def active_application(self) -> str: ...
+
+    def input_anchor(self) -> ScreenAnchor | None: ...
+
+    def activate_window(self, window: int) -> bool: ...
 
     def caps_lock_enabled(self) -> bool: ...
 
@@ -306,6 +311,12 @@ class WindowsBackend:
 
     def active_application(self) -> str:
         return self._api.active_application()
+
+    def input_anchor(self) -> ScreenAnchor | None:
+        return self._api.input_anchor()
+
+    def restore_window(self, window: int | None) -> bool:
+        return window is not None and self._api.activate_window(window)
 
     def _handle_native(self, native: NativeKeyEvent) -> None:
         if native.pressed:

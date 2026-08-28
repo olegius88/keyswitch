@@ -1,4 +1,4 @@
-.TH KEYSWITCH 1 "August 2026" "KeySwitch 0.3.0" "User Commands"
+.TH KEYSWITCH 1 "August 2026" "KeySwitch 0.4.0" "User Commands"
 .SH NAME
 keyswitch \- automatic keyboard layout correction for Ubuntu X11
 .SH SYNOPSIS
@@ -10,9 +10,18 @@ observes keyboard events in the current X11 session, detects words entered in
 the wrong English or Russian layout, changes the XKB group and replaces the
 mistyped word.
 .PP
+By default, KeySwitch also checks the current word after 1.5 seconds without
+typing, before a separator is entered. Idle correction can be disabled
+independently in the application settings.
+.PP
 Settings, exclusions, hotkeys, history and diagnostics are available from the
 application window. Left-clicking the desktop indicator opens its native menu
 with correction toggles, settings, history, exclusions, about and quit actions.
+.PP
+After a manual word conversion with Pause/Break, KeySwitch displays a focused
+prompt above the input position. Enter immediately adds the conversion to the
+local switching rules; Escape dismisses the offer. Local learning and its
+fallback repeated-conversion threshold are configurable in the application.
 .SH OPTIONS
 .TP
 .B \-\-hidden

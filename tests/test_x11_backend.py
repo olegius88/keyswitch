@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from keyswitch import x11_backend as x11
+from keyswitch.backend import ScreenAnchor
 from keyswitch.x11_backend import (
     KEY_PRESS,
     KEY_RELEASE,
@@ -38,7 +39,8 @@ def functions(*names: str) -> SimpleNamespace:
 X11_FUNCTIONS = (
     "XInitThreads", "XOpenDisplay", "XCloseDisplay", "XFlush", "XSync", "XFree",
     "XkbKeycodeToKeysym", "XkbQueryExtension", "XkbLockGroup", "XkbGetState",
-    "XKeysymToString", "XKeysymToKeycode", "XGetInputFocus", "XGetClassHint", "XQueryTree",
+    "XKeysymToString", "XKeysymToKeycode", "XGetInputFocus", "XSetInputFocus", "XGetClassHint", "XQueryTree",
+    "XDefaultScreen", "XRootWindow", "XQueryPointer", "XMoveWindow", "XRaiseWindow",
 )
 XTST_FUNCTIONS = (
     "XRecordQueryVersion", "XRecordAllocRange", "XRecordCreateContext",
@@ -75,6 +77,12 @@ def set_int(
     pointer: ctypes._CData | ctypes._CArgObject | int, value: int
 ) -> None:
     ctypes.cast(pointer, ctypes.POINTER(ctypes.c_int)).contents.value = value
+
+
+def set_ulong(
+    pointer: ctypes._CData | ctypes._CArgObject | int, value: int
+) -> None:
+    ctypes.cast(pointer, ctypes.POINTER(ctypes.c_ulong)).contents.value = value
 
 
 def backend_with(libraries: FakeLibraries | None = None, group_count: int = 2) -> tuple[X11Backend, FakeLibraries]:
@@ -504,6 +512,58 @@ class BackendTranslationTests(unittest.TestCase):
             backend.switch_group(1)
         libraries.x11.XkbLockGroup.return_value = 1
         backend.switch_group(1)
+        libraries.x11.XFlush.assert_called_with(1)
+
+    def test_pointer_anchor_and_popup_window_positioning(self) -> None:
+        backend, libraries = backend_with()
+        self.assertIsNone(backend.input_anchor())
+        self.assertFalse(backend.position_window(55, 1, 2))
+        self.assertFalse(backend.restore_window(55))
+        backend._control = 1
+        libraries.x11.XDefaultScreen.return_value = 2
+        libraries.x11.XRootWindow.return_value = 99
+        libraries.x11.XQueryPointer.return_value = 0
+        self.assertIsNone(backend.input_anchor())
+
+        def query_pointer(
+            _display: object,
+            _root: object,
+            root_return: ctypes._CData | ctypes._CArgObject | int,
+            child_return: ctypes._CData | ctypes._CArgObject | int,
+            root_x: ctypes._CData | ctypes._CArgObject | int,
+            root_y: ctypes._CData | ctypes._CArgObject | int,
+            window_x: ctypes._CData | ctypes._CArgObject | int,
+            window_y: ctypes._CData | ctypes._CArgObject | int,
+            mask: ctypes._CData | ctypes._CArgObject | int,
+        ) -> int:
+            set_ulong(root_return, 99)
+            set_ulong(child_return, 100)
+            set_int(root_x, 640)
+            set_int(root_y, 480)
+            set_int(window_x, 12)
+            set_int(window_y, 34)
+            set_int(mask, 0)
+            return 1
+
+        def focused(
+            _display: object,
+            window: ctypes._CData | ctypes._CArgObject | int,
+            revert: ctypes._CData | ctypes._CArgObject | int,
+        ) -> int:
+            set_ulong(window, 777)
+            set_int(revert, 0)
+            return 1
+
+        libraries.x11.XQueryPointer.side_effect = query_pointer
+        libraries.x11.XGetInputFocus.side_effect = focused
+        self.assertEqual(backend.input_anchor(), ScreenAnchor(640, 480, 777))
+        self.assertFalse(backend.position_window(0, 1, 2))
+        self.assertFalse(backend.restore_window(None))
+        self.assertTrue(backend.position_window(55, 10, 20))
+        self.assertTrue(backend.restore_window(777))
+        libraries.x11.XMoveWindow.assert_called_once_with(1, 55, 10, 20)
+        libraries.x11.XRaiseWindow.assert_called_once_with(1, 55)
+        libraries.x11.XSetInputFocus.assert_called_once_with(1, 777, 2, 0)
         libraries.x11.XFlush.assert_called_with(1)
 
 

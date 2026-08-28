@@ -110,6 +110,44 @@ class LearningStore:
             self.save()
             return confirmations
 
+    def confirm_manual(
+        self,
+        source_group: int,
+        word: str,
+        target_group: int,
+        confirmations_required: int,
+    ) -> int:
+        """Immediately confirm a rule offered after a manual conversion."""
+
+        key = self._key(source_group, word)
+        if not key.partition(":")[2] or source_group == target_group:
+            return 0
+        required = max(1, min(999, confirmations_required))
+        with self._lock:
+            rules = self._data["rules"]
+            current = rules.get(key, {})
+            confirmations = 0
+            if (
+                isinstance(current, dict)
+                and current.get("target_group") == target_group
+            ):
+                confirmations = int(current.get("confirmations", 0))
+            confirmed = max(required, confirmations)
+            rules[key] = {
+                "target_group": target_group,
+                "confirmations": confirmed,
+            }
+            rejections = self._data["rejections"]
+            rejected = rejections.get(key, [])
+            if isinstance(rejected, list) and target_group in rejected:
+                remaining = [item for item in rejected if item != target_group]
+                if remaining:
+                    rejections[key] = remaining
+                else:
+                    rejections.pop(key, None)
+            self.save()
+            return confirmed
+
     def reject(self, source_group: int, word: str, target_group: int) -> None:
         key = self._key(source_group, word)
         if not key.partition(":")[2] or source_group == target_group:

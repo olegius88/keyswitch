@@ -22,6 +22,8 @@ def main() -> int:
     from keyswitch.config import SettingsStore
     from keyswitch.windows_backend import NativeInput, NativeKeyEvent
     from keyswitch.windows_native import CtypesWindowsAPI
+    from keyswitch.windows_tray import WindowsTrayState
+    from keyswitch.windows_tray_native import ICON_SIZE, PystrayWindowsAdapter
     from keyswitch.windows_ui import PAGE_NAMES, WindowsApplication
 
     api = CtypesWindowsAPI()
@@ -66,6 +68,24 @@ def main() -> int:
         raise RuntimeError("Win32 hook thread did not stop")
     print("WINDOWS_HOOK_E2E_OK", flush=True)
 
+    flag_expectations = {
+        0: ((60, 59, 110, 255), (178, 34, 52, 255)),
+        1: ((255, 255, 255, 255), (213, 43, 30, 255)),
+    }
+    for group, (top_left, bottom_right) in flag_expectations.items():
+        flag = PystrayWindowsAdapter._render(
+            WindowsTrayState(group=group, indicator_style="flags")
+        )
+        if flag.size != (ICON_SIZE, ICON_SIZE):
+            raise RuntimeError(f"Unexpected Windows flag icon size: {flag.size}")
+        if flag.getbbox() != (0, 0, ICON_SIZE, ICON_SIZE):
+            raise RuntimeError(f"Windows flag does not fill the icon: {flag.getbbox()}")
+        if flag.getpixel((0, 0)) != top_left:
+            raise RuntimeError("Windows flag still has a decorative top-left frame")
+        if flag.getpixel((ICON_SIZE - 1, ICON_SIZE - 1)) != bottom_right:
+            raise RuntimeError("Windows flag still has a decorative bottom-right frame")
+    print("WINDOWS_FULL_SIZE_FLAGS_E2E_OK", flush=True)
+
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         os.environ["KEYSWITCH_CONFIG_DIR"] = str(root / "config")
@@ -98,6 +118,23 @@ def main() -> int:
                     raise RuntimeError(
                         f"Navigation label has no contrast for {page_name}"
                     )
+            pause_variable = visual_application._boolean_variables.get(
+                "detection.correct_on_pause"
+            )
+            if pause_variable is None or not pause_variable.get():
+                raise RuntimeError("Pause correction switch is missing or disabled")
+            pause_variable.set(False)
+            visual_application._save_boolean(
+                "detection.correct_on_pause", pause_variable
+            )
+            if visual_application.settings.get("detection.correct_on_pause") is not False:
+                raise RuntimeError("Pause correction switch did not save the off state")
+            pause_variable.set(True)
+            visual_application._save_boolean(
+                "detection.correct_on_pause", pause_variable
+            )
+            if visual_application.settings.get("detection.correct_on_pause") is not True:
+                raise RuntimeError("Pause correction switch did not save the on state")
         finally:
             visual_application.shutdown()
         print("WINDOWS_UI_E2E_OK", flush=True)
@@ -109,6 +146,7 @@ def main() -> int:
         completed: list[bool] = []
         layout_deadline = [0.0]
         focus_deadline = [0.0]
+        learning_deadline = [0.0]
 
         def fail(error: Exception) -> None:
             scenario_errors.append(error)
@@ -122,6 +160,16 @@ def main() -> int:
             )
             if api.send_inputs(user_inputs) != len(user_inputs):
                 raise RuntimeError("SendInput did not accept the user word")
+
+        def send_virtual_key(virtual_key: int) -> None:
+            user_inputs = (
+                NativeInput(True, virtual_key=virtual_key, synthetic=False),
+                NativeInput(False, virtual_key=virtual_key, synthetic=False),
+            )
+            if api.send_inputs(user_inputs) != len(user_inputs):
+                raise RuntimeError(
+                    f"SendInput did not accept virtual key {virtual_key:#x}"
+                )
 
         def wait_for_text(
             expected: str,
@@ -162,8 +210,212 @@ def main() -> int:
                 fail(RuntimeError(f"Unexpected Windows correction history: {pairs}"))
                 return
             print("WINDOWS_RU_TO_EN_E2E_OK", flush=True)
+            application.root.after(300, prepare_learning)
+
+        def finish_learning() -> None:
+            pairs = [
+                (entry.original, entry.replacement)
+                for entry in application.history.read()
+            ]
+            if pairs[-3:] != [
+                ("ghbdtn", "привет"),
+                ("руддщ", "hello"),
+                ("hello", "руддщ"),
+            ]:
+                fail(RuntimeError(f"Unexpected learned Windows history: {pairs}"))
+                return
+            print("WINDOWS_LEARNING_PROMPT_E2E_OK", flush=True)
             completed.append(True)
             application.shutdown()
+
+        def type_learned_word() -> None:
+            try:
+                send_scans((0x23, 0x12, 0x26, 0x26, 0x18, 0x39))
+                wait_for_text(
+                    "руддщ ", 1, finish_learning, time.monotonic() + 10.0
+                )
+            except Exception as error:
+                fail(error)
+
+        def wait_for_learned_input_focus() -> None:
+            try:
+                application.present()
+                api.activate_window(application.root.winfo_id())
+                application.test_entry.focus_force()
+                application.root.update_idletasks()
+                foreground = api.active_application().casefold()
+                expected = Path(sys.executable).stem.casefold()
+                ready = (
+                    application.backend.current_group() == 0
+                    and foreground == expected
+                    and application.root.focus_get() is application.test_entry
+                )
+                if not ready:
+                    if time.monotonic() >= learning_deadline[0]:
+                        raise RuntimeError(
+                            "Learned-rule input preparation timed out; "
+                            f"group={application.backend.current_group()}, "
+                            f"expected_app={expected!r}, actual_app={foreground!r}, "
+                            f"focus={application.root.focus_get()!r}"
+                        )
+                    application.root.after(50, wait_for_learned_input_focus)
+                    return
+                type_learned_word()
+            except Exception as error:
+                fail(error)
+
+        def prepare_learned_input() -> None:
+            try:
+                application.present()
+                api.activate_window(application.root.winfo_id())
+                application.test_entry.focus_force()
+                application.test_entry.delete(0, "end")
+                application.root.update_idletasks()
+                if not api.request_layout(application.backend.layouts[0]):
+                    raise RuntimeError(
+                        "Cannot select English for the learned-rule pass"
+                    )
+                learning_deadline[0] = time.monotonic() + 5.0
+                application.root.after(100, wait_for_learned_input_focus)
+            except Exception as error:
+                fail(error)
+
+        def wait_for_learning_confirmation() -> None:
+            try:
+                required = int(
+                    application.settings.get(
+                        "detection.learning_confirmations", 2
+                    )
+                )
+                confirmed = (
+                    application.engine.learning_prompt is None
+                    and application.learning_prompt.window.state() == "withdrawn"
+                    and application.engine.learning.forced_target(
+                        0, "hello", required
+                    )
+                    == 1
+                )
+                if not confirmed:
+                    if time.monotonic() >= learning_deadline[0]:
+                        raise RuntimeError(
+                            "Learning confirmation timed out; "
+                            f"prompt={application.engine.learning_prompt!r}, "
+                            "window_state="
+                            f"{application.learning_prompt.window.state()!r}"
+                        )
+                    application.root.after(50, wait_for_learning_confirmation)
+                    return
+                prepare_learned_input()
+            except Exception as error:
+                fail(error)
+
+        def wait_for_learning_prompt() -> None:
+            try:
+                prompt = application.engine.learning_prompt
+                popup = application.learning_prompt
+                ready = (
+                    application.test_entry.get() == "руддщ"
+                    and application.backend.current_group() == 1
+                    and prompt is not None
+                    and popup.prompt == prompt
+                    and popup.window.state() == "normal"
+                )
+                if not ready:
+                    if time.monotonic() >= learning_deadline[0]:
+                        raise RuntimeError(
+                            "Learning prompt timed out; "
+                            f"text={application.test_entry.get()!r}, "
+                            f"group={application.backend.current_group()}, "
+                            f"prompt={prompt!r}, window={popup.window.state()!r}"
+                        )
+                    application.root.after(50, wait_for_learning_prompt)
+                    return
+                anchor = popup.anchor
+                if anchor is None or anchor.window is None:
+                    raise RuntimeError("Learning prompt has no Win32 caret anchor")
+                popup.window.update_idletasks()
+                if popup.window.winfo_y() + popup.window.winfo_height() > anchor.y:
+                    raise RuntimeError(
+                        "Learning prompt was not positioned above the caret"
+                    )
+                send_virtual_key(0x0D)
+                learning_deadline[0] = time.monotonic() + 5.0
+                application.root.after(50, wait_for_learning_confirmation)
+            except Exception as error:
+                fail(error)
+
+        def start_learning_input() -> None:
+            try:
+                send_scans((0x23, 0x12, 0x26, 0x26, 0x18))
+                learning_deadline[0] = time.monotonic() + 10.0
+                application.root.after(50, wait_for_typed_learning_word)
+            except Exception as error:
+                fail(error)
+
+        def wait_for_typed_learning_word() -> None:
+            try:
+                ready = (
+                    application.test_entry.get() == "hello"
+                    and application.engine.snapshot.current_word == "hello"
+                    and application.backend.current_group() == 0
+                )
+                if not ready:
+                    if time.monotonic() >= learning_deadline[0]:
+                        raise RuntimeError(
+                            "Learning word did not settle before Pause; "
+                            f"text={application.test_entry.get()!r}, "
+                            "engine_word="
+                            f"{application.engine.snapshot.current_word!r}, "
+                            f"group={application.backend.current_group()}"
+                        )
+                    application.root.after(50, wait_for_typed_learning_word)
+                    return
+                send_virtual_key(0x13)
+                learning_deadline[0] = time.monotonic() + 10.0
+                application.root.after(50, wait_for_learning_prompt)
+            except Exception as error:
+                fail(error)
+
+        def wait_for_learning_input_focus() -> None:
+            try:
+                application.present()
+                api.activate_window(application.root.winfo_id())
+                application.test_entry.focus_force()
+                application.root.update_idletasks()
+                foreground = api.active_application().casefold()
+                expected = Path(sys.executable).stem.casefold()
+                ready = (
+                    application.backend.current_group() == 0
+                    and foreground == expected
+                    and application.root.focus_get() is application.test_entry
+                )
+                if not ready:
+                    if time.monotonic() >= learning_deadline[0]:
+                        raise RuntimeError(
+                            "Learning input preparation timed out; "
+                            f"group={application.backend.current_group()}, "
+                            f"expected_app={expected!r}, actual_app={foreground!r}, "
+                            f"focus={application.root.focus_get()!r}"
+                        )
+                    application.root.after(50, wait_for_learning_input_focus)
+                    return
+                start_learning_input()
+            except Exception as error:
+                fail(error)
+
+        def prepare_learning() -> None:
+            try:
+                application.present()
+                api.activate_window(application.root.winfo_id())
+                application.test_entry.focus_force()
+                application.test_entry.delete(0, "end")
+                application.root.update_idletasks()
+                if not api.request_layout(application.backend.layouts[0]):
+                    raise RuntimeError("Cannot select English for learning E2E")
+                learning_deadline[0] = time.monotonic() + 5.0
+                application.root.after(100, wait_for_learning_input_focus)
+            except Exception as error:
+                fail(error)
 
         def start_reverse() -> None:
             try:
@@ -267,8 +519,8 @@ def main() -> int:
                         raise RuntimeError("English layout selection timed out")
                     application.root.after(50, wait_for_english_layout)
                     return
-                send_scans((0x22, 0x23, 0x30, 0x20, 0x14, 0x31, 0x39))
-                wait_for_text("привет ", 1, finish_forward, time.monotonic() + 10.0)
+                send_scans((0x22, 0x23, 0x30, 0x20, 0x14, 0x31))
+                wait_for_text("привет", 1, finish_forward, time.monotonic() + 10.0)
             except Exception as error:
                 fail(error)
 

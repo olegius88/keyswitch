@@ -21,9 +21,11 @@ try:
     import gi
     gi.require_version("Gtk", "4.0")
     gi.require_version("Adw", "1")
-    from gi.repository import Adw, Gtk  # noqa: F401
+    gi.require_version("Atspi", "2.0")
+    gi.require_version("GdkX11", "4.0")
+    from gi.repository import Adw, Atspi, GdkX11, Gtk  # noqa: F401
 except Exception as error:
-    missing.append(f"GTK 4 / Libadwaita Python bindings: {error}")
+    missing.append(f"GTK 4 / Libadwaita / AT-SPI Python bindings: {error}")
 try:
     import dbus  # noqa: F401
 except Exception as error:
@@ -57,7 +59,8 @@ if missing:
         print(f"  - {item}", file=sys.stderr)
     print(
         "Установите: sudo apt install python3-gi python3-dbus "
-        "gir1.2-gtk-4.0 gir1.2-adw-1 libx11-6 libxtst6 libxkbcommon0 "
+        "gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-atspi-2.0 "
+        "libx11-6 libxtst6 libxkbcommon0 "
         "libhunspell-1.7-0 hunspell-en-us hunspell-ru onboard-data",
         file=sys.stderr,
     )

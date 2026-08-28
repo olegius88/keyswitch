@@ -32,6 +32,7 @@ jobs:
             desktop-file-utils \
             file \
             gir1.2-adw-1 \
+            gir1.2-atspi-2.0 \
             gir1.2-gtk-4.0 \
             hunspell-en-us \
             hunspell-ru \

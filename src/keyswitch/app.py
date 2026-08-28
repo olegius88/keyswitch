@@ -8,7 +8,7 @@ import logging
 import signal
 import sys
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 import gi
 
@@ -16,12 +16,18 @@ gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import Adw, Gdk, Gio, GLib  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import __version__
 from .config import SettingsStore
-from .engine import CorrectionPlan, EngineSnapshot, KeySwitchEngine
+from .engine import (
+    CorrectionPlan,
+    EngineSnapshot,
+    KeySwitchEngine,
+    LearningPrompt,
+)
 from .history import HistoryStore, data_dir
+from .learning_prompt import LearningPromptWindow, PromptBackend
 from .system import APP_ID, AutostartManager
 from .tray import StatusNotifierItem
 from .ui import MainWindow, RESOURCE_DIR
@@ -78,6 +84,7 @@ class KeySwitchApplication(Adw.Application):
         self.engine = KeySwitchEngine(self.settings, self.history)
         self.window: _WindowController | None = None
         self.tray: _TrayController | None = None
+        self.learning_prompt_window: LearningPromptWindow | None = None
         self._initialized = False
         self._held = False
 
@@ -113,6 +120,7 @@ class KeySwitchApplication(Adw.Application):
             self._window_close_requested,
         )
         self.engine.subscribe_corrections(self._correction_from_thread)
+        self.engine.subscribe_learning_prompts(self._learning_prompt_from_thread)
         engine_error = ""
         if not self.no_engine:
             try:
@@ -274,6 +282,26 @@ class KeySwitchApplication(Adw.Application):
             self.window.toast(f"Исправлено: {plan.original} → {plan.replacement}")
         return GLib.SOURCE_REMOVE
 
+    def _learning_prompt_from_thread(
+        self, prompt: LearningPrompt | None
+    ) -> None:
+        GLib.idle_add(self._apply_learning_prompt, prompt)
+
+    def _apply_learning_prompt(self, prompt: LearningPrompt | None) -> bool:
+        if prompt is None:
+            if self.learning_prompt_window is not None:
+                self.learning_prompt_window.hide_prompt()
+            return GLib.SOURCE_REMOVE
+        if self.learning_prompt_window is None:
+            self.learning_prompt_window = LearningPromptWindow(
+                cast(Gtk.Application, self),
+                cast(PromptBackend, self.engine.backend),
+                self.engine.confirm_learning_prompt,
+                self.engine.dismiss_learning_prompt,
+            )
+        self.learning_prompt_window.show_prompt(prompt)
+        return GLib.SOURCE_REMOVE
+
     def quit_application(self) -> bool:
         self.quit()
         return GLib.SOURCE_REMOVE
@@ -290,6 +318,9 @@ class KeySwitchApplication(Adw.Application):
         if self.tray is not None:
             self.tray.close()
             self.tray = None
+        if self.learning_prompt_window is not None:
+            self.learning_prompt_window.destroy()
+            self.learning_prompt_window = None
         if self._held:
             self.release()
             self._held = False

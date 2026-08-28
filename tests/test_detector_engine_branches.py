@@ -21,6 +21,7 @@ from keyswitch.engine import (
     Hotkey,
     KeySwitchEngine,
     LanguageContext,
+    LearningPrompt,
 )
 from keyswitch.history import HistoryStore
 from keyswitch.language_model import WordScore
@@ -372,9 +373,12 @@ class EngineBranchTests(unittest.TestCase):
 
     def test_hotkeys_modifiers_backspace_navigation_and_group_change(self) -> None:
         self.engine._handle(letter("a", group=0))
+        self.engine._handle(letter("b", keycode=31, group=0))
         self.engine._handle(key("BackSpace", keycode=22))
+        self.assertEqual(self.engine.snapshot.current_word, "a")
         self.engine._handle(key("BackSpace", keycode=22))
         self.assertEqual(self.engine.snapshot.current_word, "")
+        self.engine._handle(key("BackSpace", keycode=22))
 
         self.engine._handle(letter("a", group=0))
         self.engine._handle(letter("ф", group=1))
@@ -391,6 +395,58 @@ class EngineBranchTests(unittest.TestCase):
         self.assertFalse(self.settings.get("enabled"))
         self.engine._handle(toggle)
         self.assertTrue(self.settings.get("enabled"))
+
+    def test_pause_correction_guards_and_valid_word_path(self) -> None:
+        def arm(text: str = "ghbdtn") -> None:
+            self.engine._clear_word()
+            self.type_word(text)
+            self.engine._last_word_input_at = 10.0
+
+        arm()
+        self.settings.set("enabled", False)
+        self.engine._maybe_correct_after_pause(now=12.0)
+        self.assertFalse(self.engine._pause_correction_pending)
+        self.settings.set("enabled", True)
+
+        self.engine._pause_correction_pending = True
+        self.engine._last_word_input_at = None
+        self.engine._maybe_correct_after_pause(now=12.0)
+        self.assertFalse(self.engine._pause_correction_pending)
+
+        arm()
+        self.engine._pressed.add(30)
+        self.engine._maybe_correct_after_pause(now=12.0)
+        self.assertTrue(self.engine._pause_correction_pending)
+        self.engine._pressed.clear()
+
+        self.engine._modifier_keycodes.add(37)
+        self.engine._maybe_correct_after_pause(now=12.0)
+        self.assertTrue(self.engine._pause_correction_pending)
+        self.engine._modifier_keycodes.clear()
+
+        self.engine._pending = CorrectionPlan(
+            (letter("a"),), None, 0, 1, "a", "ф", 99, "Editor", False
+        )
+        self.engine._maybe_correct_after_pause(now=12.0)
+        self.assertTrue(self.engine._pause_correction_pending)
+        self.engine._pending = None
+
+        self.engine._manual_layout_group = 0
+        self.engine._maybe_correct_after_pause(now=12.0)
+        self.assertFalse(self.engine._pause_correction_pending)
+        self.engine._manual_layout_group = None
+
+        arm()
+        self.settings.set("exclusions.applications", ["testeditor"])
+        self.engine._maybe_correct_after_pause(now=12.0)
+        self.assertFalse(self.engine._pause_correction_pending)
+        self.settings.set("exclusions.applications", [])
+
+        arm("hello")
+        with patch("keyswitch.engine.time.monotonic", return_value=12.0):
+            self.engine._maybe_correct_after_pause()
+        self.assertFalse(self.engine._pause_correction_pending)
+        self.assertEqual(self.backend.injections, [])
 
     def test_modifier_release_defers_and_then_executes_pending(self) -> None:
         plan = CorrectionPlan((letter("a"),), None, 0, 1, "a", "ф", 99, "Editor", False)
@@ -465,6 +521,58 @@ class EngineBranchTests(unittest.TestCase):
         self.engine._pending_learning_action = ("unknown", 0, "source", 1)
         self.engine._pending_trigger_keycode = -1
         self.engine._maybe_execute_pending(key("x"))
+
+    def test_learning_prompt_confirmation_dismissal_and_expiry(self) -> None:
+        callbacks: list[LearningPrompt | None] = []
+        self.engine.subscribe_learning_prompts(callbacks.append)
+        self.assertEqual(callbacks, [None])
+        self.assertFalse(self.engine.confirm_learning_prompt())
+        self.assertFalse(self.engine.dismiss_learning_prompt())
+        self.assertFalse(self.engine._expire_learning_prompt(now=10.0))
+
+        prompt = LearningPrompt(0, 1, "hello", "руддщ", "Editor")
+        stale = LearningPrompt(0, 1, "world", "цщкдв", "Editor")
+        self.engine._show_learning_prompt(prompt)
+        self.assertIs(self.engine.learning_prompt, prompt)
+        self.assertFalse(self.engine.confirm_learning_prompt(stale))
+        self.assertFalse(self.engine.dismiss_learning_prompt(stale))
+        deadline = self.engine._learning_prompt_deadline
+        assert deadline is not None
+        self.assertFalse(self.engine._expire_learning_prompt(now=deadline - 0.01))
+        self.assertTrue(self.engine._expire_learning_prompt(now=deadline))
+        self.assertEqual(callbacks[-1], None)
+
+        self.engine._show_learning_prompt(prompt)
+        self.engine._handle(key("Escape", keycode=9))
+        self.assertIsNone(self.engine.learning_prompt)
+        self.engine._show_learning_prompt(prompt)
+        self.engine._handle(key("a", keycode=38, character="a"))
+        self.assertIsNone(self.engine.learning_prompt)
+
+        self.engine._show_learning_prompt(prompt)
+        modifier = key("Control_L", keycode=37)
+        self.engine._handle(modifier)
+        self.assertIs(self.engine.learning_prompt, prompt)
+        self.settings.set("detection.learning", False)
+        self.assertIsNone(self.engine.learning_prompt)
+        self.assertIsNone(self.engine._forced_target_group(0, "hello"))
+
+    def test_learned_rule_overrides_manual_layout_protection_on_pause(self) -> None:
+        self.engine.learning.confirm_manual(0, "hello", 1, 2)
+        self.engine._manual_layout_group = 0
+        self.engine._strokes = [
+            letter(character, keycode)
+            for keycode, character in enumerate("hello", start=30)
+        ]
+        self.engine._source_group = 0
+        self.engine._pause_correction_pending = True
+        self.engine._last_word_input_at = 1.0
+
+        self.engine._maybe_correct_after_pause(now=3.0)
+
+        self.assertEqual(len(self.backend.injections), 1)
+        self.assertEqual(self.backend.injections[0][1], 1)
+        self.assertIsNone(self.engine._manual_layout_group)
 
     def test_context_expiry_copy_and_lru_limit(self) -> None:
         strokes = (letter("a"),)

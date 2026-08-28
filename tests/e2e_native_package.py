@@ -22,6 +22,7 @@ from gi.repository import GLib, Gtk
 
 from keyswitch.config import SettingsStore
 from keyswitch.history import HistoryStore
+from keyswitch.learning import LearningStore
 from keyswitch.tray import ITEM_INTERFACE, MENU_INTERFACE, MENU_PATH, OBJECT_PATH
 from keyswitch.x11_backend import XKB_USE_CORE_KBD, XkbStateRec, _Libraries
 
@@ -63,6 +64,14 @@ class PhysicalTyper:
                 raise RuntimeError(f"No X11 keycode for {character!r}")
             self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 1, 18)
             self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 0, 8)
+        self.libraries.x11.XSync(self.display, 0)
+
+    def tap_keysym(self, keysym: int) -> None:
+        keycode = int(self.libraries.x11.XKeysymToKeycode(self.display, keysym))
+        if not keycode:
+            raise RuntimeError(f"No X11 keycode for keysym {keysym:#x}")
+        self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 1, 18)
+        self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 0, 8)
         self.libraries.x11.XSync(self.display, 0)
 
     def current_group(self) -> int:
@@ -175,18 +184,19 @@ def main() -> int:
     )
     destination = f"io.github.olegius88.KeySwitch.StatusNotifierItem.p{process.pid}"
     history = HistoryStore(root / "data" / "history.jsonl")
+    learning = LearningStore(root / "data" / "learning.json")
     typer = PhysicalTyper()
     result = NativeResult()
     loop = GLib.MainLoop()
     original_group = typer.current_group()
     cases = (
-        ("EN keys to Russian", 0, "ghbdtn ", "привет ", 1),
-        ("RU keys to English", 1, "hello ", "hello ", 0),
-        ("punctuation key is a Russian letter", 0, ",fpf ", "база ", 1),
-        ("return to EN before punctuation test", 1, "hello ", "hello ", 0),
-        ("punctuation boundary keeps its glyph", 0, "ghbdtn,", "привет,", 1),
-        ("manual layout switch protects next word", 0, "ghbdtn ", "ghbdtn ", 0),
-        ("manual protection is consumed once", 0, "ghbdtn ", "привет ", 1),
+        ("EN pause correction", 0, "ghbdtn", "привет", 1, 2300),
+        ("RU keys to English", 1, "hello ", "hello ", 0, 1000),
+        ("punctuation key is a Russian letter", 0, ",fpf ", "база ", 1, 1000),
+        ("return to EN before punctuation test", 1, "hello ", "hello ", 0, 1000),
+        ("punctuation boundary keeps its glyph", 0, "ghbdtn,", "привет,", 1, 1000),
+        ("manual layout switch protects next word", 0, "ghbdtn ", "ghbdtn ", 0, 1000),
+        ("manual protection is consumed once", 0, "ghbdtn ", "привет ", 1, 1000),
     )
     window = Gtk.Window(title="KeySwitch native package E2E")
     window.set_default_size(520, 120)
@@ -258,7 +268,14 @@ def main() -> int:
         return GLib.SOURCE_REMOVE
 
     def type_case(index: int) -> bool:
-        name, group, physical, _expected_text, _expected_group = cases[index]
+        (
+            name,
+            group,
+            physical,
+            _expected_text,
+            _expected_group,
+            verify_delay,
+        ) = cases[index]
         try:
             typer.switch_group(group)
             entry.set_text("")
@@ -266,11 +283,11 @@ def main() -> int:
             typer.type(physical)
         except (OSError, RuntimeError) as error:
             return fail(f"cannot type {name!r}: {error}")
-        GLib.timeout_add(1000, verify_case, index)
+        GLib.timeout_add(verify_delay, verify_case, index)
         return GLib.SOURCE_REMOVE
 
     def verify_case(index: int) -> bool:
-        name, _group, _physical, expected_text, expected_group = cases[index]
+        name, _group, _physical, expected_text, expected_group, _delay = cases[index]
         actual_text = entry.get_text()
         actual_group = typer.current_group()
         result.observed.append((name, actual_text, actual_group))
@@ -296,12 +313,78 @@ def main() -> int:
         ]
         if actual_history != expected_history:
             return fail(f"wrong correction history: {actual_history!r}")
+        GLib.timeout_add(200, start_learning_case)
+        return GLib.SOURCE_REMOVE
+
+    def start_learning_case() -> bool:
+        try:
+            typer.switch_group(0)
+            entry.set_text("")
+            window.present()
+            entry.grab_focus()
+            typer.type("hello")
+            typer.tap_keysym(0xFF13)
+        except (OSError, RuntimeError) as error:
+            return fail(f"cannot start packaged learning scenario: {error}")
+        GLib.timeout_add(900, confirm_learning_prompt)
+        return GLib.SOURCE_REMOVE
+
+    def confirm_learning_prompt() -> bool:
+        if entry.get_text() != "руддщ" or typer.current_group() != 1:
+            return fail(
+                "manual learning conversion failed: "
+                f"text={entry.get_text()!r} group={typer.current_group()}"
+            )
+        try:
+            typer.tap_keysym(0xFF0D)
+        except RuntimeError as error:
+            return fail(f"cannot confirm packaged learning prompt: {error}")
+        GLib.timeout_add(500, verify_learning_confirmation)
+        return GLib.SOURCE_REMOVE
+
+    def verify_learning_confirmation() -> bool:
+        required = 2
+        learning.load()
+        if learning.forced_target(0, "hello", required) != 1:
+            return fail("Enter did not persist the packaged learning rule")
+        try:
+            typer.switch_group(0)
+            entry.set_text("")
+            window.present()
+            entry.grab_focus()
+            typer.type("hello ")
+        except (OSError, RuntimeError) as error:
+            return fail(f"cannot type the learned packaged word: {error}")
+        GLib.timeout_add(900, verify_learned_rule)
+        return GLib.SOURCE_REMOVE
+
+    def verify_learned_rule() -> bool:
+        if entry.get_text() != "руддщ " or typer.current_group() != 1:
+            return fail(
+                "packaged learned rule did not run: "
+                f"text={entry.get_text()!r} group={typer.current_group()}"
+            )
+        actual_history = [
+            (item.original, item.replacement) for item in history.read()
+        ]
+        expected_history = [
+            ("ghbdtn", "привет"),
+            ("руддщ", "hello"),
+            (",fpf", "база"),
+            ("руддщ", "hello"),
+            ("ghbdtn", "привет"),
+            ("ghbdtn", "привет"),
+            ("hello", "руддщ"),
+        ]
+        if actual_history != expected_history:
+            return fail(f"wrong learned correction history: {actual_history!r}")
         result.exit_code = 0
+        print("NATIVE_LEARNING_PROMPT_E2E_OK")
         print("NATIVE_E2E_OK")
         loop.quit()
         return GLib.SOURCE_REMOVE
 
-    GLib.timeout_add_seconds(30, abort_on_timeout)
+    GLib.timeout_add_seconds(40, abort_on_timeout)
     GLib.timeout_add(100, wait_for_application)
     captured_stdout = ""
     captured_stderr = ""

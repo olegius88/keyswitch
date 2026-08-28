@@ -32,6 +32,7 @@ DEFAULTS: SettingsData = {
         "language_models": ["en_US", "ru_RU"],
         "minimum_length": 3,
         "confidence": 2.0,
+        "correct_on_pause": True,
         "correct_on_space": True,
         "correct_on_enter": True,
         "correct_on_tab": True,

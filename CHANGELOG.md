@@ -2,6 +2,23 @@
 
 All notable changes to KeySwitch are documented in this file.
 
+## Unreleased
+
+## 0.4.0 — 2026-08-28
+
+- Correct a likely wrong-layout word after 1.5 seconds without input, before a
+  separator is typed, with a dedicated option to disable idle correction.
+- Render Windows country flags at the maximum notification-area icon size
+  without the former purple frame.
+- Add an EveryLang-style learning prompt after a `Pause/Break` manual
+  conversion. `Enter` immediately confirms the word as a switching rule,
+  while Escape, unrelated input or an eight-second timeout dismisses it.
+- Position the prompt at the text caret when the platform exposes it, with a
+  pointer fallback on X11, and restore the original Windows target after the
+  focused prompt closes.
+- Keep repeated manual conversions as a configurable fallback and retain the
+  strict 100% line/branch coverage gate for the expanded core and GTK UI.
+
 ## 0.3.0 — 2026-08-27
 
 - Add a native Windows x64 backend using `WH_KEYBOARD_LL`, `ToUnicodeEx`,

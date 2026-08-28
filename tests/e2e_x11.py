@@ -14,8 +14,9 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk
 
 from keyswitch.config import SettingsStore
-from keyswitch.engine import KeySwitchEngine
+from keyswitch.engine import KeySwitchEngine, LearningPrompt
 from keyswitch.history import HistoryStore
+from keyswitch.learning_prompt import LearningPromptWindow
 from keyswitch.x11_backend import KeyEvent, X11Backend, _Libraries
 
 
@@ -46,6 +47,14 @@ class PhysicalTyper:
             self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 0, 8)
         self.libraries.x11.XSync(self.display, 0)
 
+    def tap_keysym(self, keysym: int) -> None:
+        keycode = int(self.libraries.x11.XKeysymToKeycode(self.display, keysym))
+        if not keycode:
+            raise RuntimeError(f"No X11 keycode for keysym {keysym:#x}")
+        self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 1, 18)
+        self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 0, 8)
+        self.libraries.x11.XSync(self.display, 0)
+
     def close(self) -> None:
         if self.display:
             self.libraries.x11.XCloseDisplay(self.display)
@@ -63,16 +72,20 @@ def main() -> int:
     engine = KeySwitchEngine(settings, history, backend)
     typer = PhysicalTyper()
     loop = GLib.MainLoop()
+    application = Gtk.Application(
+        application_id="io.github.olegius88.KeySwitchSourceE2E"
+    )
+    application.register(None)
     original_group = -1
     result = E2EResult()
     cases = (
-        ("EN keys to Russian", 0, "ghbdtn ", "привет ", 1),
-        ("RU keys to English", 1, "hello ", "hello ", 0),
-        ("punctuation key is a Russian letter", 0, ",fpf ", "база ", 1),
-        ("return to EN before punctuation test", 1, "hello ", "hello ", 0),
-        ("punctuation boundary keeps its glyph", 0, "ghbdtn,", "привет,", 1),
-        ("manual layout switch protects next word", 0, "ghbdtn ", "ghbdtn ", 0),
-        ("manual protection is consumed once", 0, "ghbdtn ", "привет ", 1),
+        ("EN pause correction", 0, "ghbdtn", "привет", 1, 2300),
+        ("RU keys to English", 1, "hello ", "hello ", 0, 900),
+        ("punctuation key is a Russian letter", 0, ",fpf ", "база ", 1, 900),
+        ("return to EN before punctuation test", 1, "hello ", "hello ", 0, 900),
+        ("punctuation boundary keeps its glyph", 0, "ghbdtn,", "привет,", 1, 900),
+        ("manual layout switch protects next word", 0, "ghbdtn ", "ghbdtn ", 0, 900),
+        ("manual protection is consumed once", 0, "ghbdtn ", "привет ", 1, 900),
     )
 
     def abort_on_timeout() -> bool:
@@ -90,6 +103,24 @@ def main() -> int:
     window.set_child(entry)
     window.present()
     entry.grab_focus()
+    learning_prompt = LearningPromptWindow(
+        application,
+        backend,
+        engine.confirm_learning_prompt,
+        engine.dismiss_learning_prompt,
+    )
+
+    def apply_learning_prompt(prompt: LearningPrompt | None) -> bool:
+        if prompt is None:
+            learning_prompt.hide_prompt()
+        else:
+            learning_prompt.show_prompt(prompt)
+        return GLib.SOURCE_REMOVE
+
+    def queue_learning_prompt(prompt: LearningPrompt | None) -> None:
+        GLib.idle_add(apply_learning_prompt, prompt)
+
+    engine.subscribe_learning_prompts(queue_learning_prompt)
     engine.start()
     engine_listener = backend._listener
 
@@ -107,17 +138,24 @@ def main() -> int:
     GLib.timeout_add_seconds(20, abort_on_timeout)
 
     def type_case(index: int) -> bool:
-        _name, group, physical, _expected_text, _expected_group = cases[index]
+        (
+            _name,
+            group,
+            physical,
+            _expected_text,
+            _expected_group,
+            verify_delay,
+        ) = cases[index]
         backend.switch_group(group)
         backend._libraries.x11.XSync(backend._control, 0)
         entry.set_text("")
         entry.grab_focus()
         typer.type(physical)
-        GLib.timeout_add(900, verify_case, index)
+        GLib.timeout_add(verify_delay, verify_case, index)
         return GLib.SOURCE_REMOVE
 
     def verify_case(index: int) -> bool:
-        name, _group, _physical, expected_text, expected_group = cases[index]
+        name, _group, _physical, expected_text, expected_group, _delay = cases[index]
         actual_text = entry.get_text()
         actual_group = backend.current_group()
         result.observed.append((name, actual_text, actual_group))
@@ -134,6 +172,67 @@ def main() -> int:
         if index + 1 < len(cases):
             GLib.timeout_add(200, type_case, index + 1)
             return GLib.SOURCE_REMOVE
+        GLib.timeout_add(200, start_learning_case)
+        return GLib.SOURCE_REMOVE
+
+    def start_learning_case() -> bool:
+        backend.switch_group(0)
+        backend._libraries.x11.XSync(backend._control, 0)
+        entry.set_text("")
+        entry.grab_focus()
+        typer.type("hello")
+        typer.tap_keysym(0xFF13)
+        GLib.timeout_add(900, verify_learning_prompt)
+        return GLib.SOURCE_REMOVE
+
+    def verify_learning_prompt() -> bool:
+        prompt = engine.learning_prompt
+        if (
+            entry.get_text() != "руддщ"
+            or backend.current_group() != 1
+            or prompt is None
+            or not learning_prompt.get_visible()
+        ):
+            print(
+                "learning_prompt_failed "
+                f"text={entry.get_text()!r} group={backend.current_group()} "
+                f"prompt={prompt!r} visible={learning_prompt.get_visible()}"
+            )
+            print("E2E_FAILED")
+            loop.quit()
+            return GLib.SOURCE_REMOVE
+        typer.tap_keysym(0xFF0D)
+        GLib.timeout_add(500, verify_learning_confirmation)
+        return GLib.SOURCE_REMOVE
+
+    def verify_learning_confirmation() -> bool:
+        required = int(settings.get("detection.learning_confirmations", 2))
+        if (
+            engine.learning_prompt is not None
+            or engine.learning.forced_target(0, "hello", required) != 1
+            or learning_prompt.get_visible()
+        ):
+            print("learning_confirmation_failed")
+            print("E2E_FAILED")
+            loop.quit()
+            return GLib.SOURCE_REMOVE
+        backend.switch_group(0)
+        backend._libraries.x11.XSync(backend._control, 0)
+        entry.set_text("")
+        entry.grab_focus()
+        typer.type("hello ")
+        GLib.timeout_add(900, verify_learned_rule)
+        return GLib.SOURCE_REMOVE
+
+    def verify_learned_rule() -> bool:
+        if entry.get_text() != "руддщ " or backend.current_group() != 1:
+            print(
+                f"learned_rule_failed text={entry.get_text()!r} "
+                f"group={backend.current_group()}"
+            )
+            print("E2E_FAILED")
+            loop.quit()
+            return GLib.SOURCE_REMOVE
         entries = history.read()
         expected_history = [
             ("ghbdtn", "привет"),
@@ -142,6 +241,7 @@ def main() -> int:
             ("руддщ", "hello"),
             ("ghbdtn", "привет"),
             ("ghbdtn", "привет"),
+            ("hello", "руддщ"),
         ]
         actual_history = [(item.original, item.replacement) for item in entries]
         ok = actual_history == expected_history
@@ -160,6 +260,7 @@ def main() -> int:
             backend._libraries.x11.XSync(backend._control, 0)
         engine.stop()
         typer.close()
+        learning_prompt.destroy()
         window.destroy()
         temporary.cleanup()
     return result.exit_code

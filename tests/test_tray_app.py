@@ -16,7 +16,7 @@ import warnings
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TypeVar, overload
+from typing import TypeVar, cast, overload
 from unittest.mock import Mock, call, patch
 
 import dbus
@@ -25,7 +25,8 @@ from keyswitch import app as app_module
 from keyswitch import launcher as launcher_module
 from keyswitch import tray as tray_module
 from keyswitch.app import KeySwitchApplication
-from keyswitch.engine import CorrectionPlan, EngineSnapshot
+from keyswitch.engine import CorrectionPlan, EngineSnapshot, LearningPrompt
+from keyswitch.learning_prompt import LearningPromptWindow
 from keyswitch.x11_backend import BackendProbe, KeyEvent
 
 
@@ -348,6 +349,10 @@ class FakeEngine:
         self.snapshot = EngineSnapshot(enabled=True, current_group=0)
         self.correction_callbacks: list[Callable[[CorrectionPlan], None]] = []
         self.snapshot_callbacks: list[Callable[[EngineSnapshot], None]] = []
+        self.learning_prompt_callbacks: list[
+            Callable[[LearningPrompt | None], None]
+        ] = []
+        self.backend = Mock()
         self.start_error: Exception | None = None
         self.start_calls = 0
         self.stop_calls = 0
@@ -357,6 +362,18 @@ class FakeEngine:
         self, callback: Callable[[CorrectionPlan], None]
     ) -> None:
         self.correction_callbacks.append(callback)
+
+    def subscribe_learning_prompts(
+        self, callback: Callable[[LearningPrompt | None], None]
+    ) -> None:
+        self.learning_prompt_callbacks.append(callback)
+        callback(None)
+
+    def confirm_learning_prompt(self, _prompt: LearningPrompt | None = None) -> bool:
+        return True
+
+    def dismiss_learning_prompt(self, _prompt: LearningPrompt | None = None) -> bool:
+        return True
 
     def subscribe(self, callback: Callable[[EngineSnapshot], None]) -> None:
         self.snapshot_callbacks.append(callback)
@@ -698,9 +715,27 @@ class ApplicationGlueTests(unittest.TestCase):
         self.application.window = None
         self.application._announce_correction(plan)
 
+    def test_learning_prompt_is_marshaled_created_reused_and_hidden(self) -> None:
+        prompt = LearningPrompt(0, 1, "hello", "руддщ", "Editor")
+        with patch("keyswitch.app.GLib.idle_add") as idle:
+            self.application._learning_prompt_from_thread(prompt)
+        idle.assert_called_once_with(self.application._apply_learning_prompt, prompt)
+
+        self.assertFalse(self.application._apply_learning_prompt(None))
+        popup = Mock()
+        with patch("keyswitch.app.LearningPromptWindow", return_value=popup) as factory:
+            self.assertFalse(self.application._apply_learning_prompt(prompt))
+            self.assertFalse(self.application._apply_learning_prompt(prompt))
+        factory.assert_called_once()
+        self.assertEqual(popup.show_prompt.call_count, 2)
+        self.assertFalse(self.application._apply_learning_prompt(None))
+        popup.hide_prompt.assert_called_once_with()
+
     def test_shutdown_closes_resources_releases_hold_and_logs_stop_error(self) -> None:
         tray = FakeTray()
         self.application.tray = tray
+        popup = Mock()
+        self.application.learning_prompt_window = cast(LearningPromptWindow, popup)
         self.application._held = True
         self.engine.stop_error = RuntimeError("stop failed")
         with (
@@ -711,6 +746,8 @@ class ApplicationGlueTests(unittest.TestCase):
             self.application.do_shutdown()
         logged.assert_called_once()
         self.assertEqual(tray.closed, 1)
+        popup.destroy.assert_called_once_with()
+        self.assertIsNone(self.application.learning_prompt_window)
         release.assert_called_once_with()
         base_shutdown.assert_called_once_with(self.application)
 

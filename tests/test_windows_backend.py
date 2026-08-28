@@ -27,6 +27,7 @@ from keyswitch.backend import (
     SUPER_MASK,
     BackendProbe,
     KeyEvent,
+    ScreenAnchor,
 )
 from keyswitch import config, history
 from keyswitch.config import DEFAULTS
@@ -88,6 +89,8 @@ class FakeWindowsAPI:
         self.stop_calls = 0
         self.layout_calls = 0
         self.translation: dict[tuple[int, int], str] = {}
+        self.anchor: ScreenAnchor | None = ScreenAnchor(100, 200, 300)
+        self.activated_windows: list[int] = []
 
     def loaded_layouts(self) -> tuple[int, ...]:
         self.layout_calls += 1
@@ -118,6 +121,13 @@ class FakeWindowsAPI:
 
     def active_application(self) -> str:
         return self.application
+
+    def input_anchor(self) -> ScreenAnchor | None:
+        return self.anchor
+
+    def activate_window(self, window: int) -> bool:
+        self.activated_windows.append(window)
+        return True
 
     def caps_lock_enabled(self) -> bool:
         return self.caps_lock
@@ -297,6 +307,10 @@ class WindowsBackendLifecycleTests(unittest.TestCase):
         self.assertIn("00000409", probe.xkb_version)
         self.assertEqual(backend.current_group(), 0)
         self.assertEqual(backend.active_application(), "Notepad")
+        self.assertEqual(backend.input_anchor(), ScreenAnchor(100, 200, 300))
+        self.assertFalse(backend.restore_window(None))
+        self.assertTrue(backend.restore_window(300))
+        self.assertEqual(api.activated_windows, [300])
 
         api.current_layout = 0x12340409
         self.assertEqual(backend.current_group(), 0)

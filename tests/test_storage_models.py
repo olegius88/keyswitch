@@ -180,6 +180,28 @@ class LearningStoreBranchTests(unittest.TestCase):
             store.clear()
             self.assertEqual(store.counts(), (0, 0))
 
+    def test_explicit_confirmation_activates_and_reconciles_rule(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = LearningStore(Path(temporary) / "learning.json")
+            self.assertEqual(store.confirm_manual(0, "", 1, 2), 0)
+            self.assertEqual(store.confirm_manual(0, "word", 0, 2), 0)
+
+            store.reject(0, "word", 1)
+            store.reject(0, "word", 2)
+            self.assertEqual(store.confirm_manual(0, "word", 1, 5), 5)
+            self.assertEqual(store.forced_target(0, "WORD", 5), 1)
+            self.assertEqual(store.rejected_targets(0, "word"), {2})
+
+            self.assertEqual(store.confirm_manual(0, "word", 1, 2), 5)
+            store.reject(0, "solo", 1)
+            self.assertEqual(store.confirm_manual(0, "solo", 1, 0), 1)
+            self.assertEqual(store.rejected_targets(0, "solo"), set())
+
+            store._data["rules"]["0:reset"] = 9
+            store._data["rejections"]["0:reset"] = "invalid"
+            self.assertEqual(store.confirm_manual(0, "reset", 1, 1000), 999)
+            self.assertEqual(store.forced_target(0, "reset", 999), 1)
+
 
 class LanguageModelBranchTests(unittest.TestCase):
     def _model(

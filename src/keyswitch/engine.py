@@ -25,6 +25,8 @@ NAVIGATION_KEYS = {
     "Escape", "Delete", "Insert",
 }
 PUNCTUATION = set(".,!?;:()[]{}—–-…\"«»")
+PAUSE_CORRECTION_DELAY_SECONDS = 1.5
+LEARNING_PROMPT_TIMEOUT_SECONDS = 8.0
 
 
 def _default_backend(group_count: int) -> InputBackend:
@@ -65,6 +67,15 @@ class LanguageContext:
     group: int
     words: dict[int, str]
     updated_at: float
+
+
+@dataclass(frozen=True)
+class LearningPrompt:
+    source_group: int
+    target_group: int
+    original: str
+    replacement: str
+    application: str
 
 
 class Hotkey:
@@ -122,6 +133,8 @@ class KeySwitchEngine:
         self._running = threading.Event()
         self._strokes: list[KeyEvent] = []
         self._source_group = -1
+        self._last_word_input_at: float | None = None
+        self._pause_correction_pending = False
         self._manual_layout_group: int | None = None
         self._pressed: set[int] = set()
         self._modifier_keycodes: set[int] = set()
@@ -130,6 +143,8 @@ class KeySwitchEngine:
         self._last_committed: CorrectionPlan | None = None
         self._last_correction: CorrectionPlan | None = None
         self._pending_learning_action: tuple[str, int, str, int] | None = None
+        self._learning_prompt: LearningPrompt | None = None
+        self._learning_prompt_deadline: float | None = None
         self._contexts: dict[str, LanguageContext] = {}
         self._snapshot = EngineSnapshot(
             enabled=bool(settings.get("enabled", True)),
@@ -137,6 +152,9 @@ class KeySwitchEngine:
         )
         self._callbacks: list[Callable[[EngineSnapshot], None]] = []
         self._correction_callbacks: list[Callable[[CorrectionPlan], None]] = []
+        self._learning_prompt_callbacks: list[
+            Callable[[LearningPrompt | None], None]
+        ] = []
         self._lock = threading.RLock()
         self.settings.subscribe(self._settings_changed)
 
@@ -153,6 +171,59 @@ class KeySwitchEngine:
     def subscribe_corrections(self, callback: Callable[[CorrectionPlan], None]) -> None:
         with self._lock:
             self._correction_callbacks.append(callback)
+
+    @property
+    def learning_prompt(self) -> LearningPrompt | None:
+        with self._lock:
+            return self._learning_prompt
+
+    def subscribe_learning_prompts(
+        self, callback: Callable[[LearningPrompt | None], None]
+    ) -> None:
+        with self._lock:
+            self._learning_prompt_callbacks.append(callback)
+            prompt = self._learning_prompt
+        callback(prompt)
+
+    def confirm_learning_prompt(
+        self, prompt: LearningPrompt | None = None
+    ) -> bool:
+        with self._lock:
+            current = self._learning_prompt
+            if current is None or (prompt is not None and prompt != current):
+                return False
+            self._learning_prompt = None
+            self._learning_prompt_deadline = None
+            callbacks = tuple(self._learning_prompt_callbacks)
+        required = int(self.settings.get("detection.learning_confirmations", 2))
+        self.learning.confirm_manual(
+            current.source_group,
+            current.original,
+            current.target_group,
+            required,
+        )
+        self._update(
+            last_action=(
+                f"{current.original} → {current.replacement} · правило выучено"
+            )
+        )
+        for callback in callbacks:
+            callback(None)
+        return True
+
+    def dismiss_learning_prompt(
+        self, prompt: LearningPrompt | None = None
+    ) -> bool:
+        with self._lock:
+            current = self._learning_prompt
+            if current is None or (prompt is not None and prompt != current):
+                return False
+            self._learning_prompt = None
+            self._learning_prompt_deadline = None
+            callbacks = tuple(self._learning_prompt_callbacks)
+        for callback in callbacks:
+            callback(None)
+        return True
 
     def start(self) -> None:
         if self._running.is_set():
@@ -175,6 +246,7 @@ class KeySwitchEngine:
             raise
 
     def stop(self) -> None:
+        self.dismiss_learning_prompt()
         if not self._running.is_set():
             self.backend.close()
             return
@@ -204,6 +276,8 @@ class KeySwitchEngine:
                 event = self._events.get(timeout=0.5)
             except queue.Empty:
                 self._poll_current_group()
+                self._maybe_correct_after_pause()
+                self._expire_learning_prompt()
                 continue
             if event is None:
                 break
@@ -214,6 +288,17 @@ class KeySwitchEngine:
                 self._update(last_error=str(error), last_action="Ошибка обработки ввода")
 
     def _handle(self, event: KeyEvent) -> None:
+        self._expire_learning_prompt()
+        prompt = self.learning_prompt
+        if prompt is not None and event.pressed and event.key_name not in MODIFIER_KEYS:
+            unmodified = not (event.control or event.alt or event.super_key)
+            if unmodified and event.key_name in {"Return", "KP_Enter"}:
+                self.confirm_learning_prompt(prompt)
+                return
+            if unmodified and event.key_name == "Escape":
+                self.dismiss_learning_prompt(prompt)
+                return
+            self.dismiss_learning_prompt(prompt)
         self._observe_group(event.group)
         if event.pressed:
             self._pressed.add(event.keycode)
@@ -246,6 +331,11 @@ class KeySwitchEngine:
         if event.key_name == "BackSpace":
             if self._strokes:
                 self._strokes.pop()
+                if self._strokes:
+                    self._mark_word_activity()
+                else:
+                    self._source_group = -1
+                    self._reset_pause_correction()
                 self._update(current_word=self._text_for_group(self._strokes, self._source_group))
             return
         if self._is_layout_letter(event):
@@ -256,6 +346,7 @@ class KeySwitchEngine:
                 self._clear_word()
             self._source_group = event.group
             self._strokes.append(event)
+            self._mark_word_activity()
             self._update(
                 current_group=event.group,
                 current_word=self._text_for_group(self._strokes, event.group),
@@ -272,6 +363,7 @@ class KeySwitchEngine:
         if not self._strokes:
             return
         strokes = tuple(self._strokes)
+        self._reset_pause_correction()
         source_group = self._source_group
         original = self._text_for_group(strokes, source_group)
         alternatives = {
@@ -296,12 +388,16 @@ class KeySwitchEngine:
             bool(self.settings.get("detection.respect_manual_layout", True))
             and self._manual_layout_group == source_group
         )
+        manual_layout_protected = (
+            manual_layout_selected
+            and self._forced_target_group(source_group, original) is None
+        )
         if manual_layout_selected:
             self._manual_layout_group = None
         should_analyze = (
             bool(self.settings.get("enabled", True))
             and self._boundary_enabled(boundary)
-            and not manual_layout_selected
+            and not manual_layout_protected
         )
         excluded = self._application_excluded(application)
         if should_analyze and not excluded:
@@ -324,7 +420,7 @@ class KeySwitchEngine:
             current_group=boundary.group,
             last_action=(
                 f"Ручная раскладка сохранена: {original}"
-                if manual_layout_selected
+                if manual_layout_protected
                 else None
             ),
         )
@@ -391,8 +487,6 @@ class KeySwitchEngine:
     ) -> DetectionDecision:
         context_words, context_group = self._context_for(application)
         context_aware = bool(self.settings.get("detection.context_aware", True))
-        learning_enabled = bool(self.settings.get("detection.learning", True))
-        confirmations = int(self.settings.get("detection.learning_confirmations", 2))
         ignored_words: list[str] = self.settings.get("exclusions.words", [])
         return self.detector.decide(
             original,
@@ -405,17 +499,21 @@ class KeySwitchEngine:
             protect_code=bool(self.settings.get("detection.protect_code", True)),
             previous_words=context_words if context_aware else {},
             context_group=context_group if context_aware else None,
-            forced_target_group=(
-                self.learning.forced_target(source_group, original, confirmations)
-                if learning_enabled
-                else None
-            ),
+            forced_target_group=self._forced_target_group(source_group, original),
             rejected_targets=(
                 self.learning.rejected_targets(source_group, original)
-                if learning_enabled
+                if bool(self.settings.get("detection.learning", True))
                 else set()
             ),
         )
+
+    def _forced_target_group(self, source_group: int, word: str) -> int | None:
+        if not bool(self.settings.get("detection.learning", True)):
+            return None
+        confirmations = int(
+            self.settings.get("detection.learning_confirmations", 2)
+        )
+        return self.learning.forced_target(source_group, word, confirmations)
 
     def _context_for(self, application: str) -> tuple[dict[int, str], int | None]:
         if not application.strip():
@@ -447,7 +545,7 @@ class KeySwitchEngine:
     @staticmethod
     def _plan_from_decision(
         strokes: tuple[KeyEvent, ...],
-        boundary: KeyEvent,
+        boundary: KeyEvent | None,
         application: str,
         decision: DetectionDecision,
     ) -> CorrectionPlan:
@@ -462,6 +560,70 @@ class KeySwitchEngine:
             application,
             True,
         )
+
+    def _mark_word_activity(self) -> None:
+        self._last_word_input_at = time.monotonic()
+        self._pause_correction_pending = True
+
+    def _reset_pause_correction(self) -> None:
+        self._last_word_input_at = None
+        self._pause_correction_pending = False
+
+    def _maybe_correct_after_pause(self, *, now: float | None = None) -> None:
+        if not self._pause_correction_pending:
+            return
+        if not bool(self.settings.get("detection.correct_on_pause", True)):
+            self._reset_pause_correction()
+            return
+        if not bool(self.settings.get("enabled", True)):
+            self._reset_pause_correction()
+            return
+        last_input = self._last_word_input_at
+        if last_input is None:
+            self._reset_pause_correction()
+            return
+        current_time = time.monotonic() if now is None else now
+        if current_time - last_input < PAUSE_CORRECTION_DELAY_SECONDS:
+            return
+        if self._pressed:
+            return
+        if self._modifier_keycodes:
+            return
+        if self._pending is not None:
+            return
+
+        self._pause_correction_pending = False
+        strokes = tuple(self._strokes)
+        source_group = self._source_group
+        manual_layout_selected = (
+            bool(self.settings.get("detection.respect_manual_layout", True))
+            and self._manual_layout_group == source_group
+        )
+        original = self._text_for_group(strokes, source_group)
+        if manual_layout_selected:
+            if self._forced_target_group(source_group, original) is None:
+                return
+            self._manual_layout_group = None
+        alternatives = {
+            group: self._text_for_group(strokes, group)
+            for group in self.models
+            if group != source_group
+        }
+        application = self.backend.active_application()
+        if self._application_excluded(application):
+            return
+        decision = self._decide_word(
+            original, alternatives, source_group, application
+        )
+        if not decision.should_convert:
+            return
+
+        plan = self._plan_from_decision(strokes, None, application, decision)
+        self._strokes = []
+        self._source_group = -1
+        self._reset_pause_correction()
+        self._update(current_word="")
+        self._execute_correction(plan, None)
 
     def _schedule_manual_conversion(self, trigger_keycode: int) -> None:
         if self._strokes:
@@ -501,6 +663,7 @@ class KeySwitchEngine:
         self._pending_trigger_keycode = trigger_keycode
         self._strokes = []
         self._source_group = -1
+        self._reset_pause_correction()
 
     def _schedule_undo(self, trigger_keycode: int) -> None:
         previous = self._last_correction
@@ -539,6 +702,13 @@ class KeySwitchEngine:
             return
         plan, self._pending = self._pending, None
         learning_action, self._pending_learning_action = self._pending_learning_action, None
+        self._execute_correction(plan, learning_action)
+
+    def _execute_correction(
+        self,
+        plan: CorrectionPlan,
+        learning_action: tuple[str, int, str, int] | None,
+    ) -> None:
         try:
             self.backend.inject_correction(
                 plan.strokes,
@@ -554,6 +724,7 @@ class KeySwitchEngine:
         self._remember_context(plan.application, plan.target_group, plan.strokes)
         learned_rule = False
         rejected_rule = False
+        learning_prompt: LearningPrompt | None = None
         if learning_action is not None and bool(self.settings.get("detection.learning", True)):
             action, source_group, word, target_group = learning_action
             if action == "manual":
@@ -562,6 +733,14 @@ class KeySwitchEngine:
                 )
                 required = int(self.settings.get("detection.learning_confirmations", 2))
                 learned_rule = confirmations >= required
+                if not learned_rule:
+                    learning_prompt = LearningPrompt(
+                        source_group,
+                        target_group,
+                        plan.original,
+                        plan.replacement,
+                        plan.application,
+                    )
             elif action == "reject":
                 self.learning.reject(source_group, word, target_group)
                 rejected_rule = True
@@ -585,6 +764,28 @@ class KeySwitchEngine:
             )
         for callback in tuple(self._correction_callbacks):
             callback(plan)
+        if learning_prompt is not None:
+            self._show_learning_prompt(learning_prompt)
+
+    def _show_learning_prompt(self, prompt: LearningPrompt) -> None:
+        with self._lock:
+            self._learning_prompt = prompt
+            self._learning_prompt_deadline = (
+                time.monotonic() + LEARNING_PROMPT_TIMEOUT_SECONDS
+            )
+            callbacks = tuple(self._learning_prompt_callbacks)
+        for callback in callbacks:
+            callback(prompt)
+
+    def _expire_learning_prompt(self, *, now: float | None = None) -> bool:
+        with self._lock:
+            deadline = self._learning_prompt_deadline
+        if deadline is None:
+            return False
+        current_time = time.monotonic() if now is None else now
+        if current_time < deadline:
+            return False
+        return self.dismiss_learning_prompt()
 
     def _matches_hotkey(self, name: str, event: KeyEvent) -> bool:
         return Hotkey(str(self.settings.get(f"hotkeys.{name}", ""))).matches(event)
@@ -620,8 +821,10 @@ class KeySwitchEngine:
         return "".join(stroke.character_for(group) for stroke in strokes)
 
     def _clear_word(self, action: str | None = None) -> None:
+        self.dismiss_learning_prompt()
         self._strokes = []
         self._source_group = -1
+        self._reset_pause_correction()
         self._pending = None
         self._pending_learning_action = None
         if action is None:
@@ -631,12 +834,15 @@ class KeySwitchEngine:
 
     def _settings_changed(self, path: str, value: object) -> None:
         if path == "*":
+            self.dismiss_learning_prompt()
             self._update(enabled=bool(self.settings.get("enabled", True)))
             self._manual_layout_group = None
         elif path == "enabled":
             self._update(enabled=bool(value))
         elif path == "detection.respect_manual_layout" and not bool(value):
             self._manual_layout_group = None
+        elif path == "detection.learning" and not bool(value):
+            self.dismiss_learning_prompt()
 
     def _observe_group(self, group: int) -> None:
         current_group = self.snapshot.current_group

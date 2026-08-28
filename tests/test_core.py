@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from keyswitch.config import SettingsStore
 from keyswitch.detector import DetectionDecision, LanguageDetector
-from keyswitch.engine import Hotkey, KeySwitchEngine
+from keyswitch.engine import Hotkey, KeySwitchEngine, LearningPrompt
 from keyswitch.history import HistoryStore
 from keyswitch.history import HistoryEntry
 from keyswitch.indicator import layout_icon_name, layout_label, normalize_indicator_style
@@ -104,6 +104,7 @@ class SettingsTests(unittest.TestCase):
             self.assertTrue(store.get("detection.context_aware"))
             self.assertTrue(store.get("detection.protect_code"))
             self.assertTrue(store.get("detection.respect_manual_layout"))
+            self.assertTrue(store.get("detection.correct_on_pause"))
             self.assertTrue(store.get("detection.learning"))
             self.assertEqual(store.get("detection.learning_confirmations"), 2)
             store.set("enabled", False)
@@ -266,6 +267,45 @@ class EngineTests(unittest.TestCase):
         self.assertIsNotNone(boundary)
         self.assertEqual(self.engine.snapshot.last_action, "ghbdtn → привет")
 
+    def test_word_is_corrected_after_typing_pause_without_boundary(self) -> None:
+        with patch("keyswitch.engine.time.monotonic", return_value=10.0):
+            for index, character in enumerate("ghbdtn", start=30):
+                event = letter_event(character, index, 0, self.pair)
+                self.engine._handle(event)
+                self.engine._handle(release_event(event))
+
+        self.engine._maybe_correct_after_pause(now=11.49)
+        self.assertEqual(self.backend.injections, [])
+        self.engine._maybe_correct_after_pause(now=11.5)
+
+        self.assertEqual(len(self.backend.injections), 1)
+        strokes, target, boundary = self.backend.injections[0]
+        self.assertEqual(target, 1)
+        self.assertIsNone(boundary)
+        self.assertEqual(
+            "".join(item.character_for(target) for item in strokes),
+            "привет",
+        )
+        self.assertEqual(self.engine.snapshot.current_word, "")
+        self.assertEqual(
+            [(entry.original, entry.replacement) for entry in self.history.read()],
+            [("ghbdtn", "привет")],
+        )
+
+    def test_pause_correction_can_be_disabled(self) -> None:
+        self.settings.set("detection.correct_on_pause", False)
+        with patch("keyswitch.engine.time.monotonic", return_value=20.0):
+            for index, character in enumerate("ghbdtn", start=30):
+                event = letter_event(character, index, 0, self.pair)
+                self.engine._handle(event)
+                self.engine._handle(release_event(event))
+
+        self.engine._maybe_correct_after_pause(now=22.0)
+
+        self.assertEqual(self.backend.injections, [])
+        self.assertEqual(self.engine.snapshot.current_word, "ghbdtn")
+        self.assertFalse(self.engine._pause_correction_pending)
+
     def test_layout_letter_on_punctuation_key_is_kept_inside_word(self) -> None:
         self.settings.set("detection.respect_manual_layout", False)
         for expected, physical in (("база", ",fpf"), ("общих", "j,ob[")):
@@ -408,6 +448,37 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(target, 1)
         self.assertEqual("".join(item.character_for(target) for item in strokes), "руддщ")
         self.assertIsNotNone(boundary)
+
+    def test_enter_confirms_manual_conversion_as_an_immediate_rule(self) -> None:
+        prompts: list[LearningPrompt | None] = []
+        self.engine.subscribe_learning_prompts(prompts.append)
+        for index, character in enumerate("hello", start=30):
+            self.engine._handle(letter_event(character, index, 0, self.pair))
+        pause = KeyEvent(True, 127, "Pause", "", ("", ""), 0, 0, 2000)
+        self.engine._handle(pause)
+        self.engine._handle(release_event(pause))
+
+        prompt = self.engine.learning_prompt
+        self.assertIsNotNone(prompt)
+        assert prompt is not None
+        self.assertEqual((prompt.original, prompt.replacement), ("hello", "руддщ"))
+        self.assertIsNone(self.engine.learning.forced_target(0, "hello", 2))
+
+        enter = KeyEvent(True, 36, "Return", "\n", ("\n", "\n"), 1, 0, 2002)
+        self.engine._handle(enter)
+        self.assertIsNone(self.engine.learning_prompt)
+        self.assertEqual(self.engine.learning.forced_target(0, "hello", 2), 1)
+        self.assertEqual(prompts[-1], None)
+        self.assertIn("правило выучено", self.engine.snapshot.last_action)
+
+        self.engine._manual_layout_group = 0
+        for index, character in enumerate("hello", start=70):
+            self.engine._handle(letter_event(character, index, 0, self.pair))
+        self.engine._handle(boundary_event(True))
+        self.engine._handle(boundary_event(False))
+        self.assertEqual(len(self.backend.injections), 2)
+        self.assertEqual(self.backend.injections[-1][1], 1)
+        self.assertIsNone(self.engine._manual_layout_group)
 
     def test_two_manual_conversions_create_an_automatic_rule(self) -> None:
         self.settings.set("detection.respect_manual_layout", False)

@@ -248,6 +248,13 @@ class MainWindowInteractionTests(unittest.TestCase):
         self.assertTrue(manual_layout.get_active())
         manual_layout.set_active(False)
         self.assertFalse(self.settings.get("detection.respect_manual_layout"))
+        pause_correction = self.window._settings_controls[
+            "detection.correct_on_pause"
+        ]
+        assert isinstance(pause_correction, Adw.SwitchRow)
+        self.assertTrue(pause_correction.get_active())
+        pause_correction.set_active(False)
+        self.assertFalse(self.settings.get("detection.correct_on_pause"))
         indicator = self.window._settings_controls["appearance.indicator_style"]
         assert isinstance(indicator, Adw.ComboRow)
         indicator.set_selected(1)

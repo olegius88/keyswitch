@@ -4,7 +4,7 @@ Section: utils
 Priority: optional
 Architecture: @ARCHITECTURE@
 Maintainer: Oleg Shevchuk <sh.oleg@list.ru>
-Depends: gir1.2-gtk-4.0, gir1.2-adw-1, libbz2-1.0, libc6, libdbus-1-3, libexpat1, libffi8, libgirepository-2.0-0 | libgirepository-1.0-1, libglib2.0-0t64, liblzma5, libssl3t64 | libssl3, libx11-6, libxtst6, libxkbcommon0, libzstd1, zlib1g, libhunspell-1.7-0, hunspell-en-us, hunspell-ru, onboard-data
+Depends: gir1.2-gtk-4.0, gir1.2-adw-1, gir1.2-atspi-2.0, libbz2-1.0, libc6, libdbus-1-3, libexpat1, libffi8, libgirepository-2.0-0 | libgirepository-1.0-1, libglib2.0-0t64, liblzma5, libssl3t64 | libssl3, libx11-6, libxtst6, libxkbcommon0, libzstd1, zlib1g, libhunspell-1.7-0, hunspell-en-us, hunspell-ru, onboard-data
 Homepage: https://github.com/olegius88/keyswitch
 Description: automatic EN/RU keyboard layout correction for Ubuntu X11
  KeySwitch detects words entered using the wrong English or Russian keyboard

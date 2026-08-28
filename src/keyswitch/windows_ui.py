@@ -12,8 +12,14 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from . import __version__
+from .backend import ScreenAnchor
 from .config import SettingsStore
-from .engine import CorrectionPlan, EngineSnapshot, KeySwitchEngine
+from .engine import (
+    CorrectionPlan,
+    EngineSnapshot,
+    KeySwitchEngine,
+    LearningPrompt,
+)
 from .history import HistoryEntry, HistoryStore, data_dir
 from .indicator import layout_label
 from .windows_backend import WindowsBackend
@@ -44,6 +50,117 @@ PAGE_NAMES = (
     ("maintenance", "Обслуживание"),
     ("about", "О программе"),
 )
+WINDOWS_LEARNING_PROMPT_DELAY_MS = 200
+
+
+class WindowsLearningPrompt:
+    """Keyboard-focused learning prompt positioned above the Win32 caret."""
+
+    def __init__(
+        self,
+        root: tk.Tk,
+        backend: WindowsBackend,
+        confirm: Callable[[LearningPrompt], bool],
+        dismiss: Callable[[LearningPrompt], bool],
+    ) -> None:
+        self.root = root
+        self.backend = backend
+        self.confirm = confirm
+        self.dismiss = dismiss
+        self.prompt: LearningPrompt | None = None
+        self.anchor: ScreenAnchor | None = None
+        self.window = tk.Toplevel(root, class_="KeySwitchLearningPrompt")
+        self.window.withdraw()
+        self.window.overrideredirect(True)
+        self.window.attributes("-topmost", True)
+        self.window.configure(background="#7657ff", borderwidth=1)
+
+        card = tk.Frame(
+            self.window,
+            background="#171a21",
+            padx=16,
+            pady=12,
+        )
+        card.pack(fill="both", expand=True)
+        tk.Label(
+            card,
+            text="Добавить слово в правила переключения?",
+            background="#171a21",
+            foreground="#ffffff",
+            font=("Segoe UI Semibold", 10),
+            anchor="w",
+        ).pack(fill="x")
+        self.word = tk.Label(
+            card,
+            background="#171a21",
+            foreground="#9a84ff",
+            font=("Segoe UI Semibold", 11),
+            anchor="w",
+        )
+        self.word.pack(fill="x", pady=(5, 2))
+        tk.Label(
+            card,
+            text="Enter - ДА    Esc - НЕТ",
+            background="#171a21",
+            foreground="#b7bdc9",
+            font=("Segoe UI", 9),
+            anchor="w",
+        ).pack(fill="x")
+        self.window.bind("<Return>", self._confirm_event)
+        self.window.bind("<Escape>", self._dismiss_event)
+
+    def show_prompt(
+        self, prompt: LearningPrompt, anchor: ScreenAnchor | None
+    ) -> None:
+        self.prompt = prompt
+        self.anchor = anchor
+        self.word.configure(text=f"{prompt.original}  →  {prompt.replacement}")
+        self.window.update_idletasks()
+        width = max(390, self.window.winfo_reqwidth())
+        height = self.window.winfo_reqheight()
+        if anchor is None:
+            pointer_x, pointer_y = self.root.winfo_pointerxy()
+            anchor = ScreenAnchor(pointer_x, pointer_y)
+            self.anchor = anchor
+        x = anchor.x - width // 2
+        y = anchor.y - height - 12
+        virtual_x = self.root.winfo_vrootx()
+        virtual_y = self.root.winfo_vrooty()
+        virtual_width = self.root.winfo_vrootwidth()
+        virtual_height = self.root.winfo_vrootheight()
+        x = max(virtual_x + 8, min(x, virtual_x + virtual_width - width - 8))
+        y = max(virtual_y + 8, min(y, virtual_y + virtual_height - height - 8))
+        self.window.geometry(f"{width}x{height}+{x}+{y}")
+        self.window.deiconify()
+        self.window.lift()
+        self.window.focus_force()
+
+    def hide_prompt(self) -> None:
+        anchor = self.anchor
+        self.prompt = None
+        self.anchor = None
+        self.window.withdraw()
+        if anchor is not None and anchor.window is not None:
+            self.root.after_idle(
+                lambda: self.backend.restore_window(anchor.window)
+            )
+
+    def destroy(self) -> None:
+        self.prompt = None
+        self.anchor = None
+        self.window.destroy()
+
+    def _confirm_event(self, _event: tk.Event[tk.Misc]) -> str:
+        prompt = self.prompt
+        if prompt is not None:
+            self.confirm(prompt)
+        return "break"
+
+    def _dismiss_event(self, _event: tk.Event[tk.Misc]) -> str:
+        prompt = self.prompt
+        if prompt is not None:
+            self.dismiss(prompt)
+        return "break"
 
 
 class WindowsApplication:
@@ -85,6 +202,12 @@ class WindowsApplication:
         # A Tk font description is a Tcl list; brace the Windows family name
         # so its embedded space is not parsed as a bogus size/style token.
         self.root.option_add("*Font", "{Segoe UI} 10")
+        self.learning_prompt = WindowsLearningPrompt(
+            self.root,
+            self.backend,
+            self.engine.confirm_learning_prompt,
+            self.engine.dismiss_learning_prompt,
+        )
 
         self.status_text = tk.StringVar(master=self.root, value="Подготовка движка…")
         self.layout_text = tk.StringVar(master=self.root, value="Раскладка: —")
@@ -109,6 +232,7 @@ class WindowsApplication:
         self.history.subscribe(lambda: self._post(self._refresh_history))
         self.engine.subscribe(self._snapshot_from_thread)
         self.engine.subscribe_corrections(self._correction_from_thread)
+        self.engine.subscribe_learning_prompts(self._learning_prompt_from_thread)
 
     def _build_window(self) -> None:
         shell = ttk.Frame(self.root, style="App.TFrame")
@@ -221,7 +345,7 @@ class WindowsApplication:
         test = self._section(page, "Проверка в реальном поле", 3)
         ttk.Label(
             test,
-            text="Выберите EN, напечатайте ghbdtn и нажмите пробел — должно появиться «привет ». Потом проверьте обратное направление.",
+            text="Выберите EN и напечатайте ghbdtn: после паузы появится «привет». Можно также нажать пробел. Потом проверьте обратное направление.",
             wraplength=720,
         ).grid(row=0, column=0, sticky="w")
         self.test_entry = ttk.Entry(test, font=("Segoe UI", 14))
@@ -742,6 +866,39 @@ class WindowsApplication:
         if bool(self.settings.get("general.sound", False)):
             winsound.MessageBeep(winsound.MB_OK)
 
+    def _learning_prompt_from_thread(
+        self, prompt: LearningPrompt | None
+    ) -> None:
+        anchor = self.backend.input_anchor() if prompt is not None else None
+        if prompt is None:
+            self._post(partial(self._apply_learning_prompt, prompt, anchor))
+            return
+        self._post(partial(self._schedule_learning_prompt, prompt, anchor))
+
+    def _schedule_learning_prompt(
+        self,
+        prompt: LearningPrompt,
+        anchor: ScreenAnchor | None,
+    ) -> None:
+        self.root.after(
+            WINDOWS_LEARNING_PROMPT_DELAY_MS,
+            self._apply_learning_prompt,
+            prompt,
+            anchor,
+        )
+
+    def _apply_learning_prompt(
+        self,
+        prompt: LearningPrompt | None,
+        anchor: ScreenAnchor | None,
+    ) -> None:
+        if prompt is None:
+            self.learning_prompt.hide_prompt()
+            return
+        if self.engine.learning_prompt != prompt:
+            return
+        self.learning_prompt.show_prompt(prompt, anchor)
+
     def _sync_autostart(self) -> None:
         try:
             self.autostart.set_enabled(
@@ -1072,6 +1229,7 @@ class WindowsApplication:
         if self.tray is not None:
             self.tray.close()
             self.tray = None
+        self.learning_prompt.destroy()
         self.root.destroy()
 
 
