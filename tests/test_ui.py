@@ -355,6 +355,8 @@ class MainWindowInteractionTests(unittest.TestCase):
             patch.object(self.window, "_confirm_reset") as reset,
             patch.object(self.window, "_confirm_clear_history") as clear_history,
             patch.object(self.window, "_copy_diagnostics") as copy_diagnostics,
+            patch.object(self.window, "_check_updates") as check_updates,
+            patch.object(self.window, "_open_update_release") as open_update_release,
             patch.object(
                 self.window, "_remove_application_exclusion"
             ) as remove_application,
@@ -367,6 +369,8 @@ class MainWindowInteractionTests(unittest.TestCase):
             button(label="Сбросить").emit("clicked")
             button(icon_name="user-trash-symbolic").emit("clicked")
             button(icon_name="edit-copy-symbolic").emit("clicked")
+            button(label="Проверить сейчас").emit("clicked")
+            button(label="Открыть выпуск").emit("clicked")
             next(
                 widget
                 for widget in widgets
@@ -381,6 +385,8 @@ class MainWindowInteractionTests(unittest.TestCase):
         reset.assert_called_once_with()
         clear_history.assert_called_once_with()
         copy_diagnostics.assert_called_once_with(self.engine.backend.probe())
+        check_updates.assert_called_once_with()
+        open_update_release.assert_called_once_with()
         remove_application.assert_called_once_with("keepassxc")
 
     def test_hotkeys_text_debounce_navigation_and_setting_updates(self) -> None:

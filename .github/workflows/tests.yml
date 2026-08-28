@@ -210,7 +210,8 @@ jobs:
           '{"general":{"autostart":false},"appearance":{"show_indicator":false},"updates":{"check_automatically":false}}' | Set-Content -Path (Join-Path $env:KEYSWITCH_CONFIG_DIR "config.json") -Encoding utf8NoBOM
           $smoke = Start-Process -FilePath (Join-Path $installRoot "KeySwitch.exe") -ArgumentList "--smoke-ui" -Wait -PassThru
           if ($smoke.ExitCode -ne 0) { throw "Installed executable exited with $($smoke.ExitCode)" }
-          $update = Start-Process -FilePath $installer -ArgumentList "/SP-", "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/NORESTARTAPPLICATIONS", "/KEYSWITCHUPDATE=1", "/DIR=$installRoot" -Wait -PassThru
+          $update = Start-Process -FilePath $installer -ArgumentList "/SP-", "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/NORESTARTAPPLICATIONS", "/KEYSWITCHUPDATE=1", "/DIR=$installRoot" -PassThru
+          $update.WaitForExit()
           if ($update.ExitCode -ne 0) { throw "Auto-update installer exited with $($update.ExitCode)" }
           $keyswitchUpdatedProcess = $null
           for ($attempt = 0; $attempt -lt 40 -and -not $keyswitchUpdatedProcess; $attempt++) {

@@ -656,11 +656,16 @@ class WindowsInstallerLaunchTests(unittest.TestCase):
             ).read_text(encoding="utf-8")
             for required in (
                 "/KEYSWITCHUPDATE=1",
+                "$update.WaitForExit()",
                 "Auto-update installer did not relaunch KeySwitch",
                 "tests/test_updates.py",
                 "*/updates.py",
             ):
                 self.assertIn(required, workflow)
+            update_launch = next(
+                line for line in workflow.splitlines() if "$update = Start-Process" in line
+            )
+            self.assertNotIn("-Wait", update_launch)
 
     def test_installer_path_and_arguments_are_strict(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
