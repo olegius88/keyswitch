@@ -4,6 +4,19 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.5.0 — 2026-08-28
+
+- Add stable GitHub Release checks at startup and every six hours on Windows
+  and Ubuntu, with a complete updates settings/status page on both platforms.
+- On Windows, download the exact versioned Setup EXE, require its GitHub asset
+  size and SHA-256 digest to match, install silently, and relaunch KeySwitch.
+- Keep Ubuntu package replacement under APT authorization: notify about a new
+  release and open its verified repository page instead of silently invoking
+  elevated package installation.
+- Cover update metadata validation, redirect restrictions, corrupted and
+  interrupted downloads, state transitions and installer arguments with the
+  mandatory 100% line/branch test gate.
+
 ## 0.4.0 — 2026-08-28
 
 - Correct a likely wrong-layout word after 1.5 seconds without input, before a

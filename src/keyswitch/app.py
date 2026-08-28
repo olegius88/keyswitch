@@ -31,10 +31,13 @@ from .learning_prompt import LearningPromptWindow, PromptBackend
 from .system import APP_ID, AutostartManager
 from .tray import StatusNotifierItem
 from .ui import MainWindow, RESOURCE_DIR
+from .updates import UpdateManager, UpdatePhase, UpdateSnapshot
 from .x11_backend import X11Backend
 
 
 LOGGER = logging.getLogger(__name__)
+UPDATE_INITIAL_DELAY_SECONDS = 30
+UPDATE_INTERVAL_SECONDS = 6 * 60 * 60
 
 
 class _WindowController(Protocol):
@@ -82,11 +85,15 @@ class KeySwitchApplication(Adw.Application):
         self.autostart = AutostartManager()
         self.history = HistoryStore(limit=int(self.settings.get("history.limit", 200)))
         self.engine = KeySwitchEngine(self.settings, self.history)
+        self.updates = UpdateManager(__version__, data_dir() / "updates")
         self.window: _WindowController | None = None
         self.tray: _TrayController | None = None
         self.learning_prompt_window: LearningPromptWindow | None = None
         self._initialized = False
         self._held = False
+        self._update_initial_source: int | None = None
+        self._update_periodic_source: int | None = None
+        self._last_update_notification = ""
 
     def do_startup(self) -> None:
         Adw.Application.do_startup(self)
@@ -101,6 +108,7 @@ class KeySwitchApplication(Adw.Application):
         self._apply_theme(str(self.settings.get("appearance.theme", "system")))
         self._sync_autostart()
         self.settings.subscribe(self._settings_changed)
+        self.updates.subscribe(self._update_snapshot_from_thread)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, self._signal_quit)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, self._signal_quit)
 
@@ -117,6 +125,7 @@ class KeySwitchApplication(Adw.Application):
             self.settings,
             self.history,
             self.engine,
+            self.updates,
             self._window_close_requested,
         )
         self.engine.subscribe_corrections(self._correction_from_thread)
@@ -130,6 +139,7 @@ class KeySwitchApplication(Adw.Application):
                 LOGGER.exception("Не удалось запустить движок")
         self._sync_tray()
         self.engine.subscribe(self._engine_snapshot_from_thread)
+        self._schedule_update_checks()
         should_hide = self.hidden
         if not should_hide or engine_error:
             self.window.present()
@@ -234,6 +244,67 @@ class KeySwitchApplication(Adw.Application):
             self._apply_theme(str(value))
         elif path in {"general.autostart", "general.start_hidden"}:
             self._sync_autostart()
+        elif path == "updates.check_automatically":
+            if bool(value):
+                self._schedule_update_checks()
+            else:
+                self._cancel_update_checks()
+        elif path == "*":
+            self._schedule_update_checks()
+        return GLib.SOURCE_REMOVE
+
+    def _schedule_update_checks(self) -> None:
+        if (
+            self.no_engine
+            or not bool(self.settings.get("updates.check_automatically", True))
+            or self._update_initial_source is not None
+            or self._update_periodic_source is not None
+        ):
+            return
+        self._update_initial_source = GLib.timeout_add_seconds(
+            UPDATE_INITIAL_DELAY_SECONDS,
+            self._initial_update_check,
+        )
+
+    def _initial_update_check(self) -> bool:
+        self._update_initial_source = None
+        self._automatic_update_check()
+        if bool(self.settings.get("updates.check_automatically", True)):
+            self._update_periodic_source = GLib.timeout_add_seconds(
+                UPDATE_INTERVAL_SECONDS,
+                self._periodic_update_check,
+            )
+        return GLib.SOURCE_REMOVE
+
+    def _periodic_update_check(self) -> bool:
+        self._automatic_update_check()
+        return GLib.SOURCE_CONTINUE
+
+    def _automatic_update_check(self) -> None:
+        self.updates.check(automatic=True, install_automatically=False)
+
+    def _cancel_update_checks(self) -> None:
+        for attribute in ("_update_initial_source", "_update_periodic_source"):
+            source = cast(int | None, getattr(self, attribute))
+            if source is not None:
+                GLib.source_remove(source)
+                setattr(self, attribute, None)
+
+    def _update_snapshot_from_thread(self, snapshot: UpdateSnapshot) -> None:
+        GLib.idle_add(self._apply_update_snapshot, snapshot)
+
+    def _apply_update_snapshot(self, snapshot: UpdateSnapshot) -> bool:
+        if (
+            snapshot.phase is UpdatePhase.AVAILABLE
+            and snapshot.available_version != self._last_update_notification
+        ):
+            self._last_update_notification = snapshot.available_version
+            if bool(self.settings.get("general.notifications", True)):
+                notification = Gio.Notification.new("Доступно обновление KeySwitch")
+                notification.set_body(snapshot.message)
+                notification.set_icon(Gio.ThemedIcon.new("keyswitch"))
+                notification.set_default_action("app.show")
+                self.send_notification("keyswitch-update", notification)
         return GLib.SOURCE_REMOVE
 
     def _engine_snapshot_from_thread(self, snapshot: EngineSnapshot) -> None:
@@ -311,6 +382,8 @@ class KeySwitchApplication(Adw.Application):
         return GLib.SOURCE_REMOVE
 
     def do_shutdown(self) -> None:
+        self._cancel_update_checks()
+        self.updates.close()
         try:
             self.engine.stop()
         except Exception:

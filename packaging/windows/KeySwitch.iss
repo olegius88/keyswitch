@@ -54,8 +54,16 @@ Name: "{autodesktop}\KeySwitch"; Filename: "{app}\KeySwitch.exe"; Tasks: desktop
 
 [Run]
 Filename: "{app}\KeySwitch.exe"; Description: "Запустить KeySwitch"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\KeySwitch.exe"; Parameters: "--hidden"; Flags: nowait skipifnotsilent; Check: IsKeySwitchAutoUpdate
 
 [Code]
+function IsKeySwitchAutoUpdate: Boolean;
+begin
+  Result := CompareText(
+    ExpandConstant('{param:KEYSWITCHUPDATE|0}'),
+    '1') = 0;
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then

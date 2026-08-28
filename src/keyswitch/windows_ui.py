@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import queue
+import webbrowser
 import winsound
 from collections.abc import Callable, Iterable
 from functools import partial
+from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -34,7 +36,14 @@ from .windows_ui_model import (
     HOTKEY_SETTINGS,
     SYSTEM_SETTINGS,
     TRIGGER_SETTINGS,
+    UPDATE_SETTINGS,
     SettingSpec,
+)
+from .updates import (
+    UpdateManager,
+    UpdatePhase,
+    UpdateSnapshot,
+    launch_windows_installer,
 )
 
 
@@ -47,10 +56,13 @@ PAGE_NAMES = (
     ("exclusions", "Исключения"),
     ("appearance", "Внешний вид и система"),
     ("history", "История"),
+    ("updates", "Обновления"),
     ("maintenance", "Обслуживание"),
     ("about", "О программе"),
 )
 WINDOWS_LEARNING_PROMPT_DELAY_MS = 200
+WINDOWS_UPDATE_INITIAL_DELAY_MS = 30_000
+WINDOWS_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000
 
 
 class WindowsLearningPrompt:
@@ -166,9 +178,16 @@ class WindowsLearningPrompt:
 class WindowsApplication:
     """Own Tk, the global engine, tray and per-user desktop integration."""
 
-    def __init__(self, *, hidden: bool, no_engine: bool) -> None:
+    def __init__(
+        self,
+        *,
+        hidden: bool,
+        no_engine: bool,
+        enable_updates: bool = True,
+    ) -> None:
         self.hidden = hidden
         self.no_engine = no_engine
+        self.enable_updates = enable_updates
         self.settings = SettingsStore()
         self.history = HistoryStore(limit=int(self.settings.get("history.limit", 200)))
         self.backend = WindowsBackend()
@@ -183,6 +202,11 @@ class WindowsApplication:
         self.tray: WindowsTray | None = None
         self._closing = False
         self._events: queue.SimpleQueue[Callable[[], None]] = queue.SimpleQueue()
+        self.updates = UpdateManager(
+            __version__,
+            data_dir() / "updates",
+            install_request=self._install_request_from_thread,
+        )
         self._pages: dict[str, ttk.Frame] = {}
         self._navigation: dict[str, tk.Button] = {}
         self._active_page = "overview"
@@ -193,6 +217,8 @@ class WindowsApplication:
         self._string_variables: dict[str, tk.StringVar] = {}
         self._choice_labels: dict[str, dict[str, str]] = {}
         self._catalog_items: dict[str, CatalogApplication] = {}
+        self._update_after_id: str | None = None
+        self._last_update_notification = ""
 
         self.root = tk.Tk(className="KeySwitch")
         self.root.title("KeySwitch")
@@ -218,6 +244,15 @@ class WindowsApplication:
         self.manual_application = tk.StringVar(master=self.root, value="")
         self.manual_word = tk.StringVar(master=self.root, value="")
         self.learning_text = tk.StringVar(master=self.root, value="")
+        self.update_status_text = tk.StringVar(
+            master=self.root,
+            value=self.updates.snapshot.message,
+        )
+        self.update_version_text = tk.StringVar(
+            master=self.root,
+            value=f"Установлена версия {__version__}",
+        )
+        self.update_progress_text = tk.StringVar(master=self.root, value="")
 
         self.application_list: tk.Listbox
         self.word_list: tk.Listbox
@@ -225,6 +260,9 @@ class WindowsApplication:
         self.history_tree: ttk.Treeview
         self.diagnostics_text: tk.Text
         self.test_entry: ttk.Entry
+        self.update_check_button: ttk.Button
+        self.update_install_button: ttk.Button
+        self.update_release_button: ttk.Button
         self._build_window()
         self._apply_theme(str(self.settings.get("appearance.theme", "system")))
 
@@ -233,6 +271,7 @@ class WindowsApplication:
         self.engine.subscribe(self._snapshot_from_thread)
         self.engine.subscribe_corrections(self._correction_from_thread)
         self.engine.subscribe_learning_prompts(self._learning_prompt_from_thread)
+        self.updates.subscribe(self._update_from_thread)
 
     def _build_window(self) -> None:
         shell = ttk.Frame(self.root, style="App.TFrame")
@@ -291,6 +330,7 @@ class WindowsApplication:
         self._build_exclusions(content_shell)
         self._build_appearance(content_shell)
         self._build_history(content_shell)
+        self._build_updates(content_shell)
         self._build_maintenance(content_shell)
         self._build_about(content_shell)
         self.show_page("overview")
@@ -508,6 +548,130 @@ class WindowsApplication:
         self.history_tree.grid(row=3, column=0, sticky="nsew")
         page.rowconfigure(3, weight=1)
         self._refresh_history()
+
+    def _build_updates(self, parent: ttk.Frame) -> None:
+        page = self._new_page(
+            parent,
+            "updates",
+            "Обновления",
+            "KeySwitch проверяет стабильные выпуски, сверяет SHA-256 и может тихо обновиться с автоматическим перезапуском.",
+        )
+        state = self._section(page, "Состояние", 2)
+        ttk.Label(
+            state,
+            textvariable=self.update_version_text,
+            style="CardTitle.TLabel",
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            state,
+            textvariable=self.update_status_text,
+            wraplength=720,
+        ).grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(
+            state,
+            textvariable=self.update_progress_text,
+            style="Muted.TLabel",
+        ).grid(row=2, column=0, sticky="w", pady=(4, 0))
+
+        policy = self._section(page, "Политика", 3)
+        for row, spec in enumerate(UPDATE_SETTINGS):
+            self._add_setting(policy, spec, row)
+
+        actions = self._section(page, "Действия", 4)
+        controls = ttk.Frame(actions)
+        controls.grid(row=0, column=0, sticky="w")
+        self.update_check_button = ttk.Button(
+            controls,
+            text="Проверить сейчас",
+            command=self._check_updates,
+        )
+        self.update_check_button.pack(side="left")
+        self.update_install_button = ttk.Button(
+            controls,
+            text="Установить сейчас",
+            command=self._install_available_update,
+            state="disabled",
+        )
+        self.update_install_button.pack(side="left", padx=(8, 0))
+        self.update_release_button = ttk.Button(
+            controls,
+            text="Открыть выпуск",
+            command=self._open_update_release,
+            state="disabled",
+        )
+        self.update_release_button.pack(side="left", padx=(8, 0))
+        ttk.Label(
+            actions,
+            text=(
+                "Автоустановка работает для Setup EXE текущего пользователя и не требует "
+                "прав администратора. При обновлении окно закроется и KeySwitch запустится снова."
+            ),
+            wraplength=720,
+            style="Muted.TLabel",
+        ).grid(row=1, column=0, sticky="w", pady=(10, 0))
+
+    def _update_from_thread(self, snapshot: UpdateSnapshot) -> None:
+        self._post(partial(self._apply_update_snapshot, snapshot))
+
+    def _apply_update_snapshot(self, snapshot: UpdateSnapshot) -> None:
+        self.update_status_text.set(snapshot.message)
+        self.update_version_text.set(
+            f"Доступна версия {snapshot.available_version}"
+            if snapshot.available_version
+            else f"Установлена версия {snapshot.current_version}"
+        )
+        self.update_progress_text.set(
+            f"Загрузка: {snapshot.progress}%"
+            if snapshot.phase is UpdatePhase.DOWNLOADING
+            else ""
+        )
+        busy = snapshot.phase in {UpdatePhase.CHECKING, UpdatePhase.DOWNLOADING}
+        self.update_check_button.state(["disabled"] if busy else ["!disabled"])
+        can_install = snapshot.phase is UpdatePhase.AVAILABLE
+        self.update_install_button.state(
+            ["!disabled"] if can_install else ["disabled"]
+        )
+        self.update_release_button.state(
+            ["!disabled"] if snapshot.release_url else ["disabled"]
+        )
+        if (
+            can_install
+            and snapshot.available_version != self._last_update_notification
+        ):
+            self._last_update_notification = snapshot.available_version
+            if (
+                bool(self.settings.get("general.notifications", True))
+                and self.tray is not None
+            ):
+                self.tray.notify("Доступно обновление KeySwitch", snapshot.message)
+
+    def _check_updates(self) -> None:
+        if not self.updates.check(automatic=False, install_automatically=False):
+            self.update_status_text.set("Проверка обновлений уже выполняется")
+
+    def _install_available_update(self) -> None:
+        if not self.updates.install_available():
+            self.update_status_text.set("Сначала проверьте наличие новой версии")
+
+    def _open_update_release(self) -> None:
+        release_url = self.updates.snapshot.release_url
+        if not release_url:
+            self.update_status_text.set("Сначала проверьте наличие новой версии")
+            return
+        if not webbrowser.open(release_url):
+            self.update_status_text.set("Не удалось открыть страницу выпуска")
+
+    def _install_request_from_thread(self, path: Path) -> None:
+        self._post(partial(self._install_update, path))
+
+    def _install_update(self, path: Path) -> None:
+        try:
+            launch_windows_installer(path)
+        except Exception as error:
+            LOGGER.exception("Не удалось запустить установщик KeySwitch")
+            self.updates.installation_failed(error)
+            return
+        self.shutdown()
 
     def _build_maintenance(self, parent: ttk.Frame) -> None:
         page = self._new_page(
@@ -813,6 +977,8 @@ class WindowsApplication:
                 self.history.limit = max(1, int(value))
         elif path in {"exclusions.applications", "exclusions.words"}:
             self._refresh_exclusion_lists()
+        elif path == "updates.check_automatically":
+            self._sync_update_schedule(initial=True)
 
     def _refresh_setting_controls(self) -> None:
         for path, boolean_variable in self._boolean_variables.items():
@@ -837,6 +1003,7 @@ class WindowsApplication:
             self.tray.set_indicator_style(
                 self.settings.get("appearance.indicator_style", "letters")
             )
+        self._sync_update_schedule(initial=True)
 
     def _snapshot_from_thread(self, snapshot: EngineSnapshot) -> None:
         self._post(partial(self._apply_snapshot, snapshot))
@@ -908,6 +1075,39 @@ class WindowsApplication:
         except OSError as error:
             LOGGER.warning("Не удалось синхронизировать автозагрузку Windows: %s", error)
             self.error_text.set(f"Автозагрузка: {error}")
+
+    def _sync_update_schedule(self, *, initial: bool) -> None:
+        requested = (
+            self.enable_updates
+            and not self._closing
+            and bool(self.settings.get("updates.check_automatically", True))
+        )
+        if self._update_after_id is not None:
+            try:
+                self.root.after_cancel(self._update_after_id)
+            except tk.TclError:
+                pass
+            self._update_after_id = None
+        if requested:
+            delay = (
+                WINDOWS_UPDATE_INITIAL_DELAY_MS
+                if initial
+                else WINDOWS_UPDATE_INTERVAL_MS
+            )
+            self._update_after_id = self.root.after(
+                delay,
+                self._automatic_update_check,
+            )
+
+    def _automatic_update_check(self) -> None:
+        self._update_after_id = None
+        self.updates.check(
+            automatic=True,
+            install_automatically=bool(
+                self.settings.get("updates.install_automatically", True)
+            ),
+        )
+        self._sync_update_schedule(initial=False)
 
     def _tray_action(self, action: Callable[[], None]) -> None:
         self._post(action)
@@ -1202,6 +1402,7 @@ class WindowsApplication:
     def run(self) -> int:
         self._sync_autostart()
         self._sync_tray()
+        self._sync_update_schedule(initial=True)
         engine_error = ""
         if not self.no_engine:
             try:
@@ -1222,6 +1423,8 @@ class WindowsApplication:
         if self._closing:
             return
         self._closing = True
+        self._sync_update_schedule(initial=False)
+        self.updates.close()
         try:
             self.engine.stop()
         except Exception:
@@ -1239,7 +1442,11 @@ def run_windows_application(
     no_engine: bool,
     quit_after_ms: int | None = None,
 ) -> int:
-    application = WindowsApplication(hidden=hidden, no_engine=no_engine)
+    application = WindowsApplication(
+        hidden=hidden,
+        no_engine=no_engine,
+        enable_updates=quit_after_ms is None,
+    )
     if quit_after_ms is not None:
         application.root.after(quit_after_ms, application.shutdown)
     return application.run()

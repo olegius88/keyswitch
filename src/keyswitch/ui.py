@@ -27,6 +27,7 @@ from .history import HistoryStore
 from .learning import LearningStore
 from .system import AutostartManager
 from .backend import BackendProbe
+from .updates import UpdateController, UpdatePhase, UpdateSnapshot
 
 
 RESOURCE_DIR = Path(__file__).resolve().parent / "resources"
@@ -121,6 +122,7 @@ class MainWindow(Adw.ApplicationWindow):
         ("hotkeys", "Горячие клавиши", "preferences-desktop-keyboard-shortcuts-symbolic"),
         ("exceptions", "Исключения", "action-unavailable-symbolic"),
         ("system", "Внешний вид и система", "preferences-desktop-theme-symbolic"),
+        ("updates", "Обновления", "software-update-available-symbolic"),
         ("history", "История", "document-open-recent-symbolic"),
         ("diagnostics", "О программе", "help-about-symbolic"),
     )
@@ -131,12 +133,14 @@ class MainWindow(Adw.ApplicationWindow):
         settings: SettingsStore,
         history: HistoryStore,
         engine: _UiEngine,
+        updates: UpdateController,
         on_close_request: Callable[[], bool],
     ) -> None:
         super().__init__(application=application, title="KeySwitch")
         self.settings = settings
         self.history = history
         self.engine = engine
+        self.updates = updates
         self.autostart = AutostartManager()
         self._close_handler = on_close_request
         self._text_save_sources: dict[str, int] = {}
@@ -153,6 +157,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.engine.subscribe(self._engine_update_from_thread)
         self.history.subscribe(self._history_changed)
         self.settings.subscribe(self._setting_update_from_thread)
+        self.updates.subscribe(self._update_from_thread)
 
     def _history_changed(self) -> None:
         GLib.idle_add(self.refresh_history)
@@ -196,6 +201,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._add_hotkeys_page()
         self._add_exceptions_page()
         self._add_system_page()
+        self._add_updates_page()
         self._add_history_page()
         self._add_diagnostics_page()
         self.nav_list.select_row(self.nav_list.get_row_at_index(0))
@@ -690,6 +696,98 @@ class MainWindow(Adw.ApplicationWindow):
         row.set_active(self.autostart.enabled())
         row.connect("notify::active", self._autostart_toggled)
         return row
+
+    def _add_updates_page(self) -> None:
+        page = self._new_page(
+            "updates",
+            "Обновления",
+            "Проверка стабильных выпусков KeySwitch и безопасный переход к системной установке.",
+        )
+        state = Adw.PreferencesGroup(title="Состояние")
+        state.add(Adw.ActionRow(title="Установленная версия", subtitle=__version__))
+        self.update_status_row = Adw.ActionRow(
+            title="Проверка обновлений",
+            subtitle=self.updates.snapshot.message,
+        )
+        state.add(self.update_status_row)
+        self.update_version_row = Adw.ActionRow(
+            title="Новая версия",
+            subtitle="Новых выпусков пока не найдено",
+        )
+        state.add(self.update_version_row)
+        page.append(state)
+
+        policy = Adw.PreferencesGroup(title="Автоматическая проверка")
+        policy.add(
+            self._switch_row(
+                "updates.check_automatically",
+                "Проверять автоматически",
+                "Первая проверка через 30 секунд после запуска, затем каждые шесть часов",
+            )
+        )
+        policy.add(
+            Adw.ActionRow(
+                title="Установка в Ubuntu",
+                subtitle=(
+                    "KeySwitch уведомит о выпуске и откроет его страницу. Системный DEB "
+                    "обновляется с подтверждением через APT; фоновая установка без прав "
+                    "администратора отключена."
+                ),
+            )
+        )
+        page.append(policy)
+
+        actions = Adw.PreferencesGroup(title="Действия")
+        action_row = Adw.ActionRow(
+            title="GitHub Releases",
+            subtitle="Метаданные и SHA-256 загружаются только из официального репозитория",
+        )
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.update_check_button = Gtk.Button(label="Проверить сейчас")
+        self.update_check_button.connect("clicked", lambda _button: self._check_updates())
+        self.update_open_button = Gtk.Button(label="Открыть выпуск")
+        self.update_open_button.set_sensitive(bool(self.updates.snapshot.release_url))
+        self.update_open_button.connect(
+            "clicked", lambda _button: self._open_update_release()
+        )
+        buttons.append(self.update_check_button)
+        buttons.append(self.update_open_button)
+        action_row.add_suffix(buttons)
+        actions.add(action_row)
+        page.append(actions)
+
+    def _update_from_thread(self, snapshot: UpdateSnapshot) -> None:
+        GLib.idle_add(self._apply_update_snapshot, snapshot)
+
+    def _apply_update_snapshot(self, snapshot: UpdateSnapshot) -> bool:
+        self.update_status_row.set_subtitle(snapshot.message)
+        self.update_version_row.set_subtitle(
+            f"Доступна {snapshot.available_version}"
+            if snapshot.available_version
+            else "Новых выпусков пока не найдено"
+        )
+        self.update_check_button.set_sensitive(
+            snapshot.phase not in {UpdatePhase.CHECKING, UpdatePhase.DOWNLOADING}
+        )
+        self.update_open_button.set_sensitive(bool(snapshot.release_url))
+        return GLib.SOURCE_REMOVE
+
+    def _check_updates(self) -> None:
+        if not self.updates.check(automatic=False, install_automatically=False):
+            self.toast("Проверка обновлений уже выполняется")
+
+    def _open_update_release(self) -> None:
+        release_url = self.updates.snapshot.release_url
+        if not release_url:
+            self.toast("Сначала проверьте наличие новой версии")
+            return
+        try:
+            launched = Gio.AppInfo.launch_default_for_uri(release_url, None)
+        except GLib.Error as error:
+            self.toast(f"Не удалось открыть выпуск: {error.message}")
+            return
+        if not launched:
+            self.toast("Не удалось открыть страницу выпуска")
 
     def _add_history_page(self) -> None:
         page = self._new_page(

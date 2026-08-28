@@ -27,6 +27,7 @@ from keyswitch import tray as tray_module
 from keyswitch.app import KeySwitchApplication
 from keyswitch.engine import CorrectionPlan, EngineSnapshot, LearningPrompt
 from keyswitch.learning_prompt import LearningPromptWindow
+from keyswitch.updates import UpdatePhase, UpdateSnapshot
 from keyswitch.x11_backend import BackendProbe, KeyEvent
 
 
@@ -306,6 +307,8 @@ class FakeSettings:
             "general.close_to_tray": True,
             "general.notifications": True,
             "general.sound": False,
+            "updates.check_automatically": True,
+            "updates.install_automatically": True,
         }
         self.callbacks: list[Callable[[str, object], None]] = []
 
@@ -661,6 +664,15 @@ class ApplicationGlueTests(unittest.TestCase):
         with patch.object(self.application, "_apply_theme") as theme:
             self.application._apply_setting("appearance.theme", "dark")
         theme.assert_called_once_with("dark")
+        with (
+            patch.object(self.application, "_schedule_update_checks") as schedule,
+            patch.object(self.application, "_cancel_update_checks") as cancel,
+        ):
+            self.application._apply_setting("updates.check_automatically", True)
+            self.application._apply_setting("updates.check_automatically", False)
+            self.application._apply_setting("*", {})
+        self.assertEqual(schedule.call_count, 2)
+        cancel.assert_called_once_with()
         with patch.object(self.application, "_sync_autostart") as sync_autostart:
             self.application._apply_setting("general.autostart", False)
             self.application._apply_setting("general.start_hidden", False)
@@ -671,6 +683,114 @@ class ApplicationGlueTests(unittest.TestCase):
         self.application.tray = None
         self.assertFalse(self.application._apply_setting("unrelated", object()))
         self.assertFalse(self.application._apply_engine_snapshot(snapshot))
+
+    def test_update_schedule_checks_notifications_and_cancellation(self) -> None:
+        self.application.no_engine = True
+        with patch("keyswitch.app.GLib.timeout_add_seconds") as timeout:
+            self.application._schedule_update_checks()
+        timeout.assert_not_called()
+
+        self.application.no_engine = False
+        self.settings.values["updates.check_automatically"] = False
+        with patch("keyswitch.app.GLib.timeout_add_seconds") as timeout:
+            self.application._schedule_update_checks()
+        timeout.assert_not_called()
+
+        self.settings.values["updates.check_automatically"] = True
+        self.application._update_initial_source = 8
+        with patch("keyswitch.app.GLib.timeout_add_seconds") as timeout:
+            self.application._schedule_update_checks()
+        timeout.assert_not_called()
+        self.application._update_initial_source = None
+        self.application._update_periodic_source = 9
+        with patch("keyswitch.app.GLib.timeout_add_seconds") as timeout:
+            self.application._schedule_update_checks()
+        timeout.assert_not_called()
+        self.application._update_periodic_source = None
+
+        with patch("keyswitch.app.GLib.timeout_add_seconds", return_value=10) as timeout:
+            self.application._schedule_update_checks()
+        self.assertEqual(self.application._update_initial_source, 10)
+        timeout.assert_called_once_with(
+            app_module.UPDATE_INITIAL_DELAY_SECONDS,
+            self.application._initial_update_check,
+        )
+
+        with (
+            patch.object(self.application, "_automatic_update_check") as automatic,
+            patch("keyswitch.app.GLib.timeout_add_seconds", return_value=11) as timeout,
+        ):
+            self.assertFalse(self.application._initial_update_check())
+        automatic.assert_called_once_with()
+        timeout.assert_called_once_with(
+            app_module.UPDATE_INTERVAL_SECONDS,
+            self.application._periodic_update_check,
+        )
+        self.assertEqual(self.application._update_periodic_source, 11)
+
+        with patch.object(self.application, "_automatic_update_check") as automatic:
+            self.assertTrue(self.application._periodic_update_check())
+        automatic.assert_called_once_with()
+        with patch.object(self.application.updates, "check", return_value=True) as check:
+            self.application._automatic_update_check()
+        check.assert_called_once_with(automatic=True, install_automatically=False)
+
+        self.settings.values["updates.check_automatically"] = False
+        self.application._update_initial_source = 12
+        with (
+            patch.object(self.application, "_automatic_update_check"),
+            patch("keyswitch.app.GLib.timeout_add_seconds") as timeout,
+        ):
+            self.assertFalse(self.application._initial_update_check())
+        timeout.assert_not_called()
+
+        self.application._update_initial_source = 13
+        self.application._update_periodic_source = 14
+        with patch("keyswitch.app.GLib.source_remove") as remove:
+            self.application._cancel_update_checks()
+        self.assertEqual(remove.call_args_list, [call(13), call(14)])
+        self.assertIsNone(self.application._update_initial_source)
+        self.assertIsNone(self.application._update_periodic_source)
+        with patch("keyswitch.app.GLib.source_remove") as remove:
+            self.application._cancel_update_checks()
+        remove.assert_not_called()
+
+        available = UpdateSnapshot(
+            UpdatePhase.AVAILABLE,
+            "Доступна версия 1.0.0",
+            "0.4.0",
+            "1.0.0",
+            "https://github.com/olegius88/keyswitch/releases/tag/v1.0.0",
+        )
+        with patch("keyswitch.app.GLib.idle_add") as idle:
+            self.application._update_snapshot_from_thread(available)
+        idle.assert_called_once_with(self.application._apply_update_snapshot, available)
+
+        notification = Mock()
+        with (
+            patch("keyswitch.app.Gio.Notification.new", return_value=notification),
+            patch.object(self.application, "send_notification") as send,
+        ):
+            self.assertFalse(self.application._apply_update_snapshot(available))
+            self.assertFalse(self.application._apply_update_snapshot(available))
+        send.assert_called_once_with("keyswitch-update", notification)
+        notification.set_default_action.assert_called_once_with("app.show")
+
+        self.settings.values["general.notifications"] = False
+        second = UpdateSnapshot(
+            UpdatePhase.AVAILABLE,
+            "Доступна версия 1.1.0",
+            "0.4.0",
+            "1.1.0",
+        )
+        with patch.object(self.application, "send_notification") as send:
+            self.assertFalse(self.application._apply_update_snapshot(second))
+            self.assertFalse(
+                self.application._apply_update_snapshot(
+                    UpdateSnapshot(UpdatePhase.CURRENT, "Актуально", "0.4.0")
+                )
+            )
+        send.assert_not_called()
 
     def test_autostart_theme_and_error(self) -> None:
         self.application._sync_autostart()

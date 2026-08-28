@@ -47,6 +47,10 @@ entirely locally and using the active EN/RU system layout pair.
   correction, hotkeys, exclusions, history and backend diagnostics;
 - single-instance protection: launching KeySwitch again activates the existing
   application window.
+- automatic stable GitHub Release checks after startup and every six hours;
+  Windows downloads the verified Setup EXE, installs it silently and restarts
+  KeySwitch, while Ubuntu reports the release and hands installation to the
+  system package manager.
 
 KeySwitch does not record the complete keystroke stream. Only the current word
 is kept in memory. When history is enabled, it stores correction pairs such as
@@ -54,15 +58,24 @@ is kept in memory. When history is enabled, it stores correction pairs such as
 
 ## Install on Windows
 
-Download `KeySwitch-Setup-0.4.0-x64.exe` from the
+Download `KeySwitch-Setup-0.5.0-x64.exe` from the
 [latest release](https://github.com/olegius88/keyswitch/releases/latest) and run
 it. The per-user installation goes to `%LOCALAPPDATA%\Programs\KeySwitch` and
 does not require administrator privileges. The release also includes the
-portable `KeySwitch-0.4.0-windows-x64.zip` archive.
+portable `KeySwitch-0.5.0-windows-x64.zip` archive.
 
 After launch, KeySwitch appears in the notification area. Left- or right-click
 the `EN/RU` or flag icon to open its menu. Startup, start minimized, indicator,
 sound and notifications can be changed on the Appearance and System page.
+
+Automatic checks and installation are enabled by default on the Updates page.
+Thirty seconds after startup and every six hours thereafter, KeySwitch reads
+the latest stable release from
+[`olegius88/keyswitch`](https://github.com/olegius88/keyswitch/releases), then
+validates the exact Setup EXE name, URL, size and GitHub API SHA-256 digest. If
+a newer version exists, the per-user installer runs silently; KeySwitch exits
+and starts minimized again after installation. Automatic checking and
+installation can be disabled independently.
 
 To run from source on Windows:
 
@@ -107,12 +120,12 @@ Probe the system backend without opening the application window:
 
 ## Install the Debian package
 
-Download `keyswitch_0.4.0_amd64.deb` from the
+Download `keyswitch_0.5.0_amd64.deb` from the
 [latest release](https://github.com/olegius88/keyswitch/releases/latest), then
 install it with:
 
 ```bash
-sudo apt install ./keyswitch_0.4.0_amd64.deb
+sudo apt install ./keyswitch_0.5.0_amd64.deb
 ```
 
 The package installs the required system dependencies and adds KeySwitch to the
@@ -121,6 +134,12 @@ ELF executable: `/usr/lib/keyswitch` contains no application `.py` sources or
 `.pyc` bytecode, and the package does not depend on the system Python
 interpreter. The native runtime includes `libpython`, so the `amd64` package
 cannot be installed on a different architecture.
+
+Release checking also works on Ubuntu, but KeySwitch does not silently install
+a system DEB itself: that requires APT authorization and a configured package
+repository. When a new version is found, the app shows a notification and an
+Open release button; installation remains an explicit APT action. This is a
+Linux system-privilege boundary, not a limitation of release discovery.
 
 ## Install from source for the current user
 
@@ -261,7 +280,7 @@ Build the reproducible native Debian package with:
 sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
 ./tools/install-build-tools.sh .nuitka
 KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package="dist/keyswitch_0.4.0_$(dpkg --print-architecture).deb"
+package="dist/keyswitch_0.5.0_$(dpkg --print-architecture).deb"
 ./tools/verify-native-deb.sh "$package"
 ```
 
@@ -304,7 +323,7 @@ ZIP, silently install and smoke-test the installed application, create one
 - On Windows, UIPI prevents a regular process from injecting input into a
   window running at a higher integrity level. KeySwitch needs a matching level
   for that target window.
-- The Windows 0.4.0 Setup EXE is not yet signed with a publisher certificate.
+- The Windows 0.5.0 Setup EXE is not yet signed with a publisher certificate.
 
 ## License
 

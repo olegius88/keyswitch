@@ -17,7 +17,7 @@ _T = TypeVar("_T")
 
 
 DEFAULTS: SettingsData = {
-    "schema_version": 3,
+    "schema_version": 4,
     "enabled": True,
     "general": {
         "start_hidden": True,
@@ -57,6 +57,10 @@ DEFAULTS: SettingsData = {
         "theme": "system",
         "show_indicator": True,
         "indicator_style": "letters",
+    },
+    "updates": {
+        "check_automatically": True,
+        "install_automatically": True,
     },
     "history": {"limit": 200},
 }

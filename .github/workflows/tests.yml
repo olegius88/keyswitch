@@ -180,7 +180,8 @@ jobs:
         run: |
           python -m coverage erase
           python -m coverage run --branch --source=src/keyswitch -m unittest discover -s tests -p test_windows_backend.py -v
-          python -m coverage report --fail-under=100 --include="*/windows_app.py,*/windows_backend.py,*/windows_instance.py,*/windows_system.py,*/windows_tray.py,*/windows_ui_model.py"
+          python -m coverage run --append --branch --source=src/keyswitch tests/test_updates.py -v
+          python -m coverage report --fail-under=100 --include="*/updates.py,*/windows_app.py,*/windows_backend.py,*/windows_instance.py,*/windows_system.py,*/windows_tray.py,*/windows_ui_model.py"
 
       - name: Run bidirectional WH_KEYBOARD_LL, SendInput and Tk correction E2E
         env:
@@ -206,9 +207,21 @@ jobs:
           $env:KEYSWITCH_CONFIG_DIR = Join-Path $env:RUNNER_TEMP "KeySwitch-smoke-config"
           $env:KEYSWITCH_DATA_DIR = Join-Path $env:RUNNER_TEMP "KeySwitch-smoke-data"
           New-Item -ItemType Directory -Force $env:KEYSWITCH_CONFIG_DIR | Out-Null
-          '{"general":{"autostart":false},"appearance":{"show_indicator":false}}' | Set-Content -Path (Join-Path $env:KEYSWITCH_CONFIG_DIR "config.json") -Encoding utf8NoBOM
+          '{"general":{"autostart":false},"appearance":{"show_indicator":false},"updates":{"check_automatically":false}}' | Set-Content -Path (Join-Path $env:KEYSWITCH_CONFIG_DIR "config.json") -Encoding utf8NoBOM
           $smoke = Start-Process -FilePath (Join-Path $installRoot "KeySwitch.exe") -ArgumentList "--smoke-ui" -Wait -PassThru
           if ($smoke.ExitCode -ne 0) { throw "Installed executable exited with $($smoke.ExitCode)" }
+          $update = Start-Process -FilePath $installer -ArgumentList "/SP-", "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/NORESTARTAPPLICATIONS", "/KEYSWITCHUPDATE=1", "/DIR=$installRoot" -Wait -PassThru
+          if ($update.ExitCode -ne 0) { throw "Auto-update installer exited with $($update.ExitCode)" }
+          $keyswitchUpdatedProcess = $null
+          for ($attempt = 0; $attempt -lt 40 -and -not $keyswitchUpdatedProcess; $attempt++) {
+            Start-Sleep -Milliseconds 250
+            $keyswitchUpdatedProcess = Get-Process -Name "KeySwitch" -ErrorAction SilentlyContinue |
+              Where-Object { $_.Path -eq (Join-Path $installRoot "KeySwitch.exe") } |
+              Select-Object -First 1
+          }
+          if (-not $keyswitchUpdatedProcess) { throw "Auto-update installer did not relaunch KeySwitch" }
+          Stop-Process -Id $keyswitchUpdatedProcess.Id -Force
+          Wait-Process -Id $keyswitchUpdatedProcess.Id -ErrorAction SilentlyContinue
           $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
           New-Item -Path $runKey -Force | Out-Null
           New-ItemProperty -Path $runKey -Name "KeySwitch" -Value (Join-Path $installRoot "KeySwitch.exe") -PropertyType String -Force | Out-Null

@@ -95,6 +95,7 @@ def main() -> int:
         settings.set("appearance.show_indicator", True)
         settings.set("general.notifications", False)
         settings.set("detection.respect_manual_layout", False)
+        settings.set("updates.check_automatically", False)
 
         print("WINDOWS_UI_INIT_START", flush=True)
         visual_application = WindowsApplication(hidden=False, no_engine=True)
@@ -135,6 +136,12 @@ def main() -> int:
             )
             if visual_application.settings.get("detection.correct_on_pause") is not True:
                 raise RuntimeError("Pause correction switch did not save the on state")
+            for update_path in (
+                "updates.check_automatically",
+                "updates.install_automatically",
+            ):
+                if update_path not in visual_application._boolean_variables:
+                    raise RuntimeError(f"Update switch is missing: {update_path}")
         finally:
             visual_application.shutdown()
         print("WINDOWS_UI_E2E_OK", flush=True)

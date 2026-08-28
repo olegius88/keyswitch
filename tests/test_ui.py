@@ -25,6 +25,7 @@ from keyswitch.engine import EngineSnapshot
 from keyswitch.history import HistoryEntry, HistoryStore
 from keyswitch.learning import LearningStore
 from keyswitch.ui import ApplicationChoice, MainWindow
+from keyswitch.updates import UpdatePhase, UpdateSnapshot
 from keyswitch.x11_backend import BackendProbe
 
 
@@ -88,6 +89,41 @@ class FakeAutostart:
             raise self.error
         self.state = enabled
         self.calls.append((enabled, start_hidden))
+
+
+class FakeUpdates:
+    def __init__(self) -> None:
+        self._snapshot = UpdateSnapshot(
+            UpdatePhase.IDLE,
+            "Обновления ещё не проверялись",
+            "0.4.0",
+        )
+        self.callbacks: list[Callable[[UpdateSnapshot], None]] = []
+        self.checks: list[tuple[bool, bool]] = []
+        self.check_result = True
+
+    @property
+    def snapshot(self) -> UpdateSnapshot:
+        return self._snapshot
+
+    def subscribe(self, callback: Callable[[UpdateSnapshot], None]) -> None:
+        self.callbacks.append(callback)
+        callback(self._snapshot)
+
+    def check(self, *, automatic: bool, install_automatically: bool) -> bool:
+        self.checks.append((automatic, install_automatically))
+        return self.check_result
+
+    def install_available(self) -> bool:
+        return False
+
+    def installation_failed(self, _error: Exception) -> None:
+        return
+
+    def emit(self, snapshot: UpdateSnapshot) -> None:
+        self._snapshot = snapshot
+        for callback in tuple(self.callbacks):
+            callback(snapshot)
 
 
 def descendants(widget: Gtk.Widget) -> Iterator[Gtk.Widget]:
@@ -190,6 +226,7 @@ class MainWindowInteractionTests(unittest.TestCase):
         self.history.append(HistoryEntry.create("ghbdtn", "привет", "", 4.256))
         self.engine = FakeEngine(self.root)
         self.autostart = FakeAutostart()
+        self.updates = FakeUpdates()
         self.choices = [
             ApplicationChoice("Code", "code", "code", Gio.ThemedIcon.new("text-editor")),
             ApplicationChoice("Terminal", "terminal", "terminal", None),
@@ -203,6 +240,7 @@ class MainWindowInteractionTests(unittest.TestCase):
                 self.settings,
                 self.history,
                 self.engine,
+                self.updates,
                 lambda: True,
             )
 
@@ -220,7 +258,7 @@ class MainWindowInteractionTests(unittest.TestCase):
 
     def test_full_window_builds_all_pages_and_bound_controls(self) -> None:
         self.assertEqual(self.window.get_title(), "KeySwitch")
-        self.assertEqual(len(self.window.NAVIGATION), 8)
+        self.assertEqual(len(self.window.NAVIGATION), 9)
         for name, _label, _icon in self.window.NAVIGATION:
             self.assertIsNotNone(self.window.stack.get_child_by_name(name))
         menu = self.window._header_menu()
@@ -371,7 +409,7 @@ class MainWindowInteractionTests(unittest.TestCase):
             fresh_timeout.call_args.args[1]()
 
         self.window._navigation_selected(self.window.nav_list, None)
-        history_row = self.window.nav_list.get_row_at_index(6)
+        history_row = self.window.nav_list.get_row_at_index(7)
         automation_row = self.window.nav_list.get_row_at_index(1)
         with patch.object(self.window, "refresh_history") as refresh:
             self.window._navigation_selected(self.window.nav_list, history_row)
@@ -412,6 +450,75 @@ class MainWindowInteractionTests(unittest.TestCase):
         self.window._apply_engine_snapshot(failed)
         self.assertEqual(self.window.hero_pill.get_label(), "ОШИБКА")
         self.assertEqual(self.window.hero_subtitle.get_label(), "backend failed")
+
+    def test_update_page_states_checks_and_release_opening(self) -> None:
+        available = UpdateSnapshot(
+            UpdatePhase.AVAILABLE,
+            "Доступна версия 1.0.0",
+            "0.4.0",
+            "1.0.0",
+            "https://github.com/olegius88/keyswitch/releases/tag/v1.0.0",
+        )
+        with patch("keyswitch.ui.GLib.idle_add") as idle:
+            self.window._update_from_thread(available)
+        idle.assert_called_once_with(self.window._apply_update_snapshot, available)
+
+        self.assertFalse(self.window._apply_update_snapshot(available))
+        self.assertEqual(
+            self.window.update_version_row.get_subtitle(),
+            "Доступна 1.0.0",
+        )
+        self.assertTrue(self.window.update_open_button.get_sensitive())
+        for phase in (UpdatePhase.CHECKING, UpdatePhase.DOWNLOADING):
+            snapshot = UpdateSnapshot(phase, "Занято", "0.4.0")
+            self.window._apply_update_snapshot(snapshot)
+            self.assertFalse(self.window.update_check_button.get_sensitive())
+        self.window._apply_update_snapshot(
+            UpdateSnapshot(UpdatePhase.CURRENT, "Актуально", "0.4.0")
+        )
+        self.assertTrue(self.window.update_check_button.get_sensitive())
+        self.assertEqual(
+            self.window.update_version_row.get_subtitle(),
+            "Новых выпусков пока не найдено",
+        )
+
+        self.window._check_updates()
+        self.assertEqual(self.updates.checks[-1], (False, False))
+        self.updates.check_result = False
+        with patch.object(self.window, "toast") as toast:
+            self.window._check_updates()
+        toast.assert_called_once_with("Проверка обновлений уже выполняется")
+
+        self.updates.emit(UpdateSnapshot(UpdatePhase.IDLE, "Ожидание", "0.4.0"))
+        with patch.object(self.window, "toast") as toast:
+            self.window._open_update_release()
+        toast.assert_called_once_with("Сначала проверьте наличие новой версии")
+
+        self.updates.emit(available)
+        with patch(
+            "keyswitch.ui.Gio.AppInfo.launch_default_for_uri",
+            return_value=True,
+        ) as launch:
+            self.window._open_update_release()
+        launch.assert_called_once_with(available.release_url, None)
+        with (
+            patch(
+                "keyswitch.ui.Gio.AppInfo.launch_default_for_uri",
+                return_value=False,
+            ),
+            patch.object(self.window, "toast") as toast,
+        ):
+            self.window._open_update_release()
+        toast.assert_called_once_with("Не удалось открыть страницу выпуска")
+        with (
+            patch(
+                "keyswitch.ui.Gio.AppInfo.launch_default_for_uri",
+                side_effect=GLib.Error("open failed"),
+            ),
+            patch.object(self.window, "toast") as toast,
+        ):
+            self.window._open_update_release()
+        self.assertIn("open failed", toast.call_args.args[0])
 
     def test_history_rendering_time_plural_and_clear_list(self) -> None:
         self.history.clear()
@@ -606,7 +713,14 @@ class MainWindowInteractionTests(unittest.TestCase):
             patch("keyswitch.ui.AutostartManager", return_value=self.autostart),
             patch("keyswitch.ui.installed_application_choices", return_value=[]),
         ):
-            second = MainWindow(self.application, self.settings, self.history, failed_engine, lambda: True)
+            second = MainWindow(
+                self.application,
+                self.settings,
+                self.history,
+                failed_engine,
+                self.updates,
+                lambda: True,
+            )
         self.assertFalse(failed_engine.backend.probe().available)
         second.destroy()
 

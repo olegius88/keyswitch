@@ -211,9 +211,26 @@ SYSTEM_SETTINGS = (
 )
 
 
+UPDATE_SETTINGS = (
+    SettingSpec(
+        "updates.check_automatically",
+        "Автоматически проверять обновления",
+        "Проверять GitHub Releases после запуска и каждые шесть часов.",
+        "bool",
+    ),
+    SettingSpec(
+        "updates.install_automatically",
+        "Автоматически устанавливать обновления",
+        "Скачать проверенный Setup EXE, тихо обновить KeySwitch и перезапустить его.",
+        "bool",
+    ),
+)
+
+
 ALL_SETTING_SPECS = (
     *AUTOCORRECTION_SETTINGS,
     *TRIGGER_SETTINGS,
     *HOTKEY_SETTINGS,
     *SYSTEM_SETTINGS,
+    *UPDATE_SETTINGS,
 )
