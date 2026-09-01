@@ -617,6 +617,14 @@ class WindowsPackagingContractTests(unittest.TestCase):
                 "Build and self-diagnose native ZIP and Inno Setup installer",
                 workflow,
             )
+            self.assertIn(
+                'python -m mypy --config-file pyproject.toml --exclude "^tools/freeze_intent_development_corpus\\.py$"',
+                workflow,
+            )
+            self.assertIn(
+                "python -m mypy --config-file pyproject.toml --platform linux tools/freeze_intent_development_corpus.py",
+                workflow,
+            )
             installer = workflow.index(
                 '$install = Start-Process -FilePath $installer'
             )
