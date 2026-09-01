@@ -244,10 +244,33 @@ def main() -> int:
             ("hello", "руддщ"),
         ]
         actual_history = [(item.original, item.replacement) for item in entries]
-        ok = actual_history == expected_history
         print(f"history={actual_history!r}")
-        print("E2E_OK" if ok else "E2E_FAILED")
-        result.exit_code = 0 if ok else 1
+        if actual_history != expected_history:
+            print("E2E_FAILED")
+            loop.quit()
+            return GLib.SOURCE_REMOVE
+        if not engine.select_alternate_group():
+            print(f"menu_layout_queue_failed error={engine.snapshot.last_error!r}")
+            print("E2E_FAILED")
+            loop.quit()
+            return GLib.SOURCE_REMOVE
+        GLib.timeout_add(300, verify_menu_layout_selection)
+        return GLib.SOURCE_REMOVE
+
+    def verify_menu_layout_selection() -> bool:
+        actual_group = backend.current_group()
+        if actual_group != 0 or engine.snapshot.current_group != 0:
+            print(
+                "menu_layout_failed "
+                f"backend_group={actual_group} "
+                f"engine_group={engine.snapshot.current_group}"
+            )
+            print("E2E_FAILED")
+            loop.quit()
+            return GLib.SOURCE_REMOVE
+        print("MENU_LAYOUT_SELECTION_E2E_OK")
+        print("E2E_OK")
+        result.exit_code = 0
         loop.quit()
         return GLib.SOURCE_REMOVE
 

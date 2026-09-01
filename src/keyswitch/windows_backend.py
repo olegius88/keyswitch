@@ -299,6 +299,12 @@ class WindowsBackend:
     def current_group(self) -> int:
         return self._group_for_layout(self._api.foreground_layout())
 
+    def switch_group(self, group: int) -> None:
+        if not 0 <= group < len(self.layouts):
+            raise WindowsBackendError(f"Неизвестная группа раскладки {group}")
+        with self._inject_lock:
+            self._switch_group(group)
+
     def _group_for_layout(self, layout: int) -> int:
         try:
             return self.layouts.index(layout)

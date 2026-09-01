@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "phase": "strict_external_quality_gate",
+  "decision": "rejected",
+  "reason": "load_latency",
+  "model_version": "intent-v1-568703fd628c",
+  "artifact_sha256": "111aabc9299a14cbdd6bb13bbe232df7efae55c7a721c7705a1857964d3b68b8",
+  "config_sha256": "1edd537e10c44e41b4e8106dfbc4c77b9e4c54ff4c50027fc850bf217184088c",
+  "seal_registry_sha256": "47a7fdde4cc1becb93e112272764a4503fabace2b959438bb6de6c7bdd9011c9",
+  "external_report_sha256": "1f30eaa0508f3eac4a71c6ce5fe1f9bc7164817e049e6ce994f9ad66149cd9de",
+  "limits_ms": {
+    "load_p95": 500.0,
+    "inference_p95": 10.0
+  },
+  "observed": {
+    "artifact_bytes": 10391452,
+    "load_ms": {
+      "median": 233.269041,
+      "p95": 655.432857,
+      "samples": 11
+    },
+    "inference_ms": {
+      "median": 0.834149,
+      "p95": 1.711472,
+      "samples": 5000
+    },
+    "deterministic_predictions": true
+  },
+  "strict_gate_count": 30,
+  "failed_strict_gates": [
+    "load_latency"
+  ],
+  "all_other_strict_gates_passed": true,
+  "remediation": "Rotate all sealed v8 namespaces after changing the signed runtime loader; do not retune against the revealed v7 holdouts."
+}

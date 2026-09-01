@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "phase": "internal_sealed_quality_gate",
+  "decision": "rejected",
+  "reason": "sealed_non_pause_recall",
+  "artifact_published": false,
+  "config_sha256": "25391f3117ccf21628a8fb8d797f576a95254ae3e0dec2afe2b2bf7cd4fd9863",
+  "candidate_sha256": "68cf1ceecdbb31831f546b89d3ade4b4afedff4aea6deb0cb34bc424e601241c",
+  "candidate_dataset_sha256": "822b0b33361aaba9319db4fe3edf1be39e10d29782f24df95032fdd4dcc6577a",
+  "seal_registry_sha256": "2dbad3d0851090c0f2bd617510d4817bf4c41be958cc7997a35a461f4bdbe309",
+  "internal_report_sha256": "86f4068110d9d3ebb023c29452c88fb4b6764bc8f40a3260d8ab4e2d9571e18d",
+  "two_run_byte_identical": true,
+  "failed_internal_gates": [
+    "sealed_test",
+    "sealed_test_context_stress"
+  ],
+  "passed_internal_gates": [
+    "threshold_selection",
+    "sealed_test_typos",
+    "safety",
+    "veto"
+  ],
+  "observed": {
+    "selected_global_logit_margin": 0.9938225471937638,
+    "selection_non_pause": {
+      "precision": 1.0,
+      "recall": 0.95003473,
+      "specificity": 1.0,
+      "false_positives": 0
+    },
+    "sealed_non_pause": {
+      "precision": 1.0,
+      "recall": 0.944410276,
+      "specificity": 1.0,
+      "false_positives": 0,
+      "minimum_recall": 0.95
+    },
+    "sealed_pause": {
+      "precision": 1.0,
+      "recall": 0.933812745,
+      "specificity": 1.0,
+      "false_positives": 0,
+      "minimum_recall": 0.9
+    },
+    "sealed_non_pause_typos": {
+      "precision": 1.0,
+      "recall": 0.937049557,
+      "specificity": 1.0,
+      "false_positives": 0,
+      "minimum_recall": 0.9
+    }
+  },
+  "remediation": "Do not tune against the revealed v10 sealed rows. Freeze the already model-blind unknown-typo development corpus as a signed source, partition its physical signatures into disjoint train, development, calibration and threshold roles, rotate every v11 sealed namespace, and evaluate the new v11 holdouts exactly once."
+}

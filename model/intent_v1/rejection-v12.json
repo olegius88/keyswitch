@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "phase": "strict_external_corpus_provenance",
+  "decision": "rejected",
+  "reason": "development_corpus_self_exclusion",
+  "artifact_published": true,
+  "internal_quality_gates_passed": true,
+  "independent_external_holdout_evaluated": false,
+  "model_version": "intent-v1-e4d8cc7ee8dc",
+  "artifact_sha256": "54600d59181acc755e2c49e535fbcd78176a7fe86a5c423be08cfb7dfd570463",
+  "config_sha256": "61e87445a52e990cf8cc2116782f3e71f1e1211a20cc162294476547afe70d46",
+  "candidate_sha256": "201d47a333b5276c0d2a9ac3f20019d2fc2b73c873f0413686c257975366eb36",
+  "candidate_dataset_sha256": "43c94670009a3ce3ebfc18c9f788abb77dfa44f84ea438bd4dc24dceada31015",
+  "seal_registry_sha256": "2ad1d4b7ff226992f5b1a56a32c2bf7684466b3134821daae7d01587fc2ab306",
+  "manifest_sha256": "9596464565442861323c8250dfef85333d778571e77870de08cad8a412c6292e",
+  "internal_report_sha256": "7630e4f38eab0a8563e012508802bc32868dbe10586825f49dd8b3d40a2dd001",
+  "evaluator_sha256": "c091621fe7521617cf035faeddd4ffcae387a529dd5608439950f301184cd3fb",
+  "strict_failure_report_sha256": "08e4f07e1fd1445ed5d5c00318695cff4f14a700a7ca59c8a9f01f59e3837a60",
+  "failure": {
+    "phase": "external_corpus_provenance",
+    "external_model_metrics_evaluated": false,
+    "failed_gates": [
+      "unknown_typo_development_provenance",
+      "unknown_typo_holdout_provenance"
+    ],
+    "passed_external_provenance_gates": 9,
+    "total_external_provenance_gates": 11
+  },
+  "remediation": "Keep the frozen hard-negative development corpus separate from the base sealed lexical-signature index, add it exactly once to holdout exclusions, rotate the sealed split, registry and independent holdout to v13, and run the new v13 candidate exactly once. Do not reuse the revealed v12 sealed test as release evidence."
+}

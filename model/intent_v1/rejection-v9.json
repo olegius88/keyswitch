@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "phase": "strict_external_quality_gate",
+  "decision": "rejected",
+  "reason": "production_context_ensemble",
+  "model_version": "intent-v1-c4dd80bea7d6",
+  "artifact_sha256": "32dd79083d06d0c335bbff7ee1131a225251ebf72ccc62a7eb1e5d125ba95f43",
+  "config_sha256": "b7f18d861ebf7fa2cf578b4fec314d5a8e08f5597565e5c7135f014682cb9361",
+  "seal_registry_sha256": "cc2ee4cc3f9489b5750d519b1288d82dc5c90a5438a03feee8c92aed56ad640d",
+  "external_report_sha256": "2a34fa13dcfbcb9ec71a3c98f683d0ca6ae35f8bc66e0cd4b7fe02c1a197453a",
+  "strict_gate_count": 30,
+  "failed_strict_gates": [
+    "production_context_ensemble"
+  ],
+  "all_other_strict_gates_passed": true,
+  "observed": {
+    "unknown_typo_per_trigger": {
+      "negative_samples": 10000,
+      "precision": 0.999591378,
+      "recall": 0.9785,
+      "specificity": 0.9996,
+      "false_positives": 4,
+      "false_positive_rate_upper_95": 0.001028128,
+      "maximum_false_positive_rate_upper_95": 0.001
+    },
+    "unknown_typo_all_triggers": {
+      "negative_samples": 60000,
+      "precision": 0.999591086,
+      "recall": 0.9778,
+      "specificity": 0.9996,
+      "false_positives": 24,
+      "false_positive_rate_upper_95": 0.000595143
+    },
+    "performance": {
+      "artifact_bytes": 10392546,
+      "load_ms": {
+        "median": 227.863164,
+        "p95": 252.688791,
+        "samples": 11
+      },
+      "inference_ms": {
+        "median": 0.959407,
+        "p95": 1.9199,
+        "samples": 5000
+      },
+      "deterministic_predictions": true
+    }
+  },
+  "remediation": "Add a signed global calibrated-logit safety margin selected only on the policy-development unknown-typo corpus, rotate all sealed v10 namespaces, and evaluate a new v10 holdout exactly once. Do not tune against the revealed v9 holdout."
+}

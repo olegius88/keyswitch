@@ -60,6 +60,18 @@ class WordScore:
     spell_known: bool = False
     ngram_score: float = 0.0
     invalid_ratio: float = 1.0
+    raw_ngram_score: float = -15.0
+
+
+class _DisabledSpellChecker:
+    """Deterministic no-op spell checker for sealed offline model training."""
+
+    available = False
+    source = ""
+
+    @staticmethod
+    def check(_word: str) -> bool:
+        return False
 
 
 class LanguageModel:
@@ -73,13 +85,19 @@ class LanguageModel:
         frequencies: dict[str, int],
         source: str,
         bigrams: dict[tuple[str, str], int] | None = None,
+        *,
+        enable_spellcheck: bool = True,
     ) -> None:
         self.locale = locale
         self.frequencies = frequencies
         self.bigrams = bigrams or {}
         self.maximum = max(frequencies.values(), default=1)
         self.maximum_bigram = max(self.bigrams.values(), default=1)
-        self.speller = HunspellDictionary(locale)
+        self.speller: HunspellDictionary | _DisabledSpellChecker = (
+            HunspellDictionary(locale)
+            if enable_spellcheck
+            else _DisabledSpellChecker()
+        )
         sources = [source]
         if self.speller.available:
             sources.append(f"Hunspell: {self.speller.source}")
@@ -92,7 +110,7 @@ class LanguageModel:
         calibration_words = [
             word
             for word, _frequency in sorted(
-                frequencies.items(), key=lambda item: item[1], reverse=True
+                frequencies.items(), key=lambda item: (-item[1], item[0])
             )[:12_000]
             if len(word) >= 3 and word.isalpha()
         ]
@@ -276,7 +294,10 @@ class LanguageModel:
             key=lambda item: item.value,
         )
 
+    @lru_cache(maxsize=65_536)
     def score(self, word: str) -> WordScore:
+        """Score a token with a bounded cache shared by runtime and training."""
+
         normalized = self.normalize(word)
         if not normalized:
             return WordScore(-30.0, False, 0, 0.0, ngram_score=-15.0)
@@ -299,7 +320,8 @@ class LanguageModel:
         hits = sum(gram in self._gram_counts[3] for gram in trigrams)
         ratio = hits / len(trigrams) if trigrams else 0.0
         invalid_ratio = 1.0 - ratio
-        naturalness = max(-15.0, min(4.0, self.ngram_score(normalized)))
+        raw_naturalness = max(-15.0, min(4.0, self.ngram_score(normalized)))
+        naturalness = raw_naturalness
         lexical = 0.0
         if exact:
             popularity = math.log1p(frequency) / math.log1p(self.maximum)
@@ -318,4 +340,5 @@ class LanguageModel:
             spell_known,
             naturalness,
             invalid_ratio,
+            raw_naturalness,
         )

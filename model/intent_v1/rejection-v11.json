@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "phase": "strict_external_evaluator_pipeline",
+  "decision": "rejected",
+  "reason": "unsupported_frozen_hard_negative_signature_index",
+  "artifact_published": true,
+  "internal_quality_gates_passed": true,
+  "independent_external_holdout_evaluated": false,
+  "model_version": "intent-v1-03e626897ac1",
+  "artifact_sha256": "15c4c5ddc14f7eb7778872d106dd873b67e09f1d9f88c4537cbdeb1ccae0ca41",
+  "config_sha256": "0727591060119c2ab670a06dec3d6e75afe68875c167adc565b575f404040f2c",
+  "candidate_sha256": "4e76382aeb3bf5ecfdf1ed1869c9592a11950aef6127d4653ba2d2f54857cb36",
+  "candidate_dataset_sha256": "cd2106e5c6e842c98f11694dceccca9fe69579652e049f22a572b9cf14e293dd",
+  "seal_registry_sha256": "d290db718f8890d64299297dd0a257c967e4b45ffc4840986f25f5042993f1ce",
+  "manifest_sha256": "d6e594d3f61de764303c377cc8252ce1d2b4c78ed8edaaae5958ceb4dfa1f695",
+  "internal_report_sha256": "ecb9d16ecd2148ab22fe13e28e170968b32ec3cbf81220ad73f26546f265bee9",
+  "evaluator_sha256": "facc30b39465a5de1548d331a9f5bdee9fbbd37162865c2646b545f53bcca964",
+  "failure": {
+    "exception": "RuntimeError",
+    "operation": "build_sealed_signature_index",
+    "unsupported_variant": "hunspell-unknown-deletion",
+    "message": "cannot prove sealed-signature exclusion for unsupported dataset row"
+  },
+  "remediation": "Teach the signed external evaluator to validate and index the exact frozen hunspell-unknown variant family, rotate the sealed split, registry and independent holdout to v12, and run the new v12 candidate exactly once. Do not reuse the revealed v11 sealed test as release evidence."
+}

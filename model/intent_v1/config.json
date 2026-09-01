@@ -1,0 +1,153 @@
+{
+  "schema_version": 13,
+  "seed": 20260828,
+  "dimension": 2097152,
+  "feature_hash_seed": 14695981039346656037,
+  "membership_hash_seed": 11400714819323198485,
+  "ngram_orders": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "split_buckets": [
+    [
+      "train",
+      26
+    ],
+    [
+      "development",
+      4
+    ],
+    [
+      "calibration",
+      4
+    ],
+    [
+      "threshold",
+      3
+    ],
+    [
+      "test",
+      3
+    ]
+  ],
+  "sources": {
+    "package": "onboard-data",
+    "package_version": "1.4.3+git20260213+ds-2",
+    "license_declaration": "GPL-3+",
+    "license_evidence": {
+      "path": "model/intent_v1/sources/COPYRIGHT.onboard-data",
+      "sha256": "bafb01a0e2cbdf8a2717cd3678b94329aa11ec8963c88f9ad2ceb1e7473d8033",
+      "bytes": 31752
+    },
+    "languages": {
+      "en_US": {
+        "group": 0,
+        "path": "model/intent_v1/sources/en_US.lm",
+        "sha256": "017a513a23bb37947a3a0e73e307066fa8ec0642075172cdcad6ea204cae68da",
+        "bytes": 698492
+      },
+      "ru_RU": {
+        "group": 1,
+        "path": "model/intent_v1/sources/ru_RU.lm",
+        "sha256": "e57c14eec2b78e52a2125dce2b38044d8dfe480f3964b9d118614527195ceda9",
+        "bytes": 1012774
+      }
+    }
+  },
+  "external_evaluation": {
+    "schema_version": 2,
+    "minimum_words_per_group": 5000,
+    "trigger_expansion": [
+      "boundary_probe",
+      "pause",
+      "space",
+      "enter",
+      "tab",
+      "punctuation"
+    ],
+    "hunspell": {
+      "en_US": {
+        "dictionary_sha256": "829a043cf078d1e80e886289a13823454977f442a239a859d2133ea61944aa60",
+        "dictionary_bytes": 860381,
+        "affix_sha256": "70fe5778717d097ce2f3326baaa5c1e4d2206d81a5a81d3ea8e11c4770806dd5",
+        "affix_bytes": 3131
+      },
+      "ru_RU": {
+        "dictionary_sha256": "f6047416a0204adbecf3a451b874ec8a97ee37e2cbc714466ef04d8dbcc0d6fc",
+        "dictionary_bytes": 3473191,
+        "affix_sha256": "38ce7d4af78e211e9bafe4bf7e3d6a2c420591136cb738ec6648f8fdf6524cd7",
+        "affix_bytes": 71236
+      }
+    },
+    "lexical_disjoint_corpus_sha256": "57c83b5a8005ebdaf3b676ef381cd4b4f59a045fe64e52c47f3295a2738f1a7f",
+    "unknown_typo_development_corpus_sha256": "0a84144da4259e43bf645c3c3d6a6b39a999e8d1a82aabe8b0a9b1a03d47e8c2",
+    "unknown_typo_holdout_corpus_sha256": "0e687cbfc9c5821356b05e6858fea4582bb6948867bfdd2140665a73c4c544a8"
+  },
+  "hard_negative_development": {
+    "schema_version": 2,
+    "source": {
+      "path": "model/intent_v1/unknown-typo-development-v14.json",
+      "sha256": "44b460ee6457dd26269c843a87b43bd22b026927de8f194ee1abbf2cf910af2f",
+      "bytes": 2129741
+    },
+    "role_namespace": "keyswitch:intent-v14:unknown-typo-development-role",
+    "training_example_weight": 3.0,
+    "words_per_group": {
+      "train": 3500,
+      "development": 500,
+      "calibration": 500,
+      "threshold": 500
+    }
+  },
+  "sealed_evaluation": {
+    "schema_version": 1,
+    "split_namespace": "keyswitch:intent-v14:physical-signature",
+    "registry_path": "model/intent_v1/seal-registry-v14.json"
+  },
+  "dataset": {
+    "minimum_word_length": 5,
+    "maximum_word_length": 24,
+    "maximum_words_per_language": 0,
+    "typo_augmentations": 3
+  },
+  "ftrl": {
+    "maximum_epochs": 64,
+    "minimum_epochs": 6,
+    "patience": 4,
+    "alpha": 0.08,
+    "beta": 1.0,
+    "l1": 0.001,
+    "l2": 0.05
+  },
+  "calibration": {
+    "l2": 0.01,
+    "maximum_iterations": 100
+  },
+  "thresholds": {
+    "precision_floor": 0.9995,
+    "maximum_false_positive_rate": 0.001,
+    "pause_maximum_false_positive_rate": 0.001,
+    "selection_maximum_false_positives_per_trigger": 0,
+    "threshold_logit_margin_cap": 2.0,
+    "pause_logit_margin": 0.5,
+    "veto_positive_quantile": 0.0,
+    "veto_logit_margin": 0.25,
+    "veto_max_false_negative_rate": 0.001
+  },
+  "quality_gates": {
+    "minimum_precision": 0.999,
+    "minimum_recall": 0.95,
+    "minimum_pause_recall": 0.9,
+    "minimum_typo_recall": 0.90,
+    "minimum_pause_typo_recall": 0.85,
+    "selection_minimum_recall": 0.956,
+    "selection_minimum_pause_recall": 0.91,
+    "selection_minimum_typo_recall": 0.91,
+    "selection_minimum_pause_typo_recall": 0.86,
+    "minimum_specificity": 0.999,
+    "safety_maximum_guard_failures": 0
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "policy": "keyswitch-intent-v10-preseal-holdout",
+  "model_loaded": false,
+  "metrics_evaluated": false,
+  "development": {
+    "role": "policy-development-only",
+    "rank_namespace": "keyswitch:intent-v1:unknown-typo-rank",
+    "choice_namespace": "keyswitch:intent-v1:unknown-typo-choice",
+    "corpus_sha256": "0a84144da4259e43bf645c3c3d6a6b39a999e8d1a82aabe8b0a9b1a03d47e8c2",
+    "signature_count": 10000,
+    "words_by_group": {
+      "0": 5000,
+      "1": 5000
+    }
+  },
+  "holdout": {
+    "role": "independent-release-holdout",
+    "rank_namespace": "keyswitch:intent-v10:unknown-typo-holdout-rank",
+    "choice_namespace": "keyswitch:intent-v10:unknown-typo-holdout-choice",
+    "corpus_sha256": "cb79253df226023414e0b6180cce81b2c25e37ec6c211094aedc1367bc6f9c34",
+    "signature_count": 10000,
+    "words_by_group": {
+      "0": 5000,
+      "1": 5000
+    }
+  },
+  "sealed_dataset_exclusions": {
+    "signature_count": 288842,
+    "sha256": "345abd42521c323e520e4b98375876b4b1ab9719486cc6decfd407f26fda9c38"
+  },
+  "combined_holdout_exclusions": {
+    "signature_count": 298842,
+    "sha256": "814e739f17e1a1e74954d9c6fb8c6de0b08dd0d68c892e921d14ff87afe5e7b9"
+  },
+  "overlap_counts": {
+    "development_holdout": 0,
+    "sealed_holdout": 0
+  }
+}

@@ -12,7 +12,13 @@ from keyswitch.detector import DetectionDecision, LanguageDetector
 from keyswitch.engine import Hotkey, KeySwitchEngine, LearningPrompt
 from keyswitch.history import HistoryStore
 from keyswitch.history import HistoryEntry
-from keyswitch.indicator import layout_icon_name, layout_label, normalize_indicator_style
+from keyswitch.indicator import (
+    alternate_layout_action_label,
+    alternate_layout_group,
+    layout_icon_name,
+    layout_label,
+    normalize_indicator_style,
+)
 from keyswitch.language_model import LanguageModel
 from keyswitch.learning import LearningStore
 from keyswitch.layouts import LayoutPair
@@ -32,6 +38,9 @@ class FakeBackend:
 
     def current_group(self) -> int:
         return self.group
+
+    def switch_group(self, group: int) -> None:
+        self.group = group
 
     def inject_correction(
         self,
@@ -89,6 +98,20 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(pair.translate("Ghbdtn", "us", "ru"), "Привет")
         self.assertEqual(pair.translate("Руддщ", "ru", "us"), "Hello")
 
+    def test_alternate_layout_menu_mapping(self) -> None:
+        self.assertEqual(alternate_layout_group(0), 1)
+        self.assertEqual(alternate_layout_group(1), 0)
+        self.assertIsNone(alternate_layout_group(-1))
+        self.assertEqual(
+            alternate_layout_action_label(0),
+            "Переключить на русский (RU)",
+        )
+        self.assertEqual(
+            alternate_layout_action_label(1),
+            "Переключить на английский (EN)",
+        )
+        self.assertEqual(alternate_layout_action_label(7), "Переключить язык")
+
 
 class SettingsTests(unittest.TestCase):
     def test_defaults_are_merged_and_changes_persist(self) -> None:
@@ -103,6 +126,7 @@ class SettingsTests(unittest.TestCase):
             self.assertEqual(store.get("appearance.indicator_style"), "letters")
             self.assertTrue(store.get("detection.context_aware"))
             self.assertTrue(store.get("detection.protect_code"))
+            self.assertTrue(store.get("detection.intent_model_enabled"))
             self.assertTrue(store.get("detection.respect_manual_layout"))
             self.assertTrue(store.get("detection.correct_on_pause"))
             self.assertTrue(store.get("detection.learning"))

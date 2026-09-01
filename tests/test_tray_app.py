@@ -68,6 +68,7 @@ class TrayItemTests(unittest.TestCase):
         interface = Mock()
         callbacks: dict[str, Mock] = {
             "settings": Mock(),
+            "layout": Mock(),
             "autoswitch": Mock(),
             "sound": Mock(),
             "notifications": Mock(),
@@ -90,6 +91,7 @@ class TrayItemTests(unittest.TestCase):
                 callbacks["settings"],
                 callbacks["autoswitch"],
                 Path("/icons"),
+                on_switch_layout=callbacks["layout"],
                 on_sound_toggle=callbacks["sound"],
                 on_notifications_toggle=callbacks["notifications"],
                 on_history=callbacks["history"],
@@ -197,6 +199,10 @@ class TrayItemTests(unittest.TestCase):
             properties = as_mapping(child[1])
             labels[as_int(child[0])] = str(properties.get("label", ""))
         self.assertEqual(labels[tray_module.MENU_SETTINGS], "Настройки KeySwitch…")
+        self.assertEqual(labels[tray_module.MENU_SWITCH_LAYOUT], "Переключить язык")
+        self.assertFalse(
+            menu.GetProperty(tray_module.MENU_SWITCH_LAYOUT, "enabled")
+        )
         self.assertEqual(labels[tray_module.MENU_AUTOSWITCH], "Автопереключение")
         self.assertEqual(labels[tray_module.MENU_QUIT], "Выход")
         _revision, shallow = menu.GetLayout(0, 0, ["label"])
@@ -230,13 +236,18 @@ class TrayItemTests(unittest.TestCase):
             errors = menu.EventGroup(
                 [
                     (tray_module.MENU_AUTOSWITCH, "clicked", dbus.String(""), 0),
+                    (tray_module.MENU_SWITCH_LAYOUT, "clicked", dbus.String(""), 0),
                     (tray_module.MENU_SOUND, "hovered", dbus.String(""), 0),
                     (999, "clicked", dbus.String(""), 0),
                 ]
             )
         self.assertEqual(
             idle.call_args_list,
-            [call(callbacks["settings"]), call(callbacks["autoswitch"])],
+            [
+                call(callbacks["settings"]),
+                call(callbacks["autoswitch"]),
+                call(callbacks["layout"]),
+            ],
         )
         self.assertEqual([int(item_id) for item_id in errors], [999])
         self.assertFalse(menu.AboutToShow(0))
@@ -256,12 +267,19 @@ class TrayItemTests(unittest.TestCase):
         with patch.object(menu, "ItemsPropertiesUpdated") as properties_updated:
             menu.set_indicator_state(True, -1, "keyswitch")
             menu.set_indicator_state(False, 1, "keyswitch-ru")
-            self.assertEqual(properties_updated.call_count, 2)
+            self.assertEqual(properties_updated.call_count, 3)
             menu.set_indicator_state(False, 1, "keyswitch-ru")
-            self.assertEqual(properties_updated.call_count, 2)
+            self.assertEqual(properties_updated.call_count, 3)
         self.assertEqual(
             str(menu.GetProperty(tray_module.MENU_LAYOUT, "label")),
             "Текущая раскладка: RU",
+        )
+        self.assertEqual(
+            str(menu.GetProperty(tray_module.MENU_SWITCH_LAYOUT, "label")),
+            "Переключить на английский (EN)",
+        )
+        self.assertTrue(
+            menu.GetProperty(tray_module.MENU_SWITCH_LAYOUT, "enabled")
         )
         self.assertEqual(
             as_int(menu.GetProperty(tray_module.MENU_AUTOSWITCH, "toggle-state")),
@@ -286,6 +304,10 @@ class TrayItemTests(unittest.TestCase):
 
         menu._actions.pop(tray_module.MENU_ABOUT)
         self.assertFalse(menu._item_properties(tray_module.MENU_ABOUT)["enabled"])
+        menu._actions.pop(tray_module.MENU_SWITCH_LAYOUT)
+        self.assertFalse(
+            menu._item_properties(tray_module.MENU_SWITCH_LAYOUT)["enabled"]
+        )
         with self.assertRaises(dbus.exceptions.DBusException):
             menu._item_properties(999)
         with patch.object(tray_module.StatusNotifierMenu, "remove_from_connection") as remove:
@@ -360,6 +382,8 @@ class FakeEngine:
         self.start_calls = 0
         self.stop_calls = 0
         self.stop_error: Exception | None = None
+        self.select_result = True
+        self.select_calls = 0
 
     def subscribe_corrections(
         self, callback: Callable[[CorrectionPlan], None]
@@ -391,6 +415,10 @@ class FakeEngine:
         self.stop_calls += 1
         if self.stop_error:
             raise self.stop_error
+
+    def select_alternate_group(self) -> bool:
+        self.select_calls += 1
+        return self.select_result
 
 
 class FakeWindow:
@@ -491,6 +519,14 @@ class ApplicationGlueTests(unittest.TestCase):
         self.assertTrue(self.settings.get("general.sound"))
         self.assertFalse(self.application.toggle_notifications())
         self.assertFalse(self.settings.get("general.notifications"))
+        self.assertFalse(self.application.select_alternate_layout())
+        self.assertEqual(self.engine.select_calls, 1)
+        self.engine.select_result = False
+        self.engine.snapshot = EngineSnapshot(last_error="язык не определён")
+        self.application.window = FakeWindow()
+        self.assertFalse(self.application.select_alternate_layout())
+        self.assertEqual(self.application.window.toasts, ["язык не определён"])
+        self.application.window = None
         with patch.object(self.application, "quit") as quit_mock:
             self.assertFalse(self.application.quit_application())
             self.assertFalse(self.application._signal_quit())
@@ -609,6 +645,7 @@ class ApplicationGlueTests(unittest.TestCase):
         self.assertEqual(
             set(tray.callbacks),
             {
+                "on_switch_layout",
                 "on_sound_toggle",
                 "on_notifications_toggle",
                 "on_history",

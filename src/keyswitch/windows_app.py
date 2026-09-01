@@ -13,6 +13,7 @@ import sys
 
 from . import __version__
 from .history import data_dir
+from .intent_model import LinearNgramModel
 from .windows_backend import WindowsBackend
 
 
@@ -29,6 +30,7 @@ def configure_logging() -> None:
 def diagnose() -> int:
     backend = WindowsBackend()
     probe = backend.probe()
+    _intent_model, intent_status = LinearNgramModel.try_load_default()
     print(
         json.dumps(
             {
@@ -40,6 +42,7 @@ def diagnose() -> int:
                 "injection": probe.xtest_version,
                 "layouts": probe.xkb_version,
                 "current_group": probe.current_group,
+                "intent_model": intent_status.as_dict(),
                 "error": probe.error,
             },
             # Keep redirected output valid even when a legacy Windows console

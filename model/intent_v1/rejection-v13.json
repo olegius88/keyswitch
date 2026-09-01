@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "phase": "strict_production_context_ensemble",
+  "decision": "rejected",
+  "reason": "unknown_typo_per_trigger_wilson_bound",
+  "artifact_published": true,
+  "internal_quality_gates_passed": true,
+  "independent_external_holdout_evaluated": true,
+  "model_version": "intent-v1-c49ad9ac2541",
+  "artifact_sha256": "988e21061a9de4b97b28e3df1849b2890b1cee6ec6957d0541f2cae5e57cb8b4",
+  "config_sha256": "a500ee2bd732b174af4d732b0614bd17820816a19a08ce15301ba02f2a186239",
+  "candidate_sha256": "c2ec18d6cee03c6843056deb676d33f504da9690899f757db6c290d4f012e3cd",
+  "candidate_dataset_sha256": "2a7d5b40aa7f1146da66eefd1e8cb6969830b959ce65a001027330f4e912a2dd",
+  "seal_registry_sha256": "a6500000c9ed1a6bc38c9578da70668b8e0adf5af38cf1cd1868ef51e742c563",
+  "manifest_sha256": "8e8c052f153b6b8d830d83eb4a5141fbfc7fd461c004793bf2d870fff90fc452",
+  "internal_report_sha256": "2463260095d43f1e3e8be95bd523f30d8bf16c81fa8332024a9f0ae75b14b3ca",
+  "evaluator_sha256": "72ece818b3be6db76de8b36592611ae061230a79dcb6dd4f1a5f547f3d6f61d0",
+  "strict_report_sha256": "98cc5353d874405487595b875a7f7dc62dfa8403ba95f61dab1f97e93068cc61",
+  "failure": {
+    "failed_strict_gates": [
+      "production_context_ensemble"
+    ],
+    "corpus": "unknown_typo",
+    "affected_non_pause_triggers": [
+      "boundary_probe",
+      "enter",
+      "punctuation",
+      "space",
+      "tab"
+    ],
+    "false_positive": 4,
+    "negative_samples_per_trigger": 10000,
+    "false_positive_rate": 0.0004,
+    "false_positive_rate_upper_95": 0.001028128,
+    "maximum_false_positive_rate_upper_95": 0.001,
+    "recall": 0.9536,
+    "pause_false_positive": 2,
+    "pause_false_positive_rate_upper_95": 0.000728996,
+    "pause_recall": 0.9465
+  },
+  "remediation": "Treat the disclosed v13 external result as development evidence only. Require zero aggregate selection false positives per trigger, set the presealed overall recall floor to 0.956, rotate the sealed split, registry and independent holdout to v14, and evaluate the new v14 candidate exactly once. Do not reuse the v13 holdout as release evidence."
+}

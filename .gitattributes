@@ -1,0 +1,54 @@
+# Reproducible binary model inputs and artifact must never undergo EOL conversion.
+model/intent_v1/sources/*.lm -text
+model/intent_v1/sources/COPYRIGHT.onboard-data -text
+src/keyswitch/resources/models/*.ksm binary
+
+# These text files are hashed byte-for-byte into KSLM provenance or its sealed
+# receipt. Force LF even on Windows so a checkout cannot invalidate the model.
+model/intent_v1/config.json text eol=lf
+model/intent_v1/manifest.json text eol=lf
+model/intent_v1/test-report.json text eol=lf
+model/intent_v1/seal-registry-v2.json text eol=lf
+model/intent_v1/seal-registry-v3.json text eol=lf
+model/intent_v1/seal-registry-v4.json text eol=lf
+model/intent_v1/seal-registry-v5.json text eol=lf
+model/intent_v1/seal-registry-v6.json text eol=lf
+model/intent_v1/seal-registry-v7.json text eol=lf
+model/intent_v1/seal-registry-v8.json text eol=lf
+model/intent_v1/seal-registry-v9.json text eol=lf
+model/intent_v1/seal-registry-v10.json text eol=lf
+model/intent_v1/seal-registry-v11.json text eol=lf
+model/intent_v1/seal-registry-v12.json text eol=lf
+model/intent_v1/seal-registry-v13.json text eol=lf
+model/intent_v1/seal-registry-v14.json text eol=lf
+model/intent_v1/holdout-v6-preseal.json text eol=lf
+model/intent_v1/holdout-v7-preseal.json text eol=lf
+model/intent_v1/holdout-v8-preseal.json text eol=lf
+model/intent_v1/holdout-v9-preseal.json text eol=lf
+model/intent_v1/holdout-v10-preseal.json text eol=lf
+model/intent_v1/holdout-v11-preseal.json text eol=lf
+model/intent_v1/holdout-v12-preseal.json text eol=lf
+model/intent_v1/holdout-v13-preseal.json text eol=lf
+model/intent_v1/holdout-v14-preseal.json text eol=lf
+model/intent_v1/unknown-typo-development-v11.json text eol=lf
+model/intent_v1/unknown-typo-development-v12.json text eol=lf
+model/intent_v1/unknown-typo-development-v13.json text eol=lf
+model/intent_v1/unknown-typo-development-v14.json text eol=lf
+model/intent_v1/rejection-v10.json text eol=lf
+model/intent_v1/rejection-v11.json text eol=lf
+model/intent_v1/rejection-v12.json text eol=lf
+model/intent_v1/rejection-v13.json text eol=lf
+model/intent_v1/rejection-v8.json text eol=lf
+model/intent_v1/rejection-v9.json text eol=lf
+model/intent_v1/rejection-v6.json text eol=lf
+model/intent_v1/rejection-v7.json text eol=lf
+model/intent_v1/sources/SHA256SUMS text eol=lf
+tools/train_intent_model.py text eol=lf
+tools/evaluate_intent_model.py text eol=lf
+tools/preseal_intent_holdout.py text eol=lf
+tools/freeze_intent_development_corpus.py text eol=lf
+src/keyswitch/intent_model.py text eol=lf
+src/keyswitch/detector.py text eol=lf
+src/keyswitch/layouts.py text eol=lf
+src/keyswitch/language_model.py text eol=lf
+src/keyswitch/resources/protected_tokens.txt text eol=lf

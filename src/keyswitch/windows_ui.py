@@ -1118,6 +1118,7 @@ class WindowsApplication:
             try:
                 actions = WindowsTrayActions(
                     lambda: self._tray_action(self.present),
+                    lambda: self._tray_action(self._select_alternate_layout),
                     lambda: self._tray_action(self._toggle_engine),
                     lambda: self._tray_action(self._toggle_sound),
                     lambda: self._tray_action(self._toggle_notifications),
@@ -1152,6 +1153,10 @@ class WindowsApplication:
 
     def _toggle_engine(self) -> None:
         self.settings.set("enabled", not bool(self.settings.get("enabled", True)))
+
+    def _select_alternate_layout(self) -> None:
+        if not self.engine.select_alternate_group():
+            self.error_text.set(self.engine.snapshot.last_error)
 
     def _toggle_sound(self) -> None:
         self.settings.set(
@@ -1351,6 +1356,7 @@ class WindowsApplication:
             "layouts": probe.xkb_version,
             "current_group": probe.current_group,
             "current_layout": layout_label(probe.current_group),
+            "intent_model": self.engine.intent_model_status.as_dict(),
             "settings": str(self.settings.path),
             "data": str(data_dir()),
             "error": probe.error,

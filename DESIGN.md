@@ -12,14 +12,15 @@
 6. Из интерфейса можно немедленно выключить автокоррекцию, изменить порог,
    исключения и системное поведение; настройки переживают перезапуск.
 7. Левый щелчок по индикатору раскладки открывает нативное меню быстрых
-   действий; его переключатели отражают актуальное состояние приложения.
+   действий; оно предлагает язык, отличный от текущего, а его переключатели
+   отражают актуальное состояние приложения.
 8. Если пользователь сам переключил системную раскладку, первое завершённое
    слово в выбранной раскладке не исправляется; затем обычное распознавание
    автоматически возобновляется.
 
 ## Поток данных
 
-`InputBackend -> KeyEvent -> WordBuffer -> EnsembleDetector -> CorrectionPlan -> InputBackend`
+`InputBackend -> KeyEvent -> WordBuffer -> HybridDetector -> CorrectionPlan -> InputBackend`
 
 - Windows использует `WH_KEYBOARD_LL`, `ToUnicodeEx`, `SendInput` и
   `WM_INPUTLANGCHANGEREQUEST`; Linux использует XRecord, XKB и XTEST. Оба
@@ -29,9 +30,10 @@
 - Буфер хранит физические клавиши, поэтому русские буквы на клавишах
   `, . ; [ ]` не теряются как пунктуация. Решение «буква или граница слова»
   принимается по уже накопленному слову.
-- Распознавание объединяет пять независимых сигналов: частотные ARPA-словари
-  Onboard, морфологию Hunspell, сглаженные символьные 2/3/4-граммы, краткий
-  контекст предыдущего слова и явно подтверждённые пользовательские правила.
+- Precision-first распознавание сначала применяет жёсткие защиты и явно
+  подтверждённые пользовательские правила, затем объединяет частотные
+  ARPA-словари Onboard, морфологию Hunspell, сглаженные символьные 2/3/4-граммы,
+  краткий контекст и дополнительную линейную модель намерения.
 - Валидное исходное слово, совпадение сразу в двух раскладках, URL, путь,
   идентификатор с цифрами/подчёркиванием, `camelCase`, аббревиатура и защищённый
   технический термин по умолчанию не переключаются. Цена ложного исправления
@@ -41,6 +43,82 @@
   набранный текст в обучающую базу не попадает.
 - Контекст хранится только в памяти, отдельно по имени процесса или `WM_CLASS`,
   не дольше 45 секунд.
+- Линейный слой сравнивает обе расшифровки по знаковым символьным 1–5-граммам и
+  ограниченным структурным признакам. После hard guards это единственное
+  статистическое решение: применяется только calibrated trigger/direction
+  threshold. Membership coverage и языковые score остаются диагностикой и не
+  могут отменить положительный результат порога. Эвристика остаётся только
+  fallback для коротких токенов, отключённой модели или отсутствующего
+  артефакта; допустимое исходное слово всегда остаётся без автокоррекции.
+- Поставляемая модель обучается offline через FTRL-Proximal, калибруется на
+  отдельной выборке независимо для EN→RU и RU→EN и хранится в проверяемом KSLM
+  schema 4 с int16-весами и точными calibrated-logit порогами.
+  Вектор содержит 2 097 152 hash-buckets; конфигурация допускает максимум 64
+  эпох. Детерминированный выбор эпохи использует только development и
+  предпочитает high-precision recall policy, а log loss оставляет последним
+  tie-breaker; threshold split остаётся независимым.
+  Покрытие определяется по отсортированным точным uint64-отпечаткам символьных
+  признаков в независимом membership hash namespace, а не по занятости
+  collision-prone weight buckets. Runtime не содержит ML-зависимостей,
+  ограничивает весь контейнер 14 MiB, embedded manifest 1 MiB, payload 12 MiB,
+  число membership-отпечатков `2^20` и при любой ошибке возвращается к
+  детерминированному ансамблю.
+- Feature schema v5 строит вход линейного слоя только из raw token обеих
+  интерпретаций: знаковых символьных 1–5-грамм, направления, длины и trigger.
+  Поля контекста и все поля `WordScore`, включая lexical/ngram/frequency и
+  exact/spell-known, полностью игнорируются классификатором. Реальный контекст
+  остаётся отдельным входом консервативной эвристики detector и не учитывается
+  второй раз в linear score. Trainer использует тот же runtime extractor с теми
+  же seed и порядками n-грамм, обеспечивая точное train/serve feature parity.
+  Линейный слой применяется только если максимум длин двух нормализованных
+  интерпретаций не меньше 5. Более короткие токены остаются у
+  детерминированных защит и правил. Dataset builder применяет тот же минимум
+  после генерации deletion/duplication/transposition, поэтому train, внешняя
+  проверка и runtime не расходятся; значение входит в подписанную
+  `gate_policy.model_applicability`.
+  Реальные frozen Onboard collision-пары длиной 3–4 сохраняются отдельно
+  только как safety evidence предмодельного valid-source guard и не попадают в
+  train/development/calibration/threshold/test классификатора.
+  Train-only scorer сохраняется как отдельный проверяемый provenance-объект, но
+  не подаёт признаки классификатору. Candidate pre-pass
+  без доступа к test помещает в quarantine фактические identity/typo-сигнатуры
+  с владельцами из разных pre-sealed split/языков либо пересечением с
+  protected/safety строками. После атомарной фиксации точного candidate SHA
+  отдельная test-фаза строится и асимметрично объединяется: test-сигнатуры,
+  раскрытые строками, quarantine или safety-данными кандидата, исключаются,
+  candidate-строки не меняются. Post-build audit
+  проверяет сгенерированные строки. Физические сигнатуры распределяются
+  namespace `keyswitch:intent-v14:physical-signature`.
+- Schema 13 загружает отдельный frozen
+  `unknown-typo-development-v14.json`, построенный model-blind до обучения.
+  Независимый namespace ролей делит по 5 000 сигнатур каждого языка как
+  3 500/500/500/500 между train/development/calibration/threshold без test.
+  Loader проверяет hashes/sizes, Hunspell provenance, физическую эквивалентность,
+  уникальность и точное повторное развёртывание 120 000 симметричных строк;
+  подписанный вес `3.0` применяется только к train-роли, а оценочные роли
+  остаются с весом `1.0`;
+  общий аудит после merge исключает пересечения ролей и исходного корпуса.
+- Calibration, threshold и sealed test используют нейтральный контекст как
+  основной срез. Фиксированные непустые label-independent context-stress
+  профили дополнительно сертифицируют инвариантность feature schema v5:
+  контекст не меняет vector/logit/решение, и каждый профиль проходит те же
+  per-trigger precision/recall/specificity/Wilson-FPR gates.
+- Strict evaluator отдельно запускает реальный production detector на neutral
+  и шести достижимых extrema контекста (-2,05…+2,30) для sealed, typo,
+  unknown-typo, safety и source-known срезов. Он запрещает новые false positive
+  относительно fallback/neutral, проверяет асимметричную recall policy и
+  доказывает точную достижимость либо остановку на pre-model guards.
+- Train/test строятся только из побайтно зафиксированных
+  `model/intent_v1/sources/en_US.lm` и `ru_RU.lm`. Config и `SHA256SUMS`
+  закрепляют версию исходного пакета, размеры, SHA-256 и неизменённый файл
+  copyright; системное обновление `onboard-data` не меняет artifact. Frozen
+  лексиконы используются без глобального pre-split truncation:
+  `maximum_words_per_language` обязан быть равен нулю. Build
+  provenance дополнительно фиксирует hashes trainer, intent runtime, layouts,
+  language scorer, detector и protected-token list, Python/platform identity,
+  candidate/full dataset, оба quarantine, исключённые test-сигнатуры и
+  train-only scorer. Receipt связывает точный KSLM payload/runtime-параметры;
+  evaluator проверяет его до построения test-фазы и вывода sealed-метрик.
 - Исправление удаляет ошибочное слово и воспроизводит те же физические клавиши
   после переключения системной раскладки. Буфер обмена не используется.
 - Синтетические события помечаются внутренней ожидаемой очередью и повторно не
@@ -64,6 +142,62 @@ CI отклоняет изменение, если на частотном ко�
 либо не пройден хотя бы один специально подобранный случай. Это
 внутренний воспроизводимый регрессионный барьер, а не заявление о независимом
 сравнении с закрытыми моделями других продуктов.
+
+`tools/evaluate_intent_model.py --strict` отдельно проверяет контрольные суммы и
+KSLM schema 4, frozen-source/toolchain provenance, protected-token hash,
+quarantine, train-only scorer, зафиксированные срезы и precision-first пороги.
+Каждый threshold/test gate обязан иметь оба label. До вычисления sealed test
+selection на нейтральном контексте совместно выбирает для каждого trigger
+отдельные EN→RU/RU→EN пороги; каждый направленный operating curve обязан иметь
+оба label в общем и typo-срезе. Агрегированный trigger-срез требует: общие precision
+>= 0,9995, recall >= 0,956, specificity >= 0,999 и верхнюю family-wise
+95%-границу Wilson FPR <= 0,001; typo-срез требует selection precision >=
+0,9995, recall >= 0,91, specificity >= 0,999 и ту же границу <= 0,001. Семейство
+содержит 12 первичных проверок (6 trigger × overall/typo); Bonferroni задаёт
+per-comparison confidence 0,9958333333333333 и z=2,8652602385321333. Каждый
+signed gate хранит метод, multiplicity correction, число сравнений, confidence,
+z и endpoint. Config schema 13 дополнительно требует ноль false positive на
+общем и typo selection-срезах каждого trigger до открытия test. После выбора schema 13
+детерминированно находит на threshold
+split максимальный общий signed margin, который сохраняет всю selection policy,
+и прибавляет его к обоим направленным calibrated-logit порогам каждого trigger.
+Signed cap 2,0 зафиксирован до v11 по external model-blind unknown-typo
+development-корпусу; фактический margin выбирается только на его frozen
+threshold-роли, сохраняется в manifest, а selection-метрики пересчитываются
+после ужесточения. Sealed test в выборе не участвует и независимо применяет
+обычную 95%-границу Wilson с
+z=1,959963984540054. Для `pause` selection recall/typo recall равны 0,91/0,86,
+граница остаётся 0,001, а его
+logit-порог каждого направления минимум на 0,5 выше самого строгого non-pause
+порога того же направления. Невыполнимая
+policy останавливает процесс до sealed test. В независимом sealed test minimum
+precision для обоих срезов равен 0,999, recall — 0,95/0,90, а pause —
+0,90/0,85; усиление selection создаёт
+запас переноса. До claim также должны пройти
+safety-аудит и selection-veto, а пробная runtime-сериализация KSLM проверяет
+numeric bounds, quantization parity и size caps. Safety-gate прогоняет защитные
+строки через production detector и его pre-model guards; прямые ответы линейной
+модели и membership coverage имеют только диагностический статус.
+Рабочее решение выбирает точный `threshold_logit` по trigger и физическому
+направлению и сравнивает с ним calibrated logit. Sigmoid от этого порога выводится
+только для диагностики и не участвует в сравнении. Внешняя evaluation policy
+фиксирует размеры и SHA-256 Hunspell `.dic`/`.aff` обоих языков, ожидаемые
+SHA-256 lexical-disjoint, unknown-typo-development и независимого
+unknown-typo-holdout корпусов, минимум 5000 слов на язык и канонический список
+всех шести trigger. Holdout строится без загрузки модели под отдельными
+rank/choice namespace и исключает sealed и development сигнатуры; strict
+evaluator отклоняет любое расхождение.
+Train/calibration/threshold/test строятся из лексических и синтетических пар,
+сгруппированных по физической последовательности до аугментации. Поэтому этот
+контур обнаруживает регрессии и прямую утечку между выборками, но не заявляет
+качество на реальном потоке пользовательского ввода.
+
+Trainer публикует выходы только после всех gates. Он заранее записывает и
+синхронизирует report, artifact и manifest, заменяет их в этом порядке и
+оставляет manifest последним commit marker; при ошибке процесса уже заменённые
+назначения восстанавливаются. Точная процедура двух одинаковых запусков и
+побайтного сравнения всех трёх файлов описана в
+[model/intent_v1/MODEL_CARD.md](model/intent_v1/MODEL_CARD.md#воспроизводимость).
 
 Подробный обзор решений и источников: [docs/detection-research.md](docs/detection-research.md).
 
@@ -100,19 +234,46 @@ CI отклоняет изменение, если на частотном ко�
 
 - `packaging/build-deb.sh` компилирует приложение закреплённой версией Nuitka в
   standalone ELF и формирует пакет для архитектуры `dpkg --print-architecture`.
+- Linux- и Windows-сборка обязаны включить точный
+  `resources/models/layout_intent_v1.ksm` и frozen `en_US.lm`/`ru_RU.lm`;
+  встроенный каталог моделей имеет приоритет над системным `onboard-data`, а
+  после Nuitka все три файла сравниваются побайтно. До упаковки KSLM проверяется заголовок
+  `KSLM`, предел полного файла 14 MiB, embedded manifest 1 MiB, payload 12 MiB
+  и не более `2^20` membership-отпечатков, а после Nuitka — наличие и точное
+  совпадение артефакта.
+  Стабильное имя `layout_intent_v1.ksm` обозначает поколение классификатора;
+  контейнер использует schema 4. Это не номера соседних документов: training
+  config имеет `schema_version: 13`, а внешний публикационный `manifest.json` —
+  `schema_version: 1`. Диагностика показывает версию/SHA-256 модели либо причину
+  безопасного fallback, а пользователь может отключить линейный слой
+  переключателем «Локальная линейная модель».
+- Сборки проверяют `model/intent_v1/sources/SHA256SUMS` и обе включают эти
+  frozen EN/RU-модели. Windows fresh-clone build по умолчанию также использует
+  copyright напрямую,
+  а необязательные staged-пути принимает только при точном совпадении пути,
+  размера и SHA-256 с config. До чтения Windows preflight ограничивает config,
+  manifest, KSLM и диагностический вывод; portable `--provenance-only` pass
+  воспроизводит обе dataset-фазы и проверяет registry/seal, frozen sources,
+  toolchain, artifact и полное совпадение embedded manifest;
+  Debian и Windows включают тот же неизменённый `COPYRIGHT.onboard-data` в
+  комплект лицензий.
 - В дереве `/usr/lib/keyswitch` запрещены `.py`, `.pyc` и `.pyo`; зависимость
   пакета от системного интерпретатора `python3` также запрещена проверкой.
 - `tools/verify-native-deb.sh` проверяет метаданные, архитектуру, формат ELF,
-  разрешение динамических библиотек и версию исполняемого файла.
+  разрешение динамических библиотек, версию исполняемого файла и bundled KSLM.
 - `tests/e2e_native_package.py` запускает извлечённый из DEB бинарник и повторяет
   пользовательский сценарий через настоящий X11 RECORD/XTEST. Дополнительно он
   проверяет историю и экспорт полного StatusNotifierItem/DBusMenu.
 - `packaging/build-windows.ps1` компилирует Windows-приложение закреплённой
   версией Nuitka, формирует переносимый ZIP и per-user инсталлятор Inno Setup.
-  В standalone-каталоге также запрещены `.py`, `.pyc` и `.pyo`.
+  Перед компиляцией он требует KSLM schema 4 и точный config SHA-256, полную
+  подписанную матрицу quality gates и её совпадение с metadata KSLM. В
+  standalone-каталоге запрещены `.py`, `.pyc` и `.pyo`; готовый EXE обязан
+  подтвердить через `--diagnose`, что bundled intent model доступна.
 - `tests/e2e_windows.py` запускает настоящий `WH_KEYBOARD_LL`, вводит через
   `SendInput` обе ошибочные последовательности в поле Tk и проверяет исправления,
   итоговые раскладки и историю. Windows CI затем тихо устанавливает готовый
-  Setup EXE и запускает встроенный `--smoke-ui` установленного бинарника.
+  Setup EXE, запускает bounded `--diagnose` с точной проверкой пути, версии и
+  SHA-256 bundled KSLM, а затем встроенный `--smoke-ui` установленного бинарника.
 - Test и release workflows выполняют этот контракт заново; публикация не
   начинается, если любой нативный пакет ведёт себя иначе, чем исходный запуск.

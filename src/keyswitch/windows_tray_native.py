@@ -49,6 +49,11 @@ class PystrayWindowsAdapter:
                 enabled=False,
             ),
             pystray.MenuItem(
+                lambda _item: state().alternate_layout_label,
+                lambda _icon, _item: actions.switch_layout(),
+                enabled=lambda _item: state().can_switch_layout,
+            ),
+            pystray.MenuItem(
                 "Настройки KeySwitch…",
                 lambda _icon, _item: actions.show_settings(),
                 default=True,

@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "phase": "strict_external_quality_gate",
+  "decision": "rejected",
+  "reason": "production_context_ensemble",
+  "model_version": "intent-v1-46a58e35312e",
+  "artifact_sha256": "65cca19260a631bfae6d80025aa7e5f7c17e4a59922f57e1e8309ab270d40242",
+  "config_sha256": "99398ad779fe2b82887205e3d7b1454f82aa7becf88fb01844bf3d10f7225df5",
+  "seal_registry_sha256": "81d7e7c76f9cec8895502bdd6afe06b3e66ec7057025c94a490d55d1eae09b24",
+  "external_report_sha256": "7c6b13a7a39577c475a9525f1d8bcc87d44bd1ce82d64da595bf107c12b1d41a",
+  "strict_gate_count": 30,
+  "failed_strict_gates": [
+    "production_context_ensemble"
+  ],
+  "all_other_strict_gates_passed": true,
+  "observed": {
+    "raw_sealed_non_pause": {
+      "precision": 1.0,
+      "recall": 0.950488303,
+      "specificity": 1.0,
+      "false_positives": 0
+    },
+    "production_neutral_non_pause": {
+      "precision": 1.0,
+      "recall": 0.941585283,
+      "specificity": 1.0,
+      "false_positives": 0
+    },
+    "performance": {
+      "artifact_bytes": 10373623,
+      "load_ms": {
+        "median": 230.360455,
+        "p95": 268.771704,
+        "samples": 11
+      },
+      "inference_ms": {
+        "median": 0.92796,
+        "p95": 1.876366,
+        "samples": 5000
+      },
+      "deterministic_predictions": true
+    }
+  },
+  "remediation": "Remove post-model membership and target-language statistical vetoes so the calibrated trigger/direction threshold is authoritative after hard guards. Rotate all sealed v9 namespaces; do not retune against the revealed v8 holdouts."
+}

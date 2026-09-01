@@ -1,0 +1,814 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Onboard
+Upstream-Contact: Onboard devel team (https://launchpad.net/~onboard)
+Source: https://github.com/onboard-osk/onboard
+Files-Excluded: debian
+
+Files: Onboard/Appearance.py
+ Onboard/AtspiStateTracker.py
+ Onboard/AutoHide.py
+ Onboard/AutoShow.py
+ Onboard/ConfigUtils.py
+ Onboard/GlobalKeyListener.py
+ Onboard/HardwareSensorTracker.py
+ Onboard/KeyboardPopups.py
+ Onboard/LanguageSupport.py
+ Onboard/LayoutView.py
+ Onboard/SpellChecker.py
+ Onboard/TextChanges.py
+ Onboard/TextContext.py
+ Onboard/TextDomain.py
+ Onboard/Timer.py
+ Onboard/TouchHandles.py
+ Onboard/TouchInput.py
+ Onboard/UDevTracker.py
+ Onboard/Version.py
+ Onboard/WPEngine.py
+ Onboard/WindowUtils.py
+ Onboard/WordSuggestions.py
+ Onboard/XInput.py
+ Onboard/__init__.py
+ Onboard/canonical_equivalents.py
+ Onboard/definitions.py
+ Onboard/osk/osk_hunspell.c
+ Onboard/osk/osk_udev.c
+ Onboard/osk/osk_uinput.c
+ Onboard/osk/osk_uinput.h
+ Onboard/osk/osk_virtkey.h
+ Onboard/osk/osk_virtkey_wayland.c
+ Onboard/osk/osk_virtkey_wayland.h
+ Onboard/osk/osk_virtkey_x.h
+ Onboard/pypredict/__init__.py
+ Onboard/pypredict/attic/multilevel
+ Onboard/pypredict/attic/prune.py
+ Onboard/pypredict/attic/randbench
+ Onboard/pypredict/attic/setup.py
+ Onboard/pypredict/attic/test-client
+ Onboard/pypredict/lm/accent_transform.h
+ Onboard/pypredict/lm/lm.cpp
+ Onboard/pypredict/lm/lm.h
+ Onboard/pypredict/lm/lm_dynamic.cpp
+ Onboard/pypredict/lm/lm_dynamic.h
+ Onboard/pypredict/lm/lm_dynamic_cached.h
+ Onboard/pypredict/lm/lm_dynamic_impl.h
+ Onboard/pypredict/lm/lm_dynamic_kn.h
+ Onboard/pypredict/lm/lm_merged.cpp
+ Onboard/pypredict/lm/lm_merged.h
+ Onboard/pypredict/lm/lm_python.cpp
+ Onboard/pypredict/lm/lm_unigram.cpp
+ Onboard/pypredict/lm/lm_unigram.h
+ Onboard/pypredict/lm/pool_allocator.cpp
+ Onboard/pypredict/lm_wrapper.py
+ Onboard/pypredict/test/test_checkmodels.py
+ Onboard/pypredict/test/test_pypredict.py
+ Onboard/test/test_LayoutLoaderSVG.py
+ Onboard/test/test_dbus_service.py
+ Onboard/test/test_gui.py
+ Onboard/test/test_migration.py
+ Onboard/test/test_translations.py
+ gnome/Onboard_Indicator@onboard.org/prefs.js
+ gnome/Onboard_Indicator@onboard.org/schemas/org.gnome.shell.extensions.onboard-indicator.gschema.xml
+Copyright: 2009, 2012 marmuta <marmvta@gmail.com>
+  2009-2010, 2012 marmuta <marmvta@gmail.com>
+  2009-2010, 2012-2013, marmuta <marmvta@gmail.com>
+  2009-2010, 2012-2014, marmuta <marmvta@gmail.com>
+  2009-2010, 2012-2016, marmuta <marmvta@gmail.com>
+  2009-2010, 2013-2014, marmuta <marmvta@gmail.com>
+  2010, 2012-2013, 2016 marmuta <marmvta@gmail.com>
+  2010, 2012-2014, marmuta <marmvta@gmail.com>
+  2011-2012, marmuta <marmvta@gmail.com>
+  2011-2014, 2016 marmuta <marmvta@gmail.com>
+  2012, 2016 marmuta <marmvta@gmail.com>
+  2012, marmuta <marmvta@gmail.com>
+  2012-2013, 2015-2016, marmuta <marmvta@gmail.com>
+  2012-2013, 2016 marmuta <marmvta@gmail.com>
+  2012-2014, 2016 marmuta <marmvta@gmail.com>
+  2012-2014, marmuta <marmvta@gmail.com>
+  2012-2016, marmuta <marmvta@gmail.com>
+  2013, marmuta <marmvta@gmail.com>
+  2013-2014, marmuta <marmvta@gmail.com>
+  2013-2016, marmuta <marmvta@gmail.com>
+  2014, 2016 marmuta <marmvta@gmail.com>
+  2014, marmuta <marmvta@gmail.com>
+  2015-2016, marmuta <marmvta@gmail.com>
+  2016, marmuta <marmvta@gmail.com>
+License: GPL-3+
+
+Files: emojione/*
+Copyright: Emoji provided free by http://emojione.com
+License: CC-BY-4.0
+ Creative Commons Attribution 4.0 International Public License
+ .
+ By exercising the Licensed Rights (defined below), You accept and agree
+ to be bound by the terms and conditions of this Creative Commons
+ Attribution 4.0 International Public License ("Public License"). To the
+ extent this Public License may be interpreted as a contract, You are
+ granted the Licensed Rights in consideration of Your acceptance of
+ these terms and conditions, and the Licensor grants You such rights in
+ consideration of benefits the Licensor receives from making the
+ Licensed Material available under these terms and conditions.
+ .
+ Section 1 -- Definitions.
+ .
+  a. Adapted Material means material subject to Copyright and Similar
+     Rights that is derived from or based upon the Licensed Material
+     and in which the Licensed Material is translated, altered,
+     arranged, transformed, or otherwise modified in a manner requiring
+     permission under the Copyright and Similar Rights held by the
+     Licensor. For purposes of this Public License, where the Licensed
+     Material is a musical work, performance, or sound recording,
+     Adapted Material is always produced where the Licensed Material is
+     synched in timed relation with a moving image.
+ .
+  b. Adapter's License means the license You apply to Your Copyright
+     and Similar Rights in Your contributions to Adapted Material in
+     accordance with the terms and conditions of this Public License.
+ .
+  c. Copyright and Similar Rights means copyright and/or similar rights
+     closely related to copyright including, without limitation,
+     performance, broadcast, sound recording, and Sui Generis Database
+     Rights, without regard to how the rights are labeled or
+     categorized. For purposes of this Public License, the rights
+     specified in Section 2(b)(1)-(2) are not Copyright and Similar
+     Rights.
+ .
+  d. Effective Technological Measures means those measures that, in the
+     absence of proper authority, may not be circumvented under laws
+     fulfilling obligations under Article 11 of the WIPO Copyright
+     Treaty adopted on December 20, 1996, and/or similar international
+     agreements.
+ .
+  e. Exceptions and Limitations means fair use, fair dealing, and/or
+     any other exception or limitation to Copyright and Similar Rights
+     that applies to Your use of the Licensed Material.
+ .
+  f. Licensed Material means the artistic or literary work, database,
+     or other material to which the Licensor applied this Public
+     License.
+ .
+  g. Licensed Rights means the rights granted to You subject to the
+     terms and conditions of this Public License, which are limited to
+     all Copyright and Similar Rights that apply to Your use of the
+     Licensed Material and that the Licensor has authority to license.
+ .
+  h. Licensor means the individual(s) or entity(ies) granting rights
+     under this Public License.
+ .
+  i. Share means to provide material to the public by any means or
+     process that requires permission under the Licensed Rights, such
+     as reproduction, public display, public performance, distribution,
+     dissemination, communication, or importation, and to make material
+     available to the public including in ways that members of the
+     public may access the material from a place and at a time
+     individually chosen by them.
+ .
+  j. Sui Generis Database Rights means rights other than copyright
+     resulting from Directive 96/9/EC of the European Parliament and of
+     the Council of 11 March 1996 on the legal protection of databases,
+     as amended and/or succeeded, as well as other essentially
+     equivalent rights anywhere in the world.
+ .
+  k. You means the individual or entity exercising the Licensed Rights
+     under this Public License. Your has a corresponding meaning.
+ .
+ Section 2 -- Scope.
+ .
+  a. License grant.
+ .
+       1. Subject to the terms and conditions of this Public License,
+          the Licensor hereby grants You a worldwide, royalty-free,
+          non-sublicensable, non-exclusive, irrevocable license to
+          exercise the Licensed Rights in the Licensed Material to:
+ .
+            a. reproduce and Share the Licensed Material, in whole or
+               in part; and
+ .
+            b. produce, reproduce, and Share Adapted Material.
+ .
+       2. Exceptions and Limitations. For the avoidance of doubt, where
+          Exceptions and Limitations apply to Your use, this Public
+          License does not apply, and You do not need to comply with
+          its terms and conditions.
+ .
+       3. Term. The term of this Public License is specified in Section
+          6(a).
+ .
+       4. Media and formats; technical modifications allowed. The
+          Licensor authorizes You to exercise the Licensed Rights in
+          all media and formats whether now known or hereafter created,
+          and to make technical modifications necessary to do so. The
+          Licensor waives and/or agrees not to assert any right or
+          authority to forbid You from making technical modifications
+          necessary to exercise the Licensed Rights, including
+          technical modifications necessary to circumvent Effective
+          Technological Measures. For purposes of this Public License,
+          simply making modifications authorized by this Section 2(a)
+          (4) never produces Adapted Material.
+ .
+       5. Downstream recipients.
+ .
+            a. Offer from the Licensor -- Licensed Material. Every
+               recipient of the Licensed Material automatically
+               receives an offer from the Licensor to exercise the
+               Licensed Rights under the terms and conditions of this
+               Public License.
+ .
+            b. No downstream restrictions. You may not offer or impose
+               any additional or different terms or conditions on, or
+               apply any Effective Technological Measures to, the
+               Licensed Material if doing so restricts exercise of the
+               Licensed Rights by any recipient of the Licensed
+               Material.
+ .
+       6. No endorsement. Nothing in this Public License constitutes or
+          may be construed as permission to assert or imply that You
+          are, or that Your use of the Licensed Material is, connected
+          with, or sponsored, endorsed, or granted official status by,
+          the Licensor or others designated to receive attribution as
+          provided in Section 3(a)(1)(A)(i).
+ .
+  b. Other rights.
+ .
+       1. Moral rights, such as the right of integrity, are not
+          licensed under this Public License, nor are publicity,
+          privacy, and/or other similar personality rights; however, to
+          the extent possible, the Licensor waives and/or agrees not to
+          assert any such rights held by the Licensor to the limited
+          extent necessary to allow You to exercise the Licensed
+          Rights, but not otherwise.
+ .
+       2. Patent and trademark rights are not licensed under this
+          Public License.
+ .
+       3. To the extent possible, the Licensor waives any right to
+          collect royalties from You for the exercise of the Licensed
+          Rights, whether directly or through a collecting society
+          under any voluntary or waivable statutory or compulsory
+          licensing scheme. In all other cases the Licensor expressly
+          reserves any right to collect such royalties.
+ .
+ Section 3 -- License Conditions.
+ .
+ Your exercise of the Licensed Rights is expressly made subject to the
+ following conditions.
+ .
+  a. Attribution.
+ .
+       1. If You Share the Licensed Material (including in modified
+          form), You must:
+ .
+            a. retain the following if it is supplied by the Licensor
+               with the Licensed Material:
+ .
+                 i. identification of the creator(s) of the Licensed
+                    Material and any others designated to receive
+                    attribution, in any reasonable manner requested by
+                    the Licensor (including by pseudonym if
+                    designated);
+ .
+                ii. a copyright notice;
+ .
+               iii. a notice that refers to this Public License;
+ .
+                iv. a notice that refers to the disclaimer of
+                    warranties;
+ .
+                 v. a URI or hyperlink to the Licensed Material to the
+                    extent reasonably practicable;
+ .
+            b. indicate if You modified the Licensed Material and
+               retain an indication of any previous modifications; and
+ .
+            c. indicate the Licensed Material is licensed under this
+               Public License, and include the text of, or the URI or
+               hyperlink to, this Public License.
+ .
+       2. You may satisfy the conditions in Section 3(a)(1) in any
+          reasonable manner based on the medium, means, and context in
+          which You Share the Licensed Material. For example, it may be
+          reasonable to satisfy the conditions by providing a URI or
+          hyperlink to a resource that includes the required
+          information.
+ .
+       3. If requested by the Licensor, You must remove any of the
+          information required by Section 3(a)(1)(A) to the extent
+          reasonably practicable.
+ .
+       4. If You Share Adapted Material You produce, the Adapter's
+          License You apply must not prevent recipients of the Adapted
+          Material from complying with this Public License.
+ .
+ Section 4 -- Sui Generis Database Rights.
+ .
+ Where the Licensed Rights include Sui Generis Database Rights that
+ apply to Your use of the Licensed Material:
+ .
+  a. for the avoidance of doubt, Section 2(a)(1) grants You the right
+     to extract, reuse, reproduce, and Share all or a substantial
+     portion of the contents of the database;
+ .
+  b. if You include all or a substantial portion of the database
+     contents in a database in which You have Sui Generis Database
+     Rights, then the database in which You have Sui Generis Database
+     Rights (but not its individual contents) is Adapted Material; and
+ .
+  c. You must comply with the conditions in Section 3(a) if You Share
+     all or a substantial portion of the contents of the database.
+ .
+ For the avoidance of doubt, this Section 4 supplements and does not
+ replace Your obligations under this Public License where the Licensed
+ Rights include other Copyright and Similar Rights.
+ .
+ Section 5 -- Disclaimer of Warranties and Limitation of Liability.
+ .
+  a. UNLESS OTHERWISE SEPARATELY UNDERTAKEN BY THE LICENSOR, TO THE
+     EXTENT POSSIBLE, THE LICENSOR OFFERS THE LICENSED MATERIAL AS-IS
+     AND AS-AVAILABLE, AND MAKES NO REPRESENTATIONS OR WARRANTIES OF
+     ANY KIND CONCERNING THE LICENSED MATERIAL, WHETHER EXPRESS,
+     IMPLIED, STATUTORY, OR OTHER. THIS INCLUDES, WITHOUT LIMITATION,
+     WARRANTIES OF TITLE, MERCHANTABILITY, FITNESS FOR A PARTICULAR
+     PURPOSE, NON-INFRINGEMENT, ABSENCE OF LATENT OR OTHER DEFECTS,
+     ACCURACY, OR THE PRESENCE OR ABSENCE OF ERRORS, WHETHER OR NOT
+     KNOWN OR DISCOVERABLE. WHERE DISCLAIMERS OF WARRANTIES ARE NOT
+     ALLOWED IN FULL OR IN PART, THIS DISCLAIMER MAY NOT APPLY TO YOU.
+ .
+  b. TO THE EXTENT POSSIBLE, IN NO EVENT WILL THE LICENSOR BE LIABLE
+     TO YOU ON ANY LEGAL THEORY (INCLUDING, WITHOUT LIMITATION,
+     NEGLIGENCE) OR OTHERWISE FOR ANY DIRECT, SPECIAL, INDIRECT,
+     INCIDENTAL, CONSEQUENTIAL, PUNITIVE, EXEMPLARY, OR OTHER LOSSES,
+     COSTS, EXPENSES, OR DAMAGES ARISING OUT OF THIS PUBLIC LICENSE OR
+     USE OF THE LICENSED MATERIAL, EVEN IF THE LICENSOR HAS BEEN
+     ADVISED OF THE POSSIBILITY OF SUCH LOSSES, COSTS, EXPENSES, OR
+     DAMAGES. WHERE A LIMITATION OF LIABILITY IS NOT ALLOWED IN FULL OR
+     IN PART, THIS LIMITATION MAY NOT APPLY TO YOU.
+ .
+  c. The disclaimer of warranties and limitation of liability provided
+     above shall be interpreted in a manner that, to the extent
+     possible, most closely approximates an absolute disclaimer and
+     waiver of all liability.
+ .
+ Section 6 -- Term and Termination.
+ .
+  a. This Public License applies for the term of the Copyright and
+     Similar Rights licensed here. However, if You fail to comply with
+     this Public License, then Your rights under this Public License
+     terminate automatically.
+ .
+  b. Where Your right to use the Licensed Material has terminated under
+     Section 6(a), it reinstates:
+ .
+       1. automatically as of the date the violation is cured, provided
+          it is cured within 30 days of Your discovery of the
+          violation; or
+ .
+       2. upon express reinstatement by the Licensor.
+ .
+     For the avoidance of doubt, this Section 6(b) does not affect any
+     right the Licensor may have to seek remedies for Your violations
+     of this Public License.
+ .
+  c. For the avoidance of doubt, the Licensor may also offer the
+     Licensed Material under separate terms or conditions or stop
+     distributing the Licensed Material at any time; however, doing so
+     will not terminate this Public License.
+ .
+  d. Sections 1, 5, 6, 7, and 8 survive termination of this Public
+     License.
+ .
+ Section 7 -- Other Terms and Conditions.
+ .
+  a. The Licensor shall not be bound by any additional or different
+     terms or conditions communicated by You unless expressly agreed.
+ .
+  b. Any arrangements, understandings, or agreements regarding the
+     Licensed Material not stated herein are separate from and
+     independent of the terms and conditions of this Public License.
+ .
+ Section 8 -- Interpretation.
+ .
+  a. For the avoidance of doubt, this Public License does not, and
+     shall not be interpreted to, reduce, limit, restrict, or impose
+     conditions on any use of the Licensed Material that could lawfully
+     be made without permission under this Public License.
+ .
+  b. To the extent possible, if any provision of this Public License is
+     deemed unenforceable, it shall be automatically reformed to the
+     minimum extent necessary to make it enforceable. If the provision
+     cannot be reformed, it shall be severed from this Public License
+     without affecting the enforceability of the remaining terms and
+     conditions.
+ .
+  c. No term or condition of this Public License will be waived and no
+     failure to comply consented to unless expressly agreed to by the
+     Licensor.
+ .
+  d. Nothing in this Public License constitutes or may be interpreted
+     as a limitation upon, or waiver of, any privileges and immunities
+     that apply to the Licensor or You, including from the legal
+     processes of any jurisdiction or authority.
+
+Files: Onboard/ClickSimulator.py
+ Onboard/DBusUtils.py
+ Onboard/Layout.py
+ Onboard/Scanner.py
+ Onboard/Sound.py
+ Onboard/osk/osk_audio.c
+ Onboard/osk/osk_click_mapper.c
+ Onboard/osk/osk_dconf.c
+ Onboard/osk/osk_devices.c
+ Onboard/osk/osk_module.c
+ Onboard/osk/osk_module.h
+ Onboard/osk/osk_struts.c
+ Onboard/osk/osk_util.c
+Copyright: 2011, 2013 Gerd Kohlberger <lowfi@chello.at>
+  2011, Gerd Kohlberger <lowfi@chello.at>
+  2011-2012, Gerd Kohlberger <lowfi@chello.at>
+  2011-2013, 2016 marmuta <marmvta@gmail.com>
+  2011-2013, Gerd Kohlberger <lowfi@chello.at>
+  2011-2014, 2016 marmuta <marmvta@gmail.com>
+  2011-2014, marmuta <marmvta@gmail.com>
+  2011-2015, marmuta <marmvta@gmail.com>
+  2012, Gerd Kohlberger <lowfi@chello.at>
+  2012-2013, marmuta <marmvta@gmail.com>
+  2012-2014, 2016 marmuta <marmvta@gmail.com>
+  2012-2014, marmuta <marmvta@gmail.com>
+  2013, 2016 marmuta <marmvta@gmail.com>
+  2013, Gerd Kohlberger <lowfi@chello.at>
+  2013-2016, marmuta <marmvta@gmail.com>
+License: GPL-3+
+
+Files: Onboard/Config.py
+ Onboard/IconPalette.py
+ Onboard/KbdWindow.py
+ Onboard/settings.py
+ Onboard/utils.py
+Copyright: 2006-2007, 2009 Chris Jones <tortoise@tortuga>
+  2007-2009, Chris Jones <tortoise@tortuga>
+  2008, 2010 Francesco Fumanti <francesco.fumanti@gmx.net>
+  2008, Chris Jones <tortoise@tortuga>
+  2008-2009, Francesco Fumanti <francesco.fumanti@gmx.net>
+  2008-2010, Chris Jones <tortoise@tortuga>
+  2008-2010, Francesco Fumanti <francesco.fumanti@gmx.net>
+  2008-2011, Francesco Fumanti <francesco.fumanti@gmx.net>
+  2009, 2011-2016, marmuta <marmvta@gmail.com>
+  2009, Chris Jones <tortoise@tortuga>
+  2009-2011, Francesco Fumanti <francesco.fumanti@gmx.net>
+  2010-2016, marmuta <marmvta@gmail.com>
+  2011, Gerd Kohlberger <lowfi@chello.at>
+  2011-2012, Gerd Kohlberger <lowfi@chello.at>
+  2011-2016, marmuta <marmvta@gmail.com>
+  2012, Gerd Kohlberger <lowfi@chello.at>
+License: GPL-3+
+
+Files: Onboard/Exceptions.py
+ Onboard/Indicator.py
+ Onboard/LayoutLoaderSVG.py
+Copyright: 2008-2009, Chris Jones <tortoise@tortuga>
+  2008-2010, Chris Jones <tortoise@tortuga>
+  2010, Chris Jones <tortoise@tortuga>
+  2010, Francesco Fumanti <francesco.fumanti@gmx.net>
+  2011, Francesco Fumanti <francesco.fumanti@gmx.net>
+  2011-2014, marmuta <marmvta@gmail.com>
+  2011-2016, marmuta <marmvta@gmail.com>
+License: GPL-3+
+
+Files: Onboard/KeyboardWidget.py
+ Onboard/osk/osk_virtkey.c
+ Onboard/osk/osk_virtkey_x.c
+Copyright: 2006-2008, Chris Jones <tortoise@tortuga>
+  2009, 2011-2016, marmuta <marmvta@gmail.com>
+  2009, Chris Jones <tortoise@tortuga>
+  2010, 2013, 2015-2016, marmuta <marmvta@gmail.com>
+  2010, 2016 marmuta <marmvta@gmail.com>
+  2012, Gerd Kohlberger <lowfi@chello.at>
+  2013, Gerd Kohlberger <lowfi@chello.at>
+License: GPL-3+
+
+Files: Onboard/Keyboard.py
+ Onboard/OnboardGtk.py
+Copyright: 2007, Martin Böhme <martin.bohm@kubuntu.org>
+  2007-2009, Chris Jones <tortoise@tortuga>
+  2007-2010, Chris Jones <tortoise@tortuga>
+  2008-2010, Francesco Fumanti <francesco.fumanti@gmx.net>
+  2009, 2011-2016, marmuta <marmvta@gmail.com>
+  2010, Francesco Fumanti <francesco.fumanti@gmx.net>
+  2010-2016, marmuta <marmvta@gmail.com>
+  2012, Gerd Kohlberger <lowfi@chello.at>
+  2012-2013, Gerd Kohlberger <lowfi@chello.at>
+License: GPL-3+
+
+Files: Onboard/SnippetView.py
+ scripts/sokSettings.py
+Copyright: 2009, Chris Jones <tortoise@tortuga>
+  2011-2012, 2014, 2016, marmuta <marmvta@gmail.com>
+  2012-2013, marmuta <marmvta@gmail.com>
+License: GPL-3+
+
+Files: Onboard/pypredict/test/__init__.py
+ Onboard/test/__init__.py
+ gnome/Onboard_Indicator@onboard.org/schemas/gschemas.compiled
+ onboard-default-settings.gschema.override.example
+Copyright: *No copyright*
+License: GPL-3+
+Comment:
+ Applying license as found in COPYING.GPL3 file.
+
+Files: Onboard/KeyGtk.py
+Copyright: 2007, Martin Böhme <martin.bohm@kubuntu.org>
+  2009, Chris Jones <tortoise@tortuga>
+  2009-2014, 2016 marmuta <marmvta@gmail.com>
+  2010, Francesco Fumanti <francesco.fumanti@gmx.net>
+  2011, Alan Bell <alanbell@ubuntu.com>
+  2012, Gerd Kohlberger <lowfi@chello.at>
+License: GPL-3+
+
+Files: Onboard/KeyCommon.py
+Copyright: 2007, Martin Böhme <martin.bohm@kubuntu.org>
+  2008-2009, Chris Jones <tortoise@tortuga>
+  2009, 2011-2016, marmuta <marmvta@gmail.com>
+  2010, Francesco Fumanti <francesco.fumanti@gmx.net>
+License: GPL-3+
+
+Files: gnome/Onboard_Indicator@onboard.org/extension.js
+Copyright: 2016, Simon Schumann
+  2016, marmuta <marmvta@gmail.com>
+License: GPL-3+
+
+Files: gnome/Onboard_Indicator@onboard.org/convenience.js
+Copyright: 2011-2012, Giovanni Campagna <scampa.giovanni@gmail.com>
+License: BSD-3-clause
+
+Files: Onboard/pypredict/README
+Copyright: Michael Djavidan
+License: GPL-3+
+Comment:
+ This copyright holder (and license) probably applies to various
+ files in the Onboard/pypredict folder (and subfolders). However,
+ that name does not appear in any of the code files' headers.
+
+Files: Onboard/pypredict/tools/*
+Copyright: 2014, marmuta
+           2013, marmuta
+           2012, marmuta <marmvta@gmail.com>
+           2012, marmuta
+License: GPL-3+
+
+Files: help/C/*
+Copyright: 2016, Francesco Fumanti <francesco.fumanti@gmx.net>
+License: GPL-3+
+
+Files: help/C/introduction.page
+Copyright: 2016, Francesco Fumanti <francesco.fumanti@gmx.net>
+  2016, marmuta <marmvta@gmail.com>
+License: GPL-3+
+
+Files: help/C/overview.page
+  help/C/figures/*.png
+Copyright: 2016, marmuta <marmvta@gmail.com>
+License: GPL-3+
+
+Files: Onboard/pypredict/attic/ngram-test
+Copyright: 2009, 2011-2014, marmuta <marmvta@gmail.com>
+  2010, 2013, Francesco Fumanti <francesco.fumanti@gmx.net>
+License: GPL-3+
+
+Files: data/*
+Copyright: 2011-2015, marmuta <marmvta@gmail.com>
+  2012, Gerd Kohlberger <lowfi@chello.at>
+License: GPL-3+
+
+Files: data/onboard-autostart.desktop.in
+Copyright: 2012, 2015, marmuta <marmvta@gmail.com>
+  2015, Martin Wimpress <martin@flexion.org>
+  2011, Luke Yelavitch <luke.yelavich@canonical.com>
+License: GPL-3+
+
+Files: data/onboard.desktop.in
+  data/onboard-settings.desktop.in
+Copyright: 2012, 2015, marmuta <marmvta@gmail.com>
+  2010-2011, Francesco Fumanti <francesco.fumanti@gmx.net>
+  2011, Gerd Kohlberger <lowfi@chello.at>
+  2008, Luke Yelavitch <luke.yelavich@canonical.com>
+  2007-2010, Chris Jones <tortoise@tortuga>
+License: GPL-3+
+
+Files: icons/*
+Copyright: 2016, Francesco Fumanti <francesco.fumanti@gmx.net>
+  2012, Gerd Kohlberger <lowfi@chello.at>
+License: GPL-3+
+
+Files: layouts/*
+Copyright: 2009, 2011-2014, 2016, marmuta <marmvta@gmail.com>
+  2010, 2013, 2016, Francesco Fumanti <francesco.fumanti@gmx.net>
+License: GPL-3+
+
+Files: layouts/Full?Keyboard.onboard
+  layouts/Grid.onboard
+  layouts/word_suggestions.xml
+Copyright: 2009-2015, marmuta <marmvta@gmail.com>
+License: GPL-3+
+
+Files: layouts/Whiteboard.onboard
+  layouts/Whiteboard_wide.onboard
+Copyright: 2014, Johannes Almer
+License: GPL-3+
+
+Files: layouts/Whiteboard-*.svg
+  layouts/Whiteboard_wide-*.svg
+Copyright: 2014, Johannes Almer
+  2016, Francesco Fumanti <francesco.fumanti@gmx.net>
+License: GPL-3+
+
+Files: layouts/key_defs.xml
+Copyright: 2011-2014, marmuta <marmvta@gmail.com>
+  2011, 2012, Francesco Fumanti <francesco.fumanti@gmx.net>
+License: GPL-3+
+
+Files: man/onboard.1
+Copyright: 2015, Mike Gabriel <mike.gabriel@das-netzwerkteam.de>
+  2011-2014, marmuta <marmvta@gmail.com>
+  2012, Gerd Kohlberger <lowfi@chello.at>
+  2008, Chris Jones <tortoise@tortuga>
+License: GPL-3+
+
+Files: man/onboard-settings.1
+Copyright: 2015, Mike Gabriel <mike.gabriel@das-netzwerkteam.de>
+License: GPL-3+
+
+Files: models/*
+Copyright: 2013, 2014, marmuta <marmvta@gmail.com>
+  2011, 2012, Francesco Fumanti <francesco.fumanti@gmx.net>
+License: GPL-3+
+
+Files: onboard
+Copyright: 2012, marmuta <marmvta@gmail.com>
+  2009, Chris Jones <tortoise@tortuga>
+  2007, Martin Böhme <martin.bohm@kubuntu.org>
+License: GPL-3+
+
+Files: onboard-defaults.conf.example
+Copyright: 2011-2014, marmuta <marmvta@gmail.com>
+  2011, 2012, Francesco Fumanti <francesco.fumanti@gmx.net>
+License: GPL-3+
+
+Files: onboard-settings
+Copyright: 2012, marmuta <marmvta@gmail.com>
+  2007, Martin Böhme <martin.bohm@kubuntu.org>
+License: GPL-3+
+
+Files: po/*
+Copyright: 2007-2015, Rosetta Contributors
+License: BSD-3-clause
+Comment:
+ The BSD-3-clause license applies to the translation strings,
+ while the original strings remain under the license of the file they
+ were extracted from.
+
+Files: setup.py
+Copyright: 2011-2016, marmuta <marmvta@gmail.com>
+  2009-2016, Francesco Fumanti <francesco.fumanti@gmx.net>
+  2012, 2013, Gerd Kohlberger <lowfi@chello.at>
+  2015, Reiner Herrmann <reiner@reiner-h.de>
+  2007, Martin Böhme <martin.bohm@kubuntu.org>
+License: GPL-3+
+
+Files: settings.ui
+Copyright: 2011-2014, 2016, marmuta <marmvta@gmail.com>
+  2010-2012, Francesco Fumanti <francesco.fumanti@gmx.net>
+  2011-2012, Gerd Kohlberger <lowfi@chello.at>
+  2009, Chris Jones <tortoise@tortuga>
+License: GPL-3+
+
+Files: settings_scanner_dialog.ui
+Copyright: 2014, marmuta <marmvta@gmail.com>
+  2012, Gerd Kohlberger <lowfi@chello.at>
+License: GPL-3+
+
+Files: settings_docking_dialog.ui
+  settings_theme_dialog.ui
+Copyright: 2012-2016, marmuta <marmvta@gmail.com>
+License: GPL-3+
+
+Files: sounds/onboard-key-feedback.oga
+Copyright: 2013, Gerd Kohlberger <lowfi@chello.at>
+License: GPL-3+
+
+Files: themes/Aubergine.colors
+  themes/ModelM.colors
+  themes/Typist.colors
+Copyright: 2011-2014, marmuta <marmvta@gmail.com>
+  2011, Alan Bell <alanbell@ubuntu.com>
+License: GPL-3+
+
+Files: themes/Ambiance.theme
+ themes/Blackboard.theme
+ themes/Black.colors
+ themes/Charcoal.colors
+ themes/Classic?Onboard.colors
+ themes/Classic?Onboard.theme
+ themes/DarkRoom.colors
+ themes/DarkRoom.theme
+ themes/Droid.theme
+ themes/Granite.colors
+ themes/HighContrast.colors
+ themes/HighContrastInverseBlack.colors
+ themes/HighContrastInverseBlue.colors
+ themes/HighContrastInverse.theme
+ themes/HighContrast.theme
+ themes/LowContrast.colors
+ themes/LowContrast.theme
+ themes/ModelM.theme
+ themes/Nightshade.theme
+ themes/Typist.theme
+Copyright: 2011-2013, marmuta <marmvta@gmail.com>
+  2011, 2013, marmuta <marmvta@gmail.com>
+  2012-2013, marmuta <marmvta@gmail.com>
+  2011-2014, marmuta <marmvta@gmail.com>
+  2011, 2013-2014, marmuta <marmvta@gmail.com>
+License: GPL-3+
+
+Files: AUTHORS
+Copyright: 2010-2011, 2015, Francesco Fumanti <francesco.fumanti@gmx.net>
+  2008-2009, Chris Jones <tortoise@tortuga>
+License: GPL-3+
+
+Files: CHANGELOG
+Copyright: 2014, Francesco Fumanti <francesco.fumanti@gmx.net>
+License: GPL-3+
+
+Files: HACKING
+Copyright: 2016, marmuta <marmvta@gmail.com>
+  2009, Francesco Fumanti <francesco.fumanti@gmx.net>
+  2009, Chris Jones <tortoise@tortuga>
+License: GPL-3+
+
+Files: NEWS
+Copyright: 2010-2016, Francesco Fumanti <francesco.fumanti@gmx.net>
+  2014-2015, marmuta <marmvta@gmail.com>
+  2009, Chris Jones <tortoise@tortuga>
+License: GPL-3+
+
+Files: README
+Copyright: 2012-2014, marmuta <marmvta@gmail.com>
+  2009-2013, 2015-2016 Francesco Fumanti <francesco.fumanti@gmx.net>
+License: GPL-3+
+
+
+Files:
+ Onboard/pypredict/attic/Makefile
+ Onboard/pypredict/lm/gen_accent_transform
+ PKG-INFO
+ gnome/Onboard_Indicator@onboard.org/metadata.json
+ gnome/Onboard_Indicator@onboard.org/stylesheet.css
+ setup.cfg
+Copyright: *No copyright*
+License: GPL-3+
+Comment:
+ Assuming License as found in COPYING.GPL3 file.
+
+Files: debian/*
+Copyright: 2012-2015 Francesco Fumanti <francesco.fumanti@gmx.net>
+           2015-2024 Mike Gabriel <mike.gabriel@das-netzwerkteam.de>
+           2026 Alex Myczko <tar@debian.org>
+License: GPL-3+
+
+License: GPL-3+
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation, either version 3 of the License, or
+ (at your option) any later version.
+ .
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+ .
+ You should have received a copy of the GNU General Public License
+ along with the Onboard package.  If not, please have a look at
+ /usr/share/common-licenses or <http://www.gnu.org/licenses/>.
+
+License: BSD-3-clause
+ Redistribution and use in source and binary forms, with or without
+ modification, are permitted provided that the following conditions
+ are met:
+ .
+   1. Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+   2. Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+   3. Neither the name of the University nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
+ .
+ THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ SUCH DAMAGE.

@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "status": "rejected",
+  "phase": "sealed_test_quality_gate",
+  "split_namespace": "keyswitch:intent-v6:physical-signature",
+  "candidate_sha256": "11d36f7abb63dbd664bc9ad4899299ccf438f68cc68f81f80c8288d55e602e43",
+  "candidate_dataset_sha256": "fd4e6328f836e05944908f275b0c2c3796f83fe14ba221298534bdce621d228c",
+  "config_sha256": "4d08f0494ef648f348a29ca7f42a6e5c62785e9232a83df21c1a504fcec12f66",
+  "quality_gates_passed": false,
+  "artifact_published": false,
+  "ordinary_non_pause": {
+    "false_positives": 9,
+    "negative_samples": 21288,
+    "false_positive_rate_upper_95": 0.0008033688907343645,
+    "maximum_false_positive_rate_upper_95": 0.001,
+    "passed": true
+  },
+  "typo_non_pause": {
+    "false_positives": 9,
+    "negative_samples": 15812,
+    "false_positive_rate_upper_95": 0.001081497550035581,
+    "maximum_false_positive_rate_upper_95": 0.001,
+    "passed": false
+  },
+  "ordinary_pause": {
+    "false_positives": 7,
+    "negative_samples": 21288,
+    "false_positive_rate_upper_95": 0.0006786540966875451,
+    "maximum_false_positive_rate_upper_95": 0.001,
+    "passed": true
+  },
+  "typo_pause": {
+    "false_positives": 7,
+    "negative_samples": 15812,
+    "false_positive_rate_upper_95": 0.0009136104799767272,
+    "maximum_false_positive_rate_upper_95": 0.001,
+    "passed": true
+  },
+  "veto": {
+    "vetoed_positive_samples": 18,
+    "positive_samples": 127716,
+    "false_negative_rate": 0.0001409377055341539,
+    "maximum_false_negative_rate": 0.001,
+    "passed": true
+  }
+}

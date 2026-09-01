@@ -6,6 +6,13 @@ Files: *
 Copyright: 2026 Oleg Shevchuk
 License: GPL-3+
 
+Files: model/intent_v1/sources/en_US.lm
+ model/intent_v1/sources/ru_RU.lm
+ src/keyswitch/resources/models/layout_intent_v1.ksm
+Copyright: 2013, 2014, marmuta <marmvta@gmail.com>
+  2011, 2012, Francesco Fumanti <francesco.fumanti@gmx.net>
+License: GPL-3+
+
 License: GPL-3+
  This program is free software: you can redistribute it and/or modify it under
  the terms of the GNU General Public License as published by the Free Software

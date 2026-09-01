@@ -154,6 +154,7 @@ def main() -> int:
         layout_deadline = [0.0]
         focus_deadline = [0.0]
         learning_deadline = [0.0]
+        menu_layout_deadline = [0.0]
 
         def fail(error: Exception) -> None:
             scenario_errors.append(error)
@@ -232,8 +233,33 @@ def main() -> int:
                 fail(RuntimeError(f"Unexpected learned Windows history: {pairs}"))
                 return
             print("WINDOWS_LEARNING_PROMPT_E2E_OK", flush=True)
-            completed.append(True)
-            application.shutdown()
+            application._select_alternate_layout()
+            menu_layout_deadline[0] = time.monotonic() + 5.0
+            application.root.after(50, wait_for_menu_layout_selection)
+
+        def wait_for_menu_layout_selection() -> None:
+            try:
+                tray_group = application.tray.state.group if application.tray else -1
+                selected = (
+                    application.backend.current_group() == 0
+                    and application.engine.snapshot.current_group == 0
+                    and tray_group == 0
+                )
+                if not selected:
+                    if time.monotonic() >= menu_layout_deadline[0]:
+                        raise RuntimeError(
+                            "Tray language selection timed out; "
+                            f"backend={application.backend.current_group()}, "
+                            f"engine={application.engine.snapshot.current_group}, "
+                            f"tray={tray_group}"
+                        )
+                    application.root.after(50, wait_for_menu_layout_selection)
+                    return
+                print("WINDOWS_MENU_LAYOUT_SELECTION_E2E_OK", flush=True)
+                completed.append(True)
+                application.shutdown()
+            except Exception as error:
+                fail(error)
 
         def type_learned_word() -> None:
             try:

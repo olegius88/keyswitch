@@ -6,8 +6,15 @@ import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Protocol
+from typing import Final, Protocol
 
+from .intent_model import (
+    CorrectionTrigger,
+    IntentModelInput,
+    LinearPrediction,
+    MINIMUM_RUNTIME_TOKEN_LENGTH,
+    normalize_token,
+)
 from .language_model import LanguageModel, WordScore
 
 
@@ -25,6 +32,14 @@ def _load_protected_tokens() -> frozenset[str]:
 
 PROTECTED_TOKENS = _load_protected_tokens()
 
+# Public policy constants keep offline production-context evaluation tied to
+# the exact arithmetic used by the serving detector.  LanguageModel's
+# context_score contract is bounded to [0, 1].
+CONTEXT_SCORE_MINIMUM: Final[float] = 0.0
+CONTEXT_SCORE_MAXIMUM: Final[float] = 1.0
+CONTEXT_DELTA_MULTIPLIER: Final[float] = 1.75
+CONTEXT_TARGET_GROUP_BONUS: Final[float] = 0.55
+CONTEXT_SOURCE_GROUP_PENALTY: Final[float] = 0.3
 
 @dataclass(frozen=True)
 class DetectionDecision:
@@ -37,6 +52,9 @@ class DetectionDecision:
     reason: str
     source_score: WordScore
     target_score: WordScore
+    model_probability: float | None = None
+    model_threshold: float | None = None
+    model_version: str = ""
 
 
 class LanguageScorer(Protocol):
@@ -49,6 +67,15 @@ class LanguageScorer(Protocol):
     def best_single_deletion(self, word: str) -> WordScore: ...
 
 
+class IntentClassifier(Protocol):
+    """Minimal inference contract used by the policy layer."""
+
+    @property
+    def veto_threshold(self) -> float: ...
+
+    def predict(self, item: IntentModelInput) -> LinearPrediction: ...
+
+
 class LanguageDetector:
     """Fuse lexicons, morphology, character statistics and recent context.
 
@@ -58,10 +85,15 @@ class LanguageDetector:
     heuristics.
     """
 
-    def __init__(self, models: Mapping[int, LanguageScorer]) -> None:
+    def __init__(
+        self,
+        models: Mapping[int, LanguageScorer],
+        intent_model: IntentClassifier | None = None,
+    ) -> None:
         if len(models) < 2:
             raise ValueError("At least two language models are required")
         self.models = dict(models)
+        self.intent_model = intent_model
 
     def decide(
         self,
@@ -78,6 +110,8 @@ class LanguageDetector:
         context_group: int | None = None,
         forced_target_group: int | None = None,
         rejected_targets: set[int] | None = None,
+        trigger: CorrectionTrigger = "space",
+        use_intent_model: bool = True,
     ) -> DetectionDecision:
         ignored = {self.token_key(word) for word in (ignored_words or set())}
         rejected_groups = rejected_targets or set()
@@ -94,14 +128,14 @@ class LanguageDetector:
             source_score,
             source_score,
         )
-        scored: list[tuple[float, int, str, WordScore]] = []
+        scored: list[tuple[float, int, str, WordScore, float]] = []
         previous = previous_words or {}
         for group, candidate in alternatives.items():
             if group == source_group or group not in self.models or candidate == original:
                 continue
             target_score = self.models[group].score(candidate)
             delta = target_score.value - source_score.value
-            delta += self._context_delta(
+            context_delta = self._context_delta(
                 source_group,
                 group,
                 original,
@@ -109,11 +143,14 @@ class LanguageDetector:
                 previous,
                 context_group,
             )
-            scored.append((delta, group, candidate, target_score))
+            delta += context_delta
+            scored.append((delta, group, candidate, target_score, context_delta))
         if not scored:
             return replace(rejected, reason="нет другой раскладки")
 
-        delta, group, replacement, target_score = max(scored, key=lambda item: item[0])
+        delta, group, replacement, target_score, context_delta = max(
+            scored, key=lambda item: item[0]
+        )
         normalized = LanguageModel.normalize(original)
         original_key = self.token_key(original)
         replacement_normalized = LanguageModel.normalize(replacement)
@@ -134,7 +171,7 @@ class LanguageDetector:
                 None,
             )
             if forced is not None:
-                forced_delta, forced_group, forced_text, forced_score = forced
+                forced_delta, forced_group, forced_text, forced_score, _context = forced
                 return DetectionDecision(
                     True,
                     original,
@@ -162,6 +199,46 @@ class LanguageDetector:
                 ),
             )
 
+        prediction = self._intent_prediction(
+            original,
+            replacement,
+            source_group,
+            group,
+            trigger,
+            source_score,
+            target_score,
+            context_delta,
+            context_group,
+            use_intent_model,
+        )
+
+        # Once a supported model has observed a token, its calibrated,
+        # trigger-specific decision is the sole statistical switching signal.
+        # Applying feature-coverage or language-score heuristics afterwards is
+        # a second statistical veto: it invalidates the recall certified for
+        # the selected model threshold.  Coverage and lexical scores remain
+        # diagnostics only.  The heuristic ensemble below is available for
+        # short tokens and installations where the artifact is absent or
+        # explicitly disabled.
+        if prediction is not None:
+            should_convert = prediction.should_switch
+            if should_convert:
+                reason = "уверенное решение линейной n-граммной модели"
+            else:
+                reason = "линейная модель не достигла безопасного порога"
+            return DetectionDecision(
+                should_convert,
+                original,
+                replacement,
+                source_group,
+                group,
+                delta,
+                reason,
+                source_score,
+                target_score,
+                *(self._prediction_fields(prediction)),
+            )
+
         if target_score.known:
             length_relief = min(1.0, max(0, effective_length - 3) * 0.18)
             required = max(0.65, confidence_threshold - length_relief)
@@ -175,7 +252,8 @@ class LanguageDetector:
             morphology_is_plausible = (
                 target_score.ngram_score >= -4.0 or context_supports_target
             )
-            should_convert = delta >= required and morphology_is_plausible
+            heuristic_should_convert = delta >= required and morphology_is_plausible
+            should_convert = heuristic_should_convert
             if target_score.exact:
                 reason = "слово найдено только в целевом частотном словаре"
             elif should_convert:
@@ -194,6 +272,7 @@ class LanguageDetector:
                 reason,
                 source_score,
                 target_score,
+                *(self._prediction_fields(prediction)),
             )
 
         # One accidental extra character should not erase otherwise decisive
@@ -205,11 +284,12 @@ class LanguageDetector:
             typo_delta = target_without_one.value - max(
                 source_score.value, source_without_one.value
             )
-            if (
+            typo_supported = (
                 target_without_one.known
                 and not source_without_one.known
                 and typo_delta >= confidence_threshold + 0.5
-            ):
+            )
+            if typo_supported:
                 return DetectionDecision(
                     True,
                     original,
@@ -220,6 +300,7 @@ class LanguageDetector:
                     "целевая раскладка подтверждается после удаления одной опечатки",
                     source_score,
                     target_score,
+                    *(self._prediction_fields(prediction)),
                 )
 
         # Unknown words can still be recognised by smoothed character n-grams,
@@ -233,12 +314,13 @@ class LanguageDetector:
         required = max(confidence_threshold + 0.25, required)
         source_is_unlikely = source_score.ngram_score <= (-0.65 if aggressive else -1.1)
         target_is_plausible = target_score.ngram_score >= (-2.0 if aggressive else -1.25)
-        should_convert = (
+        heuristic_should_convert = (
             effective_length >= (4 if aggressive else 5)
             and source_is_unlikely
             and target_is_plausible
             and delta >= required
         )
+        should_convert = heuristic_should_convert
         if should_convert:
             reason = "устойчивый перевес символьной языковой модели"
         elif not source_is_unlikely:
@@ -257,7 +339,53 @@ class LanguageDetector:
             reason,
             source_score,
             target_score,
+            *(self._prediction_fields(prediction)),
         )
+
+    def _intent_prediction(
+        self,
+        original: str,
+        replacement: str,
+        source_group: int,
+        target_group: int,
+        trigger: CorrectionTrigger,
+        source_score: WordScore,
+        target_score: WordScore,
+        context_delta: float,
+        context_group: int | None,
+        use_intent_model: bool,
+    ) -> LinearPrediction | None:
+        if (
+            not use_intent_model
+            or self.intent_model is None
+            or max(
+                len(normalize_token(original)),
+                len(normalize_token(replacement)),
+            )
+            < MINIMUM_RUNTIME_TOKEN_LENGTH
+        ):
+            return None
+        return self.intent_model.predict(
+            IntentModelInput(
+                original=original,
+                alternative=replacement,
+                source_group=source_group,
+                target_group=target_group,
+                trigger=trigger,
+                source_score=source_score,
+                target_score=target_score,
+                context_delta=context_delta,
+                context_group=context_group,
+            )
+        )
+
+    @staticmethod
+    def _prediction_fields(
+        prediction: LinearPrediction | None,
+    ) -> tuple[float | None, float | None, str]:
+        if prediction is None:
+            return None, None, ""
+        return prediction.probability, prediction.threshold, prediction.model_version
 
     def _context_delta(
         self,
@@ -274,11 +402,13 @@ class LanguageDetector:
         target_context = self.models[target_group].context_score(
             previous_words.get(target_group, ""), target_word
         )
-        delta = 1.75 * (target_context - source_context)
+        delta = CONTEXT_DELTA_MULTIPLIER * (
+            target_context - source_context
+        )
         if context_group == target_group:
-            delta += 0.55
+            delta += CONTEXT_TARGET_GROUP_BONUS
         elif context_group == source_group:
-            delta -= 0.3
+            delta -= CONTEXT_SOURCE_GROUP_PENALTY
         return delta
 
     @staticmethod
@@ -299,6 +429,8 @@ class LanguageDetector:
             return True
         lowered = token.casefold()
         if lowered in PROTECTED_TOKENS:
+            return True
+        if lowered.startswith("-"):
             return True
         if any(marker in lowered for marker in ("http://", "https://", "www.", "@")):
             return True

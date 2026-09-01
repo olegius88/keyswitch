@@ -24,6 +24,7 @@ from . import __version__
 from .config import SettingsStore
 from .engine import EngineSnapshot
 from .history import HistoryStore
+from .intent_model import IntentModelStatus
 from .learning import LearningStore
 from .system import AutostartManager
 from .backend import BackendProbe
@@ -83,6 +84,9 @@ class _UiEngine(Protocol):
 
     @property
     def models(self) -> Mapping[int, _UiLanguageModel]: ...
+
+    @property
+    def intent_model_status(self) -> IntentModelStatus: ...
 
     def subscribe(self, callback: Callable[[EngineSnapshot], None]) -> None: ...
 
@@ -400,6 +404,7 @@ class MainWindow(Adw.ApplicationWindow):
         behavior.add(self._switch_row("detection.aggressive", "Агрессивное распознавание", "Разрешить исправлять незнакомые слова по характерным сочетаниям букв"))
         behavior.add(self._switch_row("detection.context_aware", "Учитывать контекст", "Предыдущее слово и язык в текущем приложении помогают разрешать сомнения; контекст хранится только в памяти"))
         behavior.add(self._switch_row("detection.protect_code", "Защищать код и сокращения", "Не трогать URL, пути, слова с цифрами, ALL-CAPS и camelCase"))
+        behavior.add(self._switch_row("detection.intent_model_enabled", "Локальная линейная модель", "Собственная символьная n-граммная модель проверяет сомнительные решения; введённый текст не покидает компьютер"))
         page.append(behavior)
 
         learning = Adw.PreferencesGroup(
@@ -490,6 +495,25 @@ class MainWindow(Adw.ApplicationWindow):
             )
             row.add_suffix(Gtk.Image(icon_name="emblem-ok-symbolic"))
             models.add(row)
+        intent_status = self.engine.intent_model_status
+        intent_row = Adw.ActionRow(
+            title="Линейная модель намерения",
+            subtitle=(
+                f"Версия {intent_status.version or 'unknown'} · {(intent_status.checksum or 'unknown')[:12]}"
+                if intent_status.available
+                else f"Безопасный fallback · {intent_status.error}"
+            ),
+        )
+        intent_row.add_suffix(
+            Gtk.Image(
+                icon_name=(
+                    "emblem-ok-symbolic"
+                    if intent_status.available
+                    else "dialog-warning-symbolic"
+                )
+            )
+        )
+        models.add(intent_row)
         page.append(models)
 
         example = Adw.PreferencesGroup(title="Пример физического соответствия")
@@ -1213,6 +1237,7 @@ class MainWindow(Adw.ApplicationWindow):
                 f"XTEST: {probe.xtest_version}",
                 f"XKB: {probe.xkb_version}",
                 f"XKB group: {probe.current_group}",
+                f"Intent model: {self.engine.intent_model_status.summary}",
                 f"Backend error: {probe.error or 'none'}",
             )
         )

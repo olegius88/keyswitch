@@ -11,7 +11,13 @@ import dbus.service
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
 
-from .indicator import layout_icon_name, layout_label, normalize_indicator_style
+from .indicator import (
+    alternate_layout_action_label,
+    alternate_layout_group,
+    layout_icon_name,
+    layout_label,
+    normalize_indicator_style,
+)
 
 
 ITEM_INTERFACE = "org.kde.StatusNotifierItem"
@@ -32,9 +38,11 @@ MENU_EXCEPTIONS = 9
 MENU_ABOUT = 10
 MENU_SEPARATOR_QUIT = 11
 MENU_QUIT = 12
+MENU_SWITCH_LAYOUT = 13
 
 MENU_ITEM_IDS = (
     MENU_LAYOUT,
+    MENU_SWITCH_LAYOUT,
     MENU_SETTINGS,
     MENU_SEPARATOR_PRIMARY,
     MENU_AUTOSWITCH,
@@ -122,6 +130,7 @@ class StatusNotifierMenu(dbus.service.Object):
                 if self._group >= 0
                 else "Текущая раскладка определяется"
             ),
+            MENU_SWITCH_LAYOUT: alternate_layout_action_label(self._group),
             MENU_SETTINGS: "Настройки KeySwitch…",
             MENU_AUTOSWITCH: "Автопереключение",
             MENU_SOUND: "Звуковые эффекты",
@@ -133,6 +142,7 @@ class StatusNotifierMenu(dbus.service.Object):
         }
         icons = {
             MENU_LAYOUT: self._layout_icon,
+            MENU_SWITCH_LAYOUT: "input-keyboard-symbolic",
             MENU_SETTINGS: "preferences-system-symbolic",
             MENU_AUTOSWITCH: "input-keyboard-symbolic",
             MENU_SOUND: "audio-volume-high-symbolic",
@@ -148,6 +158,11 @@ class StatusNotifierMenu(dbus.service.Object):
         }
         if item_id == MENU_LAYOUT:
             properties["enabled"] = dbus.Boolean(False)
+        elif item_id == MENU_SWITCH_LAYOUT:
+            properties["enabled"] = dbus.Boolean(
+                alternate_layout_group(self._group) is not None
+                and item_id in self._actions
+            )
         if item_id in {MENU_AUTOSWITCH, MENU_SOUND, MENU_NOTIFICATIONS}:
             states = {
                 MENU_AUTOSWITCH: self._enabled,
@@ -156,7 +171,10 @@ class StatusNotifierMenu(dbus.service.Object):
             }
             properties["toggle-type"] = dbus.String("checkmark")
             properties["toggle-state"] = dbus.Int32(1 if states[item_id] else 0)
-        if item_id not in self._actions and item_id != MENU_LAYOUT:
+        if item_id not in self._actions and item_id not in {
+            MENU_LAYOUT,
+            MENU_SWITCH_LAYOUT,
+        }:
             properties["enabled"] = dbus.Boolean(False)
         return properties
 
@@ -341,7 +359,8 @@ class StatusNotifierMenu(dbus.service.Object):
         )
 
     def set_indicator_state(self, enabled: bool, group: int, icon_name: str) -> None:
-        if self._group != group or self._layout_icon != icon_name:
+        group_changed = self._group != group
+        if group_changed or self._layout_icon != icon_name:
             self._group = group
             self._layout_icon = icon_name
             label = (
@@ -354,6 +373,17 @@ class StatusNotifierMenu(dbus.service.Object):
                 {
                     "label": dbus.String(label),
                     "icon-name": dbus.String(icon_name),
+                },
+            )
+        if group_changed:
+            self._notify(
+                MENU_SWITCH_LAYOUT,
+                {
+                    "label": dbus.String(alternate_layout_action_label(group)),
+                    "enabled": dbus.Boolean(
+                        alternate_layout_group(group) is not None
+                        and MENU_SWITCH_LAYOUT in self._actions
+                    ),
                 },
             )
         if self._enabled != enabled:
@@ -394,6 +424,7 @@ class StatusNotifierItem(dbus.service.Object):
         on_toggle: TrayAction,
         icon_theme_path: Path,
         *,
+        on_switch_layout: TrayAction | None = None,
         on_sound_toggle: TrayAction | None = None,
         on_notifications_toggle: TrayAction | None = None,
         on_history: TrayAction | None = None,
@@ -422,6 +453,7 @@ class StatusNotifierItem(dbus.service.Object):
             MENU_AUTOSWITCH: on_toggle,
         }
         optional_actions: dict[int, TrayAction | None] = {
+            MENU_SWITCH_LAYOUT: on_switch_layout,
             MENU_SOUND: on_sound_toggle,
             MENU_NOTIFICATIONS: on_notifications_toggle,
             MENU_HISTORY: on_history,

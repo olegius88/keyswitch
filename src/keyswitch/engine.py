@@ -12,8 +12,10 @@ from .backend import InputBackend, KeyEvent
 from .config import SettingsStore
 from .detector import DetectionDecision, LanguageDetector
 from .history import HistoryEntry, HistoryStore
+from .indicator import alternate_layout_group, layout_label
 from .language_model import LanguageModel
 from .learning import LearningStore
+from .intent_model import CorrectionTrigger, LinearNgramModel
 
 
 MODIFIER_KEYS = {
@@ -78,6 +80,11 @@ class LearningPrompt:
     application: str
 
 
+@dataclass(frozen=True)
+class _LayoutSelection:
+    group: int
+
+
 class Hotkey:
     MODIFIERS = {"ctrl", "control", "alt", "shift", "super", "meta"}
 
@@ -124,11 +131,14 @@ class KeySwitchEngine:
             index: LanguageModel.load(locale)
             for index, locale in enumerate(locales[:2])
         }
-        self.detector = LanguageDetector(self.models)
+        intent_model, self.intent_model_status = LinearNgramModel.try_load_default()
+        self.detector = LanguageDetector(self.models, intent_model)
         self.backend: InputBackend = backend or _default_backend(len(self.models))
         self.backend_label = backend_label
         self.learning = learning or LearningStore(history.path.with_name("learning.json"))
-        self._events: queue.Queue[KeyEvent | None] = queue.Queue(maxsize=4096)
+        self._events: queue.Queue[KeyEvent | _LayoutSelection | None] = queue.Queue(
+            maxsize=4096
+        )
         self._worker: threading.Thread | None = None
         self._running = threading.Event()
         self._strokes: list[KeyEvent] = []
@@ -270,6 +280,32 @@ class KeySwitchEngine:
         except queue.Full:
             self._clear_word("Очередь ввода переполнена")
 
+    def select_alternate_group(self) -> bool:
+        """Queue an explicit selection of the language opposite to the current one."""
+
+        if not self._running.is_set():
+            self._update(
+                last_error="Движок раскладки не запущен",
+                last_action="Язык из меню не переключён",
+            )
+            return False
+        target = alternate_layout_group(self.snapshot.current_group)
+        if target is None or target not in self.models:
+            self._update(
+                last_error="Текущая раскладка EN/RU не определена",
+                last_action="Язык из меню не переключён",
+            )
+            return False
+        try:
+            self._events.put_nowait(_LayoutSelection(target))
+        except queue.Full:
+            self._update(
+                last_error="Очередь ввода переполнена",
+                last_action="Язык из меню не переключён",
+            )
+            return False
+        return True
+
     def _run(self) -> None:
         while self._running.is_set():
             try:
@@ -282,10 +318,34 @@ class KeySwitchEngine:
             if event is None:
                 break
             try:
-                self._handle(event)
+                if isinstance(event, _LayoutSelection):
+                    self._apply_layout_selection(event.group)
+                else:
+                    self._handle(event)
             except Exception as error:
                 self._clear_word()
                 self._update(last_error=str(error), last_action="Ошибка обработки ввода")
+
+    def _apply_layout_selection(self, group: int) -> None:
+        try:
+            self.backend.switch_group(group)
+        except Exception as error:
+            self._update(
+                last_error=str(error),
+                last_action="Язык из меню не переключён",
+            )
+            return
+        self._clear_word()
+        self._manual_layout_group = (
+            group
+            if bool(self.settings.get("detection.respect_manual_layout", True))
+            else None
+        )
+        self._update(
+            current_group=group,
+            last_action=f"Язык выбран из меню: {layout_label(group)}",
+            last_error="",
+        )
 
     def _handle(self, event: KeyEvent) -> None:
         self._expire_learning_prompt()
@@ -402,7 +462,11 @@ class KeySwitchEngine:
         excluded = self._application_excluded(application)
         if should_analyze and not excluded:
             decision = self._decide_word(
-                original, alternatives, source_group, application
+                original,
+                alternatives,
+                source_group,
+                application,
+                self._trigger_for_boundary(boundary),
             )
             if decision.should_convert:
                 plan = self._plan_from_decision(strokes, boundary, application, decision)
@@ -455,7 +519,11 @@ class KeySwitchEngine:
         }
         application = self.backend.active_application()
         decision = self._decide_word(
-            original, alternatives, self._source_group, application
+            original,
+            alternatives,
+            self._source_group,
+            application,
+            "boundary_probe",
         )
         effective_length = max(
             len(LanguageModel.normalize(original)),
@@ -484,6 +552,7 @@ class KeySwitchEngine:
         alternatives: dict[int, str],
         source_group: int,
         application: str,
+        trigger: CorrectionTrigger = "space",
     ) -> DetectionDecision:
         context_words, context_group = self._context_for(application)
         context_aware = bool(self.settings.get("detection.context_aware", True))
@@ -504,6 +573,10 @@ class KeySwitchEngine:
                 self.learning.rejected_targets(source_group, original)
                 if bool(self.settings.get("detection.learning", True))
                 else set()
+            ),
+            trigger=trigger,
+            use_intent_model=bool(
+                self.settings.get("detection.intent_model_enabled", True)
             ),
         )
 
@@ -613,7 +686,7 @@ class KeySwitchEngine:
         if self._application_excluded(application):
             return
         decision = self._decide_word(
-            original, alternatives, source_group, application
+            original, alternatives, source_group, application, "pause"
         )
         if not decision.should_convert:
             return
@@ -804,6 +877,16 @@ class KeySwitchEngine:
         if event.key_name in {"Tab", "ISO_Left_Tab"}:
             return bool(self.settings.get("detection.correct_on_tab", True))
         return bool(self.settings.get("detection.correct_on_punctuation", True))
+
+    @staticmethod
+    def _trigger_for_boundary(event: KeyEvent) -> CorrectionTrigger:
+        if event.key_name == "space":
+            return "space"
+        if event.key_name == "Return":
+            return "enter"
+        if event.key_name in {"Tab", "ISO_Left_Tab"}:
+            return "tab"
+        return "punctuation"
 
     def _application_excluded(self, application: str) -> bool:
         normalized = application.casefold()

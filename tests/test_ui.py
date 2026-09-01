@@ -23,6 +23,7 @@ from keyswitch import ui
 from keyswitch.config import SettingsStore
 from keyswitch.engine import EngineSnapshot
 from keyswitch.history import HistoryEntry, HistoryStore
+from keyswitch.intent_model import IntentModelStatus
 from keyswitch.learning import LearningStore
 from keyswitch.ui import ApplicationChoice, MainWindow
 from keyswitch.updates import UpdatePhase, UpdateSnapshot
@@ -67,6 +68,13 @@ class FakeEngine:
             0: FakeLanguageModel({"hello": 10}, "test-en"),
             1: FakeLanguageModel({"привет": 10}, "test-ru"),
         }
+        self.intent_model_status = IntentModelStatus(
+            True,
+            root / "layout_intent_v1.ksm",
+            "test-v1",
+            "0123456789abcdef",
+            None,
+        )
         self.snapshot = EngineSnapshot()
         self.callbacks: list[Callable[[EngineSnapshot], None]] = []
 
@@ -279,6 +287,12 @@ class MainWindowInteractionTests(unittest.TestCase):
         assert isinstance(switch, Adw.SwitchRow)
         switch.set_active(True)
         self.assertTrue(self.settings.get("detection.aggressive"))
+        intent_model = self.window._settings_controls[
+            "detection.intent_model_enabled"
+        ]
+        assert isinstance(intent_model, Adw.SwitchRow)
+        intent_model.set_active(False)
+        self.assertFalse(self.settings.get("detection.intent_model_enabled"))
         manual_layout = self.window._settings_controls[
             "detection.respect_manual_layout"
         ]

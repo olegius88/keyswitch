@@ -605,11 +605,16 @@ class X11Backend:
         return True
 
     def switch_group(self, group: int) -> None:
+        if not 0 <= group < self.group_count:
+            raise X11Error(f"Неизвестная группа раскладки {group}")
         if not self._control:
             raise X11Error("X11 backend не запущен")
-        if not self._libraries.x11.XkbLockGroup(self._control, XKB_USE_CORE_KBD, group):
-            raise X11Error(f"Не удалось переключить XKB-группу на {group}")
-        self._libraries.x11.XFlush(self._control)
+        with self._inject_lock:
+            if not self._libraries.x11.XkbLockGroup(
+                self._control, XKB_USE_CORE_KBD, group
+            ):
+                raise X11Error(f"Не удалось переключить XKB-группу на {group}")
+            self._libraries.x11.XFlush(self._control)
 
     def inject_correction(
         self,

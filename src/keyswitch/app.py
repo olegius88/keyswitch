@@ -183,6 +183,11 @@ class KeySwitchApplication(Adw.Application):
         )
         return GLib.SOURCE_REMOVE
 
+    def select_alternate_layout(self) -> bool:
+        if not self.engine.select_alternate_group() and self.window is not None:
+            self.window.toast(self.engine.snapshot.last_error)
+        return GLib.SOURCE_REMOVE
+
     def _window_close_requested(self) -> bool:
         if bool(self.settings.get("general.close_to_tray", True)) and self.tray is not None:
             assert self.window is not None
@@ -199,6 +204,7 @@ class KeySwitchApplication(Adw.Application):
                     self.show_window,
                     self.toggle_engine,
                     RESOURCE_DIR,
+                    on_switch_layout=self.select_alternate_layout,
                     on_sound_toggle=self.toggle_sound,
                     on_notifications_toggle=self.toggle_notifications,
                     on_history=self.show_history,
@@ -403,6 +409,9 @@ class KeySwitchApplication(Adw.Application):
 def diagnose() -> int:
     backend = X11Backend()
     probe = backend.probe()
+    from .intent_model import LinearNgramModel
+
+    _intent_model, intent_status = LinearNgramModel.try_load_default()
     payload = {
         "keyswitch": __version__,
         "available": probe.available,
@@ -412,6 +421,7 @@ def diagnose() -> int:
         "xtest_version": probe.xtest_version,
         "xkb_version": probe.xkb_version,
         "current_group": probe.current_group,
+        "intent_model": intent_status.as_dict(),
         "error": probe.error,
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))

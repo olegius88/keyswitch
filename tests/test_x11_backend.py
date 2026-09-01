@@ -490,6 +490,8 @@ class BackendTranslationTests(unittest.TestCase):
     def test_current_and_switch_group_paths(self) -> None:
         backend, libraries = backend_with()
         self.assertEqual(backend.current_group(), -1)
+        with self.assertRaisesRegex(X11Error, "Неизвестная группа"):
+            backend.switch_group(2)
         with self.assertRaisesRegex(X11Error, "не запущен"):
             backend.switch_group(1)
         backend._control = 1

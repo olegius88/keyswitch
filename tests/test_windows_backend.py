@@ -319,6 +319,11 @@ class WindowsBackendLifecycleTests(unittest.TestCase):
         api.current_layout = 0x00000407
         self.assertEqual(backend.current_group(), -1)
 
+        with self.assertRaisesRegex(WindowsBackendError, "Неизвестная группа"):
+            backend.switch_group(2)
+        backend.switch_group(1)
+        self.assertEqual(api.requests[-1], RUSSIAN_LAYOUT)
+
     def test_probe_reports_layout_failure(self) -> None:
         api = FakeWindowsAPI()
         api.layout_values = (ENGLISH_LAYOUT,)
@@ -655,6 +660,7 @@ class WindowsTrayTests(unittest.TestCase):
         actions = WindowsTrayActions(
             *(lambda name=name: calls.append(name) for name in (
                 "settings",
+                "layout",
                 "engine",
                 "sound",
                 "notifications",
@@ -667,6 +673,8 @@ class WindowsTrayTests(unittest.TestCase):
         adapter = FakeTrayAdapter()
         tray = WindowsTray(actions, adapter)
         self.assertEqual(tray.state.label, "—")
+        self.assertEqual(tray.state.alternate_layout_label, "Переключить язык")
+        self.assertFalse(tray.state.can_switch_layout)
         tray.set_layout(1)
         tray.set_enabled(False)
         tray.set_sound_enabled(True)
@@ -674,6 +682,11 @@ class WindowsTrayTests(unittest.TestCase):
         tray.set_indicator_style("flags")
         tray.set_indicator_style("invalid")
         self.assertEqual(tray.state.label, "RU")
+        self.assertEqual(
+            tray.state.alternate_layout_label,
+            "Переключить на английский (EN)",
+        )
+        self.assertTrue(tray.state.can_switch_layout)
         self.assertEqual(tray.state.indicator_style, "letters")
         tray.notify("Исправлено", "ghbdtn → привет")
         self.assertEqual(adapter.notifications, [("Исправлено", "ghbdtn → привет")])
@@ -682,6 +695,7 @@ class WindowsTrayTests(unittest.TestCase):
         assert adapter.actions is not None
         for action in (
             adapter.actions.show_settings,
+            adapter.actions.switch_layout,
             adapter.actions.toggle_engine,
             adapter.actions.toggle_sound,
             adapter.actions.toggle_notifications,
@@ -695,6 +709,7 @@ class WindowsTrayTests(unittest.TestCase):
             calls,
             [
                 "settings",
+                "layout",
                 "engine",
                 "sound",
                 "notifications",

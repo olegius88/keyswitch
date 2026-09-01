@@ -5,6 +5,7 @@ from __future__ import annotations
 
 INDICATOR_STYLES = ("letters", "flags")
 LAYOUT_LABELS = {0: "EN", 1: "RU"}
+LAYOUT_NAMES = {0: "английский (EN)", 1: "русский (RU)"}
 
 
 def normalize_indicator_style(value: object) -> str:
@@ -14,6 +15,21 @@ def normalize_indicator_style(value: object) -> str:
 
 def layout_label(group: int) -> str:
     return LAYOUT_LABELS.get(group, "—")
+
+
+def alternate_layout_group(group: int) -> int | None:
+    """Return the other member of the supported EN/RU layout pair."""
+
+    return 1 - group if group in LAYOUT_LABELS else None
+
+
+def alternate_layout_action_label(group: int) -> str:
+    target = alternate_layout_group(group)
+    return (
+        f"Переключить на {LAYOUT_NAMES[target]}"
+        if target is not None
+        else "Переключить язык"
+    )
 
 
 def layout_icon_name(style: object, group: int) -> str:

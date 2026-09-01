@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -215,6 +216,120 @@ class LanguageModelBranchTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         LanguageModel._load_cached.cache_clear()
+        LanguageModel.score.cache_clear()
+
+    def test_disabled_spellcheck_is_host_independent_and_matches_noop_speller(
+        self,
+    ) -> None:
+        frequencies = {"hello": 100, "help": 20, "world": 10}
+        fake_speller = SimpleNamespace(
+            available=False,
+            source="",
+            check=lambda _word: False,
+        )
+        with patch(
+            "keyswitch.language_model.HunspellDictionary",
+            return_value=fake_speller,
+        ):
+            ordinary = LanguageModel("en_US", frequencies, "sealed")
+
+        with patch(
+            "keyswitch.language_model.HunspellDictionary"
+        ) as hunspell_factory:
+            deterministic = LanguageModel(
+                "en_US",
+                dict(reversed(tuple(frequencies.items()))),
+                "sealed",
+                enable_spellcheck=False,
+            )
+        hunspell_factory.assert_not_called()
+        self.assertFalse(deterministic.speller.available)
+        self.assertEqual(deterministic.speller.source, "")
+        self.assertEqual(deterministic.source, "sealed")
+
+        for token in ("hello", "help", "unknown", "hello!", "!!!"):
+            with self.subTest(token=token):
+                self.assertEqual(deterministic.score(token), ordinary.score(token))
+                self.assertFalse(deterministic.score(token).spell_known)
+
+    def test_equal_frequency_calibration_cutoff_has_canonical_tie_order(self) -> None:
+        def alpha_word(index: int) -> str:
+            return "w" + "".join(
+                chr(ord("a") + (index // divisor) % 26)
+                for divisor in (26 * 26, 26, 1)
+            )
+
+        words = tuple(alpha_word(index) for index in range(12_001))
+        expected = tuple(sorted(words)[:12_000])
+        observed: list[str] = []
+
+        def record_raw_score(_model: LanguageModel, word: str) -> float:
+            observed.append(word)
+            return float(len(word))
+
+        empty_counts = {
+            order: Counter[str]() for order in LanguageModel.NGRAM_ORDERS
+        }
+        with (
+            patch.object(
+                LanguageModel,
+                "_build_gram_counts",
+                return_value=empty_counts,
+            ),
+            patch.object(
+                LanguageModel,
+                "_raw_ngram_score",
+                new=record_raw_score,
+            ),
+        ):
+            forward = LanguageModel(
+                "en_US",
+                {word: 7 for word in words},
+                "sealed",
+                enable_spellcheck=False,
+            )
+            forward_selection = tuple(observed)
+            observed.clear()
+            reverse = LanguageModel(
+                "en_US",
+                {word: 7 for word in reversed(words)},
+                "sealed",
+                enable_spellcheck=False,
+            )
+            reverse_selection = tuple(observed)
+
+        self.assertEqual(forward_selection, expected)
+        self.assertEqual(reverse_selection, expected)
+        self.assertEqual(forward._ngram_mean, reverse._ngram_mean)
+        self.assertEqual(forward._ngram_deviation, reverse._ngram_deviation)
+
+    def test_score_cache_is_bounded_and_recomputation_has_exact_parity(self) -> None:
+        LanguageModel.score.cache_clear()
+        model = LanguageModel(
+            "en_US",
+            {"hello": 100, "help": 20},
+            "sealed",
+            enable_spellcheck=False,
+        )
+        with patch.object(
+            model,
+            "ngram_score",
+            wraps=model.ngram_score,
+        ) as ngram_score:
+            first = model.score("hello")
+            second = model.score("hello")
+            self.assertIs(second, first)
+            self.assertEqual(ngram_score.call_count, 1)
+
+            cache = LanguageModel.score.cache_info()
+            self.assertEqual(cache.maxsize, 65_536)
+            self.assertLessEqual(cache.currsize, 65_536)
+            self.assertEqual((cache.hits, cache.misses), (1, 1))
+
+            LanguageModel.score.cache_clear()
+            recomputed = model.score("hello")
+            self.assertEqual(recomputed, first)
+            self.assertEqual(ngram_score.call_count, 2)
 
     def test_normalization_arpa_parsing_and_read_failure(self) -> None:
         self.assertEqual(LanguageModel.normalize(" HeL-lo_42! "), "hel-lo")

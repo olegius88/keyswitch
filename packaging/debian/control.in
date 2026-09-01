@@ -8,9 +8,10 @@ Depends: at-spi2-core, gir1.2-gtk-4.0, gir1.2-adw-1, gir1.2-atspi-2.0, libbz2-1.
 Homepage: https://github.com/olegius88/keyswitch
 Description: automatic EN/RU keyboard layout correction for Ubuntu X11
  KeySwitch detects words entered using the wrong English or Russian keyboard
- layout, switches the XKB group and replaces the already typed word. Detection
- combines frequency lexicons, Hunspell morphology, character n-grams, recent
- context and explicit local learning.
+ layout, switches the XKB group and replaces the already typed word. Its
+ precision-first hybrid detector combines hard safety guards, frequency
+ lexicons, Hunspell morphology, character n-grams, a checksum-validated bundled
+ local linear classifier, recent context and explicit local learning.
  .
  It includes a GTK 4 and Libadwaita settings interface, global hotkeys,
  application and word exclusions, correction history, autostart integration

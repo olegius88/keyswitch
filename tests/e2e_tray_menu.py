@@ -21,6 +21,7 @@ from keyswitch.tray import (
     MENU_INTERFACE,
     MENU_PATH,
     MENU_SETTINGS,
+    MENU_SWITCH_LAYOUT,
     OBJECT_PATH,
     StatusNotifierItem,
 )
@@ -113,10 +114,12 @@ def run_probe() -> int:
 
         DBusGMainLoop(set_as_default=True)
         settings_opened = threading.Event()
+        layout_switched = threading.Event()
         item = StatusNotifierItem(
             settings_opened.set,
             lambda: None,
             Path(__file__).resolve().parents[1] / "src/keyswitch/resources",
+            on_switch_layout=layout_switched.set,
             on_sound_toggle=lambda: None,
             on_notifications_toggle=lambda: None,
             on_history=lambda: None,
@@ -124,6 +127,7 @@ def run_probe() -> int:
             on_about=lambda: None,
             on_quit=lambda: None,
         )
+        item.set_layout(1)
         if read_line(watcher, 5) != f"REGISTERED {OBJECT_PATH}":
             raise RuntimeError("StatusNotifierItem registered an unexpected object path")
 
@@ -170,15 +174,26 @@ def run_probe() -> int:
             "<''>",
             "0",
         )
+        dbus_call(
+            destination,
+            MENU_PATH,
+            f"{MENU_INTERFACE}.Event",
+            str(MENU_SWITCH_LAYOUT),
+            "clicked",
+            "<''>",
+            "0",
+        )
 
         checks = {
             "ItemIsMenu": "true" in item_is_menu,
             "Menu object path": MENU_PATH in menu_path,
             "DBusMenu version": "uint32 3" in version,
             "settings menu item": "Настройки KeySwitch" in layout,
+            "alternate layout menu item": "Переключить на английский (EN)" in layout,
             "autoswitch menu item": "Автопереключение" in layout,
             "quit menu item": "Выход" in layout,
             "clicked event": settings_opened.wait(timeout=2),
+            "layout clicked event": layout_switched.wait(timeout=2),
         }
         failed = [name for name, passed in checks.items() if not passed]
         if failed:

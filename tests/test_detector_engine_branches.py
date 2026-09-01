@@ -24,6 +24,7 @@ from keyswitch.engine import (
     LearningPrompt,
 )
 from keyswitch.history import HistoryStore
+from keyswitch.intent_model import CorrectionTrigger, IntentModelInput, LinearPrediction
 from keyswitch.language_model import WordScore
 from keyswitch.layouts import LayoutPair
 from keyswitch.x11_backend import (
@@ -45,7 +46,17 @@ def score(
     spell: bool = False,
     ngram: float = -2.0,
 ) -> WordScore:
-    return WordScore(value, known, 10 if exact else 0, 0.5, exact, spell, ngram, 0.5)
+    return WordScore(
+        value,
+        known,
+        10 if exact else 0,
+        0.5,
+        exact,
+        spell,
+        ngram,
+        0.5,
+        ngram,
+    )
 
 
 class StubModel:
@@ -62,6 +73,22 @@ class StubModel:
 
     def best_single_deletion(self, word: str) -> WordScore:
         return self.deletions.get(word, score(-5.0))
+
+
+class StubIntentClassifier:
+    def __init__(
+        self,
+        prediction: LinearPrediction,
+        *,
+        veto_threshold: float = -3.0,
+    ) -> None:
+        self.prediction = prediction
+        self.veto_threshold = veto_threshold
+        self.inputs: list[IntentModelInput] = []
+
+    def predict(self, item: IntentModelInput) -> LinearPrediction:
+        self.inputs.append(item)
+        return self.prediction
 
 
 class DetectorBranchTests(unittest.TestCase):
@@ -88,6 +115,7 @@ class DetectorBranchTests(unittest.TestCase):
         context_group: int | None = None,
         forced_target_group: int | None = None,
         rejected_targets: set[int] | None = None,
+        trigger: CorrectionTrigger = "space",
     ) -> DetectionDecision:
         return detector.decide(
             original,
@@ -100,6 +128,7 @@ class DetectorBranchTests(unittest.TestCase):
             context_group=context_group,
             forced_target_group=forced_target_group,
             rejected_targets=rejected_targets,
+            trigger=trigger,
         )
 
     def test_requires_two_models_and_handles_no_alternative(self) -> None:
@@ -131,6 +160,142 @@ class DetectorBranchTests(unittest.TestCase):
             score(8, known=True, exact=True, ngram=1), score(-2)
         )
         self.assertEqual(self.decide(source_only).reason, "исходное слово допустимо")
+
+    def test_linear_model_is_residual_and_cannot_bypass_hard_guards(self) -> None:
+        prediction = LinearPrediction(8.0, 0.999, 0.99, 1.0, True, "test-v1")
+        model = StubIntentClassifier(prediction)
+        left = StubModel({"source": score(8, known=True, exact=True, ngram=1)})
+        right = StubModel({"target": score(9, known=True, exact=True, ngram=1)})
+        detector = LanguageDetector({0: left, 1: right}, model)
+        self.assertFalse(self.decide(detector).should_convert)
+        self.assertEqual(model.inputs, [])
+        protected = self.decide(
+            detector,
+            original="user_name",
+            alternatives={1: "target"},
+        )
+        self.assertFalse(protected.should_convert)
+        self.assertIn("код", protected.reason)
+        self.assertEqual(model.inputs, [])
+
+        short = LanguageDetector(
+            {
+                0: StubModel({"abcd": score(-5)}),
+                1: StubModel({"фисв": score(-5)}),
+            },
+            model,
+        ).decide(
+            "abcd",
+            {1: "фисв"},
+            0,
+            minimum_length=3,
+            confidence_threshold=20.0,
+        )
+        self.assertFalse(short.should_convert)
+        self.assertIsNone(short.model_probability)
+        self.assertEqual(model.inputs, [])
+
+    def test_linear_model_is_authoritative_after_hard_guards(self) -> None:
+        veto = StubIntentClassifier(
+            LinearPrediction(-6.0, 0.002, 0.98, 1.0, False, "test-v1"),
+            veto_threshold=-4.0,
+        )
+        left = StubModel({"source": score(-8, ngram=-3)})
+        right = StubModel({"target": score(8, known=True, exact=True, ngram=1)})
+        detector = LanguageDetector({0: left, 1: right}, veto)
+        rejected = self.decide(detector)
+        self.assertFalse(rejected.should_convert)
+        self.assertIn("безопасного порога", rejected.reason)
+        self.assertEqual(rejected.model_probability, 0.002)
+        self.assertEqual(rejected.model_threshold, 0.98)
+        self.assertEqual(rejected.model_version, "test-v1")
+        self.assertEqual(veto.inputs[0].trigger, "space")
+
+        pause_gate = StubIntentClassifier(
+            LinearPrediction(0.0, 0.5, 0.98, 1.0, False, "test-v1"),
+            veto_threshold=-4.0,
+        )
+        detector = LanguageDetector({0: left, 1: right}, pause_gate)
+        paused = self.decide(detector, trigger="pause")
+        self.assertFalse(paused.should_convert)
+        self.assertIn("безопасного порога", paused.reason)
+
+        rescue = StubIntentClassifier(
+            LinearPrediction(6.0, 0.998, 0.98, 1.0, True, "test-v1")
+        )
+        left = StubModel({"source": score(2, ngram=-2)})
+        right = StubModel({"target": score(4, known=True, spell=True, ngram=0)})
+        detector = LanguageDetector({0: left, 1: right}, rescue)
+        recovered = self.decide(detector, confidence_threshold=3.0)
+        self.assertTrue(recovered.should_convert)
+        self.assertIn("линейной", recovered.reason)
+
+    def test_linear_model_threshold_is_not_overridden_by_secondary_scores(self) -> None:
+        unsupported = StubIntentClassifier(
+            LinearPrediction(0.0, 0.5, 0.98, 1.0, False, "test-v1"),
+            veto_threshold=-5.0,
+        )
+        left = StubModel({"source": score(-8, ngram=-2)})
+        right = StubModel({"target": score(2, ngram=0)})
+        detector = LanguageDetector({0: left, 1: right}, unsupported)
+        abstained = self.decide(detector)
+        self.assertFalse(abstained.should_convert)
+        self.assertIn("безопасного порога", abstained.reason)
+
+        low_coverage = StubIntentClassifier(
+            LinearPrediction(8.0, 0.999, 0.98, 0.2, True, "test-v1")
+        )
+        fallback = LanguageDetector({0: left, 1: right}, low_coverage)
+        low_coverage_result = self.decide(fallback)
+        self.assertTrue(low_coverage_result.should_convert)
+        self.assertIn("линейной", low_coverage_result.reason)
+
+        rescue = StubIntentClassifier(
+            LinearPrediction(8.0, 0.999, 0.98, 1.0, True, "test-v1")
+        )
+        left = StubModel({"sourcex": score(-2.5, ngram=-1.0)})
+        right = StubModel({"targetx": score(0.0, ngram=-1.5)})
+        detector = LanguageDetector({0: left, 1: right}, rescue)
+        rescued = self.decide(
+            detector,
+            original="sourcex",
+            alternatives={1: "targetx"},
+        )
+        self.assertTrue(rescued.should_convert)
+        self.assertIn("линейной", rescued.reason)
+
+        implausible_right = StubModel(
+            {"targetx": score(0.0, ngram=-6.01)}
+        )
+        implausible = LanguageDetector(
+            {0: left, 1: implausible_right}, rescue
+        )
+        rejected_target = self.decide(
+            implausible,
+            original="sourcex",
+            alternatives={1: "targetx"},
+        )
+        self.assertTrue(rejected_target.should_convert)
+        self.assertIn("линейной", rejected_target.reason)
+
+        floor_right = StubModel({"targetx": score(0.0, ngram=-6.0)})
+        at_floor = LanguageDetector({0: left, 1: floor_right}, rescue)
+        self.assertTrue(
+            self.decide(
+                at_floor,
+                original="sourcex",
+                alternatives={1: "targetx"},
+            ).should_convert
+        )
+
+        disabled = detector.decide(
+            "sourcex",
+            {1: "targetx"},
+            0,
+            use_intent_model=False,
+        )
+        self.assertIsNone(disabled.model_probability)
+        self.assertEqual(len(rescue.inputs), 3)
 
     def test_exact_and_morphological_target_outcomes(self) -> None:
         exact, _left, _right = self.detector(score(-8, ngram=-4), score(8, known=True, exact=True, ngram=1))
@@ -208,6 +373,8 @@ class DetectorBranchTests(unittest.TestCase):
             protected = (
                 "x" * 65,
                 "reserved",
+                "--force-with-lease",
+                "-x",
                 "www.example.org",
                 "mail@example.org",
                 "version2",
@@ -234,12 +401,20 @@ class FakeBackend:
         self.closed = 0
         self.start_error: Exception | None = None
         self.inject_error: Exception | None = None
+        self.switch_error: Exception | None = None
+        self.switches: list[int] = []
 
     def active_application(self) -> str:
         return self.application
 
     def current_group(self) -> int:
         return self.group
+
+    def switch_group(self, group: int) -> None:
+        if self.switch_error:
+            raise self.switch_error
+        self.switches.append(group)
+        self.group = group
 
     def inject_correction(
         self,
@@ -324,6 +499,24 @@ class EngineBranchTests(unittest.TestCase):
         self.engine._update(last_action="updated")
         self.assertEqual(snapshots[-1].last_action, "updated")
 
+    def test_engine_model_toggle_and_trigger_are_applied_without_restart(self) -> None:
+        classifier = StubIntentClassifier(
+            LinearPrediction(8.0, 0.999, 0.98, 1.0, True, "test-v1")
+        )
+        self.engine.detector.intent_model = classifier
+        self.settings.set("detection.intent_model_enabled", False)
+        disabled = self.engine._decide_word(
+            "ghbdtn", {1: "привет"}, 0, "Editor", "pause"
+        )
+        self.assertTrue(disabled.should_convert)
+        self.assertEqual(classifier.inputs, [])
+        self.settings.set("detection.intent_model_enabled", True)
+        enabled = self.engine._decide_word(
+            "ghbdtn", {1: "привет"}, 0, "Editor", "pause"
+        )
+        self.assertTrue(enabled.should_convert)
+        self.assertEqual(classifier.inputs[0].trigger, "pause")
+
     def test_start_stop_idempotence_and_backend_failure(self) -> None:
         self.engine.start()
         self.engine.start()
@@ -349,6 +542,49 @@ class EngineBranchTests(unittest.TestCase):
         with patch.object(self.engine._events, "put_nowait", side_effect=queue.Full):
             self.engine.enqueue(letter("a"))
         self.assertEqual(self.engine.snapshot.last_action, "Очередь ввода переполнена")
+
+    def test_alternate_layout_selection_guards_queue_and_applies(self) -> None:
+        self.assertFalse(self.engine.select_alternate_group())
+        self.assertIn("не запущен", self.engine.snapshot.last_error)
+
+        self.engine._running.set()
+        self.engine._update(current_group=-1)
+        self.assertFalse(self.engine.select_alternate_group())
+        self.assertIn("не определена", self.engine.snapshot.last_error)
+
+        self.engine._update(current_group=0)
+        original_models = self.engine.models
+        self.engine.models = {0: original_models[0]}
+        self.assertFalse(self.engine.select_alternate_group())
+        self.engine.models = original_models
+
+        with patch.object(self.engine._events, "put_nowait", side_effect=queue.Full):
+            self.assertFalse(self.engine.select_alternate_group())
+        self.assertIn("переполнена", self.engine.snapshot.last_error)
+
+        self.engine._handle(letter("a"))
+        self.assertTrue(self.engine.select_alternate_group())
+        self.engine._events.put_nowait(None)
+        self.engine._run()
+        self.assertEqual(self.backend.switches, [1])
+        self.assertEqual(self.engine.snapshot.current_group, 1)
+        self.assertEqual(self.engine.snapshot.current_word, "")
+        self.assertEqual(self.engine._manual_layout_group, 1)
+        self.assertIn("выбран из меню: RU", self.engine.snapshot.last_action)
+
+    def test_alternate_layout_backend_error_and_disabled_manual_protection(self) -> None:
+        self.backend.switch_error = RuntimeError("смена отклонена")
+        self.engine._apply_layout_selection(1)
+        self.assertIn("смена отклонена", self.engine.snapshot.last_error)
+        self.assertIn("не переключён", self.engine.snapshot.last_action)
+
+        self.backend.switch_error = None
+        self.settings.set("detection.respect_manual_layout", False)
+        self.engine._apply_layout_selection(0)
+        self.assertEqual(self.backend.switches, [0])
+        self.assertIsNone(self.engine._manual_layout_group)
+        self.assertEqual(self.engine.snapshot.current_group, 0)
+        self.assertEqual(self.engine.snapshot.last_error, "")
 
     def test_worker_polls_handles_errors_and_stops_at_sentinel(self) -> None:
         event = letter("a")
@@ -593,15 +829,16 @@ class EngineBranchTests(unittest.TestCase):
 
     def test_boundaries_exclusions_polling_and_clear_action(self) -> None:
         cases = (
-            ("space", "detection.correct_on_space"),
-            ("Return", "detection.correct_on_enter"),
-            ("Tab", "detection.correct_on_tab"),
-            ("ISO_Left_Tab", "detection.correct_on_tab"),
-            ("period", "detection.correct_on_punctuation"),
+            ("space", "detection.correct_on_space", "space"),
+            ("Return", "detection.correct_on_enter", "enter"),
+            ("Tab", "detection.correct_on_tab", "tab"),
+            ("ISO_Left_Tab", "detection.correct_on_tab", "tab"),
+            ("period", "detection.correct_on_punctuation", "punctuation"),
         )
-        for name, setting in cases:
+        for name, setting, trigger in cases:
             event = key(name, character="." if name == "period" else "")
             self.assertTrue(self.engine._is_boundary(event))
+            self.assertEqual(self.engine._trigger_for_boundary(event), trigger)
             self.settings.set(setting, False)
             self.assertFalse(self.engine._boundary_enabled(event))
             self.settings.set(setting, True)

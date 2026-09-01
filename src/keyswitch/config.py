@@ -17,7 +17,7 @@ _T = TypeVar("_T")
 
 
 DEFAULTS: SettingsData = {
-    "schema_version": 4,
+    "schema_version": 5,
     "enabled": True,
     "general": {
         "start_hidden": True,
@@ -41,6 +41,7 @@ DEFAULTS: SettingsData = {
         "aggressive": False,
         "context_aware": True,
         "protect_code": True,
+        "intent_model_enabled": True,
         "learning": True,
         "learning_confirmations": 2,
     },

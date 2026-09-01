@@ -6,7 +6,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from .indicator import layout_label, normalize_indicator_style
+from .indicator import (
+    alternate_layout_action_label,
+    alternate_layout_group,
+    layout_label,
+    normalize_indicator_style,
+)
 
 
 TrayAction = Callable[[], None]
@@ -25,6 +30,7 @@ def menu_activation_message(
 @dataclass(frozen=True)
 class WindowsTrayActions:
     show_settings: TrayAction
+    switch_layout: TrayAction
     toggle_engine: TrayAction
     toggle_sound: TrayAction
     toggle_notifications: TrayAction
@@ -45,6 +51,14 @@ class WindowsTrayState:
     @property
     def label(self) -> str:
         return layout_label(self.group)
+
+    @property
+    def alternate_layout_label(self) -> str:
+        return alternate_layout_action_label(self.group)
+
+    @property
+    def can_switch_layout(self) -> bool:
+        return alternate_layout_group(self.group) is not None
 
 
 class WindowsTrayAdapter(Protocol):
