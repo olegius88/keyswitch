@@ -1,6 +1,6 @@
 # Reproducible binary model inputs and artifact must never undergo EOL conversion.
 model/intent_v1/sources/*.lm -text
-model/intent_v1/sources/COPYRIGHT.onboard-data -text
+model/intent_v1/sources/COPYRIGHT.onboard-data -text whitespace=-trailing-space
 src/keyswitch/resources/models/*.ksm binary
 
 # These text files are hashed byte-for-byte into KSLM provenance or its sealed

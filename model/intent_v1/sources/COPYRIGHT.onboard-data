@@ -512,7 +512,7 @@ Copyright: *No copyright*
 License: GPL-3+
 Comment:
  Applying license as found in COPYING.GPL3 file.
-
+ 
 Files: Onboard/KeyGtk.py
 Copyright: 2007, Martin Böhme <martin.bohm@kubuntu.org>
   2009, Chris Jones <tortoise@tortuga>
@@ -754,7 +754,7 @@ Copyright: 2012-2014, marmuta <marmvta@gmail.com>
 License: GPL-3+
 
 
-Files:
+Files: 
  Onboard/pypredict/attic/Makefile
  Onboard/pypredict/lm/gen_accent_transform
  PKG-INFO
