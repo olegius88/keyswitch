@@ -994,7 +994,7 @@ if (-not $ModelLicense) {
 $IntentModel = Join-Path $ProjectDirectory "src\keyswitch\resources\models\layout_intent_v1.ksm"
 $IntentManifest = Join-Path $ProjectDirectory "model\intent_v1\manifest.json"
 $IntentConfig = Join-Path $ProjectDirectory "model\intent_v1\config.json"
-$IntentModelMaximumBytes = 12MB
+$IntentModelMaximumBytes = 14MB
 
 $StrictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
 [byte[]]$PyProjectBytes = Read-BoundedFileBytes `

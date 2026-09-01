@@ -248,7 +248,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
     def test_every_native_package_enforces_the_same_bounded_kslm_envelope(
         self,
     ) -> None:
-        self.assertIn("$IntentModelMaximumBytes = 12MB", self.script)
+        self.assertIn("$IntentModelMaximumBytes = 14MB", self.script)
         self.assertIn(
             'src\\keyswitch\\resources\\models\\layout_intent_v1.ksm',
             self.script,
