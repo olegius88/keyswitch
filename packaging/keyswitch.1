@@ -1,4 +1,4 @@
-.TH KEYSWITCH 1 "August 2026" "KeySwitch 0.5.0" "User Commands"
+.TH KEYSWITCH 1 "September 2026" "KeySwitch 0.6.0" "User Commands"
 .SH NAME
 keyswitch \- automatic keyboard layout correction for Ubuntu X11
 .SH SYNOPSIS
@@ -13,6 +13,101 @@ mistyped word.
 By default, KeySwitch also checks the current word after 1.5 seconds without
 typing, before a separator is entered. Idle correction can be disabled
 independently in the application settings.
+.PP
+Detection is a precision-first hybrid. Hard guards and explicit user rules are
+resolved before the optional classifier. Dictionaries, Hunspell and context
+form the deterministic fallback; when the bundled local linear character
+n-gram model is available, enabled and applicable, it is the sole statistical
+decision after those guards. It must pass its calibrated trigger/direction
+threshold; coverage and language scores are diagnostic only and cannot veto
+that result. A negative model decision is not handed to the fallback for a
+second chance.
+Its KSLM schema 4 container stores int16 weights, independent EN-to-RU and
+RU-to-EN Platt coefficients, exact calibrated-logit thresholds for every
+trigger/direction pair and sorted uint64 membership fingerprints instead of a
+weight-bucket
+occupancy bitset. The Local linear
+model setting disables this extra layer. Diagnostics report its version and
+checksum, or an explicit safe fallback when the artifact cannot be loaded.
+The deterministic fallback is used only for a disabled or unavailable model,
+or when the longer normalized interpretation contains fewer than five
+characters. Shorter tokens remain under deterministic guards and user rules;
+training and external typo evaluation enforce the same limit.
+Frozen three- and four-character bilingual collisions are retained only as
+safety evidence for the valid-source pre-model guard.
+.PP
+Offline training uses 2097152 hash buckets and at most 64 deterministic FTRL
+epochs. Feature schema v5 uses only the source and alternative raw tokens:
+signed character 1-5-grams, direction, length and trigger. It ignores context,
+every WordScore and every language-model score field. Real short-lived context
+remains in the conservative detector heuristic and is not counted again in the
+linear score. The trainer invokes the same runtime extractor with the same seeds
+and n-gram orders for exact train/serve feature parity. Train-only character scorers remain checked
+provenance but are not classifier inputs; this does not disable Hunspell in the
+runtime deterministic ensemble. Physical signatures use the
+keyswitch:intent-v14:physical-signature split namespace. Identity and typo
+signatures that cross splits, languages or protected safety rows are
+quarantined before row creation.
+.PP
+Schema 13 also consumes a byte-frozen, model-blind v14 hard-negative source.
+Its 5000 EN and 5000 RU physical signatures are assigned under an independent
+namespace as 3500/500/500/500 words per language across train, development,
+calibration and threshold, with no test role. The loader verifies source and
+Hunspell provenance, physical equivalence, uniqueness, exact role sizes and
+the SHA-256 of all 120000 re-expanded symmetric rows before the full leakage
+audit. External provenance indexes the base lexical and safety dataset first,
+then adds this development domain exactly once to the independent holdout
+exclusions. The independent holdout uses different namespaces.
+.PP
+Calibration, threshold and sealed-test splits use neutral context as their
+primary slice. Fixed non-empty label-independent context-stress profiles prove
+feature-schema-v5 invariance: changing context must not alter the vector, logit
+or decision, and every profile must pass the same per-trigger gates.
+.PP
+Before sealed-test evaluation, separate EN-to-RU/RU-to-EN thresholds are
+selected jointly for every trigger with neutral context. Each directional
+operating curve requires both labels in its overall and typo slices. Aggregate
+precision, recall and specificity
+must reach 0.9995, 0.956 and 0.999; the typo slice must reach 0.9995, 0.91 and
+0.999. The 12 primary selection FPR checks use a Bonferroni-corrected
+family-wise 95 percent Wilson endpoint with per-comparison confidence
+0.9958333333333333 and z-score 2.8652602385321333; it must not exceed 0.001.
+In addition, training config schema 13 gives each trigger an exact selection
+budget of zero false positives across the overall and typo slices. This
+absolute budget is enforced
+before the sealed test is materialised.
+Schema 13 then deterministically chooses on the threshold split the greatest
+common calibrated-logit margin that preserves the complete selection policy.
+The margin is bounded by a signed 2.0 cap fixed before v11 from the model-blind
+development corpus. Schema 13 selects its effective value only on the frozen
+threshold role, records it for every trigger, and recomputes selection metrics
+against the hardened boundaries. The sealed test does not select the margin.
+The sealed test independently uses ordinary 95 percent Wilson and recall
+0.95/0.90. Selection for Pause uses recall 0.91, typo recall 0.86, while its
+sealed gate keeps 0.90/0.85; the same FPR limit and a logit threshold in
+each direction at least 0.5 above the strictest non-pause threshold in that
+same direction. Infeasible selection stops before the sealed test. The sealed
+test keeps an independent 0.999 minimum precision for both slices, so stricter
+selection provides transfer headroom. The safety gate runs the guarded production detector;
+raw model predictions and membership coverage are diagnostic only.
+.PP
+Runtime selects the exact threshold_logit by trigger and physical direction,
+then compares the calibrated logit directly with it. Its sigmoid-derived
+confidence is diagnostic
+only and is never used for the decision.
+.PP
+Training provenance includes hashes of the frozen sources, configuration,
+trainer, development-corpus freezer, runtime model code, layouts, language
+scorer, detector, protected tokens and the frozen hard-negative source,
+together with dataset, quarantine, train-only scorer and Python/platform
+identity. Only a successful gated build publishes its pre-synced report,
+artifact and manifest, in that order; the manifest is the final commit marker
+and process failures roll back replaced outputs. The model card documents the
+two-run byte-identical retraining check. Training config schema 13, KSLM schema
+4 and external publication manifest schema 1 are independent. Frozen external
+evaluation additionally pins Hunspell dictionary and affix sizes and SHA-256
+digests, expected lexical and unknown-typo corpus digests, at least 5000 words
+per language, and all six runtime triggers.
 .PP
 Settings, exclusions, hotkeys, history and diagnostics are available from the
 application window. Left-clicking the desktop indicator opens its native menu
@@ -51,6 +146,18 @@ Optional per-user Hunspell dictionaries.
 .TP
 .I ~/.local/share/keyswitch/keyswitch.log
 Application log.
+.TP
+.I /usr/lib/keyswitch/keyswitch/resources/models/layout_intent_v1.ksm
+Bundled, checksum-validated KSLM schema 4 linear intent model, bounded to
+14 MiB in total, with a 1 MiB embedded-manifest cap, a 12 MiB payload cap and
+at most 2^20 exact membership fingerprints. The v1 filename identifies the
+classifier generation.
+.TP
+.I /usr/lib/keyswitch/keyswitch/resources/models/en_US.lm
+Frozen English lexical and character n-gram source used by the runtime scorer.
+.TP
+.I /usr/lib/keyswitch/keyswitch/resources/models/ru_RU.lm
+Frozen Russian lexical and character n-gram source used by the runtime scorer.
 .SH ENVIRONMENT
 .TP
 .B DISPLAY
@@ -61,6 +168,14 @@ Must identify an X11 session for the global backend.
 .TP
 .B KEYSWITCH_HUNSPELL_PATH
 Optional colon-separated list of Hunspell dictionary directories.
+.TP
+.B KEYSWITCH_MODEL_PATH
+Optional colon-separated list of Onboard language-model directories. Entries
+precede the bundled frozen EN/RU models and are intended for controlled testing.
+.TP
+.B KEYSWITCH_INTENT_MODEL_PATH
+Optional path to a compatible KSLM schema 4 model. Invalid or oversized files
+are rejected and the deterministic detector remains available.
 .SH SEE ALSO
 .BR setxkbmap (1)
 .SH BUGS

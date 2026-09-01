@@ -19,8 +19,9 @@ KeySwitch — настольное приложение для Windows 10/11 x64
 - автоматическое распознавание английского и русского слова через 1,5 секунды
   без ввода, а также после пробела, Enter, Tab или знака препинания; коррекцию
   по паузе можно отдельно отключить в настройках;
-- ансамблевое распознавание по частотному словарю, морфологии Hunspell,
-  символьным n-граммам и недавнему контексту;
+- precision-first гибридное распознавание: жёсткие защиты, частотный словарь,
+  морфология Hunspell, символьные n-граммы, недавний контекст и собственная
+  легковесная линейная модель;
 - консервативная защита URL, путей, кода, аббревиатур, неоднозначных слов и
   распространённых технических терминов;
 - локальное самообучение: после ручного преобразования по `Pause/Break`
@@ -39,8 +40,9 @@ KeySwitch — настольное приложение для Windows 10/11 x64
 - локальная история только выполненных исправлений;
 - уведомления, звук, светлая/тёмная тема и автозагрузка после входа в ОС;
 - живой системный индикатор раскладки `EN/RU` или флагами стран; щелчок левой
-  или правой кнопкой открывает меню с настройками, паузой, звуком,
-  уведомлениями, историей, исключениями, сведениями о программе и выходом;
+  или правой кнопкой открывает меню, где можно выбрать противоположный
+  язык, а также открыть настройки, паузу, звук, уведомления, историю,
+  исключения, сведения о программе и выход;
 - нативное для платформы полное окно настроек с обзором, тестовым полем,
   автокоррекцией, горячими клавишами, исключениями, историей и диагностикой;
 - защита от запуска второго экземпляра: повторный запуск активирует уже
@@ -52,17 +54,20 @@ KeySwitch — настольное приложение для Windows 10/11 x64
 
 Полный поток клавиатуры не записывается. В памяти находится текущее слово, а в
 историю при включённой опции попадают только пары вида `ghbdtn → привет`.
+Линейная модель выполняет инференс полностью локально и не дообучается на
+обычном вводе.
 
 ## Установка в Windows
 
-Скачайте `KeySwitch-Setup-0.5.0-x64.exe` со страницы
+Скачайте `KeySwitch-Setup-0.6.0-x64.exe` со страницы
 [последнего выпуска](https://github.com/olegius88/keyswitch/releases/latest) и
 запустите его. Установка выполняется для текущего пользователя в
 `%LOCALAPPDATA%\Programs\KeySwitch` и не требует прав администратора. В выпуск
-также входит переносимый архив `KeySwitch-0.5.0-windows-x64.zip`.
+также входит переносимый архив `KeySwitch-0.6.0-windows-x64.zip`.
 
 После запуска KeySwitch появится в области уведомлений. Левый или правый щелчок
-по `EN/RU` либо флагу открывает меню. В разделе «Внешний вид и система» можно
+по `EN/RU` либо флагу открывает меню. В нём пункт «Переключить на…» всегда
+предлагает язык, отличный от текущего. В разделе «Внешний вид и система» можно
 отключить автозагрузку, запуск свёрнутым, индикатор, звук и уведомления.
 
 На странице «Обновления» по умолчанию включены автоматическая проверка и
@@ -83,8 +88,10 @@ py -m venv .venv
 ```
 
 Для полной модели распознавания при запуске из исходников задайте
-`KEYSWITCH_MODEL_PATH` равным каталогу с `en_US.lm` и `ru_RU.lm` из пакета
-Onboard. В Setup EXE и переносимый ZIP эти модели включаются автоматически.
+`KEYSWITCH_MODEL_PATH` равным `model/intent_v1/sources`: там находятся точные
+зафиксированные `en_US.lm` и `ru_RU.lm`, использованные при обучении.
+Собственный `layout_intent_v1.ksm` уже находится в ресурсах KeySwitch. В Setup
+EXE и переносимый ZIP все три модели включаются автоматически.
 
 ## Быстрый запуск в Ubuntu
 
@@ -119,11 +126,11 @@ cd keyswitch
 
 ## Установка DEB-пакета
 
-Скачайте `keyswitch_0.5.0_amd64.deb` со страницы
+Скачайте `keyswitch_0.6.0_amd64.deb` со страницы
 [последнего выпуска](https://github.com/olegius88/keyswitch/releases/latest), затем:
 
 ```bash
-sudo apt install ./keyswitch_0.5.0_amd64.deb
+sudo apt install ./keyswitch_0.6.0_amd64.deb
 ```
 
 Пакет установит системные зависимости и добавит KeySwitch в меню приложений.
@@ -205,6 +212,182 @@ setxkbmap -query
 другие чувствительные приложения следует добавить по имени `.exe` в Windows
 или `WM_CLASS` в Linux на странице «Исключения».
 
+Переключатель «Локальная линейная модель» в разделе автокоррекции отключает
+только дополнительную проверку классификатором: словари, жёсткие защиты и явно
+выученные правила продолжают работать. На странице диагностики отображаются
+версия и сокращённая SHA-256 поставляемого KSLM либо причина безопасного
+fallback на детерминированный ансамбль. Ни слова, ни признаки модели не
+отправляются в сеть.
+
+После пользовательских правил и жёстких защит допустимого исходного слова,
+кода и адресов KSLM является единственным статистическим решением: применяется
+только её откалиброванный trigger/direction-порог. Membership coverage и оценки
+языковых моделей остаются диагностикой и не могут отменить положительное
+решение уже сертифицированного порога. Отрицательное решение не передаётся
+эвристике повторно. Детерминированный ансамбль используется только для коротких
+токенов, отключённой модели или недоступного артефакта.
+
+Линейный слой вызывается только когда хотя бы одна из двух нормализованных
+интерпретаций содержит не менее 5 символов. Более короткие слова остаются у
+детерминированных эвристик и пользовательских правил: это исключает наиболее
+неоднозначный хвост из вероятностного решения, не отключая коррекцию целиком.
+Trainer отбрасывает и deletion-опечатки, ставшие короче этого порога; тот же
+порог записан в подписанную policy модели и проверяется тестами.
+При этом реальные двуязычные collision-пары длиной 3–4 из frozen Onboard
+сохраняются только в safety-корпусе: они не обучают классификатор, но доказывают
+работу предмодельной защиты допустимого исходного слова по всем trigger.
+
+`layout_intent_v1.ksm` — первое поколение классификатора в контейнере KSLM
+schema 4. Помимо int16-весов он хранит отсортированные uint64-отпечатки точного
+membership символьных признаков в независимом hash namespace, а не occupancy-
+bitset весовых buckets. Loader проверяет schema, форму, сортировку, CRC32 и
+SHA-256, ограничивает весь файл 14 MiB и безопасно отключает слой при любой
+ошибке. Внутри этого лимита канонический embedded manifest ограничен 1 MiB,
+payload — 12 MiB, а число точных membership-отпечатков — `2^20`.
+Номера схем независимы: training config использует `schema_version: 13`, сам
+контейнер — KSLM schema 4, а внешний публикационный `manifest.json` —
+`schema_version: 1`.
+
+Offline-модель использует 2 097 152 hash-buckets и конфигурацию максимум на 64
+эпохи с детерминированной ранней остановкой. Frozen EN/RU-лексиконы используются
+целиком после фильтрации; `maximum_words_per_language` обязан быть равен нулю,
+чтобы глобальное усечение до split не могло зависеть от held-out identity.
+Feature schema v5 строится только
+из исходного и альтернативного raw token: знаковых символьных 1–5-грамм,
+направления, длины и trigger. Поля контекста, все поля `WordScore` и оценки
+language model полностью игнорируются классификатором. Реальный краткий
+контекст остаётся в консервативной эвристике детектора, где он не дублируется
+в линейном score. Trainer вызывает тот же runtime extractor с теми же seed и
+порядками n-грамм, поэтому train/serve feature parity точная. Train-only EN/RU
+scorer остаётся отдельной проверяемой provenance-записью, но не является входом
+классификатора. Разбиение физических сигнатур
+закреплено namespace `keyswitch:intent-v14:physical-signature`. До генерации
+строк candidate-фаза независимо помещает identity- и typo-сигнатуры с
+владельцами из разных pre-sealed split/языков либо пересечением с
+protected/safety токеном в quarantine. Sealed-test строки и их quarantine
+строятся только после атомарной фиксации точного candidate SHA; при merge
+удаляются test-сигнатуры, совпавшие со строками, quarantine или safety-данными
+кандидата, а строки кандидата не меняются.
+
+Schema 13 дополнительно подключает побайтно зафиксированный
+`unknown-typo-development-v14.json`. Он был построен model-blind до обучения
+из 5 000 EN и 5 000 RU неизвестных Hunspell-опечаток, а затем компактно
+сохранён по одной записи на физическую сигнатуру. Независимый namespace ролей
+детерминированно распределяет каждую языковую половину как 3 500/500/500/500
+слов между train/development/calibration/threshold; test-роли у этого корпуса
+нет. При загрузке trainer проверяет SHA-256 и размер файла, provenance обоих
+Hunspell-словарей, физическую эквивалентность пары раскладок, уникальность,
+точные размеры ролей и SHA-256 заново развёрнутых 120 000 симметричных строк.
+Только train-роль получает явно подписанный вес `3.0`, равный верхней границе
+веса обычных частотных примеров; три оценочные роли сохраняют вес `1.0`.
+Так критичные неизвестные опечатки не теряются на фоне частотного корпуса, но
+оценка качества остаётся невзвешенной и не получает скрытой поблажки.
+Полный post-merge аудит запрещает пересечения между ролями и с исходным
+лексическим/safety-корпусом. Независимый v14 holdout использует другие
+rank/choice namespaces и не участвует ни в обучении, ни в выборе порога.
+
+Calibration, threshold и sealed test используют нейтральный контекст как
+основной срез. Фиксированные непустые label-independent context-stress профили
+дополнительно доказывают контекстную инвариантность feature schema v5: изменение
+`context_delta` или `context_group` не должно менять vector, logit или решение,
+а каждый профиль проходит те же per-trigger quality gates.
+
+До открытия sealed test для каждого trigger совместно выбираются отдельные
+EN→RU/RU→EN пороги; оба направленных operating curve обязаны содержать оба
+label и в общем, и в typo-срезе. Агрегированный trigger-срез обязан пройти
+полную selection policy с нейтральным контекстом: общие
+precision не ниже 0,9995, recall не ниже 0,956 и specificity не ниже 0,999;
+для typo-среза — тот же усиленный selection precision 0,9995, recall не ниже
+0,91 и specificity не
+ниже 0,999. Для 12 первичных selection-проверок FPR (шесть trigger × общий и
+typo-срезы) применяется Bonferroni-коррекция: верхняя family-wise 95%-граница
+Wilson использует per-comparison confidence 0,9958333333333333 и закреплённый
+z-score 2,8652602385321333 и не должна превышать 0,001. Signed gate evidence
+отдельно хранит метод, число сравнений, confidence, z-score и рассчитанную
+границу; sealed test остаётся независимым и использует обычную 95%-границу
+Wilson. Дополнительно training config schema 13 требует ноль false positive
+на selection для каждого trigger — одновременно на общем и typo-срезе — и всё
+равно требует усиленную family-wise Wilson-границу. Этот абсолютный бюджет
+проверяется до materialization sealed test. После
+направленного выбора schema 13 детерминированно выбирает на threshold split
+наибольший общий calibrated-logit margin, при котором вся selection policy
+остаётся выполненной. Margin ограничен подписанным cap 2,0, зафиксированным до
+v11 по model-blind unknown-typo development-корпусу. В schema 13 его frozen
+сигнатуры уже имеют независимые роли, поэтому фактическое значение выбирается
+только на их threshold-подмножестве, хранится для каждого trigger, а метрики
+пересчитываются уже с ужесточёнными границами.
+Sealed test в выборе margin не участвует. Для `pause` на selection действуют
+recall 0,91 и typo recall 0,86, та же граница
+0,001, а logit-порог каждого направления — как минимум на
+0,5 выше самого строгого не-pause порога того же направления. Невыполнимая
+selection policy завершает обучение до вычисления sealed test. Финальный
+sealed test сохраняет независимые minimum precision 0,999, recall 0,95,
+typo recall 0,90 и pause recall 0,90/0,85. Разница в precision и один
+процентный пункт recall создают pre-seal запас переноса, но не ослабляют
+закрытый gate. До
+захвата seal также обязаны пройти safety-аудит и selection-veto;
+затем trainer пробно сериализует и загружает KSLM тем же runtime-кодом, проверяя
+числовые границы, quantization parity и лимиты payload/fingerprint. Safety-gate
+проверяет фактическую production-политику с runtime guards; прямые ответы модели
+и membership coverage остаются raw diagnostics и не являются gates.
+
+Строгий evaluator отдельно запускает настоящий `LanguageDetector` в нейтральном
+контексте и шести достижимых extrema контекстной арифметики (дельты от -2,05 до
++2,30) на sealed, sealed-typo, unknown-typo, safety и source-known срезах.
+Каждый профиль обязан сохранять precision/specificity/Wilson-FPR, иметь не
+больше суммарных false positives, чем fallback и neutral, и не ухудшать recall
+сверх зафиксированной asymmetric policy. На конечных safety/source-known
+наборах действует более сильный инвариант exact-zero: эти строки не должны
+доходить до модели, а все unknown-typo строки должны до неё доходить.
+
+KSLM schema 4 хранит отдельную монотонную Platt-калибровку для направлений
+EN→RU и RU→EN и точный `threshold_logit` для каждой пары trigger/направление.
+Оба калибратора
+обучаются только на calibration split и устраняют систематический сдвиг между
+направлениями, не меняя порядок примеров внутри каждого из них. Runtime
+выбирает порог по trigger и физическому направлению, затем сравнивает с ним
+direction-calibrated logit напрямую; sigmoid-derived confidence порога
+доступна только в диагностике и не используется для принятия решения. Frozen
+external evaluation policy фиксирует размеры и SHA-256 Hunspell `.dic`/`.aff`
+обоих языков, ожидаемые SHA-256 lexical-disjoint, unknown-typo-development и
+независимого unknown-typo-holdout корпусов, минимум 5000 слов на язык и
+канонический набор всех шести trigger. Holdout использует другой rank/choice
+namespace и исключает sealed и development сигнатуры.
+V11 прошёл внутренние gates, но был отклонён до независимого external holdout:
+strict-evaluator не умел fail-closed индексировать новое семейство frozen
+`hunspell-unknown-*` строк. Причина и точные хэши сохранены в
+`rejection-v11.json`. V12 исправил индекс, но был отклонён: evaluator ошибочно
+построил базовый exclusion-index уже после добавления development-корпуса и не
+смог воспроизвести его frozen provenance. V13 исправил разделение доменов и
+дошёл до независимого holdout, но получил 4 false positive из 10 000 на
+обычный trigger: Wilson upper 0,001028128 превысил лимит 0,001. Точные причины
+и хэши сохранены в `rejection-v12.json` и `rejection-v13.json`. V14 заранее
+зафиксировал нулевой selection FP-бюджет, ротировал все namespaces и прошёл
+независимую strict-проверку с 0 FP из 60 000 unknown-typo негативов.
+Файл `holdout-v14-preseal.json` фиксирует SHA-256, namespaces, размеры и
+нулевые пересечения до загрузки или оценки v14-модели; поля
+`model_loaded=false` и `metrics_evaluated=false` делают эту фазу явной.
+
+Manifest связывает SHA-256 config, frozen sources, trainer, external evaluator,
+preseal generator/receipt, freezer development-корпуса, intent runtime, layouts,
+language scorer и detector,
+а также frozen hard-negative source и SHA-256 списка защищённых токенов,
+с Python/platform identity, candidate/full dataset, обоими quarantine,
+исключёнными test-сигнатурами и train-only scorer provenance. Receipt связывает
+точный KSLM payload/runtime-параметры и публикуется через fsync-нутый временный
+файл и атомарный no-replace hard link. Evaluator до валидного receipt не строит
+sealed-test строки и не выводит их метрики, независимо от флага `--strict`.
+После успешных gates report, artifact и manifest публикуются из заранее
+записанных и синхронизированных временных файлов именно в таком порядке;
+manifest служит последним commit marker, а ошибка процесса откатывает уже
+заменённые файлы. Точная процедура двух независимых запусков и побайтного
+сравнения всех трёх результатов приведена в
+[карточке модели](model/intent_v1/MODEL_CARD.md#воспроизводимость).
+Операционный выпуск нового кандидата описывает
+[runbook](docs/intent-model-runbook.md), а готовые пошаговые команды для
+preseal, обучения, strict-проверки, replay и сборки пакета собраны в
+[cookbook](docs/intent-model-cookbook.md).
+
 ## Разработка и проверка
 
 Весь Python-код приложения, тестов и утилит проходит усиленный профиль
@@ -247,9 +430,19 @@ py tests/e2e_windows.py
 защитных случаев:
 
 ```bash
+(cd model/intent_v1/sources && sha256sum --check SHA256SUMS)
 PYTHONPATH=src tools/evaluate_detector.py \
   --sample 10000 --dictionary-sample 10000 --strict
+PYTHONPATH=src tools/evaluate_intent_model.py --strict
 ```
+
+Вторая команда проверяет bundled `layout_intent_v1.ksm`, его KSLM schema 4,
+контрольные суммы, frozen-source и toolchain provenance, hash protected tokens,
+quarantine и train-only scorer, непустые Wilson-gates, production guarded
+safety и отдельные precision-first пороги для паузы и завершённого слова.
+Raw-model safety/membership срезы остаются диагностическими. Набор
+лексико-синтетический и служит регрессионным барьером, а не оценкой качества на
+реальном пользовательском вводе.
 
 Настоящий сквозной тест в активной X11-сессии:
 
@@ -279,21 +472,33 @@ dbus-run-session -- env PYTHONPATH=src python3 tests/e2e_tray_menu.py
 sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
 ./tools/install-build-tools.sh .nuitka
 KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package="dist/keyswitch_0.5.0_$(dpkg --print-architecture).deb"
+package="dist/keyswitch_0.6.0_$(dpkg --print-architecture).deb"
 ./tools/verify-native-deb.sh "$package"
 ```
+
+DEB включает не только KSLM, но и точные frozen `en_US.lm`/`ru_RU.lm` из
+`model/intent_v1/sources`. Встроенный каталог имеет приоритет над системным
+`onboard-data`, поэтому runtime n-граммные оценки совпадают с проверенным
+release snapshot; verifier требует побайтного равенства обоих файлов.
 
 Нативные Windows-артефакты собираются на Windows с Python, Nuitka и Inno Setup:
 
 ```powershell
-./packaging/build-windows.ps1 `
-  -ModelDirectory build/windows-models/models `
-  -ModelLicense build/windows-models/COPYRIGHT.onboard-data
+./packaging/build-windows.ps1
 ```
 
 Команда создаёт standalone `KeySwitch.exe` без исходных `.py`, переносимый ZIP
-и per-user Setup EXE. Файлы моделей `en_US.lm` и `ru_RU.lm` берутся из пакета
-Onboard вместе с его лицензией.
+и per-user Setup EXE. В fresh clone команда по умолчанию берёт закреплённые
+`en_US.lm`, `ru_RU.lm` и лицензию прямо из `model/intent_v1/sources`;
+необязательные `-ModelDirectory` и `-ModelLicense` принимаются только для
+staged-копий с точными путями, размерами и SHA-256 из config; `SHA256SUMS`
+также обязан побайтно совпасть с config. Все внешние JSON/KSLM-входы читаются
+с лимитами. До Nuitka portable provenance-pass заново строит обе dataset-фазы
+и проверяет seal registry, frozen sources, toolchain, artifact и полный
+embedded manifest, после чего отдельная проверка подтверждает всю матрицу
+threshold/sealed/context/typo/safety/veto quality evidence. После Nuitka сборка
+запускает готовый `KeySwitch.exe --diagnose` без model override и требует
+`intent_model.available=true` с ожидаемыми версией и SHA-256.
 
 После остановки уже запущенного экземпляра полный E2E именно бинарника из
 пакета можно выполнить в активной X11-сессии:
@@ -306,7 +511,8 @@ dbus-run-session -- ./tools/run-native-e2e.sh "$package"
 исправления, смену XKB-группы, историю, регистрацию StatusNotifierItem и состав
 всплывающего DBusMenu. При отправке тега `v*` GitHub Actions независимо
 проверяет Linux и Windows, собирает DEB, Windows Setup EXE и переносимый ZIP,
-выполняет тихую установку и smoke-тест установленного приложения, формирует
+выполняет тихую установку, точную диагностику bundled-модели и UI-smoke
+установленного приложения, формирует
 единый `SHA256SUMS` и публикует артефакты в GitHub Release.
 
 ## Ограничения
@@ -320,15 +526,28 @@ dbus-run-session -- ./tools/run-native-e2e.sh "$package"
 - В Windows механизм UIPI не позволяет обычному процессу вводить текст в окно,
   запущенное с более высоким уровнем целостности. Для такого окна KeySwitch
   также должен быть запущен с сопоставимыми правами.
-- Windows Setup EXE версии 0.5.0 пока не подписан сертификатом издателя.
+- Windows Setup EXE версии 0.6.0 пока не подписан сертификатом издателя.
 
 ## Лицензия
 
 KeySwitch распространяется на условиях
 [GNU General Public License 3.0 или более поздней версии](LICENSE).
+Поставляемая модель построена из зафиксированного снимка Onboard `models/*` из
+`onboard-data` `1.4.3+git20260213+ds-2`. Исходная декларация указывает GPL-3+ и
+правообладателей marmuta (2013, 2014) и Francesco Fumanti (2011, 2012). Точные
+`.lm`, `SHA256SUMS` и неизменённый `COPYRIGHT.onboard-data` находятся в
+`model/intent_v1/sources`; файл copyright включается в комплекты лицензий
+Debian и Windows.
 
 ## Первичные спецификации
 
+- [Google Research: FTRL-Proximal](https://research.google/pubs/ad-click-prediction-a-view-from-the-trenches/)
+  — алгоритм offline-обучения разреженной линейной модели;
+- [AISTATS/PMLR: Beta calibration](https://proceedings.mlr.press/v54/kull17a.html)
+  — первичный источник об альтернативной калибровке бинарных классификаторов;
+  Layout Intent v1 использует более простой Platt-вариант на отдельной выборке;
+- [ACL Anthology: символьные n-граммы для коротких сегментов](https://aclanthology.org/L10-1193/)
+  — исследование n-граммного распознавания короткого текста;
 - [Microsoft LowLevelKeyboardProc](https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc)
   — низкоуровневый клавиатурный hook и обязательный цикл сообщений;
 - [Microsoft SendInput](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput)
