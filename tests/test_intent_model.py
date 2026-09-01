@@ -1765,7 +1765,7 @@ class DiscoveryCacheAndSystemBranchTests(unittest.TestCase):
             packaged.write_bytes(model_bytes())
             with patch.object(im, "__file__", str(fake_module)), patch.dict(
                 os.environ,
-                {"KEYSWITCH_INTENT_MODEL_PATH": str(packaged)},
+                {"KEYSWITCH_INTENT_MODEL_PATH": str(packaged.resolve())},
             ), patch.object(LinearNgramModel, "load", side_effect=RuntimeError("bug")):
                 with self.assertRaises(RuntimeError):
                     LinearNgramModel.try_load_default()
