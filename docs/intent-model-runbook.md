@@ -114,6 +114,14 @@ dpkg-query -W -f='${Package} ${Version}\n' \
 candidate provenance. Побайтная воспроизводимость обещана только в той же
 зафиксированной среде.
 
+`evaluate_intent_model.py --strict` и `--provenance-only` относятся к
+сертификационному контуру reference host. Нативная упаковка для другой ОС не
+должна заново строить corpus в иной platform identity. Она обязана проверить
+SHA-256 KSLM и frozen inputs, неизменяемый seal registry, hashes model
+toolchain, полный подписанный manifest и quality evidence внутри KSLM. Общий
+release workflow остаётся зелёным только после отдельного полного `--strict`
+на reference host.
+
 ## 2. Выбрать режим: replay или новый кандидат
 
 ### Точный replay принятого кандидата

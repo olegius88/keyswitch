@@ -176,11 +176,16 @@ def fail(message: str) -> None:
     raise ValueError(message)
 
 
-def strict_json(path: Path, maximum_bytes: int, label: str) -> dict[str, Any]:
+def bounded_bytes(path: Path, maximum_bytes: int, label: str) -> bytes:
     with path.open("rb") as stream:
         raw = stream.read(maximum_bytes + 1)
     if len(raw) > maximum_bytes:
         fail(f"{label} exceeds {maximum_bytes} bytes: {path}")
+    return raw
+
+
+def strict_json(path: Path, maximum_bytes: int, label: str) -> dict[str, Any]:
+    raw = bounded_bytes(path, maximum_bytes, label)
 
     def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
@@ -279,6 +284,16 @@ def exact_object(value: Any, path: str, fields: set[str]) -> dict[str, Any]:
 def exact_true(value: Any, path: str) -> None:
     if value is not True:
         fail(f"{path} must be exact true")
+
+
+def exact_sha256(value: Any, path: str) -> str:
+    if (
+        type(value) is not str
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        fail(f"{path} must be a lowercase SHA-256")
+    return value
 
 
 def finite_number(value: Any, path: str) -> float:
@@ -800,6 +815,90 @@ def main() -> None:
         fail("intent manifest gate_policy does not match config.json")
     exact_true(manifest.get("quality_gates_passed"), "manifest.quality_gates_passed")
 
+    sealed = exact_object(
+        manifest.get("sealed_evaluation"),
+        "manifest.sealed_evaluation",
+        {
+            "schema_version",
+            "split_namespace",
+            "candidate_sha256",
+            "registry_path",
+            "candidate_dataset_sha256",
+            "config_sha256",
+            "registry_sha256",
+        },
+    )
+    if sealed["schema_version"] != 1:
+        fail("manifest.sealed_evaluation schema must be exact integer 1")
+    for field in (
+        "candidate_sha256",
+        "candidate_dataset_sha256",
+        "config_sha256",
+        "registry_sha256",
+    ):
+        exact_sha256(sealed[field], f"manifest.sealed_evaluation.{field}")
+    if (
+        sealed["split_namespace"] != config.sealed_evaluation.split_namespace
+        or sealed["registry_path"] != config.sealed_evaluation.registry_path
+        or sealed["config_sha256"] != config_digest
+    ):
+        fail("manifest sealed evaluation differs from config.json")
+    registry_relative = Path(config.sealed_evaluation.registry_path)
+    if registry_relative.is_absolute() or ".." in registry_relative.parts:
+        fail("sealed registry path must be repository-relative")
+    project_root = project.resolve()
+    registry_path = (project_root / registry_relative).resolve()
+    try:
+        registry_path.relative_to(project_root)
+    except ValueError as error:
+        raise ValueError("sealed registry escapes the repository") from error
+    registry_bytes = bounded_bytes(
+        registry_path, 16 * 1024, "immutable seal registry"
+    )
+    if hashlib.sha256(registry_bytes).hexdigest() != sealed["registry_sha256"]:
+        fail("immutable seal registry SHA-256 differs from the manifest")
+    registry = strict_json(
+        registry_path, 16 * 1024, "immutable seal registry"
+    )
+    expected_registry = {
+        "schema_version": sealed["schema_version"],
+        "split_namespace": sealed["split_namespace"],
+        "candidate_sha256": sealed["candidate_sha256"],
+        "config_sha256": sealed["config_sha256"],
+        "candidate_dataset_sha256": sealed["candidate_dataset_sha256"],
+    }
+    if registry != expected_registry:
+        fail("immutable seal registry differs from the signed manifest receipt")
+
+    toolchain = manifest.get("toolchain")
+    if type(toolchain) is not dict:
+        fail("manifest.toolchain must be an object")
+    toolchain_paths = {
+        "trainer_sha256": "tools/train_intent_model.py",
+        "runtime_sha256": "src/keyswitch/intent_model.py",
+        "detector_sha256": "src/keyswitch/detector.py",
+        "protected_tokens_sha256": "src/keyswitch/resources/protected_tokens.txt",
+        "layouts_sha256": "src/keyswitch/layouts.py",
+        "language_model_sha256": "src/keyswitch/language_model.py",
+        "evaluator_sha256": "tools/evaluate_intent_model.py",
+        "preseal_generator_sha256": "tools/preseal_intent_holdout.py",
+        "development_freezer_sha256": "tools/freeze_intent_development_corpus.py",
+        "preseal_receipt_sha256": "model/intent_v1/holdout-v14-preseal.json",
+    }
+    for field, relative_path in toolchain_paths.items():
+        expected_digest = exact_sha256(
+            toolchain.get(field), f"manifest.toolchain.{field}"
+        )
+        actual_digest = hashlib.sha256(
+            bounded_bytes(
+                project_root / relative_path,
+                8 * 1024 * 1024,
+                f"model toolchain file {relative_path}",
+            )
+        ).hexdigest()
+        if actual_digest != expected_digest:
+            fail(f"model toolchain file differs from manifest: {relative_path}")
+
     triggers = tuple(TRIGGERS)
     if len(triggers) * 2 != SELECTION_FALSE_POSITIVE_COMPARISONS:
         fail("Windows packaging selection comparison count differs from runtime")
@@ -1178,18 +1277,6 @@ if ($IntentManifestObject.artifact_sha256 -ne $IntentHash) {
     throw "Intent-model artifact differs from its commit manifest"
 }
 $env:PYTHONPATH = Join-Path $ProjectDirectory "src"
-Invoke-NativeCommand `
-    -Command "python" `
-    -Arguments @(
-        (Join-Path $ProjectDirectory "tools\evaluate_intent_model.py"),
-        "--config", $IntentConfig,
-        "--en-model", $EnglishModel,
-        "--ru-model", $RussianModel,
-        "--artifact", $IntentModel,
-        "--manifest", $IntentManifest,
-        "--provenance-only"
-    ) `
-    -FailureMessage "Intent-model sealed provenance validation failed"
 Invoke-NativeCommand `
     -Command "python" `
     -Arguments @(

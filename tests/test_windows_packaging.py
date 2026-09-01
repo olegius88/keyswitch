@@ -83,6 +83,25 @@ class WindowsPackagingContractTests(unittest.TestCase):
             raise AssertionError("embedded Python validator is missing")
         validator = match.group(1)
         compile(validator, "build-windows-model-contract", "exec")
+        accepted = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                validator,
+                str(PROJECT_ROOT),
+                str(PROJECT_ROOT / "model/intent_v1/config.json"),
+                str(PROJECT_ROOT / "model/intent_v1/manifest.json"),
+                str(
+                    PROJECT_ROOT
+                    / "src/keyswitch/resources/models/layout_intent_v1.ksm"
+                ),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertEqual(accepted.stdout.strip(), "intent-v1-6bf96537c28f")
 
         required_contracts = (
             "KSLM_MAXIMUM_CONTAINER_BYTES = 14 * 1024 * 1024",
@@ -115,6 +134,11 @@ class WindowsPackagingContractTests(unittest.TestCase):
             'model.threshold_logits[trigger][direction]',
             'thresholds[trigger]["logits"][direction]',
             'model.veto_threshold != raw_veto["selection"]["raw_logit"]',
+            '"immutable seal registry"',
+            'registry != expected_registry',
+            '"trainer_sha256": "tools/train_intent_model.py"',
+            '"evaluator_sha256": "tools/evaluate_intent_model.py"',
+            'model toolchain file differs from manifest',
         )
         for contract in required_contracts:
             self.assertIn(contract, validator)
@@ -134,7 +158,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
         compilation = self.script.index('$NuitkaArguments = @(')
         self.assertLess(validation_call, compilation)
 
-    def test_windows_preflight_is_bounded_and_replays_sealed_provenance(self) -> None:
+    def test_windows_preflight_verifies_the_certified_sealed_artifact(self) -> None:
         preflight = self.script[
             self.script.index("$ProjectDirectory =") : self.script.index(
                 "$BuildDirectory ="
@@ -160,17 +184,17 @@ class WindowsPackagingContractTests(unittest.TestCase):
         self.assertIn('-MaximumBytes 1MB', preflight)
         self.assertIn('-MaximumBytes 64KB', preflight)
 
-        provenance = preflight.index("--provenance-only")
-        embedded_contract = preflight.index("$ModelContractValidator")
-        self.assertLess(provenance, embedded_contract)
-        for argument in (
-            '"--config", $IntentConfig',
-            '"--en-model", $EnglishModel',
-            '"--ru-model", $RussianModel',
-            '"--artifact", $IntentModel',
-            '"--manifest", $IntentManifest',
-        ):
-            self.assertIn(argument, preflight)
+        embedded_contract = self.script.index(
+            "$ModelContractValidator",
+            self.script.index("$ProjectDirectory ="),
+        )
+        compilation = self.script.index("$NuitkaArguments = @(")
+        self.assertLess(embedded_contract, compilation)
+        self.assertNotIn("--provenance-only", preflight)
+        self.assertNotIn(
+            'Join-Path $ProjectDirectory "tools\\evaluate_intent_model.py"',
+            preflight,
+        )
 
         for contract in (
             'model/intent_v1/sources/en_US.lm',
@@ -655,6 +679,16 @@ class WindowsPackagingContractTests(unittest.TestCase):
                 'exact in-installation intent model',
             ):
                 self.assertIn(contract, workflow)
+
+        for relative in (
+            ".github/workflows/tests.yml",
+            ".github/workflows/release.yml",
+        ):
+            workflow = (PROJECT_ROOT / relative).read_text(encoding="utf-8")
+            self.assertIn(
+                "PYTHONPATH=src tools/evaluate_intent_model.py --strict",
+                workflow,
+            )
 
 
 if __name__ == "__main__":

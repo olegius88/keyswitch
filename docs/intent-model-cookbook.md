@@ -177,6 +177,11 @@ jq -e '
 она остаётся длительной CPU-проверкой и не заменяет model-blind preseal для
 нового кандидата.
 
+Выполняйте этот replay только в reference environment из manifest. Для
+Windows/macOS consumer package не пересобирайте corpus: проверяйте точные
+artifact/config/source/registry/toolchain hashes и встроенный signed manifest,
+а полный `--strict` оставляйте обязательным отдельным job на reference host.
+
 ## 3. Воспроизвести v14 preseal без доступа к KSLM
 
 ```bash
