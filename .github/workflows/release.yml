@@ -157,7 +157,8 @@ jobs:
         env:
           PYTHONPATH: src
         run: |
-          python -m mypy --config-file pyproject.toml
+          python -m mypy --config-file pyproject.toml --exclude "^tools/freeze_intent_development_corpus\.py$"
+          python -m mypy --config-file pyproject.toml --platform linux tools/freeze_intent_development_corpus.py
           python -m coverage erase
           python -m coverage run --branch --source=src/keyswitch tests/test_intent_model.py -v
           python -m coverage run --append --branch --source=src/keyswitch -m unittest discover -s tests -p test_windows_backend.py -v

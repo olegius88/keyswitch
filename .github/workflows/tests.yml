@@ -146,7 +146,11 @@ jobs:
           }
 
       - name: Run maximum strict Python type checking on Windows
-        run: python -m mypy --config-file pyproject.toml
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m mypy --config-file pyproject.toml --exclude "^tools/freeze_intent_development_corpus\.py$"
+          python -m mypy --config-file pyproject.toml --platform linux tools/freeze_intent_development_corpus.py
 
       - name: Run Win32 unit tests with 100% branch coverage
         env:

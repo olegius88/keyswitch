@@ -239,13 +239,11 @@ def _atomic_write(path: Path, payload: bytes) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, destination)
-        directory_flag = cast(int | None, getattr(os, "O_DIRECTORY", None))
-        if directory_flag is not None:
-            directory_descriptor = os.open(parent, os.O_RDONLY | directory_flag)
-            try:
-                os.fsync(directory_descriptor)
-            finally:
-                os.close(directory_descriptor)
+        directory_descriptor = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
     finally:
         try:
             temporary.unlink()
