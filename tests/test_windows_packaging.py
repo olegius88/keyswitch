@@ -157,6 +157,22 @@ class WindowsPackagingContractTests(unittest.TestCase):
         )
         compilation = self.script.index('$NuitkaArguments = @(')
         self.assertLess(validation_call, compilation)
+        self.assertIn(
+            '"validate_intent_model_contract.py"',
+            self.script,
+        )
+        self.assertIn(
+            "$ModelContractValidatorPath,\n            $ProjectDirectory,",
+            self.script,
+        )
+        self.assertNotIn(
+            '"-c",\n        $ModelContractValidator',
+            self.script,
+        )
+        self.assertIn(
+            "-LiteralPath $ModelContractValidatorPath",
+            self.script,
+        )
 
     def test_windows_preflight_verifies_the_certified_sealed_artifact(self) -> None:
         preflight = self.script[

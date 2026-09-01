@@ -1276,29 +1276,45 @@ $IntentHash = Get-BytesSha256 -Bytes $IntentModelBytes
 if ($IntentManifestObject.artifact_sha256 -ne $IntentHash) {
     throw "Intent-model artifact differs from its commit manifest"
 }
-$env:PYTHONPATH = Join-Path $ProjectDirectory "src"
-Invoke-NativeCommand `
-    -Command "python" `
-    -Arguments @(
-        "-c",
-        $ModelContractValidator,
-        $ProjectDirectory,
-        $IntentConfig,
-        $IntentManifest,
-        $IntentModel
-    ) `
-    -FailureMessage "Intent-model schema, provenance or quality evidence validation failed"
-
 $BuildDirectory = Join-Path $ProjectDirectory "build\windows"
+if (Test-Path $BuildDirectory) {
+    Remove-Item -Recurse -Force $BuildDirectory
+}
+New-Item -ItemType Directory -Force $BuildDirectory | Out-Null
+$ModelContractValidatorPath = Join-Path `
+    $BuildDirectory `
+    "validate_intent_model_contract.py"
+[System.IO.File]::WriteAllText(
+    $ModelContractValidatorPath,
+    $ModelContractValidator,
+    $StrictUtf8
+)
+$env:PYTHONPATH = Join-Path $ProjectDirectory "src"
+try {
+    Invoke-NativeCommand `
+        -Command "python" `
+        -Arguments @(
+            $ModelContractValidatorPath,
+            $ProjectDirectory,
+            $IntentConfig,
+            $IntentManifest,
+            $IntentModel
+        ) `
+        -FailureMessage "Intent-model schema, provenance or quality evidence validation failed"
+}
+finally {
+    Remove-Item `
+        -LiteralPath $ModelContractValidatorPath `
+        -Force `
+        -ErrorAction SilentlyContinue
+}
+
 $NativeOutput = Join-Path $BuildDirectory "native"
 $Icon = Join-Path $BuildDirectory "keyswitch.ico"
 $EntryPoint = Join-Path $ProjectDirectory "packaging\keyswitch_windows_entry.py"
 $NativeDistribution = Join-Path $NativeOutput "keyswitch_windows_entry.dist"
 $Executable = Join-Path $NativeDistribution "KeySwitch.exe"
 
-if (Test-Path $BuildDirectory) {
-    Remove-Item -Recurse -Force $BuildDirectory
-}
 New-Item -ItemType Directory -Force $NativeOutput, $OutputDirectory | Out-Null
 
 Invoke-NativeCommand `
