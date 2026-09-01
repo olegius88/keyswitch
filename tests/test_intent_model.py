@@ -314,7 +314,7 @@ class StatusAndPrimitiveTests(unittest.TestCase):
             status.as_dict(),
             {
                 "available": True,
-                "path": "/tmp/model.ksm",
+                "path": str(path),
                 "version": "v1",
                 "checksum": "a" * 64,
                 "error": None,
@@ -1090,7 +1090,8 @@ class EncodingAndPredictionTests(unittest.TestCase):
                 metadata={"source": "test"},
             )
             self.assertEqual(model.model_version, "atomic-v1")
-            self.assertEqual(path.stat().st_mode & 0o777, 0o644)
+            if os.name == "posix":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o644)
             self.assertFalse(list(path.parent.glob("*.tmp")))
             self.assertEqual(LinearNgramModel.load(path).metadata, {"source": "test"})
 
@@ -1740,7 +1741,7 @@ class DiscoveryCacheAndSystemBranchTests(unittest.TestCase):
             ):
                 model, status = LinearNgramModel.try_load_default()
             self.assertEqual(cast(LinearNgramModel, model).model_version, "packaged")
-            self.assertEqual(status.path, packaged)
+            self.assertEqual(cast(Path, status.path).resolve(), packaged.resolve())
 
             packaged.write_bytes(b"also bad")
             clear_model_cache()
@@ -1751,7 +1752,7 @@ class DiscoveryCacheAndSystemBranchTests(unittest.TestCase):
                 missing, failed = LinearNgramModel.try_load_default()
             self.assertIsNone(missing)
             self.assertFalse(failed.available)
-            self.assertEqual(failed.path, override)
+            self.assertEqual(cast(Path, failed.path).resolve(), override.resolve())
             self.assertIn("bad.ksm", cast(str, failed.error))
             self.assertIn("layout_intent_v1.ksm", cast(str, failed.error))
 
