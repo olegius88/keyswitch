@@ -768,14 +768,25 @@ class WindowsApplicationEntrypointTests(unittest.TestCase):
     def test_logging_parser_diagnostics_and_ui_dispatch(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
+            handler = logging.NullHandler()
             with (
                 patch("keyswitch.windows_app.data_dir", return_value=directory),
                 patch("keyswitch.windows_app.logging.basicConfig") as basic,
-                patch("keyswitch.windows_app.logging.FileHandler", return_value=logging.NullHandler()),
+                patch(
+                    "keyswitch.windows_app.RotatingFileHandler",
+                    return_value=handler,
+                ) as rotating,
             ):
                 windows_app_module.configure_logging()
             self.assertTrue(directory.is_dir())
             self.assertEqual(basic.call_args.kwargs["level"], logging.INFO)
+            rotating.assert_called_once_with(
+                directory / "keyswitch.log",
+                maxBytes=5 * 1024 * 1024,
+                backupCount=3,
+                encoding="utf-8",
+            )
+            self.assertEqual(basic.call_args.kwargs["handlers"], [handler])
 
         api = FakeWindowsAPI()
         backend = WindowsBackend(api)
@@ -866,7 +877,10 @@ class WindowsApplicationEntrypointTests(unittest.TestCase):
                 patch("keyswitch.windows_backend.WindowsBackend", return_value=backend),
                 patch("keyswitch.history.data_dir", return_value=Path(temporary)),
                 patch("logging.basicConfig"),
-                patch("logging.FileHandler", return_value=logging.NullHandler()),
+                patch(
+                    "logging.handlers.RotatingFileHandler",
+                    return_value=logging.NullHandler(),
+                ),
                 contextlib.redirect_stdout(io.StringIO()),
                 warnings.catch_warnings(),
                 self.assertRaises(SystemExit) as stopped,

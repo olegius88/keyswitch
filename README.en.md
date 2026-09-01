@@ -60,11 +60,11 @@ model is not updated from ordinary typing.
 
 ## Install on Windows
 
-Download `KeySwitch-Setup-0.6.0-x64.exe` from the
+Download `KeySwitch-Setup-0.6.1-x64.exe` from the
 [latest release](https://github.com/olegius88/keyswitch/releases/latest) and run
 it. The per-user installation goes to `%LOCALAPPDATA%\Programs\KeySwitch` and
 does not require administrator privileges. The release also includes the
-portable `KeySwitch-0.6.0-windows-x64.zip` archive.
+portable `KeySwitch-0.6.1-windows-x64.zip` archive.
 
 After launch, KeySwitch appears in the notification area. Left- or right-click
 the `EN/RU` or flag icon to open its menu. Its Switch to action always offers
@@ -125,12 +125,12 @@ Probe the system backend without opening the application window:
 
 ## Install the Debian package
 
-Download `keyswitch_0.6.0_amd64.deb` from the
+Download `keyswitch_0.6.1_amd64.deb` from the
 [latest release](https://github.com/olegius88/keyswitch/releases/latest), then
 install it with:
 
 ```bash
-sudo apt install ./keyswitch_0.6.0_amd64.deb
+sudo apt install ./keyswitch_0.6.1_amd64.deb
 ```
 
 The package installs the required system dependencies and adds KeySwitch to the
@@ -204,13 +204,22 @@ On Linux:
   `~/.local/share/keyswitch/learning.json`;
 - optional per-user Hunspell dictionaries:
   `~/.local/share/keyswitch/dictionaries/<locale>.aff/.dic`;
-- application and error log: `~/.local/share/keyswitch/keyswitch.log`;
+- startup and optional technical-diagnostics log:
+  `~/.local/share/keyswitch/keyswitch.log`;
 - autostart entry: `~/.config/autostart/io.github.olegius88.KeySwitch.desktop`.
 
 `KeePassXC`, `1Password` and `Bitwarden` are excluded by default. A global
 observer does not know the semantics of an individual input field, so other
 sensitive applications should be added by `.exe` name on Windows or by
 `WM_CLASS` on Linux using the Exclusions settings page.
+
+Detailed technical logging can be enabled on the Maintenance page on Windows
+or the About page on Linux. It records the decision reason, scores for both
+interpretations, manual-layout intent and correction outcomes. Because it may
+contain typed words and application names, it is disabled by default. Text is
+always replaced with `<redacted>` for excluded applications. The log is capped
+at 5 MiB and rotated with three backups; after reproducing a problem, disable
+logging and share `keyswitch.log` for analysis.
 
 The Local linear model switch on the automatic-correction page disables only
 the classifier check; dictionaries, hard guards and explicitly learned rules
@@ -232,6 +241,14 @@ the deterministic heuristics and user rules: this removes the most ambiguous
 tail from probabilistic decisions without disabling correction as a whole.
 The trainer also excludes deletion typos that fall below this limit; the same
 limit is recorded in the signed model policy and covered by tests.
+
+The configured minimum length does not block a narrow reviewed exception list
+for frequent two-letter function words; it currently contains Russian-layout
+`ша` to English `if`. The exception requires an exact target-language lexicon
+hit and at least a 100x target/source frequency ratio. An explicit manual
+layout change has higher priority and protects the entire next word, including
+pause correction and previously learned rules. Normal detection resumes after
+the word boundary.
 Real three- and four-character bilingual collision pairs from frozen Onboard
 data are retained only in the safety corpus: they never train the classifier,
 but prove the valid-source pre-model guard across every trigger.
@@ -473,7 +490,7 @@ Build the reproducible native Debian package with:
 sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
 ./tools/install-build-tools.sh .nuitka
 KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package="dist/keyswitch_0.6.0_$(dpkg --print-architecture).deb"
+package="dist/keyswitch_0.6.1_$(dpkg --print-architecture).deb"
 ./tools/verify-native-deb.sh "$package"
 ```
 
@@ -530,7 +547,7 @@ installed UI, create one
 - On Windows, UIPI prevents a regular process from injecting input into a
   window running at a higher integrity level. KeySwitch needs a matching level
   for that target window.
-- The Windows 0.6.0 Setup EXE is not yet signed with a publisher certificate.
+- The Windows 0.6.1 Setup EXE is not yet signed with a publisher certificate.
 
 ## License
 

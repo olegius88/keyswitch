@@ -1,4 +1,4 @@
-.TH KEYSWITCH 1 "September 2026" "KeySwitch 0.6.0" "User Commands"
+.TH KEYSWITCH 1 "September 2026" "KeySwitch 0.6.1" "User Commands"
 .SH NAME
 keyswitch \- automatic keyboard layout correction for Ubuntu X11
 .SH SYNOPSIS
@@ -145,7 +145,10 @@ Explicitly learned conversions and rejected automatic corrections.
 Optional per-user Hunspell dictionaries.
 .TP
 .I ~/.local/share/keyswitch/keyswitch.log
-Application log.
+Application log. Detailed word-decision diagnostics are disabled by default
+and can be enabled in the About page. Diagnostic records may contain typed
+words and application names; text from excluded applications is redacted. The
+file is limited to 5 MiB and rotated with three backups.
 .TP
 .I /usr/lib/keyswitch/keyswitch/resources/models/layout_intent_v1.ksm
 Bundled, checksum-validated KSLM schema 4 linear intent model, bounded to

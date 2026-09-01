@@ -300,6 +300,13 @@ class MainWindowInteractionTests(unittest.TestCase):
         self.assertTrue(manual_layout.get_active())
         manual_layout.set_active(False)
         self.assertFalse(self.settings.get("detection.respect_manual_layout"))
+        technical_logging = self.window._settings_controls[
+            "diagnostics.technical_logging"
+        ]
+        assert isinstance(technical_logging, Adw.SwitchRow)
+        self.assertFalse(technical_logging.get_active())
+        technical_logging.set_active(True)
+        self.assertTrue(self.settings.get("diagnostics.technical_logging"))
         pause_correction = self.window._settings_controls[
             "detection.correct_on_pause"
         ]
@@ -709,7 +716,10 @@ class MainWindowInteractionTests(unittest.TestCase):
         display.get_clipboard.return_value = clipboard
         with patch("keyswitch.ui.Gdk.Display.get_default", return_value=display):
             self.window._copy_diagnostics(self.engine.backend.probe())
-        self.assertIn("KeySwitch", clipboard.set.call_args.args[0])
+        diagnostics = clipboard.set.call_args.args[0]
+        self.assertIn("KeySwitch", diagnostics)
+        self.assertIn("Technical logging:", diagnostics)
+        self.assertIn("keyswitch.log", diagnostics)
         with (
             patch("keyswitch.ui.Gdk.Display.get_default", return_value=None),
             patch.object(self.window, "toast") as toast,

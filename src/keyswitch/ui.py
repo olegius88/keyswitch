@@ -23,7 +23,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 from . import __version__
 from .config import SettingsStore
 from .engine import EngineSnapshot
-from .history import HistoryStore
+from .history import HistoryStore, data_dir
 from .intent_model import IntentModelStatus
 from .learning import LearningStore
 from .system import AutostartManager
@@ -388,7 +388,9 @@ class MainWindow(Adw.ApplicationWindow):
         )
         minimum = Adw.SpinRow.new_with_range(2, 12, 1)
         minimum.set_title("Минимальная длина слова")
-        minimum.set_subtitle("Короткие фрагменты чаще бывают командами и сокращениями")
+        minimum.set_subtitle(
+            "Короткие фрагменты обычно не меняются; проверенный список частотных служебных слов обрабатывается отдельно"
+        )
         minimum.set_value(float(self.settings.get("detection.minimum_length", 3)))
         minimum.connect("notify::value", lambda row, _p: self.settings.set("detection.minimum_length", int(row.get_value())))
         self._settings_controls["detection.minimum_length"] = minimum
@@ -861,6 +863,28 @@ class MainWindow(Adw.ApplicationWindow):
         locations.add(Adw.ActionRow(title="Самообучение", subtitle=str(self.engine.learning.path)))
         page.append(locations)
 
+        technical_log = Adw.PreferencesGroup(
+            title="Технический журнал",
+            description=(
+                "Включайте на время воспроизведения проблемы. Журнал содержит решения модели, "
+                "названия приложений и может содержать введённые слова; текст из приложений-исключений скрывается."
+            ),
+        )
+        technical_log.add(
+            self._switch_row(
+                "diagnostics.technical_logging",
+                "Записывать подробную диагностику распознавания",
+                "По умолчанию выключено; журнал ограничен по размеру и хранится только локально",
+            )
+        )
+        technical_log.add(
+            Adw.ActionRow(
+                title="Файл журнала",
+                subtitle=str(data_dir() / "keyswitch.log"),
+            )
+        )
+        page.append(technical_log)
+
         copy_button = Gtk.Button(label="Скопировать диагностику", icon_name="edit-copy-symbolic", halign=Gtk.Align.START)
         copy_button.connect("clicked", lambda _b: self._copy_diagnostics(probe))
         page.append(copy_button)
@@ -1238,6 +1262,8 @@ class MainWindow(Adw.ApplicationWindow):
                 f"XKB: {probe.xkb_version}",
                 f"XKB group: {probe.current_group}",
                 f"Intent model: {self.engine.intent_model_status.summary}",
+                f"Technical logging: {bool(self.settings.get('diagnostics.technical_logging', False))}",
+                f"Technical log: {data_dir() / 'keyswitch.log'}",
                 f"Backend error: {probe.error or 'none'}",
             )
         )

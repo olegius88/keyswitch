@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import queue
 import tempfile
 import threading
@@ -27,6 +29,7 @@ from keyswitch.history import HistoryStore
 from keyswitch.intent_model import CorrectionTrigger, IntentModelInput, LinearPrediction
 from keyswitch.language_model import WordScore
 from keyswitch.layouts import LayoutPair
+from keyswitch.short_words import trusted_short_word_decision
 from keyswitch.x11_backend import (
     CONTROL_MASK,
     LOCK_MASK,
@@ -45,11 +48,12 @@ def score(
     exact: bool = False,
     spell: bool = False,
     ngram: float = -2.0,
+    frequency: int | None = None,
 ) -> WordScore:
     return WordScore(
         value,
         known,
-        10 if exact else 0,
+        (10 if exact else 0) if frequency is None else frequency,
         0.5,
         exact,
         spell,
@@ -150,6 +154,157 @@ class DetectorBranchTests(unittest.TestCase):
         self.assertTrue(not_found.should_convert)
         protected = self.decide(detector, original="https://host", alternatives={1: "target"})
         self.assertEqual(protected.reason, "код, адрес или аббревиатура")
+
+    def test_trusted_short_words_require_curated_exact_dominant_target(self) -> None:
+        source = StubModel(
+            {
+                "ша": score(5.0, known=True, exact=True, frequency=531),
+                "щл": score(-4.0),
+                "аб": score(-4.0),
+            }
+        )
+        target = StubModel(
+            {
+                "if": score(
+                    4.5,
+                    known=True,
+                    exact=True,
+                    spell=True,
+                    frequency=464_324,
+                ),
+                "ok": score(4.0, known=True, spell=True),
+                "zz": score(8.0, known=True, exact=True, frequency=1_000_000),
+            }
+        )
+        detector = LanguageDetector({0: target, 1: source})
+
+        trusted = trusted_short_word_decision(
+            detector,
+            "ша",
+            {1: "ша", 2: "if", 0: "if"},
+            1,
+            ignored_words=(),
+            rejected_targets=set(),
+            protect_code=True,
+        )
+        self.assertIsNotNone(trusted)
+        assert trusted is not None
+        self.assertTrue(trusted.should_convert)
+        self.assertEqual(trusted.replacement, "if")
+        self.assertIn("безопасного списка", trusted.reason)
+
+        protected = trusted_short_word_decision(
+            detector,
+            "ША",
+            {0: "if"},
+            1,
+            ignored_words=(),
+            rejected_targets=set(),
+            protect_code=True,
+        )
+        self.assertIsNone(protected)
+
+        ignored = trusted_short_word_decision(
+            detector,
+            "ша",
+            {0: "if"},
+            1,
+            ignored_words=(" ША ",),
+            rejected_targets=set(),
+            protect_code=False,
+        )
+        self.assertIsNone(ignored)
+
+        rejected = trusted_short_word_decision(
+            detector,
+            "ша",
+            {0: "if"},
+            1,
+            ignored_words=(),
+            rejected_targets={0},
+            protect_code=True,
+        )
+        self.assertIsNone(rejected)
+
+        not_exact = trusted_short_word_decision(
+            detector,
+            "щл",
+            {0: "ok"},
+            1,
+            ignored_words=(),
+            rejected_targets=set(),
+            protect_code=True,
+        )
+        self.assertIsNone(not_exact)
+
+        not_curated = trusted_short_word_decision(
+            detector,
+            "аб",
+            {0: "zz"},
+            1,
+            ignored_words=(),
+            rejected_targets=set(),
+            protect_code=True,
+        )
+        self.assertIsNone(not_curated)
+
+        target.values["if"] = score(
+            8.0, known=True, exact=True, frequency=9_999
+        )
+        self.assertIsNone(
+            trusted_short_word_decision(
+                detector,
+                "ша",
+                {0: "if"},
+                1,
+                ignored_words=(),
+                rejected_targets=set(),
+                protect_code=True,
+            )
+        )
+        target.values["if"] = score(
+            8.0, known=True, exact=True, frequency=10_000
+        )
+        source.values["ша"] = score(
+            5.0, known=True, exact=True, frequency=100
+        )
+        self.assertIsNone(
+            trusted_short_word_decision(
+                detector,
+                "ша",
+                {0: "if"},
+                1,
+                ignored_words=(),
+                rejected_targets=set(),
+                protect_code=True,
+            )
+        )
+        target.values["if"] = score(
+            8.0, known=True, exact=True, frequency=1_000_000
+        )
+        source.values["шаш"] = score(-4.0)
+        self.assertIsNone(
+            trusted_short_word_decision(
+                detector,
+                "шаш",
+                {0: "if"},
+                1,
+                ignored_words=(),
+                rejected_targets=set(),
+                protect_code=True,
+            )
+        )
+        self.assertIsNone(
+            trusted_short_word_decision(
+                detector,
+                "ша",
+                {0: "ша"},
+                1,
+                ignored_words=(),
+                rejected_targets=set(),
+                protect_code=True,
+            )
+        )
 
     def test_valid_source_guards_ambiguity(self) -> None:
         both, _left, _right = self.detector(
@@ -517,6 +672,85 @@ class EngineBranchTests(unittest.TestCase):
         self.assertTrue(enabled.should_convert)
         self.assertEqual(classifier.inputs[0].trigger, "pause")
 
+    def test_technical_logging_is_opt_in_structured_and_redacts_exclusions(self) -> None:
+        with self.assertLogs("keyswitch.engine", logging.INFO) as captured:
+            self.settings.set("diagnostics.technical_logging", True)
+            self.type_word("ghbdtn")
+            boundary = key("space", character=" ")
+            self.engine._handle(boundary)
+            self.engine._handle(released(boundary))
+
+            self.settings.set("exclusions.applications", ["testeditor"])
+            self.backend.group = 0
+            self.engine._update(current_group=0)
+            self.type_word("ghbdtn")
+            self.engine._handle(boundary)
+            self.engine._handle(released(boundary))
+            excluded_plan = self.engine._last_committed
+            self.assertIsNotNone(excluded_plan)
+            assert excluded_plan is not None
+            redacted_decision = self.engine._decide_word(
+                "ghbdtn", {1: "привет"}, 0, "TestEditor"
+            )
+            self.engine._log_word_evaluation(
+                trigger="pause",
+                original="ghbdtn",
+                alternatives={1: "привет"},
+                application="TestEditor",
+                enabled=True,
+                trigger_enabled=True,
+                manual_layout_protected=False,
+                application_excluded=True,
+                decision=redacted_decision,
+            )
+            self.engine._execute_correction(excluded_plan, None)
+
+        payloads = [
+            json.loads(record.getMessage().removeprefix("TECHNICAL "))
+            for record in captured.records
+        ]
+        events = [str(payload["event"]) for payload in payloads]
+        self.assertIn("setting_changed", events)
+        self.assertIn("technical_logging_enabled", events)
+        self.assertIn("word_evaluation", events)
+        self.assertIn("correction_applied", events)
+        evaluated = [
+            payload for payload in payloads if payload["event"] == "word_evaluation"
+        ]
+        decision = evaluated[0]["decision"]
+        self.assertIsInstance(decision, dict)
+        assert isinstance(decision, dict)
+        self.assertTrue(decision["should_convert"])
+        self.assertIn("source_score", decision)
+        self.assertEqual(evaluated[-1]["original"], "<redacted>")
+        self.assertEqual(evaluated[-1]["alternatives"], {})
+        redacted_decision_payload = evaluated[-1]["decision"]
+        self.assertIsInstance(redacted_decision_payload, dict)
+        assert isinstance(redacted_decision_payload, dict)
+        self.assertEqual(
+            redacted_decision_payload["replacement"], "<redacted>"
+        )
+        excluded_corrections = [
+            payload
+            for payload in payloads
+            if payload["event"] == "correction_applied"
+            and payload["application_excluded"] is True
+        ]
+        self.assertEqual(excluded_corrections[0]["original"], "<redacted>")
+        self.assertEqual(excluded_corrections[0]["replacement"], "<redacted>")
+
+        root = Path(self.temporary.name) / "logging-enabled"
+        settings = SettingsStore(root / "config.json")
+        settings.set("diagnostics.technical_logging", True)
+        with self.assertLogs("keyswitch.engine", logging.INFO) as initialized:
+            KeySwitchEngine(settings, HistoryStore(root / "history.jsonl"), FakeBackend())
+        initial_payload = json.loads(
+            initialized.records[0].getMessage().removeprefix("TECHNICAL ")
+        )
+        self.assertEqual(initial_payload["event"], "engine_initialized")
+        self.assertEqual(initial_payload["keyswitch_version"], "0.6.1")
+        self.assertIn("minimum_length", initial_payload["detection_settings"])
+
     def test_start_stop_idempotence_and_backend_failure(self) -> None:
         self.engine.start()
         self.engine.start()
@@ -793,7 +1027,7 @@ class EngineBranchTests(unittest.TestCase):
         self.assertIsNone(self.engine.learning_prompt)
         self.assertIsNone(self.engine._forced_target_group(0, "hello"))
 
-    def test_learned_rule_overrides_manual_layout_protection_on_pause(self) -> None:
+    def test_manual_layout_protection_overrides_learned_rule_on_pause(self) -> None:
         self.engine.learning.confirm_manual(0, "hello", 1, 2)
         self.engine._manual_layout_group = 0
         self.engine._strokes = [
@@ -806,9 +1040,9 @@ class EngineBranchTests(unittest.TestCase):
 
         self.engine._maybe_correct_after_pause(now=3.0)
 
-        self.assertEqual(len(self.backend.injections), 1)
-        self.assertEqual(self.backend.injections[0][1], 1)
-        self.assertIsNone(self.engine._manual_layout_group)
+        self.assertEqual(self.backend.injections, [])
+        self.assertEqual(self.engine._manual_layout_group, 0)
+        self.assertFalse(self.engine._pause_correction_pending)
 
     def test_context_expiry_copy_and_lru_limit(self) -> None:
         strokes = (letter("a"),)

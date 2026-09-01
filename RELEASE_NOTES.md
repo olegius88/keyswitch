@@ -1,84 +1,73 @@
-# KeySwitch 0.6.0
+# KeySwitch 0.6.1
 
 ## Русский
 
-Главное изменение выпуска — собственная локальная линейная n-граммная модель
-для более точного распознавания текста, набранного в неправильной раскладке.
+Этот patch-релиз исправляет два конфликтующих сценария короткого ввода и
+добавляет безопасный технический журнал для анализа решений распознавания.
 
-- Модель сравнивает EN/RU-интерпретации одной физической последовательности
-  клавиш. Она использует символьные 1–5-граммы, направление раскладки, длину и
-  способ завершения слова, работает полностью локально и не отправляет
-  пользовательский текст в сеть.
-- Жёсткие защиты URL, путей, кода, аббревиатур, коротких и неоднозначных слов,
-  приложений-исключений и пользовательских правил остаются выше модели. Если
-  модель недоступна, KeySwitch безопасно возвращается к консервативному
-  детерминированному распознаванию.
-- Сертифицированный кандидат `intent-v1-6bf96537c28f` прошёл все 30 strict
-  gates. На независимом model-blind unknown-typo holdout зафиксировано 0 ложных
-  переключений из 60 000 негативных примеров; два независимых переобучения
-  побайтно воспроизвели KSLM, manifest и test report.
-- Точные frozen EN/RU Onboard-источники, их исходная лицензия и
-  checksum-validated KSLM теперь входят в Linux и Windows пакеты. Обычный ввод
-  пользователя не используется для общего обучения модели.
-- В меню индикатора появилась команда выбора языка, противоположного текущему:
-  при RU доступен английский, при EN — русский.
-- Linux и Windows packaging выполняют fail-closed проверку модели, provenance,
-  размеров контейнера и фактически установленного native runtime. DEB не
-  зависит от системного интерпретатора Python.
-- Добавлены подробные runbook и cookbook по созданию корпуса, preseal,
-  обучению, независимой проверке, воспроизводимости и выпуску модели.
+- `ша`, набранное в русской раскладке как физический эквивалент английского
+  `if`, теперь исправляется независимо от настройки минимальной длины слова —
+  после пробела, другого включённого разделителя или паузы.
+- Исключение намеренно узкое: оно требует точного частотного совпадения и не
+  включает неоднозначные пары вроде `шт` → `in` и `фе` → `at`.
+- Явная ручная смена раскладки имеет абсолютный приоритет для следующего слова.
+  Если пользователь выбрал RU и ввёл `ша`, KeySwitch сохраняет русский текст
+  как после паузы, так и после завершения слова; это правило сильнее ранее
+  выученных автоматических преобразований.
+- В Linux и Windows появился выключенный по умолчанию подробный технический
+  журнал. Он фиксирует версию приложения и модели, настройки распознавания,
+  оценки обеих раскладок, причины решений, ручной выбор языка и результат
+  исправления.
+- Журнал может содержать введённые слова и названия приложений. Текст из
+  приложений-исключений всегда заменяется на `<redacted>`. Файл хранится только
+  локально, ограничен 5 МиБ и имеет три ротационные копии.
+- Сертифицированный KSLM-артефакт `intent-v1-6bf96537c28f` не изменён; проверка
+  его замороженного toolchain и упаковочного контракта остаётся fail-closed.
 
-Проверочный контур включает строгую типизацию Python, 100% покрытия строк и
-ветвей, detector/model quality gates, настоящие X11/DBusMenu и Win32 E2E,
-проверку нативного DEB, тихую установку и автообновление Windows Setup.
+Локальный контур выпуска: строгий `mypy`, 342 автоматических теста и 100%
+покрытия строк и ветвей.
 
 ### Установка
 
-- Windows 10/11 x64: `KeySwitch-Setup-0.6.0-x64.exe` или переносимый
-  `KeySwitch-0.6.0-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.6.0_amd64.deb`.
+- Windows 10/11 x64: `KeySwitch-Setup-0.6.1-x64.exe` или переносимый
+  `KeySwitch-0.6.1-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.6.1_amd64.deb`.
 
 Windows Setup пока не подписан сертификатом издателя. Нативная Wayland-сессия
 Linux пока не поддерживается.
 
 ## English
 
-The main addition in this release is a first-party local linear n-gram model
-for more accurate detection of text entered with the wrong keyboard layout.
+This patch release fixes two conflicting short-input scenarios and adds a safe
+technical log for analysing detection decisions.
 
-- The model compares the EN/RU interpretations of the same physical key
-  sequence. It uses character 1–5-grams, layout direction, token length and the
-  word-completion trigger, runs entirely locally and never sends user text over
-  the network.
-- Hard guards for URLs, paths, code, abbreviations, short or ambiguous words,
-  excluded applications and explicit user rules remain above the model. If the
-  artifact is unavailable, KeySwitch safely falls back to its conservative
-  deterministic detector.
-- The certified `intent-v1-6bf96537c28f` candidate passed all 30 strict gates.
-  On an independent model-blind unknown-typo holdout it produced 0 false
-  switches among 60,000 negative examples; two independent retraining runs
-  reproduced the KSLM, manifest and test report byte for byte.
-- Exact frozen EN/RU Onboard sources, their original license evidence and the
-  checksum-validated KSLM are now bundled in both Linux and Windows packages.
-  Ordinary user input is not used to train the shared model.
-- The tray menu now offers the language opposite to the active one: English
-  while RU is active and Russian while EN is active.
-- Linux and Windows packaging fail closed on model provenance, container
-  bounds and the model loaded by the installed native runtime. The DEB does not
-  depend on the system Python interpreter.
-- A detailed runbook and cookbook now document corpus creation, preseal,
-  training, independent evaluation, reproducibility and model release.
+- Russian-layout `ша`, the physical equivalent of English `if`, is now
+  corrected independently of the configured minimum word length after Space,
+  any other enabled boundary, or a typing pause.
+- The exception is deliberately narrow: it requires an exact high-frequency
+  match and does not admit ambiguous pairs such as `шт` → `in` or `фе` → `at`.
+- An explicit manual layout change has absolute priority for the next word. If
+  the user selects RU and types `ша`, KeySwitch preserves the Russian text both
+  after a pause and at the word boundary, even when an older learned automatic
+  rule exists.
+- Linux and Windows settings now include detailed technical logging, disabled
+  by default. It records application and model versions, detection settings,
+  both layout scores, decision reasons, manual language selection and
+  correction outcomes.
+- The log may contain typed words and application names. Text from excluded
+  applications is always replaced with `<redacted>`. Files stay local, are
+  capped at 5 MiB and rotate through three backups.
+- The certified `intent-v1-6bf96537c28f` KSLM artifact is unchanged; its frozen
+  toolchain and packaging contract remain fail-closed.
 
-The release quality contour includes strict Python typing, mandatory 100% line
-and branch coverage, detector/model quality gates, real X11/DBusMenu and Win32
-E2E tests, native DEB verification, silent Windows installation and automatic
-update relaunch testing.
+The local release gate passes strict `mypy`, 342 automated tests and mandatory
+100% line and branch coverage.
 
 ### Installation
 
-- Windows 10/11 x64: `KeySwitch-Setup-0.6.0-x64.exe` or the portable
-  `KeySwitch-0.6.0-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.6.0_amd64.deb`.
+- Windows 10/11 x64: `KeySwitch-Setup-0.6.1-x64.exe` or the portable
+  `KeySwitch-0.6.1-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.6.1_amd64.deb`.
 
 The Windows installer is not yet signed with a publisher certificate. Native
 Linux Wayland sessions are not supported yet.

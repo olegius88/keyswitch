@@ -31,7 +31,7 @@ AUTOCORRECTION_SETTINGS = (
     SettingSpec(
         "detection.minimum_length",
         "Минимальная длина слова",
-        "Короткие последовательности остаются без изменений.",
+        "Короткие последовательности остаются без изменений, кроме проверенного списка частотных служебных слов.",
         "int",
         minimum=2,
         maximum=12,
@@ -233,10 +233,21 @@ UPDATE_SETTINGS = (
 )
 
 
+DIAGNOSTIC_SETTINGS = (
+    SettingSpec(
+        "diagnostics.technical_logging",
+        "Записывать технический журнал",
+        "Сохранять решения распознавания, оценки и названия приложений. Журнал может содержать введённые слова; в приложениях-исключениях текст скрывается.",
+        "bool",
+    ),
+)
+
+
 ALL_SETTING_SPECS = (
     *AUTOCORRECTION_SETTINGS,
     *TRIGGER_SETTINGS,
     *HOTKEY_SETTINGS,
     *SYSTEM_SETTINGS,
     *UPDATE_SETTINGS,
+    *DIAGNOSTIC_SETTINGS,
 )

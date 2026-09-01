@@ -136,6 +136,22 @@ def main() -> int:
             )
             if visual_application.settings.get("detection.correct_on_pause") is not True:
                 raise RuntimeError("Pause correction switch did not save the on state")
+            technical_logging = visual_application._boolean_variables.get(
+                "diagnostics.technical_logging"
+            )
+            if technical_logging is None or technical_logging.get():
+                raise RuntimeError(
+                    "Technical logging switch is missing or enabled by default"
+                )
+            technical_logging.set(True)
+            visual_application._save_boolean(
+                "diagnostics.technical_logging", technical_logging
+            )
+            if (
+                visual_application.settings.get("diagnostics.technical_logging")
+                is not True
+            ):
+                raise RuntimeError("Technical logging switch did not save")
             for update_path in (
                 "updates.check_automatically",
                 "updates.install_automatically",

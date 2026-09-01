@@ -197,6 +197,9 @@ def main() -> int:
         ("punctuation boundary keeps its glyph", 0, "ghbdtn,", "привет,", 1, 1000),
         ("manual layout switch protects next word", 0, "ghbdtn ", "ghbdtn ", 0, 1000),
         ("manual protection is consumed once", 0, "ghbdtn ", "привет ", 1, 1000),
+        ("short Russian word switches to English", 1, "if ", "if ", 0, 1000),
+        ("manual Russian selection protects short word", 1, "if ", "ша ", 1, 1000),
+        ("short-word protection is consumed once", 1, "if ", "if ", 0, 1000),
     )
     window = Gtk.Window(title="KeySwitch native package E2E")
     window.set_default_size(520, 120)
@@ -310,6 +313,8 @@ def main() -> int:
             ("руддщ", "hello"),
             ("ghbdtn", "привет"),
             ("ghbdtn", "привет"),
+            ("ша", "if"),
+            ("ша", "if"),
         ]
         if actual_history != expected_history:
             return fail(f"wrong correction history: {actual_history!r}")
@@ -355,6 +360,22 @@ def main() -> int:
             typer.type("hello ")
         except (OSError, RuntimeError) as error:
             return fail(f"cannot type the learned packaged word: {error}")
+        GLib.timeout_add(900, verify_manual_override_of_learned_rule)
+        return GLib.SOURCE_REMOVE
+
+    def verify_manual_override_of_learned_rule() -> bool:
+        if entry.get_text() != "hello " or typer.current_group() != 0:
+            return fail(
+                "manual layout did not override the packaged learned rule: "
+                f"text={entry.get_text()!r} group={typer.current_group()}"
+            )
+        try:
+            entry.set_text("")
+            window.present()
+            entry.grab_focus()
+            typer.type("hello ")
+        except (OSError, RuntimeError) as error:
+            return fail(f"cannot repeat the learned packaged word: {error}")
         GLib.timeout_add(900, verify_learned_rule)
         return GLib.SOURCE_REMOVE
 
@@ -374,6 +395,8 @@ def main() -> int:
             ("руддщ", "hello"),
             ("ghbdtn", "привет"),
             ("ghbdtn", "привет"),
+            ("ша", "if"),
+            ("ша", "if"),
             ("hello", "руддщ"),
         ]
         if actual_history != expected_history:
@@ -384,7 +407,7 @@ def main() -> int:
         loop.quit()
         return GLib.SOURCE_REMOVE
 
-    GLib.timeout_add_seconds(40, abort_on_timeout)
+    GLib.timeout_add_seconds(50, abort_on_timeout)
     GLib.timeout_add(100, wait_for_application)
     captured_stdout = ""
     captured_stderr = ""

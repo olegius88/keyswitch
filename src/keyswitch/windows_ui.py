@@ -33,6 +33,7 @@ from .windows_system import (
 from .windows_tray import WindowsTray, WindowsTrayActions
 from .windows_ui_model import (
     AUTOCORRECTION_SETTINGS,
+    DIAGNOSTIC_SETTINGS,
     HOTKEY_SETTINGS,
     SYSTEM_SETTINGS,
     TRIGGER_SETTINGS,
@@ -704,7 +705,22 @@ class WindowsApplication:
             command=self._reset_settings,
         ).grid(row=1, column=0, sticky="w", pady=(10, 0))
 
-        locations = self._section(page, "Локальные файлы", 4)
+        diagnostics = self._section(page, "Технический журнал", 4)
+        diagnostics.columnconfigure(0, weight=1)
+        for row, spec in enumerate(DIAGNOSTIC_SETTINGS):
+            self._add_setting(diagnostics, spec, row)
+        ttk.Label(
+            diagnostics,
+            text=f"Файл журнала: {data_dir() / 'keyswitch.log'}",
+            wraplength=720,
+        ).grid(
+            row=len(DIAGNOSTIC_SETTINGS),
+            column=0,
+            sticky="w",
+            pady=(8, 0),
+        )
+
+        locations = self._section(page, "Локальные файлы", 5)
         ttk.Label(
             locations,
             text=(
@@ -1357,6 +1373,10 @@ class WindowsApplication:
             "current_group": probe.current_group,
             "current_layout": layout_label(probe.current_group),
             "intent_model": self.engine.intent_model_status.as_dict(),
+            "technical_logging": bool(
+                self.settings.get("diagnostics.technical_logging", False)
+            ),
+            "technical_log": str(data_dir() / "keyswitch.log"),
             "settings": str(self.settings.path),
             "data": str(data_dir()),
             "error": probe.error,

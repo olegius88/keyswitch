@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import queue
 import threading
 import time
-from dataclasses import dataclass
 from collections.abc import Callable
+from dataclasses import dataclass
 
+from . import __version__
 from .backend import InputBackend, KeyEvent
 from .config import SettingsStore
 from .detector import DetectionDecision, LanguageDetector
 from .history import HistoryEntry, HistoryStore
 from .indicator import alternate_layout_group, layout_label
-from .language_model import LanguageModel
+from .language_model import LanguageModel, WordScore
 from .learning import LearningStore
 from .intent_model import CorrectionTrigger, LinearNgramModel
+from .short_words import trusted_short_word_decision
 
 
 MODIFIER_KEYS = {
@@ -29,6 +33,7 @@ NAVIGATION_KEYS = {
 PUNCTUATION = set(".,!?;:()[]{}—–-…\"«»")
 PAUSE_CORRECTION_DELAY_SECONDS = 1.5
 LEARNING_PROMPT_TIMEOUT_SECONDS = 8.0
+LOGGER = logging.getLogger(__name__)
 
 
 def _default_backend(group_count: int) -> InputBackend:
@@ -167,6 +172,7 @@ class KeySwitchEngine:
         ] = []
         self._lock = threading.RLock()
         self.settings.subscribe(self._settings_changed)
+        self._technical_session_event("engine_initialized")
 
     @property
     def snapshot(self) -> EngineSnapshot:
@@ -330,6 +336,11 @@ class KeySwitchEngine:
         try:
             self.backend.switch_group(group)
         except Exception as error:
+            self._technical_event(
+                "layout_selection_failed",
+                requested_group=group,
+                error=str(error),
+            )
             self._update(
                 last_error=str(error),
                 last_action="Язык из меню не переключён",
@@ -340,6 +351,11 @@ class KeySwitchEngine:
             group
             if bool(self.settings.get("detection.respect_manual_layout", True))
             else None
+        )
+        self._technical_event(
+            "layout_selected_from_menu",
+            selected_group=group,
+            protects_next_word=self._manual_layout_group == group,
         )
         self._update(
             current_group=group,
@@ -448,18 +464,20 @@ class KeySwitchEngine:
             bool(self.settings.get("detection.respect_manual_layout", True))
             and self._manual_layout_group == source_group
         )
-        manual_layout_protected = (
-            manual_layout_selected
-            and self._forced_target_group(source_group, original) is None
-        )
+        # An explicit layout selection is the strongest available user intent.
+        # It protects exactly one word even when an older learned rule exists.
+        manual_layout_protected = manual_layout_selected
         if manual_layout_selected:
             self._manual_layout_group = None
+        enabled = bool(self.settings.get("enabled", True))
+        trigger_enabled = self._boundary_enabled(boundary)
         should_analyze = (
-            bool(self.settings.get("enabled", True))
-            and self._boundary_enabled(boundary)
+            enabled
+            and trigger_enabled
             and not manual_layout_protected
         )
         excluded = self._application_excluded(application)
+        decision: DetectionDecision | None = None
         if should_analyze and not excluded:
             decision = self._decide_word(
                 original,
@@ -477,6 +495,17 @@ class KeySwitchEngine:
                 self._remember_context(application, source_group, strokes)
         else:
             self._remember_context(application, source_group, strokes)
+        self._log_word_evaluation(
+            trigger=self._trigger_for_boundary(boundary),
+            original=original,
+            alternatives=alternatives,
+            application=application,
+            enabled=enabled,
+            trigger_enabled=trigger_enabled,
+            manual_layout_protected=manual_layout_protected,
+            application_excluded=excluded,
+            decision=decision,
+        )
         self._strokes = []
         self._source_group = -1
         self._update(
@@ -557,7 +586,13 @@ class KeySwitchEngine:
         context_words, context_group = self._context_for(application)
         context_aware = bool(self.settings.get("detection.context_aware", True))
         ignored_words: list[str] = self.settings.get("exclusions.words", [])
-        return self.detector.decide(
+        rejected_targets = (
+            self.learning.rejected_targets(source_group, original)
+            if bool(self.settings.get("detection.learning", True))
+            else set()
+        )
+        protect_code = bool(self.settings.get("detection.protect_code", True))
+        decision = self.detector.decide(
             original,
             alternatives,
             source_group,
@@ -565,20 +600,28 @@ class KeySwitchEngine:
             confidence_threshold=float(self.settings.get("detection.confidence", 2.0)),
             ignored_words=set(ignored_words),
             aggressive=bool(self.settings.get("detection.aggressive", False)),
-            protect_code=bool(self.settings.get("detection.protect_code", True)),
+            protect_code=protect_code,
             previous_words=context_words if context_aware else {},
             context_group=context_group if context_aware else None,
             forced_target_group=self._forced_target_group(source_group, original),
-            rejected_targets=(
-                self.learning.rejected_targets(source_group, original)
-                if bool(self.settings.get("detection.learning", True))
-                else set()
-            ),
+            rejected_targets=rejected_targets,
             trigger=trigger,
             use_intent_model=bool(
                 self.settings.get("detection.intent_model_enabled", True)
             ),
         )
+        if decision.should_convert:
+            return decision
+        short_decision = trusted_short_word_decision(
+            self.detector,
+            original,
+            alternatives,
+            source_group,
+            ignored_words=ignored_words,
+            rejected_targets=rejected_targets,
+            protect_code=protect_code,
+        )
+        return decision if short_decision is None else short_decision
 
     def _forced_target_group(self, source_group: int, word: str) -> int | None:
         if not bool(self.settings.get("detection.learning", True)):
@@ -634,6 +677,126 @@ class KeySwitchEngine:
             True,
         )
 
+    @staticmethod
+    def _score_diagnostics(score: WordScore) -> dict[str, object]:
+        return {
+            "value": round(score.value, 6),
+            "known": score.known,
+            "frequency": score.frequency,
+            "exact": score.exact,
+            "spell_known": score.spell_known,
+            "ngram_score": round(score.ngram_score, 6),
+            "invalid_ratio": round(score.invalid_ratio, 6),
+        }
+
+    @classmethod
+    def _decision_diagnostics(
+        cls, decision: DetectionDecision
+    ) -> dict[str, object]:
+        return {
+            "should_convert": decision.should_convert,
+            "replacement": decision.replacement,
+            "source_group": decision.source_group,
+            "target_group": decision.target_group,
+            "confidence": round(decision.confidence, 6),
+            "reason": decision.reason,
+            "source_score": cls._score_diagnostics(decision.source_score),
+            "target_score": cls._score_diagnostics(decision.target_score),
+            "model_probability": decision.model_probability,
+            "model_threshold": decision.model_threshold,
+            "model_version": decision.model_version,
+        }
+
+    def _technical_event(self, event: str, **fields: object) -> None:
+        if not bool(self.settings.get("diagnostics.technical_logging", False)):
+            return
+        payload: dict[str, object] = {"schema": 1, "event": event}
+        payload.update(fields)
+        LOGGER.info(
+            "TECHNICAL %s",
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ),
+        )
+
+    def _technical_session_event(self, event: str) -> None:
+        self._technical_event(
+            event,
+            keyswitch_version=__version__,
+            backend=self.backend_label,
+            intent_model=self.intent_model_status.as_dict(),
+            language_models={
+                str(group): {
+                    "locale": model.locale,
+                    "words": len(model.frequencies),
+                    "source": model.source,
+                }
+                for group, model in self.models.items()
+            },
+            detection_settings={
+                path: self.settings.get(f"detection.{path}")
+                for path in (
+                    "minimum_length",
+                    "confidence",
+                    "aggressive",
+                    "protect_code",
+                    "context_aware",
+                    "respect_manual_layout",
+                    "correct_on_pause",
+                    "learning",
+                    "learning_confirmations",
+                    "intent_model_enabled",
+                )
+            },
+        )
+
+    def _log_word_evaluation(
+        self,
+        *,
+        trigger: CorrectionTrigger,
+        original: str,
+        alternatives: dict[int, str],
+        application: str,
+        enabled: bool,
+        trigger_enabled: bool,
+        manual_layout_protected: bool,
+        application_excluded: bool,
+        decision: DetectionDecision | None,
+    ) -> None:
+        decision_payload = (
+            None if decision is None else self._decision_diagnostics(decision)
+        )
+        # Never put text typed inside an excluded application into the log,
+        # even when detailed diagnostics are explicitly enabled.
+        logged_original = "<redacted>" if application_excluded else original
+        logged_alternatives: object = (
+            {} if application_excluded else alternatives
+        )
+        if application_excluded and decision_payload is not None:
+            decision_payload["replacement"] = "<redacted>"
+        self._technical_event(
+            "word_evaluation",
+            trigger=trigger,
+            original=logged_original,
+            alternatives=logged_alternatives,
+            application=application,
+            enabled=enabled,
+            trigger_enabled=trigger_enabled,
+            manual_layout_protected=manual_layout_protected,
+            application_excluded=application_excluded,
+            minimum_length=int(
+                self.settings.get("detection.minimum_length", 3)
+            ),
+            confidence_threshold=float(
+                self.settings.get("detection.confidence", 2.0)
+            ),
+            decision=decision_payload,
+        )
+
     def _mark_word_activity(self) -> None:
         self._last_word_input_at = time.monotonic()
         self._pause_correction_pending = True
@@ -673,20 +836,52 @@ class KeySwitchEngine:
             and self._manual_layout_group == source_group
         )
         original = self._text_for_group(strokes, source_group)
-        if manual_layout_selected:
-            if self._forced_target_group(source_group, original) is None:
-                return
-            self._manual_layout_group = None
         alternatives = {
             group: self._text_for_group(strokes, group)
             for group in self.models
             if group != source_group
         }
         application = self.backend.active_application()
-        if self._application_excluded(application):
+        excluded = self._application_excluded(application)
+        if manual_layout_selected:
+            self._log_word_evaluation(
+                trigger="pause",
+                original=original,
+                alternatives=alternatives,
+                application=application,
+                enabled=True,
+                trigger_enabled=True,
+                manual_layout_protected=True,
+                application_excluded=excluded,
+                decision=None,
+            )
+            return
+        if excluded:
+            self._log_word_evaluation(
+                trigger="pause",
+                original=original,
+                alternatives=alternatives,
+                application=application,
+                enabled=True,
+                trigger_enabled=True,
+                manual_layout_protected=False,
+                application_excluded=True,
+                decision=None,
+            )
             return
         decision = self._decide_word(
             original, alternatives, source_group, application, "pause"
+        )
+        self._log_word_evaluation(
+            trigger="pause",
+            original=original,
+            alternatives=alternatives,
+            application=application,
+            enabled=True,
+            trigger_enabled=True,
+            manual_layout_protected=False,
+            application_excluded=False,
+            decision=decision,
         )
         if not decision.should_convert:
             return
@@ -782,6 +977,11 @@ class KeySwitchEngine:
         plan: CorrectionPlan,
         learning_action: tuple[str, int, str, int] | None,
     ) -> None:
+        application_excluded = self._application_excluded(plan.application)
+        logged_original = "<redacted>" if application_excluded else plan.original
+        logged_replacement = (
+            "<redacted>" if application_excluded else plan.replacement
+        )
         try:
             self.backend.inject_correction(
                 plan.strokes,
@@ -790,8 +990,31 @@ class KeySwitchEngine:
                 plan.source_group,
             )
         except Exception as error:
+            self._technical_event(
+                "correction_failed",
+                original=logged_original,
+                replacement=logged_replacement,
+                source_group=plan.source_group,
+                target_group=plan.target_group,
+                application=plan.application,
+                application_excluded=application_excluded,
+                automatic=plan.automatic,
+                error=str(error),
+            )
             self._update(last_error=str(error), last_action="Исправление не выполнено")
             return
+        self._technical_event(
+            "correction_applied",
+            original=logged_original,
+            replacement=logged_replacement,
+            source_group=plan.source_group,
+            target_group=plan.target_group,
+            application=plan.application,
+            application_excluded=application_excluded,
+            automatic=plan.automatic,
+            confidence=round(plan.confidence, 6),
+            boundary=(None if plan.boundary is None else plan.boundary.key_name),
+        )
         self._last_correction = plan
         self._last_correction_time = time.monotonic()
         self._remember_context(plan.application, plan.target_group, plan.strokes)
@@ -926,6 +1149,9 @@ class KeySwitchEngine:
             self._manual_layout_group = None
         elif path == "detection.learning" and not bool(value):
             self.dismiss_learning_prompt()
+        self._technical_event("setting_changed", path=path)
+        if path == "diagnostics.technical_logging" and bool(value):
+            self._technical_session_event("technical_logging_enabled")
 
     def _observe_group(self, group: int) -> None:
         current_group = self.snapshot.current_group
@@ -935,6 +1161,12 @@ class KeySwitchEngine:
             self.settings.get("detection.respect_manual_layout", True)
         ):
             self._manual_layout_group = group
+            self._technical_event(
+                "manual_layout_observed",
+                previous_group=current_group,
+                selected_group=group,
+                protects_next_word=True,
+            )
             self._update(
                 current_group=group,
                 last_action=(

@@ -962,10 +962,25 @@ class ApplicationEntrypointTests(unittest.TestCase):
     def test_logging_diagnostics_parser_and_main_modes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
-            with patch("keyswitch.app.data_dir", return_value=directory), patch("keyswitch.app.logging.basicConfig") as basic:
+            handler = logging.NullHandler()
+            with (
+                patch("keyswitch.app.data_dir", return_value=directory),
+                patch("keyswitch.app.logging.basicConfig") as basic,
+                patch(
+                    "keyswitch.app.RotatingFileHandler",
+                    return_value=handler,
+                ) as rotating,
+            ):
                 app_module.configure_logging()
             self.assertTrue(directory.is_dir())
             self.assertEqual(basic.call_args.kwargs["level"], logging.INFO)
+            rotating.assert_called_once_with(
+                directory / "keyswitch.log",
+                maxBytes=5 * 1024 * 1024,
+                backupCount=3,
+                encoding="utf-8",
+            )
+            self.assertEqual(basic.call_args.kwargs["handlers"], [handler])
 
         probe = BackendProbe(True, "x11", ":1", "1.13", "2.2", "1.0", 1)
         backend = Mock()

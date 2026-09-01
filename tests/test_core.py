@@ -22,6 +22,7 @@ from keyswitch.indicator import (
 from keyswitch.language_model import LanguageModel
 from keyswitch.learning import LearningStore
 from keyswitch.layouts import LayoutPair
+from keyswitch.short_words import trusted_short_word_decision
 from keyswitch.spellcheck import HunspellDictionary
 from keyswitch.system import AutostartManager
 from keyswitch.x11_backend import BackendProbe, KeyEvent
@@ -75,8 +76,22 @@ def letter_event(character: str, keycode: int, group: int, pair: LayoutPair) -> 
     return KeyEvent(True, keycode, characters[0], character, characters, group, 0, keycode)
 
 
-def boundary_event(pressed: bool, keycode: int = 65, state: int = 0) -> KeyEvent:
-    return KeyEvent(pressed, keycode, "space", " ", (" ", " "), 0, state, 1000)
+def boundary_event(
+    pressed: bool,
+    keycode: int = 65,
+    state: int = 0,
+    group: int = 0,
+) -> KeyEvent:
+    return KeyEvent(
+        pressed,
+        keycode,
+        "space",
+        " ",
+        (" ", " "),
+        group,
+        state,
+        1000,
+    )
 
 
 def release_event(event: KeyEvent) -> KeyEvent:
@@ -239,6 +254,39 @@ class DetectorTests(unittest.TestCase):
                 decision = self.decision(source, group)
                 self.assertTrue(decision.should_convert)
                 self.assertEqual(decision.replacement, expected)
+
+    def test_trusted_short_if_bypasses_configured_minimum_length(self) -> None:
+        translated = self.pair.translate("ша", "ru", "us")
+        self.assertEqual(translated, "if")
+        decision = trusted_short_word_decision(
+            self.detector,
+            "ша",
+            {0: translated},
+            1,
+            ignored_words=(),
+            rejected_targets=set(),
+            protect_code=True,
+        )
+        self.assertIsNotNone(decision)
+        assert decision is not None
+        self.assertTrue(decision.should_convert)
+        self.assertEqual(decision.replacement, "if")
+        self.assertIn("короткое слово", decision.reason)
+
+        for source in ("шт", "фе"):
+            replacement = self.pair.translate(source, "ru", "us")
+            with self.subTest(source=source, replacement=replacement):
+                self.assertIsNone(
+                    trusted_short_word_decision(
+                        self.detector,
+                        source,
+                        {0: replacement},
+                        1,
+                        ignored_words=(),
+                        rejected_targets=set(),
+                        protect_code=True,
+                    )
+                )
 
     def test_valid_words_are_not_changed(self) -> None:
         self.assertFalse(self.decision("hello", 0).should_convert)
@@ -500,9 +548,59 @@ class EngineTests(unittest.TestCase):
             self.engine._handle(letter_event(character, index, 0, self.pair))
         self.engine._handle(boundary_event(True))
         self.engine._handle(boundary_event(False))
+        self.assertEqual(len(self.backend.injections), 1)
+        self.assertIsNone(self.engine._manual_layout_group)
+        self.assertIn("Ручная раскладка сохранена", self.engine.snapshot.last_action)
+
+        for index, character in enumerate("hello", start=90):
+            self.engine._handle(letter_event(character, index, 0, self.pair))
+        self.engine._handle(boundary_event(True))
+        self.engine._handle(boundary_event(False))
         self.assertEqual(len(self.backend.injections), 2)
         self.assertEqual(self.backend.injections[-1][1], 1)
+
+    def test_manual_russian_selection_protects_short_if_on_pause_and_space(self) -> None:
+        self.engine._update(current_group=0)
+        self.backend.group = 1
+        self.engine._poll_current_group()
+        self.assertEqual(self.engine._manual_layout_group, 1)
+
+        with patch("keyswitch.engine.time.monotonic", return_value=10.0):
+            for index, character in enumerate("ша", start=30):
+                event = letter_event(character, index, 1, self.pair)
+                self.engine._handle(event)
+                self.engine._handle(release_event(event))
+
+        self.engine._maybe_correct_after_pause(now=12.0)
+        self.assertEqual(self.backend.injections, [])
+        self.assertEqual(self.engine._manual_layout_group, 1)
+        self.engine._handle(boundary_event(True, group=1))
+        self.engine._handle(boundary_event(False, group=1))
+        self.assertEqual(self.backend.injections, [])
         self.assertIsNone(self.engine._manual_layout_group)
+
+        for index, character in enumerate("ша", start=50):
+            event = letter_event(character, index, 1, self.pair)
+            self.engine._handle(event)
+            self.engine._handle(release_event(event))
+        self.engine._handle(boundary_event(True, group=1))
+        self.engine._handle(boundary_event(False, group=1))
+        self.assertEqual(len(self.backend.injections), 1)
+        self.assertEqual(self.backend.injections[0][1], 0)
+
+    def test_short_if_converts_after_pause_without_manual_intent(self) -> None:
+        self.engine._update(current_group=1)
+        with patch("keyswitch.engine.time.monotonic", return_value=20.0):
+            for index, character in enumerate("ша", start=30):
+                event = letter_event(character, index, 1, self.pair)
+                self.engine._handle(event)
+                self.engine._handle(release_event(event))
+
+        self.engine._maybe_correct_after_pause(now=22.0)
+
+        self.assertEqual(len(self.backend.injections), 1)
+        self.assertEqual(self.backend.injections[0][1], 0)
+        self.assertIsNone(self.backend.injections[0][2])
 
     def test_two_manual_conversions_create_an_automatic_rule(self) -> None:
         self.settings.set("detection.respect_manual_layout", False)

@@ -4,6 +4,19 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.6.1 — 2026-09-02
+
+- Correct the reviewed Russian-layout `ша` to English `if` case independently
+  of the configured minimum word length. Require an exact target lexicon hit
+  and a 100x frequency advantage; keep other two-letter collisions behind the
+  normal minimum-length guard to avoid new false positives.
+- Give an explicit manual layout change absolute priority for the next complete
+  word, including pause correction and previously learned automatic rules.
+- Add opt-in structured technical decision logging to the Linux and Windows
+  settings. Include model/session metadata, score and correction events, redact
+  words from excluded applications, and rotate the 5 MiB log with three
+  backups.
+
 ## 0.6.0 — 2026-09-01
 
 - Accept the v14 layout-intent candidate after all 30 strict gates passed.

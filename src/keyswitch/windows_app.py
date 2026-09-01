@@ -10,6 +10,7 @@ import argparse
 import json
 import logging
 import sys
+from logging.handlers import RotatingFileHandler
 
 from . import __version__
 from .history import data_dir
@@ -23,7 +24,14 @@ def configure_logging() -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=[logging.FileHandler(directory / "keyswitch.log", encoding="utf-8")],
+        handlers=[
+            RotatingFileHandler(
+                directory / "keyswitch.log",
+                maxBytes=5 * 1024 * 1024,
+                backupCount=3,
+                encoding="utf-8",
+            )
+        ],
     )
 
 

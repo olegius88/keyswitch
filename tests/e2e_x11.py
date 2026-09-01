@@ -86,6 +86,9 @@ def main() -> int:
         ("punctuation boundary keeps its glyph", 0, "ghbdtn,", "привет,", 1, 900),
         ("manual layout switch protects next word", 0, "ghbdtn ", "ghbdtn ", 0, 900),
         ("manual protection is consumed once", 0, "ghbdtn ", "привет ", 1, 900),
+        ("short Russian word switches to English", 1, "if ", "if ", 0, 900),
+        ("manual Russian selection protects short word", 1, "if ", "ша ", 1, 900),
+        ("short-word protection is consumed once", 1, "if ", "if ", 0, 900),
     )
 
     def abort_on_timeout() -> bool:
@@ -135,7 +138,7 @@ def main() -> int:
 
     backend._listener = observe
     original_group = backend.current_group()
-    GLib.timeout_add_seconds(20, abort_on_timeout)
+    GLib.timeout_add_seconds(30, abort_on_timeout)
 
     def type_case(index: int) -> bool:
         (
@@ -221,6 +224,21 @@ def main() -> int:
         entry.set_text("")
         entry.grab_focus()
         typer.type("hello ")
+        GLib.timeout_add(900, verify_manual_override_of_learned_rule)
+        return GLib.SOURCE_REMOVE
+
+    def verify_manual_override_of_learned_rule() -> bool:
+        if entry.get_text() != "hello " or backend.current_group() != 0:
+            print(
+                "manual_override_of_learned_rule_failed "
+                f"text={entry.get_text()!r} group={backend.current_group()}"
+            )
+            print("E2E_FAILED")
+            loop.quit()
+            return GLib.SOURCE_REMOVE
+        entry.set_text("")
+        entry.grab_focus()
+        typer.type("hello ")
         GLib.timeout_add(900, verify_learned_rule)
         return GLib.SOURCE_REMOVE
 
@@ -241,6 +259,8 @@ def main() -> int:
             ("руддщ", "hello"),
             ("ghbdtn", "привет"),
             ("ghbdtn", "привет"),
+            ("ша", "if"),
+            ("ша", "if"),
             ("hello", "руддщ"),
         ]
         actual_history = [(item.original, item.replacement) for item in entries]
