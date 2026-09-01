@@ -598,11 +598,22 @@ class WindowsPackagingContractTests(unittest.TestCase):
                 self.assertNotEqual(rejected.returncode, 0)
 
     def test_windows_workflows_exercise_fresh_clone_defaults(self) -> None:
+        manifest = json.loads(
+            (PROJECT_ROOT / "model/intent_v1/manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        training_python = str(manifest["toolchain"]["python_version"])
+        training_python_series = ".".join(training_python.split(".")[:2])
         for relative in (
             ".github/workflows/tests.yml",
             ".github/workflows/release.yml",
         ):
             workflow = (PROJECT_ROOT / relative).read_text(encoding="utf-8")
+            self.assertIn(
+                f'python-version: "{training_python_series}"',
+                workflow,
+            )
             self.assertNotIn("keyswitch-windows-models", workflow)
             self.assertNotIn("build/windows-models", workflow)
             self.assertIn(
