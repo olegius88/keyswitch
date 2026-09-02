@@ -84,16 +84,16 @@
     },
     "lexical_disjoint_corpus_sha256": "57c83b5a8005ebdaf3b676ef381cd4b4f59a045fe64e52c47f3295a2738f1a7f",
     "unknown_typo_development_corpus_sha256": "0a84144da4259e43bf645c3c3d6a6b39a999e8d1a82aabe8b0a9b1a03d47e8c2",
-    "unknown_typo_holdout_corpus_sha256": "0e687cbfc9c5821356b05e6858fea4582bb6948867bfdd2140665a73c4c544a8"
+    "unknown_typo_holdout_corpus_sha256": "61b1c74e74af1759ff3e5a35235dd878cad80f2ab3dd49d7fd8f80f92af7cbba"
   },
   "hard_negative_development": {
     "schema_version": 2,
     "source": {
-      "path": "model/intent_v1/unknown-typo-development-v14.json",
-      "sha256": "44b460ee6457dd26269c843a87b43bd22b026927de8f194ee1abbf2cf910af2f",
+      "path": "model/intent_v1/unknown-typo-development-v15.json",
+      "sha256": "a0585bdbd21526434fc77effc64200075269d884321a702fa44bd8a9dc7f963c",
       "bytes": 2129741
     },
-    "role_namespace": "keyswitch:intent-v14:unknown-typo-development-role",
+    "role_namespace": "keyswitch:intent-v15:unknown-typo-development-role",
     "training_example_weight": 3.0,
     "words_per_group": {
       "train": 3500,
@@ -104,8 +104,8 @@
   },
   "sealed_evaluation": {
     "schema_version": 1,
-    "split_namespace": "keyswitch:intent-v14:physical-signature",
-    "registry_path": "model/intent_v1/seal-registry-v14.json"
+    "split_namespace": "keyswitch:intent-v15:physical-signature",
+    "registry_path": "model/intent_v1/seal-registry-v15.json"
   },
   "dataset": {
     "minimum_word_length": 5,

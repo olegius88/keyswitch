@@ -13,14 +13,17 @@ import argparse
 import hashlib
 import json
 import math
+import multiprocessing
 import os
 import platform
 import random
 import struct
 import sys
 import tempfile
+import time
 from collections import defaultdict
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
@@ -81,10 +84,10 @@ PRESEALED_SPLITS: Final[tuple[SplitName, ...]] = (
     "threshold",
 )
 SEALED_TEST_SPLITS: Final[tuple[SplitName, ...]] = ("test",)
-SPLIT_NAMESPACE: Final[str] = "keyswitch:intent-v14:physical-signature"
+SPLIT_NAMESPACE: Final[str] = "keyswitch:intent-v15:physical-signature"
 SPLIT_HASH_NAMESPACE: Final[bytes] = SPLIT_NAMESPACE.encode("ascii") + b"\0"
 SEALED_REGISTRY_RELATIVE_PATH: Final[str] = (
-    "model/intent_v1/seal-registry-v14.json"
+    "model/intent_v1/seal-registry-v15.json"
 )
 UNKNOWN_TYPO_DEVELOPMENT_RANK_NAMESPACE: Final[str] = (
     "keyswitch:intent-v1:unknown-typo-rank"
@@ -93,16 +96,16 @@ UNKNOWN_TYPO_DEVELOPMENT_CHOICE_NAMESPACE: Final[str] = (
     "keyswitch:intent-v1:unknown-typo-choice"
 )
 UNKNOWN_TYPO_HOLDOUT_RANK_NAMESPACE: Final[str] = (
-    "keyswitch:intent-v14:unknown-typo-holdout-rank"
+    "keyswitch:intent-v15:unknown-typo-holdout-rank"
 )
 UNKNOWN_TYPO_HOLDOUT_CHOICE_NAMESPACE: Final[str] = (
-    "keyswitch:intent-v14:unknown-typo-holdout-choice"
+    "keyswitch:intent-v15:unknown-typo-holdout-choice"
 )
 HARD_NEGATIVE_ROLE_NAMESPACE: Final[str] = (
-    "keyswitch:intent-v14:unknown-typo-development-role"
+    "keyswitch:intent-v15:unknown-typo-development-role"
 )
 HARD_NEGATIVE_SOURCE_RELATIVE_PATH: Final[str] = (
-    "model/intent_v1/unknown-typo-development-v14.json"
+    "model/intent_v1/unknown-typo-development-v15.json"
 )
 SAFETY_COLLISION_MINIMUM_WORD_LENGTH: Final[int] = 3
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
@@ -125,7 +128,7 @@ DEVELOPMENT_FREEZER_PATH: Final[Path] = (
     PROJECT_ROOT / "tools/freeze_intent_development_corpus.py"
 )
 PRESEAL_RECEIPT_PATH: Final[Path] = (
-    PROJECT_ROOT / "model/intent_v1/holdout-v14-preseal.json"
+    PROJECT_ROOT / "model/intent_v1/holdout-v15-preseal.json"
 )
 MAX_TRAINING_CONFIG_BYTES: Final[int] = 1 << 16
 MAX_FROZEN_SOURCE_BYTES: Final[int] = 1 << 26
@@ -332,7 +335,7 @@ class HardNegativeDevelopmentPolicy:
             )
         if self.role_namespace != HARD_NEGATIVE_ROLE_NAMESPACE:
             raise ValueError(
-                "hard-negative development role namespace must match v14"
+                "hard-negative development role namespace must match v15"
             )
         counts = self.role_counts()
         if any(
@@ -2475,11 +2478,11 @@ def _decode_hard_negative_development_corpus(
     if _integer(root, "schema_version") != 1:
         raise ValueError("unsupported frozen hard-negative corpus schema")
     if _string(root, "policy") != (
-        "keyswitch-intent-v14-frozen-unknown-typo-development"
+        "keyswitch-intent-v15-frozen-unknown-typo-development"
     ):
-        raise ValueError("hard-negative corpus policy must match v14")
+        raise ValueError("hard-negative corpus policy must match v15")
     if _string(root, "role_namespace") != HARD_NEGATIVE_ROLE_NAMESPACE:
-        raise ValueError("hard-negative corpus role namespace must match v14")
+        raise ValueError("hard-negative corpus role namespace must match v15")
     if _string(root, "rank_namespace") != (
         UNKNOWN_TYPO_DEVELOPMENT_RANK_NAMESPACE
     ) or _string(root, "choice_namespace") != (
@@ -4011,6 +4014,39 @@ class ExampleFeatureExtractor(Protocol):
     ) -> ExtractedExampleFeatures: ...
 
 
+@dataclass(frozen=True)
+class RuntimeFeatureExtractor:
+    """Pickle-safe adapter for deterministic multiprocessing workers."""
+
+    hash_seed: int
+    membership_seed: int
+
+    def __call__(
+        self, example: LexicalExample, dimension: int
+    ) -> ExtractedExampleFeatures:
+        evidence = IntentModelInput(
+            original=example.original,
+            alternative=example.alternative,
+            source_group=example.source_group,
+            target_group=example.target_group,
+            trigger=example.trigger,
+            source_score=_IGNORED_CLASSIFIER_WORD_SCORE,
+            target_score=_IGNORED_CLASSIFIER_WORD_SCORE,
+            context_delta=example.context_delta,
+            context_group=example.context_group,
+        )
+        vector = extract_features(
+            evidence,
+            dimension=dimension,
+            hash_seed=self.hash_seed,
+            membership_seed=self.membership_seed,
+            ngram_orders=NGRAM_ORDERS,
+        )
+        return ExtractedExampleFeatures(
+            vector.values, vector.character_fingerprints
+        )
+
+
 def featurize_examples(
     examples: Iterable[LexicalExample],
     dimension: int,
@@ -4030,6 +4066,183 @@ def featurize_examples(
             )
         )
     return tuple(result)
+
+
+@dataclass(frozen=True)
+class _FeaturizationWorkload:
+    examples: Sequence[LexicalExample]
+    dimension: int
+    extractor: ExampleFeatureExtractor
+    collect_supported_fingerprints: bool
+
+
+@dataclass(frozen=True)
+class _FeaturizationChunk:
+    start: int
+    features: tuple[SparseFeatures, ...]
+    supported_fingerprints: frozenset[int]
+
+
+_FEATURIZATION_WORKLOAD: _FeaturizationWorkload | None = None
+
+
+def _initialize_featurization_worker(
+    workload: _FeaturizationWorkload,
+) -> None:
+    global _FEATURIZATION_WORKLOAD
+    _FEATURIZATION_WORKLOAD = workload
+
+
+def _featurize_worker(bounds: tuple[int, int]) -> _FeaturizationChunk:
+    workload = _FEATURIZATION_WORKLOAD
+    if workload is None:
+        raise RuntimeError("parallel featurization worker is not initialized")
+    start, stop = bounds
+    fingerprints: set[int] | None = (
+        set() if workload.collect_supported_fingerprints else None
+    )
+    features: list[SparseFeatures] = []
+    for example in workload.examples[start:stop]:
+        extracted = workload.extractor(example, workload.dimension)
+        if fingerprints is not None:
+            fingerprints.update(extracted.character_fingerprints)
+        features.append(
+            normalize_sparse_features(extracted.values, workload.dimension)
+        )
+    return _FeaturizationChunk(
+        start,
+        tuple(features),
+        frozenset(fingerprints or ()),
+    )
+
+
+def available_training_workers() -> int:
+    """Return the logical CPUs available to the current process."""
+
+    affinity_count = 0
+    affinity_reader = cast(
+        Callable[[int], set[int]] | None,
+        getattr(os, "sched_getaffinity", None),
+    )
+    if affinity_reader is not None:
+        try:
+            affinity_count = len(affinity_reader(0))
+        except OSError:
+            pass
+    return max(1, affinity_count or os.cpu_count() or 1)
+
+
+def resolve_training_workers(requested: int) -> int:
+    """Resolve zero to all CPUs and avoid accidental oversubscription."""
+
+    if requested < 0:
+        raise ValueError("training workers cannot be negative")
+    available = available_training_workers()
+    return available if requested == 0 else min(requested, available)
+
+
+def _balanced_ranges(length: int, chunks: int) -> tuple[tuple[int, int], ...]:
+    if length < 0 or chunks < 1:
+        raise ValueError("parallel range dimensions are invalid")
+    if length == 0:
+        return ()
+    actual_chunks = min(length, chunks)
+    width, remainder = divmod(length, actual_chunks)
+    start = 0
+    result: list[tuple[int, int]] = []
+    for index in range(actual_chunks):
+        stop = start + width + int(index < remainder)
+        result.append((start, stop))
+        start = stop
+    return tuple(result)
+
+
+def featurize_examples_parallel(
+    examples: Sequence[LexicalExample],
+    dimension: int,
+    extractor: ExampleFeatureExtractor,
+    *,
+    workers: int,
+    supported_fingerprints: set[int] | None = None,
+) -> tuple[FeaturedExample, ...]:
+    """Extract features on worker processes without changing row order."""
+
+    if workers < 1:
+        raise ValueError("parallel featurization requires at least one worker")
+    actual_workers = min(workers, len(examples))
+    if actual_workers <= 1:
+        return featurize_examples(
+            examples,
+            dimension,
+            extractor,
+            supported_fingerprints=supported_fingerprints,
+        )
+    workload = _FeaturizationWorkload(
+        examples,
+        dimension,
+        extractor,
+        supported_fingerprints is not None,
+    )
+    ranges = _balanced_ranges(len(examples), actual_workers)
+    start_method = (
+        "fork"
+        if "fork" in multiprocessing.get_all_start_methods()
+        else "spawn"
+    )
+    context = multiprocessing.get_context(start_method)
+    with ProcessPoolExecutor(
+        max_workers=actual_workers,
+        mp_context=context,
+        initializer=_initialize_featurization_worker,
+        initargs=(workload,),
+    ) as executor:
+        chunks = tuple(executor.map(_featurize_worker, ranges))
+    if tuple(chunk.start for chunk in chunks) != tuple(
+        start for start, _stop in ranges
+    ):
+        raise RuntimeError("parallel featurization changed chunk order")
+    if supported_fingerprints is not None:
+        for chunk in chunks:
+            supported_fingerprints.update(chunk.supported_fingerprints)
+    return tuple(
+        FeaturedExample(examples[chunk.start + offset], features)
+        for chunk in chunks
+        for offset, features in enumerate(chunk.features)
+    )
+
+
+def featurize_training_phase(
+    phase: str,
+    examples: Sequence[LexicalExample],
+    dimension: int,
+    extractor: ExampleFeatureExtractor,
+    *,
+    workers: int,
+    supported_fingerprints: set[int] | None = None,
+) -> tuple[FeaturedExample, ...]:
+    """Run one measured feature phase while keeping stdout machine-readable."""
+
+    actual_workers = max(1, min(workers, len(examples)))
+    started = time.monotonic()
+    sys.stderr.write(
+        f"KeySwitch trainer: phase=features:{phase} rows={len(examples)} "
+        f"workers={actual_workers}\n"
+    )
+    sys.stderr.flush()
+    result = featurize_examples_parallel(
+        examples,
+        dimension,
+        extractor,
+        workers=workers,
+        supported_fingerprints=supported_fingerprints,
+    )
+    elapsed = time.monotonic() - started
+    sys.stderr.write(
+        f"KeySwitch trainer: phase=features:{phase} complete "
+        f"seconds={elapsed:.3f}\n"
+    )
+    sys.stderr.flush()
+    return result
 
 
 @dataclass(frozen=True)
@@ -4196,13 +4409,30 @@ class FTRLTrainingResult:
     history: tuple[EpochReport, ...]
 
 
+def report_ftrl_epoch(report: EpochReport) -> None:
+    """Emit human progress on stderr without contaminating JSON stdout."""
+
+    sys.stderr.write(
+        "KeySwitch trainer: phase=ftrl "
+        f"epoch={report.epoch} loss={report.development_log_loss:.9f} "
+        f"policy_passed={str(report.development_policy_passed).lower()} "
+        f"nonzero_weights={report.nonzero_weights}\n"
+    )
+    sys.stderr.flush()
+
+
 def fit_ftrl(
     training: Sequence[FeaturedExample],
     development: Sequence[FeaturedExample],
     config: TrainingConfig,
+    *,
+    evaluation_workers: int = 1,
+    progress: Callable[[EpochReport], None] | None = None,
 ) -> FTRLTrainingResult:
     if not training or not development:
         raise ValueError("training and development datasets must not be empty")
+    if evaluation_workers < 1:
+        raise ValueError("FTRL evaluation requires at least one worker")
     parameters = FTRLParameters(
         config.dimension,
         config.ftrl_alpha,
@@ -4224,7 +4454,12 @@ def fit_ftrl(
         for index in indices:
             item = training[index]
             model.update(item.features, item.example.label, item.example.weight)
-        evaluation = evaluate_development_epoch(model, development, config)
+        evaluation = evaluate_development_epoch_parallel(
+            model,
+            development,
+            config,
+            workers=evaluation_workers,
+        )
         report = EpochReport(
             epoch=epoch,
             development_log_loss=evaluation.log_loss,
@@ -4263,6 +4498,8 @@ def fit_ftrl(
             nonzero_weights=model.nonzero_weight_count(),
         )
         history.append(report)
+        if progress is not None:
+            progress(report)
         ranking = evaluation.ranking()
         if best_ranking is None or ranking > best_ranking:
             best_ranking = ranking
@@ -4567,6 +4804,46 @@ def score_examples(
             )
         )
     return tuple(result)
+
+
+def calibrate_raw_logits(
+    examples: Sequence[FeaturedExample],
+    raw_logits: Sequence[float],
+    calibration: DirectionalPlattCalibration,
+) -> tuple[ScoredExample, ...]:
+    """Attach calibrated logits to an already ordered raw-score vector."""
+
+    if len(raw_logits) != len(examples):
+        raise ValueError("raw logits do not match examples")
+    return tuple(
+        ScoredExample(
+            item.example,
+            raw_logit,
+            calibration.transform_logit(
+                raw_logit,
+                item.example.source_group,
+                item.example.target_group,
+            ),
+        )
+        for item, raw_logit in zip(examples, raw_logits, strict=True)
+    )
+
+
+def score_examples_parallel(
+    model: SparseScorer,
+    calibration: DirectionalPlattCalibration,
+    examples: Sequence[FeaturedExample],
+    *,
+    workers: int,
+) -> tuple[ScoredExample, ...]:
+    """Score independent rows on processes and preserve canonical order."""
+
+    raw_logits = score_raw_logits_parallel(
+        model,
+        examples,
+        workers=workers,
+    )
+    return calibrate_raw_logits(examples, raw_logits, calibration)
 
 
 def confusion_at_threshold(
@@ -5242,13 +5519,23 @@ def evaluate_development_epoch(
     while every already-extracted feature remains byte-for-byte unchanged.
     """
 
+    raw_logits = tuple(model.score(item.features) for item in examples)
+    return _evaluate_development_logits(examples, raw_logits, config)
+
+
+def _evaluate_development_logits(
+    examples: Sequence[FeaturedExample],
+    raw_logits: Sequence[float],
+    config: TrainingConfig,
+) -> DevelopmentEpochEvaluation:
     if not examples:
         raise ValueError("cannot evaluate an empty development dataset")
+    if len(raw_logits) != len(examples):
+        raise ValueError("development logits do not match examples")
     scored: list[ScoredExample] = []
     weighted_loss = 0.0
     total_weight = 0.0
-    for item in examples:
-        raw_logit = model.score(item.features)
+    for item, raw_logit in zip(examples, raw_logits, strict=True):
         weighted_loss += (
             logistic_loss(raw_logit, item.example.label) * item.example.weight
         )
@@ -5319,6 +5606,153 @@ def evaluate_development_epoch(
         policy_checks_passed=sum(checks),
         policy_passed=all(checks),
     )
+
+
+@dataclass(frozen=True)
+class _RawScoringWorkload:
+    model: SparseScorer
+    examples: Sequence[FeaturedExample]
+
+
+@dataclass(frozen=True)
+class _RawScoreChunk:
+    start: int
+    raw_logits: tuple[float, ...]
+
+
+_RAW_SCORING_WORKLOAD: _RawScoringWorkload | None = None
+
+
+def _initialize_raw_scoring_worker(
+    workload: _RawScoringWorkload,
+) -> None:
+    global _RAW_SCORING_WORKLOAD
+    _RAW_SCORING_WORKLOAD = workload
+
+
+def _score_raw_logits_worker(
+    bounds: tuple[int, int],
+) -> _RawScoreChunk:
+    workload = _RAW_SCORING_WORKLOAD
+    if workload is None:
+        raise RuntimeError("raw scoring worker is not initialized")
+    start, stop = bounds
+    return _RawScoreChunk(
+        start,
+        tuple(
+            workload.model.score(item.features)
+            for item in workload.examples[start:stop]
+        ),
+    )
+
+
+def score_raw_logits_parallel(
+    model: SparseScorer,
+    examples: Sequence[FeaturedExample],
+    *,
+    workers: int,
+) -> tuple[float, ...]:
+    """Score independent rows on processes and preserve canonical order."""
+
+    if workers < 1:
+        raise ValueError("parallel scoring requires at least one worker")
+    actual_workers = min(workers, len(examples))
+    if actual_workers <= 1:
+        return tuple(model.score(item.features) for item in examples)
+    ranges = _balanced_ranges(len(examples), actual_workers)
+    workload = _RawScoringWorkload(model, examples)
+    start_method = (
+        "fork"
+        if "fork" in multiprocessing.get_all_start_methods()
+        else "spawn"
+    )
+    context = multiprocessing.get_context(start_method)
+    with ProcessPoolExecutor(
+        max_workers=actual_workers,
+        mp_context=context,
+        initializer=_initialize_raw_scoring_worker,
+        initargs=(workload,),
+    ) as executor:
+        chunks = tuple(executor.map(_score_raw_logits_worker, ranges))
+    if tuple(chunk.start for chunk in chunks) != tuple(
+        start for start, _stop in ranges
+    ):
+        raise RuntimeError("parallel scoring changed chunk order")
+    return tuple(
+        raw_logit
+        for chunk in chunks
+        for raw_logit in chunk.raw_logits
+    )
+
+
+def score_raw_training_phase(
+    phase: str,
+    model: SparseScorer,
+    examples: Sequence[FeaturedExample],
+    *,
+    workers: int,
+) -> tuple[float, ...]:
+    """Run one measured raw-scoring phase without touching JSON stdout."""
+
+    actual_workers = max(1, min(workers, len(examples)))
+    started = time.monotonic()
+    sys.stderr.write(
+        f"KeySwitch trainer: phase=score:{phase} rows={len(examples)} "
+        f"workers={actual_workers}\n"
+    )
+    sys.stderr.flush()
+    result = score_raw_logits_parallel(
+        model,
+        examples,
+        workers=workers,
+    )
+    elapsed = time.monotonic() - started
+    sys.stderr.write(
+        f"KeySwitch trainer: phase=score:{phase} complete "
+        f"seconds={elapsed:.3f}\n"
+    )
+    sys.stderr.flush()
+    return result
+
+
+def score_training_phase(
+    phase: str,
+    model: SparseScorer,
+    calibration: DirectionalPlattCalibration,
+    examples: Sequence[FeaturedExample],
+    *,
+    workers: int,
+) -> tuple[ScoredExample, ...]:
+    """Run one measured calibrated-scoring phase in canonical row order."""
+
+    raw_logits = score_raw_training_phase(
+        phase,
+        model,
+        examples,
+        workers=workers,
+    )
+    return calibrate_raw_logits(examples, raw_logits, calibration)
+
+
+def evaluate_development_epoch_parallel(
+    model: SparseScorer,
+    examples: Sequence[FeaturedExample],
+    config: TrainingConfig,
+    *,
+    workers: int,
+) -> DevelopmentEpochEvaluation:
+    """Score a frozen epoch on processes and reduce in canonical row order."""
+
+    if workers < 1:
+        raise ValueError("development evaluation requires at least one worker")
+    if workers == 1:
+        return evaluate_development_epoch(model, examples, config)
+    raw_logits = score_raw_logits_parallel(
+        model,
+        examples,
+        workers=workers,
+    )
+    return _evaluate_development_logits(examples, raw_logits, config)
 
 
 def _apply_trigger_threshold_margin(
@@ -6563,33 +6997,7 @@ def runtime_feature_extractor(
     """Adapt lexical rows to the exact feature function used in production."""
 
     validate_word_scorers(scorers)
-
-    def extractor(
-        example: LexicalExample, dimension: int
-    ) -> ExtractedExampleFeatures:
-        evidence = IntentModelInput(
-            original=example.original,
-            alternative=example.alternative,
-            source_group=example.source_group,
-            target_group=example.target_group,
-            trigger=example.trigger,
-            source_score=_IGNORED_CLASSIFIER_WORD_SCORE,
-            target_score=_IGNORED_CLASSIFIER_WORD_SCORE,
-            context_delta=example.context_delta,
-            context_group=example.context_group,
-        )
-        vector = extract_features(
-            evidence,
-            dimension=dimension,
-            hash_seed=hash_seed,
-            membership_seed=membership_seed,
-            ngram_orders=NGRAM_ORDERS,
-        )
-        return ExtractedExampleFeatures(
-            vector.values, vector.character_fingerprints
-        )
-
-    return extractor
+    return RuntimeFeatureExtractor(hash_seed, membership_seed)
 
 
 def intent_input_for_example(
@@ -6671,6 +7079,16 @@ def _parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "ledger"
         ),
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=0,
+        metavar="N",
+        help=(
+            "parallel worker processes; 0 (the default) uses every logical "
+            "CPU available to the process"
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -6678,6 +7096,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Train, calibrate, select thresholds, seal test metrics and write artifacts."""
 
     arguments = _parse_arguments(argv)
+    workers = resolve_training_workers(arguments.workers)
+    sys.stderr.write(
+        "KeySwitch trainer: deterministic parallel phases use "
+        f"{workers} worker process(es)\n"
+    )
+    sys.stderr.flush()
     config, config_sha256 = load_training_config_snapshot(arguments.config)
     toolchain_snapshot = capture_toolchain_snapshot(config_sha256)
     evidence_path = verify_training_sources(
@@ -6770,17 +7194,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         scorers=training_language_scorers.scorers,
     )
     training_fingerprint_union: set[int] = set()
-    training_featured = featurize_examples(
+    training_featured = featurize_training_phase(
+        "train",
         dataset.by_split["train"],
         config.dimension,
         extractor,
+        workers=workers,
         supported_fingerprints=training_fingerprint_union,
     )
-    development_featured = featurize_examples(
-        dataset.by_split["development"], config.dimension, extractor
+    development_featured = featurize_training_phase(
+        "development",
+        dataset.by_split["development"],
+        config.dimension,
+        extractor,
+        workers=workers,
     )
     training_result = fit_ftrl(
-        training_featured, development_featured, config
+        training_featured,
+        development_featured,
+        config,
+        evaluation_workers=workers,
+        progress=report_ftrl_epoch,
     )
     final_sparse_weights = training_result.model.sparse_weights()
     quantized = quantize_weights(
@@ -6793,19 +7227,33 @@ def main(argv: Sequence[str] | None = None) -> int:
     del training_fingerprint_union
     del training_featured
     del development_featured
-    calibration_featured = featurize_examples(
-        dataset.by_split["calibration"], config.dimension, extractor
+    calibration_featured = featurize_training_phase(
+        "calibration",
+        dataset.by_split["calibration"],
+        config.dimension,
+        extractor,
+        workers=workers,
+    )
+    calibration_raw_logits = score_raw_training_phase(
+        "calibration",
+        quantized_scorer,
+        calibration_featured,
+        workers=workers,
     )
     calibration_pairs = tuple(
         (
-            quantized_scorer.score(item.features),
+            raw_logit,
             item.example.label,
             layout_direction(
                 item.example.source_group,
                 item.example.target_group,
             ),
         )
-        for item in calibration_featured
+        for item, raw_logit in zip(
+            calibration_featured,
+            calibration_raw_logits,
+            strict=True,
+        )
     )
     calibration = fit_directional_platt_calibration(
         calibration_pairs,
@@ -6817,20 +7265,31 @@ def main(argv: Sequence[str] | None = None) -> int:
         for direction in LAYOUT_DIRECTIONS
     ):
         raise RuntimeError("calibration reversed the model score orientation")
-    calibration_scores = score_examples(
-        quantized_scorer, calibration, calibration_featured
+    calibration_scores = calibrate_raw_logits(
+        calibration_featured,
+        calibration_raw_logits,
+        calibration,
     )
+    del calibration_raw_logits
     veto_selection = choose_veto_threshold(
         calibration_scores,
         quantile=config.veto_positive_quantile,
         margin=config.veto_logit_margin,
     )
     del calibration_featured
-    threshold_featured = featurize_examples(
-        dataset.by_split["threshold"], config.dimension, extractor
+    threshold_featured = featurize_training_phase(
+        "threshold",
+        dataset.by_split["threshold"],
+        config.dimension,
+        extractor,
+        workers=workers,
     )
-    threshold_scores = score_examples(
-        quantized_scorer, calibration, threshold_featured
+    threshold_scores = score_training_phase(
+        "threshold",
+        quantized_scorer,
+        calibration,
+        threshold_featured,
+        workers=workers,
     )
     thresholds = choose_trigger_thresholds(threshold_scores, config)
     (
@@ -7051,17 +7510,35 @@ def main(argv: Sequence[str] | None = None) -> int:
     assert_no_split_leakage(dataset)
     dataset_sha256 = dataset_fingerprint(dataset)
     safety_audit = audit_guarded_safety_corpus(dataset.safety)
-    test_featured = featurize_examples(
-        dataset.by_split["test"], config.dimension, extractor
+    test_featured = featurize_training_phase(
+        "test",
+        dataset.by_split["test"],
+        config.dimension,
+        extractor,
+        workers=workers,
     )
-    test_scores = score_examples(
-        quantized_scorer, calibration, test_featured
+    test_scores = score_training_phase(
+        "test",
+        quantized_scorer,
+        calibration,
+        test_featured,
+        workers=workers,
     )
     del test_featured
-    safety_featured = featurize_examples(
-        dataset.safety, config.dimension, extractor
+    safety_featured = featurize_training_phase(
+        "safety",
+        dataset.safety,
+        config.dimension,
+        extractor,
+        workers=workers,
     )
-    safety_scores = score_examples(quantized_scorer, calibration, safety_featured)
+    safety_scores = score_training_phase(
+        "safety",
+        quantized_scorer,
+        calibration,
+        safety_featured,
+        workers=workers,
+    )
     test_veto = veto_metrics(test_scores, veto_selection.raw_logit)
     test_metrics = {
         trigger: confusion_at_directional_threshold(

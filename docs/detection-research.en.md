@@ -70,7 +70,7 @@ participating in training or threshold selection.
 The offline trainer fits sparse logistic regression with FTRL-Proximal. Every
 variant of one physical sequence is assigned to one split before augmentation;
 train, development, calibration, threshold and sealed-test sets stay separate
-under `keyswitch:intent-v14:physical-signature`. The candidate pre-pass enumerates
+under `keyswitch:intent-v15:physical-signature`. The candidate pre-pass enumerates
 the actual identity, deletion, duplication and transposition signatures without
 accessing test, then quarantines conflicts among pre-sealed splits/languages and
 protected/safety tokens. Only after the exact candidate SHA is atomically
@@ -79,7 +79,7 @@ signatures already exposed by candidate rows, quarantine or safety data without
 changing candidate rows. A post-build audit verifies these invariants against
 the rows actually produced.
 
-For v14, a new model-blind unknown-typo development corpus is frozen as
+Since v14 (and again for v15), a model-blind unknown-typo development corpus is frozen as
 a separate signed JSON source. Its 10,000 unique physical signatures are
 assigned by an independent hash namespace with no test role: 3,500/500/500/500
 words from each language enter train/development/calibration/threshold. Every

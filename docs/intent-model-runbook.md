@@ -7,14 +7,14 @@
 [cookbook](intent-model-cookbook.md), устройство модели — в
 [карточку модели](../model/intent_v1/MODEL_CARD.md).
 
-Runbook соответствует текущему контуру v14:
+Runbook соответствует текущему контуру v15:
 
 - training config schema 13;
 - feature schema v5;
 - KSLM container schema 4;
-- sealed split namespace `keyswitch:intent-v14:physical-signature`;
+- sealed split namespace `keyswitch:intent-v15:physical-signature`;
 - reference host Ubuntu 26.04 и Python 3.14;
-- сертифицированный artifact `intent-v1-6bf96537c28f`.
+- сертифицированный artifact `intent-v1-bec1f1d3dceb`.
 
 Номера этих схем независимы. Нельзя автоматически повышать их вместе только
 ради нового релиза.
@@ -168,7 +168,7 @@ checks и тесты. Feature schema и KSLM schema повышаются тол�
 Перед правками получить полный список version-bound мест:
 
 ```bash
-rg -n 'v14|schema_version|SPLIT_NAMESPACE|SEALED_REGISTRY|PRESEAL_RECEIPT|UNKNOWN_TYPO|HARD_NEGATIVE' \
+rg -n 'v15|schema_version|SPLIT_NAMESPACE|SEALED_REGISTRY|PRESEAL_RECEIPT|UNKNOWN_TYPO|HARD_NEGATIVE' \
   tools model packaging tests README.md README.en.md DESIGN.md docs
 ```
 
@@ -286,9 +286,17 @@ diff -u model/intent_v1/holdout-vN-preseal.json /tmp/keyswitch-preseal-check.jso
 
 ```bash
 set -o pipefail
-PYTHONPATH=src python3 tools/train_intent_model_release.py | \
+PYTHONPATH=src python3 tools/train_intent_model_release.py --workers 0 | \
   tee /tmp/keyswitch-train-manifest.json
 ```
+
+`--workers 0` — значение по умолчанию: trainer использует все logical CPU,
+доступные через affinity процесса. `--workers N` задаёт верхнюю границу, а
+`--workers 1` нужен для диагностики. Process pool применяется только к
+независимым вычислениям и возвращает строки в каноническом порядке; online
+FTRL update остаётся последовательным и сохраняет точную математику принятого
+алгоритма. Число worker-ов не записывается в candidate identity и не должно
+менять artifact/manifest/report bytes.
 
 Trainer выполняет последовательно:
 
@@ -432,6 +440,29 @@ Windows release выполняется workflow `windows` из
 [`tests.yml`](../.github/workflows/tests.yml): strict mypy/tests, настоящий
 `WH_KEYBOARD_LL`/`SendInput` E2E, native ZIP/installer, silent install и
 диагностика установленной модели.
+
+### Единый прогон
+
+Проверки разделов 3, 5, 8–11 целиком выполняет `tools/release_pipeline.py`.
+Профиль `release` проверяет frozen sources и provenance, побайтно
+воспроизводит development corpus и preseal receipt, запускает независимый
+strict evaluator, два retraining replay с трёхсторонним сравнением (и strict
+для replay «a» при `--replay-strict`), затем typecheck, coverage, detector,
+X11/tray E2E, DEB, verifier, Lintian и packaged E2E. Независимые фазы идут
+параллельно, а планировщик допускает их только при достаточном свободном ОЗУ:
+
+```bash
+python3 tools/release_pipeline.py start --profile release --replay-strict
+python3 tools/release_pipeline.py wait
+```
+
+Итог — `dist/release-pipeline/latest/SUMMARY.md` с чек-листом раздела 12,
+hashes всех артефактов и хвостами журналов проваленных фаз. Скрипт не
+выполняет официальный train и не трогает registry: новый кандидат по разделам
+4–7 создаётся вручную, а pipeline доказывает уже опубликованный артефакт. Уже
+запущенные вручную replay передаются через `--replay-dir`. Фаза
+`release-metadata` в профиле `release` требует, чтобы версия, changelog, model
+card и `.gitattributes` уже соответствовали кандидату.
 
 ## 12. Решение о выпуске
 

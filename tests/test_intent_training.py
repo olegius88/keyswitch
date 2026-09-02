@@ -356,7 +356,7 @@ def config(**changes: object) -> TrainingConfig:
         "sealed_evaluation": SealedEvaluationPolicy(
             schema_version=1,
             split_namespace=SPLIT_NAMESPACE,
-            registry_path="model/intent_v1/seal-registry-v14.json",
+            registry_path="model/intent_v1/seal-registry-v15.json",
         ),
         "minimum_word_length": 3,
         "maximum_word_length": 18,
@@ -1645,7 +1645,7 @@ class DatasetConstructionTests(unittest.TestCase):
             ),
             (
                 replace(baseline, role_namespace="other"),
-                "role namespace must match v14",
+                "role namespace must match v15",
             ),
             (
                 replace(baseline, train_words_per_group=0),
@@ -1957,6 +1957,70 @@ class LeakageAndFeatureTests(unittest.TestCase):
         self.assertTrue(featured)
         self.assertTrue(all(not hasattr(row, "character_fingerprints") for row in featured))
 
+    def test_process_featurization_is_ordered_and_bit_exact(self) -> None:
+        examples = tuple(
+            lexical_example(
+                index % 2 == 0,
+                trigger=TRIGGERS[index % len(TRIGGERS)],
+                signature=f"parallel-feature-{index}",
+            )
+            for index in range(24)
+        )
+        extractor = runtime_feature_extractor(
+            DEFAULT_FNV_SEED,
+            DEFAULT_MEMBERSHIP_FNV_SEED,
+            scorers=test_word_scorers(),
+        )
+        sequential_support: set[int] = set()
+        parallel_support: set[int] = set()
+        sequential = featurize_examples(
+            examples,
+            256,
+            extractor,
+            supported_fingerprints=sequential_support,
+        )
+        parallel = tim.featurize_examples_parallel(
+            examples,
+            256,
+            extractor,
+            workers=2,
+            supported_fingerprints=parallel_support,
+        )
+
+        self.assertEqual(parallel, sequential)
+        self.assertTrue(
+            all(
+                featured.example is example
+                for featured, example in zip(parallel, examples, strict=True)
+            )
+        )
+        self.assertEqual(parallel_support, sequential_support)
+        self.assertEqual(tim.resolve_training_workers(1), 1)
+        with patch(
+            "train_intent_model.os.sched_getaffinity",
+            return_value={2, 4, 6, 8},
+        ):
+            self.assertEqual(tim.available_training_workers(), 4)
+            self.assertEqual(tim.resolve_training_workers(0), 4)
+            self.assertEqual(tim.resolve_training_workers(99), 4)
+        with (
+            patch(
+                "train_intent_model.os.sched_getaffinity",
+                side_effect=OSError("unsupported"),
+            ),
+            patch("train_intent_model.os.cpu_count", return_value=6),
+        ):
+            self.assertEqual(tim.available_training_workers(), 6)
+        with self.assertRaisesRegex(ValueError, "at least one worker"):
+            tim.featurize_examples_parallel(
+                examples,
+                256,
+                extractor,
+                workers=0,
+            )
+        with self.assertRaisesRegex(ValueError, "cannot be negative"):
+            tim.resolve_training_workers(-1)
+
 
 class OptimizerAndCalibrationTests(unittest.TestCase):
     @staticmethod
@@ -2106,8 +2170,15 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
 
     def test_ftrl_is_deterministic_sparse_and_separates(self) -> None:
         training, development = self._featured()
-        first = fit_ftrl(training, development, config())
+        progress: list[tim.EpochReport] = []
+        first = fit_ftrl(
+            training,
+            development,
+            config(),
+            progress=progress.append,
+        )
         second = fit_ftrl(training, development, config())
+        self.assertEqual(tuple(progress), first.history)
         self.assertEqual(first.best_epoch, second.best_epoch)
         self.assertEqual(first.history, second.history)
         self.assertEqual(first.model.z, second.model.z)
@@ -2121,6 +2192,57 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         self.assertEqual(sparse.sparse_weights(), {})
         with self.assertRaisesRegex(ValueError, "sample weight"):
             sparse.update(((1, 1.0),), True, 0.0)
+
+    def test_parallel_development_scoring_is_bit_exact(self) -> None:
+        training, development = self._featured()
+        parameters = FTRLParameters(256, 0.1, 1.0, 0.0, 0.01)
+        model = FTRLProximal(parameters)
+        for item in training:
+            model.update(
+                item.features,
+                item.example.label,
+                item.example.weight,
+            )
+
+        expected = evaluate_development_epoch(
+            model,
+            development,
+            config(dimension=256),
+        )
+        actual = tim.evaluate_development_epoch_parallel(
+            model,
+            development,
+            config(dimension=256),
+            workers=2,
+        )
+
+        self.assertEqual(actual, expected)
+        calibration = directional_calibration(scale=1.25, bias=-0.5)
+        self.assertEqual(
+            tim.score_examples_parallel(
+                model,
+                calibration,
+                development,
+                workers=2,
+            ),
+            tim.score_examples(model, calibration, development),
+        )
+        with self.assertRaisesRegex(ValueError, "do not match"):
+            tim.calibrate_raw_logits(development, (), calibration)
+        with self.assertRaisesRegex(ValueError, "at least one worker"):
+            tim.evaluate_development_epoch_parallel(
+                model,
+                development,
+                config(dimension=256),
+                workers=0,
+            )
+        with self.assertRaisesRegex(ValueError, "at least one worker"):
+            fit_ftrl(
+                training,
+                development,
+                config(dimension=256),
+                evaluation_workers=0,
+            )
 
     def test_epoch_selection_prefers_certified_tail_over_lower_log_loss(
         self,
@@ -6198,6 +6320,8 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                 str(manifest),
                 "--test-report",
                 str(report),
+                "--workers",
+                "1",
             ]
             if dry_run:
                 arguments.append("--dry-run")
@@ -7625,6 +7749,8 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                         str(report),
                         "--diagnostic-output",
                         str(diagnostic_path),
+                        "--workers",
+                        "1",
                     )
                 )
                 threshold_gate.return_value = {"passed": True}
@@ -7645,6 +7771,8 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                             str(manifest),
                             "--test-report",
                             str(report),
+                            "--workers",
+                            "1",
                         )
                     )
                 claim_gate.assert_called_once()
@@ -8099,22 +8227,22 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         )
         self.assertEqual(
             loaded.external_evaluation.unknown_typo_holdout_corpus_sha256,
-            "0e687cbfc9c5821356b05e6858fea4582bb6948867bfdd2140665a73c4c544a8",
+            "61b1c74e74af1759ff3e5a35235dd878cad80f2ab3dd49d7fd8f80f92af7cbba",
         )
         self.assertEqual(
             loaded.sealed_evaluation.split_namespace, SPLIT_NAMESPACE
         )
         self.assertEqual(
             loaded.sealed_evaluation.registry_path,
-            "model/intent_v1/seal-registry-v14.json",
+            "model/intent_v1/seal-registry-v15.json",
         )
         self.assertEqual(
             loaded.hard_negative_development.source.path,
-            "model/intent_v1/unknown-typo-development-v14.json",
+            "model/intent_v1/unknown-typo-development-v15.json",
         )
         self.assertEqual(
             loaded.hard_negative_development.source.sha256,
-            "44b460ee6457dd26269c843a87b43bd22b026927de8f194ee1abbf2cf910af2f",
+            "a0585bdbd21526434fc77effc64200075269d884321a702fa44bd8a9dc7f963c",
         )
         self.assertEqual(
             loaded.hard_negative_development.role_counts(),
@@ -8143,7 +8271,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             (0.956, 0.91, 0.91, 0.86),
         )
         self.assertEqual(loaded.threshold_logit_margin_cap, 2.0)
-        preseal_path = repository / "model/intent_v1/holdout-v14-preseal.json"
+        preseal_path = repository / "model/intent_v1/holdout-v15-preseal.json"
         preseal_bytes = preseal_path.read_bytes()
         self.assertLessEqual(len(preseal_bytes), 64 * 1024)
         preseal = cast(
@@ -8167,7 +8295,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         self.assertEqual(preseal["schema_version"], 1)
         self.assertEqual(
             preseal["policy"],
-            "keyswitch-intent-v14-preseal-holdout",
+            "keyswitch-intent-v15-preseal-holdout",
         )
         self.assertIs(preseal["model_loaded"], False)
         self.assertIs(preseal["metrics_evaluated"], False)
@@ -8232,18 +8360,18 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         self.assertEqual(
             sealed_exclusions,
             {
-                "signature_count": 288_891,
+                "signature_count": 288_869,
                 "sha256": (
-                    "9dd9688358964e5b9dbb0d0d56cdda6852eb9d428012485aa2ce2d0ce85e7c4f"
+                    "c33d48e1518cfd42ebe2228bdbbdfe3dd34662db6d94eafeea3aa3469c6d17eb"
                 ),
             },
         )
         self.assertEqual(
             combined_exclusions,
             {
-                "signature_count": 298_891,
+                "signature_count": 298_869,
                 "sha256": (
-                    "0c8d9ff04588f9df958c43d9f489e1b53eb017dee2c0dfee2fcb0a6b69aa3d0b"
+                    "1277b180fbbc8ed7ac158d09e318c392bd18c251f4acdf0beb3b0114404a2219"
                 ),
             },
         )

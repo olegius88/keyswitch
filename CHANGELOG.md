@@ -4,6 +4,51 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.7.0 — 2026-09-02
+
+- Accept the v15 layout-intent candidate `intent-v1-bec1f1d3dceb` after the
+  multiprocess trainer changed the toolchain identity behind v14. Rotate the
+  split, registry, hard-negative source and holdout namespaces to v15, freeze
+  the model-blind `unknown-typo-development-v15.json` (SHA-256
+  `a0585bdbd21526434fc77effc64200075269d884321a702fa44bd8a9dc7f963c`) and
+  preseal `holdout-v15-preseal.json` with zero overlap against 288,869 sealed
+  and 10,000 development physical signatures. The trainer ran all 64 permitted
+  epochs and selected epoch 64 with 765,205 nonzero weights and 1,031,416
+  membership fingerprints. The independent strict report, SHA-256
+  `82ff2b6f332369eea2e71eb2df4960a554a1aa9de9c31025c35bf15d4485c303`,
+  passed all 30 gates: on the 60,000-negative model-blind holdout the
+  production ensemble produced 12 false positives (2 per trigger slice, Wilson
+  upper endpoint 0.000728996 against the 0.001 limit; 6 introduced by the model
+  while 60 fallback false positives were prevented) with recall 0.96935, and
+  every sealed per-trigger slice shows 2 false positives among 21,574
+  negatives with recall 0.973 (Pause 0.968). The published artifact has SHA-256
+  `7631b821bafc958364353a8a13de3abc23e922e51b589bd181075db55fa9e9dc`; the
+  manifest and test-report SHA-256 values are
+  `e0070e8e6813da4a8dde1a09eb2c1713f033d002a64216299cba3764032d82f7` and
+  `05caf3828ff2724fc5f1d22ff2e28d9b31cd2d1bcfcceb64f934bb8bfe84480d`. Two
+  independent sequential retraining runs reproduced byte-identical KSLM,
+  manifest and test-report files, and the strict evaluator re-run against the
+  first replay passed all 30 gates with report SHA-256
+  `88f6704c845efd86b8c3ba924607bcdf972e915d0d7d6c75ff147e1d0099f23e`.
+- Add `tools/release_pipeline.py`, an unattended Linux release pipeline that
+  runs model provenance and reproducibility evidence, strict typing, coverage,
+  detector gates, X11/tray E2E, the native Debian build, its verifier and the
+  packaged E2E as one detached process. Phases form a dependency graph and run
+  concurrently under a memory-aware scheduler; every run leaves a live
+  `state.json` plus final `summary.json`/`SUMMARY.md` with the runbook
+  checklist for later review.
+- Pin the v15 registry, preseal receipt and frozen development source in
+  `.gitattributes`, describe the v15 contract in the man page and pin
+  `intent-v1-bec1f1d3dceb` in the Windows packaging contract test.
+- Use every CPU available through process affinity by default while training
+  the layout-intent model. Parallelize deterministic feature extraction,
+  frozen-model epoch evaluation, calibration, threshold and sealed-test
+  scoring; preserve canonical row order and provide `--workers N` for resource
+  limits or single-process diagnostics.
+- Preserve the maximized or snapped state of the active Windows application
+  when the learning prompt closes. Return keyboard focus without issuing
+  `SW_RESTORE`, and cover the maximized-window confirmation path in Win32 E2E.
+
 ## 0.6.1 — 2026-09-02
 
 - Correct the reviewed Russian-layout `ша` to English `if` case independently

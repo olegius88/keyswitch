@@ -1,73 +1,71 @@
-# KeySwitch 0.6.1
+# KeySwitch 0.7.0
 
 ## Русский
 
-Этот patch-релиз исправляет два конфликтующих сценария короткого ввода и
-добавляет безопасный технический журнал для анализа решений распознавания.
+Этот выпуск ускоряет обучение локальной модели намерения, исправляет
+восстановление окна в Windows и переводит приложение на новый сертифицированный
+KSLM-артефакт v15.
 
-- `ша`, набранное в русской раскладке как физический эквивалент английского
-  `if`, теперь исправляется независимо от настройки минимальной длины слова —
-  после пробела, другого включённого разделителя или паузы.
-- Исключение намеренно узкое: оно требует точного частотного совпадения и не
-  включает неоднозначные пары вроде `шт` → `in` и `фе` → `at`.
-- Явная ручная смена раскладки имеет абсолютный приоритет для следующего слова.
-  Если пользователь выбрал RU и ввёл `ша`, KeySwitch сохраняет русский текст
-  как после паузы, так и после завершения слова; это правило сильнее ранее
-  выученных автоматических преобразований.
-- В Linux и Windows появился выключенный по умолчанию подробный технический
-  журнал. Он фиксирует версию приложения и модели, настройки распознавания,
-  оценки обеих раскладок, причины решений, ручной выбор языка и результат
-  исправления.
-- Журнал может содержать введённые слова и названия приложений. Текст из
-  приложений-исключений всегда заменяется на `<redacted>`. Файл хранится только
-  локально, ограничен 5 МиБ и имеет три ротационные копии.
-- Сертифицированный KSLM-артефакт `intent-v1-6bf96537c28f` не изменён; проверка
-  его замороженного toolchain и упаковочного контракта остаётся fail-closed.
+- Offline trainer использует все logical CPU, доступные процессу: извлечение
+  признаков, оценка эпох, калибровка, выбор порогов и sealed-test scoring идут
+  в process pool с каноническим порядком строк, а `--workers N` ограничивает
+  число процессов. Online-обновление FTRL-Proximal остаётся последовательным,
+  поэтому результат побайтно не зависит от числа worker-ов.
+- Изменённый trainer означает новую toolchain identity, поэтому выпущен новый
+  кандидат `intent-v1-bec1f1d3dceb`: заново заморожен model-blind
+  development-корпус, создан holdout v15 с нулевыми пересечениями, пройдены все
+  внутренние gates и независимая strict-проверка (30 из 30 gates). На новом
+  holdout из 60 000 негативов ансамбль дал 12 ложных срабатываний при recall
+  0,96935; полные метрики и хэши приведены в model card.
+- В Windows подсказка обучения больше не «восстанавливает» развёрнутое или
+  прикреплённое окно: фокус возвращается без `SW_RESTORE`.
+- Добавлен `tools/release_pipeline.py`: один отсоединённый от терминала процесс
+  выполняет весь Linux-контур проверки и сборки, параллельно и с учётом
+  свободного ОЗУ, и оставляет `SUMMARY.md` с чек-листом runbook.
 
-Локальный контур выпуска: строгий `mypy`, 342 автоматических теста и 100%
+Локальный контур выпуска: строгий `mypy`, 368 автоматических тестов и 100%
 покрытия строк и ветвей.
 
 ### Установка
 
-- Windows 10/11 x64: `KeySwitch-Setup-0.6.1-x64.exe` или переносимый
-  `KeySwitch-0.6.1-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.6.1_amd64.deb`.
+- Windows 10/11 x64: `KeySwitch-Setup-0.7.0-x64.exe` или переносимый
+  `KeySwitch-0.7.0-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.7.0_amd64.deb`.
 
 Windows Setup пока не подписан сертификатом издателя. Нативная Wayland-сессия
 Linux пока не поддерживается.
 
 ## English
 
-This patch release fixes two conflicting short-input scenarios and adds a safe
-technical log for analysing detection decisions.
+This release speeds up training of the local intent model, fixes window
+restoration on Windows and moves the application to a new certified v15 KSLM
+artifact.
 
-- Russian-layout `ша`, the physical equivalent of English `if`, is now
-  corrected independently of the configured minimum word length after Space,
-  any other enabled boundary, or a typing pause.
-- The exception is deliberately narrow: it requires an exact high-frequency
-  match and does not admit ambiguous pairs such as `шт` → `in` or `фе` → `at`.
-- An explicit manual layout change has absolute priority for the next word. If
-  the user selects RU and types `ша`, KeySwitch preserves the Russian text both
-  after a pause and at the word boundary, even when an older learned automatic
-  rule exists.
-- Linux and Windows settings now include detailed technical logging, disabled
-  by default. It records application and model versions, detection settings,
-  both layout scores, decision reasons, manual language selection and
-  correction outcomes.
-- The log may contain typed words and application names. Text from excluded
-  applications is always replaced with `<redacted>`. Files stay local, are
-  capped at 5 MiB and rotate through three backups.
-- The certified `intent-v1-6bf96537c28f` KSLM artifact is unchanged; its frozen
-  toolchain and packaging contract remain fail-closed.
+- The offline trainer uses every logical CPU available to the process: feature
+  extraction, epoch evaluation, calibration, threshold selection and sealed-test
+  scoring run in a process pool with canonical row order, and `--workers N`
+  caps the process count. The online FTRL-Proximal update stays sequential, so
+  the result is byte-for-byte independent of the worker count.
+- A changed trainer is a new toolchain identity, so a new candidate
+  `intent-v1-bec1f1d3dceb` was released: the model-blind development corpus was
+  frozen again, a v15 holdout was presealed with zero overlap, and every
+  internal gate plus the independent strict evaluation (30 of 30 gates) passed.
+  On the new 60,000-negative holdout the ensemble produced 12 false positives
+  with recall 0.96935; the complete metrics and hashes are in the model card.
+- On Windows the learning prompt no longer "restores" a maximized or snapped
+  window: focus returns without `SW_RESTORE`.
+- `tools/release_pipeline.py` runs the whole Linux verification and packaging
+  contour as one detached process, concurrently and within the available RAM,
+  and leaves `SUMMARY.md` with the runbook checklist.
 
-The local release gate passes strict `mypy`, 342 automated tests and mandatory
+The local release gate passes strict `mypy`, 368 automated tests and mandatory
 100% line and branch coverage.
 
 ### Installation
 
-- Windows 10/11 x64: `KeySwitch-Setup-0.6.1-x64.exe` or the portable
-  `KeySwitch-0.6.1-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.6.1_amd64.deb`.
+- Windows 10/11 x64: `KeySwitch-Setup-0.7.0-x64.exe` or the portable
+  `KeySwitch-0.7.0-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.7.0_amd64.deb`.
 
 The Windows installer is not yet signed with a publisher certificate. Native
 Linux Wayland sessions are not supported yet.

@@ -60,11 +60,11 @@ model is not updated from ordinary typing.
 
 ## Install on Windows
 
-Download `KeySwitch-Setup-0.6.1-x64.exe` from the
+Download `KeySwitch-Setup-0.7.0-x64.exe` from the
 [latest release](https://github.com/olegius88/keyswitch/releases/latest) and run
 it. The per-user installation goes to `%LOCALAPPDATA%\Programs\KeySwitch` and
 does not require administrator privileges. The release also includes the
-portable `KeySwitch-0.6.1-windows-x64.zip` archive.
+portable `KeySwitch-0.7.0-windows-x64.zip` archive.
 
 After launch, KeySwitch appears in the notification area. Left- or right-click
 the `EN/RU` or flag icon to open its menu. Its Switch to action always offers
@@ -125,12 +125,12 @@ Probe the system backend without opening the application window:
 
 ## Install the Debian package
 
-Download `keyswitch_0.6.1_amd64.deb` from the
+Download `keyswitch_0.7.0_amd64.deb` from the
 [latest release](https://github.com/olegius88/keyswitch/releases/latest), then
 install it with:
 
 ```bash
-sudo apt install ./keyswitch_0.6.1_amd64.deb
+sudo apt install ./keyswitch_0.7.0_amd64.deb
 ```
 
 The package installs the required system dependencies and adds KeySwitch to the
@@ -268,7 +268,15 @@ publication `manifest.json` uses `schema_version: 1`.
 The offline model uses 2,097,152 hash buckets and permits at most 64 epochs with
 deterministic early stopping. The frozen EN/RU lexicons are used in full after
 filtering; `maximum_words_per_language` must be zero so global truncation before
-the split cannot depend on held-out identities. Feature schema v5 is derived only from the source
+the split cannot depend on held-out identities.
+The offline trainer discovers the logical CPUs available through process
+affinity and uses all of them by default for feature extraction and independent
+scoring. `--workers N` caps the worker-process count, while `--workers 1`
+enables single-process diagnostics. Worker output is reduced in original row
+order, so the worker count cannot alter online-FTRL ordering or candidate
+bytes. The online FTRL update itself remains sequential because every step
+depends on the state produced by the preceding example.
+Feature schema v5 is derived only from the source
 and alternative raw tokens: signed character 1–5-grams, direction, length,
 and trigger. Context fields, every `WordScore`, and every language-model score
 field are ignored by the classifier. Real short-lived context remains in the
@@ -277,7 +285,7 @@ score. The trainer invokes the same runtime extractor with the same seeds and
 n-gram orders, giving exact train/serve feature parity. A train-only EN/RU scorer
 remains as separate, checked provenance but is not a classifier input.
 Physical signatures are partitioned under
-`keyswitch:intent-v14:physical-signature`. Before row generation, the independent
+`keyswitch:intent-v15:physical-signature`. Before row generation, the independent
 candidate phase quarantines every identity or typo signature owned by different
 pre-sealed splits/languages, or overlapping a protected/safety token. Sealed-test
 rows and their quarantine are built only after the exact candidate SHA has been
@@ -285,7 +293,7 @@ atomically claimed; the merge removes test signatures exposed by candidate
 rows, quarantine or safety data and never changes candidate rows.
 
 Schema 13 additionally consumes the byte-frozen
-`unknown-typo-development-v14.json`. It was built model-blind before training
+`unknown-typo-development-v15.json`. It was built model-blind before training
 from 5,000 EN and 5,000 RU Hunspell-unknown typos and compacted to one record
 per physical signature. An independent role namespace deterministically assigns
 each language half as 3,500/500/500/500 words across
@@ -299,7 +307,7 @@ weight `1.0`. Critical unknown typos therefore remain influential during
 optimization without silently relaxing the unweighted quality measurements.
 The complete post-merge audit forbids role overlap and overlap with the
 original lexical/safety corpus.
-The independent v14 holdout uses distinct rank/choice namespaces and is never
+The independent v15 holdout uses distinct rank/choice namespaces and is never
 used for training or threshold selection.
 
 Calibration, threshold selection and sealed-test evaluation use neutral context
@@ -382,9 +390,12 @@ for each ordinary trigger; its 0.001028128 Wilson upper endpoint exceeded the
 0.001 limit. `rejection-v12.json` and `rejection-v13.json` preserve the exact
 causes and hashes. V14 fixed a zero-FP selection budget before rotating every
 namespace and passed strict evaluation with 0 false positives among 60,000
-unknown-typo negatives.
-`holdout-v14-preseal.json` pins its SHA-256, namespaces, sizes and zero overlap
-before a v14 model is loaded or evaluated; `model_loaded=false` and
+unknown-typo negatives. V15 rotated every namespace again after the trainer
+became multiprocess and passed strict evaluation on its new holdout with 12
+false positives among 60,000 negatives (2 per trigger slice, Wilson upper
+endpoint 0.000728996 against the 0.001 limit) and recall 0.96935.
+`holdout-v15-preseal.json` pins its SHA-256, namespaces, sizes and zero overlap
+before a v15 model is loaded or evaluated; `model_loaded=false` and
 `metrics_evaluated=false` make that phase explicit.
 
 The manifest binds hashes of the config, frozen sources, trainer, external
@@ -490,7 +501,7 @@ Build the reproducible native Debian package with:
 sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
 ./tools/install-build-tools.sh .nuitka
 KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package="dist/keyswitch_0.6.1_$(dpkg --print-architecture).deb"
+package="dist/keyswitch_0.7.0_$(dpkg --print-architecture).deb"
 ./tools/verify-native-deb.sh "$package"
 ```
 
@@ -535,6 +546,30 @@ ZIP, silently install it, diagnose the exact bundled model, smoke-test the
 installed UI, create one
 `SHA256SUMS` file and publish all artifacts in a GitHub Release.
 
+The whole Linux contour — model provenance and strict evaluation, replay
+evidence, type checking, coverage, the detector gates, X11/tray E2E, the DEB
+build, its verifier and the packaged-binary E2E — runs as one process detached
+from the terminal:
+
+```bash
+python3 tools/release_pipeline.py start --profile release
+python3 tools/release_pipeline.py status
+python3 tools/release_pipeline.py wait
+```
+
+Phases form a dependency graph and run concurrently; the scheduler admits the
+next phase only when enough RAM stays available after the peaks that already
+running phases may still reach and a reserve (`--jobs`,
+`--memory-reserve-mib`). Every run lives in
+`dist/release-pipeline/<stamp>-<profile>/`: `state.json` is updated while the
+run proceeds, `summary.json` and `SUMMARY.md` appear at the end next to the
+phase logs, strict reports and the DEB. The `app` profile mirrors the `verify`
+job of GitHub Actions, `quick` stops at type checking, coverage and the
+detector, and `release` adds the byte-identical model replays; `--replay-dir`
+adopts replays that are still running or already finished, and
+`python3 tools/release_pipeline.py phases` prints the phases, memory budgets
+and dependencies.
+
 ## Limitations
 
 - The Linux backend is designed for X11. In a native Wayland session, KeySwitch
@@ -547,7 +582,7 @@ installed UI, create one
 - On Windows, UIPI prevents a regular process from injecting input into a
   window running at a higher integrity level. KeySwitch needs a matching level
   for that target window.
-- The Windows 0.6.1 Setup EXE is not yet signed with a publisher certificate.
+- The Windows 0.7.0 Setup EXE is not yet signed with a publisher certificate.
 
 ## License
 

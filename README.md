@@ -59,11 +59,11 @@ KeySwitch — настольное приложение для Windows 10/11 x64
 
 ## Установка в Windows
 
-Скачайте `KeySwitch-Setup-0.6.1-x64.exe` со страницы
+Скачайте `KeySwitch-Setup-0.7.0-x64.exe` со страницы
 [последнего выпуска](https://github.com/olegius88/keyswitch/releases/latest) и
 запустите его. Установка выполняется для текущего пользователя в
 `%LOCALAPPDATA%\Programs\KeySwitch` и не требует прав администратора. В выпуск
-также входит переносимый архив `KeySwitch-0.6.1-windows-x64.zip`.
+также входит переносимый архив `KeySwitch-0.7.0-windows-x64.zip`.
 
 После запуска KeySwitch появится в области уведомлений. Левый или правый щелчок
 по `EN/RU` либо флагу открывает меню. В нём пункт «Переключить на…» всегда
@@ -126,11 +126,11 @@ cd keyswitch
 
 ## Установка DEB-пакета
 
-Скачайте `keyswitch_0.6.1_amd64.deb` со страницы
+Скачайте `keyswitch_0.7.0_amd64.deb` со страницы
 [последнего выпуска](https://github.com/olegius88/keyswitch/releases/latest), затем:
 
 ```bash
-sudo apt install ./keyswitch_0.6.1_amd64.deb
+sudo apt install ./keyswitch_0.7.0_amd64.deb
 ```
 
 Пакет установит системные зависимости и добавит KeySwitch в меню приложений.
@@ -270,6 +270,13 @@ Offline-модель использует 2 097 152 hash-buckets и конфиг
 эпохи с детерминированной ранней остановкой. Frozen EN/RU-лексиконы используются
 целиком после фильтрации; `maximum_words_per_language` обязан быть равен нулю,
 чтобы глобальное усечение до split не могло зависеть от held-out identity.
+Offline trainer по умолчанию определяет доступные процессу logical CPU через
+affinity и использует их все для извлечения признаков и независимого scoring.
+`--workers N` ограничивает число worker-процессов, а `--workers 1` включает
+однопроцессный диагностический режим. Результаты worker-ов собираются строго в
+исходном порядке, поэтому число worker-ов не меняет порядок online FTRL и
+байты кандидата. Сам online FTRL update остаётся последовательным: каждый его
+шаг зависит от состояния, созданного предыдущим примером.
 Feature schema v5 строится только
 из исходного и альтернативного raw token: знаковых символьных 1–5-грамм,
 направления, длины и trigger. Поля контекста, все поля `WordScore` и оценки
@@ -279,7 +286,7 @@ language model полностью игнорируются классифика�
 порядками n-грамм, поэтому train/serve feature parity точная. Train-only EN/RU
 scorer остаётся отдельной проверяемой provenance-записью, но не является входом
 классификатора. Разбиение физических сигнатур
-закреплено namespace `keyswitch:intent-v14:physical-signature`. До генерации
+закреплено namespace `keyswitch:intent-v15:physical-signature`. До генерации
 строк candidate-фаза независимо помещает identity- и typo-сигнатуры с
 владельцами из разных pre-sealed split/языков либо пересечением с
 protected/safety токеном в quarantine. Sealed-test строки и их quarantine
@@ -288,7 +295,7 @@ protected/safety токеном в quarantine. Sealed-test строки и их 
 кандидата, а строки кандидата не меняются.
 
 Schema 13 дополнительно подключает побайтно зафиксированный
-`unknown-typo-development-v14.json`. Он был построен model-blind до обучения
+`unknown-typo-development-v15.json`. Он был построен model-blind до обучения
 из 5 000 EN и 5 000 RU неизвестных Hunspell-опечаток, а затем компактно
 сохранён по одной записи на физическую сигнатуру. Независимый namespace ролей
 детерминированно распределяет каждую языковую половину как 3 500/500/500/500
@@ -301,7 +308,7 @@ Hunspell-словарей, физическую эквивалентность �
 Так критичные неизвестные опечатки не теряются на фоне частотного корпуса, но
 оценка качества остаётся невзвешенной и не получает скрытой поблажки.
 Полный post-merge аудит запрещает пересечения между ролями и с исходным
-лексическим/safety-корпусом. Независимый v14 holdout использует другие
+лексическим/safety-корпусом. Независимый v15 holdout использует другие
 rank/choice namespaces и не участвует ни в обучении, ни в выборе порога.
 
 Calibration, threshold и sealed test используют нейтральный контекст как
@@ -381,9 +388,13 @@ strict-evaluator не умел fail-closed индексировать новое
 обычный trigger: Wilson upper 0,001028128 превысил лимит 0,001. Точные причины
 и хэши сохранены в `rejection-v12.json` и `rejection-v13.json`. V14 заранее
 зафиксировал нулевой selection FP-бюджет, ротировал все namespaces и прошёл
-независимую strict-проверку с 0 FP из 60 000 unknown-typo негативов.
-Файл `holdout-v14-preseal.json` фиксирует SHA-256, namespaces, размеры и
-нулевые пересечения до загрузки или оценки v14-модели; поля
+независимую strict-проверку с 0 FP из 60 000 unknown-typo негативов. V15
+повторил ротацию всех namespaces после перехода trainer на многопроцессный
+backend и прошёл strict-проверку на новом holdout с 12 FP из 60 000 негативов
+(по 2 на trigger-срез, Wilson upper 0,000728996 при лимите 0,001) и recall
+0,96935.
+Файл `holdout-v15-preseal.json` фиксирует SHA-256, namespaces, размеры и
+нулевые пересечения до загрузки или оценки v15-модели; поля
 `model_loaded=false` и `metrics_evaluated=false` делают эту фазу явной.
 
 Manifest связывает SHA-256 config, frozen sources, trainer, external evaluator,
@@ -490,7 +501,7 @@ dbus-run-session -- env PYTHONPATH=src python3 tests/e2e_tray_menu.py
 sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
 ./tools/install-build-tools.sh .nuitka
 KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package="dist/keyswitch_0.6.1_$(dpkg --print-architecture).deb"
+package="dist/keyswitch_0.7.0_$(dpkg --print-architecture).deb"
 ./tools/verify-native-deb.sh "$package"
 ```
 
@@ -533,6 +544,29 @@ dbus-run-session -- ./tools/run-native-e2e.sh "$package"
 установленного приложения, формирует
 единый `SHA256SUMS` и публикует артефакты в GitHub Release.
 
+Весь Linux-контур целиком — provenance и strict-оценку модели,
+replay-доказательства, typecheck, coverage, детектор, X11/tray E2E, сборку и
+проверку DEB и E2E упакованного бинарника — выполняет один процесс,
+отсоединённый от терминала:
+
+```bash
+python3 tools/release_pipeline.py start --profile release
+python3 tools/release_pipeline.py status
+python3 tools/release_pipeline.py wait
+```
+
+Фазы образуют граф зависимостей и выполняются параллельно; планировщик
+допускает следующую фазу только при достаточном свободном ОЗУ с учётом ещё не
+достигнутых пиков уже запущенных фаз и резерва (`--jobs`,
+`--memory-reserve-mib`). Каждый прогон живёт в
+`dist/release-pipeline/<метка>-<профиль>/`: `state.json` обновляется по ходу,
+`summary.json` и `SUMMARY.md` появляются в конце рядом с журналами фаз,
+strict-отчётами и DEB-пакетом. Профиль `app` повторяет job `verify` из GitHub
+Actions, `quick` ограничивается typecheck, coverage и детектором, `release`
+добавляет побайтные replay модели; `--replay-dir` адоптирует уже идущие или
+завершённые replay, а `python3 tools/release_pipeline.py phases` печатает
+фазы, бюджеты памяти и зависимости.
+
 ## Ограничения
 
 - Linux-backend предназначен для X11. В нативной Wayland-сессии приложение
@@ -544,7 +578,7 @@ dbus-run-session -- ./tools/run-native-e2e.sh "$package"
 - В Windows механизм UIPI не позволяет обычному процессу вводить текст в окно,
   запущенное с более высоким уровнем целостности. Для такого окна KeySwitch
   также должен быть запущен с сопоставимыми правами.
-- Windows Setup EXE версии 0.6.1 пока не подписан сертификатом издателя.
+- Windows Setup EXE версии 0.7.0 пока не подписан сертификатом издателя.
 
 ## Лицензия
 

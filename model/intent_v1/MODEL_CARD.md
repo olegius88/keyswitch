@@ -14,35 +14,47 @@
 Модель не отправляет текст в сеть, не требует NumPy, scikit-learn, ONNX или
 отдельного рантайма и выполняет один скалярный проход по разреженным признакам.
 
-## Сертифицированный артефакт v14
+## Сертифицированный артефакт v15
 
-Текущий артефакт — `intent-v1-6bf96537c28f`, 12 918 510 байт, SHA-256
-`b22706d95e6ac942e39cd16006f4ce9c4508d98566271f202d5855d528cf1b16`.
+Текущий артефакт — `intent-v1-bec1f1d3dceb`, 12 962 713 байт, SHA-256
+`7631b821bafc958364353a8a13de3abc23e922e51b589bd181075db55fa9e9dc`.
 Build provenance —
-`6bf96537c28fe8b54d5eeff677b3566c45b5b6b7d9ac363c2dd70dc1f246b19a`,
-config — `559e5a20bd264ef91575aa92e84ea9aac148ae006fbe8da367bf5711d3921e86`,
-dataset — `5cb1eda6404e506fdcdd0e5e8c1950f17500fdbf122626faa4668aadfa1f9e31`.
-Из 34 выполненных эпох выбрана эпоха 30; контейнер содержит 765 092 ненулевых
-веса и 1 028 514 точных membership-отпечатков.
+`bec1f1d3dceb05ccf6edd10f5b2cf5f18bdf184a19af3d24b73e1cf418c2e7e2`,
+config — `06fa899534c8e6e0d3984d2ff7e22b46fe9721efde7df4cf02c53b6967d55127`,
+dataset — `624dc0e77601fa1d1157c85c43ed9f379b33a60a924e00d477692ae7582cad33`.
+Trainer выполнил все 64 разрешённые эпохи и выбрал эпоху 64; контейнер
+содержит 765 205 ненулевых весов и 1 031 416 точных membership-отпечатков.
 
 Полный независимый strict-report, SHA-256
-`c4e72a3290801dab22236a2bc381f7ba97b99f0745a078dd410e973d55d8bf52`,
+`82ff2b6f332369eea2e71eb2df4960a554a1aa9de9c31025c35bf15d4485c303`,
 прошёл все 30 gates. На model-blind unknown-typo holdout ансамбль получил
-0 false positive из 60 000 негативов, precision/specificity 1,0 и recall
-0,94875; обычные trigger имеют recall 0,95, Pause — 0,9425. Верхняя 95%-граница
-Wilson для каждого 0/10 000 отрицательного trigger-среза равна 0,000383998 при
-лимите 0,001. Все семь production-context профилей прошли. На 5 000 измерениях
-inference median равна 0,602226 мс, p95 — 0,93818 мс; load median по 11
-измерениям — 179,788905 мс, p95 — 191,813336 мс. Эти синтетические результаты
-не являются оценкой реального пользовательского потока.
+12 false positive из 60 000 негативов (по 2 из 10 000 в каждом
+trigger-срезе), precision 0,999793719, specificity 0,9998 и recall 0,96935;
+обычные trigger имеют recall 0,9702, Pause — 0,9651. Из этих 12 ложных
+срабатываний 6 внесены моделью, тогда как 60 ложных срабатываний
+детерминированного fallback она предотвратила. Верхняя 95%-граница Wilson для
+каждого 2/10 000 отрицательного trigger-среза равна 0,000728996 при лимите
+0,001. Внутренний sealed test даёт 2 false positive на 21 574 негатива в каждом
+trigger при recall 0,973160896 (Pause — 0,967598387). Все семь
+production-context профилей прошли. На 5 000 измерениях inference median равна
+0,608413 мс, p95 — 0,936677 мс; load median по 11 измерениям — 186,378296 мс,
+p95 — 236,702506 мс. Эти синтетические результаты не являются оценкой реального
+пользовательского потока. Holdout v15 построен в новом namespace и не совпадает
+с holdout v14, поэтому 12/60 000 здесь и 0/60 000 у v14 — результаты на разных
+выборках, а не прямое сравнение одной и той же метрики.
 
 Два независимых полных retraining-запуска выполнены после официального train в
-той же Python/platform среде и записаны в разные выходные пути. `cmp` подтвердил
-трёхстороннее побайтное равенство official/replay1/replay2 для KSLM, manifest и
-test-report. Их SHA-256 соответственно равны
-`b22706d95e6ac942e39cd16006f4ce9c4508d98566271f202d5855d528cf1b16`,
-`33b55674f6454c0b45ad55fc704b9113b5e934404ea69577ce8d7949518d2822` и
-`84b01b68e9fa186f1791828520d1b4319b39d9e6ab261a5210844cd68ba4f01e`.
+той же Python/platform среде и записаны в разные выходные пути. Сравнение
+подтвердило трёхстороннее побайтное равенство official/replay-a/replay-b для
+KSLM, manifest и test-report; их SHA-256 равны соответственно
+`7631b821bafc958364353a8a13de3abc23e922e51b589bd181075db55fa9e9dc`,
+`e0070e8e6813da4a8dde1a09eb2c1713f033d002a64216299cba3764032d82f7` и
+`05caf3828ff2724fc5f1d22ff2e28d9b31cd2d1bcfcceb64f934bb8bfe84480d`. Независимый
+strict evaluator, повторно запущенный на replay-a, также прошёл все 30 gates;
+SHA-256 этого отчёта —
+`88f6704c845efd86b8c3ba924607bcdf972e915d0d7d6c75ff147e1d0099f23e`. Оба replay
+выполнялись последовательно: один trainer с worker-пулом занимает почти всю
+память reference host.
 
 ## Данные и лицензирование
 
@@ -70,7 +82,7 @@ card самостоятельных юридических выводов. Ст�
 Единица разделения — не строка и не язык, а физическая последовательность
 клавиш. Для русского слова она сначала отображается в координаты US-клавиатуры.
 До аугментации SHA-256 этой последовательности в namespace
-`keyswitch:intent-v14:physical-signature` распределяет её по 40 неизменным
+`keyswitch:intent-v15:physical-signature` распределяет её по 40 неизменным
 бакетам:
 
 - 26/40 (65%) — обучение;
@@ -100,22 +112,22 @@ pre-sealed строки при этом должны остаться побай
 список исключённых test-сигнатур и числа исключённых вхождений входят в
 provenance модели.
 
-V14 использует дополнительный frozen source
-`unknown-typo-development-v14.json`, созданный model-blind до обучения из
+V15 использует дополнительный frozen source
+`unknown-typo-development-v15.json`, созданный model-blind до обучения из
 unknown-typo development-корпуса. Он содержит 10 000 уникальных физических
 сигнатур — по 5 000 на язык — без test-роли. Независимый namespace
-`keyswitch:intent-v14:unknown-typo-development-role` распределяет в каждом
+`keyswitch:intent-v15:unknown-typo-development-role` распределяет в каждом
 языке 3 500 слов в train и по 500 в development, calibration и threshold.
 Loader проверяет размер и SHA-256 source, provenance Hunspell `.dic`/`.aff`,
 физическую эквивалентность EN/RU пары, уникальность и точный SHA-256 повторно
 развёрнутых 120 000 строк (два label × шесть trigger). После объединения общий
 row-level audit снова запрещает cross-split, cross-language, safety и
 quarantine пересечения. Компактный source и freezer входят в toolchain
-provenance; внешний v14 holdout использует другие rank/choice namespaces.
+provenance; внешний v15 holdout использует другие rank/choice namespaces.
 
 `config.json` schema 13 также содержит policy `sealed_evaluation` schema 1.
 Указанный в ней repository-relative
-`registry_path: model/intent_v1/seal-registry-v14.json` разрешается от
+`registry_path: model/intent_v1/seal-registry-v15.json` разрешается от
 канонического корня проекта, а не от расположения переданной копии config, и
 закрепляет один candidate SHA за одним `split_namespace`. После успешного
 прохождения полного pre-sealed gate — threshold/context, safety,
@@ -195,7 +207,7 @@ positive из 10 000 и Wilson upper 0,001028128 при лимите 0,001; ре
 нулевой selection FP-бюджет и minimum recall 0,956, ротировал
 split/registry/source/holdout namespaces и прошёл strict-проверку с 0 false
 positive из 60 000 unknown-typo негативов. Новый holdout заранее зафиксирован
-без загрузки модели в `holdout-v14-preseal.json`.
+без загрузки модели в `holdout-v15-preseal.json`.
 
 `--dry-run` не отменяет эту гарантию: если полный pre-sealed gate пройден,
 registry захватывается до sealed scoring и seal расходуется, даже когда artifact,
@@ -442,12 +454,12 @@ membership coverage на тех же строках сохраняются то�
 ```bash
 (cd model/intent_v1/sources && sha256sum --check SHA256SUMS)
 PYTHONPATH=src:tools python3 tools/preseal_intent_holdout.py | \
-  diff -u model/intent_v1/holdout-v14-preseal.json -
+  diff -u model/intent_v1/holdout-v15-preseal.json -
 PYTHONPATH=src python3 tools/train_intent_model_release.py
 PYTHONPATH=src python3 tools/evaluate_intent_model.py --strict
 ```
 
-Trainer v14 входит в candidate identity и после выдачи receipt не изменяется.
+Trainer v15 входит в candidate identity и после выдачи receipt не изменяется.
 На границе записи KSLM он преобразует tuple-контейнеры dataclass в
 JSON-native массивы и побайтно доказывает неизменность канонического JSON.
 `train_intent_model_release.py` остаётся стабильной командой запуска и только
@@ -465,13 +477,13 @@ JSON-native массивы и побайтно доказывает неизме
 `lexical_disjoint_corpus_sha256`,
 `unknown_typo_development_corpus_sha256` и
 `unknown_typo_holdout_corpus_sha256`. До v11 development-корпус использовался
-для выбора serving policy, включая signed cap 2,0. В v14 новый model-blind
+для выбора serving policy, включая signed cap 2,0. Начиная с v14 новый model-blind
 development source распределён по независимым pre-sealed ролям; фактический глобальный
 calibrated-logit margin выбирается только на threshold-роли.
-Holdout v14 построен другим rank/choice namespace до загрузки модели, исключает
-все 288 891 sealed и 10 000 development физических сигнатур и впервые
+Holdout v15 построен другим rank/choice namespace до загрузки модели, исключает
+все 288 869 sealed и 10 000 development физических сигнатур и впервые
 оценивается только после фиксации candidate receipt. Его model-blind provenance
-заранее сохранён в `holdout-v14-preseal.json`: `model_loaded=false`,
+заранее сохранён в `holdout-v15-preseal.json`: `model_loaded=false`,
 `metrics_evaluated=false`, оба overlap-счётчика равны нулю. Внешний
 manifest schema 1 сохраняет SHA-256 для config,
 frozen-источников,
@@ -562,7 +574,7 @@ identity намеренно входит в provenance. Версия устан�
 - Новая схема признаков, split namespace или формат данных требуют нового
   feature/config/container version; существующий `intent_v1` нельзя молча
   переобучать с несовместимой семантикой. Текущие значения — feature schema v5,
-  split namespace `keyswitch:intent-v14:physical-signature`, training config
+  split namespace `keyswitch:intent-v15:physical-signature`, training config
   schema 13, KSLM schema 4 и внешний manifest schema 1.
 - Повышение recall запрещено ценой нарушения precision, specificity или
   safety-гейтов из фиксированного config.

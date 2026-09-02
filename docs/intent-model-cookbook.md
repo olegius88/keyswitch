@@ -93,6 +93,45 @@ dpkg-query -W -f='${Package} ${Version}\n' \
   onboard-data hunspell-en-us hunspell-ru libhunspell-1.7-0
 ```
 
+### Использовать все доступные CPU
+
+Trainer по умолчанию эквивалентен `--workers 0`: он читает CPU affinity
+процесса и запускает по одному worker-процессу на каждый доступный logical
+CPU. На Linux это позволяет обойти GIL в самых дорогих независимых фазах:
+извлечении признаков и scoring development/calibration/threshold/test/safety.
+Порядок строк после каждого process pool восстанавливается канонически, поэтому
+`--workers 1`, `--workers 4` и `--workers 0` должны давать побайтно одинаковый
+кандидат в одной и той же reference-среде.
+
+Проверить доступный параллелизм до длительного запуска:
+
+```bash
+python3 - <<'PY'
+from __future__ import annotations
+
+import os
+
+available = (
+    len(os.sched_getaffinity(0))
+    if hasattr(os, "sched_getaffinity")
+    else (os.cpu_count() or 1)
+)
+print(f"available logical CPUs: {available}")
+PY
+```
+
+Обычный запуск не требует флага. Для ограничения RAM/CPU укажите, например,
+`--workers 4`; для воспроизведения ошибки без multiprocessing —
+`--workers 1`. Progress и длительность фаз пишутся в stderr, а JSON в stdout
+остаётся машинно-читаемым.
+
+Online update FTRL-Proximal намеренно не делится между worker-ами: состояние
+после каждого примера является входом следующего шага. Недетерминированный
+Hogwild update изменил бы модель и нарушил byte-identical replay. Поэтому во
+время части `phase=ftrl` возможны последовательные участки, но извлечение
+признаков, development scoring каждой эпохи и все большие fixed-model scoring
+фазы используют настроенный process pool.
+
 Зафиксировать именно те Hunspell-файлы, которые обнаруживает production code:
 
 ```bash
@@ -123,12 +162,12 @@ Paths, sizes и hashes должны совпасть с
 Hunspell snapshot намеренно меняется, сначала обновите эти четыре поля каждого
 языка, затем заново создайте development source и holdout как нового кандидата.
 
-На reference host v14 это Ubuntu 26.04.1 LTS, Python 3.14.4,
+На reference host v15 это Ubuntu 26.04.1 LTS, Python 3.14.4,
 `onboard-data 1.4.3+git20260213+ds-2`. Для воспроизводимого replay используйте
 ту же Python/platform identity из `manifest.json`, а не только совместимую
 версию Python.
 
-## 2. Проверить текущую v14 без переобучения
+## 2. Проверить текущую v15 без переобучения
 
 ### Frozen sources
 
@@ -141,25 +180,25 @@ Hunspell snapshot намеренно меняется, сначала обнов
 ```bash
 sha256sum \
   model/intent_v1/config.json \
-  model/intent_v1/unknown-typo-development-v14.json \
-  model/intent_v1/holdout-v14-preseal.json \
-  model/intent_v1/seal-registry-v14.json \
+  model/intent_v1/unknown-typo-development-v15.json \
+  model/intent_v1/holdout-v15-preseal.json \
+  model/intent_v1/seal-registry-v15.json \
   model/intent_v1/manifest.json \
   model/intent_v1/test-report.json \
   src/keyswitch/resources/models/layout_intent_v1.ksm
 ```
 
-Ожидаемый v14 baseline:
+Ожидаемый v15 baseline:
 
 | Файл | SHA-256 |
 | --- | --- |
-| `config.json` | `559e5a20bd264ef91575aa92e84ea9aac148ae006fbe8da367bf5711d3921e86` |
-| `unknown-typo-development-v14.json` | `44b460ee6457dd26269c843a87b43bd22b026927de8f194ee1abbf2cf910af2f` |
-| `holdout-v14-preseal.json` | `23914f2cb4f482c49fc9fd0031402d01b73eb7e86c1e7a917212313fa05f60e4` |
-| `seal-registry-v14.json` | `7cfdd466dddde11fbe5cb113885196d1f5c1d2429d3cc2e327557ce143216eb8` |
-| `manifest.json` | `33b55674f6454c0b45ad55fc704b9113b5e934404ea69577ce8d7949518d2822` |
-| `test-report.json` | `84b01b68e9fa186f1791828520d1b4319b39d9e6ab261a5210844cd68ba4f01e` |
-| `layout_intent_v1.ksm` | `b22706d95e6ac942e39cd16006f4ce9c4508d98566271f202d5855d528cf1b16` |
+| `config.json` | `06fa899534c8e6e0d3984d2ff7e22b46fe9721efde7df4cf02c53b6967d55127` |
+| `unknown-typo-development-v15.json` | `a0585bdbd21526434fc77effc64200075269d884321a702fa44bd8a9dc7f963c` |
+| `holdout-v15-preseal.json` | `56ceb18efe4e1cdd4372e3cf1eb0d7c01f7d1320075a3961bf9f31ff06a34d1d` |
+| `seal-registry-v15.json` | `5dc4d01b59d7f614f1178ab8ca14b7f701ed09f5551c118cdb6328c5d7e512a4` |
+| `manifest.json` | `e0070e8e6813da4a8dde1a09eb2c1713f033d002a64216299cba3764032d82f7` |
+| `test-report.json` | `05caf3828ff2724fc5f1d22ff2e28d9b31cd2d1bcfcceb64f934bb8bfe84480d` |
+| `layout_intent_v1.ksm` | `7631b821bafc958364353a8a13de3abc23e922e51b589bd181075db55fa9e9dc` |
 
 ### Internal provenance без внешнего performance-прогона
 
@@ -182,17 +221,17 @@ Windows/macOS consumer package не пересобирайте corpus: пров�
 artifact/config/source/registry/toolchain hashes и встроенный signed manifest,
 а полный `--strict` оставляйте обязательным отдельным job на reference host.
 
-## 3. Воспроизвести v14 preseal без доступа к KSLM
+## 3. Воспроизвести v15 preseal без доступа к KSLM
 
 ```bash
 PYTHONPATH=src python3 tools/preseal_intent_holdout.py \
   --config model/intent_v1/config.json \
   --en-model model/intent_v1/sources/en_US.lm \
   --ru-model model/intent_v1/sources/ru_RU.lm \
-  > "$work_root/holdout-v14-preseal.json"
+  > "$work_root/holdout-v15-preseal.json"
 
-diff -u model/intent_v1/holdout-v14-preseal.json \
-  "$work_root/holdout-v14-preseal.json"
+diff -u model/intent_v1/holdout-v15-preseal.json \
+  "$work_root/holdout-v15-preseal.json"
 
 jq -e '
   .model_loaded == false and
@@ -201,21 +240,28 @@ jq -e '
   .holdout.signature_count == 10000 and
   .overlap_counts.development_holdout == 0 and
   .overlap_counts.sealed_holdout == 0
-' "$work_root/holdout-v14-preseal.json"
+' "$work_root/holdout-v15-preseal.json"
 ```
 
 Это безопасная проверка: `preseal_intent_holdout.py` не принимает путь к KSLM,
 не загружает intent artifact и не считает метрики модели.
 
-## 4. Сделать точный retraining replay v14
+## 4. Сделать точный retraining replay v15
 
 Этот рецепт занимает заметное CPU-время. Он разрешён существующим registry
 только потому, что ожидается тот же canonical candidate SHA.
+Trainer входит в candidate identity: после изменения `tools/train_intent_model.py`
+(например, multiprocessing backend в v15) прежний кандидат больше не
+воспроизводим из текущего дерева. Точный v14 replay запускается только из
+чистого тега `v0.6.1`, чей trainer SHA совпадает с его manifest; текущий v15
+registry разрешает replay только текущего trainer. Любое новое изменение
+trainer до длительного train требует ротации по разделу 6.
 
 ```bash
 mkdir "$work_root/replay"
 
 PYTHONPATH=src python3 tools/train_intent_model_release.py \
+  --workers 0 \
   --artifact "$work_root/replay/layout_intent_v1.ksm" \
   --manifest "$work_root/replay/manifest.json" \
   --test-report "$work_root/replay/test-report.json" \
@@ -231,7 +277,7 @@ jq -e '.quality_gates_passed == true' \
 ```
 
 Если trainer сообщает, что namespace уже занят другим кандидатом, не удаляйте
-registry: текущие inputs отличаются от v14. Это уже новый кандидат и требует
+registry: текущие inputs отличаются от v15. Это уже новый кандидат и требует
 ротации.
 
 ## 5. Запустить полный strict report для текущей модели
@@ -269,7 +315,7 @@ release holdout.
 ### 6.1. Найти все version-bound значения
 
 ```bash
-rg -n 'v14|schema_version|SPLIT_NAMESPACE|SEALED_REGISTRY|PRESEAL_RECEIPT|UNKNOWN_TYPO|HARD_NEGATIVE' \
+rg -n 'v15|schema_version|SPLIT_NAMESPACE|SEALED_REGISTRY|PRESEAL_RECEIPT|UNKNOWN_TYPO|HARD_NEGATIVE' \
   tools model packaging tests README.md README.en.md DESIGN.md docs \
   > "$work_root/version-bound.txt"
 less "$work_root/version-bound.txt"
@@ -472,6 +518,7 @@ inputs:
 ```bash
 set -o pipefail
 PYTHONPATH=src python3 tools/train_intent_model_release.py \
+  --workers 0 \
   --diagnostic-output "$work_root/presealed-failure.json" \
   | tee "$work_root/train-stdout.json"
 ```
@@ -697,6 +744,24 @@ dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24 -noreset" \
 Успешный package verifier подтверждает, что DEB содержит native executable,
 точный KSLM и frozen EN/RU models и не зависит от системного Python.
 
+### Всё сразу одним процессом
+
+Рецепты этого раздела и replay-доказательства раздела 6 объединены в
+`tools/release_pipeline.py`:
+
+```bash
+python3 tools/release_pipeline.py start --profile app      # как job verify в CI
+python3 tools/release_pipeline.py start --profile release  # плюс replay-доказательства
+python3 tools/release_pipeline.py status
+```
+
+Прогон отсоединён от терминала и переживает закрытие сессии; результат
+читается из `dist/release-pipeline/latest/SUMMARY.md`. Уже запущенные вручную
+replay передаются через `--replay-dir`, готовый strict-отчёт — через
+`--strict-report`; `--jobs` и `--memory-reserve-mib` ограничивают параллелизм
+по числу фаз и по свободному ОЗУ, а `--fail-fast` останавливает приём новых
+фаз после первого отказа.
+
 ## 9. Частые ошибки
 
 ### `unsupported training config schema`
@@ -748,8 +813,9 @@ provenance считается настоящим отказом; нельзя з
 
 ### Можно ли ускорить обучение GPU
 
-Текущий trainer — последовательный sparse FTRL-Proximal на стандартной
-библиотеке Python; GPU backend в коде отсутствует. Критический release contract
+Текущий trainer использует многопроцессный CPU backend для независимого
+извлечения признаков и scoring, но online update sparse FTRL-Proximal остаётся
+последовательным. GPU backend в коде отсутствует. Критический release contract
 требует deterministic byte-identical replay и включает Python/platform identity
 в provenance. Поэтому штатный рецепт использует CPU. GPU-реализация была бы
 отдельным trainer/toolchain-кандидатом и должна заново доказать численную
