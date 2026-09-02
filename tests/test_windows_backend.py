@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import io
 import json
 import logging
@@ -64,6 +65,7 @@ from keyswitch.windows_tray import (
     _native_adapter,
     menu_activation_message,
 )
+from keyswitch.windows_native import CtypesWindowsAPI, GA_ROOT
 from keyswitch.windows_ui_model import ALL_SETTING_SPECS
 
 
@@ -147,6 +149,37 @@ class FakeWindowsAPI:
     def stop_keyboard_hook(self) -> None:
         self.stop_calls += 1
         self.stop_event.set()
+
+
+class FakeActivationUser32:
+    def __init__(self, *, root: int | None, activated: bool = True) -> None:
+        self.root = root
+        self.activated = activated
+        self.ancestor_calls: list[tuple[int, int]] = []
+        self.foreground_calls: list[int] = []
+        self.show_calls: list[tuple[int, int]] = []
+
+    def GetAncestor(self, handle: ctypes.c_void_p, flag: int) -> int | None:
+        self.ancestor_calls.append((int(handle.value or 0), flag))
+        return self.root
+
+    def SetForegroundWindow(self, handle: ctypes.c_void_p | int) -> int:
+        value = (
+            int(handle.value or 0)
+            if isinstance(handle, ctypes.c_void_p)
+            else handle
+        )
+        self.foreground_calls.append(value)
+        return int(self.activated)
+
+    def ShowWindow(self, handle: ctypes.c_void_p | int, command: int) -> int:
+        value = (
+            int(handle.value or 0)
+            if isinstance(handle, ctypes.c_void_p)
+            else handle
+        )
+        self.show_calls.append((value, command))
+        return 1
 
 
 class FakeRegistry:
@@ -292,6 +325,32 @@ class WindowsBackendHelperTests(unittest.TestCase):
         self.assertTrue(event.super_key)
         self.assertEqual(event.character_for(1), "ф")
         self.assertEqual(event.character_for(9), "")
+
+
+class WindowsNativeActivationTests(unittest.TestCase):
+    @staticmethod
+    def api_with(user32: FakeActivationUser32) -> CtypesWindowsAPI:
+        api = CtypesWindowsAPI.__new__(CtypesWindowsAPI)
+        object.__setattr__(api, "user32", user32)
+        return api
+
+    def test_activate_window_preserves_top_level_show_state(self) -> None:
+        user32 = FakeActivationUser32(root=900)
+        api = self.api_with(user32)
+
+        self.assertTrue(api.activate_window(300))
+        self.assertEqual(user32.ancestor_calls, [(300, GA_ROOT)])
+        self.assertEqual(user32.foreground_calls, [900])
+        self.assertEqual(user32.show_calls, [])
+
+    def test_activate_window_falls_back_to_child_and_reports_failure(self) -> None:
+        user32 = FakeActivationUser32(root=None, activated=False)
+        api = self.api_with(user32)
+
+        self.assertFalse(api.activate_window(300))
+        self.assertEqual(user32.ancestor_calls, [(300, GA_ROOT)])
+        self.assertEqual(user32.foreground_calls, [300])
+        self.assertEqual(user32.show_calls, [])
 
 
 class WindowsBackendLifecycleTests(unittest.TestCase):

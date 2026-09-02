@@ -58,7 +58,6 @@ INPUT_KEYBOARD = 1
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 KEYSWITCH_EXTRA_INFO = 0x4B535743
 GA_ROOT = 2
-SW_RESTORE = 9
 
 
 class KBDLLHOOKSTRUCT(ctypes.Structure):
@@ -240,8 +239,6 @@ class CtypesWindowsAPI:
         user32.GetAncestor.restype = ctypes.c_void_p
         user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
         user32.SetForegroundWindow.restype = ctypes.c_int
-        user32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
-        user32.ShowWindow.restype = ctypes.c_int
         user32.GetKeyState.argtypes = [ctypes.c_int]
         user32.GetKeyState.restype = ctypes.c_short
         user32.GetWindowThreadProcessId.argtypes = [
@@ -327,11 +324,10 @@ class CtypesWindowsAPI:
         return int(self.user32.GetKeyboardLayout(thread_id) or 0)
 
     def activate_window(self, window: int) -> bool:
-        """Restore and request foreground activation for a Tk child HWND."""
+        """Request foreground activation without changing the window state."""
 
         handle = ctypes.c_void_p(window)
         root = self.user32.GetAncestor(handle, GA_ROOT) or handle
-        self.user32.ShowWindow(root, SW_RESTORE)
         return bool(self.user32.SetForegroundWindow(root))
 
     def input_anchor(self) -> ScreenAnchor | None:

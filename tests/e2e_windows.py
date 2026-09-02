@@ -354,6 +354,11 @@ def main() -> int:
                         )
                     application.root.after(50, wait_for_learning_confirmation)
                     return
+                if application.root.state() != "zoomed":
+                    raise RuntimeError(
+                        "Learning prompt changed the maximized target window "
+                        f"to {application.root.state()!r}"
+                    )
                 prepare_learned_input()
             except Exception as error:
                 fail(error)
@@ -437,6 +442,7 @@ def main() -> int:
                     application.backend.current_group() == 0
                     and foreground == expected
                     and application.root.focus_get() is application.test_entry
+                    and application.root.state() == "zoomed"
                 )
                 if not ready:
                     if time.monotonic() >= learning_deadline[0]:
@@ -444,7 +450,8 @@ def main() -> int:
                             "Learning input preparation timed out; "
                             f"group={application.backend.current_group()}, "
                             f"expected_app={expected!r}, actual_app={foreground!r}, "
-                            f"focus={application.root.focus_get()!r}"
+                            f"focus={application.root.focus_get()!r}, "
+                            f"window_state={application.root.state()!r}"
                         )
                     application.root.after(50, wait_for_learning_input_focus)
                     return
@@ -456,6 +463,7 @@ def main() -> int:
             try:
                 application.present()
                 api.activate_window(application.root.winfo_id())
+                application.root.state("zoomed")
                 application.test_entry.focus_force()
                 application.test_entry.delete(0, "end")
                 application.root.update_idletasks()
