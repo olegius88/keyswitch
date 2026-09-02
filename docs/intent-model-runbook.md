@@ -7,14 +7,14 @@
 [cookbook](intent-model-cookbook.md), устройство модели — в
 [карточку модели](../model/intent_v1/MODEL_CARD.md).
 
-Runbook соответствует текущему контуру v15:
+Runbook соответствует текущему контуру v20:
 
 - training config schema 13;
 - feature schema v5;
 - KSLM container schema 4;
-- sealed split namespace `keyswitch:intent-v15:physical-signature`;
+- sealed split namespace `keyswitch:intent-v20:physical-signature`;
 - reference host Ubuntu 26.04 и Python 3.14;
-- сертифицированный artifact `intent-v1-bec1f1d3dceb`.
+- сертифицированный artifact `intent-v1-6ece07f881ec`.
 
 Номера этих схем независимы. Нельзя автоматически повышать их вместе только
 ради нового релиза.
@@ -168,7 +168,7 @@ checks и тесты. Feature schema и KSLM schema повышаются тол�
 Перед правками получить полный список version-bound мест:
 
 ```bash
-rg -n 'v15|schema_version|SPLIT_NAMESPACE|SEALED_REGISTRY|PRESEAL_RECEIPT|UNKNOWN_TYPO|HARD_NEGATIVE' \
+rg -n 'v20|schema_version|SPLIT_NAMESPACE|SEALED_REGISTRY|PRESEAL_RECEIPT|UNKNOWN_TYPO|HARD_NEGATIVE' \
   tools model packaging tests README.md README.en.md DESIGN.md docs
 ```
 
@@ -291,7 +291,10 @@ PYTHONPATH=src python3 tools/train_intent_model_release.py --workers 0 | \
 ```
 
 `--workers 0` — значение по умолчанию: trainer использует все logical CPU,
-доступные через affinity процесса. `--workers N` задаёт верхнюю границу, а
+доступные через affinity процесса. Последовательный FTRL-проход выполняет
+встроенное нативное ядро (`--ftrl-kernel auto`), которое перед первой эпохой
+обязано бит-в-бит совпасть с эталонным Python-циклом на реальных строках;
+байты кандидата от выбора ядра не зависят. `--workers N` задаёт верхнюю границу, а
 `--workers 1` нужен для диагностики. Process pool применяется только к
 независимым вычислениям и возвращает строки в каноническом порядке; online
 FTRL update остаётся последовательным и сохраняет точную математику принятого
@@ -353,7 +356,10 @@ jq '{strict_passed, gate_count: (.strict_gates | length), performance}' \
 
 Strict evaluator независимо проверяет provenance, пересобирает internal sealed
 evidence, открывает зафиксированный external holdout, запускает production
-detector/context/safety проверки и измеряет load/inference latency.
+detector/context/safety проверки и измеряет load/inference latency. Scoring
+строк распределяется по worker-процессам (`--workers`, по умолчанию все CPU);
+результаты и счётчики отчёта от числа worker-ов не зависят, latency
+измеряется по-прежнему в одном процессе.
 
 Если strict gate провален:
 

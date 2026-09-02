@@ -7,6 +7,9 @@ import hashlib
 import json
 import math
 import os
+import random
+import shutil
+import struct
 import sys
 import tempfile
 import unittest
@@ -356,7 +359,7 @@ def config(**changes: object) -> TrainingConfig:
         "sealed_evaluation": SealedEvaluationPolicy(
             schema_version=1,
             split_namespace=SPLIT_NAMESPACE,
-            registry_path="model/intent_v1/seal-registry-v15.json",
+            registry_path="model/intent_v1/seal-registry-v20.json",
         ),
         "minimum_word_length": 3,
         "maximum_word_length": 18,
@@ -1645,7 +1648,7 @@ class DatasetConstructionTests(unittest.TestCase):
             ),
             (
                 replace(baseline, role_namespace="other"),
-                "role namespace must match v15",
+                "role namespace must match v20",
             ),
             (
                 replace(baseline, train_words_per_group=0),
@@ -8227,22 +8230,22 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         )
         self.assertEqual(
             loaded.external_evaluation.unknown_typo_holdout_corpus_sha256,
-            "61b1c74e74af1759ff3e5a35235dd878cad80f2ab3dd49d7fd8f80f92af7cbba",
+            "63640ebb85e54bc4f484f8379fffe23a6c20610c24d78266aa6bbcbbc8c26c4f",
         )
         self.assertEqual(
             loaded.sealed_evaluation.split_namespace, SPLIT_NAMESPACE
         )
         self.assertEqual(
             loaded.sealed_evaluation.registry_path,
-            "model/intent_v1/seal-registry-v15.json",
+            "model/intent_v1/seal-registry-v20.json",
         )
         self.assertEqual(
             loaded.hard_negative_development.source.path,
-            "model/intent_v1/unknown-typo-development-v15.json",
+            "model/intent_v1/unknown-typo-development-v20.json",
         )
         self.assertEqual(
             loaded.hard_negative_development.source.sha256,
-            "a0585bdbd21526434fc77effc64200075269d884321a702fa44bd8a9dc7f963c",
+            "61e02546fb05c2502b2535c512b0e11fad13042d25b1f4f70cff621a4e35686f",
         )
         self.assertEqual(
             loaded.hard_negative_development.role_counts(),
@@ -8271,7 +8274,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             (0.956, 0.91, 0.91, 0.86),
         )
         self.assertEqual(loaded.threshold_logit_margin_cap, 2.0)
-        preseal_path = repository / "model/intent_v1/holdout-v15-preseal.json"
+        preseal_path = repository / "model/intent_v1/holdout-v20-preseal.json"
         preseal_bytes = preseal_path.read_bytes()
         self.assertLessEqual(len(preseal_bytes), 64 * 1024)
         preseal = cast(
@@ -8295,7 +8298,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         self.assertEqual(preseal["schema_version"], 1)
         self.assertEqual(
             preseal["policy"],
-            "keyswitch-intent-v15-preseal-holdout",
+            "keyswitch-intent-v20-preseal-holdout",
         )
         self.assertIs(preseal["model_loaded"], False)
         self.assertIs(preseal["metrics_evaluated"], False)
@@ -8362,7 +8365,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             {
                 "signature_count": 288_869,
                 "sha256": (
-                    "c33d48e1518cfd42ebe2228bdbbdfe3dd34662db6d94eafeea3aa3469c6d17eb"
+                    "89515df7c24edcf33a75aa7d78e57095026acb29b205923b304bd8b157e93cdc"
                 ),
             },
         )
@@ -8371,7 +8374,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             {
                 "signature_count": 298_869,
                 "sha256": (
-                    "1277b180fbbc8ed7ac158d09e318c392bd18c251f4acdf0beb3b0114404a2219"
+                    "9219e02aa424437be273bc21774059e7d233c73c1d011f4ba3278167bd662453"
                 ),
             },
         )
@@ -8519,6 +8522,296 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                 )
                 with self.assertRaisesRegex(ValueError, message):
                     load_training_config(invalid_path)
+
+
+class NativeFTRLKernelTests(unittest.TestCase):
+    """The compiled epoch kernel must be indistinguishable from the reference."""
+
+    DIMENSION = 512
+
+    def _rows(self, count: int, seed: int) -> tuple[FeaturedExample, ...]:
+        rng = random.Random(seed)
+        rows: list[FeaturedExample] = []
+        for position in range(count):
+            width = rng.randint(1, 24)
+            features = tuple(
+                (index, rng.choice((1.0, 0.5, 2.0, -0.25, rng.uniform(-3.0, 3.0))))
+                for index in sorted(rng.sample(range(self.DIMENSION), width))
+            )
+            direction: LayoutDirection = "0>1" if position % 2 == 0 else "1>0"
+            example = replace(
+                lexical_example(
+                    rng.random() < 0.5,
+                    signature=f"native-{seed}-{position}",
+                    direction=direction,
+                ),
+                weight=rng.choice((1.0, 3.0, rng.uniform(0.5, 3.0))),
+            )
+            rows.append(FeaturedExample(example, features))
+        return tuple(rows)
+
+    @staticmethod
+    def _same_state(left: FTRLProximal, right: FTRLProximal) -> bool:
+        pack = struct.Struct("<d").pack
+        return (
+            set(left.z) == set(right.z)
+            and set(left.n) == set(right.n)
+            and all(pack(value) == pack(right.z[index]) for index, value in left.z.items())
+            and all(pack(value) == pack(right.n[index]) for index, value in left.n.items())
+            and pack(left.bias_z) == pack(right.bias_z)
+            and pack(left.bias_n) == pack(right.bias_n)
+        )
+
+    def _kernel(self) -> tim.NativeFTRLKernel:
+        kernel = tim.NativeFTRLKernel.load()
+        if kernel is None:
+            self.skipTest("no C compiler for the native FTRL kernel")
+        return kernel
+
+    def test_native_epochs_are_bit_exact_against_the_reference_update(self) -> None:
+        kernel = self._kernel()
+        rows = self._rows(3000, 11)
+        parameters = FTRLParameters(self.DIMENSION, 0.05, 1.0, 0.3, 0.1)
+        packed = tim.pack_training_rows(rows, self.DIMENSION)
+        reference = FTRLProximal(parameters)
+        candidate = FTRLProximal(parameters)
+        order = list(range(len(rows)))
+        for epoch in range(1, 5):
+            random.Random(epoch).shuffle(order)
+            for index in order:
+                item = rows[index]
+                reference.update(item.features, item.example.label, item.example.weight)
+            kernel.run_epoch(candidate, packed, order)
+            self.assertTrue(self._same_state(reference, candidate), f"epoch {epoch}")
+        self.assertEqual(reference.sparse_weights(), candidate.sparse_weights())
+        self.assertEqual(reference.nonzero_weight_count(), candidate.nonzero_weight_count())
+
+    def test_zero_regularisation_and_partial_orders_stay_bit_exact(self) -> None:
+        kernel = self._kernel()
+        rows = self._rows(800, 5)
+        parameters = FTRLParameters(self.DIMENSION, 0.5, 0.0, 0.0, 0.0)
+        packed = tim.pack_training_rows(rows, self.DIMENSION)
+        reference = FTRLProximal(parameters)
+        candidate = FTRLProximal(parameters)
+        order = [index for index in range(len(rows)) if index % 3 != 0]
+        for index in order:
+            item = rows[index]
+            reference.update(item.features, item.example.label, item.example.weight)
+        kernel.run_epoch(candidate, packed, order)
+        self.assertTrue(self._same_state(reference, candidate))
+
+    def test_self_check_accepts_the_real_kernel_and_rejects_a_divergent_one(self) -> None:
+        kernel = self._kernel()
+        rows = self._rows(600, 3)
+        parameters = FTRLParameters(self.DIMENSION, 0.05, 1.0, 0.3, 0.1)
+        packed = tim.pack_training_rows(rows, self.DIMENSION)
+        tim.verify_native_ftrl_kernel(kernel, packed, rows, parameters, range(len(rows)))
+
+        class DivergentKernel(tim.NativeFTRLKernel):
+            def __init__(self) -> None:  # noqa: D401 - test double
+                self.library_path = kernel.library_path
+                self._function = kernel._function
+
+            def run_epoch(
+                self,
+                model: FTRLProximal,
+                packed_rows: tim.PackedTrainingRows,
+                order: Sequence[int],
+            ) -> None:
+                super().run_epoch(model, packed_rows, order)
+                first = min(model.z)
+                model.z[first] = math.nextafter(model.z[first], math.inf)
+
+        with self.assertRaisesRegex(RuntimeError, "diverged in z"):
+            tim.verify_native_ftrl_kernel(
+                DivergentKernel(), packed, rows, parameters, range(len(rows))
+            )
+
+    def test_pack_training_rows_validates_like_update(self) -> None:
+        good = self._rows(4, 1)
+        bad_weight = FeaturedExample(replace(good[0].example, weight=0.0), good[0].features)
+        with self.assertRaisesRegex(ValueError, "sample weight"):
+            tim.pack_training_rows((bad_weight,), self.DIMENSION)
+        unordered = FeaturedExample(good[0].example, ((5, 1.0), (5, 1.0)))
+        with self.assertRaisesRegex(ValueError, "strictly increasing"):
+            tim.pack_training_rows((unordered,), self.DIMENSION)
+        outside = FeaturedExample(good[0].example, ((self.DIMENSION, 1.0),))
+        with self.assertRaisesRegex(ValueError, "outside model dimension"):
+            tim.pack_training_rows((outside,), self.DIMENSION)
+        packed = tim.pack_training_rows(good, self.DIMENSION)
+        self.assertEqual(packed.row_count, 4)
+        self.assertEqual(len(packed.indptr), 5)
+        self.assertEqual(len(packed.indices), sum(len(row.features) for row in good))
+
+    def test_fit_ftrl_kernels_produce_identical_models(self) -> None:
+        self._kernel()
+        rows = self._rows(1200, 21)
+        development = self._rows(300, 22)
+        settings = config(
+            dimension=self.DIMENSION, maximum_epochs=3, minimum_epochs=1, patience=3
+        )
+        native = fit_ftrl(rows, development, settings, kernel="native")
+        python = fit_ftrl(rows, development, settings, kernel="python")
+        self.assertEqual(native.best_epoch, python.best_epoch)
+        self.assertEqual(native.history, python.history)
+        self.assertTrue(self._same_state(native.model, python.model))
+
+    def test_missing_compiler_falls_back_to_python_unless_native_is_required(self) -> None:
+        rows = self._rows(200, 31)
+        development = self._rows(60, 32)
+        settings = config(
+            dimension=self.DIMENSION, maximum_epochs=1, minimum_epochs=1, patience=1
+        )
+        with patch.object(shutil, "which", return_value=None):
+            fallback = fit_ftrl(rows, development, settings, kernel="auto")
+            with self.assertRaisesRegex(RuntimeError, "unavailable"):
+                fit_ftrl(rows, development, settings, kernel="native")
+        python = fit_ftrl(rows, development, settings, kernel="python")
+        self.assertTrue(self._same_state(fallback.model, python.model))
+        with self.assertRaisesRegex(ValueError, "unsupported FTRL kernel"):
+            tim.ftrl_kernel_choice("gpu")
+        self.assertEqual(tim.ftrl_kernel_choice("native"), "native")
+
+
+class DeterministicIntentModel:
+    """Picklable stand-in whose predictions depend only on the input."""
+
+    veto_threshold = -999.0
+    dimension = 256
+    fnv_seed = DEFAULT_FNV_SEED
+    membership_seed = DEFAULT_MEMBERSHIP_FNV_SEED
+
+    def predict(self, item: IntentModelInput) -> LinearPrediction:
+        logit = float(len(item.original) - len(item.alternative)) + 0.25
+        return LinearPrediction(
+            logit, stable_sigmoid(logit), 0.0, 0.75, logit > 0.0, "deterministic"
+        )
+
+
+def _misordered_worker(bounds: tuple[int, int]) -> tuple[int, list[int]]:
+    start, stop = bounds
+    return start + 1, list(range(start, stop))
+
+
+class ParallelRowScoringTests(unittest.TestCase):
+    """Worker processes must reproduce sequential scoring row for row."""
+
+    def setUp(self) -> None:
+        pair = LayoutPair()
+        words = ("hello", "world", "python", "layout", "switch", "typing", "kernel")
+        rows: list[LexicalExample] = []
+        for index, word in enumerate(words):
+            rows.append(
+                LexicalExample(
+                    original=word,
+                    alternative=pair.translate(word, "us", "ru"),
+                    source_group=0,
+                    target_group=1,
+                    trigger="space",
+                    label=index % 2 == 0,
+                    weight=1.0,
+                    base_signature=f"parallel-{index}",
+                    variant_kind="identity",
+                    source_known=False,
+                    target_known=False,
+                )
+            )
+            russian = pair.translate(word, "us", "ru")
+            rows.append(
+                LexicalExample(
+                    original=russian,
+                    alternative=word,
+                    source_group=1,
+                    target_group=0,
+                    trigger="pause",
+                    label=index % 3 == 0,
+                    weight=1.0,
+                    base_signature=f"parallel-ru-{index}",
+                    variant_kind="identity",
+                    source_known=False,
+                    target_known=False,
+                )
+            )
+        self.rows = tuple(rows)
+        self.language_models = cast(
+            dict[int, LanguageModel],
+            {
+                0: EvaluationLanguageModel("en_US", {"hello", "world"}),
+                1: EvaluationLanguageModel("ru_RU", {"руддщ"}),
+            },
+        )
+        self.model = cast(LinearNgramModel, DeterministicIntentModel())
+
+    def test_prediction_and_comparison_match_sequential_scoring(self) -> None:
+        sequential = predict_model_examples(
+            self.model, self.rows, scorers=self.language_models, workers=1
+        )
+        parallel = predict_model_examples(
+            self.model, self.rows, scorers=self.language_models, workers=3
+        )
+        self.assertEqual(sequential, parallel)
+        self.assertEqual(
+            compare_with_fallback(
+                self.model, self.rows, 0, language_models=self.language_models, workers=1
+            ),
+            compare_with_fallback(
+                self.model, self.rows, 0, language_models=self.language_models, workers=3
+            ),
+        )
+
+    def test_context_rows_match_sequential_scoring_and_replay_the_cache(self) -> None:
+        scorers = {
+            group: eim._CorpusLanguageScorerCache(model)
+            for group, model in self.language_models.items()
+        }
+        sequential_cache = eim._ContextInvariantIntentModel(self.model)
+        parallel_cache = eim._ContextInvariantIntentModel(self.model)
+        for profile in eim.PRODUCTION_CONTEXT_PROFILES[:2]:
+            sequential = eim._evaluate_production_context_profile_rows(
+                sequential_cache, self.rows, profile, language_models=scorers, workers=1
+            )
+            parallel = eim._evaluate_production_context_profile_rows(
+                parallel_cache, self.rows, profile, language_models=scorers, workers=4
+            )
+            self.assertEqual(sequential, parallel)
+            self.assertEqual(
+                (sequential_cache.unique_predictions, sequential_cache.cache_hits),
+                (parallel_cache.unique_predictions, parallel_cache.cache_hits),
+            )
+        self.assertGreater(parallel_cache.cache_hits, 0)
+        raw = eim._evaluate_production_context_profile_rows(
+            self.model, self.rows, eim.PRODUCTION_CONTEXT_PROFILES[0],
+            language_models=scorers, workers=2,
+        )
+        self.assertEqual(
+            raw,
+            eim._evaluate_production_context_profile_rows(
+                self.model, self.rows, eim.PRODUCTION_CONTEXT_PROFILES[0],
+                language_models=scorers, workers=1,
+            ),
+        )
+
+    def test_worker_bookkeeping_is_validated(self) -> None:
+        with self.assertRaisesRegex(ValueError, "at least one worker"):
+            eim.set_default_row_workers(0)
+        with self.assertRaisesRegex(ValueError, "at least one worker"):
+            eim._effective_row_workers(0, 10)
+        self.assertEqual(eim._effective_row_workers(8, 3), 3)
+        self.assertEqual(eim._effective_row_workers(None, 3), 1)
+        with self.assertRaisesRegex(RuntimeError, "not initialised"):
+            eim._row_workload()
+        with self.assertRaisesRegex(RuntimeError, "changed chunk order"):
+            eim._map_row_chunks(
+                _misordered_worker, eim._RowWorkload(examples=self.rows), 2
+            )
+
+    def test_main_restores_the_default_worker_count(self) -> None:
+        before = eim._DEFAULT_ROW_WORKERS
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing-config.json"
+            with self.assertRaises(Exception):
+                eim.main(["--config", str(missing), "--workers", "3"])
+        self.assertEqual(eim._DEFAULT_ROW_WORKERS, before)
 
 
 if __name__ == "__main__":

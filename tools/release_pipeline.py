@@ -745,6 +745,9 @@ class PhaseSpec:
     expected_seconds: int
     memory_mib: int
     lane: str = ""
+    # Phases that measure wall-clock latency run alone: nothing else may be
+    # running when they start, and nothing is admitted until they finish.
+    exclusive: bool = False
 
 
 # --------------------------------------------------------------------------
@@ -1868,8 +1871,9 @@ PHASES: Final[tuple[PhaseSpec, ...]] = (
         phase_model_strict,
         ("model-inputs",),
         4 * 3600,
-        2400,
-        1500,
+        900,
+        9500,
+        exclusive=True,
     ),
     PhaseSpec(
         "model-replays",
@@ -1886,8 +1890,9 @@ PHASES: Final[tuple[PhaseSpec, ...]] = (
         phase_model_replay_strict,
         ("model-replays",),
         4 * 3600,
-        2400,
-        1500,
+        900,
+        4000,
+        exclusive=True,
     ),
     PhaseSpec(
         "typecheck",
@@ -1943,8 +1948,8 @@ PHASES: Final[tuple[PhaseSpec, ...]] = (
         phase_build_deb,
         ("environment", "model-inputs", "model-strict"),
         6 * 3600,
-        3600,
-        2500,
+        600,
+        4000,
     ),
     PhaseSpec(
         "verify-deb",
@@ -2431,9 +2436,19 @@ def command_run(options: Options, run_dir: Path, resume: bool) -> int:
             unrealized += max(0, phase_memory_estimate(ctx, name) - observed)
         busy_lanes = {PHASE_BY_NAME[name].lane for name in running if PHASE_BY_NAME[name].lane}
         occupied_slots = sum(1 for name in running if phase_occupies_job_slot(ctx, name))
+        exclusive_running = [name for name in running if PHASE_BY_NAME[name].exclusive]
         waiting: dict[str, str] = {}
         for name in ready:
             spec = PHASE_BY_NAME[name]
+            if exclusive_running:
+                waiting[name] = f"exclusive phase running: {', '.join(exclusive_running)}"
+                continue
+            if spec.exclusive and running:
+                waiting[name] = (
+                    "exclusive phase waits for an idle host: "
+                    + ", ".join(sorted(running))
+                )
+                continue
             if occupied_slots >= options.jobs:
                 waiting[name] = f"job slots busy ({options.jobs})"
                 continue
@@ -2465,6 +2480,8 @@ def command_run(options: Options, run_dir: Path, resume: bool) -> int:
                 occupied_slots += 1
             if spec.lane:
                 busy_lanes.add(spec.lane)
+            if spec.exclusive:
+                exclusive_running.append(name)
         for name in pending:
             phases[name].waiting_reason = waiting.get(name)
         if running and available < options.memory_reserve_mib:

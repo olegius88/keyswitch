@@ -88,9 +88,9 @@
   раскрытые строками, quarantine или safety-данными кандидата, исключаются,
   candidate-строки не меняются. Post-build audit
   проверяет сгенерированные строки. Физические сигнатуры распределяются
-  namespace `keyswitch:intent-v15:physical-signature`.
+  namespace `keyswitch:intent-v20:physical-signature`.
 - Schema 13 загружает отдельный frozen
-  `unknown-typo-development-v15.json`, построенный model-blind до обучения.
+  `unknown-typo-development-v20.json`, построенный model-blind до обучения.
   Независимый namespace ролей делит по 5 000 сигнатур каждого языка как
   3 500/500/500/500 между train/development/calibration/threshold без test.
   Loader проверяет hashes/sizes, Hunspell provenance, физическую эквивалентность,

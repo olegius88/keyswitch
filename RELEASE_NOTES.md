@@ -1,71 +1,82 @@
-# KeySwitch 0.7.0
+# KeySwitch 0.8.0
 
 ## Русский
 
-Этот выпуск ускоряет обучение локальной модели намерения, исправляет
-восстановление окна в Windows и переводит приложение на новый сертифицированный
-KSLM-артефакт v15.
+Этот выпуск делает обучение и сертификацию локальной модели намерения в
+разы быстрее без изменения её математики и переводит приложение на новый
+сертифицированный KSLM-артефакт v20.
 
-- Offline trainer использует все logical CPU, доступные процессу: извлечение
-  признаков, оценка эпох, калибровка, выбор порогов и sealed-test scoring идут
-  в process pool с каноническим порядком строк, а `--workers N` ограничивает
-  число процессов. Online-обновление FTRL-Proximal остаётся последовательным,
-  поэтому результат побайтно не зависит от числа worker-ов.
-- Изменённый trainer означает новую toolchain identity, поэтому выпущен новый
-  кандидат `intent-v1-bec1f1d3dceb`: заново заморожен model-blind
-  development-корпус, создан holdout v15 с нулевыми пересечениями, пройдены все
-  внутренние gates и независимая strict-проверка (30 из 30 gates). На новом
-  holdout из 60 000 негативов ансамбль дал 12 ложных срабатываний при recall
-  0,96935; полные метрики и хэши приведены в model card.
-- В Windows подсказка обучения больше не «восстанавливает» развёрнутое или
-  прикреплённое окно: фокус возвращается без `SW_RESTORE`.
-- Добавлен `tools/release_pipeline.py`: один отсоединённый от терминала процесс
-  выполняет весь Linux-контур проверки и сборки, параллельно и с учётом
-  свободного ОЗУ, и оставляет `SUMMARY.md` с чек-листом runbook.
+- Последовательные эпохи FTRL-Proximal выполняет компилируемое ядро,
+  встроенное в trainer: оно повторяет эталонный Python-цикл выражение за
+  выражением и перед первой эпохой обязано совпасть с ним бит-в-бит на
+  реальных строках. Эпоха занимает секунды вместо минуты, а полный цикл
+  кандидата (заморозка корпуса, preseal, обучение, strict-оценка) — около
+  30 минут вместо нескольких часов.
+- Strict evaluator оценивает строки на worker-процессах; решения, логиты и
+  счётчики кэша не зависят от числа worker-ов (однопоточный и параллельный
+  отчёты совпадают во всех разделах, кроме замеров времени).
+- Таблицы преобразования раскладок US/RU предвычисляются один раз, поэтому
+  приложение, trainer и evaluator больше не пересобирают словарь при каждом
+  слове; результат посимвольно тот же.
+- Сборка DEB и CI переиспользуют один проверенный strict-отчёт вместо
+  повторной получасовой оценки; отчёт принимается только при совпадении всех
+  записанных в нём хэшей с текущими файлами.
+- Новый артефакт `intent-v1-6ece07f881ec` (кандидат v20): все внутренние
+  gates, model-blind holdout (6 ложных срабатываний из 60 000, ни одно не
+  внесено моделью относительно fallback, recall 0,9445) и 30 независимых
+  strict gates пройдены. Кандидаты v16, v17 и v19 не прошли pre-sealed gate,
+  v18 отклонён strict-gate `fallback_regression`; полные хэши и метрики — в
+  model card и `rejection-v18.json`.
 
-Локальный контур выпуска: строгий `mypy`, 368 автоматических тестов и 100%
-покрытия строк и ветвей.
+Локальный контур выпуска: строгий `mypy`, автоматические тесты со 100%
+покрытием строк и ветвей, единый отсоединённый прогон `tools/release_pipeline.py`.
 
 ### Установка
 
-- Windows 10/11 x64: `KeySwitch-Setup-0.7.0-x64.exe` или переносимый
-  `KeySwitch-0.7.0-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.7.0_amd64.deb`.
+- Windows 10/11 x64: `KeySwitch-Setup-0.8.0-x64.exe` или переносимый
+  `KeySwitch-0.8.0-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.8.0_amd64.deb`.
 
 Windows Setup пока не подписан сертификатом издателя. Нативная Wayland-сессия
 Linux пока не поддерживается.
 
 ## English
 
-This release speeds up training of the local intent model, fixes window
-restoration on Windows and moves the application to a new certified v15 KSLM
-artifact.
+This release makes training and certifying the local intent model several
+times faster without changing its arithmetic, and moves the application to a
+new certified v20 KSLM artifact.
 
-- The offline trainer uses every logical CPU available to the process: feature
-  extraction, epoch evaluation, calibration, threshold selection and sealed-test
-  scoring run in a process pool with canonical row order, and `--workers N`
-  caps the process count. The online FTRL-Proximal update stays sequential, so
-  the result is byte-for-byte independent of the worker count.
-- A changed trainer is a new toolchain identity, so a new candidate
-  `intent-v1-bec1f1d3dceb` was released: the model-blind development corpus was
-  frozen again, a v15 holdout was presealed with zero overlap, and every
-  internal gate plus the independent strict evaluation (30 of 30 gates) passed.
-  On the new 60,000-negative holdout the ensemble produced 12 false positives
-  with recall 0.96935; the complete metrics and hashes are in the model card.
-- On Windows the learning prompt no longer "restores" a maximized or snapped
-  window: focus returns without `SW_RESTORE`.
-- `tools/release_pipeline.py` runs the whole Linux verification and packaging
-  contour as one detached process, concurrently and within the available RAM,
-  and leaves `SUMMARY.md` with the runbook checklist.
+- The sequential FTRL-Proximal epochs run in a compiled kernel embedded in the
+  trainer: it mirrors the reference Python loop expression by expression and
+  must reproduce it bit for bit on real rows before the first epoch. An epoch
+  takes seconds instead of a minute, and a complete candidate cycle (corpus
+  freeze, preseal, training, strict evaluation) takes about 30 minutes
+  instead of several hours.
+- The strict evaluator scores rows on worker processes; decisions, logits and
+  cache counters do not depend on the worker count (single-process and
+  parallel reports agree in every section except timing).
+- The US/RU layout translation tables are precomputed once, so the
+  application, trainer and evaluator no longer rebuild the mapping for every
+  word; the result is identical character for character.
+- The DEB build and CI reuse one verified strict report instead of repeating
+  the half-hour evaluation; a report is accepted only when every hash it
+  recorded matches the current files.
+- The new artifact `intent-v1-6ece07f881ec` (candidate v20) passed every
+  internal gate, the model-blind holdout (6 false positives among 60,000, none
+  introduced by the model relative to the fallback, recall 0.9445) and all 30
+  independent strict gates. Candidates v16, v17 and v19 failed the pre-sealed
+  gate and v18 was rejected by the `fallback_regression` strict gate; the
+  complete hashes and metrics are in the model card and `rejection-v18.json`.
 
-The local release gate passes strict `mypy`, 368 automated tests and mandatory
-100% line and branch coverage.
+The local release gate passes strict `mypy`, automated tests with mandatory
+100% line and branch coverage, and one detached `tools/release_pipeline.py`
+run.
 
 ### Installation
 
-- Windows 10/11 x64: `KeySwitch-Setup-0.7.0-x64.exe` or the portable
-  `KeySwitch-0.7.0-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.7.0_amd64.deb`.
+- Windows 10/11 x64: `KeySwitch-Setup-0.8.0-x64.exe` or the portable
+  `KeySwitch-0.8.0-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.8.0_amd64.deb`.
 
 The Windows installer is not yet signed with a publisher certificate. Native
 Linux Wayland sessions are not supported yet.

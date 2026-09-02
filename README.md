@@ -59,11 +59,11 @@ KeySwitch — настольное приложение для Windows 10/11 x64
 
 ## Установка в Windows
 
-Скачайте `KeySwitch-Setup-0.7.0-x64.exe` со страницы
+Скачайте `KeySwitch-Setup-0.8.0-x64.exe` со страницы
 [последнего выпуска](https://github.com/olegius88/keyswitch/releases/latest) и
 запустите его. Установка выполняется для текущего пользователя в
 `%LOCALAPPDATA%\Programs\KeySwitch` и не требует прав администратора. В выпуск
-также входит переносимый архив `KeySwitch-0.7.0-windows-x64.zip`.
+также входит переносимый архив `KeySwitch-0.8.0-windows-x64.zip`.
 
 После запуска KeySwitch появится в области уведомлений. Левый или правый щелчок
 по `EN/RU` либо флагу открывает меню. В нём пункт «Переключить на…» всегда
@@ -126,11 +126,11 @@ cd keyswitch
 
 ## Установка DEB-пакета
 
-Скачайте `keyswitch_0.7.0_amd64.deb` со страницы
+Скачайте `keyswitch_0.8.0_amd64.deb` со страницы
 [последнего выпуска](https://github.com/olegius88/keyswitch/releases/latest), затем:
 
 ```bash
-sudo apt install ./keyswitch_0.7.0_amd64.deb
+sudo apt install ./keyswitch_0.8.0_amd64.deb
 ```
 
 Пакет установит системные зависимости и добавит KeySwitch в меню приложений.
@@ -286,7 +286,7 @@ language model полностью игнорируются классифика�
 порядками n-грамм, поэтому train/serve feature parity точная. Train-only EN/RU
 scorer остаётся отдельной проверяемой provenance-записью, но не является входом
 классификатора. Разбиение физических сигнатур
-закреплено namespace `keyswitch:intent-v15:physical-signature`. До генерации
+закреплено namespace `keyswitch:intent-v20:physical-signature`. До генерации
 строк candidate-фаза независимо помещает identity- и typo-сигнатуры с
 владельцами из разных pre-sealed split/языков либо пересечением с
 protected/safety токеном в quarantine. Sealed-test строки и их quarantine
@@ -295,7 +295,7 @@ protected/safety токеном в quarantine. Sealed-test строки и их 
 кандидата, а строки кандидата не меняются.
 
 Schema 13 дополнительно подключает побайтно зафиксированный
-`unknown-typo-development-v15.json`. Он был построен model-blind до обучения
+`unknown-typo-development-v20.json`. Он был построен model-blind до обучения
 из 5 000 EN и 5 000 RU неизвестных Hunspell-опечаток, а затем компактно
 сохранён по одной записи на физическую сигнатуру. Независимый namespace ролей
 детерминированно распределяет каждую языковую половину как 3 500/500/500/500
@@ -308,7 +308,7 @@ Hunspell-словарей, физическую эквивалентность �
 Так критичные неизвестные опечатки не теряются на фоне частотного корпуса, но
 оценка качества остаётся невзвешенной и не получает скрытой поблажки.
 Полный post-merge аудит запрещает пересечения между ролями и с исходным
-лексическим/safety-корпусом. Независимый v15 holdout использует другие
+лексическим/safety-корпусом. Независимый v20 holdout использует другие
 rank/choice namespaces и не участвует ни в обучении, ни в выборе порога.
 
 Calibration, threshold и sealed test используют нейтральный контекст как
@@ -392,9 +392,17 @@ strict-evaluator не умел fail-closed индексировать новое
 повторил ротацию всех namespaces после перехода trainer на многопроцессный
 backend и прошёл strict-проверку на новом holdout с 12 FP из 60 000 негативов
 (по 2 на trigger-срез, Wilson upper 0,000728996 при лимите 0,001) и recall
-0,96935.
-Файл `holdout-v15-preseal.json` фиксирует SHA-256, namespaces, размеры и
-нулевые пересечения до загрузки или оценки v15-модели; поля
+0,96935. После переноса FTRL в нативное ядро v16 и v17 не прошли pre-sealed
+gate: при нулевом FP-бюджете recall на threshold-split составил 0,9479 и
+0,9458 при минимуме 0,956, registry не создавался. V18 прошёл внутренние gates
+и независимый holdout (5 FP из 60 000, recall 0,9425), но был отклонён
+strict-gate `fallback_regression`: один false positive, внесённый моделью
+относительно детерминированного fallback на 5 000-строчной sealed-выборке;
+решение сохранено в `rejection-v18.json`. V19 снова не прошёл pre-sealed gate
+(recall 0,9463), а v20 прошёл все внутренние gates, holdout (6 FP из 60 000,
+recall 0,9445) и 30 strict gates и стал текущим сертифицированным артефактом.
+Файл `holdout-v20-preseal.json` фиксирует SHA-256, namespaces, размеры и
+нулевые пересечения до загрузки или оценки v20-модели; поля
 `model_loaded=false` и `metrics_evaluated=false` делают эту фазу явной.
 
 Manifest связывает SHA-256 config, frozen sources, trainer, external evaluator,
@@ -501,7 +509,7 @@ dbus-run-session -- env PYTHONPATH=src python3 tests/e2e_tray_menu.py
 sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
 ./tools/install-build-tools.sh .nuitka
 KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package="dist/keyswitch_0.7.0_$(dpkg --print-architecture).deb"
+package="dist/keyswitch_0.8.0_$(dpkg --print-architecture).deb"
 ./tools/verify-native-deb.sh "$package"
 ```
 
@@ -578,7 +586,7 @@ Actions, `quick` ограничивается typecheck, coverage и детек�
 - В Windows механизм UIPI не позволяет обычному процессу вводить текст в окно,
   запущенное с более высоким уровнем целостности. Для такого окна KeySwitch
   также должен быть запущен с сопоставимыми правами.
-- Windows Setup EXE версии 0.7.0 пока не подписан сертификатом издателя.
+- Windows Setup EXE версии 0.8.0 пока не подписан сертификатом издателя.
 
 ## Лицензия
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Final
 
 
 US_KEYS = "`qwertyuiop[]\\asdfghjkl;'zxcvbnm,."
@@ -17,6 +18,16 @@ def _case_aware_map(source: str, target: str) -> dict[str, str]:
     return mapping
 
 
+# The mappings are pure functions of the two key rows, so they are built once.
+# ``str.translate`` with these tables replaces exactly the characters the
+# mapping contains and leaves every other code point untouched, which is the
+# same result as substituting character by character.
+_US_TO_RU: Final[dict[str, str]] = _case_aware_map(US_KEYS, RU_KEYS)
+_RU_TO_US: Final[dict[str, str]] = _case_aware_map(RU_KEYS, US_KEYS)
+_US_TO_RU_TABLE: Final[dict[int, str]] = str.maketrans(_US_TO_RU)
+_RU_TO_US_TABLE: Final[dict[int, str]] = str.maketrans(_RU_TO_US)
+
+
 @dataclass(frozen=True)
 class LayoutPair:
     first: str = "us"
@@ -28,19 +39,19 @@ class LayoutPair:
 
     @property
     def us_to_ru(self) -> dict[str, str]:
-        return _case_aware_map(US_KEYS, RU_KEYS)
+        return dict(_US_TO_RU)
 
     @property
     def ru_to_us(self) -> dict[str, str]:
-        return _case_aware_map(RU_KEYS, US_KEYS)
+        return dict(_RU_TO_US)
 
     def translate(self, text: str, source: str, target: str) -> str:
         if source == target:
             return text
         if (source, target) == ("us", "ru"):
-            mapping = self.us_to_ru
+            table = _US_TO_RU_TABLE
         elif (source, target) == ("ru", "us"):
-            mapping = self.ru_to_us
+            table = _RU_TO_US_TABLE
         else:
             raise ValueError(f"Unsupported layout conversion: {source} -> {target}")
-        return "".join(mapping.get(character, character) for character in text)
+        return text.translate(table)

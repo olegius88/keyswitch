@@ -7,10 +7,12 @@ import argparse
 import hashlib
 import json
 import math
+import multiprocessing
 import statistics
 import sys
 import time
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Final, Literal, TypeVar, cast
@@ -44,6 +46,7 @@ from keyswitch.spellcheck import HunspellDictionary
 
 from train_intent_model import (
     CONTEXT_STRESS_PROFILES,
+    resolve_training_workers,
     DEVELOPMENT_FREEZER_PATH,
     INTENT_RUNTIME_PATH,
     LANGUAGE_MODEL_RUNTIME_PATH,
@@ -78,6 +81,7 @@ from train_intent_model import (
     WordScorer,
     audit_guarded_safety_corpus,
     assert_no_split_leakage,
+    _balanced_ranges,
     build_dataset,
     context_stress_gate_breakdown,
     dataset_fingerprint,
@@ -313,6 +317,7 @@ class EvaluationArguments:
     latency_sample: int
     strict: bool
     provenance_only: bool
+    workers: int = 1
 
 
 @dataclass(frozen=True)
@@ -612,6 +617,16 @@ def _parse_arguments(argv: Sequence[str] | None = None) -> EvaluationArguments:
     )
     parser.add_argument("--strict", action="store_true")
     parser.add_argument(
+        "--workers",
+        type=int,
+        default=0,
+        metavar="N",
+        help=(
+            "worker processes for row scoring; 0 (the default) uses every "
+            "logical CPU available to the process; results do not depend on it"
+        ),
+    )
+    parser.add_argument(
         "--provenance-only",
         action="store_true",
         help=(
@@ -643,6 +658,7 @@ def _parse_arguments(argv: Sequence[str] | None = None) -> EvaluationArguments:
         latency_sample,
         cast(bool, namespace.strict),
         cast(bool, namespace.provenance_only),
+        resolve_training_workers(cast(int, namespace.workers)),
     )
 
 
@@ -1863,9 +1879,24 @@ def predict_model_examples(
     examples: Iterable[LexicalExample],
     *,
     scorers: Mapping[int, WordScorer],
+    workers: int | None = None,
 ) -> tuple[ModelPredictionRow, ...]:
+    rows = tuple(examples)
+    actual_workers = _effective_row_workers(workers, len(rows))
+    if actual_workers > 1:
+        outputs = _map_row_chunks(
+            _predict_rows_worker,
+            _RowWorkload(examples=rows, model=model, scorers=scorers),
+            actual_workers,
+        )
+        return tuple(
+            ModelPredictionRow(example, should_switch, logit, coverage)
+            for example, (should_switch, logit, coverage) in zip(
+                rows, outputs, strict=True
+            )
+        )
     result: list[ModelPredictionRow] = []
-    for example in examples:
+    for example in rows:
         prediction = model.predict(
             intent_input_for_example(example, scorers=scorers)
         )
@@ -2846,6 +2877,7 @@ def compare_with_fallback(
     requested: int,
     *,
     language_models: Mapping[int, LanguageModel] | None = None,
+    workers: int | None = None,
 ) -> PredictionComparison:
     sample = _deterministic_sample(examples, requested)
     scorers = (
@@ -2863,24 +2895,43 @@ def compare_with_fallback(
     ensemble_rows: list[tuple[bool, bool]] = []
     rescued = vetoed = prevented_fp = introduced_fp = 0
     model_evaluated = negative_model_evaluated = 0
-    for example in sample:
-        alternatives = {example.target_group: example.alternative}
-        fallback = detector.decide(
-            example.original,
-            alternatives,
-            example.source_group,
-            trigger=example.trigger,
-            use_intent_model=False,
-        ).should_convert
-        ensemble_decision = detector.decide(
-            example.original,
-            alternatives,
-            example.source_group,
-            trigger=example.trigger,
-            use_intent_model=True,
+    actual_workers = _effective_row_workers(workers, len(sample))
+    decisions: list[tuple[bool, bool, bool]]
+    if actual_workers > 1:
+        decisions = _map_row_chunks(
+            _fallback_rows_worker,
+            _RowWorkload(examples=sample, detector=detector),
+            actual_workers,
         )
-        ensemble = ensemble_decision.should_convert
-        if ensemble_decision.model_probability is not None:
+    else:
+        decisions = []
+        for example in sample:
+            alternatives = {example.target_group: example.alternative}
+            fallback_decision = detector.decide(
+                example.original,
+                alternatives,
+                example.source_group,
+                trigger=example.trigger,
+                use_intent_model=False,
+            ).should_convert
+            ensemble_decision = detector.decide(
+                example.original,
+                alternatives,
+                example.source_group,
+                trigger=example.trigger,
+                use_intent_model=True,
+            )
+            decisions.append(
+                (
+                    fallback_decision,
+                    ensemble_decision.should_convert,
+                    ensemble_decision.model_probability is not None,
+                )
+            )
+    for example, (fallback, ensemble, evaluated) in zip(
+        sample, decisions, strict=True
+    ):
+        if evaluated:
             model_evaluated += 1
             if not example.label:
                 negative_model_evaluated += 1
@@ -2991,6 +3042,243 @@ class _ContextInvariantIntentModel:
         self._cache[neutral] = prediction
         return prediction
 
+    def replay(self, neutral: IntentModelInput, prediction: LinearPrediction) -> None:
+        """Account for a call made on a worker exactly as ``predict`` would."""
+
+        if neutral in self._cache:
+            self.cache_hits += 1
+        else:
+            self._cache[neutral] = prediction
+
+
+# ---------------------------------------------------------------------------
+# Parallel row scoring
+# ---------------------------------------------------------------------------
+#
+# Every row decision below is a pure function of the row and of read-only
+# model/scorer objects, so rows are scored on forked worker processes and
+# reassembled in the original order; no decision, logit or coverage changes.
+# The one stateful object, the context-invariant prediction cache, is replayed
+# in the parent from the model calls each worker recorded, so its reported
+# counters stay exactly what a sequential run produces.
+
+_DEFAULT_ROW_WORKERS = 1
+_R = TypeVar("_R")
+
+
+def set_default_row_workers(workers: int) -> None:
+    """Set the worker count used when a scoring call does not name one."""
+
+    global _DEFAULT_ROW_WORKERS
+    if workers < 1:
+        raise ValueError("row scoring needs at least one worker")
+    _DEFAULT_ROW_WORKERS = workers
+
+
+def _effective_row_workers(requested: int | None, rows: int) -> int:
+    workers = _DEFAULT_ROW_WORKERS if requested is None else requested
+    if workers < 1:
+        raise ValueError("row scoring needs at least one worker")
+    return max(1, min(workers, rows))
+
+
+class _RecordingIntentModel:
+    """Forward to a classifier and record every call for parent-side replay."""
+
+    def __init__(
+        self, delegate: LinearNgramModel | _ContextInvariantIntentModel
+    ) -> None:
+        self._delegate = delegate
+        self.calls: list[tuple[IntentModelInput, LinearPrediction]] = []
+
+    @property
+    def veto_threshold(self) -> float:
+        return self._delegate.veto_threshold
+
+    def predict(self, item: IntentModelInput) -> LinearPrediction:
+        prediction = self._delegate.predict(item)
+        neutral = IntentModelInput(
+            original=item.original,
+            alternative=item.alternative,
+            source_group=item.source_group,
+            target_group=item.target_group,
+            trigger=item.trigger,
+            source_score=item.source_score,
+            target_score=item.target_score,
+        )
+        self.calls.append((neutral, prediction))
+        return prediction
+
+
+@dataclass(frozen=True)
+class _RowWorkload:
+    examples: Sequence[LexicalExample]
+    model: LinearNgramModel | _ContextInvariantIntentModel | None = None
+    scorers: Mapping[int, WordScorer] | None = None
+    detector: LanguageDetector | None = None
+    profile: ProductionContextProfile | None = None
+    recorder: _RecordingIntentModel | None = None
+
+
+_ROW_WORKLOAD: _RowWorkload | None = None
+
+
+def _initialize_row_worker(workload: _RowWorkload) -> None:
+    global _ROW_WORKLOAD
+    _ROW_WORKLOAD = workload
+
+
+def _row_workload() -> _RowWorkload:
+    if _ROW_WORKLOAD is None:
+        raise RuntimeError("row scoring worker was not initialised")
+    return _ROW_WORKLOAD
+
+
+def _map_row_chunks(
+    worker: Callable[[tuple[int, int]], tuple[int, list[_R]]],
+    workload: _RowWorkload,
+    workers: int,
+) -> list[_R]:
+    """Score contiguous row ranges on worker processes, keeping row order."""
+
+    ranges = _balanced_ranges(len(workload.examples), workers)
+    start_method = (
+        "fork"
+        if "fork" in multiprocessing.get_all_start_methods()
+        else "spawn"
+    )
+    context = multiprocessing.get_context(start_method)
+    with ProcessPoolExecutor(
+        max_workers=len(ranges),
+        mp_context=context,
+        initializer=_initialize_row_worker,
+        initargs=(workload,),
+    ) as executor:
+        chunks = tuple(executor.map(worker, ranges))
+    if tuple(chunk[0] for chunk in chunks) != tuple(start for start, _stop in ranges):
+        raise RuntimeError("parallel row scoring changed chunk order")
+    results = [item for _start, items in chunks for item in items]
+    if len(results) != len(workload.examples):
+        raise RuntimeError("parallel row scoring lost rows")
+    return results
+
+
+def _predict_rows_worker(
+    bounds: tuple[int, int],
+) -> tuple[int, list[tuple[bool, float, float]]]:
+    workload = _row_workload()
+    if workload.model is None or workload.scorers is None:
+        raise RuntimeError("prediction worker lacks a model or scorers")
+    start, stop = bounds
+    results: list[tuple[bool, float, float]] = []
+    for example in workload.examples[start:stop]:
+        prediction = workload.model.predict(
+            intent_input_for_example(example, scorers=workload.scorers)
+        )
+        results.append(
+            (prediction.should_switch, prediction.logit, prediction.coverage)
+        )
+    return start, results
+
+
+def _fallback_rows_worker(
+    bounds: tuple[int, int],
+) -> tuple[int, list[tuple[bool, bool, bool]]]:
+    workload = _row_workload()
+    detector = workload.detector
+    if detector is None:
+        raise RuntimeError("comparison worker lacks a detector")
+    start, stop = bounds
+    results: list[tuple[bool, bool, bool]] = []
+    for example in workload.examples[start:stop]:
+        alternatives = {example.target_group: example.alternative}
+        fallback = detector.decide(
+            example.original,
+            alternatives,
+            example.source_group,
+            trigger=example.trigger,
+            use_intent_model=False,
+        ).should_convert
+        ensemble_decision = detector.decide(
+            example.original,
+            alternatives,
+            example.source_group,
+            trigger=example.trigger,
+            use_intent_model=True,
+        )
+        results.append(
+            (
+                fallback,
+                ensemble_decision.should_convert,
+                ensemble_decision.model_probability is not None,
+            )
+        )
+    return start, results
+
+
+_ContextRowResult = tuple[
+    bool, bool, bool, float, tuple[tuple[IntentModelInput, LinearPrediction], ...]
+]
+
+
+def _context_profile_rows_worker(
+    bounds: tuple[int, int],
+) -> tuple[int, list[_ContextRowResult]]:
+    workload = _row_workload()
+    detector = workload.detector
+    profile = workload.profile
+    recorder = workload.recorder
+    if detector is None or profile is None or recorder is None:
+        raise RuntimeError("context worker lacks a detector, profile or recorder")
+    start, stop = bounds
+    results: list[_ContextRowResult] = []
+    for example in workload.examples[start:stop]:
+        recorder.calls.clear()
+        previous_words = {
+            example.source_group: _SOURCE_CONTEXT_SENTINEL,
+            example.target_group: _TARGET_CONTEXT_SENTINEL,
+        }
+        context_group = profile.context_group(
+            example.source_group, example.target_group
+        )
+        observed_delta = detector._context_delta(
+            example.source_group,
+            example.target_group,
+            example.original,
+            example.alternative,
+            previous_words,
+            context_group,
+        )
+        alternatives = {example.target_group: example.alternative}
+        fallback = detector.decide(
+            example.original,
+            alternatives,
+            example.source_group,
+            previous_words=previous_words,
+            context_group=context_group,
+            trigger=example.trigger,
+            use_intent_model=False,
+        ).should_convert
+        ensemble_decision = detector.decide(
+            example.original,
+            alternatives,
+            example.source_group,
+            previous_words=previous_words,
+            context_group=context_group,
+            trigger=example.trigger,
+            use_intent_model=True,
+        )
+        results.append(
+            (
+                fallback,
+                ensemble_decision.should_convert,
+                ensemble_decision.model_probability is not None,
+                observed_delta,
+                tuple(recorder.calls),
+            )
+        )
+    return start, results
+
 
 def _prediction_comparison_from_policy_rows(
     rows: Sequence[ProductionPolicyRow],
@@ -3054,11 +3342,48 @@ def _evaluate_production_context_profile_rows(
     profile: ProductionContextProfile,
     *,
     language_models: Mapping[int, LanguageScorer],
+    workers: int | None = None,
 ) -> tuple[ProductionPolicyRow, ...]:
     fixed_scorers: dict[int, LanguageScorer] = {
         group: _FixedContextLanguageScorer(scorer, profile)
         for group, scorer in language_models.items()
     }
+    examples = tuple(examples)
+    actual_workers = _effective_row_workers(workers, len(examples))
+    if actual_workers > 1:
+        recorder = _RecordingIntentModel(model)
+        outputs = _map_row_chunks(
+            _context_profile_rows_worker,
+            _RowWorkload(
+                examples=examples,
+                model=model,
+                detector=LanguageDetector(fixed_scorers, recorder),
+                profile=profile,
+                recorder=recorder,
+            ),
+            actual_workers,
+        )
+        parallel_rows: list[ProductionPolicyRow] = []
+        for example, (
+            fallback_decision,
+            ensemble_decision_value,
+            evaluated,
+            observed,
+            calls,
+        ) in zip(examples, outputs, strict=True):
+            if isinstance(model, _ContextInvariantIntentModel):
+                for neutral, prediction in calls:
+                    model.replay(neutral, prediction)
+            parallel_rows.append(
+                ProductionPolicyRow(
+                    example=example,
+                    fallback=fallback_decision,
+                    ensemble=ensemble_decision_value,
+                    model_evaluated=evaluated,
+                    observed_context_delta=observed,
+                )
+            )
+        return tuple(parallel_rows)
     detector = LanguageDetector(fixed_scorers, model)
     rows: list[ProductionPolicyRow] = []
     for example in examples:
@@ -4271,6 +4596,20 @@ def strict_gates_pass(gates: Mapping[str, object]) -> bool:
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parse_arguments(argv)
+    previous_workers = _DEFAULT_ROW_WORKERS
+    set_default_row_workers(arguments.workers)
+    sys.stderr.write(
+        "KeySwitch evaluator: row scoring uses "
+        f"{arguments.workers} worker process(es)\n"
+    )
+    sys.stderr.flush()
+    try:
+        return _evaluate(arguments)
+    finally:
+        set_default_row_workers(previous_workers)
+
+
+def _evaluate(arguments: EvaluationArguments) -> int:
     config = load_training_config(arguments.config)
     external_policy = external_evaluation_policy_from_config(config)
     verify_training_sources(

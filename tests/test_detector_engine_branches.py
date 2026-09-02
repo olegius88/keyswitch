@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from keyswitch import detector as detector_module
+from keyswitch import layouts
 from keyswitch.config import SettingsStore
 from keyswitch.detector import DetectionDecision, LanguageDetector
 from keyswitch.engine import (
@@ -748,7 +749,7 @@ class EngineBranchTests(unittest.TestCase):
             initialized.records[0].getMessage().removeprefix("TECHNICAL ")
         )
         self.assertEqual(initial_payload["event"], "engine_initialized")
-        self.assertEqual(initial_payload["keyswitch_version"], "0.7.0")
+        self.assertEqual(initial_payload["keyswitch_version"], "0.8.0")
         self.assertIn("minimum_length", initial_payload["detection_settings"])
 
     def test_start_stop_idempotence_and_backend_failure(self) -> None:
@@ -1117,6 +1118,29 @@ class HotkeyAndKeyEventBranchTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             pair.translate("text", "de", "ru")
         self.assertEqual(pair.translate("1🙂", "us", "ru"), "1🙂")
+
+    def test_layout_tables_equal_character_by_character_mapping(self) -> None:
+        """The precomputed tables must behave exactly like per-character lookup."""
+
+        pair = LayoutPair()
+        forward = pair.us_to_ru
+        backward = pair.ru_to_us
+        self.assertEqual(forward, layouts._case_aware_map(layouts.US_KEYS, layouts.RU_KEYS))
+        self.assertEqual(backward, layouts._case_aware_map(layouts.RU_KEYS, layouts.US_KEYS))
+        forward["x"] = "changed"
+        self.assertNotEqual(pair.us_to_ru.get("x"), "changed")
+        everything = "".join(
+            chr(code) for code in range(0x10000) if not 0xD800 <= code <= 0xDFFF
+        )
+        for source, target, mapping in (
+            ("us", "ru", pair.us_to_ru),
+            ("ru", "us", pair.ru_to_us),
+        ):
+            expected = "".join(mapping.get(character, character) for character in everything)
+            self.assertEqual(pair.translate(everything, source, target), expected)
+        self.assertEqual(pair.translate("Ghbdtn", "us", "ru"), "Привет")
+        self.assertEqual(pair.translate("Привет", "ru", "us"), "Ghbdtn")
+        self.assertEqual(pair.translate("ß İ ~", "us", "ru"), "ß İ ~")
 
 
 if __name__ == "__main__":

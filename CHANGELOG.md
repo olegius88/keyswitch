@@ -4,6 +4,60 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.8.0 — 2026-09-02
+
+- Accept the v20 layout-intent candidate `intent-v1-6ece07f881ec`, the first
+  certified under the compiled FTRL kernel and the multi-process evaluator.
+  The trainer change altered the toolchain identity behind v15, so the split,
+  registry, hard-negative source and holdout namespaces were rotated per
+  candidate: v16, v17 and v19 failed the pre-sealed gate (zero-false-positive
+  recall on their threshold splits 0.9479, 0.9458 and 0.9463 against the 0.956
+  minimum; no registry was claimed), v18 passed its internal gates and holdout
+  but was rejected by the `fallback_regression` strict gate (one model-introduced
+  false positive on the 5,000-row sealed sample; `rejection-v18.json`), and v20
+  passed everything. Freeze `unknown-typo-development-v20.json` (SHA-256
+  `61e02546fb05c2502b2535c512b0e11fad13042d25b1f4f70cff621a4e35686f`), preseal
+  `holdout-v20-preseal.json` with zero overlap against 288,869 sealed and
+  10,000 development signatures, select epoch 45 of 49 on development with
+  765,166 nonzero weights and 1,029,480 membership fingerprints. The
+  independent strict report, SHA-256
+  `01cc92bfc293019377019ecdcd965af11a61ac3da8cdf3837915459bf9f1d525`,
+  passed all 30 gates: on the 60,000-negative model-blind holdout the ensemble
+  produced 6 false positives (1 per trigger slice, Wilson upper endpoint
+  0.000566269 against the 0.001 limit, none introduced by the model, 42
+  fallback false positives prevented) with recall 0.944483; every ordinary
+  sealed trigger shows 1 false positive among 21,338 negatives with recall
+  0.954539 and Pause shows none with recall 0.946712. The published artifact
+  has SHA-256
+  `85deddb83e041f52622b794cf919770994d71a9f1c50af482be4f6574c4163cd`; the
+  manifest and test-report SHA-256 values are
+  `9c39b615ba90b94107be6bef0140ce9387e493bb6aae195f4a8d116021283da9` and
+  `f3c44b42c96ce654042d17c822d92bd3202a9d1b12d6b28e34e394531a10fa94`. Two
+  independent sequential retraining runs reproduced byte-identical KSLM,
+  manifest and test-report files, and the strict evaluator re-run against the
+  first replay passed all 30 gates with report SHA-256
+  `5e77f44b857c9096cc306ce4de3232f81037df932d1d3b5c8ca01de8082404fc`.
+- Add `tools/write_intent_rejection.py`, which writes `rejection-vN.json`
+  from the manifest, registry and strict report so a rejected candidate's
+  receipt cannot disagree with its evidence.
+- Score rows on worker processes in the strict intent-model evaluator
+  (`--workers`, default every available CPU). Model predictions, fallback
+  comparisons and production-context profiles are pure per-row functions, so
+  results are identical in any worker count; the context-invariant prediction
+  cache is replayed in the parent from the recorded calls so its reported
+  counters stay exactly those of a sequential run.
+- Precompute the US/RU layout translation tables once and translate through
+  `str.translate`. The mapping is unchanged character for character, but the
+  runtime, trainer audits and evaluator no longer rebuild the dictionary on
+  every call (about 20x faster per translation).
+- Run the sequential FTRL-Proximal epochs of the layout-intent trainer in a
+  compiled kernel. The C source is embedded in `tools/train_intent_model.py`,
+  compiled with fused multiply-add disabled and called through `ctypes`; it
+  mirrors `FTRLProximal.update` expression by expression, including the
+  compensated float `sum()` of CPython 3.12+, and must reproduce the Python
+  reference bit for bit on the first 4,096 real rows before the first epoch.
+  `--ftrl-kernel auto|native|python` selects the loop; the bytes are identical
+  and an epoch takes seconds instead of a minute.
 - Let `packaging/build-deb.sh` reuse a strict intent-model report produced
   earlier in the same release contour instead of repeating the half-hour
   evaluation. `tools/verify_intent_strict_report.py` accepts the report only

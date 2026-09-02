@@ -56,9 +56,9 @@ class WindowsPackagingContractTests(unittest.TestCase):
         ]
         self.assertNotIn("build\\windows-models", default_section)
 
-    def test_native_help_describes_the_v15_model_first_contract(self) -> None:
+    def test_native_help_describes_the_v20_model_first_contract(self) -> None:
         for contract in (
-            "keyswitch:intent-v15:physical-signature",
+            "keyswitch:intent-v20:physical-signature",
             "Training config schema 13",
             "sole statistical",
             "coverage and language scores are diagnostic only",
@@ -101,7 +101,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(accepted.returncode, 0, accepted.stderr)
-        self.assertEqual(accepted.stdout.strip(), "intent-v1-bec1f1d3dceb")
+        self.assertEqual(accepted.stdout.strip(), "intent-v1-6ece07f881ec")
 
         required_contracts = (
             "KSLM_MAXIMUM_CONTAINER_BYTES = 14 * 1024 * 1024",
@@ -241,6 +241,8 @@ class WindowsPackagingContractTests(unittest.TestCase):
             "model/intent_v1/seal-registry-v12.json",
             "model/intent_v1/seal-registry-v13.json",
             "model/intent_v1/seal-registry-v15.json",
+            "model/intent_v1/seal-registry-v18.json",
+            "model/intent_v1/seal-registry-v20.json",
             "model/intent_v1/holdout-v6-preseal.json",
             "model/intent_v1/holdout-v7-preseal.json",
             "model/intent_v1/holdout-v8-preseal.json",
@@ -250,12 +252,17 @@ class WindowsPackagingContractTests(unittest.TestCase):
             "model/intent_v1/holdout-v12-preseal.json",
             "model/intent_v1/holdout-v13-preseal.json",
             "model/intent_v1/holdout-v15-preseal.json",
+            "model/intent_v1/holdout-v18-preseal.json",
+            "model/intent_v1/holdout-v20-preseal.json",
             "model/intent_v1/unknown-typo-development-v11.json",
             "model/intent_v1/unknown-typo-development-v12.json",
             "model/intent_v1/unknown-typo-development-v13.json",
             "model/intent_v1/unknown-typo-development-v15.json",
+            "model/intent_v1/unknown-typo-development-v18.json",
+            "model/intent_v1/unknown-typo-development-v20.json",
             "model/intent_v1/rejection-v12.json",
             "model/intent_v1/rejection-v13.json",
+            "model/intent_v1/rejection-v18.json",
             "model/intent_v1/rejection-v11.json",
             "model/intent_v1/rejection-v10.json",
             "model/intent_v1/rejection-v9.json",

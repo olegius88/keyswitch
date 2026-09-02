@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "phase": "strict_fallback_regression",
+  "decision": "rejected",
+  "reason": "fallback_regression",
+  "artifact_published": true,
+  "internal_quality_gates_passed": true,
+  "independent_external_holdout_evaluated": true,
+  "model_version": "intent-v1-edafef388548",
+  "artifact_sha256": "b843d75815a7b1c1d3c4014478dcd8315aead5f8613ff3402a095ae79c8314de",
+  "config_sha256": "692340e4162c8902140f67082f4c582b6d9eea8fa5bb9112a0ca5ea315fd9a52",
+  "candidate_sha256": "e80d2febdef2fd31e106c2b47fcfd6c33fc1fea9a6f8f60f91216cd76d8f0e5c",
+  "candidate_dataset_sha256": "b79348f00941d7a98b0cca0e6dcacf536af821d6a14b3ea06668d3d9e7a5a1fc",
+  "seal_registry_sha256": "65f9657ca615e0293ca9223ffbe6090d985430605578f25ad6c754756f3a01ce",
+  "manifest_sha256": "b3aeb81a3596306e67bdfd9cae291c6cde753549bc92d1ad0fc8f5565382c294",
+  "internal_report_sha256": "430166a365ef8675d4e6b90820b80e42c8a0e1ffe9b8fcf6fe118361d458870b",
+  "evaluator_sha256": "fbc5115cbe5b8378945b8ccfb519efaf6d6a2ecc6d94b63e17b4104682d3ab77",
+  "strict_report_sha256": "c4e60f945740293f16fcbee3dd659fdd18b4a88b83c110942a942f71e61b6751",
+  "failure": {
+    "failed_strict_gates": [
+      "fallback_regression"
+    ],
+    "model_vs_fallback": {
+      "ensemble": {
+        "false_negative": 129,
+        "false_positive": 1,
+        "false_positive_rate": 0.0004,
+        "false_positive_rate_upper_95": 0.002262385,
+        "negative_samples": 2500,
+        "precision": 0.999578415,
+        "recall": 0.9484,
+        "specificity": 0.9996,
+        "true_negative": 2499,
+        "true_positive": 2371
+      },
+      "fallback": {
+        "false_negative": 664,
+        "false_positive": 6,
+        "false_positive_rate": 0.0024,
+        "false_positive_rate_upper_95": 0.00522647,
+        "negative_samples": 2500,
+        "precision": 0.996742671,
+        "recall": 0.7344,
+        "specificity": 0.9976,
+        "true_negative": 2494,
+        "true_positive": 1836
+      },
+      "introduced_false_positives": 1,
+      "model_evaluated_samples": 4314,
+      "negative_model_evaluated": 1814,
+      "prevented_false_positives": 6,
+      "rescued_true_positives": 593,
+      "samples": 5000,
+      "vetoed_true_positives": 58
+    }
+  },
+  "remediation": "Treat the disclosed sealed and external results as development evidence only. Rotate the sealed split, registry, hard-negative source and independent holdout namespaces before the next candidate and evaluate that candidate exactly once."
+}

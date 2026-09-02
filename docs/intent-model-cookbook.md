@@ -127,10 +127,28 @@ PY
 
 Online update FTRL-Proximal намеренно не делится между worker-ами: состояние
 после каждого примера является входом следующего шага. Недетерминированный
-Hogwild update изменил бы модель и нарушил byte-identical replay. Поэтому во
-время части `phase=ftrl` возможны последовательные участки, но извлечение
-признаков, development scoring каждой эпохи и все большие fixed-model scoring
-фазы используют настроенный process pool.
+Hogwild update изменил бы модель и нарушил byte-identical replay. Поэтому
+сам проход `phase=ftrl` остаётся последовательным, а извлечение признаков,
+development scoring каждой эпохи и все большие fixed-model scoring фазы
+используют настроенный process pool.
+
+### Нативное ядро FTRL
+
+Последовательный проход выполняет компилируемое ядро: C-исходник встроен в
+`tools/train_intent_model.py` (и потому входит в trainer SHA-256), собирается
+`gcc` в `build/ftrl-native/` с отключённым fused multiply-add и вызывается
+через `ctypes`. Ядро повторяет `FTRLProximal.update` выражение за выражением,
+включая компенсированное суммирование `sum()` CPython 3.12+ и те же `exp`/`sqrt`
+из libm, поэтому байты кандидата не зависят от выбора ядра. Перед первой
+эпохой trainer обязан получить бит-в-бит то же состояние, что эталонный
+Python-цикл, на первых 4 096 реальных строках, иначе обучение останавливается.
+На reference host эпоха занимает около 2–3 с вместо ~60 с.
+
+```bash
+--ftrl-kernel auto    # по умолчанию: ядро, если есть компилятор, иначе Python
+--ftrl-kernel native  # требовать ядро, без компилятора завершиться ошибкой
+--ftrl-kernel python  # эталонный цикл для диагностики; байты те же
+```
 
 Зафиксировать именно те Hunspell-файлы, которые обнаруживает production code:
 
@@ -162,12 +180,12 @@ Paths, sizes и hashes должны совпасть с
 Hunspell snapshot намеренно меняется, сначала обновите эти четыре поля каждого
 языка, затем заново создайте development source и holdout как нового кандидата.
 
-На reference host v15 это Ubuntu 26.04.1 LTS, Python 3.14.4,
+На reference host v20 это Ubuntu 26.04.1 LTS, Python 3.14.4,
 `onboard-data 1.4.3+git20260213+ds-2`. Для воспроизводимого replay используйте
 ту же Python/platform identity из `manifest.json`, а не только совместимую
 версию Python.
 
-## 2. Проверить текущую v15 без переобучения
+## 2. Проверить текущую v20 без переобучения
 
 ### Frozen sources
 
@@ -180,25 +198,25 @@ Hunspell snapshot намеренно меняется, сначала обнов
 ```bash
 sha256sum \
   model/intent_v1/config.json \
-  model/intent_v1/unknown-typo-development-v15.json \
-  model/intent_v1/holdout-v15-preseal.json \
-  model/intent_v1/seal-registry-v15.json \
+  model/intent_v1/unknown-typo-development-v20.json \
+  model/intent_v1/holdout-v20-preseal.json \
+  model/intent_v1/seal-registry-v20.json \
   model/intent_v1/manifest.json \
   model/intent_v1/test-report.json \
   src/keyswitch/resources/models/layout_intent_v1.ksm
 ```
 
-Ожидаемый v15 baseline:
+Ожидаемый v20 baseline:
 
 | Файл | SHA-256 |
 | --- | --- |
-| `config.json` | `06fa899534c8e6e0d3984d2ff7e22b46fe9721efde7df4cf02c53b6967d55127` |
-| `unknown-typo-development-v15.json` | `a0585bdbd21526434fc77effc64200075269d884321a702fa44bd8a9dc7f963c` |
-| `holdout-v15-preseal.json` | `56ceb18efe4e1cdd4372e3cf1eb0d7c01f7d1320075a3961bf9f31ff06a34d1d` |
-| `seal-registry-v15.json` | `5dc4d01b59d7f614f1178ab8ca14b7f701ed09f5551c118cdb6328c5d7e512a4` |
-| `manifest.json` | `e0070e8e6813da4a8dde1a09eb2c1713f033d002a64216299cba3764032d82f7` |
-| `test-report.json` | `05caf3828ff2724fc5f1d22ff2e28d9b31cd2d1bcfcceb64f934bb8bfe84480d` |
-| `layout_intent_v1.ksm` | `7631b821bafc958364353a8a13de3abc23e922e51b589bd181075db55fa9e9dc` |
+| `config.json` | `f308a605737e0122f39cb83fe937b7133701b57b6dbb9caa1e35df1474a41249` |
+| `unknown-typo-development-v20.json` | `61e02546fb05c2502b2535c512b0e11fad13042d25b1f4f70cff621a4e35686f` |
+| `holdout-v20-preseal.json` | `875d828cbdc8096d7b3258769c58cd886eb195f38b8ea0790714c1e9763c0b4d` |
+| `seal-registry-v20.json` | `dbe05a3b868232c7f46f57af174ceafa51693fcff0dd60331ff1b2349c588112` |
+| `manifest.json` | `9c39b615ba90b94107be6bef0140ce9387e493bb6aae195f4a8d116021283da9` |
+| `test-report.json` | `f3c44b42c96ce654042d17c822d92bd3202a9d1b12d6b28e34e394531a10fa94` |
+| `layout_intent_v1.ksm` | `85deddb83e041f52622b794cf919770994d71a9f1c50af482be4f6574c4163cd` |
 
 ### Internal provenance без внешнего performance-прогона
 
@@ -221,17 +239,17 @@ Windows/macOS consumer package не пересобирайте corpus: пров�
 artifact/config/source/registry/toolchain hashes и встроенный signed manifest,
 а полный `--strict` оставляйте обязательным отдельным job на reference host.
 
-## 3. Воспроизвести v15 preseal без доступа к KSLM
+## 3. Воспроизвести v20 preseal без доступа к KSLM
 
 ```bash
 PYTHONPATH=src python3 tools/preseal_intent_holdout.py \
   --config model/intent_v1/config.json \
   --en-model model/intent_v1/sources/en_US.lm \
   --ru-model model/intent_v1/sources/ru_RU.lm \
-  > "$work_root/holdout-v15-preseal.json"
+  > "$work_root/holdout-v20-preseal.json"
 
-diff -u model/intent_v1/holdout-v15-preseal.json \
-  "$work_root/holdout-v15-preseal.json"
+diff -u model/intent_v1/holdout-v20-preseal.json \
+  "$work_root/holdout-v20-preseal.json"
 
 jq -e '
   .model_loaded == false and
@@ -240,21 +258,22 @@ jq -e '
   .holdout.signature_count == 10000 and
   .overlap_counts.development_holdout == 0 and
   .overlap_counts.sealed_holdout == 0
-' "$work_root/holdout-v15-preseal.json"
+' "$work_root/holdout-v20-preseal.json"
 ```
 
 Это безопасная проверка: `preseal_intent_holdout.py` не принимает путь к KSLM,
 не загружает intent artifact и не считает метрики модели.
 
-## 4. Сделать точный retraining replay v15
+## 4. Сделать точный retraining replay v20
 
 Этот рецепт занимает заметное CPU-время. Он разрешён существующим registry
 только потому, что ожидается тот же canonical candidate SHA.
 Trainer входит в candidate identity: после изменения `tools/train_intent_model.py`
 (например, multiprocessing backend в v15) прежний кандидат больше не
 воспроизводим из текущего дерева. Точный v14 replay запускается только из
-чистого тега `v0.6.1`, чей trainer SHA совпадает с его manifest; текущий v15
-registry разрешает replay только текущего trainer. Любое новое изменение
+чистого тега `v0.6.1`, чей trainer SHA совпадает с его manifest, а точный v15
+replay — из тега `v0.7.0`; текущий v20 registry разрешает replay только
+текущего trainer. Любое новое изменение
 trainer до длительного train требует ротации по разделу 6.
 
 ```bash
@@ -277,7 +296,7 @@ jq -e '.quality_gates_passed == true' \
 ```
 
 Если trainer сообщает, что namespace уже занят другим кандидатом, не удаляйте
-registry: текущие inputs отличаются от v15. Это уже новый кандидат и требует
+registry: текущие inputs отличаются от v20. Это уже новый кандидат и требует
 ротации.
 
 ## 5. Запустить полный strict report для текущей модели
@@ -306,16 +325,22 @@ jq '{
 брать из JSON: при добавлении нового независимого gate оно закономерно
 изменится.
 
+Evaluator оценивает строки на worker-процессах (`--workers N`, по умолчанию
+`0` — все доступные CPU). Каждое решение — чистая функция строки и read-only
+модели/скореров, поэтому результаты, логиты и счётчики кэша предсказаний не
+зависят от числа worker-ов; `--workers 1` даёт эталонный последовательный
+проход для диагностики.
+
 ## 6. Создать новый кандидат vN
 
-Ниже `vN` означает ещё не использованный номер, например `v15`. Не делайте
+Ниже `vN` означает ещё не использованный номер, например `v19`. Не делайте
 слепую глобальную замену: часть `v1` обозначает поколение модели, а не номер
 release holdout.
 
 ### 6.1. Найти все version-bound значения
 
 ```bash
-rg -n 'v15|schema_version|SPLIT_NAMESPACE|SEALED_REGISTRY|PRESEAL_RECEIPT|UNKNOWN_TYPO|HARD_NEGATIVE' \
+rg -n 'v20|schema_version|SPLIT_NAMESPACE|SEALED_REGISTRY|PRESEAL_RECEIPT|UNKNOWN_TYPO|HARD_NEGATIVE' \
   tools model packaging tests README.md README.en.md DESIGN.md docs \
   > "$work_root/version-bound.txt"
 less "$work_root/version-bound.txt"
@@ -579,7 +604,17 @@ jq -r '.strict_gates | to_entries[] | select(.value != true) | .key' \
 ```
 
 Создайте `model/intent_v1/rejection-vN.json` по структуре предыдущего receipt.
-Заполняйте только фактическими данными из manifest/registry/strict report:
+Проще всего сгенерировать его из фактических файлов, чтобы ни одно значение
+не было набрано вручную:
+
+```bash
+python3 tools/write_intent_rejection.py --version N \
+  --strict-report "$work_root/strict-vN.json"
+```
+
+Скрипт читает manifest, registry и strict report, отказывается писать receipt
+для отчёта, прошедшего все gates, и никогда не перезаписывает существующий
+файл. Заполняйте только фактическими данными из manifest/registry/strict report:
 
 ```json
 {
@@ -765,7 +800,9 @@ python3 tools/release_pipeline.py status
 replay передаются через `--replay-dir`, готовый strict-отчёт — через
 `--strict-report`; `--jobs` и `--memory-reserve-mib` ограничивают параллелизм
 по числу фаз и по свободному ОЗУ, а `--fail-fast` останавливает приём новых
-фаз после первого отказа.
+фаз после первого отказа. Фазы strict-оценки измеряют load/inference latency,
+поэтому выполняются в одиночестве: планировщик ждёт, пока завершатся все
+остальные фазы, и не запускает новых, пока идёт оценка.
 
 ## 9. Частые ошибки
 

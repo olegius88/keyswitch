@@ -23,7 +23,7 @@ from train_intent_model import (
 )
 
 
-_POLICY = "keyswitch-intent-v15-frozen-unknown-typo-development"
+_POLICY = "keyswitch-intent-v20-frozen-unknown-typo-development"
 _PREFIX = "hunspell-unknown:"
 
 

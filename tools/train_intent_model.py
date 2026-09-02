@@ -10,6 +10,7 @@ system lexicons.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
 import math
@@ -17,10 +18,13 @@ import multiprocessing
 import os
 import platform
 import random
+import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 import time
+from array import array
 from collections import defaultdict
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
@@ -84,10 +88,10 @@ PRESEALED_SPLITS: Final[tuple[SplitName, ...]] = (
     "threshold",
 )
 SEALED_TEST_SPLITS: Final[tuple[SplitName, ...]] = ("test",)
-SPLIT_NAMESPACE: Final[str] = "keyswitch:intent-v15:physical-signature"
+SPLIT_NAMESPACE: Final[str] = "keyswitch:intent-v20:physical-signature"
 SPLIT_HASH_NAMESPACE: Final[bytes] = SPLIT_NAMESPACE.encode("ascii") + b"\0"
 SEALED_REGISTRY_RELATIVE_PATH: Final[str] = (
-    "model/intent_v1/seal-registry-v15.json"
+    "model/intent_v1/seal-registry-v20.json"
 )
 UNKNOWN_TYPO_DEVELOPMENT_RANK_NAMESPACE: Final[str] = (
     "keyswitch:intent-v1:unknown-typo-rank"
@@ -96,16 +100,16 @@ UNKNOWN_TYPO_DEVELOPMENT_CHOICE_NAMESPACE: Final[str] = (
     "keyswitch:intent-v1:unknown-typo-choice"
 )
 UNKNOWN_TYPO_HOLDOUT_RANK_NAMESPACE: Final[str] = (
-    "keyswitch:intent-v15:unknown-typo-holdout-rank"
+    "keyswitch:intent-v20:unknown-typo-holdout-rank"
 )
 UNKNOWN_TYPO_HOLDOUT_CHOICE_NAMESPACE: Final[str] = (
-    "keyswitch:intent-v15:unknown-typo-holdout-choice"
+    "keyswitch:intent-v20:unknown-typo-holdout-choice"
 )
 HARD_NEGATIVE_ROLE_NAMESPACE: Final[str] = (
-    "keyswitch:intent-v15:unknown-typo-development-role"
+    "keyswitch:intent-v20:unknown-typo-development-role"
 )
 HARD_NEGATIVE_SOURCE_RELATIVE_PATH: Final[str] = (
-    "model/intent_v1/unknown-typo-development-v15.json"
+    "model/intent_v1/unknown-typo-development-v20.json"
 )
 SAFETY_COLLISION_MINIMUM_WORD_LENGTH: Final[int] = 3
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
@@ -128,7 +132,7 @@ DEVELOPMENT_FREEZER_PATH: Final[Path] = (
     PROJECT_ROOT / "tools/freeze_intent_development_corpus.py"
 )
 PRESEAL_RECEIPT_PATH: Final[Path] = (
-    PROJECT_ROOT / "model/intent_v1/holdout-v15-preseal.json"
+    PROJECT_ROOT / "model/intent_v1/holdout-v20-preseal.json"
 )
 MAX_TRAINING_CONFIG_BYTES: Final[int] = 1 << 16
 MAX_FROZEN_SOURCE_BYTES: Final[int] = 1 << 26
@@ -335,7 +339,7 @@ class HardNegativeDevelopmentPolicy:
             )
         if self.role_namespace != HARD_NEGATIVE_ROLE_NAMESPACE:
             raise ValueError(
-                "hard-negative development role namespace must match v15"
+                "hard-negative development role namespace must match v20"
             )
         counts = self.role_counts()
         if any(
@@ -2478,11 +2482,11 @@ def _decode_hard_negative_development_corpus(
     if _integer(root, "schema_version") != 1:
         raise ValueError("unsupported frozen hard-negative corpus schema")
     if _string(root, "policy") != (
-        "keyswitch-intent-v15-frozen-unknown-typo-development"
+        "keyswitch-intent-v20-frozen-unknown-typo-development"
     ):
-        raise ValueError("hard-negative corpus policy must match v15")
+        raise ValueError("hard-negative corpus policy must match v20")
     if _string(root, "role_namespace") != HARD_NEGATIVE_ROLE_NAMESPACE:
-        raise ValueError("hard-negative corpus role namespace must match v15")
+        raise ValueError("hard-negative corpus role namespace must match v20")
     if _string(root, "rank_namespace") != (
         UNKNOWN_TYPO_DEVELOPMENT_RANK_NAMESPACE
     ) or _string(root, "choice_namespace") != (
@@ -4409,6 +4413,387 @@ class FTRLTrainingResult:
     history: tuple[EpochReport, ...]
 
 
+# ---------------------------------------------------------------------------
+# Native FTRL epoch kernel
+# ---------------------------------------------------------------------------
+#
+# The online FTRL-Proximal update is inherently sequential, so the only way to
+# make it fast without changing a single bit of the result is to run the same
+# arithmetic outside the interpreter.  The C source below is a line-for-line
+# port of ``FTRLProximal.update``: it evaluates every expression in the same
+# order, reproduces the compensated float ``sum()`` of CPython 3.12+, calls the
+# same libm ``exp``/``sqrt`` and is compiled with fused multiply-add disabled.
+# The source lives in this file so the trainer digest already covers it, and
+# before the first epoch the kernel must reproduce the reference Python update
+# bit for bit on real rows or training stops.  Without a C compiler the
+# reference Python loop runs instead and produces identical bytes.
+
+FTRL_NATIVE_SOURCE: Final[str] = r"""
+#include <math.h>
+#include <stddef.h>
+#include <stdint.h>
+
+static double ftrl_weight(
+    double z, double n, double alpha, double beta, double l1, double l2
+) {
+    if (fabs(z) <= l1) {
+        return 0.0;
+    }
+    double sign = (z < 0.0) ? -1.0 : 1.0;
+    double denominator = (beta + sqrt(n)) / alpha + l2;
+    return -(z - sign * l1) / denominator;
+}
+
+static double ftrl_bias(double bias_z, double bias_n, double alpha, double beta) {
+    double denominator = (beta + sqrt(bias_n)) / alpha;
+    return denominator ? -bias_z / denominator : 0.0;
+}
+
+static double stable_sigmoid(double value) {
+    if (value >= 0.0) {
+        return 1.0 / (1.0 + exp(-value));
+    }
+    double exponential = exp(value);
+    return exponential / (1.0 + exponential);
+}
+
+int64_t ftrl_run_epoch(
+    const int64_t *indptr,
+    const int32_t *indices,
+    const double *values,
+    const uint8_t *labels,
+    const double *weights,
+    const int32_t *order,
+    int64_t row_count,
+    double *z,
+    double *n,
+    uint8_t *touched_mask,
+    int32_t *touched_list,
+    double *bias_state,
+    double *scratch,
+    double alpha,
+    double beta,
+    double l1,
+    double l2
+) {
+    double bias_z = bias_state[0];
+    double bias_n = bias_state[1];
+    int64_t touched_count = 0;
+    for (int64_t position = 0; position < row_count; ++position) {
+        int32_t row = order[position];
+        int64_t begin = indptr[row];
+        int64_t end = indptr[row + 1];
+        double old_bias = ftrl_bias(bias_z, bias_n, alpha, beta);
+        /* CPython 3.12+ float sum(): Neumaier compensation, first term added
+           to integer zero exactly, compensation applied once at the end. */
+        double f_result = 0.0;
+        double c = 0.0;
+        for (int64_t k = begin; k < end; ++k) {
+            int32_t index = indices[k];
+            double weight = ftrl_weight(z[index], n[index], alpha, beta, l1, l2);
+            scratch[k - begin] = weight;
+            double x = weight * values[k];
+            double t = f_result + x;
+            if (fabs(f_result) >= fabs(x)) {
+                c += (f_result - t) + x;
+            } else {
+                c += (x - t) + f_result;
+            }
+            f_result = t;
+        }
+        if (c != 0.0 && isfinite(c)) {
+            f_result += c;
+        }
+        double prediction = stable_sigmoid(old_bias + f_result);
+        double residual = (prediction - (double)labels[row]) * weights[row];
+        double old_bias_n = bias_n;
+        double new_bias_n = old_bias_n + residual * residual;
+        double bias_sigma = (sqrt(new_bias_n) - sqrt(old_bias_n)) / alpha;
+        bias_z += residual - bias_sigma * old_bias;
+        bias_n = new_bias_n;
+        for (int64_t k = begin; k < end; ++k) {
+            int32_t index = indices[k];
+            double gradient = residual * values[k];
+            double old_n = n[index];
+            double new_n = old_n + gradient * gradient;
+            double sigma = (sqrt(new_n) - sqrt(old_n)) / alpha;
+            z[index] = z[index] + gradient - sigma * scratch[k - begin];
+            n[index] = new_n;
+            if (!touched_mask[index]) {
+                touched_mask[index] = 1;
+                touched_list[touched_count++] = index;
+            }
+        }
+    }
+    bias_state[0] = bias_z;
+    bias_state[1] = bias_n;
+    return touched_count;
+}
+"""
+
+FTRL_NATIVE_COMPILER_FLAGS: Final[tuple[str, ...]] = (
+    "-std=c11",
+    "-O2",
+    "-fPIC",
+    "-shared",
+    "-ffp-contract=off",
+    "-fno-fast-math",
+    "-fexcess-precision=standard",
+)
+FTRL_NATIVE_SELF_CHECK_ROWS: Final[int] = 4096
+FTRLKernelChoice: TypeAlias = Literal["auto", "native", "python"]
+
+
+def _same_double(left: float, right: float) -> bool:
+    """Bitwise IEEE-754 equality, which also separates -0.0 from 0.0."""
+
+    return struct.pack("<d", left) == struct.pack("<d", right)
+
+
+@dataclass(frozen=True)
+class PackedTrainingRows:
+    """Training rows in CSR layout for the native kernel."""
+
+    row_count: int
+    maximum_row_length: int
+    indptr: array[int]
+    indices: array[int]
+    values: array[float]
+    labels: array[int]
+    weights: array[float]
+
+
+def pack_training_rows(
+    training: Sequence[FeaturedExample], dimension: int
+) -> PackedTrainingRows:
+    """Validate rows exactly like ``FTRLProximal.update`` and pack them once."""
+
+    indptr = array("q", [0])
+    indices = array("i")
+    values = array("d")
+    labels = array("B")
+    weights = array("d")
+    if indptr.itemsize != 8 or indices.itemsize != 4:
+        raise RuntimeError("native FTRL kernel needs 64-bit offsets and 32-bit indices")
+    maximum_row_length = 0
+    for item in training:
+        sample_weight = item.example.weight
+        if sample_weight <= 0.0 or not math.isfinite(sample_weight):
+            raise ValueError("sample weight must be positive and finite")
+        previous_index = -1
+        for index, value in item.features:
+            if isinstance(index, bool) or not 0 <= index < dimension:
+                raise ValueError("feature index outside model dimension")
+            if index <= previous_index:
+                raise ValueError(
+                    "sparse feature indices must be unique and strictly increasing"
+                )
+            if not math.isfinite(value):
+                raise ValueError("feature value must be finite")
+            previous_index = index
+            indices.append(index)
+            values.append(value)
+        maximum_row_length = max(maximum_row_length, len(item.features))
+        indptr.append(len(indices))
+        labels.append(1 if item.example.label else 0)
+        weights.append(sample_weight)
+    if len(training) >= 2**31 or dimension >= 2**31:
+        raise ValueError("native FTRL kernel supports at most 2^31 rows and features")
+    return PackedTrainingRows(
+        row_count=len(training),
+        maximum_row_length=maximum_row_length,
+        indptr=indptr,
+        indices=indices,
+        values=values,
+        labels=labels,
+        weights=weights,
+    )
+
+
+class NativeFTRLKernel:
+    """Compiled epoch runner that mirrors ``FTRLProximal.update`` bit for bit."""
+
+    def __init__(self, library_path: Path) -> None:
+        self.library_path = library_path
+        library = ctypes.CDLL(str(library_path))
+        function = library.ftrl_run_epoch
+        function.restype = ctypes.c_int64
+        function.argtypes = [
+            ctypes.c_void_p,  # indptr
+            ctypes.c_void_p,  # indices
+            ctypes.c_void_p,  # values
+            ctypes.c_void_p,  # labels
+            ctypes.c_void_p,  # weights
+            ctypes.c_void_p,  # order
+            ctypes.c_int64,  # row_count
+            ctypes.c_void_p,  # z
+            ctypes.c_void_p,  # n
+            ctypes.c_void_p,  # touched_mask
+            ctypes.c_void_p,  # touched_list
+            ctypes.c_void_p,  # bias_state
+            ctypes.c_void_p,  # scratch
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+        ]
+        self._function = function
+
+    @staticmethod
+    def source_digest() -> str:
+        payload = "\n".join((FTRL_NATIVE_SOURCE, *FTRL_NATIVE_COMPILER_FLAGS))
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def load(cls, cache_root: Path | None = None) -> NativeFTRLKernel | None:
+        """Compile (once per source digest) and load the kernel, or ``None``."""
+
+        compiler = shutil.which("gcc") or shutil.which("cc")
+        if compiler is None:
+            return None
+        directory = (cache_root or PROJECT_ROOT / "build" / "ftrl-native") / (
+            cls.source_digest()[:16]
+        )
+        library = directory / "libftrl.so"
+        if not library.is_file():
+            try:
+                directory.mkdir(parents=True, exist_ok=True)
+                source = directory / "ftrl.c"
+                source.write_text(FTRL_NATIVE_SOURCE, encoding="utf-8")
+                with tempfile.NamedTemporaryFile(
+                    dir=directory, suffix=".so.tmp", delete=False
+                ) as handle:
+                    temporary = Path(handle.name)
+                completed = subprocess.run(
+                    [
+                        compiler,
+                        *FTRL_NATIVE_COMPILER_FLAGS,
+                        "-o",
+                        str(temporary),
+                        str(source),
+                        "-lm",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if completed.returncode != 0:
+                    temporary.unlink(missing_ok=True)
+                    sys.stderr.write(
+                        "KeySwitch trainer: native FTRL kernel did not compile; "
+                        f"using the Python reference loop\n{completed.stderr}"
+                    )
+                    return None
+                os.replace(temporary, library)
+            except OSError as error:
+                sys.stderr.write(
+                    "KeySwitch trainer: native FTRL kernel is unavailable "
+                    f"({error}); using the Python reference loop\n"
+                )
+                return None
+        try:
+            return cls(library)
+        except (OSError, AttributeError) as error:
+            sys.stderr.write(
+                "KeySwitch trainer: native FTRL kernel failed to load "
+                f"({error}); using the Python reference loop\n"
+            )
+            return None
+
+    def run_epoch(
+        self,
+        model: FTRLProximal,
+        packed: PackedTrainingRows,
+        order: Sequence[int],
+    ) -> None:
+        """Apply one epoch in ``order`` and write the state back into ``model``."""
+
+        dimension = model.parameters.dimension
+        z = array("d", bytes(8 * dimension))
+        n = array("d", bytes(8 * dimension))
+        for index, value in model.z.items():
+            z[index] = value
+        for index, value in model.n.items():
+            n[index] = value
+        touched_mask = array("B", bytes(dimension))
+        touched_list = array("i", bytes(4 * dimension))
+        order_array = array("i", order)
+        if len(order_array) > packed.row_count or any(
+            not 0 <= row < packed.row_count for row in order_array
+        ):
+            raise ValueError("epoch order refers to rows outside the packed set")
+        bias_state = array("d", [model.bias_z, model.bias_n])
+        scratch = array("d", bytes(8 * max(1, packed.maximum_row_length)))
+        touched_count = int(
+            self._function(
+                packed.indptr.buffer_info()[0],
+                packed.indices.buffer_info()[0],
+                packed.values.buffer_info()[0],
+                packed.labels.buffer_info()[0],
+                packed.weights.buffer_info()[0],
+                order_array.buffer_info()[0],
+                len(order_array),
+                z.buffer_info()[0],
+                n.buffer_info()[0],
+                touched_mask.buffer_info()[0],
+                touched_list.buffer_info()[0],
+                bias_state.buffer_info()[0],
+                scratch.buffer_info()[0],
+                model.parameters.alpha,
+                model.parameters.beta,
+                model.parameters.l1,
+                model.parameters.l2,
+            )
+        )
+        if not 0 <= touched_count <= dimension:
+            raise RuntimeError("native FTRL kernel returned an invalid touched count")
+        for position in range(touched_count):
+            index = touched_list[position]
+            model.z[index] = z[index]
+            model.n[index] = n[index]
+        model.bias_z = bias_state[0]
+        model.bias_n = bias_state[1]
+
+
+def verify_native_ftrl_kernel(
+    kernel: NativeFTRLKernel,
+    packed: PackedTrainingRows,
+    training: Sequence[FeaturedExample],
+    parameters: FTRLParameters,
+    order: Sequence[int],
+) -> None:
+    """Require bit-exact agreement with the Python reference on real rows."""
+
+    reference = FTRLProximal(parameters)
+    for index in order:
+        item = training[index]
+        reference.update(item.features, item.example.label, item.example.weight)
+    candidate = FTRLProximal(parameters)
+    kernel.run_epoch(candidate, packed, order)
+    if set(candidate.z) != set(reference.z) or set(candidate.n) != set(reference.n):
+        raise RuntimeError("native FTRL kernel touched a different feature set")
+    for index, value in reference.z.items():
+        if not _same_double(value, candidate.z[index]):
+            raise RuntimeError(f"native FTRL kernel diverged in z[{index}]")
+    for index, value in reference.n.items():
+        if not _same_double(value, candidate.n[index]):
+            raise RuntimeError(f"native FTRL kernel diverged in n[{index}]")
+    if not _same_double(reference.bias_z, candidate.bias_z) or not _same_double(
+        reference.bias_n, candidate.bias_n
+    ):
+        raise RuntimeError("native FTRL kernel diverged in the bias state")
+
+
+def ftrl_kernel_choice(value: object) -> FTRLKernelChoice:
+    if value == "auto":
+        return "auto"
+    if value == "native":
+        return "native"
+    if value == "python":
+        return "python"
+    raise ValueError(f"unsupported FTRL kernel choice: {value!r}")
+
+
 def report_ftrl_epoch(report: EpochReport) -> None:
     """Emit human progress on stderr without contaminating JSON stdout."""
 
@@ -4428,6 +4813,7 @@ def fit_ftrl(
     *,
     evaluation_workers: int = 1,
     progress: Callable[[EpochReport], None] | None = None,
+    kernel: FTRLKernelChoice = "auto",
 ) -> FTRLTrainingResult:
     if not training or not development:
         raise ValueError("training and development datasets must not be empty")
@@ -4440,6 +4826,26 @@ def fit_ftrl(
         config.ftrl_l1,
         config.ftrl_l2,
     )
+    native: NativeFTRLKernel | None = None
+    packed: PackedTrainingRows | None = None
+    if kernel != "python":
+        native = NativeFTRLKernel.load()
+        if native is None and kernel == "native":
+            raise RuntimeError("the native FTRL kernel was requested but is unavailable")
+        if native is not None:
+            packed = pack_training_rows(training, config.dimension)
+            verify_native_ftrl_kernel(
+                native,
+                packed,
+                training,
+                parameters,
+                range(min(len(training), FTRL_NATIVE_SELF_CHECK_ROWS)),
+            )
+    sys.stderr.write(
+        "KeySwitch trainer: phase=ftrl kernel="
+        f"{'native' if native is not None else 'python'}\n"
+    )
+    sys.stderr.flush()
     model = FTRLProximal(parameters)
     best_model: FTRLProximal | None = None
     best_ranking: (
@@ -4451,9 +4857,12 @@ def fit_ftrl(
     indices = list(range(len(training)))
     for epoch in range(1, config.maximum_epochs + 1):
         random.Random(config.seed + epoch).shuffle(indices)
-        for index in indices:
-            item = training[index]
-            model.update(item.features, item.example.label, item.example.weight)
+        if native is not None and packed is not None:
+            native.run_epoch(model, packed, indices)
+        else:
+            for index in indices:
+                item = training[index]
+                model.update(item.features, item.example.label, item.example.weight)
         evaluation = evaluate_development_epoch_parallel(
             model,
             development,
@@ -7089,6 +7498,16 @@ def _parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "CPU available to the process"
         ),
     )
+    parser.add_argument(
+        "--ftrl-kernel",
+        choices=("auto", "native", "python"),
+        default="auto",
+        help=(
+            "run FTRL epochs with the compiled bit-exact kernel when a C "
+            "compiler is available (auto), require it (native) or use the "
+            "reference Python loop (python); the bytes are identical"
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -7215,6 +7634,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         config,
         evaluation_workers=workers,
         progress=report_ftrl_epoch,
+        kernel=ftrl_kernel_choice(arguments.ftrl_kernel),
     )
     final_sparse_weights = training_result.model.sparse_weights()
     quantized = quantize_weights(

@@ -1,4 +1,4 @@
-.TH KEYSWITCH 1 "September 2026" "KeySwitch 0.7.0" "User Commands"
+.TH KEYSWITCH 1 "September 2026" "KeySwitch 0.8.0" "User Commands"
 .SH NAME
 keyswitch \- automatic keyboard layout correction for Ubuntu X11
 .SH SYNOPSIS
@@ -45,11 +45,11 @@ linear score. The trainer invokes the same runtime extractor with the same seeds
 and n-gram orders for exact train/serve feature parity. Train-only character scorers remain checked
 provenance but are not classifier inputs; this does not disable Hunspell in the
 runtime deterministic ensemble. Physical signatures use the
-keyswitch:intent-v15:physical-signature split namespace. Identity and typo
+keyswitch:intent-v20:physical-signature split namespace. Identity and typo
 signatures that cross splits, languages or protected safety rows are
 quarantined before row creation.
 .PP
-Schema 13 also consumes a byte-frozen, model-blind v15 hard-negative source.
+Schema 13 also consumes a byte-frozen, model-blind v20 hard-negative source.
 Its 5000 EN and 5000 RU physical signatures are assigned under an independent
 namespace as 3500/500/500/500 words per language across train, development,
 calibration and threshold, with no test role. The loader verifies source and
