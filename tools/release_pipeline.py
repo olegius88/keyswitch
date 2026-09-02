@@ -1272,13 +1272,31 @@ def phase_model_strict(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
         facts, problems = strict_report_facts(
             provided, identity.artifact_sha256, identity.artifact_version
         )
-        if not problems:
+        verified = (
+            ctx.run_command(
+                state.name,
+                log,
+                [
+                    "python3",
+                    str(PROJECT_ROOT / "tools" / "verify_intent_strict_report.py"),
+                    "--report",
+                    str(provided),
+                ],
+                timeout=ctx.timeout(600),
+                check=False,
+            )
+            == 0
+        )
+        if not problems and verified:
             output.write_bytes(provided.read_bytes())
             facts["reused_from"] = str(provided)
             state.notes.append(f"reused existing strict report {provided}")
             state.facts.update(facts)
             return
-        log.write(f"provided strict report is not acceptable, re-running: {problems}")
+        log.write(
+            "provided strict report is not bound to the current tree, re-running: "
+            f"{problems or 'verifier rejected it'}"
+        )
     run_strict_evaluator(
         ctx,
         state.name,
@@ -1603,11 +1621,18 @@ def package_path(ctx: Context) -> Path:
 
 def phase_build_deb(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
     package = package_path(ctx)
+    env = {"KEYSWITCH_NUITKA_ROOT": str(NUITKA_ROOT)}
+    strict_report = ctx.model_dir / "strict.json"
+    if strict_report.is_file():
+        # build-deb.sh re-verifies the report against the current tree with
+        # tools/verify_intent_strict_report.py before skipping its own run.
+        env["KEYSWITCH_INTENT_STRICT_REPORT"] = str(strict_report)
+        state.notes.append("build-deb reuses the verified strict report of this run")
     ctx.run_command(
         state.name,
         log,
         [str(PROJECT_ROOT / "packaging" / "build-deb.sh"), str(ctx.artifacts_dir)],
-        env={"KEYSWITCH_NUITKA_ROOT": str(NUITKA_ROOT)},
+        env=env,
         timeout=ctx.timeout(6 * 3600),
     )
     if not package.is_file():
@@ -1916,7 +1941,7 @@ PHASES: Final[tuple[PhaseSpec, ...]] = (
         "build-deb",
         "Native Debian package (Nuitka)",
         phase_build_deb,
-        ("environment", "model-inputs"),
+        ("environment", "model-inputs", "model-strict"),
         6 * 3600,
         3600,
         2500,

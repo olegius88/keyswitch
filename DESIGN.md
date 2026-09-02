@@ -234,6 +234,11 @@ Trainer публикует выходы только после всех gates. 
 
 - `packaging/build-deb.sh` компилирует приложение закреплённой версией Nuitka в
   standalone ELF и формирует пакет для архитектуры `dpkg --print-architecture`.
+  Перед сборкой он выполняет strict evaluation модели либо принимает отчёт,
+  созданный ранее в том же контуре, но только после того, как
+  `tools/verify_intent_strict_report.py` докажет, что все gates пройдены и все
+  записанные в отчёт hashes артефакта, config, frozen sources и toolchain
+  совпадают с текущими файлами.
 - Linux- и Windows-сборка обязаны включить точный
   `resources/models/layout_intent_v1.ksm` и frozen `en_US.lm`/`ru_RU.lm`;
   встроенный каталог моделей имеет приоритет над системным `onboard-data`, а

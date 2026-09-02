@@ -88,11 +88,16 @@ jobs:
       - name: Enforce linear intent-model quality gates
         run: |
           (cd model/intent_v1/sources && sha256sum --check SHA256SUMS)
-          PYTHONPATH=src tools/evaluate_intent_model.py --strict
+          mkdir -p build
+          PYTHONPATH=src tools/evaluate_intent_model.py --strict \
+            > build/keyswitch-intent-strict.json
+          python3 tools/verify_intent_strict_report.py \
+            --report build/keyswitch-intent-strict.json
 
       - name: Build Debian package
         env:
           KEYSWITCH_NUITKA_ROOT: ${{ runner.temp }}/keyswitch-nuitka
+          KEYSWITCH_INTENT_STRICT_REPORT: build/keyswitch-intent-strict.json
         run: ./packaging/build-deb.sh
 
       - name: Validate native package metadata and contents
@@ -123,7 +128,6 @@ jobs:
 
   windows:
     name: Test and build native Windows installer
-    needs: package
     runs-on: windows-2025
 
     steps:

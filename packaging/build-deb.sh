@@ -135,7 +135,35 @@ if ! verify_kslm_packaging_bounds "$intent_model"; then
 fi
 mkdir -p -- "$project_dir/build" "$output_dir"
 intent_quality_report="$output_dir/keyswitch-intent-evaluation.json"
-if ! PYTHONPATH="$project_dir/src" python3 \
+# A strict report produced earlier in the same release contour may stand in
+# for the half-hour evaluation, but only after tools/verify_intent_strict_report.py
+# proves that every gate passed and every hash it recorded (artifact, config,
+# frozen sources and the complete model toolchain) still equals the current
+# file. Anything else fails the build instead of silently re-running.
+reusable_strict_report="${KEYSWITCH_INTENT_STRICT_REPORT:-}"
+if [[ -n "$reusable_strict_report" ]]; then
+    if [[ ! -f "$reusable_strict_report" ]]; then
+        printf 'Reusable strict report does not exist: %s\n' \
+            "$reusable_strict_report" >&2
+        exit 1
+    fi
+    if ! python3 "$project_dir/tools/verify_intent_strict_report.py" \
+        --report "$reusable_strict_report" \
+        --artifact "$intent_model" \
+        --manifest "$intent_manifest" \
+        --config "$project_dir/model/intent_v1/config.json" \
+        --project-root "$project_dir" >/dev/null; then
+        printf 'Reusable strict report is not bound to the current tree: %s\n' \
+            "$reusable_strict_report" >&2
+        exit 1
+    fi
+    if [[ "$(realpath -- "$reusable_strict_report")" \
+        != "$(realpath -m -- "$intent_quality_report")" ]]; then
+        install -m 0644 -- "$reusable_strict_report" "$intent_quality_report"
+    fi
+    printf 'Reusing verified strict intent-model report: %s\n' \
+        "$reusable_strict_report"
+elif ! PYTHONPATH="$project_dir/src" python3 \
     "$project_dir/tools/evaluate_intent_model.py" \
     --config "$project_dir/model/intent_v1/config.json" \
     --en-model "$project_dir/model/intent_v1/sources/en_US.lm" \

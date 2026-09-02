@@ -432,7 +432,12 @@ dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24 -noreset" \
 ```
 
 `build-deb.sh` повторно запускает strict evaluator и не собирает пакет при
-провале модели. Verifier требует KSLM schema 4, размерные bounds, побайтное
+провале модели. Если переменная `KEYSWITCH_INTENT_STRICT_REPORT` указывает на
+отчёт, созданный ранее в том же контуре, `tools/verify_intent_strict_report.py`
+сначала проверяет, что все gates пройдены и каждый записанный в отчёт hash
+(артефакт, config, frozen sources, весь model toolchain и preseal receipt)
+совпадает с текущим файлом; только тогда повторная получасовая оценка
+пропускается, иначе сборка останавливается с ошибкой. Verifier требует KSLM schema 4, размерные bounds, побайтное
 совпадение packaged artifact/frozen EN/RU sources и отсутствие зависимости DEB
 от системного Python interpreter.
 

@@ -741,6 +741,11 @@ dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24 -noreset" \
 ```
 
 `build-deb.sh` сам выполняет strict intent evaluation перед Nuitka build.
+Чтобы не ждать её второй раз, передайте отчёт, уже полученный в этом же
+контуре: `KEYSWITCH_INTENT_STRICT_REPORT="$work_root/strict.json"`. Скрипт
+примет его только после `tools/verify_intent_strict_report.py`, который
+сверяет каждый hash отчёта с текущими файлами; так же поступают CI и
+`tools/release_pipeline.py`.
 Успешный package verifier подтверждает, что DEB содержит native executable,
 точный KSLM и frozen EN/RU models и не зависит от системного Python.
 

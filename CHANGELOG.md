@@ -4,6 +4,16 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- Let `packaging/build-deb.sh` reuse a strict intent-model report produced
+  earlier in the same release contour instead of repeating the half-hour
+  evaluation. `tools/verify_intent_strict_report.py` accepts the report only
+  when every gate passed and every recorded hash of the artifact, config,
+  frozen sources, model toolchain and preseal receipt still equals the current
+  file; CI, the release pipeline and packaging share that single check.
+- Run the Windows release job concurrently with the Linux job instead of
+  after it, and make the release pipeline's `build-deb` phase depend on
+  `model-strict` so one strict evaluation serves both.
+
 ## 0.7.0 — 2026-09-02
 
 - Accept the v15 layout-intent candidate `intent-v1-bec1f1d3dceb` after the
