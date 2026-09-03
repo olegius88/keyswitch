@@ -1,0 +1,71 @@
+{
+  // В дереве проекта лежат очень тяжёлые артефакты сборки:
+  //   build/       ~42 ГБ, ~57 000 файлов (windows-vm, wine-validation, deb-сборки)
+  //   dist/ 258M, .typing/ 98M, .nuitka/ 34M, .mypy_cache/ 14M
+  // Без исключений ниже VSCode вешает на них file watcher и ripgrep-индексацию
+  // (quick open / поиск), из-за чего при открытии проекта грузятся все ядра.
+  // Проверено на VSCode 1.135.
+
+  // 1. Не следить за изменениями файлов — главный источник нагрузки CPU и inotify.
+  "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/build/**": true,
+    "**/dist/**": true,
+    "**/.nuitka/**": true,
+    "**/.typing/**": true,
+    "**/.mypy_cache/**": true,
+    "**/.pytest_cache/**": true,
+    "**/.ruff_cache/**": true,
+    "**/.t/**": true,
+    "**/htmlcov/**": true,
+    "**/__pycache__/**": true,
+    "**/*.egg-info/**": true,
+    "**/.venv/**": true,
+    "**/node_modules/**": true
+  },
+
+  // 2. Не индексировать при поиске и Quick Open (это те самые процессы rg --files).
+  "search.exclude": {
+    "**/build": true,
+    "**/dist": true,
+    "**/.nuitka": true,
+    "**/.typing": true,
+    "**/.mypy_cache": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true,
+    "**/.t": true,
+    "**/htmlcov": true,
+    "**/__pycache__": true,
+    "**/*.egg-info": true,
+    "**/.venv": true,
+    "**/node_modules": true
+  },
+  "search.useIgnoreFiles": true,
+  "search.useGlobalIgnoreFiles": true,
+  "search.followSymlinks": false,
+  "search.maxResults": 20000,
+
+  // 3. Скрыть служебные каталоги из Explorer (на диске они остаются).
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    "**/.mypy_cache": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true,
+    "**/.nuitka": true,
+    "**/.typing": true,
+    "**/*.egg-info": true,
+    "**/htmlcov": true
+  },
+
+  // 4. Git: не считать untracked-файлы вперемешку с изменениями в огромном дереве.
+  "git.untrackedChanges": "separate",
+  "git.ignoreLimitWarning": true,
+  "scm.diffDecorations": "gutter",
+
+  // 5. Отключить фоновое сканирование дерева задачами.
+  "npm.autoDetect": "off",
+  "task.autoDetect": "off",
+  "editor.largeFileOptimizations": true
+}
