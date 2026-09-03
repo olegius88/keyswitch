@@ -318,6 +318,9 @@ class EngineTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         root = Path(self.temporary.name)
         self.settings = SettingsStore(root / "config.json")
+        # These fixtures type whole words at once; the prefix-based early
+        # switch has dedicated tests and would otherwise fire on "ghbd".
+        self.settings.set("detection.early_switch", False)
         self.history = HistoryStore(root / "history.jsonl")
         self.backend = FakeBackend()
         self.engine = KeySwitchEngine(self.settings, self.history, self.backend)

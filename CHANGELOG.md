@@ -4,6 +4,38 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.9.0 — 2026-09-03
+
+- `Pause` converts only what was typed after the last word boundary: the
+  unfinished word, layout-dependent symbols such as the Russian quote meant as
+  `@`, or the last completed word while nothing else was typed after it;
+  otherwise the key only switches the layout and protects the next word.
+- Early layout switching: once a prefix (4 letters by default, configurable
+  3–8) has no continuation in the current language and clearly continues in
+  the other one, the layout is switched and the prefix rewritten as soon as
+  the last letter's key is released (letters pressed before that release are
+  absorbed). A letter that arrives in the old layout within 0.5 s is converted
+  on its own;
+  the finished word is recorded as one correction at the boundary.
+  `detection.early_switch` and `detection.early_switch_min_length` settings,
+  rows in both settings UIs and a slowly typed X11 E2E case.
+- Configurable typing pause (`detection.pause_delay_seconds`, 0.3–5 s, default
+  1.5). The engine wakes exactly when the delay elapses instead of on a 0.5 s
+  grid, and key presses without a release older than 3 s no longer block pause
+  correction forever.
+- A change to the layout the engine itself just selected, observed within
+  1.5 s, is no longer treated as a manual switch, so a correction, `Pause` or
+  the menu action does not protect the following word by mistake; switching
+  away from it stays manual. Only key presses (not releases) update the
+  observed layout.
+- Technical log: `word_evaluation` now carries `skipped_reason`, protection
+  details, the context that was used, `idle_ms` and a shadow detector verdict
+  for protected or disabled words; `correction_applied` records the mode,
+  deleted characters, previous layout and injection time; new events for
+  deferred pause corrections, pruned stale presses, early-switch evaluations,
+  late strokes, layout switches without a word, learning prompt lifecycle and
+  attributed layout changes; `setting_changed` includes scalar values.
+
 ## 0.8.0 — 2026-09-02
 
 - Accept the v20 layout-intent candidate `intent-v1-6ece07f881ec`, the first

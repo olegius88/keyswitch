@@ -1,4 +1,4 @@
-.TH KEYSWITCH 1 "September 2026" "KeySwitch 0.8.0" "User Commands"
+.TH KEYSWITCH 1 "September 2026" "KeySwitch 0.9.0" "User Commands"
 .SH NAME
 keyswitch \- automatic keyboard layout correction for Ubuntu X11
 .SH SYNOPSIS
@@ -117,6 +117,15 @@ After a manual word conversion with Pause/Break, KeySwitch displays a focused
 prompt above the input position. Enter immediately adds the conversion to the
 local switching rules; Escape dismisses the offer. Local learning and its
 fallback repeated-conversion threshold are configurable in the application.
+.PP
+Pause/Break converts the unfinished word, the layout-dependent symbols typed
+right after a word boundary (for example a Russian quote meant as "@"), or the
+last completed word; once anything else was typed after that word, the key
+only switches the layout. The typing pause that triggers idle correction is
+configurable (1.5 seconds by default). Early layout switching rewrites the
+beginning of a word as soon as its prefix is impossible in the current
+language and clearly continues in the other one; the minimum prefix length is
+configurable and the feature can be disabled.
 .SH OPTIONS
 .TP
 .B \-\-hidden
@@ -146,9 +155,11 @@ Optional per-user Hunspell dictionaries.
 .TP
 .I ~/.local/share/keyswitch/keyswitch.log
 Application log. Detailed word-decision diagnostics are disabled by default
-and can be enabled in the About page. Diagnostic records may contain typed
-words and application names; text from excluded applications is redacted. The
-file is limited to 5 MiB and rotated with three backups.
+and can be enabled in the About page. They record decision and skip reasons,
+shadow verdicts for protected words, layout-change attribution, deferred pause
+corrections, early-switch events and settings changes. Diagnostic records may
+contain typed words and application names; text from excluded applications is
+redacted. The file is limited to 5 MiB and rotated with three backups.
 .TP
 .I /usr/lib/keyswitch/keyswitch/resources/models/layout_intent_v1.ksm
 Bundled, checksum-validated KSLM schema 4 linear intent model, bounded to

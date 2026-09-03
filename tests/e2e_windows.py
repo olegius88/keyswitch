@@ -95,6 +95,9 @@ def main() -> int:
         settings.set("appearance.show_indicator", True)
         settings.set("general.notifications", False)
         settings.set("detection.respect_manual_layout", False)
+        # Synthetic typing has no inter-key gaps; prefix switching is covered
+        # by unit tests and would race with the burst here.
+        settings.set("detection.early_switch", False)
         settings.set("updates.check_automatically", False)
 
         print("WINDOWS_UI_INIT_START", flush=True)

@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import ctypes
+import logging
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -67,9 +69,18 @@ def main() -> int:
     root = Path(temporary.name)
     settings = SettingsStore(root / "config.json")
     settings.set("general.keep_history", True)
+    # Burst-typed cases below have no inter-key gaps; prefix switching gets
+    # its own slowly typed case at the end.
+    settings.set("detection.early_switch", False)
+    # Engine diagnostics go to stderr so a failed run can be understood from
+    # the captured log alone.
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    settings.set("diagnostics.technical_logging", True)
     history = HistoryStore(root / "history.jsonl")
     backend = X11Backend()
     engine = KeySwitchEngine(settings, history, backend)
+    correction_modes: list[str] = []
+    engine.subscribe_corrections(lambda plan: correction_modes.append(plan.mode))
     typer = PhysicalTyper()
     loop = GLib.MainLoop()
     application = Gtk.Application(
@@ -289,6 +300,57 @@ def main() -> int:
             loop.quit()
             return GLib.SOURCE_REMOVE
         print("MENU_LAYOUT_SELECTION_E2E_OK")
+        GLib.timeout_add(200, start_early_switch_case)
+        return GLib.SOURCE_REMOVE
+
+    def type_slowly(physical: str, index: int, done: Callable[[], bool]) -> bool:
+        if index >= len(physical):
+            GLib.timeout_add(900, done)
+            return GLib.SOURCE_REMOVE
+        typer.type(physical[index])
+        GLib.timeout_add(150, type_slowly, physical, index + 1, done)
+        return GLib.SOURCE_REMOVE
+
+    def start_early_switch_case() -> bool:
+        settings.set("detection.early_switch", True)
+        backend.switch_group(0)
+        backend._libraries.x11.XSync(backend._control, 0)
+        entry.set_text("")
+        entry.grab_focus()
+        # The menu selection above protects exactly one word; spend it on a
+        # word that stays English anyway, then type the real case slowly.
+        typer.type("hello ")
+        GLib.timeout_add(600, start_slow_early_switch_typing)
+        return GLib.SOURCE_REMOVE
+
+    def start_slow_early_switch_typing() -> bool:
+        del correction_modes[:]
+        type_slowly("ghbdtn ", 0, verify_early_switch)
+        return GLib.SOURCE_REMOVE
+
+    def verify_early_switch() -> bool:
+        actual_text = entry.get_text()
+        actual_group = backend.current_group()
+        entries = history.read()
+        last_entry = (
+            (entries[-1].original, entries[-1].replacement) if entries else None
+        )
+        print(
+            f"early_switch text={actual_text!r} group={actual_group} "
+            f"modes={correction_modes!r} last_history={last_entry!r} "
+            f"engine={engine.snapshot.last_action!r}"
+        )
+        if (
+            actual_text != "hello привет "
+            or actual_group != 1
+            or "early" not in correction_modes
+            or last_entry != ("ghbdtn", "привет")
+            or len(entries) != 10
+        ):
+            print("E2E_FAILED")
+            loop.quit()
+            return GLib.SOURCE_REMOVE
+        print("EARLY_SWITCH_E2E_OK")
         print("E2E_OK")
         result.exit_code = 0
         loop.quit()

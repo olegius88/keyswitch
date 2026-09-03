@@ -407,6 +407,25 @@ class MainWindow(Adw.ApplicationWindow):
         behavior.add(self._switch_row("detection.context_aware", "Учитывать контекст", "Предыдущее слово и язык в текущем приложении помогают разрешать сомнения; контекст хранится только в памяти"))
         behavior.add(self._switch_row("detection.protect_code", "Защищать код и сокращения", "Не трогать URL, пути, слова с цифрами, ALL-CAPS и camelCase"))
         behavior.add(self._switch_row("detection.intent_model_enabled", "Локальная линейная модель", "Собственная символьная n-граммная модель проверяет сомнительные решения; введённый текст не покидает компьютер"))
+        behavior.add(
+            self._switch_row(
+                "detection.early_switch",
+                "Ранняя смена раскладки",
+                "Переключать раскладку и переписывать начало слова, как только префикс невозможен в текущем языке и явно продолжается в другом",
+            )
+        )
+        early_length = Adw.SpinRow.new_with_range(3, 8, 1)
+        early_length.set_title("Букв до ранней смены")
+        early_length.set_subtitle("Меньше — быстрее, но чаще ложные переключения на сокращениях и технических словах")
+        early_length.set_value(float(self.settings.get("detection.early_switch_min_length", 4)))
+        early_length.connect(
+            "notify::value",
+            lambda row, _parameter: self.settings.set(
+                "detection.early_switch_min_length", int(row.get_value())
+            ),
+        )
+        self._settings_controls["detection.early_switch_min_length"] = early_length
+        behavior.add(early_length)
         page.append(behavior)
 
         learning = Adw.PreferencesGroup(
@@ -443,9 +462,22 @@ class MainWindow(Adw.ApplicationWindow):
             self._switch_row(
                 "detection.correct_on_pause",
                 "Паузы в наборе",
-                "Проверять текущее слово после 1,5 секунды без ввода",
+                "Проверять текущее слово после паузы без ввода",
             )
         )
+        pause_delay = Adw.SpinRow.new_with_range(0.3, 5.0, 0.1)
+        pause_delay.set_title("Длительность паузы, с")
+        pause_delay.set_subtitle("Сколько ждать без ввода, прежде чем проверить незавершённое слово")
+        pause_delay.set_digits(1)
+        pause_delay.set_value(float(self.settings.get("detection.pause_delay_seconds", 1.5)))
+        pause_delay.connect(
+            "notify::value",
+            lambda row, _parameter: self.settings.set(
+                "detection.pause_delay_seconds", round(float(row.get_value()), 1)
+            ),
+        )
+        self._settings_controls["detection.pause_delay_seconds"] = pause_delay
+        triggers.add(pause_delay)
         triggers.add(self._switch_row("detection.correct_on_space", "Пробела", "Основной и самый предсказуемый триггер"))
         triggers.add(self._switch_row("detection.correct_on_enter", "Enter", "Работает в обычных многострочных полях"))
         triggers.add(self._switch_row("detection.correct_on_tab", "Tab", "Удобно при заполнении форм"))

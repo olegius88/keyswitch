@@ -76,6 +76,20 @@ AUTOCORRECTION_SETTINGS = (
         "bool",
     ),
     SettingSpec(
+        "detection.early_switch",
+        "Ранняя смена раскладки",
+        "Переключать раскладку и переписывать начало слова, как только префикс невозможен в текущем языке и явно продолжается в другом.",
+        "bool",
+    ),
+    SettingSpec(
+        "detection.early_switch_min_length",
+        "Букв до ранней смены",
+        "Сколько букв нужно набрать, прежде чем префикс может переключить раскладку. Меньше — быстрее, но чаще ложные переключения на сокращениях.",
+        "int",
+        minimum=3,
+        maximum=8,
+    ),
+    SettingSpec(
         "detection.learning",
         "Локальное обучение",
         "Предлагать правило после Pause/Break и запоминать подтверждение Enter.",
@@ -96,8 +110,17 @@ TRIGGER_SETTINGS = (
     SettingSpec(
         "detection.correct_on_pause",
         "Пауза в наборе",
-        "Проверять текущее слово после 1,5 секунды без ввода.",
+        "Проверять текущее слово после паузы без ввода.",
         "bool",
+    ),
+    SettingSpec(
+        "detection.pause_delay_seconds",
+        "Пауза, секунд",
+        "Сколько ждать без ввода, прежде чем проверить незавершённое слово.",
+        "float",
+        minimum=0.3,
+        maximum=5.0,
+        step=0.1,
     ),
     SettingSpec(
         "detection.correct_on_space",

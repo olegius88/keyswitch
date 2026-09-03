@@ -14,6 +14,12 @@ from . import __version__
 from .backend import InputBackend, KeyEvent
 from .config import SettingsStore
 from .detector import DetectionDecision, LanguageDetector
+from .early_switch import (
+    EarlySwitchDecision,
+    EarlySwitchPolicy,
+    PrefixIndex,
+    early_switch_decision,
+)
 from .history import HistoryEntry, HistoryStore
 from .indicator import alternate_layout_group, layout_label
 from .language_model import LanguageModel, WordScore
@@ -33,6 +39,17 @@ NAVIGATION_KEYS = {
 PUNCTUATION = set(".,!?;:()[]{}—–-…\"«»")
 PAUSE_CORRECTION_DELAY_SECONDS = 1.5
 LEARNING_PROMPT_TIMEOUT_SECONDS = 8.0
+# A layout change observed this soon after the engine switched the layout
+# itself (correction, menu action) is the engine's own switch, not the user's.
+ENGINE_SWITCH_GRACE_SECONDS = 1.5
+# A key without a release for this long is treated as a lost key-up so a
+# stuck entry can never block pause correction forever.
+STALE_PRESS_SECONDS = 3.0
+# A letter arriving in the old layout this soon after an early switch was
+# pressed before the switch took effect and is converted on its own.
+LATE_STROKE_GRACE_SECONDS = 0.5
+EARLY_SWITCH_CONFIDENCE = 15.0
+WORD_BOUNDARY_KEYS = {"space", "Return", "Tab", "ISO_Left_Tab"}
 LOGGER = logging.getLogger(__name__)
 
 
@@ -55,6 +72,8 @@ class CorrectionPlan:
     confidence: float
     application: str
     automatic: bool = True
+    # boundary | pause | manual | undo | early | symbols | late_stroke
+    mode: str = "boundary"
 
 
 @dataclass(frozen=True)
@@ -152,7 +171,27 @@ class KeySwitchEngine:
         self._pause_correction_pending = False
         self._manual_layout_group: int | None = None
         self._pressed: set[int] = set()
+        self._pressed_since: dict[int, float] = {}
         self._modifier_keycodes: set[int] = set()
+        # Layout-dependent symbols typed right after a boundary (e.g. the RU
+        # quote on Shift+2 meant as "@"); Pause converts them on their own.
+        self._symbol_strokes: list[KeyEvent] = []
+        # True once anything was typed after the last committed word, so Pause
+        # must not rewrite that word any more.
+        self._last_committed_stale = False
+        self._early_switch_origin: int | None = None
+        self._early_switch_at: float | None = None
+        self._engine_switch_at: float | None = None
+        self._engine_switch_group: int | None = None
+        self._manual_layout_observed_at: float | None = None
+        self._manual_layout_source = ""
+        self._pause_deferral_logged = False
+        # Built once per lexicon and cached process-wide, so the first early
+        # switch decision does not stall the input thread.
+        self._prefix_indexes = {
+            group: PrefixIndex.for_language_model(model)
+            for group, model in self.models.items()
+        }
         self._pending: CorrectionPlan | None = None
         self._pending_trigger_keycode = -1
         self._last_committed: CorrectionPlan | None = None
@@ -218,6 +257,13 @@ class KeySwitchEngine:
             current.target_group,
             required,
         )
+        self._technical_event(
+            "learning_prompt_confirmed",
+            source_group=current.source_group,
+            target_group=current.target_group,
+            application=current.application,
+            required_confirmations=required,
+        )
         self._update(
             last_action=(
                 f"{current.original} → {current.replacement} · правило выучено"
@@ -228,7 +274,7 @@ class KeySwitchEngine:
         return True
 
     def dismiss_learning_prompt(
-        self, prompt: LearningPrompt | None = None
+        self, prompt: LearningPrompt | None = None, *, reason: str = "dismissed"
     ) -> bool:
         with self._lock:
             current = self._learning_prompt
@@ -237,6 +283,13 @@ class KeySwitchEngine:
             self._learning_prompt = None
             self._learning_prompt_deadline = None
             callbacks = tuple(self._learning_prompt_callbacks)
+        self._technical_event(
+            "learning_prompt_dismissed",
+            reason=reason,
+            source_group=current.source_group,
+            target_group=current.target_group,
+            application=current.application,
+        )
         for callback in callbacks:
             callback(None)
         return True
@@ -315,7 +368,7 @@ class KeySwitchEngine:
     def _run(self) -> None:
         while self._running.is_set():
             try:
-                event = self._events.get(timeout=0.5)
+                event = self._events.get(timeout=self._loop_timeout())
             except queue.Empty:
                 self._poll_current_group()
                 self._maybe_correct_after_pause()
@@ -332,6 +385,26 @@ class KeySwitchEngine:
                 self._clear_word()
                 self._update(last_error=str(error), last_action="Ошибка обработки ввода")
 
+    def _loop_timeout(self) -> float:
+        """Wake exactly when the pause delay elapses, at most every 0.5 s."""
+
+        last_input = self._last_word_input_at
+        if not self._pause_correction_pending or last_input is None:
+            return 0.5
+        remaining = last_input + self._pause_delay() - time.monotonic()
+        return max(0.01, min(0.5, remaining))
+
+    def _pause_delay(self) -> float:
+        try:
+            delay = float(
+                self.settings.get(
+                    "detection.pause_delay_seconds", PAUSE_CORRECTION_DELAY_SECONDS
+                )
+            )
+        except (TypeError, ValueError):
+            delay = PAUSE_CORRECTION_DELAY_SECONDS
+        return min(10.0, max(0.2, delay))
+
     def _apply_layout_selection(self, group: int) -> None:
         try:
             self.backend.switch_group(group)
@@ -347,11 +420,15 @@ class KeySwitchEngine:
             )
             return
         self._clear_word()
+        self._last_committed_stale = True
+        self._note_engine_switch(group)
         self._manual_layout_group = (
             group
             if bool(self.settings.get("detection.respect_manual_layout", True))
             else None
         )
+        self._manual_layout_observed_at = time.monotonic()
+        self._manual_layout_source = "menu"
         self._technical_event(
             "layout_selected_from_menu",
             selected_group=group,
@@ -372,14 +449,22 @@ class KeySwitchEngine:
                 self.confirm_learning_prompt(prompt)
                 return
             if unmodified and event.key_name == "Escape":
-                self.dismiss_learning_prompt(prompt)
+                self.dismiss_learning_prompt(prompt, reason="escape")
                 return
-            self.dismiss_learning_prompt(prompt)
-        self._observe_group(event.group)
+            self.dismiss_learning_prompt(prompt, reason="other_key")
+        # Only presses carry a meaningful group: a release reports whatever
+        # layout was active when the finger came up, which is stale right
+        # after the engine switched the layout itself.
         if event.pressed:
+            # A key pressed before an early switch landed still reports the
+            # old layout; that is a race, not the user switching back.
+            if not self._late_stroke_after_early_switch(event):
+                self._observe_group(event.group, source="keystroke")
             self._pressed.add(event.keycode)
+            self._pressed_since[event.keycode] = time.monotonic()
         else:
             self._pressed.discard(event.keycode)
+            self._pressed_since.pop(event.keycode, None)
         if event.key_name in MODIFIER_KEYS:
             if event.pressed:
                 self._modifier_keycodes.add(event.keycode)
@@ -412,12 +497,20 @@ class KeySwitchEngine:
                 else:
                     self._source_group = -1
                     self._reset_pause_correction()
+                    self._early_switch_origin = None
+                    self._early_switch_at = None
                 self._update(current_word=self._text_for_group(self._strokes, self._source_group))
+            elif self._symbol_strokes:
+                self._symbol_strokes.pop()
+            else:
+                self._last_committed_stale = True
             return
         if self._is_layout_letter(event):
             if not event.character.isalpha() and self._ambiguous_key_is_boundary(event):
                 self._commit_word(event)
                 return
+            if self._late_stroke_after_early_switch(event):
+                event = self._convert_late_stroke(event)
             if self._source_group not in (-1, event.group):
                 self._clear_word()
             self._source_group = event.group
@@ -428,12 +521,282 @@ class KeySwitchEngine:
                 current_word=self._text_for_group(self._strokes, event.group),
                 last_error="",
             )
+            self._maybe_early_switch()
             return
         if self._is_boundary(event):
-            self._commit_word(event)
+            if self._strokes:
+                self._commit_word(event)
+                return
+            # Nothing typed since the last boundary: remember layout-dependent
+            # symbols so Pause converts just them (RU quote -> "@"), and never
+            # rewrite the previous word after further input.
+            if event.key_name in WORD_BOUNDARY_KEYS:
+                self._symbol_strokes = []
+            elif self._layout_dependent(event):
+                self._symbol_strokes.append(event)
+            self._last_committed_stale = True
             return
         if event.key_name in NAVIGATION_KEYS or event.character:
+            self._last_committed_stale = True
+            if (
+                not self._strokes
+                and event.key_name not in NAVIGATION_KEYS
+                and self._layout_dependent(event)
+            ):
+                # "@" typed in the US layout but meant as the RU quote.
+                self._symbol_strokes.append(event)
+                return
             self._clear_word()
+
+    @staticmethod
+    def _layout_dependent(event: KeyEvent) -> bool:
+        """A printable key whose character differs between the layouts."""
+
+        return bool(event.character) and len(
+            {character for character in event.characters if character}
+        ) > 1
+
+    def _early_switch_policy(self) -> EarlySwitchPolicy:
+        try:
+            minimum = int(self.settings.get("detection.early_switch_min_length", 4))
+        except (TypeError, ValueError):
+            minimum = 4
+        return EarlySwitchPolicy(minimum_length=max(3, min(8, minimum)))
+
+    def _maybe_early_switch(self) -> None:
+        """Switch the layout as soon as the typed prefix proves it wrong."""
+
+        if not bool(self.settings.get("detection.early_switch", True)):
+            return
+        if not bool(self.settings.get("enabled", True)):
+            return
+        if self._early_switch_origin is not None or self._pending is not None:
+            return
+        policy = self._early_switch_policy()
+        if len(self._strokes) < policy.minimum_length:
+            return
+        source_group = self._source_group
+        if source_group not in self.models:
+            return
+        if (
+            bool(self.settings.get("detection.respect_manual_layout", True))
+            and self._manual_layout_group == source_group
+        ):
+            return
+        strokes = tuple(self._strokes)
+        original = self._text_for_group(strokes, source_group)
+        alternatives = {
+            group: self._text_for_group(strokes, group)
+            for group in self.models
+            if group != source_group
+        }
+        decision = early_switch_decision(
+            self._prefix_indexes,
+            self.models,
+            original,
+            alternatives,
+            source_group,
+            policy=policy,
+        )
+        application = self.backend.active_application()
+        excluded = self._application_excluded(application)
+        if len(strokes) == policy.minimum_length or decision.should_switch:
+            self._log_early_switch(decision, policy, application, excluded)
+        if not decision.should_switch or excluded:
+            return
+        plan = CorrectionPlan(
+            strokes,
+            None,
+            source_group,
+            decision.target_group,
+            original,
+            decision.replacement,
+            EARLY_SWITCH_CONFIDENCE,
+            application,
+            True,
+            "early",
+        )
+        # The last letter's key is physically still down: a synthetic press of a
+        # held key is ignored by the X server and the retyped letter would be
+        # lost. Like boundary corrections, execute on that key's release and
+        # absorb letters pressed before it (rollover typing).
+        self._pending = plan
+        self._pending_learning_action = None
+        self._pending_trigger_keycode = strokes[-1].keycode
+        self._technical_event(
+            "early_switch_scheduled",
+            trigger_keycode=strokes[-1].keycode,
+            prefix_length=len(strokes),
+        )
+
+    def _refresh_early_plan(self, plan: CorrectionPlan) -> CorrectionPlan | None:
+        """Extend a scheduled early switch with letters typed before release."""
+
+        strokes = tuple(self._strokes)
+        prefix = len(plan.strokes)
+        if (
+            len(strokes) < prefix
+            or strokes[:prefix] != plan.strokes
+            or self._source_group != plan.source_group
+        ):
+            return None
+        if len(strokes) == prefix:
+            return plan
+        return CorrectionPlan(
+            strokes,
+            None,
+            plan.source_group,
+            plan.target_group,
+            self._text_for_group(strokes, plan.source_group),
+            self._text_for_group(strokes, plan.target_group),
+            plan.confidence,
+            plan.application,
+            True,
+            "early",
+        )
+
+    def _log_early_switch(
+        self,
+        decision: EarlySwitchDecision,
+        policy: EarlySwitchPolicy,
+        application: str,
+        excluded: bool,
+    ) -> None:
+        payload = decision.as_dict()
+        if excluded:
+            payload["replacement"] = "<redacted>"
+        self._technical_event(
+            "early_switch_evaluation",
+            original="<redacted>" if excluded else decision.original,
+            prefix_length=len(decision.original),
+            application=application,
+            application_excluded=excluded,
+            policy=policy.as_dict(),
+            decision=payload,
+        )
+
+    def _late_stroke_after_early_switch(self, event: KeyEvent) -> bool:
+        switched_at = self._early_switch_at
+        return (
+            switched_at is not None
+            and event.group == self._early_switch_origin
+            and event.group != self._source_group
+            and time.monotonic() - switched_at <= LATE_STROKE_GRACE_SECONDS
+        )
+
+    def _convert_late_stroke(self, event: KeyEvent) -> KeyEvent:
+        """Rewrite one letter that was pressed before the early switch landed."""
+
+        target_group = self._source_group
+        delay_ms = (
+            None
+            if self._early_switch_at is None
+            else round((time.monotonic() - self._early_switch_at) * 1000)
+        )
+        try:
+            self.backend.inject_correction((event,), target_group, None, event.group)
+        except Exception as error:
+            self._technical_event(
+                "late_stroke_conversion_failed",
+                source_group=event.group,
+                target_group=target_group,
+                delay_ms=delay_ms,
+                error=str(error),
+            )
+            return event
+        self._note_engine_switch(target_group)
+        self._technical_event(
+            "late_stroke_converted",
+            source_group=event.group,
+            target_group=target_group,
+            delay_ms=delay_ms,
+        )
+        return KeyEvent(
+            event.pressed,
+            event.keycode,
+            event.key_name,
+            event.character_for(target_group),
+            event.characters,
+            target_group,
+            event.state,
+            event.timestamp,
+            event.synthetic,
+        )
+
+    def _note_engine_switch(self, group: int) -> None:
+        """Remember that the engine itself just switched the layout."""
+
+        self._engine_switch_at = time.monotonic()
+        self._engine_switch_group = group
+
+    def _protection_details(self) -> dict[str, object]:
+        observed_at = self._manual_layout_observed_at
+        return {
+            "reason": "manual_layout",
+            "group": self._manual_layout_group,
+            "source": self._manual_layout_source,
+            "observed_ms_ago": (
+                None
+                if observed_at is None
+                else round((time.monotonic() - observed_at) * 1000)
+            ),
+        }
+
+    def _finish_early_switch(
+        self,
+        strokes: tuple[KeyEvent, ...],
+        boundary: KeyEvent | None,
+        application: str,
+        final_group: int,
+    ) -> None:
+        """Record the completed word of an early switch as one correction."""
+
+        origin = self._early_switch_origin
+        self._early_switch_origin = None
+        self._early_switch_at = None
+        if origin is None:
+            return
+        original = self._text_for_group(strokes, origin)
+        replacement = self._text_for_group(strokes, final_group)
+        plan = CorrectionPlan(
+            strokes,
+            boundary,
+            origin,
+            final_group,
+            original,
+            replacement,
+            EARLY_SWITCH_CONFIDENCE,
+            application,
+            True,
+            "early",
+        )
+        self._last_correction = plan
+        self._last_correction_time = time.monotonic()
+        self._last_committed = plan
+        self._last_committed_stale = False
+        excluded = self._application_excluded(application)
+        self._technical_event(
+            "early_switch_completed",
+            original="<redacted>" if excluded else original,
+            replacement="<redacted>" if excluded else replacement,
+            source_group=origin,
+            target_group=final_group,
+            application=application,
+            application_excluded=excluded,
+            word_length=len(strokes),
+        )
+        self._update(
+            correction_count=self.snapshot.correction_count + 1,
+            last_action=f"{original} → {replacement}",
+        )
+        if bool(self.settings.get("general.keep_history", True)):
+            self.history.append(
+                HistoryEntry.create(
+                    original, replacement, application, EARLY_SWITCH_CONFIDENCE
+                )
+            )
+        for callback in tuple(self._correction_callbacks):
+            callback(plan)
 
     def _commit_word(self, boundary: KeyEvent) -> None:
         if not self._strokes:
@@ -448,6 +811,7 @@ class KeySwitchEngine:
             if group != source_group
         }
         application = self.backend.active_application()
+        context = self._context_for(application)
         plan = CorrectionPlan(
             strokes,
             boundary,
@@ -460,6 +824,9 @@ class KeySwitchEngine:
             False,
         )
         self._last_committed = plan
+        self._last_committed_stale = False
+        self._symbol_strokes = []
+        early_switch_origin = self._early_switch_origin
         manual_layout_selected = (
             bool(self.settings.get("detection.respect_manual_layout", True))
             and self._manual_layout_group == source_group
@@ -467,6 +834,7 @@ class KeySwitchEngine:
         # An explicit layout selection is the strongest available user intent.
         # It protects exactly one word even when an older learned rule exists.
         manual_layout_protected = manual_layout_selected
+        protection = self._protection_details() if manual_layout_selected else None
         if manual_layout_selected:
             self._manual_layout_group = None
         enabled = bool(self.settings.get("enabled", True))
@@ -505,7 +873,16 @@ class KeySwitchEngine:
             manual_layout_protected=manual_layout_protected,
             application_excluded=excluded,
             decision=decision,
+            protection=protection,
+            source_group=source_group,
+            early_switch_origin=early_switch_origin,
+            context=context,
         )
+        if decision is None or not decision.should_convert:
+            self._finish_early_switch(strokes, boundary, application, source_group)
+        else:
+            self._early_switch_origin = None
+            self._early_switch_at = None
         self._strokes = []
         self._source_group = -1
         self._update(
@@ -664,6 +1041,7 @@ class KeySwitchEngine:
         boundary: KeyEvent | None,
         application: str,
         decision: DetectionDecision,
+        mode: str = "boundary",
     ) -> CorrectionPlan:
         return CorrectionPlan(
             strokes,
@@ -675,6 +1053,7 @@ class KeySwitchEngine:
             decision.confidence,
             application,
             True,
+            mode,
         )
 
     @staticmethod
@@ -746,11 +1125,22 @@ class KeySwitchEngine:
                     "protect_code",
                     "context_aware",
                     "respect_manual_layout",
+                    "correct_on_space",
+                    "correct_on_enter",
+                    "correct_on_tab",
+                    "correct_on_punctuation",
                     "correct_on_pause",
+                    "pause_delay_seconds",
+                    "early_switch",
+                    "early_switch_min_length",
                     "learning",
                     "learning_confirmations",
                     "intent_model_enabled",
                 )
+            },
+            hotkeys={
+                name: self.settings.get(f"hotkeys.{name}")
+                for name in ("toggle", "convert_last", "undo")
             },
         )
 
@@ -766,7 +1156,14 @@ class KeySwitchEngine:
         manual_layout_protected: bool,
         application_excluded: bool,
         decision: DetectionDecision | None,
+        protection: dict[str, object] | None = None,
+        source_group: int | None = None,
+        early_switch_origin: int | None = None,
+        idle_ms: int | None = None,
+        context: tuple[dict[int, str], int | None] | None = None,
     ) -> None:
+        if not bool(self.settings.get("diagnostics.technical_logging", False)):
+            return
         decision_payload = (
             None if decision is None else self._decision_diagnostics(decision)
         )
@@ -778,28 +1175,64 @@ class KeySwitchEngine:
         )
         if application_excluded and decision_payload is not None:
             decision_payload["replacement"] = "<redacted>"
+        skipped_reason: str | None = None
+        if application_excluded:
+            skipped_reason = "application_excluded"
+        elif not enabled:
+            skipped_reason = "disabled"
+        elif not trigger_enabled:
+            skipped_reason = "trigger_disabled"
+        elif manual_layout_protected:
+            skipped_reason = "manual_layout_protected"
+        # When the detector was not consulted, still record what it would have
+        # said so that a missed correction can be told from a wrong verdict.
+        shadow_payload: dict[str, object] | None = None
+        if (
+            decision is None
+            and skipped_reason not in (None, "application_excluded")
+            and source_group is not None
+            and source_group in self.models
+        ):
+            shadow = self._decide_word(
+                original, alternatives, source_group, application, trigger
+            )
+            shadow_payload = self._decision_diagnostics(shadow)
+        context_words, context_group = (
+            self._context_for(application) if context is None else context
+        )
         self._technical_event(
             "word_evaluation",
             trigger=trigger,
             original=logged_original,
             alternatives=logged_alternatives,
+            source_group=source_group,
             application=application,
             enabled=enabled,
             trigger_enabled=trigger_enabled,
             manual_layout_protected=manual_layout_protected,
+            protection=protection,
             application_excluded=application_excluded,
+            skipped_reason=skipped_reason,
             minimum_length=int(
                 self.settings.get("detection.minimum_length", 3)
             ),
             confidence_threshold=float(
                 self.settings.get("detection.confidence", 2.0)
             ),
+            context={
+                "group": context_group,
+                "words": {} if application_excluded else context_words,
+            },
+            early_switch_origin=early_switch_origin,
+            idle_ms=idle_ms,
             decision=decision_payload,
+            shadow_decision=shadow_payload,
         )
 
     def _mark_word_activity(self) -> None:
         self._last_word_input_at = time.monotonic()
         self._pause_correction_pending = True
+        self._pause_deferral_logged = False
 
     def _reset_pause_correction(self) -> None:
         self._last_word_input_at = None
@@ -819,13 +1252,27 @@ class KeySwitchEngine:
             self._reset_pause_correction()
             return
         current_time = time.monotonic() if now is None else now
-        if current_time - last_input < PAUSE_CORRECTION_DELAY_SECONDS:
+        idle_ms = round((current_time - last_input) * 1000)
+        if current_time - last_input < self._pause_delay():
             return
+        self._prune_stale_presses(current_time)
+        deferral: str | None = None
         if self._pressed:
-            return
-        if self._modifier_keycodes:
-            return
-        if self._pending is not None:
+            deferral = "keys_pressed"
+        elif self._modifier_keycodes:
+            deferral = "modifiers_pressed"
+        elif self._pending is not None:
+            deferral = "correction_pending"
+        if deferral is not None:
+            if not self._pause_deferral_logged:
+                self._pause_deferral_logged = True
+                self._technical_event(
+                    "pause_correction_deferred",
+                    reason=deferral,
+                    idle_ms=idle_ms,
+                    pressed_keycodes=sorted(self._pressed),
+                    modifier_keycodes=sorted(self._modifier_keycodes),
+                )
             return
 
         self._pause_correction_pending = False
@@ -854,6 +1301,10 @@ class KeySwitchEngine:
                 manual_layout_protected=True,
                 application_excluded=excluded,
                 decision=None,
+                protection=self._protection_details(),
+                source_group=source_group,
+                early_switch_origin=self._early_switch_origin,
+                idle_ms=idle_ms,
             )
             return
         if excluded:
@@ -867,6 +1318,9 @@ class KeySwitchEngine:
                 manual_layout_protected=False,
                 application_excluded=True,
                 decision=None,
+                source_group=source_group,
+                early_switch_origin=self._early_switch_origin,
+                idle_ms=idle_ms,
             )
             return
         decision = self._decide_word(
@@ -882,56 +1336,145 @@ class KeySwitchEngine:
             manual_layout_protected=False,
             application_excluded=False,
             decision=decision,
+            source_group=source_group,
+            early_switch_origin=self._early_switch_origin,
+            idle_ms=idle_ms,
         )
         if not decision.should_convert:
             return
 
-        plan = self._plan_from_decision(strokes, None, application, decision)
+        self._early_switch_origin = None
+        self._early_switch_at = None
+        plan = self._plan_from_decision(strokes, None, application, decision, "pause")
         self._strokes = []
         self._source_group = -1
         self._reset_pause_correction()
         self._update(current_word="")
         self._execute_correction(plan, None)
 
+    def _prune_stale_presses(self, now: float) -> None:
+        """Forget presses whose release was never delivered (focus changes)."""
+
+        stale = [
+            keycode
+            for keycode, since in self._pressed_since.items()
+            if now - since > STALE_PRESS_SECONDS
+        ]
+        if not stale:
+            return
+        for keycode in stale:
+            self._pressed_since.pop(keycode, None)
+            self._pressed.discard(keycode)
+            self._modifier_keycodes.discard(keycode)
+        self._technical_event("stale_presses_pruned", keycodes=sorted(stale))
+
     def _schedule_manual_conversion(self, trigger_keycode: int) -> None:
+        """Pause: convert what was typed since the last boundary, or switch."""
+
+        mode = "manual"
+        learn = True
         if self._strokes:
-            strokes = tuple(self._strokes)
+            strokes = tuple(self._symbol_strokes) + tuple(self._strokes)
             source_group = self._source_group
             boundary = None
             application = self.backend.active_application()
-        elif self._last_committed is not None:
+            source = "current_word" if not self._symbol_strokes else "symbols_and_word"
+            self._early_switch_origin = None
+            self._early_switch_at = None
+        elif self._symbol_strokes:
+            strokes = tuple(self._symbol_strokes)
+            source_group = self._symbol_strokes[-1].group
+            boundary = None
+            application = self.backend.active_application()
+            source = "symbols"
+            mode = "symbols"
+            learn = False
+        elif self._last_committed is not None and not self._last_committed_stale:
             strokes = self._last_committed.strokes
             source_group = self._last_committed.source_group
             boundary = self._last_committed.boundary
             application = self._last_committed.application
+            source = "last_committed"
         else:
-            self._update(last_action="Нет слова для ручного преобразования")
+            self._switch_layout_only(trigger_keycode)
             return
         targets = [group for group in self.models if group != source_group]
         if not targets:
             return
         target = targets[0]
+        original = self._text_for_group(strokes, source_group)
+        replacement = self._text_for_group(strokes, target)
         self._pending = CorrectionPlan(
             strokes,
             boundary,
             source_group,
             target,
-            self._text_for_group(strokes, source_group),
-            self._text_for_group(strokes, target),
+            original,
+            replacement,
             99.0,
             application,
             False,
+            mode,
         )
         self._pending_learning_action = (
-            "manual",
-            source_group,
-            self._text_for_group(strokes, source_group),
-            target,
+            ("manual", source_group, original, target) if learn else None
         )
         self._pending_trigger_keycode = trigger_keycode
+        excluded = self._application_excluded(application)
+        self._technical_event(
+            "manual_conversion_scheduled",
+            source=source,
+            original="<redacted>" if excluded else original,
+            replacement="<redacted>" if excluded else replacement,
+            source_group=source_group,
+            target_group=target,
+            application=application,
+            application_excluded=excluded,
+            symbol_count=len(self._symbol_strokes),
+        )
         self._strokes = []
+        self._symbol_strokes = []
         self._source_group = -1
+        self._last_committed_stale = True
         self._reset_pause_correction()
+
+    def _switch_layout_only(self, trigger_keycode: int) -> None:
+        """Pause with nothing to convert just toggles the layout."""
+
+        current = self.snapshot.current_group
+        target = alternate_layout_group(current)
+        if target is None or target not in self.models:
+            self._update(last_action="Нет слова для ручного преобразования")
+            return
+        try:
+            self.backend.switch_group(target)
+        except Exception as error:
+            self._technical_event(
+                "layout_switch_failed",
+                source="convert_last",
+                requested_group=target,
+                error=str(error),
+            )
+            self._update(last_error=str(error), last_action="Раскладка не переключена")
+            return
+        self._note_engine_switch(target)
+        protects = bool(self.settings.get("detection.respect_manual_layout", True))
+        self._manual_layout_group = target if protects else None
+        self._manual_layout_observed_at = time.monotonic()
+        self._manual_layout_source = "convert_last"
+        self._technical_event(
+            "layout_switched_without_word",
+            trigger_keycode=trigger_keycode,
+            previous_group=current,
+            selected_group=target,
+            protects_next_word=protects,
+            last_committed_stale=self._last_committed_stale,
+        )
+        self._update(
+            current_group=target,
+            last_action=f"Раскладка переключена: {layout_label(target)}",
+            last_error="",
+        )
 
     def _schedule_undo(self, trigger_keycode: int) -> None:
         previous = self._last_correction
@@ -948,6 +1491,7 @@ class KeySwitchEngine:
             99.0,
             previous.application,
             False,
+            "undo",
         )
         self._pending_learning_action = (
             (
@@ -970,6 +1514,16 @@ class KeySwitchEngine:
             return
         plan, self._pending = self._pending, None
         learning_action, self._pending_learning_action = self._pending_learning_action, None
+        if plan.mode == "early":
+            refreshed = self._refresh_early_plan(plan)
+            if refreshed is None:
+                self._technical_event(
+                    "early_switch_dropped",
+                    reason="word_changed_before_release",
+                    current_word_length=len(self._strokes),
+                )
+                return
+            plan = refreshed
         self._execute_correction(plan, learning_action)
 
     def _execute_correction(
@@ -982,6 +1536,8 @@ class KeySwitchEngine:
         logged_replacement = (
             "<redacted>" if application_excluded else plan.replacement
         )
+        previous_group = self.snapshot.current_group
+        started = time.monotonic()
         try:
             self.backend.inject_correction(
                 plan.strokes,
@@ -992,6 +1548,7 @@ class KeySwitchEngine:
         except Exception as error:
             self._technical_event(
                 "correction_failed",
+                mode=plan.mode,
                 original=logged_original,
                 replacement=logged_replacement,
                 source_group=plan.source_group,
@@ -1003,20 +1560,60 @@ class KeySwitchEngine:
             )
             self._update(last_error=str(error), last_action="Исправление не выполнено")
             return
+        self._note_engine_switch(plan.target_group)
         self._technical_event(
             "correction_applied",
+            mode=plan.mode,
             original=logged_original,
             replacement=logged_replacement,
             source_group=plan.source_group,
             target_group=plan.target_group,
+            previous_group=previous_group,
+            layout_switched=plan.source_group != plan.target_group,
+            deleted_characters=len(plan.strokes) + (0 if plan.boundary is None else 1),
+            injection_ms=round((time.monotonic() - started) * 1000),
             application=plan.application,
             application_excluded=application_excluded,
             automatic=plan.automatic,
             confidence=round(plan.confidence, 6),
             boundary=(None if plan.boundary is None else plan.boundary.key_name),
         )
+        if plan.mode == "early":
+            # The prefix is finished later; only then does it become a
+            # correction that can be undone or listed in the history.
+            self._early_switch_origin = plan.source_group
+            self._early_switch_at = time.monotonic()
+            self._source_group = plan.target_group
+            self._update(
+                current_group=plan.target_group,
+                current_word=self._text_for_group(self._strokes, plan.target_group),
+                last_error="",
+            )
+            return
         self._last_correction = plan
         self._last_correction_time = time.monotonic()
+        if plan.mode == "symbols":
+            self._update(
+                current_group=plan.target_group,
+                last_action=f"{plan.original} → {plan.replacement}",
+                last_error="",
+            )
+            for callback in tuple(self._correction_callbacks):
+                callback(plan)
+            return
+        # Pause right after a correction converts the same word back.
+        self._last_committed = CorrectionPlan(
+            plan.strokes,
+            plan.boundary,
+            plan.target_group,
+            plan.source_group,
+            plan.replacement,
+            plan.original,
+            plan.confidence,
+            plan.application,
+            False,
+        )
+        self._last_committed_stale = False
         self._remember_context(plan.application, plan.target_group, plan.strokes)
         learned_rule = False
         rejected_rule = False
@@ -1070,6 +1667,16 @@ class KeySwitchEngine:
                 time.monotonic() + LEARNING_PROMPT_TIMEOUT_SECONDS
             )
             callbacks = tuple(self._learning_prompt_callbacks)
+        excluded = self._application_excluded(prompt.application)
+        self._technical_event(
+            "learning_prompt_shown",
+            original="<redacted>" if excluded else prompt.original,
+            replacement="<redacted>" if excluded else prompt.replacement,
+            source_group=prompt.source_group,
+            target_group=prompt.target_group,
+            application=prompt.application,
+            timeout_seconds=LEARNING_PROMPT_TIMEOUT_SECONDS,
+        )
         for callback in callbacks:
             callback(prompt)
 
@@ -1081,7 +1688,7 @@ class KeySwitchEngine:
         current_time = time.monotonic() if now is None else now
         if current_time < deadline:
             return False
-        return self.dismiss_learning_prompt()
+        return self.dismiss_learning_prompt(reason="timeout")
 
     def _matches_hotkey(self, name: str, event: KeyEvent) -> bool:
         return Hotkey(str(self.settings.get(f"hotkeys.{name}", ""))).matches(event)
@@ -1127,9 +1734,12 @@ class KeySwitchEngine:
         return "".join(stroke.character_for(group) for stroke in strokes)
 
     def _clear_word(self, action: str | None = None) -> None:
-        self.dismiss_learning_prompt()
+        self.dismiss_learning_prompt(reason="word_cleared")
         self._strokes = []
+        self._symbol_strokes = []
         self._source_group = -1
+        self._early_switch_origin = None
+        self._early_switch_at = None
         self._reset_pause_correction()
         self._pending = None
         self._pending_learning_action = None
@@ -1140,7 +1750,7 @@ class KeySwitchEngine:
 
     def _settings_changed(self, path: str, value: object) -> None:
         if path == "*":
-            self.dismiss_learning_prompt()
+            self.dismiss_learning_prompt(reason="settings_reloaded")
             self._update(enabled=bool(self.settings.get("enabled", True)))
             self._manual_layout_group = None
         elif path == "enabled":
@@ -1148,25 +1758,62 @@ class KeySwitchEngine:
         elif path == "detection.respect_manual_layout" and not bool(value):
             self._manual_layout_group = None
         elif path == "detection.learning" and not bool(value):
-            self.dismiss_learning_prompt()
-        self._technical_event("setting_changed", path=path)
+            self.dismiss_learning_prompt(reason="learning_disabled")
+        self._technical_event(
+            "setting_changed", path=path, value=self._loggable_setting(path, value)
+        )
         if path == "diagnostics.technical_logging" and bool(value):
             self._technical_session_event("technical_logging_enabled")
 
-    def _observe_group(self, group: int) -> None:
+    @staticmethod
+    def _loggable_setting(path: str, value: object) -> object:
+        if path == "*":
+            return "<all>"
+        if isinstance(value, (bool, int, float)) or value is None:
+            return value
+        if isinstance(value, str):
+            return value if len(value) <= 80 else value[:77] + "..."
+        if isinstance(value, (list, tuple, set, dict)):
+            return {"type": type(value).__name__, "items": len(value)}
+        return type(value).__name__
+
+    def _observe_group(self, group: int, *, source: str = "poll") -> None:
         current_group = self.snapshot.current_group
         if not 0 <= group < len(self.models) or group == current_group:
             return
-        if current_group >= 0 and bool(
-            self.settings.get("detection.respect_manual_layout", True)
-        ):
+        switched_at = self._engine_switch_at
+        engine_switch_ms = (
+            None
+            if switched_at is None
+            else round((time.monotonic() - switched_at) * 1000)
+        )
+        # Only a change *to* the layout the engine itself just selected is the
+        # engine's own switch; the user switching away right after a wrong
+        # correction is manual and must protect the retyped word.
+        initiated_by_engine = (
+            engine_switch_ms is not None
+            and engine_switch_ms <= ENGINE_SWITCH_GRACE_SECONDS * 1000
+            and group == self._engine_switch_group
+        )
+        application = self.backend.active_application()
+        respect = bool(self.settings.get("detection.respect_manual_layout", True))
+        protects = current_group >= 0 and respect and not initiated_by_engine
+        self._technical_event(
+            "layout_change_observed" if not protects else "manual_layout_observed",
+            source=source,
+            previous_group=current_group,
+            selected_group=group,
+            application=application,
+            initiated_by_engine=initiated_by_engine,
+            engine_switch_ms_ago=engine_switch_ms,
+            respect_manual_layout=respect,
+            protects_next_word=protects,
+            current_word_length=len(self._strokes),
+        )
+        if protects:
             self._manual_layout_group = group
-            self._technical_event(
-                "manual_layout_observed",
-                previous_group=current_group,
-                selected_group=group,
-                protects_next_word=True,
-            )
+            self._manual_layout_observed_at = time.monotonic()
+            self._manual_layout_source = source
             self._update(
                 current_group=group,
                 last_action=(
@@ -1177,7 +1824,7 @@ class KeySwitchEngine:
         self._update(current_group=group)
 
     def _poll_current_group(self) -> None:
-        self._observe_group(self.backend.current_group())
+        self._observe_group(self.backend.current_group(), source="poll")
 
     def _update(
         self,

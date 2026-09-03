@@ -148,6 +148,9 @@ def configure_isolated_profile(root: Path) -> None:
         ("general.keep_history", True),
         ("appearance.show_indicator", True),
         ("appearance.indicator_style", "letters"),
+        # Synthetic typing has no inter-key gaps; prefix switching is covered
+        # by unit tests and the source E2E and would race with the burst here.
+        ("detection.early_switch", False),
     ):
         settings.set(path, value)
 

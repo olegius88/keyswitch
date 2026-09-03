@@ -16,9 +16,14 @@ entirely locally and using the active EN/RU system layout pair.
 
 - global input observation through `WH_KEYBOARD_LL` on Windows and XRecord in
   regular Linux X11 applications;
-- automatic English and Russian word detection after 1.5 seconds without
-  input, as well as after Space, Enter, Tab or punctuation; idle correction
-  can be disabled independently in settings;
+- automatic English and Russian word detection after a typing pause (1.5
+  seconds by default, configurable), as well as after Space, Enter, Tab or
+  punctuation; idle correction can be disabled independently in settings;
+- early layout switching: as soon as the beginning of a word is impossible in
+  the current language and clearly continues in the other one (for example
+  `ghbd`), the layout is switched and the prefix rewritten without waiting for
+  the end of the word; the minimum prefix length is configurable (4 by
+  default) and the feature can be disabled;
 - precision-first hybrid detection using hard guards, frequency lexicons,
   Hunspell morphology, character n-grams, recent context and a lightweight
   first-party linear model;
@@ -33,7 +38,9 @@ entirely locally and using the active EN/RU system layout pair.
 - respect for manual layout selection: the first completed word after the user
   switches languages is left unchanged; this behavior can be disabled;
 - case preservation: `Ghbdtn` becomes `Привет`;
-- manual conversion of the last word with `Pause`;
+- manual conversion with `Pause` of the unfinished word, of symbols typed
+  after a word boundary (for example `"` meant as `@`), or of the last word;
+  once anything else was typed after it, `Pause` only switches the layout;
 - undo of the last correction for 10 seconds with `Ctrl+Alt+Z`;
 - global pause with `Ctrl+Alt+P`;
 - application exclusions selected from the active window, the installed
@@ -60,11 +67,11 @@ model is not updated from ordinary typing.
 
 ## Install on Windows
 
-Download `KeySwitch-Setup-0.8.0-x64.exe` from the
+Download `KeySwitch-Setup-0.9.0-x64.exe` from the
 [latest release](https://github.com/olegius88/keyswitch/releases/latest) and run
 it. The per-user installation goes to `%LOCALAPPDATA%\Programs\KeySwitch` and
 does not require administrator privileges. The release also includes the
-portable `KeySwitch-0.8.0-windows-x64.zip` archive.
+portable `KeySwitch-0.9.0-windows-x64.zip` archive.
 
 After launch, KeySwitch appears in the notification area. Left- or right-click
 the `EN/RU` or flag icon to open its menu. Its Switch to action always offers
@@ -125,12 +132,12 @@ Probe the system backend without opening the application window:
 
 ## Install the Debian package
 
-Download `keyswitch_0.8.0_amd64.deb` from the
+Download `keyswitch_0.9.0_amd64.deb` from the
 [latest release](https://github.com/olegius88/keyswitch/releases/latest), then
 install it with:
 
 ```bash
-sudo apt install ./keyswitch_0.8.0_amd64.deb
+sudo apt install ./keyswitch_0.9.0_amd64.deb
 ```
 
 The package installs the required system dependencies and adds KeySwitch to the
@@ -215,7 +222,12 @@ sensitive applications should be added by `.exe` name on Windows or by
 
 Detailed technical logging can be enabled on the Maintenance page on Windows
 or the About page on Linux. It records the decision reason, scores for both
-interpretations, manual-layout intent and correction outcomes. Because it may
+interpretations, the skip reason (`skipped_reason`) and the detector's shadow
+verdict for protected or disabled cases, context, the source and age of a
+manual layout change, whether a layout change was made by the engine itself
+or by the user, deferred pause corrections with their cause, early-switch
+events, the learning prompt lifecycle and the values of changed settings.
+Because it may
 contain typed words and application names, it is disabled by default. Text is
 always replaced with `<redacted>` for excluded applications. The log is capped
 at 5 MiB and rotated with three backups; after reproducing a problem, disable
@@ -248,7 +260,10 @@ for frequent two-letter function words; it currently contains Russian-layout
 hit and at least a 100x target/source frequency ratio. An explicit manual
 layout change has higher priority and protects the entire next word, including
 pause correction and previously learned rules. Normal detection resumes after
-the word boundary.
+the word boundary. A change to the very layout the engine itself just selected
+(a correction, `Pause`, the menu action), observed within 1.5 seconds, is
+attributed to the engine and does not enable the protection; a change to any
+other layout stays manual.
 Real three- and four-character bilingual collision pairs from frozen Onboard
 data are retained only in the safety corpus: they never train the classifier,
 but prove the valid-source pre-model guard across every trigger.
@@ -511,7 +526,7 @@ Build the reproducible native Debian package with:
 sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
 ./tools/install-build-tools.sh .nuitka
 KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package="dist/keyswitch_0.8.0_$(dpkg --print-architecture).deb"
+package="dist/keyswitch_0.9.0_$(dpkg --print-architecture).deb"
 ./tools/verify-native-deb.sh "$package"
 ```
 
@@ -592,7 +607,7 @@ and dependencies.
 - On Windows, UIPI prevents a regular process from injecting input into a
   window running at a higher integrity level. KeySwitch needs a matching level
   for that target window.
-- The Windows 0.8.0 Setup EXE is not yet signed with a publisher certificate.
+- The Windows 0.9.0 Setup EXE is not yet signed with a publisher certificate.
 
 ## License
 

@@ -624,6 +624,9 @@ class EngineBranchTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         root = Path(self.temporary.name)
         self.settings = SettingsStore(root / "config.json")
+        # These fixtures type whole words at once; the prefix-based early
+        # switch has dedicated tests and would otherwise fire on "ghbd".
+        self.settings.set("detection.early_switch", False)
         self.history = HistoryStore(root / "history.jsonl")
         self.backend = FakeBackend()
         self.engine = KeySwitchEngine(self.settings, self.history, self.backend)
@@ -749,7 +752,7 @@ class EngineBranchTests(unittest.TestCase):
             initialized.records[0].getMessage().removeprefix("TECHNICAL ")
         )
         self.assertEqual(initial_payload["event"], "engine_initialized")
-        self.assertEqual(initial_payload["keyswitch_version"], "0.8.0")
+        self.assertEqual(initial_payload["keyswitch_version"], "0.9.0")
         self.assertIn("minimum_length", initial_payload["detection_settings"])
 
     def test_start_stop_idempotence_and_backend_failure(self) -> None:
