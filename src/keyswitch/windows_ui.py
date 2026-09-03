@@ -24,11 +24,19 @@ from .engine import (
 )
 from .history import HistoryEntry, HistoryStore, data_dir
 from .indicator import layout_label
+from .logsetup import (
+    follow_settings,
+    log_directory,
+    log_path,
+    rotation_summary,
+)
 from .windows_backend import WindowsBackend
 from .windows_system import (
     WindowsApplication as CatalogApplication,
     WindowsApplicationCatalog,
     WindowsAutostartManager,
+    WindowsSystemError,
+    open_directory,
 )
 from .windows_tray import WindowsTray, WindowsTrayActions
 from .windows_ui_model import (
@@ -204,6 +212,7 @@ class WindowsApplication:
         self.no_engine = no_engine
         self.enable_updates = enable_updates
         self.settings = SettingsStore()
+        follow_settings(self.settings)
         self.history = HistoryStore(limit=int(self.settings.get("history.limit", 200)))
         self.backend = WindowsBackend()
         self.engine = KeySwitchEngine(
@@ -725,10 +734,24 @@ class WindowsApplication:
             self._add_setting(diagnostics, spec, row)
         ttk.Label(
             diagnostics,
-            text=f"Файл журнала: {data_dir() / 'keyswitch.log'}",
+            text=(
+                f"Файл журнала: {log_path()}\n"
+                f"Ротация в режиме диагностики: {rotation_summary(True)}, "
+                "включение начинает новый файл"
+            ),
             wraplength=720,
         ).grid(
             row=len(DIAGNOSTIC_SETTINGS),
+            column=0,
+            sticky="w",
+            pady=(8, 0),
+        )
+        ttk.Button(
+            diagnostics,
+            text="Открыть папку журнала",
+            command=self._open_log_directory,
+        ).grid(
+            row=len(DIAGNOSTIC_SETTINGS) + 1,
             column=0,
             sticky="w",
             pady=(8, 0),
@@ -741,7 +764,7 @@ class WindowsApplication:
                 f"Настройки: {self.settings.path}\n"
                 f"История: {self.history.path}\n"
                 f"Самообучение: {self.engine.learning.path}\n"
-                f"Журнал: {data_dir() / 'keyswitch.log'}"
+                f"Журнал: {log_path()}"
             ),
             wraplength=720,
         ).grid(row=0, column=0, sticky="w")
@@ -1390,7 +1413,7 @@ class WindowsApplication:
             "technical_logging": bool(
                 self.settings.get("diagnostics.technical_logging", False)
             ),
-            "technical_log": str(data_dir() / "keyswitch.log"),
+            "technical_log": str(log_path()),
             "settings": str(self.settings.path),
             "data": str(data_dir()),
             "error": probe.error,
@@ -1403,6 +1426,17 @@ class WindowsApplication:
         self.diagnostics_text.delete("1.0", tk.END)
         self.diagnostics_text.insert("1.0", diagnostics)
         self.diagnostics_text.configure(state="disabled")
+
+    def _open_log_directory(self) -> None:
+        try:
+            open_directory(log_directory())
+        except (WindowsSystemError, OSError) as error:
+            LOGGER.exception("Не удалось открыть папку журнала")
+            messagebox.showerror(
+                "Папка журнала",
+                f"Не удалось открыть папку журнала: {error}",
+                parent=self.root,
+            )
 
     def _copy_diagnostics(self) -> None:
         self.root.clipboard_clear()

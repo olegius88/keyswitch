@@ -755,7 +755,7 @@ class EngineBranchTests(unittest.TestCase):
             initialized.records[0].getMessage().removeprefix("TECHNICAL ")
         )
         self.assertEqual(initial_payload["event"], "engine_initialized")
-        self.assertEqual(initial_payload["keyswitch_version"], "0.9.1")
+        self.assertEqual(initial_payload["keyswitch_version"], "0.10.0")
         self.assertIn("minimum_length", initial_payload["detection_settings"])
 
     def test_start_stop_idempotence_and_backend_failure(self) -> None:

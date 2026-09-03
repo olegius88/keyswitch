@@ -5,6 +5,7 @@ from __future__ import annotations
 import ntpath
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -12,9 +13,31 @@ from typing import Protocol
 
 AUTOSTART_VALUE_NAME = "KeySwitch"
 
+DirectoryOpener = Callable[[list[str]], None]
+
 
 class WindowsSystemError(RuntimeError):
     pass
+
+
+def _spawn_explorer(arguments: list[str]) -> None:
+    subprocess.Popen(arguments, close_fds=True)
+
+
+def open_directory(
+    path: Path,
+    *,
+    spawn: DirectoryOpener = _spawn_explorer,
+) -> None:
+    """Show a folder in Explorer.
+
+    Explorer reports success with a non-zero exit code, so the process is only
+    started and never waited for; a missing folder is reported here instead.
+    """
+
+    if not path.is_dir():
+        raise WindowsSystemError(f"Каталог не найден: {path}")
+    spawn(["explorer", str(path)])
 
 
 class WindowsRegistry(Protocol):

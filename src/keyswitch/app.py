@@ -7,7 +7,6 @@ import json
 import logging
 import signal
 import sys
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -28,6 +27,7 @@ from .engine import (
     LearningPrompt,
 )
 from .history import HistoryStore, data_dir
+from .logsetup import configure_logging as configure_logging, follow_settings
 from .learning_prompt import LearningPromptWindow, PromptBackend
 from .system import APP_ID, AutostartManager
 from .tray import StatusNotifierItem
@@ -67,29 +67,13 @@ class _TrayController(Protocol):
     def close(self) -> None: ...
 
 
-def configure_logging() -> None:
-    directory = data_dir()
-    directory.mkdir(parents=True, exist_ok=True)
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=[
-            RotatingFileHandler(
-                directory / "keyswitch.log",
-                maxBytes=5 * 1024 * 1024,
-                backupCount=3,
-                encoding="utf-8",
-            )
-        ],
-    )
-
-
 class KeySwitchApplication(Adw.Application):
     def __init__(self, *, hidden: bool = False, no_engine: bool = False) -> None:
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
         self.hidden = hidden
         self.no_engine = no_engine
         self.settings = SettingsStore()
+        follow_settings(self.settings)
         self.autostart = AutostartManager()
         self.history = HistoryStore(limit=int(self.settings.get("history.limit", 200)))
         self.engine = KeySwitchEngine(self.settings, self.history)

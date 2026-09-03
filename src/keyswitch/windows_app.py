@@ -8,31 +8,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import logging
 import sys
-from logging.handlers import RotatingFileHandler
 
 from . import __version__
-from .history import data_dir
+from .logsetup import configure_logging as configure_logging
 from .intent_model import LinearNgramModel
 from .windows_backend import WindowsBackend
-
-
-def configure_logging() -> None:
-    directory = data_dir()
-    directory.mkdir(parents=True, exist_ok=True)
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=[
-            RotatingFileHandler(
-                directory / "keyswitch.log",
-                maxBytes=5 * 1024 * 1024,
-                backupCount=3,
-                encoding="utf-8",
-            )
-        ],
-    )
 
 
 def diagnose() -> int:

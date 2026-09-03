@@ -66,11 +66,11 @@ KeySwitch — настольное приложение для Windows 10/11 x64
 
 ## Установка в Windows
 
-Скачайте `KeySwitch-Setup-0.9.1-x64.exe` со страницы
+Скачайте `KeySwitch-Setup-0.10.0-x64.exe` со страницы
 [последнего выпуска](https://github.com/olegius88/keyswitch/releases/latest) и
 запустите его. Установка выполняется для текущего пользователя в
 `%LOCALAPPDATA%\Programs\KeySwitch` и не требует прав администратора. В выпуск
-также входит переносимый архив `KeySwitch-0.9.1-windows-x64.zip`.
+также входит переносимый архив `KeySwitch-0.10.0-windows-x64.zip`.
 
 После запуска KeySwitch появится в области уведомлений. Левый или правый щелчок
 по `EN/RU` либо флагу открывает меню. В нём пункт «Переключить на…» всегда
@@ -133,11 +133,11 @@ cd keyswitch
 
 ## Установка DEB-пакета
 
-Скачайте `keyswitch_0.9.1_amd64.deb` со страницы
+Скачайте `keyswitch_0.10.0_amd64.deb` со страницы
 [последнего выпуска](https://github.com/olegius88/keyswitch/releases/latest), затем:
 
 ```bash
-sudo apt install ./keyswitch_0.9.1_amd64.deb
+sudo apt install ./keyswitch_0.10.0_amd64.deb
 ```
 
 Пакет установит системные зависимости и добавит KeySwitch в меню приложений.
@@ -524,7 +524,7 @@ dbus-run-session -- env PYTHONPATH=src python3 tests/e2e_tray_menu.py
 sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
 ./tools/install-build-tools.sh .nuitka
 KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package="dist/keyswitch_0.9.1_$(dpkg --print-architecture).deb"
+package="dist/keyswitch_0.10.0_$(dpkg --print-architecture).deb"
 ./tools/verify-native-deb.sh "$package"
 ```
 
@@ -590,6 +590,21 @@ Actions, `quick` ограничивается typecheck, coverage и детек�
 завершённые replay, а `python3 tools/release_pipeline.py phases` печатает
 фазы, бюджеты памяти и зависимости.
 
+Сам выпуск выполняется одной командой. Скрипт переносит версию во все файлы,
+где она указана, закрывает раздел `Unreleased` в `CHANGELOG.md`, проверяет
+`RELEASE_NOTES.md`, запускает контур проверки, коммитит, ставит тег, пушит и
+ждёт, пока workflow опубликует DEB, Windows Setup EXE, ZIP и `SHA256SUMS`:
+
+```bash
+python3 tools/release.py --version 0.9.2
+python3 tools/release.py --version 0.9.2 --dry-run   # только проверки, без записи
+```
+
+Текст выпуска пишет человек: без записей под `## Unreleased` и без
+`RELEASE_NOTES.md` для этой версии скрипт останавливается и называет файл,
+который нужно дополнить. Любой шаг узнаёт уже сделанную работу, поэтому
+повторный запуск после сбоя продолжает с места остановки.
+
 ## Ограничения
 
 - Linux-backend предназначен для X11. В нативной Wayland-сессии приложение
@@ -601,7 +616,7 @@ Actions, `quick` ограничивается typecheck, coverage и детек�
 - В Windows механизм UIPI не позволяет обычному процессу вводить текст в окно,
   запущенное с более высоким уровнем целостности. Для такого окна KeySwitch
   также должен быть запущен с сопоставимыми правами.
-- Windows Setup EXE версии 0.9.1 пока не подписан сертификатом издателя.
+- Windows Setup EXE версии 0.10.0 пока не подписан сертификатом издателя.
 
 ## Лицензия
 

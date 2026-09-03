@@ -4,6 +4,25 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.10.0 — 2026-09-04
+
+- The log file rotates by the mode it is in: ordinary operation keeps 1 MB in
+  3 files, and the diagnostics ("developer") log, which writes a line per
+  evaluated word, keeps 5 MB in 6 files. Turning the diagnostics mode on now
+  starts a fresh file, so the log attached to a report contains that session
+  only; turning it off keeps what was recorded. Both platforms share one
+  `keyswitch.logsetup` module instead of duplicating the handler.
+- A button on the diagnostics page opens the folder that holds the log, in the
+  file manager on Linux and in Explorer on Windows. The page also states the
+  rotation budget.
+- `tools/release.py` performs a release in one command: it propagates the
+  version to every file that spells it, closes the changelog section, checks
+  the release notes, runs the verification contour, commits, tags, pushes, and
+  waits for the workflow and the published packages. Every step recognises the
+  work it has already done, so a re-run after a failure continues where it
+  stopped; anything that does not hold stops the run with a message naming the
+  file to fix.
+
 ## 0.9.1 — 2026-09-03
 
 - Windows keeps a keyboard layout per window, so the layout that arrived

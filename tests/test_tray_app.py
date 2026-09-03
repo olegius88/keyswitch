@@ -21,6 +21,7 @@ from unittest.mock import Mock, call, patch
 
 import dbus
 
+from keyswitch import logsetup
 from keyswitch import app as app_module
 from keyswitch import launcher as launcher_module
 from keyswitch import tray as tray_module
@@ -960,27 +961,9 @@ class ApplicationEntrypointTests(unittest.TestCase):
         self.assertEqual(stopped.exception.code, 0)
 
     def test_logging_diagnostics_parser_and_main_modes(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            directory = Path(temporary)
-            handler = logging.NullHandler()
-            with (
-                patch("keyswitch.app.data_dir", return_value=directory),
-                patch("keyswitch.app.logging.basicConfig") as basic,
-                patch(
-                    "keyswitch.app.RotatingFileHandler",
-                    return_value=handler,
-                ) as rotating,
-            ):
-                app_module.configure_logging()
-            self.assertTrue(directory.is_dir())
-            self.assertEqual(basic.call_args.kwargs["level"], logging.INFO)
-            rotating.assert_called_once_with(
-                directory / "keyswitch.log",
-                maxBytes=5 * 1024 * 1024,
-                backupCount=3,
-                encoding="utf-8",
-            )
-            self.assertEqual(basic.call_args.kwargs["handlers"], [handler])
+        # The log file, its rotation budget and the diagnostics mode live in
+        # keyswitch.logsetup, which tests/test_logsetup.py covers on its own.
+        self.assertIs(app_module.configure_logging, logsetup.configure_logging)
 
         probe = BackendProbe(True, "x11", ":1", "1.13", "2.2", "1.0", 1)
         backend = Mock()

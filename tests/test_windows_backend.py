@@ -18,6 +18,7 @@ from pathlib import Path
 from types import ModuleType
 from unittest.mock import patch
 
+from keyswitch import logsetup
 from keyswitch import windows_app as windows_app_module
 from keyswitch import launcher as launcher_module
 from keyswitch.backend import (
@@ -57,6 +58,7 @@ from keyswitch.windows_system import (
     WindowsAutostartManager,
     WindowsSystemError,
     clean_windows_executable,
+    open_directory,
     windows_launcher_command,
 )
 from keyswitch.windows_tray import (
@@ -702,6 +704,25 @@ class WindowsSystemTests(unittest.TestCase):
         self.assertTrue(manager.enabled())
         self.assertEqual(catalog.installed(), ())
 
+    def test_open_directory_starts_explorer_and_rejects_a_missing_folder(self) -> None:
+        started: list[list[str]] = []
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            open_directory(directory, spawn=started.append)
+            self.assertEqual(started, [["explorer", str(directory)]])
+            missing = directory / "gone"
+            with self.assertRaisesRegex(WindowsSystemError, "Каталог не найден"):
+                open_directory(missing, spawn=started.append)
+        self.assertEqual(len(started), 1)
+
+    def test_open_directory_spawns_a_detached_process_by_default(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch("keyswitch.windows_system.subprocess.Popen") as popen,
+        ):
+            open_directory(Path(temporary))
+        popen.assert_called_once_with(["explorer", temporary], close_fds=True)
+
 
 class WindowsSingleInstanceTests(unittest.TestCase):
     def test_lifecycle_duplicate_activation_and_idempotent_close(self) -> None:
@@ -856,27 +877,11 @@ class WindowsUIModelTests(unittest.TestCase):
 
 class WindowsApplicationEntrypointTests(unittest.TestCase):
     def test_logging_parser_diagnostics_and_ui_dispatch(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            directory = Path(temporary)
-            handler = logging.NullHandler()
-            with (
-                patch("keyswitch.windows_app.data_dir", return_value=directory),
-                patch("keyswitch.windows_app.logging.basicConfig") as basic,
-                patch(
-                    "keyswitch.windows_app.RotatingFileHandler",
-                    return_value=handler,
-                ) as rotating,
-            ):
-                windows_app_module.configure_logging()
-            self.assertTrue(directory.is_dir())
-            self.assertEqual(basic.call_args.kwargs["level"], logging.INFO)
-            rotating.assert_called_once_with(
-                directory / "keyswitch.log",
-                maxBytes=5 * 1024 * 1024,
-                backupCount=3,
-                encoding="utf-8",
-            )
-            self.assertEqual(basic.call_args.kwargs["handlers"], [handler])
+        # Logging is configured by the shared keyswitch.logsetup module, which
+        # tests/test_logsetup.py covers including the rotation budgets.
+        self.assertIs(
+            windows_app_module.configure_logging, logsetup.configure_logging
+        )
 
         api = FakeWindowsAPI()
         backend = WindowsBackend(api)

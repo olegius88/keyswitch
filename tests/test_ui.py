@@ -20,6 +20,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gio, GLib, Gtk
 
 from keyswitch import ui
+from keyswitch import logsetup
 from keyswitch.config import SettingsStore
 from keyswitch.engine import EngineSnapshot
 from keyswitch.history import HistoryEntry, HistoryStore
@@ -546,6 +547,35 @@ class MainWindowInteractionTests(unittest.TestCase):
         ):
             self.window._open_update_release()
         self.assertIn("open failed", toast.call_args.args[0])
+
+    def test_log_folder_button_opens_the_directory_and_reports_failures(self) -> None:
+        expected = logsetup.log_directory().as_uri()
+        with patch(
+            "keyswitch.ui.Gio.AppInfo.launch_default_for_uri",
+            return_value=True,
+        ) as launch:
+            self.window._open_log_directory()
+        launch.assert_called_once_with(expected, None)
+
+        with (
+            patch(
+                "keyswitch.ui.Gio.AppInfo.launch_default_for_uri",
+                return_value=False,
+            ),
+            patch.object(self.window, "toast") as toast,
+        ):
+            self.window._open_log_directory()
+        toast.assert_called_once_with("Не удалось открыть папку журнала")
+
+        with (
+            patch(
+                "keyswitch.ui.Gio.AppInfo.launch_default_for_uri",
+                side_effect=GLib.Error("no file manager"),
+            ),
+            patch.object(self.window, "toast") as toast,
+        ):
+            self.window._open_log_directory()
+        self.assertIn("no file manager", toast.call_args.args[0])
 
     def test_history_rendering_time_plural_and_clear_list(self) -> None:
         self.history.clear()

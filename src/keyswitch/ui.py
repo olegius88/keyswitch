@@ -23,7 +23,8 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 from . import __version__
 from .config import SettingsStore
 from .engine import EngineSnapshot
-from .history import HistoryStore, data_dir
+from .history import HistoryStore
+from .logsetup import log_directory, log_path, rotation_summary
 from .intent_model import IntentModelStatus
 from .learning import LearningStore
 from .system import AutostartManager
@@ -847,6 +848,16 @@ class MainWindow(Adw.ApplicationWindow):
         if not launched:
             self.toast("Не удалось открыть страницу выпуска")
 
+    def _open_log_directory(self) -> None:
+        directory = log_directory()
+        try:
+            launched = Gio.AppInfo.launch_default_for_uri(directory.as_uri(), None)
+        except GLib.Error as error:
+            self.toast(f"Не удалось открыть папку журнала: {error.message}")
+            return
+        if not launched:
+            self.toast("Не удалось открыть папку журнала")
+
     def _add_history_page(self) -> None:
         page = self._new_page(
             "history",
@@ -906,15 +917,23 @@ class MainWindow(Adw.ApplicationWindow):
             self._switch_row(
                 "diagnostics.technical_logging",
                 "Записывать подробную диагностику распознавания",
-                "По умолчанию выключено; журнал ограничен по размеру и хранится только локально",
+                (
+                    "По умолчанию выключено; включение начинает новый файл, "
+                    f"журнал хранится только локально и ротируется по {rotation_summary(True)}"
+                ),
             )
         )
-        technical_log.add(
-            Adw.ActionRow(
-                title="Файл журнала",
-                subtitle=str(data_dir() / "keyswitch.log"),
-            )
+        log_row = Adw.ActionRow(title="Файл журнала", subtitle=str(log_path()))
+        open_log = Gtk.Button(
+            icon_name="folder-symbolic",
+            tooltip_text="Открыть папку журнала",
+            valign=Gtk.Align.CENTER,
         )
+        open_log.add_css_class("flat")
+        open_log.connect("clicked", lambda _b: self._open_log_directory())
+        log_row.add_suffix(open_log)
+        log_row.set_activatable_widget(open_log)
+        technical_log.add(log_row)
         page.append(technical_log)
 
         copy_button = Gtk.Button(label="Скопировать диагностику", icon_name="edit-copy-symbolic", halign=Gtk.Align.START)
@@ -1295,7 +1314,7 @@ class MainWindow(Adw.ApplicationWindow):
                 f"XKB group: {probe.current_group}",
                 f"Intent model: {self.engine.intent_model_status.summary}",
                 f"Technical logging: {bool(self.settings.get('diagnostics.technical_logging', False))}",
-                f"Technical log: {data_dir() / 'keyswitch.log'}",
+                f"Technical log: {log_path()}",
                 f"Backend error: {probe.error or 'none'}",
             )
         )
