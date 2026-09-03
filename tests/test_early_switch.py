@@ -36,6 +36,7 @@ RU_WORDS = {
     "приз": 3_000,
     "почему": 800_000,
     "почесать": 1_500,
+    "тебя": 600_000,
 }
 
 
@@ -154,6 +155,23 @@ class EarlySwitchDecisionTests(unittest.TestCase):
         scorers = {0: _Scorer({"ghbd"}), 1: _Scorer(set())}
         decision = early_switch_decision(_indexes(), scorers, "ghbd", {1: "прив"}, 0)
         self.assertEqual(decision.reason, "префикс сам является словом исходного языка")
+
+    def test_letters_on_punctuation_keys_form_a_prefix(self) -> None:
+        # The comma key is the letter "б" in the Russian layout: "nt,z" is "тебя".
+        decision = self.decide("nt,z")
+        self.assertTrue(decision.should_switch)
+        self.assertEqual(decision.replacement, "тебя")
+        # A digit is not a letter in either layout; the rejection still names
+        # the rendering that was judged.
+        rejected = self.decide("nt1z")
+        self.assertFalse(rejected.should_switch)
+        self.assertEqual(rejected.reason, "префикс содержит не буквы")
+        self.assertEqual((rejected.target_group, rejected.replacement), (1, "те1я"))
+        # Russian text on those keys renders as punctuation in English.
+        english = self.decide("тебя", group=1)
+        self.assertFalse(english.should_switch)
+        self.assertEqual(english.reason, "префикс содержит не буквы")
+        self.assertEqual(english.replacement, "nt,z")
 
     def test_missing_layout_information_is_rejected(self) -> None:
         indexes = _indexes()

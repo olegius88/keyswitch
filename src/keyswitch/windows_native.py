@@ -58,6 +58,14 @@ INPUT_KEYBOARD = 1
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 KEYSWITCH_EXTRA_INFO = 0x4B535743
 GA_ROOT = 2
+GWL_EXSTYLE = -20
+WS_EX_TOOLWINDOW = 0x00000080
+WS_EX_NOACTIVATE = 0x08000000
+SWP_NOSIZE = 0x0001
+SWP_NOMOVE = 0x0002
+SWP_NOZORDER = 0x0004
+SWP_NOACTIVATE = 0x0010
+SWP_FRAMECHANGED = 0x0020
 
 
 class KBDLLHOOKSTRUCT(ctypes.Structure):
@@ -246,6 +254,24 @@ class CtypesWindowsAPI:
             ctypes.POINTER(ctypes.c_ulong),
         ]
         user32.GetWindowThreadProcessId.restype = ctypes.c_ulong
+        user32.GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        user32.GetWindowLongW.restype = ctypes.c_long
+        user32.SetWindowLongW.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_long,
+        ]
+        user32.SetWindowLongW.restype = ctypes.c_long
+        user32.SetWindowPos.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_uint,
+        ]
+        user32.SetWindowPos.restype = ctypes.c_int
         user32.GetGUIThreadInfo.argtypes = [
             ctypes.c_ulong,
             ctypes.POINTER(GUITHREADINFO),
@@ -282,6 +308,8 @@ class CtypesWindowsAPI:
         kernel32.GetModuleHandleW.restype = ctypes.c_void_p
         kernel32.GetCurrentThreadId.argtypes = []
         kernel32.GetCurrentThreadId.restype = ctypes.c_ulong
+        kernel32.GetCurrentProcessId.argtypes = []
+        kernel32.GetCurrentProcessId.restype = ctypes.c_ulong
         kernel32.GetLastError.argtypes = []
         kernel32.GetLastError.restype = ctypes.c_ulong
         kernel32.OpenProcess.argtypes = [
@@ -322,6 +350,56 @@ class CtypesWindowsAPI:
         if not thread_id:
             return 0
         return int(self.user32.GetKeyboardLayout(thread_id) or 0)
+
+    def foreground_window(self) -> int:
+        return int(self.user32.GetForegroundWindow() or 0)
+
+    def window_process_id(self, window: int) -> int:
+        if not window:
+            return 0
+        process_id = ctypes.c_ulong()
+        if not self.user32.GetWindowThreadProcessId(
+            ctypes.c_void_p(window), ctypes.byref(process_id)
+        ):
+            return 0
+        return int(process_id.value)
+
+    def current_process_id(self) -> int:
+        return int(self.kernel32.GetCurrentProcessId())
+
+    def keep_window_inactive(self, window: int) -> bool:
+        """Mark a popup so that showing or clicking it never takes the foreground.
+
+        ``WS_EX_NOACTIVATE`` keeps the caret (and the per-window keyboard
+        layout) in the editor while the learning prompt is visible.
+        """
+
+        if not window:
+            return False
+        handle = ctypes.c_void_p(window)
+        root = int(self.user32.GetAncestor(handle, GA_ROOT) or window)
+        applied = False
+        for target in sorted({window, root}):
+            pointer = ctypes.c_void_p(target)
+            style = int(self.user32.GetWindowLongW(pointer, GWL_EXSTYLE))
+            wanted = style | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
+            if wanted != style:
+                self.user32.SetWindowLongW(pointer, GWL_EXSTYLE, wanted)
+            self.user32.SetWindowPos(
+                pointer,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOSIZE
+                | SWP_NOMOVE
+                | SWP_NOZORDER
+                | SWP_NOACTIVATE
+                | SWP_FRAMECHANGED,
+            )
+            applied = True
+        return applied
 
     def activate_window(self, window: int) -> bool:
         """Request foreground activation without changing the window state."""

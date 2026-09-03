@@ -144,9 +144,23 @@ class WindowsLearningPrompt:
         x = max(virtual_x + 8, min(x, virtual_x + virtual_width - width - 8))
         y = max(virtual_y + 8, min(y, virtual_y + virtual_height - height - 8))
         self.window.geometry(f"{width}x{height}+{x}+{y}")
+        # The prompt must never take the foreground: on Windows every window
+        # has its own keyboard layout, so an activated prompt would both read
+        # as a manual layout switch and swallow the next typed key. Enter and
+        # Esc reach the engine through the global hook instead.
+        self._keep_editor_focused()
         self.window.deiconify()
         self.window.lift()
-        self.window.focus_force()
+        self._keep_editor_focused()
+        if anchor.window is not None:
+            self.backend.restore_window(anchor.window)
+
+    def _keep_editor_focused(self) -> None:
+        try:
+            handle = int(self.window.winfo_id())
+        except (tk.TclError, ValueError):
+            return
+        self.backend.keep_window_inactive(handle)
 
     def hide_prompt(self) -> None:
         anchor = self.anchor

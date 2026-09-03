@@ -24,6 +24,7 @@ from .backend import (
     SHIFT_MASK as SHIFT_MASK,
     SUPER_MASK,
     BackendProbe as BackendProbe,
+    FocusInfo,
     KeyEvent as KeyEvent,
     ScreenAnchor,
 )
@@ -40,6 +41,7 @@ XKB_USE_CORE_KBD = 0x0100
 XRECORD_START_TIMEOUT = 5.0
 REVERT_TO_PARENT = 2
 CURRENT_TIME = 0
+XA_CARDINAL = 6
 
 MOD1_MASK = ALT_MASK
 MOD4_MASK = SUPER_MASK
@@ -217,6 +219,23 @@ class _Libraries:
         x11.XRaiseWindow.restype = ctypes.c_int
         x11.XGetClassHint.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(XClassHint)]
         x11.XGetClassHint.restype = ctypes.c_int
+        x11.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+        x11.XInternAtom.restype = ctypes.c_ulong
+        x11.XGetWindowProperty.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_long,
+            ctypes.c_long,
+            ctypes.c_int,
+            ctypes.c_ulong,
+            ctypes.POINTER(ctypes.c_ulong),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_ulong),
+            ctypes.POINTER(ctypes.c_ulong),
+            ctypes.POINTER(ctypes.c_void_p),
+        ]
+        x11.XGetWindowProperty.restype = ctypes.c_int
         x11.XQueryTree.argtypes = [
             ctypes.c_void_p,
             ctypes.c_ulong,
@@ -288,6 +307,10 @@ class X11Backend:
         self.group_count = max(2, min(group_count, 4))
         self._libraries = _Libraries()
         self._control: int | None = None
+        # Own-window verdicts by X window id; ids of another client can never
+        # collide with ours (each client allocates from its own id range).
+        self._own_windows: dict[int, bool] = {}
+        self._net_wm_pid_atom: int | None = None
         self._record: int | None = None
         self._context = 0
         self._range: ctypes._Pointer[XRecordRange] | None = None
@@ -586,6 +609,98 @@ class X11Backend:
             self._control, ctypes.byref(focus), ctypes.byref(revert)
         )
         return ScreenAnchor(root_x.value, root_y.value, int(focus.value) or None)
+
+    def focused_window(self) -> FocusInfo | None:
+        if not self._control:
+            return None
+        window, revert = ctypes.c_ulong(), ctypes.c_int()
+        if not self._libraries.x11.XGetInputFocus(
+            self._control, ctypes.byref(window), ctypes.byref(revert)
+        ):
+            return None
+        focus = int(window.value)
+        if focus in (0, 1):  # None or PointerRoot: nobody has the focus
+            return None
+        return FocusInfo(focus, self._window_is_own(focus))
+
+    def _window_is_own(self, window: int) -> bool:
+        cached = self._own_windows.get(window)
+        if cached is not None:
+            return cached
+        own = self._window_process_id(window) == os.getpid()
+        if len(self._own_windows) >= 256:
+            self._own_windows.clear()
+        self._own_windows[window] = own
+        return own
+
+    def _window_process_id(self, window: int) -> int:
+        """``_NET_WM_PID`` of the client owning ``window`` (GTK sets it).
+
+        Toolkits give the focus to a child window that carries no properties
+        of its own, so the search walks up a bounded number of parents.
+        """
+
+        if self._net_wm_pid_atom is None:
+            self._net_wm_pid_atom = int(
+                self._libraries.x11.XInternAtom(self._control, b"_NET_WM_PID", 1)
+            )
+        atom = self._net_wm_pid_atom
+        if not atom:
+            return 0
+        current = window
+        for _ in range(16):
+            process_id = self._cardinal_property(current, atom)
+            if process_id:
+                return process_id
+            parent = self._parent_window(current)
+            if parent in (0, current):
+                return 0
+            current = parent
+        return 0
+
+    def _cardinal_property(self, window: int, atom: int) -> int:
+        actual_type, actual_format = ctypes.c_ulong(), ctypes.c_int()
+        count, remaining = ctypes.c_ulong(), ctypes.c_ulong()
+        data = ctypes.c_void_p()
+        status = self._libraries.x11.XGetWindowProperty(
+            self._control,
+            window,
+            atom,
+            0,
+            1,
+            0,
+            XA_CARDINAL,
+            ctypes.byref(actual_type),
+            ctypes.byref(actual_format),
+            ctypes.byref(count),
+            ctypes.byref(remaining),
+            ctypes.byref(data),
+        )
+        if status != 0 or not data.value:
+            return 0
+        try:
+            if actual_format.value != 32 or count.value < 1:
+                return 0
+            return int(ctypes.cast(data, ctypes.POINTER(ctypes.c_ulong))[0])
+        finally:
+            self._libraries.x11.XFree(data)
+
+    def _parent_window(self, window: int) -> int:
+        root, parent = ctypes.c_ulong(), ctypes.c_ulong()
+        children = ctypes.POINTER(ctypes.c_ulong)()
+        count = ctypes.c_uint()
+        if not self._libraries.x11.XQueryTree(
+            self._control,
+            window,
+            ctypes.byref(root),
+            ctypes.byref(parent),
+            ctypes.byref(children),
+            ctypes.byref(count),
+        ):
+            return 0
+        if ctypes.cast(children, ctypes.c_void_p).value is not None:
+            self._libraries.x11.XFree(children)
+        return int(parent.value)
 
     def position_window(self, window: int, x: int, y: int) -> bool:
         if not self._control or not window:

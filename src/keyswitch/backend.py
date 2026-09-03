@@ -74,6 +74,23 @@ class ScreenAnchor:
     window: int | None = None
 
 
+@dataclass(frozen=True)
+class FocusInfo:
+    """The focused top-level window as the backend sees it.
+
+    ``window`` is the platform identity (an HWND or an X window id). ``own``
+    marks windows of KeySwitch itself (settings, the learning prompt), which
+    never count as the user moving to another window. ``isolated_layout``
+    says that the window carries a keyboard layout of its own that the user
+    did not choose (Windows keeps one per window), so a layout change seen
+    while it is focused must be ignored; on X11 the layout is global.
+    """
+
+    window: int
+    own: bool = False
+    isolated_layout: bool = False
+
+
 class InputBackend(Protocol):
     """Operations required by the correction engine and diagnostics UI."""
 
@@ -88,6 +105,8 @@ class InputBackend(Protocol):
     def switch_group(self, group: int) -> None: ...
 
     def active_application(self) -> str: ...
+
+    def focused_window(self) -> FocusInfo | None: ...
 
     def probe(self) -> BackendProbe: ...
 

@@ -186,13 +186,20 @@ def early_switch_decision(
         for group, candidate in alternatives.items()
         if group != source_group and group in indexes and group in scorers
     ]
-    rejected = EarlySwitchDecision(False, source_group, source_group, original, original, "")
     if source_group not in indexes or source_group not in scorers or not candidates:
-        return _replace_reason(rejected, "нет другой раскладки")
+        return EarlySwitchDecision(
+            False, source_group, source_group, original, original, "нет другой раскладки"
+        )
     target_group, replacement = candidates[0]
+    rejected = EarlySwitchDecision(
+        False, source_group, target_group, original, replacement, ""
+    )
     if len(original) < policy.minimum_length:
         return _replace_reason(rejected, "слишком короткий префикс")
-    if not original.isalpha() or not replacement.isalpha():
+    # Only the rendering in the other layout has to be letters: the comma key
+    # is the letter "б" there, so ``nt,z`` (тебя) is a valid prefix, while a
+    # digit or a real punctuation mark is not a letter in either layout.
+    if not replacement.isalpha():
         return _replace_reason(rejected, "префикс содержит не буквы")
     if _looks_like_abbreviation(original) or _looks_like_abbreviation(replacement):
         return _replace_reason(rejected, "похоже на сокращение или camelCase")

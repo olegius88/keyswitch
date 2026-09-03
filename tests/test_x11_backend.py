@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch
 
 from keyswitch import x11_backend as x11
 from keyswitch.backend import ScreenAnchor
+from keyswitch.backend import FocusInfo
 from keyswitch.x11_backend import (
     KEY_PRESS,
     KEY_RELEASE,
@@ -41,6 +42,7 @@ X11_FUNCTIONS = (
     "XkbKeycodeToKeysym", "XkbQueryExtension", "XkbLockGroup", "XkbGetState",
     "XKeysymToString", "XKeysymToKeycode", "XGetInputFocus", "XSetInputFocus", "XGetClassHint", "XQueryTree",
     "XDefaultScreen", "XRootWindow", "XQueryPointer", "XMoveWindow", "XRaiseWindow",
+    "XInternAtom", "XGetWindowProperty",
 )
 XTST_FUNCTIONS = (
     "XRecordQueryVersion", "XRecordAllocRange", "XRecordCreateContext",
@@ -64,6 +66,8 @@ class FakeLibraries:
         self.x11.XkbGetState.return_value = 0
         self.x11.XGetInputFocus.return_value = 0
         self.x11.XGetClassHint.return_value = 0
+        self.x11.XInternAtom.return_value = 0
+        self.x11.XGetWindowProperty.return_value = 1
         self.x11.XQueryTree.return_value = 0
         self.xtst.XRecordQueryVersion.return_value = 1
         self.xtst.XRecordCreateContext.return_value = 42
@@ -567,6 +571,137 @@ class BackendTranslationTests(unittest.TestCase):
         libraries.x11.XRaiseWindow.assert_called_once_with(1, 55)
         libraries.x11.XSetInputFocus.assert_called_once_with(1, 777, 2, 0)
         libraries.x11.XFlush.assert_called_with(1)
+
+
+    def test_focused_window_recognises_this_process_by_net_wm_pid(self) -> None:
+        backend, libraries = backend_with()
+        self.assertIsNone(backend.focused_window())
+        backend._control = 1
+        focus_value = 0
+        owners: dict[int, int] = {}
+        parents: dict[int, int] = {}
+        property_format = 32
+        property_count = 1
+        children_pointer: int | None = None
+        owner = (ctypes.c_ulong * 1)(0)
+
+        def focused(
+            _display: object,
+            window: ctypes._CData | ctypes._CArgObject | int,
+            revert: ctypes._CData | ctypes._CArgObject | int,
+        ) -> int:
+            set_ulong(window, focus_value)
+            set_int(revert, 0)
+            return 1
+
+        def get_property(
+            _display: object,
+            window: int,
+            _atom: int,
+            _offset: int,
+            _length: int,
+            _delete: int,
+            _type: int,
+            _actual_type: ctypes._CData | ctypes._CArgObject | int,
+            actual_format: ctypes._CData | ctypes._CArgObject | int,
+            count: ctypes._CData | ctypes._CArgObject | int,
+            _remaining: ctypes._CData | ctypes._CArgObject | int,
+            data: ctypes._CData | ctypes._CArgObject | int,
+        ) -> int:
+            if window not in owners:
+                return 1  # BadWindow, or no such property on this window
+            owner[0] = owners[window]
+            set_int(actual_format, property_format)
+            set_ulong(count, property_count)
+            ctypes.cast(data, ctypes.POINTER(ctypes.c_void_p)).contents.value = (
+                ctypes.addressof(owner)
+            )
+            return 0
+
+        def query_tree(
+            _display: object,
+            window: int,
+            root: ctypes._CData | ctypes._CArgObject | int,
+            parent: ctypes._CData | ctypes._CArgObject | int,
+            children: ctypes._CData | ctypes._CArgObject | int,
+            count: ctypes._CData | ctypes._CArgObject | int,
+        ) -> int:
+            if window not in parents:
+                return 0  # the window is gone
+            set_ulong(root, 99)
+            set_ulong(parent, parents[window])
+            ctypes.cast(children, ctypes.POINTER(ctypes.c_void_p)).contents.value = (
+                children_pointer
+            )
+            ctypes.cast(count, ctypes.POINTER(ctypes.c_uint)).contents.value = 0
+            return 1
+
+        libraries.x11.XGetInputFocus.side_effect = focused
+        libraries.x11.XGetWindowProperty.side_effect = get_property
+        libraries.x11.XQueryTree.side_effect = query_tree
+
+        # No window holds the focus: None and PointerRoot mean nobody.
+        self.assertIsNone(backend.focused_window())
+        focus_value = 1
+        self.assertIsNone(backend.focused_window())
+        libraries.x11.XGetInputFocus.side_effect = None
+        libraries.x11.XGetInputFocus.return_value = 0
+        self.assertIsNone(backend.focused_window())
+        libraries.x11.XGetInputFocus.side_effect = focused
+
+        # Without the _NET_WM_PID atom no window can be attributed.
+        focus_value = 777
+        libraries.x11.XInternAtom.return_value = 0
+        self.assertEqual(backend.focused_window(), FocusInfo(777, False))
+        libraries.x11.XGetWindowProperty.assert_not_called()
+
+        backend._own_windows.clear()
+        backend._net_wm_pid_atom = None
+        libraries.x11.XInternAtom.return_value = 5
+        owners[777] = os.getpid()
+        owners[555] = os.getpid() + 1
+        parents[778] = 777  # a child window of ours, as toolkits create them
+        parents[779] = 779  # its own parent: a root window
+        self.assertEqual(backend.focused_window(), FocusInfo(777, True))
+        libraries.x11.XFree.assert_called()
+        focus_value = 778
+        self.assertEqual(backend.focused_window(), FocusInfo(778, True))
+        focus_value = 555
+        self.assertEqual(backend.focused_window(), FocusInfo(555, False))
+        # A window whose ancestry ends without the property, one that is gone
+        # while it is examined, and one that is its own parent.
+        focus_value = 780
+        self.assertEqual(backend.focused_window(), FocusInfo(780, False))
+        focus_value = 779
+        self.assertEqual(backend.focused_window(), FocusInfo(779, False))
+
+        # Verdicts are cached per window id, and the cache is bounded.
+        libraries.x11.XGetWindowProperty.reset_mock()
+        focus_value = 777
+        self.assertEqual(backend.focused_window(), FocusInfo(777, True))
+        libraries.x11.XGetWindowProperty.assert_not_called()
+        backend._own_windows.clear()
+        backend._own_windows.update({index: False for index in range(1000, 1256)})
+        self.assertEqual(backend.focused_window(), FocusInfo(777, True))
+        self.assertEqual(backend._own_windows, {777: True})
+
+        # A property of an unexpected shape is ignored, and so is a window
+        # tower deeper than the bounded walk.
+        backend._own_windows.clear()
+        property_format = 8
+        self.assertEqual(backend.focused_window(), FocusInfo(777, False))
+        backend._own_windows.clear()
+        property_format = 32
+        property_count = 0
+        self.assertEqual(backend.focused_window(), FocusInfo(777, False))
+        backend._own_windows.clear()
+        property_count = 1
+        owners.pop(777)
+        parents.update({window: window + 1 for window in range(777, 900)})
+        children_pointer = ctypes.addressof(owner)
+        libraries.x11.XQueryTree.reset_mock()
+        self.assertEqual(backend.focused_window(), FocusInfo(777, False))
+        self.assertEqual(libraries.x11.XQueryTree.call_count, 16)
 
 
 class BackendInjectionTests(unittest.TestCase):

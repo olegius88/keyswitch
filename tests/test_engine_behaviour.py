@@ -10,6 +10,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from unittest.mock import patch
 
+from keyswitch.backend import FocusInfo
 from keyswitch.config import SettingsStore
 from keyswitch.engine import (
     ENGINE_SWITCH_GRACE_SECONDS,
@@ -26,9 +27,15 @@ class FakeBackend:
     def __init__(self) -> None:
         self.injections: list[tuple[tuple[KeyEvent, ...], int, KeyEvent | None]] = []
         self.group = 0
+        self.window = 1
+        self.own_window = False
+        self.isolated_layout = False
 
     def active_application(self) -> str:
         return "TestEditor"
+
+    def focused_window(self) -> FocusInfo | None:
+        return FocusInfo(self.window, self.own_window, self.isolated_layout)
 
     def current_group(self) -> int:
         return self.group
@@ -666,6 +673,224 @@ class EngineBehaviourTests(unittest.TestCase):
         observed = self.technical_events(logs.output)[0]
         self.assertEqual(observed["event"], "manual_layout_observed")
         self.assertEqual(self.engine._manual_layout_group, 1)
+
+    def test_layout_arriving_with_another_window_is_not_manual(self) -> None:
+        # The first observation only records which window has the focus.
+        self.engine._poll_current_group()
+        self.assertEqual(self.engine._focus_window, 1)
+        self.backend.window = 2
+        self.backend.group = 1
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._poll_current_group()
+        events = self.technical_events(logs.output)
+        self.assertEqual([event["event"] for event in events], ["focus_changed", "layout_change_observed"])
+        observed = events[1]
+        self.assertTrue(observed["focus_changed"])
+        self.assertFalse(observed["protects_next_word"])
+        self.assertFalse(observed["initiated_by_engine"])
+        self.assertIsNone(self.engine._manual_layout_group)
+        self.assertEqual(self.engine.snapshot.current_group, 1)
+
+        # The same change inside one window is the user's own switch.
+        self.backend.group = 0
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._observe_group(0, source="keystroke")
+        observed = self.technical_events(logs.output)[0]
+        self.assertEqual(observed["event"], "manual_layout_observed")
+        self.assertFalse(observed["focus_changed"])
+        self.assertEqual(self.engine._manual_layout_group, 0)
+
+        # Another window with yet another layout drops that manual pick, and
+        # the word typed there is corrected as usual.
+        self.backend.window = 3
+        self.backend.group = 1
+        self.engine._poll_current_group()
+        self.assertIsNone(self.engine._manual_layout_group)
+        self.backend.window = 4
+        self.backend.group = 0
+        self.engine._poll_current_group()
+        self.correct_hello()
+
+    def test_own_window_layout_is_ignored(self) -> None:
+        self.engine._poll_current_group()
+        self.backend.own_window = True
+        self.backend.isolated_layout = True
+        self.backend.window = 9
+        self.backend.group = 1
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._poll_current_group()
+        ignored = self.technical_events(logs.output)[0]
+        self.assertEqual(ignored["event"], "layout_change_ignored")
+        self.assertEqual(ignored["reason"], "own_window")
+        self.assertEqual((ignored["previous_group"], ignored["selected_group"]), (0, 1))
+        self.assertEqual(self.engine.snapshot.current_group, 0)
+        self.assertIsNone(self.engine._manual_layout_group)
+        self.assertEqual(self.engine._focus_window, 1)
+        # Back in the editor nothing happened: no focus change, no protection.
+        self.backend.own_window = False
+        self.backend.isolated_layout = False
+        self.backend.window = 1
+        self.backend.group = 0
+        self.engine._poll_current_group()
+        self.assertEqual(self.engine._focus_window, 1)
+        self.assertFalse(self.engine._last_committed_stale)
+        self.correct_hello()
+
+    def test_own_window_with_a_global_layout_still_sees_manual_switches(self) -> None:
+        # X11: the layout is global, so a switch made while a KeySwitch window
+        # (or the E2E's own entry) is focused is the user's own choice.
+        self.engine._poll_current_group()
+        self.backend.own_window = True
+        self.backend.window = 9
+        self.backend.group = 1
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._poll_current_group()
+        observed = self.technical_events(logs.output)[0]
+        self.assertEqual(observed["event"], "manual_layout_observed")
+        self.assertFalse(observed["focus_changed"])
+        self.assertEqual(self.engine._manual_layout_group, 1)
+        self.assertEqual(self.engine.snapshot.current_group, 1)
+        self.assertEqual(self.engine._focus_window, 1)
+
+    def test_engine_switch_drops_an_older_manual_pick(self) -> None:
+        self.engine._manual_layout_group = 1
+        self.engine._manual_layout_observed_at = time.monotonic()
+        self.correct_hello()
+        self.assertIsNone(self.engine._manual_layout_group)
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.type_word("привет", group=1, start=50)
+            self.press_space(1)
+        evaluation = next(
+            event for event in self.technical_events(logs.output) if event["event"] == "word_evaluation"
+        )
+        self.assertIsNone(evaluation["skipped_reason"])
+
+    def test_moving_to_another_window_drops_the_unfinished_word(self) -> None:
+        self.correct_hello()
+        self.assertFalse(self.engine._last_committed_stale)
+        self.type_word("руд", group=1, start=60)
+        self.assertEqual(self.engine.snapshot.current_word, "руд")
+        self.backend.window = 2
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._poll_current_group()
+        changed = next(
+            event for event in self.technical_events(logs.output) if event["event"] == "focus_changed"
+        )
+        self.assertEqual((changed["previous_window"], changed["window"]), (1, 2))
+        self.assertEqual(changed["dropped_word_length"], 3)
+        self.assertEqual(self.engine._strokes, [])
+        self.assertEqual(self.engine.snapshot.current_word, "")
+        self.assertTrue(self.engine._last_committed_stale)
+        # Pause in the new window only switches the layout: the word behind
+        # the previous correction lives in the other window.
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.press_pause()
+        names = [event["event"] for event in self.technical_events(logs.output)]
+        self.assertIn("layout_switched_without_word", names)
+        self.assertEqual(len(self.backend.injections), 1)
+
+    def _undo_early_switch(self) -> None:
+        self.settings.set("detection.early_switch", True)
+        self.type_word("ghbd")
+        self.assertEqual(self.engine._early_switch_origin, 0)
+        self.assertEqual(len(self.backend.injections), 1)
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._schedule_undo(200)
+            self.engine._handle(plain_key("z", 200, 1, pressed=False))
+        strokes, target, boundary = self.backend.injections[-1]
+        self.assertEqual((len(strokes), target, boundary), (4, 0, None))
+        self.assertEqual(self.engine.snapshot.current_group, 0)
+        self.assertEqual(self.engine.snapshot.current_word, "ghbd")
+        self.assertEqual(
+            self.engine.snapshot.last_action, "прив → ghbd · раннее переключение отменено"
+        )
+        self.assertIsNone(self.engine._early_switch_origin)
+        self.assertTrue(self.engine._early_switch_undone)
+        events = self.technical_events(logs.output)
+        scheduled = next(event for event in events if event["event"] == "early_switch_undo_scheduled")
+        self.assertEqual((scheduled["source_group"], scheduled["target_group"]), (1, 0))
+        applied = next(event for event in events if event["event"] == "correction_applied")
+        self.assertEqual(applied["mode"], "early_undo")
+        self.assertEqual(applied["deleted_characters"], 4)
+        self.assertFalse(applied["automatic"])
+        # The rest of the word is neither switched early again nor corrected.
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.type_word("tn", group=0, start=34)
+            self.press_space(0)
+        self.assertEqual(len(self.backend.injections), 2)
+        evaluation = next(
+            event for event in self.technical_events(logs.output) if event["event"] == "word_evaluation"
+        )
+        self.assertEqual(evaluation["skipped_reason"], "manual_layout_protected")
+        protection = evaluation["protection"]
+        assert isinstance(protection, dict)
+        self.assertEqual(protection["reason"], "early_switch_undone")
+        self.assertFalse(self.engine._early_switch_undone)
+        self.assertIsNone(self.engine._manual_layout_group)
+        self.assertEqual(self.engine.snapshot.correction_count, 0)
+        self.assertEqual(self.history.read(), [])
+        # The next wrong-layout word is switched early again.
+        self.type_word("ghbd", start=90)
+        self.assertEqual(len(self.backend.injections), 3)
+        self.assertEqual(self.engine._early_switch_origin, 0)
+        self.assertEqual(self.engine.snapshot.current_word, "прив")
+
+    def test_undo_during_an_early_switch_reverts_the_prefix(self) -> None:
+        self._undo_early_switch()
+
+    def test_undo_during_an_early_switch_holds_without_manual_layout_respect(self) -> None:
+        self.settings.set("detection.respect_manual_layout", False)
+        self._undo_early_switch()
+
+    def test_clearing_an_early_switched_word_records_the_correction(self) -> None:
+        self.settings.set("detection.early_switch", True)
+        self.type_word("ghbd")
+        self.type_word("ет", group=1, start=34)
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._handle(plain_key("Left", 113, 1))
+        completed = next(
+            event for event in self.technical_events(logs.output) if event["event"] == "early_switch_completed"
+        )
+        self.assertEqual((completed["original"], completed["replacement"]), ("ghbdtn", "привет"))
+        self.assertEqual(self.engine.snapshot.correction_count, 1)
+        self.assertEqual(len(self.history.read()), 1)
+        self.assertTrue(self.engine._last_committed_stale)
+        assert self.engine._last_correction is not None
+        self.assertEqual(self.engine._last_correction.mode, "early")
+        self.assertIsNone(self.engine._early_switch_origin)
+        self.assertEqual(self.engine._strokes, [])
+        # A generic undo now reverts exactly that prefix.
+        self.engine._schedule_undo(200)
+        self.engine._handle(plain_key("z", 200, 1, pressed=False))
+        strokes, target, boundary = self.backend.injections[-1]
+        self.assertEqual((len(strokes), target, boundary), (6, 0, None))
+
+    def test_learning_is_not_offered_for_a_lone_letter_or_symbols(self) -> None:
+        self.settings.set("detection.learning_confirmations", 1)
+        self.engine._handle(boundary_event(True, group=1))
+        self.engine._handle(boundary_event(False, group=1))
+        self.type_word("б", group=1, start=70)
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.press_pause()
+        strokes, target, boundary = self.backend.injections[-1]
+        self.assertEqual((len(strokes), target, boundary), (1, 0, None))
+        self.assertEqual(self.engine.snapshot.last_action, "б → ,")
+        self.assertIsNone(self.engine.learning_prompt)
+        self.assertEqual(self.engine.learning.counts(), (0, 0))
+        scheduled = next(
+            event for event in self.technical_events(logs.output) if event["event"] == "manual_conversion_scheduled"
+        )
+        self.assertFalse(scheduled["learnable"])
+        # Two letters still read as a word and become a rule at once.
+        self.type_word("yj", group=0, start=80)
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.press_pause()
+        self.assertEqual(self.engine.snapshot.last_action, "yj → но · правило выучено")
+        self.assertEqual(self.engine.learning.counts(), (1, 0))
+        scheduled = next(
+            event for event in self.technical_events(logs.output) if event["event"] == "manual_conversion_scheduled"
+        )
+        self.assertTrue(scheduled["learnable"])
 
     def test_learning_prompt_lifecycle_is_logged(self) -> None:
         self.settings.set("detection.learning_confirmations", 5)

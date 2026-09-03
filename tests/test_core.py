@@ -37,6 +37,9 @@ class FakeBackend:
     def active_application(self) -> str:
         return "TestEditor"
 
+    def focused_window(self) -> None:
+        return None
+
     def current_group(self) -> int:
         return self.group
 

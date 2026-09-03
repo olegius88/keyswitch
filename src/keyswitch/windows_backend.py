@@ -16,6 +16,7 @@ from .backend import (
     SHIFT_MASK,
     SUPER_MASK,
     BackendProbe,
+    FocusInfo,
     KeyEvent,
     ScreenAnchor,
 )
@@ -109,9 +110,17 @@ class WindowsAPI(Protocol):
 
     def active_application(self) -> str: ...
 
+    def foreground_window(self) -> int: ...
+
+    def window_process_id(self, window: int) -> int: ...
+
+    def current_process_id(self) -> int: ...
+
     def input_anchor(self) -> ScreenAnchor | None: ...
 
     def activate_window(self, window: int) -> bool: ...
+
+    def keep_window_inactive(self, window: int) -> bool: ...
 
     def caps_lock_enabled(self) -> bool: ...
 
@@ -318,11 +327,22 @@ class WindowsBackend:
     def active_application(self) -> str:
         return self._api.active_application()
 
+    def focused_window(self) -> FocusInfo | None:
+        window = self._api.foreground_window()
+        if not window:
+            return None
+        process_id = self._api.window_process_id(window)
+        own = bool(process_id) and process_id == self._api.current_process_id()
+        return FocusInfo(window, own, isolated_layout=own)
+
     def input_anchor(self) -> ScreenAnchor | None:
         return self._api.input_anchor()
 
     def restore_window(self, window: int | None) -> bool:
         return window is not None and self._api.activate_window(window)
+
+    def keep_window_inactive(self, window: int) -> bool:
+        return self._api.keep_window_inactive(window)
 
     def _handle_native(self, native: NativeKeyEvent) -> None:
         if native.pressed:

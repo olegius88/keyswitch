@@ -563,6 +563,9 @@ class FakeBackend:
     def active_application(self) -> str:
         return self.application
 
+    def focused_window(self) -> None:
+        return None
+
     def current_group(self) -> int:
         return self.group
 
@@ -752,7 +755,7 @@ class EngineBranchTests(unittest.TestCase):
             initialized.records[0].getMessage().removeprefix("TECHNICAL ")
         )
         self.assertEqual(initial_payload["event"], "engine_initialized")
-        self.assertEqual(initial_payload["keyswitch_version"], "0.9.0")
+        self.assertEqual(initial_payload["keyswitch_version"], "0.9.1")
         self.assertIn("minimum_length", initial_payload["detection_settings"])
 
     def test_start_stop_idempotence_and_backend_failure(self) -> None:

@@ -4,6 +4,36 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.9.1 — 2026-09-03
+
+- Windows keeps a keyboard layout per window, so the layout that arrived
+  together with another window (Telegram → TeamViewer, an IDE → the browser)
+  was logged as a manual switch and protected the next word from
+  autocorrection. The engine now tracks the focused window and treats such a
+  change as that window's own layout; a layout the engine selects itself also
+  drops an older manual pick instead of reviving it minutes later.
+- Windows of KeySwitch itself (settings, the learning prompt) never count as
+  a layout change. The Windows learning prompt is shown as a non-activating
+  popup: it no longer takes the caret away from the editor or swallows the
+  next typed key. Enter and Esc still answer it through the global hook, and
+  because the editor keeps the focus they now also reach the editor itself.
+- Moving to another window drops the unfinished word and marks the last
+  committed one stale, so a typing pause or `Pause` never rewrites text in
+  the wrong window.
+- Learning is offered only for something that reads as a word (at least two
+  letters): a lone letter converted to punctuation (`б` → `,`) is neither
+  offered nor counted towards an automatic rule.
+- The undo hotkey pressed while an early-switched word is still being typed
+  reverts that prefix instead of the previous correction and leaves the rest
+  of the word alone (also with manual layout respect off). An early switch
+  abandoned without a boundary (navigation key, another window) is still
+  recorded in the history and can be undone.
+- Early switching accepts prefixes typed on punctuation keys that are letters
+  in the other layout (`nt,z` → `тебя`).
+- Technical log: layout observations carry `focus_changed`; new events
+  `focus_changed`, `layout_change_ignored` and `early_switch_undo_scheduled`;
+  `manual_conversion_scheduled` reports `learnable`.
+
 ## 0.9.0 — 2026-09-03
 
 - `Pause` converts only what was typed after the last word boundary: the

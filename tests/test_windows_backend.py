@@ -27,6 +27,7 @@ from keyswitch.backend import (
     SHIFT_MASK,
     SUPER_MASK,
     BackendProbe,
+    FocusInfo,
     KeyEvent,
     ScreenAnchor,
 )
@@ -93,6 +94,10 @@ class FakeWindowsAPI:
         self.translation: dict[tuple[int, int], str] = {}
         self.anchor: ScreenAnchor | None = ScreenAnchor(100, 200, 300)
         self.activated_windows: list[int] = []
+        self.foreground = 300
+        self.window_owners: dict[int, int] = {300: 4242}
+        self.process_id = 7777
+        self.inactive_windows: list[int] = []
 
     def loaded_layouts(self) -> tuple[int, ...]:
         self.layout_calls += 1
@@ -129,6 +134,19 @@ class FakeWindowsAPI:
 
     def activate_window(self, window: int) -> bool:
         self.activated_windows.append(window)
+        return True
+
+    def foreground_window(self) -> int:
+        return self.foreground
+
+    def window_process_id(self, window: int) -> int:
+        return self.window_owners.get(window, 0)
+
+    def current_process_id(self) -> int:
+        return self.process_id
+
+    def keep_window_inactive(self, window: int) -> bool:
+        self.inactive_windows.append(window)
         return True
 
     def caps_lock_enabled(self) -> bool:
@@ -433,6 +451,19 @@ class WindowsBackendLifecycleTests(unittest.TestCase):
             with self.assertRaisesRegex(WindowsBackendError, "не подтвердил"):
                 backend.start(lambda _event: None)
         self.assertEqual(api.stop_calls, 1)
+
+    def test_focused_window_marks_windows_of_this_process(self) -> None:
+        api = FakeWindowsAPI()
+        backend = WindowsBackend(api)
+        self.assertEqual(backend.focused_window(), FocusInfo(300, False))
+        api.window_owners[300] = api.process_id
+        self.assertEqual(backend.focused_window(), FocusInfo(300, True, True))
+        api.foreground = 301
+        self.assertEqual(backend.focused_window(), FocusInfo(301, False))
+        api.foreground = 0
+        self.assertIsNone(backend.focused_window())
+        self.assertTrue(backend.keep_window_inactive(55))
+        self.assertEqual(api.inactive_windows, [55])
 
     def test_stop_does_not_join_current_thread(self) -> None:
         api = FakeWindowsAPI()
