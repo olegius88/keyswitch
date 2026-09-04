@@ -8,6 +8,7 @@ import queue
 import webbrowser
 import winsound
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 import tkinter as tk
@@ -28,6 +29,7 @@ from .logsetup import (
     follow_settings,
     log_directory,
     log_path,
+    log_status,
     rotation_summary,
 )
 from .windows_backend import WindowsBackend
@@ -72,6 +74,79 @@ PAGE_NAMES = (
 WINDOWS_LEARNING_PROMPT_DELAY_MS = 200
 WINDOWS_UPDATE_INITIAL_DELAY_MS = 30_000
 WINDOWS_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000
+# One wheel notch moves three of these steps, matching the Windows default.
+PAGE_SCROLL_STEP_PIXELS = 20
+# Reserved gutters keep the layout still while the markers appear and vanish.
+MODIFIED_MARKER_WIDTH = 3
+MODIFIED_MARKER_COLUMN = 12
+RESET_BUTTON_COLUMN = 54
+# A word, not a pictogram: Segoe UI is documented to cover Cyrillic, while the
+# revert arrows live in Segoe UI Symbol and would depend on font fallback.
+RESET_BUTTON_LABEL = "Сброс"
+RESET_BUTTON_HINT = "Вернуть значение по умолчанию"
+DESCRIPTION_INDENT = 24
+DESCRIPTION_MARGIN = 12
+DESCRIPTION_MINIMUM_WRAP = 120
+DESCRIPTION_INITIAL_WRAP = 260
+PAGE_PADDING = 30
+# Widgets that already answer the wheel and the paging keys themselves.
+SELF_SCROLLING_WIDGETS = (tk.Text, tk.Listbox, ttk.Treeview)
+
+
+@dataclass(frozen=True)
+class _SettingIndicator:
+    """Widgets that mark one setting as changed away from its default."""
+
+    marker: tk.Frame
+    reset: ttk.Button
+    label: ttk.Label | ttk.Checkbutton
+    normal_style: str
+    modified_style: str
+
+
+class _Tooltip:
+    """Minimal hover hint; Tk ships no tooltip widget of its own."""
+
+    def __init__(self, widget: ttk.Widget, text: str) -> None:
+        self._widget = widget
+        self._text = text
+        self._window: tk.Toplevel | None = None
+        widget.bind("<Enter>", self._show, add=True)
+        widget.bind("<Leave>", self._hide, add=True)
+        widget.bind("<ButtonPress>", self._hide, add=True)
+
+    def _show(self, _event: tk.Event[tk.Misc]) -> None:
+        if self._window is not None:
+            return
+        try:
+            window = tk.Toplevel(self._widget)
+            window.wm_overrideredirect(True)
+            window.wm_geometry(
+                f"+{self._widget.winfo_rootx()}"
+                f"+{self._widget.winfo_rooty() + self._widget.winfo_height() + 4}"
+            )
+            tk.Label(
+                window,
+                text=self._text,
+                background="#2b3040",
+                foreground="white",
+                borderwidth=0,
+                padx=8,
+                pady=4,
+            ).pack()
+        except tk.TclError:
+            LOGGER.debug("Не удалось показать подсказку", exc_info=True)
+            return
+        self._window = window
+
+    def _hide(self, _event: tk.Event[tk.Misc] | None = None) -> None:
+        window, self._window = self._window, None
+        if window is None:
+            return
+        try:
+            window.destroy()
+        except tk.TclError:
+            LOGGER.debug("Не удалось скрыть подсказку", exc_info=True)
 
 
 class WindowsLearningPrompt:
@@ -232,11 +307,16 @@ class WindowsApplication:
             install_request=self._install_request_from_thread,
         )
         self._pages: dict[str, ttk.Frame] = {}
+        self._page_holders: dict[str, ttk.Frame] = {}
+        self._page_viewports: dict[str, tk.Canvas] = {}
+        self._setting_indicators: dict[str, list[_SettingIndicator]] = {}
         self._navigation: dict[str, tk.Button] = {}
         self._active_page = "overview"
         self._sidebar_background = "#18233a"
         self._navigation_accent = "#4f7cff"
         self._navigation_hover = "#293957"
+        self._content_background = "#ffffff"
+        self._modified_accent = "#4f7cff"
         self._boolean_variables: dict[str, tk.BooleanVar] = {}
         self._string_variables: dict[str, tk.StringVar] = {}
         self._choice_labels: dict[str, dict[str, str]] = {}
@@ -277,6 +357,7 @@ class WindowsApplication:
             value=f"Установлена версия {__version__}",
         )
         self.update_progress_text = tk.StringVar(master=self.root, value="")
+        self.log_state_text = tk.StringVar(master=self.root, value="")
 
         self.application_list: tk.Listbox
         self.word_list: tk.Listbox
@@ -357,6 +438,7 @@ class WindowsApplication:
         self._build_updates(content_shell)
         self._build_maintenance(content_shell)
         self._build_about(content_shell)
+        self._bind_scrolling()
         self.show_page("overview")
 
     def _new_page(
@@ -366,17 +448,157 @@ class WindowsApplication:
         title: str,
         subtitle: str,
     ) -> ttk.Frame:
-        page = ttk.Frame(parent, padding=(30, 24), style="Content.TFrame")
-        page.grid(row=0, column=0, sticky="nsew")
+        # Every page scrolls on its own so a long settings list stays reachable
+        # on short screens instead of being clipped by the window height.
+        holder = ttk.Frame(parent, style="Content.TFrame")
+        holder.grid(row=0, column=0, sticky="nsew")
+        holder.rowconfigure(0, weight=1)
+        holder.columnconfigure(0, weight=1)
+        viewport = tk.Canvas(
+            holder,
+            background=self._content_background,
+            borderwidth=0,
+            highlightthickness=0,
+            yscrollincrement=PAGE_SCROLL_STEP_PIXELS,
+        )
+        viewport.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(holder, orient="vertical", command=viewport.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        viewport.configure(yscrollcommand=scrollbar.set)
+        page = ttk.Frame(
+            viewport,
+            padding=(PAGE_PADDING, 24),
+            style="Content.TFrame",
+        )
+        window = viewport.create_window(0, 0, window=page, anchor="nw")
         page.columnconfigure(0, weight=1)
+        fit = partial(self._fit_page, viewport, window, page, scrollbar)
+        viewport.bind("<Configure>", fit)
+        page.bind("<Configure>", fit)
         ttk.Label(page, text=title, style="PageTitle.TLabel").grid(
             row=0, column=0, sticky="w"
         )
-        ttk.Label(page, text=subtitle, style="PageSubtitle.TLabel", wraplength=760).grid(
-            row=1, column=0, sticky="ew", pady=(3, 18)
+        caption = ttk.Label(
+            page,
+            text=subtitle,
+            style="PageSubtitle.TLabel",
+            wraplength=760,
+            justify="left",
         )
+        caption.grid(row=1, column=0, sticky="ew", pady=(3, 18))
+        self._follow_width(caption, page, 2 * PAGE_PADDING + DESCRIPTION_MARGIN)
         self._pages[name] = page
+        self._page_holders[name] = holder
+        self._page_viewports[name] = viewport
         return page
+
+    def _fit_page(
+        self,
+        viewport: tk.Canvas,
+        window: int,
+        page: ttk.Frame,
+        scrollbar: ttk.Scrollbar,
+        _event: tk.Event[tk.Misc] | None = None,
+    ) -> None:
+        width = viewport.winfo_width()
+        height = viewport.winfo_height()
+        needed = page.winfo_reqheight()
+        # The page always fills the viewport so pages that stretch a table keep
+        # working; only the surplus becomes scrollable content.
+        extent = max(needed, height)
+        viewport.itemconfigure(window, width=width, height=extent)
+        viewport.configure(scrollregion=(0, 0, width, extent))
+        if needed > height:
+            scrollbar.grid()
+            return
+        viewport.yview_moveto(0.0)
+        scrollbar.grid_remove()
+
+    def _follow_width(
+        self,
+        label: ttk.Label,
+        container: tk.Misc,
+        reserve: int,
+        *,
+        minimum: int = DESCRIPTION_MINIMUM_WRAP,
+    ) -> None:
+        """Wrap long copy to the real width instead of a fixed pixel guess."""
+
+        def resize(event: tk.Event[tk.Misc]) -> None:
+            target = max(minimum, event.width - reserve)
+            # A dead band keeps the wrap width from oscillating by a pixel.
+            if abs(int(str(label.cget("wraplength"))) - target) >= 6:
+                label.configure(wraplength=target)
+
+        container.bind("<Configure>", resize, add=True)
+
+    def _bind_scrolling(self) -> None:
+        self.root.bind_all("<MouseWheel>", self._wheel_scroll, add=True)
+        self.root.bind_all("<Button-4>", self._wheel_scroll, add=True)
+        self.root.bind_all("<Button-5>", self._wheel_scroll, add=True)
+        self.root.bind_all("<Prior>", partial(self._keyboard_scroll, -1), add=True)
+        self.root.bind_all("<Next>", partial(self._keyboard_scroll, 1), add=True)
+
+    @staticmethod
+    def _scrolls_itself(widget: tk.Misc | None) -> bool:
+        node = widget
+        while node is not None:
+            if isinstance(node, SELF_SCROLLING_WIDGETS):
+                return True
+            node = node.master
+        return False
+
+    def _viewport_of(self, widget: tk.Misc | None) -> tk.Canvas | None:
+        viewports = set(self._page_viewports.values())
+        node = widget
+        while node is not None:
+            if isinstance(node, tk.Canvas) and node in viewports:
+                return node
+            node = node.master
+        return None
+
+    @staticmethod
+    def _wheel_steps(event: tk.Event[tk.Misc]) -> int:
+        if event.num in {4, 5}:
+            return -3 if event.num == 4 else 3
+        delta = int(event.delta)
+        if delta == 0:
+            return 0
+        # Windows counts 120 units per notch; builds that report a bare
+        # ±1 are treated as one notch as well.
+        notches = delta // 120 if abs(delta) >= 120 else (1 if delta > 0 else -1)
+        return -3 * notches
+
+    def _wheel_scroll(self, event: tk.Event[tk.Misc]) -> None:
+        # Route by pointer position rather than by the widget Tk happened to
+        # deliver the event to, so the wheel always moves what is under it.
+        pointer = self.root.winfo_containing(event.x_root, event.y_root)
+        if self._scrolls_itself(pointer):
+            return
+        viewport = self._viewport_of(pointer) or self._page_viewports.get(
+            self._active_page
+        )
+        if viewport is None:
+            return
+        viewport.yview_scroll(self._wheel_steps(event), "units")
+
+    def _wheel_over_control(self, event: tk.Event[tk.Misc]) -> str:
+        """Scroll the page instead of nudging the value under the pointer."""
+
+        self._wheel_scroll(event)
+        return "break"
+
+    def _bind_wheel_guard(self, control: ttk.Widget) -> None:
+        control.bind("<MouseWheel>", self._wheel_over_control)
+        control.bind("<Button-4>", self._wheel_over_control)
+        control.bind("<Button-5>", self._wheel_over_control)
+
+    def _keyboard_scroll(self, direction: int, event: tk.Event[tk.Misc]) -> None:
+        if self._scrolls_itself(event.widget):
+            return
+        viewport = self._page_viewports.get(self._active_page)
+        if viewport is not None:
+            viewport.yview_scroll(direction, "pages")
 
     @staticmethod
     def _section(parent: ttk.Frame, title: str, row: int) -> ttk.LabelFrame:
@@ -435,12 +657,12 @@ class WindowsApplication:
         behavior.grid(row=0, column=0, sticky="nsew", padx=(0, 7))
         behavior.columnconfigure(0, weight=1)
         for row, spec in enumerate(AUTOCORRECTION_SETTINGS):
-            self._add_setting(behavior, spec, row, description_wrap=310)
+            self._add_setting(behavior, spec, row)
         triggers = ttk.LabelFrame(columns, text="Когда проверять слово", padding=(18, 14))
         triggers.grid(row=0, column=1, sticky="nsew", padx=(7, 0))
         triggers.columnconfigure(0, weight=1)
         for row, spec in enumerate(TRIGGER_SETTINGS):
-            self._add_setting(triggers, spec, row, description_wrap=310)
+            self._add_setting(triggers, spec, row)
 
     def _build_layouts(self, parent: ttk.Frame) -> None:
         page = self._new_page(
@@ -734,12 +956,9 @@ class WindowsApplication:
             self._add_setting(diagnostics, spec, row)
         ttk.Label(
             diagnostics,
-            text=(
-                f"Файл журнала: {log_path()}\n"
-                f"Ротация в режиме диагностики: {rotation_summary(True)}, "
-                "включение начинает новый файл"
-            ),
+            textvariable=self.log_state_text,
             wraplength=720,
+            justify="left",
         ).grid(
             row=len(DIAGNOSTIC_SETTINGS),
             column=0,
@@ -769,6 +988,7 @@ class WindowsApplication:
             wraplength=720,
         ).grid(row=0, column=0, sticky="w")
         self._refresh_learning()
+        self._refresh_log_state()
 
     def _build_about(self, parent: ttk.Frame) -> None:
         page = self._new_page(
@@ -796,12 +1016,36 @@ class WindowsApplication:
         parent: ttk.LabelFrame,
         spec: SettingSpec,
         row: int,
-        *,
-        description_wrap: int = 620,
     ) -> None:
-        cell = ttk.Frame(parent)
+        cell = ttk.Frame(parent, style="Content.TFrame")
         cell.grid(row=row, column=0, sticky="ew", pady=5)
-        cell.columnconfigure(0, weight=1)
+        cell.columnconfigure(0, minsize=MODIFIED_MARKER_COLUMN)
+        cell.columnconfigure(1, weight=1)
+        cell.columnconfigure(2, minsize=RESET_BUTTON_COLUMN)
+        marker = tk.Frame(
+            cell,
+            width=MODIFIED_MARKER_WIDTH,
+            background=self._modified_accent,
+            borderwidth=0,
+            highlightthickness=0,
+        )
+        marker.grid(row=0, column=0, sticky="nsw")
+        marker.grid_remove()
+        body = ttk.Frame(cell, style="Content.TFrame")
+        body.grid(row=0, column=1, sticky="ew")
+        body.columnconfigure(0, weight=1)
+        # No fixed width: the button sizes itself to the label, and the
+        # reserved column keeps the rows aligned while it is hidden.
+        reset = ttk.Button(
+            cell,
+            text=RESET_BUTTON_LABEL,
+            style="Reset.TButton",
+            command=partial(self._restore_default, spec.path),
+        )
+        reset.grid(row=0, column=2, sticky="ne")
+        reset.grid_remove()
+        _Tooltip(reset, RESET_BUTTON_HINT)
+        label: ttk.Label | ttk.Checkbutton
         if spec.kind == "bool":
             variable = self._boolean_variables.get(spec.path)
             if variable is None:
@@ -810,31 +1054,61 @@ class WindowsApplication:
                     value=bool(self.settings.get(spec.path, False)),
                 )
                 self._boolean_variables[spec.path] = variable
-            ttk.Checkbutton(
-                cell,
+            label = ttk.Checkbutton(
+                body,
                 text=spec.title,
                 variable=variable,
                 command=partial(self._save_boolean, spec.path, variable),
-            ).grid(row=0, column=0, columnspan=2, sticky="w")
-        else:
-            ttk.Label(cell, text=spec.title, style="CardTitle.TLabel").grid(
-                row=0, column=0, sticky="w"
             )
-            control = self._setting_control(cell, spec)
+            label.grid(row=0, column=0, columnspan=2, sticky="w")
+            normal_style = "TCheckbutton"
+            modified_style = "Modified.TCheckbutton"
+            indent = DESCRIPTION_INDENT
+        else:
+            label = ttk.Label(body, text=spec.title, style="CardTitle.TLabel")
+            label.grid(row=0, column=0, sticky="w")
+            control = self._setting_control(body, spec)
             control.grid(row=0, column=1, sticky="e", padx=(16, 0))
-        ttk.Label(
-            cell,
+            normal_style = "CardTitle.TLabel"
+            modified_style = "Modified.CardTitle.TLabel"
+            indent = 0
+        description = ttk.Label(
+            body,
             text=spec.description,
             style="Muted.TLabel",
-            wraplength=description_wrap,
+            wraplength=DESCRIPTION_INITIAL_WRAP,
             justify="left",
-        ).grid(
-            row=1,
-            column=0,
-            columnspan=2,
-            sticky="w",
-            padx=(24 if spec.kind == "bool" else 0, 0),
         )
+        description.grid(row=1, column=0, columnspan=2, sticky="w", padx=(indent, 0))
+        self._follow_width(description, body, indent + DESCRIPTION_MARGIN)
+        self._setting_indicators.setdefault(spec.path, []).append(
+            _SettingIndicator(marker, reset, label, normal_style, modified_style)
+        )
+        self._update_modified_indicator(spec.path)
+
+    def _restore_default(self, path: str) -> None:
+        self.settings.restore_default(path)
+        self._update_modified_indicator(path)
+
+    def _update_modified_indicator(self, path: str) -> None:
+        indicators = self._setting_indicators.get(path)
+        if not indicators:
+            return
+        modified = not self.settings.is_default(path)
+        for indicator in indicators:
+            if modified:
+                indicator.marker.grid()
+                indicator.reset.grid()
+            else:
+                indicator.marker.grid_remove()
+                indicator.reset.grid_remove()
+            indicator.label.configure(
+                style=indicator.modified_style if modified else indicator.normal_style
+            )
+
+    def _refresh_modified_indicators(self) -> None:
+        for path in tuple(self._setting_indicators):
+            self._update_modified_indicator(path)
 
     def _setting_control(self, parent: ttk.Frame, spec: SettingSpec) -> ttk.Widget:
         stored = self.settings.get(spec.path, "")
@@ -856,6 +1130,7 @@ class WindowsApplication:
                 "<<ComboboxSelected>>",
                 partial(self._save_choice_event, spec.path, variable),
             )
+            self._bind_wheel_guard(choice_control)
             return choice_control
         variable = self._string_variables.setdefault(
             spec.path,
@@ -875,6 +1150,7 @@ class WindowsApplication:
                 "<FocusOut>",
                 partial(self._save_number_event, spec, variable),
             )
+            self._bind_wheel_guard(number_control)
             return number_control
         text_control = ttk.Entry(parent, width=25, textvariable=variable)
         text_control.bind(
@@ -889,11 +1165,13 @@ class WindowsApplication:
 
     def _save_boolean(self, path: str, variable: tk.BooleanVar) -> None:
         self.settings.set(path, variable.get())
+        self._update_modified_indicator(path)
 
     def _save_text(self, path: str, variable: tk.StringVar) -> None:
         value = variable.get().strip()
         if value:
             self.settings.set(path, value)
+            self._update_modified_indicator(path)
 
     def _save_text_event(
         self,
@@ -908,6 +1186,7 @@ class WindowsApplication:
         values = self._choice_labels[path]
         internal = next((key for key, label in values.items() if label == selected), selected)
         self.settings.set(path, internal)
+        self._update_modified_indicator(path)
 
     def _save_choice_event(
         self,
@@ -927,6 +1206,7 @@ class WindowsApplication:
         value: int | float = int(round(numeric)) if spec.kind == "int" else round(numeric, 2)
         variable.set(str(value))
         self.settings.set(spec.path, value)
+        self._update_modified_indicator(spec.path)
 
     def _save_number_event(
         self,
@@ -937,10 +1217,10 @@ class WindowsApplication:
         self._save_number(spec, variable)
 
     def show_page(self, page_name: str) -> None:
-        page = self._pages.get(page_name)
-        if page is None:
+        holder = self._page_holders.get(page_name)
+        if holder is None:
             return
-        page.tkraise()
+        holder.tkraise()
         self._active_page = page_name
         self._refresh_navigation_style()
         if page_name == "history":
@@ -949,6 +1229,7 @@ class WindowsApplication:
             self._load_catalog()
         elif page_name == "maintenance":
             self._refresh_learning()
+            self._refresh_log_state()
         elif page_name == "about":
             self._refresh_diagnostics()
 
@@ -1004,6 +1285,7 @@ class WindowsApplication:
         if path == "*":
             self._refresh_setting_controls()
             return
+        self._update_modified_indicator(path)
         boolean = self._boolean_variables.get(path)
         if boolean is not None:
             boolean.set(bool(value))
@@ -1040,6 +1322,7 @@ class WindowsApplication:
             value = self.settings.get(path, "")
             labels = self._choice_labels.get(path, {})
             string_variable.set(labels.get(str(value), str(value)))
+        self._refresh_modified_indicators()
         self.history.limit = max(1, int(self.settings.get("history.limit", 200)))
         self._apply_theme(str(self.settings.get("appearance.theme", "system")))
         self._refresh_exclusion_lists()
@@ -1374,6 +1657,26 @@ class WindowsApplication:
         ):
             self.history.clear()
 
+    def _refresh_log_state(self) -> None:
+        """Say whether the journal is really being written, and how large."""
+
+        status = log_status()
+        size = int(str(status["size"]))
+        if not status["installed"]:
+            state = "журнал не ведётся: обработчик не установлен"
+        elif size < 0:
+            state = "журнал не ведётся: файл недоступен"
+        elif size == 0:
+            state = "файл пуст: записей ещё нет"
+        else:
+            state = f"записывается, {size / 1024:.1f} КБ"
+        self.log_state_text.set(
+            f"Файл журнала: {log_path()}\n"
+            f"Состояние: {state}\n"
+            f"Ротация в режиме диагностики: {rotation_summary(True)}, "
+            "включение начинает новый файл"
+        )
+
     def _refresh_learning(self) -> None:
         rules, rejections = self.engine.learning.counts()
         self.learning_text.set(
@@ -1414,6 +1717,7 @@ class WindowsApplication:
                 self.settings.get("diagnostics.technical_logging", False)
             ),
             "technical_log": str(log_path()),
+            "log": log_status(),
             "settings": str(self.settings.path),
             "data": str(data_dir()),
             "error": probe.error,
@@ -1456,14 +1760,25 @@ class WindowsApplication:
         self._sidebar_background = sidebar
         self._navigation_accent = accent
         self._navigation_hover = "#293957"
+        self._content_background = content
+        self._modified_accent = accent
         self.root.configure(background=background)
+        style.configure("TFrame", background=content)
         style.configure("App.TFrame", background=background)
         style.configure("Content.TFrame", background=content)
         style.configure("Sidebar.TFrame", background=sidebar)
+        style.configure("TCheckbutton", background=content, foreground=foreground)
+        style.configure("Modified.TCheckbutton", background=content, foreground=accent)
+        style.configure("Reset.TButton", padding=(2, 0), font=("Segoe UI", 8))
         style.configure("TLabel", background=content, foreground=foreground)
         style.configure("PageTitle.TLabel", background=content, foreground=foreground, font=("Segoe UI Semibold", 22))
         style.configure("PageSubtitle.TLabel", background=content, foreground=muted)
         style.configure("CardTitle.TLabel", foreground=foreground, font=("Segoe UI Semibold", 10))
+        style.configure(
+            "Modified.CardTitle.TLabel",
+            foreground=accent,
+            font=("Segoe UI Semibold", 10),
+        )
         style.configure("Muted.TLabel", foreground=muted)
         style.configure("Error.TLabel", foreground="#e5484d")
         style.configure("Brand.TLabel", background=sidebar, foreground="white", font=("Segoe UI Semibold", 20))
@@ -1472,6 +1787,11 @@ class WindowsApplication:
         self._refresh_navigation_style()
         style.configure("TLabelframe", background=content, foreground=foreground)
         style.configure("TLabelframe.Label", background=content, foreground=foreground, font=("Segoe UI Semibold", 11))
+        for viewport in self._page_viewports.values():
+            viewport.configure(background=content)
+        for indicators in self._setting_indicators.values():
+            for indicator in indicators:
+                indicator.marker.configure(background=accent)
 
     def run(self) -> int:
         self._sync_autostart()

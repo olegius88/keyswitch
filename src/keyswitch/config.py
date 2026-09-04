@@ -187,6 +187,31 @@ class SettingsStore:
         for callback in callbacks:
             callback(dotted_path, copy.deepcopy(value))
 
+    def default(self, dotted_path: str, fallback: object = None) -> object:
+        """Return the shipped value for a path without touching stored data."""
+
+        value: object = DEFAULTS
+        for part in dotted_path.split("."):
+            mapping = _string_keyed_mapping(value)
+            if mapping is None or part not in mapping:
+                return fallback
+            value = mapping[part]
+        return copy.deepcopy(value)
+
+    def is_default(self, dotted_path: str) -> bool:
+        missing = object()
+        return self.get(dotted_path, missing) == self.default(dotted_path, missing)
+
+    def restore_default(self, dotted_path: str) -> bool:
+        """Reset a single path; unknown paths are left untouched."""
+
+        missing = object()
+        value = self.default(dotted_path, missing)
+        if value is missing:
+            return False
+        self.set(dotted_path, value)
+        return True
+
     def subscribe(self, callback: SettingCallback) -> Callable[[], None]:
         with self._lock:
             self._callbacks.append(callback)

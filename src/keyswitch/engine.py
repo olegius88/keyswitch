@@ -349,7 +349,7 @@ class KeySwitchEngine:
         try:
             self._events.put_nowait(event)
         except queue.Full:
-            self._clear_word("Очередь ввода переполнена")
+            self._clear_word("Очередь ввода переполнена", reason="input_overflow")
 
     def select_alternate_group(self) -> bool:
         """Queue an explicit selection of the language opposite to the current one."""
@@ -394,7 +394,7 @@ class KeySwitchEngine:
                 else:
                     self._handle(event)
             except Exception as error:
-                self._clear_word()
+                self._clear_word(reason="input_error")
                 self._update(last_error=str(error), last_action="Ошибка обработки ввода")
 
     def _loop_timeout(self) -> float:
@@ -431,7 +431,7 @@ class KeySwitchEngine:
                 last_action="Язык из меню не переключён",
             )
             return
-        self._clear_word()
+        self._clear_word(reason="layout_selected")
         self._last_committed_stale = True
         self._note_engine_switch(group)
         self._manual_layout_group = (
@@ -490,7 +490,10 @@ class KeySwitchEngine:
         if self._matches_hotkey("toggle", event):
             enabled = not bool(self.settings.get("enabled", True))
             self.settings.set("enabled", enabled)
-            self._clear_word("Автокоррекция включена" if enabled else "Автокоррекция на паузе")
+            self._clear_word(
+                "Автокоррекция включена" if enabled else "Автокоррекция на паузе",
+                reason="engine_toggled",
+            )
             return
         if self._matches_hotkey("convert_last", event):
             self._schedule_manual_conversion(event.keycode)
@@ -499,7 +502,7 @@ class KeySwitchEngine:
             self._schedule_undo(event.keycode)
             return
         if event.control or event.alt or event.super_key:
-            self._clear_word()
+            self._clear_word(reason="modifier_shortcut")
             return
         if event.key_name == "BackSpace":
             if self._strokes:
@@ -524,7 +527,7 @@ class KeySwitchEngine:
             if self._late_stroke_after_early_switch(event):
                 event = self._convert_late_stroke(event)
             if self._source_group not in (-1, event.group):
-                self._clear_word()
+                self._clear_word(reason="layout_changed_mid_word")
             self._source_group = event.group
             self._strokes.append(event)
             self._mark_word_activity()
@@ -548,17 +551,29 @@ class KeySwitchEngine:
                 self._symbol_strokes.append(event)
             self._last_committed_stale = True
             return
-        if event.key_name in NAVIGATION_KEYS or event.character:
+        if event.key_name in NAVIGATION_KEYS:
+            # The caret moved: what was typed belongs to another position.
             self._last_committed_stale = True
-            if (
-                not self._strokes
-                and event.key_name not in NAVIGATION_KEYS
-                and self._layout_dependent(event)
-            ):
+            self._clear_word(reason="navigation")
+            return
+        if event.character:
+            self._last_committed_stale = True
+            if self._strokes:
+                # A digit or another printable key inside a word ("зь2") stays
+                # part of it, so Pause still converts the whole token. Nothing
+                # changes for automatic correction: the detector treats a token
+                # carrying a digit as code and leaves it alone.
+                self._strokes.append(event)
+                self._mark_word_activity()
+                self._update(
+                    current_word=self._text_for_group(self._strokes, self._source_group)
+                )
+                return
+            if self._layout_dependent(event):
                 # "@" typed in the US layout but meant as the RU quote.
                 self._symbol_strokes.append(event)
                 return
-            self._clear_word()
+            self._clear_word(reason="non_word_key")
 
     @staticmethod
     def _layout_dependent(event: KeyEvent) -> bool:
@@ -1253,6 +1268,30 @@ class KeySwitchEngine:
             shadow_decision=shadow_payload,
         )
 
+    def _log_word_discarded(self, reason: str) -> None:
+        """Record a word that was thrown away before it could be corrected."""
+
+        if not (self._strokes or self._symbol_strokes):
+            return
+        # Read the setting first: the application probe is a system call.
+        if not bool(self.settings.get("diagnostics.technical_logging", False)):
+            return
+        application = self.backend.active_application()
+        excluded = self._application_excluded(application)
+        original = self._text_for_group(
+            tuple(self._symbol_strokes) + tuple(self._strokes), self._source_group
+        )
+        self._technical_event(
+            "word_discarded",
+            reason=reason or "unspecified",
+            original="<redacted>" if excluded else original,
+            length=len(self._strokes),
+            symbol_count=len(self._symbol_strokes),
+            source_group=self._source_group,
+            application=application,
+            application_excluded=excluded,
+        )
+
     def _mark_word_activity(self) -> None:
         self._last_word_input_at = time.monotonic()
         self._pause_correction_pending = True
@@ -1830,7 +1869,8 @@ class KeySwitchEngine:
     def _text_for_group(strokes: list[KeyEvent] | tuple[KeyEvent, ...], group: int) -> str:
         return "".join(stroke.character_for(group) for stroke in strokes)
 
-    def _clear_word(self, action: str | None = None) -> None:
+    def _clear_word(self, action: str | None = None, *, reason: str = "") -> None:
+        self._log_word_discarded(reason)
         self.dismiss_learning_prompt(reason="word_cleared")
         if self._early_switch_origin is not None and self._strokes:
             # The rewritten prefix stays on screen: record it so that the
@@ -1905,7 +1945,7 @@ class KeySwitchEngine:
 
         dropped = len(self._strokes)
         if self._strokes or self._symbol_strokes:
-            self._clear_word()
+            self._clear_word(reason="focus_changed")
         self._last_committed_stale = True
         self._technical_event(
             "focus_changed",

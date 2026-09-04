@@ -4,6 +4,40 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.11.0 — 2026-09-04
+
+- Every page of the Windows settings window scrolls. A page taller than the
+  window carries its own scrollbar and answers the wheel and PageUp/PageDown,
+  instead of hiding the settings below the fold; the wheel over a number field
+  or a drop-down scrolls the page rather than silently changing the value.
+  Descriptions wrap to the width the column really has, so the pages survive a
+  narrow window too.
+- A setting that differs from its shipped default is marked the way an editor
+  marks an edited line: an accent bar beside it, an accented title and a
+  "Сброс" button that restores that one value. The gutters holding them are
+  reserved, so nothing moves as the markers appear. Setting rows also share
+  the page background now instead of the grey band the platform theme drew
+  behind them.
+- A digit or a symbol typed inside a word no longer throws the word away.
+  `зь2` used to leave an empty buffer, so `Pause` had nothing to convert and
+  only switched the layout; it now becomes `pm2`. Automatic correction is
+  unchanged — the detector still treats a token carrying a digit as code and
+  never touches it on its own.
+- Whenever the engine does drop an unfinished word — a shortcut, a caret move,
+  a layout change mid-word, a focus change — the technical log records
+  `word_discarded` with the reason, so a correction that never happened can be
+  explained from the log instead of guessed at.
+- The log file is installed on the root logger directly instead of through
+  `logging.basicConfig`, which does nothing at all once anything else has
+  configured logging first — and does it silently, leaving an empty
+  `keyswitch.log` for a whole session. The maintenance page now states whether
+  the journal is really being written and how large it is, and the same state
+  is part of the diagnostics report.
+- Every line of the technical log carries the version that wrote it, and each
+  session opens with a banner naming the version, the platform and the
+  rotation budget. A rotated file that outlives an update can no longer be
+  read as if it came from the version installed now.
+
 ## 0.10.0 — 2026-09-04
 
 - The log file rotates by the mode it is in: ordinary operation keeps 1 MB in

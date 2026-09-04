@@ -152,6 +152,39 @@ class SettingsTests(unittest.TestCase):
             store.set("enabled", False)
             self.assertFalse(SettingsStore(path).get("enabled"))
 
+    def test_a_single_setting_reports_and_restores_its_default(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = SettingsStore(Path(directory) / "config.json")
+            changed: list[tuple[str, object]] = []
+            store.subscribe(lambda path, value: changed.append((path, value)))
+
+            self.assertEqual(store.default("detection.confidence"), 2.0)
+            self.assertIsNone(store.default("detection.unknown"))
+            self.assertEqual(store.default("detection.unknown", "—"), "—")
+            self.assertTrue(store.is_default("detection.confidence"))
+
+            store.set("detection.confidence", 3.5)
+            self.assertFalse(store.is_default("detection.confidence"))
+            self.assertTrue(store.restore_default("detection.confidence"))
+            self.assertEqual(store.get("detection.confidence"), 2.0)
+            self.assertTrue(store.is_default("detection.confidence"))
+            self.assertEqual(
+                changed,
+                [("detection.confidence", 3.5), ("detection.confidence", 2.0)],
+            )
+
+            # A path outside the shipped schema has no default to restore.
+            self.assertFalse(store.restore_default("detection.unknown"))
+            self.assertTrue(store.is_default("detection.unknown"))
+            store.set("detection.unknown", "kept")
+            self.assertFalse(store.is_default("detection.unknown"))
+
+            # Mutating what a lookup returned must not touch the defaults.
+            layouts = store.default("detection.layouts")
+            assert isinstance(layouts, list)
+            layouts.append("de")
+            self.assertEqual(store.default("detection.layouts"), ["us", "ru"])
+
 
 class LearningTests(unittest.TestCase):
     def test_manual_confirmations_and_rejection_are_persistent(self) -> None:

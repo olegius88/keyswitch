@@ -9,7 +9,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from unittest.mock import patch
 
-from keyswitch import logsetup
+from keyswitch import __version__, logsetup
 from keyswitch.config import SettingsStore
 
 
@@ -146,53 +146,121 @@ class SettingsFollowingTests(unittest.TestCase):
             root.removeHandler(other)
 
 
+class LogFormatTests(unittest.TestCase):
+    def test_every_line_carries_the_running_version(self) -> None:
+        record = logging.LogRecord(
+            "keyswitch.engine", logging.INFO, __file__, 1, "исправление", None, None
+        )
+        line = logsetup.log_formatter().format(record)
+        self.assertIn(f" {__version__} INFO keyswitch.engine: исправление", line)
+
+    def test_the_state_of_a_missing_log_file_is_reported(self) -> None:
+        missing = Path("/nonexistent-keyswitch") / "keyswitch.log"
+        with patch("keyswitch.logsetup.log_path", return_value=missing):
+            status = logsetup.log_status()
+        self.assertEqual(status["size"], -1)
+        self.assertFalse(status["installed"])
+        self.assertEqual(status["path"], str(missing))
+
+    def test_the_session_banner_names_the_version_and_the_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "data"
+            settings = SettingsStore(Path(temporary) / "config.json")
+            settings.set("diagnostics.technical_logging", True)
+            root = logging.getLogger()
+            previous, level = root.handlers[:], root.level
+            root.handlers = []
+            try:
+                with patch("keyswitch.logsetup.data_dir", return_value=directory):
+                    handler = logsetup.configure_logging(settings)
+                    handler.close()
+                banner = (directory / "keyswitch.log").read_text(encoding="utf-8")
+            finally:
+                root.handlers, root.level = previous, level
+            self.assertIn(f"KeySwitch {__version__} запущен", banner)
+            self.assertIn(str(directory / "keyswitch.log"), banner)
+            self.assertIn(logsetup.rotation_summary(True), banner)
+            self.assertIn("режим диагностики", banner)
+            self.assertIn(f" {__version__} INFO keyswitch.logsetup:", banner)
+
+
 class ConfigureLoggingTests(unittest.TestCase):
+    def setUp(self) -> None:
+        root = logging.getLogger()
+        self.handlers, self.level = root.handlers[:], root.level
+
+    def tearDown(self) -> None:
+        root = logging.getLogger()
+        for handler in root.handlers:
+            if handler not in self.handlers:
+                handler.close()
+        root.handlers, root.level = self.handlers, self.level
+
     def test_the_handler_is_installed_with_the_budget_of_the_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary) / "data"
             settings = SettingsStore(Path(temporary) / "config.json")
             settings.set("diagnostics.technical_logging", True)
-            with (
-                patch("keyswitch.logsetup.data_dir", return_value=directory),
-                patch("keyswitch.logsetup.logging.basicConfig") as basic,
-            ):
+            with patch("keyswitch.logsetup.data_dir", return_value=directory):
                 handler = logsetup.configure_logging(settings)
-                try:
-                    self.assertTrue(directory.is_dir())
-                    self.assertEqual(
-                        Path(handler.baseFilename), directory / "keyswitch.log"
-                    )
-                    self.assertEqual(
-                        (handler.maxBytes, handler.backupCount),
-                        logsetup.TECHNICAL_ROTATION,
-                    )
-                    self.assertEqual(basic.call_args.kwargs["level"], logging.INFO)
-                    self.assertEqual(basic.call_args.kwargs["handlers"], [handler])
+                self.assertTrue(directory.is_dir())
+                self.assertEqual(
+                    Path(handler.baseFilename), directory / "keyswitch.log"
+                )
+                self.assertEqual(
+                    (handler.maxBytes, handler.backupCount),
+                    logsetup.TECHNICAL_ROTATION,
+                )
 
-                    # The freshly installed handler keeps following the setting.
-                    settings.set("diagnostics.technical_logging", False)
-                    self.assertEqual(
-                        (handler.maxBytes, handler.backupCount),
-                        logsetup.DEFAULT_ROTATION,
-                    )
-                finally:
-                    handler.close()
+                # The freshly installed handler keeps following the setting.
+                settings.set("diagnostics.technical_logging", False)
+                self.assertEqual(
+                    (handler.maxBytes, handler.backupCount),
+                    logsetup.DEFAULT_ROTATION,
+                )
+
+    def test_the_root_logger_is_wired_even_when_it_already_has_handlers(self) -> None:
+        # logging.basicConfig would do nothing here, leaving the log silent.
+        root = logging.getLogger()
+        root.handlers = [logging.NullHandler()]
+        root.setLevel(logging.CRITICAL)
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "data"
+            with patch("keyswitch.logsetup.data_dir", return_value=directory):
+                handler = logsetup.configure_logging()
+                self.assertIn(handler, root.handlers)
+                self.assertIs(logsetup.file_handler(), handler)
+                self.assertEqual(root.level, logging.INFO)
+                logging.getLogger("keyswitch.engine").info("проверка")
+                handler.flush()
+                self.assertIn(
+                    "проверка", (directory / "keyswitch.log").read_text("utf-8")
+                )
+                status = logsetup.log_status()
+                self.assertTrue(status["installed"])
+                self.assertEqual(status["level"], "INFO")
+                self.assertEqual(status["path"], str(directory / "keyswitch.log"))
+                self.assertGreater(int(str(status["size"])), 0)
+                self.assertFalse(status["technical"])
+
+                # A second start replaces the handler instead of doubling it.
+                replacement = logsetup.configure_logging()
+                self.assertNotIn(handler, root.handlers)
+                self.assertIn(replacement, root.handlers)
+                self.assertEqual(
+                    len([h for h in root.handlers if isinstance(h, logging.FileHandler)]),
+                    1,
+                )
 
     def test_without_settings_the_ordinary_budget_is_used(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary) / "data"
-            with (
-                patch("keyswitch.logsetup.data_dir", return_value=directory),
-                patch("keyswitch.logsetup.logging.basicConfig"),
-            ):
+            with patch("keyswitch.logsetup.data_dir", return_value=directory):
                 handler = logsetup.configure_logging()
-                try:
-                    self.assertEqual(
-                        (handler.maxBytes, handler.backupCount),
-                        logsetup.DEFAULT_ROTATION,
-                    )
-                finally:
-                    handler.close()
+                self.assertEqual(
+                    (handler.maxBytes, handler.backupCount),
+                    logsetup.DEFAULT_ROTATION,
+                )
 
 
 if __name__ == "__main__":

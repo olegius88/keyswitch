@@ -10,7 +10,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from unittest.mock import patch
 
-from keyswitch.backend import FocusInfo
+from keyswitch.backend import CONTROL_MASK, FocusInfo
 from keyswitch.config import SettingsStore
 from keyswitch.engine import (
     ENGINE_SWITCH_GRACE_SECONDS,
@@ -86,6 +86,12 @@ def quote_event(group: int = 1, keycode: int = 11) -> KeyEvent:
 
 def plain_key(name: str, keycode: int, group: int, pressed: bool = True) -> KeyEvent:
     return KeyEvent(pressed, keycode, name, "", ("", ""), group, 0, 700)
+
+
+def digit_event(digit: str, group: int, keycode: int = 11) -> KeyEvent:
+    """A digit row key: the same character in both layouts."""
+
+    return KeyEvent(True, keycode, digit, digit, (digit, digit), group, 0, keycode)
 
 
 class EngineBehaviourTests(unittest.TestCase):
@@ -250,6 +256,92 @@ class EngineBehaviourTests(unittest.TestCase):
         )
         self.assertEqual(scheduled["source"], "last_committed")
         self.assertEqual((scheduled["original"], scheduled["replacement"]), ("привет", "ghbdtn"))
+
+    def test_a_digit_stays_part_of_the_word_so_pause_converts_it(self) -> None:
+        self.type_word("зь", group=1)
+        digit = digit_event("2", 1)
+        self.engine._handle(digit)
+        self.engine._handle(
+            KeyEvent(False, digit.keycode, "2", "2", ("2", "2"), 1, 0, digit.keycode)
+        )
+        self.assertEqual(self.engine._strokes[-1], digit)
+        self.assertEqual(self.engine.snapshot.current_word, "зь2")
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.press_pause()
+        strokes, target, boundary = self.backend.injections[-1]
+        self.assertEqual(len(strokes), 3)
+        self.assertEqual((target, boundary), (0, None))
+        self.assertEqual(self.engine.snapshot.last_action, "зь2 → pm2")
+        self.assertEqual(self.engine.snapshot.current_group, 0)
+        scheduled = next(
+            event
+            for event in self.technical_events(logs.output)
+            if event["event"] == "manual_conversion_scheduled"
+        )
+        self.assertEqual((scheduled["original"], scheduled["replacement"]), ("зь2", "pm2"))
+        # A token carrying a digit is code: nothing is learned from it and the
+        # automatic path leaves it alone.
+        self.assertFalse(scheduled["learnable"])
+
+    def test_a_word_with_a_digit_is_never_corrected_automatically(self) -> None:
+        self.type_word("ыекштп", group=1)
+        digit = digit_event("2", 1)
+        self.engine._handle(digit)
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.press_space(1)
+        self.assertEqual(self.backend.injections, [])
+        evaluation = next(
+            event
+            for event in self.technical_events(logs.output)
+            if event["event"] == "word_evaluation"
+        )
+        self.assertEqual(evaluation["original"], "ыекштп2")
+        decision = evaluation["decision"]
+        assert isinstance(decision, dict)
+        self.assertFalse(decision["should_convert"])
+        self.assertEqual(decision["reason"], "код, адрес или аббревиатура")
+
+    def test_a_discarded_word_says_why_in_the_log(self) -> None:
+        self.type_word("зь", group=1)
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._handle(
+                KeyEvent(True, 38, "a", "a", ("a", "ф"), 1, CONTROL_MASK, 800)
+            )
+        self.assertEqual(self.engine._strokes, [])
+        discarded = next(
+            event
+            for event in self.technical_events(logs.output)
+            if event["event"] == "word_discarded"
+        )
+        self.assertEqual(discarded["reason"], "modifier_shortcut")
+        self.assertEqual(discarded["original"], "зь")
+        self.assertEqual(discarded["length"], 2)
+
+        # Navigation keys still drop the word, and say so.
+        self.type_word("зь", group=1)
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._handle(plain_key("Left", 100, 1))
+        self.assertEqual(
+            next(
+                event["reason"]
+                for event in self.technical_events(logs.output)
+                if event["event"] == "word_discarded"
+            ),
+            "navigation",
+        )
+
+        # A digit with no word in progress drops the remembered symbols.
+        self.engine._handle(quote_event())
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._handle(digit_event("2", 1))
+        self.assertEqual(self.engine._symbol_strokes, [])
+        discarded = next(
+            event
+            for event in self.technical_events(logs.output)
+            if event["event"] == "word_discarded"
+        )
+        self.assertEqual(discarded["reason"], "non_word_key")
+        self.assertEqual(discarded["symbol_count"], 1)
 
     def test_layout_dependent_symbols_only_are_remembered(self) -> None:
         dot = KeyEvent(True, 60, "period", ".", (".", "."), 0, 0, 1)

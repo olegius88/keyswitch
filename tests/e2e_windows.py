@@ -106,6 +106,15 @@ def main() -> int:
             for page_name, title in PAGE_NAMES:
                 visual_application.show_page(page_name)
                 visual_application.root.update()
+                page = visual_application._pages[page_name]
+                viewport = visual_application._page_viewports[page_name]
+                region = str(viewport.cget("scrollregion")).split()
+                if len(region) != 4:
+                    raise RuntimeError(f"Page {page_name} has no scroll region")
+                if int(float(region[3])) < page.winfo_reqheight():
+                    raise RuntimeError(
+                        f"Page {page_name} cannot scroll to its full height"
+                    )
                 button = visual_application._navigation[page_name]
                 if button.cget("text") != title:
                     raise RuntimeError(f"Navigation label is missing for {page_name}")
@@ -133,12 +142,39 @@ def main() -> int:
             )
             if visual_application.settings.get("detection.correct_on_pause") is not False:
                 raise RuntimeError("Pause correction switch did not save the off state")
-            pause_variable.set(True)
-            visual_application._save_boolean(
-                "detection.correct_on_pause", pause_variable
-            )
+            pause_indicator = visual_application._setting_indicators[
+                "detection.correct_on_pause"
+            ][0]
+            visual_application.root.update()
+            if not pause_indicator.marker.winfo_ismapped():
+                raise RuntimeError("A changed setting is not marked as changed")
+            if not pause_indicator.reset.winfo_ismapped():
+                raise RuntimeError("A changed setting offers no reset button")
+            pause_indicator.reset.invoke()
+            visual_application.root.update()
             if visual_application.settings.get("detection.correct_on_pause") is not True:
-                raise RuntimeError("Pause correction switch did not save the on state")
+                raise RuntimeError("The reset button did not restore the default")
+            if not pause_variable.get():
+                raise RuntimeError("The switch did not follow the restored value")
+            if pause_indicator.marker.winfo_ismapped():
+                raise RuntimeError("A default setting is still marked as changed")
+
+            visual_application.show_page("autocorrection")
+            visual_application.root.update()
+            settings_viewport = visual_application._page_viewports["autocorrection"]
+            if settings_viewport.yview()[1] < 1.0:
+                settings_viewport.event_generate(
+                    "<MouseWheel>",
+                    delta=-120,
+                    x=20,
+                    y=20,
+                    rootx=settings_viewport.winfo_rootx() + 20,
+                    rooty=settings_viewport.winfo_rooty() + 20,
+                )
+                visual_application.root.update()
+                if settings_viewport.yview()[0] <= 0.0:
+                    raise RuntimeError("The wheel does not scroll the settings page")
+                settings_viewport.yview_moveto(0.0)
             technical_logging = visual_application._boolean_variables.get(
                 "diagnostics.technical_logging"
             )

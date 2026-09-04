@@ -972,8 +972,10 @@ class WindowsApplicationEntrypointTests(unittest.TestCase):
                 patch("keyswitch.windows_backend.WindowsBackend", return_value=backend),
                 patch("keyswitch.history.data_dir", return_value=Path(temporary)),
                 patch("logging.basicConfig"),
+                # logsetup imported the handler by name, so the patch has to
+                # name it there or the run opens the real log file.
                 patch(
-                    "logging.handlers.RotatingFileHandler",
+                    "keyswitch.logsetup.RotatingFileHandler",
                     return_value=logging.NullHandler(),
                 ),
                 contextlib.redirect_stdout(io.StringIO()),

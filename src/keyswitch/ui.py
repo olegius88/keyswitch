@@ -24,7 +24,7 @@ from . import __version__
 from .config import SettingsStore
 from .engine import EngineSnapshot
 from .history import HistoryStore
-from .logsetup import log_directory, log_path, rotation_summary
+from .logsetup import log_directory, log_path, log_status, rotation_summary
 from .intent_model import IntentModelStatus
 from .learning import LearningStore
 from .system import AutostartManager
@@ -1315,6 +1315,7 @@ class MainWindow(Adw.ApplicationWindow):
                 f"Intent model: {self.engine.intent_model_status.summary}",
                 f"Technical logging: {bool(self.settings.get('diagnostics.technical_logging', False))}",
                 f"Technical log: {log_path()}",
+                f"Log state: {log_status()}",
                 f"Backend error: {probe.error or 'none'}",
             )
         )

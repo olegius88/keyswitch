@@ -10,21 +10,32 @@ file so the log that is later attached to a report contains that session only.
 from __future__ import annotations
 
 import logging
+import sys
 from collections.abc import Callable
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from . import __version__
 from .config import SettingsStore
 from .history import data_dir
 
 
+LOGGER = logging.getLogger(__name__)
 LOG_FILE_NAME = "keyswitch.log"
-LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+# Every line carries the version: a rotated file that outlives an update must
+# not be read as if it came from the version that is installed now.
+LOG_FORMAT = "%(asctime)s %(version)s %(levelname)s %(name)s: %(message)s"
 TECHNICAL_LOGGING_PATH = "diagnostics.technical_logging"
 # Rotation budgets: (bytes per file, kept files). The diagnostics mode keeps
 # more and larger files because a busy hour of typing fills megabytes.
 DEFAULT_ROTATION = (1024 * 1024, 2)
 TECHNICAL_ROTATION = (5 * 1024 * 1024, 5)
+
+
+def log_formatter() -> logging.Formatter:
+    """Formatter stamping the running version on every recorded line."""
+
+    return logging.Formatter(LOG_FORMAT, defaults={"version": __version__})
 
 
 def log_directory() -> Path:
@@ -46,6 +57,41 @@ def rotation_summary(technical: bool) -> str:
 
     maximum, backups = rotation_limits(technical)
     return f"{maximum // (1024 * 1024)} МБ × {backups + 1} файлов"
+
+
+def install_handler(handler: logging.Handler) -> None:
+    """Attach the file log to the root logger and let INFO records through.
+
+    ``logging.basicConfig`` does nothing at all once the root logger carries a
+    handler, and it fails silently: the file is created by the handler and then
+    never written, which is indistinguishable from a quiet session. Wiring the
+    root logger directly is the only way to be sure the log is really live.
+    """
+
+    root = logging.getLogger()
+    for existing in list(root.handlers):
+        if isinstance(existing, logging.FileHandler):
+            root.removeHandler(existing)
+            existing.close()
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
+
+def log_status() -> dict[str, object]:
+    """State of the file log, so a silent journal is visible in a report."""
+
+    handler = file_handler()
+    try:
+        size = log_path().stat().st_size
+    except OSError:
+        size = -1
+    return {
+        "path": str(log_path()),
+        "installed": handler is not None,
+        "level": logging.getLevelName(logging.getLogger().getEffectiveLevel()),
+        "size": size,
+        "technical": handler is not None and handler.maxBytes == TECHNICAL_ROTATION[0],
+    }
 
 
 def file_handler() -> RotatingFileHandler | None:
@@ -126,7 +172,16 @@ def configure_logging(settings: SettingsStore | None = None) -> RotatingFileHand
         backupCount=backups,
         encoding="utf-8",
     )
-    logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, handlers=[handler])
+    handler.setFormatter(log_formatter())
+    install_handler(handler)
+    LOGGER.info(
+        "KeySwitch %s запущен на %s: журнал %s, ротация %s%s",
+        __version__,
+        sys.platform,
+        log_path(),
+        rotation_summary(technical),
+        ", режим диагностики" if technical else "",
+    )
     if settings is not None:
         follow_settings(settings, handler)
     return handler

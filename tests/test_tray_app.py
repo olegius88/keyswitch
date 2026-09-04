@@ -952,6 +952,9 @@ class ApplicationEntrypointTests(unittest.TestCase):
                 patch.object(sys, "argv", ["app.py", "--diagnose"]),
                 patch("keyswitch.x11_backend.X11Backend", return_value=backend),
                 patch("keyswitch.history.data_dir", return_value=Path(temporary)),
+                # logsetup imported data_dir by name, so the log file needs
+                # its own patch or the run writes into the real data directory.
+                patch("keyswitch.logsetup.data_dir", return_value=Path(temporary)),
                 contextlib.redirect_stdout(io.StringIO()),
                 warnings.catch_warnings(),
                 self.assertRaises(SystemExit) as stopped,
