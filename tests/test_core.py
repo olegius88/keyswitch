@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import ClassVar
 from unittest.mock import patch
@@ -22,7 +22,13 @@ from keyswitch.indicator import (
 from keyswitch.language_model import LanguageModel
 from keyswitch.learning import LearningStore
 from keyswitch.layouts import LayoutPair
-from keyswitch.short_words import trusted_short_word_decision
+from keyswitch.language_model import WordScore
+from keyswitch.short_words import (
+    CONTEXT_SHORT_WORD_REASON,
+    NATURAL_SOURCE_REASON,
+    natural_short_source_veto,
+    trusted_short_word_decision,
+)
 from keyswitch.spellcheck import HunspellDictionary
 from keyswitch.system import AutostartManager
 from keyswitch.x11_backend import BackendProbe, KeyEvent
@@ -31,6 +37,9 @@ from keyswitch.x11_backend import BackendProbe, KeyEvent
 class FakeBackend:
     def __init__(self) -> None:
         self.injections: list[tuple[tuple[KeyEvent, ...], int, KeyEvent | None]] = []
+        self.late: list[tuple[KeyEvent, ...]] = []
+        self.hold_calls = 0
+        self.held_count = 0
         self.group = 0
         self.listener: Callable[[KeyEvent], None] | None = None
 
@@ -46,15 +55,21 @@ class FakeBackend:
     def switch_group(self, group: int) -> None:
         self.group = group
 
+    def hold_input(self) -> None:
+        self.hold_calls += 1
+
     def inject_correction(
         self,
         strokes: Iterable[KeyEvent],
         target_group: int,
         boundary: KeyEvent | None,
         source_group: int | None = None,
-    ) -> None:
+        late: Sequence[KeyEvent] = (),
+    ) -> int:
         self.injections.append((tuple(strokes), target_group, boundary))
+        self.late.append(tuple(late))
         self.group = target_group
+        return self.held_count
 
     def set_key_filter(
         self, predicate: Callable[[KeyEvent], bool] | None
@@ -234,6 +249,50 @@ class LearningRuleStateTests(unittest.TestCase):
             store._data["rules"][store._key(0, "qwerty")] = "broken"
             self.assertEqual(store.rule_state(0, "qwerty"), (None, 0))
 
+    def test_the_settings_window_can_list_what_was_learned(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = LearningStore(Path(directory) / "learning.json")
+            self.assertEqual(store.rules(), ())
+            self.assertEqual(store.rejections(), ())
+
+            store.record_manual(0, "ghbdtn", 1)
+            store.record_manual(0, "ghbdtn", 1)
+            store.record_manual(1, "руддщ", 0)
+            store.reject(0, "hjrjdsq", 1)
+
+            self.assertEqual(
+                [
+                    (rule.word, rule.source_group, rule.target_group,
+                     rule.confirmations, rule.active)
+                    for rule in store.rules(2)
+                ],
+                [("ghbdtn", 0, 1, 2, True), ("руддщ", 1, 0, 1, False)],
+            )
+            # A stricter threshold leaves the same rule waiting.
+            self.assertFalse(store.rules(3)[0].active)
+            self.assertEqual(
+                [
+                    (item.word, item.source_group, item.target_group)
+                    for item in store.rejections()
+                ],
+                [("hjrjdsq", 0, 1)],
+            )
+
+            # Damaged entries are skipped instead of breaking the listing.
+            rules = store._data["rules"]
+            rules["broken"] = {"target_group": 1, "confirmations": 1}
+            rules["x:word"] = {"target_group": 1, "confirmations": 1}
+            rules[store._key(0, "text")] = "not a rule"
+            rules[store._key(0, "other")] = {"confirmations": 1}
+            rejections = store._data["rejections"]
+            rejections["broken"] = [1]
+            rejections[store._key(0, "word")] = "not a list"
+            rejections[store._key(0, "mixed")] = [1, "nonsense"]
+            self.assertEqual(len(store.rules(2)), 2)
+            self.assertEqual(
+                [item.word for item in store.rejections()], ["hjrjdsq", "mixed"]
+            )
+
 
 class SpellcheckTests(unittest.TestCase):
     def test_per_user_dictionary_root_is_discovered(self) -> None:
@@ -350,6 +409,80 @@ class DetectorTests(unittest.TestCase):
                         protect_code=True,
                     )
                 )
+
+    def test_russian_function_words_typed_in_latin_are_trusted(self) -> None:
+        def short(original: str, replacement: str, context: int | None) -> DetectionDecision | None:
+            return trusted_short_word_decision(
+                self.detector,
+                original,
+                {1: replacement},
+                0,
+                ignored_words=(),
+                rejected_targets=set(),
+                protect_code=True,
+                context_group=context,
+            )
+
+        # Frequent and unambiguous: no context needed.
+        for original, replacement in (("yt", "не"), ("gj", "по"), ("yf", "на")):
+            with self.subTest(original=original):
+                decision = short(original, replacement, None)
+                assert decision is not None
+                self.assertTrue(decision.should_convert)
+                self.assertEqual(decision.replacement, replacement)
+                self.assertEqual(decision.reason, "частотное короткое слово из безопасного списка")
+        # Real English tokens need the previous word to be Russian.
+        self.assertIsNone(short("kb", "ли", None))
+        with_context = short("kb", "ли", 1)
+        assert with_context is not None
+        self.assertEqual(with_context.reason, CONTEXT_SHORT_WORD_REASON)
+        # ...and even then a more frequent English token stays.
+        self.assertIsNone(short("vs", "мы", 1))
+        # A single letter is a word only after a Russian word.
+        self.assertIsNone(short("f", "а", None))
+        self.assertIsNone(short("f", "а", 0))
+        letter = short("f", "а", 1)
+        assert letter is not None
+        self.assertTrue(letter.should_convert)
+        self.assertEqual((letter.replacement, letter.confidence), ("а", 1.0))
+        self.assertEqual(letter.reason, CONTEXT_SHORT_WORD_REASON)
+        # A letter outside the curated list is not a word.
+        self.assertIsNone(short("g", "п", 1))
+
+    def test_a_short_natural_word_is_not_traded_for_a_dictionary_token(self) -> None:
+        def decision(
+            *,
+            convert: bool = True,
+            reason: str = "слово найдено только в целевом частотном словаре",
+            original: str = "дев",
+            replacement: str = "ltd",
+            ngram: float = -0.73,
+        ) -> DetectionDecision:
+            source = WordScore(-0.8, False, 0, 0.0, ngram_score=ngram)
+            target = WordScore(4.2, True, 54906, 0.0, exact=True, ngram_score=-4.0)
+            return DetectionDecision(
+                convert, original, replacement, 1, 0, 4.73, reason, source, target
+            )
+
+        vetoed = natural_short_source_veto(decision(), context_group=1)
+        self.assertFalse(vetoed.should_convert)
+        self.assertEqual(vetoed.reason, NATURAL_SOURCE_REASON)
+        # The context favouring the target, an unnatural source, a longer
+        # token, another reason or no conversion at all all leave it alone.
+        for kept in (
+            natural_short_source_veto(decision(), context_group=0),
+            natural_short_source_veto(decision(ngram=-6.3), context_group=1),
+            natural_short_source_veto(
+                decision(original="rfrjq", replacement="какой"), context_group=1
+            ),
+            natural_short_source_veto(
+                decision(reason="уверенное решение линейной n-граммной модели"),
+                context_group=1,
+            ),
+        ):
+            self.assertTrue(kept.should_convert)
+        untouched = decision(convert=False)
+        self.assertIs(natural_short_source_veto(untouched, context_group=1), untouched)
 
     def test_valid_words_are_not_changed(self) -> None:
         self.assertFalse(self.decision("hello", 0).should_convert)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -100,6 +100,8 @@ class InputBackend(Protocol):
         self, predicate: Callable[[KeyEvent], bool] | None
     ) -> None: ...
 
+    def hold_input(self) -> None: ...
+
     def stop(self) -> None: ...
 
     def close(self) -> None: ...
@@ -120,4 +122,5 @@ class InputBackend(Protocol):
         target_group: int,
         boundary: KeyEvent | None,
         source_group: int | None = None,
-    ) -> None: ...
+        late: Sequence[KeyEvent] = (),
+    ) -> int: ...

@@ -9,7 +9,7 @@ import tempfile
 import threading
 import time
 import unittest
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -575,17 +575,22 @@ class FakeBackend:
         self.switches.append(group)
         self.group = group
 
+    def hold_input(self) -> None:
+        return None
+
     def inject_correction(
         self,
         strokes: Iterable[KeyEvent],
         target_group: int,
         boundary: KeyEvent | None,
         source_group: int | None = None,
-    ) -> None:
+        late: Sequence[KeyEvent] = (),
+    ) -> int:
         if self.inject_error:
             raise self.inject_error
         self.injections.append((tuple(strokes), target_group, boundary, source_group))
         self.group = target_group
+        return 0
 
     def set_key_filter(
         self, predicate: Callable[[KeyEvent], bool] | None
@@ -760,7 +765,7 @@ class EngineBranchTests(unittest.TestCase):
             initialized.records[0].getMessage().removeprefix("TECHNICAL ")
         )
         self.assertEqual(initial_payload["event"], "engine_initialized")
-        self.assertEqual(initial_payload["keyswitch_version"], "0.12.0")
+        self.assertEqual(initial_payload["keyswitch_version"], "0.13.0")
         self.assertIn("minimum_length", initial_payload["detection_settings"])
 
     def test_start_stop_idempotence_and_backend_failure(self) -> None:

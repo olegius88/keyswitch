@@ -746,6 +746,24 @@ class BackendInjectionTests(unittest.TestCase):
         self.assertEqual(libraries.x11.XkbLockGroup.call_count, 1)
         self.assertEqual(libraries.xtst.XTestFakeKeyEvent.call_count, 4)
 
+    def test_late_keys_are_deleted_and_typed_again_outside_the_expected_echo(self) -> None:
+        backend, libraries = backend_with()
+        backend._control = 1
+        backend.hold_input()
+        self.assertEqual(
+            backend.inject_correction([self.stroke()], 1, None, late=[self.stroke(shifted=True)]),
+            0,
+        )
+        # Two backspaces, the word, then the late key with its shift: the late
+        # taps are not expected echoes, so the engine sees them as typed.
+        self.assertEqual(libraries.xtst.XTestFakeKeyEvent.call_count, 4 + 2 + 4)
+        self.assertEqual(len(backend._expected), 6)
+
+        libraries.xtst.XTestFakeKeyEvent.side_effect = [1] * 6 + [0]
+        with self.assertRaises(X11Error):
+            backend.inject_correction([self.stroke()], 1, None, late=[self.stroke()])
+        self.assertEqual(backend._expected, deque())
+
     def test_target_lock_and_fake_event_errors_clear_expected_and_release_grab(self) -> None:
         for mode in ("lock", "fake"):
             with self.subTest(mode=mode):

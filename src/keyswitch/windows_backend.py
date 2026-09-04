@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -214,6 +214,12 @@ class WindowsBackend:
         self._pressed: set[int] = set()
         self._key_filter: Callable[[KeyEvent], bool] | None = None
         self._consumed_keys: set[int] = set()
+        # While a correction is being injected the user's own keys are kept
+        # back here and typed again afterwards, so they can neither land
+        # between the backspaces and the replacement nor be lost.
+        self._hold_lock = threading.Lock()
+        self._holding = False
+        self._held: list[NativeKeyEvent] = []
         self._caps_lock = False
         self._inject_lock = threading.Lock()
 
@@ -371,7 +377,24 @@ class WindowsBackend:
         self._consumed_keys.add(event.keycode)
         return True
 
+    def hold_input(self) -> None:
+        """Keep the user's keys back until the next correction has landed."""
+
+        with self._hold_lock:
+            self._holding = True
+
+    def _release_hold(self) -> tuple[NativeKeyEvent, ...]:
+        with self._hold_lock:
+            self._holding = False
+            held, self._held = tuple(self._held), []
+        return held
+
     def _handle_native(self, native: NativeKeyEvent) -> bool:
+        if not native.injected:
+            with self._hold_lock:
+                if self._holding:
+                    self._held.append(native)
+                    return True
         if native.pressed:
             if native.virtual_key == VK_CAPITAL and native.virtual_key not in self._pressed:
                 self._caps_lock = not self._caps_lock
@@ -425,10 +448,21 @@ class WindowsBackend:
         target_group: int,
         boundary: KeyEvent | None,
         source_group: int | None = None,
-    ) -> None:
+        late: Sequence[KeyEvent] = (),
+    ) -> int:
+        """Replace the word and return how many held keys were typed again.
+
+        ``late`` are keys the user typed after the word but before this call:
+        their characters already follow the word on screen, so they are
+        deleted with it and typed again after the replacement, in the new
+        layout. Keys arriving during the injection are held by the hook (see
+        :meth:`hold_input`) and typed again last.
+        """
+
         if not 0 <= target_group < len(self.layouts):
             raise WindowsBackendError(f"Неизвестная группа раскладки {target_group}")
         stroke_list = list(strokes)
+        late_list = list(late)
         rendered_source_group = (
             source_group
             if source_group is not None
@@ -438,7 +472,9 @@ class WindowsBackend:
             raise WindowsBackendError(
                 f"Неизвестная исходная группа раскладки {rendered_source_group}"
             )
-        delete_count = len(stroke_list) + (1 if boundary is not None else 0)
+        delete_count = (
+            len(stroke_list) + (1 if boundary is not None else 0) + len(late_list)
+        )
         delete_inputs = tuple(
             NativeInput(pressed, virtual_key=VK_BACK)
             for _ in range(delete_count)
@@ -450,36 +486,79 @@ class WindowsBackend:
             for item in self._stroke_inputs(stroke)
         )
         boundary_inputs = self._stroke_inputs(boundary) if boundary is not None else ()
+        # Typed again as the user's own input: the engine must see these keys
+        # as the start of the next word, not as its own injection.
+        late_inputs = tuple(
+            item
+            for stroke in late_list
+            for item in self._stroke_inputs(stroke, synthetic=False)
+        )
         preserve_boundary_layout = bool(
             boundary is not None
             and rendered_source_group != target_group
             and boundary.character
             and boundary.character_for(target_group) != boundary.character
         )
+        late_deleted = False
+        late_typed = False
+        failure: Exception | None = None
         with self._inject_lock:
-            self._send_exact(delete_inputs)
-            self._switch_group(target_group)
-            self._send_exact(replay_inputs)
-            if preserve_boundary_layout:
-                self._switch_group(rendered_source_group)
-                self._send_exact(boundary_inputs)
+            try:
+                # The layout is switched first so that the deletion and the
+                # replacement travel in one SendInput call: Windows keeps the
+                # events of a single call together, but lets the user's keys
+                # slip in between separate calls.
                 self._switch_group(target_group)
-            else:
-                self._send_exact(boundary_inputs)
+                self._send_exact(
+                    delete_inputs
+                    + replay_inputs
+                    + (() if preserve_boundary_layout else boundary_inputs)
+                )
+                late_deleted = True
+                if preserve_boundary_layout:
+                    self._switch_group(rendered_source_group)
+                    self._send_exact(boundary_inputs)
+                    self._switch_group(target_group)
+                self._send_exact(late_inputs)
+                late_typed = True
+            except Exception as error:
+                failure = error
+            held = self._release_hold()
+            restore = late_inputs if late_deleted and not late_typed else ()
+            held_inputs = tuple(
+                NativeInput(
+                    item.pressed,
+                    virtual_key=item.virtual_key,
+                    scan_code=item.scan_code,
+                    extended=item.extended,
+                    synthetic=False,
+                )
+                for item in held
+            )
+            try:
+                self._send_exact(restore + held_inputs)
+            except Exception as error:
+                # The primary failure explains more than a failed restore.
+                failure = failure or error
+        if failure is not None:
+            raise failure
+        return len(held)
 
     @staticmethod
-    def _stroke_inputs(stroke: KeyEvent) -> tuple[NativeInput, ...]:
+    def _stroke_inputs(
+        stroke: KeyEvent, *, synthetic: bool = True
+    ) -> tuple[NativeInput, ...]:
         result: list[NativeInput] = []
         if stroke.shift:
-            result.append(NativeInput(True, virtual_key=VK_SHIFT))
+            result.append(NativeInput(True, virtual_key=VK_SHIFT, synthetic=synthetic))
         result.extend(
             (
-                NativeInput(True, scan_code=stroke.keycode),
-                NativeInput(False, scan_code=stroke.keycode),
+                NativeInput(True, scan_code=stroke.keycode, synthetic=synthetic),
+                NativeInput(False, scan_code=stroke.keycode, synthetic=synthetic),
             )
         )
         if stroke.shift:
-            result.append(NativeInput(False, virtual_key=VK_SHIFT))
+            result.append(NativeInput(False, virtual_key=VK_SHIFT, synthetic=synthetic))
         return tuple(result)
 
     def _send_exact(self, inputs: tuple[NativeInput, ...]) -> None:

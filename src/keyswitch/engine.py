@@ -25,7 +25,11 @@ from .indicator import alternate_layout_group, layout_label
 from .language_model import LanguageModel, WordScore
 from .learning import LearningStore
 from .intent_model import CorrectionTrigger, LinearNgramModel
-from .short_words import trusted_short_word_decision
+from .short_words import (
+    is_short_word_override,
+    natural_short_source_veto,
+    trusted_short_word_decision,
+)
 
 
 MODIFIER_KEYS = {
@@ -184,6 +188,7 @@ class KeySwitchEngine:
         self._last_word_input_at: float | None = None
         self._pause_correction_pending = False
         self._manual_layout_group: int | None = None
+        self._own_layout_ignored = False
         self._pressed: set[int] = set()
         self._pressed_since: dict[int, float] = {}
         self._modifier_keycodes: set[int] = set()
@@ -910,6 +915,9 @@ class KeySwitchEngine:
             )
             if decision.should_convert:
                 plan = self._plan_from_decision(strokes, boundary, application, decision)
+                # A boundary typed before the early switch's key was released
+                # takes over the same word: say so instead of losing the plan.
+                self._log_pending_dropped("superseded_by_boundary")
                 self._pending = plan
                 self._pending_learning_action = None
                 self._pending_trigger_keycode = boundary.keycode
@@ -1001,7 +1009,11 @@ class KeySwitchEngine:
         natural_source_boundary = (
             effective_length >= 4 and decision.source_score.ngram_score >= -0.25
         )
-        return decision.should_convert or protected_boundary or ignored_boundary or (
+        # A one- or two-letter word from the trusted list is recognisable, but
+        # it is just as often the start of a longer word whose next letter
+        # sits on this key: `j,ob[` is "общих", not "о" and a comma.
+        recognisable = decision.should_convert and not is_short_word_override(decision)
+        return recognisable or protected_boundary or ignored_boundary or (
             decision.source_score.known
             and effective_length
             >= int(self.settings.get("detection.minimum_length", 3))
@@ -1042,6 +1054,10 @@ class KeySwitchEngine:
                 self.settings.get("detection.intent_model_enabled", True)
             ),
         )
+        decision = natural_short_source_veto(
+            decision,
+            context_group=context_group if context_aware else None,
+        )
         if decision.should_convert:
             return decision
         short_decision = trusted_short_word_decision(
@@ -1052,6 +1068,7 @@ class KeySwitchEngine:
             ignored_words=ignored_words,
             rejected_targets=rejected_targets,
             protect_code=protect_code,
+            context_group=context_group if context_aware else None,
         )
         return decision if short_decision is None else short_decision
 
@@ -1546,13 +1563,30 @@ class KeySwitchEngine:
             False,
             mode,
         )
+        reversal = self._reversal_of_last_correction(plan)
+        action: tuple[str, int, str, int] | None = None
+        if reversal is not None and reversal.automatic:
+            # Pause right after an automatic correction undoes it, exactly as
+            # the undo hotkey does: the direction is rejected so the mistake
+            # is not repeated, and the way back is not learned as a rule.
+            action = (
+                "reject",
+                reversal.source_group,
+                reversal.original,
+                reversal.target_group,
+            )
+            learn = False
+        elif reversal is not None:
+            # Toggling a manual conversion back and forth is indecision, not
+            # a confirmation: neither direction counts.
+            learn = False
+        elif learn:
+            action = ("manual", source_group, original, target)
         # A second Pause before the first one ran replaces the plan; without
         # this line the first conversion would vanish without a trace.
         self._log_pending_dropped("replaced_by_manual_conversion")
         self._pending = plan
-        self._pending_learning_action = (
-            ("manual", source_group, original, target) if learn else None
-        )
+        self._pending_learning_action = action
         self._pending_trigger_keycode = trigger_keycode
         excluded = self._application_excluded(application)
         self._technical_event(
@@ -1566,6 +1600,11 @@ class KeySwitchEngine:
             application_excluded=excluded,
             symbol_count=len(self._symbol_strokes),
             learnable=learn,
+            reversal=(
+                None
+                if reversal is None
+                else "automatic" if reversal.automatic else "manual"
+            ),
         )
         self._strokes = []
         self._symbol_strokes = []
@@ -1587,6 +1626,83 @@ class KeySwitchEngine:
         return letters >= 2 and all(
             character.isalpha() or character in "'-" for character in replacement
         )
+
+    @staticmethod
+    def _late_text_key(event: KeyEvent) -> bool:
+        return (
+            event.pressed
+            and bool(event.character)
+            and event.character.isprintable()
+            and event.character != " "
+            and event.key_name not in MODIFIER_KEYS
+            and event.key_name not in NAVIGATION_KEYS
+            and event.key_name != "BackSpace"
+            and not (event.control or event.alt or event.super_key)
+        )
+
+    def _collect_late_input(self, plan: CorrectionPlan) -> tuple[KeyEvent, ...]:
+        """Keys typed after the word but before its correction lands.
+
+        Their characters already follow the word on screen, so the backend
+        deletes them with the word and types them again in the new layout;
+        they come back through the hook as fresh input. Called while the hook
+        holds input, so the queue cannot grow in the meantime. Anything that is
+        not plain text (Enter, a caret move, a shortcut) makes the outcome
+        unpredictable; then nothing is touched and the keys stay queued.
+        """
+
+        planned = {id(stroke) for stroke in plan.strokes}
+        rollover = [stroke for stroke in self._strokes if id(stroke) not in planned]
+        queued: list[KeyEvent | _LayoutSelection | None] = []
+        while True:
+            try:
+                queued.append(self._events.get_nowait())
+            except queue.Empty:
+                break
+        late = list(rollover)
+        kept: list[KeyEvent | _LayoutSelection | None] = []
+        usable = all(self._late_text_key(stroke) for stroke in rollover)
+        for item in queued:
+            if (
+                not isinstance(item, KeyEvent)
+                or item.synthetic
+                or item.key_name in MODIFIER_KEYS
+            ):
+                kept.append(item)
+            elif not item.pressed:
+                # The release of a key typed again below, or of one pressed
+                # before the word ended: either way it has done its work.
+                continue
+            elif self._late_text_key(item):
+                late.append(item)
+            else:
+                usable = False
+        if not usable or not late:
+            for item in queued:
+                self._events.put_nowait(item)
+            return ()
+        for item in kept:
+            self._events.put_nowait(item)
+        if rollover:
+            self._strokes = [
+                stroke for stroke in self._strokes if id(stroke) in planned
+            ]
+        return tuple(late)
+
+    def _reversal_of_last_correction(
+        self, plan: CorrectionPlan
+    ) -> CorrectionPlan | None:
+        """The last correction, if ``plan`` converts the same keys back."""
+
+        previous = self._last_correction
+        if (
+            previous is None
+            or plan.strokes != previous.strokes
+            or plan.source_group != previous.target_group
+            or plan.target_group != previous.source_group
+        ):
+            return None
+        return previous
 
     def _switch_layout_only(self, trigger_keycode: int) -> None:
         """Pause with nothing to convert just toggles the layout."""
@@ -1644,6 +1760,7 @@ class KeySwitchEngine:
 
         strokes = tuple(self._strokes)
         current_group = self._source_group
+        self._log_pending_dropped("replaced_by_undo")
         self._pending = CorrectionPlan(
             strokes,
             None,
@@ -1674,6 +1791,7 @@ class KeySwitchEngine:
         if previous is None or time.monotonic() - getattr(self, "_last_correction_time", 0.0) > 10.0:
             self._update(last_action="Последнее исправление уже нельзя отменить")
             return
+        self._log_pending_dropped("replaced_by_undo")
         self._pending = CorrectionPlan(
             previous.strokes,
             previous.boundary,
@@ -1732,12 +1850,18 @@ class KeySwitchEngine:
         previous_group = self.snapshot.current_group
         started = time.monotonic()
         typed_before = self._typed_events
+        # From here on the hook keeps the user's keys back; whatever was typed
+        # before this moment is collected and typed again after the word.
+        self.backend.hold_input()
+        late = self._collect_late_input(plan)
+        held = 0
         try:
-            self.backend.inject_correction(
+            held = self.backend.inject_correction(
                 plan.strokes,
                 plan.target_group,
                 plan.boundary,
                 plan.source_group,
+                late=late,
             )
         except Exception as error:
             self._technical_event(
@@ -1751,6 +1875,7 @@ class KeySwitchEngine:
                 application_excluded=application_excluded,
                 automatic=plan.automatic,
                 keys_during_injection=self._typed_events - typed_before,
+                late_keys=len(late),
                 error=str(error),
             )
             self._update(last_error=str(error), last_action="Исправление не выполнено")
@@ -1774,6 +1899,8 @@ class KeySwitchEngine:
             # missing characters even though every step reported success.
             keys_during_injection=self._typed_events - typed_before,
             queued_events=self._events.qsize(),
+            late_keys=len(late),
+            held_keys=held,
             application=plan.application,
             application_excluded=application_excluded,
             automatic=plan.automatic,
@@ -2068,6 +2195,7 @@ class KeySwitchEngine:
     def _focus_changed(self, previous: int, window: int) -> None:
         """The unfinished word and the last committed one stay in the old window."""
 
+        self._own_layout_ignored = False
         dropped = len(self._strokes)
         if self._strokes or self._symbol_strokes:
             self._clear_word(reason="focus_changed")
@@ -2081,6 +2209,10 @@ class KeySwitchEngine:
 
     def _observe_group(self, group: int, *, source: str = "poll") -> None:
         focus = self._track_focus()
+        if not focus.ignore_layout:
+            # Any look outside an own window ends the ignored episode, so the
+            # next visit to the settings window is logged once again.
+            self._own_layout_ignored = False
         current_group = self.snapshot.current_group
         if not 0 <= group < len(self.models) or group == current_group:
             return
@@ -2088,13 +2220,16 @@ class KeySwitchEngine:
             # Windows keeps a layout per window: the settings window or the
             # learning prompt of KeySwitch itself says nothing about the
             # layout the user types in, so it neither protects nor updates.
-            self._technical_event(
-                "layout_change_ignored",
-                source=source,
-                reason="own_window",
-                previous_group=current_group,
-                selected_group=group,
-            )
+            # Every poll repeats the observation; the log needs it once.
+            if not self._own_layout_ignored:
+                self._own_layout_ignored = True
+                self._technical_event(
+                    "layout_change_ignored",
+                    source=source,
+                    reason="own_window",
+                    previous_group=current_group,
+                    selected_group=group,
+                )
             return
         switched_at = self._engine_switch_at
         engine_switch_ms = (

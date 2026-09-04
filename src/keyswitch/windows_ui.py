@@ -25,6 +25,7 @@ from .engine import (
 )
 from .history import HistoryEntry, HistoryStore, data_dir
 from .indicator import layout_label
+from .layouts import LayoutPair
 from .logsetup import (
     follow_settings,
     log_directory,
@@ -363,6 +364,7 @@ class WindowsApplication:
         self.word_list: tk.Listbox
         self.catalog_combo: ttk.Combobox
         self.history_tree: ttk.Treeview
+        self.learning_tree: ttk.Treeview
         self.diagnostics_text: tk.Text
         self.test_entry: ttk.Entry
         self.update_check_button: ttk.Button
@@ -927,16 +929,59 @@ class WindowsApplication:
             "Управляйте локальными правилами, настройками и расположением данных KeySwitch.",
         )
         learning = self._section(page, "Локальное обучение", 2)
+        learning.columnconfigure(0, weight=1)
         ttk.Label(learning, textvariable=self.learning_text).grid(
             row=0,
             column=0,
             sticky="w",
         )
+        columns = ("word", "replacement", "direction", "confirmations", "state")
+        self.learning_tree = ttk.Treeview(
+            learning,
+            columns=columns,
+            show="headings",
+            height=6,
+        )
+        headings = {
+            "word": "Набрано",
+            "replacement": "Заменяется на",
+            "direction": "Направление",
+            "confirmations": "Подтверждений",
+            "state": "Состояние",
+        }
+        widths = {
+            "word": 150,
+            "replacement": 150,
+            "direction": 105,
+            "confirmations": 115,
+            "state": 175,
+        }
+        for column in columns:
+            self.learning_tree.heading(column, text=headings[column])
+            self.learning_tree.column(
+                column,
+                width=widths[column],
+                minwidth=widths[column],
+                stretch=column == "state",
+                anchor="w",
+            )
+        self.learning_tree.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        ttk.Label(
+            learning,
+            text=(
+                "Правило появляется после ручного преобразования (Pause) и "
+                "начинает действовать, набрав нужное число подтверждений. "
+                "Запрет запоминается, когда вы отменяете автоисправление."
+            ),
+            style="Muted.TLabel",
+            wraplength=720,
+            justify="left",
+        ).grid(row=2, column=0, sticky="w", pady=(8, 0))
         ttk.Button(
             learning,
             text="Очистить правила и запреты",
             command=self._clear_learning,
-        ).grid(row=1, column=0, sticky="w", pady=(10, 0))
+        ).grid(row=3, column=0, sticky="w", pady=(10, 0))
 
         settings = self._section(page, "Настройки", 3)
         ttk.Label(
@@ -1689,6 +1734,54 @@ class WindowsApplication:
         rules, rejections = self.engine.learning.counts()
         self.learning_text.set(
             f"Выученных правил: {rules} · запретов после отмены: {rejections}"
+        )
+        self._refresh_learning_rules()
+
+    def _refresh_learning_rules(self) -> None:
+        """List what local learning remembers, rules first, then rejections."""
+
+        self.learning_tree.delete(*self.learning_tree.get_children())
+        required = int(self.settings.get("detection.learning_confirmations", 2))
+        for rule in self.engine.learning.rules(required):
+            self.learning_tree.insert(
+                "",
+                "end",
+                values=(
+                    rule.word,
+                    self._other_layout_text(rule.word, rule.source_group),
+                    self._direction_label(rule.source_group, rule.target_group),
+                    f"{rule.confirmations} из {required}",
+                    "действует" if rule.active else "ждёт подтверждений",
+                ),
+            )
+        for rejection in self.engine.learning.rejections():
+            self.learning_tree.insert(
+                "",
+                "end",
+                values=(
+                    rejection.word,
+                    self._other_layout_text(rejection.word, rejection.source_group),
+                    self._direction_label(
+                        rejection.source_group, rejection.target_group
+                    ),
+                    "—",
+                    "запрещено после отмены",
+                ),
+            )
+
+    @staticmethod
+    def _direction_label(source_group: int, target_group: int) -> str:
+        return f"{layout_label(source_group)} → {layout_label(target_group)}"
+
+    @staticmethod
+    def _other_layout_text(word: str, source_group: int) -> str:
+        """The word as the other layout renders the same physical keys."""
+
+        pair = LayoutPair()
+        return (
+            pair.translate(word, "us", "ru")
+            if source_group == 0
+            else pair.translate(word, "ru", "us")
         )
 
     def _clear_learning(self) -> None:

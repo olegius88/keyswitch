@@ -4,6 +4,41 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.13.0 — 2026-09-04
+
+- A correction no longer collides with what is typed into it. The layout is
+  switched first and the deletion and the replacement travel in one
+  `SendInput` call, which Windows keeps together; keys that arrived after the
+  word — typed before the engine got to it, or while it was replacing the
+  text — are deleted with the word and typed again in the new layout, and
+  keys pressed during the injection are held by the hook and typed last. On
+  X11 the late keys are handled the same way; XRecord cannot withhold input,
+  so nothing is held there. `correction_applied` reports `late_keys` and
+  `held_keys`.
+- `Pause` right after an automatic correction now records a rejection of that
+  correction, exactly as the undo hotkey does, instead of teaching a rule for
+  the way back: the log showed a false correction that had been fixed by hand
+  twice and still fired a third time. Toggling a manual conversion back and
+  forth with `Pause` no longer counts as confirmations: three toggles used to
+  turn a typo into an active rule while the prompt had been dismissed.
+- A short word found only in the other language's frequency list is left
+  alone when it reads as ordinary text in the language it was typed in and the
+  previous word does not favour the switch: `дев` after `на` was traded for
+  `ltd`. The bar is the one the unknown-word branch already applies; it lives
+  in the policy layer, the certified detector is unchanged.
+- The most frequent Russian function words typed in the Latin layout are
+  corrected at last: `yt`, `gj`, `yf` (`не`, `по`, `на`) on their own, `kb` and
+  `nj` (`ли`, `то`) after a Russian word, and single letters `а`, `и`, `с`,
+  `в`, `к`, `у`, `о`, `я` after a Russian word. A trusted short word never
+  turns a key that is punctuation in one layout and a letter in the other into
+  a word boundary, so `общих` is not cut into `о` and a comma.
+- The maintenance page lists what local learning remembers: the typed word,
+  what it becomes, the direction, the confirmations gathered and required, and
+  the rejections made by undoing.
+- The log names a correction that is superseded by a boundary or replaced by
+  an undo, and reports the layout of KeySwitch's own window once per visit
+  instead of on every poll — that line was fifteen percent of a session.
+
 ## 0.12.0 — 2026-09-04
 
 - The key that answers the learning prompt no longer reaches the text as well.

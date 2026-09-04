@@ -8,6 +8,7 @@ diagnostics command.
 from __future__ import annotations
 
 import ctypes
+from collections.abc import Sequence
 import ctypes.util
 import logging
 import os
@@ -743,16 +744,23 @@ class X11Backend:
                 raise X11Error(f"Не удалось переключить XKB-группу на {group}")
             self._libraries.x11.XFlush(self._control)
 
+    def hold_input(self) -> None:
+        """Accepted for the shared contract; XRecord cannot withhold keys."""
+
+        return None
+
     def inject_correction(
         self,
         strokes: Iterable[KeyEvent],
         target_group: int,
         boundary: KeyEvent | None,
         source_group: int | None = None,
-    ) -> None:
+        late: Sequence[KeyEvent] = (),
+    ) -> int:
         if not self._control:
             raise X11Error("X11 backend не запущен")
         stroke_list = list(strokes)
+        late_list = list(late)
         backspace_keycode = int(self._libraries.x11.XKeysymToKeycode(self._control, 0xFF08))
         shift_keycode = int(self._libraries.x11.XKeysymToKeycode(self._control, 0xFFE1))
         if not backspace_keycode or not shift_keycode:
@@ -768,11 +776,19 @@ class X11Backend:
             if shifted:
                 target.append((False, shift_keycode))
 
-        delete_count = len(stroke_list) + (1 if boundary is not None else 0)
+        delete_count = (
+            len(stroke_list) + (1 if boundary is not None else 0) + len(late_list)
+        )
         for _ in range(delete_count):
             tap(sequence, backspace_keycode)
         for stroke in stroke_list:
             tap(sequence, stroke.keycode, stroke.shift)
+        # Keys typed after the word are deleted with it and typed again in the
+        # new layout. They are left out of ``_expected`` on purpose: the engine
+        # must see them come back as the user's own input.
+        late_sequence: list[tuple[bool, int]] = []
+        for stroke in late_list:
+            tap(late_sequence, stroke.keycode, stroke.shift)
         rendered_source_group = (
             source_group
             if source_group is not None
@@ -853,6 +869,11 @@ class X11Backend:
                         raise X11Error(
                             f"Не удалось восстановить XKB-группу {target_group}"
                         )
+                for pressed, keycode in late_sequence:
+                    if not self._libraries.xtst.XTestFakeKeyEvent(
+                        self._control, keycode, int(pressed), 0
+                    ):
+                        raise X11Error(f"XTest отклонил keycode {keycode}")
                 self._libraries.x11.XSync(self._control, 0)
             except Exception:
                 with self._expected_lock:
@@ -861,6 +882,7 @@ class X11Backend:
             finally:
                 self._libraries.xtst.XTestGrabControl(self._control, 0)
                 self._libraries.x11.XFlush(self._control)
+        return 0
 
     def active_application(self) -> str:
         if not self._control:

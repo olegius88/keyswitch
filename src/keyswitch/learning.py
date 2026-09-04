@@ -4,10 +4,31 @@ from __future__ import annotations
 
 import json
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
 
 from .history import data_dir
+
+
+@dataclass(frozen=True)
+class LearnedRule:
+    """One remembered manual conversion, as the settings window shows it."""
+
+    source_group: int
+    word: str
+    target_group: int
+    confirmations: int
+    active: bool
+
+
+@dataclass(frozen=True)
+class LearnedRejection:
+    """One correction the user undid, which is never offered again."""
+
+    source_group: int
+    word: str
+    target_group: int
 
 
 class _LearningData(TypedDict):
@@ -212,6 +233,64 @@ class LearningStore:
                 except (TypeError, ValueError):
                     continue
             return result
+
+    @classmethod
+    def _split_key(cls, key: str) -> tuple[int, str] | None:
+        group, _separator, word = key.partition(":")
+        if not word:
+            return None
+        try:
+            return int(group), word
+        except ValueError:
+            return None
+
+    def rules(self, confirmations_required: int = 2) -> tuple[LearnedRule, ...]:
+        """Every remembered rule, including those still short of the threshold."""
+
+        required = max(1, confirmations_required)
+        with self._lock:
+            stored = dict(self._data["rules"])
+        result: list[LearnedRule] = []
+        for key, rule in stored.items():
+            identity = self._split_key(key)
+            if identity is None or not isinstance(rule, dict):
+                continue
+            source_group, word = identity
+            try:
+                target_group = int(rule["target_group"])
+                confirmations = int(rule.get("confirmations", 0))
+            except (KeyError, TypeError, ValueError):
+                continue
+            result.append(
+                LearnedRule(
+                    source_group,
+                    word,
+                    target_group,
+                    confirmations,
+                    confirmations >= required,
+                )
+            )
+        return tuple(sorted(result, key=lambda rule: (rule.word, rule.source_group)))
+
+    def rejections(self) -> tuple[LearnedRejection, ...]:
+        """Every direction a user's undo has forbidden."""
+
+        with self._lock:
+            stored = dict(self._data["rejections"])
+        result: list[LearnedRejection] = []
+        for key, targets in stored.items():
+            identity = self._split_key(key)
+            if identity is None or not isinstance(targets, list):
+                continue
+            source_group, word = identity
+            for target in targets:
+                try:
+                    result.append(LearnedRejection(source_group, word, int(target)))
+                except (TypeError, ValueError):
+                    continue
+        return tuple(
+            sorted(result, key=lambda item: (item.word, item.source_group, item.target_group))
+        )
 
     def counts(self) -> tuple[int, int]:
         with self._lock:

@@ -542,8 +542,10 @@ class WindowsBackendInjectionTests(unittest.TestCase):
             character=";",
             characters=(";", "ж"),
         )
-        backend.inject_correction((stroke,), 1, boundary, source_group=0)
+        self.assertEqual(backend.inject_correction((stroke,), 1, boundary, source_group=0), 0)
 
+        # The layout switches first, then deletion and replacement travel in
+        # one SendInput call so the user's keys cannot slip in between.
         self.assertEqual(
             api.sent[0],
             (
@@ -551,18 +553,15 @@ class WindowsBackendInjectionTests(unittest.TestCase):
                 NativeInput(False, virtual_key=VK_BACK),
                 NativeInput(True, virtual_key=VK_BACK),
                 NativeInput(False, virtual_key=VK_BACK),
-            ),
-        )
-        self.assertEqual(
-            api.sent[1],
-            (
                 NativeInput(True, virtual_key=VK_SHIFT),
                 NativeInput(True, scan_code=30),
                 NativeInput(False, scan_code=30),
                 NativeInput(False, virtual_key=VK_SHIFT),
             ),
         )
-        self.assertEqual(api.sent[2][0].scan_code, 39)
+        # The boundary keeps its own layout: typed after a switch back.
+        self.assertEqual(api.sent[1][0].scan_code, 39)
+        self.assertEqual(len(api.sent), 2)
         self.assertEqual(
             api.requests,
             [RUSSIAN_LAYOUT, ENGLISH_LAYOUT, RUSSIAN_LAYOUT],
@@ -576,7 +575,8 @@ class WindowsBackendInjectionTests(unittest.TestCase):
         self.assertEqual(api.sent, [])
         backend.inject_correction((key_event(),), 1, boundary)
         self.assertEqual(api.requests, [RUSSIAN_LAYOUT])
-        self.assertEqual(len(api.sent), 3)
+        self.assertEqual(len(api.sent), 1)
+        self.assertEqual([item.scan_code for item in api.sent[0] if item.scan_code], [30, 30, 30, 30])
 
     def test_invalid_groups_partial_send_and_rejected_switch_fail_loudly(self) -> None:
         api = FakeWindowsAPI()
@@ -591,9 +591,117 @@ class WindowsBackendInjectionTests(unittest.TestCase):
             backend.inject_correction((key_event(),), 1, None)
 
         api.send_count = None
+        # The layout now switches before anything is sent, so the refused
+        # switch needs a layout that still has to change.
+        api.current_layout = ENGLISH_LAYOUT
         api.accept_switch = False
         with self.assertRaisesRegex(WindowsBackendError, "отклонило"):
             backend.inject_correction((key_event(),), 1, None)
+
+    def test_late_and_held_keys_are_deleted_and_typed_again_as_the_users_own(self) -> None:
+        api = FakeWindowsAPI()
+        backend = WindowsBackend(api)
+        delivered: list[KeyEvent] = []
+        backend.start(delivered.append)
+        listener = api.hook_listener
+        assert listener is not None
+        backend.hold_input()
+        # Held keys are swallowed and never reach the engine directly.
+        self.assertTrue(listener(NativeKeyEvent(True, ord("D"), 32, False, False, 10)))
+        self.assertTrue(listener(NativeKeyEvent(False, ord("D"), 32, False, False, 11)))
+        # The backend's own injection is never held.
+        self.assertFalse(listener(NativeKeyEvent(True, ord("X"), 45, False, True, 12)))
+        self.assertEqual([event.synthetic for event in delivered], [True])
+
+        late = key_event(keycode=31)
+        held = backend.inject_correction((key_event(),), 1, None, source_group=0, late=(late,))
+        self.assertEqual(held, 2)
+        self.assertEqual(api.requests, [RUSSIAN_LAYOUT])
+        batch, late_sent, held_sent = api.sent
+        # Two characters to delete: the word and the late key after it.
+        self.assertEqual(sum(1 for item in batch if item.virtual_key == VK_BACK), 4)
+        self.assertEqual([item.scan_code for item in batch if item.scan_code], [30, 30])
+        self.assertTrue(all(item.synthetic for item in batch))
+        self.assertEqual(
+            late_sent,
+            (
+                NativeInput(True, scan_code=31, synthetic=False),
+                NativeInput(False, scan_code=31, synthetic=False),
+            ),
+        )
+        self.assertEqual(
+            held_sent,
+            (
+                NativeInput(True, virtual_key=ord("D"), scan_code=32, synthetic=False),
+                NativeInput(False, virtual_key=ord("D"), scan_code=32, synthetic=False),
+            ),
+        )
+        # The hold is over: the next key is delivered as before.
+        self.assertFalse(listener(NativeKeyEvent(True, ord("A"), 30, False, False, 13)))
+        self.assertEqual(len(delivered), 2)
+        backend.stop()
+
+    def test_a_failed_injection_still_types_the_held_keys_again(self) -> None:
+        api = FakeWindowsAPI()
+        backend = WindowsBackend(api)
+        delivered: list[KeyEvent] = []
+        backend.start(delivered.append)
+        listener = api.hook_listener
+        assert listener is not None
+
+        # The switch is refused before anything was deleted: the late key is
+        # still on screen and must not be typed twice; the held one is typed.
+        backend.hold_input()
+        self.assertTrue(listener(NativeKeyEvent(True, ord("D"), 32, False, False, 10)))
+        api.accept_switch = False
+        with self.assertRaisesRegex(WindowsBackendError, "отклонило"):
+            backend.inject_correction((key_event(),), 1, None, late=(key_event(keycode=31),))
+        self.assertEqual(
+            api.sent,
+            [(NativeInput(True, virtual_key=ord("D"), scan_code=32, synthetic=False),)],
+        )
+        self.assertFalse(backend._holding)
+
+        # The batch fails after the switch: nothing was deleted either, and
+        # a restore that fails too keeps the original error.
+        api.accept_switch = True
+        api.sent.clear()
+        backend.hold_input()
+        self.assertTrue(listener(NativeKeyEvent(False, ord("D"), 32, False, False, 11)))
+        api.send_count = 0
+        with self.assertRaisesRegex(WindowsBackendError, "SendInput"):
+            backend.inject_correction((key_event(),), 1, None, late=(key_event(keycode=31),))
+        self.assertEqual(len(api.sent), 2)
+        self.assertFalse(backend._holding)
+
+        # The boundary switch fails after the batch: the late key was deleted,
+        # so it is typed again together with the held keys.
+        api.send_count = None
+        api.sent.clear()
+        api.current_layout = ENGLISH_LAYOUT
+        boundary = key_event(keycode=39, character=";", characters=(";", "ж"))
+        original_request = api.request_layout
+
+        def refuse_second_switch(layout: int) -> bool:
+            if layout == ENGLISH_LAYOUT and len(api.requests) >= 1:
+                api.requests.append(layout)
+                return False
+            return original_request(layout)
+
+        api.request_layout = refuse_second_switch  # type: ignore[method-assign]
+        backend.hold_input()
+        with self.assertRaisesRegex(WindowsBackendError, "отклонило"):
+            backend.inject_correction(
+                (key_event(),), 1, boundary, source_group=0, late=(key_event(keycode=31),)
+            )
+        self.assertEqual(
+            api.sent[-1],
+            (
+                NativeInput(True, scan_code=31, synthetic=False),
+                NativeInput(False, scan_code=31, synthetic=False),
+            ),
+        )
+        backend.stop()
 
     def test_switch_timeout_and_already_selected_group(self) -> None:
         api = FakeWindowsAPI()
