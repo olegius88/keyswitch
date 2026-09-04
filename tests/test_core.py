@@ -56,6 +56,11 @@ class FakeBackend:
         self.injections.append((tuple(strokes), target_group, boundary))
         self.group = target_group
 
+    def set_key_filter(
+        self, predicate: Callable[[KeyEvent], bool] | None
+    ) -> None:
+        self.key_filter = predicate
+
     def start(self, listener: Callable[[KeyEvent], None]) -> None:
         self.listener = listener
 

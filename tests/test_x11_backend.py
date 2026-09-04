@@ -168,6 +168,14 @@ class BackendOpenProbeTests(unittest.TestCase):
         low._running.set()
         self.assertTrue(low.running)
 
+    def test_a_key_filter_is_accepted_and_ignored(self) -> None:
+        # XRecord only observes: a key cannot be withheld from the focused
+        # client, so the shared contract is satisfied by doing nothing.
+        backend, _ = backend_with()
+        backend.set_key_filter(lambda _event: True)
+        backend.set_key_filter(None)
+        self.assertFalse(backend.running)
+
     def test_open_rejects_wayland_missing_display_and_open_failure(self) -> None:
         backend, libraries = backend_with()
         with patch.dict(os.environ, {"XDG_SESSION_TYPE": "wayland", "DISPLAY": ":1"}, clear=True):

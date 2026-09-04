@@ -541,7 +541,7 @@ class CtypesWindowsAPI:
 
     def run_keyboard_hook(
         self,
-        listener: Callable[[NativeKeyEvent], None],
+        listener: Callable[[NativeKeyEvent], bool],
         ready: Callable[[], None],
     ) -> None:
         def callback(code: int, message: int, data: int) -> int:
@@ -555,7 +555,7 @@ class CtypesWindowsAPI:
                     data,
                     ctypes.POINTER(KBDLLHOOKSTRUCT),
                 ).contents
-                listener(
+                consumed = listener(
                     NativeKeyEvent(
                         message in {WM_KEYDOWN, WM_SYSKEYDOWN},
                         int(native.vkCode),
@@ -568,6 +568,11 @@ class CtypesWindowsAPI:
                         int(native.time),
                     )
                 )
+                if consumed:
+                    # A non-zero result keeps the key out of the hook chain and
+                    # away from the focused window: the key answered KeySwitch
+                    # itself and must not also reach the text being typed.
+                    return 1
             return int(self.user32.CallNextHookEx(None, code, message, data))
 
         callback_object = self.hook_callback_type(callback)

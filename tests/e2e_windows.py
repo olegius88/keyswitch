@@ -33,10 +33,11 @@ def main() -> int:
     events: list[NativeKeyEvent] = []
     errors: list[Exception] = []
 
-    def listener(event: NativeKeyEvent) -> None:
+    def listener(event: NativeKeyEvent) -> bool:
         events.append(event)
         if event.virtual_key == 0x87:
             received.set()
+        return False
 
     def hook_loop() -> None:
         try:
@@ -221,6 +222,9 @@ def main() -> int:
         completed: list[bool] = []
         layout_deadline = [0.0]
         focus_deadline = [0.0]
+        probe_deadline = [0.0]
+        probe_attempts = [0]
+        probe_confirmed = [False]
         learning_deadline = [0.0]
         menu_layout_deadline = [0.0]
 
@@ -632,10 +636,47 @@ def main() -> int:
                         raise RuntimeError("KeySwitch E2E entry did not receive focus")
                     application.root.after(50, wait_for_test_focus)
                     return
+                if not probe_confirmed[0]:
+                    # Foreground and Tk focus can both hold while injected keys
+                    # still go nowhere. Prove the field really receives input
+                    # before the scenario starts depending on it: a lone space
+                    # leaves the engine's word buffer empty.
+                    application.test_entry.delete(0, "end")
+                    send_scans((0x39,))
+                    probe_deadline[0] = time.monotonic() + 3.0
+                    application.root.after(50, wait_for_input_probe)
+                    return
                 if not api.request_layout(application.backend.layouts[0]):
                     raise RuntimeError("Cannot select the English layout for E2E")
                 layout_deadline[0] = time.monotonic() + 5.0
                 application.root.after(100, wait_for_english_layout)
+            except Exception as error:
+                fail(error)
+
+        def wait_for_input_probe() -> None:
+            try:
+                if application.test_entry.get() == " ":
+                    probe_confirmed[0] = True
+                    application.test_entry.delete(0, "end")
+                    application.root.update_idletasks()
+                    focus_deadline[0] = time.monotonic() + 5.0
+                    wait_for_test_focus()
+                    return
+                if time.monotonic() < probe_deadline[0]:
+                    application.root.after(50, wait_for_input_probe)
+                    return
+                if probe_attempts[0] >= 3:
+                    raise RuntimeError(
+                        "Injected input never reached the KeySwitch E2E field; "
+                        f"field={application.test_entry.get()!r}, "
+                        f"foreground={api.active_application()!r}"
+                    )
+                # Reclaim the foreground and try once more: the window can be
+                # activated and focused and still not be the input target yet.
+                probe_attempts[0] += 1
+                print("WINDOWS_E2E_INPUT_RETRY", flush=True)
+                focus_deadline[0] = time.monotonic() + 5.0
+                application.root.after(100, wait_for_test_focus)
             except Exception as error:
                 fail(error)
 

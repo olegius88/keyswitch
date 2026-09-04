@@ -53,6 +53,11 @@ class FakeBackend:
         self.injections.append((tuple(strokes), target_group, boundary))
         self.group = target_group
 
+    def set_key_filter(
+        self, predicate: Callable[[KeyEvent], bool] | None
+    ) -> None:
+        self.key_filter: Callable[[KeyEvent], bool] | None = predicate
+
     def start(self, listener: Callable[[KeyEvent], None]) -> None:
         pass
 
@@ -468,6 +473,60 @@ class EngineBehaviourTests(unittest.TestCase):
         )
         self.assertEqual(discarded["reason"], "non_word_key")
         self.assertEqual(discarded["symbol_count"], 1)
+
+    def test_the_prompt_answer_is_kept_away_from_the_window(self) -> None:
+        enter = KeyEvent(True, 36, "Return", "\r", ("\r", "\r"), 1, 0, 4000)
+        escape = KeyEvent(True, 9, "Escape", "", ("", ""), 1, 0, 4001)
+        letter = letter_event("a", 38, 1, self.pair)
+
+        # No prompt: every key belongs to the application.
+        self.assertFalse(self.engine.consumes_key(enter))
+
+        self.correct_hello()
+        self.engine._handle(
+            KeyEvent(True, 127, "Pause", "", ("", ""), 1, 0, 4002)
+        )
+        self.engine._handle(
+            KeyEvent(False, 127, "Pause", "", ("", ""), 0, 0, 4003)
+        )
+        self.assertIsNotNone(self.engine.learning_prompt)
+
+        # While the prompt is shown Enter and Esc answer it, and only them.
+        self.assertTrue(self.engine.consumes_key(enter))
+        self.assertTrue(self.engine.consumes_key(escape))
+        self.assertFalse(self.engine.consumes_key(letter))
+        self.assertFalse(
+            self.engine.consumes_key(
+                KeyEvent(False, 36, "Return", "\r", ("\r", "\r"), 1, 0, 4004)
+            )
+        )
+        # A shortcut with Enter is the application's, not the prompt's.
+        self.assertFalse(
+            self.engine.consumes_key(
+                KeyEvent(True, 36, "Return", "\r", ("\r", "\r"), 1, CONTROL_MASK, 4005)
+            )
+        )
+
+        # An expired prompt releases the key even before the sweep runs.
+        self.engine._prompt_key_deadline = time.monotonic() - 0.1
+        self.assertFalse(self.engine.consumes_key(enter))
+
+        # Answering the prompt releases it too.
+        self.engine._prompt_key_deadline = time.monotonic() + 5
+        prompt = self.engine.learning_prompt
+        assert prompt is not None
+        self.engine.confirm_learning_prompt(prompt)
+        self.assertFalse(self.engine.consumes_key(enter))
+        self.assertIsNone(self.engine.learning_prompt)
+
+    def test_the_backend_learns_the_filter_when_the_engine_runs(self) -> None:
+        self.engine.start()
+        try:
+            # A bound method is a fresh object per lookup, so compare by value.
+            self.assertEqual(self.backend.key_filter, self.engine.consumes_key)
+        finally:
+            self.engine.stop()
+        self.assertIsNone(self.backend.key_filter)
 
     def test_layout_dependent_symbols_only_are_remembered(self) -> None:
         dot = KeyEvent(True, 60, "period", ".", (".", "."), 0, 0, 1)

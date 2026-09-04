@@ -401,6 +401,18 @@ class X11Backend:
             if temporary:
                 self.close()
 
+    def set_key_filter(
+        self, predicate: Callable[[KeyEvent], bool] | None
+    ) -> None:
+        """Accepted for the shared backend contract and deliberately ignored.
+
+        XRecord is a passive observer: X11 delivers the key to the focused
+        client no matter what this process decides, so a key can never be
+        withheld the way the Windows hook withholds it.
+        """
+
+        del predicate
+
     def start(self, listener: Callable[[KeyEvent], None]) -> None:
         if self.running:
             return

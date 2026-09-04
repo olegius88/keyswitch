@@ -46,6 +46,7 @@ from keyswitch.windows_backend import (
     VK_CONTROL,
     VK_LWIN,
     VK_MENU,
+    VK_RETURN,
     VK_SHIFT,
     WindowsBackend,
     WindowsBackendError,
@@ -90,7 +91,7 @@ class FakeWindowsAPI:
         self.hook_error: Exception | None = None
         self.signal_ready = True
         self.stop_event = threading.Event()
-        self.hook_listener: Callable[[NativeKeyEvent], None] | None = None
+        self.hook_listener: Callable[[NativeKeyEvent], bool] | None = None
         self.stop_calls = 0
         self.layout_calls = 0
         self.translation: dict[tuple[int, int], str] = {}
@@ -156,7 +157,7 @@ class FakeWindowsAPI:
 
     def run_keyboard_hook(
         self,
-        listener: Callable[[NativeKeyEvent], None],
+        listener: Callable[[NativeKeyEvent], bool],
         ready: Callable[[], None],
     ) -> None:
         self.hook_listener = listener
@@ -430,6 +431,30 @@ class WindowsBackendLifecycleTests(unittest.TestCase):
         self.assertEqual(events[0].character, "a")
         self.assertTrue(events[0].synthetic)
         self.assertTrue(events[0].caps_lock)
+
+        # Without a filter every key reaches the window.
+        self.assertFalse(listener(NativeKeyEvent(True, VK_RETURN, 28, False, False, 124)))
+
+        # The filter answers for presses; the matching release is hidden with
+        # them so the window never sees a key-up it has no key-down for.
+        consumed: list[KeyEvent] = []
+
+        def only_enter(event: KeyEvent) -> bool:
+            consumed.append(event)
+            return event.key_name == "Return"
+
+        backend.set_key_filter(only_enter)
+        self.assertTrue(listener(NativeKeyEvent(True, VK_RETURN, 28, False, False, 125)))
+        self.assertTrue(listener(NativeKeyEvent(False, VK_RETURN, 28, False, False, 126)))
+        # A release with no swallowed press behind it passes through.
+        self.assertFalse(listener(NativeKeyEvent(False, VK_RETURN, 28, False, False, 127)))
+        self.assertFalse(listener(NativeKeyEvent(True, ord("A"), 30, False, False, 128)))
+        self.assertEqual(
+            [event.key_name for event in consumed], ["Return", "a"]
+        )
+
+        backend.set_key_filter(None)
+        self.assertFalse(listener(NativeKeyEvent(True, VK_RETURN, 28, False, False, 129)))
         backend.stop()
         self.assertFalse(backend.running)
         self.assertEqual(api.stop_calls, 1)

@@ -4,6 +4,21 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.12.0 — 2026-09-04
+
+- The key that answers the learning prompt no longer reaches the text as well.
+  Enter used to confirm the rule *and* arrive in the editor underneath, which
+  in a chat sends the half-written message; Esc had the same double life. The
+  Windows hook now withholds an unmodified Enter, keypad Enter or Esc while the
+  prompt is on screen — together with the matching key release, so no window
+  sees a key-up without its key-down. The prompt still does not take the focus,
+  so typing around it is unchanged, and once it is answered or its eight
+  seconds run out the keys belong to the application again. Linux keeps passing
+  them through: XRecord only observes and cannot withhold a key.
+- The Windows end-to-end scenario proves that injected input actually reaches
+  its field before it starts typing into it, and retries the activation a few
+  times instead of failing ten seconds later with an empty field.
+
 ## 0.11.2 — 2026-09-04
 
 - A correction records how much the user typed into it. `correction_applied`

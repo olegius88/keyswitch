@@ -587,6 +587,11 @@ class FakeBackend:
         self.injections.append((tuple(strokes), target_group, boundary, source_group))
         self.group = target_group
 
+    def set_key_filter(
+        self, predicate: Callable[[KeyEvent], bool] | None
+    ) -> None:
+        self.key_filter = predicate
+
     def start(self, listener: Callable[[KeyEvent], None]) -> None:
         self.started += 1
         self.listener = listener
@@ -755,7 +760,7 @@ class EngineBranchTests(unittest.TestCase):
             initialized.records[0].getMessage().removeprefix("TECHNICAL ")
         )
         self.assertEqual(initial_payload["event"], "engine_initialized")
-        self.assertEqual(initial_payload["keyswitch_version"], "0.11.2")
+        self.assertEqual(initial_payload["keyswitch_version"], "0.12.0")
         self.assertIn("minimum_length", initial_payload["detection_settings"])
 
     def test_start_stop_idempotence_and_backend_failure(self) -> None:

@@ -126,7 +126,7 @@ class WindowsAPI(Protocol):
 
     def run_keyboard_hook(
         self,
-        listener: Callable[[NativeKeyEvent], None],
+        listener: Callable[[NativeKeyEvent], bool],
         ready: Callable[[], None],
     ) -> None: ...
 
@@ -212,6 +212,8 @@ class WindowsBackend:
         self._ready = threading.Event()
         self._start_error: Exception | None = None
         self._pressed: set[int] = set()
+        self._key_filter: Callable[[KeyEvent], bool] | None = None
+        self._consumed_keys: set[int] = set()
         self._caps_lock = False
         self._inject_lock = threading.Lock()
 
@@ -344,7 +346,32 @@ class WindowsBackend:
     def keep_window_inactive(self, window: int) -> bool:
         return self._api.keep_window_inactive(window)
 
-    def _handle_native(self, native: NativeKeyEvent) -> None:
+    def set_key_filter(
+        self, predicate: Callable[[KeyEvent], bool] | None
+    ) -> None:
+        """Decide, inside the hook, which keys must not reach the window."""
+
+        self._key_filter = predicate
+
+    def _consumes(self, event: KeyEvent) -> bool:
+        """Ask the filter about a press, and hide the matching release.
+
+        A window that saw no key-down must not receive the key-up either, so
+        the release of a swallowed key is swallowed with it.
+        """
+
+        if not event.pressed:
+            if event.keycode not in self._consumed_keys:
+                return False
+            self._consumed_keys.discard(event.keycode)
+            return True
+        predicate = self._key_filter
+        if predicate is None or not predicate(event):
+            return False
+        self._consumed_keys.add(event.keycode)
+        return True
+
+    def _handle_native(self, native: NativeKeyEvent) -> bool:
         if native.pressed:
             if native.virtual_key == VK_CAPITAL and native.virtual_key not in self._pressed:
                 self._caps_lock = not self._caps_lock
@@ -363,21 +390,22 @@ class WindowsBackend:
         )
         group = self.current_group()
         character = characters[group] if 0 <= group < len(characters) else ""
+        event = KeyEvent(
+            native.pressed,
+            native.scan_code,
+            key_name(native.virtual_key),
+            character,
+            characters,
+            group,
+            state,
+            native.timestamp,
+            native.injected,
+        )
+        consumed = self._consumes(event)
         listener = self._listener
         if listener is not None:
-            listener(
-                KeyEvent(
-                    native.pressed,
-                    native.scan_code,
-                    key_name(native.virtual_key),
-                    character,
-                    characters,
-                    group,
-                    state,
-                    native.timestamp,
-                    native.injected,
-                )
-            )
+            listener(event)
+        return consumed
 
     def _normalized_state(self) -> int:
         state = LOCK_MASK if self._caps_lock else 0

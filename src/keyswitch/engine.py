@@ -39,6 +39,9 @@ NAVIGATION_KEYS = {
 PUNCTUATION = set(".,!?;:()[]{}—–-…\"«»")
 PAUSE_CORRECTION_DELAY_SECONDS = 1.5
 LEARNING_PROMPT_TIMEOUT_SECONDS = 8.0
+# Keys that answer the learning prompt: while it is shown they belong to
+# KeySwitch, not to the text being typed.
+PROMPT_KEYS = {"Return", "KP_Enter", "Escape"}
 # A layout change observed this soon after the engine switched the layout
 # itself (correction, menu action) is the engine's own switch, not the user's.
 ENGINE_SWITCH_GRACE_SECONDS = 1.5
@@ -169,6 +172,8 @@ class KeySwitchEngine:
         self.backend_label = backend_label
         self.learning = learning or LearningStore(history.path.with_name("learning.json"))
         self._typed_events = 0
+        # Read from the keyboard hook without a lock: see `consumes_key`.
+        self._prompt_key_deadline = 0.0
         self._events: queue.Queue[KeyEvent | _LayoutSelection | None] = queue.Queue(
             maxsize=4096
         )
@@ -262,6 +267,7 @@ class KeySwitchEngine:
                 return False
             self._learning_prompt = None
             self._learning_prompt_deadline = None
+            self._prompt_key_deadline = 0.0
             callbacks = tuple(self._learning_prompt_callbacks)
         required = int(self.settings.get("detection.learning_confirmations", 2))
         confirmations = self.learning.confirm_manual(
@@ -296,6 +302,7 @@ class KeySwitchEngine:
                 return False
             self._learning_prompt = None
             self._learning_prompt_deadline = None
+            self._prompt_key_deadline = 0.0
             callbacks = tuple(self._learning_prompt_callbacks)
         self._technical_event(
             "learning_prompt_dismissed",
@@ -315,6 +322,8 @@ class KeySwitchEngine:
         self._worker = threading.Thread(target=self._run, name="keyswitch-engine", daemon=True)
         self._worker.start()
         try:
+            # The hook asks this before letting a key through to the window.
+            self.backend.set_key_filter(self.consumes_key)
             self.backend.start(self.enqueue)
             self._update(
                 running=True,
@@ -330,6 +339,7 @@ class KeySwitchEngine:
 
     def stop(self) -> None:
         self.dismiss_learning_prompt()
+        self.backend.set_key_filter(None)
         if not self._running.is_set():
             self.backend.close()
             return
@@ -1900,6 +1910,7 @@ class KeySwitchEngine:
             self._learning_prompt_deadline = (
                 time.monotonic() + LEARNING_PROMPT_TIMEOUT_SECONDS
             )
+            self._prompt_key_deadline = self._learning_prompt_deadline
             callbacks = tuple(self._learning_prompt_callbacks)
         excluded = self._application_excluded(prompt.application)
         self._technical_event(
@@ -1923,6 +1934,21 @@ class KeySwitchEngine:
         if current_time < deadline:
             return False
         return self.dismiss_learning_prompt(reason="timeout")
+
+    def consumes_key(self, event: KeyEvent) -> bool:
+        """Whether KeySwitch answers this key itself and the window must not.
+
+        Called from the keyboard hook while the system waits for the answer,
+        so it only reads plain attributes: taking the engine lock here could
+        hold the hook past the low-level timeout, and Windows then removes the
+        hook without telling anyone.
+        """
+
+        if not event.pressed or time.monotonic() >= self._prompt_key_deadline:
+            return False
+        if event.control or event.alt or event.super_key:
+            return False
+        return event.key_name in PROMPT_KEYS
 
     def _matches_hotkey(self, name: str, event: KeyEvent) -> bool:
         return Hotkey(str(self.settings.get(f"hotkeys.{name}", ""))).matches(event)
