@@ -260,9 +260,112 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertTrue(self.engine._last_committed_stale)
 
     def test_pause_without_any_word_reports_nothing_to_convert(self) -> None:
-        self.press_pause()
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.press_pause()
         self.assertEqual(self.engine.snapshot.last_action, "Нет слова для ручного преобразования")
         self.assertEqual(self.backend.injections, [])
+        impossible = next(
+            event
+            for event in self.technical_events(logs.output)
+            if event["event"] == "manual_conversion_impossible"
+        )
+        self.assertEqual(impossible["reason"], "no_alternate_layout")
+        self.assertEqual(impossible["current_group"], -1)
+
+    def test_typing_into_an_injection_is_counted_in_the_log(self) -> None:
+        self.settings.set("detection.respect_manual_layout", False)
+        self.type_word("ghbdtn")
+        inject = self.backend.inject_correction
+
+        def typing_user(*arguments: object, **keywords: object) -> None:
+            # The user keeps typing while the correction is being injected.
+            self.engine.enqueue(letter_event("x", 99, 0, self.pair))
+            inject(*arguments, **keywords)  # type: ignore[arg-type]
+
+        with (
+            patch.object(self.backend, "inject_correction", side_effect=typing_user),
+            self.assertLogs("keyswitch.engine", level="INFO") as logs,
+        ):
+            self.press_space(0)
+        applied = next(
+            event
+            for event in self.technical_events(logs.output)
+            if event["event"] == "correction_applied"
+        )
+        self.assertEqual(applied["keys_during_injection"], 1)
+        self.assertEqual(applied["queued_events"], 1)
+        self.assertEqual(applied["replayed_strokes"], 6)
+        self.assertTrue(applied["boundary_replayed"])
+
+        # A failed injection reports the same count.
+        self.backend.group = 0
+        self.type_word("ghbdtn", start=60)
+        with (
+            patch.object(
+                self.backend, "inject_correction", side_effect=RuntimeError("boom")
+            ),
+            self.assertLogs("keyswitch.engine", level="INFO") as logs,
+        ):
+            self.press_space(0)
+        failed = next(
+            event
+            for event in self.technical_events(logs.output)
+            if event["event"] == "correction_failed"
+        )
+        self.assertEqual(failed["keys_during_injection"], 0)
+
+    def test_a_scheduled_conversion_that_never_runs_is_logged(self) -> None:
+        self.type_word("ghbdtn")
+        self.engine._schedule_manual_conversion(127)
+        self.assertIsNotNone(self.engine._pending)
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._handle(
+                KeyEvent(True, 38, "a", "a", ("a", "ф"), 0, CONTROL_MASK, 800)
+            )
+        self.assertIsNone(self.engine._pending)
+        self.assertEqual(self.backend.injections, [])
+        dropped = next(
+            event
+            for event in self.technical_events(logs.output)
+            if event["event"] == "pending_correction_dropped"
+        )
+        self.assertEqual(dropped["reason"], "modifier_shortcut")
+        self.assertEqual((dropped["original"], dropped["replacement"]), ("ghbdtn", "привет"))
+        self.assertEqual(dropped["mode"], "manual")
+
+        # A second Pause replaces an unfinished plan; the first one says so.
+        self.type_word("ghbdtn")
+        self.engine._schedule_manual_conversion(127)
+        self.type_word("ghbdtn", start=60)
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._schedule_manual_conversion(128)
+        self.assertEqual(
+            next(
+                event["reason"]
+                for event in self.technical_events(logs.output)
+                if event["event"] == "pending_correction_dropped"
+            ),
+            "replaced_by_manual_conversion",
+        )
+
+        # Text of an excluded application never reaches the log.
+        self.settings.set("exclusions.applications", ["TestEditor"])
+        self.type_word("ghbdtn", start=90)
+        self.engine._schedule_manual_conversion(129)
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._handle(
+                KeyEvent(True, 38, "a", "a", ("a", "ф"), 0, CONTROL_MASK, 900)
+            )
+        redacted = next(
+            event
+            for event in self.technical_events(logs.output)
+            if event["event"] == "pending_correction_dropped"
+        )
+        self.assertEqual(
+            (redacted["original"], redacted["replacement"]),
+            ("<redacted>", "<redacted>"),
+        )
+        self.settings.set("exclusions.applications", [])
 
     def test_pause_right_after_a_correction_converts_the_word_back(self) -> None:
         self.correct_hello()

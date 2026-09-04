@@ -4,6 +4,22 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.11.2 — 2026-09-04
+
+- A correction records how much the user typed into it. `correction_applied`
+  and `correction_failed` now carry `keys_during_injection` — the real
+  keystrokes that arrived while the text was being replaced — next to
+  `queued_events`, `replayed_strokes` and `boundary_replayed`. Nothing reads
+  the text back from the application, so this is the signal that explains a
+  replacement that came out with extra or missing characters while every step
+  reported success.
+- A correction that is scheduled but never runs is no longer silent. It waits
+  for the release of the key that triggered it, and a shortcut, a caret move, a
+  focus change or a second `Pause` in between used to cancel it without a
+  trace; the log now records `pending_correction_dropped` with the reason, the
+  word and the direction. `Pause` that has neither a word nor a second layout
+  records `manual_conversion_impossible`.
+
 ## 0.11.1 — 2026-09-04
 
 - The technical log now explains what local learning did with a word. Every

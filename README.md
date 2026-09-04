@@ -66,11 +66,11 @@ KeySwitch — настольное приложение для Windows 10/11 x64
 
 ## Установка в Windows
 
-Скачайте `KeySwitch-Setup-0.11.1-x64.exe` со страницы
+Скачайте `KeySwitch-Setup-0.11.2-x64.exe` со страницы
 [последнего выпуска](https://github.com/olegius88/keyswitch/releases/latest) и
 запустите его. Установка выполняется для текущего пользователя в
 `%LOCALAPPDATA%\Programs\KeySwitch` и не требует прав администратора. В выпуск
-также входит переносимый архив `KeySwitch-0.11.1-windows-x64.zip`.
+также входит переносимый архив `KeySwitch-0.11.2-windows-x64.zip`.
 
 После запуска KeySwitch появится в области уведомлений. Левый или правый щелчок
 по `EN/RU` либо флагу открывает меню. В нём пункт «Переключить на…» всегда
@@ -133,11 +133,11 @@ cd keyswitch
 
 ## Установка DEB-пакета
 
-Скачайте `keyswitch_0.11.1_amd64.deb` со страницы
+Скачайте `keyswitch_0.11.2_amd64.deb` со страницы
 [последнего выпуска](https://github.com/olegius88/keyswitch/releases/latest), затем:
 
 ```bash
-sudo apt install ./keyswitch_0.11.1_amd64.deb
+sudo apt install ./keyswitch_0.11.2_amd64.deb
 ```
 
 Пакет установит системные зависимости и добавит KeySwitch в меню приложений.
@@ -524,7 +524,7 @@ dbus-run-session -- env PYTHONPATH=src python3 tests/e2e_tray_menu.py
 sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
 ./tools/install-build-tools.sh .nuitka
 KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package="dist/keyswitch_0.11.1_$(dpkg --print-architecture).deb"
+package="dist/keyswitch_0.11.2_$(dpkg --print-architecture).deb"
 ./tools/verify-native-deb.sh "$package"
 ```
 
@@ -616,7 +616,7 @@ python3 tools/release.py --version 0.9.2 --dry-run   # только провер
 - В Windows механизм UIPI не позволяет обычному процессу вводить текст в окно,
   запущенное с более высоким уровнем целостности. Для такого окна KeySwitch
   также должен быть запущен с сопоставимыми правами.
-- Windows Setup EXE версии 0.11.1 пока не подписан сертификатом издателя.
+- Windows Setup EXE версии 0.11.2 пока не подписан сертификатом издателя.
 
 ## Лицензия
 

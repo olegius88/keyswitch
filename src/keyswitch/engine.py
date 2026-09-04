@@ -168,6 +168,7 @@ class KeySwitchEngine:
         self.backend: InputBackend = backend or _default_backend(len(self.models))
         self.backend_label = backend_label
         self.learning = learning or LearningStore(history.path.with_name("learning.json"))
+        self._typed_events = 0
         self._events: queue.Queue[KeyEvent | _LayoutSelection | None] = queue.Queue(
             maxsize=4096
         )
@@ -347,6 +348,10 @@ class KeySwitchEngine:
     def enqueue(self, event: KeyEvent) -> None:
         if event.synthetic:
             return
+        # Counted on the hook thread: the difference across an injection is
+        # what the user typed into the middle of it, which is the one thing
+        # that can add or lose characters without any step reporting an error.
+        self._typed_events += 1
         try:
             self._events.put_nowait(event)
         except queue.Full:
@@ -1270,6 +1275,31 @@ class KeySwitchEngine:
             shadow_decision=shadow_payload,
         )
 
+    def _log_pending_dropped(self, reason: str) -> None:
+        """Record a scheduled correction that is thrown away before it runs.
+
+        A correction waits for the release of the key that triggered it, so a
+        shortcut or a focus change in between silently cancels it: from the
+        outside the hotkey simply did nothing.
+        """
+
+        plan = self._pending
+        if plan is None:
+            return
+        excluded = self._application_excluded(plan.application)
+        self._technical_event(
+            "pending_correction_dropped",
+            reason=reason or "unspecified",
+            mode=plan.mode,
+            original="<redacted>" if excluded else plan.original,
+            replacement="<redacted>" if excluded else plan.replacement,
+            source_group=plan.source_group,
+            target_group=plan.target_group,
+            trigger_keycode=self._pending_trigger_keycode,
+            application=plan.application,
+            application_excluded=excluded,
+        )
+
     def _learning_diagnostics(
         self, source_group: int | None, word: str
     ) -> dict[str, object]:
@@ -1494,7 +1524,7 @@ class KeySwitchEngine:
         original = self._text_for_group(strokes, source_group)
         replacement = self._text_for_group(strokes, target)
         learn = learn and self._learnable(replacement)
-        self._pending = CorrectionPlan(
+        plan = CorrectionPlan(
             strokes,
             boundary,
             source_group,
@@ -1506,6 +1536,10 @@ class KeySwitchEngine:
             False,
             mode,
         )
+        # A second Pause before the first one ran replaces the plan; without
+        # this line the first conversion would vanish without a trace.
+        self._log_pending_dropped("replaced_by_manual_conversion")
+        self._pending = plan
         self._pending_learning_action = (
             ("manual", source_group, original, target) if learn else None
         )
@@ -1550,6 +1584,13 @@ class KeySwitchEngine:
         current = self.snapshot.current_group
         target = alternate_layout_group(current)
         if target is None or target not in self.models:
+            self._technical_event(
+                "manual_conversion_impossible",
+                reason="no_alternate_layout",
+                current_group=current,
+                trigger_keycode=trigger_keycode,
+                last_committed_stale=self._last_committed_stale,
+            )
             self._update(last_action="Нет слова для ручного преобразования")
             return
         try:
@@ -1680,6 +1721,7 @@ class KeySwitchEngine:
         )
         previous_group = self.snapshot.current_group
         started = time.monotonic()
+        typed_before = self._typed_events
         try:
             self.backend.inject_correction(
                 plan.strokes,
@@ -1698,6 +1740,7 @@ class KeySwitchEngine:
                 application=plan.application,
                 application_excluded=application_excluded,
                 automatic=plan.automatic,
+                keys_during_injection=self._typed_events - typed_before,
                 error=str(error),
             )
             self._update(last_error=str(error), last_action="Исправление не выполнено")
@@ -1713,7 +1756,14 @@ class KeySwitchEngine:
             previous_group=previous_group,
             layout_switched=plan.source_group != plan.target_group,
             deleted_characters=len(plan.strokes) + (0 if plan.boundary is None else 1),
+            replayed_strokes=len(plan.strokes),
+            boundary_replayed=plan.boundary is not None,
             injection_ms=round((time.monotonic() - started) * 1000),
+            # Anything above zero means the text was typed into while the
+            # correction was being injected: the result may hold extra or
+            # missing characters even though every step reported success.
+            keys_during_injection=self._typed_events - typed_before,
+            queued_events=self._events.qsize(),
             application=plan.application,
             application_excluded=application_excluded,
             automatic=plan.automatic,
@@ -1919,6 +1969,7 @@ class KeySwitchEngine:
 
     def _clear_word(self, action: str | None = None, *, reason: str = "") -> None:
         self._log_word_discarded(reason)
+        self._log_pending_dropped(reason)
         self.dismiss_learning_prompt(reason="word_cleared")
         if self._early_switch_origin is not None and self._strokes:
             # The rewritten prefix stays on screen: record it so that the
