@@ -1,6 +1,10 @@
-# KeySwitch 0.14.0
+# KeySwitch 0.14.1
 
 ## Русский
+
+Включает все изменения 0.14.0, установщики которого не были опубликованы.
+Исправлен Windows E2E: ожидание обработки очистки поля, UTF-8 в диагностике,
+обязательное закрытие окна при ошибке и таймаут с выводом стеков.
 
 Выпуск повышает надёжность ввода и замены EN/RU по результатам пользовательских
 обращений. Сертифицированная модель намерения `intent-v1-6ece07f881ec`
@@ -29,19 +33,23 @@
 В Linux/X11 Enter/Tab остаются недоступными триггерами: пассивный XRecord не
 может задержать уже доставленную клавишу. Используйте пробел, паузу, пунктуацию
 или Pause до отправки. Матрица сценариев и оставшиеся ограничения доступны в
-[docs/input-maturity.md](https://github.com/olegius88/keyswitch/blob/v0.14.0/docs/input-maturity.md).
+[docs/input-maturity.md](https://github.com/olegius88/keyswitch/blob/v0.14.1/docs/input-maturity.md).
 
 ### Установка
 
-- Windows 10/11 x64: `KeySwitch-Setup-0.14.0-x64.exe` или переносимый
-  `KeySwitch-0.14.0-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.14.0_amd64.deb`.
+- Windows 10/11 x64: `KeySwitch-Setup-0.14.1-x64.exe` или переносимый
+  `KeySwitch-0.14.1-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.14.1_amd64.deb`.
 - Контрольные суммы: `SHA256SUMS`.
 
 Windows Setup пока не подписан сертификатом издателя. Нативная Wayland-сессия
 не поддерживается. Технические журналы могут содержать личный текст.
 
 ## English
+
+Includes all 0.14.0 changes; that version's installers were not published.
+The Windows E2E now waits for keyboard-driven field clearing, emits UTF-8
+diagnostics, always closes its window on failure and has a bounded watchdog.
 
 This release hardens EN/RU input handling based on user-reported failures.
 The certified intent model `intent-v1-6ece07f881ec` is unchanged.
@@ -71,9 +79,9 @@ need application-specific validation.
 
 ### Installation
 
-- Windows 10/11 x64: `KeySwitch-Setup-0.14.0-x64.exe` or
-  `KeySwitch-0.14.0-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.14.0_amd64.deb`.
+- Windows 10/11 x64: `KeySwitch-Setup-0.14.1-x64.exe` or
+  `KeySwitch-0.14.1-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.14.1_amd64.deb`.
 - Checksums: `SHA256SUMS`.
 
 The Windows installer is not yet publisher-signed. Native Wayland sessions

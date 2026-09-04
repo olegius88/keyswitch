@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import faulthandler
+import io
 import os
 import sys
 import tempfile
@@ -236,23 +238,25 @@ def main() -> int:
             # A scenario that fails in CI cannot be examined afterwards, so
             # print the visible state and the technical events the engine
             # recorded on the way in.
-            print("WINDOWS_E2E_DIAGNOSTICS", flush=True)
-            snapshot = application.engine.snapshot
-            print(
-                f"field={application.test_entry.get()!r} "
-                f"group={application.backend.current_group()} "
-                f"corrections={snapshot.correction_count} "
-                f"action={snapshot.last_action!r} error={snapshot.last_error!r} "
-                f"word={snapshot.current_word!r} "
-                f"foreground={api.active_application()!r} "
-                f"focus={application.root.focus_get()!r}",
-                flush=True,
-            )
-            for line in recorded[-30:]:
-                print(line[:600], flush=True)
-            print("WINDOWS_E2E_DIAGNOSTICS_END", flush=True)
             scenario_errors.append(error)
-            application.shutdown()
+            try:
+                print("WINDOWS_E2E_DIAGNOSTICS", flush=True)
+                snapshot = application.engine.snapshot
+                print(
+                    f"field={application.test_entry.get()!r} "
+                    f"group={application.backend.current_group()} "
+                    f"corrections={snapshot.correction_count} "
+                    f"action={snapshot.last_action!r} error={snapshot.last_error!r} "
+                    f"word={snapshot.current_word!r} "
+                    f"foreground={api.active_application()!r} "
+                    f"focus={application.root.focus_get()!r}",
+                    flush=True,
+                )
+                for line in recorded[-30:]:
+                    print(line[:600], flush=True)
+                print("WINDOWS_E2E_DIAGNOSTICS_END", flush=True)
+            finally:
+                application.shutdown()
 
         def send_scans(scan_codes: tuple[int, ...]) -> None:
             user_inputs = tuple(
@@ -652,9 +656,18 @@ def main() -> int:
                 api.activate_window(application.root.winfo_id())
                 application.test_entry.focus_force()
                 clear_editor()
-                application.root.update_idletasks()
+                layout_deadline[0] = time.monotonic() + 5.0
+                application.root.after(50, wait_for_cleared_reverse_field)
+            except Exception as error:
+                fail(error)
+
+        def wait_for_cleared_reverse_field() -> None:
+            try:
                 if application.test_entry.get():
-                    raise RuntimeError("KeySwitch E2E field did not clear")
+                    if time.monotonic() >= layout_deadline[0]:
+                        raise RuntimeError("KeySwitch E2E field did not clear")
+                    application.root.after(50, wait_for_cleared_reverse_field)
+                    return
                 if api.active_application().casefold() != Path(sys.executable).stem.casefold():
                     raise RuntimeError("KeySwitch E2E lost foreground before RU to EN pass")
                 if not api.request_layout(application.backend.layouts[1]):
@@ -769,4 +782,11 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+    faulthandler.dump_traceback_later(90, exit=True)
+    try:
+        raise SystemExit(main())
+    finally:
+        faulthandler.cancel_dump_traceback_later()
