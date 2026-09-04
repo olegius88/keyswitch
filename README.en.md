@@ -17,7 +17,7 @@ entirely locally and using the active EN/RU system layout pair.
 - global input observation through `WH_KEYBOARD_LL` on Windows and XRecord in
   regular Linux X11 applications;
 - automatic English and Russian word detection after a typing pause (1.5
-  seconds by default, configurable), as well as after Space, Enter, Tab or
+  seconds by default, configurable), as well as after Space or
   punctuation; idle correction can be disabled independently in settings;
 - early layout switching: as soon as the beginning of a word is impossible in
   the current language and clearly continues in the other one (for example
@@ -65,13 +65,25 @@ is kept in memory. When history is enabled, it stores correction pairs such as
 `ghbdtn → привет` and nothing else. Linear inference is fully local and the
 model is not updated from ordinary typing.
 
+Technical logging also writes evaluated words and decision reasons, including
+unchanged words. It may contain private text; enable it temporarily for diagnosis.
+On Windows, Enter/Tab is intercepted before delivery: the word is corrected
+first, then the action is sent exactly once. For example, `ghbdtn` + Enter
+submits `привет`. A learning prompt owns Enter exclusively while it is active.
+Shift/Ctrl/Alt shortcuts are not intercepted. A correction failure or a focus
+change cancels submission and is reported in diagnostics. On X11 these actions
+have already reached the application, so use Space, idle correction or Pause
+before submitting or changing fields.
+See the [EN/RU input maturity matrix](docs/input-maturity.md) for regression
+scenarios and platform limitations.
+
 ## Install on Windows
 
-Download `KeySwitch-Setup-0.13.0-x64.exe` from the
+Download `KeySwitch-Setup-0.14.0-x64.exe` from the
 [latest release](https://github.com/olegius88/keyswitch/releases/latest) and run
 it. The per-user installation goes to `%LOCALAPPDATA%\Programs\KeySwitch` and
 does not require administrator privileges. The release also includes the
-portable `KeySwitch-0.13.0-windows-x64.zip` archive.
+portable `KeySwitch-0.14.0-windows-x64.zip` archive.
 
 After launch, KeySwitch appears in the notification area. Left- or right-click
 the `EN/RU` or flag icon to open its menu. Its Switch to action always offers
@@ -132,12 +144,12 @@ Probe the system backend without opening the application window:
 
 ## Install the Debian package
 
-Download `keyswitch_0.13.0_amd64.deb` from the
+Download `keyswitch_0.14.0_amd64.deb` from the
 [latest release](https://github.com/olegius88/keyswitch/releases/latest), then
 install it with:
 
 ```bash
-sudo apt install ./keyswitch_0.13.0_amd64.deb
+sudo apt install ./keyswitch_0.14.0_amd64.deb
 ```
 
 The package installs the required system dependencies and adds KeySwitch to the
@@ -526,7 +538,7 @@ Build the reproducible native Debian package with:
 sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
 ./tools/install-build-tools.sh .nuitka
 KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package="dist/keyswitch_0.13.0_$(dpkg --print-architecture).deb"
+package="dist/keyswitch_0.14.0_$(dpkg --print-architecture).deb"
 ./tools/verify-native-deb.sh "$package"
 ```
 
@@ -623,7 +635,7 @@ a failure continues where it stopped.
 - On Windows, UIPI prevents a regular process from injecting input into a
   window running at a higher integrity level. KeySwitch needs a matching level
   for that target window.
-- The Windows 0.13.0 Setup EXE is not yet signed with a publisher certificate.
+- The Windows 0.14.0 Setup EXE is not yet signed with a publisher certificate.
 
 ## License
 

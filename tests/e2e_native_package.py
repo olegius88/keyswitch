@@ -83,6 +83,14 @@ class PhysicalTyper:
             raise RuntimeError("Cannot read the current XKB group")
         return int(state.group)
 
+    def clear_field(self) -> None:
+        """Clear through real input so the packaged observer sees the edit."""
+        control = int(self.libraries.x11.XKeysymToKeycode(self.display, 0xFFE3))
+        letter_a = int(self.libraries.x11.XKeysymToKeycode(self.display, ord("a")))
+        for keycode, pressed in ((control, 1), (letter_a, 1), (letter_a, 0), (control, 0)):
+            self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, pressed, 8)
+        self.tap_keysym(0xFF08)
+
     def switch_group(self, group: int) -> None:
         if not self.libraries.x11.XkbLockGroup(
             self.display, XKB_USE_CORE_KBD, group
@@ -284,8 +292,8 @@ def main() -> int:
         ) = cases[index]
         try:
             typer.switch_group(group)
-            entry.set_text("")
             entry.grab_focus()
+            typer.clear_field()
             typer.type(physical)
         except (OSError, RuntimeError) as error:
             return fail(f"cannot type {name!r}: {error}")
@@ -327,9 +335,9 @@ def main() -> int:
     def start_learning_case() -> bool:
         try:
             typer.switch_group(0)
-            entry.set_text("")
             window.present()
             entry.grab_focus()
+            typer.clear_field()
             typer.type("hello")
             typer.tap_keysym(0xFF13)
         except (OSError, RuntimeError) as error:
@@ -357,9 +365,9 @@ def main() -> int:
             return fail("Enter did not persist the packaged learning rule")
         try:
             typer.switch_group(0)
-            entry.set_text("")
             window.present()
             entry.grab_focus()
+            typer.clear_field()
             typer.type("hello ")
         except (OSError, RuntimeError) as error:
             return fail(f"cannot type the learned packaged word: {error}")
@@ -373,9 +381,9 @@ def main() -> int:
                 f"text={entry.get_text()!r} group={typer.current_group()}"
             )
         try:
-            entry.set_text("")
             window.present()
             entry.grab_focus()
+            typer.clear_field()
             typer.type("hello ")
         except (OSError, RuntimeError) as error:
             return fail(f"cannot repeat the learned packaged word: {error}")

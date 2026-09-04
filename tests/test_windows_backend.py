@@ -142,6 +142,9 @@ class FakeWindowsAPI:
     def foreground_window(self) -> int:
         return self.foreground
 
+    def focused_control(self) -> int:
+        return self.foreground
+
     def window_process_id(self, window: int) -> int:
         return self.window_owners.get(window, 0)
 
@@ -318,6 +321,11 @@ class WindowsBackendHelperTests(unittest.TestCase):
         self.assertEqual(key_name(ord("A")), "a")
         self.assertEqual(key_name(ord("7")), "7")
         self.assertEqual(key_name(0xFE), "VK_FE")
+        # Punctuation keys carry the X11 keysym names, so a log line reads
+        # "comma", never "VK_BC".
+        self.assertEqual(key_name(0xBC), "comma")
+        self.assertEqual(key_name(0xBE), "period")
+        self.assertEqual(key_name(0xDE), "apostrophe")
 
     def test_constructor_rejects_default_native_api_outside_windows(self) -> None:
         with patch("keyswitch.windows_backend._running_on_windows", return_value=False):
@@ -617,7 +625,8 @@ class WindowsBackendInjectionTests(unittest.TestCase):
         held = backend.inject_correction((key_event(),), 1, None, source_group=0, late=(late,))
         self.assertEqual(held, 2)
         self.assertEqual(api.requests, [RUSSIAN_LAYOUT])
-        batch, late_sent, held_sent = api.sent
+        batch, late_sent, *held_batches = api.sent
+        held_sent = tuple(item for batch in held_batches for item in batch)
         # Two characters to delete: the word and the late key after it.
         self.assertEqual(sum(1 for item in batch if item.virtual_key == VK_BACK), 4)
         self.assertEqual([item.scan_code for item in batch if item.scan_code], [30, 30])
@@ -625,15 +634,15 @@ class WindowsBackendInjectionTests(unittest.TestCase):
         self.assertEqual(
             late_sent,
             (
-                NativeInput(True, scan_code=31, synthetic=False),
-                NativeInput(False, scan_code=31, synthetic=False),
+                NativeInput(True, scan_code=31, synthetic=False, replayed=True),
+                NativeInput(False, scan_code=31, synthetic=False, replayed=True),
             ),
         )
         self.assertEqual(
             held_sent,
             (
-                NativeInput(True, virtual_key=ord("D"), scan_code=32, synthetic=False),
-                NativeInput(False, virtual_key=ord("D"), scan_code=32, synthetic=False),
+                NativeInput(True, virtual_key=ord("D"), scan_code=32, synthetic=False, replayed=True),
+                NativeInput(False, virtual_key=ord("D"), scan_code=32, synthetic=False, replayed=True),
             ),
         )
         # The hold is over: the next key is delivered as before.
@@ -658,7 +667,7 @@ class WindowsBackendInjectionTests(unittest.TestCase):
             backend.inject_correction((key_event(),), 1, None, late=(key_event(keycode=31),))
         self.assertEqual(
             api.sent,
-            [(NativeInput(True, virtual_key=ord("D"), scan_code=32, synthetic=False),)],
+            [(NativeInput(True, virtual_key=ord("D"), scan_code=32, synthetic=False, replayed=True),)],
         )
         self.assertFalse(backend._holding)
 
@@ -697,8 +706,8 @@ class WindowsBackendInjectionTests(unittest.TestCase):
         self.assertEqual(
             api.sent[-1],
             (
-                NativeInput(True, scan_code=31, synthetic=False),
-                NativeInput(False, scan_code=31, synthetic=False),
+                NativeInput(True, scan_code=31, synthetic=False, replayed=True),
+                NativeInput(False, scan_code=31, synthetic=False, replayed=True),
             ),
         )
         backend.stop()

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from keyswitch.backend import KeyDisposition
+
 import json
 import logging
 import queue
@@ -578,6 +580,12 @@ class FakeBackend:
     def hold_input(self) -> None:
         return None
 
+    def release_input(self) -> int:
+        return 0
+
+    def complete_action(self, deliver: bool) -> int:
+        return 0
+
     def inject_correction(
         self,
         strokes: Iterable[KeyEvent],
@@ -593,7 +601,7 @@ class FakeBackend:
         return 0
 
     def set_key_filter(
-        self, predicate: Callable[[KeyEvent], bool] | None
+        self, predicate: Callable[[KeyEvent], KeyDisposition] | None
     ) -> None:
         self.key_filter = predicate
 
@@ -765,7 +773,7 @@ class EngineBranchTests(unittest.TestCase):
             initialized.records[0].getMessage().removeprefix("TECHNICAL ")
         )
         self.assertEqual(initial_payload["event"], "engine_initialized")
-        self.assertEqual(initial_payload["keyswitch_version"], "0.13.0")
+        self.assertEqual(initial_payload["keyswitch_version"], "0.14.0")
         self.assertIn("minimum_length", initial_payload["detection_settings"])
 
     def test_start_stop_idempotence_and_backend_failure(self) -> None:
@@ -792,6 +800,8 @@ class EngineBranchTests(unittest.TestCase):
         self.assertTrue(self.engine._events.empty())
         with patch.object(self.engine._events, "put_nowait", side_effect=queue.Full):
             self.engine.enqueue(letter("a"))
+        self.assertTrue(self.engine._input_overflow.is_set())
+        self.engine._handle(key("space", character=" "))
         self.assertEqual(self.engine.snapshot.last_action, "Очередь ввода переполнена")
 
     def test_alternate_layout_selection_guards_queue_and_applies(self) -> None:

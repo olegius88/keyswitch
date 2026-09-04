@@ -40,6 +40,7 @@ from .windows_backend import (
 
 
 WH_KEYBOARD_LL = 13
+WH_MOUSE_LL = 14
 HC_ACTION = 0
 WM_KEYDOWN = 0x0100
 WM_KEYUP = 0x0101
@@ -57,6 +58,7 @@ KEYEVENTF_SCANCODE = 0x0008
 INPUT_KEYBOARD = 1
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 KEYSWITCH_EXTRA_INFO = 0x4B535743
+KEYSWITCH_REPLAY_INFO = 0x4B535752
 GA_ROOT = 2
 GWL_EXSTYLE = -20
 WS_EX_TOOLWINDOW = 0x00000080
@@ -447,6 +449,13 @@ class CtypesWindowsAPI:
             )
         )
 
+    def focused_control(self) -> int:
+        info = GUITHREADINFO()
+        info.cbSize = ctypes.sizeof(GUITHREADINFO)
+        if self.user32.GetGUIThreadInfo(0, ctypes.byref(info)):
+            return int(info.hwndFocus or 0)
+        return 0
+
     def translate_key(
         self,
         virtual_key: int,
@@ -504,7 +513,7 @@ class CtypesWindowsAPI:
                 item.scan_code,
                 flags,
                 0,
-                KEYSWITCH_EXTRA_INFO if item.synthetic else 0,
+                KEYSWITCH_EXTRA_INFO if item.synthetic else KEYSWITCH_REPLAY_INFO if item.replayed else 0,
             )
         return int(self.user32.SendInput(len(native), native, ctypes.sizeof(INPUT)))
 
@@ -544,6 +553,13 @@ class CtypesWindowsAPI:
         listener: Callable[[NativeKeyEvent], bool],
         ready: Callable[[], None],
     ) -> None:
+        def mouse_callback(code: int, message: int, data: int) -> int:
+            # Button-down and wheel events invalidate the caret position.
+            # Observe only: never suppress the user's pointer action.
+            if code == HC_ACTION and message in {0x0201, 0x0204, 0x0207, 0x020A, 0x020B, 0x020E}:
+                listener(NativeKeyEvent(True, 0, 0, False, False, 0))
+            return int(self.user32.CallNextHookEx(None, code, message, data))
+
         def callback(code: int, message: int, data: int) -> int:
             if code == HC_ACTION and message in {
                 WM_KEYDOWN,
@@ -566,6 +582,10 @@ class CtypesWindowsAPI:
                             and native.dwExtraInfo == KEYSWITCH_EXTRA_INFO
                         ),
                         int(native.time),
+                        bool(
+                            native.flags & LLKHF_INJECTED
+                            and native.dwExtraInfo == KEYSWITCH_REPLAY_INFO
+                        ),
                     )
                 )
                 if consumed:
@@ -598,6 +618,14 @@ class CtypesWindowsAPI:
         if not hook:
             self._hook_callback = None
             raise self._error("Не удалось установить WH_KEYBOARD_LL")
+        mouse_callback_object = self.hook_callback_type(mouse_callback)
+        mouse_hook = self.user32.SetWindowsHookExW(
+            WH_MOUSE_LL, mouse_callback_object, module, 0,
+        )
+        if not mouse_hook:
+            self.user32.UnhookWindowsHookEx(hook)
+            self._hook_callback = None
+            raise self._error("Не удалось установить WH_MOUSE_LL")
         with self._lock:
             self._hook = int(hook)
             self._thread_id = int(self.kernel32.GetCurrentThreadId())
@@ -613,6 +641,7 @@ class CtypesWindowsAPI:
                 self.user32.TranslateMessage(ctypes.byref(message))
                 self.user32.DispatchMessageW(ctypes.byref(message))
         finally:
+            self.user32.UnhookWindowsHookEx(mouse_hook)
             self.user32.UnhookWindowsHookEx(hook)
             with self._lock:
                 self._hook = None

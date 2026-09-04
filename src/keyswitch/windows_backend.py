@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 
 from .backend import (
@@ -18,6 +18,7 @@ from .backend import (
     BackendProbe,
     FocusInfo,
     KeyEvent,
+    KeyDisposition,
     ScreenAnchor,
 )
 
@@ -55,6 +56,19 @@ VK_LCONTROL = 0xA2
 VK_RCONTROL = 0xA3
 VK_LMENU = 0xA4
 VK_RMENU = 0xA5
+# Punctuation keys of the US layout; named after the X11 keysyms so the log
+# reads the same on both platforms instead of showing "VK_BC" for a comma.
+VK_OEM_1 = 0xBA
+VK_OEM_PLUS = 0xBB
+VK_OEM_COMMA = 0xBC
+VK_OEM_MINUS = 0xBD
+VK_OEM_PERIOD = 0xBE
+VK_OEM_2 = 0xBF
+VK_OEM_3 = 0xC0
+VK_OEM_4 = 0xDB
+VK_OEM_5 = 0xDC
+VK_OEM_6 = 0xDD
+VK_OEM_7 = 0xDE
 
 SHIFT_KEYS = frozenset((VK_SHIFT, VK_LSHIFT, VK_RSHIFT))
 CONTROL_KEYS = frozenset((VK_CONTROL, VK_LCONTROL, VK_RCONTROL))
@@ -80,6 +94,7 @@ class NativeKeyEvent:
     extended: bool
     injected: bool
     timestamp: int
+    replayed: bool = False
 
 
 @dataclass(frozen=True)
@@ -89,6 +104,7 @@ class NativeInput:
     scan_code: int = 0
     extended: bool = False
     synthetic: bool = True
+    replayed: bool = False
 
 
 class WindowsAPI(Protocol):
@@ -111,6 +127,8 @@ class WindowsAPI(Protocol):
     def active_application(self) -> str: ...
 
     def foreground_window(self) -> int: ...
+
+    def focused_control(self) -> int: ...
 
     def window_process_id(self, window: int) -> int: ...
 
@@ -162,6 +180,17 @@ KEY_NAMES = {
     VK_RCONTROL: "Control_R",
     VK_LMENU: "Alt_L",
     VK_RMENU: "Alt_R",
+    VK_OEM_1: "semicolon",
+    VK_OEM_PLUS: "equal",
+    VK_OEM_COMMA: "comma",
+    VK_OEM_MINUS: "minus",
+    VK_OEM_PERIOD: "period",
+    VK_OEM_2: "slash",
+    VK_OEM_3: "grave",
+    VK_OEM_4: "bracketleft",
+    VK_OEM_5: "backslash",
+    VK_OEM_6: "bracketright",
+    VK_OEM_7: "apostrophe",
 }
 
 
@@ -212,7 +241,7 @@ class WindowsBackend:
         self._ready = threading.Event()
         self._start_error: Exception | None = None
         self._pressed: set[int] = set()
-        self._key_filter: Callable[[KeyEvent], bool] | None = None
+        self._key_filter: Callable[[KeyEvent], KeyDisposition] | None = None
         self._consumed_keys: set[int] = set()
         # While a correction is being injected the user's own keys are kept
         # back here and typed again afterwards, so they can neither land
@@ -221,6 +250,11 @@ class WindowsBackend:
         self._holding = False
         self._held: list[NativeKeyEvent] = []
         self._caps_lock = False
+        self._pointer_epoch = 0
+        self._hold_pointer_epoch = 0
+        self._hold_window = 0
+        self._deferred_action: NativeKeyEvent | None = None
+        self._action_prior_keys: set[int] = set()
         self._inject_lock = threading.Lock()
 
     @property
@@ -300,6 +334,8 @@ class WindowsBackend:
         self._ready.set()
 
     def stop(self) -> None:
+        self._key_filter = None
+        self.complete_action(False)
         thread = self._thread
         if thread is None:
             return
@@ -341,7 +377,7 @@ class WindowsBackend:
             return None
         process_id = self._api.window_process_id(window)
         own = bool(process_id) and process_id == self._api.current_process_id()
-        return FocusInfo(window, own, isolated_layout=own)
+        return FocusInfo(self._api.focused_control() or window, own, isolated_layout=own)
 
     def input_anchor(self) -> ScreenAnchor | None:
         return self._api.input_anchor()
@@ -353,46 +389,122 @@ class WindowsBackend:
         return self._api.keep_window_inactive(window)
 
     def set_key_filter(
-        self, predicate: Callable[[KeyEvent], bool] | None
+        self, predicate: Callable[[KeyEvent], KeyDisposition] | None
     ) -> None:
         """Decide, inside the hook, which keys must not reach the window."""
 
         self._key_filter = predicate
 
-    def _consumes(self, event: KeyEvent) -> bool:
+    def _consumes(self, event: KeyEvent) -> KeyDisposition:
         """Ask the filter about a press, and hide the matching release.
 
         A window that saw no key-down must not receive the key-up either, so
         the release of a swallowed key is swallowed with it.
         """
 
+        if event.synthetic:
+            return False
         if not event.pressed:
             if event.keycode not in self._consumed_keys:
                 return False
             self._consumed_keys.discard(event.keycode)
             return True
+        if event.keycode in self._consumed_keys:
+            return True
         predicate = self._key_filter
-        if predicate is None or not predicate(event):
+        decision = predicate(event) if predicate is not None else False
+        if not decision:
             return False
         self._consumed_keys.add(event.keycode)
-        return True
+        return decision
 
     def hold_input(self) -> None:
         """Keep the user's keys back until the next correction has landed."""
 
         with self._hold_lock:
+            if not self._holding:
+                self._hold_window = self._api.focused_control() or self._api.foreground_window()
+                self._hold_pointer_epoch = self._pointer_epoch
             self._holding = True
 
-    def _release_hold(self) -> tuple[NativeKeyEvent, ...]:
-        with self._hold_lock:
-            self._holding = False
-            held, self._held = tuple(self._held), []
-        return held
+    def release_input(self) -> int:
+        """Replay held events before allowing fresh physical input through.
+
+        Replays have their own native marker: they reach the engine but must
+        never enter this buffer again. Never hold the mutex across SendInput,
+        which calls the hook synchronously on another thread.
+        """
+
+        active = self._deferred_action
+        if active is not None:
+            return 0
+        count = 0
+        try:
+            while True:
+                with self._hold_lock:
+                    if self._deferred_action is not None:
+                        # A replayed second Enter starts the next transaction.
+                        # Let its preceding key-ups reach the worker, retaining
+                        # all following text until that action is completed.
+                        index = next((
+                            index for index, item in enumerate(self._held)
+                            if not item.pressed and item.virtual_key in self._action_prior_keys
+                        ), None)
+                        if index is None:
+                            return count
+                        item = self._held.pop(index)
+                    elif self._held:
+                        item = self._held.pop(0)
+                    else:
+                        self._holding = False
+                        return count
+                self._send_exact((NativeInput(
+                    item.pressed, virtual_key=item.virtual_key,
+                    scan_code=item.scan_code, extended=item.extended,
+                    synthetic=False, replayed=True,
+                ),))
+                count += 1
+        finally:
+            # An OS injection failure must never leave the keyboard captured.
+            with self._hold_lock:
+                if self._deferred_action is None:
+                    self._holding = False
+
+    def complete_action(self, deliver: bool) -> int:
+        """Deliver a withheld Enter/Tab once, before releasing subsequent input."""
+
+        action = self._deferred_action
+        if action is None:
+            return 0
+        try:
+            if deliver:
+                if (
+                    self._pointer_epoch != self._hold_pointer_epoch
+                    or (self._api.focused_control() or self._api.foreground_window()) != self._hold_window
+                ):
+                    raise WindowsBackendError("Enter/Tab не передан: место ввода изменилось")
+                self._send_exact(tuple(
+                    NativeInput(pressed, virtual_key=action.virtual_key,
+                                scan_code=action.scan_code, extended=action.extended)
+                    for pressed in (True, False)
+                ))
+        finally:
+            self._deferred_action = None
+            self._action_prior_keys.clear()
+            self.release_input()
+        return 2 if deliver else 0
 
     def _handle_native(self, native: NativeKeyEvent) -> bool:
-        if not native.injected:
+        if native.virtual_key == 0:
+            self._pointer_epoch += 1
+            if self._listener is not None:
+                self._listener(KeyEvent(True, 0, "Pointer", "", ("", ""), -1, 0, native.timestamp))
+            return False
+        if not native.injected and not native.replayed:
             with self._hold_lock:
-                if self._holding:
+                prior_release = not native.pressed and native.virtual_key in self._action_prior_keys
+                action_key = self._deferred_action is not None and native.scan_code in self._consumed_keys
+                if self._holding and not prior_release and not action_key:
                     self._held.append(native)
                     return True
         if native.pressed:
@@ -401,6 +513,15 @@ class WindowsBackend:
             self._pressed.add(native.virtual_key)
         else:
             self._pressed.discard(native.virtual_key)
+            with self._hold_lock:
+                if native.virtual_key in self._action_prior_keys and any(
+                    item.pressed and item.virtual_key == native.virtual_key
+                    for item in self._held
+                ):
+                    # An auto-repeat after Enter belongs to the held next
+                    # input. Its key-up also has to follow that replay.
+                    self._held.append(replace(native, replayed=False))
+            self._action_prior_keys.discard(native.virtual_key)
         state = self._normalized_state()
         characters = tuple(
             self._api.translate_key(
@@ -424,11 +545,17 @@ class WindowsBackend:
             native.timestamp,
             native.injected,
         )
+        repeated_answer = not event.synthetic and event.pressed and event.keycode in self._consumed_keys
         consumed = self._consumes(event)
+        if consumed == "defer":
+            self.hold_input()
+            self._deferred_action = native
+            self._action_prior_keys = set(self._pressed)
+            event = replace(event, deferred=True)
         listener = self._listener
-        if listener is not None:
+        if listener is not None and not repeated_answer:
             listener(event)
-        return consumed
+        return bool(consumed)
 
     def _normalized_state(self) -> int:
         state = LOCK_MASK if self._caps_lock else 0
@@ -459,6 +586,16 @@ class WindowsBackend:
         :meth:`hold_input`) and typed again last.
         """
 
+        try:
+            return self._inject_correction(strokes, target_group, boundary, source_group, late)
+        finally:
+            self.release_input()
+
+    def _inject_correction(
+        self, strokes: Iterable[KeyEvent], target_group: int,
+        boundary: KeyEvent | None, source_group: int | None,
+        late: Sequence[KeyEvent],
+    ) -> int:
         if not 0 <= target_group < len(self.layouts):
             raise WindowsBackendError(f"Неизвестная группа раскладки {target_group}")
         stroke_list = list(strokes)
@@ -483,7 +620,7 @@ class WindowsBackend:
         replay_inputs = tuple(
             item
             for stroke in stroke_list
-            for item in self._stroke_inputs(stroke)
+            for item in self._stroke_inputs(stroke, group=target_group)
         )
         boundary_inputs = self._stroke_inputs(boundary) if boundary is not None else ()
         # Typed again as the user's own input: the engine must see these keys
@@ -491,7 +628,7 @@ class WindowsBackend:
         late_inputs = tuple(
             item
             for stroke in late_list
-            for item in self._stroke_inputs(stroke, synthetic=False)
+            for item in self._stroke_inputs(stroke, synthetic=False, group=target_group)
         )
         preserve_boundary_layout = bool(
             boundary is not None
@@ -509,6 +646,11 @@ class WindowsBackend:
                 # events of a single call together, but lets the user's keys
                 # slip in between separate calls.
                 self._switch_group(target_group)
+                if self._holding and (
+                    self._pointer_epoch != self._hold_pointer_epoch
+                    or (self._api.focused_control() or self._api.foreground_window()) != self._hold_window
+                ):
+                    raise WindowsBackendError("Место ввода изменилось до замены; текст не изменён")
                 self._send_exact(
                     delete_inputs
                     + replay_inputs
@@ -519,46 +661,42 @@ class WindowsBackend:
                     self._switch_group(rendered_source_group)
                     self._send_exact(boundary_inputs)
                     self._switch_group(target_group)
-                self._send_exact(late_inputs)
+                # A partial send is not an all-or-nothing failure; retrying
+                # this whole batch could duplicate an already delivered prefix.
                 late_typed = True
+                self._send_exact(late_inputs)
             except Exception as error:
                 failure = error
-            held = self._release_hold()
             restore = late_inputs if late_deleted and not late_typed else ()
-            held_inputs = tuple(
-                NativeInput(
-                    item.pressed,
-                    virtual_key=item.virtual_key,
-                    scan_code=item.scan_code,
-                    extended=item.extended,
-                    synthetic=False,
-                )
-                for item in held
-            )
+            held_count = 0
             try:
-                self._send_exact(restore + held_inputs)
+                self._send_exact(restore)
+                held_count = self.release_input()
             except Exception as error:
                 # The primary failure explains more than a failed restore.
                 failure = failure or error
         if failure is not None:
             raise failure
-        return len(held)
+        return held_count
 
-    @staticmethod
     def _stroke_inputs(
-        stroke: KeyEvent, *, synthetic: bool = True
+        self, stroke: KeyEvent, *, synthetic: bool = True, group: int | None = None
     ) -> tuple[NativeInput, ...]:
         result: list[NativeInput] = []
-        if stroke.shift:
-            result.append(NativeInput(True, virtual_key=VK_SHIFT, synthetic=synthetic))
+        rendered_group = stroke.group if group is None else group
+        shifted = stroke.shift
+        if stroke.character_for(rendered_group).isalpha():
+            shifted ^= stroke.caps_lock != self._caps_lock
+        if shifted:
+            result.append(NativeInput(True, virtual_key=VK_SHIFT, synthetic=synthetic, replayed=not synthetic))
         result.extend(
             (
-                NativeInput(True, scan_code=stroke.keycode, synthetic=synthetic),
-                NativeInput(False, scan_code=stroke.keycode, synthetic=synthetic),
+                NativeInput(True, scan_code=stroke.keycode, synthetic=synthetic, replayed=not synthetic),
+                NativeInput(False, scan_code=stroke.keycode, synthetic=synthetic, replayed=not synthetic),
             )
         )
-        if stroke.shift:
-            result.append(NativeInput(False, virtual_key=VK_SHIFT, synthetic=synthetic))
+        if shifted:
+            result.append(NativeInput(False, virtual_key=VK_SHIFT, synthetic=synthetic, replayed=not synthetic))
         return tuple(result)
 
     def _send_exact(self, inputs: tuple[NativeInput, ...]) -> None:
@@ -567,7 +705,7 @@ class WindowsBackend:
         sent = self._api.send_inputs(inputs)
         if sent != len(inputs):
             raise WindowsBackendError(
-                "SendInput не смог исправить текст; возможно, целевое "
+                f"SendInput отправил {sent} из {len(inputs)} событий; результат текста неизвестен; возможно, целевое "
                 "приложение запущено с правами администратора"
             )
 

@@ -7,10 +7,11 @@ import tempfile
 import time
 import unittest
 from collections.abc import Callable, Iterable, Sequence
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from keyswitch.backend import ALT_MASK, CONTROL_MASK, FocusInfo
+from keyswitch.backend import ALT_MASK, CONTROL_MASK, FocusInfo, KeyDisposition
 from keyswitch.config import SettingsStore
 from keyswitch.engine import (
     ENGINE_SWITCH_GRACE_SECONDS,
@@ -49,6 +50,12 @@ class FakeBackend:
     def hold_input(self) -> None:
         self.hold_calls += 1
 
+    def release_input(self) -> int:
+        return 0
+
+    def complete_action(self, deliver: bool) -> int:
+        return 0
+
     def inject_correction(
         self,
         strokes: Iterable[KeyEvent],
@@ -63,9 +70,9 @@ class FakeBackend:
         return self.held_count
 
     def set_key_filter(
-        self, predicate: Callable[[KeyEvent], bool] | None
+        self, predicate: Callable[[KeyEvent], KeyDisposition] | None
     ) -> None:
-        self.key_filter: Callable[[KeyEvent], bool] | None = predicate
+        self.key_filter: Callable[[KeyEvent], KeyDisposition] | None = predicate
 
     def start(self, listener: Callable[[KeyEvent], None]) -> None:
         pass
@@ -138,10 +145,15 @@ class EngineBehaviourTests(unittest.TestCase):
         self.engine._handle(boundary_event(False, group=current))
 
     def press_pause(self, keycode: int = 127) -> None:
+        self.release_keys()
         self.engine._schedule_manual_conversion(keycode)
         self.engine._handle(
             plain_key("Pause", keycode, self.engine.snapshot.current_group, pressed=False)
         )
+
+    def release_keys(self) -> None:
+        for keycode in tuple(self.engine._pressed):
+            self.engine._handle(plain_key("a", keycode, self.backend.group, pressed=False))
 
     def technical_events(self, logs: list[str]) -> list[dict[str, object]]:
         events: list[dict[str, object]] = []
@@ -291,10 +303,10 @@ class EngineBehaviourTests(unittest.TestCase):
         self.type_word("ghbdtn")
         inject = self.backend.inject_correction
 
-        def typing_user(*arguments: object, **keywords: object) -> None:
+        def typing_user(*arguments: object, **keywords: object) -> int:
             # The user keeps typing while the correction is being injected.
             self.engine.enqueue(letter_event("x", 99, 0, self.pair))
-            inject(*arguments, **keywords)  # type: ignore[arg-type]
+            return inject(*arguments, **keywords)  # type: ignore[arg-type]
 
         with (
             patch.object(self.backend, "inject_correction", side_effect=typing_user),
@@ -470,20 +482,14 @@ class EngineBehaviourTests(unittest.TestCase):
             "navigation",
         )
 
-        # A digit with no word in progress drops the remembered symbols.
+        # A leading digit stays in the token for manual conversion and code protection.
         self.engine._handle(quote_event())
-        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            self.engine._handle(digit_event("2", 1))
-        self.assertEqual(self.engine._symbol_strokes, [])
-        discarded = next(
-            event
-            for event in self.technical_events(logs.output)
-            if event["event"] == "word_discarded"
-        )
-        self.assertEqual(discarded["reason"], "non_word_key")
-        self.assertEqual(discarded["symbol_count"], 1)
+        self.engine._handle(digit_event("2", 1))
+        self.assertEqual(len(self.engine._symbol_strokes), 1)
+        self.assertEqual(self.engine.snapshot.current_word, "2")
 
     def test_the_prompt_answer_is_kept_away_from_the_window(self) -> None:
+        self.settings.set("detection.correct_on_enter", False)
         enter = KeyEvent(True, 36, "Return", "\r", ("\r", "\r"), 1, 0, 4000)
         escape = KeyEvent(True, 9, "Escape", "", ("", ""), 1, 0, 4001)
         letter = letter_event("a", 38, 1, self.pair)
@@ -600,6 +606,7 @@ class EngineBehaviourTests(unittest.TestCase):
         # An undo hotkey pressed while a plan waits replaces it as well.
         self.engine._pending_trigger_keycode = -1
         self.engine._handle(boundary_event(False, group=0))
+        self.release_keys()
         self.assertEqual(len(self.backend.injections), 1)
         self.type_word("руд", group=1, start=40)
         self.engine._handle(letter_event("д", 43, 1, self.pair))
@@ -624,24 +631,22 @@ class EngineBehaviourTests(unittest.TestCase):
         # Rollover: the next word starts before the space is released.
         rollover = letter_event("d", 40, 0, self.pair)
         self.engine._handle(rollover)
+        self.engine._handle(replace(rollover, pressed=False))
         # Queued: more keys arrived before the engine got to them.
         queued = letter_event("t", 41, 0, self.pair)
         self.engine._events.put_nowait(queued)
         self.engine._events.put_nowait(
             KeyEvent(False, 41, "t", "t", ("t", "е"), 0, 0, 41)
         )
-        self.engine._events.put_nowait(
-            KeyEvent(True, 50, "Shift_L", "", ("", ""), 0, 0, 42)
-        )
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.engine._handle(boundary_event(False, group=0))
         self.assertEqual(self.backend.hold_calls, 1)
         self.assertEqual(self.backend.late, [(rollover, queued)])
         self.assertEqual(self.engine._strokes, [])
-        # The modifier stays queued; the typed keys come back through the hook.
+        # Release bookkeeping stays queued; typed keys come back through the hook.
         remaining = self.engine._events.get_nowait()
         assert isinstance(remaining, KeyEvent)
-        self.assertEqual(remaining.key_name, "Shift_L")
+        self.assertEqual((remaining.key_name, remaining.pressed), ("t", False))
         self.assertTrue(self.engine._events.empty())
         applied = next(
             e for e in self.technical_events(logs.output) if e["event"] == "correction_applied"
@@ -654,17 +659,18 @@ class EngineBehaviourTests(unittest.TestCase):
         self.engine._handle(boundary_event(True, group=0))
         rollover = letter_event("d", 40, 0, self.pair)
         self.engine._handle(rollover)
+        self.engine._handle(replace(rollover, pressed=False))
         enter = KeyEvent(True, 36, "Return", "\r", ("\r", "\r"), 0, 0, 41)
         self.engine._events.put_nowait(enter)
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.engine._handle(boundary_event(False, group=0))
-        self.assertEqual(self.backend.late, [()])
+        self.assertEqual(self.backend.late, [])
         self.assertEqual(self.engine._strokes, [rollover])
         self.assertIs(self.engine._events.get_nowait(), enter)
         applied = next(
-            e for e in self.technical_events(logs.output) if e["event"] == "correction_applied"
+            e for e in self.technical_events(logs.output) if e["event"] == "correction_aborted"
         )
-        self.assertEqual(applied["late_keys"], 0)
+        self.assertEqual(applied["reason"], "unsafe_input_after_word")
 
         # A failed injection reports the late keys it was given.
         self.backend.group = 0
@@ -672,6 +678,7 @@ class EngineBehaviourTests(unittest.TestCase):
         self.type_word("ghbdtn", start=60)
         self.engine._handle(boundary_event(True, group=0))
         self.engine._handle(letter_event("d", 70, 0, self.pair))
+        self.engine._handle(replace(letter_event("d", 70, 0, self.pair), pressed=False))
         with (
             patch.object(self.backend, "inject_correction", side_effect=RuntimeError("boom")),
             self.assertLogs("keyswitch.engine", level="INFO") as logs,
@@ -816,32 +823,37 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertIsNotNone(boundary)
         self.assertEqual(self.engine.snapshot.last_action, "привет → ghbdtn · ложное срабатывание запомнено")
 
-    def test_late_stroke_after_early_switch_is_converted_on_its_own(self) -> None:
+    def test_late_stroke_after_early_switch_waits_for_release(self) -> None:
+        self.settings.set("detection.respect_manual_layout", False)
         self.settings.set("detection.early_switch", True)
         self.type_word("ghbd")
         late = letter_event("t", 34, 0, self.pair)
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.engine._handle(late)
+        self.assertEqual(len(self.backend.injections), 1)
+        self.engine._handle(replace(late, pressed=False))
         self.assertEqual(len(self.backend.injections), 2)
-        self.assertEqual(self.backend.injections[-1], ((late,), 1, None))
+        self.assertEqual(len(self.backend.injections[-1][0]), 5)
         self.assertEqual(self.engine.snapshot.current_word, "приве")
         self.assertEqual(self.engine._source_group, 1)
         self.assertEqual(self.engine._strokes[-1].group, 1)
         converted = next(
-            event for event in self.technical_events(logs.output) if event["event"] == "late_stroke_converted"
+            event for event in self.technical_events(logs.output) if event["event"] == "late_stroke_scheduled"
         )
         self.assertEqual((converted["source_group"], converted["target_group"]), (0, 1))
 
         with patch.object(self.backend, "inject_correction", side_effect=RuntimeError("xtest")):
             with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-                self.engine._handle(letter_event("n", 35, 0, self.pair))
+                event = letter_event("n", 35, 0, self.pair)
+                self.engine._handle(event)
+                self.engine._handle(replace(event, pressed=False))
         failed = next(
             event
             for event in self.technical_events(logs.output)
-            if event["event"] == "late_stroke_conversion_failed"
+            if event["event"] == "correction_failed"
         )
         self.assertEqual(failed["error"], "xtest")
-        self.assertEqual(self.engine.snapshot.current_word, "n")
+        self.assertEqual(self.engine.snapshot.current_word, "")
         self.assertIsNone(self.engine._early_switch_origin)
 
         self.engine._clear_word()
@@ -953,6 +965,8 @@ class EngineBehaviourTests(unittest.TestCase):
         self.engine._handle(rollover)
         self.assertEqual(self.backend.injections, [])
         self.engine._handle(KeyEvent(False, 33, "d", "d", held.characters, 0, 0, 40))
+        self.assertEqual(self.backend.injections, [])
+        self.engine._handle(replace(rollover, pressed=False))
         self.assertEqual(len(self.backend.injections), 1)
         strokes, target, _boundary = self.backend.injections[0]
         self.assertEqual((len(strokes), target), (5, 1))
@@ -967,16 +981,16 @@ class EngineBehaviourTests(unittest.TestCase):
         self.type_word("ghb")
         held = letter_event("d", 33, 0, self.pair)
         self.engine._handle(held)
-        self.engine._handle(plain_key("BackSpace", 22, 0))
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._handle(plain_key("BackSpace", 22, 0))
             self.engine._handle(KeyEvent(False, 33, "d", "d", held.characters, 0, 0, 40))
         self.assertEqual(self.backend.injections, [])
         self.assertIsNone(self.engine._pending)
         self.assertIsNone(self.engine._early_switch_origin)
         dropped = next(
-            event for event in self.technical_events(logs.output) if event["event"] == "early_switch_dropped"
+            event for event in self.technical_events(logs.output) if event["event"] == "pending_correction_dropped"
         )
-        self.assertEqual(dropped["current_word_length"], 3)
+        self.assertEqual(dropped["reason"], "backspace")
 
         self.engine._clear_word()
         self.type_word("ghb", start=50)
@@ -985,6 +999,7 @@ class EngineBehaviourTests(unittest.TestCase):
         self.engine._handle(letter_event("t", 54, 0, self.pair))
         self.engine._handle(letter_event("n", 55, 0, self.pair))
         self.press_space(0)  # the boundary correction takes over the whole word
+        self.release_keys()
         self.assertEqual(len(self.backend.injections), 1)
         strokes, target, boundary = self.backend.injections[0]
         self.assertEqual((len(strokes), target), (6, 1))
@@ -1431,11 +1446,11 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertEqual(self.engine._last_correction.mode, "early")
         self.assertIsNone(self.engine._early_switch_origin)
         self.assertEqual(self.engine._strokes, [])
-        # A generic undo now reverts exactly that prefix.
+        # Navigation invalidated the position, so undo must not delete elsewhere.
+        before = len(self.backend.injections)
         self.engine._schedule_undo(200)
         self.engine._handle(plain_key("z", 200, 1, pressed=False))
-        strokes, target, boundary = self.backend.injections[-1]
-        self.assertEqual((len(strokes), target, boundary), (6, 0, None))
+        self.assertEqual(len(self.backend.injections), before)
 
     def test_learning_is_not_offered_for_a_lone_letter_or_symbols(self) -> None:
         self.settings.set("detection.learning_confirmations", 1)

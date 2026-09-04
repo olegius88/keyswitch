@@ -480,8 +480,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._settings_controls["detection.pause_delay_seconds"] = pause_delay
         triggers.add(pause_delay)
         triggers.add(self._switch_row("detection.correct_on_space", "Пробела", "Основной и самый предсказуемый триггер"))
-        triggers.add(self._switch_row("detection.correct_on_enter", "Enter", "Работает в обычных многострочных полях"))
-        triggers.add(self._switch_row("detection.correct_on_tab", "Tab", "Удобно при заполнении форм"))
+        for path, title in (("detection.correct_on_enter", "Enter"), ("detection.correct_on_tab", "Tab")):
+            row = self._switch_row(path, title, "Замена после отправки или перехода небезопасна. Используйте пробел, паузу или Pause заранее.")
+            row.set_sensitive(False)
+            triggers.add(row)
         triggers.add(self._switch_row("detection.correct_on_punctuation", "Знака препинания", "Точка, запятая, вопросительный знак и другие границы слова"))
         page.append(triggers)
 

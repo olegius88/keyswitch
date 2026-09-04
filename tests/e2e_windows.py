@@ -227,6 +227,10 @@ def main() -> int:
         probe_confirmed = [False]
         learning_deadline = [0.0]
         menu_layout_deadline = [0.0]
+        entered_messages: list[str] = []
+        application.test_entry.bind(
+            "<Return>", lambda _event: entered_messages.append(application.test_entry.get()), add=True,
+        )
 
         def fail(error: Exception) -> None:
             # A scenario that fails in CI cannot be examined afterwards, so
@@ -268,6 +272,62 @@ def main() -> int:
                 raise RuntimeError(
                     f"SendInput did not accept virtual key {virtual_key:#x}"
                 )
+
+        def clear_editor() -> None:
+            # Real edits invalidate the engine's prefix; directly setting a
+            # widget's value cannot be observed by a keyboard-only backend.
+            inputs = (
+                NativeInput(True, virtual_key=0x11, synthetic=False),
+                NativeInput(True, virtual_key=0x41, synthetic=False),
+                NativeInput(False, virtual_key=0x41, synthetic=False),
+                NativeInput(False, virtual_key=0x11, synthetic=False),
+                NativeInput(True, virtual_key=0x08, synthetic=False),
+                NativeInput(False, virtual_key=0x08, synthetic=False),
+            )
+            if api.send_inputs(inputs) != len(inputs):
+                raise RuntimeError("Could not clear the editor through its keyboard")
+
+        def finish_enter_submission() -> None:
+            try:
+                if entered_messages != ["привет"]:
+                    raise RuntimeError(f"Enter submitted an uncorrected or duplicate message: {entered_messages!r}")
+                if application.engine.snapshot.current_word:
+                    raise RuntimeError("A submitted word is still eligible for correction")
+                print("WINDOWS_CORRECT_BEFORE_ENTER_E2E_OK", flush=True)
+                completed.append(True)
+                application.shutdown()
+            except Exception as error:
+                fail(error)
+
+        def wait_for_enter_submission(deadline: float) -> None:
+            if entered_messages:
+                application.root.after(300, finish_enter_submission)
+            elif time.monotonic() >= deadline:
+                fail(RuntimeError("The intercepted Enter never reached the editor"))
+            else:
+                application.root.after(50, lambda: wait_for_enter_submission(deadline))
+
+        def type_and_submit() -> None:
+            try:
+                inputs = tuple(
+                    NativeInput(pressed, scan_code=scan, synthetic=False)
+                    for scan in (0x22, 0x23, 0x30, 0x20, 0x14, 0x31, 0x1C)
+                    for pressed in (True, False)
+                )
+                if api.send_inputs(inputs) != len(inputs):
+                    raise RuntimeError("The word and Enter were not accepted")
+                wait_for_enter_submission(time.monotonic() + 10)
+            except Exception as error:
+                fail(error)
+
+        def prepare_enter_submission() -> None:
+            application.settings.set("detection.early_switch", False)
+            application.settings.set("detection.correct_on_pause", False)
+            application.settings.set("detection.respect_manual_layout", False)
+            application.settings.set("detection.correct_on_enter", True)
+            application.test_entry.focus_force()
+            clear_editor()
+            application.root.after(200, type_and_submit)
 
         def wait_for_text(
             expected: str,
@@ -346,8 +406,7 @@ def main() -> int:
                     application.root.after(50, wait_for_menu_layout_selection)
                     return
                 print("WINDOWS_MENU_LAYOUT_SELECTION_E2E_OK", flush=True)
-                completed.append(True)
-                application.shutdown()
+                prepare_enter_submission()
             except Exception as error:
                 fail(error)
 
@@ -392,7 +451,7 @@ def main() -> int:
                 application.present()
                 api.activate_window(application.root.winfo_id())
                 application.test_entry.focus_force()
-                application.test_entry.delete(0, "end")
+                clear_editor()
                 application.root.update_idletasks()
                 if not api.request_layout(application.backend.layouts[0]):
                     raise RuntimeError(
@@ -433,6 +492,11 @@ def main() -> int:
                         "Learning prompt changed the maximized target window "
                         f"to {application.root.state()!r}"
                     )
+                if entered_messages:
+                    raise RuntimeError(f"Prompt Enter leaked to the editor: {entered_messages!r}")
+                if application.test_entry.get() != "руддщ":
+                    raise RuntimeError("Prompt confirmation changed the editor text")
+                print("WINDOWS_PROMPT_ENTER_NO_LEAK_E2E_OK", flush=True)
                 prepare_learned_input()
             except Exception as error:
                 fail(error)
@@ -539,7 +603,7 @@ def main() -> int:
                 api.activate_window(application.root.winfo_id())
                 application.root.state("zoomed")
                 application.test_entry.focus_force()
-                application.test_entry.delete(0, "end")
+                clear_editor()
                 application.root.update_idletasks()
                 if not api.request_layout(application.backend.layouts[0]):
                     raise RuntimeError("Cannot select English for learning E2E")
@@ -587,7 +651,7 @@ def main() -> int:
                 application.present()
                 api.activate_window(application.root.winfo_id())
                 application.test_entry.focus_force()
-                application.test_entry.delete(0, "end")
+                clear_editor()
                 application.root.update_idletasks()
                 if application.test_entry.get():
                     raise RuntimeError("KeySwitch E2E field did not clear")
@@ -641,7 +705,7 @@ def main() -> int:
                     # still go nowhere. Prove the field really receives input
                     # before the scenario starts depending on it: a lone space
                     # leaves the engine's word buffer empty.
-                    application.test_entry.delete(0, "end")
+                    clear_editor()
                     send_scans((0x39,))
                     probe_deadline[0] = time.monotonic() + 3.0
                     application.root.after(50, wait_for_input_probe)
@@ -657,7 +721,7 @@ def main() -> int:
             try:
                 if application.test_entry.get() == " ":
                     probe_confirmed[0] = True
-                    application.test_entry.delete(0, "end")
+                    clear_editor()
                     application.root.update_idletasks()
                     focus_deadline[0] = time.monotonic() + 5.0
                     wait_for_test_focus()

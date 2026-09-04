@@ -312,7 +312,7 @@ class BackendCaptureTests(unittest.TestCase):
         with patch("keyswitch.x11_backend.threading.Thread", return_value=thread):
             backend.start(Mock())
         self.assertEqual(range_value.device_events.first, KEY_PRESS)
-        self.assertEqual(range_value.device_events.last, KEY_RELEASE)
+        self.assertEqual(range_value.device_events.last, 4)  # button presses invalidate the caret
         self.assertEqual(backend._context, 42)
         self.assertTrue(backend.running)
         libraries.x11.XSync.assert_called_once_with(1, 0)

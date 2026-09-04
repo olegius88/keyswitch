@@ -32,6 +32,7 @@ from keyswitch.short_words import (
 from keyswitch.spellcheck import HunspellDictionary
 from keyswitch.system import AutostartManager
 from keyswitch.x11_backend import BackendProbe, KeyEvent
+from keyswitch.backend import KeyDisposition
 
 
 class FakeBackend:
@@ -58,6 +59,12 @@ class FakeBackend:
     def hold_input(self) -> None:
         self.hold_calls += 1
 
+    def release_input(self) -> int:
+        return 0
+
+    def complete_action(self, deliver: bool) -> int:
+        return 0
+
     def inject_correction(
         self,
         strokes: Iterable[KeyEvent],
@@ -72,7 +79,7 @@ class FakeBackend:
         return self.held_count
 
     def set_key_filter(
-        self, predicate: Callable[[KeyEvent], bool] | None
+        self, predicate: Callable[[KeyEvent], KeyDisposition] | None
     ) -> None:
         self.key_filter = predicate
 
@@ -528,6 +535,7 @@ class EngineTests(unittest.TestCase):
     def test_word_is_corrected_after_space_release(self) -> None:
         for index, character in enumerate("ghbdtn", start=30):
             self.engine._handle(letter_event(character, index, 0, self.pair))
+            self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
         self.assertEqual(self.backend.injections, [])
         self.engine._handle(boundary_event(False))
@@ -557,7 +565,7 @@ class EngineTests(unittest.TestCase):
             "".join(item.character_for(target) for item in strokes),
             "привет",
         )
-        self.assertEqual(self.engine.snapshot.current_word, "")
+        self.assertEqual(self.engine.snapshot.current_word, "привет")
         self.assertEqual(
             [(entry.original, entry.replacement) for entry in self.history.read()],
             [("ghbdtn", "привет")],
@@ -599,6 +607,7 @@ class EngineTests(unittest.TestCase):
     def test_punctuation_after_a_complete_word_remains_a_boundary(self) -> None:
         for index, character in enumerate("ghbdtn", start=30):
             self.engine._handle(letter_event(character, index, 0, self.pair))
+            self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         comma = letter_event(",", 59, 0, self.pair)
         self.engine._handle(comma)
         self.assertEqual(self.backend.injections, [])
@@ -637,6 +646,7 @@ class EngineTests(unittest.TestCase):
         self.settings.set("enabled", False)
         for index, character in enumerate("ghbdtn", start=30):
             self.engine._handle(letter_event(character, index, 0, self.pair))
+            self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
         self.engine._handle(boundary_event(False))
         self.assertEqual(self.backend.injections, [])
@@ -645,6 +655,7 @@ class EngineTests(unittest.TestCase):
         self.settings.set("exclusions.applications", ["testeditor"])
         for index, character in enumerate("ghbdtn", start=30):
             self.engine._handle(letter_event(character, index, 0, self.pair))
+            self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
         self.engine._handle(boundary_event(False))
         self.assertEqual(self.backend.injections, [])
@@ -666,6 +677,7 @@ class EngineTests(unittest.TestCase):
         self.engine._update(current_group=1)
         for index, character in enumerate("ghbdtn", start=30):
             self.engine._handle(letter_event(character, index, 0, self.pair))
+            self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
         self.engine._handle(boundary_event(False))
 
@@ -678,6 +690,7 @@ class EngineTests(unittest.TestCase):
 
         for index, character in enumerate("ghbdtn", start=70):
             self.engine._handle(letter_event(character, index, 0, self.pair))
+            self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
         self.engine._handle(boundary_event(False))
         self.assertEqual(len(self.backend.injections), 1)
@@ -691,6 +704,7 @@ class EngineTests(unittest.TestCase):
 
         for index, character in enumerate("ghbdtn", start=30):
             self.engine._handle(letter_event(character, index, 0, self.pair))
+            self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
         self.engine._handle(boundary_event(False))
         self.assertEqual(len(self.backend.injections), 1)
@@ -707,6 +721,7 @@ class EngineTests(unittest.TestCase):
     def test_pause_manually_converts_last_valid_word(self) -> None:
         for index, character in enumerate("hello", start=30):
             self.engine._handle(letter_event(character, index, 0, self.pair))
+            self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
         self.engine._handle(boundary_event(False))
         self.assertEqual(self.backend.injections, [])
@@ -725,6 +740,7 @@ class EngineTests(unittest.TestCase):
         self.engine.subscribe_learning_prompts(prompts.append)
         for index, character in enumerate("hello", start=30):
             self.engine._handle(letter_event(character, index, 0, self.pair))
+            self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         pause = KeyEvent(True, 127, "Pause", "", ("", ""), 0, 0, 2000)
         self.engine._handle(pause)
         self.engine._handle(release_event(pause))
@@ -745,6 +761,7 @@ class EngineTests(unittest.TestCase):
         self.engine._manual_layout_group = 0
         for index, character in enumerate("hello", start=70):
             self.engine._handle(letter_event(character, index, 0, self.pair))
+            self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
         self.engine._handle(boundary_event(False))
         self.assertEqual(len(self.backend.injections), 1)
@@ -753,6 +770,7 @@ class EngineTests(unittest.TestCase):
 
         for index, character in enumerate("hello", start=90):
             self.engine._handle(letter_event(character, index, 0, self.pair))
+            self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
         self.engine._handle(boundary_event(False))
         self.assertEqual(len(self.backend.injections), 2)
@@ -807,6 +825,7 @@ class EngineTests(unittest.TestCase):
             self.backend.group = 0
             for index, character in enumerate("qwerty", start=30):
                 self.engine._handle(letter_event(character, index, 0, self.pair))
+                self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
             pause_press = KeyEvent(True, 127, "Pause", "", ("", ""), 0, 0, 2000)
             self.engine._handle(pause_press)
             self.engine._handle(release_event(pause_press))
@@ -814,6 +833,7 @@ class EngineTests(unittest.TestCase):
         self.backend.group = 0
         for index, character in enumerate("qwerty", start=30):
             self.engine._handle(letter_event(character, index, 0, self.pair))
+            self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
         self.engine._handle(boundary_event(False))
         self.assertEqual(len(self.backend.injections), 3)
@@ -822,6 +842,7 @@ class EngineTests(unittest.TestCase):
     def test_undo_hotkey_restores_previous_layout(self) -> None:
         for index, character in enumerate("ghbdtn", start=30):
             self.engine._handle(letter_event(character, index, 0, self.pair))
+            self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
         self.engine._handle(boundary_event(False))
         control = 1 << 2
@@ -841,6 +862,7 @@ class EngineTests(unittest.TestCase):
         self.backend.group = 0
         for index, character in enumerate("ghbdtn", start=30):
             self.engine._handle(letter_event(character, index, 0, self.pair))
+            self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
         self.engine._handle(boundary_event(False))
         self.assertEqual([item[1] for item in self.backend.injections], [1, 0])

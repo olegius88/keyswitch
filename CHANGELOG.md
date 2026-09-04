@@ -4,6 +4,33 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.14.0 — 2026-09-05
+
+- Input integrity audit and an EN/RU regression matrix covering punctuation,
+  whitespace, identifiers, Unicode, focus, submission and manual correction.
+- Pending replacements are cancelled after unsafe queued input, backspacing,
+  pointer activity or focus changes. Undo cannot rewrite an old word after the
+  text or caret changes. Early and late-prefix corrections wait for key-up.
+- Windows intercepts Enter, Numpad Enter and Tab before delivery: correct the
+  word first, then send the action exactly once. Subsequent input stays ordered,
+  including a second queued message. Failures, focus changes and missing key-up
+  cancel the action. Shift/Ctrl/Alt shortcuts are not intercepted. X11 leaves
+  these already delivered actions alone; its trigger controls remain disabled.
+- Windows prompt answers suppress key autorepeat through release. Shift+Enter
+  remains an application action. Held input uses a separate replay marker and
+  is released on every exit path; partial SendInput errors include event counts.
+- Preserve internal hyphens/apostrophes, leading digits and identifier markers;
+  support Unicode whitespace boundaries and reject unsafe multi-character input.
+  Replay letter case using each stroke's Caps Lock state.
+- Explicit learned short-word rules are no longer hidden by minimum length.
+- Continue tracking the entire word after a boundary-free correction, so
+  subsequent typing, Backspace and Pause do not operate on a detached suffix.
+- Diagnostics distinguish key presses from all keyboard events, include a
+  correction id, and explicitly state that application text was not read back.
+  README now explains that technical logs can contain uncorrected private text.
+- Windows punctuation keys are named in the log the way X11 names them
+  (`comma`, `period`, `apostrophe`, …) instead of the raw `VK_BC` codes.
+
 ## 0.13.0 — 2026-09-04
 
 - A correction no longer collides with what is typed into it. The layout is

@@ -160,10 +160,13 @@ jobs:
       - name: Run Win32 unit tests with 100% branch coverage
         env:
           PYTHONPATH: src
+          KEYSWITCH_MODEL_PATH: model/intent_v1/sources
         run: |
           python -m coverage erase
           python -m coverage run --branch --source=src/keyswitch tests/test_intent_model.py -v
           python -m coverage run --append --branch --source=src/keyswitch -m unittest discover -s tests -p test_windows_backend.py -v
+          python -m coverage run --append --branch --source=src/keyswitch -m unittest discover -s tests -p test_input_integrity.py -v
+          python -m coverage run --append --branch --source=src/keyswitch -m unittest discover -s tests -p test_action_boundary.py -v
           python -m coverage run --append --branch --source=src/keyswitch tests/test_updates.py -v
           python -m coverage report --fail-under=100 --include="*/intent_model.py,*/updates.py,*/windows_app.py,*/windows_backend.py,*/windows_instance.py,*/windows_system.py,*/windows_tray.py,*/windows_ui_model.py"
 

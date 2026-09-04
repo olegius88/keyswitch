@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 
 # Internal modifier bits intentionally match the X11 core masks. Platform
@@ -15,6 +15,7 @@ LOCK_MASK = 1 << 1
 CONTROL_MASK = 1 << 2
 ALT_MASK = 1 << 3
 SUPER_MASK = 1 << 6
+KeyDisposition = bool | Literal["defer"]
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class KeyEvent:
     state: int
     timestamp: int
     synthetic: bool = False
+    deferred: bool = False
 
     @property
     def shift(self) -> bool:
@@ -97,10 +99,14 @@ class InputBackend(Protocol):
     def start(self, listener: Callable[[KeyEvent], None]) -> None: ...
 
     def set_key_filter(
-        self, predicate: Callable[[KeyEvent], bool] | None
+        self, predicate: Callable[[KeyEvent], KeyDisposition] | None
     ) -> None: ...
 
     def hold_input(self) -> None: ...
+
+    def release_input(self) -> int: ...
+
+    def complete_action(self, deliver: bool) -> int: ...
 
     def stop(self) -> None: ...
 

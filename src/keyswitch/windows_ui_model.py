@@ -130,14 +130,14 @@ TRIGGER_SETTINGS = (
     ),
     SettingSpec(
         "detection.correct_on_enter",
-        "Enter",
-        "Проверять слово перед переводом строки.",
+        "Перед Enter",
+        "Сначала исправить слово, затем передать Enter приложению один раз. Shift+Enter не перехватывается.",
         "bool",
     ),
     SettingSpec(
         "detection.correct_on_tab",
-        "Tab",
-        "Проверять слово перед переходом к следующему полю.",
+        "Перед Tab",
+        "Сначала исправить слово, затем перейти к следующему полю. Shift+Tab не перехватывается.",
         "bool",
     ),
     SettingSpec(

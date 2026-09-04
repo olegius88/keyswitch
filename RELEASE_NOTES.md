@@ -1,108 +1,80 @@
-# KeySwitch 0.13.0
+# KeySwitch 0.14.0
 
 ## Русский
 
-Выпуск по итогам разбора реального журнала: замена больше не смешивается с
-набором, обучение перестало запоминать колебания, короткие русские слова
-наконец исправляются, а выученные правила видны в окне. Сертифицированная
-модель намерения `intent-v1-6ece07f881ec` не изменилась.
+Выпуск повышает надёжность ввода и замены EN/RU по результатам пользовательских
+обращений. Сертифицированная модель намерения `intent-v1-6ece07f881ec`
+не изменена.
 
-- Замена больше не сталкивается с тем, что в неё печатают. Раскладка
-  переключается первой, а удаление и перенабор уходят одним вызовом
-  `SendInput`, который Windows не перемешивает с другим вводом; клавиши,
-  пришедшие после слова — до того, как движок до него добрался, или пока он
-  переписывал текст, — удаляются вместе со словом и набираются заново уже в
-  новой раскладке, а нажатия во время самой вставки хук придерживает и
-  допечатывает последними. В журнале у половины замен стояло
-  `keys_during_injection > 0` — отсюда и брались лишние и потерянные символы.
-  В X11 поздние клавиши обрабатываются так же; удерживать ввод XRecord не
-  умеет. `correction_applied` сообщает `late_keys` и `held_keys`.
-- `Pause` сразу после автозамены теперь записывает запрет этой замены — как
-  горячая клавиша отмены, — а не учит правило «обратно»: в журнале была ложная
-  замена, которую уже дважды чинили вручную, и она сработала в третий раз.
-  Переключение слова `Pause` туда-обратно больше не считается подтверждениями:
-  три переключения делали из опечатки действующее правило, хотя подсказку
-  отклонили.
-- Короткое слово, найденное только в частотном словаре другого языка,
-  остаётся на месте, если в своём языке оно читается как обычный текст, а
-  предыдущее слово не говорит за смену: «дев» после «на» превращалось в
-  «ltd». Порог — тот же, что в ветке неизвестных слов; живёт в слое политики,
-  сертифицированный детектор не тронут.
-- Самые частые русские служебные слова, набранные в латинской раскладке,
-  наконец исправляются: `yt`, `gj`, `yf` («не», «по», «на») сами по себе, `kb`
-  и `nj` («ли», «то») после русского слова, одиночные «а», «и», «с», «в», «к»,
-  «у», «о», «я» после русского слова. Короткое слово из безопасного списка
-  никогда не превращает клавишу, которая в одной раскладке знак, а в другой
-  буква, в границу слова — «общих» не режется на «о» и запятую.
-- На странице «Обслуживание» видно, что запомнило локальное обучение:
-  набранное слово, во что оно превращается, направление, сколько подтверждений
-  набрано и сколько нужно, и запреты после отмены.
-- Журнал называет замену, вытесненную границей слова или отменой, а раскладку
-  собственного окна KeySwitch отмечает один раз за визит, а не каждым опросом —
-  эта строка занимала пятнадцать процентов сеанса.
+- В Windows `ghbdtn` + Enter сначала исправляется в `привет`, затем Enter
+  передаётся чату один раз. Аналогично обрабатываются Numpad Enter и Tab.
+  Быстрый ввод следующего сообщения остаётся после предыдущего; удержание
+  Enter не вызывает повторной отправки.
+- Enter в подсказке обучения только подтверждает правило. Shift/Ctrl/Alt
+  сочетания остаются у приложения. При смене поля, сбое замены или отсутствии
+  отпускания клавиш отложенное действие отменяется с диагностикой.
+- Замены учитывают отпускание клавиш, очередь ввода, клики, положение фокуса
+  и Caps Lock. Undo не переписывает устаревшее слово. Удержанный ввод
+  воспроизводится с отдельной меткой и без повторного захвата.
+- После Pause и исправления по таймеру можно продолжить слово, стереть букву
+  и снова нажать Pause: сохраняется весь токен, а не только новый суффикс.
+- Улучшены границы слов: внутренние дефисы и апострофы, цифры в `pm2`,
+  маркеры идентификаторов, пунктуация и Unicode-пробелы. Сложный Unicode
+  и слишком длинные токены не запускают опасную замену суффикса.
+- Явные выученные правила коротких слов больше не скрываются минимальной длиной.
+- Журнал различает нажатия и отпускания, связывает попытки замены, описывает
+  перехват/доставку/отмену Enter и явно указывает `text_verified=false`:
+  отправка событий не означает, что итоговый текст был прочитан обратно.
 
-Локальный контур выпуска: строгий `mypy`, автоматические тесты со 100%
-покрытием строк и ветвей, единый отсоединённый прогон `tools/release_pipeline.py`.
+В Linux/X11 Enter/Tab остаются недоступными триггерами: пассивный XRecord не
+может задержать уже доставленную клавишу. Используйте пробел, паузу, пунктуацию
+или Pause до отправки. Матрица сценариев и оставшиеся ограничения доступны в
+[docs/input-maturity.md](https://github.com/olegius88/keyswitch/blob/v0.14.0/docs/input-maturity.md).
 
 ### Установка
 
-- Windows 10/11 x64: `KeySwitch-Setup-0.13.0-x64.exe` или переносимый
-  `KeySwitch-0.13.0-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.13.0_amd64.deb`.
+- Windows 10/11 x64: `KeySwitch-Setup-0.14.0-x64.exe` или переносимый
+  `KeySwitch-0.14.0-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.14.0_amd64.deb`.
+- Контрольные суммы: `SHA256SUMS`.
 
 Windows Setup пока не подписан сертификатом издателя. Нативная Wayland-сессия
-Linux пока не поддерживается.
+не поддерживается. Технические журналы могут содержать личный текст.
 
 ## English
 
-A release driven by a real session log: corrections no longer collide with
-typing, learning stops remembering hesitation, short Russian words are finally
-corrected, and learned rules are visible in the window. The certified intent
-model `intent-v1-6ece07f881ec` is unchanged.
+This release hardens EN/RU input handling based on user-reported failures.
+The certified intent model `intent-v1-6ece07f881ec` is unchanged.
 
-- A correction no longer collides with what is typed into it. The layout is
-  switched first and the deletion and the replacement travel in one
-  `SendInput` call, which Windows keeps together; keys that arrived after the
-  word — typed before the engine got to it, or while it was replacing the
-  text — are deleted with the word and typed again in the new layout, and keys
-  pressed during the injection are held by the hook and typed last. Half of
-  the corrections in the log carried `keys_during_injection > 0`; that is
-  where the extra and missing characters came from. On X11 late keys are
-  handled the same way; XRecord cannot withhold input. `correction_applied`
-  reports `late_keys` and `held_keys`.
-- `Pause` right after an automatic correction records a rejection of that
-  correction, exactly as the undo hotkey does, instead of teaching a rule for
-  the way back: the log showed a false correction fixed by hand twice that
-  still fired a third time. Toggling a manual conversion back and forth with
-  `Pause` no longer counts as confirmations: three toggles used to turn a typo
-  into an active rule while the prompt had been dismissed.
-- A short word found only in the other language's frequency list is left
-  alone when it reads as ordinary text in the language it was typed in and the
-  previous word does not favour the switch: `дев` after `на` was traded for
-  `ltd`. The bar is the one the unknown-word branch already applies; it lives
-  in the policy layer, the certified detector is unchanged.
-- The most frequent Russian function words typed in the Latin layout are
-  corrected at last: `yt`, `gj`, `yf` (`не`, `по`, `на`) on their own, `kb` and
-  `nj` (`ли`, `то`) after a Russian word, and the single letters `а`, `и`,
-  `с`, `в`, `к`, `у`, `о`, `я` after a Russian word. A trusted short word never
-  turns a key that is punctuation in one layout and a letter in the other into
-  a word boundary, so `общих` is not cut into `о` and a comma.
-- The maintenance page lists what local learning remembers: the typed word,
-  what it becomes, the direction, the confirmations gathered and required, and
-  the rejections made by undoing.
-- The log names a correction superseded by a boundary or replaced by an undo,
-  and reports the layout of KeySwitch's own window once per visit instead of on
-  every poll — that line was fifteen percent of a session.
+- On Windows, `ghbdtn` + Enter is corrected to `привет` before Enter reaches
+  the chat exactly once. Numpad Enter and Tab use the same ordering. Rapid
+  subsequent messages remain separate, including queued Enter presses.
+- Learning confirmation owns Enter exclusively. Shift/Ctrl/Alt shortcuts
+  remain application actions. Focus changes, correction errors and missing
+  key-up cancel a deferred action with diagnostics.
+- Corrections respect key releases, queued input, pointer activity, focus and
+  Caps Lock. Stale Undo is refused; held input uses a distinct replay marker.
+- Continued typing, Backspace and Pause after a boundary-free correction
+  operate on the whole token.
+- Internal hyphens/apostrophes, digits, identifier markers, punctuation and
+  Unicode whitespace are handled more conservatively. Complex Unicode and
+  oversized tokens cannot start an unsafe suffix replacement.
+- Explicit learned short-word rules bypass the minimum-length threshold.
+- Diagnostics distinguish key presses from releases and report action
+  deferral, delivery and cancellation. `text_verified=false` explicitly means
+  application text was not read back.
 
-The local release gate passes strict `mypy`, automated tests with mandatory
-100% line and branch coverage, and one detached `tools/release_pipeline.py`
-run.
+On Linux/X11, Enter/Tab correction remains unavailable because XRecord is
+passive. Use Space, idle correction, punctuation or Pause before submitting.
+Editor-specific autocomplete, protected fields, IMEs and remote desktops still
+need application-specific validation.
 
 ### Installation
 
-- Windows 10/11 x64: `KeySwitch-Setup-0.13.0-x64.exe` or the portable
-  `KeySwitch-0.13.0-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.13.0_amd64.deb`.
+- Windows 10/11 x64: `KeySwitch-Setup-0.14.0-x64.exe` or
+  `KeySwitch-0.14.0-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.14.0_amd64.deb`.
+- Checksums: `SHA256SUMS`.
 
-The Windows installer is not yet signed with a publisher certificate. Native
-Linux Wayland sessions are not supported yet.
+The Windows installer is not yet publisher-signed. Native Wayland sessions
+are unsupported. Technical logs can contain private text.

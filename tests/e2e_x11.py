@@ -57,6 +57,15 @@ class PhysicalTyper:
         self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 0, 8)
         self.libraries.x11.XSync(self.display, 0)
 
+    def clear_field(self) -> None:
+        """Clear via real Ctrl+A/Backspace so the observer sees the edit too."""
+
+        control = int(self.libraries.x11.XKeysymToKeycode(self.display, 0xFFE3))
+        select_all = int(self.libraries.x11.XKeysymToKeycode(self.display, ord("a")))
+        for pressed, keycode in ((True, control), (True, select_all), (False, select_all), (False, control)):
+            self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, int(pressed), 8)
+        self.tap_keysym(0xFF08)
+
     def close(self) -> None:
         if self.display:
             self.libraries.x11.XCloseDisplay(self.display)
@@ -162,8 +171,8 @@ def main() -> int:
         ) = cases[index]
         backend.switch_group(group)
         backend._libraries.x11.XSync(backend._control, 0)
-        entry.set_text("")
         entry.grab_focus()
+        typer.clear_field()
         typer.type(physical)
         GLib.timeout_add(verify_delay, verify_case, index)
         return GLib.SOURCE_REMOVE
@@ -192,8 +201,8 @@ def main() -> int:
     def start_learning_case() -> bool:
         backend.switch_group(0)
         backend._libraries.x11.XSync(backend._control, 0)
-        entry.set_text("")
         entry.grab_focus()
+        typer.clear_field()
         typer.type("hello")
         typer.tap_keysym(0xFF13)
         GLib.timeout_add(900, verify_learning_prompt)
@@ -232,8 +241,8 @@ def main() -> int:
             return GLib.SOURCE_REMOVE
         backend.switch_group(0)
         backend._libraries.x11.XSync(backend._control, 0)
-        entry.set_text("")
         entry.grab_focus()
+        typer.clear_field()
         typer.type("hello ")
         GLib.timeout_add(900, verify_manual_override_of_learned_rule)
         return GLib.SOURCE_REMOVE
@@ -247,8 +256,8 @@ def main() -> int:
             print("E2E_FAILED")
             loop.quit()
             return GLib.SOURCE_REMOVE
-        entry.set_text("")
         entry.grab_focus()
+        typer.clear_field()
         typer.type("hello ")
         GLib.timeout_add(900, verify_learned_rule)
         return GLib.SOURCE_REMOVE
@@ -315,8 +324,8 @@ def main() -> int:
         settings.set("detection.early_switch", True)
         backend.switch_group(0)
         backend._libraries.x11.XSync(backend._control, 0)
-        entry.set_text("")
         entry.grab_focus()
+        typer.clear_field()
         # The menu selection above protects exactly one word; spend it on a
         # word that stays English anyway, then type the real case slowly.
         typer.type("hello ")

@@ -27,6 +27,7 @@ from .backend import (
     BackendProbe as BackendProbe,
     FocusInfo,
     KeyEvent as KeyEvent,
+    KeyDisposition,
     ScreenAnchor,
 )
 
@@ -34,6 +35,7 @@ from .backend import (
 LOGGER = logging.getLogger(__name__)
 
 KEY_PRESS = 2
+BUTTON_PRESS = 4
 KEY_RELEASE = 3
 XRECORD_FROM_SERVER = 0
 XRECORD_START_OF_DATA = 4
@@ -403,7 +405,7 @@ class X11Backend:
                 self.close()
 
     def set_key_filter(
-        self, predicate: Callable[[KeyEvent], bool] | None
+        self, predicate: Callable[[KeyEvent], KeyDisposition] | None
     ) -> None:
         """Accepted for the shared backend contract and deliberately ignored.
 
@@ -413,6 +415,10 @@ class X11Backend:
         """
 
         del predicate
+
+    def complete_action(self, deliver: bool) -> int:
+        """XRecord cannot defer actions; there is nothing to deliver here."""
+        return 0
 
     def start(self, listener: Callable[[KeyEvent], None]) -> None:
         if self.running:
@@ -432,7 +438,7 @@ class X11Backend:
             self.close()
             raise X11Error("XRecordAllocRange не выделил диапазон событий")
         self._range.contents.device_events.first = KEY_PRESS
-        self._range.contents.device_events.last = KEY_RELEASE
+        self._range.contents.device_events.last = BUTTON_PRESS
         clients = (ctypes.c_ulong * 1)(XRECORD_ALL_CLIENTS)
         ranges = (ctypes.POINTER(XRecordRange) * 1)(self._range)
         self._context = self._libraries.xtst.XRecordCreateContext(
@@ -523,6 +529,8 @@ class X11Backend:
             _pad,
         ) = struct.unpack("=BBHIIIIhhhhHBB", payload)
         event_type &= 0x7F
+        if event_type == BUTTON_PRESS:
+            return KeyEvent(True, 0, "Pointer", "", ("", ""), -1, 0, timestamp)
         if event_type not in (KEY_PRESS, KEY_RELEASE):
             return None
         pressed = event_type == KEY_PRESS
@@ -749,6 +757,9 @@ class X11Backend:
 
         return None
 
+    def release_input(self) -> int:
+        return 0
+
     def inject_correction(
         self,
         strokes: Iterable[KeyEvent],
@@ -761,6 +772,15 @@ class X11Backend:
             raise X11Error("X11 backend не запущен")
         stroke_list = list(strokes)
         late_list = list(late)
+        keyboard_state = XkbStateRec()
+        if self._libraries.x11.XkbGetState(self._control, XKB_USE_CORE_KBD, ctypes.byref(keyboard_state)) != 0:
+            raise X11Error("Не удалось прочитать состояние Caps Lock перед заменой")
+        caps_lock = bool(keyboard_state.locked_mods & LOCK_MASK)
+
+        def shifted(stroke: KeyEvent, group: int) -> bool:
+            return stroke.shift ^ (
+                stroke.character_for(group).isalpha() and stroke.caps_lock != caps_lock
+            )
         backspace_keycode = int(self._libraries.x11.XKeysymToKeycode(self._control, 0xFF08))
         shift_keycode = int(self._libraries.x11.XKeysymToKeycode(self._control, 0xFFE1))
         if not backspace_keycode or not shift_keycode:
@@ -782,13 +802,13 @@ class X11Backend:
         for _ in range(delete_count):
             tap(sequence, backspace_keycode)
         for stroke in stroke_list:
-            tap(sequence, stroke.keycode, stroke.shift)
+            tap(sequence, stroke.keycode, shifted(stroke, target_group))
         # Keys typed after the word are deleted with it and typed again in the
         # new layout. They are left out of ``_expected`` on purpose: the engine
         # must see them come back as the user's own input.
         late_sequence: list[tuple[bool, int]] = []
         for stroke in late_list:
-            tap(late_sequence, stroke.keycode, stroke.shift)
+            tap(late_sequence, stroke.keycode, shifted(stroke, target_group))
         rendered_source_group = (
             source_group
             if source_group is not None
