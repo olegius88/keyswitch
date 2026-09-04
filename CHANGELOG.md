@@ -7,7 +7,8 @@ All notable changes to KeySwitch are documented in this file.
 ## 0.14.1 — 2026-09-05
 
 - Windows native E2E waits for real keyboard-driven field clearing before
-  asserting the result. Diagnostics use UTF-8 and always close the test window;
+  asserting the result, using layout-independent Home/Shift+End/Backspace.
+  Diagnostics use UTF-8 and always close the test window;
   watchdogs turn an unhandled GUI stall into a bounded failure with tracebacks.
 - This release includes the input-integrity and correct-before-Enter changes
   from 0.14.0, whose installer publication was stopped by the E2E harness defect.

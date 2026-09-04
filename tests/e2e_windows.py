@@ -280,11 +280,15 @@ def main() -> int:
         def clear_editor() -> None:
             # Real edits invalidate the engine's prefix; directly setting a
             # widget's value cannot be observed by a keyboard-only backend.
+            # Tk's Ctrl+A binding is layout-dependent on Windows. Home and
+            # Shift+End select the single-line field in both EN and RU.
             inputs = (
-                NativeInput(True, virtual_key=0x11, synthetic=False),
-                NativeInput(True, virtual_key=0x41, synthetic=False),
-                NativeInput(False, virtual_key=0x41, synthetic=False),
-                NativeInput(False, virtual_key=0x11, synthetic=False),
+                NativeInput(True, virtual_key=0x24, extended=True, synthetic=False),
+                NativeInput(False, virtual_key=0x24, extended=True, synthetic=False),
+                NativeInput(True, virtual_key=0x10, synthetic=False),
+                NativeInput(True, virtual_key=0x23, extended=True, synthetic=False),
+                NativeInput(False, virtual_key=0x23, extended=True, synthetic=False),
+                NativeInput(False, virtual_key=0x10, synthetic=False),
                 NativeInput(True, virtual_key=0x08, synthetic=False),
                 NativeInput(False, virtual_key=0x08, synthetic=False),
             )
