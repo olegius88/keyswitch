@@ -180,6 +180,24 @@ class LearningStore:
             except (KeyError, TypeError, ValueError):
                 return None
 
+    def rule_state(self, source_group: int, word: str) -> tuple[int | None, int]:
+        """Target and confirmation count of the rule for this word, if any.
+
+        Read-only companion of :meth:`forced_target`: it reports a rule that
+        has not reached the confirmation threshold yet, which is what the
+        diagnostics log needs to explain a correction that did not happen.
+        """
+
+        key = self._key(source_group, word)
+        with self._lock:
+            rule = self._data["rules"].get(key)
+            if not isinstance(rule, dict):
+                return None, 0
+            try:
+                return int(rule["target_group"]), int(rule.get("confirmations", 0))
+            except (KeyError, TypeError, ValueError):
+                return None, 0
+
     def rejected_targets(self, source_group: int, word: str) -> set[int]:
         key = self._key(source_group, word)
         with self._lock:

@@ -1087,8 +1087,22 @@ class WindowsApplication:
         self._update_modified_indicator(spec.path)
 
     def _restore_default(self, path: str) -> None:
-        self.settings.restore_default(path)
+        if not self.settings.restore_default(path):
+            return
+        # The control follows the store through the event queue, which is
+        # drained on a timer; showing the restored value right away keeps the
+        # button honest even before that tick.
+        self._apply_control_value(path, self.settings.get(path))
         self._update_modified_indicator(path)
+
+    def _apply_control_value(self, path: str, value: object) -> None:
+        boolean = self._boolean_variables.get(path)
+        if boolean is not None:
+            boolean.set(bool(value))
+        string = self._string_variables.get(path)
+        if string is not None:
+            labels = self._choice_labels.get(path, {})
+            string.set(labels.get(str(value), str(value)))
 
     def _update_modified_indicator(self, path: str) -> None:
         indicators = self._setting_indicators.get(path)
@@ -1286,13 +1300,7 @@ class WindowsApplication:
             self._refresh_setting_controls()
             return
         self._update_modified_indicator(path)
-        boolean = self._boolean_variables.get(path)
-        if boolean is not None:
-            boolean.set(bool(value))
-        string = self._string_variables.get(path)
-        if string is not None:
-            labels = self._choice_labels.get(path, {})
-            string.set(labels.get(str(value), str(value)))
+        self._apply_control_value(path, value)
         if path == "appearance.theme":
             self._apply_theme(str(value))
         elif path in {"general.autostart", "general.start_hidden"}:

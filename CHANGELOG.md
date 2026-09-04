@@ -4,6 +4,23 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.11.1 — 2026-09-04
+
+- The technical log now explains what local learning did with a word. Every
+  `word_evaluation` carries a `learning` block — whether learning is on, the
+  target and confirmation count of the rule for this word, the confirmations it
+  still needs, the target a confirmed rule forces, and the rejections
+  remembered after an undo. A rule with one confirmation out of two changes
+  nothing yet, and until now such a line was indistinguishable from a word with
+  no rule at all.
+- The per-setting reset button now updates its control at once instead of
+  waiting for the settings queue tick, so the value shown always matches the
+  value stored.
+- Writing a rule is an event of its own: `learning_rule_recorded` names the
+  word, the direction, the confirmation count and whether the rule became
+  active, and `learning_rejection_recorded` records an undo that blocks a
+  correction. Confirming the prompt reports the resulting count as well.
+
 ## 0.11.0 — 2026-09-04
 
 - Every page of the Windows settings window scrolls. A page taller than the

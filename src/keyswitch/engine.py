@@ -263,7 +263,7 @@ class KeySwitchEngine:
             self._learning_prompt_deadline = None
             callbacks = tuple(self._learning_prompt_callbacks)
         required = int(self.settings.get("detection.learning_confirmations", 2))
-        self.learning.confirm_manual(
+        confirmations = self.learning.confirm_manual(
             current.source_group,
             current.original,
             current.target_group,
@@ -275,6 +275,7 @@ class KeySwitchEngine:
             target_group=current.target_group,
             application=current.application,
             required_confirmations=required,
+            confirmations=confirmations,
         )
         self._update(
             last_action=(
@@ -1264,9 +1265,36 @@ class KeySwitchEngine:
             },
             early_switch_origin=early_switch_origin,
             idle_ms=idle_ms,
+            learning=self._learning_diagnostics(source_group, original),
             decision=decision_payload,
             shadow_decision=shadow_payload,
         )
+
+    def _learning_diagnostics(
+        self, source_group: int | None, word: str
+    ) -> dict[str, object]:
+        """What local learning knows about this word before the decision.
+
+        A rule that has not reached the confirmation threshold changes nothing
+        yet, so without these numbers a log line cannot be told apart from one
+        where no rule exists at all.
+        """
+
+        if source_group is None:
+            return {"enabled": bool(self.settings.get("detection.learning", True))}
+        target, confirmations = self.learning.rule_state(source_group, word)
+        return {
+            "enabled": bool(self.settings.get("detection.learning", True)),
+            "required_confirmations": int(
+                self.settings.get("detection.learning_confirmations", 2)
+            ),
+            "rule_target": target,
+            "confirmations": confirmations,
+            "forced_target": self._forced_target_group(source_group, word),
+            "rejected_targets": sorted(
+                self.learning.rejected_targets(source_group, word)
+            ),
+        }
 
     def _log_word_discarded(self, reason: str) -> None:
         """Record a word that was thrown away before it could be corrected."""
@@ -1756,12 +1784,24 @@ class KeySwitchEngine:
         learning_prompt: LearningPrompt | None = None
         if learning_action is not None and bool(self.settings.get("detection.learning", True)):
             action, source_group, word, target_group = learning_action
+            excluded = self._application_excluded(plan.application)
             if action == "manual":
                 confirmations = self.learning.record_manual(
                     source_group, word, target_group
                 )
                 required = int(self.settings.get("detection.learning_confirmations", 2))
                 learned_rule = confirmations >= required
+                self._technical_event(
+                    "learning_rule_recorded",
+                    word="<redacted>" if excluded else word,
+                    source_group=source_group,
+                    target_group=target_group,
+                    confirmations=confirmations,
+                    required_confirmations=required,
+                    active=learned_rule,
+                    application=plan.application,
+                    application_excluded=excluded,
+                )
                 if not learned_rule:
                     learning_prompt = LearningPrompt(
                         source_group,
@@ -1773,6 +1813,14 @@ class KeySwitchEngine:
             elif action == "reject":
                 self.learning.reject(source_group, word, target_group)
                 rejected_rule = True
+                self._technical_event(
+                    "learning_rejection_recorded",
+                    word="<redacted>" if excluded else word,
+                    source_group=source_group,
+                    target_group=target_group,
+                    application=plan.application,
+                    application_excluded=excluded,
+                )
         count = self.snapshot.correction_count + (1 if plan.automatic else 0)
         action = f"{plan.original} → {plan.replacement}"
         if learned_rule:

@@ -208,6 +208,28 @@ class LearningTests(unittest.TestCase):
             self.assertIsNone(learning.forced_target(0, "fpf", 2))
 
 
+class LearningRuleStateTests(unittest.TestCase):
+    def test_a_pending_rule_is_readable_before_it_becomes_active(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = LearningStore(Path(directory) / "learning.json")
+            self.assertEqual(store.rule_state(0, "qwerty"), (None, 0))
+
+            store.record_manual(0, "qwerty", 1)
+            self.assertEqual(store.rule_state(0, "qwerty"), (1, 1))
+            # One confirmation is not yet a rule that forces a conversion.
+            self.assertIsNone(store.forced_target(0, "qwerty", 2))
+
+            store.record_manual(0, "qwerty", 1)
+            self.assertEqual(store.rule_state(0, "qwerty"), (1, 2))
+            self.assertEqual(store.forced_target(0, "qwerty", 2), 1)
+
+            # A malformed rule reads as no rule at all.
+            store._data["rules"][store._key(0, "qwerty")] = {"confirmations": 3}
+            self.assertEqual(store.rule_state(0, "qwerty"), (None, 0))
+            store._data["rules"][store._key(0, "qwerty")] = "broken"
+            self.assertEqual(store.rule_state(0, "qwerty"), (None, 0))
+
+
 class SpellcheckTests(unittest.TestCase):
     def test_per_user_dictionary_root_is_discovered(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

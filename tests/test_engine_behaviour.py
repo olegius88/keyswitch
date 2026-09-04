@@ -10,7 +10,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from unittest.mock import patch
 
-from keyswitch.backend import CONTROL_MASK, FocusInfo
+from keyswitch.backend import ALT_MASK, CONTROL_MASK, FocusInfo
 from keyswitch.config import SettingsStore
 from keyswitch.engine import (
     ENGINE_SWITCH_GRACE_SECONDS,
@@ -138,6 +138,29 @@ class EngineBehaviourTests(unittest.TestCase):
                 assert isinstance(payload, dict)
                 events.append(payload)
         return events
+
+    def learning_field(self, logs: list[str], word: str) -> dict[str, object]:
+        evaluation = next(
+            event
+            for event in self.technical_events(logs)
+            if event["event"] == "word_evaluation" and event["original"] == word
+        )
+        field = evaluation["learning"]
+        assert isinstance(field, dict)
+        return field
+
+    def press_undo(self) -> None:
+        control, alt = CONTROL_MASK, ALT_MASK
+        group = self.engine.snapshot.current_group
+        for event in (
+            KeyEvent(True, 37, "Control_L", "", ("", ""), group, 0, 3000),
+            KeyEvent(True, 64, "Alt_L", "", ("", ""), group, control, 3001),
+            KeyEvent(True, 52, "z", "", ("z", "я"), group, control | alt, 3002),
+            KeyEvent(False, 52, "z", "", ("z", "я"), group, control | alt, 3003),
+            KeyEvent(False, 64, "Alt_L", "", ("", ""), group, control | alt, 3004),
+            KeyEvent(False, 37, "Control_L", "", ("", ""), group, control, 3005),
+        ):
+            self.engine._handle(event)
 
     def correct_hello(self) -> None:
         """Type ghbdtn + space so the engine converts it to привет."""
@@ -721,6 +744,132 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertEqual(evaluation["skipped_reason"], "application_excluded")
         self.assertIsNone(evaluation["shadow_decision"])
         self.assertEqual(evaluation["original"], "<redacted>")
+
+    def test_the_log_shows_what_local_learning_knows_about_the_word(self) -> None:
+        self.settings.set("detection.respect_manual_layout", False)
+
+        # No rule yet: the word is evaluated by the model alone.
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.type_word("ghbdtn")
+            self.press_space(0)
+        learning = self.learning_field(logs.output, "ghbdtn")
+        self.assertEqual(
+            learning,
+            {
+                "enabled": True,
+                "required_confirmations": 2,
+                "rule_target": None,
+                "confirmations": 0,
+                "forced_target": None,
+                "rejected_targets": [],
+            },
+        )
+
+        # One manual conversion: a rule exists but does not force anything yet.
+        self.backend.group = 0
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.type_word("qwerty")
+            self.press_pause()
+        recorded = next(
+            event
+            for event in self.technical_events(logs.output)
+            if event["event"] == "learning_rule_recorded"
+        )
+        self.assertEqual(
+            (recorded["word"], recorded["confirmations"], recorded["active"]),
+            ("qwerty", 1, False),
+        )
+        self.assertEqual(recorded["required_confirmations"], 2)
+        self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (1, 1))
+
+        self.backend.group = 0
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.type_word("qwerty")
+            self.press_space(0)
+        pending = self.learning_field(logs.output, "qwerty")
+        self.assertEqual(pending["confirmations"], 1)
+        self.assertEqual(pending["rule_target"], 1)
+        self.assertIsNone(pending["forced_target"])
+
+        # The second manual conversion turns it into an active rule.
+        self.backend.group = 0
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.type_word("qwerty")
+            self.press_pause()
+        recorded = next(
+            event
+            for event in self.technical_events(logs.output)
+            if event["event"] == "learning_rule_recorded"
+        )
+        self.assertEqual((recorded["confirmations"], recorded["active"]), (2, True))
+
+        self.backend.group = 0
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.type_word("qwerty")
+            self.press_space(0)
+        forced = self.learning_field(logs.output, "qwerty")
+        self.assertEqual(forced["forced_target"], 1)
+        self.assertEqual(forced["confirmations"], 2)
+        evaluation = next(
+            event
+            for event in self.technical_events(logs.output)
+            if event["event"] == "word_evaluation" and event["original"] == "qwerty"
+        )
+        decision = evaluation["decision"]
+        assert isinstance(decision, dict)
+        self.assertEqual(decision["reason"], "подтверждённое правило пользователя")
+
+    def test_the_log_shows_a_rejection_and_the_word_it_blocks(self) -> None:
+        self.settings.set("detection.respect_manual_layout", False)
+        self.correct_hello()
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.press_undo()
+        rejection = next(
+            event
+            for event in self.technical_events(logs.output)
+            if event["event"] == "learning_rejection_recorded"
+        )
+        self.assertEqual(
+            (rejection["word"], rejection["source_group"], rejection["target_group"]),
+            ("ghbdtn", 0, 1),
+        )
+
+        self.backend.group = 0
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.type_word("ghbdtn")
+            self.press_space(0)
+        blocked = self.learning_field(logs.output, "ghbdtn")
+        self.assertEqual(blocked["rejected_targets"], [1])
+        evaluation = next(
+            event
+            for event in self.technical_events(logs.output)
+            if event["event"] == "word_evaluation" and event["original"] == "ghbdtn"
+        )
+        decision = evaluation["decision"]
+        assert isinstance(decision, dict)
+        self.assertEqual(decision["reason"], "отклонённое пользователем исправление")
+
+    def test_the_learning_field_reports_the_switch_when_the_word_is_unknown(self) -> None:
+        self.settings.set("detection.learning", False)
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._log_word_evaluation(
+                trigger="space",
+                original="ghbdtn",
+                alternatives={1: "привет"},
+                source_group=None,
+                application="TestEditor",
+                application_excluded=False,
+                enabled=True,
+                trigger_enabled=True,
+                manual_layout_protected=False,
+                decision=None,
+            )
+        evaluation = next(
+            event
+            for event in self.technical_events(logs.output)
+            if event["event"] == "word_evaluation"
+        )
+        self.assertEqual(evaluation["learning"], {"enabled": False})
 
     def test_word_evaluation_is_skipped_entirely_without_technical_logging(self) -> None:
         self.settings.set("diagnostics.technical_logging", False)
