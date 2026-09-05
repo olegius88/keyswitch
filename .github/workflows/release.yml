@@ -80,6 +80,14 @@ jobs:
       - name: Run real StatusNotifierItem and DBusMenu integration test
         run: dbus-run-session -- env PYTHONPATH=src python3 tests/e2e_tray_menu.py
 
+      - name: Verify contextual training reproducibility and quality evidence
+        run: |
+          PYTHONPATH=src python3 tools/train_context_model.py --verify
+          PYTHONPATH=src python3 tools/verify_context_model.py
+
+      - name: Run isolated native AT-SPI context and unavailable-bus E2E
+        run: ./tools/run-atspi-e2e.sh
+
       - name: Enforce detector quality gates
         run: >-
           PYTHONPATH=src tools/evaluate_detector.py
@@ -142,7 +150,7 @@ jobs:
 
       - name: Install pinned typing, runtime and build dependencies
         run: |
-          python -m pip install coverage==7.15.4 mypy==2.3.1 Nuitka==4.2 ordered-set==4.1.0 pystray==0.19.5 Pillow==12.3.0
+          python -m pip install coverage==7.15.4 mypy==2.3.1 Nuitka==4.2 ordered-set==4.1.0 pystray==0.19.5 Pillow==12.3.0 comtypes==1.4.16
           python -m pip install --no-deps PyGObject-stubs==2.17.0
 
       - name: Configure the EN and RU keyboard layouts for the E2E
@@ -169,6 +177,7 @@ jobs:
           python -m coverage run --append --branch --source=src/keyswitch -m unittest discover -s tests -p test_windows_backend.py -v
           python -m coverage run --append --branch --source=src/keyswitch -m unittest discover -s tests -p test_input_integrity.py -v
           python -m coverage run --append --branch --source=src/keyswitch -m unittest discover -s tests -p test_action_boundary.py -v
+          python -m coverage run --append --branch --source=src/keyswitch -m unittest discover -s tests -p test_context*.py -v
           python -m coverage run --append --branch --source=src/keyswitch tests/test_updates.py -v
           python -m coverage report --fail-under=100 --include="*/intent_model.py,*/updates.py,*/windows_app.py,*/windows_backend.py,*/windows_instance.py,*/windows_system.py,*/windows_tray.py,*/windows_ui_model.py"
 

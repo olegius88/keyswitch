@@ -1290,6 +1290,16 @@ $ModelContractValidatorPath = Join-Path `
     $StrictUtf8
 )
 $env:PYTHONPATH = Join-Path $ProjectDirectory "src"
+Invoke-NativeCommand `
+    -Command "python" `
+    -Arguments @((Join-Path $ProjectDirectory "tools\verify_context_model.py")) `
+    -FailureMessage "Context model provenance or quality gate failed"
+# Generate the OS type library before freezing. The runtime must not need
+# writable installation files or a Python compiler to open accessibility.
+Invoke-NativeCommand `
+    -Command "python" `
+    -Arguments @("-c", "import comtypes.client; comtypes.client.GetModule('UIAutomationCore.dll')") `
+    -FailureMessage "UI Automation interface generation failed"
 try {
     Invoke-NativeCommand `
         -Command "python" `
@@ -1346,6 +1356,11 @@ $NuitkaArguments = @(
     "--include-module=keyswitch.windows_registry",
     "--include-module=keyswitch.windows_tray_native",
     "--include-module=keyswitch.intent_model",
+    "--include-module=keyswitch.windows_context",
+    "--include-package=comtypes",
+    "--include-package=comtypes.gen",
+    "--nofollow-import-to=comtypes.test",
+    "--nofollow-import-to=keyswitch.atspi_context",
     "--include-module=pystray._base",
     "--include-module=pystray._util",
     "--include-module=pystray._util.win32",
@@ -1389,6 +1404,16 @@ if ($ProductVersion -ne "$Version.0") {
 }
 
 $BundledIntentModel = Join-Path $NativeDistribution "keyswitch\resources\models\layout_intent_v1.ksm"
+$BundledContextModel = Join-Path $NativeDistribution "keyswitch\resources\models\context_policy_v1.json"
+$ContextReport = Read-BoundedJsonObject `
+    -Path (Join-Path $ProjectDirectory "model\context_v1\report.json") `
+    -MaximumBytes 1MB -Label "context-model quality report"
+[byte[]]$BundledContextBytes = Read-BoundedFileBytes `
+    -Path $BundledContextModel -MaximumBytes 8MB -MinimumBytes 2 `
+    -Label "bundled contextual model"
+if ((Get-BytesSha256 -Bytes $BundledContextBytes) -cne $ContextReport.artifact_sha256) {
+    throw "Native distribution contains a different contextual model"
+}
 [byte[]]$BundledIntentModelBytes = Read-BoundedFileBytes `
     -Path $BundledIntentModel `
     -MaximumBytes $IntentModelMaximumBytes `
@@ -1481,6 +1506,12 @@ $PostBuildDiagnostics = Read-BoundedJsonObject `
     -Path $PostBuildDiagnosticsPath `
     -MaximumBytes 1MB `
     -Label "post-build executable diagnostics"
+if ($PostBuildDiagnostics.context_model.available -ne $true -or $PostBuildDiagnostics.context_model.status -cne $ContextReport.model_version) {
+    throw "Post-build executable cannot load its exact contextual model"
+}
+if ($PostBuildDiagnostics.context_field_access.available -ne $true) {
+    throw "Post-build executable cannot initialize its bundled UI Automation bridge"
+}
 if ($PostBuildDiagnostics.intent_model.available -isnot [bool] -or -not $PostBuildDiagnostics.intent_model.available) {
     throw "Post-build executable cannot load its bundled intent model: $($PostBuildDiagnostics.intent_model.error)"
 }
@@ -1504,6 +1535,7 @@ Invoke-NativeCommand `
         (Join-Path $ProjectDirectory "tools\collect_python_licenses.py"),
         $LicenseDirectory,
         "Nuitka",
+        "comtypes",
         "pystray",
         "Pillow",
         "six"

@@ -211,6 +211,7 @@ def main() -> int:
         ("short Russian word switches to English", 1, "if ", "if ", 0, 1000),
         ("manual Russian selection protects short word", 1, "if ", "ша ", 1, 1000),
         ("short-word protection is consumed once", 1, "if ", "if ", 0, 1000),
+        ("context resolves a short word with the next word", 0, "e 'njuj ", "у этого ", 1, 1200),
     )
     window = Gtk.Window(title="KeySwitch native package E2E")
     window.set_default_size(520, 120)
@@ -326,6 +327,7 @@ def main() -> int:
             ("ghbdtn", "привет"),
             ("ша", "if"),
             ("ша", "if"),
+            ("e 'njuj", "у этого"),
         ]
         if actual_history != expected_history:
             return fail(f"wrong correction history: {actual_history!r}")
@@ -408,6 +410,7 @@ def main() -> int:
             ("ghbdtn", "привет"),
             ("ша", "if"),
             ("ша", "if"),
+            ("e 'njuj", "у этого"),
             ("hello", "руддщ"),
         ]
         if actual_history != expected_history:

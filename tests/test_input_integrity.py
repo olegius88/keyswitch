@@ -76,6 +76,7 @@ class InputIntegrityTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         root = Path(self.temporary.name)
         self.settings = SettingsStore(root / "config.json")
+        self.settings.set("detection.context_policy", "off")
         self.settings.set("detection.early_switch", False)
         self.settings.set("detection.respect_manual_layout", False)
         self.settings.set("diagnostics.technical_logging", True)

@@ -43,6 +43,8 @@ DEFAULTS: SettingsData = {
         "respect_manual_layout": True,
         "aggressive": False,
         "context_aware": True,
+        "context_policy": "assist",
+        "context_read_field": False,
         "protect_code": True,
         "intent_model_enabled": True,
         "learning": True,

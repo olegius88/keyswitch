@@ -15,7 +15,7 @@ from keyswitch.engine import KeySwitchEngine, LearningPrompt
 from keyswitch.history import HistoryStore
 from keyswitch.layouts import LayoutPair
 from keyswitch.windows_backend import (
-    NativeInput, NativeKeyEvent, VK_BACK, VK_RETURN, VK_SHIFT, VK_TAB, WindowsBackend,
+    NativeInput, NativeKeyEvent, VK_BACK, VK_RETURN, VK_SHIFT, VK_SPACE, VK_TAB, WindowsBackend,
 )
 from test_windows_backend import ENGLISH_LAYOUT, FakeWindowsAPI
 
@@ -24,6 +24,7 @@ SCANS = dict(zip("qwertyuiopasdfghjklzxcvbnm", (
     16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
     30, 31, 32, 33, 34, 35, 36, 37, 38, 44, 45, 46, 47, 48, 49, 50,
 )))
+SCANS[" "] = 57
 
 
 class ActionEditorAPI(FakeWindowsAPI):
@@ -36,6 +37,8 @@ class ActionEditorAPI(FakeWindowsAPI):
         self.timeline: list[str] = []
 
     def translate_key(self, virtual_key: int, scan_code: int, state: int, layout: int) -> str:
+        if virtual_key == VK_SPACE:
+            return " "
         if not 65 <= virtual_key <= 90:
             return ""
         text = chr(virtual_key).lower()
@@ -125,6 +128,16 @@ class ActionBoundaryTests(unittest.TestCase):
         self.flush()
         self.assertEqual(self.api.fields, ["привет"])
         self.assertEqual(sum(item.pressed and item.virtual_key == VK_BACK for batch in self.api.sent for item in batch), 6)
+
+    def test_contextual_phrase_is_corrected_before_enter_is_delivered(self) -> None:
+        self.type("z ctujlyz")
+        self.tap(self.key(VK_RETURN, 28))
+        self.assertEqual(self.api.messages, [])
+        self.flush()
+        self.assertEqual(self.api.messages, ["я сегодня"])
+        self.assertEqual(self.api.text, "")
+        self.assertFalse(self.backend._holding)
+        self.assertEqual(self.engine.context_policy.stream.text, "")
 
     def test_rapid_next_message_and_second_enter_stay_in_order(self) -> None:
         self.type("ghbdtn")

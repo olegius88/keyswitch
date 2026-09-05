@@ -1,4 +1,4 @@
-.TH KEYSWITCH 1 "September 2026" "KeySwitch 0.14.1" "User Commands"
+.TH KEYSWITCH 1 "September 2026" "KeySwitch 0.15.0" "User Commands"
 .SH NAME
 keyswitch \- automatic keyboard layout correction for Ubuntu X11
 .SH SYNOPSIS
@@ -14,7 +14,21 @@ By default, KeySwitch also checks the current word after 1.5 seconds without
 typing, before a separator is entered. Idle correction can be disabled
 independently in the application settings.
 .PP
-Detection is a precision-first hybrid. Hard guards and explicit user rules are
+The contextual assistant adds a separate local, trained four-action policy:
+keep, convert, wait for context or suggest. It uses a bounded recent phrase,
+application identity and lexical evidence. Assist mode is enabled by default;
+shadow mode observes without changing baseline decisions, and off restores
+the baseline alone. Context text stays in RAM and is not sent to a service.
+Optional UI Automation/AT-SPI field reading is disabled by default. Detected
+passwords, selections and contradictory field snapshots block replacement.
+Not all applications expose password metadata; exclusions remain necessary.
+The current contextual evaluation is synthetic, not a real-world error rate.
+Its certification is separate from the sealed baseline described below.
+Prefix replacement remains available in off/shadow modes; assist waits for a
+completed word or idle boundary.
+.PP
+Without contextual intervention, detection is a precision-first hybrid.
+Hard guards and explicit user rules are
 resolved before the optional classifier. Dictionaries, Hunspell and context
 form the deterministic fallback; when the bundled local linear character
 n-gram model is available, enabled and applicable, it is the sole statistical

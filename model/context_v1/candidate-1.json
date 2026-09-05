@@ -1,0 +1,7 @@
+{
+  "model_version": "context-v1-ea4521720367",
+  "status": "development-only",
+  "reason": "After the first synthetic test, the reported e -> у lookahead regression still failed. This candidate and all its scenarios are development evidence, not a production claim.",
+  "synthetic_test": {"rows": 2241, "desired_conversions": 939, "converted_correctly": 789, "false_conversions": 0, "baseline_converted_correctly": 634},
+  "next_evaluation": "New physical token families in holdout-2.json; no family from scenarios.json may enter that test."
+}

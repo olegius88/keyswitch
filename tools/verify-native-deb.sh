@@ -173,6 +173,8 @@ test -s "$intent_model"
 test "$(head -c 4 "$intent_model")" = "KSLM"
 verify_kslm_packaging_bounds "$intent_model"
 cmp -s "$expected_intent_model" "$intent_model"
+cmp -s "$project_dir/src/keyswitch/resources/models/context_policy_v1.json" \
+    "$staging/usr/lib/keyswitch/keyswitch/resources/models/context_policy_v1.json"
 test -s "$english_model"
 test -s "$russian_model"
 cmp -s "$expected_english_model" "$english_model"

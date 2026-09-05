@@ -120,6 +120,9 @@ class EngineBehaviourTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         root = Path(self.temporary.name)
         self.settings = SettingsStore(root / "config.json")
+        # Exercise legacy prefix/rule behaviour separately from the learned
+        # context-policy matrix, which explicitly enables assist mode.
+        self.settings.set("detection.context_policy", "off")
         self.settings.set("detection.early_switch", False)
         self.settings.set("diagnostics.technical_logging", True)
         self.history = HistoryStore(root / "history.jsonl")

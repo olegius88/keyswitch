@@ -26,6 +26,9 @@ from .indicator import alternate_layout_group, layout_label
 from .language_model import LanguageModel, WordScore
 from .learning import LearningStore
 from .intent_model import CorrectionTrigger, LinearNgramModel
+from .context_policy import ContextPolicy, ContextResult
+from .context_access import PlatformFieldReader
+from .input_context import FieldContext, FieldReader
 from .short_words import (
     is_short_word_override,
     natural_short_source_veto,
@@ -94,6 +97,7 @@ class CorrectionPlan:
     automatic: bool = True
     # boundary | pause | manual | undo | early | symbols | late_stroke
     mode: str = "boundary"
+    context_field: str = ""
 
 
 @dataclass(frozen=True)
@@ -106,6 +110,8 @@ class EngineSnapshot:
     correction_count: int = 0
     last_action: str = "Ожидание ввода"
     last_error: str = ""
+    context_action: str = ""
+    context_model: str = ""
 
 
 @dataclass(frozen=True)
@@ -113,6 +119,15 @@ class LanguageContext:
     group: int
     words: dict[int, str]
     updated_at: float
+
+
+@dataclass(frozen=True)
+class WaitingContextWord:
+    plan: CorrectionPlan
+    decision: DetectionDecision
+    field: FieldContext
+    window: int
+    deadline: float
 
 
 @dataclass(frozen=True)
@@ -165,6 +180,7 @@ class KeySwitchEngine:
         backend: InputBackend | None = None,
         learning: LearningStore | None = None,
         backend_label: str = "X11 RECORD + XTEST",
+        context_reader: FieldReader | None = None,
     ) -> None:
         self.settings = settings
         self.history = history
@@ -180,6 +196,10 @@ class KeySwitchEngine:
         self.backend: InputBackend = backend or _default_backend(len(self.models))
         self.backend_label = backend_label
         self.learning = learning or LearningStore(history.path.with_name("learning.json"))
+        self.context_policy = ContextPolicy(context_reader or PlatformFieldReader(self.backend))
+        self._context_result: ContextResult | None = None
+        self._context_waiting: WaitingContextWord | None = None
+        self._sensitive_context_window: int | None = None
         self._typed_events = 0
         self._typed_presses = 0
         self._correction_sequence = 0
@@ -355,6 +375,7 @@ class KeySwitchEngine:
             raise
 
     def stop(self) -> None:
+        self.context_policy.stream.clear()
         self.dismiss_learning_prompt()
         self.backend.set_key_filter(None)
         if not self._running.is_set():
@@ -433,6 +454,9 @@ class KeySwitchEngine:
             except Exception as error:
                 self._clear_word(reason="input_error")
                 self._update(last_error=str(error), last_action="Ошибка обработки ввода")
+        reader = self.context_policy.reader
+        if isinstance(reader, PlatformFieldReader):
+            reader.close()
 
     def _loop_timeout(self) -> float:
         """Wake exactly when the pause delay elapses, at most every 0.5 s."""
@@ -495,12 +519,15 @@ class KeySwitchEngine:
             self._complete_deferred_action(False, "input_overflow")
             self._clear_word("Очередь ввода переполнена", reason="input_overflow")
             self._untracked_token = True
+            self.context_policy.stream.clear()
         if event.pressed:
             self._track_focus()
         if event.key_name == "Pointer":
+            self._sensitive_context_window = None
             self._clear_word(reason="pointer_activity")
             self._untracked_token = False
             self._contexts.clear()
+            self.context_policy.stream.clear()
             return
         self._expire_learning_prompt()
         prompt = self.learning_prompt
@@ -518,6 +545,36 @@ class KeySwitchEngine:
                 self.dismiss_learning_prompt(prompt, reason="escape")
                 return
             self.dismiss_learning_prompt(prompt, reason="other_key")
+        if event.pressed:
+            application = self.backend.active_application()
+            if (
+                event.character and not self._strokes
+                and self._sensitive_context_window is None
+                and not self._application_excluded(application)
+                and bool(self.settings.get("enabled", True))
+                and bool(self.settings.get("detection.context_read_field", False))
+                and self.context_policy.reader is not None
+            ):
+                field = self.context_policy.reader.read(application, self._focus_window or 0)
+                if field is not None and field.sensitive:
+                    self._sensitive_context_window = self._focus_window
+                    self._context_waiting = None
+                    self.context_policy.stream.clear()
+            context_enabled = (
+                bool(self.settings.get("enabled", True))
+                and bool(self.settings.get("detection.context_aware", True))
+                and self.settings.get("detection.context_policy", "assist") != "off"
+                and not self._application_excluded(application)
+            )
+            stream = self.context_policy.stream
+            stream.focus(application, self._focus_window or 0)
+            if context_enabled:
+                if not any(self._matches_hotkey(name, event) for name in ("toggle", "convert_last", "undo")):
+                    stream.observe(event)
+            else:
+                stream.clear()
+            if event.key_name == "BackSpace" or event.control or event.alt or event.super_key:
+                self._context_waiting = None
         # Only presses carry a meaningful group: a release reports whatever
         # layout was active when the finger came up, which is stale right
         # after the engine switched the layout itself.
@@ -592,6 +649,10 @@ class KeySwitchEngine:
             self._clear_word(reason="action_boundary_already_delivered")
             self._untracked_token = False
             self._contexts.clear()
+            self.context_policy.stream.clear()
+            self._sensitive_context_window = None
+            return
+        if self._sensitive_context_window is not None:
             return
         if self._untracked_token:
             if self._is_boundary(event):
@@ -726,6 +787,14 @@ class KeySwitchEngine:
     def _maybe_early_switch(self) -> None:
         """Switch the layout as soon as the typed prefix proves it wrong."""
 
+        if (
+            self.context_policy.model is not None
+            and bool(self.settings.get("detection.context_aware", True))
+            and self.settings.get("detection.context_policy", "assist") == "assist"
+        ):
+            # Contextual training covers completed tokens/idle, not prefixes.
+            # Legacy early switching remains available in off/shadow mode.
+            return
         if not bool(self.settings.get("detection.early_switch", True)):
             return
         if not bool(self.settings.get("enabled", True)):
@@ -1012,6 +1081,7 @@ class KeySwitchEngine:
         )
         excluded = self._application_excluded(application)
         decision: DetectionDecision | None = None
+        waiting, self._context_waiting = self._context_waiting, None
         if should_analyze and not excluded:
             decision = self._decide_word(
                 original,
@@ -1020,7 +1090,14 @@ class KeySwitchEngine:
                 application,
                 self._trigger_for_boundary(boundary),
             )
-            if decision.should_convert:
+            excluded = self._application_excluded(application)
+            joint = self._resolve_context_wait(waiting, strokes, boundary, decision, application)
+            if joint is not None:
+                self._pending = joint
+                self._pending_learning_action = None
+                self._pending_trigger_keycode = boundary.keycode
+                decision = replace(decision, should_convert=True)
+            elif decision.should_convert:
                 plan = self._plan_from_decision(strokes, boundary, application, decision)
                 if boundary.deferred:
                     # Enter/Tab has not reached the editor. Do not delete it
@@ -1034,6 +1111,17 @@ class KeySwitchEngine:
                 self._pending_trigger_keycode = boundary.keycode
             else:
                 self._remember_context(application, source_group, strokes)
+                result = self._context_result
+                if (
+                    result is not None and result.prediction is not None
+                    and result.prediction.action == "wait" and result.field is not None
+                    and len(original) <= 2 and boundary.character == " "
+                    and not boundary.deferred
+                    and self.settings.get("detection.context_policy", "assist") == "assist"
+                ):
+                    self._context_waiting = WaitingContextWord(
+                        plan, decision, result.field, self._focus_window or 0, time.monotonic() + 10.0,
+                    )
         else:
             self._remember_context(application, source_group, strokes)
         self._log_word_evaluation(
@@ -1138,6 +1226,7 @@ class KeySwitchEngine:
         application: str,
         trigger: CorrectionTrigger = "space",
     ) -> DetectionDecision:
+        self._context_result = None
         context_words, context_group = self._context_for(application)
         context_aware = bool(self.settings.get("detection.context_aware", True))
         ignored_words: list[str] = self.settings.get("exclusions.words", [])
@@ -1173,9 +1262,7 @@ class KeySwitchEngine:
             decision,
             context_group=context_group if context_aware else None,
         )
-        if decision.should_convert:
-            return decision
-        short_decision = trusted_short_word_decision(
+        short_decision = None if decision.should_convert else trusted_short_word_decision(
             self.detector,
             original,
             alternatives,
@@ -1185,7 +1272,82 @@ class KeySwitchEngine:
             protect_code=protect_code,
             context_group=context_group if context_aware else None,
         )
-        return decision if short_decision is None else short_decision
+        decision = decision if short_decision is None else short_decision
+        if (
+            not context_aware or forced_target is not None or trigger == "boundary_probe"
+            or self.detector.token_key(original) in {self.detector.token_key(word) for word in ignored_words}
+            or (protect_code and self.detector.is_protected_token(original))
+            or self._application_excluded(application)
+        ):
+            return decision
+        candidates = [(group, text) for group, text in alternatives.items() if group not in rejected_targets]
+        if not candidates:
+            return decision
+        group, alternative = candidates[0]
+        result = self.context_policy.decide(
+            decision, alternative, group, self.detector, trigger,
+            str(self.settings.get("detection.context_policy", "assist")),
+            read_field=bool(self.settings.get("detection.context_read_field", False)),
+        )
+        self._context_result = result
+        if result.field is not None and result.field.sensitive:
+            self._sensitive_context_window = self._focus_window
+            self.context_policy.stream.clear()
+            self._contexts.clear()
+            self._update(current_word="", last_action="Защищённое поле: обработка отключена")
+        if result.prediction is not None:
+            prediction = result.prediction
+            self._update(context_action=prediction.action, context_model=prediction.model_version)
+            field = result.field
+            self._technical_event(
+                "context_decision", action=prediction.action,
+                score=round(prediction.probability, 6), model_version=prediction.model_version,
+                mode=self.settings.get("detection.context_policy", "assist"),
+                applied=result.decision.should_convert, baseline_convert=decision.should_convert,
+                context_source=field.source if field else "unavailable",
+                before_characters=len(field.before) if field else 0,
+                after_characters=len(field.after) if field else 0,
+                field_role=field.role if field else "unknown",
+                # Context content and surrounding sentences are never logged.
+            )
+            if prediction.action == "suggest" and self.settings.get("detection.context_policy", "assist") == "assist":
+                self._update(last_action=f"Возможно: {original} → {alternative} · Pause для замены")
+        return result.decision
+
+    def _resolve_context_wait(
+        self, waiting: WaitingContextWord | None, strokes: tuple[KeyEvent, ...],
+        boundary: KeyEvent, decision: DetectionDecision, application: str,
+    ) -> CorrectionPlan | None:
+        if waiting is None or self.settings.get("detection.context_policy", "assist") != "assist":
+            return None
+        previous = waiting.plan
+        if (
+            time.monotonic() > waiting.deadline or waiting.window != (self._focus_window or 0)
+            or previous.application != application or previous.boundary is None
+            or previous.source_group != decision.source_group
+            or not decision.should_convert
+            or any(stroke.group != previous.source_group for stroke in (*previous.strokes, *strokes))
+        ):
+            return None
+        original = previous.original + previous.boundary.character + decision.original
+        suffix = "" if boundary.deferred else boundary.character
+        if not self.context_policy.stream.text.endswith(original + suffix):
+            return None
+        group = decision.target_group
+        alternative = self._text_for_group(previous.strokes, group)
+        result = self.context_policy.decide(
+            waiting.decision, alternative, group, self.detector, "space", "assist",
+            after=decision.replacement, field_override=waiting.field,
+        )
+        if not result.decision.should_convert:
+            return None
+        self._technical_event("context_wait_resolved", previous_characters=len(previous.original), next_characters=len(decision.original))
+        return CorrectionPlan(
+            previous.strokes + (previous.boundary,) + strokes,
+            None if boundary.deferred else boundary, previous.source_group, group,
+            original, alternative + previous.boundary.character + decision.replacement,
+            result.decision.confidence, application, True, "context_phrase", self._context_field_id(),
+        )
 
     def _forced_target_group(self, source_group: int, word: str) -> int | None:
         if not bool(self.settings.get("detection.learning", True)):
@@ -1210,7 +1372,7 @@ class KeySwitchEngine:
         group: int,
         strokes: tuple[KeyEvent, ...] | list[KeyEvent],
     ) -> None:
-        if group not in self.models or not strokes or not application.strip():
+        if group not in self.models or not strokes or not application.strip() or self._application_excluded(application):
             return
         words = {
             candidate_group: self._text_for_group(strokes, candidate_group)
@@ -1222,8 +1384,8 @@ class KeySwitchEngine:
         while len(self._contexts) > 32:
             self._contexts.pop(next(iter(self._contexts)))
 
-    @staticmethod
     def _plan_from_decision(
+        self,
         strokes: tuple[KeyEvent, ...],
         boundary: KeyEvent | None,
         application: str,
@@ -1241,7 +1403,12 @@ class KeySwitchEngine:
             application,
             True,
             mode,
+            self._context_field_id(),
         )
+
+    def _context_field_id(self) -> str:
+        result = self._context_result
+        return result.field.field_id if result is not None and result.field is not None and result.field.source != "observed" else ""
 
     @staticmethod
     def _score_diagnostics(score: WordScore) -> dict[str, object]:
@@ -1586,6 +1753,7 @@ class KeySwitchEngine:
         decision = self._decide_word(
             original, alternatives, source_group, application, "pause"
         )
+        excluded = self._application_excluded(application)
         self._log_word_evaluation(
             trigger="pause",
             original=original,
@@ -1954,6 +2122,7 @@ class KeySwitchEngine:
                 self._complete_deferred_action(succeeded, "corrected" if plan else "no_correction")
             self._clear_word(reason="action_completed")
             self._contexts.clear()
+            self.context_policy.stream.clear()
             return
         if self._pending is None:
             return
@@ -1985,10 +2154,27 @@ class KeySwitchEngine:
             return False
         if self._input_overflow.is_set():
             self._clear_word(reason="input_overflow")
+            self._technical_event("correction_aborted", mode=plan.mode, reason="input_overflow")
             return False
         if any(not self._safe_text_stroke(stroke) for stroke in plan.strokes):
             self._clear_word(reason="unrepresentable_text")
+            self._technical_event(
+                "correction_aborted", mode=plan.mode, reason="unrepresentable_text",
+                character_lengths=[tuple(map(len, stroke.characters)) for stroke in plan.strokes],
+            )
             return False
+        if plan.context_field:
+            reader = self.context_policy.reader
+            field = None if reader is None else reader.read(plan.application, self._focus_window or 0)
+            suffix = plan.original + (plan.boundary.character if plan.boundary else "")
+            if (
+                field is None or field.field_id != plan.context_field
+                or field.application != plan.application or field.sensitive or field.selection
+                or not field.before.endswith(suffix)
+            ):
+                self._clear_word(reason="context_field_changed")
+                self._technical_event("correction_aborted", mode=plan.mode, reason="context_field_changed")
+                return False
         application_excluded = self._application_excluded(plan.application)
         logged_original = "<redacted>" if application_excluded else plan.original
         logged_replacement = (
@@ -2048,6 +2234,12 @@ class KeySwitchEngine:
             self._update(last_error=str(error), last_action="Ошибка замены · проверьте текст в приложении")
             return False
         self._note_engine_switch(plan.target_group)
+        if late or held:
+            self.context_policy.stream.clear()
+        else:
+            self.context_policy.stream.replace_suffix(
+                plan.original, plan.replacement, plan.boundary.character if plan.boundary else "",
+            )
         self._technical_event(
             "correction_applied",
             correction_id=correction_id,
@@ -2282,6 +2474,8 @@ class KeySwitchEngine:
 
         if not event.pressed or event.synthetic:
             return False
+        if self._sensitive_context_window is not None:
+            return False
         if event.key_name in MODIFIER_KEYS:
             return False
         if event.control or event.alt or event.super_key or event.shift:
@@ -2326,6 +2520,8 @@ class KeySwitchEngine:
         return "punctuation"
 
     def _application_excluded(self, application: str) -> bool:
+        if self._sensitive_context_window is not None and self._sensitive_context_window == self._focus_window:
+            return True
         normalized = application.casefold()
         applications: list[str] = self.settings.get(
             "exclusions.applications", []
@@ -2341,6 +2537,8 @@ class KeySwitchEngine:
         return "".join(stroke.character_for(group) for stroke in strokes)
 
     def _clear_word(self, action: str | None = None, *, reason: str = "") -> None:
+        self.context_policy.stream.clear()
+        self._context_waiting = None
         if self._deferred_action is not None:
             self._complete_deferred_action(False, reason)
         self._log_word_discarded(reason)
@@ -2372,6 +2570,10 @@ class KeySwitchEngine:
             self._update(current_word="", last_action=action)
 
     def _settings_changed(self, path: str, value: object) -> None:
+        if path in {"*", "enabled", "detection.context_aware", "detection.context_policy", "detection.context_read_field", "exclusions.applications"}:
+            self.context_policy.stream.clear()
+            self._context_waiting = None
+            self._sensitive_context_window = None
         self._action_keys = self._configured_action_keys()
         if path == "*":
             self.dismiss_learning_prompt(reason="settings_reloaded")
@@ -2420,10 +2622,12 @@ class KeySwitchEngine:
         """The unfinished word and the last committed one stay in the old window."""
 
         self._own_layout_ignored = False
+        self._sensitive_context_window = None
         dropped = len(self._strokes)
         self._clear_word(reason="focus_changed")
         self._untracked_token = False
         self._contexts.clear()
+        self.context_policy.stream.clear()
         self._manual_layout_group = None
         self._last_committed_stale = True
         self._technical_event(
@@ -2524,6 +2728,8 @@ class KeySwitchEngine:
         correction_count: int | None = None,
         last_action: str | None = None,
         last_error: str | None = None,
+        context_action: str | None = None,
+        context_model: str | None = None,
     ) -> None:
         with self._lock:
             current = self._snapshot
@@ -2546,6 +2752,8 @@ class KeySwitchEngine:
                     current.last_action if last_action is None else last_action
                 ),
                 last_error=current.last_error if last_error is None else last_error,
+                context_action=current.context_action if context_action is None else context_action,
+                context_model=current.context_model if context_model is None else context_model,
             )
             callbacks = tuple(self._callbacks)
             snapshot = self._snapshot

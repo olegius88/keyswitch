@@ -2,6 +2,11 @@
 model/intent_v1/sources/*.lm -text
 model/intent_v1/sources/COPYRIGHT.onboard-data -text whitespace=-trailing-space
 src/keyswitch/resources/models/*.ksm binary
+src/keyswitch/resources/models/context_policy_v1.json text eol=lf
+model/context_v1/*.json text eol=lf
+src/keyswitch/context_model.py text eol=lf
+tools/train_context_model.py text eol=lf
+tools/verify_context_model.py text eol=lf
 
 # These text files are hashed byte-for-byte into KSLM provenance or its sealed
 # receipt. Force LF even on Windows so a checkout cannot invalidate the model.

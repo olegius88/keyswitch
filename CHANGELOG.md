@@ -4,6 +4,29 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.15.0 — 2026-09-05
+
+- Check native AT-SPI initialization before field access and remember startup
+  failure for the process lifetime, avoiding libatspi's fatal missing-bus path.
+  Cover unavailable-bus startup and reader recreation with a native subprocess
+  regression test, isolate parallel accessibility test sessions, and document
+  the initial context corpus's limited diversity.
+- Add a local, trained four-action contextual policy (keep/convert/wait/suggest),
+  app/field evidence, bounded RAM-only phrase context, assist/shadow/off settings
+  and redacted decision diagnostics. The initial quality evidence is synthetic,
+  not a claim of general language understanding or real-world error rates.
+- Resolve a waiting short word with its immediately following word while
+  preserving the space, physical stroke order and joint undo. Explicit user
+  rules, exclusions and input-integrity guards remain above model decisions.
+- Add opt-in UI Automation/AT-SPI caret context without clipboard access,
+  detected-password/selection guards and exact field/suffix revalidation.
+- Disable prefix replacement in contextual assist mode; retain it in legacy
+  and shadow modes. Add reproducible training, token-family holdout evidence,
+  artifact provenance gates and context-specific regression tests.
+- Resolve X11 common-key group fallback through XKB instead of treating the
+  Russian-layout space as an empty character. Log rejected unrepresentable
+  replacement plans even when the current word buffer has already been cleared.
+
 ## 0.14.1 — 2026-09-05
 
 - Windows native E2E waits for real keyboard-driven field clearing before

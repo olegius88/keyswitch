@@ -22,6 +22,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from . import __version__
 from .config import SettingsStore
+from .context_policy import ContextPolicy
 from .engine import EngineSnapshot
 from .history import HistoryStore
 from .logsetup import log_directory, log_path, log_status, rotation_summary
@@ -77,6 +78,9 @@ class _UiBackend(Protocol):
 
 
 class _UiEngine(Protocol):
+    @property
+    def context_policy(self) -> ContextPolicy: ...
+
     @property
     def backend(self) -> _UiBackend: ...
 
@@ -406,13 +410,22 @@ class MainWindow(Adw.ApplicationWindow):
         behavior.add(confidence)
         behavior.add(self._switch_row("detection.aggressive", "Агрессивное распознавание", "Разрешить исправлять незнакомые слова по характерным сочетаниям букв"))
         behavior.add(self._switch_row("detection.context_aware", "Учитывать контекст", "Предыдущее слово и язык в текущем приложении помогают разрешать сомнения; контекст хранится только в памяти"))
+        context_modes = ["assist", "shadow", "off"]
+        context_mode = Adw.ComboRow(title="Контекстный ИИ-помощник", subtitle="Локальная модель учитывает фразу и приложение; контекст хранится только в памяти")
+        context_mode.set_model(Gtk.StringList.new(["Исправлять и предлагать", "Только наблюдать", "Выключен"]))
+        current_context_mode = str(self.settings.get("detection.context_policy", "assist"))
+        context_mode.set_selected(context_modes.index(current_context_mode) if current_context_mode in context_modes else 2)
+        context_mode.connect("notify::selected", lambda row, _param: self.settings.set("detection.context_policy", context_modes[row.get_selected()]))
+        self._settings_controls["detection.context_policy"] = context_mode
+        behavior.add(context_mode)
+        behavior.add(self._switch_row("detection.context_read_field", "Читать контекст активного поля", "Дополнять контекст текстом рядом с курсором через доступность ОС; только локально, без защищённых полей"))
         behavior.add(self._switch_row("detection.protect_code", "Защищать код и сокращения", "Не трогать URL, пути, слова с цифрами, ALL-CAPS и camelCase"))
         behavior.add(self._switch_row("detection.intent_model_enabled", "Локальная линейная модель", "Собственная символьная n-граммная модель проверяет сомнительные решения; введённый текст не покидает компьютер"))
         behavior.add(
             self._switch_row(
                 "detection.early_switch",
                 "Ранняя смена раскладки",
-                "Переключать раскладку и переписывать начало слова, как только префикс невозможен в текущем языке и явно продолжается в другом",
+                "Используется, когда ИИ-помощник выключен или только наблюдает; в режиме исправления модель ждёт границы слова или паузы",
             )
         )
         early_length = Adw.SpinRow.new_with_range(3, 8, 1)
@@ -1010,6 +1023,11 @@ class MainWindow(Adw.ApplicationWindow):
             selected = 1 if value == "flags" else 0
             if control.get_selected() != selected:
                 control.set_selected(selected)
+        if path == "detection.context_policy" and isinstance(control, Adw.ComboRow):
+            modes = ["assist", "shadow", "off"]
+            selected = modes.index(str(value)) if str(value) in modes else 2
+            if control.get_selected() != selected:
+                control.set_selected(selected)
         if path == "exclusions.applications" and hasattr(self, "apps_group"):
             self._refresh_application_exclusions()
         if path == "enabled" and self.service_switch.get_active() != bool(value):
@@ -1315,6 +1333,9 @@ class MainWindow(Adw.ApplicationWindow):
                 f"XKB: {probe.xkb_version}",
                 f"XKB group: {probe.current_group}",
                 f"Intent model: {self.engine.intent_model_status.summary}",
+                f"Context model: {self.engine.context_policy.status}",
+                f"Context mode: {self.settings.get('detection.context_policy', 'assist')}",
+                f"Read active field: {self.settings.get('detection.context_read_field', False)}",
                 f"Technical logging: {bool(self.settings.get('diagnostics.technical_logging', False))}",
                 f"Technical log: {log_path()}",
                 f"Log state: {log_status()}",

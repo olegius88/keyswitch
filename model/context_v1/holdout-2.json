@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "description": "New physical-token families reserved for candidate 2 before training. No model predictions were used to author this file.",
+  "russian": ["здравствуйте", "уведомление", "клавиатура", "объяснение", "собеседник", "предложение", "содержимое", "переключение", "обработка", "намерение", "сохранение", "завершение", "поведение", "исключение", "надежность", "безопасность", "пользователь", "приложение", "ошибочный", "правильный", "случайность", "решение", "ситуация", "обучение", "испытание", "результат", "уверенность", "контекст", "продолжить", "согласен", "переход", "позднее", "быстрее", "медленно", "удобно", "автоматически", "желательно", "действительно", "серьёзно", "подтверждение"],
+  "english": ["greetings", "notification", "conversation", "sentence", "content", "processing", "intention", "saving", "completion", "behavior", "exception", "reliability", "security", "personally", "incorrect", "correctly", "decision", "situation", "training", "evaluation", "result", "confidence", "context", "continue-on-error", "confirmed", "transition", "earlier", "faster", "slowly", "comfortable", "automatically", "preferably", "certainly", "seriously", "confirmation", "keyboard-layout", "wouldn't", "couldn't", "hasn't", "we've"],
+  "short_russian": ["же", "то", "их", "им", "об", "ну", "ни", "во", "со", "уж"],
+  "technical": ["yarn", "kubectl", "systemctl", "cargo", "make", "curl", "wget", "SELECT", "INSERT", "DELETE", "my_variable", "127.0.0.1", "https://example.net/a", "test@example.net", "package.json", "--force", "foo_bar", "3pm", "д", "g", "h", "l", "m", "p", "q", "v"]
+}

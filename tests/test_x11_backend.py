@@ -39,7 +39,7 @@ def functions(*names: str) -> SimpleNamespace:
 
 X11_FUNCTIONS = (
     "XInitThreads", "XOpenDisplay", "XCloseDisplay", "XFlush", "XSync", "XFree",
-    "XkbKeycodeToKeysym", "XkbQueryExtension", "XkbLockGroup", "XkbGetState",
+    "XkbKeycodeToKeysym", "XkbLookupKeySym", "XkbQueryExtension", "XkbLockGroup", "XkbGetState",
     "XKeysymToString", "XKeysymToKeycode", "XGetInputFocus", "XSetInputFocus", "XGetClassHint", "XQueryTree",
     "XDefaultScreen", "XRootWindow", "XQueryPointer", "XMoveWindow", "XRaiseWindow",
     "XInternAtom", "XGetWindowProperty",
@@ -62,6 +62,7 @@ class FakeLibraries:
         self.x11.XkbLockGroup.return_value = 1
         self.x11.XKeysymToKeycode.side_effect = lambda _display, keysym: 22 if keysym == 0xFF08 else 50
         self.x11.XkbKeycodeToKeysym.return_value = ord("a")
+        self.x11.XkbLookupKeySym.return_value = 0
         self.x11.XKeysymToString.return_value = b"a"
         self.x11.XkbGetState.return_value = 0
         self.x11.XGetInputFocus.return_value = 0
@@ -528,6 +529,22 @@ class BackendTranslationTests(unittest.TestCase):
         backend.switch_group(1)
         libraries.x11.XFlush.assert_called_with(1)
 
+    def test_common_space_uses_xkb_group_fallback_and_failed_lookup_is_empty(self) -> None:
+        backend, libraries = backend_with()
+        backend._control = 1
+        libraries.x11.XkbKeycodeToKeysym.return_value = 0
+        self.assertEqual(backend._character_for_keycode(65, 1, 0), "")
+
+        def lookup(_display: object, code: int, state: int, _mods: object,
+                   symbol: ctypes._CData | ctypes._CArgObject | int) -> int:
+            self.assertEqual((code, state), (65, 1 << 13))
+            set_ulong(symbol, 32)
+            return 1
+
+        libraries.x11.XkbLookupKeySym.side_effect = lookup
+        libraries.xkb.xkb_keysym_to_utf32.side_effect = lambda symbol: symbol
+        self.assertEqual(backend._character_for_keycode(65, 1, 0), " ")
+
     def test_pointer_anchor_and_popup_window_positioning(self) -> None:
         backend, libraries = backend_with()
         self.assertIsNone(backend.input_anchor())
@@ -674,6 +691,7 @@ class BackendTranslationTests(unittest.TestCase):
         libraries.x11.XFree.assert_called()
         focus_value = 778
         self.assertEqual(backend.focused_window(), FocusInfo(778, True))
+        self.assertEqual(backend.window_process_id(778), os.getpid())
         focus_value = 555
         self.assertEqual(backend.focused_window(), FocusInfo(555, False))
         # A window whose ancestry ends without the property, one that is gone

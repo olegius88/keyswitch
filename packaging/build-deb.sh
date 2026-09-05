@@ -20,6 +20,8 @@ frozen_russian_model="$frozen_model_sources/ru_RU.lm"
 onboard_copyright="$frozen_model_sources/COPYRIGHT.onboard-data"
 export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-1787749200}"
 
+PYTHONPATH="$project_dir/src" python3 "$project_dir/tools/verify_context_model.py"
+
 verify_kslm_packaging_bounds() {
     local model_path="$1"
     python3 -c '
@@ -407,6 +409,11 @@ if [[ "$("$native_dist/keyswitch-bin" --version)" != "KeySwitch $version" ]]; th
     exit 1
 fi
 bundled_intent_model="$native_dist/keyswitch/resources/models/layout_intent_v1.ksm"
+if ! cmp -s "$project_dir/src/keyswitch/resources/models/context_policy_v1.json" \
+    "$native_dist/keyswitch/resources/models/context_policy_v1.json"; then
+    printf 'Native distribution does not contain the exact contextual model.\n' >&2
+    exit 1
+fi
 bundled_english_model="$native_dist/keyswitch/resources/models/en_US.lm"
 bundled_russian_model="$native_dist/keyswitch/resources/models/ru_RU.lm"
 if [[ ! -s "$bundled_intent_model" ]] \

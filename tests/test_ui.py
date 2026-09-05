@@ -22,6 +22,7 @@ from gi.repository import Adw, Gio, GLib, Gtk
 from keyswitch import ui
 from keyswitch import logsetup
 from keyswitch.config import SettingsStore
+from keyswitch.context_policy import ContextPolicy
 from keyswitch.engine import EngineSnapshot
 from keyswitch.history import HistoryEntry, HistoryStore
 from keyswitch.intent_model import IntentModelStatus
@@ -63,6 +64,7 @@ class FakeLanguageModel:
 
 class FakeEngine:
     def __init__(self, root: Path, *, backend_available: bool = True) -> None:
+        self.context_policy = ContextPolicy()
         self.backend = FakeBackend(backend_available)
         self.learning = LearningStore(root / "learning.json")
         self.models: dict[int, FakeLanguageModel] = {
@@ -412,6 +414,12 @@ class MainWindowInteractionTests(unittest.TestCase):
         remove_application.assert_called_once_with("keepassxc")
 
     def test_hotkeys_text_debounce_navigation_and_setting_updates(self) -> None:
+        context_control = self.window._settings_controls["detection.context_policy"]
+        assert isinstance(context_control, Adw.ComboRow)
+        for mode, selected in (("shadow", 1), ("off", 2), ("invalid", 2), ("assist", 0)):
+            self.window._apply_setting_update("detection.context_policy", mode)
+            self.window._apply_setting_update("detection.context_policy", mode)
+            self.assertEqual(context_control.get_selected(), selected)
         entry = self.window._settings_controls["hotkeys.toggle"]
         assert isinstance(entry, Gtk.Entry)
         with patch.object(self.window, "toast") as toast:

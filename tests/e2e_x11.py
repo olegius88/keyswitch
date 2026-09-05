@@ -109,6 +109,7 @@ def main() -> int:
         ("short Russian word switches to English", 1, "if ", "if ", 0, 900),
         ("manual Russian selection protects short word", 1, "if ", "ша ", 1, 900),
         ("short-word protection is consumed once", 1, "if ", "if ", 0, 900),
+        ("context resolves a short word with the next word", 0, "e 'njuj ", "у этого ", 1, 1200),
     )
 
     def abort_on_timeout() -> bool:
@@ -158,7 +159,7 @@ def main() -> int:
 
     backend._listener = observe
     original_group = backend.current_group()
-    GLib.timeout_add_seconds(30, abort_on_timeout)
+    GLib.timeout_add_seconds(35, abort_on_timeout)
 
     def type_case(index: int) -> bool:
         (
@@ -188,6 +189,7 @@ def main() -> int:
             f"backend_running={backend.running} engine={engine.snapshot.last_action!r}"
         )
         if actual_text != expected_text or actual_group != expected_group:
+            print(f"pending={engine._pending!r} pressed={engine._pressed!r} trigger={engine._pending_trigger_keycode} error={engine.snapshot.last_error!r}")
             print(f"event_sample={result.sample!r}")
             print("E2E_FAILED")
             loop.quit()
@@ -281,6 +283,7 @@ def main() -> int:
             ("ghbdtn", "привет"),
             ("ша", "if"),
             ("ша", "if"),
+            ("e 'njuj", "у этого"),
             ("hello", "руддщ"),
         ]
         actual_history = [(item.original, item.replacement) for item in entries]
@@ -321,6 +324,7 @@ def main() -> int:
         return GLib.SOURCE_REMOVE
 
     def start_early_switch_case() -> bool:
+        settings.set("detection.context_policy", "off")
         settings.set("detection.early_switch", True)
         backend.switch_group(0)
         backend._libraries.x11.XSync(backend._control, 0)
@@ -354,7 +358,7 @@ def main() -> int:
             or actual_group != 1
             or "early" not in correction_modes
             or last_entry != ("ghbdtn", "привет")
-            or len(entries) != 10
+            or len(entries) != 11
         ):
             print("E2E_FAILED")
             loop.quit()

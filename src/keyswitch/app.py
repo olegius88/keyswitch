@@ -402,8 +402,10 @@ def diagnose() -> int:
     backend = X11Backend()
     probe = backend.probe()
     from .intent_model import LinearNgramModel
+    from .context_model import ContextModel
 
     _intent_model, intent_status = LinearNgramModel.try_load_default()
+    context_model, context_status = ContextModel.try_load()
     payload = {
         "keyswitch": __version__,
         "available": probe.available,
@@ -414,6 +416,7 @@ def diagnose() -> int:
         "xkb_version": probe.xkb_version,
         "current_group": probe.current_group,
         "intent_model": intent_status.as_dict(),
+        "context_model": {"available": context_model is not None, "status": context_status},
         "error": probe.error,
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))

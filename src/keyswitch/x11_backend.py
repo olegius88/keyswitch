@@ -165,6 +165,11 @@ class _Libraries:
             ctypes.c_int,
         ]
         x11.XkbKeycodeToKeysym.restype = ctypes.c_ulong
+        x11.XkbLookupKeySym.argtypes = [
+            ctypes.c_void_p, ctypes.c_ubyte, ctypes.c_uint,
+            ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_ulong),
+        ]
+        x11.XkbLookupKeySym.restype = ctypes.c_int
         x11.XkbQueryExtension.argtypes = [
             ctypes.c_void_p,
             ctypes.POINTER(ctypes.c_int),
@@ -566,6 +571,18 @@ class X11Backend:
         keysym = self._libraries.x11.XkbKeycodeToKeysym(
             self._control, keycode, group, 1 if shift else 0
         )
+        if not keysym:
+            # Common keys such as Space often have only group 0 in XKB.
+            # Direct indexing returns NoSymbol for RU; the actual key lookup
+            # applies the key's group fallback, just as the editor does.
+            consumed, resolved = ctypes.c_uint(), ctypes.c_ulong()
+            lookup_state = (state & ~(3 << 13)) | ((group & 3) << 13)
+            if not self._libraries.x11.XkbLookupKeySym(
+                self._control, keycode, lookup_state,
+                ctypes.byref(consumed), ctypes.byref(resolved),
+            ):
+                return ""
+            keysym = resolved.value
         codepoint = self._libraries.xkb.xkb_keysym_to_utf32(keysym)
         if not codepoint or codepoint > 0x10FFFF:
             return ""
@@ -653,6 +670,10 @@ class X11Backend:
             self._own_windows.clear()
         self._own_windows[window] = own
         return own
+
+    def window_process_id(self, window: int) -> int:
+        """Resolve the exact client process for optional accessibility reads."""
+        return self._window_process_id(window)
 
     def _window_process_id(self, window: int) -> int:
         """``_NET_WM_PID`` of the client owning ``window`` (GTK sets it).

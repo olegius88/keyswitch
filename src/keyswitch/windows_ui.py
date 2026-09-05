@@ -1814,6 +1814,13 @@ class WindowsApplication:
             "current_group": probe.current_group,
             "current_layout": layout_label(probe.current_group),
             "intent_model": self.engine.intent_model_status.as_dict(),
+            "context_model": {
+                "available": self.engine.context_policy.model is not None,
+                "status": self.engine.context_policy.status,
+                "mode": self.settings.get("detection.context_policy", "assist"),
+                "read_field": self.settings.get("detection.context_read_field", False),
+                "last_action": self.engine.snapshot.context_action,
+            },
             "technical_logging": bool(
                 self.settings.get("diagnostics.technical_logging", False)
             ),

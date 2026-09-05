@@ -13,6 +13,8 @@ import sys
 from . import __version__
 from .logsetup import configure_logging as configure_logging
 from .intent_model import LinearNgramModel
+from .context_model import ContextModel
+from .windows_context import probe_uia
 from .windows_backend import WindowsBackend
 
 
@@ -20,6 +22,7 @@ def diagnose() -> int:
     backend = WindowsBackend()
     probe = backend.probe()
     _intent_model, intent_status = LinearNgramModel.try_load_default()
+    context_model, context_status = ContextModel.try_load()
     print(
         json.dumps(
             {
@@ -32,6 +35,8 @@ def diagnose() -> int:
                 "layouts": probe.xkb_version,
                 "current_group": probe.current_group,
                 "intent_model": intent_status.as_dict(),
+                "context_model": {"available": context_model is not None, "status": context_status},
+                "context_field_access": probe_uia(),
                 "error": probe.error,
             },
             # Keep redirected output valid even when a legacy Windows console
