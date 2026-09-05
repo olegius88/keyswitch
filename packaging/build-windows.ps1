@@ -1294,6 +1294,10 @@ Invoke-NativeCommand `
     -Command "python" `
     -Arguments @((Join-Path $ProjectDirectory "tools\verify_context_model.py")) `
     -FailureMessage "Context model provenance or quality gate failed"
+Invoke-NativeCommand `
+    -Command "python" `
+    -Arguments @((Join-Path $ProjectDirectory "tools\verify_context_v2.py")) `
+    -FailureMessage "Context corpus evidence changed or rejected candidate was activated"
 # Generate the OS type library before freezing. The runtime must not need
 # writable installation files or a Python compiler to open accessibility.
 Invoke-NativeCommand `

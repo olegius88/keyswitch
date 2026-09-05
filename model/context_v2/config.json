@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "candidate": 1,
+  "feature_version": 2,
+  "maximum_features": 45000,
+  "minimum_feature_rows": 3,
+  "epochs": 24,
+  "learning_rate": 0.08,
+  "keep_importance": 3.0,
+  "technical_importance": 4.0,
+  "threshold_candidates": [0.985, 0.99, 0.995, 0.999, 0.9995, 0.9999, 0.99995, 0.99999, 0.999999, 1.0],
+  "calibration_max_false_conversions": 0,
+  "promotion": {
+    "minimum_recall": 0.9,
+    "maximum_false_conversion_rate": 0.001,
+    "must_not_increase_false_conversions_over_v1": true,
+    "must_not_reduce_correct_conversions_over_v1": true,
+    "must_not_increase_false_conversions_over_detector": true,
+    "maximum_technical_false_conversions": 0,
+    "require_both_dictionary_profiles": true,
+    "require_phrase_and_lexical_test": true
+  },
+  "evaluation_policy": "Epoch is selected on development loss, threshold on calibration only, candidate weights are sealed before test. A failed candidate is not promoted or tuned against these test groups; reserve remains unused. Metrics measure synthetic interventions on public text, not observed intent or real-world probability."
+}

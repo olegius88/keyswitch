@@ -1,0 +1,38 @@
+{
+  "archive_sha256": "0b4b58b84239c4c194096040258deececa4f6a1ac3b93da16b64ae477b70f98e",
+  "assignment_sha256": "4e24f07c8fe9f88d4f6f9873f7007de8dff9e4fdbc4e24b86a44333cc6a8ac97",
+  "builder_sha256": "4c71b1ec1d213b2301899856b10066d5551e44a56c1e5a352d1742969e83806a",
+  "eligible_rows": 64234,
+  "group_cap": 4,
+  "grouping_scope": "normalized lexical text and bounded single-token edits; not all paraphrases",
+  "groups": 59721,
+  "groups_by_split": {
+    "calibration": 5904,
+    "development": 6051,
+    "reserve": 5891,
+    "test": 5980,
+    "train": 35895
+  },
+  "license": "CC0-1.0",
+  "license_evidence": "https://tatoeba.org/en/downloads",
+  "locale_rows": {
+    "eng": 41022,
+    "rus": 22491
+  },
+  "maximum_group_size": 117,
+  "metrics_evaluated": false,
+  "model_loaded": false,
+  "retained_rows": 63513,
+  "rows_by_split": {
+    "calibration": 6223,
+    "development": 6455,
+    "reserve": 6272,
+    "test": 6390,
+    "train": 38173
+  },
+  "schema_version": 1,
+  "source_rows": 64537,
+  "source_sha256": "1f7df948b946f1d1aed5efd2a83a9a5a09d2b8abcb9224045b40c9ec6720e793",
+  "source_url": "https://downloads.tatoeba.org/exports/sentences_CC0.tar.bz2",
+  "split_namespace": "keyswitch:context-v2:phrases-20260905"
+}

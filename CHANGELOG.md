@@ -4,6 +4,22 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.16.0 — 2026-09-05
+
+- Add a frozen CC0 English/Russian phrase corpus with source/near-duplicate
+  grouping, separate development/calibration/test partitions, a focus-lexical
+  holdout and an unused reserve. Include spelling-error keep interventions
+  and separately authored technical safety cases without using private logs.
+- Train and seal a larger context candidate with a parity-tested training-only
+  native optimizer and fixed portable/Hunspell lexical evidence. Replay its
+  weights and independent reports byte-for-byte in CI.
+- Compare the candidate with the shipping model through contextual decisions
+  and visible-editor engine replay. Reject it for runtime promotion because
+  fewer false conversions came with substantially more missed corrections.
+  Keep shipping model weights, correction behavior and user defaults unchanged.
+- Gate both native packages against accidental activation of the rejected
+  candidate; publish the corpus, failed experiment and limitations for review.
+
 ## 0.15.0 — 2026-09-05
 
 - Check native AT-SPI initialization before field access and remember startup

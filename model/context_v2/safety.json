@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "description": "Project-authored technical keep curriculum, not real user input; related token variants are split by physical family.",
+  "technical": ["pm2", "npm", "pnpm", "yarn", "git", "ssh", "docker", "pytest", "pip", "uv", "curl", "wget", "sudo", "bash", "make", "cmake", "node", "python", "gcc", "Ctrl", "Shift", "API", "HTTP", "HTTPS", "JSON", "SQL", "UTF8", "OAuth", "JWT", "CSS", "HTML", "XML", "TCP", "UDP", "DNS", "CPU", "GPU", "RAM", "USB", "WiFi", "v0.15.0", "node.js", "user_id", "fooBar", "localhost", "https://example.org", "mail@example.org", "/usr/bin/python", "C:\\Windows", "2ghbdtn", "@ghbdtn", "#issue", "x", "y", "z", "a", "b", "c", "i", "j", "k", "n", "e", "f", "r", "t", "s", "w"]
+}

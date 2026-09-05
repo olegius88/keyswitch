@@ -85,6 +85,13 @@ jobs:
           PYTHONPATH=src python3 tools/train_context_model.py --verify
           PYTHONPATH=src python3 tools/verify_context_model.py
 
+      - name: Replay public-phrase context experiment without promoting rejected weights
+        run: |
+          PYTHONPATH=src python3 tools/context_corpus.py
+          PYTHONPATH=src python3 tools/train_context_v2.py verify
+          PYTHONPATH=src python3 tools/evaluate_context_engine.py --verify
+          PYTHONPATH=src python3 tools/verify_context_v2.py
+
       - name: Run isolated native AT-SPI context and unavailable-bus E2E
         run: ./tools/run-atspi-e2e.sh
 
