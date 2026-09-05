@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """Unattended Linux release pipeline for KeySwitch.
 
-The script runs the complete verification contour described in
-``docs/intent-model-runbook.md`` and mirrored by ``.github/workflows`` as one
-process: model provenance and reproducibility evidence, strict typing, 100%
+The script runs the baseline KSLM/application contour described in
+``docs/intent-model-runbook.md`` as one process: model provenance and
+reproducibility evidence, strict typing, scoped 100%
 coverage, detector gates, X11/tray end-to-end tests, the native Debian build,
 its verifier and the packaged end-to-end test.
+The workflows additionally run contextual-model training/engine replays,
+native AT-SPI E2E and separate Windows jobs; these are not pipeline phases.
+See ``docs/verification.md`` for the complete verification map.
 
 Phases form a dependency graph and run concurrently.  A memory-aware scheduler
 admits a phase only when the host has enough available RAM for its declared
-peak on top of what already running phases may still claim, so the run cannot
-push the machine into swap or the OOM killer.  Every phase is recorded in a
+peak on top of what already running phases may still claim. These estimates
+reduce memory pressure but cannot guarantee against external load or an
+underestimated peak. Every phase is recorded in a
 machine-readable ``state.json`` while it runs, and the run ends with
 ``summary.json`` and ``SUMMARY.md`` so a reviewer (a person or an LLM) can check
 the outcome after the fact without watching the terminal.

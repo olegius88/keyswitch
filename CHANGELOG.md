@@ -4,6 +4,14 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.16.1 — 2026-09-05
+
+- Synchronize Russian/English user guides, architecture, model instructions,
+  Linux manual and settings descriptions with current context-policy behavior.
+  Clarify log retention, password/input-verification limits, KSLM versus context
+  evidence, and the separate CI/release checks. Add documentation navigation,
+  troubleshooting and release-recovery guides; leave model weights and defaults unchanged.
+
 ## 0.16.0 — 2026-09-05
 
 - Add a frozen CC0 English/Russian phrase corpus with source/near-duplicate

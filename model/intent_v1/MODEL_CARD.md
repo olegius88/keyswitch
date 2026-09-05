@@ -2,6 +2,15 @@
 
 [**Русский**](MODEL_CARD.md) · [English](MODEL_CARD.en.md)
 
+Область карточки — **базовая KSLM**, не приложение целиком. Контекстный
+помощник, добавленный в 0.15.0, имеет отдельные признаки, веса и отчёты:
+[документация](../../docs/context-assistant.md). Расширенный
+[context-v2](../context_v2/README.md) в 0.16.0 отклонён. Числа ниже —
+зафиксированная сертификация v20; это не актуальная оценка режима `assist`.
+Контрольные суммы связывают файлы и выявляют расхождения, но не являются
+цифровой подписью издателя. `signed` для весов/FNV означает знак числа;
+подлинность издателя CRC32/SHA-256 сами по себе не доказывают.
+
 ## Назначение
 
 `Layout Intent v1` — собственный локальный линейный классификатор намерения
@@ -55,7 +64,7 @@ official/replay-a/replay-b для KSLM, manifest и test-report; их SHA-256 р
 strict evaluator, повторно запущенный на replay-a, также прошёл все 30 gates;
 SHA-256 этого отчёта —
 `5e77f44b857c9096cc306ce4de3232f81037df932d1d3b5c8ca01de8082404fc`. Полный
-контур выпуска, включая обе strict-оценки, replay и нативную упаковку,
+контур выпуска базовой v20, включая обе strict-оценки, replay и нативную упаковку,
 выполнен одним прогоном `tools/release_pipeline.py` за 17,7 минуты.
 
 ## Данные и лицензирование
@@ -74,7 +83,8 @@ Onboard в репозитории:
 трёх файлов. Trainer записывает те же provenance-поля в manifest. Мы не
 подменяем декларацию нормализованным SPDX-идентификатором и не делаем в model
 card самостоятельных юридических выводов. Сторонние корпуса и сетевые API не
-используются.
+используются при обучении этой KSLM; отдельный эксперимент context-v2
+имеет собственные публичные источники и provenance.
 
 Побайтная provenance-запись и контрольные суммы описаны в
 [sources/README.md](sources/README.md) и `sources/SHA256SUMS`.
@@ -192,11 +202,11 @@ unknown-typo holdout дал 4 false positive из 10 000 отрицательн�
 Wilson 0,001028128 при лимите 0,001. Поэтому production-context gate отклонил
 кандидата; точное решение сохранено в `rejection-v9.json`, а раскрытые v9
 sealed/holdout данные не используются для настройки. V10 применил выбранный
-только на development-корпусе signed cap 2,0 и детерминированно получил общий
+только на development-корпусе закреплённый cap 2,0 и детерминированно получил общий
 margin 0,9938225471937638. Он прошёл pre-seal, но независимый sealed non-pause
 recall составил 0,944410276 при минимуме 0,95; точное решение сохранено в
 `rejection-v10.json`, а раскрытые строки v10 не переиспользуются. V11 прошёл
-внутренние selection и sealed gates, но подписанный strict-evaluator затем
+внутренние selection и sealed gates, но закреплённый SHA-256 strict-evaluator затем
 остановился до независимого external holdout: индекс исключений не поддерживал
 новое семейство frozen `hunspell-unknown-*` строк. Артефакт v11 отклонён,
 точная причина и все хэши сохранены в `rejection-v11.json`. V12 исправил индекс,
@@ -419,7 +429,7 @@ z=2,8652602385321333. Signed gate evidence хранит метод, correction, 
 сравнений, confidence, z и endpoint; sealed gate независимо использует обычный
 95% Wilson с z=1,959963984540054. Config schema 13 дополнительно требует ноль
 false positive на общем и typo selection-срезах каждого trigger; этот
-абсолютный бюджет входит в signed evidence и проверяется до materialization
+абсолютный бюджет входит в закреплённое hashes evidence и проверяется до materialization
 test. После направленного выбора
 trainer детерминированно находит на threshold
 split максимальный общий margin, который сохраняет весь selection gate, и
@@ -491,7 +501,7 @@ JSON-native массивы и побайтно доказывает неизме
 `lexical_disjoint_corpus_sha256`,
 `unknown_typo_development_corpus_sha256` и
 `unknown_typo_holdout_corpus_sha256`. До v11 development-корпус использовался
-для выбора serving policy, включая signed cap 2,0. Начиная с v14 новый model-blind
+для выбора serving policy, включая закреплённый cap 2,0. Начиная с v14 новый model-blind
 development source распределён по независимым pre-sealed ролям; фактический глобальный
 calibrated-logit margin выбирается только на threshold-роли.
 Holdout v20 построен другим rank/choice namespace до загрузки модели, исключает
@@ -585,8 +595,9 @@ identity намеренно входит в provenance. Версия устан�
   авторитетом должна быть закоммиченная запись registry в защищённой удалённой
   Git-истории с обязательным review; удаление или ротация требуют отдельного
   осознанного изменения policy.
-- Новая схема признаков, split namespace или формат данных требуют нового
-  feature/config/container version; существующий `intent_v1` нельзя молча
+- Новая схема признаков, split namespace или формат данных требуют
+  согласования соответствующей feature/config/container version: смена только
+  split namespace не требует повышения всех форматов. Существующий `intent_v1` нельзя молча
   переобучать с несовместимой семантикой. Текущие значения — feature schema v5,
   split namespace `keyswitch:intent-v20:physical-signature`, training config
   schema 13, KSLM schema 4 и внешний manifest schema 1.

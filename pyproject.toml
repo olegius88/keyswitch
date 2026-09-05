@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "keyswitch"
-version = "0.16.0"
-description = "Automatic EN/RU keyboard layout correction for Linux and Windows"
+version = "0.16.1"
+description = "Local EN/RU keyboard layout correction for Windows and Linux X11"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "GPL-3.0-or-later"}

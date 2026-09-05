@@ -2,6 +2,13 @@
 
 Sources were verified on 28 August 2026.
 
+The external-product comparison below is a historical review as of that date,
+not a fresh check of current releases. The KSLM description covers the baseline
+detector. Since 0.15.0, `assist` applies a separate
+[contextual policy](context-assistant.md); KSLM v20 gates do not measure its
+effect. The [expanded 0.16.0 experiment](../model/context_v2/README.md) is a
+rejected research candidate, not a replacement for shipping weights.
+
 ## What mature solutions use
 
 | Solution | Verified mechanism | Adopted in KeySwitch |
@@ -20,7 +27,7 @@ KeySwitch decodes every physical key sequence in each supported layout group.
 The detector follows a precision-first policy: a false correction costs more
 than a missed one, so the linear classifier cannot bypass hard guards.
 
-The decision is layered:
+The baseline decision, before any `ContextPolicy` intervention, is layered:
 
 1. The engine checks the global pause state, the boundary-specific option,
    application exclusions and an explicit manual layout choice.
@@ -80,7 +87,7 @@ changing candidate rows. A post-build audit verifies these invariants against
 the rows actually produced.
 
 Since v14 (and again for every later candidate, including v20), a model-blind unknown-typo development corpus is frozen as
-a separate signed JSON source. Its 10,000 unique physical signatures are
+a separate checksum-bound JSON source. Its 10,000 unique physical signatures are
 assigned by an independent hash namespace with no test role: 3,500/500/500/500
 words from each language enter train/development/calibration/threshold. Every
 compact record is strictly verified and expanded into symmetric positive and
@@ -133,12 +140,12 @@ precision >= 0.9995, recall >= 0.956 and specificity >= 0.999 with a family-wise
 precision >= 0.9995, recall >= 0.91 and specificity >= 0.999 with the same
 bound. The Bonferroni correction for 12 primary comparisons (six triggers times
 overall/typo) fixes per-comparison confidence at 0.9958333333333333 and
-z=2.8652602385321333; those parameters and the endpoint are signed gate
+z=2.8652602385321333; those parameters and the endpoint are hash-bound gate
 evidence. The independent sealed test uses the ordinary 95% Wilson endpoint
 with z=1.959963984540054. After directional selection, config schema 13
 deterministically chooses on the threshold split the greatest common
 calibrated-logit margin that preserves the full selection gate, then adds it to
-every threshold. Its signed 2.0 cap was fixed before v11 from the model-blind
+every threshold. Its config-bound 2.0 cap was fixed before v11 from the model-blind
 unknown-typo development corpus; the effective value is selected only on its
 frozen threshold role and recorded for every trigger. The sealed test does not
 select the margin. For `pause`, recall/typo recall become 0.91/0.86, the
@@ -208,12 +215,17 @@ The complete data, feature, split-policy and limitations card is available in
 
 ## Learning and privacy
 
-KeySwitch learns only from explicit actions. By default, two identical manual
-conversions create a rule; the threshold is configurable from one to five.
+Local rules learn only from explicit actions. Enter in a manual-conversion
+prompt activates the rule immediately without submitting a message. Without
+that confirmation, two repeated conversions activate it by default; the UI
+allows 1–5 on Linux and 1–10 on Windows.
 Undoing an automatic correction records a rejection for that source token and
 direction. `learning.json` contains only those tokens, directions and counters,
-never the ordinary input stream. Previous-word context is memory-only, expires
-after 45 seconds and is isolated by application `WM_CLASS`.
+not the ordinary input stream. Baseline previous-word context is RAM-only,
+expires after 45 seconds and is keyed by application name. The contextual
+assistant additionally uses a bounded observed phrase in the active window and
+an optional field snapshot. Technical logging can contain evaluated words,
+including unchanged words; this is a separate setting, not model-weight training.
 
 The global linear model is built by a separate offline tool and is not updated
 from the ordinary keystroke stream while the application runs. Inference is
@@ -242,7 +254,8 @@ and quarantining by physical key sequence prevent direct variant leakage across
 splits, but do not turn this corpus into a study of real user input.
 
 On the verified system with `onboard-data`, `libhunspell-1.7-0`,
-`hunspell-en-us` and `hunspell-ru`, the current tree produces:
+`hunspell-en-us` and `hunspell-ru`, the following baseline result was recorded
+(a historical slice without the new `ContextPolicy`):
 
 | Intended word language | Precision | Recall | Specificity |
 | --- | ---: | ---: | ---: |

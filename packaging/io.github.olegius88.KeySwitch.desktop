@@ -2,8 +2,8 @@
 Type=Application
 Name=KeySwitch
 Name[ru]=KeySwitch — умная раскладка
-Comment=Automatic keyboard layout correction
-Comment[ru]=Автоматическое исправление раскладки клавиатуры
+Comment=Local English/Russian keyboard layout correction for X11
+Comment[ru]=Локальное исправление английской и русской раскладки в X11
 Exec=keyswitch
 Icon=keyswitch
 Terminal=false

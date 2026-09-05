@@ -2,6 +2,15 @@
 
 [Русский](MODEL_CARD.md) · [**English**](MODEL_CARD.en.md)
 
+This card covers **baseline KSLM**, not the entire application. The contextual
+assistant introduced in 0.15.0 has separate features, weights and reports:
+[documentation](../../docs/context-assistant.md). The expanded
+[context-v2](../context_v2/README.md) candidate was rejected in 0.16.0.
+The figures below are the recorded v20 certification, not a current evaluation
+of `assist`. Checksums bind files and detect mismatches; they are not a publisher
+digital signature. Signed weights/FNV refer to a numeric sign, not authenticity;
+CRC32/SHA-256 alone do not authenticate the publisher.
+
 ## Purpose
 
 `Layout Intent v1` is KeySwitch's own local linear classifier for the intent to
@@ -57,7 +66,7 @@ SHA-256 digests are respectively
 independent strict evaluator, re-run against replay-a, also passed all 30
 gates; that report has SHA-256
 `5e77f44b857c9096cc306ce4de3232f81037df932d1d3b5c8ca01de8082404fc`. The complete
-release contour, including both strict evaluations, the replays and native
+baseline-v20 release contour, including both strict evaluations, the replays and native
 packaging, ran as one `tools/release_pipeline.py` run in 17.7 minutes.
 
 ## Training data and licensing
@@ -76,8 +85,9 @@ declaration and attribution. `SHA256SUMS` and the `sources` section of
 `config.json` pin the SHA-256 digest and size of all three files. The trainer
 records the same provenance fields in the manifest. We neither replace that
 declaration with a normalized SPDX identifier nor make independent legal
-conclusions in this model card. No third-party corpora or network APIs are
-used.
+conclusions in this model card. No additional third-party corpora or network
+APIs are used in this KSLM training; the separate context-v2 experiment has its
+own public sources and provenance.
 
 The byte-level provenance and checksums are documented in
 [sources/README.md](sources/README.md) and `sources/SHA256SUMS`.
@@ -193,12 +203,12 @@ holdout produced 4 false positives among 10,000 negatives for every trigger:
 precision 0.999591378, specificity 0.9996, and an upper 95% Wilson endpoint of
 0.001028128 against the 0.001 limit. The production-context gate therefore
 rejected it; `rejection-v9.json` preserves the exact decision, and revealed v9
-sealed/holdout data is not used for tuning. V10 applied the signed 2.0 cap
+sealed/holdout data is not used for tuning. V10 applied the config-bound 2.0 cap
 selected only on development and deterministically chose a common margin of
 0.9938225471937638. It passed pre-seal, but independent sealed non-pause recall
 was 0.944410276 against the 0.95 minimum; `rejection-v10.json` records the exact
 decision and the revealed v10 rows are not reused. V11 passed its internal
-selection and sealed gates, but the signed strict evaluator then stopped before
+selection and sealed gates, but the SHA-256-bound strict evaluator then stopped before
 the independent external holdout because its exclusion index did not support
 the new frozen `hunspell-unknown-*` row family. The v11 artifact is rejected and
 `rejection-v11.json` preserves the exact cause and hashes. V12 fixed that index,
@@ -420,11 +430,11 @@ gate evidence records the method, correction, comparison count, confidence, z
 and endpoint; the sealed gate independently uses ordinary 95% Wilson with
 z=1.959963984540054. Config schema 13 additionally requires zero false positives
 in every trigger's overall and typo selection slices; this absolute budget is
-part of the signed evidence and is checked before test materialization. After directional selection, the
+part of the hash-bound evidence and is checked before test materialization. After directional selection, the
 trainer deterministically
 finds on the threshold split the greatest common margin that preserves the
 complete selection gate and adds it to every calibrated-logit threshold. The
-signed 2.0 cap was fixed before v11 from the external model-blind unknown-typo
+config-bound 2.0 cap was fixed before v11 from the external model-blind unknown-typo
 development corpus; schema 13 selects the effective margin only on its frozen
 threshold role. It is recorded for every trigger, and the sealed test does not
 participate in its selection. Selection requires overall/typo recall of
@@ -493,7 +503,7 @@ policy; it does not change the training config's root `schema_version: 13`.
 The resulting samples are pinned by `lexical_disjoint_corpus_sha256`,
 `unknown_typo_development_corpus_sha256`, and
 `unknown_typo_holdout_corpus_sha256`. Before v11, the development corpus was
-used to select serving policy, including the signed 2.0 cap. Since v14 a fresh
+used to select serving policy, including the config-bound 2.0 cap. Since v14 a fresh
 model-blind development source is assigned to independent pre-sealed roles; the effective global
 calibrated-logit margin is selected only on the threshold role.
 The v20 holdout was built under distinct rank/choice namespaces before loading
@@ -587,8 +597,9 @@ the frozen copies.
   can delete all local evidence. The committed registry record in protected
   remote Git history, with mandatory review, must be the operational append-only
   authority; deletion or rotation requires a separate deliberate policy change.
-- A new feature schema, split namespace or data format requires a new
-  feature/config/container version; the existing `intent_v1` must not be
+- A new feature schema, split namespace or data format requires matching
+  feature/config/container semantics. Changing only a split namespace does not
+  require bumping all format versions; the existing `intent_v1` must not be
   silently retrained with incompatible semantics. Current values are feature
   schema v5, split namespace `keyswitch:intent-v20:physical-signature`, training
   config schema 13, KSLM schema 4 and external manifest schema 1.

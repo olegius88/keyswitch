@@ -26,7 +26,8 @@ LOG_FILE_NAME = "keyswitch.log"
 # not be read as if it came from the version that is installed now.
 LOG_FORMAT = "%(asctime)s %(version)s %(levelname)s %(name)s: %(message)s"
 TECHNICAL_LOGGING_PATH = "diagnostics.technical_logging"
-# Rotation budgets: (bytes per file, kept files). The diagnostics mode keeps
+# Rotation budgets: (bytes per file, backup files), excluding the active file.
+# The diagnostics mode keeps
 # more and larger files because a busy hour of typing fills megabytes.
 DEFAULT_ROTATION = (1024 * 1024, 2)
 TECHNICAL_ROTATION = (5 * 1024 * 1024, 5)

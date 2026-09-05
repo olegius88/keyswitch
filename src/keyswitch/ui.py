@@ -383,7 +383,7 @@ class MainWindow(Adw.ApplicationWindow):
             "Настройте момент срабатывания и насколько осторожно KeySwitch принимает решение.",
         )
         behavior = Adw.PreferencesGroup(title="Распознавание")
-        behavior.add(self._switch_row("enabled", "Автоматически исправлять раскладку", "Главный выключатель фонового движка"))
+        behavior.add(self._switch_row("enabled", "Автоматически исправлять раскладку", "Отключает автоматические замены; ручные горячие клавиши остаются доступны"))
         behavior.add(
             self._switch_row(
                 "detection.respect_manual_layout",
@@ -394,7 +394,7 @@ class MainWindow(Adw.ApplicationWindow):
         minimum = Adw.SpinRow.new_with_range(2, 12, 1)
         minimum.set_title("Минимальная длина слова")
         minimum.set_subtitle(
-            "Короткие фрагменты обычно не меняются; проверенный список частотных служебных слов обрабатывается отдельно"
+            "Минимум для базового детектора; явные правила, короткие исключения и контекстный помощник могут разрешить замену раньше"
         )
         minimum.set_value(float(self.settings.get("detection.minimum_length", 3)))
         minimum.connect("notify::value", lambda row, _p: self.settings.set("detection.minimum_length", int(row.get_value())))
@@ -402,13 +402,13 @@ class MainWindow(Adw.ApplicationWindow):
         behavior.add(minimum)
         confidence = Adw.SpinRow.new_with_range(0.5, 8.0, 0.5)
         confidence.set_title("Порог уверенности")
-        confidence.set_subtitle("Выше — меньше исправлений и меньше ложных срабатываний")
+        confidence.set_subtitle("Выше — строже резервные эвристики; пороги обученных моделей не меняются")
         confidence.set_digits(1)
         confidence.set_value(float(self.settings.get("detection.confidence", 2.0)))
         confidence.connect("notify::value", lambda row, _p: self.settings.set("detection.confidence", float(row.get_value())))
         self._settings_controls["detection.confidence"] = confidence
         behavior.add(confidence)
-        behavior.add(self._switch_row("detection.aggressive", "Агрессивное распознавание", "Разрешить исправлять незнакомые слова по характерным сочетаниям букв"))
+        behavior.add(self._switch_row("detection.aggressive", "Агрессивное распознавание", "Расширить резервное распознавание незнакомых слов; пороги обученных моделей не меняются"))
         behavior.add(self._switch_row("detection.context_aware", "Учитывать контекст", "Предыдущее слово и язык в текущем приложении помогают разрешать сомнения; контекст хранится только в памяти"))
         context_modes = ["assist", "shadow", "off"]
         context_mode = Adw.ComboRow(title="Контекстный ИИ-помощник", subtitle="Локальная модель учитывает фразу и приложение; контекст хранится только в памяти")
@@ -418,9 +418,9 @@ class MainWindow(Adw.ApplicationWindow):
         context_mode.connect("notify::selected", lambda row, _param: self.settings.set("detection.context_policy", context_modes[row.get_selected()]))
         self._settings_controls["detection.context_policy"] = context_mode
         behavior.add(context_mode)
-        behavior.add(self._switch_row("detection.context_read_field", "Читать контекст активного поля", "Дополнять контекст текстом рядом с курсором через доступность ОС; только локально, без защищённых полей"))
+        behavior.add(self._switch_row("detection.context_read_field", "Читать контекст активного поля", "Читать текст рядом с курсором локально через доступность ОС; распознанные защищённые поля исключаются, не все приложения сообщают о них"))
         behavior.add(self._switch_row("detection.protect_code", "Защищать код и сокращения", "Не трогать URL, пути, слова с цифрами, ALL-CAPS и camelCase"))
-        behavior.add(self._switch_row("detection.intent_model_enabled", "Локальная линейная модель", "Собственная символьная n-граммная модель проверяет сомнительные решения; введённый текст не покидает компьютер"))
+        behavior.add(self._switch_row("detection.intent_model_enabled", "Локальная линейная модель", "Базовый KSLM-распознаватель слов; при отключении работают резервные эвристики. Контекстный помощник настраивается отдельно"))
         behavior.add(
             self._switch_row(
                 "detection.early_switch",
@@ -754,7 +754,7 @@ class MainWindow(Adw.ApplicationWindow):
         page.append(startup)
 
         maintenance = Adw.PreferencesGroup(title="Обслуживание")
-        reset_row = Adw.ActionRow(title="Вернуть настройки по умолчанию", subtitle="История исправлений при этом не удаляется")
+        reset_row = Adw.ActionRow(title="Вернуть настройки по умолчанию", subtitle="История исправлений и выученные правила при этом не удаляются")
         reset_button = Gtk.Button(label="Сбросить", valign=Gtk.Align.CENTER)
         reset_button.add_css_class("destructive-action")
         reset_button.connect("clicked", lambda _b: self._confirm_reset())

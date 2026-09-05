@@ -2,7 +2,7 @@
 """One command that turns a prepared working tree into a published release.
 
 The mechanical half of a KeySwitch release is always the same: propagate the
-version, close the changelog section, run the complete verification contour,
+version, close the changelog section, run the selected Linux verification profile,
 commit, tag, push and wait for the packages to appear in the GitHub release.
 This script performs all of it in order and stops at the first step that does
 not hold, printing what is wrong and what to do about it.
@@ -13,10 +13,14 @@ script refuses to run without them.
 
 Typical use::
 
-    python3 tools/release.py --version 0.9.2
+    python3 tools/release.py --version X.Y.Z --dry-run
+    python3 tools/release.py --version X.Y.Z
 
-Re-running after a failure is safe: every step recognises the work it has
-already done and skips it.
+Replace X.Y.Z with an unused version. Publication stages every working-tree
+change with git add -A. The dry run checks preparation without writing files
+or running verification. A retry normally runs verification again; an existing
+tag is allowed only at the same clean HEAD. It does not roll back a pushed tag
+or restart a failed Actions run. See docs/verification.md for recovery.
 """
 
 from __future__ import annotations
@@ -589,7 +593,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--skip-pipeline",
         action="store_true",
-        help="reuse an earlier verification run instead of verifying again",
+        help="skip local verification (does not validate or select an earlier run)",
     )
     parser.add_argument(
         "--skip-ci",

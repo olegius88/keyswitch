@@ -1,41 +1,35 @@
-# KeySwitch 0.16.0
+# KeySwitch 0.16.1
 
 ## Русский
 
-Этот выпуск развивает обучение и проверку контекстной модели. Рабочие веса,
-режим автозамены и настройки пользователя **не изменены**: новый кандидат
-не прошёл условия качества и не включён в установщики как рабочая модель.
+Этот выпуск актуализирует документацию и пояснения в интерфейсе. Алгоритмы
+замены, веса моделей и настройки по умолчанию **не изменены**.
 
-- Добавлен зафиксированный CC0-корпус: 64 537 русских и английских предложений.
-  Похожие тексты объединяются до разделения на обучение и независимую проверку.
-  Есть отдельный тест незнакомых целевых слов и неиспользованный резерв.
-- Подготовлено 224 693 ситуации: ошибки раскладки, правильные слова, опечатки,
-  короткие слова, апострофы, дефисы, команды, переменные, адреса и смешанный
-  технический текст. Исходные фразы реальные; ошибки и метки действий созданы
-  искусственно. Частные логи и переписка в корпус не включены.
-- Обучение, выбор порога и итоговые тесты разделены. Словарные оценки
-  зафиксированы для двух условий: с эталонным Hunspell и без него.
-  Повторное обучение воспроизводит веса и отчёты побайтно.
-- Проверен полный путь через движок и виртуальное текстовое поле:
-  учитывается смена раскладки после каждой замены, сравнивается конечный текст.
-  Это дополнение к существующим нативным тестам, не имитация всех приложений ОС.
-- На проверке новых фраз без Hunspell кандидат сделал 1 ложную замену против
-  4 у текущей модели, но выполнил лишь 7 006 нужных замен против 8 024.
-  В тесте целых фраз восстановил 43/128 против 90/128. Поэтому его веса
-  оставлены исследовательским артефактом и не активируются в приложении.
-- Обе платформенные сборки теперь проверяют происхождение результатов и
-  запрещают случайную подмену рабочей модели отклонённым кандидатом.
+- Синхронизированы русская и английская инструкции: настройка EN/RU,
+  защита первого слова после ручной смены языка, Pause/Enter, раннее
+  переключение, обновления и сброс настроек.
+- Исправлены пояснения порога уверенности, минимальной длины и линейной
+  модели. Порог резервных эвристик не описывается как общий порог всех моделей;
+  контекстный помощник настраивается отдельно.
+- Уточнены фактические пределы журнала, наличие личного текста, ограничения
+  распознавания парольных полей и смысл `text_verified=false`. Это уточнение
+  существующего поведения, не новая проверка конечного текста.
+- Добавлены карта документации и практическая диагностика пустого журнала,
+  несработавшего Pause, отправки по Enter и лишних/пропавших символов.
+- Обновлены инструкции обучения, сборки и восстановления после сбоя выпуска.
+  Разделены проверки базовой KSLM, контекстной политики и нативного ввода;
+  контрольные суммы больше не описываются как подпись издателя.
 
-Подробности, исходники и ограничения:
-[отчёт эксперимента](https://github.com/olegius88/keyswitch/blob/v0.16.0/model/context_v2/README.md).
-Большой словарь и хорошие синтетические показатели сами по себе не доказывают
-понимание намерений пользователя или отсутствие ошибок в реальной переписке.
+[Карта документации](https://github.com/olegius88/keyswitch/blob/v0.16.1/docs/README.md) ·
+[Диагностика ввода](https://github.com/olegius88/keyswitch/blob/v0.16.1/docs/troubleshooting.md).
+Исторические метрики сохранены с указанием их области применимости.
+Отклонённый эксперимент context-v2 из 0.16.0 по-прежнему не активирован.
 
 ### Установка
 
-- Windows 10/11 x64: `KeySwitch-Setup-0.16.0-x64.exe` или
-  `KeySwitch-0.16.0-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.16.0_amd64.deb`.
+- Windows 10/11 x64: `KeySwitch-Setup-0.16.1-x64.exe` или
+  `KeySwitch-0.16.1-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.16.1_amd64.deb`.
 - Контрольные суммы: `SHA256SUMS`.
 
 Установщик Windows пока не подписан сертификатом издателя. Нативный Wayland
@@ -43,37 +37,31 @@
 
 ## English
 
-This release expands context-model training and validation. Shipping weights,
-correction behavior and user settings are **unchanged**. The new candidate
-failed promotion requirements and is not activated in the application.
+This maintenance release updates documentation and settings explanations.
+Correction algorithms, model weights and default settings are **unchanged**.
 
-- Freeze 64,537 CC0 English/Russian sentences with source-family splitting,
-  development/calibration/test separation, focus-lexical holdout and an unused
-  reserve. Layout/spelling errors and action labels are synthetic interventions
-  on public text, not observed human intent or private logs.
-- Build 224,693 action situations, including correct prose, spelling mistakes,
-  short words, apostrophes/hyphens and technical keep cases. Reproduce training
-  using fixed portable and reference-Hunspell lexical evidence and a
-  parity-tested training-only native optimizer.
-- Seal weights before test scoring and replay both model decisions and the
-  actual engine through a visible-editor harness. Native platform E2E tests
-  remain separate and required.
-- Preserve the failed result: on the portable phrase test the candidate makes
-  1 false conversion versus 4 for the shipping policy, but only 7,006 correct
-  conversions versus 8,024. Whole-phrase replay restores 43/128 versus 90/128.
-  Fewer false conversions do not justify this recall regression.
-- Both native package builds verify evidence provenance and prevent accidental
-  installation of the rejected research weights as the active model.
+- Synchronize Russian/English guides for layout order, manual-language
+  protection, Pause/Enter, prefix correction, updates and settings resets.
+- Clarify confidence/minimum-length controls and distinguish the baseline
+  linear model from the separately configured contextual assistant.
+- Correct log-retention documentation and explain private text, password-field
+  limitations and `text_verified=false`. This documents existing behavior;
+  it does not introduce final-text verification.
+- Add documentation navigation and practical troubleshooting for empty logs,
+  missed Pause conversions, Enter submission and missing/extra characters.
+- Update training/build/release-recovery instructions, distinguish baseline,
+  contextual and native-input evidence, and stop describing checksums as
+  publisher digital signatures.
 
-See the [experiment report](https://github.com/olegius88/keyswitch/blob/v0.16.0/model/context_v2/README.md)
-for exact scope, limitations and reproduction commands. No universal language
-understanding or real-world error-rate guarantee is claimed.
+See the [documentation map](https://github.com/olegius88/keyswitch/blob/v0.16.1/docs/README.md).
+Historical metrics retain their original scope. The rejected context-v2
+experiment from 0.16.0 remains inactive.
 
 ### Installation
 
-- Windows 10/11 x64: `KeySwitch-Setup-0.16.0-x64.exe` or
-  `KeySwitch-0.16.0-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.16.0_amd64.deb`.
+- Windows 10/11 x64: `KeySwitch-Setup-0.16.1-x64.exe` or
+  `KeySwitch-0.16.1-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.16.1_amd64.deb`.
 - Checksums: `SHA256SUMS`.
 
 The Windows installer is not yet publisher-signed. Native Wayland is unsupported.

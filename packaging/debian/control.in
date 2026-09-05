@@ -11,7 +11,9 @@ Description: automatic EN/RU keyboard layout correction for Ubuntu X11
  layout, switches the XKB group and replaces the already typed word. Its
  precision-first hybrid detector combines hard safety guards, frequency
  lexicons, Hunspell morphology, character n-grams, a checksum-validated bundled
- local linear classifier, recent context and explicit local learning.
+ local linear classifier and explicit local rules. A separate local contextual
+ classifier can keep, convert, wait or suggest using recent text. Optional
+ AT-SPI field reading is disabled by default; no text is sent to a service.
  .
  It includes a GTK 4 and Libadwaita settings interface, global hotkeys,
  application and word exclusions, correction history, autostart integration

@@ -7,6 +7,10 @@ production-кандидата сначала прочитайте обязате
 
 Все команды ниже выполняются из корня репозитория KeySwitch.
 
+Это инструкция **базовой KSLM v20**, не контекстного помощника context-v1/v2.
+Его [обучение и ограничения](context-assistant.md) и
+[отдельные команды проверки](verification.md) имеют собственный набор доказательств.
+
 ## Что именно создаёт trainer
 
 Перед командами полезно понимать всю конструкцию модели:
@@ -236,7 +240,7 @@ jq -e '
 
 Выполняйте этот replay только в reference environment из manifest. Для
 Windows/macOS consumer package не пересобирайте corpus: проверяйте точные
-artifact/config/source/registry/toolchain hashes и встроенный signed manifest,
+artifact/config/source/registry/toolchain hashes и связанный ими встроенный manifest,
 а полный `--strict` оставляйте обязательным отдельным job на reference host.
 
 ## 3. Воспроизвести v20 preseal без доступа к KSLM
@@ -333,7 +337,8 @@ Evaluator оценивает строки на worker-процессах (`--wor
 
 ## 6. Создать новый кандидат vN
 
-Ниже `vN` означает ещё не использованный номер, например `v19`. Не делайте
+Ниже `vN` означает ещё не использованный номер после проверки истории кандидатов;
+`v19` и `v20` уже использованы. Не делайте
 слепую глобальную замену: часть `v1` обозначает поколение модели, а не номер
 release holdout.
 
@@ -724,9 +729,16 @@ jq '{
 }' "$work_root/strict-vN.json"
 ```
 
-## 8. Полный тестовый и packaging-рецепт
+## 8. Тестовый и packaging-рецепт базовой модели и приложения
+
+Для полного CI-контракта дополнительно выполните
+[контекстные training/engine replay и нативный AT-SPI E2E](verification.md).
+Быстрые проверки context-v1/v2 входят в обе сборки, но не заменяют эти шаги.
 
 ### Typecheck и 100% coverage
+
+100% относится к области [.coveragerc](../.coveragerc), а не ко всем нативным
+Windows-файлам и Windows UI; их отдельные проверки выполняет Windows CI.
 
 ```bash
 ./tools/install-typing-tools.sh .typing
@@ -790,8 +802,8 @@ dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24 -noreset" \
 `tools/release_pipeline.py`:
 
 ```bash
-python3 tools/release_pipeline.py start --profile app      # как job verify в CI
-python3 tools/release_pipeline.py start --profile release  # плюс replay-доказательства
+python3 tools/release_pipeline.py start --profile app      # KSLM и Linux-приложение
+python3 tools/release_pipeline.py start --profile release  # плюс KSLM replay-доказательства
 python3 tools/release_pipeline.py status
 ```
 
@@ -803,6 +815,8 @@ replay передаются через `--replay-dir`, готовый strict-о�
 фаз после первого отказа. Фазы strict-оценки измеряют load/inference latency,
 поэтому выполняются в одиночестве: планировщик ждёт, пока завершатся все
 остальные фазы, и не запускает новых, пока идёт оценка.
+Отдельные контекстные и AT-SPI проверки из CI не являются фазами этого
+конвейера; профиль `release` не равнозначен всему Linux/Windows CI.
 
 ## 9. Частые ошибки
 

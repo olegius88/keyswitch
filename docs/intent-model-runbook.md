@@ -7,6 +7,11 @@
 [cookbook](intent-model-cookbook.md), устройство модели — в
 [карточку модели](../model/intent_v1/MODEL_CARD.md).
 
+Область документа — **базовая KSLM**, не четырёхклассовый контекстный помощник.
+Для context-v1/v2 используйте [контекстное описание](context-assistant.md) и
+[общую инструкцию проверки](verification.md). KSLM gates не сертифицируют
+контекстную политику и доставку клавиш во все приложения.
+
 Runbook соответствует текущему контуру v20:
 
 - training config schema 13;
@@ -87,7 +92,7 @@ model-blind корпусов и обучения:
 sudo apt-get update
 sudo apt-get install --yes --no-install-recommends \
   hunspell-en-us hunspell-ru libhunspell-1.7-0 onboard-data \
-  python3 python3-pip
+  python3 python3-pip jq
 ```
 
 Для полного Linux release-контура дополнительно нужны пакеты из job `verify`:
@@ -118,7 +123,7 @@ candidate provenance. Побайтная воспроизводимость об
 сертификационному контуру reference host. Нативная упаковка для другой ОС не
 должна заново строить corpus в иной platform identity. Она обязана проверить
 SHA-256 KSLM и frozen inputs, неизменяемый seal registry, hashes model
-toolchain, полный подписанный manifest и quality evidence внутри KSLM. Общий
+toolchain, полный закреплённый hashes manifest и quality evidence внутри KSLM. Общий
 release workflow остаётся зелёным только после отдельного полного `--strict`
 на reference host.
 
@@ -271,14 +276,16 @@ jq -e '
 Минимальный контроль:
 
 ```bash
+release_work="$(mktemp -d /tmp/keyswitch-intent-release.XXXXXXXX)"
 git diff --check
 (cd model/intent_v1/sources && sha256sum --check SHA256SUMS)
-PYTHONPATH=src python3 tools/preseal_intent_holdout.py > /tmp/keyswitch-preseal-check.json
-diff -u model/intent_v1/holdout-vN-preseal.json /tmp/keyswitch-preseal-check.json
+PYTHONPATH=src python3 tools/preseal_intent_holdout.py > "$release_work/preseal-check.json"
+diff -u model/intent_v1/holdout-vN-preseal.json "$release_work/preseal-check.json"
 ```
 
-Для реальной работы используйте task-scoped каталог из cookbook, а не
-фиксированный путь `/tmp/keyswitch-preseal-check.json`.
+`vN` замените выбранным новым namespace. Сохраните отчёты из `$release_work`
+до очистки временных файлов; [cookbook](intent-model-cookbook.md) содержит
+проверяемую процедуру очистки только созданного каталога.
 
 ## 7. Выполнить официальный train
 
@@ -287,7 +294,7 @@ diff -u model/intent_v1/holdout-vN-preseal.json /tmp/keyswitch-preseal-check.jso
 ```bash
 set -o pipefail
 PYTHONPATH=src python3 tools/train_intent_model_release.py --workers 0 | \
-  tee /tmp/keyswitch-train-manifest.json
+  tee "$release_work/train-manifest.json"
 ```
 
 `--workers 0` — значение по умолчанию: trainer использует все logical CPU,
@@ -401,7 +408,7 @@ cmp model/intent_v1/test-report.json "$retrain_root/a/test-report.json"
 
 ## 11. Проверить приложение и пакеты
 
-Полный Linux quality contour:
+Linux-проверки приложения и базового детектора:
 
 ```bash
 ./tools/install-typing-tools.sh .typing
@@ -447,14 +454,20 @@ dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24 -noreset" \
 совпадение packaged artifact/frozen EN/RU sources и отсутствие зависимости DEB
 от системного Python interpreter.
 
-Windows release выполняется workflow `windows` из
+Дополнительно обязательны отдельные [контекстные проверки](verification.md):
+replay context-v1/v2, corpus/engine replay и нативный AT-SPI E2E. Сборка запускает
+быстрые проверки обоих контекстных артефактов, но не заменяет ими retraining.
+
+Windows-проверки выполняются job `windows` из
 [`tests.yml`](../.github/workflows/tests.yml): strict mypy/tests, настоящий
 `WH_KEYBOARD_LL`/`SendInput` E2E, native ZIP/installer, silent install и
 диагностика установленной модели.
 
 ### Единый прогон
 
-Проверки разделов 3, 5, 8–11 целиком выполняет `tools/release_pipeline.py`.
+Базовые Linux-проверки разделов 3, 5, 8–11 объединяет `tools/release_pipeline.py`.
+Windows и отдельные контекстные/AT-SPI шаги в него не входят; см.
+[карту профилей и CI](verification.md).
 Профиль `release` проверяет frozen sources и provenance, побайтно
 воспроизводит development corpus и preseal receipt, запускает независимый
 strict evaluator, два retraining replay с трёхсторонним сравнением (и strict
@@ -467,8 +480,10 @@ python3 tools/release_pipeline.py start --profile release --replay-strict
 python3 tools/release_pipeline.py wait
 ```
 
-Итог — `dist/release-pipeline/latest/SUMMARY.md` с чек-листом раздела 12,
-hashes всех артефактов и хвостами журналов проваленных фаз. Скрипт не
+Итог — `dist/release-pipeline/latest/SUMMARY.md` с базовыми Linux-пунктами
+чек-листа раздела 12, hashes артефактов и хвостами журналов проваленных фаз.
+Отдельные Windows, контекстные и AT-SPI результаты сверяются дополнительно.
+Скрипт не
 выполняет официальный train и не трогает registry: новый кандидат по разделам
 4–7 создаётся вручную, а pipeline доказывает уже опубликованный артефакт. Уже
 запущенные вручную replay передаются через `--replay-dir`. Фаза
@@ -489,6 +504,8 @@ card и `.gitattributes` уже соответствовали кандидат�
 - [ ] Независимый strict report прошёл каждый gate.
 - [ ] Official/replay-a/replay-b побайтно совпали.
 - [ ] Strict typing и 100% line/branch coverage прошли.
+- [ ] Отдельные контекстные replay/gates и AT-SPI E2E прошли; их результат
+      не подменён KSLM-отчётом или только быстрыми packaging-проверками.
 - [ ] Detector, X11, tray и packaged native E2E прошли.
 - [ ] DEB/Windows artifacts прошли свои verifier/smoke tests.
 - [ ] Model card, changelog и hashes обновлены фактическими результатами.

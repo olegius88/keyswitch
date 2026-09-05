@@ -1,4 +1,4 @@
-.TH KEYSWITCH 1 "September 2026" "KeySwitch 0.16.0" "User Commands"
+.TH KEYSWITCH 1 "September 2026" "KeySwitch 0.16.1" "User Commands"
 .SH NAME
 keyswitch \- automatic keyboard layout correction for Ubuntu X11
 .SH SYNOPSIS
@@ -22,10 +22,12 @@ the baseline alone. Context text stays in RAM and is not sent to a service.
 Optional UI Automation/AT-SPI field reading is disabled by default. Detected
 passwords, selections and contradictory field snapshots block replacement.
 Not all applications expose password metadata; exclusions remain necessary.
-The current contextual evaluation is synthetic, not a real-world error rate.
+The shipping contextual evaluation is synthetic, not a real-world error rate.
+The expanded public-phrase experiment found limitations of the shipping model
+and rejected its new candidate; the original context-v1 weights remain active.
 Its certification is separate from the sealed baseline described below.
 Prefix replacement remains available in off/shadow modes; assist waits for a
-completed word or idle boundary.
+completed word or idle boundary when its model and context are enabled.
 .PP
 Without contextual intervention, detection is a precision-first hybrid.
 Hard guards and explicit user rules are
@@ -43,6 +45,9 @@ weight-bucket
 occupancy bitset. The Local linear
 model setting disables this extra layer. Diagnostics report its version and
 checksum, or an explicit safe fallback when the artifact cannot be loaded.
+The contextual assistant has a separate switch. Confidence threshold and
+aggressive recognition tune the baseline fallback heuristics, not the trained
+models' fixed thresholds.
 The deterministic fallback is used only for a disabled or unavailable model,
 or when the longer normalized interpretation contains fewer than five
 characters. Shorter tokens remain under deterministic guards and user rules;
@@ -92,7 +97,7 @@ absolute budget is enforced
 before the sealed test is materialised.
 Schema 13 then deterministically chooses on the threshold split the greatest
 common calibrated-logit margin that preserves the complete selection policy.
-The margin is bounded by a signed 2.0 cap fixed before v11 from the model-blind
+The margin is bounded by a config-bound 2.0 cap fixed before v11 from the model-blind
 development corpus. Schema 13 selects its effective value only on the frozen
 threshold role, records it for every trigger, and recomputes selection metrics
 against the hardened boundaries. The sealed test does not select the margin.
@@ -131,6 +136,9 @@ After a manual word conversion with Pause/Break, KeySwitch displays a focused
 prompt above the input position. Enter immediately adds the conversion to the
 local switching rules; Escape dismisses the offer. Local learning and its
 fallback repeated-conversion threshold are configurable in the application.
+Enter confirming this prompt does not also submit a message. Ordinary X11
+Enter/Tab events cannot be delayed by XRecord, so correct the word using
+Space, idle correction or Pause before submitting or changing fields.
 .PP
 Pause/Break converts the unfinished word, the layout-dependent symbols typed
 right after a word boundary (for example a Russian quote meant as "@"), or the
@@ -139,7 +147,8 @@ only switches the layout. The typing pause that triggers idle correction is
 configurable (1.5 seconds by default). Early layout switching rewrites the
 beginning of a word as soon as its prefix is impossible in the current
 language and clearly continues in the other one; the minimum prefix length is
-configurable and the feature can be disabled.
+configurable and the feature can be disabled. An active contextual assistant
+in assist mode suppresses this prefix mechanism.
 .SH OPTIONS
 .TP
 .B \-\-hidden
@@ -173,7 +182,17 @@ and can be enabled in the About page. They record decision and skip reasons,
 shadow verdicts for protected words, layout-change attribution, deferred pause
 corrections, early-switch events and settings changes. Diagnostic records may
 contain typed words and application names; text from excluded applications is
-redacted. The file is limited to 5 MiB and rotated with three backups.
+redacted in engine diagnostic events. The ordinary log uses 1 MiB per file and
+two backups. Technical mode uses 5 MiB and five backups, six files including
+the active log. Enabling technical mode rotates a nonempty current file;
+disabling it does not immediately erase existing records or old backups.
+Review the current log and relevant backups for private text before sharing.
+correction_applied confirms event submission, not final application text;
+text_verified=false indicates that the result was not read back.
+.TP
+.I /usr/lib/keyswitch/keyswitch/resources/models/context_policy_v1.json
+Bundled local four-action contextual classifier. This is separate from KSLM;
+the rejected context-v2 research candidate is not installed as the active model.
 .TP
 .I /usr/lib/keyswitch/keyswitch/resources/models/layout_intent_v1.ksm
 Bundled, checksum-validated KSLM schema 4 linear intent model, bounded to
@@ -194,6 +213,13 @@ X11 display used for global input observation and correction.
 .B XDG_SESSION_TYPE
 Must identify an X11 session for the global backend.
 .TP
+.BR XDG_CONFIG_HOME , " XDG_DATA_HOME"
+Override the Linux base directories for configuration and user data.
+.TP
+.BR KEYSWITCH_CONFIG_DIR , " KEYSWITCH_DATA_DIR"
+Override KeySwitch's configuration and data directories directly. These take
+precedence over the corresponding platform defaults.
+.TP
 .B KEYSWITCH_HUNSPELL_PATH
 Optional colon-separated list of Hunspell dictionary directories.
 .TP
@@ -203,7 +229,9 @@ precede the bundled frozen EN/RU models and are intended for controlled testing.
 .TP
 .B KEYSWITCH_INTENT_MODEL_PATH
 Optional path to a compatible KSLM schema 4 model. Invalid or oversized files
-are rejected and the deterministic detector remains available.
+are rejected; the loader next tries the bundled model. The baseline falls back
+to heuristics only if no compatible KSLM can be loaded. This variable does not
+select or disable the separate contextual model.
 .SH SEE ALSO
 .BR setxkbmap (1)
 .SH BUGS

@@ -12,6 +12,10 @@ X11 that automatically corrects words typed using the wrong keyboard layout.
 It serves a similar purpose to Punto Switcher and EveryLang, while running
 entirely locally and using the active EN/RU system layout pair.
 
+[Documentation map](docs/README.md) ·
+[Input troubleshooting](docs/troubleshooting.md) ·
+[Verification, builds and releases](docs/verification.md) (guides in Russian)
+
 ## Features
 
 - global input observation through `WH_KEYBOARD_LL` on Windows and XRecord in
@@ -23,7 +27,9 @@ entirely locally and using the active EN/RU system layout pair.
   the current language and clearly continues in the other one (for example
   `ghbd`), the layout is switched and the prefix rewritten without waiting for
   the end of the word; the minimum prefix length is configurable (4 by
-  default) and the feature can be disabled;
+  default) and the feature can be disabled. An active contextual assistant in
+  `assist` mode suppresses prefix replacement; it is available in `off`/`shadow`
+  or when the assistant is disabled or unavailable;
 - precision-first hybrid detection using hard guards, frequency lexicons,
   Hunspell morphology, character n-grams, recent context and a lightweight
   first-party linear model;
@@ -53,23 +59,40 @@ entirely locally and using the active EN/RU system layout pair.
   settings, pause, sound, notifications, history, exclusions, about and quit;
 - a native full settings window with overview, test field, automatic
   correction, hotkeys, exclusions, history and backend diagnostics;
+- scrollable settings pages; Windows marks changed settings with a color and
+  offers individual reset buttons. Both platforms offer a full settings reset
+  that preserves correction history and learned rules;
 - single-instance protection: launching KeySwitch again activates the existing
-  application window.
+  application window;
 - automatic stable GitHub Release checks after startup and every six hours;
   Windows downloads the verified Setup EXE, installs it silently and restarts
-  KeySwitch, while Ubuntu reports the release and hands installation to the
-  system package manager.
+  KeySwitch, while Ubuntu reports the release and opens its page for manual
+  DEB installation.
 
-KeySwitch does not record the complete keystroke stream. Only the current word
-is kept in memory. When history is enabled, it stores correction pairs such as
-`ghbdtn → привет` and nothing else. Linear inference is fully local and the
-model is not updated from ordinary typing.
+KeySwitch does not record the complete keystroke stream. The current word and
+up to 512 recent context characters are held in RAM. When history is enabled,
+it stores correction pairs such as `ghbdtn → привет` with their timestamp,
+application and score. Linear inference is fully local and model weights are
+not updated from ordinary typing.
 
 Technical logging also writes evaluated words and decision reasons, including
 unchanged words. It may contain private text; enable it temporarily for diagnosis.
+
+The contextual assistant is a separate local four-action classifier, not an
+LLM: keep, convert, wait or suggest. It uses recent text and application
+identity; for example, it can wait for the next word in `e 'njuj` → `у этого`.
+`assist` is enabled by default; `shadow` leaves automatic decisions to the
+baseline detector. Optional reading of existing field text through OS
+accessibility is off by default. Quality is not established for real chats.
+The expanded corpus exposed limitations of both the shipping model and a new
+candidate; the candidate failed its quality conditions and **is not deployed**.
+The shipping contextual weights remain those introduced in 0.15.0.
+See [settings, training, privacy and limits](docs/context-assistant.md).
+
 On Windows, Enter/Tab is intercepted before delivery: the word is corrected
 first, then the action is sent exactly once. For example, `ghbdtn` + Enter
-submits `привет`. A learning prompt owns Enter exclusively while it is active.
+submits `привет` when settings and safety guards permit correction.
+A learning prompt owns Enter exclusively while it is active.
 Shift/Ctrl/Alt shortcuts are not intercepted. A correction failure or a focus
 change cancels submission and is reported in diagnostics. On X11 these actions
 have already reached the application, so use Space, idle correction or Pause
@@ -79,11 +102,11 @@ scenarios and platform limitations.
 
 ## Install on Windows
 
-Download `KeySwitch-Setup-0.16.0-x64.exe` from the
+Download `KeySwitch-Setup-0.16.1-x64.exe` from the
 [latest release](https://github.com/olegius88/keyswitch/releases/latest) and run
 it. The per-user installation goes to `%LOCALAPPDATA%\Programs\KeySwitch` and
 does not require administrator privileges. The release also includes the
-portable `KeySwitch-0.16.0-windows-x64.zip` archive.
+portable `KeySwitch-0.16.1-windows-x64.zip` archive.
 
 After launch, KeySwitch appears in the notification area. Left- or right-click
 the `EN/RU` or flag icon to open its menu. Its Switch to action always offers
@@ -104,6 +127,7 @@ To run from source on Windows:
 ```powershell
 py -m venv .venv
 .venv\Scripts\python -m pip install -e ".[windows]"
+$env:KEYSWITCH_MODEL_PATH = "$PWD\model\intent_v1\sources"
 .venv\Scripts\keyswitch
 ```
 
@@ -111,7 +135,7 @@ For the complete detection model when running from source, point
 `KEYSWITCH_MODEL_PATH` to `model/intent_v1/sources`; it contains the exact
 frozen `en_US.lm` and `ru_RU.lm` used for training. KeySwitch's own
 `layout_intent_v1.ksm` is already part of its resources. The Setup EXE and
-portable ZIP bundle all three models automatically.
+portable ZIP bundle the lexicons, KSLM and contextual model automatically.
 
 ## Quick start on Ubuntu
 
@@ -124,10 +148,14 @@ cd keyswitch
 ./run.sh
 ```
 
-The application window includes a test field. Switch to EN, type `ghbdtn` and
-stop: after about 1.5 seconds the field should contain `привет` and the active
-layout should be RU. You can also press Space for an immediate check. For the
-reverse direction, switch to RU and type `hello` using the same physical keys.
+The application window includes a test field. Select EN, type `test `, then
+`ghbdtn` and stop: the default idle check runs after about 1.5 seconds to
+convert it to `привет` and select RU. Space requests an immediate check.
+The initial `test ` completes the default one-word protection after a manual
+language choice; that protection is intentional, not a lost event.
+For the reverse direction, select RU, type `тест `, then `руддщ` (the physical
+keys for `hello`). `Pause` requests manual conversion of the current word;
+technical logging explains why automatic correction was skipped.
 
 To teach KeySwitch a personal exception, type the word and press `Pause/Break`.
 After the manual replacement, a prompt above the input position asks whether
@@ -144,12 +172,12 @@ Probe the system backend without opening the application window:
 
 ## Install the Debian package
 
-Download `keyswitch_0.16.0_amd64.deb` from the
+Download `keyswitch_0.16.1_amd64.deb` from the
 [latest release](https://github.com/olegius88/keyswitch/releases/latest), then
 install it with:
 
 ```bash
-sudo apt install ./keyswitch_0.16.0_amd64.deb
+sudo apt install ./keyswitch_0.16.1_amd64.deb
 ```
 
 The package installs the required system dependencies and adds KeySwitch to the
@@ -160,10 +188,10 @@ interpreter. The native runtime includes `libpython`, so the `amd64` package
 cannot be installed on a different architecture.
 
 Release checking also works on Ubuntu, but KeySwitch does not silently install
-a system DEB itself: that requires APT authorization and a configured package
-repository. When a new version is found, the app shows a notification and an
-Open release button; installation remains an explicit APT action. This is a
-Linux system-privilege boundary, not a limitation of release discovery.
+a system DEB itself. When a new version is found, the app shows a notification
+and an Open release button; installation remains an explicit APT action with
+the necessary permissions. Installing a downloaded `.deb` needs no separate
+KeySwitch repository; the app does not configure automatic APT updates.
 
 ## Install from source for the current user
 
@@ -201,9 +229,10 @@ Check the active XKB layout pair with:
 setxkbmap -query
 ```
 
-This release uses the first two XKB groups. For the expected scenario, the
-output should contain `layout: us,ru` or the same pair in reverse order. The
-language models in the settings are currently bound to the EN, RU order.
+This release uses the first two XKB groups. Default settings require
+`layout: us,ru`: `detection.language_models` maps `["en_US", "ru_RU"]` by group
+index. Reversing the layouts is not equivalent without matching language-model
+configuration; the standard setup is `us,ru`.
 
 ## Settings and data
 
@@ -227,8 +256,14 @@ On Linux:
   `~/.local/share/keyswitch/keyswitch.log`;
 - autostart entry: `~/.config/autostart/io.github.olegius88.KeySwitch.desktop`.
 
+These are default paths. Linux honors `XDG_CONFIG_HOME`/`XDG_DATA_HOME`;
+`KEYSWITCH_CONFIG_DIR` and `KEYSWITCH_DATA_DIR` override settings and data
+directories on both platforms, for example for isolated testing.
+
 `KeePassXC`, `1Password` and `Bitwarden` are excluded by default. A global
-observer does not know the semantics of an individual input field, so other
+observer alone does not know field semantics. Optional accessibility reading
+excludes recognized protected fields but is not a universal password detector.
+Other
 sensitive applications should be added by `.exe` name on Windows or by
 `WM_CLASS` on Linux using the Exclusions settings page.
 
@@ -240,16 +275,34 @@ manual layout change, whether a layout change was made by the engine itself
 or by the user, deferred pause corrections with their cause, early-switch
 events, the learning prompt lifecycle and the values of changed settings.
 Because it may
-contain typed words and application names, it is disabled by default. Text is
-always replaced with `<redacted>` for excluded applications. The log is capped
-at 5 MiB and rotated with three backups; after reproducing a problem, disable
-logging and share `keyswitch.log` for analysis.
+contain typed words and application names, technical mode is disabled by
+default. Engine diagnostic events replace excluded-application text with
+`<redacted>`; this is not a general personal-data scrubber for all error messages.
+The ordinary log uses 1 MiB per file and two backups; technical mode uses
+5 MiB and five backups (`keyswitch.log.1` … `.5`), up to six files in total.
+Enabling technical mode rotates a nonempty current file. Disabling it does
+not immediately erase existing records or old backups. After reproducing the
+issue, disable the mode, review files for private data and save the current log
+and backups covering the incident. `context_decision` does not include the
+surrounding phrase; `correction_applied` confirms event submission, not the
+final text. See [troubleshooting](docs/troubleshooting.md).
 
 The Local linear model switch on the automatic-correction page disables only
-the classifier check; dictionaries, hard guards and explicitly learned rules
-continue to work. Diagnostics show the bundled KSLM version and abbreviated
+the baseline KSLM classifier; dictionaries, hard guards and explicitly learned
+rules continue to work. The contextual assistant has a separate setting and
+is not disabled by this switch. Diagnostics show the bundled KSLM version and abbreviated
 SHA-256, or the reason for a safe fallback to the deterministic ensemble.
 Neither words nor model features are sent over the network.
+
+Confidence threshold and aggressive recognition configure the baseline
+detector's fallback heuristics, not the trained models' fixed thresholds.
+They can indirectly change the baseline decision seen by the assistant.
+Minimum length is not a universal ban on short words: explicit rules,
+reviewed short-word exceptions and contextual decisions can still apply.
+
+The following describes the baseline detector without contextual intervention
+in `off`/`shadow`. In `assist`, a separate model uses its lexical evidence and
+decision; KSLM certification does not certify that contextual policy.
 
 After user rules and the hard guards for valid source words, code and addresses,
 KSLM is the sole statistical decision: only its calibrated trigger/direction
@@ -264,7 +317,7 @@ interpretations contains five or more characters. Shorter words remain with
 the deterministic heuristics and user rules: this removes the most ambiguous
 tail from probabilistic decisions without disabling correction as a whole.
 The trainer also excludes deletion typos that fall below this limit; the same
-limit is recorded in the signed model policy and covered by tests.
+limit is recorded in the hash-bound model policy and covered by tests.
 
 The configured minimum length does not block a narrow reviewed exception list
 for frequent two-letter function words; it currently contains Russian-layout
@@ -272,10 +325,10 @@ for frequent two-letter function words; it currently contains Russian-layout
 hit and at least a 100x target/source frequency ratio. An explicit manual
 layout change has higher priority and protects the entire next word, including
 pause correction and previously learned rules. Normal detection resumes after
-the word boundary. A change to the very layout the engine itself just selected
-(a correction, `Pause`, the menu action), observed within 1.5 seconds, is
-attributed to the engine and does not enable the protection; a change to any
-other layout stays manual.
+the word boundary. Re-observing a layout the engine just selected within 1.5
+seconds does not create new protection as an external manual change would.
+An explicit menu language choice itself protects the next word, as does Pause
+when no replaceable word remains. A change to another layout stays manual.
 Real three- and four-character bilingual collision pairs from frozen Onboard
 data are retained only in the safety corpus: they never train the classifier,
 but prove the valid-source pre-model guard across every trigger.
@@ -328,7 +381,7 @@ train/development/calibration/threshold; this corpus has no test role. On load,
 the trainer verifies file size and SHA-256, both Hunspell dictionary provenance
 records, layout-pair physical equivalence, uniqueness, exact role sizes, and
 the SHA-256 of all 120,000 re-expanded symmetric rows.
-Only the train role receives the explicitly signed `3.0` weight, equal to the
+Only the train role receives the config-bound `3.0` weight, equal to the
 ordinary frequency-derived weight ceiling; all three evaluation roles retain
 weight `1.0`. Critical unknown typos therefore remain influential during
 optimization without silently relaxing the unweighted quality measurements.
@@ -363,7 +416,7 @@ budget is checked before the sealed
 test is materialized. After
 directional selection, schema 13 deterministically chooses on the threshold
 split the greatest common calibrated-logit margin that preserves the complete
-selection policy. The margin is bounded by a signed 2.0 cap fixed before v11
+selection policy. The margin is bounded by a config-bound 2.0 cap fixed before v11
 from the model-blind unknown-typo development corpus. Under schema 13 those
 frozen signatures have independent roles, so the effective value is selected
 only on their threshold subset, recorded for every trigger, and threshold
@@ -480,7 +533,20 @@ and branch coverage gate (GTK needs an active X11 display or Xvfb):
 
 For headless execution, run the same command inside `dbus-run-session` and
 `xvfb-run`; GitHub Actions uses that exact setup. The report stops the build if
-coverage drops below 100%.
+coverage drops below 100% within [.coveragerc](.coveragerc). Native Win32
+wrappers and the Windows UI are excluded from this metric and have separate
+Windows tests; it is not 100% coverage of every platform file.
+
+Contextual models have separate checks, not covered by a KSLM report:
+
+```bash
+PYTHONPATH=src python3 tools/verify_context_model.py
+PYTHONPATH=src python3 tools/verify_context_v2.py
+```
+
+These are fast artifact/provenance checks. Training replay, final-text
+evaluation, AT-SPI E2E and their environment requirements are documented in
+the [verification guide](docs/verification.md).
 
 On Windows, a separate E2E starts a real `WH_KEYBOARD_LL` hook, types scan codes
 through `SendInput` into a Tk field and verifies both directions, the learning
@@ -538,11 +604,14 @@ Build the reproducible native Debian package with:
 sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
 ./tools/install-build-tools.sh .nuitka
 KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package="dist/keyswitch_0.16.0_$(dpkg --print-architecture).deb"
+package="dist/keyswitch_0.16.1_$(dpkg --print-architecture).deb"
 ./tools/verify-native-deb.sh "$package"
 ```
 
-The DEB bundles not only KSLM but also the exact frozen `en_US.lm`/`ru_RU.lm`
+The build runs strict KSLM evaluation and both fast contextual checks first.
+A verified strict report can be reused through `KEYSWITCH_INTENT_STRICT_REPORT`,
+as described in the [build guide](docs/verification.md).
+The DEB bundles KSLM, the contextual model and the exact frozen `en_US.lm`/`ru_RU.lm`
 from `model/intent_v1/sources`. The in-package directory takes precedence over
 system `onboard-data`, so runtime n-gram scores use the release-tested snapshot;
 the verifier requires both files to be byte-identical.
@@ -583,8 +652,8 @@ ZIP, silently install it, diagnose the exact bundled model, smoke-test the
 installed UI, create one
 `SHA256SUMS` file and publish all artifacts in a GitHub Release.
 
-The whole Linux contour — model provenance and strict evaluation, replay
-evidence, type checking, coverage, the detector gates, X11/tray E2E, the DEB
+The baseline-model/application Linux pipeline — KSLM provenance and strict
+evaluation, its replay evidence, type checking, coverage, detector gates, X11/tray E2E, the DEB
 build, its verifier and the packaged-binary E2E — runs as one process detached
 from the terminal:
 
@@ -600,28 +669,36 @@ running phases may still reach and a reserve (`--jobs`,
 `--memory-reserve-mib`). Every run lives in
 `dist/release-pipeline/<stamp>-<profile>/`: `state.json` is updated while the
 run proceeds, `summary.json` and `SUMMARY.md` appear at the end next to the
-phase logs, strict reports and the DEB. The `app` profile mirrors the `verify`
-job of GitHub Actions, `quick` stops at type checking, coverage and the
-detector, and `release` adds the byte-identical model replays; `--replay-dir`
+phase logs, strict reports and the DEB. `quick` checks the environment, KSLM
+inputs, typing, coverage, detector and release metadata; `app` adds strict
+KSLM, X11/tray and native DEB tests; `release` adds KSLM/corpus replay.
+No profile directly runs contextual-model retraining, contextual engine replay
+or native AT-SPI E2E; CI runs these separately. The local pipeline is therefore
+not equivalent to all CI checks. `--replay-dir`
 adopts replays that are still running or already finished, and
 `python3 tools/release_pipeline.py phases` prints the phases, memory budgets
 and dependencies.
 
-The release itself is one command. The script propagates the version to every
-file that spells it, closes the `Unreleased` section of `CHANGELOG.md`, checks
+Release publication is a separate command, **only after an explicit release
+decision**. It commits and pushes all working-tree changes, so review
+`git status` and the diff first. The script updates a fixed list of versioned
+files, closes the `Unreleased` section of `CHANGELOG.md`, checks
 `RELEASE_NOTES.md`, runs the verification contour, commits, tags, pushes and
 waits until the workflow publishes the DEB, the Windows Setup EXE, the ZIP and
 `SHA256SUMS`:
 
 ```bash
-python3 tools/release.py --version 0.9.2
-python3 tools/release.py --version 0.9.2 --dry-run   # checks only, writes nothing
+python3 tools/release.py --version X.Y.Z --dry-run  # replace X.Y.Z; no writes
+python3 tools/release.py --version X.Y.Z            # commit, tag, push, publish
 ```
 
-The prose stays with the author: without entries under `## Unreleased` and
-without `RELEASE_NOTES.md` for that version the script stops and names the file
-to complete. Every step recognises work it has already done, so a re-run after
-a failure continues where it stopped.
+`X.Y.Z` means an unused version. The author must prepare `## Unreleased`
+entries (or an already closed section for that version) and matching release
+notes with the asset names. `--dry-run` checks preparation but runs no tests
+or builds. A retry **does not automatically resume at the last failed phase**:
+verification normally runs again; an existing tag is accepted only at the
+same clean HEAD. Pushed tags or published releases are not rolled back.
+See [release and recovery procedures](docs/verification.md).
 
 ## Limitations
 
@@ -635,7 +712,7 @@ a failure continues where it stopped.
 - On Windows, UIPI prevents a regular process from injecting input into a
   window running at a higher integrity level. KeySwitch needs a matching level
   for that target window.
-- The Windows 0.16.0 Setup EXE is not yet signed with a publisher certificate.
+- The Windows 0.16.1 Setup EXE is not yet signed with a publisher certificate.
 
 ## License
 
@@ -647,6 +724,11 @@ GPL-3+ and credits marmuta (2013, 2014) and Francesco Fumanti (2011, 2012).
 The exact `.lm` files, `SHA256SUMS` and unchanged `COPYRIGHT.onboard-data` live
 under `model/intent_v1/sources`; the copyright file is included in both the
 Debian and Windows license bundles.
+
+The separate expanded-context research corpus uses Tatoeba's public CC0
+export. [Source provenance and numeric-cache licensing](model/context_v2/sources/README.md)
+are documented separately; they do not replace the Onboard or project license.
+This research corpus is not bundled as a runtime dictionary.
 
 ## Primary specifications
 
