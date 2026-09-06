@@ -13,6 +13,42 @@ from .catalog import list_entries
 from .config import data_directory, load_config
 from .secrets import read_token, redact
 from .telegram import Telegram
+from .versions import VERSION
+
+
+def selection_directory(root: Path, entries: list[dict], scope: str | None):
+    """A complete, content-addressed selection never shares a folder with old downloads."""
+    if scope is None:
+        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        return root, None
+    manifest = {
+        "schema": 1,
+        "kind": "logcourier.selection",
+        "keyswitch_version": scope,
+        "files": [
+            {
+                "name": f"lc-{entry['bundle_id']}.zip",
+                **{
+                    key: entry[key]
+                    for key in ("bundle_id", "source_id", "keyswitch_version", "sha256", "size")
+                },
+            }
+            for entry in entries
+        ],
+    }
+    data = json.dumps(manifest, sort_keys=True, ensure_ascii=False, indent=2).encode()
+    root = root / f"keyswitch-{scope}-{hashlib.sha256(data).hexdigest()[:20]}"
+    if root.is_symlink():
+        raise ValueError("Папка подборки является ссылкой; сохранение запрещено.")
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    expected = {entry["name"] for entry in manifest["files"]} | {"selection.json"}
+    if any(path.name not in expected for path in root.iterdir()):
+        raise ValueError("В папке подборки есть посторонние файлы. Выберите другой --output.")
+    target = root / "selection.json"
+    if target.exists() or target.is_symlink():
+        if target.is_symlink() or target.stat().st_size != len(data) or target.read_bytes() != data:
+            raise ValueError("Манифест подборки занят другим файлом; перезапись запрещена.")
+    return root, data
 
 
 def main(argv=None, error_handler=None) -> int:
@@ -31,6 +67,20 @@ def main(argv=None, error_handler=None) -> int:
         command.add_argument("--chat-id", help="ID группы; иначе из настроек")
         command.add_argument("--bot-id", help="ID бота для системного хранилища")
         command.add_argument("--limit", type=int, default=20)
+        scope = command.add_mutually_exclusive_group()
+        scope.add_argument(
+            "--keyswitch-version",
+            default="current",
+            metavar="VERSION",
+            help="Версия KeySwitch; по умолчанию current — текущая для каждого источника",
+        )
+        scope.add_argument(
+            "--all-versions",
+            dest="keyswitch_version",
+            action="store_const",
+            const=None,
+            help="Вся история, включая старые архивы без версии и другие программы",
+        )
         if action == "fetch":
             command.add_argument("--output", type=Path, required=True)
             command.add_argument("--since", help="Дата ISO, например 2026-09-05 (UTC)")
@@ -61,6 +111,10 @@ def main(argv=None, error_handler=None) -> int:
             return 0
         if not 1 <= arguments.limit <= 10000:
             parser.error("--limit должен быть от 1 до 10000")
+        if arguments.keyswitch_version not in (None, "current") and not VERSION.fullmatch(
+            arguments.keyswitch_version
+        ):
+            parser.error("--keyswitch-version: ожидается версия, например 0.16.2, или current")
         chat_id = arguments.chat_id or config.chat_id
         if not chat_id:
             parser.error("Укажите --chat-id или сохраните группу в настройках")
@@ -71,7 +125,9 @@ def main(argv=None, error_handler=None) -> int:
         if not token:
             parser.error("Нет токена в системном хранилище или LOGCOURIER_BOT_TOKEN")
         client = Telegram(token)
-        entries = list_entries(client, chat_id, arguments.limit)
+        entries = list_entries(
+            client, chat_id, arguments.limit, keyswitch_version=arguments.keyswitch_version
+        )
         if arguments.command == "list":
             print(json.dumps(entries, ensure_ascii=False, indent=2))
             return 0
@@ -82,17 +138,25 @@ def main(argv=None, error_handler=None) -> int:
                 for entry in entries
                 if datetime.fromisoformat(entry["created_at"]).date() >= since
             ]
-        root = arguments.output.expanduser().absolute()
-        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if not entries:
+            print(
+                "Подходящих архивов пока нет; старые версии вместо них не скачивались.",
+                file=sys.stderr,
+            )
+            return 0
+        root, selection = selection_directory(
+            arguments.output.expanduser().absolute(), entries, arguments.keyswitch_version
+        )
         for entry in entries:
             data = client.download(entry["file_id"])
             if len(data) != entry["size"] or hashlib.sha256(data).hexdigest() != entry["sha256"]:
                 raise ValueError("Контрольная сумма архива не совпала; файл не сохранён.")
             target = root / f"lc-{entry['bundle_id']}.zip"
             # No overwrites, no archive extraction, no paths from remote metadata.
-            if target.exists():
+            if target.exists() or target.is_symlink():
                 if (
                     target.is_symlink()
+                    or target.stat().st_size != entry["size"]
                     or hashlib.sha256(target.read_bytes()).hexdigest() != entry["sha256"]
                 ):
                     raise ValueError("Путь результата занят другим файлом; перезапись запрещена.")
@@ -101,6 +165,13 @@ def main(argv=None, error_handler=None) -> int:
                 os.chmod(target, 0o600)
                 stream.write(data)
             print(target)
+        if selection is not None:
+            target = root / "selection.json"
+            if not target.exists():
+                with target.open("xb") as stream:
+                    os.chmod(target, 0o600)
+                    stream.write(selection)
+            print(f"Готовая подборка только выбранных версий: {target}", file=sys.stderr)
         return 0
     except Exception as error:
         if error_handler is not None:

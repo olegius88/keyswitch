@@ -13,6 +13,7 @@ from pathlib import Path
 from . import __version__
 from .config import Config, Source
 from .store import Store
+from .versions import HEADER_BYTES, latest_version, observe_version, take_fragment
 
 CHUNK_BYTES = 2 * 1024 * 1024
 ARCHIVE_LIMIT = 10 * 1024 * 1024
@@ -60,10 +61,8 @@ class Collector:
         total = 0
         errors = []
         for source in config.sources:
-            if total >= max_chunks:
-                break
             try:
-                total += self.scan_source(source, config, max_chunks - total)
+                total += self.scan_source(source, config, max(0, max_chunks - total))
             except (OSError, ValueError) as error:
                 # Do not expose paths or OS exception strings containing private paths.
                 errors.append(f"{source.label}: источник недоступен ({type(error).__name__}).")
@@ -72,6 +71,20 @@ class Collector:
     def scan_source(self, source: Source, config: Config, budget: int) -> int:
         paths = [Path(f"{source.path}.{n}") for n in range(source.rotations, 0, -1)]
         paths.append(Path(source.path))
+        # Probe the live file first, independent of the historical rotation backlog.
+        for path in reversed(paths):
+            try:
+                with open_regular(path) as stream:
+                    if not os.fstat(stream.fileno()).st_size:
+                        continue
+                    version = latest_version(stream)
+                    if version is not None:
+                        observe_version(self.store, config, source, version)
+                    break
+            except FileNotFoundError:
+                continue
+        if budget <= 0:
+            return 0  # Version probes must not wait behind another source's backlog.
         initial = not self.store.db.execute(
             "SELECT 1 FROM initialized WHERE source=?", (source.id,)
         ).fetchone()
@@ -91,6 +104,10 @@ class Collector:
                                     info.st_size,
                                     fingerprint(stream, info.st_size),
                                 ),
+                            )
+                            self.store.db.execute(
+                                "INSERT OR REPLACE INTO cursor_context VALUES (?,?,?)",
+                                (source.id, identity, latest_version(stream)),
                             )
                     except FileNotFoundError:
                         continue
@@ -122,6 +139,11 @@ class Collector:
                 )
                 if reset:
                     offset = 0
+                context = self.store.db.execute(
+                    "SELECT version FROM cursor_context WHERE source=? AND identity=?",
+                    (source.id, identity),
+                ).fetchone()
+                version = context["version"] if context and cursor and not reset else None
                 while offset < info.st_size and count < budget:
                     stream.seek(offset)
                     data = stream.read(min(self.chunk_size, info.st_size - offset))
@@ -131,6 +153,13 @@ class Collector:
                     newline = data.rfind(b"\n")
                     if newline >= 0 and newline < len(data) - 1:
                         data = data[: newline + 1]
+                    stream.seek(offset + len(data))
+                    lookahead = stream.read(HEADER_BYTES)
+                    stream.seek(max(0, offset - 1))
+                    line_start = offset == 0 or stream.read(1) == b"\n"
+                    data, version = take_fragment(data, version, line_start, lookahead)
+                    if not data:
+                        break  # The writer has not finished a version header yet.
                     bundle_id = uuid.uuid4().hex
                     now = datetime.now(timezone.utc)
                     metadata = {
@@ -141,6 +170,7 @@ class Collector:
                         "device_name": config.device_name,
                         "source_id": source.id,
                         "source_label": source.label,
+                        "keyswitch_version": version,
                         "created_at": now.isoformat(),
                         "start_byte": offset,
                         "end_byte": offset + len(data),
@@ -164,6 +194,7 @@ class Collector:
                         metadata,
                         payload,
                         name,
+                        version,
                     )
                     offset = new_offset
                     reset = False

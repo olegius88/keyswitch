@@ -28,13 +28,12 @@ entirely locally and using the active EN/RU system layout pair.
 - automatic English and Russian word detection after a typing pause (1.5
   seconds by default, configurable), as well as after Space or
   punctuation; idle correction can be disabled independently in settings;
-- early layout switching: as soon as the beginning of a word is impossible in
-  the current language and clearly continues in the other one (for example
-  `ghbd`), the layout is switched and the prefix rewritten without waiting for
-  the end of the word; the minimum prefix length is configurable (4 by
-  default) and the feature can be disabled. An active contextual assistant in
-  `assist` mode suppresses prefix replacement; it is available in `off`/`shadow`
-  or when the assistant is disabled or unavailable;
+- early layout switching before the end of a word (`ghbd` → `прив`): a
+  separately trained, context-aware prefix model decides in `assist`, within
+  its evaluated 4–12-character range, and waits when uncertain. Minimum length
+  is configurable (4 by default); early switching can be disabled. `off`,
+  `shadow`, or disabling context uses the legacy lexical prefix algorithm.
+  [Training evidence and limitations](model/prefix_v1/README.md);
 - precision-first hybrid detection using hard guards, frequency lexicons,
   Hunspell morphology, character n-grams, recent context and a lightweight
   first-party linear model;
@@ -107,11 +106,11 @@ scenarios and platform limitations.
 
 ## Install on Windows
 
-Download `KeySwitch-Setup-0.16.2-x64.exe` from the
+Download `KeySwitch-Setup-0.17.0-x64.exe` from the
 [latest release](https://github.com/olegius88/keyswitch/releases/latest) and run
 it. The per-user installation goes to `%LOCALAPPDATA%\Programs\KeySwitch` and
 does not require administrator privileges. The release also includes the
-portable `KeySwitch-0.16.2-windows-x64.zip` archive.
+portable `KeySwitch-0.17.0-windows-x64.zip` archive.
 
 After launch, KeySwitch appears in the notification area. Left- or right-click
 the `EN/RU` or flag icon to open its menu. Its Switch to action always offers
@@ -177,12 +176,12 @@ Probe the system backend without opening the application window:
 
 ## Install the Debian package
 
-Download `keyswitch_0.16.2_amd64.deb` from the
+Download `keyswitch_0.17.0_amd64.deb` from the
 [latest release](https://github.com/olegius88/keyswitch/releases/latest), then
 install it with:
 
 ```bash
-sudo apt install ./keyswitch_0.16.2_amd64.deb
+sudo apt install ./keyswitch_0.17.0_amd64.deb
 ```
 
 The package installs the required system dependencies and adds KeySwitch to the
@@ -292,7 +291,7 @@ and backups covering the incident. `context_decision` does not include the
 surrounding phrase; `correction_applied` confirms event submission, not the
 final text. See [troubleshooting](docs/troubleshooting.md).
 
-The Local linear model switch on the automatic-correction page disables only
+The Base word model (KSLM) switch on the automatic-correction page disables only
 the baseline KSLM classifier; dictionaries, hard guards and explicitly learned
 rules continue to work. The contextual assistant has a separate setting and
 is not disabled by this switch. Diagnostics show the bundled KSLM version and abbreviated
@@ -609,7 +608,7 @@ Build the reproducible native Debian package with:
 sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
 ./tools/install-build-tools.sh .nuitka
 KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package="dist/keyswitch_0.16.2_$(dpkg --print-architecture).deb"
+package="dist/keyswitch_0.17.0_$(dpkg --print-architecture).deb"
 ./tools/verify-native-deb.sh "$package"
 ```
 
@@ -717,7 +716,7 @@ See [release and recovery procedures](docs/verification.md).
 - On Windows, UIPI prevents a regular process from injecting input into a
   window running at a higher integrity level. KeySwitch needs a matching level
   for that target window.
-- The Windows 0.16.2 Setup EXE is not yet signed with a publisher certificate.
+- The Windows 0.17.0 Setup EXE is not yet signed with a publisher certificate.
 
 ## License
 

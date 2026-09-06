@@ -549,8 +549,19 @@ class Window(QMainWindow):
         stamp = (
             datetime.fromtimestamp(last).strftime("%d.%m.%Y %H:%M:%S") if last else "ещё не было"
         )
+        versions = stats.get("keyswitch_versions", {})
+        active_sources = {source.id for source in self.sources}
+        version_text = (
+            "; ".join(
+                f"{state['source_label']}: {state['version']}"
+                for source, state in versions.items()
+                if source in active_sources
+            )
+            or "ещё не определена по логам"
+        )
         self.summary.setText(
             f"{message}\nВ очереди: {stats['queued']}; ждут каталога: {stats['unindexed']}.\n"
+            f"Версия KeySwitch: {version_text}.\n"
             f"Объём очереди: {stats['queue_bytes'] / 1024 / 1024:.1f} МиБ.\n"
             f"Последняя успешная отправка: {stamp}.\n"
             f"Архивов для других ботов/групп: {stats['other']} (не отправляются сюда)."

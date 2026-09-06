@@ -1,6 +1,6 @@
 # Проверка, сборка и выпуск
 
-Инструкция для текущего дерева 0.16.1. Все команды — из корня репозитория.
+Инструкция для текущего рабочего дерева. Все команды — из корня репозитория.
 Разделы проверок не делают коммит, push или GitHub Release. Последний раздел
 публикации меняет Git и внешнее состояние; запускайте его только после явного
 решения о выпуске и проверки состава изменений.
@@ -22,6 +22,7 @@ dbus-run-session -- xvfb-run -a env GIO_USE_VFS=local ./tests/run_coverage.sh
 PYTHONPATH=src python3 tools/verify_context_model.py
 PYTHONPATH=src python3 tools/verify_context_v2.py
 PYTHONPATH=src python3 tools/verify_boundary_model.py
+PYTHONPATH=src python3 tools/verify_prefix_model.py
 ```
 
 100% line/branch coverage относится к [.coveragerc](../.coveragerc): несколько
@@ -88,6 +89,21 @@ PYTHONPATH=src python3 tools/evaluate_boundary_engine.py --verify
 независимым материалом. Подробности и ограничения —
 [в отчёте эксперимента](../model/boundary_v1/README.md). Запускайте тяжёлые
 обучения и replay последовательно. API-моки не заменяют нативный Windows E2E.
+
+Раннюю модель префиксов проверяют отдельные команды (последовательно):
+
+```bash
+PYTHONPATH=src python3 tools/prefix_corpus.py
+PYTHONPATH=src python3 tools/train_prefix_model.py verify
+PYTHONPATH=src python3 tools/evaluate_prefix_engine.py --verify
+PYTHONPATH=src python3 tools/verify_prefix_model.py
+```
+
+Обучение использует замороженные числовые признаки; сквозной replay требует
+эталонных словарей. `verify` не меняет веса, не подбирает порог и не продвигает
+модель. Для изменений только движка доступен `evaluate_prefix_engine.py
+--refresh-runtime` с архивированием старого отчёта; это регрессия, не свежий
+независимый тест. [Методика и ограничения](../model/prefix_v1/README.md).
 
 Нативное чтение поля проверяется отдельно:
 

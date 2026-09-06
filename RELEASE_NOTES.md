@@ -1,83 +1,101 @@
-# KeySwitch 0.16.2
+# KeySwitch 0.17.0
 
 ## Русский
 
-Исправления надёжности ввода и более точная диагностика. Рабочие веса моделей
-и пользовательские настройки по умолчанию сохранены.
+Обученная ранняя смена раскладки при включённом контекстном помощнике:
+например, `ghbd` → `прив` ещё до окончания слова, с продолжением набора
+в русской раскладке. Сохранённые настройки и значения по умолчанию не сбрасываются.
 
-- Контекст фразы и целое текущее слово больше не сбрасываются, если во время
-  замены повторно доставлены только подтверждённые отпускания клавиш,
-  без новых нажатий или неизвестного ввода.
-- Повторный Pause не переключает язык поверх ожидающей ручной замены.
-  Если отпускание клавиши не получено, ручная замена или отмена безопасно
-  прекращается через три секунды с понятным статусом. Таймаут не имитирует
-  отпускание физически удерживаемой клавиши.
-- Пунктуация при отмене замены сохраняется в раскладке, в которой была
-  набрана, в Windows и Linux X11.
-- Журнал различает решение контекстной модели, резервное решение,
-  неподдержанный контекст и shadow-режим. Добавлены состояние читателя поля
-  и причина сброса контекста при инъекции — без записи соседнего текста.
-- Добавлены экспериментальные отложенные границы слова, сохранение хвоста
-  пунктуации и проверки порядка «замена → Enter». Отдельный boundary-v1
-  обучен на публичных данных, но **отклонён и не включён в приложение**:
-  на 11 992 отложенных примерах — одна ошибка трактовки пунктуации и 9 998
-  отказов от решения. Прежний рабочий алгоритм границ остаётся активным.
-- Сборка защищена от случайного включения отклонённых весов. Обучение и
-  регрессионные сравнения воспроизводимы; предыдущие отчёты сохранены.
+- Отдельная локальная модель prefix-v1 обучена на последовательностях
+  незаконченных слов. Она работает в `assist`, если включены «Учитывать
+  контекст» и «Ранняя смена раскладки». Модель завершённых слов не подменяется.
+- Проверенная область ранней модели — 4–12 символов. Настройка минимума может
+  отложить проверку; значение 3 действует только в словарном алгоритме.
+  При сомнении модель ждёт продолжения. В `off`/`shadow` или без контекста
+  сохраняется прежний алгоритм раннего переключения.
+- Перед заменой после отпускания клавиш повторно проверяются прогноз,
+  текущий префикс, поле и настройки. Сохраняются продолжение слова, пробелы,
+  отмена и оценка уверенности. Ручной выбор, исключения и защиты ввода
+  остаются приоритетнее вероятностного решения.
+- В Windows и Linux обновлены описания контекстного помощника, базовой модели
+  слов и раннего переключения. Чтение настоящего поля по-прежнему включается
+  отдельно; соседний текст не добавляется в диагностику `prefix_decision`.
+- Добавлены публичный корпус, разделение по семействам префиксов, воспроизводимое
+  обучение и сквозная проверка точного текста. Сборки проверяют целостность и
+  результаты новой модели; отклонённые context-v2 и boundary-v1 остаются выключены.
 
-Это не обещание исправить все неоднозначные слова, опечатки или случаи
-смешанного ввода. `text_verified=false` по-прежнему означает, что конечный
-текст в стороннем приложении не был прочитан и проверен после инъекции.
-Приватные журналы не входят в исследовательские данные. LogCourier не меняется.
+На отложенном синтетическом тесте ранняя модель исправила до конца слова
+94.70% / 95.62% нужных случаев в двух словарных профилях. Остались две ложные
+замены опечаток в каждом профиле — это одни и те же ситуации, не четыре
+независимые ошибки. Это не оценка всех реальных приложений и намерений.
+В сквозном сравнении сохраняются прежние ложные вмешательства завершённой
+модели в 10 из 160 отрицательных примеров; этот выпуск их не устраняет.
+Приватные логи не используются в обучении и не публикуются.
 
-[Эксперимент и ограничения](https://github.com/olegius88/keyswitch/blob/v0.16.2/model/boundary_v1/README.md) ·
-[Диагностика ввода](https://github.com/olegius88/keyswitch/blob/v0.16.2/docs/troubleshooting.md).
+В исходниках LogCourier добавлены маркеры смены версии KeySwitch, разделение
+фрагментов по версиям и выбор актуальной версии при получении логов по
+умолчанию. Старые версии доступны явно. Это отдельное приложение: данный
+релиз KeySwitch не обновляет установленный LogCourier и не публикует его установщик.
+
+[Обучение, результаты и ограничения](https://github.com/olegius88/keyswitch/blob/v0.17.0/model/prefix_v1/README.md) ·
+[Настройки помощника](https://github.com/olegius88/keyswitch/blob/v0.17.0/docs/context-assistant.md).
 
 ### Установка
 
-- Windows 10/11 x64: `KeySwitch-Setup-0.16.2-x64.exe` или
-  `KeySwitch-0.16.2-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.16.2_amd64.deb`.
+- Windows 10/11 x64: `KeySwitch-Setup-0.17.0-x64.exe` или
+  `KeySwitch-0.17.0-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.17.0_amd64.deb`.
 - Контрольные суммы: `SHA256SUMS`.
 
 Установщик Windows пока не подписан сертификатом издателя. Нативный Wayland
-не поддерживается.
+не поддерживается. `text_verified=false` в журнале не подтверждает конечный
+текст стороннего приложения: после инъекции он не прочитан и не проверен.
 
 ## English
 
-Input reliability fixes and clearer diagnostics. Shipping model weights and
-user defaults remain unchanged.
+Trained mid-word layout correction with contextual assist enabled: for example,
+`ghbd` → `прив` before the word is finished, then typing continues in Russian.
+Saved preferences and default values are preserved.
 
-- Preserve phrase context and whole-word continuation when replay consists
-  only of confirmed key releases, without new presses or unknown input.
-- Do not switch layouts on a repeated Pause while a manual correction is
-  waiting. Cancel pending manual corrections/undo safely after a three-second
-  release timeout; never infer a physical key-up solely from elapsed time.
-- Replay literal punctuation in its original layout during correction undo
-  on Windows and Linux X11.
-- Distinguish contextual decisions, baseline fallbacks, unsupported context
-  and shadow results in diagnostics. Report field-reader state and context
-  reset reasons without logging surrounding text.
-- Add experimental delayed segmentation and punctuation-tail execution with
-  correct-before-Enter regression coverage. Train a separate public-data
-  boundary ranker, but **reject it for activation**: one segmentation error
-  and 9,998 abstentions on 11,992 held-out examples. The existing boundary
-  policy remains active; this is not a model-quality upgrade.
-- Add reproducible training/replays and package guards against accidental
-  rejected-weight installation; retain earlier regression evidence.
+- A separate local prefix-v1 model is trained on unfinished-word sequences.
+  It runs in `assist` with context and early switching enabled. The shipping
+  completed-word model is unchanged.
+- The validated prefix range is 4–12 characters. The minimum-length setting
+  can delay evaluation; a value of 3 applies only to the dictionary algorithm.
+  Uncertain prefixes wait for continuation. `off`/`shadow` and disabled context
+  retain the legacy early-switch algorithm.
+- After key release, revalidate the prediction, current prefix, field and
+  settings before replacement. Preserve continuation, spaces, undo and
+  confidence. Manual intent, exclusions and input-integrity guards retain priority.
+- Clarify Windows/Linux settings for the separate models and early switching.
+  Actual field reading remains opt-in; `prefix_decision` diagnostics do not
+  include surrounding text.
+- Add a public corpus, prefix-family splits, reproducible training, exact-text
+  engine replay and package promotion checks. Rejected context-v2 and boundary-v1
+  candidates remain inactive.
 
-Ambiguous words, spelling errors and mixed-language input still have known
-limitations. `text_verified=false` still means the final application text was
-not read and verified after injection. No private logs are included in the
-research corpus. LogCourier is unchanged.
+On the held-out synthetic test, the prefix model corrected 94.70% / 95.62% of
+desired cases before word completion in two dictionary profiles. Two spelling
+errors still triggered false conversions in each profile: the same two cases,
+not four independent errors. These are not real-world error-rate guarantees.
+The engine comparison retains existing completed-word false interventions in
+10 of 160 negative cases; this release does not fix them. Private logs are not
+used for training or published.
 
-See the [experiment report](https://github.com/olegius88/keyswitch/blob/v0.16.2/model/boundary_v1/README.md).
+LogCourier sources now mark KeySwitch version changes, separate fragments by
+version and default log retrieval to the current version. Older versions remain
+explicitly accessible. LogCourier is a separate application: this KeySwitch
+release neither updates an installed collector nor publishes its installer.
+
+See the [training report and limitations](https://github.com/olegius88/keyswitch/blob/v0.17.0/model/prefix_v1/README.md).
 
 ### Installation
 
-- Windows 10/11 x64: `KeySwitch-Setup-0.16.2-x64.exe` or
-  `KeySwitch-0.16.2-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.16.2_amd64.deb`.
+- Windows 10/11 x64: `KeySwitch-Setup-0.17.0-x64.exe` or
+  `KeySwitch-0.17.0-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.17.0_amd64.deb`.
 - Checksums: `SHA256SUMS`.
 
 The Windows installer is not yet publisher-signed. Native Wayland is unsupported.
+`text_verified=false` means final application text was not read and verified
+after injection, even if input events were sent successfully.

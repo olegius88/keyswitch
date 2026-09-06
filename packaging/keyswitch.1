@@ -1,4 +1,4 @@
-.TH KEYSWITCH 1 "September 2026" "KeySwitch 0.16.2" "User Commands"
+.TH KEYSWITCH 1 "September 2026" "KeySwitch 0.17.0" "User Commands"
 .SH NAME
 keyswitch \- automatic keyboard layout correction for Ubuntu X11
 .SH SYNOPSIS
@@ -26,8 +26,10 @@ The shipping contextual evaluation is synthetic, not a real-world error rate.
 The expanded public-phrase experiment found limitations of the shipping model
 and rejected its new candidate; the original context-v1 weights remain active.
 Its certification is separate from the sealed baseline described below.
-Prefix replacement remains available in off/shadow modes; assist waits for a
-completed word or idle boundary when its model and context are enabled.
+In assist, a separately trained prefix model can switch before word completion.
+It uses context and prefix evidence, evaluates lengths 4 through 12, and waits
+when uncertain. Missing prefix weights disable only this early model path.
+Off/shadow or disabled context retains the legacy lexical prefix algorithm.
 .PP
 Without contextual intervention, detection is a precision-first hybrid.
 Hard guards and explicit user rules are
@@ -147,8 +149,8 @@ only switches the layout. The typing pause that triggers idle correction is
 configurable (1.5 seconds by default). Early layout switching rewrites the
 beginning of a word as soon as its prefix is impossible in the current
 language and clearly continues in the other one; the minimum prefix length is
-configurable and the feature can be disabled. An active contextual assistant
-in assist mode suppresses this prefix mechanism.
+configurable and the feature can be disabled. In assist a separate prefix model
+makes the decision, without applying the completed-word model to partial input.
 .SH OPTIONS
 .TP
 .B \-\-hidden

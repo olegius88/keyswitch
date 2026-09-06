@@ -324,7 +324,7 @@ def main() -> int:
         return GLib.SOURCE_REMOVE
 
     def start_early_switch_case() -> bool:
-        settings.set("detection.context_policy", "off")
+        settings.set("detection.context_policy", "assist")
         settings.set("detection.early_switch", True)
         backend.switch_group(0)
         backend._libraries.x11.XSync(backend._control, 0)
@@ -338,7 +338,19 @@ def main() -> int:
 
     def start_slow_early_switch_typing() -> bool:
         del correction_modes[:]
-        type_slowly("ghbdtn ", 0, verify_early_switch)
+        type_slowly("ghbd", 0, verify_mid_word)
+        return GLib.SOURCE_REMOVE
+
+    def verify_mid_word() -> bool:
+        # Completed-word history/listeners fire only after the boundary.
+        # Here prove the actual field and the pending early continuation.
+        if entry.get_text() != "hello прив" or backend.current_group() != 1 or engine._early_switch_origin != 0:
+            print(f"PREFIX_ASSIST_FAILED text={entry.get_text()!r} modes={correction_modes!r}")
+            print("E2E_FAILED")
+            loop.quit()
+            return GLib.SOURCE_REMOVE
+        print("PREFIX_ASSIST_MID_WORD_E2E_OK")
+        type_slowly("tn ", 0, verify_early_switch)
         return GLib.SOURCE_REMOVE
 
     def verify_early_switch() -> bool:

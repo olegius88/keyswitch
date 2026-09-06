@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from .config import Config
 from .store import Store
 from .telegram import FILE_ID, MAX_DOWNLOAD, Telegram, TelegramError
+from .versions import MARKER_KIND, VERSION, caption, current_versions
 
 INDEX_LIMIT = 2 * 1024 * 1024
 HEX = re.compile(r"[a-f0-9]{64}")
@@ -44,6 +45,29 @@ def decode_index(data: bytes, chat_id: str, bot_id: str) -> dict:
             if not 0 < entry["size"] <= MAX_DOWNLOAD:
                 raise ValueError
             datetime.fromisoformat(entry["created_at"])
+            version = entry.get("keyswitch_version")
+            if version is not None:
+                if not isinstance(version, str) or not VERSION.fullmatch(version):
+                    raise ValueError
+                if not IDENTIFIER.fullmatch(entry["source_id"]):
+                    raise ValueError
+                if entry.get("device_id") != result["device_id"]:
+                    raise ValueError
+            if entry.get("kind") == MARKER_KIND and version is None:
+                raise ValueError
+        versions = result.get("keyswitch_versions", {})
+        if not isinstance(versions, dict) or len(versions) > 50:
+            raise ValueError
+        for source, state in versions.items():
+            if not IDENTIFIER.fullmatch(source) or not VERSION.fullmatch(state["version"]):
+                raise ValueError
+            if not IDENTIFIER.fullmatch(state["marker_id"]):
+                raise ValueError
+            if state.get("previous_version") is not None and not VERSION.fullmatch(
+                state["previous_version"]
+            ):
+                raise ValueError
+            datetime.fromisoformat(state["detected_at"])
         previous = result["previous"]
         if previous is not None:
             if not FILE_ID.fullmatch(previous["file_id"]) or not HEX.fullmatch(previous["sha256"]):
@@ -123,8 +147,7 @@ def deliver(store: Store, config: Config, client: Telegram, cancelled=lambda: Fa
             config.chat_id,
             row["name"],
             row["payload"],
-            f"LogCourier · {meta['device_name']} · {meta['source_label']}\n"
-            f"{meta['created_at']}\nID: {row['id']}",
+            caption(meta),
         )
         store.receipt(row["id"], message["document"]["file_id"], message["message_id"])
     entries = []
@@ -139,7 +162,8 @@ def deliver(store: Store, config: Config, client: Telegram, cancelled=lambda: Fa
             )
         if len(entries) == 200:
             break
-    if not entries:
+    versions = current_versions(store, config)
+    if not entries and versions == (head or {}).get("index", {}).get("keyswitch_versions", {}):
         return "Новых архивов для отправки нет."
     checkpoint(cancelled)
     # Detect another writer before replacing the catalog pointer.
@@ -154,6 +178,7 @@ def deliver(store: Store, config: Config, client: Telegram, cancelled=lambda: Fa
         "bot_id": client.bot_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "entries": entries,
+        "keyswitch_versions": versions,
         "previous": {"file_id": head["file_id"], "sha256": head["sha256"]} if head else None,
     }
     data = json.dumps(index, ensure_ascii=False).encode()
@@ -203,11 +228,26 @@ def finish_catalog(
     # Do not unpin anything automatically: never disturb another participant's pins.
 
 
-def list_entries(client: Telegram, chat_id: str, limit: int = 100, pages: int = 100) -> list[dict]:
+def list_entries(
+    client: Telegram,
+    chat_id: str,
+    limit: int = 100,
+    pages: int = 100,
+    *,
+    keyswitch_version: str | None = None,
+) -> list[dict]:
+    if keyswitch_version not in (None, "current") and not VERSION.fullmatch(keyswitch_version):
+        raise ValueError("Укажите версию KeySwitch, например 0.16.2, или current.")
     head = current_catalog(client, chat_id)
     if not head:
         return []
     index = head["index"]
+    versions = index.get("keyswitch_versions", {})
+    if keyswitch_version == "current" and not versions:
+        raise TelegramError(
+            "В каталоге ещё не определена версия KeySwitch. Обновите и запустите сборщик; "
+            "для старых и неверсионированных логов явно укажите --all-versions."
+        )
     device_id = index["device_id"]
     result = []
     seen_files = {head["file_id"]}
@@ -216,7 +256,18 @@ def list_entries(client: Telegram, chat_id: str, limit: int = 100, pages: int = 
         for entry in reversed(index["entries"]):
             if entry["bundle_id"] not in seen_bundles:
                 seen_bundles.add(entry["bundle_id"])
-                result.append(entry)
+                version = entry.get("keyswitch_version")
+                selected = keyswitch_version is None or (
+                    bool(version)
+                    and version
+                    == (
+                        versions.get(entry.get("source_id"), {}).get("version")
+                        if keyswitch_version == "current"
+                        else keyswitch_version
+                    )
+                )
+                if entry.get("kind") != MARKER_KIND and selected:
+                    result.append(entry)
             if len(result) >= limit:
                 return result
         previous = index["previous"]

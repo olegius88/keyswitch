@@ -27,6 +27,9 @@ class Store:
                 source TEXT NOT NULL, identity TEXT NOT NULL, offset INTEGER NOT NULL,
                 anchor TEXT NOT NULL, PRIMARY KEY(source, identity));
             CREATE TABLE IF NOT EXISTS initialized(source TEXT PRIMARY KEY);
+            CREATE TABLE IF NOT EXISTS cursor_context(
+                source TEXT NOT NULL, identity TEXT NOT NULL, version TEXT,
+                PRIMARY KEY(source, identity));
             CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS bundles(
                 id TEXT PRIMARY KEY, destination TEXT NOT NULL, created REAL NOT NULL,
@@ -71,6 +74,7 @@ class Store:
             ).fetchone()[0],
             "queue_bytes": self.queue_bytes(),
             "last_success": self.get("success:" + destination),
+            "keyswitch_versions": self.get("keyswitch_versions:" + destination, {}),
         }
 
     def enqueue(
@@ -83,27 +87,39 @@ class Store:
         metadata: dict,
         payload: bytes,
         name: str,
+        version: str | None = None,
     ) -> None:
         with self.db:
-            if self.queue_bytes() + len(payload) > self.capacity:
-                raise QueueFull(
-                    "Очередь заполнена. Сбор приостановлен; исходные файлы не удаляются."
-                )
-            self.db.execute(
-                "INSERT INTO bundles(id,destination,created,name,meta,payload) VALUES (?,?,?,?,?,?)",
-                (
-                    metadata["bundle_id"],
-                    destination,
-                    time.time(),
-                    name,
-                    json.dumps(metadata, ensure_ascii=False),
-                    payload,
-                ),
-            )
+            self._insert_bundle(destination, metadata, payload, name)
             self.db.execute(
                 "INSERT OR REPLACE INTO cursors VALUES (?,?,?,?)",
                 (source, identity, offset, anchor),
             )
+            self.db.execute(
+                "INSERT OR REPLACE INTO cursor_context VALUES (?,?,?)",
+                (source, identity, version),
+            )
+
+    def _insert_bundle(self, destination, metadata, payload, name) -> None:
+        if self.queue_bytes() + len(payload) > self.capacity:
+            raise QueueFull("Очередь заполнена. Сбор приостановлен; исходные файлы не удаляются.")
+        self.db.execute(
+            "INSERT INTO bundles(id,destination,created,name,meta,payload) VALUES (?,?,?,?,?,?)",
+            (
+                metadata["bundle_id"],
+                destination,
+                time.time(),
+                name,
+                json.dumps(metadata, ensure_ascii=False),
+                payload,
+            ),
+        )
+
+    def enqueue_event(self, destination, metadata, payload, name, updates: dict) -> None:
+        with self.db:
+            self._insert_bundle(destination, metadata, payload, name)
+            for key, value in updates.items():
+                self.db.execute("INSERT OR REPLACE INTO kv VALUES (?,?)", (key, json.dumps(value)))
 
     def receipt(self, bundle_id: str, file_id: str, message_id: int) -> None:
         with self.db:

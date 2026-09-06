@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from .store import QueueFull
 from .telegram import MAX_DOWNLOAD
+from .versions import MARKER_KIND
 
 
 def compact(store, config, limit=MAX_DOWNLOAD, max_fragments=4096):
@@ -16,19 +17,25 @@ def compact(store, config, limit=MAX_DOWNLOAD, max_fragments=4096):
         "SELECT * FROM bundles WHERE destination=? AND indexed=0 AND file_id IS NULL ORDER BY created,id",
         (config.destination,),
     )
-    selected = []
-    estimated = 1024
+    groups = {}
     for row in rows:
         meta = json.loads(row["meta"])
-        if meta.get("batch"):
+        if meta.get("batch") or meta.get("kind") == MARKER_KIND:
+            continue
+        version = meta.get("keyswitch_version")
+        key = (meta.get("source_id") if version else None, version)
+        selected, estimated, full = groups.setdefault(key, ([], 1024, False))
+        if full:
             continue
         # ZIP_STORED: payload lengths plus conservative per-entry/manifest overhead.
         cost = len(row["payload"]) + len(row["meta"].encode("utf-8")) + 512
         if estimated + cost > limit or len(selected) >= max_fragments:
-            break
+            groups[key] = (selected, estimated, True)
+            continue
         selected.append(row)
-        estimated += cost
-    if len(selected) < 2:
+        groups[key] = (selected, estimated + cost, False)
+    selected = next((group[0] for group in groups.values() if len(group[0]) >= 2), [])
+    if not selected:
         return 0
     buffer = io.BytesIO()
     manifest = []
@@ -57,6 +64,10 @@ def compact(store, config, limit=MAX_DOWNLOAD, max_fragments=4096):
         "sha256": hashlib.sha256(payload).hexdigest(),
         "size": len(payload),
     }
+    first = json.loads(selected[0]["meta"])
+    meta["keyswitch_version"] = first.get("keyswitch_version")
+    if meta["keyswitch_version"]:
+        meta["source_id"] = first["source_id"]
     with store.db:
         before = sum(len(row["payload"]) for row in selected)
         if store.queue_bytes() - before + len(payload) > store.capacity:

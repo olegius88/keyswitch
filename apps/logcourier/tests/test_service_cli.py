@@ -66,11 +66,11 @@ def test_cli_fetch_validates_and_skips_existing(
     Collector(store).scan(config)
     deliver(store, config, telegram)
     output = tmp_path / "download"
-    args = ["fetch", "--output", str(output)]
+    args = ["fetch", "--all-versions", "--output", str(output)]
     assert __main__.main(args) == 0
     assert len(list(output.glob("*.zip"))) == 1
     assert __main__.main(args) == 0
-    assert __main__.main(["list"]) == 0
+    assert __main__.main(["list", "--all-versions"]) == 0
     capsys.readouterr()
     assert __main__.main(["status"]) == 0
     assert json.loads(capsys.readouterr().out)["chat_id"] == config.chat_id

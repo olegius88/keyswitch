@@ -64,7 +64,19 @@ def main():
         assert hashlib.sha256(data).hexdigest() == entry["sha256"]
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             assert archive.read("fragment.log") == fixture.read_bytes()
-        assert cli(["fetch", "--output", str(test_root / "downloads"), "--limit", "1"]) == 0
+        assert (
+            cli(
+                [
+                    "fetch",
+                    "--all-versions",
+                    "--output",
+                    str(test_root / "downloads"),
+                    "--limit",
+                    "1",
+                ]
+            )
+            == 0
+        )
         assert not store.queue(test.destination)
         report = {
             "passed": True,

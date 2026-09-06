@@ -30,6 +30,7 @@ from .intent_model import CorrectionTrigger, LinearNgramModel
 from .context_policy import ContextPolicy, ContextResult
 from .context_access import PlatformFieldReader
 from .input_context import FieldContext, FieldReader
+from .prefix_model import PrefixInput, PrefixModel
 from .short_words import (
     is_short_word_override,
     natural_short_source_veto,
@@ -203,6 +204,8 @@ class KeySwitchEngine:
         self.context_policy = ContextPolicy(context_reader or PlatformFieldReader(self.backend))
         self._context_result: ContextResult | None = None
         self.boundary_model = BoundaryModel.default()
+        self.prefix_model = PrefixModel.default()
+        self._early_switch_confidence = EARLY_SWITCH_CONFIDENCE
         self._context_waiting: WaitingContextWord | None = None
         self._sensitive_context_window: int | None = None
         self._typed_events = 0
@@ -800,14 +803,6 @@ class KeySwitchEngine:
             for stroke in self._strokes
         ):
             return
-        if (
-            self.context_policy.model is not None
-            and bool(self.settings.get("detection.context_aware", True))
-            and self.settings.get("detection.context_policy", "assist") == "assist"
-        ):
-            # Contextual training covers completed tokens/idle, not prefixes.
-            # Legacy early switching remains available in off/shadow mode.
-            return
         if not bool(self.settings.get("detection.early_switch", True)):
             return
         if not bool(self.settings.get("enabled", True)):
@@ -839,6 +834,16 @@ class KeySwitchEngine:
         )
         application = self.backend.active_application()
         excluded = self._application_excluded(application)
+        field: FieldContext | None = None
+        confidence = EARLY_SWITCH_CONFIDENCE
+        protection = self._early_prefix_protection(original, source_group, decision.target_group)
+        if not excluded and not protection:
+            field, protection = self._early_prefix_field(original, application)
+            excluded = self._application_excluded(application)
+        if protection:
+            decision = replace(decision, should_switch=False, reason=protection)
+        elif not excluded:
+            decision, confidence = self._decide_prefix(decision, field)
         if len(strokes) == policy.minimum_length or decision.should_switch:
             self._log_early_switch(decision, policy, application, excluded)
         if not decision.should_switch or excluded:
@@ -850,10 +855,11 @@ class KeySwitchEngine:
             decision.target_group,
             original,
             decision.replacement,
-            EARLY_SWITCH_CONFIDENCE,
+            confidence,
             application,
             True,
             "early",
+            context_field=field.field_id if field is not None and field.source != "observed" else "",
         )
         # The last letter's key is physically still down: a synthetic press of a
         # held key is ignored by the X server and the retyped letter would be
@@ -868,6 +874,67 @@ class KeySwitchEngine:
             prefix_length=len(strokes),
         )
 
+    def _early_prefix_protection(self, original: str, source: int, target: int) -> str:
+        key = self.detector.token_key(original)
+        ignored: list[str] = self.settings.get("exclusions.words", [])
+        if any(self.detector.token_key(word).startswith(key) for word in ignored):
+            return "excluded_word_prefix"
+        if bool(self.settings.get("detection.learning", True)) and any(
+            item.source_group == source and item.target_group == target and item.word.startswith(key)
+            for item in self.learning.rejections()
+        ):
+            return "learned_rejected_prefix"
+        if bool(self.settings.get("detection.protect_code", True)) and self.detector.is_protected_token(original):
+            return "protected_token"
+        if self._context_waiting is not None:
+            return "context_word_waiting"
+        return ""
+
+    def _early_prefix_field(self, original: str, application: str) -> tuple[FieldContext, str]:
+        field = self.context_policy.stream.snapshot(original)
+        if not bool(self.settings.get("detection.context_aware", True)):
+            field = FieldContext(application, str(self._focus_window or 0))
+        reader = self.context_policy.reader
+        if bool(self.settings.get("detection.context_read_field", False)) and reader is not None:
+            snapshot = reader.read(application, self._focus_window or 0)
+            if snapshot is not None:
+                snapshot = snapshot.bounded()
+                if snapshot.sensitive:
+                    self._sensitive_context_window = self._focus_window
+                    self.context_policy.stream.clear()
+                    self._contexts.clear()
+                    self._update(current_word="", last_action="Защищённое поле: обработка отключена")
+                    return snapshot, "sensitive_field"
+                if snapshot.selection or not snapshot.field_id or snapshot.application != application or not snapshot.before.endswith(original):
+                    return snapshot, "context_field_changed"
+                field = replace(snapshot, before=snapshot.before[:-len(original)])
+        return field, ""
+
+    def _decide_prefix(self, baseline: EarlySwitchDecision, field: FieldContext | None) -> tuple[EarlySwitchDecision, float]:
+        mode = str(self.settings.get("detection.context_policy", "assist"))
+        if not bool(self.settings.get("detection.context_aware", True)) or mode not in {"assist", "shadow"}:
+            return baseline, EARLY_SWITCH_CONFIDENCE
+        supported = (4 <= len(baseline.original) <= 12 and baseline.replacement.isalpha()
+                     and not any(char.isupper() for char in (baseline.original[1:] + baseline.replacement[1:]))
+                     and baseline.source_group in {0, 1} and baseline.target_group == 1 - baseline.source_group
+                     and 0 in self.models and 1 in self.models and 0 in self._prefix_indexes and 1 in self._prefix_indexes)
+        model = self.prefix_model
+        if model is None or field is None or not supported:
+            reason = "prefix_model_unavailable" if model is None else "prefix_input_unsupported"
+            return (replace(baseline, should_switch=False, reason=reason) if mode == "assist" else baseline), EARLY_SWITCH_CONFIDENCE
+        prediction = model.predict(PrefixInput(baseline.original, baseline.replacement, baseline.source_group, field), self._prefix_indexes, self.models)
+        self._technical_event(
+            "prefix_decision", action=prediction.action, score=round(prediction.probability, 6),
+            model_version=prediction.model_version, mode=mode, baseline_convert=baseline.should_switch,
+            policy_applied=mode == "assist", decision_source="prefix_model" if mode == "assist" else "prefix_index",
+            final_action=prediction.action if mode == "assist" else "convert" if baseline.should_switch else "wait",
+            prefix_length=len(baseline.original), source_group=baseline.source_group,
+            context_source=field.source, before_characters=len(field.before), after_characters=len(field.after), field_role=field.role,
+        )
+        if mode == "shadow":
+            return baseline, EARLY_SWITCH_CONFIDENCE
+        return replace(baseline, should_switch=prediction.action == "convert", reason="префиксная модель: " + prediction.action), prediction.probability
+
     def _refresh_early_plan(self, plan: CorrectionPlan) -> CorrectionPlan | None:
         """Extend a scheduled early switch with letters typed before release."""
 
@@ -879,20 +946,27 @@ class KeySwitchEngine:
             or self._source_group != plan.source_group
         ):
             return None
-        if len(strokes) == prefix:
-            return plan
-        return CorrectionPlan(
-            strokes,
-            None,
-            plan.source_group,
-            plan.target_group,
-            self._text_for_group(strokes, plan.source_group),
-            self._text_for_group(strokes, plan.target_group),
-            plan.confidence,
-            plan.application,
-            plan.automatic,
-            plan.mode,
-        )
+        original = self._text_for_group(strokes, plan.source_group)
+        replacement = self._text_for_group(strokes, plan.target_group)
+        if plan.mode == "early" and (
+            not bool(self.settings.get("detection.early_switch", True))
+            or len(strokes) < self._early_switch_policy().minimum_length
+            or self._early_prefix_protection(original, plan.source_group, plan.target_group)
+            or not replacement.isalpha()
+        ):
+            return None
+        refreshed = replace(plan, strokes=strokes, original=original, replacement=replacement)
+        if plan.mode == "early":
+            field, protection = self._early_prefix_field(original, plan.application)
+            if protection:
+                return None
+            decision, confidence = self._decide_prefix(
+                EarlySwitchDecision(True, plan.source_group, plan.target_group, original, replacement, "scheduled_prefix"), field,
+            )
+            if not decision.should_switch:
+                return None
+            refreshed = replace(refreshed, confidence=confidence)
+        return refreshed
 
     def _log_early_switch(
         self,
@@ -1008,7 +1082,7 @@ class KeySwitchEngine:
             final_group,
             original,
             replacement,
-            EARLY_SWITCH_CONFIDENCE,
+            self._early_switch_confidence,
             application,
             True,
             "early",
@@ -1017,7 +1091,7 @@ class KeySwitchEngine:
         self._last_correction_time = time.monotonic()
         self._last_committed = CorrectionPlan(
             strokes, boundary, final_group, origin, replacement, original,
-            EARLY_SWITCH_CONFIDENCE, application, False,
+            self._early_switch_confidence, application, False,
         )
         self._last_committed_stale = False
         excluded = self._application_excluded(application)
@@ -2380,6 +2454,7 @@ class KeySwitchEngine:
             if plan.mode == "early":
                 self._early_switch_origin = plan.source_group
                 self._early_switch_at = time.monotonic()
+                self._early_switch_confidence = plan.confidence
             self._source_group = plan.target_group
             self._update(
                 current_group=plan.target_group,

@@ -337,6 +337,29 @@ class MainWindowInteractionTests(unittest.TestCase):
         with patch("keyswitch.ui.Gdk.Display.get_default", return_value=None):
             self.window._install_css()
 
+    def test_prefix_settings_explain_modes_and_preserve_user_values(self) -> None:
+        controls = self.window._settings_controls
+        early = controls["detection.early_switch"]
+        assert isinstance(early, Adw.SwitchRow)
+        self.assertTrue(early.get_active())
+        self.assertIn("без контекста", early.get_subtitle() or "")
+        context = controls["detection.context_policy"]
+        assert isinstance(context, Adw.ComboRow)
+        self.assertEqual(context.get_selected(), 0)
+        self.assertIn("префиксов", context.get_subtitle() or "")
+        minimum = controls["detection.early_switch_min_length"]
+        assert isinstance(minimum, Adw.SpinRow)
+        self.assertEqual(minimum.get_title(), "Символов до ранней смены")
+        self.assertIn("4–12", minimum.get_subtitle() or "")
+        self.assertEqual(minimum.get_value(), 4)
+        context.set_selected(1)
+        early.set_active(False)
+        minimum.set_value(3)
+        loaded = SettingsStore(self.settings.path)
+        self.assertEqual(loaded.get("detection.context_policy"), "shadow")
+        self.assertFalse(loaded.get("detection.early_switch"))
+        self.assertEqual(loaded.get("detection.early_switch_min_length"), 3)
+
     def test_buttons_entries_and_focus_controller_dispatch_callbacks(self) -> None:
         widgets = list(descendants(self.window))
 

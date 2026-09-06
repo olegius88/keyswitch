@@ -997,6 +997,23 @@ class WindowsTrayTests(unittest.TestCase):
 
 
 class WindowsUIModelTests(unittest.TestCase):
+    def test_model_settings_distinguish_prefix_support_without_changing_defaults(self) -> None:
+        specs = {spec.path: spec for spec in ALL_SETTING_SPECS}
+        self.assertEqual(specs["detection.context_aware"].title, "Учитывать контекст")
+        self.assertIn("префиксов", specs["detection.context_policy"].description)
+        self.assertIn("без контекста", specs["detection.early_switch"].description)
+        self.assertIn("KSLM", specs["detection.intent_model_enabled"].title)
+        minimum = specs["detection.early_switch_min_length"]
+        self.assertEqual(minimum.title, "Символов до ранней смены")
+        self.assertEqual((minimum.minimum, minimum.maximum), (3, 8))
+        self.assertIn("4–12", minimum.description)
+        detection = DEFAULTS["detection"]
+        assert isinstance(detection, dict)
+        self.assertTrue(detection["early_switch"])
+        self.assertTrue(detection["context_aware"])
+        self.assertEqual(detection["context_policy"], "assist")
+        self.assertEqual(detection["early_switch_min_length"], 4)
+
     def test_catalogue_is_unique_complete_and_uses_valid_control_metadata(self) -> None:
         paths = [spec.path for spec in ALL_SETTING_SPECS]
         self.assertEqual(len(paths), len(set(paths)))

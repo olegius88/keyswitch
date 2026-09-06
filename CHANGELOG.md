@@ -4,6 +4,22 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.17.0 — 2026-09-07
+
+- Train and independently evaluate a separate EN/RU prefix action model for
+  mid-word switching with contextual assist enabled; preserve completed-word
+  weights, personal intent and execution guards. Keep uncertain prefixes intact.
+- Recheck prefix decisions, field identity, exclusions and settings after key
+  rollover; preserve exact continuation, spaces, undo and correction confidence.
+- Add sealed prefix data, reproducible training, explicit false-intervention
+  metrics and exact-text engine replay with package promotion checks.
+- Clarify Windows/Linux settings for the separate word and prefix models,
+  context-disabled fallback and the trained 4–12 character prefix range;
+  preserve saved choices and default values.
+- Update LogCourier sources to detect KeySwitch version boundaries, publish
+  version markers and select current-version logs by default when retrieving
+  them. Keep older logs explicitly accessible; its installer release is separate.
+
 ## 0.16.2 — 2026-09-06
 
 - Preserve phrase context, current-word continuation and manual conversion

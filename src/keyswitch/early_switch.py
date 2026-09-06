@@ -116,7 +116,8 @@ class PrefixIndex:
         return PrefixEvidence(
             stop - start,
             maximum,
-            normalized in self._frequencies or normalized in self._words,
+            normalized in self._frequencies
+            or (start < len(self._words) and self._words[start] == normalized),
         )
 
     @classmethod

@@ -1302,6 +1302,10 @@ Invoke-NativeCommand `
     -Command "python" `
     -Arguments @((Join-Path $ProjectDirectory "tools\verify_boundary_model.py")) `
     -FailureMessage "Boundary evidence changed or rejected candidate was activated"
+Invoke-NativeCommand `
+    -Command "python" `
+    -Arguments @((Join-Path $ProjectDirectory "tools\verify_prefix_model.py")) `
+    -FailureMessage "Prefix model or exact-text promotion evidence changed"
 # Generate the OS type library before freezing. The runtime must not need
 # writable installation files or a Python compiler to open accessibility.
 Invoke-NativeCommand `
@@ -1413,6 +1417,15 @@ if ($ProductVersion -ne "$Version.0") {
 
 $BundledIntentModel = Join-Path $NativeDistribution "keyswitch\resources\models\layout_intent_v1.ksm"
 $BundledContextModel = Join-Path $NativeDistribution "keyswitch\resources\models\context_policy_v1.json"
+$PrefixSeal = Read-BoundedJsonObject `
+    -Path (Join-Path $ProjectDirectory "model\prefix_v1\seal.json") `
+    -MaximumBytes 1MB -Label "prefix-model seal"
+[byte[]]$BundledPrefixBytes = Read-BoundedFileBytes `
+    -Path (Join-Path $NativeDistribution "keyswitch\resources\models\prefix_policy_v1.json") `
+    -MaximumBytes 2MB -MinimumBytes 2 -Label "bundled prefix model"
+if ((Get-BytesSha256 -Bytes $BundledPrefixBytes) -cne $PrefixSeal.candidate_sha256) {
+    throw "Native distribution contains a different prefix model"
+}
 $ContextReport = Read-BoundedJsonObject `
     -Path (Join-Path $ProjectDirectory "model\context_v1\report.json") `
     -MaximumBytes 1MB -Label "context-model quality report"

@@ -409,9 +409,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._settings_controls["detection.confidence"] = confidence
         behavior.add(confidence)
         behavior.add(self._switch_row("detection.aggressive", "Агрессивное распознавание", "Расширить резервное распознавание незнакомых слов; пороги обученных моделей не меняются"))
-        behavior.add(self._switch_row("detection.context_aware", "Учитывать контекст", "Предыдущее слово и язык в текущем приложении помогают разрешать сомнения; контекст хранится только в памяти"))
+        behavior.add(self._switch_row("detection.context_aware", "Учитывать контекст", "Фраза и приложение помогают моделям выбрать действие; без контекста работает базовое распознавание. Контекст хранится только в памяти"))
         context_modes = ["assist", "shadow", "off"]
-        context_mode = Adw.ComboRow(title="Контекстный ИИ-помощник", subtitle="Локальная модель учитывает фразу и приложение; контекст хранится только в памяти")
+        context_mode = Adw.ComboRow(title="Контекстный ИИ-помощник", subtitle="Отдельные локальные модели для слов и префиксов. «Только наблюдать» не применяет их решения; базовая автокоррекция продолжает работать")
         context_mode.set_model(Gtk.StringList.new(["Исправлять и предлагать", "Только наблюдать", "Выключен"]))
         current_context_mode = str(self.settings.get("detection.context_policy", "assist"))
         context_mode.set_selected(context_modes.index(current_context_mode) if current_context_mode in context_modes else 2)
@@ -420,17 +420,17 @@ class MainWindow(Adw.ApplicationWindow):
         behavior.add(context_mode)
         behavior.add(self._switch_row("detection.context_read_field", "Читать контекст активного поля", "Читать текст рядом с курсором локально через доступность ОС; распознанные защищённые поля исключаются, не все приложения сообщают о них"))
         behavior.add(self._switch_row("detection.protect_code", "Защищать код и сокращения", "Не трогать URL, пути, слова с цифрами, ALL-CAPS и camelCase"))
-        behavior.add(self._switch_row("detection.intent_model_enabled", "Локальная линейная модель", "Базовый KSLM-распознаватель слов; при отключении работают резервные эвристики. Контекстный помощник настраивается отдельно"))
+        behavior.add(self._switch_row("detection.intent_model_enabled", "Базовая модель слов (KSLM)", "При отключении работают резервные эвристики. Контекстные модели слов и префиксов настраиваются отдельно"))
         behavior.add(
             self._switch_row(
                 "detection.early_switch",
                 "Ранняя смена раскладки",
-                "Используется, когда ИИ-помощник выключен или только наблюдает; в режиме исправления модель ждёт границы слова или паузы",
+                "Исправлять до конца слова. В assist с учётом контекста — обученная модель префиксов; без контекста или в off/shadow — словарный алгоритм",
             )
         )
         early_length = Adw.SpinRow.new_with_range(3, 8, 1)
-        early_length.set_title("Букв до ранней смены")
-        early_length.set_subtitle("Меньше — быстрее, но чаще ложные переключения на сокращениях и технических словах")
+        early_length.set_title("Символов до ранней смены")
+        early_length.set_subtitle("Минимум для проверки; значение 3 действует только в словарном алгоритме. Модель проверяет префиксы длиной 4–12 и ждёт при сомнении")
         early_length.set_value(float(self.settings.get("detection.early_switch_min_length", 4)))
         early_length.connect(
             "notify::value",
