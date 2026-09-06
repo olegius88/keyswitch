@@ -56,18 +56,20 @@ class EditorBackend(FakeBackend):
         self, strokes: Iterable[KeyEvent], target_group: int,
         boundary: KeyEvent | None, source_group: int | None = None,
         late: Sequence[KeyEvent] = (),
+        trailing: Sequence[KeyEvent] = (),
     ) -> int:
         word = tuple(strokes)
-        count = len(word) + int(boundary is not None) + len(late)
+        count = len(word) + len(trailing) + int(boundary is not None) + len(late)
         start = self.caret - count
         if start < 0:
             raise AssertionError("Correction attempted to erase text outside the word")
         replacement = "".join(stroke.character_for(target_group) for stroke in word)
+        replacement += "".join(stroke.character for stroke in trailing)
         replacement += boundary.character if boundary else ""
         replacement += "".join(stroke.character_for(target_group) for stroke in late)
         self.text = self.text[:start] + replacement + self.text[self.caret:]
         self.caret = start + len(replacement)
-        return super().inject_correction(word, target_group, boundary, source_group, late)
+        return super().inject_correction(word, target_group, boundary, source_group, late, trailing)
 
 
 class InputIntegrityTests(unittest.TestCase):

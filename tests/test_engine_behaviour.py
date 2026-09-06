@@ -63,6 +63,7 @@ class FakeBackend:
         boundary: KeyEvent | None,
         source_group: int | None = None,
         late: Sequence[KeyEvent] = (),
+        trailing: Sequence[KeyEvent] = (),
     ) -> int:
         self.injections.append((tuple(strokes), target_group, boundary))
         self.late.append(tuple(late))

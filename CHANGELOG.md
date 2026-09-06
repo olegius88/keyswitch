@@ -4,6 +4,25 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.16.2 — 2026-09-06
+
+- Preserve phrase context, current-word continuation and manual conversion
+  eligibility when input replay contains only confirmed key releases.
+- Bound pending manual corrections and undo operations by a release timeout;
+  report a safe cancellation instead of hanging or changing layout on a
+  repeated Pause without new text. Do not infer a physical key-up from time alone.
+- Attribute contextual decisions separately from baseline decisions in
+  diagnostics, including unsupported/shadow fallbacks and field-reader status.
+- Add reproducible engine-only regression refreshes with archived prior
+  reports; retain the shipping model and the rejected candidate unchanged.
+- Preserve literal punctuation in its original layout during correction undo
+  on both backends, and support a bounded punctuation tail before a boundary.
+- Add experimental delayed word segmentation and a separately trained public
+  corpus boundary ranker. Reject the first candidate: one wrong segmentation
+  and excessive abstention on the sealed test. Do not install its weights or
+  activate delayed segmentation by default. Add exact text/action regressions,
+  reproducible training and guards against accidental rejected-model packaging.
+
 ## 0.16.1 — 2026-09-05
 
 - Synchronize Russian/English user guides, architecture, model instructions,

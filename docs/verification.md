@@ -21,6 +21,7 @@ KEYSWITCH_TYPING_ROOT=.typing ./tools/typecheck.sh
 dbus-run-session -- xvfb-run -a env GIO_USE_VFS=local ./tests/run_coverage.sh
 PYTHONPATH=src python3 tools/verify_context_model.py
 PYTHONPATH=src python3 tools/verify_context_v2.py
+PYTHONPATH=src python3 tools/verify_boundary_model.py
 ```
 
 100% line/branch coverage относится к [.coveragerc](../.coveragerc): несколько
@@ -58,12 +59,35 @@ PYTHONPATH=src python3 tools/evaluate_context_engine.py --verify
 PYTHONPATH=src python3 tools/verify_context_v2.py
 ```
 
+При изменении только движка старый engine-report больше не описывает текущий
+код. Для явной регрессионной перепроверки существует
+`PYTHONPATH=src python3 tools/evaluate_context_engine.py --refresh-runtime`.
+Команда сохраняет предыдущий отчёт в `model/context_v2/engine-history/`,
+проверяет неизменность сравниваемых весов и списка фраз и выполняет replay
+заново. Новый отчёт помечен как повторная проверка уже наблюдавшегося теста;
+это не новый независимый тест и не разрешение продвигать исследовательские
+веса. После обновления обычный `--verify` должен воспроизводить его точно.
+
 Для training replay эксперимента нужен Linux C-компилятор; GPU не используется.
 Команды выше проверяют сохранённые результаты и не устанавливают candidate
 в приложение. `fit`/`evaluate` и `--freeze` предназначены для отдельного цикла
 исследования, не для обычной проверки документации или сборки. Не удаляйте seal
 и не перезаписывайте раскрытый test, чтобы повторить изменённого кандидата.
 [Данные, результаты и границы эксперимента](../model/context_v2/README.md).
+
+Эксперимент границ слова проверяется отдельно от контекстных весов:
+
+```bash
+PYTHONPATH=src python3 tools/train_boundary_model.py --verify
+PYTHONPATH=src python3 tools/verify_boundary_model.py
+PYTHONPATH=src python3 tools/evaluate_boundary_engine.py --verify
+```
+
+Кандидат отклонён и не включён в программу. Его обучение использует слова из
+прежнего резерва публичных фраз; этот резерв больше нельзя считать новым
+независимым материалом. Подробности и ограничения —
+[в отчёте эксперимента](../model/boundary_v1/README.md). Запускайте тяжёлые
+обучения и replay последовательно. API-моки не заменяют нативный Windows E2E.
 
 Нативное чтение поля проверяется отдельно:
 
@@ -116,7 +140,8 @@ dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24 -noreset" \
 Переданный strict-отчёт принимается только после сверки gates и текущих hashes.
 Без переменной `KEYSWITCH_INTENT_STRICT_REPORT` `build-deb.sh` запускает strict
 самостоятельно; с неправильным отчётом сборка падает, не обходит проверку.
-Обе нативные сборки также запускают быстрые проверки context-v1 и context-v2
+Обе нативные сборки также запускают быстрые проверки context-v1, context-v2
+и boundary-v1 (включая запрет установки отклонённых весов)
 и сверяют рабочий контекстный артефакт после компиляции.
 
 Windows собирается на Windows через `packaging/build-windows.ps1`; зависимости,

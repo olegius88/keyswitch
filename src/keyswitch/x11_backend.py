@@ -788,11 +788,13 @@ class X11Backend:
         boundary: KeyEvent | None,
         source_group: int | None = None,
         late: Sequence[KeyEvent] = (),
+        trailing: Sequence[KeyEvent] = (),
     ) -> int:
         if not self._control:
             raise X11Error("X11 backend не запущен")
         stroke_list = list(strokes)
         late_list = list(late)
+        literal = tuple(trailing) + (() if boundary is None else (boundary,))
         keyboard_state = XkbStateRec()
         if self._libraries.x11.XkbGetState(self._control, XKB_USE_CORE_KBD, ctypes.byref(keyboard_state)) != 0:
             raise X11Error("Не удалось прочитать состояние Caps Lock перед заменой")
@@ -818,7 +820,7 @@ class X11Backend:
                 target.append((False, shift_keycode))
 
         delete_count = (
-            len(stroke_list) + (1 if boundary is not None else 0) + len(late_list)
+            len(stroke_list) + len(literal) + len(late_list)
         )
         for _ in range(delete_count):
             tap(sequence, backspace_keycode)
@@ -835,27 +837,19 @@ class X11Backend:
             if source_group is not None
             else stroke_list[0].group if stroke_list else target_group
         )
-        preserve_boundary_layout = bool(
-            boundary is not None
-            and rendered_source_group != target_group
-            and boundary.character
-            and boundary.character_for(target_group) != boundary.character
-        )
+        preserve_boundary_layout = any(stroke.character_for(target_group) != stroke.character for stroke in literal)
+        literal_group = literal[0].group if literal else rendered_source_group
+        if not 0 <= literal_group < self.group_count or any(stroke.group != literal_group for stroke in literal):
+            raise X11Error("Некорректная раскладка пунктуации; замена отменена")
         # Keep boundary events immutable and inject them separately. This also
         # avoids a Nuitka 4.1/Python 3.14 list-mutation compiler regression.
-        boundary_sequence: tuple[tuple[bool, int], ...] = ()
-        if boundary is not None and boundary.shift:
-            boundary_sequence = (
-                (True, shift_keycode),
-                (True, boundary.keycode),
-                (False, boundary.keycode),
-                (False, shift_keycode),
+        boundary_sequence = tuple(
+            event for stroke in literal
+            for event in (
+                ((True, shift_keycode), (True, stroke.keycode), (False, stroke.keycode), (False, shift_keycode))
+                if shifted(stroke, literal_group) else ((True, stroke.keycode), (False, stroke.keycode))
             )
-        elif boundary is not None:
-            boundary_sequence = (
-                (True, boundary.keycode),
-                (False, boundary.keycode),
-            )
+        )
         target_boundary_sequence = (
             () if preserve_boundary_layout else boundary_sequence
         )
@@ -893,11 +887,11 @@ class X11Backend:
                         raise X11Error(f"XTest отклонил keycode {keycode}")
                 if source_boundary_sequence:
                     if not self._libraries.x11.XkbLockGroup(
-                        self._control, XKB_USE_CORE_KBD, rendered_source_group
+                        self._control, XKB_USE_CORE_KBD, literal_group
                     ):
                         raise X11Error(
                             "Не удалось временно включить "
-                            f"XKB-группу {rendered_source_group}"
+                            f"XKB-группу {literal_group}"
                         )
                     for pressed, keycode in source_boundary_sequence:
                         if not self._libraries.xtst.XTestFakeKeyEvent(

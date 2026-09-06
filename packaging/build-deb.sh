@@ -22,6 +22,7 @@ export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-1787749200}"
 
 PYTHONPATH="$project_dir/src" python3 "$project_dir/tools/verify_context_model.py"
 PYTHONPATH="$project_dir/src" python3 "$project_dir/tools/verify_context_v2.py"
+PYTHONPATH="$project_dir/src" python3 "$project_dir/tools/verify_boundary_model.py"
 
 verify_kslm_packaging_bounds() {
     local model_path="$1"

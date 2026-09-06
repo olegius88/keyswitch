@@ -13,3 +13,4 @@ build/
 dist/
 *.deb
 .t/
+/AGENTS.md

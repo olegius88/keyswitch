@@ -107,11 +107,11 @@ scenarios and platform limitations.
 
 ## Install on Windows
 
-Download `KeySwitch-Setup-0.16.1-x64.exe` from the
+Download `KeySwitch-Setup-0.16.2-x64.exe` from the
 [latest release](https://github.com/olegius88/keyswitch/releases/latest) and run
 it. The per-user installation goes to `%LOCALAPPDATA%\Programs\KeySwitch` and
 does not require administrator privileges. The release also includes the
-portable `KeySwitch-0.16.1-windows-x64.zip` archive.
+portable `KeySwitch-0.16.2-windows-x64.zip` archive.
 
 After launch, KeySwitch appears in the notification area. Left- or right-click
 the `EN/RU` or flag icon to open its menu. Its Switch to action always offers
@@ -177,12 +177,12 @@ Probe the system backend without opening the application window:
 
 ## Install the Debian package
 
-Download `keyswitch_0.16.1_amd64.deb` from the
+Download `keyswitch_0.16.2_amd64.deb` from the
 [latest release](https://github.com/olegius88/keyswitch/releases/latest), then
 install it with:
 
 ```bash
-sudo apt install ./keyswitch_0.16.1_amd64.deb
+sudo apt install ./keyswitch_0.16.2_amd64.deb
 ```
 
 The package installs the required system dependencies and adds KeySwitch to the
@@ -609,7 +609,7 @@ Build the reproducible native Debian package with:
 sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
 ./tools/install-build-tools.sh .nuitka
 KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package="dist/keyswitch_0.16.1_$(dpkg --print-architecture).deb"
+package="dist/keyswitch_0.16.2_$(dpkg --print-architecture).deb"
 ./tools/verify-native-deb.sh "$package"
 ```
 
@@ -717,7 +717,7 @@ See [release and recovery procedures](docs/verification.md).
 - On Windows, UIPI prevents a regular process from injecting input into a
   window running at a higher integrity level. KeySwitch needs a matching level
   for that target window.
-- The Windows 0.16.1 Setup EXE is not yet signed with a publisher certificate.
+- The Windows 0.16.2 Setup EXE is not yet signed with a publisher certificate.
 
 ## License
 

@@ -8,6 +8,7 @@ the repository's separate native and action-boundary tests cover those paths.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -25,6 +26,7 @@ if TESTS_PATH not in sys.path:
     sys.path.insert(0, TESTS_PATH)
 
 from keyswitch.backend import KeyEvent, SHIFT_MASK
+from keyswitch.boundary_model import BoundaryModel
 from keyswitch.config import SettingsStore
 from keyswitch.context_model import ContextModel
 from keyswitch.engine import KeySwitchEngine
@@ -89,10 +91,18 @@ def replay(text: str, target: int, initial: int, model: ContextModel | None, mod
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--verify", action="store_true")
+    parser.add_argument("--refresh-runtime", action="store_true", help="Preserve prior evidence and replay an observed test after engine-only changes; never a new model test")
     args = parser.parse_args(argv)
+    if args.verify and args.refresh_runtime:
+        parser.error("choose verification or an explicit runtime regression refresh")
     validate_seal(CORPUS_ROOT)
-    if REPORT.exists() and not args.verify:
+    if BoundaryModel.default() is not None:
+        raise ValueError("this historical replay requires the shipping boundary policy, not experimental weights")
+    previous = REPORT.read_bytes() if REPORT.exists() else None
+    if previous is not None and not (args.verify or args.refresh_runtime):
         raise ValueError("engine test already observed; only identical replay is allowed")
+    if args.refresh_runtime and previous is None:
+        raise ValueError("runtime refresh needs the previous report")
     selected = select_phrases(assign(load_source())[0])
     if len(selected) != ROWS_PER_LOCALE * 2:
         raise ValueError("insufficient independent phrase groups")
@@ -123,8 +133,31 @@ def main(argv: Sequence[str] | None = None) -> int:
     report: dict[str, object] = {"schema_version": 1, "scope": "in-process visible editor, portable dictionary, boundary-only; not native OS E2E or human-intent labels",
         "selection": "source test partition, hash-ranked distinct groups, 64 per locale, before model scoring",
         "source_ids": [row.phrase.identifier for row in selected], "results": results, "examples": examples,
-        "provenance": {str(path.relative_to(ROOT)): checksum(path) for path in (Path(__file__), CORPUS_ROOT / ARTIFACT, BASELINE, ROOT / "src/keyswitch/engine.py", ROOT / "src/keyswitch/context_policy.py", ROOT / "src/keyswitch/input_context.py", ROOT / "tests/test_input_integrity.py")},
+        "provenance": {str(path.relative_to(ROOT)): checksum(path) for path in (Path(__file__), CORPUS_ROOT / ARTIFACT, BASELINE, ROOT / "src/keyswitch/engine.py", ROOT / "src/keyswitch/context_policy.py", ROOT / "src/keyswitch/input_context.py", ROOT / "src/keyswitch/boundary_model.py", ROOT / "tests/test_input_integrity.py")},
         "promotion_passed": candidate["length_mismatches"] == 0 and candidate["changed_correct"] <= prior["changed_correct"] and candidate["exactly_restored"] >= prior["exactly_restored"]}
+    if previous is not None:
+        historical = cast(dict[str, object], json.loads(previous))
+        if args.refresh_runtime:
+            if historical["provenance"] == report["provenance"]:
+                raise ValueError("runtime sources unchanged; use --verify")
+            if historical["source_ids"] != report["source_ids"]:
+                raise ValueError("runtime refresh must keep the exact observed test selection")
+            for path in (CORPUS_ROOT / ARTIFACT, BASELINE):
+                hashes = cast(dict[str, str], historical["provenance"])
+                if hashes[str(path.relative_to(ROOT))] != checksum(path):
+                    raise ValueError("runtime refresh must not change compared model weights")
+            digest = hashlib.sha256(previous).hexdigest()
+            archive = CORPUS_ROOT / "engine-history" / f"{digest}.json"
+            archive.parent.mkdir(parents=True, exist_ok=True)
+            if archive.exists() and archive.read_bytes() != previous:
+                raise ValueError("historical report collision")
+            archive.write_bytes(previous)
+            report["runtime_regression"] = {
+                "scope": "previously observed model test; not an independent test or model promotion",
+                "previous_report": str(archive.relative_to(ROOT)), "previous_sha256": digest,
+            }
+        elif "runtime_regression" in historical:
+            report["runtime_regression"] = historical["runtime_regression"]
     if args.verify:
         if REPORT.read_bytes() != canonical(report):
             raise ValueError("engine replay changed")

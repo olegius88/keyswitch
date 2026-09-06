@@ -576,6 +576,7 @@ class WindowsBackend:
         boundary: KeyEvent | None,
         source_group: int | None = None,
         late: Sequence[KeyEvent] = (),
+        trailing: Sequence[KeyEvent] = (),
     ) -> int:
         """Replace the word and return how many held keys were typed again.
 
@@ -587,7 +588,7 @@ class WindowsBackend:
         """
 
         try:
-            return self._inject_correction(strokes, target_group, boundary, source_group, late)
+            return self._inject_correction(strokes, target_group, boundary, source_group, late, trailing)
         finally:
             self.release_input()
 
@@ -595,11 +596,13 @@ class WindowsBackend:
         self, strokes: Iterable[KeyEvent], target_group: int,
         boundary: KeyEvent | None, source_group: int | None,
         late: Sequence[KeyEvent],
+        trailing: Sequence[KeyEvent],
     ) -> int:
         if not 0 <= target_group < len(self.layouts):
             raise WindowsBackendError(f"Неизвестная группа раскладки {target_group}")
         stroke_list = list(strokes)
         late_list = list(late)
+        literal = tuple(trailing) + (() if boundary is None else (boundary,))
         rendered_source_group = (
             source_group
             if source_group is not None
@@ -610,7 +613,7 @@ class WindowsBackend:
                 f"Неизвестная исходная группа раскладки {rendered_source_group}"
             )
         delete_count = (
-            len(stroke_list) + (1 if boundary is not None else 0) + len(late_list)
+            len(stroke_list) + len(literal) + len(late_list)
         )
         delete_inputs = tuple(
             NativeInput(pressed, virtual_key=VK_BACK)
@@ -622,7 +625,7 @@ class WindowsBackend:
             for stroke in stroke_list
             for item in self._stroke_inputs(stroke, group=target_group)
         )
-        boundary_inputs = self._stroke_inputs(boundary) if boundary is not None else ()
+        boundary_inputs = tuple(item for stroke in literal for item in self._stroke_inputs(stroke))
         # Typed again as the user's own input: the engine must see these keys
         # as the start of the next word, not as its own injection.
         late_inputs = tuple(
@@ -630,12 +633,10 @@ class WindowsBackend:
             for stroke in late_list
             for item in self._stroke_inputs(stroke, synthetic=False, group=target_group)
         )
-        preserve_boundary_layout = bool(
-            boundary is not None
-            and rendered_source_group != target_group
-            and boundary.character
-            and boundary.character_for(target_group) != boundary.character
-        )
+        preserve_boundary_layout = any(stroke.character_for(target_group) != stroke.character for stroke in literal)
+        literal_group = literal[0].group if literal else rendered_source_group
+        if not 0 <= literal_group < len(self.layouts) or any(stroke.group != literal_group for stroke in literal):
+            raise WindowsBackendError("Некорректная раскладка пунктуации; замена отменена")
         late_deleted = False
         late_typed = False
         failure: Exception | None = None
@@ -658,7 +659,7 @@ class WindowsBackend:
                 )
                 late_deleted = True
                 if preserve_boundary_layout:
-                    self._switch_group(rendered_source_group)
+                    self._switch_group(literal_group)
                     self._send_exact(boundary_inputs)
                     self._switch_group(target_group)
                 # A partial send is not an all-or-nothing failure; retrying

@@ -11,7 +11,9 @@ existing user settings are unchanged by this experiment.
 - 63,513 retained variants in 59,721 normalized/near-duplicate groups.
 - 224,693 action situations: 147,835 train; 24,746 development; 23,851
   calibration; 25,653 phrase test; 2,608 focus-lexical test.
-- 6,272 source sentences (5,891 groups) remain an **unused reserve**.
+- 6,272 source sentences (5,891 groups) were an **unused reserve for this
+  experiment**. The later [boundary experiment](../boundary_v1/README.md)
+  consumes words from that reserve; it is no longer globally untouched.
 - A group holds at most four source variants. Grouping joins normalized
   lexical text and bounded single-word substitutions/insertions/deletions;
   it is not a semantic paraphrase detector.
@@ -108,3 +110,14 @@ The next research step is richer, carefully annotated intent/context evidence
 and error analysis on development data, followed by a fresh held-out test.
 An "exhaustive dictionary" alone cannot determine whether a valid short word,
 variable, English insertion or typo was intentional.
+
+## Runtime regression history
+
+Engine-only changes can be checked with
+`PYTHONPATH=src python3 tools/evaluate_context_engine.py --refresh-runtime`.
+This retains the prior report under its SHA256 in `engine-history/`, keeps the
+same compared weights and phrase IDs, and records a linked runtime-regression
+report. Replaying an already observed test does not create new independent
+model evidence or reverse the candidate's rejection. The ordinary `--verify`
+command reproduces the current report, and package verification checks both
+current source provenance and the archived report link.

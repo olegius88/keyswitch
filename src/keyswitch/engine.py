@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 
 from . import __version__
 from .backend import InputBackend, KeyEvent, KeyDisposition
+from .boundary_model import BoundaryModel, MAX_SUFFIX, features as boundary_features
 from .config import SettingsStore
 from .detector import DetectionDecision, LanguageDetector
 from .early_switch import (
@@ -65,6 +66,7 @@ ACTION_BOUNDARY_KEYS = {"Return", "KP_Enter", "Tab", "ISO_Left_Tab"}
 WORD_JOINERS = {"'", "’", "-", "‐", "‑"}
 MAX_WORD_STROKES = 256
 ACTION_TIMEOUT_SECONDS = 2.0
+MANUAL_RELEASE_TIMEOUT_SECONDS = 3.0
 LOGGER = logging.getLogger(__name__)
 
 
@@ -98,6 +100,8 @@ class CorrectionPlan:
     # boundary | pause | manual | undo | early | symbols | late_stroke
     mode: str = "boundary"
     context_field: str = ""
+    # Literal punctuation before `boundary`, not replayed in the new layout.
+    trailing: tuple[KeyEvent, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -198,6 +202,7 @@ class KeySwitchEngine:
         self.learning = learning or LearningStore(history.path.with_name("learning.json"))
         self.context_policy = ContextPolicy(context_reader or PlatformFieldReader(self.backend))
         self._context_result: ContextResult | None = None
+        self.boundary_model = BoundaryModel.default()
         self._context_waiting: WaitingContextWord | None = None
         self._sensitive_context_window: int | None = None
         self._typed_events = 0
@@ -249,6 +254,7 @@ class KeySwitchEngine:
         }
         self._pending: CorrectionPlan | None = None
         self._pending_trigger_keycode = -1
+        self._manual_release_deadline = 0.0
         self._last_committed: CorrectionPlan | None = None
         self._last_correction: CorrectionPlan | None = None
         self._pending_learning_action: tuple[str, int, str, int] | None = None
@@ -440,6 +446,7 @@ class KeySwitchEngine:
                 event = self._events.get(timeout=self._loop_timeout())
             except queue.Empty:
                 self._expire_deferred_action()
+                self._expire_manual_correction()
                 self._poll_current_group()
                 self._maybe_correct_after_pause()
                 self._expire_learning_prompt()
@@ -514,6 +521,7 @@ class KeySwitchEngine:
         )
 
     def _handle(self, event: KeyEvent) -> None:
+        self._expire_manual_correction()
         if self._input_overflow.is_set():
             self._input_overflow.clear()
             self._complete_deferred_action(False, "input_overflow")
@@ -787,6 +795,11 @@ class KeySwitchEngine:
     def _maybe_early_switch(self) -> None:
         """Switch the layout as soon as the typed prefix proves it wrong."""
 
+        if self.boundary_model is not None and any(
+            not stroke.character.isalpha() and self._is_layout_letter(stroke)
+            for stroke in self._strokes
+        ):
+            return
         if (
             self.context_policy.model is not None
             and bool(self.settings.get("detection.context_aware", True))
@@ -1038,7 +1051,7 @@ class KeySwitchEngine:
             self._log_pending_dropped("next_word_committed")
             self._pending = None
             self._pending_learning_action = None
-        strokes = tuple(self._strokes)
+        strokes, trailing, segmentation_certain = self._completed_word(tuple(self._strokes), self._source_group)
         self._reset_pause_correction()
         source_group = self._source_group
         original = self._text_for_group(strokes, source_group)
@@ -1059,6 +1072,7 @@ class KeySwitchEngine:
             0.0,
             application,
             False,
+            trailing=trailing,
         )
         self._last_committed = plan
         self._last_committed_stale = False
@@ -1078,6 +1092,7 @@ class KeySwitchEngine:
             enabled
             and trigger_enabled
             and not manual_layout_protected
+            and segmentation_certain
         )
         excluded = self._application_excluded(application)
         decision: DetectionDecision | None = None
@@ -1089,16 +1104,17 @@ class KeySwitchEngine:
                 source_group,
                 application,
                 self._trigger_for_boundary(boundary),
+                literal_tail="".join(stroke.character for stroke in trailing),
             )
             excluded = self._application_excluded(application)
-            joint = self._resolve_context_wait(waiting, strokes, boundary, decision, application)
+            joint = None if trailing else self._resolve_context_wait(waiting, strokes, boundary, decision, application)
             if joint is not None:
                 self._pending = joint
                 self._pending_learning_action = None
                 self._pending_trigger_keycode = boundary.keycode
                 decision = replace(decision, should_convert=True)
             elif decision.should_convert:
-                plan = self._plan_from_decision(strokes, boundary, application, decision)
+                plan = replace(self._plan_from_decision(strokes, boundary, application, decision), trailing=trailing)
                 if boundary.deferred:
                     # Enter/Tab has not reached the editor. Do not delete it
                     # as a character or include it in the text replacement.
@@ -1116,6 +1132,7 @@ class KeySwitchEngine:
                     result is not None and result.prediction is not None
                     and result.prediction.action == "wait" and result.field is not None
                     and len(original) <= 2 and boundary.character == " "
+                    and not trailing
                     and not boundary.deferred
                     and self.settings.get("detection.context_policy", "assist") == "assist"
                 ):
@@ -1169,6 +1186,10 @@ class KeySwitchEngine:
         retained as a physical stroke (for example `,fpf` -> `база`).
         """
 
+        if self.boundary_model is not None:
+            # No completed-word classifier gets to cut an unfinished prefix.
+            # Retain the key until a hard boundary or an idle evaluation.
+            return False
         if not self._strokes or self._source_group < 0:
             return False
         if event.character in {"'", "-"}:
@@ -1218,6 +1239,48 @@ class KeySwitchEngine:
             >= int(self.settings.get("detection.minimum_length", 3))
         ) or natural_source_boundary
 
+    def _completed_word(
+        self, strokes: tuple[KeyEvent, ...], source_group: int,
+    ) -> tuple[tuple[KeyEvent, ...], tuple[KeyEvent, ...], bool]:
+        model = self.boundary_model
+        if model is None or source_group not in self.models:
+            return strokes, (), True
+        tail = 0
+        for stroke in reversed(strokes):
+            if stroke.character.isalpha() or not self._is_layout_letter(stroke):
+                break
+            tail += 1
+        if not tail:
+            return strokes, (), True
+        targets = [group for group in self.models if group != source_group]
+        if tail >= len(strokes) or tail > MAX_SUFFIX or not targets:
+            return strokes, (), False
+        original = self._text_for_group(strokes, source_group)
+        if self._forced_target_group(source_group, original) is not None:
+            return strokes, (), True  # Explicit full-token rule outranks segmentation.
+        # Segmentation cannot turn an excluded token/path into an eligible word.
+        ignored: list[str] = self.settings.get("exclusions.words", [])
+        if ((bool(self.settings.get("detection.protect_code", True)) and self.detector.is_protected_token(original))
+                or original.casefold() in {word.casefold() for word in ignored}
+                or (bool(self.settings.get("detection.learning", True)) and set(targets) <= self.learning.rejected_targets(source_group, original))):
+            return strokes, (), False
+        target = targets[0]
+        alternative = self._text_for_group(strokes, target)
+        prediction = model.predict(tuple(
+            boundary_features(original, alternative, length, self.models[source_group], self.models[target])
+            for length in range(tail + 1)
+        ))
+        length = prediction.suffix_length
+        self._technical_event(
+            "boundary_decision", model_version=prediction.version,
+            action="abstain" if length is None else "literal" if length else "word",
+            score=round(prediction.probability, 6), preserved_characters=length,
+            candidates=tail + 1, observed_characters=len(strokes),
+        )
+        if length is None:
+            return strokes, (), False
+        return (strokes[:-length], strokes[-length:], True) if length else (strokes, (), True)
+
     def _decide_word(
         self,
         original: str,
@@ -1225,6 +1288,7 @@ class KeySwitchEngine:
         source_group: int,
         application: str,
         trigger: CorrectionTrigger = "space",
+        *, literal_tail: str = "",
     ) -> DetectionDecision:
         self._context_result = None
         context_words, context_group = self._context_for(application)
@@ -1288,6 +1352,7 @@ class KeySwitchEngine:
             decision, alternative, group, self.detector, trigger,
             str(self.settings.get("detection.context_policy", "assist")),
             read_field=bool(self.settings.get("detection.context_read_field", False)),
+            literal_tail=literal_tail,
         )
         self._context_result = result
         if result.field is not None and result.field.sensitive:
@@ -1304,6 +1369,13 @@ class KeySwitchEngine:
                 score=round(prediction.probability, 6), model_version=prediction.model_version,
                 mode=self.settings.get("detection.context_policy", "assist"),
                 applied=result.decision.should_convert, baseline_convert=decision.should_convert,
+                model_supported=prediction.supported,
+                policy_applied=result.policy_applied,
+                decision_source=result.decision_source,
+                fallback_reason=result.fallback_reason,
+                final_action="convert" if result.decision.should_convert else "keep",
+                field_read_requested=bool(self.settings.get("detection.context_read_field", False)),
+                field_reader_status=self._field_reader_status(),
                 context_source=field.source if field else "unavailable",
                 before_characters=len(field.before) if field else 0,
                 after_characters=len(field.after) if field else 0,
@@ -1462,6 +1534,8 @@ class KeySwitchEngine:
             keyswitch_version=__version__,
             backend=self.backend_label,
             intent_model=self.intent_model_status.as_dict(),
+            context_model_status=self.context_policy.status,
+            field_reader_status=self._field_reader_status(),
             language_models={
                 str(group): {
                     "locale": model.locale,
@@ -1478,6 +1552,8 @@ class KeySwitchEngine:
                     "aggressive",
                     "protect_code",
                     "context_aware",
+                    "context_policy",
+                    "context_read_field",
                     "respect_manual_layout",
                     "correct_on_space",
                     "correct_on_enter",
@@ -1706,7 +1782,7 @@ class KeySwitchEngine:
             return
 
         self._pause_correction_pending = False
-        strokes = tuple(self._strokes)
+        strokes, trailing, segmentation_certain = self._completed_word(tuple(self._strokes), self._source_group)
         source_group = self._source_group
         manual_layout_selected = self._word_protected(source_group)
         original = self._text_for_group(strokes, source_group)
@@ -1750,8 +1826,11 @@ class KeySwitchEngine:
                 idle_ms=idle_ms,
             )
             return
+        if not segmentation_certain:
+            return
         decision = self._decide_word(
-            original, alternatives, source_group, application, "pause"
+            original, alternatives, source_group, application, "pause",
+            literal_tail="".join(stroke.character for stroke in trailing),
         )
         excluded = self._application_excluded(application)
         self._log_word_evaluation(
@@ -1773,7 +1852,7 @@ class KeySwitchEngine:
 
         self._early_switch_origin = None
         self._early_switch_at = None
-        plan = self._plan_from_decision(strokes, None, application, decision, "pause")
+        plan = replace(self._plan_from_decision(strokes, None, application, decision, "pause"), trailing=trailing)
         self._strokes = []
         self._source_group = -1
         self._early_switch_undone = False
@@ -1800,8 +1879,17 @@ class KeySwitchEngine:
     def _schedule_manual_conversion(self, trigger_keycode: int) -> None:
         """Pause: convert what was typed since the last boundary, or switch."""
 
+        if self._pending is not None and not self._pending.automatic and not (self._strokes or self._symbol_strokes):
+            self._technical_event(
+                "manual_conversion_waiting", reason="previous_command_pending",
+                pressed_keycodes=sorted(self._pressed),
+                modifier_keycodes=sorted(self._modifier_keycodes),
+            )
+            self._update(last_action="Замена ожидает отпускания клавиш")
+            return
         mode = "manual"
         learn = True
+        trailing: tuple[KeyEvent, ...] = ()
         if self._strokes:
             strokes = tuple(self._symbol_strokes) + tuple(self._strokes)
             source_group = self._source_group
@@ -1824,6 +1912,7 @@ class KeySwitchEngine:
             boundary = self._last_committed.boundary
             application = self._last_committed.application
             source = "last_committed"
+            trailing = self._last_committed.trailing
         else:
             self._switch_layout_only(trigger_keycode)
             return
@@ -1845,6 +1934,7 @@ class KeySwitchEngine:
             application,
             False,
             mode,
+            trailing=trailing,
         )
         reversal = self._reversal_of_last_correction(plan)
         action: tuple[str, int, str, int] | None = None
@@ -1871,6 +1961,7 @@ class KeySwitchEngine:
         self._pending = plan
         self._pending_learning_action = action
         self._pending_trigger_keycode = trigger_keycode
+        self._manual_release_deadline = time.monotonic() + MANUAL_RELEASE_TIMEOUT_SECONDS
         excluded = self._application_excluded(application)
         self._technical_event(
             "manual_conversion_scheduled",
@@ -1934,7 +2025,7 @@ class KeySwitchEngine:
         unpredictable; then nothing is touched and the keys stay queued.
         """
 
-        planned = {id(stroke) for stroke in plan.strokes}
+        planned = {id(stroke) for stroke in (*plan.strokes, *plan.trailing)}
         rollover = [stroke for stroke in self._strokes if id(stroke) not in planned]
         queued: list[KeyEvent | _LayoutSelection | None] = []
         while True:
@@ -1981,6 +2072,7 @@ class KeySwitchEngine:
         if (
             previous is None
             or plan.strokes != previous.strokes
+            or plan.trailing != previous.trailing
             or plan.source_group != previous.target_group
             or plan.target_group != previous.source_group
         ):
@@ -2058,6 +2150,7 @@ class KeySwitchEngine:
         )
         self._pending_learning_action = None
         self._pending_trigger_keycode = trigger_keycode
+        self._manual_release_deadline = time.monotonic() + MANUAL_RELEASE_TIMEOUT_SECONDS
         self._technical_event(
             "early_switch_undo_scheduled",
             source_group=current_group,
@@ -2100,6 +2193,7 @@ class KeySwitchEngine:
             previous.application,
             False,
             "undo",
+            trailing=previous.trailing,
         )
         self._pending_learning_action = (
             (
@@ -2112,6 +2206,7 @@ class KeySwitchEngine:
             else None
         )
         self._pending_trigger_keycode = trigger_keycode
+        self._manual_release_deadline = time.monotonic() + MANUAL_RELEASE_TIMEOUT_SECONDS
 
     def _maybe_execute_pending(self, event: KeyEvent) -> None:
         if self._deferred_action is not None and not self._pressed and not self._modifier_keycodes:
@@ -2131,6 +2226,7 @@ class KeySwitchEngine:
         if self._pending_trigger_keycode != -1 or self._modifier_keycodes or self._pressed:
             return
         plan, self._pending = self._pending, None
+        self._manual_release_deadline = 0.0
         learning_action, self._pending_learning_action = self._pending_learning_action, None
         if plan.mode in ("early", "early_undo", "late_stroke"):
             refreshed = self._refresh_early_plan(plan)
@@ -2156,7 +2252,7 @@ class KeySwitchEngine:
             self._clear_word(reason="input_overflow")
             self._technical_event("correction_aborted", mode=plan.mode, reason="input_overflow")
             return False
-        if any(not self._safe_text_stroke(stroke) for stroke in plan.strokes):
+        if any(not self._safe_text_stroke(stroke) for stroke in (*plan.strokes, *plan.trailing)):
             self._clear_word(reason="unrepresentable_text")
             self._technical_event(
                 "correction_aborted", mode=plan.mode, reason="unrepresentable_text",
@@ -2166,7 +2262,7 @@ class KeySwitchEngine:
         if plan.context_field:
             reader = self.context_policy.reader
             field = None if reader is None else reader.read(plan.application, self._focus_window or 0)
-            suffix = plan.original + (plan.boundary.character if plan.boundary else "")
+            suffix = plan.original + "".join(stroke.character for stroke in plan.trailing) + (plan.boundary.character if plan.boundary else "")
             if (
                 field is None or field.field_id != plan.context_field
                 or field.application != plan.application or field.sensitive or field.selection
@@ -2201,12 +2297,14 @@ class KeySwitchEngine:
                     )
                     self._last_committed_stale = True
                     return False
+                options = {"trailing": plan.trailing} if plan.trailing else {}
                 held = self.backend.inject_correction(
                     plan.strokes,
                     plan.target_group,
                     plan.boundary,
                     plan.source_group,
                     late=late,
+                    **options,
                 )
             finally:
                 held += self.backend.release_input()
@@ -2234,11 +2332,17 @@ class KeySwitchEngine:
             self._update(last_error=str(error), last_action="Ошибка замены · проверьте текст в приложении")
             return False
         self._note_engine_switch(plan.target_group)
-        if late or held:
+        replayed_only_releases = (
+            held > 0 and self._typed_events - typed_before == held
+            and self._typed_presses == presses_before
+        )
+        context_reset_reason = "late_input" if late else "held_text_or_unknown" if held and not replayed_only_releases else ""
+        if context_reset_reason:
             self.context_policy.stream.clear()
         else:
             self.context_policy.stream.replace_suffix(
-                plan.original, plan.replacement, plan.boundary.character if plan.boundary else "",
+                plan.original, plan.replacement,
+                "".join(stroke.character for stroke in plan.trailing) + (plan.boundary.character if plan.boundary else ""),
             )
         self._technical_event(
             "correction_applied",
@@ -2251,7 +2355,8 @@ class KeySwitchEngine:
             target_group=plan.target_group,
             previous_group=previous_group,
             layout_switched=plan.source_group != plan.target_group,
-            deleted_characters=len(plan.strokes) + (0 if plan.boundary is None else 1) + len(late),
+            deleted_characters=len(plan.strokes) + len(plan.trailing) + (0 if plan.boundary is None else 1) + len(late),
+            literal_characters=len(plan.trailing),
             replayed_strokes=len(plan.strokes),
             boundary_replayed=plan.boundary is not None,
             injection_ms=round((time.monotonic() - started) * 1000),
@@ -2261,6 +2366,8 @@ class KeySwitchEngine:
             queued_events=self._events.qsize(),
             late_keys=len(late),
             held_keys=held,
+            context_reset_reason=context_reset_reason,
+            replayed_only_releases=replayed_only_releases,
             application=plan.application,
             application_excluded=application_excluded,
             automatic=plan.automatic,
@@ -2324,9 +2431,10 @@ class KeySwitchEngine:
             plan.confidence,
             plan.application,
             False,
+            trailing=plan.trailing,
         )
-        self._last_committed_stale = bool(late or held)
-        if plan.boundary is None and not late and not held and any(char.isalpha() for char in plan.replacement):
+        self._last_committed_stale = bool(context_reset_reason)
+        if plan.boundary is None and not plan.trailing and not context_reset_reason and any(char.isalpha() for char in plan.replacement):
             # Idle/manual correction did not end the word. Keep its physical
             # prefix so continued typing and Backspace still refer to the
             # whole token instead of a detached suffix.
@@ -2421,6 +2529,30 @@ class KeySwitchEngine:
     def _expire_deferred_action(self) -> None:
         if self._deferred_action is not None and time.monotonic() >= self._action_deadline:
             self._clear_word(reason="action_release_timeout")
+
+    def _expire_manual_correction(self) -> None:
+        if (
+            self._pending is not None and not self._pending.automatic
+            and self._manual_release_deadline > 0.0
+            and time.monotonic() >= self._manual_release_deadline
+        ):
+            self._technical_event(
+                "manual_conversion_timeout", reason="key_release_not_observed",
+                pressed_keycodes=sorted(self._pressed),
+                modifier_keycodes=sorted(self._modifier_keycodes),
+            )
+            # A timeout is not proof that a physical key is up. Do not inject,
+            # switch layout or turn this uncertain attempt into learning.
+            self._clear_word(
+                "Замена отменена: не получено отпускание клавиш · проверьте текст",
+                reason="manual_release_timeout",
+            )
+
+    def _field_reader_status(self) -> str:
+        reader = self.context_policy.reader
+        if reader is None:
+            return "not_configured"
+        return reader.status if isinstance(reader, PlatformFieldReader) else "custom_reader"
 
     def _configured_action_keys(self) -> frozenset[str]:
         if not bool(self.settings.get("enabled", True)):
@@ -2563,6 +2695,7 @@ class KeySwitchEngine:
         self._reset_pause_correction()
         self._pending = None
         self._pending_learning_action = None
+        self._manual_release_deadline = 0.0
         self._last_committed_stale = True
         if action is None:
             self._update(current_word="")

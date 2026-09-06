@@ -66,6 +66,24 @@ class ContextV2EvidenceTests(unittest.TestCase):
         with patch("verify_context_v2.provenance", return_value=windows):
             self.assertTrue(verify()["active_model_unchanged"])
 
+    def test_runtime_regression_keeps_history_and_rejects_tampering(self) -> None:
+        engine = read_object(CORPUS_ROOT / "engine-report.json")
+        self.assertIsInstance(engine.get("runtime_regression"), dict)
+        historical = engine["runtime_regression"]
+        assert isinstance(historical, dict)
+        variants: list[dict[str, object]] = [
+            {**engine, "runtime_regression": []},
+            {**engine, "runtime_regression": {"previous_report": "../outside.json"}},
+            {**engine, "runtime_regression": {**historical, "previous_sha256": "changed"}},
+            {**engine, "source_ids": []},
+        ]
+        for variant in variants:
+            def read(path: Path) -> dict[str, object]:
+                return variant if path == CORPUS_ROOT / "engine-report.json" else read_object(path)
+            with patch("verify_context_v2.read_object", side_effect=read):
+                with self.assertRaisesRegex(ValueError, "runtime regression"):
+                    verify()
+
     def test_report_tampering_and_missing_tracks_fail_closed(self) -> None:
         original = read_object(CORPUS_ROOT / "report.json")
         with tempfile.TemporaryDirectory() as temporary:

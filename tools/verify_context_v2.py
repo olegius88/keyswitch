@@ -47,6 +47,15 @@ def verify(directory: Path = CORPUS_ROOT, active: Path = ARTIFACT_PATH) -> dict[
         raise ValueError("candidate identity changed")
     report = read_object(directory / REPORT)
     engine = read_object(directory / "engine-report.json")
+    regression = engine.get("runtime_regression")
+    if regression is not None:
+        if not isinstance(regression, dict) or not isinstance(regression.get("previous_report"), str):
+            raise ValueError("invalid runtime regression history")
+        previous = ROOT / regression["previous_report"]
+        if not previous.resolve().is_relative_to(ROOT / "model/context_v2/engine-history") or checksum(previous) != regression.get("previous_sha256"):
+            raise ValueError("runtime regression history mismatch")
+        if read_object(previous).get("source_ids") != engine.get("source_ids"):
+            raise ValueError("runtime regression selection changed")
     if report.get("seal_sha256") != checksum(directory / SEAL) or report.get("artifact_sha256") != checksum(directory / ARTIFACT) or report.get("audit") != seal.get("audit") or report.get("reserve_used") is not False:
         raise ValueError("candidate evaluation identity changed")
     results = report.get("results")
