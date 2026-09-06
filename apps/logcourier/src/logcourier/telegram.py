@@ -10,13 +10,14 @@ import uuid
 from .secrets import redact, token_bot_id
 
 FILE_ID = re.compile(r"[A-Za-z0-9_-]{1,512}")
-MAX_DOWNLOAD = 10 * 1024 * 1024
+MAX_DOWNLOAD = 19_000_000  # below the cloud Bot API's 20 MB getFile limit
 
 
 class TelegramError(RuntimeError):
-    def __init__(self, message: str, retry_after: int = 0):
+    def __init__(self, message: str, retry_after: int = 0, status_code: int = 0):
         super().__init__(redact(message))
         self.retry_after = retry_after
+        self.status_code = status_code
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -46,7 +47,7 @@ class Telegram:
             except (ValueError, TypeError, AttributeError):
                 description, retry_after = "Ошибка Telegram", 0
             raise TelegramError(
-                f"Telegram HTTP {error.code}: {description}", min(3600, max(0, retry_after))
+                f"Telegram HTTP {error.code}: {description}", max(0, retry_after), error.code
             ) from None
         except (urllib.error.URLError, TimeoutError, OSError):
             raise TelegramError("Нет связи с Telegram. Архивы останутся в очереди.") from None

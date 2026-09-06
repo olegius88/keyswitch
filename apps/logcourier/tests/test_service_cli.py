@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 from logcourier import __main__, service
 from logcourier.collector import Collector
@@ -22,7 +23,7 @@ def test_full_queue_still_delivers(tmp_path, configured, monkeypatch):
         return "Sent"
 
     monkeypatch.setattr(service.Collector, "scan", full)
-    monkeypatch.setattr(service, "Telegram", lambda _: object())
+    monkeypatch.setattr(service, "Telegram", lambda _: SimpleNamespace(bot_id=config.bot_id))
     monkeypatch.setattr(service, "deliver", sent)
     worker.run()
     assert messages and "Sent" in messages[0][0]
@@ -40,7 +41,7 @@ def test_service_retry_retains_queue(tmp_path, configured, monkeypatch):
 
     worker = service.Service(tmp_path / "worker", config, "dummy", notify)
     worker.send_now()
-    monkeypatch.setattr(service, "Telegram", lambda _: object())
+    monkeypatch.setattr(service, "Telegram", lambda _: SimpleNamespace(bot_id=config.bot_id))
 
     def failure(*args):
         raise service.TelegramError("retry", retry_after=60)

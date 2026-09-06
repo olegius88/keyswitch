@@ -14,28 +14,17 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     from logcourier import __version__
 
-    windows_options = ["--hide-console", "hide-early"] if sys.platform == "win32" else []
-    # Optional task-local Ubuntu dependency; no system installation or network access here.
-    extra_library = ROOT / ".local/qt-deps/unpacked/usr/lib/x86_64-linux-gnu/libxcb-cursor.so.0"
-    native_options = ["--add-binary", f"{extra_library}:."] if extra_library.exists() else []
     subprocess.run(
         [
             sys.executable,
             "-m",
             "PyInstaller",
             "--noconfirm",
-            "--onedir",
-            "--name",
-            "LogCourier",
-            "--specpath",
-            "build",
             "--distpath",
             "dist",
             "--workpath",
             "build/pyinstaller",
-            *windows_options,
-            *native_options,
-            str(ROOT / "packaging/launcher.py"),
+            str(ROOT / "packaging/logcourier.spec"),
         ],
         cwd=ROOT,
         check=True,
@@ -58,7 +47,8 @@ def main():
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(source, target)
     (folder / "docs").mkdir(exist_ok=True)
-    shutil.copy2(ROOT / "docs/VERIFICATION.md", folder / "docs/VERIFICATION.md")
+    for document in (ROOT / "docs").glob("*.md"):
+        shutil.copy2(document, folder / "docs" / document.name)
     name = f"LogCourier-{__version__}-{platform.system().lower()}-{platform.machine().lower()}"
     archive = Path(
         shutil.make_archive(str(ROOT / "dist" / name), "zip", ROOT / "dist", "LogCourier")

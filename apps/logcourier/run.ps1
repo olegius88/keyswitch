@@ -9,5 +9,9 @@ if ($LASTEXITCODE -ne 0) {
     & '.venv\Scripts\python.exe' -m pip install -e .
     if ($LASTEXITCODE -ne 0) { throw 'Не удалось установить зависимости' }
 }
-& '.venv\Scripts\python.exe' -m logcourier @args
-exit $LASTEXITCODE
+if ($args.Count -eq 0 -or $args[0] -eq 'gui') {
+    Start-Process -FilePath (Join-Path $PSScriptRoot '.venv\Scripts\pythonw.exe') -ArgumentList (@('-m', 'logcourier') + $args)
+} else {
+    & '.venv\Scripts\python.exe' -m logcourier @args
+    exit $LASTEXITCODE
+}

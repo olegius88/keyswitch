@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from .config import Config
 from .store import Store
-from .telegram import FILE_ID, Telegram, TelegramError
+from .telegram import FILE_ID, MAX_DOWNLOAD, Telegram, TelegramError
 
 INDEX_LIMIT = 2 * 1024 * 1024
 HEX = re.compile(r"[a-f0-9]{64}")
@@ -41,7 +41,7 @@ def decode_index(data: bytes, chat_id: str, bot_id: str) -> dict:
                 raise ValueError
             if not FILE_ID.fullmatch(entry["file_id"]) or not HEX.fullmatch(entry["sha256"]):
                 raise ValueError
-            if not 0 < entry["size"] <= 10 * 1024 * 1024:
+            if not 0 < entry["size"] <= MAX_DOWNLOAD:
                 raise ValueError
             datetime.fromisoformat(entry["created_at"])
         previous = result["previous"]
@@ -114,7 +114,7 @@ def deliver(store: Store, config: Config, client: Telegram, cancelled=lambda: Fa
         raise TelegramError(
             "Закрепление каталога потеряно или изменено. Восстановите последнее закрепление LogCourier."
         )
-    for row in store.queue(config.destination)[:32]:
+    for row in store.queue(config.destination)[:4]:
         checkpoint(cancelled)
         if row["file_id"]:
             continue

@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import __version__
+from . import __version__, autostart
 from .catalog import current_catalog, verify_connection
 from .config import Config, Source, data_directory, load_config, save_config
 from .secrets import read_token, redact, store_token, token_bot_id
@@ -121,6 +121,7 @@ class SourceDialog(QDialog):
 class Window(QMainWindow):
     def __init__(self, root: Path, config: Config, start_service: bool = True):
         super().__init__()
+        QApplication.instance().setQuitOnLastWindowClosed(False)
         self.root, self.config = root, config
         self.sources = copy.deepcopy(config.sources)
         self.tasks: list[Task] = []
@@ -262,7 +263,10 @@ class Window(QMainWindow):
             "Логи могут содержать переписку, имена, пути и другие личные данные.\n"
             "Это передача полного содержимого, не обезличенная телеметрия.\n\n"
             "Сбор каждые 5 секунд; отправка по выбранному интервалу.\n"
-            "Очередь на диске: до 128 МиБ. Фрагмент: до 2 МиБ до сжатия.\n"
+            "Очередь: до 128 МиБ. Локальный фрагмент: до 2 МиБ до сжатия.\n"
+            "Перед отправкой фрагменты объединяются в пакеты до 19 МБ.\n"
+            "Документы и закрепления — не чаще одного раза в 4 секунды.\n"
+            "Пауза Telegram сохраняется после перезапуска; кнопка её не сбрасывает.\n"
             "При заполнении очереди сбор остановится. Ротация исходной программы\n"
             "может удалить ещё не прочитанные записи — увеличьте её срок хранения.\n\n"
             "При неопределённом ответе сети возможен повторный файл с тем же ID.\n"
@@ -272,6 +276,18 @@ class Window(QMainWindow):
         note.setWordWrap(True)
         layout.addWidget(self.consent)
         layout.addWidget(self.auto)
+        self.autostart_box = QCheckBox("Запускать при входе в Windows, сразу в трее")
+        self.autostart_box.setEnabled(sys.platform == "win32")
+        self.autostart_note = QLabel("Применяется сразу. Полный выход — через меню трея → «Выход».")
+        self.autostart_note.setWordWrap(True)
+        try:
+            self.autostart_box.setChecked(autostart.is_enabled())
+        except OSError:
+            self.autostart_box.setEnabled(False)
+            self.autostart_note.setText("Не удалось прочитать настройку автозапуска Windows.")
+        self.autostart_box.clicked.connect(self.change_autostart)
+        layout.addWidget(self.autostart_box)
+        layout.addWidget(self.autostart_note)
         form = QFormLayout()
         form.addRow("Интервал отправки", self.interval)
         layout.addLayout(form)
@@ -303,6 +319,23 @@ class Window(QMainWindow):
         )
         info.setWordWrap(True)
         layout.addWidget(info)
+
+    def change_autostart(self, enabled):
+        try:
+            autostart.set_enabled(enabled)
+        except (OSError, RuntimeError, ValueError) as error:
+            self.autostart_box.setChecked(not enabled)
+            self.error(
+                "Не удалось изменить автозапуск Windows."
+                if isinstance(error, OSError)
+                else str(error)
+            )
+            return
+        self.autostart_note.setText(
+            "Автозапуск включён: при входе в Windows программа будет в трее."
+            if enabled
+            else "Автозапуск выключен."
+        )
 
     def refresh_sources(self):
         self.table.setRowCount(len(self.sources))
@@ -544,14 +577,16 @@ class Window(QMainWindow):
             self.reveal()
 
     def closeEvent(self, event):
-        if QSystemTrayIcon.isSystemTrayAvailable() and not self.exiting:
-            event.ignore()
-            self.hide()
-        elif not self.exiting:
-            event.ignore()
-            self.shutdown()
-        else:
+        if self.exiting:
             event.accept()
+            return
+        event.ignore()
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            self.tray.show()
+            self.hide()
+        else:
+            # Do not quit or strand a running sender without a way to open it again.
+            self.statusBar().showMessage("Трей временно недоступен. Окно оставлено открытым.")
 
     def shutdown(self):
         self.exiting = True
@@ -595,3 +630,31 @@ def run(minimized: bool = False) -> int:
     if not minimized or not QSystemTrayIcon.isSystemTrayAvailable() or not config.bot_id:
         window.show()
     return app.exec()
+
+
+def smoke_test(output: Path) -> int:
+    """Exercise the packaged GUI, worker startup and shutdown without user settings."""
+    import json
+    import tempfile
+
+    app = QApplication.instance() or QApplication([])
+    with tempfile.TemporaryDirectory(prefix="logcourier-gui-test-") as profile:
+        window = Window(Path(profile), Config(), start_service=True)
+        window.show()
+
+        def exercise():
+            window.close()
+            if window.exiting or window.service.stop_event.is_set():
+                window.shutdown()
+                return
+            window.reveal()
+            window.setProperty("smokePassed", True)
+            window.shutdown()
+
+        QTimer.singleShot(100, exercise)
+        code = app.exec()
+        passed = bool(window.property("smokePassed")) and not window.service.thread.is_alive()
+        output.write_text(
+            json.dumps({"passed": passed, "qt_platform": app.platformName()}), encoding="utf-8"
+        )
+        return 0 if passed and code == 0 else 1

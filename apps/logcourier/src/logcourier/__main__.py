@@ -15,12 +15,14 @@ from .secrets import read_token, redact
 from .telegram import Telegram
 
 
-def main(argv=None) -> int:
+def main(argv=None, error_handler=None) -> int:
     parser = argparse.ArgumentParser(description="LogCourier — личный сборщик логов в Telegram")
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command")
     gui = commands.add_parser("gui", help="Открыть настройки и значок в трее")
     gui.add_argument("--minimized", action="store_true")
+    smoke = commands.add_parser("self-test", help="Проверить GUI на изолированном профиле")
+    smoke.add_argument("--output", type=Path, required=True)
     commands.add_parser("status", help="Показать настройки назначения без секретов")
     for action in ("list", "fetch"):
         command = commands.add_parser(
@@ -34,6 +36,10 @@ def main(argv=None) -> int:
             command.add_argument("--since", help="Дата ISO, например 2026-09-05 (UTC)")
     arguments = parser.parse_args(argv)
     try:
+        if arguments.command == "self-test":
+            from .gui import smoke_test
+
+            return smoke_test(arguments.output)
         if arguments.command in (None, "gui"):
             from .gui import run
 
@@ -97,7 +103,9 @@ def main(argv=None) -> int:
             print(target)
         return 0
     except Exception as error:
-        if isinstance(error, (ValueError, RuntimeError)):
+        if error_handler is not None:
+            error_handler(error)
+        elif isinstance(error, (ValueError, RuntimeError, ImportError)):
             print(redact(str(error)), file=sys.stderr)
         else:
             print(f"Операция не выполнена ({type(error).__name__}).", file=sys.stderr)
@@ -105,4 +113,8 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
+    if sys.platform == "win32" and sys.stderr is None:
+        from .startup import report_error
+
+        raise SystemExit(main(error_handler=report_error))
     raise SystemExit(main())

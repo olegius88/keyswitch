@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "logcourier"
-version = "0.1.0"
+version = "0.1.1"
 description = "Personal tray-based log collector with Telegram delivery"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]

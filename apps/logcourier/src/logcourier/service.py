@@ -4,9 +4,11 @@ import copy
 import threading
 import time
 
+from .batching import compact
 from .catalog import DeliveryCancelled, deliver
 from .collector import Collector
 from .config import Config
+from .rate_limit import RateLimitedClient
 from .secrets import redact
 from .store import QueueFull, Store
 from .telegram import Telegram, TelegramError
@@ -22,6 +24,7 @@ class Service:
         self.stop_event = threading.Event()
         self.wake = threading.Event()
         self.manual = False
+        self.manual_pending = False
         self.next_send = time.monotonic() + config.interval_minutes * 60
         self.retry_at = 0.0
         self.failures = 0
@@ -35,10 +38,9 @@ class Service:
         with self.lock:
             self._config, self._token = copy.deepcopy(config), token
             self.next_send = time.monotonic() + config.interval_minutes * 60
-            self.retry_at = 0
-            self.failures = 0
             self.revision += 1
             self.manual = False
+            self.manual_pending = False
         self.wake.set()
 
     def send_now(self):
@@ -62,10 +64,12 @@ class Service:
                 with self.lock:
                     config, token = copy.deepcopy(self._config), self._token
                     manual, self.manual = self.manual, False
+                    if manual:
+                        self.manual_pending = True
                     revision = self.revision
                 message = "Автоматическая отправка выключена."
                 try:
-                    active = config.auto_send or manual
+                    active = config.auto_send or self.manual_pending
                     if active and not config.consent:
                         message = "Требуется разрешение на передачу текста логов."
                     elif active and (not token or not config.chat_id or not config.bot_id):
@@ -79,20 +83,42 @@ class Service:
                         except QueueFull as error:
                             message = warnings = str(error)
                         now = time.monotonic()
+                        cooldown = store.get("telegram_cooldown:" + config.bot_id, 0)
+                        self.retry_at = max(self.retry_at, now + max(0, cooldown - time.time()))
                         if now < self.retry_at:
                             message += f" Повтор через {int(self.retry_at - now)} с."
-                        elif manual or now >= self.next_send:
+                        elif self.manual_pending or now >= self.next_send:
+                            # Only compact when sending is due, never create a new package each poll.
+                            try:
+                                while compact(store, config):
+                                    if self.stop_event.is_set() or self.revision != revision:
+                                        raise DeliveryCancelled(
+                                            "Отправка остановлена. Очередь сохранена."
+                                        )
+                            except QueueFull as error:
+                                warnings += " " + str(error)
+                            client = RateLimitedClient(
+                                Telegram(token),
+                                store,
+                                config.chat_id,
+                                lambda: self.stop_event.is_set() or self.revision != revision,
+                            )
                             message = deliver(
                                 store,
                                 config,
-                                Telegram(token),
+                                client,
                                 lambda: self.stop_event.is_set() or self.revision != revision,
                             )
                             if warnings:
                                 message += " " + warnings
                             self.failures = 0
                             self.retry_at = 0
-                            self.next_send = time.monotonic() + config.interval_minutes * 60
+                            pending = bool(store.queue(config.destination))
+                            if not pending:
+                                self.manual_pending = False
+                            self.next_send = time.monotonic() + (
+                                5 if pending else config.interval_minutes * 60
+                            )
                     self.notify(message, store.stats(config.destination))
                 except DeliveryCancelled as error:
                     self.notify(str(error), store.stats(config.destination))
