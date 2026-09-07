@@ -4,6 +4,15 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.17.1 — 2026-09-07
+
+- Fix Windows package verification failing while printing Cyrillic prefix-model
+  report examples to a legacy-encoded stdout. Emit lossless ASCII-safe JSON;
+  preserve validation gates, model weights and application behavior.
+- Add real CLI regression checks for cp1252, ASCII and UTF-8 output, including
+  exact report round-tripping. Include the mid-word model and settings changes
+  from 0.17.0, whose cross-platform release publication was blocked by this error.
+
 ## 0.17.0 — 2026-09-07
 
 - Train and independently evaluate a separate EN/RU prefix action model for

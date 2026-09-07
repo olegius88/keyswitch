@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import copy
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -23,6 +25,25 @@ import verify_prefix_model as verifier
 
 
 class PrefixEvidenceTests(unittest.TestCase):
+    def test_verifier_cli_preserves_unicode_report_on_legacy_stdout(self) -> None:
+        root = Path(TOOLS).parent
+        expected = verifier.verify()
+        self.assertFalse(json.dumps(expected, ensure_ascii=False).isascii())
+        for encoding in ("cp1252", "ascii", "utf-8"):
+            with self.subTest(encoding=encoding):
+                completed = subprocess.run(
+                    [sys.executable, str(Path(TOOLS) / "verify_prefix_model.py")],
+                    cwd=root,
+                    env={**os.environ, "PYTHONPATH": str(root / "src"),
+                         "PYTHONIOENCODING": encoding},
+                    capture_output=True,
+                    timeout=30,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr.decode("utf-8", "replace"))
+                self.assertTrue(completed.stdout.isascii())
+                self.assertEqual(json.loads(completed.stdout), expected)
+
     def test_hashed_prefix_text_inputs_pin_checkout_line_endings(self) -> None:
         engine = json.loads((corpus.DIRECTORY / "engine-report.json").read_bytes())
         paths = set(corpus.provenance()) | set(trainer.provenance()) | set(engine["provenance"])

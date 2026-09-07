@@ -1,6 +1,13 @@
-# KeySwitch 0.17.0
+# KeySwitch 0.17.1
 
 ## Русский
+
+Исправлена ошибка сборки Windows из 0.17.0: вывод русских примеров в отчёте
+проверки модели падал с `UnicodeEncodeError` при кодировке `cp1252`.
+JSON теперь использует Unicode-экранирование без потери содержимого; проверки
+качества не отключены и веса не изменены. Добавлен запуск настоящего CLI
+в тестах с `cp1252`, ASCII и UTF-8 и проверкой полного совпадения данных.
+Публикация 0.17.0 была остановлена; этот выпуск включает её доработки ниже.
 
 Обученная ранняя смена раскладки при включённом контекстном помощнике:
 например, `ghbd` → `прив` ещё до окончания слова, с продолжением набора
@@ -37,14 +44,14 @@
 умолчанию. Старые версии доступны явно. Это отдельное приложение: данный
 релиз KeySwitch не обновляет установленный LogCourier и не публикует его установщик.
 
-[Обучение, результаты и ограничения](https://github.com/olegius88/keyswitch/blob/v0.17.0/model/prefix_v1/README.md) ·
-[Настройки помощника](https://github.com/olegius88/keyswitch/blob/v0.17.0/docs/context-assistant.md).
+[Обучение, результаты и ограничения](https://github.com/olegius88/keyswitch/blob/v0.17.1/model/prefix_v1/README.md) ·
+[Настройки помощника](https://github.com/olegius88/keyswitch/blob/v0.17.1/docs/context-assistant.md).
 
 ### Установка
 
-- Windows 10/11 x64: `KeySwitch-Setup-0.17.0-x64.exe` или
-  `KeySwitch-0.17.0-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.17.0_amd64.deb`.
+- Windows 10/11 x64: `KeySwitch-Setup-0.17.1-x64.exe` или
+  `KeySwitch-0.17.1-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.17.1_amd64.deb`.
 - Контрольные суммы: `SHA256SUMS`.
 
 Установщик Windows пока не подписан сертификатом издателя. Нативный Wayland
@@ -52,6 +59,13 @@
 текст стороннего приложения: после инъекции он не прочитан и не проверен.
 
 ## English
+
+Fix the Windows build failure in 0.17.0: printing Cyrillic model-report
+examples raised `UnicodeEncodeError` with cp1252 stdout. Emit lossless JSON
+Unicode escapes without disabling quality gates or changing model weights.
+Real CLI regression tests cover cp1252, ASCII and UTF-8 with exact report
+round-tripping. Publication of 0.17.0 was blocked; this release includes its
+changes below.
 
 Trained mid-word layout correction with contextual assist enabled: for example,
 `ghbd` → `прив` before the word is finished, then typing continues in Russian.
@@ -87,13 +101,13 @@ version and default log retrieval to the current version. Older versions remain
 explicitly accessible. LogCourier is a separate application: this KeySwitch
 release neither updates an installed collector nor publishes its installer.
 
-See the [training report and limitations](https://github.com/olegius88/keyswitch/blob/v0.17.0/model/prefix_v1/README.md).
+See the [training report and limitations](https://github.com/olegius88/keyswitch/blob/v0.17.1/model/prefix_v1/README.md).
 
 ### Installation
 
-- Windows 10/11 x64: `KeySwitch-Setup-0.17.0-x64.exe` or
-  `KeySwitch-0.17.0-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.17.0_amd64.deb`.
+- Windows 10/11 x64: `KeySwitch-Setup-0.17.1-x64.exe` or
+  `KeySwitch-0.17.1-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.17.1_amd64.deb`.
 - Checksums: `SHA256SUMS`.
 
 The Windows installer is not yet publisher-signed. Native Wayland is unsupported.

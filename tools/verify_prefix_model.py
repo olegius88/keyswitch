@@ -81,4 +81,6 @@ def verify(*, require_active: bool = True, report_path: Path = REPORT,
 
 
 if __name__ == "__main__":
-    print(json.dumps(verify(), ensure_ascii=False, indent=2))
+    # Windows build pipes may use cp1252. JSON escapes preserve Unicode values
+    # without requiring a Unicode-capable stdout or changing validation gates.
+    print(json.dumps(verify(), ensure_ascii=True, indent=2))
