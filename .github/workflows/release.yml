@@ -1,4 +1,5 @@
 name: Build Linux and Windows packages and release
+run-name: "KeySwitch — release build (Windows + Linux) — ${{ github.ref_name }}"
 
 "on":
   push:

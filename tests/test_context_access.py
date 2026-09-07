@@ -244,6 +244,105 @@ class AtspiContextTests(unittest.TestCase):
 
 
 class PlatformReaderTests(unittest.TestCase):
+    def test_diagnostics_start_empty_and_are_independent_snapshots(self) -> None:
+        reader = PlatformFieldReader()
+        expected = {"status": "not_requested", "failure_stage": None, "failure_type": None}
+        with patch("keyswitch.context_access.sys.platform", "linux"), patch("keyswitch.atspi_context.AtspiFieldReader") as factory:
+            self.assertEqual(reader.diagnostics(), expected)
+            snapshot = reader.diagnostics()
+            snapshot["status"] = "changed"
+            snapshot["failure_type"] = "changed"
+            self.assertIsNone(reader.read("", 1))
+            self.assertIsNone(reader.read("chat", 0))
+            reader.close()
+            self.assertEqual(reader.diagnostics(), expected)
+            factory.assert_not_called()
+
+    def test_failure_diagnostics_categorize_each_stage_without_retry(self) -> None:
+        for platform, target in (("win32", "keyswitch.windows_context.WindowsFieldReader"), ("linux", "keyswitch.atspi_context.AtspiFieldReader")):
+            for stage in ("initialization", "read"):
+                for error, category in (
+                    (ImportError, "import_error"),
+                    (ModuleNotFoundError, "import_error"),
+                    (OSError, "os_error"),
+                    (PermissionError, "os_error"),
+                    (RuntimeError, "runtime_error"),
+                    (ValueError, "provider_error"),
+                    (Exception, "provider_error"),
+                ):
+                    with self.subTest(platform=platform, stage=stage, error=error.__name__):
+                        reader = PlatformFieldReader()
+                        with patch("keyswitch.context_access.sys.platform", platform), patch(target) as factory:
+                            failing_call = factory if stage == "initialization" else factory.return_value.read
+                            failing_call.side_effect = error("private provider message")
+                            self.assertIsNone(reader.read("chat", 1))
+                            expected = {"status": "unavailable", "failure_stage": stage, "failure_type": category}
+                            self.assertEqual(reader.diagnostics(), expected)
+                            factory.assert_called_once()
+                            self.assertEqual(factory.return_value.read.call_count, int(stage == "read"))
+                            factory.reset_mock()
+                            self.assertIsNone(reader.read("", 1))
+                            self.assertIsNone(reader.read("chat", 0))
+                            self.assertIsNone(reader.read("chat", 1))
+                            self.assertEqual(reader.diagnostics(), expected)
+                            factory.assert_not_called()
+                            factory.return_value.read.assert_not_called()
+                            factory.return_value.close.assert_not_called()
+
+    def test_close_clears_failures_before_fresh_reads(self) -> None:
+        for stage in ("initialization", "read"):
+            for result in (FieldContext("chat", "1", "text"), None):
+                with self.subTest(stage=stage, supported=result is not None):
+                    reader = PlatformFieldReader()
+                    with patch("keyswitch.context_access.sys.platform", "linux"), patch("keyswitch.atspi_context.AtspiFieldReader") as factory:
+                        factory.return_value.read.return_value = result
+                        failing_call = factory if stage == "initialization" else factory.return_value.read
+                        failing_call.side_effect = RuntimeError("private provider message")
+                        self.assertIsNone(reader.read("chat", 1))
+                        self.assertEqual(reader.diagnostics()["failure_stage"], stage)
+                        reader.close()
+                        self.assertEqual(factory.return_value.close.call_count, int(stage == "read"))
+                        self.assertEqual(reader.diagnostics(), {
+                            "status": "not_requested", "failure_stage": None, "failure_type": None,
+                        })
+                        failing_call.side_effect = None
+                        self.assertEqual(reader.read("chat", 1), result)
+                        self.assertEqual(factory.call_count, 2)
+                        self.assertEqual(reader.diagnostics(), {
+                            "status": "available" if result is not None else "unsupported_field",
+                            "failure_stage": None, "failure_type": None,
+                        })
+                        reader.close()
+                        reader.close()
+                        self.assertEqual(reader.diagnostics(), {
+                            "status": "not_requested", "failure_stage": None, "failure_type": None,
+                        })
+
+    def test_diagnostics_exclude_field_and_unformatted_exception_details(self) -> None:
+        class PrivateProviderError(Exception):
+            def __str__(self) -> str:
+                raise AssertionError("Provider exceptions must not be formatted")
+
+            def __repr__(self) -> str:
+                raise AssertionError("Provider exceptions must not be formatted")
+
+        reader = PlatformFieldReader()
+        field = FieldContext("private application", "private field", "private before", "private after", source="private source")
+        with patch("keyswitch.context_access.sys.platform", "linux"), patch("keyswitch.atspi_context.AtspiFieldReader") as factory:
+            factory.return_value.read.return_value = field
+            self.assertEqual(reader.read(field.application, 1), field)
+            self.assertEqual(reader.diagnostics(), {
+                "status": "available", "failure_stage": None, "failure_type": None,
+            })
+            for stage in ("read", "initialization"):
+                failing_call = factory if stage == "initialization" else factory.return_value.read
+                failing_call.side_effect = PrivateProviderError("private exception text", field)
+                self.assertIsNone(reader.read(field.application, 1))
+                self.assertEqual(reader.diagnostics(), {
+                    "status": "unavailable", "failure_stage": stage, "failure_type": "provider_error",
+                })
+                reader.close()
+
     def test_explicit_lazy_read_and_exception_privacy(self) -> None:
         reader = PlatformFieldReader()
         self.assertIsNone(reader.read("", 1))

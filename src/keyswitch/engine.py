@@ -31,6 +31,7 @@ from .context_policy import ContextPolicy, ContextResult
 from .context_access import PlatformFieldReader
 from .input_context import FieldContext, FieldReader
 from .prefix_model import PrefixInput, PrefixModel
+from .settings_diagnostics import setting_change, settings_snapshot
 from .short_words import (
     is_short_word_override,
     natural_short_source_veto,
@@ -133,6 +134,7 @@ class WaitingContextWord:
     field: FieldContext
     window: int
     deadline: float
+    diagnostic_id: int = 0
 
 
 @dataclass(frozen=True)
@@ -207,6 +209,7 @@ class KeySwitchEngine:
         self.prefix_model = PrefixModel.default()
         self._early_switch_confidence = EARLY_SWITCH_CONFIDENCE
         self._context_waiting: WaitingContextWord | None = None
+        self._context_wait_sequence = 0
         self._sensitive_context_window: int | None = None
         self._typed_events = 0
         self._typed_presses = 0
@@ -534,6 +537,8 @@ class KeySwitchEngine:
         if event.pressed:
             self._track_focus()
         if event.key_name == "Pointer":
+            if event.pressed:
+                self._log_input_edit(event, self.backend.active_application())
             self._sensitive_context_window = None
             self._clear_word(reason="pointer_activity")
             self._untracked_token = False
@@ -569,7 +574,7 @@ class KeySwitchEngine:
                 field = self.context_policy.reader.read(application, self._focus_window or 0)
                 if field is not None and field.sensitive:
                     self._sensitive_context_window = self._focus_window
-                    self._context_waiting = None
+                    self._cancel_context_wait("sensitive_field")
                     self.context_policy.stream.clear()
             context_enabled = (
                 bool(self.settings.get("enabled", True))
@@ -579,13 +584,14 @@ class KeySwitchEngine:
             )
             stream = self.context_policy.stream
             stream.focus(application, self._focus_window or 0)
+            self._log_input_edit(event, application)
             if context_enabled:
                 if not any(self._matches_hotkey(name, event) for name in ("toggle", "convert_last", "undo")):
                     stream.observe(event)
             else:
                 stream.clear()
             if event.key_name == "BackSpace" or event.control or event.alt or event.super_key:
-                self._context_waiting = None
+                self._cancel_context_wait("backspace" if event.key_name == "BackSpace" else "modifier_shortcut")
         # Only presses carry a meaningful group: a release reports whatever
         # layout was active when the finger came up, which is stale right
         # after the engine switched the layout itself.
@@ -1182,6 +1188,8 @@ class KeySwitchEngine:
             )
             excluded = self._application_excluded(application)
             joint = None if trailing else self._resolve_context_wait(waiting, strokes, boundary, decision, application)
+            if trailing:
+                self._log_context_wait("context_wait_cancelled", waiting, "literal_tail")
             if joint is not None:
                 self._pending = joint
                 self._pending_learning_action = None
@@ -1210,10 +1218,14 @@ class KeySwitchEngine:
                     and not boundary.deferred
                     and self.settings.get("detection.context_policy", "assist") == "assist"
                 ):
+                    self._context_wait_sequence += 1
                     self._context_waiting = WaitingContextWord(
                         plan, decision, result.field, self._focus_window or 0, time.monotonic() + 10.0,
+                        self._context_wait_sequence,
                     )
+                    self._log_context_wait("context_wait_started", self._context_waiting, "model_wait")
         else:
+            self._log_context_wait("context_wait_cancelled", waiting, "analysis_skipped")
             self._remember_context(application, source_group, strokes)
         self._log_word_evaluation(
             trigger=self._trigger_for_boundary(boundary),
@@ -1443,6 +1455,7 @@ class KeySwitchEngine:
                 score=round(prediction.probability, 6), model_version=prediction.model_version,
                 mode=self.settings.get("detection.context_policy", "assist"),
                 applied=result.decision.should_convert, baseline_convert=decision.should_convert,
+                baseline_reason=decision.reason,
                 model_supported=prediction.supported,
                 policy_applied=result.policy_applied,
                 decision_source=result.decision_source,
@@ -1450,6 +1463,7 @@ class KeySwitchEngine:
                 final_action="convert" if result.decision.should_convert else "keep",
                 field_read_requested=bool(self.settings.get("detection.context_read_field", False)),
                 field_reader_status=self._field_reader_status(),
+                field_reader_details=self._field_reader_details(),
                 context_source=field.source if field else "unavailable",
                 before_characters=len(field.before) if field else 0,
                 after_characters=len(field.after) if field else 0,
@@ -1465,6 +1479,7 @@ class KeySwitchEngine:
         boundary: KeyEvent, decision: DetectionDecision, application: str,
     ) -> CorrectionPlan | None:
         if waiting is None or self.settings.get("detection.context_policy", "assist") != "assist":
+            self._log_context_wait("context_wait_cancelled", waiting, "policy_disabled")
             return None
         previous = waiting.plan
         if (
@@ -1474,10 +1489,21 @@ class KeySwitchEngine:
             or not decision.should_convert
             or any(stroke.group != previous.source_group for stroke in (*previous.strokes, *strokes))
         ):
+            self._log_context_wait(
+                "context_wait_cancelled", waiting, "preconditions_changed",
+                expired=time.monotonic() > waiting.deadline,
+                same_window=waiting.window == (self._focus_window or 0),
+                same_application=previous.application == application,
+                boundary_available=previous.boundary is not None,
+                same_layout=previous.source_group == decision.source_group,
+                next_word_convert=decision.should_convert,
+                strokes_same_layout=all(stroke.group == previous.source_group for stroke in (*previous.strokes, *strokes)),
+            )
             return None
         original = previous.original + previous.boundary.character + decision.original
         suffix = "" if boundary.deferred else boundary.character
         if not self.context_policy.stream.text.endswith(original + suffix):
+            self._log_context_wait("context_wait_cancelled", waiting, "observed_suffix_changed")
             return None
         group = decision.target_group
         alternative = self._text_for_group(previous.strokes, group)
@@ -1486,13 +1512,54 @@ class KeySwitchEngine:
             after=decision.replacement, field_override=waiting.field,
         )
         if not result.decision.should_convert:
+            self._log_context_wait("context_wait_cancelled", waiting, "lookahead_not_converted")
             return None
-        self._technical_event("context_wait_resolved", previous_characters=len(previous.original), next_characters=len(decision.original))
+        self._technical_event("context_wait_resolved", wait_id=waiting.diagnostic_id, previous_characters=len(previous.original), next_characters=len(decision.original))
         return CorrectionPlan(
             previous.strokes + (previous.boundary,) + strokes,
             None if boundary.deferred else boundary, previous.source_group, group,
             original, alternative + previous.boundary.character + decision.replacement,
             result.decision.confidence, application, True, "context_phrase", self._context_field_id(),
+        )
+
+    def _log_context_wait(
+        self, event: str, waiting: WaitingContextWord | None, reason: str, **fields: object,
+    ) -> None:
+        if waiting is None:
+            return
+        self._technical_event(
+            event, wait_id=waiting.diagnostic_id, reason=reason,
+            word_characters=len(waiting.plan.original),
+            source_group=waiting.plan.source_group, target_group=waiting.plan.target_group,
+            remaining_ms=max(0, round((waiting.deadline - time.monotonic()) * 1000)),
+            **fields,
+        )
+
+    def _cancel_context_wait(self, reason: str) -> None:
+        self._log_context_wait("context_wait_cancelled", self._context_waiting, reason)
+        self._context_waiting = None
+
+    def _log_input_edit(self, event: KeyEvent, application: str) -> None:
+        # Observe editing controls, not printable keystrokes or field contents.
+        if not bool(self.settings.get("diagnostics.technical_logging", False)) or not bool(self.settings.get("enabled", True)) or self._application_excluded(application):
+            return
+        if event.control or event.alt or event.super_key:
+            edit = "shortcut"
+        elif event.key_name in {"BackSpace", "Delete"}:
+            edit = "backspace" if event.key_name == "BackSpace" else "delete"
+        elif event.key_name == "Pointer":
+            edit = "pointer"
+        elif event.key_name in NAVIGATION_KEYS:
+            edit = "navigation"
+        else:
+            return
+        self._technical_event(
+            "input_edit_observed", edit=edit, application=application,
+            group=event.group, tracked_word_characters=len(self._strokes),
+            context_characters_before=len(self.context_policy.stream.text),
+            last_committed_available=self._last_committed is not None and not self._last_committed_stale,
+            wait_id=self._context_waiting.diagnostic_id if self._context_waiting is not None else None,
+            text_verified=False,
         )
 
     def _forced_target_group(self, source_group: int, word: str) -> int | None:
@@ -1610,6 +1677,7 @@ class KeySwitchEngine:
             intent_model=self.intent_model_status.as_dict(),
             context_model_status=self.context_policy.status,
             field_reader_status=self._field_reader_status(),
+            field_reader_details=self._field_reader_details(),
             language_models={
                 str(group): {
                     "locale": model.locale,
@@ -1618,34 +1686,7 @@ class KeySwitchEngine:
                 }
                 for group, model in self.models.items()
             },
-            detection_settings={
-                path: self.settings.get(f"detection.{path}")
-                for path in (
-                    "minimum_length",
-                    "confidence",
-                    "aggressive",
-                    "protect_code",
-                    "context_aware",
-                    "context_policy",
-                    "context_read_field",
-                    "respect_manual_layout",
-                    "correct_on_space",
-                    "correct_on_enter",
-                    "correct_on_tab",
-                    "correct_on_punctuation",
-                    "correct_on_pause",
-                    "pause_delay_seconds",
-                    "early_switch",
-                    "early_switch_min_length",
-                    "learning",
-                    "learning_confirmations",
-                    "intent_model_enabled",
-                )
-            },
-            hotkeys={
-                name: self.settings.get(f"hotkeys.{name}")
-                for name in ("toggle", "convert_last", "undo")
-            },
+            settings=settings_snapshot(self.settings),
         )
 
     def _log_word_evaluation(
@@ -2039,6 +2080,7 @@ class KeySwitchEngine:
         excluded = self._application_excluded(application)
         self._technical_event(
             "manual_conversion_scheduled",
+            wait_id=self._context_waiting.diagnostic_id if self._context_waiting is not None else None,
             source=source,
             original="<redacted>" if excluded else original,
             replacement="<redacted>" if excluded else replacement,
@@ -2629,6 +2671,10 @@ class KeySwitchEngine:
             return "not_configured"
         return reader.status if isinstance(reader, PlatformFieldReader) else "custom_reader"
 
+    def _field_reader_details(self) -> dict[str, object]:
+        reader = self.context_policy.reader
+        return reader.diagnostics() if isinstance(reader, PlatformFieldReader) else {"status": self._field_reader_status()}
+
     def _configured_action_keys(self) -> frozenset[str]:
         if not bool(self.settings.get("enabled", True)):
             return frozenset()
@@ -2745,7 +2791,7 @@ class KeySwitchEngine:
 
     def _clear_word(self, action: str | None = None, *, reason: str = "") -> None:
         self.context_policy.stream.clear()
-        self._context_waiting = None
+        self._cancel_context_wait(reason or "word_cleared")
         if self._deferred_action is not None:
             self._complete_deferred_action(False, reason)
         self._log_word_discarded(reason)
@@ -2780,7 +2826,7 @@ class KeySwitchEngine:
     def _settings_changed(self, path: str, value: object) -> None:
         if path in {"*", "enabled", "detection.context_aware", "detection.context_policy", "detection.context_read_field", "exclusions.applications"}:
             self.context_policy.stream.clear()
-            self._context_waiting = None
+            self._cancel_context_wait("settings_changed")
             self._sensitive_context_window = None
         self._action_keys = self._configured_action_keys()
         if path == "*":
@@ -2793,23 +2839,11 @@ class KeySwitchEngine:
             self._manual_layout_group = None
         elif path == "detection.learning" and not bool(value):
             self.dismiss_learning_prompt(reason="learning_disabled")
-        self._technical_event(
-            "setting_changed", path=path, value=self._loggable_setting(path, value)
-        )
+        change = setting_change(self.settings, path, value)
+        if change is not None:
+            self._technical_event("setting_changed", **change)
         if path == "diagnostics.technical_logging" and bool(value):
             self._technical_session_event("technical_logging_enabled")
-
-    @staticmethod
-    def _loggable_setting(path: str, value: object) -> object:
-        if path == "*":
-            return "<all>"
-        if isinstance(value, (bool, int, float)) or value is None:
-            return value
-        if isinstance(value, str):
-            return value if len(value) <= 80 else value[:77] + "..."
-        if isinstance(value, (list, tuple, set, dict)):
-            return {"type": type(value).__name__, "items": len(value)}
-        return type(value).__name__
 
     def _track_focus(self) -> _FocusChange:
         """Notice the user moving to another window."""
@@ -2905,6 +2939,7 @@ class KeySwitchEngine:
             respect_manual_layout=respect,
             protects_next_word=protects,
             current_word_length=len(self._strokes),
+            wait_id=self._context_waiting.diagnostic_id if self._context_waiting is not None else None,
         )
         if focus.changed:
             # The manual pick belonged to the previous window.

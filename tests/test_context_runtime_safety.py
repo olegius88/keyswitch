@@ -143,9 +143,11 @@ class ContextRuntimeSafetyTests(InputIntegrityTests):
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.engine._technical_session_event("audit")
         event = self.events(logs.output)[0]
-        settings = event["detection_settings"]
+        settings = event["settings"]
         assert isinstance(settings, dict)
-        self.assertEqual(settings["context_read_field"], True)
+        overrides = settings["overrides"]
+        assert isinstance(overrides, dict)
+        self.assertEqual(overrides["detection.context_read_field"], True)
         self.assertEqual(event["field_reader_status"], "not_requested")
         self.engine.context_policy.reader = None
         self.assertEqual(self.engine._field_reader_status(), "not_configured")

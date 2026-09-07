@@ -4,6 +4,21 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.17.2 — 2026-09-07
+
+- Record only known non-default settings in versioned diagnostic snapshots;
+  log changes and resets explicitly, summarize private collections without
+  their contents, and refresh the snapshot when diagnostics are re-enabled.
+- Correlate short-word context waits, cancellations, manual conversions and
+  observed edits without adding printable keystrokes or adjacent field text
+  to the new events. Distinguish baseline decisions from contextual decisions.
+- Report safe accessibility-provider failure categories and initialization/read
+  stages without exception contents; retain the existing reader retry behavior.
+- Clarify diagnostics and their limits, add privacy and input-sequence regressions,
+  and archive previous engine evidence while retaining model weights and results.
+- Name GitHub Actions runs by KeySwitch tests/release or LogCourier purpose,
+  independently of the triggering commit title. This is not a LogCourier release.
+
 ## 0.17.1 — 2026-09-07
 
 - Fix Windows package verification failing while printing Cyrillic prefix-model

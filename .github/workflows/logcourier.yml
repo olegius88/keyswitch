@@ -1,4 +1,5 @@
 name: LogCourier Windows and Linux
+run-name: "LogCourier — tests and packages (Windows + Linux) — ${{ github.ref_name }} — ${{ github.event_name }}"
 "on":
   push:
     paths:

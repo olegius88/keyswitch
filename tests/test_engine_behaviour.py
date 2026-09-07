@@ -1539,21 +1539,53 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertEqual(changes[0]["value"], 3.5)
         self.assertEqual(changes[1]["value"], {"type": "list", "items": 1})
         self.assertEqual(len(str(changes[2]["value"])), 80)
-        self.assertEqual(self.engine._loggable_setting("*", None), "<all>")
-        self.assertEqual(self.engine._loggable_setting("x", object()), "object")
-        self.assertIsNone(self.engine._loggable_setting("x", None))
+        self.assertTrue(all(event["operation"] == "set" for event in changes))
 
     def test_session_event_lists_the_new_settings(self) -> None:
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.engine._technical_session_event("probe")
         session = self.technical_events(logs.output)[0]
-        detection = session["detection_settings"]
-        assert isinstance(detection, dict)
-        self.assertEqual(detection["pause_delay_seconds"], 1.5)
-        self.assertFalse(detection["early_switch"])
-        hotkeys = session["hotkeys"]
-        assert isinstance(hotkeys, dict)
-        self.assertEqual(hotkeys["convert_last"], "Pause")
+        settings = session["settings"]
+        assert isinstance(settings, dict)
+        overrides = settings["overrides"]
+        assert isinstance(overrides, dict)
+        self.assertNotIn("detection.pause_delay_seconds", overrides)
+        self.assertFalse(overrides["detection.early_switch"])
+        self.assertNotIn("hotkeys.convert_last", overrides)
+        self.assertNotIn("detection_settings", session)
+        self.assertNotIn("hotkeys", session)
+
+    def test_settings_delta_logs_reset_and_ignores_unknown_keys(self) -> None:
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.settings.set("detection.confidence", 3.5)
+            self.settings.restore_default("detection.confidence")
+        changes = [e for e in self.technical_events(logs.output) if e["event"] == "setting_changed"]
+        self.assertEqual([e["operation"] for e in changes], ["set", "reset"])
+        self.assertNotIn("value", changes[1])
+        self.assertEqual(changes[1]["path"], "detection.confidence")
+        with self.assertNoLogs("keyswitch.engine", level="INFO"):
+            self.settings.set("future.private_value", "private", persist=False)
+
+    def test_reload_logs_replacement_snapshot_and_disabling_logging_is_respected(self) -> None:
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._settings_changed("*", self.settings.snapshot())
+        change = next(e for e in self.technical_events(logs.output) if e["event"] == "setting_changed")
+        self.assertEqual(change["operation"], "snapshot")
+        self.assertEqual(change["path"], "*")
+        self.assertNotIn("value", change)
+        with self.assertNoLogs("keyswitch.engine", level="INFO"):
+            self.settings.set("diagnostics.technical_logging", False)
+            self.settings.restore_default("detection.early_switch")
+            self.settings.set("detection.minimum_length", 5)
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.settings.set("diagnostics.technical_logging", True)
+        session = next(e for e in self.technical_events(logs.output) if e["event"] == "technical_logging_enabled")
+        settings = session["settings"]
+        assert isinstance(settings, dict)
+        overrides = settings["overrides"]
+        assert isinstance(overrides, dict)
+        self.assertNotIn("detection.early_switch", overrides)
+        self.assertEqual(overrides["detection.minimum_length"], 5)
 
 
 if __name__ == "__main__":
