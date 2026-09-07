@@ -3,6 +3,7 @@
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+source tools/gui-test-env.sh
 task_atspi_runtime=$(mktemp -d /tmp/keyswitch-atspi-e2e.XXXXXX)
 readonly task_atspi_runtime
 cleanup() {

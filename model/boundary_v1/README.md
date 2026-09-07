@@ -2,7 +2,9 @@
 
 Status: **rejected, inactive**. `candidate.json` is research evidence, not an
 installed application model. No `resources/models/boundary-v1.json` is shipped.
-The default punctuation policy and context-v1 weights remain unchanged.
+This experiment did not change the default punctuation policy or context-v1
+weights. The later, separately evaluated [boundary-v2](../boundary_v2/README.md)
+now supplies the default segmentation policy; v1 remains rejected.
 
 ## What was implemented
 
@@ -59,12 +61,13 @@ zero segmentation errors and at least 80% decided correctly. In particular,
 only 43 test rows are whole-word endings and 11,949 are literal punctuation;
 the large row count is not broad or balanced linguistic coverage.
 
-The [authored engine regression](engine-regression.json) separately compares
-18 physical-input sequences. Experimental buffering eliminates premature
-injections in this small suite, but exact outputs fall from 13/18 to 12/18
-because of missed corrections. Both variants retain correct inputs and text
-lengths here. This is a regression comparison, not another independent test,
-not a real-user error rate and not permission to activate the candidate.
+The [authored engine regression](engine-regression.json) compares the same
+18 physical-input sequences. It now labels the legacy path explicitly and
+also includes active v2. V1 eliminates premature injections, but exact outputs
+fall from legacy 13/18 to v1 12/18 because of missed corrections. Active v2
+reaches 18/18. Prior runtime reports remain in `engine-history/`; neither the
+refresh nor the added comparison is another independent test of v1, a
+real-user error rate or permission to activate this rejected candidate.
 
 ## Reproduction
 

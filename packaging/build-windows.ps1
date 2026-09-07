@@ -1304,6 +1304,10 @@ Invoke-NativeCommand `
     -FailureMessage "Boundary evidence changed or rejected candidate was activated"
 Invoke-NativeCommand `
     -Command "python" `
+    -Arguments @((Join-Path $ProjectDirectory "tools\verify_boundary_v2.py")) `
+    -FailureMessage "Boundary-v2 model or exact-text promotion evidence changed"
+Invoke-NativeCommand `
+    -Command "python" `
     -Arguments @((Join-Path $ProjectDirectory "tools\verify_prefix_model.py")) `
     -FailureMessage "Prefix model or exact-text promotion evidence changed"
 # Generate the OS type library before freezing. The runtime must not need
@@ -1417,6 +1421,15 @@ if ($ProductVersion -ne "$Version.0") {
 
 $BundledIntentModel = Join-Path $NativeDistribution "keyswitch\resources\models\layout_intent_v1.ksm"
 $BundledContextModel = Join-Path $NativeDistribution "keyswitch\resources\models\context_policy_v1.json"
+$BoundarySeal = Read-BoundedJsonObject `
+    -Path (Join-Path $ProjectDirectory "model\boundary_v2\seal.json") `
+    -MaximumBytes 1MB -Label "boundary-model seal"
+[byte[]]$BundledBoundaryBytes = Read-BoundedFileBytes `
+    -Path (Join-Path $NativeDistribution "keyswitch\resources\models\boundary-v2.json") `
+    -MaximumBytes 64KB -MinimumBytes 2 -Label "bundled boundary model"
+if ((Get-BytesSha256 -Bytes $BundledBoundaryBytes) -cne $BoundarySeal.candidate_sha256) {
+    throw "Native distribution contains a different boundary model"
+}
 $PrefixSeal = Read-BoundedJsonObject `
     -Path (Join-Path $ProjectDirectory "model\prefix_v1\seal.json") `
     -MaximumBytes 1MB -Label "prefix-model seal"

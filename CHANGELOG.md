@@ -4,6 +4,23 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.18.0 — 2026-09-07
+
+- Train and activate a separately sealed boundary-v2 ranker for completed-token
+  spans. Preserve internal EN/RU punctuation keys until continuation, a hard
+  boundary or idle; keep literal suffixes and abstain on uncertain segmentation.
+  Retain the existing intent/context/prefix weights and rejected boundary-v1 evidence.
+- Cancel stale contextual lookahead when accepting manual Pause, including
+  commands still waiting for physical key releases.
+- Retry transient field-reader failures at bounded 5/15/60-second intervals;
+  record recovery state without exception contents and do not retry missing
+  dependencies, explicit access denial or failed provider cleanup.
+- Add learned-model, exact-text, undo, Enter/Tab and native X11 regressions;
+  bind package contents to the accepted weights and reproducible evidence.
+- Share a portal-free isolated GUI test runner across CI and release checks.
+  Disable GTK4 portals only in test processes, without sudo or system changes,
+  and preserve real accessibility tests.
+
 ## 0.17.2 — 2026-09-07
 
 - Record only known non-default settings in versioned diagnostic snapshots;

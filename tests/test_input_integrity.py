@@ -229,6 +229,11 @@ class InputIntegrityTests(unittest.TestCase):
                 self.reset_editor()
                 self.type("ghbdtn", group=0)
                 self.type(suffix, group=0)
+                if suffix in ",.;]":
+                    self.assertEqual(self.backend.text, "ghbdtn" + suffix)
+                    last = self.engine._last_word_input_at
+                    assert last is not None
+                    self.engine._maybe_correct_after_pause(now=last + 2)
                 self.assertEqual(self.backend.text, "привет" + suffix)
 
     def test_space_needs_no_letter_mapping_in_the_other_layout(self) -> None:

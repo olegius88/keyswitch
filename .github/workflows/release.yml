@@ -69,13 +69,12 @@ jobs:
 
       - name: Run unit and GTK interaction tests with 100% branch coverage
         run: >-
-          dbus-run-session --
-          xvfb-run -a -s "-screen 0 1280x800x24"
+          ./tools/run-gui-test.sh --
           ./tests/run_coverage.sh
 
       - name: Run real X11 RECORD/XTEST end-to-end test
         run: |
-          dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24 -noreset" \
+          ./tools/run-gui-test.sh --noreset -- \
             bash -c 'setxkbmap -layout us,ru && GTK_A11Y=none PYTHONPATH=src python3 tests/e2e_x11.py'
 
       - name: Run real StatusNotifierItem and DBusMenu integration test
@@ -98,6 +97,12 @@ jobs:
           PYTHONPATH=src python3 tools/train_boundary_model.py --verify
           PYTHONPATH=src python3 tools/verify_boundary_model.py
           PYTHONPATH=src python3 tools/evaluate_boundary_engine.py --verify
+
+      - name: Replay accepted boundary-v2 training and exact-text gate
+        run: |
+          PYTHONPATH=src python3 tools/boundary_v2_corpus.py
+          PYTHONPATH=src python3 tools/train_boundary_v2.py --verify
+          PYTHONPATH=src python3 tools/verify_boundary_v2.py
 
       - name: Run isolated native AT-SPI context and unavailable-bus E2E
         run: ./tools/run-atspi-e2e.sh
@@ -144,7 +149,7 @@ jobs:
           package_version="$(sed -nE 's/^version = "([^"]+)"/\1/p' pyproject.toml | head -n 1)"
           architecture="$(dpkg --print-architecture)"
           package="dist/keyswitch_${package_version}_${architecture}.deb"
-          dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24 -noreset" \
+          ./tools/run-gui-test.sh --noreset -- \
             bash -c 'setxkbmap -layout us,ru && GTK_USE_PORTAL=0 ./tools/run-native-e2e.sh "$1"' \
             _ "$package"
 

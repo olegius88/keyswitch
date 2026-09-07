@@ -14,6 +14,7 @@ from dataclasses import dataclass, replace
 from . import __version__
 from .backend import InputBackend, KeyEvent, KeyDisposition
 from .boundary_model import BoundaryModel, MAX_SUFFIX, features as boundary_features
+from .boundary_policy import BoundaryPolicy, features as boundary_policy_features
 from .config import SettingsStore
 from .detector import DetectionDecision, LanguageDetector
 from .early_switch import (
@@ -205,7 +206,7 @@ class KeySwitchEngine:
         self.learning = learning or LearningStore(history.path.with_name("learning.json"))
         self.context_policy = ContextPolicy(context_reader or PlatformFieldReader(self.backend))
         self._context_result: ContextResult | None = None
-        self.boundary_model = BoundaryModel.default()
+        self.boundary_model: BoundaryModel | None = BoundaryPolicy.default()
         self.prefix_model = PrefixModel.default()
         self._early_switch_confidence = EARLY_SWITCH_CONFIDENCE
         self._context_waiting: WaitingContextWord | None = None
@@ -1340,6 +1341,11 @@ class KeySwitchEngine:
             return strokes, (), True
         targets = [group for group in self.models if group != source_group]
         if tail >= len(strokes) or tail > MAX_SUFFIX or not targets:
+            self._technical_event(
+                "boundary_guard", model_version=model.version,
+                reason="no_word" if tail >= len(strokes) else "suffix_too_long" if tail > MAX_SUFFIX else "no_target",
+                observed_characters=len(strokes), ambiguous_tail=tail,
+            )
             return strokes, (), False
         original = self._text_for_group(strokes, source_group)
         if self._forced_target_group(source_group, original) is not None:
@@ -1352,8 +1358,9 @@ class KeySwitchEngine:
             return strokes, (), False
         target = targets[0]
         alternative = self._text_for_group(strokes, target)
+        extract = boundary_policy_features if isinstance(model, BoundaryPolicy) else boundary_features
         prediction = model.predict(tuple(
-            boundary_features(original, alternative, length, self.models[source_group], self.models[target])
+            extract(original, alternative, length, self.models[source_group], self.models[target])
             for length in range(tail + 1)
         ))
         length = prediction.suffix_length
@@ -2096,6 +2103,10 @@ class KeySwitchEngine:
                 else "automatic" if reversal.automatic else "manual"
             ),
         )
+        # Explicit intent supersedes the model's old lookahead even while the
+        # manual plan is waiting for release. Retain its ID in the event above,
+        # but never let that stale wait block the following word's prefix.
+        self._cancel_context_wait("manual_conversion")
         self._strokes = []
         self._symbol_strokes = []
         self._source_group = -1
@@ -2673,7 +2684,7 @@ class KeySwitchEngine:
 
     def _field_reader_details(self) -> dict[str, object]:
         reader = self.context_policy.reader
-        return reader.diagnostics() if isinstance(reader, PlatformFieldReader) else {"status": self._field_reader_status()}
+        return {**reader.diagnostics(), "retry": reader.retry_diagnostics()} if isinstance(reader, PlatformFieldReader) else {"status": self._field_reader_status()}
 
     def _configured_action_keys(self) -> frozenset[str]:
         if not bool(self.settings.get("enabled", True)):

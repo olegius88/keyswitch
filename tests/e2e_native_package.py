@@ -205,7 +205,8 @@ def main() -> int:
         ("RU keys to English", 1, "hello ", "hello ", 0, 1000),
         ("punctuation key is a Russian letter", 0, ",fpf ", "база ", 1, 1000),
         ("return to EN before punctuation test", 1, "hello ", "hello ", 0, 1000),
-        ("punctuation boundary keeps its glyph", 0, "ghbdtn,", "привет,", 1, 1000),
+        # Ambiguous punctuation now waits for the default 1.5-second idle boundary.
+        ("punctuation boundary keeps its glyph", 0, "ghbdtn,", "привет,", 1, 2300),
         ("manual layout switch protects next word", 0, "ghbdtn ", "ghbdtn ", 0, 1000),
         ("manual protection is consumed once", 0, "ghbdtn ", "привет ", 1, 1000),
         ("short Russian word switches to English", 1, "if ", "if ", 0, 1000),

@@ -605,7 +605,7 @@ class EngineTests(unittest.TestCase):
                     "".join(item.character_for(target) for item in strokes), expected
                 )
 
-    def test_punctuation_after_a_complete_word_remains_a_boundary(self) -> None:
+    def test_ambiguous_punctuation_after_a_complete_word_waits_for_a_pause(self) -> None:
         for index, character in enumerate("ghbdtn", start=30):
             self.engine._handle(letter_event(character, index, 0, self.pair))
             self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
@@ -613,13 +613,19 @@ class EngineTests(unittest.TestCase):
         self.engine._handle(comma)
         self.assertEqual(self.backend.injections, [])
         self.engine._handle(release_event(comma))
+        self.assertEqual(self.backend.injections, [])
+        last = self.engine._last_word_input_at
+        assert last is not None
+        self.engine._maybe_correct_after_pause(now=last + 2)
         self.assertEqual(len(self.backend.injections), 1)
         _strokes, target, boundary = self.backend.injections[0]
         self.assertEqual(target, 1)
-        assert boundary is not None
-        self.assertEqual(boundary.character, ",")
+        self.assertIsNone(boundary)
+        correction = self.engine._last_correction
+        assert correction is not None
+        self.assertEqual("".join(event.character for event in correction.trailing), ",")
 
-    def test_punctuation_after_a_protected_unknown_token_starts_a_new_word(self) -> None:
+    def test_punctuation_after_a_protected_unknown_token_waits_for_space(self) -> None:
         for index, character in enumerate("kubectl", start=30):
             event = letter_event(character, index, 0, self.pair)
             self.engine._handle(event)
@@ -627,6 +633,10 @@ class EngineTests(unittest.TestCase):
         comma = letter_event(",", 59, 0, self.pair)
         self.engine._handle(comma)
         self.engine._handle(release_event(comma))
+        self.assertEqual(self.engine.snapshot.current_word, "kubectl,")
+        self.assertEqual(self.backend.injections, [])
+        self.engine._handle(boundary_event(True))
+        self.engine._handle(boundary_event(False))
         self.assertEqual(self.engine.snapshot.current_word, "")
         self.assertEqual(self.backend.injections, [])
 

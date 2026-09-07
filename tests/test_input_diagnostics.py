@@ -95,6 +95,19 @@ class InputDiagnosticsTests(InputIntegrityTests):
         self.assertIsNotNone(scheduled["wait_id"])
         self.assertEqual(scheduled["source"], "last_committed")
         self.assertEqual(self.backend.text, "я ")
+        self.assertIsNone(self.engine._context_waiting)
+        cancelled = next(e for e in self.events(logs.output) if e["event"] == "context_wait_cancelled")
+        self.assertEqual(cancelled["wait_id"], scheduled["wait_id"])
+        self.assertEqual(cancelled["reason"], "manual_conversion")
+
+    def test_manual_intent_cancels_wait_even_while_waiting_for_key_release(self) -> None:
+        self.type("z ")
+        self.engine._pressed.add(1)
+        self.tap(self.key("Pause"))
+        self.assertIsNone(self.engine._context_waiting)
+        self.assertIsNotNone(self.engine._pending)
+        self.assertEqual(self.backend.text, "z ")
+        self.assertEqual(self.backend.injections, [])
 
     def test_delete_switch_layout_and_retype_are_distinct_from_pause(self) -> None:
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
@@ -129,6 +142,7 @@ class InputDiagnosticsTests(InputIntegrityTests):
         decision = next(e for e in self.events(logs.output) if e["event"] == "context_decision")
         self.assertEqual(decision["field_reader_details"], {
             "status": "unavailable", "failure_stage": "initialization", "failure_type": "import_error",
+            "retry": {"attempts": 0, "limit": 3, "after_ms": None},
         })
         self.assertEqual(decision["baseline_reason"], "короткое слово")
         self.assertNotIn("private field content", "\n".join(logs.output))

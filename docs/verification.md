@@ -18,10 +18,11 @@ git status --short
 git diff --check
 ./tools/install-typing-tools.sh .typing
 KEYSWITCH_TYPING_ROOT=.typing ./tools/typecheck.sh
-dbus-run-session -- xvfb-run -a env GIO_USE_VFS=local ./tests/run_coverage.sh
+./tools/run-gui-test.sh -- ./tests/run_coverage.sh
 PYTHONPATH=src python3 tools/verify_context_model.py
 PYTHONPATH=src python3 tools/verify_context_v2.py
 PYTHONPATH=src python3 tools/verify_boundary_model.py
+PYTHONPATH=src python3 tools/verify_boundary_v2.py
 PYTHONPATH=src python3 tools/verify_prefix_model.py
 ```
 
@@ -29,6 +30,32 @@ PYTHONPATH=src python3 tools/verify_prefix_model.py
 нативных Win32-модулей и Windows UI исключены. Windows CI имеет собственную
 область coverage, настоящий hook/SendInput E2E и проверку установленного EXE.
 Linux-моки и `mypy --platform win32` не заменяют эти нативные проверки.
+
+### GUI-тесты без системных порталов и sudo
+
+Штатный запускатель `tools/run-gui-test.sh` создаёт Xvfb, затем личную сессию
+D-Bus: активируемые службы получают именно тестовый `DISPLAY`. Общий файл
+`tools/gui-test-env.sh` задаёт `GDK_DEBUG=no-portals` для GTK4,
+`ADW_DISABLE_PORTAL=1` для отдельного клиента libadwaita, `GTK_USE_PORTAL=0`
+для совместимости и локальный GIO. Его используют coverage, исходный X11 E2E,
+проверки извлечённого пакета, AT-SPI, CI и релизный конвейер.
+
+В ограниченном процессе с `NoNewPrivs=1` setuid-помощник `fusermount3` не может
+получить права на монтирование: ненужная активация `xdg-document-portal`
+давала `Operation not permitted`. Одного `GTK_USE_PORTAL=0` недостаточно для
+GTK4/libadwaita. Это исправление тестового окружения, не отключение служб
+рабочего стола, не подавление stderr и не изменение прав `/dev/fuse`.
+Пароль sudo для проверок не нужен. Не переносите эти переменные в профиль
+пользователя или обычный запуск приложения.
+
+GTK-тесты и X11 E2E проверяют по D-Bus, что Desktop/Documents portal не
+активировались. Настоящие проверки клавиатуры, окна, курсора, выделения и
+паролей сохраняются; AT-SPI не отключается общим запускателем. Этот контур
+не проверяет интеграцию приложения с системным порталом выбора файлов.
+
+Основания: [GDK_DEBUG в GTK4](https://docs.gtk.org/gtk4/running.html#gdk-debug),
+[отдельный клиент libadwaita](https://github.com/GNOME/libadwaita/blob/main/src/adw-settings-impl-portal.c),
+[NoNewPrivs в ядре Linux](https://docs.kernel.org/userspace-api/no_new_privs.html).
 
 `verify_context_model.py` проверяет рабочую context-v1, её отчёт и связанные
 hashes. `verify_context_v2.py` проверяет эксперимент и требует сохранения
@@ -84,11 +111,25 @@ PYTHONPATH=src python3 tools/verify_boundary_model.py
 PYTHONPATH=src python3 tools/evaluate_boundary_engine.py --verify
 ```
 
-Кандидат отклонён и не включён в программу. Его обучение использует слова из
+Кандидат boundary-v1 отклонён и не включён в программу. Его обучение использует слова из
 прежнего резерва публичных фраз; этот резерв больше нельзя считать новым
 независимым материалом. Подробности и ограничения —
 [в отчёте эксперимента](../model/boundary_v1/README.md). Запускайте тяжёлые
 обучения и replay последовательно. API-моки не заменяют нативный Windows E2E.
+
+Принятая boundary-v2 проверяется отдельно, без изменения старого v1-test:
+
+```bash
+PYTHONPATH=src python3 tools/boundary_v2_corpus.py
+PYTHONPATH=src python3 tools/train_boundary_v2.py --verify
+PYTHONPATH=src python3 tools/verify_boundary_v2.py
+```
+
+Первый sealed test boundary-v2 и его ограничения описаны
+[в карточке модели](../model/boundary_v2/README.md). Повторный `--verify`
+сравнивает веса/отчёты побайтно, а не создаёт новую независимую проверку.
+Общий `evaluate_boundary_engine.py` теперь явно сравнивает старый алгоритм,
+отклонённый v1 и активный v2; прежние отчёты архивируются.
 
 Раннюю модель префиксов проверяют отдельные команды (последовательно):
 
@@ -147,7 +188,7 @@ package="dist/keyswitch_${package_version}_$(dpkg --print-architecture).deb"
 desktop-file-validate packaging/io.github.olegius88.KeySwitch.desktop
 lintian --fail-on error "$package"
 
-dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24 -noreset" \
+./tools/run-gui-test.sh --noreset -- \
   bash -c 'setxkbmap -layout us,ru && GTK_USE_PORTAL=0 ./tools/run-native-e2e.sh "$1"' \
   _ "$package"
 ```
@@ -156,9 +197,10 @@ dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24 -noreset" \
 Переданный strict-отчёт принимается только после сверки gates и текущих hashes.
 Без переменной `KEYSWITCH_INTENT_STRICT_REPORT` `build-deb.sh` запускает strict
 самостоятельно; с неправильным отчётом сборка падает, не обходит проверку.
-Обе нативные сборки также запускают быстрые проверки context-v1, context-v2
-и boundary-v1 (включая запрет установки отклонённых весов)
-и сверяют рабочий контекстный артефакт после компиляции.
+Обе нативные сборки также запускают быстрые проверки context-v1, context-v2,
+boundary-v1, boundary-v2 и prefix-v1 (включая запрет установки отклонённых
+весов) и сверяют рабочие контекстный, префиксный и граничный артефакты
+после компиляции.
 
 Windows собирается на Windows через `packaging/build-windows.ps1`; зависимости,
 настройка EN/RU, unit/native E2E и silent-install smoke перечислены в job

@@ -13,7 +13,7 @@ from pathlib import Path
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import GLib, Gtk
+from gi.repository import Gio, GLib, Gtk
 
 from keyswitch.config import SettingsStore
 from keyswitch.engine import KeySwitchEngine, LearningPrompt
@@ -103,14 +103,33 @@ def main() -> int:
         ("RU keys to English", 1, "hello ", "hello ", 0, 900),
         ("punctuation key is a Russian letter", 0, ",fpf ", "база ", 1, 900),
         ("return to EN before punctuation test", 1, "hello ", "hello ", 0, 900),
-        ("punctuation boundary keeps its glyph", 0, "ghbdtn,", "привет,", 1, 900),
+        ("ambiguous punctuation keeps its glyph after idle", 0, "ghbdtn,", "привет,", 1, 2300),
         ("manual layout switch protects next word", 0, "ghbdtn ", "ghbdtn ", 0, 900),
         ("manual protection is consumed once", 0, "ghbdtn ", "привет ", 1, 900),
         ("short Russian word switches to English", 1, "if ", "if ", 0, 900),
         ("manual Russian selection protects short word", 1, "if ", "ша ", 1, 900),
         ("short-word protection is consumed once", 1, "if ", "if ", 0, 900),
         ("context resolves a short word with the next word", 0, "e 'njuj ", "у этого ", 1, 1200),
+        ("return to EN before internal punctuation", 1, "hello ", "hello ", 0, 900),
+        ("learned boundaries keep the internal comma key", 0, "ghj,ktvf ", "проблема ", 1, 900),
+        ("return to EN before isolated punctuation", 1, "hello ", "hello ", 0, 900),
+        ("isolated dot stays literal after idle", 0, ".", ".", 0, 2300),
     )
+    expected_history = [
+        ("ghbdtn", "привет"),
+        ("руддщ", "hello"),
+        (",fpf", "база"),
+        ("руддщ", "hello"),
+        ("ghbdtn", "привет"),
+        ("ghbdtn", "привет"),
+        ("ша", "if"),
+        ("ша", "if"),
+        ("e 'njuj", "у этого"),
+        ("руддщ", "hello"),
+        ("ghj,ktvf", "проблема"),
+        ("руддщ", "hello"),
+        ("hello", "руддщ"),
+    ]
 
     def abort_on_timeout() -> bool:
         print("E2E_TIMEOUT")
@@ -159,7 +178,7 @@ def main() -> int:
 
     backend._listener = observe
     original_group = backend.current_group()
-    GLib.timeout_add_seconds(35, abort_on_timeout)
+    GLib.timeout_add_seconds(45, abort_on_timeout)
 
     def type_case(index: int) -> bool:
         (
@@ -274,18 +293,6 @@ def main() -> int:
             loop.quit()
             return GLib.SOURCE_REMOVE
         entries = history.read()
-        expected_history = [
-            ("ghbdtn", "привет"),
-            ("руддщ", "hello"),
-            (",fpf", "база"),
-            ("руддщ", "hello"),
-            ("ghbdtn", "привет"),
-            ("ghbdtn", "привет"),
-            ("ша", "if"),
-            ("ша", "if"),
-            ("e 'njuj", "у этого"),
-            ("hello", "руддщ"),
-        ]
         actual_history = [(item.original, item.replacement) for item in entries]
         print(f"history={actual_history!r}")
         if actual_history != expected_history:
@@ -370,12 +377,21 @@ def main() -> int:
             or actual_group != 1
             or "early" not in correction_modes
             or last_entry != ("ghbdtn", "привет")
-            or len(entries) != 11
+            or len(entries) != len(expected_history) + 1
         ):
             print("E2E_FAILED")
             loop.quit()
             return GLib.SOURCE_REMOVE
         print("EARLY_SWITCH_E2E_OK")
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        names = bus.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus",
+                              "org.freedesktop.DBus", "ListNames", None,
+                              GLib.VariantType.new("(as)"), Gio.DBusCallFlags.NONE, 3000, None).unpack()[0]
+        if any(name in names for name in ("org.freedesktop.portal.Desktop", "org.freedesktop.portal.Documents")):
+            print("E2E_FAILED: GUI tests unexpectedly activated a desktop/document portal")
+            loop.quit()
+            return GLib.SOURCE_REMOVE
+        print("NO_DOCUMENT_PORTAL_E2E_OK")
         print("E2E_OK")
         result.exit_code = 0
         loop.quit()

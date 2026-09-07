@@ -44,6 +44,8 @@ def provenance() -> dict[str, str]:
     paths = [Path(__file__), CANDIDATE, SEAL, ROOT / "src/keyswitch/engine.py",
              ROOT / "src/keyswitch/context_policy.py", ROOT / "src/keyswitch/input_context.py",
              ROOT / "src/keyswitch/prefix_model.py", ROOT / "src/keyswitch/early_switch.py",
+             ROOT / "src/keyswitch/boundary_model.py", ROOT / "src/keyswitch/boundary_policy.py",
+             ROOT / "src/keyswitch/resources/models/boundary-v2.json",
              ROOT / "src/keyswitch/resources/models/context_policy_v1.json", ROOT / "tests/test_input_integrity.py"]
     return {path.relative_to(ROOT).as_posix(): checksum(path) for path in paths}
 

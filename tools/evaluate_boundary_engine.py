@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from keyswitch.backend import KeyEvent
 from keyswitch.boundary_model import BoundaryModel
+from keyswitch.boundary_policy import ARTIFACT, BoundaryPolicy
 from keyswitch.config import SettingsStore
 from keyswitch.engine import KeySwitchEngine
 from keyswitch.history import HistoryStore
@@ -36,6 +37,13 @@ SCENARIOS = (
     ("don't", "don't"), ("example.org", "example.org"), ("path/file.py", "path/file.py"),
     ("pm2", "pm2"), ("HTTP", "HTTP"), ("we’re", "we’re"),
 )
+
+
+def provenance() -> dict[str, str]:
+    paths = [Path(__file__), CANDIDATE, ARTIFACT, ROOT / "src/keyswitch/engine.py",
+             ROOT / "src/keyswitch/boundary_model.py", ROOT / "src/keyswitch/boundary_policy.py",
+             ROOT / "src/keyswitch/context_policy.py", ROOT / "tests/test_input_integrity.py"]
+    return {path.relative_to(ROOT).as_posix(): checksum(path) for path in paths}
 
 
 def replay(original: str, model: BoundaryModel | None, models: dict[int, LanguageModel]) -> tuple[str, int]:
@@ -69,7 +77,8 @@ def replay(original: str, model: BoundaryModel | None, models: dict[int, Languag
 def evaluate() -> bytes:
     models = reference_models(False)
     results: dict[str, object] = {}
-    for label, model in (("shipping", None), ("experimental", BoundaryModel.load(CANDIDATE))):
+    for label, model in (("legacy_no_segmentation", None), ("rejected_v1", BoundaryModel.load(CANDIDATE)),
+                         ("active_v2", BoundaryPolicy.load())):
         rows: list[dict[str, object]] = []
         exact, changed_correct, premature, mismatched_length = 0, 0, 0, 0
         for original, expected in SCENARIOS:
@@ -82,10 +91,8 @@ def evaluate() -> bytes:
             rows.append({"original": original, "expected": expected + " ", "actual": actual, "before_hard_boundary": early})
         results[label] = {"rows": rows, "exact": exact, "changed_correct": changed_correct,
                           "injections_before_hard_boundary": premature, "length_mismatches": mismatched_length}
-    paths = [Path(__file__), CANDIDATE, ROOT / "src/keyswitch/engine.py", ROOT / "src/keyswitch/boundary_model.py",
-             ROOT / "src/keyswitch/context_policy.py", ROOT / "tests/test_input_integrity.py"]
-    return canonical({"schema_version": 1, "scope": "authored in-process regression; fixed physical keys/live layout; no native OS proof or promotion",
-                      "provenance": {path.relative_to(ROOT).as_posix(): checksum(path) for path in paths}, "results": results})
+    return canonical({"schema_version": 1, "scope": "authored in-process regression; fixed physical keys/live layout; no native OS proof or independent model evaluation",
+                      "provenance": provenance(), "results": results})
 
 
 def main(argv: Sequence[str] | None = None) -> int:

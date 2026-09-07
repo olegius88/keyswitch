@@ -267,6 +267,16 @@ class MainWindowInteractionTests(unittest.TestCase):
         self.window.destroy()
         self.temporary.cleanup()
 
+    def test_headless_window_does_not_activate_desktop_or_document_portals(self) -> None:
+        self.assertEqual(os.environ.get("ADW_DISABLE_PORTAL"), "1")
+        self.assertIn("no-portals", os.environ.get("GDK_DEBUG", ""))
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        names = bus.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus",
+                              "org.freedesktop.DBus", "ListNames", None,
+                              GLib.VariantType.new("(as)"), Gio.DBusCallFlags.NONE, 3000, None).unpack()[0]
+        self.assertNotIn("org.freedesktop.portal.Desktop", names)
+        self.assertNotIn("org.freedesktop.portal.Documents", names)
+
     def test_full_window_builds_all_pages_and_bound_controls(self) -> None:
         self.assertEqual(self.window.get_title(), "KeySwitch")
         self.assertEqual(len(self.window.NAVIGATION), 9)

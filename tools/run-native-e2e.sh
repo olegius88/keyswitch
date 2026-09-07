@@ -2,6 +2,7 @@
 set -euo pipefail
 
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$project_dir/tools/gui-test-env.sh"
 package="${1:-}"
 
 if [[ -z "$package" || ! -f "$package" ]]; then

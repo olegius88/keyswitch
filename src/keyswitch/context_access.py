@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import sys
+import time
 from typing import Protocol, runtime_checkable
 
 from .input_context import FieldContext, FieldReader
+
+
+RETRY_DELAYS = (5.0, 15.0, 60.0)
 
 
 class _ManagedReader(FieldReader, Protocol):
@@ -24,6 +28,8 @@ class PlatformFieldReader:
         self.status = "not_requested"
         self._failure_stage: str | None = None
         self._failure_type: str | None = None
+        self._retry_attempts = 0
+        self._retry_after: float | None = None
 
     def diagnostics(self) -> dict[str, object]:
         """Return provider status without exception details or field contents."""
@@ -40,12 +46,32 @@ class PlatformFieldReader:
         self.status = "not_requested"
         self._failure_stage = None
         self._failure_type = None
+        self._retry_attempts = 0
+        self._retry_after = None
+
+    def retry_diagnostics(self) -> dict[str, object]:
+        return {
+            "attempts": self._retry_attempts,
+            "limit": len(RETRY_DELAYS),
+            "after_ms": None if self._retry_after is None else max(0, round((self._retry_after - time.monotonic()) * 1000)),
+        }
 
     def read(self, application: str, window: int) -> FieldContext | None:
-        if not application or not window or self.status == "unavailable":
+        if not application or not window:
             return None
         stage = "initialization"
         try:
+            if self.status == "unavailable":
+                if self._retry_after is None or time.monotonic() < self._retry_after:
+                    return None
+                self._retry_attempts += 1
+                stage = "recovery"
+                # COM/provider ownership stays on the engine worker. Reopen a
+                # failed bridge, never carry stale field ranges into a retry.
+                if self._reader is not None:
+                    self._reader.close()
+                    self._reader = None
+                stage = "initialization"
             if self._reader is None:
                 if sys.platform == "win32":
                     from .windows_context import WindowsFieldReader
@@ -56,8 +82,9 @@ class PlatformFieldReader:
             stage = "read"
             result = self._reader.read(application, window)
         except Exception as error:
-            # Provider errors may contain user text. Do not log exceptions or
-            # keep retrying unavailable accessibility bridges on every key.
+            # Never format provider exceptions: they may contain user text.
+            # Missing dependencies, access denial and failed cleanup require
+            # an explicit reset, not repeated calls against the same failure.
             self.status = "unavailable"
             self._failure_stage = stage
             if isinstance(error, ImportError):
@@ -68,8 +95,15 @@ class PlatformFieldReader:
                 self._failure_type = "runtime_error"
             else:
                 self._failure_type = "provider_error"
+            self._retry_after = (
+                time.monotonic() + RETRY_DELAYS[self._retry_attempts]
+                if stage != "recovery" and not isinstance(error, (ImportError, PermissionError))
+                and self._retry_attempts < len(RETRY_DELAYS) else None
+            )
             return None
         self.status = "available" if result is not None else "unsupported_field"
         self._failure_stage = None
         self._failure_type = None
+        self._retry_attempts = 0
+        self._retry_after = None
         return result.bounded() if result is not None else None

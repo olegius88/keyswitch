@@ -97,7 +97,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("choose verification or an explicit runtime regression refresh")
     validate_seal(CORPUS_ROOT)
     if BoundaryModel.default() is not None:
-        raise ValueError("this historical replay requires the shipping boundary policy, not experimental weights")
+        raise ValueError("rejected boundary-v1 weights must not be installed")
     previous = REPORT.read_bytes() if REPORT.exists() else None
     if previous is not None and not (args.verify or args.refresh_runtime):
         raise ValueError("engine test already observed; only identical replay is allowed")
@@ -133,7 +133,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     report: dict[str, object] = {"schema_version": 1, "scope": "in-process visible editor, portable dictionary, boundary-only; not native OS E2E or human-intent labels",
         "selection": "source test partition, hash-ranked distinct groups, 64 per locale, before model scoring",
         "source_ids": [row.phrase.identifier for row in selected], "results": results, "examples": examples,
-        "provenance": {str(path.relative_to(ROOT)): checksum(path) for path in (Path(__file__), CORPUS_ROOT / ARTIFACT, BASELINE, ROOT / "src/keyswitch/engine.py", ROOT / "src/keyswitch/context_policy.py", ROOT / "src/keyswitch/input_context.py", ROOT / "src/keyswitch/boundary_model.py", ROOT / "tests/test_input_integrity.py")},
+        "provenance": {str(path.relative_to(ROOT)): checksum(path) for path in (Path(__file__), CORPUS_ROOT / ARTIFACT, BASELINE, ROOT / "src/keyswitch/engine.py", ROOT / "src/keyswitch/context_policy.py", ROOT / "src/keyswitch/input_context.py", ROOT / "src/keyswitch/boundary_model.py", ROOT / "src/keyswitch/boundary_policy.py", ROOT / "src/keyswitch/resources/models/boundary-v2.json", ROOT / "tests/test_input_integrity.py")},
         "promotion_passed": candidate["length_mismatches"] == 0 and candidate["changed_correct"] <= prior["changed_correct"] and candidate["exactly_restored"] >= prior["exactly_restored"]}
     if previous is not None:
         historical = cast(dict[str, object], json.loads(previous))

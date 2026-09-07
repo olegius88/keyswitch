@@ -61,6 +61,12 @@ def _sequence(value: object) -> tuple[object, ...]:
 
 
 class PhaseGraphTests(unittest.TestCase):
+    def test_display_commands_use_the_shared_portal_free_gui_runner(self) -> None:
+        for noreset in (False, True):
+            argv = pipeline.Context.display_command(["python3", "test.py"], noreset=noreset)
+            self.assertEqual(argv, [str(pipeline.PROJECT_ROOT / "tools/run-gui-test.sh"),
+                                    *(["--noreset"] if noreset else []), "--", "python3", "test.py"])
+
     def test_dependencies_exist_and_precede_their_dependents(self) -> None:
         order = [spec.name for spec in pipeline.PHASES]
         for spec in pipeline.PHASES:

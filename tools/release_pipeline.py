@@ -730,10 +730,9 @@ class Context:
 
     @staticmethod
     def display_command(argv: Sequence[str], *, noreset: bool = False) -> list[str]:
-        """Wrap a command exactly like CI: private D-Bus session plus Xvfb."""
+        """Use the shared isolated GUI environment, with no document portal."""
 
-        screen = XVFB_SCREEN_NORESET if noreset else XVFB_SCREEN
-        return ["dbus-run-session", "--", "xvfb-run", "-a", "-s", screen, *argv]
+        return [str(PROJECT_ROOT / "tools/run-gui-test.sh"), *(["--noreset"] if noreset else []), "--", *argv]
 
 
 PhaseRunner = Callable[[Context, PhaseLog, PhaseState], None]

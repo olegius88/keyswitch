@@ -1,4 +1,4 @@
-.TH KEYSWITCH 1 "September 2026" "KeySwitch 0.17.2" "User Commands"
+.TH KEYSWITCH 1 "September 2026" "KeySwitch 0.18.0" "User Commands"
 .SH NAME
 keyswitch \- automatic keyboard layout correction for Ubuntu X11
 .SH SYNOPSIS
@@ -30,6 +30,14 @@ In assist, a separately trained prefix model can switch before word completion.
 It uses context and prefix evidence, evaluates lengths 4 through 12, and waits
 when uncertain. Missing prefix weights disable only this early model path.
 Off/shadow or disabled context retains the legacy lexical prefix algorithm.
+.PP
+A separate learned completed-token boundary policy retains punctuation keys
+that can represent Russian letters until a hard boundary or enabled idle
+timeout. It chooses the whole word or a literal suffix of up to eight signs,
+and abstains when uncertain. Literal signs and spaces survive correction and
+undo. All-symbol tokens are not automatically converted as words; explicit
+Pause remains available. This segmentation policy also applies with context
+disabled and does not replace the intent or prefix models.
 .PP
 Without contextual intervention, detection is a precision-first hybrid.
 Hard guards and explicit user rules are
