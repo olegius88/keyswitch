@@ -4,6 +4,26 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.19.0 — 2026-09-08
+
+- Retrain the completed-word context policy on a corpus that covers what the
+  engine actually sends it: out-of-lexicon technical terms, dotfiles, Russian
+  and English jargon and misspellings, the word after a literal `/`, every
+  application with the `unknown` field role reported when the field is not
+  read, and the curated short-word override the engine applies before the
+  model. Select the epoch by the development action metric under a
+  zero-false-conversion budget instead of weighted log-loss, which stopped
+  before the model reached the unchanged 0.985 serving threshold. Score a new
+  independent holdout; keep the rejected candidates as development evidence.
+- Analyse the word after a literal `/` head (`bild/c,jhrb`, chat `/c,jhrb`) in
+  the contextual assist mode instead of treating the whole token as code; the
+  head is never replaced, a head that may itself be a wrong-layout word abstains,
+  and manual Pause still converts the whole token. Record `literal_head` in
+  `word_evaluation`.
+- Keep a curated short-word exception from being cancelled by a probabilistic
+  `keep` or an under-confident `convert`; `wait` still delays it. Record the
+  decision source separately.
+
 ## 0.18.0 — 2026-09-07
 
 - Train and activate a separately sealed boundary-v2 ranker for completed-token

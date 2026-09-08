@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "model_version": "context-v1-b330881648a7",
+  "status": "rejected-development-only",
+  "reason": "First candidate-3 attempt. Rejected on development evidence before the independent test was opened: through the engine it left `ишдв` unchanged and additionally broke two conversions the shipping model performs, `xnj,s` -> `чтобы` and the short-word lookahead `e 'njuj` -> `у этого`. Its argmax was `convert` below the fixed 0.985 threshold, which degrades to `suggest` and changes no text.",
+  "labelling_defect": "Out-of-lexicon wrong-layout tokens without context were labelled `suggest`, stricter than both the shipping model and the baseline detector. That manufactured 297 false conversions for the shipping model itself and made the promotion condition unreachable. The label now follows the physical form; only one- or two-character tokens stay ambiguous without context.",
+  "selected_epoch": 9,
+  "development_loss": 0.123905194,
+  "development": {
+    "baseline_converted_correctly": 4460,
+    "baseline_false_conversions": 298,
+    "converted_correctly": 4734,
+    "correct_actions": 12913,
+    "desired_conversions": 6020,
+    "false_conversions": 6,
+    "rows": 14295
+  },
+  "evidence_scope": "development-only; model/context_v1/holdout-3.json was never scored for this candidate"
+}

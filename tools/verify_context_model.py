@@ -25,8 +25,11 @@ def verify(root: Path = ROOT, report_path: Path = REPORT, artifact: Path = ARTIF
         raise ValueError("context quality gates failed or report missing")
     paths = {
         "sources_sha256": root / "model/context_v1/scenarios.json",
-        "holdout_sha256": root / "model/context_v1/holdout-2.json",
+        "holdout_sha256": root / "model/context_v1/holdout-3.json",
         "runtime_sha256": root / "src/keyswitch/context_model.py",
+        # The corpus reproduces the runtime short-word policy, so its source
+        # is part of the evidence a package must be able to re-check.
+        "policy_sha256": root / "src/keyswitch/short_words.py",
         "trainer_sha256": root / "tools/train_context_model.py",
         "baseline_sha256": root / "src/keyswitch/resources/models/layout_intent_v1.ksm",
         "artifact_sha256": artifact,

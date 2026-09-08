@@ -17,10 +17,11 @@ if TOOLS_PATH not in sys.path:
     sys.path.insert(0, TOOLS_PATH)
 
 from context_corpus import CORPUS_ROOT, AssignedPhrase, Phrase, Split, load_source, read_phrases
-from context_evidence import load_cache
+from context_evidence import checksum, load_cache
 from evaluate_context_engine import select_phrases
 from train_context_v2 import provenance
 from verify_context_v2 import read_object, validate_metrics, verify
+from keyswitch.context_model import ARTIFACT_PATH
 
 
 class ContextV2EvidenceTests(unittest.TestCase):
@@ -54,17 +55,20 @@ class ContextV2EvidenceTests(unittest.TestCase):
         self.assertEqual(selected, [source[3]])
         self.assertEqual(select_phrases(list(reversed(source))), selected)
 
-    def test_shipping_gate_retains_v1_and_rejects_candidate_installation(self) -> None:
+    def test_shipping_gate_requires_the_accepted_v1_and_rejects_candidate_installation(self) -> None:
         result = verify()
-        self.assertTrue(result["active_model_unchanged"])
+        self.assertTrue(result["active_model_accepted"])
+        self.assertEqual(result["active_artifact_sha256"], checksum(ARTIFACT_PATH))
         self.assertFalse(result["promotion_passed"])
         with self.assertRaisesRegex(ValueError, "must not replace"):
             verify(active=CORPUS_ROOT / "candidate.json")
+        with self.assertRaisesRegex(ValueError, "accepted context-v1"):
+            verify(active=CORPUS_ROOT / "config.json")
 
     def test_windows_path_separators_do_not_change_sealed_identity(self) -> None:
         windows = {relative.replace("/", "\\"): digest for relative, digest in provenance().items()}
         with patch("verify_context_v2.provenance", return_value=windows):
-            self.assertTrue(verify()["active_model_unchanged"])
+            self.assertTrue(verify()["active_model_accepted"])
 
     def test_runtime_regression_keeps_history_and_rejects_tampering(self) -> None:
         engine = read_object(CORPUS_ROOT / "engine-report.json")

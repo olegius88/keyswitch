@@ -1132,7 +1132,9 @@ class KeySwitchEngine:
             self._log_pending_dropped("next_word_committed")
             self._pending = None
             self._pending_learning_action = None
-        strokes, trailing, segmentation_certain = self._completed_word(tuple(self._strokes), self._source_group)
+        typed = tuple(self._strokes)
+        head = self._literal_head(typed, self._source_group)
+        strokes, trailing, segmentation_certain = self._completed_word(typed[head:], self._source_group)
         self._reset_pause_correction()
         source_group = self._source_group
         original = self._text_for_group(strokes, source_group)
@@ -1143,8 +1145,10 @@ class KeySwitchEngine:
         }
         application = self.backend.active_application()
         context = self._context_for(application)
+        # Pause on the last committed token still converts it whole: the
+        # literal head only narrows what an automatic decision may replace.
         plan = CorrectionPlan(
-            strokes,
+            typed[:head] + strokes,
             boundary,
             source_group,
             next(iter(alternatives), source_group),
@@ -1188,9 +1192,9 @@ class KeySwitchEngine:
                 literal_tail="".join(stroke.character for stroke in trailing),
             )
             excluded = self._application_excluded(application)
-            joint = None if trailing else self._resolve_context_wait(waiting, strokes, boundary, decision, application)
-            if trailing:
-                self._log_context_wait("context_wait_cancelled", waiting, "literal_tail")
+            joint = None if trailing or head else self._resolve_context_wait(waiting, strokes, boundary, decision, application)
+            if trailing or head:
+                self._log_context_wait("context_wait_cancelled", waiting, "literal_tail" if trailing else "literal_head")
             if joint is not None:
                 self._pending = joint
                 self._pending_learning_action = None
@@ -1209,13 +1213,13 @@ class KeySwitchEngine:
                 self._pending_learning_action = None
                 self._pending_trigger_keycode = boundary.keycode
             else:
-                self._remember_context(application, source_group, strokes)
+                self._remember_context(application, source_group, typed[:head] + strokes)
                 result = self._context_result
                 if (
                     result is not None and result.prediction is not None
                     and result.prediction.action == "wait" and result.field is not None
                     and len(original) <= 2 and boundary.character == " "
-                    and not trailing
+                    and not trailing and not head
                     and not boundary.deferred
                     and self.settings.get("detection.context_policy", "assist") == "assist"
                 ):
@@ -1227,7 +1231,7 @@ class KeySwitchEngine:
                     self._log_context_wait("context_wait_started", self._context_waiting, "model_wait")
         else:
             self._log_context_wait("context_wait_cancelled", waiting, "analysis_skipped")
-            self._remember_context(application, source_group, strokes)
+            self._remember_context(application, source_group, typed[:head] + strokes)
         self._log_word_evaluation(
             trigger=self._trigger_for_boundary(boundary),
             original=original,
@@ -1242,9 +1246,10 @@ class KeySwitchEngine:
             source_group=source_group,
             early_switch_origin=early_switch_origin,
             context=context,
+            literal_head=self._text_for_group(typed[:head], source_group),
         )
         if decision is None or not decision.should_convert:
-            self._finish_early_switch(strokes, boundary, application, source_group)
+            self._finish_early_switch(typed[:head] + strokes, boundary, application, source_group)
         else:
             self._early_switch_origin = None
             self._early_switch_at = None
@@ -1373,6 +1378,70 @@ class KeySwitchEngine:
         if length is None:
             return strokes, (), False
         return (strokes[:-length], strokes[-length:], True) if length else (strokes, (), True)
+
+    def _literal_head(self, strokes: tuple[KeyEvent, ...], source_group: int) -> int:
+        """Count leading strokes up to the last ``/`` that stay literal.
+
+        A slash is punctuation in both layouts, so ``bild/c,jhrb`` or a chat
+        ``/c,jhrb`` would hide the wrong-layout ``сборки`` behind the code
+        guard. Only the word after the last slash is analysed, and only when
+        the contextual policy can weigh the surrounding text: the legacy
+        detector alone keeps treating the whole token as code. The head is
+        never replaced. A head that itself looks like a wrong-layout word
+        abstains: one span cannot fix two words, and manual Pause still
+        converts the whole token.
+        """
+
+        if (
+            source_group not in self.models
+            or not bool(self.settings.get("detection.protect_code", True))
+            or not bool(self.settings.get("detection.context_aware", True))
+            or str(self.settings.get("detection.context_policy", "assist")) != "assist"
+            or self.context_policy.model is None
+        ):
+            return 0
+        slashes = [index for index, stroke in enumerate(strokes) if stroke.character == "/"]
+        targets = [group for group in self.models if group != source_group]
+        head = slashes[-1] + 1 if slashes else 0
+        core = strokes[head:]
+        if (
+            not slashes or not targets or not core
+            or not self.detector.is_protected_token(self._text_for_group(strokes, source_group))
+            or self.detector.is_protected_token(self._text_for_group(core, source_group))
+            or not all(
+                stroke.character.isalpha() or self._is_layout_letter(stroke) or stroke.character in WORD_JOINERS
+                for stroke in core
+            )
+        ):
+            return 0
+        segment: list[KeyEvent] = []
+        for stroke in strokes[:head]:
+            if stroke.character != "/":
+                segment.append(stroke)
+            elif segment and not self._head_segment_settled(tuple(segment), source_group, targets[0]):
+                return 0
+            else:
+                segment = []
+        return head
+
+    def _head_segment_settled(self, segment: tuple[KeyEvent, ...], source_group: int, target: int) -> bool:
+        """A head segment is settled when nothing suggests it needs conversion."""
+
+        original = self._text_for_group(segment, source_group)
+        if self.detector.is_protected_token(original):
+            return True
+        alternative = self._text_for_group(segment, target)
+        if self.models[target].score(alternative).known:
+            return False
+        decision = self.detector.decide(
+            original, {target: alternative}, source_group,
+            minimum_length=1,
+            confidence_threshold=float(self.settings.get("detection.confidence", 2.0)),
+            aggressive=bool(self.settings.get("detection.aggressive", False)),
+            protect_code=True,
+            use_intent_model=bool(self.settings.get("detection.intent_model_enabled", True)),
+        )
+        return not decision.should_convert
 
     def _decide_word(
         self,
@@ -1713,6 +1782,7 @@ class KeySwitchEngine:
         early_switch_origin: int | None = None,
         idle_ms: int | None = None,
         context: tuple[dict[int, str], int | None] | None = None,
+        literal_head: str = "",
     ) -> None:
         if not bool(self.settings.get("diagnostics.technical_logging", False)):
             return
@@ -1756,6 +1826,7 @@ class KeySwitchEngine:
             "word_evaluation",
             trigger=trigger,
             original=logged_original,
+            literal_head="<redacted>" if application_excluded and literal_head else literal_head,
             alternatives=logged_alternatives,
             source_group=source_group,
             application=application,
@@ -1904,10 +1975,13 @@ class KeySwitchEngine:
             return
 
         self._pause_correction_pending = False
-        strokes, trailing, segmentation_certain = self._completed_word(tuple(self._strokes), self._source_group)
+        typed = tuple(self._strokes)
+        head = self._literal_head(typed, self._source_group)
+        strokes, trailing, segmentation_certain = self._completed_word(typed[head:], self._source_group)
         source_group = self._source_group
         manual_layout_selected = self._word_protected(source_group)
         original = self._text_for_group(strokes, source_group)
+        literal_head = self._text_for_group(typed[:head], source_group)
         alternatives = {
             group: self._text_for_group(strokes, group)
             for group in self.models
@@ -1930,6 +2004,7 @@ class KeySwitchEngine:
                 source_group=source_group,
                 early_switch_origin=self._early_switch_origin,
                 idle_ms=idle_ms,
+                literal_head=literal_head,
             )
             return
         if excluded:
@@ -1946,6 +2021,7 @@ class KeySwitchEngine:
                 source_group=source_group,
                 early_switch_origin=self._early_switch_origin,
                 idle_ms=idle_ms,
+                literal_head=literal_head,
             )
             return
         if not segmentation_certain:
@@ -1968,6 +2044,7 @@ class KeySwitchEngine:
             source_group=source_group,
             early_switch_origin=self._early_switch_origin,
             idle_ms=idle_ms,
+            literal_head=literal_head,
         )
         if not decision.should_convert:
             return

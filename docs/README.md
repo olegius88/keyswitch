@@ -36,7 +36,7 @@
 | Компонент | Роль и статус | Документы и доказательства |
 | --- | --- | --- |
 | Layout Intent / KSLM v20 | Базовый классификатор пары токенов; рабочий `intent-v1-6ece07f881ec` | [Карточка RU](../model/intent_v1/MODEL_CARD.md), [EN](../model/intent_v1/MODEL_CARD.en.md), [runbook](intent-model-runbook.md), [cookbook](intent-model-cookbook.md) |
-| Context v1 | Рабочая четырёхклассовая политика `context-v1-a46b6833ee9e`, введена в 0.15.0 | [Устройство](context-assistant.md), [отчёт](../model/context_v1/report.json) |
+| Context v1 | Рабочая четырёхклассовая политика `context-v1-953375a70173`, введена в 0.15.0 и переобучена позднее | [Устройство](context-assistant.md), [отчёт](../model/context_v1/report.json) |
 | Prefix v1 | Отдельная модель раннего переключения на полуслове в `assist` | [Методика и ограничения](../model/prefix_v1/README.md), [отчёт](../model/prefix_v1/report.json) |
 | Boundary v2 | Рабочая модель границ завершённого токена; отделяет буквальный хвост от слова | [Методика и ограничения](../model/boundary_v2/README.md), [отчёт](../model/boundary_v2/report.json) |
 | Boundary v1 | Отклонённый предшественник; веса не устанавливаются | [Исторический эксперимент](../model/boundary_v1/README.md) |

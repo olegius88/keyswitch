@@ -9,7 +9,8 @@ from typing import cast
 from keyswitch.context_model import ARTIFACT_PATH, ContextModel
 from context_corpus import CORPUS_ROOT, ROOT
 from context_evidence import CACHE_RECEIPT, checksum
-from train_context_v2 import ARTIFACT, BASELINE, REPORT, SEAL, config, promotion_failures, provenance
+from train_context_v2 import ARTIFACT, REPORT, SEAL, config, promotion_failures, provenance
+from verify_context_model import REPORT as ACCEPTED_REPORT
 
 
 def read_object(path: Path) -> dict[str, object]:
@@ -78,13 +79,19 @@ def verify(directory: Path = CORPUS_ROOT, active: Path = ARTIFACT_PATH) -> dict[
             path = ROOT / str(relative)
             if not path.resolve().is_relative_to(ROOT) or checksum(path) != expected_hash:
                 raise ValueError("engine or lexical provenance mismatch")
-    # This release ships infrastructure and a rejected research candidate,
-    # not new runtime weights. A future promotion requires a new review and
-    # independent holdout, not changing this boolean or copying candidate.json.
-    if checksum(active) != checksum(BASELINE):
+    # This experiment ships infrastructure and a rejected research candidate,
+    # never runtime weights: the active model must be the artifact accepted by
+    # the separate context-v1 evaluation, and copying candidate.json over it
+    # stays rejected. `baseline-context-v1.json` remains the frozen weights this
+    # candidate was compared against, not a pin on the shipping model.
+    active_digest = checksum(active)
+    if active_digest == checksum(directory / ARTIFACT):
         raise ValueError("research candidate must not replace the shipping model")
+    if active_digest != read_object(ACCEPTED_REPORT).get("artifact_sha256"):
+        raise ValueError("active context model differs from the accepted context-v1 evaluation")
     return {"schema_version": 1, "candidate": seal["model_version"], "promotion_passed": report["promotion_passed"],
-        "engine_promotion_passed": engine.get("promotion_passed"), "active_model_unchanged": True,
+        "engine_promotion_passed": engine.get("promotion_passed"), "active_model_accepted": True,
+        "active_artifact_sha256": active_digest,
         "artifact_sha256": seal["artifact_sha256"], "corpus_rows": cast(dict[str, object], seal["audit"])["rows"]}
 
 

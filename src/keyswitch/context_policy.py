@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from .context_model import ContextEvidence, ContextModel, ContextPrediction
 from .detector import DetectionDecision, LanguageDetector
 from .input_context import FieldContext, FieldReader, InputContext
+from .short_words import is_short_word_override
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,14 @@ class ContextPolicy:
                 target_group=target_group, source_score=source, target_score=target,
                 reason="решение контекстной модели", confidence=prediction.probability,
             )
+        elif prediction.action != "wait" and is_short_word_override(baseline):
+            # A curated, reviewed exception is an explicit rule, not a guess, so
+            # neither a probabilistic `keep` nor an under-confident `convert`
+            # cancels it. Only `wait` still delays it, because that is about
+            # timing rather than direction and the lookahead may resolve the
+            # word jointly. The model's opinion is recorded either way.
+            return ContextResult(baseline, prediction, field, decision_source="short_word_override",
+                                 fallback_reason="trusted_short_word")
         else:
             decision = replace(baseline, should_convert=False, reason={
                 "keep": "контекстная модель оставляет текст",
