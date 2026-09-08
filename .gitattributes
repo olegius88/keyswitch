@@ -43,6 +43,7 @@ tools/evaluate_context_engine.py text eol=lf
 tools/verify_context_v2.py text eol=lf
 src/keyswitch/engine.py text eol=lf
 src/keyswitch/context_policy.py text eol=lf
+src/keyswitch/short_words.py text eol=lf
 src/keyswitch/input_context.py text eol=lf
 src/keyswitch/spellcheck.py text eol=lf
 tests/test_input_integrity.py text eol=lf

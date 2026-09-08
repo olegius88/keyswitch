@@ -4,6 +4,17 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.19.1 — 2026-09-08
+
+- Force LF for the short-word policy source, whose digest joined the context
+  model provenance in 0.19.0. A Windows checkout converted it to CRLF, so the
+  packaging gate rejected an unchanged file and no Windows artifact was ever
+  published for that version. Every other provenance path was already pinned.
+- Fail on any platform when a file hashed into model provenance is not pinned
+  against end-of-line conversion. The check discovers hashed files from the
+  recorded evidence as well as from code, so a future provenance entry cannot
+  reintroduce a mismatch that only a Windows checkout can see.
+
 ## 0.19.0 — 2026-09-08
 
 - Retrain the completed-word context policy on a corpus that covers what the

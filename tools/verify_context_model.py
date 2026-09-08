@@ -15,15 +15,15 @@ ROOT = Path(__file__).resolve().parents[1]
 REPORT = ROOT / "model/context_v1/report.json"
 
 
-def verify(root: Path = ROOT, report_path: Path = REPORT, artifact: Path = ARTIFACT_PATH) -> dict[str, object]:
-    with report_path.open("rb") as handle:
-        raw = handle.read(1024 * 1024 + 1)
-    if len(raw) > 1024 * 1024:
-        raise ValueError("oversized context report")
-    report: object = json.loads(raw)
-    if not isinstance(report, dict) or report.get("schema_version") != 1 or report.get("quality_gates_passed") is not True or report.get("test_overlap") != 0:
-        raise ValueError("context quality gates failed or report missing")
-    paths = {
+def provenance_paths(root: Path = ROOT, artifact: Path = ARTIFACT_PATH) -> dict[str, Path]:
+    """Report field -> file whose bytes it pins.
+
+    Exposed so a test can assert every one of them is protected from end-of-line
+    conversion: a checkout that rewrites such a file invalidates the model on
+    that platform alone, which is invisible on the machine that trained it.
+    """
+
+    return {
         "sources_sha256": root / "model/context_v1/scenarios.json",
         "holdout_sha256": root / "model/context_v1/holdout-3.json",
         "runtime_sha256": root / "src/keyswitch/context_model.py",
@@ -34,6 +34,17 @@ def verify(root: Path = ROOT, report_path: Path = REPORT, artifact: Path = ARTIF
         "baseline_sha256": root / "src/keyswitch/resources/models/layout_intent_v1.ksm",
         "artifact_sha256": artifact,
     }
+
+
+def verify(root: Path = ROOT, report_path: Path = REPORT, artifact: Path = ARTIFACT_PATH) -> dict[str, object]:
+    with report_path.open("rb") as handle:
+        raw = handle.read(1024 * 1024 + 1)
+    if len(raw) > 1024 * 1024:
+        raise ValueError("oversized context report")
+    report: object = json.loads(raw)
+    if not isinstance(report, dict) or report.get("schema_version") != 1 or report.get("quality_gates_passed") is not True or report.get("test_overlap") != 0:
+        raise ValueError("context quality gates failed or report missing")
+    paths = provenance_paths(root, artifact)
     for name, path in paths.items():
         if report.get(name) != hashlib.sha256(path.read_bytes()).hexdigest():
             raise ValueError(f"context provenance mismatch: {name}")

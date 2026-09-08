@@ -1,8 +1,13 @@
-# KeySwitch 0.19.0
+# KeySwitch 0.19.1
 
 ## Русский
 
 Переобученная контекстная модель завершённых слов и слово после косой черты.
+
+Версия 0.19.0 не публиковалась: её сборка для Windows остановилась на проверке
+происхождения модели. Исходник политики коротких слов, чей хэш вошёл в отчёт,
+не был закреплён как LF, и выгрузка на Windows превращала его в CRLF. Файл при
+этом не менялся. 0.19.1 содержит это исправление и все изменения 0.19.0.
 
 - Контекстная политика `context-v1-953375a70173` обучена на корпусе, который
   воспроизводит то, что ей действительно передаёт движок. Исправлены два
@@ -27,7 +32,7 @@
 семейств: 16 529 нужных замен из 17 658 и 0 ложных замен. Прежний изолированный
 распознаватель даёт 14 028 замен и 64 ложных. Это синтетический набор
 собственного авторства, а не измерение на реальной переписке. Известные
-ограничения — в [карточке модели](https://github.com/olegius88/keyswitch/blob/v0.19.0/docs/context-assistant.md).
+ограничения — в [карточке модели](https://github.com/olegius88/keyswitch/blob/v0.19.1/docs/context-assistant.md).
 
 Технические термины вне словаря остаются самой слабой категорией: если цели нет
 ни в одном словаре, а имя приложения незнакомо, модель предлагает замену, но не
@@ -41,17 +46,22 @@
 
 ### Установка
 
-- Windows 10/11 x64: `KeySwitch-Setup-0.19.0-x64.exe` или
-  `KeySwitch-0.19.0-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.19.0_amd64.deb`.
+- Windows 10/11 x64: `KeySwitch-Setup-0.19.1-x64.exe` или
+  `KeySwitch-0.19.1-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.19.1_amd64.deb`.
 - Контрольные суммы: `SHA256SUMS`.
 
 Установщик Windows пока не подписан сертификатом издателя. Нативный Wayland
-не поддерживается. [Описание диагностики](https://github.com/olegius88/keyswitch/blob/v0.19.0/docs/troubleshooting.md).
+не поддерживается. [Описание диагностики](https://github.com/olegius88/keyswitch/blob/v0.19.1/docs/troubleshooting.md).
 
 ## English
 
 A retrained completed-word context policy and the word after a literal slash.
+
+Version 0.19.0 was never published: its Windows build stopped at the model
+provenance gate. The short-word policy source, whose digest joined the report,
+was not pinned to LF, so a Windows checkout converted it to CRLF although the
+file itself was unchanged. 0.19.1 carries that fix and everything from 0.19.0.
 
 - Context policy `context-v1-953375a70173` is trained on a corpus that
   reproduces what the engine actually sends it. Two mismatches are fixed:
@@ -89,9 +99,9 @@ LogCourier.
 
 ### Installation
 
-- Windows 10/11 x64: `KeySwitch-Setup-0.19.0-x64.exe` or
-  `KeySwitch-0.19.0-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.19.0_amd64.deb`.
+- Windows 10/11 x64: `KeySwitch-Setup-0.19.1-x64.exe` or
+  `KeySwitch-0.19.1-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.19.1_amd64.deb`.
 - Checksums: `SHA256SUMS`.
 
 The Windows installer is not yet publisher-signed. Native Wayland is unsupported.
