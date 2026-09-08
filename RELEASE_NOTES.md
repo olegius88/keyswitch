@@ -1,107 +1,91 @@
-# KeySwitch 0.19.1
+# KeySwitch 0.20.0
 
 ## Русский
 
-Переобученная контекстная модель завершённых слов и слово после косой черты.
+Модель орфотактики: решение по последовательности клавиш, а не по словарю.
 
-Версия 0.19.0 не публиковалась: её сборка для Windows остановилась на проверке
-происхождения модели. Исходник политики коротких слов, чей хэш вошёл в отчёт,
-не был закреплён как LF, и выгрузка на Windows превращала его в CRLF. Файл при
-этом не менялся. 0.19.1 содержит это исправление и все изменения 0.19.0.
+- Словарные признаки бессильны для токена, которого нет ни в русском, ни в
+  английском словаре. `htop`, `webjs`, `.dist`, `pm2`, набранные не в той
+  раскладке, прежде оставались как есть, и их приходилось править вручную.
+- Движок наблюдает не видимую строку, а последовательность физических клавиш.
+  Отображение us/ru — биекция, поэтому у одной последовательности ровно два
+  прочтения. Новая счётная модель `ortho-v1-bdb915e4f06f` сравнивает их
+  правдоподобия и отвечает, была ли раскладка неверной, ни разу не спрашивая,
+  слово ли это. Она не оценивает, хорош ли `htop` как английское слово, — она
+  оценивает, хуже ли `рещз` как русская последовательность.
+- Второй канал — регистр. Самые «английские» настоящие русские
+  последовательности — аббревиатуры: `РСФСР`, `ЛДПР`, `РНК`. Аббревиатуру пишут
+  заглавными, поэтому строчный токен этим прочтением не оправдать. Полностью
+  заглавный токен и так не доходит до модели: его отсекает защита кода.
+- Модель только разрешает замену там, где базовый распознаватель воздержался.
+  Она никогда не запрещает замену, не отменяет отказ контекстной модели,
+  уступает ожиданию продолжения и стоит ниже явных правил и исключений.
 
-- Контекстная политика `context-v1-953375a70173` обучена на корпусе, который
-  воспроизводит то, что ей действительно передаёт движок. Исправлены два
-  расхождения: без чтения поля движок сообщает роль поля `unknown` для любого
-  приложения, а признак «база предлагает замену» строится всей цепочкой
-  решения, включая курируемое короткословное исключение. Добавлены семейства
-  технических терминов и точечных файлов вне словаря, русского и английского
-  жаргона, опечаток и слова после косой черты.
-- Слово после буквальной `/` анализируется отдельно. Раньше `bild/c,jhrb` и
-  команда чата `/c,jhrb` целиком считались кодом и до модели не доходили;
-  теперь это `bild/сборки` и `/сборки`. Сама голова токена не заменяется, а при
-  неоднозначной голове замены нет вовсе. Пути `/usr/local/bin`,
-  `src/keyswitch/engine` и команды `/start` не затрагиваются.
-- Курируемое исключение для коротких слов не отменяется вероятностной оценкой
-  модели. Ожидание продолжения по-прежнему может отложить такую замену.
-- Эпоха обучения выбирается по метрике поведения при нуле ложных замен на
-  настроечной выборке, а не по функции потерь: прежнее правило останавливало
-  обучение раньше, чем модель достигала неизменного порога замены 0.985,
-  из-за чего верное решение не меняло текст.
+На независимой проверке из 23 137 отрицательных примеров, чьи сочетания клавиш
+не встречались при обучении: 0 ложных замен и 96.7% нужных. По направлениям —
+98.9% для английского в русской раскладке и 92.6% для русского в английской.
+Ноль ложных замен не означает нулевого риска: верхняя граница 0.013%.
+Это синтетическая проверка на разговорном корпусе, а не измерение на реальной
+переписке. [Данные, результаты и границы](https://github.com/olegius88/keyswitch/blob/v0.20.0/model/ortho_v1/README.md).
 
-На независимой контрольной выборке из 36 618 ситуаций и 187 непересекающихся
-семейств: 16 529 нужных замен из 17 658 и 0 ложных замен. Прежний изолированный
-распознаватель даёт 14 028 замен и 64 ложных. Это синтетический набор
-собственного авторства, а не измерение на реальной переписке. Известные
-ограничения — в [карточке модели](https://github.com/olegius88/keyswitch/blob/v0.19.1/docs/context-assistant.md).
-
-Технические термины вне словаря остаются самой слабой категорией: если цели нет
-ни в одном словаре, а имя приложения незнакомо, модель предлагает замену, но не
-выполняет её. Веса intent, prefix и boundary не менялись. Порог замены не
-понижался. `text_verified=false` по-прежнему не подтверждает конечный текст
-в приложении. Чтение поля остаётся отдельной явно включаемой опцией.
+Межраскладочные омографы неразрешимы принципиально: `св` и `cd`, `часу` и
+`xfce` — одни и те же клавиши. Модель держит их ниже порога, то есть не портит
+текст, но и не распознаёт. Токены короче трёх символов не оцениваются.
+Веса intent, контекстной, префиксной моделей и модели границ не менялись.
 
 Технический журнал включается явно и может содержать анализируемые слова.
-Просматривайте его перед передачей. Приватные логи и локальные инструкции
-в выпуск не включены. LogCourier этим выпуском не обновляется.
+Просматривайте его перед передачей. Приватные логи в выпуск не включены.
+LogCourier этим выпуском не обновляется.
 
 ### Установка
 
-- Windows 10/11 x64: `KeySwitch-Setup-0.19.1-x64.exe` или
-  `KeySwitch-0.19.1-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.19.1_amd64.deb`.
+- Windows 10/11 x64: `KeySwitch-Setup-0.20.0-x64.exe` или
+  `KeySwitch-0.20.0-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.20.0_amd64.deb`.
 - Контрольные суммы: `SHA256SUMS`.
 
 Установщик Windows пока не подписан сертификатом издателя. Нативный Wayland
-не поддерживается. [Описание диагностики](https://github.com/olegius88/keyswitch/blob/v0.19.1/docs/troubleshooting.md).
+не поддерживается. [Описание диагностики](https://github.com/olegius88/keyswitch/blob/v0.20.0/docs/troubleshooting.md).
 
 ## English
 
-A retrained completed-word context policy and the word after a literal slash.
+An orthotactic model: the decision follows the key sequence, not a dictionary.
 
-Version 0.19.0 was never published: its Windows build stopped at the model
-provenance gate. The short-word policy source, whose digest joined the report,
-was not pinned to LF, so a Windows checkout converted it to CRLF although the
-file itself was unchanged. 0.19.1 carries that fix and everything from 0.19.0.
+- Dictionary evidence cannot help a token that neither language contains.
+  `htop`, `webjs`, `.dist` and `pm2` typed in the wrong layout used to survive
+  every layer untouched and had to be corrected by hand.
+- The engine observes the physical key sequence, not the visible string. The
+  us/ru map is a bijection, so one sequence has exactly two readings. The new
+  counted model `ortho-v1-bdb915e4f06f` compares their likelihoods and answers
+  whether the layout was wrong without ever asking whether the token is a word.
+- A counted case channel closes the remaining escape route. The most
+  English-looking genuine Russian sequences are abbreviations, and an
+  abbreviation is written in capitals, so a lowercase token cannot claim to be
+  one. An ALL-CAPS token never reaches the model: the code guard stops it first.
+- The model only licenses a conversion where the base recogniser abstained. It
+  never vetoes one, never overturns the contextual model's refusal, yields to
+  contextual lookahead, and stays below explicit rules and exclusions.
 
-- Context policy `context-v1-953375a70173` is trained on a corpus that
-  reproduces what the engine actually sends it. Two mismatches are fixed:
-  without field reading the engine reports the `unknown` field role for every
-  application, and the "baseline converts" feature is now built by the whole
-  decision chain, including the curated short-word exception. New families
-  cover out-of-lexicon technical terms and dotfiles, Russian and English
-  jargon, misspellings and the word after a slash.
-- The word after a literal `/` is analysed separately. `bild/c,jhrb` and a chat
-  `/c,jhrb` were previously treated as code in full and never reached the
-  model; they now become `bild/сборки` and `/сборки`. The head is never
-  replaced, and an ambiguous head suppresses the conversion entirely. Paths
-  such as `/usr/local/bin`, `src/keyswitch/engine` and `/start` are untouched.
-- A curated short-word exception is no longer cancelled by a probabilistic
-  verdict. Contextual lookahead can still delay it.
-- The training epoch is selected by the development action metric under a
-  zero-false-conversion budget instead of weighted log-loss, which stopped
-  before the model reached the unchanged 0.985 serving threshold and left
-  correct decisions without any effect on text.
+On an independent holdout of 23,137 negatives whose key families were unseen
+during counting: zero false conversions and 96.7% recall (98.9% for English
+typed in the Russian layout, 92.6% the other way). Zero observed false
+conversions is not zero risk: the upper bound is 0.013%. This is a synthetic
+measurement on a conversational corpus, not a field study.
 
-On an independent holdout of 36,618 situations across 187 disjoint families:
-16,529 of 17,658 required conversions and zero false conversions. The isolated
-legacy recogniser scores 14,028 conversions with 64 false ones. This is an
-author-written synthetic set, not a measurement on real conversations.
-
-Out-of-lexicon technical terms remain the weakest category: with no dictionary
-support and an unfamiliar application name the model suggests rather than
-converts. Intent, prefix and boundary weights are unchanged. The conversion
-threshold was not lowered. `text_verified=false` still does not prove the final
-application text. Field reading remains opt-in.
+Cross-layout homographs remain unresolvable in principle: `св` and `cd`, `часу`
+and `xfce` are the same keys. The model keeps them below its threshold, so it
+does not corrupt them, but it cannot recognise them either. Tokens shorter than
+three characters are not scored. Intent, context, prefix and boundary weights
+are unchanged.
 
 Technical logs can contain evaluated words: review them before sharing. Private
-logs and local instructions are not published. This release does not update
-LogCourier.
+logs are not published. This release does not update LogCourier.
 
 ### Installation
 
-- Windows 10/11 x64: `KeySwitch-Setup-0.19.1-x64.exe` or
-  `KeySwitch-0.19.1-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.19.1_amd64.deb`.
+- Windows 10/11 x64: `KeySwitch-Setup-0.20.0-x64.exe` or
+  `KeySwitch-0.20.0-windows-x64.zip`.
+- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.20.0_amd64.deb`.
 - Checksums: `SHA256SUMS`.
 
 The Windows installer is not yet publisher-signed. Native Wayland is unsupported.

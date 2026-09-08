@@ -4,6 +4,17 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.20.0 — 2026-09-09
+
+- Add a counted orthotactic model over the physical key sequence. Because the
+  us/ru map is a bijection, one key sequence has exactly two readings, so the
+  likelihood ratio of two character models answers "was the layout wrong?"
+  without asking whether the token is a word. A counted case channel closes the
+  abbreviation reading that the ratio alone leaves open. It only licenses a
+  conversion where the detector abstained, never vetoes one, and never overrides
+  an explicit rule. Independent test: 0 false conversions on 23,137 negatives,
+  96.7% recall; the lowercased lexicon stress track reports its residue openly.
+
 ## 0.19.1 — 2026-09-08
 
 - Force LF for the short-word policy source, whose digest joined the context

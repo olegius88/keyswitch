@@ -25,6 +25,7 @@ PYTHONPATH="$project_dir/src" python3 "$project_dir/tools/verify_context_v2.py"
 PYTHONPATH="$project_dir/src" python3 "$project_dir/tools/verify_boundary_model.py"
 PYTHONPATH="$project_dir/src" python3 "$project_dir/tools/verify_boundary_v2.py"
 PYTHONPATH="$project_dir/src" python3 "$project_dir/tools/verify_prefix_model.py"
+PYTHONPATH="$project_dir/src:$project_dir/tools" python3 "$project_dir/tools/verify_ortho_model.py"
 
 verify_kslm_packaging_bounds() {
     local model_path="$1"

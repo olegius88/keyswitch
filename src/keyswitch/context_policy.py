@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import ClassVar
 
 from .context_model import ContextEvidence, ContextModel, ContextPrediction
 from .detector import DetectionDecision, LanguageDetector
 from .input_context import FieldContext, FieldReader, InputContext
+from .ortho_model import OrthoEvidence, OrthoModel, shape_of
 from .short_words import is_short_word_override
 
 
@@ -21,9 +23,17 @@ class ContextResult:
 
 
 class ContextPolicy:
+    # The orthotactic artifact is several megabytes and immutable once loaded.
+    # A running application builds one engine, but replays and tests build many,
+    # so the parse is shared rather than repeated per instance.
+    _shared_ortho: ClassVar[tuple[OrthoModel | None, str] | None] = None
+
     def __init__(self, reader: FieldReader | None = None) -> None:
         self.stream = InputContext()
         self.model, self.status = ContextModel.try_load()
+        if ContextPolicy._shared_ortho is None:
+            ContextPolicy._shared_ortho = OrthoModel.try_load()
+        self.ortho, self.ortho_status = ContextPolicy._shared_ortho
         self.reader = reader
 
     def decide(
@@ -89,4 +99,54 @@ class ContextPolicy:
                 "wait": "контекстная модель ждёт продолжения",
                 "suggest": "контекстная модель предлагает проверить раскладку",
             }[prediction.action])
-        return ContextResult(decision, prediction, field, policy_applied=True, decision_source="context_model")
+        result = ContextResult(decision, prediction, field, policy_applied=True,
+                               decision_source="context_model")
+        return self._licensed(result, baseline, alternative, target_group, field)
+
+    def _licensed(self, result: ContextResult, baseline: DetectionDecision, alternative: str,
+                  target_group: int, field: FieldContext) -> ContextResult:
+        """Let the orthotactic model turn a refusal into a conversion, never the reverse.
+
+        The word models answer "is this a word"; this one answers "could this
+        sequence of keys have been produced by this language at all". That is
+        the only evidence available for a token no dictionary contains, which is
+        why an unknown command typed in the wrong layout used to survive every
+        earlier layer untouched. It never vetoes, never overrides an explicit
+        rule, and `wait` still outranks it, because waiting is about timing.
+
+        It also stays out of a contextual veto: when the detector itself wanted
+        to convert and the model refused, that refusal is the context model's
+        job and is left alone. This layer only adds recall where the detector
+        abstained, which is exactly the population no dictionary covers.
+        """
+
+        prediction = result.prediction
+        if (result.decision.should_convert or baseline.should_convert or self.ortho is None
+                or prediction is None or prediction.action == "wait"):
+            return result
+        licensed = self._orthotactic(baseline, alternative, target_group, field)
+        if licensed is None:
+            return result
+        return ContextResult(licensed, prediction, field, decision_source="ortho_model",
+                             fallback_reason="orthotactic_licence")
+
+    def _orthotactic(self, baseline: DetectionDecision, alternative: str,
+                     target_group: int, field: FieldContext) -> DetectionDecision | None:
+        """Score the physical keys under both languages and license a conversion."""
+
+        model = self.ortho
+        if model is None or baseline.source_group not in (0, 1):
+            return None
+        source_script = "en" if baseline.source_group == 0 else "ru"
+        # Key space is the US rendering, so it is whichever side is Latin.
+        keys = baseline.original if source_script == "en" else alternative
+        if len(keys) < model.minimum_length:
+            return None
+        shape = shape_of(baseline.original, not field.before.strip())
+        score = model.score(OrthoEvidence(keys, shape, source_script))
+        if not score.supported or score.total <= model.thresholds[source_script]:
+            return None
+        return replace(
+            baseline, should_convert=True, replacement=alternative, target_group=target_group,
+            reason="последовательность клавиш не соответствует языку", confidence=score.total,
+        )

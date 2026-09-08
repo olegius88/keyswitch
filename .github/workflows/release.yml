@@ -92,6 +92,12 @@ jobs:
           PYTHONPATH=src python3 tools/evaluate_context_engine.py --verify
           PYTHONPATH=src python3 tools/verify_context_v2.py
 
+      - name: Replay key-space orthotactic training and promotion guard
+        run: |
+          PYTHONPATH=src python3 tools/ortho_corpus.py
+          PYTHONPATH=src python3 tools/train_ortho_model.py verify
+          PYTHONPATH=src:tools python3 tools/verify_ortho_model.py
+
       - name: Replay boundary segmentation training and prevent rejected rollout
         run: |
           PYTHONPATH=src python3 tools/train_boundary_model.py --verify

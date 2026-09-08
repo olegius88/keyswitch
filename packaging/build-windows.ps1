@@ -1298,6 +1298,12 @@ Invoke-NativeCommand `
     -Command "python" `
     -Arguments @((Join-Path $ProjectDirectory "tools\verify_context_v2.py")) `
     -FailureMessage "Context corpus evidence changed or rejected candidate was activated"
+$env:PYTHONPATH = @((Join-Path $ProjectDirectory "src"), (Join-Path $ProjectDirectory "tools")) -join [System.IO.Path]::PathSeparator
+Invoke-NativeCommand `
+    -Command "python" `
+    -Arguments @((Join-Path $ProjectDirectory "tools\verify_ortho_model.py")) `
+    -FailureMessage "Orthotactic model provenance or promotion gate failed"
+$env:PYTHONPATH = Join-Path $ProjectDirectory "src"
 Invoke-NativeCommand `
     -Command "python" `
     -Arguments @((Join-Path $ProjectDirectory "tools\verify_boundary_model.py")) `
