@@ -881,9 +881,10 @@ def main() -> None:
         "layouts_sha256": "src/keyswitch/layouts.py",
         "language_model_sha256": "src/keyswitch/language_model.py",
         "evaluator_sha256": "tools/evaluate_intent_model.py",
+        "environment_probe_sha256": "tools/environment_probe.py",
         "preseal_generator_sha256": "tools/preseal_intent_holdout.py",
         "development_freezer_sha256": "tools/freeze_intent_development_corpus.py",
-        "preseal_receipt_sha256": "model/intent_v1/holdout-v20-preseal.json",
+        "preseal_receipt_sha256": "model/intent_v1/holdout-v21-preseal.json",
     }
     for field, relative_path in toolchain_paths.items():
         expected_digest = exact_sha256(
@@ -1146,11 +1147,11 @@ if ($RussianSourcePolicy.path -cne "model/intent_v1/sources/ru_RU.lm") {
 if ($LicenseSourcePolicy.path -cne "model/intent_v1/sources/COPYRIGHT.onboard-data") {
     throw "Frozen license-evidence path differs from the packaging contract"
 }
-if ($HardNegativeSourcePolicy.path -cne "model/intent_v1/unknown-typo-development-v20.json") {
+if ($HardNegativeSourcePolicy.path -cne "model/intent_v1/unknown-typo-development-v21.json") {
     throw "Frozen hard-negative source path differs from the packaging contract"
 }
 
-$HardNegativeSource = Join-Path $ProjectDirectory "model\intent_v1\unknown-typo-development-v20.json"
+$HardNegativeSource = Join-Path $ProjectDirectory "model\intent_v1\unknown-typo-development-v21.json"
 $null = Get-VerifiedFrozenFileHash `
     -Path $HardNegativeSource `
     -ExpectedBytes ([long]$HardNegativeSourcePolicy.bytes) `

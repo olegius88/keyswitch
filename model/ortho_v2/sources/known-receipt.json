@@ -1,0 +1,30 @@
+{
+  "description": "Whether the dictionary of each layout knows each token the engine can present, frozen so a replay needs no speller. Absent means not known.",
+  "evidence_sha256": "ce190044782d5932d825efb073def27b515b27ca08ba7b9d89d7edf3f36bfa7b",
+  "forms_by_script": {
+    "en": 111407,
+    "ru": 135038
+  },
+  "generator_sha256": "f3f02e0385ee2077d83bd84ef5d4e1bf7d093343efa00bf027d1709590b8e75f",
+  "hunspell": {
+    "en_US": {
+      "affix_bytes": 3131,
+      "affix_sha256": "70fe5778717d097ce2f3326baaa5c1e4d2206d81a5a81d3ea8e11c4770806dd5",
+      "dictionary_bytes": 860381,
+      "dictionary_sha256": "829a043cf078d1e80e886289a13823454977f442a239a859d2133ea61944aa60"
+    },
+    "ru_RU": {
+      "affix_bytes": 71236,
+      "affix_sha256": "38ce7d4af78e211e9bafe4bf7e3d6a2c420591136cb738ec6648f8fdf6524cd7",
+      "dictionary_bytes": 3473191,
+      "dictionary_sha256": "f6047416a0204adbecf3a451b874ec8a97ee37e2cbc714466ef04d8dbcc0d6fc"
+    }
+  },
+  "known_by_script": {
+    "en": 46846,
+    "ru": 56623
+  },
+  "schema_version": 1,
+  "scope": "the frequency list of model/intent_v1/sources plus Hunspell, which is what the runtime means by `known`; a machine whose speller differs will license more or fewer conversions than this evidence measured",
+  "tokens_sha256": "295a383fb493637d9fad915980d3fdeac43162aacc01332abd22d63b8620187a"
+}

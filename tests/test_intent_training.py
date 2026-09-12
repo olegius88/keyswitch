@@ -213,6 +213,7 @@ from train_intent_model import (  # noqa: E402
     variant_quarantine_fingerprint,
     validate_training_paths,
     validate_presealed_candidate_serialization,
+    ENVIRONMENT_PROBE_PATH,
     verify_frozen_file,
     verify_context_feature_invariance,
     verify_sealed_evaluation_receipt,
@@ -285,6 +286,7 @@ EXPECTED_PRESEALED_PROVENANCE_CHECK_NAMES: frozenset[str] = frozenset(
         "toolchain_layouts_sha256",
         "toolchain_language_model_sha256",
         "toolchain_evaluator_sha256",
+        "toolchain_environment_probe_sha256",
         "toolchain_preseal_generator_sha256",
         "toolchain_development_freezer_sha256",
         "toolchain_preseal_receipt_sha256",
@@ -359,7 +361,7 @@ def config(**changes: object) -> TrainingConfig:
         "sealed_evaluation": SealedEvaluationPolicy(
             schema_version=1,
             split_namespace=SPLIT_NAMESPACE,
-            registry_path="model/intent_v1/seal-registry-v20.json",
+            registry_path="model/intent_v1/seal-registry-v21.json",
         ),
         "minimum_word_length": 3,
         "maximum_word_length": 18,
@@ -1648,7 +1650,7 @@ class DatasetConstructionTests(unittest.TestCase):
             ),
             (
                 replace(baseline, role_namespace="other"),
-                "role namespace must match v20",
+                "role namespace must match v21",
             ),
             (
                 replace(baseline, train_words_per_group=0),
@@ -6124,6 +6126,12 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             events.append("claim")
             return receipt
 
+        def claim_outcome_phase(**_arguments: object) -> None:
+            # The real ledger lives in the repository, so the fixture records
+            # the call instead of making it. The order is what matters: the
+            # sealed answer must be fixed before the gates decide anything.
+            events.append("claim-outcome")
+
         def merge_phase(
             presealed_value: DatasetBundle,
             sealed_value: DatasetBundle,
@@ -6275,6 +6283,11 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                 )
             )
             stack.enter_context(
+                patch.object(
+                    tim, "claim_sealed_outcome", side_effect=claim_outcome_phase
+                )
+            )
+            stack.enter_context(
                 patch.object(tim, "verify_sealed_evaluation_receipt")
             )
             stack.enter_context(
@@ -6323,6 +6336,8 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                 str(manifest),
                 "--test-report",
                 str(report),
+                "--build-environment",
+                str(root / "build-environment.json"),
                 "--workers",
                 "1",
             ]
@@ -6350,9 +6365,20 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                 "build:sealed-test",
                 "merge",
                 "featurize:sealed-test",
+                "claim-outcome",
             ],
         )
         self.assertEqual(publications, [])
+        # The ticket is claimed before a sealed row exists, and the answer is
+        # claimed after the sealed rows have been scored. Both bracket the
+        # sealed phase, and this dry run reached the second one without
+        # publishing anything - which is the point: a run that never publishes
+        # still consumes the answer, so a failing run cannot be repeated with a
+        # tweak until the sealed test gives a nicer number.
+        self.assertLess(events.index("claim"), events.index("build:sealed-test"))
+        self.assertLess(
+            events.index("featurize:sealed-test"), events.index("claim-outcome")
+        )
 
     def test_serialized_candidate_mismatch_is_rejected_before_seal(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -7089,8 +7115,13 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                     repository_root=Path(temporary),
                 )
             )
+            # Same config, same dataset, different candidate hash. Since v21
+            # the refusal names that case specifically, because after the
+            # environment left the identity it is also how a machine that
+            # computes different weights announces itself.
             with self.assertRaisesRegex(
-                RuntimeError, "already consumed by another candidate"
+                RuntimeError,
+                "same config and the same dataset but a different candidate",
             ):
                 claim_sealed_evaluation(
                     config=config_value,
@@ -7260,7 +7291,9 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             registry.parent.mkdir(parents=True)
             partial = b'{"schema_version":1'
             registry.write_bytes(partial)
-            with self.assertRaisesRegex(RuntimeError, "already consumed"):
+            # A truncated ledger is refused, as before; the message now says
+            # what is actually wrong instead of guessing at another candidate.
+            with self.assertRaisesRegex(RuntimeError, "unreadable"):
                 claim_sealed_evaluation(
                     config=config_value,
                     candidate_sha256="f" * 64,
@@ -7750,6 +7783,8 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                         str(manifest),
                         "--test-report",
                         str(report),
+                        "--build-environment",
+                        str(root / "build-environment.json"),
                         "--diagnostic-output",
                         str(diagnostic_path),
                         "--workers",
@@ -7774,6 +7809,8 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                             str(manifest),
                             "--test-report",
                             str(report),
+                            "--build-environment",
+                            str(root / "build-environment.json"),
                             "--workers",
                             "1",
                         )
@@ -7893,6 +7930,8 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             report = root / "report.json"
             diagnostic = root / "diagnostic.json"
             seal_registry = root / "seal-registry.json"
+            seal_outcome = root / "seal-outcome.json"
+            build_environment = root / "build-environment.json"
             keyword_arguments = {
                 "config": inputs[0],
                 "english": inputs[1],
@@ -7900,9 +7939,11 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                 "license_evidence": inputs[3],
                 "hard_negative_source": inputs[4],
                 "seal_registry": seal_registry,
+                "seal_outcome": seal_outcome,
                 "artifact": artifact,
                 "manifest": manifest,
                 "report": report,
+                "build_environment": build_environment,
                 "diagnostic": diagnostic,
             }
             validate_training_paths(**keyword_arguments)
@@ -7925,6 +7966,29 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                     **{
                         **keyword_arguments,
                         "diagnostic": report,
+                    }
+                )
+            # The outcome ledger and the environment sidecar joined the set of
+            # mutable paths in v21; neither may alias anything else.
+            with self.assertRaisesRegex(ValueError, "must be distinct"):
+                validate_training_paths(
+                    **{
+                        **keyword_arguments,
+                        "seal_outcome": seal_registry,
+                    }
+                )
+            with self.assertRaisesRegex(ValueError, "must be distinct"):
+                validate_training_paths(
+                    **{
+                        **keyword_arguments,
+                        "build_environment": manifest,
+                    }
+                )
+            with self.assertRaisesRegex(ValueError, "immutable training input"):
+                validate_training_paths(
+                    **{
+                        **keyword_arguments,
+                        "build_environment": ENVIRONMENT_PROBE_PATH,
                     }
                 )
             with self.assertRaisesRegex(ValueError, "immutable training input"):
@@ -8230,22 +8294,22 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         )
         self.assertEqual(
             loaded.external_evaluation.unknown_typo_holdout_corpus_sha256,
-            "63640ebb85e54bc4f484f8379fffe23a6c20610c24d78266aa6bbcbbc8c26c4f",
+            "ecca85f5c0727ccc89ce8491ef8169a995a845bc7c70adcb7eaa137e2c8f874a",
         )
         self.assertEqual(
             loaded.sealed_evaluation.split_namespace, SPLIT_NAMESPACE
         )
         self.assertEqual(
             loaded.sealed_evaluation.registry_path,
-            "model/intent_v1/seal-registry-v20.json",
+            "model/intent_v1/seal-registry-v21.json",
         )
         self.assertEqual(
             loaded.hard_negative_development.source.path,
-            "model/intent_v1/unknown-typo-development-v20.json",
+            "model/intent_v1/unknown-typo-development-v21.json",
         )
         self.assertEqual(
             loaded.hard_negative_development.source.sha256,
-            "61e02546fb05c2502b2535c512b0e11fad13042d25b1f4f70cff621a4e35686f",
+            "eb12cd9e996eb54ccfe1e151fbd761878cd7594930b1b37980cd11b2ec29a773",
         )
         self.assertEqual(
             loaded.hard_negative_development.role_counts(),
@@ -8274,7 +8338,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             (0.956, 0.91, 0.91, 0.86),
         )
         self.assertEqual(loaded.threshold_logit_margin_cap, 2.0)
-        preseal_path = repository / "model/intent_v1/holdout-v20-preseal.json"
+        preseal_path = repository / "model/intent_v1/holdout-v21-preseal.json"
         preseal_bytes = preseal_path.read_bytes()
         self.assertLessEqual(len(preseal_bytes), 64 * 1024)
         preseal = cast(
@@ -8298,7 +8362,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         self.assertEqual(preseal["schema_version"], 1)
         self.assertEqual(
             preseal["policy"],
-            "keyswitch-intent-v20-preseal-holdout",
+            "keyswitch-intent-v21-preseal-holdout",
         )
         self.assertIs(preseal["model_loaded"], False)
         self.assertIs(preseal["metrics_evaluated"], False)
@@ -8363,18 +8427,18 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         self.assertEqual(
             sealed_exclusions,
             {
-                "signature_count": 288_869,
+                "signature_count": 288_880,
                 "sha256": (
-                    "89515df7c24edcf33a75aa7d78e57095026acb29b205923b304bd8b157e93cdc"
+                    "3a250bec7c6dee34ceea6d75b9acd4d9b6d562f1726fff0863bb22d6ecccf3ef"
                 ),
             },
         )
         self.assertEqual(
             combined_exclusions,
             {
-                "signature_count": 298_869,
+                "signature_count": 298_880,
                 "sha256": (
-                    "9219e02aa424437be273bc21774059e7d233c73c1d011f4ba3278167bd662453"
+                    "0ab0d1ace3f211fce2f3436ac6781f8750dd1311738e5df067a5f054ca86722c"
                 ),
             },
         )

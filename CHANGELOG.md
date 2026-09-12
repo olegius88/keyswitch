@@ -4,6 +4,101 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.21.0 — 2026-09-11
+
+- Seal the layout-intent model against what the toolchain **computes**, not
+  what it calls itself. The sealed candidate hash used to cover seven strings
+  naming the build machine - `python_build`, `libc`, `machine` and four more -
+  so when an `apt upgrade` rebuilt python3.14 without changing the language
+  version, the new build date moved the candidate hash and the release replay
+  was refused, while every weight, threshold and calibration constant
+  reproduced byte for byte. The name had changed and the results had not, and
+  the seal could not tell the difference. Those strings now live in
+  `model/intent_v1/build-environment.json`, and `manifest.toolchain` carries
+  code and config digests only. Nothing is given up: the candidate hash already
+  covers the weights, so an interpreter that computes differently is still
+  refused - on the weights, which is the honest ground.
+- Add `tools/environment_probe.py`, which measures the primitives the trainer
+  actually depends on and reduces each to a digest: the FTRL update as the
+  trainer writes it, exactly the libm functions it calls, summation order,
+  float text round-trips, an exhaustive walk of all 1,114,112 Unicode code
+  points, the FNV mixing loop, sort stability, integer arithmetic and the
+  Mersenne Twister stream. The probe never votes on identity - its readings are
+  provenance and its file is certified, so it cannot be weakened unnoticed -
+  but it turns "the replay differs" into "libm moved, here is the cell". A
+  one-ULP change to `sqrt` moves exactly `float_arithmetic` and `libm`; a
+  changed `NFC` moves exactly `unicode`.
+- Consume the sealed test's *answer* once, not just its ticket. Removing the
+  environment from the identity gave up a side effect: a second look from
+  another machine used to be refused before a sealed row was read.
+  `model/intent_v1/seal-outcome-v21.json` now records the digest of the sealed
+  sections unconditionally - before the gates are computed, before publication,
+  before a metric reaches any file - so a rerun that computes a different
+  answer stops without printing one. A failing run consumes the answer too,
+  which is the point: it cannot be repeated with a tweak until the numbers
+  look nicer.
+- Freeze the Hunspell dictionaries into `model/intent_v1/sources/hunspell/`.
+  The evaluation derives its lexical populations from them and pins the
+  resulting corpus digests, so `apt upgrade hunspell-ru` failed the release
+  without changing a single weight - training never consults a dictionary at
+  all. A dictionary is an input to the evaluation, and this repository already
+  freezes its other lexical inputs beside it. The frozen bytes are identical to
+  the system ones today, so no corpus digest moved.
+- Rotate the sealed split namespace to `keyswitch:intent-v21:physical-signature`
+  and accept the candidate `intent-v1-d2f32ca5db58` with artifact SHA-256
+  `6048055c1d735c277b955785bc50a7f16f994fb24ac03bb616f53e3c078f099e`. The
+  certified toolchain changed, so the splits are re-cut and the sealed test is
+  one this candidate has never been evaluated against.
+- Stop the release checklist from claiming a byte-identical replay it never
+  ran. `--replays 0` left the phase status at "running", which the runner
+  records as "passed", and the checklist printed "Official and replay outputs
+  are byte-identical: passed" after running no replay at all. A skipped phase
+  now reads `NOT PROVEN`.
+
+- Never consult the orthotactic model for a token the dictionary of the current
+  layout already knows. `руку` is an ordinary Russian word whose keys spell the
+  ordinary English word `here`; no character model can separate them, and asking
+  it to try cost a threshold high enough to silence real commands. This is
+  structural rather than statistical: no dictionary word is converted by this
+  route at all.
+- Never consult it for punctuation caught between letters either. `и"ю` is a
+  quotation mark between two letters, not Russian written badly, and such
+  fragments were setting thresholds. A hyphen or an apostrophe inside a token is
+  a different matter — the engine joins those to the word before it tests for a
+  boundary — so `Я-то`, `из-за` and `don't` keep their conversions.
+- Add a measurement pipeline for the orthotactic model under `model/ortho_v2/`
+  and `tools/ortho_v2_*`, with the evidence it produced. The weights ship
+  unchanged: no candidate built on it beat `ortho-v1-bdb915e4f06f` under honest
+  calibration, and `tools/verify_ortho_v2.py` fails closed if one is ever
+  installed without doing so.
+- Record what that pipeline found, because each item was a defect in how the
+  model was measured rather than in the model. The corpus disagreed with the
+  engine about which token reaches a model — a key that writes punctuation in the
+  layout being typed ends the word, a hyphen does not, nothing is trimmed from
+  the front — and nine percent of the population went unmeasured. The Russian
+  layout puts the full stop and the comma on the key the US layout writes as `/`,
+  which the layout table does not model, so 16.9% of Russian tokens were read
+  back as words nobody typed: `Пф,` as `пфб`. The dictionary refusal was measured
+  against the frequency list while the runtime also asks Hunspell, so ordinary
+  Russian words became evidence against conversion.
+- Freeze, for replay, the dictionary verdict for every token the corpus can
+  present and the sentence-level check on whether a token's language label can be
+  trusted at all. Both need a speller, and a replay cannot call one and get the
+  same answer on two machines.
+- Record the seven separations that were tried and rejected in
+  `model/ortho_v2/development-history/rejected-separations.json`, with the
+  numbers. The last of them is the important one: discounting labels the corpus
+  cannot vouch for looked like two free points of accuracy and turned `гифка`
+  into `ubarf` and `Ютуб` into `Юne,`. Excluding a label does not make the token
+  safe to convert; it only hides it from the metric.
+- Document a defect of the shipped model found while measuring it: `флуд`, `лут`
+  and `дюп` are converted although they are ordinary Russian. They are in neither
+  the frequency list nor Hunspell, so the dictionary refusal does not reach them,
+  and raising the threshold to cover them costs more conversions than it saves.
+- Bind the orthotactic artifact into the context engine replay evidence, which
+  compared two models without recording which orthotactic weights were loaded and
+  so could drift silently.
+
 ## 0.20.0 — 2026-09-09
 
 - Add a counted orthotactic model over the physical key sequence. Because the

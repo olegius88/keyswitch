@@ -14,11 +14,11 @@ from keyswitch.context_model import ContextPrediction
 from keyswitch.detector import DetectionDecision
 from keyswitch.input_context import FieldContext
 from keyswitch.language_model import WordScore
-from keyswitch.ortho_model import (
-    ARTIFACT_PATH, OrthoEvidence, OrthoModel, shape_of,
-)
+from keyswitch.context_policy import word_shaped
+from keyswitch.ortho_model import ARTIFACT_PATH, OrthoEvidence, OrthoModel, shape_of
 
 SCORE = WordScore(0.0, False, 0, 0.0)
+KNOWN = WordScore(0.0, True, 0, 0.0)
 
 
 def channel() -> dict[str, object]:
@@ -166,7 +166,7 @@ class OrthoLicenceTests(unittest.TestCase):
         return self.policy._orthotactic(baseline, alternative, 1 - group, self.field)
 
     def test_a_command_typed_in_the_wrong_layout_is_licensed(self) -> None:
-        for original, alternative in (("рещз", "htop"), ("цуиоы", "webjs"), ("ишдв", "bild")):
+        for original, alternative in (("рещз", "htop"), ("тпште", "nginx"), ("ишдв", "bild")):
             with self.subTest(original=original):
                 licensed = self.licence(original, alternative)
                 assert licensed is not None
@@ -207,7 +207,44 @@ class OrthoLicenceTests(unittest.TestCase):
         self.assertIs(self.policy._licensed(keep, self.decision("рещз"), "htop", 0, self.field), keep)
         self.assertIsNone(self.policy._orthotactic(self.decision("рещз"), "htop", 0, self.field))
 
+    def test_a_hyphenated_word_typed_in_the_wrong_layout_is_licensed(self) -> None:
+        """`Я-то` mistyped reads `Z-nj`; the hyphen must not disqualify it."""
+
+        licensed = self.licence("Z-nj", "Я-то", group=0)
+        assert licensed is not None
+        self.assertEqual(licensed.replacement, "Я-то")
+
+    def test_the_corpus_boundary_set_matches_the_engine(self) -> None:
+        """The corpus copies the engine's punctuation set; drift would silently
+        change which tokens the evidence is measured on."""
+
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import ortho_v2_corpus  # noqa: PLC0415
+        from keyswitch.engine import PUNCTUATION  # noqa: PLC0415
+
+        self.assertEqual(ortho_v2_corpus.BOUNDARY_PUNCTUATION, frozenset(PUNCTUATION))
+
+    def test_punctuation_between_letters_is_not_a_word_in_any_layout(self) -> None:
+        """One inner hyphen is a word; a quotation mark or a second hyphen is not."""
+
+        self.assertIsNone(self.licence('и"ю', 'b".'))
+        self.assertIsNone(self.licence("зы-ы-ырк", "ps-s-shr"))
+        self.assertIsNone(self.licence("-рещз", "-htop"))
+        self.assertTrue(word_shaped("Я-то"))
+        self.assertTrue(word_shaped("don't"))
+        for token in ('и"ю', "зы-ы-ырк", "-htop", "htop-", "a", ""):
+            self.assertFalse(word_shaped(token), token)
+
+    def test_a_token_the_dictionary_knows_is_never_licensed(self) -> None:
+        """`руку` is a Russian word whose keys spell the English word `here`."""
+
+        baseline = DetectionDecision(False, "руку", "руку", 1, 1, 0.0, "не требуется",
+                                     KNOWN, SCORE)
+        self.assertIsNone(self.policy._orthotactic(baseline, "here", 0, self.field))
+
     def test_the_shipped_artifact_is_the_one_the_package_declares(self) -> None:
         model = OrthoModel.load(ARTIFACT_PATH)
         self.assertTrue(model.version.startswith("ortho-v1-"))
         self.assertGreaterEqual(model.minimum_length, 3)
+        self.assertEqual(set(model.thresholds), {"en", "ru"})

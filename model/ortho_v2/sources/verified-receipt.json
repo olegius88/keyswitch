@@ -1,0 +1,50 @@
+{
+  "corpus_tool_sha256": "ce9f7357a86d49cf52057fe0c1fed7be8015ec239c6c54ea090170bdf663386a",
+  "description": "Key sequences whose language label is vouched for by a sentence that is verifiably monolingual, rather than inherited from one that is not.",
+  "generator_sha256": "4f18b5e15fcdfbc6bc3933ec9e8b84153b25ffb4323a151cb83294f2920affe0",
+  "hunspell": {
+    "en_US": {
+      "affix_bytes": 3131,
+      "affix_sha256": "70fe5778717d097ce2f3326baaa5c1e4d2206d81a5a81d3ea8e11c4770806dd5",
+      "dictionary_bytes": 860381,
+      "dictionary_sha256": "829a043cf078d1e80e886289a13823454977f442a239a859d2133ea61944aa60"
+    },
+    "ru_RU": {
+      "affix_bytes": 71236,
+      "affix_sha256": "38ce7d4af78e211e9bafe4bf7e3d6a2c420591136cb738ec6648f8fdf6524cd7",
+      "dictionary_bytes": 3473191,
+      "dictionary_sha256": "f6047416a0204adbecf3a451b874ec8a97ee37e2cbc714466ef04d8dbcc0d6fc"
+    }
+  },
+  "labels_sha256": "385dfa0c6575ed122785c1ffd4348364d6e4c5e3bc2058cdd2a706dde51a24d9",
+  "rule": {
+    "minimum_known_share": 0.75,
+    "minimum_tokens": 5,
+    "requires": [
+      "every token written in the sentence's own alphabet",
+      "at least the given share of tokens known to that language",
+      "no unknown token that reads as a word of the other language"
+    ]
+  },
+  "schema_version": 1,
+  "scope": "a sentence-level verdict about a token-level label; it removes the inherited labels this corpus cannot support, and it cannot invent the ones it never had",
+  "sentences": {
+    "en:mixed_script": 1,
+    "en:other_language_reading": 406,
+    "en:sentences": 41022,
+    "en:too_short": 4944,
+    "en:too_unfamiliar": 4705,
+    "en:verified": 30966,
+    "ru:mixed_script": 350,
+    "ru:other_language_reading": 4,
+    "ru:sentences": 22491,
+    "ru:too_short": 5561,
+    "ru:too_unfamiliar": 4802,
+    "ru:verified": 11774
+  },
+  "source_sha256": "1f7df948b946f1d1aed5efd2a83a9a5a09d2b8abcb9224045b40c9ec6720e793",
+  "verified_sequences": {
+    "en": 38299,
+    "ru": 20555
+  }
+}

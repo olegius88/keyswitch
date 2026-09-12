@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "order": 5,
+  "discount": 0.75,
+  "scale": 512,
+  "minimum_length": 3,
+  "length_buckets": [
+    3,
+    4,
+    5,
+    6
+  ],
+  "promotion": {
+    "minimum_unseen_negatives": 100,
+    "minimum_gate_negatives": 300,
+    "minimum_test_negatives": 200,
+    "minimum_recall_gain": 0.01
+  },
+  "margin_nats": 5.0
+}

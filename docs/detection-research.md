@@ -79,7 +79,7 @@ safety-примерами и проверяют valid-source guard по всем
 Offline-trainer обучает разреженную логистическую регрессию алгоритмом
 FTRL-Proximal. Все варианты одной физической последовательности заранее
 попадают в один split; train, development, calibration, threshold и sealed test
-разделены namespace `keyswitch:intent-v20:physical-signature`. Candidate pre-pass
+разделены namespace `keyswitch:intent-v21:physical-signature`. Candidate pre-pass
 строит реальные сигнатуры identity, удаления, дублирования и перестановки без
 доступа к test и помещает в quarantine конфликты pre-sealed split/языков и
 protected/safety токенов. Только после атомарного claim точного candidate SHA

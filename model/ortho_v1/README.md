@@ -81,8 +81,20 @@
 
 ## Воспроизведение
 
-```sh
-PYTHONPATH=src python3 tools/ortho_corpus.py
-PYTHONPATH=src python3 tools/train_ortho_model.py verify
-PYTHONPATH=src python3 tools/verify_ortho_model.py
-```
+Воспроизводится только корпус: `PYTHONPATH=src python3 tools/ortho_corpus.py`.
+Обучение и проверку см. в разделе ниже — их инструменты сняты вместе с моделью.
+
+## Снята с публикации, заменена на `model/ortho_v2`
+
+`ortho-v1-bdb915e4f06f` больше не установлена. Её `candidate.json` остаётся
+здесь, потому что это измеряемая база сравнения: правило продвижения в
+`tools/train_ortho_v2.py` читает именно эти байты и оценивает их на тех же
+строках, а `model/ortho_v2/report.json` записывает результат.
+
+Собственные инструменты воспроизведения сняты, а не оставлены сломанными: печать
+v1 связывает SHA-256 файла `src/keyswitch/ortho_model.py`, а тот изменился, и
+`train_ortho_model.py verify` не смог бы пройти ни на одной копии. Остальные
+доказательства — `seal.json`, `report.json`, `corpus-receipt.json`,
+`tokens.jsonl.gz` — не тронуты и по-прежнему описывают, как сделан лежащий рядом
+артефакт. Корпус v1 воспроизводится командой
+`PYTHONPATH=src python3 tools/ortho_corpus.py`.

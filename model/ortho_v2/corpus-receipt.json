@@ -1,0 +1,73 @@
+{
+  "description": "Key-space token types from the frozen CC0 phrase snapshot and the frozen Onboard lexicons, stored whole. What the engine presents is the token trimmed for the layout being typed, which `presented` derives. Lexicon rows carry compressed frequency weight and are for character counts only; they are lowercased and must never be used as negatives.",
+  "gate": {
+    "meaning": "excluded from every count; scored once by the promotion test",
+    "namespace": "keyswitch:ortho-v2:gate-20260910b",
+    "rule": "sha256(namespace + ':' + keys)[:8] mod 100 < share",
+    "share_percent": 16,
+    "types_by_split_script": {
+      "calibration:en": 2239,
+      "calibration:ru": 1170,
+      "development:en": 2319,
+      "development:ru": 1194,
+      "lexicon:en": 6178,
+      "lexicon:ru": 6573,
+      "reserve:en": 2233,
+      "reserve:ru": 1214,
+      "test:en": 2305,
+      "test:ru": 1180,
+      "train:en": 7555,
+      "train:ru": 4610
+    }
+  },
+  "lexicon_weight": "max(1, min(32, frequency.bit_length()))",
+  "maximum_token_characters": 32,
+  "namespace": "keyswitch:ortho-v2:key-space-20260910b",
+  "occurrences_by_split_script": {
+    "calibration:en": 53342,
+    "calibration:ru": 18016,
+    "development:en": 57651,
+    "development:ru": 18956,
+    "lexicon:en": 481882,
+    "lexicon:ru": 434630,
+    "reserve:en": 54493,
+    "reserve:ru": 19215,
+    "test:en": 55322,
+    "test:ru": 19001,
+    "train:en": 334335,
+    "train:ru": 113140
+  },
+  "provenance": {
+    "model/context_v2/corpus-receipt.json": "cf88d7fe395d09ff6fafa8b3950cd18e1e7a07d781af9199e23e15fcff57cd5b",
+    "model/context_v2/sources/tatoeba-cc0-en-ru.tsv.gz": "1f7df948b946f1d1aed5efd2a83a9a5a09d2b8abcb9224045b40c9ec6720e793",
+    "model/intent_v1/sources/en_US.lm": "017a513a23bb37947a3a0e73e307066fa8ec0642075172cdcad6ea204cae68da",
+    "model/intent_v1/sources/ru_RU.lm": "e57c14eec2b78e52a2125dce2b38044d8dfe480f3964b9d118614527195ceda9",
+    "src/keyswitch/layouts.py": "374e8913fe51c72370ae8f775875847e47c2a1db7c8deaa2fc919944dd45597c",
+    "tools/context_corpus.py": "4c71b1ec1d213b2301899856b10066d5551e44a56c1e5a352d1742969e83806a",
+    "tools/ortho_v2_corpus.py": "ce9f7357a86d49cf52057fe0c1fed7be8015ec239c6c54ea090170bdf663386a"
+  },
+  "schema_version": 1,
+  "tokens_sha256": "295a383fb493637d9fad915980d3fdeac43162aacc01332abd22d63b8620187a",
+  "types_by_split": {
+    "calibration": 21401,
+    "development": 22521,
+    "lexicon": 81493,
+    "reserve": 21824,
+    "test": 22032,
+    "train": 76099
+  },
+  "types_by_split_script": {
+    "calibration:en": 14033,
+    "calibration:ru": 7368,
+    "development:en": 14885,
+    "development:ru": 7636,
+    "lexicon:en": 39272,
+    "lexicon:ru": 42221,
+    "reserve:en": 14201,
+    "reserve:ru": 7623,
+    "test:en": 14437,
+    "test:ru": 7595,
+    "train:en": 47385,
+    "train:ru": 28714
+  }
+}

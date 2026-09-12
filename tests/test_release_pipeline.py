@@ -8,6 +8,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 TOOLS_PATH = str(Path(__file__).resolve().parents[1] / "tools")
 if TOOLS_PATH not in sys.path:
@@ -179,14 +181,41 @@ class ReportingTests(unittest.TestCase):
             )
         )
         self.assertEqual(rows["Registry, manifest and test-report agree"], "passed")
+        # A skipped phase cannot prove byte-identity, so the row must not read
+        # as a pass. Other rows keep the older, softer wording: they summarise
+        # gates rather than assert a reproduction.
         self.assertEqual(
             rows["Preseal receipt is model-blind and reproducible"],
-            "passed (some phases skipped)",
+            "NOT PROVEN (phase skipped)",
         )
         self.assertEqual(rows["Strict typing"], "FAILED")
         self.assertEqual(rows["100% line and branch coverage"], "running")
         self.assertEqual(rows["Detector quality gates"], "not run")
         self.assertIn("Windows installer verifier and smoke", rows)
+
+    def test_disabled_replays_are_not_reported_as_proof(self) -> None:
+        """`--replays 0` used to print a byte-identity claim it never tested.
+
+        The phase returned while its status was still "running", which the
+        runner records as "passed"; the checklist then asserted that official
+        and replay outputs matched after running no replay at all.
+        """
+
+        state = pipeline.PhaseState(
+            name="model-replays", title="Byte-identical retraining replays"
+        )
+        options = SimpleNamespace(replays=0)
+        context = cast(
+            pipeline.Context, SimpleNamespace(options=options)
+        )
+        log = cast(pipeline.PhaseLog, SimpleNamespace(write=lambda _message: None))
+        pipeline.phase_model_replays(context, log, state)
+        self.assertEqual(state.status, "skipped")
+        rows = dict(pipeline.checklist_rows({"model-replays": state.status}))
+        self.assertEqual(
+            rows["Official and replay outputs are byte-identical"],
+            "NOT PROVEN (phase skipped)",
+        )
 
     def test_summary_markdown_lists_failures_with_log_tail(self) -> None:
         state: dict[str, object] = {

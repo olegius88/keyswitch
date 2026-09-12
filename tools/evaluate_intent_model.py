@@ -8,6 +8,7 @@ import hashlib
 import json
 import math
 import multiprocessing
+import os
 import statistics
 import sys
 import time
@@ -20,6 +21,8 @@ from typing import Final, Literal, TypeVar, cast
 tools_path = str(Path(__file__).resolve().parent)
 if tools_path not in sys.path:
     sys.path.insert(0, tools_path)
+
+import environment_probe  # noqa: E402
 
 from keyswitch.detector import (
     CONTEXT_DELTA_MULTIPLIER,
@@ -48,6 +51,7 @@ from train_intent_model import (
     CONTEXT_STRESS_PROFILES,
     resolve_training_workers,
     DEVELOPMENT_FREEZER_PATH,
+    ENVIRONMENT_PROBE_PATH,
     INTENT_RUNTIME_PATH,
     LANGUAGE_MODEL_RUNTIME_PATH,
     LAYOUTS_RUNTIME_PATH,
@@ -117,6 +121,94 @@ _TRAINER_PATH = Path(__file__).resolve().with_name("train_intent_model.py")
 _EVALUATOR_PATH = Path(__file__).resolve()
 _DETECTOR_PATH = INTENT_RUNTIME_PATH.with_name("detector.py")
 _PROTECTED_TOKENS_PATH = _DETECTOR_PATH.parent / "resources/protected_tokens.txt"
+FROZEN_HUNSPELL_ROOT: Final[Path] = (
+    PROJECT_ROOT / "model/intent_v1/sources/hunspell"
+)
+
+
+def environment_section() -> dict[str, object]:
+    """Report what this machine computes, and which dictionaries it read.
+
+    Deliberately a section of its own rather than a `provenance` entry. Those
+    entries are a fixed set of named checks that must all pass
+    (`provenance_checks_pass`), and a machine that differs from the recorded
+    build is not a failure - it is the case this whole arrangement exists to
+    permit. What is not permitted is failing to say so, which is what this
+    section is for.
+
+    Nothing here is compared against a recorded value: the comparison belongs
+    to whoever holds the record (`tools/release_pipeline.py` does it against
+    build-environment.json). Producing the reading and judging it are kept
+    apart on purpose.
+    """
+
+    dictionaries: dict[str, object] = {}
+    for name in sorted(("en_US.aff", "en_US.dic", "ru_RU.aff", "ru_RU.dic")):
+        frozen = FROZEN_HUNSPELL_ROOT / name
+        system = Path("/usr/share/hunspell") / name
+        entry: dict[str, object] = {
+            "frozen_sha256": hashlib.sha256(frozen.read_bytes()).hexdigest()
+        }
+        if system.is_file():
+            entry["system_sha256"] = hashlib.sha256(
+                system.read_bytes()
+            ).hexdigest()
+            entry["matches_system"] = (
+                entry["system_sha256"] == entry["frozen_sha256"]
+            )
+        else:
+            entry["system_sha256"] = None
+            entry["matches_system"] = None
+        dictionaries[name] = entry
+    return {
+        "schema_version": 1,
+        "probe": environment_probe.measure(),
+        "hunspell_dictionaries": dictionaries,
+        "hunspell_scope": (
+            "the evaluation reads the frozen dictionaries; the system ones are "
+            "reported only so that a drift between them is visible"
+        ),
+    }
+
+
+def _use_frozen_hunspell_dictionaries() -> None:
+    """Point this process at the dictionaries frozen beside the other sources.
+
+    The evaluation derives its lexical populations from a Hunspell dictionary
+    and pins the resulting corpus digests in config.json. Read from
+    /usr/share/hunspell, those populations move whenever the distribution
+    updates hunspell-ru or hunspell-en-us - so an ordinary `apt upgrade` fails
+    the release, although training never consults a dictionary at all (the
+    trainer builds its scorers with enable_spellcheck=False).
+
+    A dictionary is an input to the evaluation, not a name for it, and this
+    repository already freezes its other lexical inputs: the onboard frequency
+    lists sit in the same directory with their own copyright file and
+    checksums. These are frozen the same way, and the override is applied here
+    rather than in keyswitch.spellcheck so that the shipped application keeps
+    using whatever dictionary the user actually has.
+
+    Set before the first LanguageModel.load in this process, which also covers
+    tools/preseal_intent_holdout.py because it imports this module.
+    """
+
+    missing = [
+        name
+        for name in ("en_US.aff", "en_US.dic", "ru_RU.aff", "ru_RU.dic")
+        if not (FROZEN_HUNSPELL_ROOT / name).is_file()
+    ]
+    if missing:
+        raise RuntimeError(
+            "the frozen Hunspell dictionaries are missing: "
+            + ", ".join(missing)
+            + ". Refusing to fall back to the system dictionary, which would "
+            "silently evaluate against a different lexicon."
+        )
+    os.environ["KEYSWITCH_HUNSPELL_PATH"] = str(FROZEN_HUNSPELL_ROOT)
+
+
+_use_frozen_hunspell_dictionaries()
+
 _TOOLCHAIN_CODE_PATHS: tuple[tuple[str, Path], ...] = (
     ("trainer_sha256", _TRAINER_PATH),
     ("runtime_sha256", INTENT_RUNTIME_PATH),
@@ -125,6 +217,7 @@ _TOOLCHAIN_CODE_PATHS: tuple[tuple[str, Path], ...] = (
     ("layouts_sha256", LAYOUTS_RUNTIME_PATH),
     ("language_model_sha256", LANGUAGE_MODEL_RUNTIME_PATH),
     ("evaluator_sha256", _EVALUATOR_PATH),
+    ("environment_probe_sha256", ENVIRONMENT_PROBE_PATH),
     ("preseal_generator_sha256", PRESEAL_GENERATOR_PATH),
     ("development_freezer_sha256", DEVELOPMENT_FREEZER_PATH),
     ("preseal_receipt_sha256", PRESEAL_RECEIPT_PATH),
@@ -810,7 +903,25 @@ def _source_hashes(source_rows: object) -> dict[int, str]:
 
 
 def _toolchain_code_hashes(toolchain_value: object) -> dict[str, str]:
+    """Read the toolchain, and refuse a manifest that smuggles anything else in.
+
+    Until v21 this mapping also carried seven strings naming the build machine,
+    and because the whole mapping goes into the sealed candidate hash, an
+    interpreter rebuilt without any change in behaviour was refused as a new
+    candidate. The strings now live in the build-environment sidecar.
+
+    The exact-key check is what keeps them there. A well-meant later addition -
+    "let us just record the libc version, it is only provenance" - would put
+    the old failure back without anyone noticing until the next `apt upgrade`.
+    Adding a field here is now a decision someone has to make on purpose.
+    """
+
     toolchain = _mapping(toolchain_value, "manifest.toolchain")
+    _require_exact_keys(
+        toolchain,
+        {"config_sha256", *(field for field, _path in _TOOLCHAIN_CODE_PATHS)},
+        "manifest.toolchain",
+    )
     return {
         field_name: _sha256(
             toolchain.get(field_name),
@@ -5064,6 +5175,7 @@ def _evaluate(arguments: EvaluationArguments) -> int:
             ),
         },
         "provenance": [asdict(check) for check in provenance],
+        "environment": environment_section(),
         "runtime_threshold_selection": {
             "matches_signed_training_evidence": (
                 runtime_threshold_selection_matches

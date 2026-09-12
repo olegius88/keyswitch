@@ -25,11 +25,11 @@
 
 ## Сертифицированный артефакт v20
 
-Текущий артефакт — `intent-v1-6ece07f881ec`, 12 935 540 байт, SHA-256
-`85deddb83e041f52622b794cf919770994d71a9f1c50af482be4f6574c4163cd`.
+Текущий артефакт — `intent-v1-d2f32ca5db58`, 12 935 540 байт, SHA-256
+`6048055c1d735c277b955785bc50a7f16f994fb24ac03bb616f53e3c078f099e`.
 Build provenance —
-`6ece07f881ec983f7a317fdfd01c09cd83f49d9972b903a5a1af7ebafb18a222`,
-config — `f308a605737e0122f39cb83fe937b7133701b57b6dbb9caa1e35df1474a41249`,
+`d2f32ca5db583ff56284ea57c517c9728adbc85f46417d15922b3bea717c14e3`,
+config — `2a8105d749422e9a8ef2bf6894d848ee8fdaff11df948d42a952fea27eda4116`,
 dataset — `b22247fc3c6e3762f8aa2f62a670adae0e19cc48742afa1a9e306a73f27aee82`.
 Из 49 выполненных эпох по development выбрана эпоха 45; контейнер содержит
 765 166 ненулевых весов и 1 029 480 точных membership-отпечатков.
@@ -58,7 +58,7 @@ p95 — 193,493112 мс. Эти синтетические результаты 
 пути. Сравнение подтвердило трёхстороннее побайтное равенство
 official/replay-a/replay-b для KSLM, manifest и test-report; их SHA-256 равны
 соответственно
-`85deddb83e041f52622b794cf919770994d71a9f1c50af482be4f6574c4163cd`,
+`6048055c1d735c277b955785bc50a7f16f994fb24ac03bb616f53e3c078f099e`,
 `9c39b615ba90b94107be6bef0140ce9387e493bb6aae195f4a8d116021283da9` и
 `f3c44b42c96ce654042d17c822d92bd3202a9d1b12d6b28e34e394531a10fa94`. Независимый
 strict evaluator, повторно запущенный на replay-a, также прошёл все 30 gates;
@@ -94,7 +94,7 @@ card самостоятельных юридических выводов. Ст�
 Единица разделения — не строка и не язык, а физическая последовательность
 клавиш. Для русского слова она сначала отображается в координаты US-клавиатуры.
 До аугментации SHA-256 этой последовательности в namespace
-`keyswitch:intent-v20:physical-signature` распределяет её по 40 неизменным
+`keyswitch:intent-v21:physical-signature` распределяет её по 40 неизменным
 бакетам:
 
 - 26/40 (65%) — обучение;
@@ -125,10 +125,10 @@ pre-sealed строки при этом должны остаться побай
 provenance модели.
 
 V20 использует дополнительный frozen source
-`unknown-typo-development-v20.json`, созданный model-blind до обучения из
+`unknown-typo-development-v21.json`, созданный model-blind до обучения из
 unknown-typo development-корпуса. Он содержит 10 000 уникальных физических
 сигнатур — по 5 000 на язык — без test-роли. Независимый namespace
-`keyswitch:intent-v20:unknown-typo-development-role` распределяет в каждом
+`keyswitch:intent-v21:unknown-typo-development-role` распределяет в каждом
 языке 3 500 слов в train и по 500 в development, calibration и threshold.
 Loader проверяет размер и SHA-256 source, provenance Hunspell `.dic`/`.aff`,
 физическую эквивалентность EN/RU пары, уникальность и точный SHA-256 повторно
@@ -139,7 +139,7 @@ provenance; внешний v20 holdout использует другие rank/ch
 
 `config.json` schema 13 также содержит policy `sealed_evaluation` schema 1.
 Указанный в ней repository-relative
-`registry_path: model/intent_v1/seal-registry-v20.json` разрешается от
+`registry_path: model/intent_v1/seal-registry-v21.json` разрешается от
 канонического корня проекта, а не от расположения переданной копии config, и
 закрепляет один candidate SHA за одним `split_namespace`. После успешного
 прохождения полного pre-sealed gate — threshold/context, safety,
@@ -478,7 +478,7 @@ membership coverage на тех же строках сохраняются то�
 ```bash
 (cd model/intent_v1/sources && sha256sum --check SHA256SUMS)
 PYTHONPATH=src:tools python3 tools/preseal_intent_holdout.py | \
-  diff -u model/intent_v1/holdout-v20-preseal.json -
+  diff -u model/intent_v1/holdout-v21-preseal.json -
 PYTHONPATH=src python3 tools/train_intent_model_release.py
 PYTHONPATH=src python3 tools/evaluate_intent_model.py --strict
 ```
@@ -507,7 +507,7 @@ calibrated-logit margin выбирается только на threshold-рол�
 Holdout v20 построен другим rank/choice namespace до загрузки модели, исключает
 все 288 869 sealed и 10 000 development физических сигнатур и впервые
 оценивается только после фиксации candidate receipt. Его model-blind provenance
-заранее сохранён в `holdout-v20-preseal.json`: `model_loaded=false`,
+заранее сохранён в `holdout-v21-preseal.json`: `model_loaded=false`,
 `metrics_evaluated=false`, оба overlap-счётчика равны нулю. Внешний
 manifest schema 1 сохраняет SHA-256 для config,
 frozen-источников,
@@ -553,8 +553,11 @@ commit marker; ошибка процесса вызывает восстанов
 разрешено израсходовать namespace. Registry нельзя удалять или редактировать
 для проверки изменённого кандидата — для него нужна явная ротация policy.
 
-Для проверки byte-identical retraining нужны те же байты источников и config,
-те же toolchain hashes и та же зафиксированная Python/platform identity:
+Для проверки byte-identical retraining нужны те же байты источников и config и
+те же toolchain hashes. Идентичность машины в это условие **не входит**: с v21
+снимок инструментария содержит только дайджесты кода и конфига, а описание
+машины лежит отдельно, в `build-environment.json`. Среда, которая вычисляет то
+же самое, воспроизводит те же байты, как бы она себя ни называла:
 
 ```bash
 set -euo pipefail
@@ -566,7 +569,8 @@ for run in a b; do
   PYTHONPATH=src python3 tools/train_intent_model_release.py \
     --artifact "$retrain_root/$run/layout_intent_v1.ksm" \
     --manifest "$retrain_root/$run/manifest.json" \
-    --test-report "$retrain_root/$run/test-report.json"
+    --test-report "$retrain_root/$run/test-report.json" \
+    --build-environment "$retrain_root/$run/build-environment.json"
 done
 cmp "$retrain_root/a/layout_intent_v1.ksm" \
     "$retrain_root/b/layout_intent_v1.ksm"
@@ -577,10 +581,32 @@ PYTHONPATH=src python3 tools/evaluate_intent_model.py \
   --manifest "$retrain_root/a/manifest.json" --strict
 ```
 
-Успешные `cmp` подтверждают равенство всех трёх файлов побайтно. Это обещание
-не распространяется на другую версию Python/libc или другую платформу: их
-identity намеренно входит в provenance. Версия установленного `onboard-data`
-на результат не влияет, потому что trainer читает только frozen-копии.
+Успешные `cmp` подтверждают равенство всех трёх файлов побайтно. Четвёртый
+файл, `build-environment.json`, намеренно в сравнение не входит: он описывает
+машину и обязан различаться между машинами.
+
+Обещание распространяется на любую среду, которая **считает то же самое**.
+Другая сборка Python, другая версия libc, другой дистрибутив — всё это проходит
+молча, если ни одно число не изменилось. Если изменилось, расхождение поймают
+байты, а не название: веса входят в `candidate_sha256`, поэтому печать откажет
+по весам. Чтобы расхождение можно было назвать, а не только заметить, рядом
+работает `tools/environment_probe.py`:
+
+```bash
+PYTHONPATH=src python3 tools/environment_probe.py --explain libm \
+  --against model/intent_v1/build-environment.json
+```
+
+Зонд — свидетельство, а не доказательство: пространство double шириной 2**64, а
+его сетки конечны, и libm, разошедшийся вне сетки, изменит веса, не сдвинув ни
+одной ячейки. Такой случай ловит только полный реплей — поэтому зонд никогда не
+голосует за идентичность. Исчерпывающей удалось сделать только ячейку
+`unicode`: она обходит все кодовые точки, потому что рантайм нормализует каждый
+токен, а обновление базы Unicode — настоящее и тихое изменение поведения.
+
+Версия установленного `onboard-data` на результат не влияет, потому что trainer
+читает только frozen-копии. С v21 то же верно и для словарей Hunspell: они
+заморожены в `sources/hunspell/`, а обучение к ним не обращается вовсе.
 
 ## Ограничения и обновление
 
@@ -599,7 +625,7 @@ identity намеренно входит в provenance. Версия устан�
   согласования соответствующей feature/config/container version: смена только
   split namespace не требует повышения всех форматов. Существующий `intent_v1` нельзя молча
   переобучать с несовместимой семантикой. Текущие значения — feature schema v5,
-  split namespace `keyswitch:intent-v20:physical-signature`, training config
+  split namespace `keyswitch:intent-v21:physical-signature`, training config
   schema 13, KSLM schema 4 и внешний manifest schema 1.
 - Повышение recall запрещено ценой нарушения precision, specificity или
   safety-гейтов из фиксированного config.

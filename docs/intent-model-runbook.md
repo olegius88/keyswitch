@@ -17,9 +17,9 @@ Runbook соответствует текущему контуру v20:
 - training config schema 13;
 - feature schema v5;
 - KSLM container schema 4;
-- sealed split namespace `keyswitch:intent-v20:physical-signature`;
+- sealed split namespace `keyswitch:intent-v21:physical-signature`;
 - reference host Ubuntu 26.04 и Python 3.14;
-- сертифицированный artifact `intent-v1-6ece07f881ec`.
+- сертифицированный artifact `intent-v1-d2f32ca5db58`.
 
 Номера этих схем независимы. Нельзя автоматически повышать их вместе только
 ради нового релиза.
@@ -115,9 +115,21 @@ dpkg-query -W -f='${Package} ${Version}\n' \
   onboard-data hunspell-en-us hunspell-ru libhunspell-1.7-0
 ```
 
-Версия Python, build string, ОС, архитектура, libc и byte order входят в
-candidate provenance. Побайтная воспроизводимость обещана только в той же
-зафиксированной среде.
+Версия Python, build string, ОС, архитектура, libc и byte order — это
+**провенанс**, а не идентичность. С v21 они записываются в
+`model/intent_v1/build-environment.json` и не входят ни в `candidate_sha256`,
+ни в байты артефакта. Побайтная воспроизводимость обещана любой среде, которая
+вычисляет те же числа, независимо от того, как она себя называет.
+
+Если реплей всё же разошёлся, первым делом надо выяснить, среда это или модель:
+
+```bash
+PYTHONPATH=src python3 tools/environment_probe.py \
+  --explain libm --against model/intent_v1/build-environment.json
+```
+
+Зонд назовёт разошедшийся примитив. Расхождение, которого он не увидел, — это
+расхождение самой модели, и его судят байты трёх официальных файлов.
 
 `evaluate_intent_model.py --strict` и `--provenance-only` относятся к
 сертификационному контуру reference host. Нативная упаковка для другой ОС не

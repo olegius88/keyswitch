@@ -1,0 +1,140 @@
+{
+  "artifact_model_version": "intent-v1-d2f32ca5db58",
+  "artifact_sha256": "6048055c1d735c277b955785bc50a7f16f994fb24ac03bb616f53e3c078f099e",
+  "build_provenance_sha256": "d2f32ca5db583ff56284ea57c517c9728adbc85f46417d15922b3bea717c14e3",
+  "byteorder": "little",
+  "compiler": "/usr/bin/gcc: gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+  "environment_probe": {
+    "cells": {
+      "builtin_sum": {
+        "buckets": {
+          "fsum": "d6d98ab9639ac6e9f010cd7f1eceb7c1a4681aece7ec7232bc486f7ca16fceef",
+          "loop": "31932dd2cc5b24a11dd798dbad512075557929b4e7c8b7a44607afedfe3f63d3",
+          "sum": "7761e00bca59414da9a12d6128d8e4bb129f4e940b04511f142c7b69ca14a6de",
+          "sum_start": "be1e32e7d066304d2a2ac513b05c7f989788bed878a7f8f1f58301b7aa3288b1"
+        },
+        "entries": 28,
+        "sha256": "d0a7a3d08dbdc0312199099d0ce7fe4f89e17a009da4f14b6da972153dc85333"
+      },
+      "float_arithmetic": {
+        "buckets": {
+          "sigma": "34ff3274b3a464dde4a4a57aafed3ae77a32dbef24a54946213d626bbf8bfc61",
+          "weight": "bdbeea3907589231b0ab12502cedd672e0ac2f3aeb5e7008669d82c2b3dde113",
+          "z": "e406da303ce0df38ec551f11232474d1c0e6272cddcce6edcf6ea68bf1afc023"
+        },
+        "entries": 1029,
+        "sha256": "83c54ff40c2ac9e425fa16612d02cbeb58966baf14bcfbb9c3ff50017aca51e2"
+      },
+      "float_text": {
+        "buckets": {
+          "from_hex": "03586b8696bd27a5197dbe968a91e799aa6257b0ba04edf032be66af1d38eb89",
+          "hex": "19657e9486446515f8d547bd527dec33cd751b7a2e4b9e3b129631a13fcdc37f",
+          "json": "f700acdd49a4bc074a6386a9ece46c96811a9d1b147b6c437f8ce4b8ccd03bca",
+          "repr": "e5015bd7a9b9cbbc6d9b53064ed90e279df4dc6ce96621cac04a85cf4b2420ef",
+          "round": "cea445ec6b8000463a213d4f100d52c7647001626a873f810f9352b635cb0380",
+          "roundtrip": "25ea2609841db5bd402aa45e93b8d2e479720c6e860e2a917c058c69c6a4f87d"
+        },
+        "entries": 189,
+        "sha256": "93427043e544bb5a6e149ad1c41c597b6f61011237cc72b0156ed49d1826adc8"
+      },
+      "hashing": {
+        "buckets": {
+          "byteorder": "28c814aa976d113441c660391fda4596d72a5de1c714b4e14263bf410a3c2f8f",
+          "fnv1a64": "10a04c8e22a27b8f74e4253a5cec16cd7f7df70bb5bc80cf8d0aed7047b5faf9",
+          "pack_be": "4187d4354ee93ac4e83bd050d9260ff5aac44db0cba38cea1e6ef486791937a4",
+          "pack_f32": "af92ef01ffa9c010b9728709932f45b7c1a0367af09fd31df11202f12fc325b6",
+          "pack_le": "a4cf74b859d50cd28c012730491777d05f2c6b9bc1af402dd18956354be8cdde",
+          "sha256": "fa96b185b42aef28d7dc36a98d78e13eaf69f2321fc7eb47e83ec4e2691a916f",
+          "utf8": "a0b4ebe052c84f613cdf10d97725e7f76d83de23c9589af0fa3a6294a054f2cb"
+        },
+        "entries": 98,
+        "sha256": "75fb3a63cf40a94cbddef8793f0dce0178021f80836462835c046dfce8a7f9c0"
+      },
+      "integers": {
+        "buckets": {
+          "bits": "7881c1b67d080610be24b5bc029eae905afc7d8378e057a73a79f4f201fbb9ff",
+          "divmod": "05d6bc753b53c8156c2cd9cdfe8d2bd6b2302377a911d7d663e3fa797b90fb2b",
+          "floordiv": "c2e5dc0406e1e788e3f6f0640f8054467f62135f7605ec38c60c04d84a56c633",
+          "mod": "238caa685a9f0f37a09894dd42694d818c5ec518861da4bc5092d64a1dac9053",
+          "pow_mod": "ca2cc4c20696cfeffc08ad0cbd3b354bc17bdb968b070230db549f275aab53d1",
+          "round_int": "bda59922b757802cd836aa3bb55fda51501686f21ecfaa3de740f43804ae99df",
+          "shift": "f275e6a9d66c0e6f4ca749f193ac34fc0d27be0ce67995c01aba7f622fc53843",
+          "str": "bd6d57e9982292535dfa18071dac9d02410993454f6e6ca12852a8d57f6d266c",
+          "trunc": "98fd65defd4245cf59543b27e1488a8fa9839838452b8e5d7301fc132258fbd0"
+        },
+        "entries": 315,
+        "sha256": "8b31435afd1fc16b670d8dace392094232a50d21db53b75beec503f761ef3746"
+      },
+      "libm": {
+        "buckets": {
+          "ceil": "dab3cb3e35ff56fd2262d67d604a0c10cd2997f014a45fc88082fc2bf88f176a",
+          "exp": "4be46b55e255aff076fcc0cb33b84bfb777b04fa2bed7f4a59b11b784ba34a3f",
+          "floor": "3cf1ee4732cc364f18196b11ec5e198d23fdbeadee79ad25e47fa532963bc4c2",
+          "log": "a60c15aedc633f396dd4b709f1581cb0b251dd84689a790811df0de13637813b",
+          "log1p": "04cea5a6278c1484f7c550c036d12c23264c344091c926b2f372ac52a5e0ec35",
+          "nextafter": "945f776d12d31a0c748dfa9f2468dc600f7da08e018cace64ffcbb511e0710d4",
+          "sqrt": "85ff18c00cb4996303c6783cdef1a58685acf64eb52af94bd3ef6461a7aa509d"
+        },
+        "entries": 567,
+        "sha256": "26f2582ba4ad2fddc5ee29b24528af22b76ce3da8af6d5d1d194c45bde0cd62b"
+      },
+      "ordering": {
+        "buckets": {
+          "dict_order": "7b0c230936cce6987d90ef6919d34b3d10adc6b3a3589fcaffeba812ff4b56d1",
+          "doubles": "b2c49355bce1f1b6cfad5ff990bacd20f5ee2a3aed69a677514766f8728e57de",
+          "min_max": "5e34c0f7d1cb2802c997007e26e18fa109a1113cacf98f06b77659f60fe1949c",
+          "reverse": "11826771de8dc44af372af376244818098295eaead5acd8a9c49abebf1e2625c",
+          "stable": "79787622a29beb747cae328cb0f6220f5d43c31fce921bdf7a49b3793462776e",
+          "strings": "f0cde6b2d7a93755dd041b96d039d979a8e9541f776a10a9681b311f58e4bb5c",
+          "strings_fold": "c711755c084ba7770fa4b2b90c815f7da3a864f0d4c1987f9063861d772a4922"
+        },
+        "entries": 7,
+        "sha256": "b38f7d6c83dbbc37960ef11e6b00cab9d3aa533dcc444d769316183dc446865f"
+      },
+      "random_stream": {
+        "buckets": {
+          "getrandbits": "341608617ea7e524872e6cf9833194e5c9be9b1ad2884b0996e9ef7a3244b098",
+          "random": "3a998a9f33690049471d7b6818a6b5cc162c74954a4f5959f74c8b1bd7e42827",
+          "sample": "596083b43dc8e26f4a462d8bc80bae1817fd3a79db228a9a282cb7b809920a8c",
+          "shuffle": "54c6bf56b69ae60c95a076fa221d383ae679a1326821b415e337753b46aab62e"
+        },
+        "entries": 48,
+        "sha256": "15fdfe6520f29f910b4f111ef4cae451bafd4a3c4d9f69986c6eea2f864374fb"
+      },
+      "unicode": {
+        "buckets": {
+          "plane-00": "6a08971e84aac61456503fd4bf06b7c9286c351a61cca693f4924ea3f1012510",
+          "plane-01": "8509b4e8714ac3bfc2483bc3ae2de29e3499a27beac858901ebb019219b21890",
+          "plane-02": "b46fc240868a5151c3f1615c5f3e47ef97c9c0b4841446a7ad6b808b999b9847",
+          "plane-03": "0c76e8e1657b9f3461d24c26bb8f596bd10817ea04c016a9586d4aefe26f783f",
+          "plane-04": "0bb8f3dd5c043f65b08e0cc3f96fd2bc60b5f50b5d60c554128a140e11e6b1e8",
+          "plane-05": "4cfe8528a2d3a16cd54a437856c485dfaa194fe1210e01a45c586a47d947513d",
+          "plane-06": "c7beeb4c61abad99ab957f66ffb1543e488a61a428615ca19fa817174cd6298a",
+          "plane-07": "2351a871639fc578db19e62564ba533909d679ca4d82ad53f030353f2f8de605",
+          "plane-08": "438796bb0d28b92d97f4db906a26bdd8925914ad3910157e75bcc3fb57c607a4",
+          "plane-09": "4b0d78306f1fae73fd6d7b50245408ed2b2fc2d9b1f3b8ba4493c9b87490aaa3",
+          "plane-0A": "6e257e5fbc8dfa15a54e291a225afda805fc17acbfd85a05b39171fe531d7ece",
+          "plane-0B": "432c9ca2a161a460086a2e15bd164b46f9bf2986bef7fc831c9228190c2093d2",
+          "plane-0C": "1d8f59df488dbb1b79a3ba209da2a1d435103136293d1ad51c7e779cc40c19b8",
+          "plane-0D": "763b75fdef7f3d4eb9e1f7d1dce382f60b0cd5a55f531ca50f25b9909ce6cf12",
+          "plane-0E": "1d19a6d2c5a97ca90197c2f7765d7b54fab6fbf51b8cb64c3651a6ac8a770a29",
+          "plane-0F": "6ca67c143279e743418647c3c4c84f3e5f481b4f691acaffa8e73549fa1e2359",
+          "plane-10": "59556ad87a9dfc40527928545c263d1f2d6afe2f2dfbbd6522c51bce4b61da16",
+          "str": "0d8dce958326d6f89f0a5c7453b9e452bb1c8a54307d0a26932e1a2e95ef4d25"
+        },
+        "entries": 1171684,
+        "sha256": "83fc396a747c2e3e10d85213b6adebc8cdcfbedf9509c6392d84dd68979c1a38"
+      }
+    },
+    "probe_sha256": "dba649eeacd263bb1f4206ad19ff1d1a16b581efac6227c471e5151349f0637d",
+    "schema_version": 1
+  },
+  "ftrl_kernel": "native",
+  "libc": "glibc 2.43",
+  "machine": "x86_64",
+  "python_build": "3.14.4 (main, Aug 20 2026, 10:41:58) [GCC 15.2.0]",
+  "python_implementation": "cpython",
+  "python_version": "3.14.4",
+  "schema_version": 1,
+  "system": "Linux"
+}

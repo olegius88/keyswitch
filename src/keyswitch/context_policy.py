@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import ClassVar
+from typing import ClassVar, Final
 
 from .context_model import ContextEvidence, ContextModel, ContextPrediction
 from .detector import DetectionDecision, LanguageDetector
@@ -20,6 +20,34 @@ class ContextResult:
     policy_applied: bool = False
     decision_source: str = "baseline"
     fallback_reason: str = ""
+
+
+INNER_MARKS: Final[str] = "-'’"
+
+
+def word_shaped(token: str) -> bool:
+    """Is this a word in the layout it was typed in, or a fragment?
+
+    A character model trained on words can only speak about words. `и"ю` is a
+    quotation mark caught between two letters, not Russian written badly, and
+    left in the population such fragments set every threshold. A hyphen or an
+    apostrophe inside a token is different: the engine joins those to the word
+    before it tests for a boundary at all, so `Я-то`, `из-за` and `don't` reach
+    a model whole and are ordinary words of their language.
+    """
+
+    if len(token) < 2 or not token[0].isalpha() or not token[-1].isalpha():
+        return False
+    marks = 0
+    for character in token[1:-1]:
+        if character.isalpha():
+            continue
+        if character not in INNER_MARKS:
+            return False
+        marks += 1
+        if marks > 1:
+            return False
+    return True
 
 
 class ContextPolicy:
@@ -135,12 +163,23 @@ class ContextPolicy:
         """Score the physical keys under both languages and license a conversion."""
 
         model = self.ortho
+        if baseline.source_score.known:
+            # The dictionary of the layout in use knows this token. The word
+            # models hold stronger evidence than any character model can, and
+            # their refusal stands: `руку` is a Russian word whose keys spell
+            # the English word `here`.
+            return None
         if model is None or baseline.source_group not in (0, 1):
             return None
         source_script = "en" if baseline.source_group == 0 else "ru"
         # Key space is the US rendering, so it is whichever side is Latin.
         keys = baseline.original if source_script == "en" else alternative
         if len(keys) < model.minimum_length:
+            return None
+        if not word_shaped(baseline.original):
+            # Punctuation caught between letters is not a word in the layout
+            # being typed, and a character model trained on words cannot judge
+            # it: `и"ю` is a quotation mark between two letters, not Russian.
             return None
         shape = shape_of(baseline.original, not field.before.strip())
         score = model.score(OrthoEvidence(keys, shape, source_script))

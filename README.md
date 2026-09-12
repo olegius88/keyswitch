@@ -110,11 +110,11 @@ Telegram. Токен бота и ID группы задаются в её инт
 
 ## Установка в Windows
 
-Скачайте `KeySwitch-Setup-0.20.0-x64.exe` со страницы
+Скачайте `KeySwitch-Setup-0.21.0-x64.exe` со страницы
 [последнего выпуска](https://github.com/olegius88/keyswitch/releases/latest) и
 запустите его. Установка выполняется для текущего пользователя в
 `%LOCALAPPDATA%\Programs\KeySwitch` и не требует прав администратора. В выпуск
-также входит переносимый архив `KeySwitch-0.20.0-windows-x64.zip`.
+также входит переносимый архив `KeySwitch-0.21.0-windows-x64.zip`.
 
 После запуска KeySwitch появится в области уведомлений. Левый или правый щелчок
 по `EN/RU` либо флагу открывает меню. В нём пункт «Переключить на…» всегда
@@ -181,11 +181,11 @@ cd keyswitch
 
 ## Установка DEB-пакета
 
-Скачайте `keyswitch_0.20.0_amd64.deb` со страницы
+Скачайте `keyswitch_0.21.0_amd64.deb` со страницы
 [последнего выпуска](https://github.com/olegius88/keyswitch/releases/latest), затем:
 
 ```bash
-sudo apt install ./keyswitch_0.20.0_amd64.deb
+sudo apt install ./keyswitch_0.21.0_amd64.deb
 ```
 
 Пакет установит системные зависимости и добавит KeySwitch в меню приложений.
@@ -376,7 +376,7 @@ language model полностью игнорируются классифика�
 порядками n-грамм, поэтому train/serve feature parity точная. Train-only EN/RU
 scorer остаётся отдельной проверяемой provenance-записью, но не является входом
 классификатора. Разбиение физических сигнатур
-закреплено namespace `keyswitch:intent-v20:physical-signature`. До генерации
+закреплено namespace `keyswitch:intent-v21:physical-signature`. До генерации
 строк candidate-фаза независимо помещает identity- и typo-сигнатуры с
 владельцами из разных pre-sealed split/языков либо пересечением с
 protected/safety токеном в quarantine. Sealed-test строки и их quarantine
@@ -385,7 +385,7 @@ protected/safety токеном в quarantine. Sealed-test строки и их 
 кандидата, а строки кандидата не меняются.
 
 Schema 13 дополнительно подключает побайтно зафиксированный
-`unknown-typo-development-v20.json`. Он был построен model-blind до обучения
+`unknown-typo-development-v21.json`. Он был построен model-blind до обучения
 из 5 000 EN и 5 000 RU неизвестных Hunspell-опечаток, а затем компактно
 сохранён по одной записи на физическую сигнатуру. Независимый namespace ролей
 детерминированно распределяет каждую языковую половину как 3 500/500/500/500
@@ -491,7 +491,7 @@ strict-gate `fallback_regression`: один false positive, внесённый �
 решение сохранено в `rejection-v18.json`. V19 снова не прошёл pre-sealed gate
 (recall 0,9463), а v20 прошёл все внутренние gates, holdout (6 FP из 60 000,
 recall 0,9445) и 30 strict gates и стал текущим сертифицированным артефактом.
-Файл `holdout-v20-preseal.json` фиксирует SHA-256, namespaces, размеры и
+Файл `holdout-v21-preseal.json` фиксирует SHA-256, namespaces, размеры и
 нулевые пересечения до загрузки или оценки v20-модели; поля
 `model_loaded=false` и `metrics_evaluated=false` делают эту фазу явной.
 
@@ -612,7 +612,7 @@ dbus-run-session -- env PYTHONPATH=src python3 tests/e2e_tray_menu.py
 sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
 ./tools/install-build-tools.sh .nuitka
 KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package="dist/keyswitch_0.20.0_$(dpkg --print-architecture).deb"
+package="dist/keyswitch_0.21.0_$(dpkg --print-architecture).deb"
 ./tools/verify-native-deb.sh "$package"
 ```
 
@@ -716,7 +716,7 @@ python3 tools/release.py --version X.Y.Z            # коммит, тег, push
 - В Windows механизм UIPI не позволяет обычному процессу вводить текст в окно,
   запущенное с более высоким уровнем целостности. Для такого окна KeySwitch
   также должен быть запущен с сопоставимыми правами.
-- Windows Setup EXE версии 0.20.0 пока не подписан сертификатом издателя.
+- Windows Setup EXE версии 0.21.0 пока не подписан сертификатом издателя.
 
 ## Лицензия
 

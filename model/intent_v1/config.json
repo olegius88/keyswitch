@@ -84,16 +84,16 @@
     },
     "lexical_disjoint_corpus_sha256": "57c83b5a8005ebdaf3b676ef381cd4b4f59a045fe64e52c47f3295a2738f1a7f",
     "unknown_typo_development_corpus_sha256": "0a84144da4259e43bf645c3c3d6a6b39a999e8d1a82aabe8b0a9b1a03d47e8c2",
-    "unknown_typo_holdout_corpus_sha256": "63640ebb85e54bc4f484f8379fffe23a6c20610c24d78266aa6bbcbbc8c26c4f"
+    "unknown_typo_holdout_corpus_sha256": "ecca85f5c0727ccc89ce8491ef8169a995a845bc7c70adcb7eaa137e2c8f874a"
   },
   "hard_negative_development": {
     "schema_version": 2,
     "source": {
-      "path": "model/intent_v1/unknown-typo-development-v20.json",
-      "sha256": "61e02546fb05c2502b2535c512b0e11fad13042d25b1f4f70cff621a4e35686f",
+      "path": "model/intent_v1/unknown-typo-development-v21.json",
+      "sha256": "eb12cd9e996eb54ccfe1e151fbd761878cd7594930b1b37980cd11b2ec29a773",
       "bytes": 2129741
     },
-    "role_namespace": "keyswitch:intent-v20:unknown-typo-development-role",
+    "role_namespace": "keyswitch:intent-v21:unknown-typo-development-role",
     "training_example_weight": 3.0,
     "words_per_group": {
       "train": 3500,
@@ -104,8 +104,8 @@
   },
   "sealed_evaluation": {
     "schema_version": 1,
-    "split_namespace": "keyswitch:intent-v20:physical-signature",
-    "registry_path": "model/intent_v1/seal-registry-v20.json"
+    "split_namespace": "keyswitch:intent-v21:physical-signature",
+    "registry_path": "model/intent_v1/seal-registry-v21.json"
   },
   "dataset": {
     "minimum_word_length": 5,
@@ -141,7 +141,7 @@
     "minimum_precision": 0.999,
     "minimum_recall": 0.95,
     "minimum_pause_recall": 0.9,
-    "minimum_typo_recall": 0.90,
+    "minimum_typo_recall": 0.9,
     "minimum_pause_typo_recall": 0.85,
     "selection_minimum_recall": 0.956,
     "selection_minimum_pause_recall": 0.91,

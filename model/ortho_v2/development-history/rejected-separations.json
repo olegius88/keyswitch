@@ -1,0 +1,44 @@
+{
+  "attempts": [
+    {
+      "evidence": "target minus foreign, in nats: nginx -8.62 and ифкуиль -8.83 are indistinguishable, htop -1.96 and каеффф -2.93 likewise",
+      "idea": "a third hypothesis, 'neither language', trained on the other 60 languages of the same CC0 archive with a per-language cap so Kabyle could not stand for 'foreign' by itself",
+      "result": "does not separate"
+    },
+    {
+      "evidence": "recall on reserve falls from 97.5% to 95.9% at a floor of -4 nats per character",
+      "idea": "an absolute floor on the plausibility of the target reading, so a conversion needs the target to be a good sequence and not merely a better one",
+      "result": "costs more than it saves"
+    },
+    {
+      "evidence": "removing 28 tokens makes the margin estimate jump from 2.6 to 8.9 nats and recall falls to the level of the installed model",
+      "idea": "restrict the population to sequences the us/ru pair can actually type, which is correct in itself and removes the diacritic tokens",
+      "result": "correct but not a lever"
+    },
+    {
+      "evidence": "the worst negatives are split between capitalised (+13.83) and lowercase (+14.92)",
+      "idea": "case as evidence of a proper noun",
+      "result": "does not separate"
+    },
+    {
+      "evidence": "the estimate ranges from 4.6 to 50.0 nats across the eight length buckets at the same exceedance probability",
+      "idea": "extrapolate the negative tail with an exponential fit instead of taking the observed maximum",
+      "result": "unusable at this sample size"
+    },
+    {
+      "evidence": "attestation >= 2 leaves 114 negatives and recall 94.9%; label repair removes the gate failures but drops recall to 94.6-95.7%",
+      "idea": "require a negative label to be attested at least twice, or repair labels whose other reading is a dictionary word of the other language and whose own reading is not",
+      "result": "shrinks the calibration sample until the margin swallows the gain"
+    },
+    {
+      "evidence": "the threshold fell to en 13.74 / ru 3.78 and the corpus reported no false conversion on every population, but driving the engine showed that of the nineteen Russian sequences newly converted exactly one was genuine wrong-layout text: `гифка`->`ubarf`, `Ютуб`->`Юne,`, `флуд`->`akel`, `какбэ`->`rfr,'`, `тыща`->`nsof` are ordinary Russian. The filter removed the hard negatives rather than the untrustworthy labels. Found by the fourth pre-release review.",
+      "idea": "discount a negative label the corpus cannot stand behind: the sentence around it is not verifiably monolingual, the snapshot shows the token once, or the token reads as an ordinary word of the other language",
+      "result": "corrupts ordinary words; the measured safety was hollow"
+    }
+  ],
+  "description": "Six ways of separating the residual class - foreign words, names and garbage that no dictionary knows - from text genuinely typed in the wrong layout. Each was measured and each cost more accuracy than it bought. They are kept so the next attempt starts where this one stopped.",
+  "lesson": "Excluding a label does not make the token safe to convert; it only hides it from the metric. The negative population must hold every token the engine can present, whatever one thinks of its label. A wrong label costs recall; excluding a real word costs the user's text.",
+  "schema_version": 1,
+  "what_would_help": "A corpus whose language label is verified per token rather than inherited from the sentence. Tatoeba cannot give that: its Russian sentences contain English typed in the wrong layout - `пдфку` is `glare` - and those tokens are labelled Russian, so they demand that the model leave alone exactly what it exists to convert.",
+  "why_the_class_exists": "The tokens this model must convert are, by construction, not ordinary words of the target language: they are commands, abbreviations and technical terms. Any hypothesis that captures 'this is not an ordinary word' captures them too."
+}

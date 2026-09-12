@@ -61,6 +61,11 @@ from keyswitch.detector import (
 from keyswitch.language_model import LanguageModel, WordScore
 from keyswitch.layouts import LayoutPair
 
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import environment_probe  # noqa: E402
+
 
 SplitName: TypeAlias = Literal[
     "train", "development", "calibration", "threshold", "test"
@@ -88,10 +93,20 @@ PRESEALED_SPLITS: Final[tuple[SplitName, ...]] = (
     "threshold",
 )
 SEALED_TEST_SPLITS: Final[tuple[SplitName, ...]] = ("test",)
-SPLIT_NAMESPACE: Final[str] = "keyswitch:intent-v20:physical-signature"
+SPLIT_NAMESPACE: Final[str] = "keyswitch:intent-v21:physical-signature"
 SPLIT_HASH_NAMESPACE: Final[bytes] = SPLIT_NAMESPACE.encode("ascii") + b"\0"
 SEALED_REGISTRY_RELATIVE_PATH: Final[str] = (
-    "model/intent_v1/seal-registry-v20.json"
+    "model/intent_v1/seal-registry-v21.json"
+)
+SEALED_OUTCOME_RELATIVE_PATH: Final[str] = (
+    "model/intent_v1/seal-outcome-v21.json"
+)
+SEALED_OUTCOME_SECTIONS: Final[tuple[str, ...]] = (
+    "sealed_test",
+    "sealed_test_typos",
+    "sealed_test_context_stress",
+    "safety",
+    "veto",
 )
 UNKNOWN_TYPO_DEVELOPMENT_RANK_NAMESPACE: Final[str] = (
     "keyswitch:intent-v1:unknown-typo-rank"
@@ -100,16 +115,16 @@ UNKNOWN_TYPO_DEVELOPMENT_CHOICE_NAMESPACE: Final[str] = (
     "keyswitch:intent-v1:unknown-typo-choice"
 )
 UNKNOWN_TYPO_HOLDOUT_RANK_NAMESPACE: Final[str] = (
-    "keyswitch:intent-v20:unknown-typo-holdout-rank"
+    "keyswitch:intent-v21:unknown-typo-holdout-rank"
 )
 UNKNOWN_TYPO_HOLDOUT_CHOICE_NAMESPACE: Final[str] = (
-    "keyswitch:intent-v20:unknown-typo-holdout-choice"
+    "keyswitch:intent-v21:unknown-typo-holdout-choice"
 )
 HARD_NEGATIVE_ROLE_NAMESPACE: Final[str] = (
-    "keyswitch:intent-v20:unknown-typo-development-role"
+    "keyswitch:intent-v21:unknown-typo-development-role"
 )
 HARD_NEGATIVE_SOURCE_RELATIVE_PATH: Final[str] = (
-    "model/intent_v1/unknown-typo-development-v20.json"
+    "model/intent_v1/unknown-typo-development-v21.json"
 )
 SAFETY_COLLISION_MINIMUM_WORD_LENGTH: Final[int] = 3
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
@@ -125,6 +140,9 @@ PROTECTED_TOKENS_RUNTIME_PATH: Final[Path] = (
     PROJECT_ROOT / "src/keyswitch/resources/protected_tokens.txt"
 )
 EVALUATOR_PATH: Final[Path] = PROJECT_ROOT / "tools/evaluate_intent_model.py"
+ENVIRONMENT_PROBE_PATH: Final[Path] = (
+    PROJECT_ROOT / "tools/environment_probe.py"
+)
 PRESEAL_GENERATOR_PATH: Final[Path] = (
     PROJECT_ROOT / "tools/preseal_intent_holdout.py"
 )
@@ -132,7 +150,7 @@ DEVELOPMENT_FREEZER_PATH: Final[Path] = (
     PROJECT_ROOT / "tools/freeze_intent_development_corpus.py"
 )
 PRESEAL_RECEIPT_PATH: Final[Path] = (
-    PROJECT_ROOT / "model/intent_v1/holdout-v20-preseal.json"
+    PROJECT_ROOT / "model/intent_v1/holdout-v21-preseal.json"
 )
 MAX_TRAINING_CONFIG_BYTES: Final[int] = 1 << 16
 MAX_FROZEN_SOURCE_BYTES: Final[int] = 1 << 26
@@ -339,7 +357,7 @@ class HardNegativeDevelopmentPolicy:
             )
         if self.role_namespace != HARD_NEGATIVE_ROLE_NAMESPACE:
             raise ValueError(
-                "hard-negative development role namespace must match v20"
+                "hard-negative development role namespace must match v21"
             )
         counts = self.role_counts()
         if any(
@@ -368,7 +386,32 @@ class HardNegativeDevelopmentPolicy:
 
 @dataclass(frozen=True)
 class TrainingToolchainSnapshot:
-    """Hashes of executable inputs that determine the serialized artifact."""
+    """Hashes of executable inputs that determine the serialized artifact.
+
+    Code and data only. The machine that ran them is recorded separately, in
+    `TrainingEnvironmentProvenance`, and deliberately does not appear here.
+
+    It used to. Until v21 this snapshot also carried `python_build`, `libc`,
+    `machine` and four more strings naming the host, and the snapshot goes
+    whole into the sealed candidate hash (`sealed_candidate_sha256`). On
+    2026-09-09 an `apt upgrade` rebuilt python3.14 without changing the
+    language version; `sys.version` gained a new build date, the candidate hash
+    moved, and the release replay was refused - while every weight, threshold
+    and calibration constant reproduced byte for byte. The name had changed and
+    the results had not, and the seal could not tell the difference.
+
+    Nothing is given up by removing them, because the results are already here:
+    `sealed_candidate_sha256` hashes `model_parameters` alongside this snapshot,
+    so an interpreter that computes different weights is still refused - on the
+    weights, which is the honest ground. What is gained is that an interpreter
+    computing the *same* weights is no longer refused for its build date.
+
+    `environment_probe_sha256` is the digest of tools/environment_probe.py, not
+    of its readings. The file is certified so the probe cannot be quietly
+    weakened; its readings live in the provenance sidecar, because a reading
+    inside this snapshot would put the Unicode database and libm back into the
+    identity through the same door that was just closed.
+    """
 
     config_sha256: str
     trainer_sha256: str
@@ -378,9 +421,24 @@ class TrainingToolchainSnapshot:
     detector_sha256: str
     protected_tokens_sha256: str
     evaluator_sha256: str
+    environment_probe_sha256: str
     preseal_generator_sha256: str
     development_freezer_sha256: str
     preseal_receipt_sha256: str
+
+
+@dataclass(frozen=True)
+class TrainingEnvironmentProvenance:
+    """What machine produced the artifact. Recorded, never hashed into it.
+
+    This is the other half of the split described in
+    `TrainingToolchainSnapshot`: everything here is true of the build and
+    useful to a reader, and none of it decides whether two candidates are the
+    same candidate. It is written next to the artifact rather than inside it,
+    so that a later Python, libc or distribution can reproduce those bytes.
+    """
+
+    schema_version: int
     python_implementation: str
     python_version: str
     python_build: str
@@ -388,6 +446,9 @@ class TrainingToolchainSnapshot:
     machine: str
     libc: str
     byteorder: str
+    compiler: str
+    ftrl_kernel: str
+    environment_probe: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -1707,6 +1768,166 @@ def _read_seal_registry_snapshot(path: Path) -> bytes:
     return raw
 
 
+def sealed_outcome_path(
+    config: TrainingConfig, *, repository_root: Path | None = None
+) -> Path:
+    """Resolve the outcome ledger beside the registry it complements."""
+
+    registry = sealed_registry_path(config, repository_root=repository_root)
+    return registry.parent / Path(SEALED_OUTCOME_RELATIVE_PATH).name
+
+
+def sealed_outcome_sha256(manifest: Mapping[str, object]) -> str:
+    """Digest what the sealed test said, over the sections that say it."""
+
+    missing = [name for name in SEALED_OUTCOME_SECTIONS if name not in manifest]
+    if missing:
+        raise ValueError(
+            "the manifest is missing sealed-outcome sections: "
+            + ", ".join(missing)
+        )
+    payload = {name: manifest[name] for name in SEALED_OUTCOME_SECTIONS}
+    return hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
+
+
+def claim_sealed_outcome(
+    *,
+    config: TrainingConfig,
+    outcome_sha256: str,
+    candidate_sha256: str,
+    repository_root: Path | None = None,
+) -> None:
+    """Consume the sealed test's *answer* exactly once, not just its ticket.
+
+    `claim_sealed_evaluation` limits how many candidates may look at the held-
+    out rows. Until v21 it also limited how many *machines* could, because the
+    environment was part of the candidate hash - so a second look from a
+    different interpreter was refused before a sealed row was read. Removing
+    the environment from the identity gives that side effect up: the same
+    weights now yield the same candidate hash everywhere, and the registry
+    rightly treats each such run as the identical rerun it is.
+
+    Identical inputs should give an identical answer, so an identical rerun
+    still learns nothing new. This ledger holds that to account. It records the
+    digest of the sealed sections the first time any run computes them, and a
+    later run that computes different ones is refused - so the sealed test can
+    be *answered* once rather than merely *ticketed* once.
+
+    Three properties matter, and each is deliberate:
+
+    * It is claimed unconditionally. A run that later fails its quality gates,
+      or a dry run, fixes the outcome just the same. Putting this behind the
+      publication branch would leave the failing runs - exactly the ones worth
+      repeating with a tweak - free to look again and again.
+    * It is claimed before the metrics are written anywhere. A divergent rerun
+      raises here, ahead of the manifest, the report and the artifact, so the
+      second, different answer never reaches a file a human can read.
+    * It stores digests only. The record carries no metric, so the ledger
+      cannot itself become a way to read the sealed test.
+    """
+
+    _exact_sha256(outcome_sha256, "outcome_sha256")
+    _exact_sha256(candidate_sha256, "candidate_sha256")
+    path = sealed_outcome_path(config, repository_root=repository_root)
+    record: dict[str, object] = {
+        "schema_version": 1,
+        "split_namespace": config.sealed_evaluation.split_namespace,
+        "candidate_sha256": candidate_sha256,
+        "sealed_outcome_sha256": outcome_sha256,
+    }
+    expected = _canonical_json_bytes(record)
+    if len(expected) > MAX_SEAL_REGISTRY_BYTES:
+        raise AssertionError("sealed outcome record is oversized")
+    staged: Path | None = None
+    try:
+        staged = _stage_bytes(path, expected)
+        os.link(staged, path, follow_symlinks=False)
+    except FileExistsError:
+        existing = _read_seal_registry_snapshot(path)
+        if existing == expected:
+            return
+        previous = json.loads(existing.decode("utf-8"))
+        if previous.get("candidate_sha256") != candidate_sha256:
+            raise RuntimeError(
+                "the sealed outcome ledger belongs to a different candidate; "
+                "rotate split_namespace before evaluating a changed candidate"
+            )
+        raise RuntimeError(
+            "this run computed a different answer from the sealed test than "
+            "the run that consumed it: the inputs match but "
+            f"{previous.get('sealed_outcome_sha256')} became {outcome_sha256}. "
+            "Something outside the sealed inputs changed the result; compare "
+            "the environment probe in build-environment.json before trusting "
+            "either number."
+        )
+    except OSError as error:
+        raise RuntimeError(
+            f"cannot create the sealed outcome ledger: {path}"
+        ) from error
+    else:
+        _fsync_directory(path.parent)
+    finally:
+        if staged is not None:
+            try:
+                staged.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def _sealed_claim_refusal(
+    existing: bytes, expected: Mapping[str, object]
+) -> str:
+    """Say which kind of divergence this is, not just that there is one.
+
+    The old message always advised rotating the namespace, which is right for
+    a changed candidate and misleading for everything else. Three cases are
+    worth telling apart, and the record already distinguishes them:
+
+    * the config or the dataset moved - an ordinary changed candidate;
+    * both match but the candidate hash does not - the code changed, or the
+      machine produced different weights from identical inputs, which since
+      v21 is the only way the environment can reach this point at all;
+    * the record is not even for this namespace - a stale or copied file.
+    """
+
+    try:
+        previous = json.loads(existing.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return (
+            "the sealed evaluation registry is unreadable; it must be "
+            "restored from version control before this candidate is evaluated"
+        )
+    if previous.get("split_namespace") != expected["split_namespace"]:
+        return (
+            "the sealed evaluation registry belongs to split namespace "
+            f"{previous.get('split_namespace')!r}, not "
+            f"{expected['split_namespace']!r}; the wrong registry file is in "
+            "place"
+        )
+    moved = [
+        field
+        for field in ("config_sha256", "candidate_dataset_sha256")
+        if previous.get(field) != expected[field]
+    ]
+    if moved:
+        return (
+            "the sealed test namespace is already consumed by another "
+            f"candidate ({', '.join(moved)} differ); rotate split_namespace "
+            "and registry_path before evaluating a changed candidate"
+        )
+    return (
+        "the sealed test namespace is already consumed, and this candidate "
+        "has the same config and the same dataset but a different candidate "
+        f"hash ({previous.get('candidate_sha256')} became "
+        f"{expected['candidate_sha256']}). Either the certified toolchain "
+        "changed - rotate split_namespace and registry_path - or this machine "
+        "computed different weights from identical inputs, which is an "
+        "environment divergence: compare tools/environment_probe.py against "
+        "the build-environment.json of the recorded build to find which "
+        "primitive moved."
+    )
+
+
 def claim_sealed_evaluation(
     *,
     config: TrainingConfig,
@@ -1745,11 +1966,7 @@ def claim_sealed_evaluation(
     except FileExistsError:
         existing = _read_seal_registry_snapshot(path)
         if existing != expected:
-            raise RuntimeError(
-                "sealed test namespace is already consumed by another "
-                "candidate; rotate split_namespace and registry_path before "
-                "evaluating a changed candidate"
-            )
+            raise RuntimeError(_sealed_claim_refusal(existing, record))
     except OSError as error:
         raise RuntimeError(
             f"cannot create sealed evaluation registry: {path}"
@@ -1883,6 +2100,41 @@ def capture_toolchain_snapshot(
             PRESEAL_RECEIPT_PATH,
             maximum_bytes=MAX_TRAINING_CONFIG_BYTES,
         ),
+        environment_probe_sha256=sha256_file(ENVIRONMENT_PROBE_PATH),
+    )
+
+
+def _compiler_identity() -> str:
+    """Which C compiler, if any, will build the native FTRL kernel.
+
+    Provenance, not identity: the compiler is not in the snapshot, so a new gcc
+    does not refuse a replay. It is recorded because it *can* change results
+    (`verify_native_ftrl_kernel` only cross-checks the first
+    FTRL_NATIVE_SELF_CHECK_ROWS rows against the Python reference), and an
+    unexplained divergence is worse than an explained one.
+    """
+
+    compiler = shutil.which("gcc") or shutil.which("cc")
+    if compiler is None:
+        return "absent"
+    try:
+        completed = subprocess.run(
+            [compiler, "--version"],
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return f"{compiler} (version unavailable)"
+    first = completed.stdout.decode("utf-8", "replace").splitlines()
+    return f"{compiler}: {first[0].strip()}" if first else compiler
+
+
+def capture_environment_provenance() -> TrainingEnvironmentProvenance:
+    """Describe the machine, for the reader rather than for the seal."""
+
+    return TrainingEnvironmentProvenance(
+        schema_version=1,
         python_implementation=sys.implementation.name,
         python_version=platform.python_version(),
         python_build=" ".join(sys.version.split()),
@@ -1890,6 +2142,43 @@ def capture_toolchain_snapshot(
         machine=platform.machine(),
         libc=" ".join(platform.libc_ver()),
         byteorder=sys.byteorder,
+        compiler=_compiler_identity(),
+        ftrl_kernel=(
+            "native" if NativeFTRLKernel.load() is not None else "python"
+        ),
+        environment_probe=cast(
+            dict[str, object], dict(environment_probe.measure())
+        ),
+    )
+
+
+def verify_environment_stability(
+    provenance: TrainingEnvironmentProvenance,
+) -> None:
+    """Refuse if the machine stopped computing what it computed at the start.
+
+    The probe is measured once before training and once before publication. A
+    disagreement between them means a primitive moved *inside a single run* -
+    a library swapped under the process, say - and no artifact produced across
+    that boundary can be trusted, whatever the gates say.
+    """
+
+    current = environment_probe.measure()
+    recorded = provenance.environment_probe
+    if current["probe_sha256"] == recorded.get("probe_sha256"):
+        return
+    previous_cells = cast(
+        Mapping[str, Mapping[str, object]], recorded.get("cells", {})
+    )
+    moved = sorted(
+        name
+        for name, cell in current["cells"].items()
+        if previous_cells.get(name, {}).get("sha256") != cell["sha256"]
+    )
+    raise RuntimeError(
+        "the environment changed while this run was in progress; these "
+        "primitives no longer agree with the measurement taken before "
+        "training: " + (", ".join(moved) or "(the cell set itself changed)")
     )
 
 
@@ -1920,22 +2209,25 @@ def validate_training_paths(
     license_evidence: Path,
     hard_negative_source: Path,
     seal_registry: Path,
+    seal_outcome: Path,
     artifact: Path,
     manifest: Path,
     report: Path,
+    build_environment: Path,
     diagnostic: Path | None = None,
 ) -> None:
     """Prevent output aliases from overwriting each other or immutable inputs."""
 
-    output_paths = (artifact, manifest, report) + (
+    output_paths = (artifact, manifest, report, build_environment) + (
         () if diagnostic is None else (diagnostic,)
     )
     outputs = tuple(path.resolve() for path in output_paths)
-    registry = seal_registry.resolve()
-    mutable_paths = (*outputs, registry)
+    ledgers = (seal_registry.resolve(), seal_outcome.resolve())
+    mutable_paths = (*outputs, *ledgers)
     if len(set(mutable_paths)) != len(mutable_paths):
         raise ValueError(
-            "artifact, manifest, report and seal registry paths must be distinct"
+            "artifact, manifest, report, build environment and the two seal "
+            "ledgers must be distinct paths"
         )
     protected = tuple(
         path.resolve()
@@ -1955,6 +2247,7 @@ def validate_training_paths(
             PRESEAL_GENERATOR_PATH,
             DEVELOPMENT_FREEZER_PATH,
             PRESEAL_RECEIPT_PATH,
+            ENVIRONMENT_PROBE_PATH,
         )
     )
     for output in mutable_paths:
@@ -2482,11 +2775,11 @@ def _decode_hard_negative_development_corpus(
     if _integer(root, "schema_version") != 1:
         raise ValueError("unsupported frozen hard-negative corpus schema")
     if _string(root, "policy") != (
-        "keyswitch-intent-v20-frozen-unknown-typo-development"
+        "keyswitch-intent-v21-frozen-unknown-typo-development"
     ):
-        raise ValueError("hard-negative corpus policy must match v20")
+        raise ValueError("hard-negative corpus policy must match v21")
     if _string(root, "role_namespace") != HARD_NEGATIVE_ROLE_NAMESPACE:
-        raise ValueError("hard-negative corpus role namespace must match v20")
+        raise ValueError("hard-negative corpus role namespace must match v21")
     if _string(root, "rank_namespace") != (
         UNKNOWN_TYPO_DEVELOPMENT_RANK_NAMESPACE
     ) or _string(root, "choice_namespace") != (
@@ -7471,6 +7764,18 @@ def _parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=PROJECT_ROOT / "model/intent_v1/test-report.json",
     )
     parser.add_argument(
+        "--build-environment",
+        type=Path,
+        required=True,
+        help=(
+            "where to write the environment provenance sidecar. Deliberately "
+            "without a default: the sidecar is the one published file that is "
+            "expected to differ between machines, and a default pointing into "
+            "the repository would let every verification replay overwrite the "
+            "official record of the machine that actually built the model."
+        ),
+    )
+    parser.add_argument(
         "--diagnostic-output",
         type=Path,
         default=None,
@@ -7523,6 +7828,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     sys.stderr.flush()
     config, config_sha256 = load_training_config_snapshot(arguments.config)
     toolchain_snapshot = capture_toolchain_snapshot(config_sha256)
+    # Measured here, before a single row is featurised, and checked again
+    # before publication: the probe has to describe the machine that did the
+    # work, not the one that happened to be there at the end.
+    environment_provenance = capture_environment_provenance()
     evidence_path = verify_training_sources(
         config, arguments.en_model, arguments.ru_model
     )
@@ -7536,9 +7845,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         license_evidence=evidence_path,
         hard_negative_source=hard_negative_path,
         seal_registry=sealed_registry_path(config),
+        seal_outcome=sealed_outcome_path(config),
         artifact=arguments.artifact,
         manifest=arguments.manifest,
         report=arguments.test_report,
+        build_environment=arguments.build_environment,
         diagnostic=arguments.diagnostic_output,
     )
     english_bytes = read_verified_frozen_file(
@@ -8112,6 +8423,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         ).encode("utf-8")
     ).hexdigest()
     manifest["build_provenance_sha256"] = build_provenance_sha256
+    # Before the gates are computed, before the artifact is staged, and before
+    # a single metric is written anywhere a reader could see it: fix what the
+    # sealed test said. A rerun that computes a different answer stops here.
+    claim_sealed_outcome(
+        config=config,
+        outcome_sha256=sealed_outcome_sha256(manifest),
+        candidate_sha256=candidate_sha256,
+    )
     quality_gate_breakdown = training_quality_gate_breakdown(
         config,
         test_metrics,
@@ -8210,12 +8529,32 @@ def main(argv: Sequence[str] | None = None) -> int:
             verify_toolchain_snapshot(
                 toolchain_snapshot, arguments.config
             )
+            # The probe was measured before training; if a primitive moved
+            # since, nothing produced across that boundary is trustworthy.
+            verify_environment_stability(environment_provenance)
             verify_sealed_evaluation_receipt(sealed_receipt)
+            # The sidecar carries the artifact's own identifiers, so a record
+            # of one build cannot be passed off as the record of another.
+            environment_bytes = (
+                json.dumps(
+                    {
+                        **asdict(environment_provenance),
+                        "artifact_model_version": model.model_version,
+                        "build_provenance_sha256": build_provenance_sha256,
+                        "artifact_sha256": manifest["artifact_sha256"],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n"
+            ).encode("utf-8")
             publish_bytes_bundle(
                 (
                     (arguments.test_report, report_bytes),
                     (arguments.artifact, artifact_bytes),
                     (arguments.manifest, manifest_bytes),
+                    (arguments.build_environment, environment_bytes),
                 )
             )
     print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))

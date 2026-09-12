@@ -56,9 +56,9 @@ class WindowsPackagingContractTests(unittest.TestCase):
         ]
         self.assertNotIn("build\\windows-models", default_section)
 
-    def test_native_help_describes_the_v20_model_first_contract(self) -> None:
+    def test_native_help_describes_the_v21_model_first_contract(self) -> None:
         for contract in (
-            "keyswitch:intent-v20:physical-signature",
+            "keyswitch:intent-v21:physical-signature",
             "Training config schema 13",
             "sole statistical",
             "coverage and language scores are diagnostic only",
@@ -101,7 +101,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(accepted.returncode, 0, accepted.stderr)
-        self.assertEqual(accepted.stdout.strip(), "intent-v1-6ece07f881ec")
+        self.assertEqual(accepted.stdout.strip(), "intent-v1-d2f32ca5db58")
 
         required_contracts = (
             "KSLM_MAXIMUM_CONTAINER_BYTES = 14 * 1024 * 1024",
@@ -242,7 +242,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
             "model/intent_v1/seal-registry-v13.json",
             "model/intent_v1/seal-registry-v15.json",
             "model/intent_v1/seal-registry-v18.json",
-            "model/intent_v1/seal-registry-v20.json",
+            "model/intent_v1/seal-registry-v21.json",
             "model/intent_v1/holdout-v6-preseal.json",
             "model/intent_v1/holdout-v7-preseal.json",
             "model/intent_v1/holdout-v8-preseal.json",
@@ -253,13 +253,13 @@ class WindowsPackagingContractTests(unittest.TestCase):
             "model/intent_v1/holdout-v13-preseal.json",
             "model/intent_v1/holdout-v15-preseal.json",
             "model/intent_v1/holdout-v18-preseal.json",
-            "model/intent_v1/holdout-v20-preseal.json",
+            "model/intent_v1/holdout-v21-preseal.json",
             "model/intent_v1/unknown-typo-development-v11.json",
             "model/intent_v1/unknown-typo-development-v12.json",
             "model/intent_v1/unknown-typo-development-v13.json",
             "model/intent_v1/unknown-typo-development-v15.json",
             "model/intent_v1/unknown-typo-development-v18.json",
-            "model/intent_v1/unknown-typo-development-v20.json",
+            "model/intent_v1/unknown-typo-development-v21.json",
             "model/intent_v1/rejection-v12.json",
             "model/intent_v1/rejection-v13.json",
             "model/intent_v1/rejection-v18.json",
@@ -282,7 +282,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
         )
         for path in required_lf_paths:
             self.assertIn(f"{path} text eol=lf", self.git_attributes)
-        self.assertIn("model/intent_v1/sources/*.lm -text", self.git_attributes)
+        self.assertIn("model/intent_v1/sources/*.lm binary", self.git_attributes)
         self.assertIn(
             "model/intent_v1/sources/COPYRIGHT.onboard-data -text",
             self.git_attributes,
@@ -645,12 +645,17 @@ class WindowsPackagingContractTests(unittest.TestCase):
                 self.assertNotEqual(rejected.returncode, 0)
 
     def test_windows_workflows_exercise_fresh_clone_defaults(self) -> None:
-        manifest = json.loads(
-            (PROJECT_ROOT / "model/intent_v1/manifest.json").read_text(
+        # The Python series comes from the build-environment sidecar, not the
+        # manifest: since v21 the manifest names no interpreter at all, so
+        # that a rebuilt Python which computes the same answers is the same
+        # environment. The series still has to match the workflows, because a
+        # different minor release is a different interpreter, not a rebuild.
+        environment = json.loads(
+            (PROJECT_ROOT / "model/intent_v1/build-environment.json").read_text(
                 encoding="utf-8"
             )
         )
-        training_python = str(manifest["toolchain"]["python_version"])
+        training_python = str(environment["python_version"])
         training_python_series = ".".join(training_python.split(".")[:2])
         for relative in (
             ".github/workflows/tests.yml",

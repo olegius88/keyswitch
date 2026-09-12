@@ -42,6 +42,7 @@ TOOLCHAIN_PATHS: Final[Mapping[str, str]] = {
     "toolchain_layouts_sha256": "src/keyswitch/layouts.py",
     "toolchain_language_model_sha256": "src/keyswitch/language_model.py",
     "toolchain_evaluator_sha256": "tools/evaluate_intent_model.py",
+    "toolchain_environment_probe_sha256": "tools/environment_probe.py",
     "toolchain_preseal_generator_sha256": "tools/preseal_intent_holdout.py",
     "toolchain_development_freezer_sha256": "tools/freeze_intent_development_corpus.py",
 }

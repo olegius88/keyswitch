@@ -25,12 +25,12 @@ or separate runtime, and executes one scalar pass over sparse features.
 
 ## Certified v20 artifact
 
-The current artifact is `intent-v1-6ece07f881ec`, 12,935,540 bytes, SHA-256
-`85deddb83e041f52622b794cf919770994d71a9f1c50af482be4f6574c4163cd`.
+The current artifact is `intent-v1-d2f32ca5db58`, 12,935,540 bytes, SHA-256
+`6048055c1d735c277b955785bc50a7f16f994fb24ac03bb616f53e3c078f099e`.
 Its build provenance is
-`6ece07f881ec983f7a317fdfd01c09cd83f49d9972b903a5a1af7ebafb18a222`,
+`d2f32ca5db583ff56284ea57c517c9728adbc85f46417d15922b3bea717c14e3`,
 config digest is
-`f308a605737e0122f39cb83fe937b7133701b57b6dbb9caa1e35df1474a41249`,
+`2a8105d749422e9a8ef2bf6894d848ee8fdaff11df948d42a952fea27eda4116`,
 and dataset digest is
 `b22247fc3c6e3762f8aa2f62a670adae0e19cc48742afa1a9e306a73f27aee82`.
 Epoch 45 was selected on development after 49 completed epochs; the container
@@ -60,7 +60,7 @@ official train in the same Python/platform environment and wrote to distinct
 output paths. The comparison proved three-way byte identity across
 official/replay-a/replay-b for the KSLM, manifest and test report; their
 SHA-256 digests are respectively
-`85deddb83e041f52622b794cf919770994d71a9f1c50af482be4f6574c4163cd`,
+`6048055c1d735c277b955785bc50a7f16f994fb24ac03bb616f53e3c078f099e`,
 `9c39b615ba90b94107be6bef0140ce9387e493bb6aae195f4a8d116021283da9`, and
 `f3c44b42c96ce654042d17c822d92bd3202a9d1b12d6b28e34e394531a10fa94`. The
 independent strict evaluator, re-run against replay-a, also passed all 30
@@ -97,7 +97,7 @@ The byte-level provenance and checksums are documented in
 The split unit is not a row or a language but a physical key sequence. A
 Russian word is first mapped to US-keyboard coordinates. Before augmentation,
 the SHA-256 digest of that sequence in the
-`keyswitch:intent-v20:physical-signature` namespace assigns it to one of 40
+`keyswitch:intent-v21:physical-signature` namespace assigns it to one of 40
 stable buckets:
 
 - 26/40 (65%) — training;
@@ -126,10 +126,10 @@ then audited again. Canonical SHA-256 values for both quarantines, the excluded 
 signatures and occurrence counts are part of model provenance.
 
 V20 uses an additional frozen source,
-`unknown-typo-development-v20.json`, created model-blind before training from
+`unknown-typo-development-v21.json`, created model-blind before training from
 the unknown-typo development corpus. It contains 10,000 unique physical
 signatures, 5,000 per language, and has no test role. The independent
-`keyswitch:intent-v20:unknown-typo-development-role` namespace assigns 3,500
+`keyswitch:intent-v21:unknown-typo-development-role` namespace assigns 3,500
 words per language to train and 500 each to development, calibration and
 threshold. The loader verifies source size and SHA-256, Hunspell `.dic`/`.aff`
 provenance, EN/RU physical equivalence, uniqueness, and the exact SHA-256 of
@@ -140,7 +140,7 @@ provenance; the external v20 holdout uses distinct rank/choice namespaces.
 
 `config.json` schema 13 also contains the `sealed_evaluation` schema 1 policy.
 Its repository-relative
-`registry_path: model/intent_v1/seal-registry-v20.json` is resolved from the
+`registry_path: model/intent_v1/seal-registry-v21.json` is resolved from the
 canonical project root, not from the location of a supplied config copy, and
 binds one candidate SHA to one `split_namespace`. After the complete pre-sealed
 gate passes — threshold/context, safety, selection veto, and trial runtime KSLM
@@ -480,7 +480,7 @@ recipes in the [cookbook](../../docs/intent-model-cookbook.md).
 ```bash
 (cd model/intent_v1/sources && sha256sum --check SHA256SUMS)
 PYTHONPATH=src:tools python3 tools/preseal_intent_holdout.py | \
-  diff -u model/intent_v1/holdout-v20-preseal.json -
+  diff -u model/intent_v1/holdout-v21-preseal.json -
 PYTHONPATH=src python3 tools/train_intent_model_release.py
 PYTHONPATH=src python3 tools/evaluate_intent_model.py --strict
 ```
@@ -509,7 +509,7 @@ calibrated-logit margin is selected only on the threshold role.
 The v20 holdout was built under distinct rank/choice namespaces before loading
 a model, excludes all 288,869 sealed and 10,000 development physical
 signatures, and is first evaluated only after the candidate receipt is fixed.
-Its model-blind provenance is pre-recorded in `holdout-v20-preseal.json` with
+Its model-blind provenance is pre-recorded in `holdout-v21-preseal.json` with
 `model_loaded=false`, `metrics_evaluated=false`, and both overlap counts equal
 to zero. The external manifest schema 1 stores SHA-256
 digests for config, frozen sources, trainer, the external evaluator, the preseal
@@ -555,8 +555,12 @@ byte-identical. Run it only for a candidate that is authorized to consume the
 namespace. Do not delete or edit the registry to test a changed candidate; that
 requires an explicit policy rotation.
 
-Byte-identical retraining requires the same source and config bytes, the same
-toolchain hashes, and the same pinned Python/platform identity:
+Byte-identical retraining requires the same source and config bytes and the
+same toolchain hashes. The identity of the machine is **not** part of that
+condition: since v21 the toolchain snapshot carries code and config digests
+only, and the machine is described separately in `build-environment.json`. An
+environment that computes the same answers reproduces the same bytes, whatever
+it calls itself:
 
 ```bash
 set -euo pipefail
@@ -568,7 +572,8 @@ for run in a b; do
   PYTHONPATH=src python3 tools/train_intent_model_release.py \
     --artifact "$retrain_root/$run/layout_intent_v1.ksm" \
     --manifest "$retrain_root/$run/manifest.json" \
-    --test-report "$retrain_root/$run/test-report.json"
+    --test-report "$retrain_root/$run/test-report.json" \
+    --build-environment "$retrain_root/$run/build-environment.json"
 done
 cmp "$retrain_root/a/layout_intent_v1.ksm" \
     "$retrain_root/b/layout_intent_v1.ksm"
@@ -579,11 +584,34 @@ PYTHONPATH=src python3 tools/evaluate_intent_model.py \
   --manifest "$retrain_root/a/manifest.json" --strict
 ```
 
-Successful `cmp` commands prove that all three files are byte-identical. This
-guarantee does not extend to another Python/libc version or platform, because
-their identity is deliberately included in provenance. The installed
-`onboard-data` version does not affect the result because the trainer reads only
-the frozen copies.
+Successful `cmp` commands prove that all three files are byte-identical. The
+fourth file, `build-environment.json`, is deliberately left out of the
+comparison: it describes the machine and is expected to differ between
+machines.
+
+The guarantee extends to any environment that **computes the same answers**. A
+different Python build, a different libc, a different distribution: all pass
+silently as long as no number moved. If one did, the divergence is caught by
+bytes rather than by a name - the weights are inside `candidate_sha256`, so the
+seal refuses on the weights. So that a divergence can be named and not merely
+noticed, `tools/environment_probe.py` sits alongside:
+
+```bash
+PYTHONPATH=src python3 tools/environment_probe.py --explain libm \
+  --against model/intent_v1/build-environment.json
+```
+
+The probe is evidence, not proof: the space of a double is 2**64 wide and its
+grids are finite, so a libm that diverges off the grid will change the weights
+without moving a cell. Only a full replay settles that, which is why the probe
+never votes on identity. Only the `unicode` cell could be made exhaustive: it
+walks every code point, because the runtime normalizes every token it sees and
+a Unicode database bump is a real and silent behavioural change.
+
+The installed `onboard-data` version does not affect the result because the
+trainer reads only the frozen copies. Since v21 the same is true of the Hunspell
+dictionaries: they are frozen under `sources/hunspell/`, and training never
+consults them at all.
 
 ## Limitations and updates
 
@@ -601,7 +629,7 @@ the frozen copies.
   feature/config/container semantics. Changing only a split namespace does not
   require bumping all format versions; the existing `intent_v1` must not be
   silently retrained with incompatible semantics. Current values are feature
-  schema v5, split namespace `keyswitch:intent-v20:physical-signature`, training
+  schema v5, split namespace `keyswitch:intent-v21:physical-signature`, training
   config schema 13, KSLM schema 4 and external manifest schema 1.
 - Recall must not be increased by violating precision, specificity or the
   safety gates in the fixed config.

@@ -114,7 +114,9 @@ class StrictReportVerifierTests(unittest.TestCase):
         summary = self._verify(_synthetic_report())
         self.assertEqual(summary["artifact_sha256"], _sha256(ARTIFACT))
         self.assertEqual(summary["gate_count"], 3)
-        self.assertEqual(summary["verified_files"], 12)
+        # Twelve hashed files plus tools/environment_probe.py, certified
+        # since v21 so the environment probe cannot be quietly weakened.
+        self.assertEqual(summary["verified_files"], 13)
         self.assertEqual(summary["model_version"], _manifest()["artifact_model_version"])
 
     def test_failed_or_missing_gates_are_rejected(self) -> None:

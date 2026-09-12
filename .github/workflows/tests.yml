@@ -109,6 +109,11 @@ jobs:
           PYTHONPATH=src python3 tools/ortho_corpus.py
           PYTHONPATH=src python3 tools/train_ortho_model.py verify
           PYTHONPATH=src:tools python3 tools/verify_ortho_model.py
+          PYTHONPATH=src python3 tools/ortho_v2_corpus.py
+          KEYSWITCH_MODEL_PATH=model/intent_v1/sources PYTHONPATH=src python3 tools/ortho_v2_known.py
+          KEYSWITCH_MODEL_PATH=model/intent_v1/sources PYTHONPATH=src python3 tools/ortho_v2_verified.py
+          PYTHONPATH=src python3 tools/train_ortho_v2.py verify
+          PYTHONPATH=src:tools python3 tools/verify_ortho_v2.py
 
       - name: Replay boundary segmentation training and prevent rejected rollout
         run: |

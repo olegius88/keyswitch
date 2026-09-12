@@ -54,6 +54,11 @@ from pathlib import Path
 from types import FrameType
 from typing import IO, Final
 
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import environment_probe  # noqa: E402
+
 
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 DEFAULT_PIPELINE_ROOT: Final[Path] = PROJECT_ROOT / "dist" / "release-pipeline"
@@ -76,6 +81,9 @@ MODEL_DIRECTORY: Final[Path] = PROJECT_ROOT / "model" / "intent_v1"
 MODEL_CONFIG: Final[Path] = MODEL_DIRECTORY / "config.json"
 MODEL_MANIFEST: Final[Path] = MODEL_DIRECTORY / "manifest.json"
 MODEL_TEST_REPORT: Final[Path] = MODEL_DIRECTORY / "test-report.json"
+MODEL_BUILD_ENVIRONMENT: Final[Path] = (
+    MODEL_DIRECTORY / "build-environment.json"
+)
 MODEL_SOURCES: Final[Path] = MODEL_DIRECTORY / "sources"
 MODEL_ENGLISH: Final[Path] = MODEL_SOURCES / "en_US.lm"
 MODEL_RUSSIAN: Final[Path] = MODEL_SOURCES / "ru_RU.lm"
@@ -99,6 +107,7 @@ MODEL_TOOLCHAIN_PATHS: Final[Mapping[str, str]] = {
     "layouts_sha256": "src/keyswitch/layouts.py",
     "language_model_sha256": "src/keyswitch/language_model.py",
     "evaluator_sha256": "tools/evaluate_intent_model.py",
+    "environment_probe_sha256": "tools/environment_probe.py",
     "preseal_generator_sha256": "tools/preseal_intent_holdout.py",
     "development_freezer_sha256": "tools/freeze_intent_development_corpus.py",
 }
@@ -771,6 +780,12 @@ def phase_environment(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
         "session_type": os.environ.get("XDG_SESSION_TYPE", ""),
         "jobs": ctx.options.jobs,
         "memory_reserve_mib": ctx.options.memory_reserve_mib,
+        # What this host computes, alongside what it calls itself. The names
+        # above are for a human reading the run; this digest is what any
+        # comparison with a recorded build is actually made against.
+        "environment_probe_sha256": (
+            environment_probe.measure()["probe_sha256"]
+        ),
     }
     release = Path("/etc/os-release")
     if release.is_file():
@@ -1054,15 +1069,12 @@ def phase_model_inputs(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
     facts["toolchain_drift"] = drifted
     if drifted:
         problems.append("toolchain files differ from manifest: " + ", ".join(drifted))
-    facts["toolchain_python"] = {
-        "manifest": toolchain.get("python_version"),
-        "host": platform.python_version(),
-    }
-    if toolchain.get("python_version") != platform.python_version():
-        state.notes.append(
-            "host Python differs from the training Python; byte-identical replay "
-            "is only promised in the reference environment"
-        )
+    # Whether this host still computes what the build machine computed. The
+    # manifest no longer names an interpreter - a rebuilt Python that returns
+    # the same answers is the same environment for this purpose - so the
+    # comparison is against the probe readings in the build-environment
+    # sidecar, cell by cell.
+    facts["environment"] = environment_comparison(state)
 
     # Frozen hard-negative development source.
     source = as_object(
@@ -1237,6 +1249,27 @@ def strict_report_facts(
         problems.append("strict report checksum differs from the evaluated artifact")
     if model.get("version") != expected_version:
         problems.append("strict report model version differs from the manifest")
+    # A reused report is only evidence about the machine that produced it.
+    # Until v21 the model version carried an indirect trace of the build
+    # environment, because the environment was hashed into it; now it does
+    # not, so the probe reading has to be compared explicitly or a stale
+    # report from a different machine would pass unnoticed.
+    environment = as_object(report.get("environment", {}), "strict report environment")
+    report_probe = as_object(environment.get("probe", {}), "strict report probe")
+    host_probe_sha256 = environment_probe.measure()["probe_sha256"]
+    facts["report_probe_sha256"] = report_probe.get("probe_sha256")
+    facts["host_probe_sha256"] = host_probe_sha256
+    if not report_probe:
+        problems.append(
+            "the strict report carries no environment probe; it predates v21 "
+            "and cannot be reused"
+        )
+    elif report_probe.get("probe_sha256") != host_probe_sha256:
+        problems.append(
+            "the strict report was produced on a machine that computes "
+            "different answers than this one; recompute it rather than "
+            "reusing it"
+        )
     facts["problems"] = list(problems)
     return facts, problems
 
@@ -1391,6 +1424,11 @@ def run_one_replay(ctx: Context, log: PhaseLog, phase: str, directory: Path) -> 
             str(directory / "manifest.json"),
             "--test-report",
             str(directory / "test-report.json"),
+            # Into the replay's own directory, never the repository: the
+            # sidecar records the machine that built the official model, and a
+            # verification replay must not overwrite that record with its own.
+            "--build-environment",
+            str(directory / "build-environment.json"),
         ]
         log.write(f"replay {label}: $ " + shlex.join(argv))
         process = subprocess.Popen(
@@ -1444,9 +1482,69 @@ def run_one_replay(ctx: Context, log: PhaseLog, phase: str, directory: Path) -> 
     return mode
 
 
+def environment_comparison(state: PhaseState) -> dict[str, object]:
+    """Compare this host against the recorded build, by result.
+
+    A difference is a note, not a failure. That is the whole point of the v21
+    split: a machine that computes the same answers is the same machine for
+    reproducibility, and one that computes different answers is caught by the
+    barriers that compare bytes - the sealed candidate hash, the sealed
+    outcome ledger, and the replay itself.
+
+    What this must never do is stay quiet. Before v21 the pipeline compared
+    `python_version` and noted a mismatch; that comparison was blind to the
+    rebuild that actually broke the 0.21.0 release, because the version string
+    was identical and only the build date had moved.
+    """
+
+    probe = environment_probe.measure()
+    facts: dict[str, object] = {"host_probe_sha256": probe["probe_sha256"]}
+    if not MODEL_BUILD_ENVIRONMENT.is_file():
+        facts["recorded"] = None
+        state.notes.append(
+            f"{MODEL_BUILD_ENVIRONMENT.name} is absent; this host cannot be "
+            "compared against the machine that built the model"
+        )
+        return facts
+    recorded = as_object(
+        json.loads(MODEL_BUILD_ENVIRONMENT.read_bytes()), "build-environment"
+    )
+    recorded_probe = as_object(
+        recorded.get("environment_probe", {}), "build-environment probe"
+    )
+    facts["recorded_probe_sha256"] = recorded_probe.get("probe_sha256")
+    facts["recorded_python_build"] = recorded.get("python_build")
+    facts["host_python_build"] = " ".join(sys.version.split())
+    if recorded_probe.get("probe_sha256") == probe["probe_sha256"]:
+        facts["agrees"] = True
+        return facts
+    facts["agrees"] = False
+    recorded_cells = as_object(recorded_probe.get("cells", {}), "probe cells")
+    moved = sorted(
+        name
+        for name, cell in probe["cells"].items()
+        if as_object(recorded_cells.get(name, {}), "probe cell").get("sha256")
+        != cell["sha256"]
+    )
+    facts["moved_cells"] = moved
+    state.notes.append(
+        "this host does not compute what the build machine computed; these "
+        f"primitives differ: {', '.join(moved) or '(the cell set changed)'}. "
+        "Run tools/environment_probe.py --explain <cell> --against "
+        f"{MODEL_BUILD_ENVIRONMENT} to localise it. A replay on this host is "
+        "expected to differ, and the difference is real rather than cosmetic."
+    )
+    return facts
+
+
 def phase_model_replays(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
     count = ctx.options.replays
     if count <= 0:
+        # Say "skipped", the way phase_model_replay_strict does below.  A phase
+        # that returns while its status is still "running" is recorded as
+        # "passed", which let the checklist claim byte-identical replay outputs
+        # after running no replay at all.
+        state.status = "skipped"
         state.notes.append("replays disabled with --replays 0")
         state.facts["replays"] = 0
         return
@@ -1479,9 +1577,68 @@ def phase_model_replays(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
     state.facts["replays"] = count
     state.facts["replay_root"] = str(root)
     if mismatches:
+        # Say which primitives moved before naming the files, because that is
+        # the answer to the question a reader is about to ask.
         raise PhaseFailure(
-            "replay outputs differ from the official files: " + ", ".join(mismatches)
+            "replay outputs differ from the official files: "
+            + ", ".join(mismatches)
+            + replay_environment_hint(root, labels)
         )
+
+
+def replay_environment_hint(root: Path, labels: Sequence[str]) -> str:
+    """Explain a byte mismatch by pointing at the environment that caused it.
+
+    Before v21 a rebuilt interpreter produced exactly this failure with no way
+    to tell it from a genuine model change; the sidecar makes the two
+    distinguishable, so the diagnosis belongs in the failure itself.
+    """
+
+    if not MODEL_BUILD_ENVIRONMENT.is_file():
+        return ""
+    try:
+        official = as_object(
+            json.loads(MODEL_BUILD_ENVIRONMENT.read_bytes()), "build-environment"
+        )
+        official_probe = as_object(
+            official.get("environment_probe", {}), "probe"
+        )
+    except (OSError, ValueError):
+        return ""
+    for label in labels:
+        sidecar = root / label / "build-environment.json"
+        if not sidecar.is_file():
+            continue
+        try:
+            replayed = as_object(
+                json.loads(sidecar.read_bytes()), "replay build-environment"
+            )
+            replayed_probe = as_object(
+                replayed.get("environment_probe", {}), "probe"
+            )
+        except (OSError, ValueError):
+            continue
+        if replayed_probe.get("probe_sha256") == official_probe.get("probe_sha256"):
+            return (
+                "; the environment probe agrees with the recorded build, so "
+                "this is a genuine difference in the model rather than in the "
+                "machine"
+            )
+        official_cells = as_object(official_probe.get("cells", {}), "cells")
+        replayed_cells = as_object(replayed_probe.get("cells", {}), "cells")
+        moved = sorted(
+            name
+            for name in set(official_cells) | set(replayed_cells)
+            if as_object(official_cells.get(name, {}), "cell").get("sha256")
+            != as_object(replayed_cells.get(name, {}), "cell").get("sha256")
+        )
+        return (
+            "; this host computes different answers from the recorded build "
+            f"in: {', '.join(moved) or '(the cell set changed)'} - run "
+            "tools/environment_probe.py --explain <cell> --against "
+            f"{MODEL_BUILD_ENVIRONMENT}"
+        )
+    return ""
 
 
 def phase_model_replay_strict(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
@@ -2032,6 +2189,18 @@ CHECKLIST: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
 )
 
 
+# Items whose wording is a proof of byte-identity.  A phase that did not run
+# cannot make that claim, so "skipped" must not read as a pass here the way it
+# legitimately does for the rest of the checklist.
+PROVEN_ONLY_ITEMS: Final[frozenset[str]] = frozenset(
+    {
+        "Development corpus reproduces byte for byte",
+        "Preseal receipt is model-blind and reproducible",
+        "Official and replay outputs are byte-identical",
+    }
+)
+
+
 def phase_memory_estimate(ctx: Context, name: str) -> int:
     spec = PHASE_BY_NAME[name]
     if name == "model-replays":
@@ -2162,7 +2331,11 @@ def checklist_rows(statuses: Mapping[str, str]) -> list[tuple[str, str]]:
         elif all(value == "passed" for value in values):
             verdict = "passed"
         elif all(value in {"passed", "skipped"} for value in values):
-            verdict = "passed (some phases skipped)"
+            verdict = (
+                "NOT PROVEN (phase skipped)"
+                if label in PROVEN_ONLY_ITEMS
+                else "passed (some phases skipped)"
+            )
         elif any(value == "running" for value in values):
             verdict = "running"
         else:
