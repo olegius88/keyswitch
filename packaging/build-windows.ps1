@@ -1237,11 +1237,42 @@ try {
 catch {
     throw "Frozen-source SHA256SUMS is not valid UTF-8: $FrozenChecksumsPath"
 }
+# The Hunspell dictionaries were vendored beside the onboard frequency lists in
+# v21, because the evaluation derives its lexical populations from them and an
+# ordinary distribution upgrade otherwise failed the release. Their digests come
+# from the same config the rest of this check reads; only the copyright file has
+# no config entry of its own, so it is hashed from disk.
+$FrozenHunspellPolicy = $IntentConfigObject.external_evaluation.hunspell
+$FrozenHunspellCopyright = Join-Path $FrozenModelDirectory "COPYRIGHT.hunspell"
+[byte[]]$FrozenHunspellCopyrightBytes = Read-BoundedFileBytes `
+    -Path $FrozenHunspellCopyright `
+    -MaximumBytes 1MB `
+    -MinimumBytes 1 `
+    -Label "frozen Hunspell copyright"
+$FrozenHunspellCopyrightSha256 = Get-BytesSha256 -Bytes $FrozenHunspellCopyrightBytes
+# The template is built first and formatted separately: relying on how `-f`
+# binds against a concatenation would be a needless gamble in a file that
+# cannot be executed on the machine that edits it.
+$ChecksumsTemplate = (
+    "{0}  en_US.lm`n" +
+    "{1}  ru_RU.lm`n" +
+    "{2}  COPYRIGHT.onboard-data`n" +
+    "{3}  hunspell/en_US.aff`n" +
+    "{4}  hunspell/en_US.dic`n" +
+    "{5}  hunspell/ru_RU.aff`n" +
+    "{6}  hunspell/ru_RU.dic`n" +
+    "{7}  COPYRIGHT.hunspell`n"
+)
 $ExpectedChecksumsText = (
-    "{0}  en_US.lm`n{1}  ru_RU.lm`n{2}  COPYRIGHT.onboard-data`n" -f `
+    $ChecksumsTemplate -f `
     $EnglishSourcePolicy.sha256,
     $RussianSourcePolicy.sha256,
-    $LicenseSourcePolicy.sha256
+    $LicenseSourcePolicy.sha256,
+    $FrozenHunspellPolicy.en_US.affix_sha256,
+    $FrozenHunspellPolicy.en_US.dictionary_sha256,
+    $FrozenHunspellPolicy.ru_RU.affix_sha256,
+    $FrozenHunspellPolicy.ru_RU.dictionary_sha256,
+    $FrozenHunspellCopyrightSha256
 )
 if ($FrozenChecksumsText -cne $ExpectedChecksumsText) {
     throw "Frozen-source SHA256SUMS differs from config.json"

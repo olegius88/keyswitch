@@ -457,36 +457,52 @@ def measure(cells: Sequence[str] | None = None) -> Measurement:
     }
 
 
-def _forked_measurement(cells: Sequence[str]) -> Measurement | None:
-    """Repeat the measurement in a forked child, the way workers are made.
+# Split on the platform rather than branching inside one function. typeshed
+# drops the "fork" overload of `get_context` under win32, so the strict Windows
+# check reads the result as a context with no Process attribute; a branch
+# guarded by `sys.platform` is pruned whole and reported as neither an error
+# nor unreachable code.
+if sys.platform == "win32":
 
-    The trainer fingerprints rows in forked worker processes. If a primitive
-    behaved differently after fork, every parallel phase would be suspect, so
-    the disagreement matters more than either value on its own. Returns None
-    where fork is unavailable (Windows), which is not a failure: the platform
-    simply cannot be checked this way.
-    """
+    def _forked_measurement(cells: Sequence[str]) -> Measurement | None:
+        """Windows has no fork, so there is nothing to cross-check here.
 
-    import multiprocessing
+        Not a failure: the platform simply cannot be checked this way, and the
+        caller records the measurement as unavailable rather than as agreeing.
+        """
 
-    if "fork" not in multiprocessing.get_all_start_methods():
         return None
-    context = multiprocessing.get_context("fork")
-    parent_end, child_end = context.Pipe(duplex=False)
 
-    def child() -> None:
-        child_end.send(measure(cells))
+else:
+
+    def _forked_measurement(cells: Sequence[str]) -> Measurement | None:
+        """Repeat the measurement in a forked child, the way workers are made.
+
+        The trainer fingerprints rows in forked worker processes. If a
+        primitive behaved differently after fork, every parallel phase would be
+        suspect, so the disagreement matters more than either value on its own.
+        """
+
+        import multiprocessing
+
+        if "fork" not in multiprocessing.get_all_start_methods():
+            return None
+        context = multiprocessing.get_context("fork")
+        parent_end, child_end = context.Pipe(duplex=False)
+
+        def child() -> None:
+            child_end.send(measure(cells))
+            child_end.close()
+
+        process = context.Process(target=child)
+        process.start()
         child_end.close()
-
-    process = context.Process(target=child)
-    process.start()
-    child_end.close()
-    try:
-        payload: Measurement = parent_end.recv()
-    finally:
-        parent_end.close()
-        process.join()
-    return payload
+        try:
+            payload: Measurement = parent_end.recv()
+        finally:
+            parent_end.close()
+            process.join()
+        return payload
 
 
 def _ulp_distance(left: float, right: float) -> int | None:
