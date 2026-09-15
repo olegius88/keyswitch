@@ -17,9 +17,9 @@ Runbook соответствует текущему контуру v20:
 - training config schema 13;
 - feature schema v5;
 - KSLM container schema 4;
-- sealed split namespace `keyswitch:intent-v21:physical-signature`;
+- sealed split namespace `keyswitch:intent-v23:physical-signature`;
 - reference host Ubuntu 26.04 и Python 3.14;
-- сертифицированный artifact `intent-v1-d2f32ca5db58`.
+- сертифицированный artifact `intent-v1-b2a2ec8caa8d`.
 
 Номера этих схем независимы. Нельзя автоматически повышать их вместе только
 ради нового релиза.

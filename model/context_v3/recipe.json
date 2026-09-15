@@ -1,0 +1,107 @@
+{
+  "data_revision": "symmetric-short-actions-balanced-legacy-actions-debian-commands-and-natural-lookahead-v6",
+  "epochs": 50,
+  "feature_revision": "learned-ortho-script-length-right-context-origin-and-identifier-lexicon-v6",
+  "training_revision": "identifier-evidence-dropout-one-family-in-three-and-planned-mass-balance-v2",
+  "lexicon_supplement": {
+    "ru_RU": "src/keyswitch/resources/lexicon-supplement-ru_RU.json",
+    "scope": "Cyrillic forms of the pinned OpenSubtitles 2018 top-50k list absent from the frozen onboard ru_RU.lm vocabulary (27 209 forms, list count >= 138), loaded as extra known forms with the fallback frequency by LanguageModel.load and by the trainers' reference models alike; a lexical resource, not a training split. Motivation: correctly typed colloquial words, interjections and transliterated names unknown to the portable lexicon were the class behind the isolated short-token deferrals and the residual convert-vs-keep confusions."
+  },
+  "identifier_lexicon": {
+    "path": "src/keyswitch/resources/identifiers.json",
+    "evidence": "source_identifier and target_identifier flags from exact case-insensitive membership; feature identifier:{source}:{target}, and only when a reading is an identifier its combinations with direction, length and left-context script (identifier:0:0 combinations would duplicate existing evidence), plus source:identifier and target:identifier",
+    "scope": "Debian trixie main amd64 executable names, the same index the technical corpus was frozen from; a resource shared byte-for-byte by engine, trainer and evaluator, not a training split. Calibration and test technical rows measure commands present in the shipped index; identifiers outside it are measured by the lexicon-blind development diagnostic and are not gated.",
+    "training_dropout": {
+      "families": 3,
+      "scope": "TRAIN only: one family in three (a command with all its contexts and spelling variants; otherwise the row), chosen by the corpus variant hash of the family key with purpose identifier-dropout, is featurised with an empty identifier lexicon, so command-like strings outside the shipped index keep converting on their own evidence. Development, calibration and test always use the full lexicon."
+    }
+  },
+  "runtime_policy": {
+    "short_unknown_source": {
+      "action": "suggest",
+      "maximum_length": 3,
+      "cases": ["all uppercase letters in any context", "no word on either side (empty or wordless before and after)"],
+      "scope": "Both directions. A focus whose own reading is unknown to the profile lexicon, with at most three letters in the longer reading, never converts automatically when it is all uppercase or when it stands alone; ContextModel.predict, calibration and development epoch selection apply the same mask (ContextModel.allows_automatic_conversion). Uppercase: a correctly typed brand acronym against a dictionary reading (KFC vs. the same keys). Isolated: a chat word against a command name typed in the wrong layout (a Russian three-letter word vs. a Debian executable; TRAIN holds 696 CONVERT and 1 KEEP frames of that shape, so the model cannot learn the ambiguity). Consistent with the two-letter short_pair_policy; the bound is a policy choice, not a fitted one. Cost on calibration at exp06 weights: about 110 of 7541 automatic conversions become suggestions; four-letter tokens are untouched."
+    }
+  },
+  "feature_version": 3,
+  "gate_policy": {
+    "calibration_false_conversions": 0,
+    "minimum_calibration_conversion_recall": 0.9,
+    "minimum_sequence_documents_per_group": 32,
+    "sequence_correct_text_corruptions": 0,
+    "sequence_length_mismatches": 0,
+    "sequence_net_restorations_at_least_baseline": true
+  },
+  "historical_label_profile": "pinned KSLM and reference_hunspell",
+  "keep_importance": 4.0,
+  "learning_rate": 0.15,
+  "legacy_variant_policy": "Preserve semantic fields and completed-word lookahead. Each original family/category/trigger has unit pre-class mass shared equally across its actions, then equally across variants of that action.",
+  "maximum_features": 45000,
+  "maximum_source_rows": {
+    "calibration": 4000,
+    "development": 4000,
+    "train": 20000
+  },
+  "minimum_feature_mass": 3.0,
+  "namespace": "keyswitch:context-action-v3:20260912",
+  "natural_tail_policy": "direct-boundary natural frames have empty segmented tails; supplementary physical spans provide actual engine tails and preceding whitespace in train/development/calibration",
+  "profiles": [
+    "portable",
+    "reference_hunspell"
+  ],
+  "schema_version": 1,
+  "span_maximum_families": {
+    "calibration": 32,
+    "development": 32,
+    "train": 128
+  },
+  "span_policy": "fixed-hash families and same-split anchors; literal suffix and repeated-space variants; exact captured parent body and counterfactual full-prefix labels; one pre-class sample unit per retained family",
+  "threshold_candidates": [
+    0.95,
+    0.975,
+    0.985,
+    0.99,
+    0.995,
+    0.999,
+    0.9995,
+    0.9999,
+    1.0
+  ],
+  "training_order": "SHA256 of frame identifiers mixes natural and legacy rows deterministically",
+  "variant_policy": "separate SHA256 streams for trigger, application, optional field-after and boundary event",
+  "vocabulary_policy": "Kahan-summed pre-class sample mass; presence only; cutoff tolerance 1e-9; mass rounded to 9 decimal places for ranking ties",
+  "short_pair_policy": "Both readings of an isolated token of at most two letters share WAIT/SUGGEST when neither neighbour contains a word; digits and punctuation alone are not a language label. Historical KEEP frames of such isolated tokens take the same deferred action, so natural and legacy frames never label one observable situation differently; historical CONVERT frames keep their declared label.",
+  "epoch_selection": {
+    "split": "development",
+    "maximum_false_conversions_per_profile": 0,
+    "ranking": [
+      "minimum_profile_runtime_conversion_recall",
+      "pooled_runtime_conversion_recall",
+      "lower_weighted_log_loss",
+      "lower_development_operating_threshold"
+    ],
+    "threshold_grid": "threshold_candidates",
+    "support": "same vocabulary-dependent check as runtime",
+    "rounding": "nine decimal places before development prediction",
+    "calibration": "independent final serving-threshold selection after weights are selected, never below the development operating threshold of the selected epoch: a threshold that already converted falsely on development is not a serving candidate whatever calibration says",
+    "serving_threshold_floor": "development operating threshold of the selected epoch"
+  },
+  "lookahead_curriculum": {
+    "maximum_families": 64,
+    "seeds_per_family": 128
+  },
+  "natural_lookahead_curriculum": {
+    "maximum_families": 1024,
+    "seeds_per_family": 32,
+    "scope": "Every split separately (train, development, calibration): natural one- and two-letter space-boundary frames of a document are seeds, the first word of the same row's own sentence continuation is the anchor, and the observed/empty variants divide their mass between the original frame and a planned_next_conversion variant, so field-start lookahead is trained, selected and calibrated on the same evidence the engine builds. Anchors never cross a split."
+  },
+  "planned_mass_policy": "TRAIN only, after both lookahead curricula: per (direction, focus length of 1 or 2) the planned_next_conversion frames are rescaled to carry exactly the total mass of the isolated deferred (wait/suggest, no word on either side) frames of the same class. The two are the same physical moment seen before and after the next word is known; legacy parent budgets alone left the planned regime at about one hundredth of that mass and the model could not learn the after-context distinction (planned `у этого` stayed below the serving threshold in exp05-exp08). Development and calibration frames are never rescaled.",
+  "lookahead_policy": "Replace bounded old TRAIN short-space seeds with original/planned variants of equal total mass. Positives retain annotated next words; KEEP negatives retain their original/before annotation with an explicitly mixed existing TRAIN anchor. A frozen lexical baseline proposal is an entry condition, not a label. No candidate context-model prediction selects labels.",
+  "joint_acceptance": {
+    "protocol_version": 3,
+    "prefix_baseline_path": "model/prefix_v2/baseline-prefix-v1.json",
+    "settings_modes": ["early_off", "default"],
+    "policy": "A context candidate is accepted only together with an explicit prefix candidate: the candidate pair is replayed against the frozen baseline context plus the frozen baseline prefix under unmodified application defaults (early switch, pause correction, manual-layout protection) and under the previous early-off control. Every sequence gate must hold in both modes and both lexical profiles. Installed context and prefix bytes are never read by the evaluation; the joint receipt records both evaluated artifacts so packaging installs exactly those bytes."
+  }
+}

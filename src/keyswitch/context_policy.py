@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import ClassVar, Final
 
-from .context_model import ContextEvidence, ContextModel, ContextPrediction
+from .context_model import FEATURE_VERSION, AfterOrigin, ContextEvidence, ContextModel, ContextPrediction
+from .identifier_lexicon import IdentifierLexicon
 from .detector import DetectionDecision, LanguageDetector
 from .input_context import FieldContext, FieldReader, InputContext
 from .ortho_model import OrthoEvidence, OrthoModel, shape_of
@@ -50,6 +51,49 @@ def word_shaped(token: str) -> bool:
     return True
 
 
+_SHARED_IDENTIFIERS: tuple[IdentifierLexicon | None, str] | None = None
+
+
+def shared_identifiers() -> IdentifierLexicon | None:
+    """One packaged identifier lexicon for the engine, the trainer and the evaluator."""
+
+    global _SHARED_IDENTIFIERS
+    if _SHARED_IDENTIFIERS is None:
+        _SHARED_IDENTIFIERS = IdentifierLexicon.try_load()
+    return _SHARED_IDENTIFIERS[0]
+
+
+def evidence_for_decision(
+    baseline: DetectionDecision, alternative: str, target_group: int,
+    detector: LanguageDetector, field: FieldContext, trigger: str,
+    *, literal_tail: str = "", boundary_text: str = "", ortho: OrthoModel | None = None,
+    after_origin: AfterOrigin = "none", identifiers: IdentifierLexicon | None = None,
+) -> ContextEvidence:
+    """Build the same lexical and optional orthotactic evidence for any caller."""
+
+    source = detector.models[baseline.source_group].score(baseline.original)
+    target = detector.models[target_group].score(alternative)
+    lexicon = shared_identifiers() if identifiers is None else identifiers
+    source_identifier = lexicon is not None and lexicon.contains(baseline.original)
+    target_identifier = lexicon is not None and lexicon.contains(alternative)
+    ortho_score: float | None = None
+    ortho_threshold: float | None = None
+    if ortho is not None and baseline.source_group in (0, 1):
+        script = "en" if baseline.source_group == 0 else "ru"
+        keys = baseline.original if baseline.source_group == 0 else alternative
+        scored = ortho.score(OrthoEvidence(keys, shape_of(baseline.original, not field.before.strip()), script))
+        if scored.supported:
+            ortho_score = scored.total
+            ortho_threshold = ortho.thresholds[script]
+    return ContextEvidence(
+        baseline.original, alternative, baseline.source_group, field, trigger,
+        baseline.should_convert, source.known, target.known, target.value - source.value,
+        source, target, baseline.model_probability, baseline.model_threshold,
+        literal_tail, ortho_score, ortho_threshold, boundary_text, after_origin,
+        source_identifier=source_identifier, target_identifier=target_identifier,
+    )
+
+
 class ContextPolicy:
     # The orthotactic artifact is several megabytes and immutable once loaded.
     # A running application builds one engine, but replays and tests build many,
@@ -69,7 +113,8 @@ class ContextPolicy:
         detector: LanguageDetector, trigger: str, mode: str,
         *, after: str = "", read_field: bool = False,
         field_override: FieldContext | None = None,
-        literal_tail: str = "",
+        literal_tail: str = "", boundary_text: str = "",
+        after_origin: AfterOrigin = "none",
     ) -> ContextResult:
         if mode not in {"assist", "shadow"} or self.model is None:
             return ContextResult(baseline, fallback_reason="mode_disabled" if mode not in {"assist", "shadow"} else "model_unavailable")
@@ -95,12 +140,15 @@ class ContextPolicy:
                     return ContextResult(replace(baseline, should_convert=False, reason="текст активного поля изменился"), field=snapshot, decision_source="safety", fallback_reason="field_changed")
         if after:
             field = replace(field, after=after)
-        source = detector.models[baseline.source_group].score(original)
-        target = detector.models[target_group].score(alternative)
-        prediction = self.model.predict(ContextEvidence(
-            original, alternative, baseline.source_group, field, trigger,
-            baseline.should_convert, source.known, target.known, target.value - source.value,
-        ))
+        evidence = evidence_for_decision(
+            baseline, alternative, target_group, detector, field, trigger,
+            literal_tail=literal_tail, boundary_text=boundary_text,
+            ortho=self.ortho if self.model.feature_version == 3 else None,
+            after_origin=after_origin,
+        )
+        source, target = evidence.source_score, evidence.target_score
+        assert source is not None and target is not None
+        prediction = self.model.predict(evidence)
         if mode == "shadow":
             return ContextResult(baseline, prediction, field, fallback_reason="shadow_mode")
         # Missing context is honest uncertainty, not an instruction to guess.
@@ -113,7 +161,7 @@ class ContextPolicy:
                 target_group=target_group, source_score=source, target_score=target,
                 reason="решение контекстной модели", confidence=prediction.probability,
             )
-        elif prediction.action != "wait" and is_short_word_override(baseline):
+        elif self.model.feature_version == FEATURE_VERSION and prediction.action != "wait" and is_short_word_override(baseline):
             # A curated, reviewed exception is an explicit rule, not a guess, so
             # neither a probabilistic `keep` nor an under-confident `convert`
             # cancels it. Only `wait` still delays it, because that is about
@@ -129,6 +177,8 @@ class ContextPolicy:
             }[prediction.action])
         result = ContextResult(decision, prediction, field, policy_applied=True,
                                decision_source="context_model")
+        if self.model.feature_version == 3:
+            return result
         return self._licensed(result, baseline, alternative, target_group, field)
 
     def _licensed(self, result: ContextResult, baseline: DetectionDecision, alternative: str,

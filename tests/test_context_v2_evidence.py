@@ -19,9 +19,9 @@ if TOOLS_PATH not in sys.path:
 from context_corpus import CORPUS_ROOT, AssignedPhrase, Phrase, Split, load_source, read_phrases
 from context_evidence import checksum, load_cache
 from evaluate_context_engine import select_phrases
-from train_context_v2 import provenance
 from verify_context_v2 import read_object, validate_metrics, verify
 from keyswitch.context_model import ARTIFACT_PATH
+from verify_context_v2_history import normalized_provenance, verify_sources
 
 
 class ContextV2EvidenceTests(unittest.TestCase):
@@ -55,20 +55,24 @@ class ContextV2EvidenceTests(unittest.TestCase):
         self.assertEqual(selected, [source[3]])
         self.assertEqual(select_phrases(list(reversed(source))), selected)
 
-    def test_shipping_gate_requires_the_accepted_v1_and_rejects_candidate_installation(self) -> None:
+    def test_historical_gate_preserves_rejection_without_claiming_current_acceptance(self) -> None:
         result = verify()
-        self.assertTrue(result["active_model_accepted"])
+        self.assertTrue(result["historical_evidence_verified"])
+        self.assertIs(result["current_runtime_verified"], False)
+        self.assertNotIn("active_model_accepted", result)
         self.assertEqual(result["active_artifact_sha256"], checksum(ARTIFACT_PATH))
         self.assertFalse(result["promotion_passed"])
         with self.assertRaisesRegex(ValueError, "must not replace"):
             verify(active=CORPUS_ROOT / "candidate.json")
-        with self.assertRaisesRegex(ValueError, "accepted context-v1"):
-            verify(active=CORPUS_ROOT / "config.json")
+        self.assertIs(verify(active=CORPUS_ROOT / "config.json")["current_runtime_verified"], False)
 
     def test_windows_path_separators_do_not_change_sealed_identity(self) -> None:
-        windows = {relative.replace("/", "\\"): digest for relative, digest in provenance().items()}
-        with patch("verify_context_v2.provenance", return_value=windows):
-            self.assertTrue(verify()["active_model_accepted"])
+        pins = read_object(CORPUS_ROOT / "candidate-seal.json")["provenance"]
+        assert isinstance(pins, dict)
+        windows = {relative.replace("/", "\\"): digest for relative, digest in pins.items()}
+        self.assertEqual(normalized_provenance(windows), pins)
+        verify_sources(windows)
+        self.assertTrue(verify()["historical_evidence_verified"])
 
     def test_runtime_regression_keeps_history_and_rejects_tampering(self) -> None:
         engine = read_object(CORPUS_ROOT / "engine-report.json")
@@ -92,7 +96,8 @@ class ContextV2EvidenceTests(unittest.TestCase):
         original = read_object(CORPUS_ROOT / "report.json")
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            for filename in ("candidate.json", "candidate-seal.json", "engine-report.json"):
+            for filename in ("candidate.json", "candidate-seal.json", "engine-report.json", "corpus-receipt.json",
+                             "lexical-receipt.json", "baseline-context-v1.json"):
                 shutil.copyfile(CORPUS_ROOT / filename, root / filename)
             variants = [{**original, "reserve_used": True}, {**original, "seal_sha256": "changed"},
                 {**original, "promotion_passed": True}, {**original, "results": {}},

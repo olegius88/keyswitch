@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import copy
+from contextlib import redirect_stdout
+import hashlib
+import io
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -20,7 +25,18 @@ if TOOLS_PATH not in sys.path:
     sys.path.insert(0, TOOLS_PATH)
 
 import train_context_model as trainer
+import verify_context_action_model as action_verifier
 import verify_context_model as verifier
+
+
+def write_fixture_artifact(path: Path, feature_version: int = 2) -> ContextModel:
+    weights = {"bias": [1.0, 0.0, 0.0, 0.0]}
+    fingerprint = hashlib.sha256(json.dumps(weights, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"feature_version": feature_version, "actions": list(ACTIONS),
+        "weights": weights, "weights_sha256": fingerprint, "conversion_threshold": 0.985,
+        "version": ("context-v1-" if feature_version == 2 else "context-v3-") + fingerprint[:12]}))
+    return ContextModel.load(path)
 
 
 class ContextTrainingTests(unittest.TestCase):
@@ -52,12 +68,25 @@ class ContextTrainingTests(unittest.TestCase):
         metrics = trainer.evaluate(model, rows, "development")
         self.assertEqual(cast(dict[str, int], metrics["counts"])["rows"], 4)
 
-    def test_bundled_report_is_bound_to_artifact_and_quality_counts(self) -> None:
-        valid = verifier.verify()
-        self.assertTrue(str(valid["model_version"]).startswith("context-v1-"))
-        original = cast(dict[str, object], json.loads(verifier.REPORT.read_bytes()))
+    def test_historical_report_fixture_is_bound_to_artifact_and_quality_counts(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            report_path = Path(temporary) / "report.json"
+            root = Path(temporary)
+            artifact = root / "artifact.json"
+            model = write_fixture_artifact(artifact)
+            for path in verifier.provenance_paths(root, artifact).values():
+                if path != artifact:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text("authored historical provenance fixture\n")
+            original: dict[str, object] = {"schema_version": 1, "quality_gates_passed": True,
+                "test_overlap": 0, "model_version": model.version, "evidence_scope": "synthetic fixture",
+                **{name: hashlib.sha256(path.read_bytes()).hexdigest()
+                   for name, path in verifier.provenance_paths(root, artifact).items()},
+                "test": {"counts": {"rows": 10000, "desired_conversions": 5000,
+                    "converted_correctly": 4900, "baseline_converted_correctly": 4800, "false_conversions": 0}}}
+            report_path = root / "report.json"
+            report_path.write_text(json.dumps(original))
+            valid = verifier.verify_legacy(root, report_path, artifact)
+            self.assertEqual(valid["model_version"], model.version)
             variants: list[object] = [[], {**original, "quality_gates_passed": False},
                 {**original, "test_overlap": 1}, {**original, "artifact_sha256": "tampered"},
                 {**original, "model_version": "other"}, {**original, "test": None}]
@@ -69,7 +98,10 @@ class ContextTrainingTests(unittest.TestCase):
             for payload in variants:
                 report_path.write_text(json.dumps(payload), encoding="utf-8")
                 with self.assertRaises(ValueError):
-                    verifier.verify(report_path=report_path)
+                    verifier.verify_legacy(root, report_path, artifact)
+            report_path.write_bytes(b" " * (1024 * 1024 + 1))
+            with self.assertRaisesRegex(ValueError, "oversized"):
+                verifier.verify_legacy(root, report_path, artifact)
 
     def test_training_rejects_invalid_scenarios_and_missing_baseline(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -80,6 +112,124 @@ class ContextTrainingTests(unittest.TestCase):
         with patch("train_context_model.LinearNgramModel.try_load_default", return_value=(None, None)):
             with self.assertRaises(ValueError):
                 trainer.build_corpus()
+
+
+class ActiveContextGateTests(unittest.TestCase):
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory(prefix="keyswitch-active-context-fixture-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.artifact = self.root / "artifact.json"
+        self.report = self.root / "old-report.json"
+        self.receipt = self.root / "receipt.json"
+        self.model = write_fixture_artifact(self.artifact)
+        self.identity: dict[str, object] = {"model_version": self.model.version,
+            "artifact_sha256": hashlib.sha256(self.artifact.read_bytes()).hexdigest(),
+            "evidence_scope": "authored fixture"}
+
+    def verify(self) -> dict[str, object]:
+        return verifier.verify(self.root, self.report, self.artifact, self.receipt)
+
+    def test_active_shipping_schema_uses_its_declared_model_generation(self) -> None:
+        model = ContextModel.load()
+        self.assertIn(model.feature_version, (2, 3))
+        prefix = "context-v1-" if model.feature_version == 2 else "context-v3-"
+        self.assertTrue(model.version.startswith(prefix))
+        # Acceptance is an explicit CLI gate, never inferred from this loader test.
+
+    def test_feature_two_keeps_both_historical_evidence_checks(self) -> None:
+        with patch.object(verifier, "verify_legacy", return_value=self.identity) as legacy, \
+                patch("verify_context_v2.verify") as research, \
+                patch.object(action_verifier, "verify", side_effect=AssertionError("v3 receipt must not be used")):
+            result = self.verify()
+        legacy.assert_called_once_with(self.root, self.report, self.artifact)
+        research.assert_called_once_with(self.root / "model/context_v2", self.artifact)
+        self.assertEqual(result, {**self.identity, "feature_version": 2, "quality_gates_passed": True})
+        with patch.object(verifier, "verify_legacy", return_value=self.identity), \
+                patch("verify_context_v2.verify", side_effect=ValueError("research seal mutated")):
+            with self.assertRaisesRegex(ValueError, "research seal"):
+                self.verify()
+
+    def test_feature_three_requires_its_receipt_without_historical_fallback(self) -> None:
+        model = write_fixture_artifact(self.artifact, 3)
+        with patch.object(verifier, "verify_legacy", side_effect=AssertionError("historical fallback forbidden")), \
+                patch("verify_context_v2.verify", side_effect=AssertionError("historical replay forbidden")):
+            with self.assertRaises(FileNotFoundError):
+                self.verify()
+            self.receipt.write_text('{"quality_gates_passed":true}')
+            with self.assertRaises(ValueError):
+                self.verify()
+            accepted = {"model_version": model.version, "artifact_sha256": action_verifier.checksum(self.artifact),
+                        "scope": "receipt fixture delegated to its separately tested validator"}
+            with patch.object(action_verifier, "verify", return_value=accepted) as validate:
+                result = self.verify()
+            validate.assert_called_once_with(root=self.root, receipt_path=self.receipt, artifact=self.artifact)
+            self.assertEqual(result["feature_version"], 3)
+            self.assertEqual(result["artifact_sha256"], accepted["artifact_sha256"])
+
+    def test_rejected_artifact_and_changes_during_verification_fail_closed(self) -> None:
+        with patch.object(action_verifier, "checksum", return_value=verifier.REJECTED_ARTIFACT), \
+                patch.object(verifier, "verify_legacy", side_effect=AssertionError("rejected bytes reached report")):
+            with self.assertRaisesRegex(ValueError, "rejected context-v2"):
+                self.verify()
+        with patch.object(action_verifier, "checksum", side_effect=["a" * 64, "b" * 64]), \
+                patch.object(verifier, "verify_legacy", return_value=self.identity), patch("verify_context_v2.verify"):
+            with self.assertRaisesRegex(ValueError, "changed during"):
+                self.verify()
+        payload = cast(dict[str, object], json.loads(self.artifact.read_bytes()))
+        payload["feature_version"] = 99
+        self.artifact.write_text(json.dumps(payload))
+        with self.assertRaises(ValueError):
+            self.verify()
+
+    def test_actual_rejected_research_bytes_cannot_enter_either_acceptance_branch(self) -> None:
+        rejected = verifier.ROOT / "model/context_v2/candidate.json"
+        self.assertEqual(hashlib.sha256(rejected.read_bytes()).hexdigest(), verifier.REJECTED_ARTIFACT)
+        with patch.object(verifier, "verify_legacy", side_effect=AssertionError("legacy acceptance reached")), \
+                patch.object(action_verifier, "verify", side_effect=AssertionError("receipt acceptance reached")):
+            with self.assertRaisesRegex(ValueError, "rejected context-v2"):
+                verifier.verify(artifact=rejected)
+
+    def test_replay_dispatch_keeps_exact_protocols_and_propagates_failure(self) -> None:
+        self.assertEqual(verifier.replay_commands(2), (
+            ("tools/train_context_model.py", "--verify"),))
+        with self.assertRaises(ValueError):
+            verifier.replay_commands(4)
+        with patch("verify_context_model.subprocess.run") as run:
+            verifier.replay(self.root, 3)
+        self.assertEqual(run.call_count, 4)
+        for call, target in zip(run.call_args_list, (
+                "test_language_intent_regressions.LanguageIntentRegressions",
+                "test_input_sequence_matrix.InputSequenceMatrixTests",
+                "test_context_policy.ContextEngineTests.test_bundled_trained_model_resolves_user_phrase_and_retains_code",
+                "test_default_input_sequences.DefaultInputSequenceTests")):
+            self.assertEqual(call.args[0], [sys.executable, "-m", "unittest", "-v", target])
+            self.assertIs(call.kwargs["check"], True)
+            self.assertEqual(call.kwargs["cwd"], self.root)
+            self.assertEqual(call.kwargs["env"]["PYTHONPATH"], os.pathsep.join(str(self.root / name) for name in ("src", "tools", "tests")))
+        with patch("verify_context_model.subprocess.run", side_effect=subprocess.CalledProcessError(2, ["fixture"])) as run:
+            with self.assertRaises(subprocess.CalledProcessError):
+                verifier.replay(self.root, 2)
+        self.assertEqual(run.call_count, 1)
+        with patch("verify_context_model.subprocess.run", side_effect=[
+                None, None, None, subprocess.CalledProcessError(1, ["default input regressions"])]) as run:
+            with self.assertRaises(subprocess.CalledProcessError):
+                verifier.replay(self.root, 3)
+        self.assertEqual(run.call_count, 4)
+
+    def test_cli_rechecks_evidence_after_replay_and_prints_only_verified_identity(self) -> None:
+        identity = {**self.identity, "feature_version": 3, "quality_gates_passed": True}
+        output = io.StringIO()
+        with patch.object(verifier, "verify", return_value=identity) as verify, \
+                patch.object(verifier, "replay") as replay, redirect_stdout(output):
+            self.assertEqual(verifier.main(["--replay"]), 0)
+        self.assertEqual(verify.call_count, 2)
+        replay.assert_called_once_with(verifier.ROOT, 3)
+        self.assertEqual(json.loads(output.getvalue()), identity)
+        with patch.object(verifier, "verify", side_effect=[identity, {**identity, "artifact_sha256": "mutated"}]), \
+                patch.object(verifier, "replay"):
+            with self.assertRaisesRegex(ValueError, "changed during replay"):
+                verifier.main(["--replay"])
 
 
 if __name__ == "__main__":

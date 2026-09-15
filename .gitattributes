@@ -5,7 +5,7 @@
 model/intent_v1/sources/*.lm binary
 model/intent_v1/sources/COPYRIGHT.onboard-data -text whitespace=-trailing-space
 model/intent_v1/sources/COPYRIGHT.hunspell -text whitespace=-trailing-space
-model/intent_v1/sources/hunspell/* -text
+model/intent_v1/sources/hunspell/* binary
 src/keyswitch/resources/models/*.ksm binary
 src/keyswitch/resources/models/context_policy_v1.json text eol=lf
 model/context_v1/*.json text eol=lf
@@ -14,6 +14,7 @@ tools/train_context_model.py text eol=lf
 tools/verify_context_model.py text eol=lf
 model/context_v2/*.json text eol=lf
 model/context_v2/engine-history/*.json text eol=lf
+model/context_v2/compatibility/generation-sources/*.py text eol=lf
 model/context_v2/sources/*.gz binary
 model/boundary_v1/*.json text eol=lf
 model/boundary_v1/development-history/*.json text eol=lf
@@ -46,6 +47,7 @@ tools/context_optimizer.c text eol=lf
 tools/train_context_v2.py text eol=lf
 tools/evaluate_context_engine.py text eol=lf
 tools/verify_context_v2.py text eol=lf
+tools/verify_context_v2_history.py text eol=lf
 src/keyswitch/engine.py text eol=lf
 src/keyswitch/context_policy.py text eol=lf
 src/keyswitch/short_words.py text eol=lf
@@ -97,7 +99,9 @@ model/intent_v1/seal-registry-v15.json text eol=lf
 model/intent_v1/seal-registry-v18.json text eol=lf
 model/intent_v1/seal-registry-v20.json text eol=lf
 model/intent_v1/seal-registry-v21.json text eol=lf
+model/intent_v1/seal-registry-v23.json text eol=lf
 model/intent_v1/seal-outcome-v21.json text eol=lf
+model/intent_v1/seal-outcome-v23.json text eol=lf
 model/intent_v1/holdout-v6-preseal.json text eol=lf
 model/intent_v1/holdout-v7-preseal.json text eol=lf
 model/intent_v1/holdout-v8-preseal.json text eol=lf
@@ -111,6 +115,7 @@ model/intent_v1/holdout-v15-preseal.json text eol=lf
 model/intent_v1/holdout-v18-preseal.json text eol=lf
 model/intent_v1/holdout-v20-preseal.json text eol=lf
 model/intent_v1/holdout-v21-preseal.json text eol=lf
+model/intent_v1/holdout-v23-preseal.json text eol=lf
 model/intent_v1/unknown-typo-development-v11.json text eol=lf
 model/intent_v1/unknown-typo-development-v12.json text eol=lf
 model/intent_v1/unknown-typo-development-v13.json text eol=lf
@@ -119,6 +124,7 @@ model/intent_v1/unknown-typo-development-v15.json text eol=lf
 model/intent_v1/unknown-typo-development-v18.json text eol=lf
 model/intent_v1/unknown-typo-development-v20.json text eol=lf
 model/intent_v1/unknown-typo-development-v21.json text eol=lf
+model/intent_v1/unknown-typo-development-v23.json text eol=lf
 model/intent_v1/rejection-v10.json text eol=lf
 model/intent_v1/rejection-v11.json text eol=lf
 model/intent_v1/rejection-v12.json text eol=lf
@@ -139,3 +145,12 @@ src/keyswitch/detector.py text eol=lf
 src/keyswitch/layouts.py text eol=lf
 src/keyswitch/language_model.py text eol=lf
 src/keyswitch/resources/protected_tokens.txt text eol=lf
+
+# Action-model replay records the runtime and editor harness byte for byte.
+# Keep their checkout representation stable on Linux and Windows.
+src/keyswitch/*.py text eol=lf
+src/keyswitch/**/*.py text eol=lf
+tests/*.py text eol=lf
+tools/*.py text eol=lf
+model/context_v3/*.json text eol=lf
+model/intent_v1/compatibility/*.json text eol=lf

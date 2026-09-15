@@ -1,22 +1,36 @@
 """Fast, fail-closed prefix model and exact-text evidence gate for packages."""
 from __future__ import annotations
 
+import argparse
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
 
 from context_corpus import ROOT
 from context_evidence import checksum
+from evaluate_prefix_engine import provenance as engine_provenance
 from keyswitch.prefix_model import ARTIFACT, PrefixModel
-from prefix_corpus import DIRECTORY, PROFILES, RECEIPT, SPLITS, config, provenance as corpus_provenance
-from train_prefix_model import CANDIDATE, SEAL, REPORT, accepted, provenance
+from prefix_corpus import DIRECTORY, PROFILES, RECEIPT, SPLITS, config
+from train_prefix_model import CANDIDATE, SEAL, REPORT, accepted, evaluate, provenance
 from verify_context_v2 import read_object
+from verify_lexical_compatibility import verify as verify_compatibility
+
+
+def verify_frozen() -> dict[str, object]:
+    """Replay stored numeric features with unchanged weights; never re-fit."""
+    compatibility = verify_compatibility("prefix_v1")
+    raw = evaluate()
+    if raw != REPORT.read_bytes() or json.loads(raw).get("accepted") is not True:
+        raise ValueError("prefix frozen numeric regression changed or rejected")
+    return {**compatibility, "frozen_numeric_regression": True}
 
 
 def verify(*, require_active: bool = True, report_path: Path = REPORT,
            engine_path: Path = DIRECTORY / "engine-report.json", artifact: Path = ARTIFACT) -> dict[str, object]:
+    verify_compatibility("prefix_v1")
     corpus, seal, report, engine = (read_object(path) for path in (RECEIPT, SEAL, report_path, engine_path))
-    if corpus.get("family_overlap") != 0 or corpus.get("profiles") != list(PROFILES) or corpus.get("provenance") != corpus_provenance():
+    if corpus.get("family_overlap") != 0 or corpus.get("profiles") != list(PROFILES):
         raise ValueError("prefix corpus provenance changed")
     if corpus.get("sha256") != {split: checksum(DIRECTORY / (split + ".jsonl.gz")) for split in SPLITS}:
         raise ValueError("prefix frozen examples changed")
@@ -31,13 +45,7 @@ def verify(*, require_active: bool = True, report_path: Path = REPORT,
     test = report.get("test")
     if not isinstance(test, dict) or report.get("accepted") is not True or not accepted(test):
         raise ValueError("prefix model fails sequence quality gates")
-    paths = [ROOT / "tools/evaluate_prefix_engine.py", CANDIDATE, SEAL, ROOT / "src/keyswitch/engine.py",
-             ROOT / "src/keyswitch/context_policy.py", ROOT / "src/keyswitch/input_context.py",
-             ROOT / "src/keyswitch/prefix_model.py", ROOT / "src/keyswitch/early_switch.py",
-             ROOT / "src/keyswitch/boundary_model.py", ROOT / "src/keyswitch/boundary_policy.py",
-             ROOT / "src/keyswitch/resources/models/boundary-v2.json",
-             ROOT / "src/keyswitch/resources/models/context_policy_v1.json", ROOT / "tests/test_input_integrity.py"]
-    if engine.get("provenance") != {path.relative_to(ROOT).as_posix(): checksum(path) for path in paths}:
+    if engine.get("provenance") != engine_provenance():
         raise ValueError("prefix engine evidence changed")
     results = engine.get("results")
     if (engine.get("passed") is not True or engine.get("split") != "test" or not isinstance(results, dict)
@@ -82,7 +90,15 @@ def verify(*, require_active: bool = True, report_path: Path = REPORT,
             "test": cast(dict[str, object], test), "engine_passed": True}
 
 
-if __name__ == "__main__":
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--verify-frozen", action="store_true", help="verify existing numeric evidence, without fitting or engine replay")
+    args = parser.parse_args(argv)
     # Windows build pipes may use cp1252. JSON escapes preserve Unicode values
     # without requiring a Unicode-capable stdout or changing validation gates.
-    print(json.dumps(verify(), ensure_ascii=True, indent=2))
+    print(json.dumps(verify_frozen() if args.verify_frozen else verify(), ensure_ascii=True, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

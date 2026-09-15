@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "data_revision": "symmetric-existing-prefix-forms-family-budget-v1",
+  "runtime_feature_version": 2,
+  "maximum_families": {
+    "train": 1352,
+    "development": 64,
+    "calibration": 64
+  },
+  "maximum_words_per_family": 2,
+  "maximum_prefix_length": 12,
+  "epochs": 120,
+  "learning_rate": 0.08,
+  "keep_importance": 3.0,
+  "wait_importance": 2.0,
+  "maximum_features": 8000,
+  "minimum_feature_mass": 3.0,
+  "thresholds": [
+    0.985,
+    0.99,
+    0.995,
+    0.999,
+    0.9995,
+    0.9999,
+    0.99995,
+    0.99999,
+    0.999999,
+    1.0
+  ],
+  "minimum_early_recall": 0.7,
+  "scope": "Candidate development only, using existing prefix-v1 train/development/calibration surface forms. No old or new test is read. Correct and wrong-layout forms share contexts and a fixed physical-family budget. Existing typo forms are KEEP only. Prefix substring groups are not claimed globally unseen. Promotion requires a future frozen joint engine evaluation with actual default early behavior, context model, physical events and prospective document/physical-lemma holdout.",
+  "training_revision": "experiment03: every available old TRAIN physical family (1352 of 1352) and 120 epochs; DEV frontier selection, thresholds, CAL gates, data revision and schema unchanged"
+}

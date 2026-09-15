@@ -2,15 +2,17 @@
 """Fail closed on tampered research evidence or accidental failed-model rollout."""
 from __future__ import annotations
 
+import argparse
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
 
 from keyswitch.context_model import ARTIFACT_PATH, ContextModel
 from context_corpus import CORPUS_ROOT, ROOT
-from context_evidence import CACHE_RECEIPT, checksum
-from train_context_v2 import ARTIFACT, REPORT, SEAL, config, promotion_failures, provenance
-from verify_context_model import REPORT as ACCEPTED_REPORT
+from context_evidence import CACHE_RECEIPT, PROFILES, all_frames, canonical, checksum, load_cache
+from train_context_v2 import ARTIFACT, REPORT, SEAL, audit, config, metrics, promotion_failures
+from verify_context_v2_history import verify_anchors, verify_sources
 
 
 def read_object(path: Path) -> dict[str, object]:
@@ -37,14 +39,13 @@ def validate_metrics(value: object) -> dict[str, object]:
 
 
 def verify(directory: Path = CORPUS_ROOT, active: Path = ARTIFACT_PATH) -> dict[str, object]:
-    # The trainer runs on Linux; package validation also runs on Windows.
-    # Normalize only path separators, never file bytes or expected digests.
+    historical = verify_anchors(directory)
     seal = read_object(directory / SEAL)
-    hashes = {relative.replace("\\", "/"): digest for relative, digest in provenance().items()}
-    if seal.get("stage") != "sealed-before-test" or seal.get("provenance") != hashes or seal.get("artifact_sha256") != checksum(directory / ARTIFACT):
+    verify_sources(seal.get("provenance"))
+    if seal.get("stage") != "sealed-before-test" or seal.get("artifact_sha256") != checksum(directory / ARTIFACT):
         raise ValueError("candidate seal or provenance changed")
     model = ContextModel.load(directory / ARTIFACT)
-    if seal.get("model_version") != model.version or seal.get("conversion_threshold") != model.conversion_threshold:
+    if model.feature_version != 2 or seal.get("model_version") != model.version or seal.get("conversion_threshold") != model.conversion_threshold:
         raise ValueError("candidate identity changed")
     report = read_object(directory / REPORT)
     engine = read_object(directory / "engine-report.json")
@@ -69,34 +70,55 @@ def verify(directory: Path = CORPUS_ROOT, active: Path = ARTIFACT_PATH) -> dict[
             raise ValueError("invalid independent evaluation track")
         current, prior = validate_metrics(value.get("candidate")), validate_metrics(value.get("v1"))
         failures[track] = promotion_failures(current, prior, cast(dict[str, object], config()["promotion"]))
-    if report.get("promotion_failures") != failures or report.get("promotion_passed") is not (not any(failures.values())):
+    if (report.get("promotion_failures") != failures or report.get("promotion_passed") is not False
+            or not any(failures.values()) or engine.get("promotion_passed") is not False):
         raise ValueError("candidate promotion result contradicts the metrics")
     for manifest in (engine, read_object(CACHE_RECEIPT)):
         manifest_hashes = manifest.get("provenance", manifest.get("source_hashes"))
         if not isinstance(manifest_hashes, dict) or not manifest_hashes:
             raise ValueError("missing engine or lexical provenance")
-        for relative, expected_hash in manifest_hashes.items():
-            path = ROOT / str(relative)
-            if not path.resolve().is_relative_to(ROOT) or checksum(path) != expected_hash:
-                raise ValueError("engine or lexical provenance mismatch")
-    # This experiment ships infrastructure and a rejected research candidate,
-    # never runtime weights: the active model must be the artifact accepted by
-    # the separate context-v1 evaluation, and copying candidate.json over it
-    # stays rejected. `baseline-context-v1.json` remains the frozen weights this
-    # candidate was compared against, not a pin on the shipping model.
+        verify_sources(manifest_hashes)
+    # Active-model acceptance belongs to the separate versioned shipping gate.
+    # This historical check only prevents installing the rejected candidate.
     active_digest = checksum(active)
     if active_digest == checksum(directory / ARTIFACT):
         raise ValueError("research candidate must not replace the shipping model")
-    if active_digest != read_object(ACCEPTED_REPORT).get("artifact_sha256"):
-        raise ValueError("active context model differs from the accepted context-v1 evaluation")
-    return {"schema_version": 1, "candidate": seal["model_version"], "promotion_passed": report["promotion_passed"],
-        "engine_promotion_passed": engine.get("promotion_passed"), "active_model_accepted": True,
+    return {**historical, "schema_version": 1, "candidate": seal["model_version"], "promotion_passed": False,
+        "engine_promotion_passed": False, "rejected_candidate_not_active": True,
         "active_artifact_sha256": active_digest,
         "artifact_sha256": seal["artifact_sha256"], "corpus_rows": cast(dict[str, object], seal["audit"])["rows"]}
 
 
-def main() -> int:
-    print(json.dumps(verify(), ensure_ascii=False, indent=2))
+def verify_frozen(directory: Path = CORPUS_ROOT, active: Path = ARTIFACT_PATH) -> dict[str, object]:
+    """Repeat the four observed numeric tracks; never fit or write a report."""
+    historical = verify(directory, active)
+    expected = read_object(directory / REPORT)
+    frames, cache = all_frames(), load_cache()
+    candidate = ContextModel.load(directory / ARTIFACT)
+    baseline = ContextModel.load(directory / "baseline-context-v1.json")
+    if candidate.feature_version != 2 or baseline.feature_version != 2:
+        raise ValueError("historical numeric replay requires feature-2 models")
+    results: dict[str, object] = {}
+    failures: dict[str, list[str]] = {}
+    for split in ("test", "lexical_test"):
+        selected = [row for row in frames if row.split == split]
+        for profile in PROFILES:
+            current, previous = metrics(candidate, selected, profile, cache), metrics(baseline, selected, profile, cache)
+            name = split + ":" + profile
+            results[name] = {"candidate": current, "v1": previous}
+            failures[name] = promotion_failures(current, previous, cast(dict[str, object], config()["promotion"]))
+    reproduced = {**expected, "audit": audit(frames), "results": results,
+                  "promotion_failures": failures, "promotion_passed": not any(failures.values())}
+    if canonical(reproduced) != (directory / REPORT).read_bytes() or verify(directory, active) != historical:
+        raise ValueError("historical context-v2 numeric report changed")
+    return {**historical, "frozen_numeric_regression": True}
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--verify-frozen", action="store_true", help="Repeat historical numeric results without training or current-engine replay")
+    args = parser.parse_args(argv)
+    print(json.dumps(verify_frozen() if args.verify_frozen else verify(), ensure_ascii=True, indent=2))
     return 0
 
 

@@ -2,8 +2,8 @@
 
 The model is a four-class sparse softmax classifier. It receives the recent
 sentence, application/field evidence and the existing detector's lexical
-evidence. Weights are produced by tools/train_context_model.py, not rules in
-the runtime. Probabilities are synthetic-corpus scores, not a promise of
+evidence. The legacy trainer produces feature2 weights; the context action
+trainer produces feature3 weights. Probabilities are corpus scores, not a promise of
 real-world correctness. Hard safety/explicit user intent live in the engine.
 """
 
@@ -20,13 +20,23 @@ from pathlib import Path
 from typing import Final, Literal, cast
 
 from .input_context import FieldContext
+from .language_model import WordScore
+from .context_action_features import extract_action_features
 
 
 ContextAction = Literal["keep", "convert", "wait", "suggest"]
+AfterOrigin = Literal["none", "field", "planned_next_conversion"]
 ACTIONS: Final[tuple[ContextAction, ...]] = ("keep", "convert", "wait", "suggest")
 FEATURE_VERSION = 2
 MAX_ARTIFACT_BYTES = 8 * 1024 * 1024
 MAX_FEATURES = 50000
+# A correctly typed short token unknown to the lexicon cannot be told apart from
+# the same keys typed in the wrong layout when the other reading happens to be a
+# word or a command name and nothing else disambiguates it: an all-uppercase
+# acronym or brand in any context, or any such token standing alone. The model
+# may only suggest there. Two letters are already deferred by the corpus policy.
+SHORT_UNKNOWN_SOURCE_MAX_LENGTH: Final = 3
+SHORT_UPPERCASE_UNKNOWN_SOURCE_MAX_LENGTH: Final = SHORT_UNKNOWN_SOURCE_MAX_LENGTH
 ARTIFACT_PATH = Path(__file__).parent / "resources" / "models" / "context_policy_v1.json"
 _WORDS = re.compile(r"[^\W\d_]+(?:['’\-][^\W\d_]+)*", re.UNICODE)
 
@@ -42,6 +52,23 @@ class ContextEvidence:
     source_known: bool = False
     target_known: bool = False
     score_delta: float = 0.0
+    source_score: WordScore | None = None
+    target_score: WordScore | None = None
+    model_probability: float | None = None
+    model_threshold: float | None = None
+    literal_tail: str = ""
+    ortho_score: float | None = None
+    ortho_threshold: float | None = None
+    boundary_text: str = ""
+    after_origin: AfterOrigin = "none"
+    source_identifier: bool = False
+    target_identifier: bool = False
+
+    def __post_init__(self) -> None:
+        # Replacing literal field contents must not retain a stale empty flag.
+        # A planned conversion is explicit and remains subject to validation.
+        if self.after_origin in ("none", "field"):
+            object.__setattr__(self, "after_origin", "field" if self.field.after else "none")
 
 
 @dataclass(frozen=True)
@@ -124,10 +151,14 @@ class ContextModel:
     def __init__(
         self, weights: Mapping[str, tuple[float, ...]], version: str,
         conversion_threshold: float = 0.985,
+        *, feature_version: int = FEATURE_VERSION,
     ) -> None:
+        if type(feature_version) is not int or feature_version not in (FEATURE_VERSION, 3):
+            raise ValueError("incompatible context feature version")
         self.weights = dict(weights)
         self.version = version
         self.conversion_threshold = conversion_threshold
+        self.feature_version = feature_version
 
     @classmethod
     def load(cls, path: Path = ARTIFACT_PATH) -> ContextModel:
@@ -138,7 +169,8 @@ class ContextModel:
         payload: object = json.loads(raw)
         if not isinstance(payload, dict):
             raise ValueError("context model must be an object")
-        if payload.get("feature_version") != FEATURE_VERSION or payload.get("actions") != list(ACTIONS):
+        feature_version = payload.get("feature_version")
+        if type(feature_version) is not int or feature_version not in (FEATURE_VERSION, 3) or payload.get("actions") != list(ACTIONS):
             raise ValueError("incompatible context model")
         raw_weights: object = payload.get("weights")
         if not isinstance(raw_weights, dict) or not 0 < len(raw_weights) <= MAX_FEATURES:
@@ -155,11 +187,12 @@ class ContextModel:
             raise ValueError("context model checksum mismatch")
         version: object = payload.get("version")
         threshold: object = payload.get("conversion_threshold")
-        if not isinstance(version, str) or not version.startswith("context-v1-") or len(version) > 80:
+        prefix = "context-v1-" if feature_version == FEATURE_VERSION else "context-v3-"
+        if not isinstance(version, str) or not version.startswith(prefix) or len(version) > 80:
             raise ValueError("invalid context version")
         if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not 0.95 <= threshold <= 1.0:
             raise ValueError("unsafe context threshold")
-        return cls(weights, version, float(threshold))
+        return cls(weights, version, float(threshold), feature_version=feature_version)
 
     @classmethod
     def try_load(cls) -> tuple[ContextModel | None, str]:
@@ -169,22 +202,63 @@ class ContextModel:
             return None, str(error)
         return model, model.version
 
+    def supports_features(self, features: Mapping[str, float]) -> bool:
+        """Use the same language-support gate during calibration and inference."""
+
+        if self.feature_version == 3:
+            return all(any(
+                name in self.weights for name in features
+                if name.startswith(label + ":char:") and any(char.isalpha() for char in name.split(":", 4)[4])
+            ) for label in ("source", "target"))
+        return any(
+            name in self.weights
+            for name in features
+            if name.startswith(("pair:", "before:word:", "after:word:", "app:"))
+        )
+
+    def allows_automatic_conversion(self, features: Mapping[str, float]) -> bool:
+        """Shared by inference, calibration and epoch selection.
+
+        A token of at most three letters whose own reading is unknown to the
+        lexicon may only be suggested when it is all uppercase (an acronym or a
+        brand against the same keys in the other layout) or when no word stands
+        on either side of it (a chat word against a command name typed in the
+        wrong layout): with so little text both readings stay plausible.
+        """
+
+        if self.feature_version != 3 or "source:known:0" not in features:
+            return True
+        if not any(f"length:{length}" in features for length in range(1, SHORT_UNKNOWN_SOURCE_MAX_LENGTH + 1)):
+            return True
+        uppercase = features.get("source:case:upper") == 1.0
+        isolated = any(name.startswith("before:script:none:direction:") for name in features) and any(
+            name.startswith("after:script:none:direction:") for name in features)
+        return not (uppercase or isolated)
+
     def predict(self, item: ContextEvidence) -> ContextPrediction:
-        features = extract_context_features(item)
+        if self.feature_version == 3:
+            try:
+                features = extract_action_features(item)
+            except ValueError:
+                return ContextPrediction("suggest", 0.0, (0.0, 0.0, 0.0, 1.0), self.version, False)
+        else:
+            features = extract_context_features(item)
         scores = [0.0] * len(ACTIONS)
         for name, value in features.items():
             weights = self.weights.get(name)
             if weights is not None:
                 for index, weight in enumerate(weights):
                     scores[index] += weight * value
+        if self.feature_version == 3 and not all(math.isfinite(score) for score in scores):
+            return ContextPrediction("suggest", 0.0, (0.0, 0.0, 0.0, 1.0), self.version, False)
         probabilities = softmax(scores)
         selected = max(range(len(ACTIONS)), key=probabilities.__getitem__)
         action = ACTIONS[selected]
         if action == "convert" and probabilities[selected] < self.conversion_threshold:
             action = "suggest"
-        supported = any(
-            name in self.weights
-            for name in features
-            if name.startswith(("pair:", "before:word:", "after:word:", "app:"))
-        )
+        if self.feature_version == 3 and action == "convert" and not self.allows_automatic_conversion(features):
+            action = "suggest"
+        supported = self.supports_features(features)
+        if self.feature_version == 3 and not supported and action in {"keep", "convert"}:
+            action = "suggest"
         return ContextPrediction(action, probabilities[selected], probabilities, self.version, supported)

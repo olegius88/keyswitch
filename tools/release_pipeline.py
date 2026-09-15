@@ -58,6 +58,7 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import environment_probe  # noqa: E402
+from verify_intent_strict_report import strict_gate_problems  # noqa: E402
 
 
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
@@ -1240,11 +1241,9 @@ def strict_report_facts(
         "model_checksum": model.get("checksum"),
         "performance": report.get("performance"),
     }
-    problems: list[str] = []
+    problems = strict_gate_problems(gates)
     if not passed:
         problems.append("strict_passed is not true")
-    if failed:
-        problems.append("failed strict gates: " + ", ".join(failed))
     if model.get("checksum") != expected_sha256:
         problems.append("strict report checksum differs from the evaluated artifact")
     if model.get("version") != expected_version:

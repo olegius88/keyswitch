@@ -93,13 +93,13 @@ PRESEALED_SPLITS: Final[tuple[SplitName, ...]] = (
     "threshold",
 )
 SEALED_TEST_SPLITS: Final[tuple[SplitName, ...]] = ("test",)
-SPLIT_NAMESPACE: Final[str] = "keyswitch:intent-v21:physical-signature"
+SPLIT_NAMESPACE: Final[str] = "keyswitch:intent-v23:physical-signature"
 SPLIT_HASH_NAMESPACE: Final[bytes] = SPLIT_NAMESPACE.encode("ascii") + b"\0"
 SEALED_REGISTRY_RELATIVE_PATH: Final[str] = (
-    "model/intent_v1/seal-registry-v21.json"
+    "model/intent_v1/seal-registry-v23.json"
 )
 SEALED_OUTCOME_RELATIVE_PATH: Final[str] = (
-    "model/intent_v1/seal-outcome-v21.json"
+    "model/intent_v1/seal-outcome-v23.json"
 )
 SEALED_OUTCOME_SECTIONS: Final[tuple[str, ...]] = (
     "sealed_test",
@@ -115,16 +115,16 @@ UNKNOWN_TYPO_DEVELOPMENT_CHOICE_NAMESPACE: Final[str] = (
     "keyswitch:intent-v1:unknown-typo-choice"
 )
 UNKNOWN_TYPO_HOLDOUT_RANK_NAMESPACE: Final[str] = (
-    "keyswitch:intent-v21:unknown-typo-holdout-rank"
+    "keyswitch:intent-v23:unknown-typo-holdout-rank"
 )
 UNKNOWN_TYPO_HOLDOUT_CHOICE_NAMESPACE: Final[str] = (
-    "keyswitch:intent-v21:unknown-typo-holdout-choice"
+    "keyswitch:intent-v23:unknown-typo-holdout-choice"
 )
 HARD_NEGATIVE_ROLE_NAMESPACE: Final[str] = (
-    "keyswitch:intent-v21:unknown-typo-development-role"
+    "keyswitch:intent-v23:unknown-typo-development-role"
 )
 HARD_NEGATIVE_SOURCE_RELATIVE_PATH: Final[str] = (
-    "model/intent_v1/unknown-typo-development-v21.json"
+    "model/intent_v1/unknown-typo-development-v23.json"
 )
 SAFETY_COLLISION_MINIMUM_WORD_LENGTH: Final[int] = 3
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
@@ -150,7 +150,7 @@ DEVELOPMENT_FREEZER_PATH: Final[Path] = (
     PROJECT_ROOT / "tools/freeze_intent_development_corpus.py"
 )
 PRESEAL_RECEIPT_PATH: Final[Path] = (
-    PROJECT_ROOT / "model/intent_v1/holdout-v21-preseal.json"
+    PROJECT_ROOT / "model/intent_v1/holdout-v23-preseal.json"
 )
 MAX_TRAINING_CONFIG_BYTES: Final[int] = 1 << 16
 MAX_FROZEN_SOURCE_BYTES: Final[int] = 1 << 26
@@ -357,7 +357,7 @@ class HardNegativeDevelopmentPolicy:
             )
         if self.role_namespace != HARD_NEGATIVE_ROLE_NAMESPACE:
             raise ValueError(
-                "hard-negative development role namespace must match v21"
+                "hard-negative development role namespace must match v23"
             )
         counts = self.role_counts()
         if any(
@@ -2775,11 +2775,11 @@ def _decode_hard_negative_development_corpus(
     if _integer(root, "schema_version") != 1:
         raise ValueError("unsupported frozen hard-negative corpus schema")
     if _string(root, "policy") != (
-        "keyswitch-intent-v21-frozen-unknown-typo-development"
+        "keyswitch-intent-v23-frozen-unknown-typo-development"
     ):
-        raise ValueError("hard-negative corpus policy must match v21")
+        raise ValueError("hard-negative corpus policy must match v23")
     if _string(root, "role_namespace") != HARD_NEGATIVE_ROLE_NAMESPACE:
-        raise ValueError("hard-negative corpus role namespace must match v21")
+        raise ValueError("hard-negative corpus role namespace must match v23")
     if _string(root, "rank_namespace") != (
         UNKNOWN_TYPO_DEVELOPMENT_RANK_NAMESPACE
     ) or _string(root, "choice_namespace") != (

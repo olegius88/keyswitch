@@ -185,7 +185,9 @@ class ContextEngineTests(InputIntegrityTests):
     def test_bundled_trained_model_resolves_user_phrase_and_retains_code(self) -> None:
         model = self.engine.context_policy.model
         assert model is not None
-        self.assertTrue(model.version.startswith("context-v1-"))
+        self.assertIn(model.feature_version, (2, 3))
+        prefix = "context-v1-" if model.feature_version == 2 else "context-v3-"
+        self.assertTrue(model.version.startswith(prefix))
         self.type("e ")
         self.assertEqual(self.backend.text, "e ")
         self.assertEqual(self.engine.snapshot.context_action, "wait")

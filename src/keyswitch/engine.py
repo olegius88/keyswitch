@@ -33,11 +33,8 @@ from .context_access import PlatformFieldReader
 from .input_context import FieldContext, FieldReader
 from .prefix_model import PrefixInput, PrefixModel
 from .settings_diagnostics import setting_change, settings_snapshot
-from .short_words import (
-    is_short_word_override,
-    natural_short_source_veto,
-    trusted_short_word_decision,
-)
+from .short_words import is_short_word_override
+from .word_decision import automatic_word_decision
 
 
 MODIFIER_KEYS = {
@@ -1190,6 +1187,7 @@ class KeySwitchEngine:
                 application,
                 self._trigger_for_boundary(boundary),
                 literal_tail="".join(stroke.character for stroke in trailing),
+                boundary_text=boundary.character,
             )
             excluded = self._application_excluded(application)
             joint = None if trailing or head else self._resolve_context_wait(waiting, strokes, boundary, decision, application)
@@ -1443,6 +1441,35 @@ class KeySwitchEngine:
         )
         return not decision.should_convert
 
+    def _planned_baseline(
+        self, original: str, alternatives: dict[int, str], source_group: int,
+        next_word: str, next_group: int,
+    ) -> DetectionDecision:
+        """The detector's verdict on a waiting word once its planned next word is known.
+
+        Same settings as the ordinary word decision; the only context is the
+        converted next word and its language, which is what the corpus curriculum
+        supplies for planned frames.
+        """
+        ignored_words: list[str] = self.settings.get("exclusions.words", [])
+        rejected_targets = (
+            self.learning.rejected_targets(source_group, original)
+            if bool(self.settings.get("detection.learning", True))
+            else set()
+        )
+        forced_target = self._forced_target_group(source_group, original)
+        return automatic_word_decision(
+            self.detector, original, alternatives, source_group,
+            minimum_length=(1 if forced_target is not None else int(self.settings.get("detection.minimum_length", 3))),
+            confidence_threshold=float(self.settings.get("detection.confidence", 2.0)),
+            ignored_words=set(ignored_words),
+            aggressive=bool(self.settings.get("detection.aggressive", False)),
+            protect_code=bool(self.settings.get("detection.protect_code", True)),
+            previous_words={next_group: next_word}, context_group=next_group,
+            forced_target_group=forced_target, rejected_targets=rejected_targets, trigger="space",
+            use_intent_model=bool(self.settings.get("detection.intent_model_enabled", True)),
+        )
+
     def _decide_word(
         self,
         original: str,
@@ -1450,7 +1477,7 @@ class KeySwitchEngine:
         source_group: int,
         application: str,
         trigger: CorrectionTrigger = "space",
-        *, literal_tail: str = "",
+        *, literal_tail: str = "", boundary_text: str = "",
     ) -> DetectionDecision:
         self._context_result = None
         context_words, context_group = self._context_for(application)
@@ -1463,7 +1490,8 @@ class KeySwitchEngine:
         )
         protect_code = bool(self.settings.get("detection.protect_code", True))
         forced_target = self._forced_target_group(source_group, original)
-        decision = self.detector.decide(
+        decision = automatic_word_decision(
+            self.detector,
             original,
             alternatives,
             source_group,
@@ -1484,21 +1512,6 @@ class KeySwitchEngine:
                 self.settings.get("detection.intent_model_enabled", True)
             ),
         )
-        decision = natural_short_source_veto(
-            decision,
-            context_group=context_group if context_aware else None,
-        )
-        short_decision = None if decision.should_convert else trusted_short_word_decision(
-            self.detector,
-            original,
-            alternatives,
-            source_group,
-            ignored_words=ignored_words,
-            rejected_targets=rejected_targets,
-            protect_code=protect_code,
-            context_group=context_group if context_aware else None,
-        )
-        decision = decision if short_decision is None else short_decision
         if (
             not context_aware or forced_target is not None or trigger == "boundary_probe"
             or self.detector.token_key(original) in {self.detector.token_key(word) for word in ignored_words}
@@ -1514,7 +1527,7 @@ class KeySwitchEngine:
             decision, alternative, group, self.detector, trigger,
             str(self.settings.get("detection.context_policy", "assist")),
             read_field=bool(self.settings.get("detection.context_read_field", False)),
-            literal_tail=literal_tail,
+            literal_tail=literal_tail, boundary_text=boundary_text,
         )
         self._context_result = result
         if result.field is not None and result.field.sensitive:
@@ -1583,9 +1596,19 @@ class KeySwitchEngine:
             return None
         group = decision.target_group
         alternative = self._text_for_group(previous.strokes, group)
+        # A feature-version-3 context model re-decides the waiting word with the
+        # converted next word as its language context, exactly as a word after an
+        # existing neighbour would be; the installed feature-version-2 model keeps
+        # the decision it was certified with.
+        model = self.context_policy.model
+        planned_baseline = (
+            self._planned_baseline(previous.original, {group: alternative}, previous.source_group, decision.replacement, group)
+            if model is not None and model.feature_version == 3 else waiting.decision)
         result = self.context_policy.decide(
-            waiting.decision, alternative, group, self.detector, "space", "assist",
+            planned_baseline, alternative, group, self.detector, "space", "assist",
             after=decision.replacement, field_override=waiting.field,
+            boundary_text=previous.boundary.character,
+            after_origin="planned_next_conversion",
         )
         if not result.decision.should_convert:
             self._log_context_wait("context_wait_cancelled", waiting, "lookahead_not_converted")

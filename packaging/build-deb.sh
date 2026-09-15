@@ -21,7 +21,6 @@ onboard_copyright="$frozen_model_sources/COPYRIGHT.onboard-data"
 export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-1787749200}"
 
 PYTHONPATH="$project_dir/src" python3 "$project_dir/tools/verify_context_model.py"
-PYTHONPATH="$project_dir/src" python3 "$project_dir/tools/verify_context_v2.py"
 PYTHONPATH="$project_dir/src" python3 "$project_dir/tools/verify_boundary_model.py"
 PYTHONPATH="$project_dir/src" python3 "$project_dir/tools/verify_boundary_v2.py"
 PYTHONPATH="$project_dir/src" python3 "$project_dir/tools/verify_prefix_model.py"

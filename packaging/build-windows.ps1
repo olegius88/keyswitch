@@ -884,7 +884,7 @@ def main() -> None:
         "environment_probe_sha256": "tools/environment_probe.py",
         "preseal_generator_sha256": "tools/preseal_intent_holdout.py",
         "development_freezer_sha256": "tools/freeze_intent_development_corpus.py",
-        "preseal_receipt_sha256": "model/intent_v1/holdout-v21-preseal.json",
+        "preseal_receipt_sha256": "model/intent_v1/holdout-v23-preseal.json",
     }
     for field, relative_path in toolchain_paths.items():
         expected_digest = exact_sha256(
@@ -1147,11 +1147,11 @@ if ($RussianSourcePolicy.path -cne "model/intent_v1/sources/ru_RU.lm") {
 if ($LicenseSourcePolicy.path -cne "model/intent_v1/sources/COPYRIGHT.onboard-data") {
     throw "Frozen license-evidence path differs from the packaging contract"
 }
-if ($HardNegativeSourcePolicy.path -cne "model/intent_v1/unknown-typo-development-v21.json") {
+if ($HardNegativeSourcePolicy.path -cne "model/intent_v1/unknown-typo-development-v23.json") {
     throw "Frozen hard-negative source path differs from the packaging contract"
 }
 
-$HardNegativeSource = Join-Path $ProjectDirectory "model\intent_v1\unknown-typo-development-v21.json"
+$HardNegativeSource = Join-Path $ProjectDirectory "model\intent_v1\unknown-typo-development-v23.json"
 $null = Get-VerifiedFrozenFileHash `
     -Path $HardNegativeSource `
     -ExpectedBytes ([long]$HardNegativeSourcePolicy.bytes) `
@@ -1322,14 +1322,17 @@ $ModelContractValidatorPath = Join-Path `
     $StrictUtf8
 )
 $env:PYTHONPATH = Join-Path $ProjectDirectory "src"
-Invoke-NativeCommand `
+$ActiveContextLines = @(Invoke-NativeCommand `
     -Command "python" `
     -Arguments @((Join-Path $ProjectDirectory "tools\verify_context_model.py")) `
-    -FailureMessage "Context model provenance or quality gate failed"
-Invoke-NativeCommand `
-    -Command "python" `
-    -Arguments @((Join-Path $ProjectDirectory "tools\verify_context_v2.py")) `
-    -FailureMessage "Context corpus evidence changed or rejected candidate was activated"
+    -FailureMessage "Active context model provenance or quality gate failed")
+$ActiveContext = ($ActiveContextLines -join "`n") | ConvertFrom-Json
+if ($ActiveContext.quality_gates_passed -isnot [bool] -or $ActiveContext.quality_gates_passed -ne $true `
+    -or $ActiveContext.feature_version -notin @(2, 3) `
+    -or $ActiveContext.artifact_sha256 -cnotmatch '^[a-f0-9]{64}$' `
+    -or $ActiveContext.model_version -isnot [string] -or $ActiveContext.model_version.Length -gt 80) {
+    throw "Active context verifier returned an invalid identity"
+}
 $env:PYTHONPATH = @((Join-Path $ProjectDirectory "src"), (Join-Path $ProjectDirectory "tools")) -join [System.IO.Path]::PathSeparator
 Invoke-NativeCommand `
     -Command "python" `
@@ -1477,13 +1480,10 @@ $PrefixSeal = Read-BoundedJsonObject `
 if ((Get-BytesSha256 -Bytes $BundledPrefixBytes) -cne $PrefixSeal.candidate_sha256) {
     throw "Native distribution contains a different prefix model"
 }
-$ContextReport = Read-BoundedJsonObject `
-    -Path (Join-Path $ProjectDirectory "model\context_v1\report.json") `
-    -MaximumBytes 1MB -Label "context-model quality report"
 [byte[]]$BundledContextBytes = Read-BoundedFileBytes `
     -Path $BundledContextModel -MaximumBytes 8MB -MinimumBytes 2 `
     -Label "bundled contextual model"
-if ((Get-BytesSha256 -Bytes $BundledContextBytes) -cne $ContextReport.artifact_sha256) {
+if ((Get-BytesSha256 -Bytes $BundledContextBytes) -cne $ActiveContext.artifact_sha256) {
     throw "Native distribution contains a different contextual model"
 }
 [byte[]]$BundledIntentModelBytes = Read-BoundedFileBytes `
@@ -1578,7 +1578,7 @@ $PostBuildDiagnostics = Read-BoundedJsonObject `
     -Path $PostBuildDiagnosticsPath `
     -MaximumBytes 1MB `
     -Label "post-build executable diagnostics"
-if ($PostBuildDiagnostics.context_model.available -ne $true -or $PostBuildDiagnostics.context_model.status -cne $ContextReport.model_version) {
+if ($PostBuildDiagnostics.context_model.available -ne $true -or $PostBuildDiagnostics.context_model.status -cne $ActiveContext.model_version) {
     throw "Post-build executable cannot load its exact contextual model"
 }
 if ($PostBuildDiagnostics.context_field_access.available -ne $true) {

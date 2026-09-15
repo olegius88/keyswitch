@@ -21,6 +21,11 @@ entirely locally and using the active EN/RU system layout pair.
 [Input troubleshooting](docs/troubleshooting.md) ·
 [Verification, builds and releases](docs/verification.md) (guides in Russian)
 
+The latest published stable release is
+[0.22.0](https://github.com/olegius88/keyswitch/releases/tag/v0.22.0).
+The changes are listed in [CHANGELOG.md](CHANGELOG.md) and the known defects
+of the release in [RELEASE_NOTES.md](RELEASE_NOTES.md).
+
 ## Features
 
 - global input observation through `WH_KEYBOARD_LL` on Windows and XRecord in
@@ -92,9 +97,11 @@ identity; for example, it can wait for the next word in `e 'njuj` → `у это
 `assist` is enabled by default; `shadow` leaves automatic decisions to the
 baseline detector. Optional reading of existing field text through OS
 accessibility is off by default. Quality is not established for real chats.
-The expanded corpus exposed limitations of both the shipping model and a new
-candidate; the candidate failed its quality conditions and **is not deployed**.
-The shipping contextual weights remain those introduced in 0.15.0.
+The expanded [context-v2 corpus](model/context_v2/README.md) exposed limitations
+of both its baseline and candidate; the candidate failed its quality conditions
+and **is not deployed**. Contextual weights have changed since 0.15.0; the
+[context-v1 report](model/context_v1/report.json) identifies the current artifact.
+[Context-v3](model/context_v3/README.md) remains experimental and is not installed.
 See [settings, training, privacy and limits](docs/context-assistant.md).
 
 On Windows, Enter/Tab is intercepted before delivery: the word is corrected
@@ -110,11 +117,11 @@ scenarios and platform limitations.
 
 ## Install on Windows
 
-Download `KeySwitch-Setup-0.21.0-x64.exe` from the
-[latest release](https://github.com/olegius88/keyswitch/releases/latest) and run
+Download `KeySwitch-Setup-0.22.0-x64.exe` from the
+[published 0.22.0 release](https://github.com/olegius88/keyswitch/releases/tag/v0.22.0) and run
 it. The per-user installation goes to `%LOCALAPPDATA%\Programs\KeySwitch` and
 does not require administrator privileges. The release also includes the
-portable `KeySwitch-0.21.0-windows-x64.zip` archive.
+portable `KeySwitch-0.22.0-windows-x64.zip` archive.
 
 After launch, KeySwitch appears in the notification area. Left- or right-click
 the `EN/RU` or flag icon to open its menu. Its Switch to action always offers
@@ -180,12 +187,12 @@ Probe the system backend without opening the application window:
 
 ## Install the Debian package
 
-Download `keyswitch_0.21.0_amd64.deb` from the
-[latest release](https://github.com/olegius88/keyswitch/releases/latest), then
+Download `keyswitch_0.22.0_amd64.deb` from the
+[published 0.22.0 release](https://github.com/olegius88/keyswitch/releases/tag/v0.22.0), then
 install it with:
 
 ```bash
-sudo apt install ./keyswitch_0.21.0_amd64.deb
+sudo apt install ./keyswitch_0.22.0_amd64.deb
 ```
 
 The package installs the required system dependencies and adds KeySwitch to the
@@ -373,7 +380,7 @@ score. The trainer invokes the same runtime extractor with the same seeds and
 n-gram orders, giving exact train/serve feature parity. A train-only EN/RU scorer
 remains as separate, checked provenance but is not a classifier input.
 Physical signatures are partitioned under
-`keyswitch:intent-v21:physical-signature`. Before row generation, the independent
+`keyswitch:intent-v23:physical-signature`. Before row generation, the independent
 candidate phase quarantines every identity or typo signature owned by different
 pre-sealed splits/languages, or overlapping a protected/safety token. Sealed-test
 rows and their quarantine are built only after the exact candidate SHA has been
@@ -381,7 +388,7 @@ atomically claimed; the merge removes test signatures exposed by candidate
 rows, quarantine or safety data and never changes candidate rows.
 
 Schema 13 additionally consumes the byte-frozen
-`unknown-typo-development-v21.json`. It was built model-blind before training
+`unknown-typo-development-v23.json`. It was built model-blind before training
 from 5,000 EN and 5,000 RU Hunspell-unknown typos and compacted to one record
 per physical signature. An independent role namespace deterministically assigns
 each language half as 3,500/500/500/500 words across
@@ -492,7 +499,7 @@ positive introduced by the model relative to the deterministic fallback on the
 (recall 0.9463), while v20 passed every internal gate, the holdout (6 false
 positives among 60,000, recall 0.9445) and all 30 strict gates and became the
 current certified artifact.
-`holdout-v21-preseal.json` pins its SHA-256, namespaces, sizes and zero overlap
+`holdout-v23-preseal.json` pins its SHA-256, namespaces, sizes and zero overlap
 before a v20 model is loaded or evaluated; `model_loaded=false` and
 `metrics_evaluated=false` make that phase explicit.
 
@@ -612,7 +619,8 @@ Build the reproducible native Debian package with:
 sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
 ./tools/install-build-tools.sh .nuitka
 KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package="dist/keyswitch_0.21.0_$(dpkg --print-architecture).deb"
+package_version="$(sed -nE 's/^version = "([^"]+)"/\1/p' pyproject.toml | head -n 1)"
+package="dist/keyswitch_${package_version}_$(dpkg --print-architecture).deb"
 ./tools/verify-native-deb.sh "$package"
 ```
 
@@ -720,7 +728,7 @@ See [release and recovery procedures](docs/verification.md).
 - On Windows, UIPI prevents a regular process from injecting input into a
   window running at a higher integrity level. KeySwitch needs a matching level
   for that target window.
-- The Windows 0.21.0 Setup EXE is not yet signed with a publisher certificate.
+- The published Windows 0.22.0 Setup EXE is not signed with a publisher certificate.
 
 ## License
 

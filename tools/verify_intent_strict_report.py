@@ -31,6 +31,40 @@ MANIFEST_LIMIT_BYTES: Final[int] = 1024 * 1024
 ARTIFACT_LIMIT_BYTES: Final[int] = 14 * 1024 * 1024
 SHA256_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
 CURRENT_PATTERN: Final[re.Pattern[str]] = re.compile(r"current=([0-9a-f]{64})")
+REQUIRED_STRICT_GATES: Final[frozenset[str]] = frozenset(
+    {
+        "provenance",
+        "external_policy_schema",
+        "external_minimum_corpus_policy",
+        "external_trigger_expansion_policy",
+        "external_hunspell_provenance",
+        "hunspell_handle_snapshot_stability",
+        "runtime_threshold_selection_evidence",
+        "sealed_test",
+        "sealed_test_context_stress",
+        "safety",
+        "typo_unknown_recall",
+        "veto",
+        "fallback_regression",
+        "lexical_disjoint_size",
+        "lexical_disjoint_corpus_provenance",
+        "hunspell_hard_guard_regression",
+        "lexical_disjoint_recall",
+        "unknown_typo_development_provenance",
+        "unknown_typo_disjoint_size",
+        "unknown_typo_holdout_provenance",
+        "unknown_typo_holdout_disjointness",
+        "unknown_typo_model_evaluated",
+        "unknown_typo_false_positives",
+        "unknown_typo_recall",
+        "unknown_typo_raw_model_integrity",
+        "production_context_ensemble",
+        "artifact_size",
+        "load_latency",
+        "inference_latency",
+        "deterministic_inference",
+    }
+)
 
 # Mirrors the mapping enforced by packaging/build-windows.ps1 and by the
 # release pipeline; the preseal receipt path is derived from the registry.
@@ -69,6 +103,22 @@ REQUIRED_PROVENANCE: Final[frozenset[str]] = frozenset(
 
 class ReportRejected(Exception):
     """The report cannot stand in for a fresh strict evaluation."""
+
+
+def strict_gate_problems(gates: Mapping[str, object]) -> list[str]:
+    if not gates:
+        return ["strict_gates is empty"]
+    problems: list[str] = []
+    missing = sorted(REQUIRED_STRICT_GATES - gates.keys())
+    unexpected = sorted(gates.keys() - REQUIRED_STRICT_GATES)
+    failed = sorted(name for name, value in gates.items() if value is not True)
+    if missing:
+        problems.append("missing strict gates: " + ", ".join(missing))
+    if unexpected:
+        problems.append("unexpected strict gates: " + ", ".join(unexpected))
+    if failed:
+        problems.append("failed strict gates: " + ", ".join(failed))
+    return problems
 
 
 def sha256_bytes(payload: bytes) -> str:
@@ -153,11 +203,9 @@ def verify_report(
     if report.get("strict_passed") is not True:
         raise ReportRejected("strict_passed is not true")
     gates = as_object(report.get("strict_gates"), "strict_gates")
-    if not gates:
-        raise ReportRejected("strict_gates is empty")
-    failed = sorted(name for name, value in gates.items() if value is not True)
-    if failed:
-        raise ReportRejected("failed strict gates: " + ", ".join(failed))
+    gate_problems = strict_gate_problems(gates)
+    if gate_problems:
+        raise ReportRejected("; ".join(gate_problems))
 
     model = as_object(report.get("model"), "report.model")
     if model.get("checksum") != artifact_sha256:

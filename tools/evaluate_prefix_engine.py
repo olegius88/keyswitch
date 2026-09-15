@@ -18,10 +18,12 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
+from auxiliary_runtime_evidence import packaged_intent, runtime_provenance
 from context_corpus import ROOT
 from context_evidence import canonical, checksum, reference_models
 from prefix_corpus import DIRECTORY, PROFILES, rows
 from train_prefix_model import CANDIDATE, SEAL
+from verify_lexical_compatibility import verify as verify_compatibility
 from keyswitch.backend import KeyEvent
 from keyswitch.config import SettingsStore
 from keyswitch.early_switch import PrefixIndex, _dictionary_stems
@@ -41,13 +43,10 @@ PER_CATEGORY = 32
 
 
 def provenance() -> dict[str, str]:
-    paths = [Path(__file__), CANDIDATE, SEAL, ROOT / "src/keyswitch/engine.py",
-             ROOT / "src/keyswitch/context_policy.py", ROOT / "src/keyswitch/input_context.py",
-             ROOT / "src/keyswitch/prefix_model.py", ROOT / "src/keyswitch/early_switch.py",
-             ROOT / "src/keyswitch/boundary_model.py", ROOT / "src/keyswitch/boundary_policy.py",
-             ROOT / "src/keyswitch/resources/models/boundary-v2.json",
-             ROOT / "src/keyswitch/resources/models/context_policy_v1.json", ROOT / "tests/test_input_integrity.py"]
-    return {path.relative_to(ROOT).as_posix(): checksum(path) for path in paths}
+    return runtime_provenance(ROOT, [Path(__file__), CANDIDATE, SEAL, DIRECTORY / "corpus.json",
+        DIRECTORY / "lexical-compatibility.json", ROOT / "tools/prefix_corpus.py",
+        ROOT / "tools/train_prefix_model.py", ROOT / "tools/verify_lexical_compatibility.py",
+        ROOT / "model/intent_v1/compatibility/generation-config-v21.json"])
 
 
 def select(split: str) -> list[dict[str, object]]:
@@ -85,7 +84,9 @@ def replay(row: dict[str, object], model: PrefixModel | None, models: dict[int, 
         backend.text, backend.caret, backend.group = before, len(before), source
         def load(locale: str) -> LanguageModel:
             return models[0 if locale == "en_US" else 1]
-        with patch("keyswitch.engine.LanguageModel.load", side_effect=load), patch.object(backend, "active_application", return_value=application):
+        with patch("keyswitch.engine.LanguageModel.load", side_effect=load), \
+                patch("keyswitch.engine.LinearNgramModel.try_load_default", return_value=packaged_intent(ROOT)), \
+                patch.object(backend, "active_application", return_value=application):
             engine = KeySwitchEngine(settings, HistoryStore(root / "history.jsonl"), backend,
                                      context_reader=Reader(backend, cast(FieldRole, row["role"])))
             engine.prefix_model, engine._prefix_indexes = model, indexes
@@ -109,6 +110,8 @@ def replay(row: dict[str, object], model: PrefixModel | None, models: dict[int, 
 
 
 def evaluate(split: str) -> dict[str, object]:
+    verify_compatibility("prefix_v1")
+    runtime = provenance()
     selected = select(split)
     variants = {"shipping_no_prefix": None, "candidate": PrefixModel.load(CANDIDATE)}
     results: dict[str, dict[str, dict[str, int]]] = {}
@@ -143,8 +146,10 @@ def evaluate(split: str) -> dict[str, object]:
         and variant["candidate"]["early_restored"] >= .7 * variant["candidate"]["desired"]
         for variant in results.values()
     )
+    if provenance() != runtime:
+        raise ValueError("prefix runtime inputs changed during replay")
     return {"schema_version": 1, "split": split, "selection": "32 hash-ranked situations per category, selected before scoring",
-            "sequence_ids": [row["sequence"] for row in selected], "provenance": provenance(),
+            "sequence_ids": [row["sequence"] for row in selected], "provenance": runtime,
             "scope": "in-process physical keys/live layout/exact final text/two spaces; separate observed and simulated field contexts; not native OS proof",
             "results": results, "examples": failures, "passed": passed}
 

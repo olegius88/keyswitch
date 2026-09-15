@@ -10,12 +10,14 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
+from unittest.mock import patch
 
 TOOLS_PATH = str(Path(__file__).resolve().parents[1] / "tools")
 if TOOLS_PATH not in sys.path:
     sys.path.insert(0, TOOLS_PATH)
 
 import release_pipeline as pipeline  # noqa: E402
+from test_intent_strict_report import _declared_strict_gates  # noqa: E402
 
 
 def _options(**overrides: object) -> pipeline.Options:
@@ -162,6 +164,33 @@ class SelectionTests(unittest.TestCase):
 
 
 class ReportingTests(unittest.TestCase):
+    def test_strict_report_requires_every_declared_gate(self) -> None:
+        required = _declared_strict_gates()
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "strict.json"
+            for missing in (None, *sorted(required)):
+                with self.subTest(missing=missing):
+                    report = {
+                        "strict_passed": True,
+                        "strict_gates": {
+                            name: True for name in required if name != missing
+                        },
+                        "model": {"checksum": "a" * 64, "version": "intent-test"},
+                        "environment": {"probe": {"probe_sha256": "b" * 64}},
+                    }
+                    path.write_text(json.dumps(report), "utf-8")
+                    with patch(
+                        "release_pipeline.environment_probe.measure",
+                        return_value={"probe_sha256": "b" * 64},
+                    ):
+                        _facts, problems = pipeline.strict_report_facts(
+                            path, "a" * 64, "intent-test"
+                        )
+                    self.assertEqual(
+                        problems,
+                        [] if missing is None else ["missing strict gates: " + missing],
+                    )
+
     def test_changelog_sections_collect_entries_per_heading(self) -> None:
         sections = pipeline.changelog_sections(
             "# Changelog\n\n## Unreleased\n\n- one\n- two\n\n## 0.6.1 — 2026-09-02\n\n- three\n"

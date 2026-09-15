@@ -202,9 +202,9 @@ Hunspell snapshot намеренно меняется, сначала обнов
 ```bash
 sha256sum \
   model/intent_v1/config.json \
-  model/intent_v1/unknown-typo-development-v21.json \
-  model/intent_v1/holdout-v21-preseal.json \
-  model/intent_v1/seal-registry-v21.json \
+  model/intent_v1/unknown-typo-development-v23.json \
+  model/intent_v1/holdout-v23-preseal.json \
+  model/intent_v1/seal-registry-v23.json \
   model/intent_v1/manifest.json \
   model/intent_v1/test-report.json \
   src/keyswitch/resources/models/layout_intent_v1.ksm
@@ -214,13 +214,13 @@ sha256sum \
 
 | Файл | SHA-256 |
 | --- | --- |
-| `config.json` | `2a8105d749422e9a8ef2bf6894d848ee8fdaff11df948d42a952fea27eda4116` |
-| `unknown-typo-development-v21.json` | `61e02546fb05c2502b2535c512b0e11fad13042d25b1f4f70cff621a4e35686f` |
-| `holdout-v21-preseal.json` | `875d828cbdc8096d7b3258769c58cd886eb195f38b8ea0790714c1e9763c0b4d` |
-| `seal-registry-v21.json` | `dbe05a3b868232c7f46f57af174ceafa51693fcff0dd60331ff1b2349c588112` |
+| `config.json` | `76fde35bec793c2c1d6a168753e28cb1cb0c62ac63fa1da40a6d36c85c7fd532` |
+| `unknown-typo-development-v23.json` | `61e02546fb05c2502b2535c512b0e11fad13042d25b1f4f70cff621a4e35686f` |
+| `holdout-v23-preseal.json` | `875d828cbdc8096d7b3258769c58cd886eb195f38b8ea0790714c1e9763c0b4d` |
+| `seal-registry-v23.json` | `dbe05a3b868232c7f46f57af174ceafa51693fcff0dd60331ff1b2349c588112` |
 | `manifest.json` | `9c39b615ba90b94107be6bef0140ce9387e493bb6aae195f4a8d116021283da9` |
 | `test-report.json` | `f3c44b42c96ce654042d17c822d92bd3202a9d1b12d6b28e34e394531a10fa94` |
-| `layout_intent_v1.ksm` | `6048055c1d735c277b955785bc50a7f16f994fb24ac03bb616f53e3c078f099e` |
+| `layout_intent_v1.ksm` | `47f86818c4c1243daeabfafd50d03dd9884aa3973bb546191afe02c4092a3f4d` |
 
 ### Internal provenance без внешнего performance-прогона
 
@@ -250,10 +250,10 @@ PYTHONPATH=src python3 tools/preseal_intent_holdout.py \
   --config model/intent_v1/config.json \
   --en-model model/intent_v1/sources/en_US.lm \
   --ru-model model/intent_v1/sources/ru_RU.lm \
-  > "$work_root/holdout-v21-preseal.json"
+  > "$work_root/holdout-v23-preseal.json"
 
-diff -u model/intent_v1/holdout-v21-preseal.json \
-  "$work_root/holdout-v21-preseal.json"
+diff -u model/intent_v1/holdout-v23-preseal.json \
+  "$work_root/holdout-v23-preseal.json"
 
 jq -e '
   .model_loaded == false and
@@ -262,7 +262,7 @@ jq -e '
   .holdout.signature_count == 10000 and
   .overlap_counts.development_holdout == 0 and
   .overlap_counts.sealed_holdout == 0
-' "$work_root/holdout-v21-preseal.json"
+' "$work_root/holdout-v23-preseal.json"
 ```
 
 Это безопасная проверка: `preseal_intent_holdout.py` не принимает путь к KSLM,

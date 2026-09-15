@@ -4,7 +4,89 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
-## 0.21.0 — 2026-09-11
+## 0.22.0 — 2026-09-15
+
+- Publish everything since 0.20.0. The 0.21.0 section below was tagged but its
+  release job never produced assets, so this is the first published release
+  that carries those changes: the v23 layout-intent seal
+  (`intent-v1-b2a2ec8caa8d`), the frozen Hunspell inputs, the environment
+  probe and the orthotactic gating rules.
+- Re-fit the completed-word context policy against the v23 intent baseline:
+  `context-v1-a24683995ca4`, artifact SHA-256
+  `121e32d42939a9be6c9e6837bb7c4a5939778fcbf0c12b248e168225dba15f47`. Same
+  author-written scenarios, same gates: 36,618 synthetic rows, 16,539 of 17,658
+  desired conversions restored, 0 false conversions, against 13,905 restored by
+  the detector alone. Its report pins the runtime module it was evaluated with;
+  after the schema-3 work below changed that module, the pin was re-established
+  by replaying the training (`tools/train_context_model.py`) and checking that
+  the artifact came back byte for byte, not by editing the digest.
+- Ship the same prefix, boundary and orthotactic weights as before
+  (`prefix-v1-2f0c54bf546b`, `boundary-v2-3b2b1af6693e`,
+  `ortho-v1-bdb915e4f06f`) and re-verify their frozen evidence against this
+  engine instead of retraining them on CI. `tools/verify_lexical_compatibility.py`
+  attests that the lexical inputs the prefix and boundary corpora consumed are
+  unchanged and that the frozen corpus, candidate, seal and report bytes match
+  reviewed digests; `tools/verify_prefix_model.py --verify-frozen` and
+  `tools/verify_boundary_v2.py --verify-frozen` check the numeric regressions;
+  the engine replays were refreshed on the current runtime and pin the packaged
+  intent model (`tools/auxiliary_runtime_evidence.py`): boundary-v2 18 of 18
+  sequences exact with no correct word changed, prefix-v1 128 of 128 desired
+  restorations with no length mismatch. The rejected context-v2 keeps its
+  numeric history behind `tools/verify_context_v2.py --verify-frozen` and
+  `tools/verify_context_v2_history.py`; `tools/verify_context_model.py` is the
+  single active-model gate and picks the replay by feature schema. The
+  strict-report verifier refuses a report that lacks a required gate even when
+  every remaining gate passes.
+- One automatic word decision for the engine and the training tools.
+  `src/keyswitch/word_decision.py` (`automatic_word_decision`) is what the
+  engine calls for every completed word, and
+  `context_policy.evidence_for_decision` builds the context evidence the
+  engine, the trainer and the evaluator all see. Two earlier defects came from
+  corpora that mirrored the engine imperfectly; the tools now call the
+  engine's own functions.
+- Teach the context runtime feature schema 3 without installing it. The loader
+  accepts schema-3 artifacts (`context-v3-…`), `ContextModel` carries the
+  runtime masks a schema-3 model is calibrated with, the policy passes the
+  boundary character and the origin of the following text, and the engine
+  re-decides a waiting word against its planned next word for schema-3 models
+  only. Every schema-3 branch is inert for the installed schema-2 weights,
+  which the frozen engine replays above confirm. `tests/disclosed_regressions.py`
+  marks six authored regressions of the installed pair as expected failures;
+  they become hard assertions the moment a schema-3 model is installed.
+- Package two lexica for the research features: `resources/identifiers.json`
+  (14,160 command names from Debian trixie main, read through
+  `identifier_lexicon.py`; evidence for schema-3 features only) and
+  `resources/lexicon-supplement-ru_RU.json` (27,209 Russian forms from the
+  OpenSubtitles 2018 frequency list that the onboard `ru_RU.lm` lacks; read by
+  `tools/reference_lexicon.py` for training and evaluation only). The engine
+  and the early switch keep the certified onboard lexicon: the shipped models
+  were measured on it, and their frozen evidence pins it.
+- Move prefix feature schema two into `src/keyswitch/prefix_schema.py`.
+  `prefix_model.py` is pinned byte for byte by the prefix-v1 corpus, seal and
+  compatibility gate, so the second schema (characters of the observed prefix)
+  and the schema-aware loader live beside it; the engine keeps loading the
+  installed artifact through the frozen module, which still refuses a
+  schema-two artifact.
+- Research that did not ship, recorded so it is not mistaken for shipped work:
+  a context action classifier (schema 3, `model/context_v3/`) and a schema-two
+  prefix model (`model/prefix_v2/`), trained on physical-key sequences with a
+  natural lookahead curriculum, a test-only holdout frozen from UD Russian-GSD,
+  UD English-GUM and the Debian sid Contents index
+  (`tools/freeze_context_action_holdout.py`), and a joint acceptance protocol
+  with one sealed test per pair. The best pair passed every development and
+  calibration gate and failed the sealed test twice, by two rows each time
+  (corpus v4: net restorations below the baseline; corpus v5: two corrupted
+  correct words in the portable early-off mode). Nothing from it is installed.
+- Pin line endings for every file whose digest enters a model receipt,
+  including the frozen Hunspell dictionaries and the runtime and test harness
+  the action replay hashes, so a Windows checkout cannot invalidate a model on
+  one platform alone. The Windows packaging validator now reads the active
+  context verifier's identity and the v23 pre-seal receipt.
+
+## 0.21.0 — unpublished development, 2026-09-11
+
+These changes were tagged but did not produce a published release. They remain
+part of the work following the published 0.20.0 release.
 
 - Seal the layout-intent model against what the toolchain **computes**, not
   what it calls itself. The sealed candidate hash used to cover seven strings
@@ -31,7 +113,7 @@ All notable changes to KeySwitch are documented in this file.
 - Consume the sealed test's *answer* once, not just its ticket. Removing the
   environment from the identity gave up a side effect: a second look from
   another machine used to be refused before a sealed row was read.
-  `model/intent_v1/seal-outcome-v21.json` now records the digest of the sealed
+  `model/intent_v1/seal-outcome-v23.json` now records the digest of the sealed
   sections unconditionally - before the gates are computed, before publication,
   before a metric reaches any file - so a rerun that computes a different
   answer stops without printing one. A failing run consumes the answer too,
@@ -44,9 +126,9 @@ All notable changes to KeySwitch are documented in this file.
   all. A dictionary is an input to the evaluation, and this repository already
   freezes its other lexical inputs beside it. The frozen bytes are identical to
   the system ones today, so no corpus digest moved.
-- Rotate the sealed split namespace to `keyswitch:intent-v21:physical-signature`
-  and accept the candidate `intent-v1-d2f32ca5db58` with artifact SHA-256
-  `6048055c1d735c277b955785bc50a7f16f994fb24ac03bb616f53e3c078f099e`. The
+- Rotate the sealed split namespace to `keyswitch:intent-v23:physical-signature`
+  and accept the candidate `intent-v1-b2a2ec8caa8d` with artifact SHA-256
+  `47f86818c4c1243daeabfafd50d03dd9884aa3973bb546191afe02c4092a3f4d`. The
   certified toolchain changed, so the splits are re-cut and the sealed test is
   one this candidate has never been evaluated against.
 - Stop the release checklist from claiming a byte-identical replay it never
@@ -107,8 +189,11 @@ All notable changes to KeySwitch are documented in this file.
   without asking whether the token is a word. A counted case channel closes the
   abbreviation reading that the ratio alone leaves open. It only licenses a
   conversion where the detector abstained, never vetoes one, and never overrides
-  an explicit rule. Independent test: 0 false conversions on 23,137 negatives,
-  96.7% recall; the lowercased lexicon stress track reports its residue openly.
+  an explicit rule. Original sentence-group test: 0 false conversions on 23,137
+  negatives, 96.7% recall. Token-family overlap with training means this is not
+  an independent physical-family test; see the corrected
+  [scope](model/ortho_v1/README.md). The lowercased lexicon stress track reports
+  its residue openly.
 
 ## 0.19.1 — 2026-09-08
 

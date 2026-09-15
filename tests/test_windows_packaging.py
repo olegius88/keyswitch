@@ -56,9 +56,28 @@ class WindowsPackagingContractTests(unittest.TestCase):
         ]
         self.assertNotIn("build\\windows-models", default_section)
 
+    def test_context_packaging_uses_the_verified_active_identity(self) -> None:
+        for script in (self.script, self.deb_script):
+            self.assertIn("verify_context_model.py", script)
+            self.assertNotIn("verify_context_v2.py", script)
+        self.assertIn("$ActiveContextLines = @(Invoke-NativeCommand", self.script)
+        self.assertIn("$ActiveContext.artifact_sha256", self.script)
+        self.assertIn("$ActiveContext.model_version", self.script)
+        self.assertIn("$ActiveContext.quality_gates_passed -isnot [bool]", self.script)
+        self.assertNotIn("$ContextReport", self.script)
+        self.assertNotIn('"model\\context_v1\\report.json"', self.script)
+        for workflow in ("tests.yml", "release.yml"):
+            text = (PROJECT_ROOT / ".github/workflows" / workflow).read_text()
+            self.assertIn("tools/verify_context_model.py --replay", text)
+            self.assertIn("tools/verify_context_v2.py --verify-frozen", text)
+            self.assertNotIn("tools/train_context_model.py --verify", text)
+            self.assertNotIn("tools/train_context_v2.py verify", text)
+            for module in ("test_language_intent_regressions.py", "test_input_sequence_matrix.py", "test_word_decision.py"):
+                self.assertIn(module, text)
+
     def test_native_help_describes_the_v21_model_first_contract(self) -> None:
         for contract in (
-            "keyswitch:intent-v21:physical-signature",
+            "keyswitch:intent-v23:physical-signature",
             "Training config schema 13",
             "sole statistical",
             "coverage and language scores are diagnostic only",
@@ -101,7 +120,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(accepted.returncode, 0, accepted.stderr)
-        self.assertEqual(accepted.stdout.strip(), "intent-v1-d2f32ca5db58")
+        self.assertEqual(accepted.stdout.strip(), "intent-v1-b2a2ec8caa8d")
 
         required_contracts = (
             "KSLM_MAXIMUM_CONTAINER_BYTES = 14 * 1024 * 1024",
@@ -174,6 +193,42 @@ class WindowsPackagingContractTests(unittest.TestCase):
             self.script,
         )
 
+    def test_embedded_validator_rejects_a_missing_quality_gate(self) -> None:
+        match = re.search(
+            r"\$ModelContractValidator = @'\n(.*?)\n'@", self.script, re.DOTALL
+        )
+        self.assertIsNotNone(match)
+        assert match is not None
+        validator = match.group(1)
+        with tempfile.TemporaryDirectory() as temporary:
+            manifest_path = Path(temporary) / "manifest.json"
+            original = json.loads(
+                (PROJECT_ROOT / "model/intent_v1/manifest.json").read_text("utf-8")
+            )
+            required = original["quality_gate_breakdown"]
+            for missing in sorted(required):
+                with self.subTest(gate=missing):
+                    manifest = {
+                        **original,
+                        "quality_gate_breakdown": {
+                            name: value for name, value in required.items()
+                            if name != missing
+                        },
+                    }
+                    manifest_path.write_text(json.dumps(manifest), "utf-8")
+                    result = subprocess.run(
+                        [
+                            sys.executable, "-c", validator, str(PROJECT_ROOT),
+                            str(PROJECT_ROOT / "model/intent_v1/config.json"),
+                            str(manifest_path),
+                            str(PROJECT_ROOT / "src/keyswitch/resources/models/layout_intent_v1.ksm"),
+                        ],
+                        capture_output=True, text=True, check=False,
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("manifest.quality_gate_breakdown", result.stderr)
+                    self.assertIn(missing, result.stderr)
+
     def test_windows_preflight_verifies_the_certified_sealed_artifact(self) -> None:
         preflight = self.script[
             self.script.index("$ProjectDirectory =") : self.script.index(
@@ -242,7 +297,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
             "model/intent_v1/seal-registry-v13.json",
             "model/intent_v1/seal-registry-v15.json",
             "model/intent_v1/seal-registry-v18.json",
-            "model/intent_v1/seal-registry-v21.json",
+            "model/intent_v1/seal-registry-v23.json",
             "model/intent_v1/holdout-v6-preseal.json",
             "model/intent_v1/holdout-v7-preseal.json",
             "model/intent_v1/holdout-v8-preseal.json",
@@ -253,13 +308,13 @@ class WindowsPackagingContractTests(unittest.TestCase):
             "model/intent_v1/holdout-v13-preseal.json",
             "model/intent_v1/holdout-v15-preseal.json",
             "model/intent_v1/holdout-v18-preseal.json",
-            "model/intent_v1/holdout-v21-preseal.json",
+            "model/intent_v1/holdout-v23-preseal.json",
             "model/intent_v1/unknown-typo-development-v11.json",
             "model/intent_v1/unknown-typo-development-v12.json",
             "model/intent_v1/unknown-typo-development-v13.json",
             "model/intent_v1/unknown-typo-development-v15.json",
             "model/intent_v1/unknown-typo-development-v18.json",
-            "model/intent_v1/unknown-typo-development-v21.json",
+            "model/intent_v1/unknown-typo-development-v23.json",
             "model/intent_v1/rejection-v12.json",
             "model/intent_v1/rejection-v13.json",
             "model/intent_v1/rejection-v18.json",

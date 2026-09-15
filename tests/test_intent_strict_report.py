@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import shutil
@@ -73,7 +74,7 @@ def _synthetic_report() -> dict[str, object]:
         )
     return {
         "strict_passed": True,
-        "strict_gates": {"provenance": True, "safety": True, "sealed_test": True},
+        "strict_gates": {name: True for name in _declared_strict_gates()},
         "model": {
             "version": manifest["artifact_model_version"],
             "checksum": _sha256(ARTIFACT),
@@ -82,6 +83,19 @@ def _synthetic_report() -> dict[str, object]:
         "provenance": provenance,
         "toolchain_digest_sample": toolchain.get("trainer_sha256"),
     }
+
+
+def _declared_strict_gates() -> frozenset[str]:
+    source = ast.parse((PROJECT_ROOT / "tools/evaluate_intent_model.py").read_text("utf-8"))
+    for statement in source.body:
+        if (
+            isinstance(statement, ast.AnnAssign)
+            and isinstance(statement.target, ast.Name)
+            and statement.target.id == "STRICT_GATE_NAMES"
+            and isinstance(statement.value, ast.Call)
+        ):
+            return frozenset(ast.literal_eval(statement.value.args[0]))
+    raise AssertionError("evaluator strict gate contract is missing")
 
 
 class StrictReportVerifierTests(unittest.TestCase):
@@ -113,7 +127,7 @@ class StrictReportVerifierTests(unittest.TestCase):
     def test_report_bound_to_the_current_tree_is_accepted(self) -> None:
         summary = self._verify(_synthetic_report())
         self.assertEqual(summary["artifact_sha256"], _sha256(ARTIFACT))
-        self.assertEqual(summary["gate_count"], 3)
+        self.assertEqual(summary["gate_count"], len(_declared_strict_gates()))
         # Twelve hashed files plus tools/environment_probe.py, certified
         # since v21 so the environment probe cannot be quietly weakened.
         self.assertEqual(summary["verified_files"], 13)
@@ -129,6 +143,30 @@ class StrictReportVerifierTests(unittest.TestCase):
         self._assert_rejected(report, "strict_gates is empty")
         report["strict_passed"] = False
         self._assert_rejected(report, "strict_passed is not true")
+
+    def test_removing_any_required_gate_is_rejected(self) -> None:
+        for name in sorted(_declared_strict_gates()):
+            with self.subTest(gate=name):
+                report = _synthetic_report()
+                gates = report["strict_gates"]
+                assert isinstance(gates, dict)
+                del gates[name]
+                self._assert_rejected(report, "missing strict gates: " + name)
+
+    def test_unknown_gate_cannot_replace_a_required_gate(self) -> None:
+        report = _synthetic_report()
+        gates = report["strict_gates"]
+        assert isinstance(gates, dict)
+        del gates["safety"]
+        gates["unchecked_safety"] = True
+        self._assert_rejected(report, "missing strict gates: safety")
+
+    def test_unrecognized_gate_is_rejected(self) -> None:
+        report = _synthetic_report()
+        gates = report["strict_gates"]
+        assert isinstance(gates, dict)
+        gates["unexpected"] = True
+        self._assert_rejected(report, "unexpected strict gates: unexpected")
 
     def test_foreign_artifact_or_version_is_rejected(self) -> None:
         report = _synthetic_report()

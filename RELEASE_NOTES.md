@@ -1,211 +1,146 @@
-# KeySwitch 0.21.0
+# KeySwitch 0.22.0
 
 ## Русский
 
-Печать модели намерения теперь привязана к тому, что инструментарий
-**вычисляет**, а не к тому, как он себя называет. Плюс два отказа перед моделью
-орфотактики. Веса орфотактики не менялись; модель намерения перепечатана.
+Первый опубликованный выпуск после
+[KeySwitch 0.20.0](https://github.com/olegius88/keyswitch/releases/tag/v0.20.0).
+Тег 0.21.0 существует, но его сборка не была опубликована, поэтому все
+изменения 0.21.0 входят в этот выпуск. Полный перечень — в
+[CHANGELOG.md](CHANGELOG.md).
 
-### Обновление версий больше ничего не ломает само по себе
+### Файлы выпуска
 
-9 сентября `apt` пересобрал python3.14, не меняя версии языка. Ни одно число не
-изменилось — веса, пороги и калибровки воспроизводились побайтно, — но в
-`sys.version` сдвинулась дата сборки, а она входила в хеш кандидата. Выпуск
-встал.
+- `keyswitch_0.22.0_amd64.deb` — Ubuntu/Xubuntu, сеанс X11.
+- `KeySwitch-Setup-0.22.0-x64.exe` — установщик для Windows 10/11 x64. Он не
+  подписан сертификатом издателя: SmartScreen покажет предупреждение.
+- `KeySwitch-0.22.0-windows-x64.zip` — переносимый архив для Windows.
+- `SHA256SUMS` — контрольные суммы трёх файлов; сверьте их перед установкой.
 
-Семь строк, называвших машину сборки, вынесены из идентичности в
-`model/intent_v1/build-environment.json`. В `manifest.toolchain` остались только
-дайджесты кода и конфига. Гарантия не ослабла: веса и так входят в хеш
-кандидата, поэтому интерпретатор, считающий иначе, по-прежнему отвергается — по
-весам, а это честное основание.
+### Установленные модели
 
-Чтобы «считает иначе» можно было не только заметить, но и назвать, добавлен
-`tools/environment_probe.py`. Он измеряет ровно те примитивы, от которых зависит
-обучение: выражения FTRL как они написаны в трейнере, те самые функции libm,
-порядок суммирования, текстовые преобразования float, **исчерпывающий** обход
-всех 1 114 112 кодовых точек Unicode, цикл FNV, устойчивость сортировки,
-целочисленную арифметику и поток Mersenne Twister. Зонд не участвует в
-идентичности — его показания это провенанс, а его файл сертифицирован, чтобы
-пробу нельзя было втихую ослабить. Сдвиг `sqrt` на один ULP двигает ровно
-`float_arithmetic` и `libm`; подмена `NFC` — ровно `unicode`.
+| Слой | Версия |
+| --- | --- |
+| Намерение раскладки (intent) | `intent-v1-b2a2ec8caa8d` (запечатанный тест v23) |
+| Контекст завершённого слова | `context-v1-a24683995ca4` |
+| Ранний префикс | `prefix-v1-2f0c54bf546b` |
+| Граница слова | `boundary-v2-3b2b1af6693e` |
+| Орфотактика | `ortho-v1-bdb915e4f06f` |
 
-Словари Hunspell заморожены в `model/intent_v1/sources/hunspell/`. Оценка
-выводит из них свои лексические выборки, поэтому обычное обновление пакета
-валило выпуск, хотя обучение словарь не открывает вовсе. Замороженные байты
-сегодня совпадают с системными, так что ни один дайджест корпуса не сдвинулся.
+Контекстная модель переобучена на тех же авторских сценариях относительно
+intent-модели v23: 36 618 синтетических строк, 16 539 из 17 658 желаемых замен
+восстановлены, 0 ложных замен (детектор без неё восстанавливает 13 905). Это
+синтетические сценарии, а не измерение качества на реальном вводе. Веса
+префикса, границы и орфотактики не изменились; их замороженные свидетельства
+заново проверены на движке этого выпуска: граница — 18 из 18
+последовательностей точно, ни одно правильное слово не изменено; префикс —
+128 из 128 желаемых восстановлений без расхождений длины.
 
-Запечатанный тест теперь расходуется по **ответу**, а не только по билету:
-`seal-outcome-v21.json` фиксирует дайджест запечатанных секций безусловно —
-до расчёта гейтов, до публикации и до того, как метрика попадёт в любой файл.
-Повтор, давший другой ответ, останавливается, ничего не напечатав.
+### Известные дефекты
 
-Пространство нарезки переведено на `keyswitch:intent-v21:physical-signature`:
-инструментарий изменился, значит выборки перерезаны, и запечатанный тест —
-тот, против которого этот кандидат ещё не оценивался.
+Эти случаи воспроизведены целыми последовательностями клавиш на моделях
+именно этого выпуска и зафиксированы в тестах как ожидаемые падения
+(`tests/disclosed_regressions.py`). Кандидаты новых моделей, исправляющие
+часть из них, дважды не прошли независимый запечатанный тест и не
+установлены.
 
-### Два отказа перед моделью орфотактики
+- Раннее переключение может преждевременно перевести правильное русское
+  слово, если его начало совпадает с началом английского слова в другой
+  раскладке. Подтверждённый пример: `гифку` в комментарии редактора кода
+  превращается в `ubare`, и проверка завершённого слова уже не возвращает
+  исходный текст.
+- Короткие разговорные русские слова, набранные отдельно (`гифку`, `флуд`,
+  `лут`, `дюп`, `ютуб`, `зум`), могут быть заменены по паузе или по границе
+  слова.
+- Обход: выключить раннее переключение (`detection.early_switch`) или
+  исправление по паузе (`detection.correct_on_pause`), либо добавить слово в
+  исключения (`exclusions.words`). Клавиша отмены (по умолчанию `Ctrl+Alt+Z`)
+  возвращает исходный текст.
 
-- **Слово, которое знает словарь текущей раскладки, эта модель больше не
-  заменит — никогда.** `руку` — обычное русское слово, чьи клавиши пишут обычное
-  английское `here`; никакая символьная модель их не различит, и попытка
-  различать стоила порога, заглушавшего настоящие команды. Это гарантия по
-  построению, а не по статистике: словесные модели знают о таком токене больше,
-  и их отказ теперь окончателен.
-- **Знак, застрявший между букв, — не слово ни в одной раскладке.** `и"ю` — это
-  кавычка между двумя буквами, а не плохо написанный русский. Дефис и апостроф
-  внутри слова — другое дело: движок присоединяет их к слову до всякой проверки
-  на границу, поэтому `Я-то`, `из-за` и `don\'t` заменяются по-прежнему.
+Нулевые ошибки на выбранных проверках не доказывают отсутствие ошибок при
+любом возможном вводе.
 
-Оба отказа сужают то, о чём модель вообще спрашивают, и ни один не добавляет
-замен. Разница в поведении небольшая и вся в сторону безопасности.
+### Проверка выпуска
 
-### Почему веса прежние
+Идентичность intent-модели больше не включает строку с датой сборки Python;
+сведения об окружении сохраняются отдельно в
+[build-environment.json](model/intent_v1/build-environment.json), а код,
+конфигурация и байты модели по-прежнему проверяются по SHA256. Hunspell-словари
+оценки заморожены в репозитории. Проверка strict-отчёта отклоняет отсутствие
+обязательного условия, даже если все остальные условия успешны. Вспомогательные
+модели больше не переобучаются на CI: проверяются неизменность их лексических
+входов, замороженные байты и повтор на текущем движке. См.
+[методику проверки](docs/verification.md).
 
-Для этой модели построен отдельный измерительный конвейер (`model/ortho_v2/`).
-Он нашёл четыре дефекта в том, **как** модель измерялась: корпус расходился с
-движком в том, какой токен вообще до модели доходит; ЙЦУКЕН ставит точку и
-запятую на клавишу, которую американская раскладка пишет как `/`, отчего 16.9%
-русских токенов читались обратно как слова, которых никто не набирал; словарный
-отказ мерился по частотному списку, тогда как рантайм спрашивает ещё и Hunspell;
-и две модели сравнивались на выборке, часть которой одна из них видела при
-обучении.
-
-Ни один кандидат, построенный на исправленном измерении, не превзошёл
-установленную модель при честной калибровке. Веса не виноваты: подбор порядка и
-сглаживания (25 конфигураций) даёт 99.69% против нынешних 99.65%, а при идеальном
-пороге веса отделяют 99.7% нужных замен. Всё теряется на запасе над порогом, а
-запас велик потому, что хвост отрицательных примеров — это мусор и текст, сам
-набранный не в той раскладке.
-
-Семь способов отделить этот класс проверены и отвергнуты, каждый с числами.
-Последний из них важен: если не считать ошибкой замену там, где метке корпуса
-нельзя верить, порог падает и картина выглядит отличной — а движок начинает
-превращать `гифка` в `ubarf` и `Ютуб` в `Юne,`. Исключить метку не значит сделать
-токен безопасным для замены.
-
-### Известное и неисправленное
-
-Попутно нашёлся дефект самой выпущенной модели: `флуд`, `лут` и `дюп`
-преобразуются, хотя это обычные русские слова. Их нет ни в частотном списке, ни в
-Hunspell, поэтому словарный отказ до них не достаёт, а поднять порог значит
-потерять больше нужных замен, чем сберечь. Ручное преобразование горячей клавишей
-это отменяет, а обучение запоминает отказ.
-
-Технический журнал включается явно и может содержать анализируемые слова.
-Просматривайте его перед передачей. Приватные логи в выпуск не включены.
-LogCourier этим выпуском не обновляется.
-
-### Установка
-
-- Windows 10/11 x64: `KeySwitch-Setup-0.21.0-x64.exe` или
-  `KeySwitch-0.21.0-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.21.0_amd64.deb`.
-- Контрольные суммы: `SHA256SUMS`.
-
-Установщик Windows пока не подписан сертификатом издателя. Нативный Wayland
-не поддерживается. [Описание диагностики](https://github.com/olegius88/keyswitch/blob/v0.21.0/docs/troubleshooting.md).
+Технический журнал может содержать анализируемые слова. Просматривайте его
+перед передачей. Приватные логи и переписка не входят в состав выпуска.
 
 ## English
 
-The layout-intent seal now binds to what the toolchain **computes** rather than
-to what it calls itself, plus two refusals in front of the orthotactic model.
-The orthotactic weights are unchanged; the intent model is re-sealed.
+The first published release after
+[KeySwitch 0.20.0](https://github.com/olegius88/keyswitch/releases/tag/v0.20.0).
+The 0.21.0 tag exists, but its build was never published, so every 0.21.0
+change is part of this release. The full list is in
+[CHANGELOG.md](CHANGELOG.md).
 
-### A version bump no longer breaks anything on its own
+### Release files
 
-On 9 September `apt` rebuilt python3.14 without changing the language version.
-Not one number moved - weights, thresholds and calibration reproduced byte for
-byte - but the build date inside `sys.version` did, and that string was part of
-the candidate hash. The release stopped.
+- `keyswitch_0.22.0_amd64.deb` — Ubuntu/Xubuntu, X11 session.
+- `KeySwitch-Setup-0.22.0-x64.exe` — installer for Windows 10/11 x64. It is not
+  signed with a publisher certificate, so SmartScreen shows a warning.
+- `KeySwitch-0.22.0-windows-x64.zip` — portable archive for Windows.
+- `SHA256SUMS` — checksums of the three files; verify them before installing.
 
-The seven strings naming the build machine have left the identity for
-`model/intent_v1/build-environment.json`. `manifest.toolchain` now carries code
-and config digests only. Nothing is given up: the candidate hash already covers
-the weights, so an interpreter that computes differently is still refused - on
-the weights, which is the honest ground.
+### Installed models
 
-So that "computes differently" can be named rather than merely noticed,
-`tools/environment_probe.py` measures the primitives training actually depends
-on: the FTRL update as the trainer writes it, exactly the libm functions it
-calls, summation order, float text round-trips, an **exhaustive** walk of all
-1,114,112 Unicode code points, the FNV mixing loop, sort stability, integer
-arithmetic and the Mersenne Twister stream. The probe never votes on identity -
-its readings are provenance and its file is certified so it cannot be weakened
-unnoticed. A one-ULP change to `sqrt` moves exactly `float_arithmetic` and
-`libm`; a changed `NFC` moves exactly `unicode`.
+| Layer | Version |
+| --- | --- |
+| Layout intent | `intent-v1-b2a2ec8caa8d` (sealed test v23) |
+| Completed-word context | `context-v1-a24683995ca4` |
+| Early prefix | `prefix-v1-2f0c54bf546b` |
+| Word boundary | `boundary-v2-3b2b1af6693e` |
+| Orthotactics | `ortho-v1-bdb915e4f06f` |
 
-The Hunspell dictionaries are frozen into `model/intent_v1/sources/hunspell/`.
-The evaluation derives its lexical populations from them, so an ordinary
-package update failed the release although training never opens a dictionary at
-all. The frozen bytes are identical to the system ones today, so no corpus
-digest moved.
+The context model was re-fitted on the same author-written scenarios against
+the v23 intent model: 36,618 synthetic rows, 16,539 of 17,658 desired
+conversions restored, 0 false conversions (the detector alone restores 13,905).
+These are synthetic scenarios, not a measurement of quality on real input. The
+prefix, boundary and orthotactic weights are unchanged; their frozen evidence
+was re-verified on this release's engine: boundary 18 of 18 sequences exact
+with no correct word changed, prefix 128 of 128 desired restorations with no
+length mismatch.
 
-The sealed test is now consumed by its **answer** rather than only by its
-ticket: `seal-outcome-v21.json` records the digest of the sealed sections
-unconditionally - before the gates are computed, before publication, and before
-a metric reaches any file. A rerun that computes a different answer stops
-without printing one.
+### Known defects
 
-The split namespace is rotated to `keyswitch:intent-v21:physical-signature`:
-the certified toolchain changed, so the splits are re-cut and the sealed test is
-one this candidate has never been evaluated against.
+These cases are reproduced as whole keystroke sequences on the models of this
+very release and recorded in the test suite as expected failures
+(`tests/disclosed_regressions.py`). Candidate models that fix some of them
+failed the independent sealed test twice and are not installed.
 
-### Two refusals in front of the orthotactic model
+- The early switch can convert a correctly typed Russian word too early when
+  its beginning coincides with the beginning of an English word in the other
+  layout. Confirmed example: `гифку` in a code-editor comment becomes `ubare`,
+  and the completed-word check no longer sees the original text.
+- Short colloquial Russian words typed on their own (`гифку`, `флуд`, `лут`,
+  `дюп`, `ютуб`, `зум`) can be replaced on pause or at a word boundary.
+- Workaround: disable the early switch (`detection.early_switch`) or the
+  pause correction (`detection.correct_on_pause`), or add the word to the
+  exclusions (`exclusions.words`). The undo key (`Ctrl+Alt+Z` by default)
+  restores the original text.
 
-- **A word the dictionary of the current layout knows is never converted by this
-  model again.** `руку` is an ordinary Russian word whose keys spell the ordinary
-  English word `here`; no character model can separate them, and asking it to try
-  cost a threshold high enough to silence real commands. This is structural
-  rather than statistical: the word models know more about such a token, and
-  their refusal is now final.
-- **Punctuation caught between letters is not a word in either layout.** `и"ю` is
-  a quotation mark between two letters, not Russian written badly. A hyphen or an
-  apostrophe inside a token is a different matter — the engine joins those to the
-  word before it tests for a boundary — so `Я-то`, `из-за` and `don\'t` keep
-  their conversions.
+Zero observed errors on selected checks would not prove correctness for every
+possible input.
 
-Both refusals narrow what the model is asked about; neither adds a conversion.
-The behavioural difference is small and entirely on the safe side.
+### Release verification
 
-### Why the weights are unchanged
+The intent-model identity no longer includes the Python build-date string;
+environment details are recorded separately in
+[build-environment.json](model/intent_v1/build-environment.json), while code,
+configuration and model bytes remain bound by SHA256. The Hunspell
+dictionaries used by the evaluation are frozen in the repository. Strict-report
+validation rejects a missing required gate even when every remaining gate
+passes. The auxiliary models are no longer retrained on CI: the checks attest
+their unchanged lexical inputs, their frozen bytes and a replay on the current
+engine. See the [verification procedure](docs/verification.md) (in Russian).
 
-A separate measurement pipeline was built for this model (`model/ortho_v2/`). It
-found four defects in **how** the model was being measured: the corpus disagreed
-with the engine about which token reaches a model at all; the Russian layout puts
-the full stop and the comma on the key the US layout writes as `/`, so 16.9% of
-Russian tokens were read back as words nobody typed; the dictionary refusal was
-measured against the frequency list while the runtime also asks Hunspell; and the
-two models were compared on a population one of them had trained on.
-
-No candidate built on the corrected measurement beat the installed model under
-honest calibration. The weights are not at fault: sweeping order and smoothing
-(25 configurations) gives 99.69% against the current 99.65%, and at an ideal
-threshold the weights separate 99.7% of the wanted conversions. Everything is
-lost to the safety margin, and the margin is large because the negative tail is
-garbage and text that was itself typed in the wrong layout.
-
-Seven ways of separating that class were tried and rejected, each with its
-numbers. The last one matters: declining to count a conversion as an error where
-the corpus label cannot be trusted drops the threshold and makes everything look
-excellent — and makes the engine turn `гифка` into `ubarf` and `Ютуб` into
-`Юne,`. Excluding a label does not make the token safe to convert.
-
-### Known and unfixed
-
-Measuring the shipped model turned up a defect in it: `флуд`, `лут` and `дюп` are
-converted although they are ordinary Russian. They are in neither the frequency
-list nor Hunspell, so the dictionary refusal does not reach them, and raising the
-threshold to cover them costs more conversions than it saves. The manual hotkey
-undoes such a conversion and learning remembers the refusal.
-
-Technical logs can contain evaluated words: review them before sharing. Private
-logs are not published. This release does not update LogCourier.
-
-### Installation
-
-- Windows 10/11 x64: `KeySwitch-Setup-0.21.0-x64.exe` or
-  `KeySwitch-0.21.0-windows-x64.zip`.
-- Ubuntu 26.04 x64/X11: `sudo apt install ./keyswitch_0.21.0_amd64.deb`.
-- Checksums: `SHA256SUMS`.
-
-The Windows installer is not yet publisher-signed. Native Wayland is unsupported.
+Technical logs may contain evaluated words. Review them before sharing.
+Private logs and conversations are excluded from the release.

@@ -11,6 +11,7 @@ from pathlib import Path
 from collections.abc import Sequence
 from unittest.mock import patch
 
+from auxiliary_runtime_evidence import packaged_intent, runtime_provenance
 from keyswitch.backend import KeyEvent
 from keyswitch.boundary_model import BoundaryModel
 from keyswitch.boundary_policy import ARTIFACT, BoundaryPolicy
@@ -22,6 +23,7 @@ from keyswitch.layouts import LayoutPair
 from context_corpus import ROOT
 from context_evidence import canonical, checksum, reference_models
 from train_boundary_model import CANDIDATE, DIRECTORY
+from verify_lexical_compatibility import verify as verify_compatibility
 
 if str(ROOT / "tests") not in sys.path:
     sys.path.insert(0, str(ROOT / "tests"))
@@ -40,10 +42,11 @@ SCENARIOS = (
 
 
 def provenance() -> dict[str, str]:
-    paths = [Path(__file__), CANDIDATE, ARTIFACT, ROOT / "src/keyswitch/engine.py",
-             ROOT / "src/keyswitch/boundary_model.py", ROOT / "src/keyswitch/boundary_policy.py",
-             ROOT / "src/keyswitch/context_policy.py", ROOT / "tests/test_input_integrity.py"]
-    return {path.relative_to(ROOT).as_posix(): checksum(path) for path in paths}
+    return runtime_provenance(ROOT, [Path(__file__), CANDIDATE, ARTIFACT,
+        ROOT / "model/boundary_v2/corpus.json", ROOT / "model/boundary_v2/seal.json",
+        ROOT / "model/boundary_v2/lexical-compatibility.json", ROOT / "tools/train_boundary_model.py",
+        ROOT / "tools/verify_lexical_compatibility.py",
+        ROOT / "model/intent_v1/compatibility/generation-config-v21.json"])
 
 
 def replay(original: str, model: BoundaryModel | None, models: dict[int, LanguageModel]) -> tuple[str, int]:
@@ -58,7 +61,8 @@ def replay(original: str, model: BoundaryModel | None, models: dict[int, Languag
         backend = EditorBackend()
         def load(locale: str) -> LanguageModel:
             return models[0 if locale == "en_US" else 1]
-        with patch("keyswitch.engine.LanguageModel.load", side_effect=load):
+        with patch("keyswitch.engine.LanguageModel.load", side_effect=load), \
+                patch("keyswitch.engine.LinearNgramModel.try_load_default", return_value=packaged_intent(ROOT)):
             engine = KeySwitchEngine(settings, HistoryStore(root / "history.jsonl"), backend)
         engine.boundary_model = model
         early = 0
@@ -75,6 +79,8 @@ def replay(original: str, model: BoundaryModel | None, models: dict[int, Languag
 
 
 def evaluate() -> bytes:
+    verify_compatibility("boundary_v2")
+    runtime = provenance()
     models = reference_models(False)
     results: dict[str, object] = {}
     for label, model in (("legacy_no_segmentation", None), ("rejected_v1", BoundaryModel.load(CANDIDATE)),
@@ -91,8 +97,10 @@ def evaluate() -> bytes:
             rows.append({"original": original, "expected": expected + " ", "actual": actual, "before_hard_boundary": early})
         results[label] = {"rows": rows, "exact": exact, "changed_correct": changed_correct,
                           "injections_before_hard_boundary": premature, "length_mismatches": mismatched_length}
+    if provenance() != runtime:
+        raise ValueError("boundary runtime inputs changed during replay")
     return canonical({"schema_version": 1, "scope": "authored in-process regression; fixed physical keys/live layout; no native OS proof or independent model evaluation",
-                      "provenance": provenance(), "results": results})
+                      "provenance": runtime, "results": results})
 
 
 def main(argv: Sequence[str] | None = None) -> int:

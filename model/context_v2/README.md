@@ -1,9 +1,11 @@
 # Context policy, public-phrase experiment 1
 
-Status: **rejected for runtime promotion**. The shipping 0.15.0 weights are
-retained byte-for-byte. `candidate.json` is a research artifact, not a package
-resource and not an automatic upgrade. The default application mode and
-existing user settings are unchanged by this experiment.
+Status: **rejected for runtime promotion**. The comparison preserves the exact
+v1 weights that shipped at the time of this experiment in
+`baseline-context-v1.json`; that frozen baseline is not a declaration of the
+currently installed model. `candidate.json` is a research artifact, not a
+package resource or an automatic upgrade. This experiment did not change the
+default application mode or existing user settings.
 
 ## Data and separation
 
@@ -59,7 +61,7 @@ test. Subsequent experimentation needs a new candidate and independent test.
 The following are effective contextual-policy decisions, including its
 unsupported-context fallback to the detector, not only raw softmax classes.
 
-| Independent test | Required changes | Current v1 correct / false | Candidate correct / false |
+| Independent test | Required changes | Frozen v1 baseline correct / false | Candidate correct / false |
 | --- | ---: | ---: | ---: |
 | New phrase groups, portable | 10,115 | 8,024 / 4 | 7,006 / 1 |
 | New phrase groups, reference Hunspell | 10,115 | 7,678 / 24 | 6,987 / 1 |
@@ -79,10 +81,16 @@ not a claim about these new phrases or real chat quality.
 initially correct and wrong layouts (256 cases per policy). Physical key
 choices stay fixed; glyphs follow layout changes made by the engine.
 
-- Whole wrong-layout phrases restored: detector 77/128; current context v1
-  90/128; candidate 43/128.
-- Initially correct phrases changed: detector 1/128; v1 0/128; candidate 0/128.
+- Whole wrong-layout phrases restored in the current stored report: detector
+  80/128; frozen context v1 baseline 102/128; candidate 53/128.
+- Initially correct phrases changed: 0/128 for all three policies.
 - Length mismatches: zero for all three policies in this sample.
+
+The [historical report](engine-history/71d982a8278f3325ce758cd1324e9b2246272371772ba48f69cd529fa6c5046a.json)
+recorded 77/90/43 restorations and one changed correct phrase for the detector.
+Those numbers remain evidence about the earlier runtime. Refreshing the same
+observed cases is a runtime regression, not a new independent evaluation or
+proof that the current working tree has passed verification.
 
 This is an in-process visible-editor test using a portable dictionary,
 boundary-only corrections and no automatic learning. It does not validate
@@ -103,8 +111,11 @@ PYTHONPATH=src python3 tools/verify_context_v2.py
 Training replay requires a C compiler on Linux, not a GPU. The checked-in
 source snapshot and lexical cache make it independent of network access and
 installed Hunspell dictionaries. Fast metadata/provenance validation runs on
-both packaging platforms. It requires the shipping model to equal the frozen
-v1 comparison artifact, preventing accidental deployment of rejected weights.
+both packaging platforms. The historical verifier prohibits installing this
+rejected candidate and preserves its comparison evidence. Acceptance of the
+active model belongs to the separate feature-version-aware
+[shipping gate](../../tools/verify_context_model.py); it does not require every
+later accepted model to equal this experiment's frozen v1 baseline.
 
 The next research step is richer, carefully annotated intent/context evidence
 and error analysis on development data, followed by a fresh held-out test.

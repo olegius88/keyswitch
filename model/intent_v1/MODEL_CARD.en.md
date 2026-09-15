@@ -6,8 +6,8 @@ This card covers **baseline KSLM**, not the entire application. The contextual
 assistant introduced in 0.15.0 has separate features, weights and reports:
 [documentation](../../docs/context-assistant.md). The expanded
 [context-v2](../context_v2/README.md) candidate was rejected in 0.16.0.
-The figures below are the recorded v20 certification, not a current evaluation
-of `assist`. Checksums bind files and detect mismatches; they are not a publisher
+The figures below describe recorded baseline KSLM training in namespace v23,
+not an evaluation of `assist`. Checksums bind files and detect mismatches; they are not a publisher
 digital signature. Signed weights/FNV refer to a numeric sign, not authenticity;
 CRC32/SHA-256 alone do not authenticate the publisher.
 
@@ -23,51 +23,39 @@ word remain above the model.
 The model sends no text over the network, requires no NumPy, scikit-learn, ONNX
 or separate runtime, and executes one scalar pass over sparse features.
 
-## Certified v20 artifact
+## Current artifact: namespace v23
 
-The current artifact is `intent-v1-d2f32ca5db58`, 12,935,540 bytes, SHA-256
-`6048055c1d735c277b955785bc50a7f16f994fb24ac03bb616f53e3c078f099e`.
-Its build provenance is
-`d2f32ca5db583ff56284ea57c517c9728adbc85f46417d15922b3bea717c14e3`,
-config digest is
-`2a8105d749422e9a8ef2bf6894d848ee8fdaff11df948d42a952fea27eda4116`,
-and dataset digest is
-`b22247fc3c6e3762f8aa2f62a670adae0e19cc48742afa1a9e306a73f27aee82`.
-Epoch 45 was selected on development after 49 completed epochs; the container
-holds 765,166 nonzero weights and 1,029,480 exact membership fingerprints.
+`v23` identifies the KSLM training-data generation, not the application release.
+The current artifact is `intent-v1-b2a2ec8caa8d`, 12,917,635 bytes, SHA-256
+`47f86818c4c1243daeabfafd50d03dd9884aa3973bb546191afe02c4092a3f4d`.
+The [manifest](manifest.json) records build provenance
+`b2a2ec8caa8de95a796892d825cc80ac96e65fdf9ebf5269d922395eac55ce93`,
+config `76fde35bec793c2c1d6a168753e28cb1cb0c62ac63fa1da40a6d36c85c7fd532`,
+and dataset `ad74e2bfed82763f0f96a7fb26d24517220581502c9c000403fd908e20b80c0b`.
+Development selected epoch 2 of 6 completed epochs. The container holds
+751,494 nonzero weights and 1,030,660 membership fingerprints.
 
-The complete independent strict report, SHA-256
-`01cc92bfc293019377019ecdcd965af11a61ac3da8cdf3837915459bf9f1d525`,
-passed all 30 gates. On the model-blind unknown-typo holdout, the ensemble had
-6 false positives among 60,000 negatives (1 per 10,000-negative trigger
-slice), precision 0.999894133, specificity 0.9999 and recall 0.944483333;
-ordinary triggers have 0.946 recall and Pause has 0.9369. None of those 6
-false positives was introduced by the model relative to the deterministic
-fallback, which produces 48 false positives on its own; the model prevented 42
-of them. The upper 95% Wilson endpoint for every 1/10,000 negative trigger
-slice is 0.000566269 against the 0.001 limit. The internal sealed test shows 1
-false positive among 21,338 negatives for every ordinary trigger with recall
-0.954539064, and 0 false positives for Pause with recall 0.946712284. All seven
-production-context profiles passed. Across 5,000 measurements inference median
-is 0.581739 ms and p95 is 0.914246 ms; load median across 11 measurements is
-180.394173 ms and p95 is 193.493112 ms. These synthetic results are not an
-estimate of real user traffic. Every candidate's holdout is built in its own
-namespace, so 6/60,000 here, 12/60,000 for v15 and 0/60,000 for v14 are
-results on different samples rather than one metric.
+The [recorded test report](test-report.json) states that internal training
+gates passed. Space, tab and boundary_probe have 2 false positives among
+21,588 negatives and recall 0.955855105; enter and punctuation have 2 among
+21,588 and recall 0.955808783; pause has 1 among 21,588 and recall 0.945015749.
+The manifest SHA-256 is
+`b9b2e5b8eef2dac9cc275d4d5ed19d03ed8dffd54a9100156c63a2791a0bfba7`;
+the test-report SHA-256 is
+`3758bcde5746c7298e8c8e7f663cbf62067b3aefd20916b51a5e8956bb9fe013`.
+These lexical and synthetic results do not measure complete-switcher accuracy
+in real user input.
 
-Two independent full retraining runs were executed sequentially after the
-official train in the same Python/platform environment and wrote to distinct
-output paths. The comparison proved three-way byte identity across
-official/replay-a/replay-b for the KSLM, manifest and test report; their
-SHA-256 digests are respectively
-`6048055c1d735c277b955785bc50a7f16f994fb24ac03bb616f53e3c078f099e`,
-`9c39b615ba90b94107be6bef0140ce9387e493bb6aae195f4a8d116021283da9`, and
-`f3c44b42c96ce654042d17c822d92bd3202a9d1b12d6b28e34e394531a10fa94`. The
-independent strict evaluator, re-run against replay-a, also passed all 30
-gates; that report has SHA-256
-`5e77f44b857c9096cc306ce4de3232f81037df932d1d3b5c8ca01de8082404fc`. The complete
-baseline-v20 release contour, including both strict evaluations, the replays and native
-packaging, ran as one `tools/release_pipeline.py` run in 17.7 minutes.
+On 2026-09-12, the external [strict evaluator](../../tools/evaluate_intent_model.py)
+passed all 30 mandatory gates again. The full report SHA-256 is
+`6f163faf82fb99b5172f0ebd02009390f29490d6d657582955b783c9702b82af`;
+the separate verifier confirmed the model identity and 13 provenance files.
+The current tree still requires byte-identical replays, context checks and
+native packaging. The earlier 6/60,000 result,
+latency measurements and two replays from v20 do not certify these weights;
+they remain in the [historical v0.20.0 card](https://github.com/olegius88/keyswitch/blob/v0.20.0/model/intent_v1/MODEL_CARD.en.md).
+Neither an unchanged Python version label nor a recorded success flag replaces
+current byte verification and every mandatory quality gate.
 
 ## Training data and licensing
 
@@ -97,7 +85,7 @@ The byte-level provenance and checksums are documented in
 The split unit is not a row or a language but a physical key sequence. A
 Russian word is first mapped to US-keyboard coordinates. Before augmentation,
 the SHA-256 digest of that sequence in the
-`keyswitch:intent-v21:physical-signature` namespace assigns it to one of 40
+`keyswitch:intent-v23:physical-signature` namespace assigns it to one of 40
 stable buckets:
 
 - 26/40 (65%) — training;
@@ -125,22 +113,22 @@ remain byte-for-byte equivalent. The generated sides of the merged pairs are
 then audited again. Canonical SHA-256 values for both quarantines, the excluded test
 signatures and occurrence counts are part of model provenance.
 
-V20 uses an additional frozen source,
-`unknown-typo-development-v21.json`, created model-blind before training from
+The current v23 namespace uses an additional frozen source,
+`unknown-typo-development-v23.json`, created model-blind before training from
 the unknown-typo development corpus. It contains 10,000 unique physical
 signatures, 5,000 per language, and has no test role. The independent
-`keyswitch:intent-v21:unknown-typo-development-role` namespace assigns 3,500
+`keyswitch:intent-v23:unknown-typo-development-role` namespace assigns 3,500
 words per language to train and 500 each to development, calibration and
 threshold. The loader verifies source size and SHA-256, Hunspell `.dic`/`.aff`
 provenance, EN/RU physical equivalence, uniqueness, and the exact SHA-256 of
 120,000 re-expanded rows (two labels times six triggers). A complete row-level
 audit after merging again forbids cross-split, cross-language, safety and
 quarantine overlap. The compact source and freezer are part of toolchain
-provenance; the external v20 holdout uses distinct rank/choice namespaces.
+provenance; the external v23 holdout uses distinct rank/choice namespaces.
 
 `config.json` schema 13 also contains the `sealed_evaluation` schema 1 policy.
 Its repository-relative
-`registry_path: model/intent_v1/seal-registry-v21.json` is resolved from the
+`registry_path: model/intent_v1/seal-registry-v23.json` is resolved from the
 canonical project root, not from the location of a supplied config copy, and
 binds one candidate SHA to one `split_namespace`. After the complete pre-sealed
 gate passes — threshold/context, safety, selection veto, and trial runtime KSLM
@@ -480,12 +468,12 @@ recipes in the [cookbook](../../docs/intent-model-cookbook.md).
 ```bash
 (cd model/intent_v1/sources && sha256sum --check SHA256SUMS)
 PYTHONPATH=src:tools python3 tools/preseal_intent_holdout.py | \
-  diff -u model/intent_v1/holdout-v21-preseal.json -
+  diff -u model/intent_v1/holdout-v23-preseal.json -
 PYTHONPATH=src python3 tools/train_intent_model_release.py
 PYTHONPATH=src python3 tools/evaluate_intent_model.py --strict
 ```
 
-The v20 trainer is part of the candidate identity and remains unchanged after
+The current trainer is part of the candidate identity and remains unchanged after
 its receipt is issued. At the KSLM write boundary it converts dataclass tuple
 containers to JSON-native arrays and proves that canonical JSON bytes remain
 unchanged. `train_intent_model_release.py` remains the stable command entry
@@ -506,17 +494,18 @@ The resulting samples are pinned by `lexical_disjoint_corpus_sha256`,
 used to select serving policy, including the config-bound 2.0 cap. Since v14 a fresh
 model-blind development source is assigned to independent pre-sealed roles; the effective global
 calibrated-logit margin is selected only on the threshold role.
-The v20 holdout was built under distinct rank/choice namespaces before loading
-a model, excludes all 288,869 sealed and 10,000 development physical
+The v23 holdout was built under distinct rank/choice namespaces before loading
+a model, excludes all 288,843 sealed and 10,000 development physical
 signatures, and is first evaluated only after the candidate receipt is fixed.
-Its model-blind provenance is pre-recorded in `holdout-v21-preseal.json` with
+Its model-blind provenance is pre-recorded in `holdout-v23-preseal.json` with
 `model_loaded=false`, `metrics_evaluated=false`, and both overlap counts equal
 to zero. The external manifest schema 1 stores SHA-256
 digests for config, frozen sources, trainer, the external evaluator, the preseal
 generator/receipt, development freezer, runtime intent extractor, layouts,
 `language_model.py`, detector, frozen hard-negative source and the
-protected-token list, as well as Python
-implementation/version/build, platform, architecture, libc and byte order. A
+protected-token list. Python implementation/version/build, platform, architecture,
+libc and byte order are recorded separately in
+[build-environment.json](build-environment.json), outside candidate identity. A
 build-provenance hash additionally binds the candidate/full datasets, both
 quarantines, excluded test signatures and train-only scorer; the first 12
 characters of that hash are included in the model version.
@@ -629,7 +618,7 @@ consults them at all.
   feature/config/container semantics. Changing only a split namespace does not
   require bumping all format versions; the existing `intent_v1` must not be
   silently retrained with incompatible semantics. Current values are feature
-  schema v5, split namespace `keyswitch:intent-v21:physical-signature`, training
+  schema v5, split namespace `keyswitch:intent-v23:physical-signature`, training
   config schema 13, KSLM schema 4 and external manifest schema 1.
 - Recall must not be increased by violating precision, specificity or the
   safety gates in the fixed config.

@@ -6,7 +6,7 @@
 помощник, добавленный в 0.15.0, имеет отдельные признаки, веса и отчёты:
 [документация](../../docs/context-assistant.md). Расширенный
 [context-v2](../context_v2/README.md) в 0.16.0 отклонён. Числа ниже —
-зафиксированная сертификация v20; это не актуальная оценка режима `assist`.
+зафиксированное обучение базовой KSLM в namespace v23; это не оценка режима `assist`.
 Контрольные суммы связывают файлы и выявляют расхождения, но не являются
 цифровой подписью издателя. `signed` для весов/FNV означает знак числа;
 подлинность издателя CRC32/SHA-256 сами по себе не доказывают.
@@ -23,49 +23,38 @@
 Модель не отправляет текст в сеть, не требует NumPy, scikit-learn, ONNX или
 отдельного рантайма и выполняет один скалярный проход по разреженным признакам.
 
-## Сертифицированный артефакт v20
+## Текущий артефакт: namespace v23
 
-Текущий артефакт — `intent-v1-d2f32ca5db58`, 12 935 540 байт, SHA-256
-`6048055c1d735c277b955785bc50a7f16f994fb24ac03bb616f53e3c078f099e`.
-Build provenance —
-`d2f32ca5db583ff56284ea57c517c9728adbc85f46417d15922b3bea717c14e3`,
-config — `2a8105d749422e9a8ef2bf6894d848ee8fdaff11df948d42a952fea27eda4116`,
-dataset — `b22247fc3c6e3762f8aa2f62a670adae0e19cc48742afa1a9e306a73f27aee82`.
-Из 49 выполненных эпох по development выбрана эпоха 45; контейнер содержит
-765 166 ненулевых весов и 1 029 480 точных membership-отпечатков.
+`v23` обозначает поколение обучающих данных KSLM, а не номер релиза приложения.
+Текущий артефакт — `intent-v1-b2a2ec8caa8d`, 12 917 635 байт, SHA-256
+`47f86818c4c1243daeabfafd50d03dd9884aa3973bb546191afe02c4092a3f4d`.
+[Manifest](manifest.json) фиксирует build provenance
+`b2a2ec8caa8de95a796892d825cc80ac96e65fdf9ebf5269d922395eac55ce93`,
+config `76fde35bec793c2c1d6a168753e28cb1cb0c62ac63fa1da40a6d36c85c7fd532`
+и dataset `ad74e2bfed82763f0f96a7fb26d24517220581502c9c000403fd908e20b80c0b`.
+По development выбрана эпоха 2 из 6 выполненных; контейнер содержит
+751 494 ненулевых веса и 1 030 660 membership-отпечатков.
 
-Полный независимый strict-report, SHA-256
-`01cc92bfc293019377019ecdcd965af11a61ac3da8cdf3837915459bf9f1d525`,
-прошёл все 30 gates. На model-blind unknown-typo holdout ансамбль получил
-6 false positive из 60 000 негативов (по 1 из 10 000 в каждом trigger-срезе),
-precision 0,999894133, specificity 0,9999 и recall 0,944483333; обычные
-trigger имеют recall 0,946, Pause — 0,9369. Ни одно из этих 6 ложных
-срабатываний не внесено моделью относительно детерминированного fallback,
-который сам даёт 48 ложных срабатываний; 42 из них модель предотвратила.
-Верхняя 95%-граница Wilson для каждого 1/10 000 отрицательного trigger-среза
-равна 0,000566269 при лимите 0,001. Внутренний sealed test даёт 1 false
-positive на 21 338 негативов в каждом обычном trigger при recall 0,954539064,
-а Pause — 0 false positive при recall 0,946712284. Все семь production-context
-профилей прошли. На 5 000 измерениях inference median равна 0,581739 мс,
-p95 — 0,914246 мс; load median по 11 измерениям — 180,394173 мс,
-p95 — 193,493112 мс. Эти синтетические результаты не являются оценкой
-реального пользовательского потока. Holdout каждого кандидата строится в
-своём namespace, поэтому 6/60 000 здесь, 12/60 000 у v15 и 0/60 000 у v14 —
-результаты на разных выборках, а не одна и та же метрика.
+[Сохранённый test-report](test-report.json) сообщает о прохождении внутренних
+условий обучения. Для space, tab и boundary_probe он содержит 2 ложных
+срабатывания на 21 588 негативов и recall 0,955855105; для enter и punctuation —
+2 на 21 588 и recall 0,955808783; для pause — 1 на 21 588 и recall 0,945015749.
+SHA-256 manifest —
+`b9b2e5b8eef2dac9cc275d4d5ed19d03ed8dffd54a9100156c63a2791a0bfba7`,
+test-report — `3758bcde5746c7298e8c8e7f663cbf62067b3aefd20916b51a5e8956bb9fe013`.
+Эти лексические и синтетические результаты не измеряют точность полного
+переключателя в пользовательском потоке.
 
-Два независимых полных retraining-запуска выполнены последовательно после
-официального train в той же Python/platform среде и записаны в разные выходные
-пути. Сравнение подтвердило трёхстороннее побайтное равенство
-official/replay-a/replay-b для KSLM, manifest и test-report; их SHA-256 равны
-соответственно
-`6048055c1d735c277b955785bc50a7f16f994fb24ac03bb616f53e3c078f099e`,
-`9c39b615ba90b94107be6bef0140ce9387e493bb6aae195f4a8d116021283da9` и
-`f3c44b42c96ce654042d17c822d92bd3202a9d1b12d6b28e34e394531a10fa94`. Независимый
-strict evaluator, повторно запущенный на replay-a, также прошёл все 30 gates;
-SHA-256 этого отчёта —
-`5e77f44b857c9096cc306ce4de3232f81037df932d1d3b5c8ca01de8082404fc`. Полный
-контур выпуска базовой v20, включая обе strict-оценки, replay и нативную упаковку,
-выполнен одним прогоном `tools/release_pipeline.py` за 17,7 минуты.
+12.09.2026 внешний [strict evaluator](../../tools/evaluate_intent_model.py)
+повторно выполнил все 30 обязательных условий. SHA-256 полного отчёта —
+`6f163faf82fb99b5172f0ebd02009390f29490d6d657582955b783c9702b82af`;
+отдельный verifier подтвердил identity модели и 13 файлов provenance.
+Для текущего дерева ещё требуются побайтные replay, контекстные проверки
+и нативная упаковка. Старые измерения
+6/60 000, latency и два replay из выпуска v20 не сертифицируют этот артефакт;
+они сохранены в [исторической карточке v0.20.0](https://github.com/olegius88/keyswitch/blob/v0.20.0/model/intent_v1/MODEL_CARD.md).
+Ни неизменность названия Python, ни один сохранённый флаг успешности не заменяют
+текущую проверку байтов и всех обязательных условий.
 
 ## Данные и лицензирование
 
@@ -94,7 +83,7 @@ card самостоятельных юридических выводов. Ст�
 Единица разделения — не строка и не язык, а физическая последовательность
 клавиш. Для русского слова она сначала отображается в координаты US-клавиатуры.
 До аугментации SHA-256 этой последовательности в namespace
-`keyswitch:intent-v21:physical-signature` распределяет её по 40 неизменным
+`keyswitch:intent-v23:physical-signature` распределяет её по 40 неизменным
 бакетам:
 
 - 26/40 (65%) — обучение;
@@ -124,22 +113,22 @@ pre-sealed строки при этом должны остаться побай
 список исключённых test-сигнатур и числа исключённых вхождений входят в
 provenance модели.
 
-V20 использует дополнительный frozen source
-`unknown-typo-development-v21.json`, созданный model-blind до обучения из
+Текущий namespace v23 использует дополнительный frozen source
+`unknown-typo-development-v23.json`, созданный model-blind до обучения из
 unknown-typo development-корпуса. Он содержит 10 000 уникальных физических
 сигнатур — по 5 000 на язык — без test-роли. Независимый namespace
-`keyswitch:intent-v21:unknown-typo-development-role` распределяет в каждом
+`keyswitch:intent-v23:unknown-typo-development-role` распределяет в каждом
 языке 3 500 слов в train и по 500 в development, calibration и threshold.
 Loader проверяет размер и SHA-256 source, provenance Hunspell `.dic`/`.aff`,
 физическую эквивалентность EN/RU пары, уникальность и точный SHA-256 повторно
 развёрнутых 120 000 строк (два label × шесть trigger). После объединения общий
 row-level audit снова запрещает cross-split, cross-language, safety и
 quarantine пересечения. Компактный source и freezer входят в toolchain
-provenance; внешний v20 holdout использует другие rank/choice namespaces.
+provenance; внешний v23 holdout использует другие rank/choice namespaces.
 
 `config.json` schema 13 также содержит policy `sealed_evaluation` schema 1.
 Указанный в ней repository-relative
-`registry_path: model/intent_v1/seal-registry-v21.json` разрешается от
+`registry_path: model/intent_v1/seal-registry-v23.json` разрешается от
 канонического корня проекта, а не от расположения переданной копии config, и
 закрепляет один candidate SHA за одним `split_namespace`. После успешного
 прохождения полного pre-sealed gate — threshold/context, safety,
@@ -478,12 +467,12 @@ membership coverage на тех же строках сохраняются то�
 ```bash
 (cd model/intent_v1/sources && sha256sum --check SHA256SUMS)
 PYTHONPATH=src:tools python3 tools/preseal_intent_holdout.py | \
-  diff -u model/intent_v1/holdout-v21-preseal.json -
+  diff -u model/intent_v1/holdout-v23-preseal.json -
 PYTHONPATH=src python3 tools/train_intent_model_release.py
 PYTHONPATH=src python3 tools/evaluate_intent_model.py --strict
 ```
 
-Trainer v20 входит в candidate identity и после выдачи receipt не изменяется.
+Текущий trainer входит в candidate identity и после выдачи receipt не изменяется.
 На границе записи KSLM он преобразует tuple-контейнеры dataclass в
 JSON-native массивы и побайтно доказывает неизменность канонического JSON.
 `train_intent_model_release.py` остаётся стабильной командой запуска и только
@@ -504,18 +493,19 @@ JSON-native массивы и побайтно доказывает неизме
 для выбора serving policy, включая закреплённый cap 2,0. Начиная с v14 новый model-blind
 development source распределён по независимым pre-sealed ролям; фактический глобальный
 calibrated-logit margin выбирается только на threshold-роли.
-Holdout v20 построен другим rank/choice namespace до загрузки модели, исключает
-все 288 869 sealed и 10 000 development физических сигнатур и впервые
+Holdout v23 построен другим rank/choice namespace до загрузки модели, исключает
+все 288 843 sealed и 10 000 development физических сигнатур и впервые
 оценивается только после фиксации candidate receipt. Его model-blind provenance
-заранее сохранён в `holdout-v21-preseal.json`: `model_loaded=false`,
+заранее сохранён в `holdout-v23-preseal.json`: `model_loaded=false`,
 `metrics_evaluated=false`, оба overlap-счётчика равны нулю. Внешний
 manifest schema 1 сохраняет SHA-256 для config,
 frozen-источников,
 trainer, внешний evaluator, preseal generator/receipt, development freezer,
 runtime intent extractor, layouts, `language_model.py`, detector, frozen
-hard-negative source и списка защищённых токенов, а также
-Python implementation/version/build,
-платформу, архитектуру, libc и byte order. Build-provenance hash дополнительно
+hard-negative source и списка защищённых токенов. Python implementation/version/build,
+платформа, архитектура, libc и byte order записаны отдельно в
+[build-environment.json](build-environment.json), вне candidate identity.
+Build-provenance hash дополнительно
 связывает candidate/full dataset, оба quarantine, исключённые test-сигнатуры и
 train-only scorer; первые 12 символов этого hash входят в model version. Strict
 evaluator пересчитывает эти связи и
@@ -625,7 +615,7 @@ PYTHONPATH=src python3 tools/environment_probe.py --explain libm \
   согласования соответствующей feature/config/container version: смена только
   split namespace не требует повышения всех форматов. Существующий `intent_v1` нельзя молча
   переобучать с несовместимой семантикой. Текущие значения — feature schema v5,
-  split namespace `keyswitch:intent-v21:physical-signature`, training config
+  split namespace `keyswitch:intent-v23:physical-signature`, training config
   schema 13, KSLM schema 4 и внешний manifest schema 1.
 - Повышение recall запрещено ценой нарушения precision, specificity или
   safety-гейтов из фиксированного config.

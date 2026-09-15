@@ -92,17 +92,11 @@ jobs:
           ./tools/run-gui-test.sh --noreset -- \
             bash -c 'setxkbmap -layout us,ru && GTK_A11Y=none PYTHONPATH=src python3 tests/e2e_x11.py'
 
-      - name: Verify contextual model training and quality evidence
-        run: |
-          PYTHONPATH=src python3 tools/train_context_model.py --verify
-          PYTHONPATH=src python3 tools/verify_context_model.py
+      - name: Verify active contextual evidence and versioned replay
+        run: PYTHONPATH=src python3 tools/verify_context_model.py --replay
 
-      - name: Replay public-phrase context experiment and promotion guard
-        run: |
-          PYTHONPATH=src python3 tools/context_corpus.py
-          PYTHONPATH=src python3 tools/train_context_v2.py verify
-          PYTHONPATH=src python3 tools/evaluate_context_engine.py --verify
-          PYTHONPATH=src python3 tools/verify_context_v2.py
+      - name: Verify historical rejected context-v2 numeric evidence
+        run: PYTHONPATH=src python3 tools/verify_context_v2.py --verify-frozen
 
       - name: Replay key-space orthotactic training and promotion guard
         run: |
@@ -121,19 +115,19 @@ jobs:
           PYTHONPATH=src python3 tools/verify_boundary_model.py
           PYTHONPATH=src python3 tools/evaluate_boundary_engine.py --verify
 
-      - name: Replay accepted boundary-v2 training and exact-text gate
+      - name: Verify frozen boundary-v2 numeric evidence and current engine gate
         run: |
-          PYTHONPATH=src python3 tools/boundary_v2_corpus.py
-          PYTHONPATH=src python3 tools/train_boundary_v2.py --verify
+          PYTHONPATH=src python3 tools/verify_lexical_compatibility.py boundary_v2
+          PYTHONPATH=src python3 tools/verify_boundary_v2.py --verify-frozen
           PYTHONPATH=src python3 tools/verify_boundary_v2.py
 
       - name: Run native AT-SPI caret and password E2E
         run: ./tools/run-atspi-e2e.sh
 
-      - name: Replay prefix training and exact-text promotion evidence
+      - name: Verify frozen prefix numeric evidence and current engine replay
         run: |
-          PYTHONPATH=src python3 tools/prefix_corpus.py
-          PYTHONPATH=src python3 tools/train_prefix_model.py verify
+          PYTHONPATH=src python3 tools/verify_lexical_compatibility.py prefix_v1
+          PYTHONPATH=src python3 tools/verify_prefix_model.py --verify-frozen
           PYTHONPATH=src python3 tools/evaluate_prefix_engine.py --verify
           PYTHONPATH=src python3 tools/verify_prefix_model.py
 
@@ -211,6 +205,9 @@ jobs:
           python -m coverage run --branch --source=src/keyswitch tests/test_intent_model.py -v
           python -m coverage run --append --branch --source=src/keyswitch -m unittest discover -s tests -p test_windows_backend.py -v
           python -m coverage run --append --branch --source=src/keyswitch -m unittest discover -s tests -p test_input_integrity.py -v
+          python -m coverage run --append --branch --source=src/keyswitch -m unittest discover -s tests -p test_input_sequence_matrix.py -v
+          python -m coverage run --append --branch --source=src/keyswitch -m unittest discover -s tests -p test_language_intent_regressions.py -v
+          python -m coverage run --append --branch --source=src/keyswitch -m unittest discover -s tests -p test_word_decision.py -v
           python -m coverage run --append --branch --source=src/keyswitch -m unittest discover -s tests -p test_action_boundary.py -v
           python -m coverage run --append --branch --source=src/keyswitch -m unittest discover -s tests -p test_context*.py -v
           python -m coverage run --append --branch --source=src/keyswitch -m unittest discover -s tests -p test_boundary_model.py -v

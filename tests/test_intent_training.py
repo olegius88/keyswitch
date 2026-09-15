@@ -361,7 +361,7 @@ def config(**changes: object) -> TrainingConfig:
         "sealed_evaluation": SealedEvaluationPolicy(
             schema_version=1,
             split_namespace=SPLIT_NAMESPACE,
-            registry_path="model/intent_v1/seal-registry-v21.json",
+            registry_path="model/intent_v1/seal-registry-v23.json",
         ),
         "minimum_word_length": 3,
         "maximum_word_length": 18,
@@ -1650,7 +1650,7 @@ class DatasetConstructionTests(unittest.TestCase):
             ),
             (
                 replace(baseline, role_namespace="other"),
-                "role namespace must match v21",
+                "role namespace must match v23",
             ),
             (
                 replace(baseline, train_words_per_group=0),
@@ -8294,22 +8294,22 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         )
         self.assertEqual(
             loaded.external_evaluation.unknown_typo_holdout_corpus_sha256,
-            "ecca85f5c0727ccc89ce8491ef8169a995a845bc7c70adcb7eaa137e2c8f874a",
+            "806bb9a5d1711bca0d5957cd8c119b3c5fa504068b95c5cc65655b6e02b0d75c",
         )
         self.assertEqual(
             loaded.sealed_evaluation.split_namespace, SPLIT_NAMESPACE
         )
         self.assertEqual(
             loaded.sealed_evaluation.registry_path,
-            "model/intent_v1/seal-registry-v21.json",
+            "model/intent_v1/seal-registry-v23.json",
         )
         self.assertEqual(
             loaded.hard_negative_development.source.path,
-            "model/intent_v1/unknown-typo-development-v21.json",
+            "model/intent_v1/unknown-typo-development-v23.json",
         )
         self.assertEqual(
             loaded.hard_negative_development.source.sha256,
-            "eb12cd9e996eb54ccfe1e151fbd761878cd7594930b1b37980cd11b2ec29a773",
+            "95ec8affaf49392862ab982e38e3b16cad67256423768a7dcb9e20940527dce8",
         )
         self.assertEqual(
             loaded.hard_negative_development.role_counts(),
@@ -8338,7 +8338,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             (0.956, 0.91, 0.91, 0.86),
         )
         self.assertEqual(loaded.threshold_logit_margin_cap, 2.0)
-        preseal_path = repository / "model/intent_v1/holdout-v21-preseal.json"
+        preseal_path = repository / "model/intent_v1/holdout-v23-preseal.json"
         preseal_bytes = preseal_path.read_bytes()
         self.assertLessEqual(len(preseal_bytes), 64 * 1024)
         preseal = cast(
@@ -8362,7 +8362,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         self.assertEqual(preseal["schema_version"], 1)
         self.assertEqual(
             preseal["policy"],
-            "keyswitch-intent-v21-preseal-holdout",
+            "keyswitch-intent-v23-preseal-holdout",
         )
         self.assertIs(preseal["model_loaded"], False)
         self.assertIs(preseal["metrics_evaluated"], False)
@@ -8427,18 +8427,18 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         self.assertEqual(
             sealed_exclusions,
             {
-                "signature_count": 288_880,
+                "signature_count": 288_843,
                 "sha256": (
-                    "3a250bec7c6dee34ceea6d75b9acd4d9b6d562f1726fff0863bb22d6ecccf3ef"
+                    "5d8d55c6277901a33cc72c5a3a526e33deff2b154e15e816eb8889161b1079fa"
                 ),
             },
         )
         self.assertEqual(
             combined_exclusions,
             {
-                "signature_count": 298_880,
+                "signature_count": 298_843,
                 "sha256": (
-                    "0ab0d1ace3f211fce2f3436ac6781f8750dd1311738e5df067a5f054ca86722c"
+                    "99553887249602e5fee72bac59491b89be58882f383820e9cc0a80cd5b0e8204"
                 ),
             },
         )

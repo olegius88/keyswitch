@@ -24,6 +24,7 @@ if TOOLS_PATH not in sys.path:
 
 import release_pipeline  # noqa: E402
 import verify_context_model  # noqa: E402
+import verify_context_v2_history  # noqa: E402
 
 # Mappings whose keys are repository-relative paths of hashed files. Reading the
 # recorded evidence instead of importing every trainer keeps future provenance
@@ -53,6 +54,7 @@ def hashed_files() -> list[Path]:
     paths = set(recorded_paths())
     paths |= set(verify_context_model.provenance_paths().values())
     paths |= {ROOT / relative for relative in release_pipeline.MODEL_TOOLCHAIN_PATHS.values()}
+    paths |= {ROOT / verify_context_v2_history.ARCHIVE / Path(name).name for name in verify_context_v2_history.SOURCES}
     return sorted(path for path in paths if path.is_file())
 
 
@@ -94,7 +96,8 @@ class ProvenanceLineEndingTests(unittest.TestCase):
         )
 
     def test_detects_a_hashed_file_without_a_pin(self) -> None:
-        unpinned = ROOT / "tests" / "test_provenance_line_endings.py"
+        # git check-attr resolves unmatched paths without creating a file.
+        unpinned = ROOT / "unprotected-provenance-fixture.dat"
         self.assertEqual(unprotected([unpinned]), [unpinned.relative_to(ROOT).as_posix()])
 
 
