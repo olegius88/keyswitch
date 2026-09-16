@@ -55,6 +55,7 @@ from keyswitch.windows_backend import (
     select_layout_pair,
 )
 from keyswitch.windows_system import (
+    AutostartStatus,
     _executable_exists,
     WindowsApplicationCatalog,
     WindowsAutostartManager,
@@ -1087,6 +1088,19 @@ class WindowsUIModelTests(unittest.TestCase):
 
 
 class WindowsApplicationEntrypointTests(unittest.TestCase):
+    def test_autostart_status_reports_the_state_or_the_reason_it_cannot(self) -> None:
+        """Both branches run on either platform: the registry is reachable, or it is not."""
+        status = AutostartStatus('"C:\\Programs\\KeySwitch.exe" --hidden', False, False)
+        with patch("keyswitch.windows_app.WindowsAutostartManager") as manager:
+            manager.return_value.status.return_value = status
+            self.assertEqual(windows_app_module.autostart_status(), status.as_dict())
+        for error in (WindowsSystemError("Реестр Windows доступен только в Windows"), OSError("access denied")):
+            with self.subTest(error=type(error).__name__):
+                with patch("keyswitch.windows_app.WindowsAutostartManager", side_effect=error):
+                    reported = windows_app_module.autostart_status()
+                self.assertEqual(set(reported), {"error"})
+                self.assertIn(type(error).__name__, str(reported["error"]))
+
     def test_logging_parser_diagnostics_and_ui_dispatch(self) -> None:
         # Logging is configured by the shared keyswitch.logsetup module, which
         # tests/test_logsetup.py covers including the rotation budgets.

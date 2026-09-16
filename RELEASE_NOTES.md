@@ -1,19 +1,20 @@
-# KeySwitch 0.23.0
+# KeySwitch 0.23.1
 
 ## Русский
 
 Выпуск убирает две причины, по которым портился правильно набранный текст, и чинит
-автозагрузку в Windows. Модели те же, что в
+автозагрузку в Windows. Номер 0.23.1: тег 0.23.0 существует, но его сборка остановилась
+на проверке покрытия в Windows, и файлы выпуска не были опубликованы. Модели те же, что в
 [0.22.0](https://github.com/olegius88/keyswitch/releases/tag/v0.22.0); изменилось то,
 какой словарь читает движок и что он делает до конца слова. Полный перечень — в
 [CHANGELOG.md](CHANGELOG.md).
 
 ### Файлы выпуска
 
-- `keyswitch_0.23.0_amd64.deb` — Ubuntu/Xubuntu, сеанс X11.
-- `KeySwitch-Setup-0.23.0-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
+- `keyswitch_0.23.1_amd64.deb` — Ubuntu/Xubuntu, сеанс X11.
+- `KeySwitch-Setup-0.23.1-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
   сертификатом издателя: SmartScreen покажет предупреждение.
-- `KeySwitch-0.23.0-windows-x64.zip` — переносимый архив для Windows.
+- `KeySwitch-0.23.1-windows-x64.zip` — переносимый архив для Windows.
 - `SHA256SUMS` — контрольные суммы трёх файлов; сверьте их перед установкой.
 
 ### Разговорные русские слова больше не переводятся
@@ -64,17 +65,18 @@ KeySwitch снимает блокировку Windows; автоматическ�
 ## English
 
 This release removes two causes of correctly typed text being changed and fixes
-autostart on Windows. The models are the same as in
+autostart on Windows. It is numbered 0.23.1: the 0.23.0 tag exists, but its build stopped
+at the Windows coverage gate and no files were published. The models are the same as in
 [0.22.0](https://github.com/olegius88/keyswitch/releases/tag/v0.22.0); what changed is
 the lexicon the engine reads and what it does before a word ends. The full list is in
 [CHANGELOG.md](CHANGELOG.md).
 
 ### Release files
 
-- `keyswitch_0.23.0_amd64.deb` — Ubuntu/Xubuntu, X11 session.
-- `KeySwitch-Setup-0.23.0-x64.exe` — installer for Windows 10/11 x64. It is not signed
+- `keyswitch_0.23.1_amd64.deb` — Ubuntu/Xubuntu, X11 session.
+- `KeySwitch-Setup-0.23.1-x64.exe` — installer for Windows 10/11 x64. It is not signed
   with a publisher certificate, so SmartScreen shows a warning.
-- `KeySwitch-0.23.0-windows-x64.zip` — portable archive for Windows.
+- `KeySwitch-0.23.1-windows-x64.zip` — portable archive for Windows.
 - `SHA256SUMS` — checksums of the three files; verify them before installing.
 
 ### Colloquial Russian words are no longer converted

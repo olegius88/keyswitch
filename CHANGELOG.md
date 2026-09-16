@@ -4,6 +4,14 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.23.1 — 2026-09-16
+
+- Publish what 0.23.0 could not. Its tag exists, but the release job stopped at the
+  Windows coverage gate: the new autostart diagnosis has a branch that only runs
+  where the registry is unreachable, which on Windows is never, so the gate counted
+  it as untested. The branch now has its own test on both platforms, and nothing
+  else in the release changed.
+
 ## 0.23.0 — 2026-09-16
 
 - Stop converting correctly typed Russian words that the shipped lexicon does not
