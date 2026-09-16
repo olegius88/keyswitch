@@ -295,18 +295,20 @@ class ShortUppercaseUnknownSourcePolicyTests(unittest.TestCase):
         punctuation = FieldContext("Telegram", "1", "12 ", "!", "text")
         worded = FieldContext("Telegram", "1", "включи ", "", "text")
         cases = (
-            ("зум", "pev", alone, False, "suggest"),        # chat word vs. a command typed in the wrong layout
-            ("зцв", "pwd", alone, False, "suggest"),        # the same shape from the other side: also only suggested
-            ("ghb", "при", alone, False, "suggest"),
-            ("зум", "pev", punctuation, False, "suggest"),  # digits and punctuation are not words
-            ("зум", "pev", worded, False, "convert"),       # a neighbouring word makes it a context decision
-            ("зумм", "pevv", alone, False, "convert"),      # four letters: outside the policy
-            ("зум", "pev", alone, True, "convert"),         # a known source reading is not the ambiguous class
+            ("зум", "pev", alone, False, False, "suggest"),        # chat word vs. a command typed in the wrong layout
+            ("зцв", "pwd", alone, False, False, "suggest"),        # the same shape from the other side: also only suggested
+            ("ghb", "при", alone, False, False, "suggest"),
+            ("зум", "pev", punctuation, False, False, "suggest"),  # digits and punctuation are not words
+            ("зум", "pev", worded, False, False, "convert"),       # a neighbouring word makes it a context decision
+            ("зумм", "pevv", alone, False, False, "convert"),      # four letters: outside the short policy; unknown own reading licenses
+            ("зум", "pev", alone, True, True, "convert"),          # a known source reading is not the ambiguous class; the baseline licenses
+            ("зум", "pev", alone, True, False, "suggest"),         # ... but alone, between two dictionary readings, it needs a licence
         )
-        for original, alternative, field, source_known, expected in cases:
-            with self.subTest(original=original, before=field.before, source_known=source_known):
+        for original, alternative, field, source_known, baseline, expected in cases:
+            with self.subTest(original=original, before=field.before, source_known=source_known, baseline=baseline):
                 group = 0 if original.isascii() else 1
-                item = ContextEvidence(original, alternative, group, field, source_known=source_known, target_known=True)
+                item = ContextEvidence(original, alternative, group, field, baseline_convert=baseline,
+                                       source_known=source_known, target_known=True)
                 weights = supported_weights(item)
                 weights["bias"] = (0.0, 20.0, 0.0, 0.0)
                 model = ContextModel(weights, "context-v3-fixture", feature_version=3)
@@ -314,6 +316,41 @@ class ShortUppercaseUnknownSourcePolicyTests(unittest.TestCase):
                 prediction = model.predict(item)
                 self.assertTrue(prediction.supported)
                 self.assertEqual(prediction.action, expected)
+
+    def test_isolated_token_without_a_frozen_licence_may_only_be_suggested(self) -> None:
+        alone = FieldContext("Telegram", "1", "", "", "text")
+        worded = FieldContext("Telegram", "1", "в городе ", "", "text")
+        unsupported = {"source_known": False, "target_known": False, "baseline_convert": False,
+                       "ortho_score": -6.7, "ortho_threshold": 10.4}
+        cases: tuple[tuple[str, str, FieldContext, dict[str, object], str], ...] = (
+            ("афиши", "fabib", alone, {}, "suggest"),                            # no lexicon, no index, no frozen verdict
+            ("k.andfaat", "люфтваффе", alone, {}, "suggest"),                    # both directions
+            ("афиши", "fabib", alone, {"source_known": True}, "suggest"),        # a known own reading changes nothing here
+            ("Еще", "Tot", alone, {"source_known": True, "target_known": True}, "suggest"),  # two dictionary words: no licence
+            ("hfyj", "рано", alone, {"target_known": True}, "convert"),         # a dictionary reading against an unknown own one
+            ("афиши", "fabib", alone, {"baseline_convert": True}, "convert"),   # the detector's own verdict licenses
+            ("афиши", "fabib", alone, {"ortho_score": 12.0}, "convert"),        # orthotactics above its own threshold licenses
+            ("афиши", "fabib", alone, {"ortho_score": 10.4}, "suggest"),        # exactly at the threshold: no margin
+            ("афиши", "fabib", alone, {"ortho_score": None, "ortho_threshold": None}, "suggest"),  # unsupported: no licence
+            ("афиши", "fabib", alone, {"target_known": True}, "convert"),       # a dictionary reading licenses
+            ("афиши", "fabib", alone, {"target_identifier": True}, "convert"),  # a command name licenses an unknown own reading
+            ("зум", "pev", alone, {"source_known": True, "target_identifier": True}, "suggest"),  # ... but not a known one
+            ("афиши", "fabib", worded, {}, "convert"),                          # a neighbouring word: a context decision
+        )
+        for original, alternative, field, change, expected in cases:
+            with self.subTest(original=original, before=field.before, change=change):
+                group = 0 if original.isascii() else 1
+                item = ContextEvidence(original, alternative, group, field, **{**unsupported, **change})  # type: ignore[arg-type]
+                weights = supported_weights(item)
+                weights["bias"] = (0.0, 20.0, 0.0, 0.0)
+                model = ContextModel(weights, "context-v3-fixture", feature_version=3)
+                self.assertEqual(model.allows_automatic_conversion(extract_action_features(item)), expected == "convert")
+                prediction = model.predict(item)
+                self.assertTrue(prediction.supported)
+                self.assertEqual(prediction.action, expected)
+        legacy = ContextModel({"bias": (0.0, 20.0, 0.0, 0.0)}, "context-v1-fixture")
+        self.assertTrue(legacy.allows_automatic_conversion({"target:known:0": 1.0, "target:identifier:0": 1.0, "baseline:0": 1.0,
+                                                            "before:script:none:direction:1": 1.0, "after:script:none:direction:1": 1.0}))
 
 
 class ContextActionPolicyTests(unittest.TestCase):

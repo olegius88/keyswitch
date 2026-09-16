@@ -21,7 +21,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from auxiliary_runtime_evidence import packaged_intent
-from context_evidence import reference_models
+from reference_lexicon import reference_models
 from context_physical_keys import KEYS
 from keyswitch.backend import KeyEvent, SHIFT_MASK
 from keyswitch.config import SettingsStore
@@ -30,7 +30,6 @@ from keyswitch.history import HistoryStore
 from keyswitch.intent_model import IntentModelStatus, LinearNgramModel
 from keyswitch.language_model import LanguageModel
 from test_input_integrity import EditorBackend
-from disclosed_regressions import disclosed_installed_pair_regression
 
 
 class _Clock:
@@ -105,18 +104,18 @@ class DefaultInputSequenceTests(unittest.TestCase):
             root = Path(directory)
             settings = SettingsStore(root / "settings.json")
             expected = {
-                "early_switch": True, "early_switch_min_length": 4,
+                "early_switch": False, "early_switch_min_length": 4,
                 "correct_on_pause": True, "pause_delay_seconds": 1.5,
                 "respect_manual_layout": True, "learning": True,
                 "context_policy": "assist", "context_aware": True,
-                "context_read_field": False,
+                "context_read_field": True, "aggressive": False,
             }
             self.assertEqual({name: settings.get("detection." + name) for name in expected}, expected)
             backend, clock = EditorBackend(), _Clock()
             backend.group = group
 
             def load(locale: str, extra_words: Iterable[str] = ()) -> LanguageModel:
-                # The engine passes the packaged lexicon supplement; the fixture models stand in for both.
+                # Mirrors what the engine loads: the onboard lexicon plus the packaged supplement.
                 return self.models[{"en_US": 0, "ru_RU": 1}[locale]]
 
             with patch.object(backend, "active_application", return_value=application), \
@@ -136,14 +135,12 @@ class DefaultInputSequenceTests(unittest.TestCase):
             (expected, "", [expected]),
         )
 
-    @disclosed_installed_pair_regression
     def test_russian_chat_keeps_spelling_spaces_and_one_submission(self) -> None:
         for text in ("пришли гифку  позже. ", "этот флуд  закончился. ", "севодня  будет созвон. "):
             with self.subTest(text=text), self.session() as session:
                 session.type(text, 1)
                 self.assert_sent_once(session, text)
 
-    @disclosed_installed_pair_regression
     def test_code_editor_keeps_russian_comment_before_manual_english_insert(self) -> None:
         with self.session(application="Code") as session:
             session.type("// сохрани гифку  ", 1)

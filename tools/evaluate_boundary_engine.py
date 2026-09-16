@@ -8,7 +8,7 @@ import sys
 import tempfile
 from dataclasses import replace
 from pathlib import Path
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from unittest.mock import patch
 
 from auxiliary_runtime_evidence import packaged_intent, runtime_provenance
@@ -21,7 +21,9 @@ from keyswitch.history import HistoryStore
 from keyswitch.language_model import LanguageModel
 from keyswitch.layouts import LayoutPair
 from context_corpus import ROOT
-from context_evidence import canonical, checksum, reference_models
+from context_evidence import canonical, checksum
+# The engine serves the onboard lexicon plus the packaged supplement, so the replay does too.
+from reference_lexicon import reference_models
 from train_boundary_model import CANDIDATE, DIRECTORY
 from verify_lexical_compatibility import verify as verify_compatibility
 
@@ -46,6 +48,7 @@ def provenance() -> dict[str, str]:
         ROOT / "model/boundary_v2/corpus.json", ROOT / "model/boundary_v2/seal.json",
         ROOT / "model/boundary_v2/lexical-compatibility.json", ROOT / "tools/train_boundary_model.py",
         ROOT / "tools/verify_lexical_compatibility.py",
+        ROOT / "src/keyswitch/resources/lexicon-supplement-ru_RU.json",
         ROOT / "model/intent_v1/compatibility/generation-config-v21.json"])
 
 
@@ -59,7 +62,7 @@ def replay(original: str, model: BoundaryModel | None, models: dict[int, Languag
         settings.set("detection.learning", False)
         settings.set("general.keep_history", False)
         backend = EditorBackend()
-        def load(locale: str) -> LanguageModel:
+        def load(locale: str, extra_words: Iterable[str] = ()) -> LanguageModel:
             return models[0 if locale == "en_US" else 1]
         with patch("keyswitch.engine.LanguageModel.load", side_effect=load), \
                 patch("keyswitch.engine.LinearNgramModel.try_load_default", return_value=packaged_intent(ROOT)):

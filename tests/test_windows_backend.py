@@ -55,6 +55,7 @@ from keyswitch.windows_backend import (
     select_layout_pair,
 )
 from keyswitch.windows_system import (
+    _executable_exists,
     WindowsApplicationCatalog,
     WindowsAutostartManager,
     WindowsSystemError,
@@ -209,6 +210,7 @@ class FakeActivationUser32:
 class FakeRegistry:
     def __init__(self) -> None:
         self.autostart: dict[str, str] = {}
+        self.startup_approval: dict[str, bytes] = {}
         self.apps: tuple[tuple[str, str], ...] = ()
 
     def read_autostart(self, name: str) -> str | None:
@@ -219,6 +221,12 @@ class FakeRegistry:
 
     def delete_autostart(self, name: str) -> None:
         self.autostart.pop(name, None)
+
+    def read_startup_approval(self, name: str) -> bytes | None:
+        return self.startup_approval.get(name)
+
+    def clear_startup_approval(self, name: str) -> None:
+        self.startup_approval.pop(name, None)
 
     def application_paths(self) -> tuple[tuple[str, str], ...]:
         return self.apps
@@ -764,13 +772,54 @@ class WindowsSystemTests(unittest.TestCase):
 
     def test_autostart_manager_and_quoted_commands(self) -> None:
         registry = FakeRegistry()
-        manager = WindowsAutostartManager(registry, command='"C:\\Key Switch\\KeySwitch.exe" --hidden')
+        command = '"C:\\Key Switch\\KeySwitch.exe" --hidden'
+        manager = WindowsAutostartManager(registry, command=command, exists=lambda path: path == "C:\\Key Switch\\KeySwitch.exe")
         self.assertFalse(manager.enabled())
         manager.set_enabled(True)
         self.assertTrue(manager.enabled())
         self.assertIn("--hidden", registry.autostart["KeySwitch"])
         manager.set_enabled(False)
         self.assertFalse(manager.enabled())
+
+    def test_the_default_target_check_reads_the_file_system_and_survives_a_bad_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            present = Path(temporary) / "KeySwitch.exe"
+            present.write_bytes(b"binary")
+            self.assertTrue(_executable_exists(str(present)))
+            self.assertFalse(_executable_exists(str(present / "deeper")))
+            for unusable in ("missing\x00path", "x" * 5000, ""):
+                with self.subTest(path=unusable[:12]):
+                    self.assertFalse(_executable_exists(unusable))
+
+    def test_autostart_reports_what_the_next_logon_will_do(self) -> None:
+        registry = FakeRegistry()
+        present = "C:\\Programs\\KeySwitch\\KeySwitch.exe"
+        command = f'"{present}" --hidden'
+        manager = WindowsAutostartManager(registry, command=command, exists=lambda path: path == present)
+        manager.set_enabled(True)
+        self.assertEqual(manager.status().as_dict(),
+                         {"command": command, "blocked_by_windows": False, "target_missing": False, "effective": True})
+        # Task Manager's Startup tab disables the value; Windows then skips it at every logon.
+        registry.startup_approval["KeySwitch"] = bytes([0x03]) + bytes(11)
+        self.assertFalse(manager.enabled())
+        self.assertTrue(manager.status().blocked_by_windows)
+        # The automatic sync at every launch must not overrule that choice.
+        manager.set_enabled(True)
+        self.assertFalse(manager.enabled())
+        # An explicit toggle in the KeySwitch interface does lift it.
+        manager.set_enabled(True, clear_windows_block=True)
+        self.assertTrue(manager.enabled())
+        self.assertNotIn("KeySwitch", registry.startup_approval)
+        for approval, expected in ((bytes([0x02]) + bytes(11), True), (bytes([0x06]) + bytes(11), True),
+                                   (bytes([0x01]) + bytes(11), False), (b"", False)):
+            with self.subTest(approval=approval.hex()):
+                registry.startup_approval["KeySwitch"] = approval
+                self.assertEqual(manager.enabled(), expected)
+        registry.startup_approval.pop("KeySwitch")
+        # A value left behind by another install location cannot start anything either.
+        stale = WindowsAutostartManager(registry, command=command, exists=lambda path: False)
+        self.assertFalse(stale.enabled())
+        self.assertTrue(stale.status().target_missing)
 
         frozen = windows_launcher_command(
             start_hidden=False,
@@ -843,7 +892,9 @@ class WindowsSystemTests(unittest.TestCase):
             manager = WindowsAutostartManager(command="KeySwitch.exe --hidden")
             catalog = WindowsApplicationCatalog()
         manager.set_enabled(True)
-        self.assertTrue(manager.enabled())
+        # The factory reached the isolated adapter; whether the logon would really start it
+        # depends on the executable and on Windows itself, which the status tests cover.
+        self.assertEqual(registry.autostart["KeySwitch"], "KeySwitch.exe --hidden")
         self.assertEqual(catalog.installed(), ())
 
     def test_open_directory_starts_explorer_and_rejects_a_missing_folder(self) -> None:
@@ -1009,7 +1060,8 @@ class WindowsUIModelTests(unittest.TestCase):
         self.assertIn("4–12", minimum.description)
         detection = DEFAULTS["detection"]
         assert isinstance(detection, dict)
-        self.assertTrue(detection["early_switch"])
+        # Off by default since 0.23.0: it changed correctly typed words before they ended.
+        self.assertFalse(detection["early_switch"])
         self.assertTrue(detection["context_aware"])
         self.assertEqual(detection["context_policy"], "assist")
         self.assertEqual(detection["early_switch_min_length"], 4)

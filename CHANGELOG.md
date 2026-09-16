@@ -4,6 +4,61 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.23.0 — 2026-09-16
+
+- Stop converting correctly typed Russian words that the shipped lexicon does not
+  know. The packaged supplement of 199,680 Russian forms is now part of the
+  lexicon the engine serves (`LanguageModel.load(locale, supplement_words(locale))`),
+  not just of the training pipeline. Five of the six disclosed regressions of the
+  installed model pair are gone with the same weights: `гифку`, `флуд`, the chat
+  sequences and the code-editor comment keep their spelling. The sixth, an
+  isolated word that neither the onboard lexicon nor the supplement knows (`дюп`),
+  is still converted and stays in the suite as a disclosed expected failure.
+  The authored sequence tests now load exactly what the product loads, so a
+  lexicon change can no longer look better in the tests than it is for a user.
+- Turn the early layout switch off by default. On the development population it
+  corrupts 13 correctly typed words out of 256 while restoring 116 of 229 wrong
+  ones; without it the same pair corrupts 4 and restores 109. Corrupting text the
+  user typed correctly is the worse failure, and the completed-word decision
+  recovers most of what the early switch was restoring. The feature stays one
+  switch away in the settings, and its description now says why it is off.
+- Report the Windows startup entry honestly. Task Manager's Startup tab and
+  Settings keep an approval byte per `Run` value under
+  `Explorer\StartupApproved\Run`; a value disabled there is skipped at every
+  logon however often it is rewritten, and KeySwitch rewrote it at every launch
+  while reporting autostart as enabled. The autostart manager now reads that
+  record and the command's target: `enabled()` answers whether the next logon
+  will really start KeySwitch, `--diagnose` prints the command, the block and a
+  missing target, and the settings window explains both cases. Toggling the
+  switch in KeySwitch clears a Windows block, while the automatic sync at every
+  launch no longer overrules a choice the user made in Windows.
+- Read the active field by default. This is what gives the context model the
+  text actually around the caret instead of the engine's own recollection, which
+  is the evidence the model was built to use. It reads through the operating
+  system's accessibility interface, recognised protected fields are skipped, and
+  the switch is one click away for anyone who would rather it stayed off.
+  The wider unknown-word recognition stays off, now with a measurement behind
+  that: it is not model evidence but a lower bar for the character-level
+  fallback, and on the frozen prefix population it changed one more correctly
+  typed row in every profile while restoring nothing extra (11 changed rows
+  against 12, 127 and 128 restorations either way); on 490 development sequences
+  it changed no outcome at all.
+- Add application quirks: rules about one application's own syntax rather than
+  about language, each its own setting under a new "Особенности программ"
+  section in both interfaces. The first one is Telegram: a quote typed in the
+  Russian layout and left alone becomes the `@` of a mention after the same idle
+  pause the completed-word decision uses, because `@name` is how Telegram
+  addresses somebody and the quote sits on that very key. Two quotes in a row
+  stay quotes, so does a quote the user kept typing after, another application is
+  untouched, and the undo key puts the quote back.
+- Make the sequence protocol's `early_off` control mode run the engine's idle
+  callbacks like the default mode. Without them a document that ends without a
+  boundary key never reached the completed-word decision at all, so the control
+  measured the early switch alone for every single-token document: 0 of 116
+  technical rows restored, against 97 to 112 once the callbacks run. Gates and
+  thresholds are unchanged; the audited protocol digest is updated and the three
+  consumed sealed tests are unaffected by it.
+
 ## 0.22.0 — 2026-09-15
 
 - Publish everything since 0.20.0. The 0.21.0 section below was tagged but its

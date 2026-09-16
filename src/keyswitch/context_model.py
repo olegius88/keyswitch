@@ -219,20 +219,38 @@ class ContextModel:
     def allows_automatic_conversion(self, features: Mapping[str, float]) -> bool:
         """Shared by inference, calibration and epoch selection.
 
-        A token of at most three letters whose own reading is unknown to the
-        lexicon may only be suggested when it is all uppercase (an acronym or a
-        brand against the same keys in the other layout) or when no word stands
-        on either side of it (a chat word against a command name typed in the
-        wrong layout): with so little text both readings stay plausible.
+        Two ambiguous classes may only be suggested. A token of at most three
+        letters whose own reading is unknown to the lexicon, when it is all
+        uppercase (an acronym or a brand against the same keys in the other
+        layout) or when no word stands on either side of it (a chat word against
+        a command name typed in the wrong layout): with so little text both
+        readings stay plausible. And a token of any length standing alone
+        converts automatically only under a licence from a frozen verdict: the
+        detector's baseline decision, an orthotactic margin above that model's
+        own threshold, or a known other reading - a dictionary word or a command
+        name - against an own reading the lexicon does not know. Without one,
+        with no context, the conversion would rest on the learned character
+        weights alone, which cannot tell a rare correctly typed word from the
+        same keys in the wrong layout, nor one dictionary word from another. A
+        word the lexicon knows is evidence for what was typed, so it withdraws
+        the licence even when the other reading is a command name: `зум` is a
+        chat word as much as `pev` is a program.
         """
 
-        if self.feature_version != 3 or "source:known:0" not in features:
+        if self.feature_version != 3:
+            return True
+        isolated = any(name.startswith("before:script:none:direction:") for name in features) and any(
+            name.startswith("after:script:none:direction:") for name in features)
+        known_other_reading = "target:known:1" in features or "target:identifier:1" in features
+        licensed = ("baseline:1" in features or features.get("ortho:margin", 0.0) > 0.0
+                    or (known_other_reading and "source:known:0" in features))
+        if isolated and not licensed:
+            return False
+        if "source:known:0" not in features:
             return True
         if not any(f"length:{length}" in features for length in range(1, SHORT_UNKNOWN_SOURCE_MAX_LENGTH + 1)):
             return True
         uppercase = features.get("source:case:upper") == 1.0
-        isolated = any(name.startswith("before:script:none:direction:") for name in features) and any(
-            name.startswith("after:script:none:direction:") for name in features)
         return not (uppercase or isolated)
 
     def predict(self, item: ContextEvidence) -> ContextPrediction:

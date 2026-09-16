@@ -34,7 +34,7 @@ GATE_POLICY: dict[str, object] = {
     "sequence_net_restorations_at_least_baseline": True, "minimum_sequence_documents_per_group": 32,
 }
 SCOPE = "Sealed private-corpus test aggregates and current artifact/provenance verification; fresh-fit reproducibility, reviewed human-intent labels and native OS execution are not asserted."
-AUDITED_SEQUENCE_PROTOCOL_SHA256 = "f4cecf44dc0f314b9ad9ff8c321ee2a1f45fdb7efbaf476feb611ceac17cca7a"
+AUDITED_SEQUENCE_PROTOCOL_SHA256 = "20cb92bb0cc664f5c103f1d9798789a7705f31e6ed6d9665084f3c8d6d75b6c7"
 PROTOCOL: dict[str, object] = {
     "version": 3, "document_cap_per_group": 128, "profiles": list(PROFILES),
     "window": "bounded_sentence", "backend": "simulated_editor", "physical_key_period_ms": 100,

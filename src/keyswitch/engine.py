@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 
 from . import __version__
 from .backend import InputBackend, KeyEvent, KeyDisposition
+from .app_quirks import symbol_quirk
 from .boundary_model import BoundaryModel, MAX_SUFFIX, features as boundary_features
 from .boundary_policy import BoundaryPolicy, features as boundary_policy_features
 from .config import SettingsStore
@@ -26,6 +27,7 @@ from .early_switch import (
 from .history import HistoryEntry, HistoryStore
 from .indicator import alternate_layout_group, layout_label
 from .language_model import LanguageModel, WordScore
+from .lexicon_supplement import supplement_words
 from .learning import LearningStore
 from .intent_model import CorrectionTrigger, LinearNgramModel
 from .context_policy import ContextPolicy, ContextResult
@@ -193,7 +195,7 @@ class KeySwitchEngine:
             "detection.language_models", ["en_US", "ru_RU"]
         )
         self.models = {
-            index: LanguageModel.load(locale)
+            index: LanguageModel.load(locale, supplement_words(locale))
             for index, locale in enumerate(locales[:2])
         }
         intent_model, self.intent_model_status = LinearNgramModel.try_load_default()
@@ -735,6 +737,7 @@ class KeySwitchEngine:
                 self._symbol_strokes = []
             elif self._layout_dependent(event):
                 self._symbol_strokes.append(event)
+                self._mark_word_activity()
             self._last_committed_stale = True
             return
         if event.key_name in NAVIGATION_KEYS:
@@ -756,8 +759,11 @@ class KeySwitchEngine:
                 )
                 return
             if self._layout_dependent(event):
-                # "@" typed in the US layout but meant as the RU quote.
+                # "@" typed in the US layout but meant as the RU quote. A symbol
+                # left alone can also be an application's own syntax, so the idle
+                # pause has to reach it (KeySwitchEngine._correct_pending_symbol).
                 self._symbol_strokes.append(event)
+                self._mark_word_activity()
                 return
             # A leading digit or path marker belongs to the token too:
             # `2ghbdtn` must not be seen as the unrelated word `ghbdtn`.
@@ -1998,6 +2004,9 @@ class KeySwitchEngine:
             return
 
         self._pause_correction_pending = False
+        if not self._strokes:
+            self._correct_pending_symbol(idle_ms)
+            return
         typed = tuple(self._strokes)
         head = self._literal_head(typed, self._source_group)
         strokes, trailing, segmentation_certain = self._completed_word(typed[head:], self._source_group)
@@ -2080,6 +2089,42 @@ class KeySwitchEngine:
         self._early_switch_undone = False
         self._reset_pause_correction()
         self._update(current_word="")
+        self._execute_correction(plan, None)
+
+    def _correct_pending_symbol(self, idle_ms: int) -> None:
+        """A symbol left alone in an application whose syntax explains it.
+
+        Only a single pending symbol qualifies: a doubled quote and a quote the
+        user kept typing after are ordinary text, and both leave the engine in a
+        state this branch never sees.
+        """
+
+        if len(self._symbol_strokes) != 1:
+            return
+        stroke = self._symbol_strokes[0]
+        source_group = stroke.group
+        target = next((group for group in self.models if group != source_group), None)
+        if target is None or source_group not in self.models:
+            return
+        typed = self._text_for_group((stroke,), source_group)
+        meant = self._text_for_group((stroke,), target)
+        application = self.backend.active_application()
+        if self._application_excluded(application):
+            return
+        quirk = symbol_quirk(application, typed, meant, lambda path: bool(self.settings.get(path, True)))
+        if quirk is None:
+            return
+        plan = CorrectionPlan(
+            (stroke,), None, source_group, target, typed, meant, 99.0, application,
+            True, "symbol_quirk",
+        )
+        self._technical_event(
+            "symbol_quirk_applied", quirk=quirk.setting, application=application,
+            original=typed, replacement=meant, source_group=source_group,
+            target_group=target, idle_ms=idle_ms,
+        )
+        self._symbol_strokes = []
+        self._reset_pause_correction()
         self._execute_correction(plan, None)
 
     def _prune_stale_presses(self, now: float) -> None:

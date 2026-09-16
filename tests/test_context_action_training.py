@@ -481,6 +481,26 @@ class RuntimePolicyMaskTests(unittest.TestCase):
         isolated = {**lower, "before:script:none:direction:1": 1.0}
         del isolated["before:script:ru:direction:1"]
         self.assertFalse(model.allows_automatic_conversion(isolated))
+        unsupported = {**vocabulary, "source:known:0": 1.0, "target:known:0": 1.0, "target:identifier:0": 1.0, "baseline:0": 1.0,
+                       "length:5": 1.0, "before:script:none:direction:1": 1.0, "after:script:none:direction:1": 1.0}
+        self.assertFalse(model.allows_automatic_conversion(unsupported))
+        self.assertFalse(model.allows_automatic_conversion({**unsupported, "ortho:margin": -0.13}))
+        both_known = {**{k: v for k, v in unsupported.items() if k not in ("source:known:0", "target:known:0")},
+                      "source:known:1": 1.0, "target:known:1": 1.0}
+        self.assertFalse(model.allows_automatic_conversion(both_known))
+        licences: tuple[tuple[str, str, float], ...] = (("baseline:0", "baseline:1", 1.0), ("target:known:0", "target:known:1", 1.0),
+                                                        ("target:identifier:0", "target:identifier:1", 1.0), ("", "ortho:margin", 0.05),
+                                                        ("before:script:none:direction:1", "before:script:ru:direction:1", 1.0))
+        # A known own reading withdraws the lexical licences: two plausible readings, no context.
+        known_source = {**{k: v for k, v in unsupported.items() if k != "source:known:0"}, "source:known:1": 1.0}
+        for added in ("target:known:1", "target:identifier:1"):
+            with self.subTest(withdrawn=added):
+                self.assertFalse(model.allows_automatic_conversion({**known_source, added: 1.0}))
+        self.assertTrue(model.allows_automatic_conversion({**known_source, "baseline:1": 1.0}))
+        for removed, added, value in licences:
+            with self.subTest(licence=added):
+                licensed = {name: weight for name, weight in unsupported.items() if name != removed}
+                self.assertTrue(model.allows_automatic_conversion({**licensed, added: value}))
         convert = [0.001, 0.999, 0.0, 0.0]
         probabilities = array("d", convert * 4)
         guarded = apply_runtime_support(probabilities, rows, model)
@@ -514,6 +534,10 @@ class RuntimePolicyMaskTests(unittest.TestCase):
         self.assertEqual(policy["maximum_length"], SHORT_UPPERCASE_UNKNOWN_SOURCE_MAX_LENGTH)
         self.assertEqual(policy["maximum_length"], SHORT_UNKNOWN_SOURCE_MAX_LENGTH)
         self.assertEqual(policy["action"], "suggest")
+        unlicensed = recipe["runtime_policy"]["unlicensed_isolated"]
+        self.assertEqual(unlicensed["action"], "suggest")
+        self.assertEqual(set(unlicensed["licences"]),
+                         {"neighbouring_word", "baseline_convert", "ortho_margin_positive", "known_target_and_unknown_source"})
         self.assertEqual(recipe["gate_policy"]["sequence_net_restorations_at_least_baseline"], True)
         self.assertNotIn("sequence_restored_at_least_baseline", recipe["gate_policy"])
 

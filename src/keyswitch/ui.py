@@ -21,6 +21,7 @@ gi.require_version("Pango", "1.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from . import __version__
+from .app_quirks import SYMBOL_QUIRKS
 from .config import SettingsStore
 from .context_policy import ContextPolicy
 from .engine import EngineSnapshot
@@ -425,7 +426,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._switch_row(
                 "detection.early_switch",
                 "Ранняя смена раскладки",
-                "Исправлять до конца слова. В assist с учётом контекста — обученная модель префиксов; без контекста или в off/shadow — словарный алгоритм",
+                "Исправлять до конца слова, не дожидаясь пробела. Выключено по умолчанию: правильно набранное слово иногда переводится по первым буквам. В assist с учётом контекста — обученная модель префиксов; без контекста или в off/shadow — словарный алгоритм",
             )
         )
         early_length = Adw.SpinRow.new_with_range(3, 8, 1)
@@ -441,6 +442,14 @@ class MainWindow(Adw.ApplicationWindow):
         self._settings_controls["detection.early_switch_min_length"] = early_length
         behavior.add(early_length)
         page.append(behavior)
+
+        quirks = Adw.PreferencesGroup(
+            title="Особенности программ",
+            description="Правила о синтаксисе самих приложений, а не о языке. Каждое включается отдельно.",
+        )
+        for quirk in SYMBOL_QUIRKS:
+            quirks.add(self._switch_row(quirk.setting, quirk.title, quirk.description))
+        page.append(quirks)
 
         learning = Adw.PreferencesGroup(
             title="Самообучение",

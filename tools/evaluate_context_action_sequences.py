@@ -109,8 +109,8 @@ PROTOCOL: dict[str, object] = {
     "punctuation": "physical keys chosen in intended layout, including ambiguous literal signs; no extra terminator or synthetic idle correction",
     "profiles": list(PROFILES),
     "settings_modes": {
-        "early_off": "context assist; early switch, learning, history, field reading and manual-layout cooldown disabled; context tracking enabled; deterministic 80 ms key-down plus 20 ms key-up; no idle or timer callback",
-        "default": "unmodified application defaults: early switch from four letters, pause correction after 1.5 s, manual-layout protection, learning, context assist without field reading; 50 ms before every key-down, 30 ms before every key-up, engine timer callbacks after every key, 1.7 s idle with timer callbacks after every completed word; a layout selection is a manual switch only when it changes the live backend group",
+        "early_off": "context assist; early switch, learning, history, field reading and manual-layout cooldown disabled; context tracking enabled; 50 ms before every key-down, 30 ms before every key-up, engine timer callbacks after every key, 1.7 s idle with timer callbacks after every completed word, exactly as in the default mode, so the completed-word decision reaches a document that ends without a boundary key",
+        "default": "application defaults with the early switch enabled explicitly, the configuration a user gets by turning that feature on: early switch from four letters, pause correction after 1.5 s, manual-layout protection, learning, context assist without field reading; 50 ms before every key-down, 30 ms before every key-up, engine timer callbacks after every key, 1.7 s idle with timer callbacks after every completed word; a layout selection is a manual switch only when it changes the live backend group",
     },
     "models": "candidate and baseline context and prefix artifacts are injected explicitly; installed context and prefix bytes are never loaded; boundary, orthotactic and intent models are the pinned packaged files",
     "pairs": {"early_off": ["baseline: baseline context + baseline prefix", "candidate: candidate context + candidate prefix"],
@@ -465,6 +465,10 @@ def replay(plan: SequencePlan, model: ContextModel, models: dict[int, LanguageMo
     with tempfile.TemporaryDirectory(prefix="keyswitch-context-sequence-") as temporary:
         directory = Path(temporary)
         settings = SettingsStore(directory / "settings.json")
+        if mode == "default":
+            # The shipped default turned the early switch off; this mode exists to measure it,
+            # so it is enabled explicitly and the control mode below remains its counterpart.
+            settings.set("detection.early_switch", True)
         if mode == "early_off":
             for setting, value in {
                 "detection.context_policy": "assist", "detection.context_aware": True,
@@ -512,26 +516,25 @@ def replay(plan: SequencePlan, model: ContextModel, models: dict[int, LanguageMo
                                         "source_group": backend.group, "target_group": plan.group}
                         if observed == intended:
                             raise ValueError("wrong intervention did not change the focus letter")
-                    if mode == "default":
-                        clock[0] += DEFAULT_KEY_DOWN_SECONDS
-                    else:
-                        clock[0] = 1000.0 + serial * 0.1
+                    clock[0] += DEFAULT_KEY_DOWN_SECONDS
                     event = KeyEvent(True, key.keycode, "space" if observed == " " else observed,
                                      observed, key.characters, backend.group, SHIFT_MASK if key.shift else 0,
                                      round(clock[0] * 1000))
                     backend.type(event)
                     engine._handle(event)
-                    clock[0] += DEFAULT_KEY_UP_SECONDS if mode == "default" else 0.08
+                    clock[0] += DEFAULT_KEY_UP_SECONDS
                     released = replace(event, pressed=False, timestamp=round(clock[0] * 1000))
                     backend.type(released)
                     engine._handle(released)
-                    if mode == "default":
+                    # Both modes run the engine's idle callbacks: without them a document that
+                    # ends without a boundary key never reaches the completed-word decision, so
+                    # the control mode would measure the early switch alone for such rows.
+                    timers()
+                    character = expected[serial - 1]
+                    following = expected[serial:serial + 1]
+                    if not character.isspace() and (not following or following.isspace()):
+                        clock[0] += DEFAULT_WORD_IDLE_SECONDS
                         timers()
-                        character = expected[serial - 1]
-                        following = expected[serial:serial + 1]
-                        if not character.isspace() and (not following or following.isspace()):
-                            clock[0] += DEFAULT_WORD_IDLE_SECONDS
-                            timers()
             except (AssertionError, ValueError, IndexError) as exception:
                 error = type(exception).__name__ + ": " + str(exception)
         return {"mode": mode, "actual": backend.text, "exact": error is None and backend.text == plan.expected,

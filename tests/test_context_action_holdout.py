@@ -18,6 +18,8 @@ from freeze_context_action_corpus import CorpusRow, canonical, checksum, digest,
 from freeze_context_action_holdout import (
     PRIOR_TEST, Exclusions, alias_reasons, assemble, base_test_rows_to_quarantine, holdout_inventory, prior_access_overlap,
     select_holdout_sentences, sentence_documents, sid_holdout_rows, ud_holdout_rows, verified_sid_source,
+    arch_holdout_rows, read_arch_commands, verified_arch_source, ARCH_MIRROR,
+    fedora_holdout_rows, read_fedora_commands, verified_fedora_source, FEDORA_BASE,
 )
 from reconcile_context_action_corpus import expanded_aliases
 
@@ -125,6 +127,129 @@ class SidHoldoutTests(unittest.TestCase):
         self.assertTrue(all(row.split == "test" for row in rows if not row.quarantine_reasons))
         with self.assertRaises(ValueError):
             sid_holdout_rows([Command("dup", ("usr/bin/dup",), ("a/b",)), Command("dup", ("usr/bin/dup",), ("a/b",))], empty_exclusions(), "ns")
+
+
+class ArchHoldoutTests(unittest.TestCase):
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+
+    def database(self, repository: str, packages: dict[str, list[str]]) -> Path:
+        import io
+        import tarfile
+        path = self.root / f"{repository}.files"
+        with tarfile.open(path, "w:gz") as archive:
+            for package, files in packages.items():
+                for member, text in ((f"{package}-1.0-1/desc", f"%FILENAME%\n{package}-1.0-1-x86_64.pkg.tar.zst\n\n%NAME%\n{package}\n\n%VERSION%\n1.0-1\n"),
+                                     (f"{package}-1.0-1/files", "%FILES%\n" + "\n".join(files) + "\n")):
+                    data = text.encode("utf-8")
+                    info = tarfile.TarInfo(member)
+                    info.size = len(data)
+                    archive.addfile(info, io.BytesIO(data))
+        return path
+
+    def test_arch_databases_yield_usr_bin_commands_with_repository_owners(self) -> None:
+        core = self.database("core", {"acl": ["usr/", "usr/bin/", "usr/bin/chacl", "usr/bin/getfacl", "usr/lib/libacl.so"]})
+        extra = self.database("extra", {"zzuf": ["usr/bin/zzuf", "usr/share/doc/zzuf/README"], "acl-extra": ["usr/bin/chacl"]})
+        commands = {item.name: item for item in read_arch_commands([("core", core), ("extra", extra)])}
+        self.assertEqual(set(commands), {"chacl", "getfacl", "zzuf"})
+        self.assertEqual(commands["chacl"].owners, ("core/acl", "extra/acl-extra"))
+        self.assertEqual(commands["zzuf"].paths, ("usr/bin/zzuf",))
+        rows, summary = arch_holdout_rows(list(commands.values()), empty_exclusions(lexicon=frozenset({"getfacl"})), "ns")
+        by_name = {row.original: row for row in rows}
+        self.assertNotIn("getfacl", by_name)
+        self.assertEqual(by_name["zzuf"].identifier, "arch-x86_64:command:zzuf")
+        self.assertEqual((by_name["zzuf"].source, by_name["zzuf"].source_file), ("Arch-x86_64", "core.files+extra.files"))
+        self.assertTrue(by_name["zzuf"].document.startswith("arch-package-component:"))
+        self.assertEqual(summary["commands_outside_lexicon"], 2)
+
+    def test_arch_source_requires_tls_receipt_matching_both_databases(self) -> None:
+        core = self.database("core", {"acl": ["usr/bin/chacl"]})
+        extra = self.database("extra", {"zzuf": ["usr/bin/zzuf"]})
+        receipt: dict[str, object] = {"tls_certificate_verification": True, "mirror": ARCH_MIRROR, "databases": {
+            name: {"file": f"{name}.files", "sha256": checksum(path), "bytes": path.stat().st_size,
+                   "download": {"status": 200, "url": f"{ARCH_MIRROR}{name}/os/x86_64/{name}.files"}}
+            for name, path in (("core", core), ("extra", extra))}}
+        (self.root / "source-receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
+        databases, provenance, metadata = verified_arch_source(self.root)
+        self.assertEqual([name for name, _ in databases], ["core", "extra"])
+        self.assertIn(str(extra), provenance)
+        self.assertIn("no detached signature", str(metadata["verification"]))
+        extra.write_bytes(extra.read_bytes() + b"\x00")
+        with self.assertRaises(ValueError):
+            verified_arch_source(self.root)
+        extra.write_bytes(extra.read_bytes()[:-1])
+        cast(dict[str, object], cast(dict[str, object], receipt["databases"])["core"])["download"] = {"status": 200, "url": "https://example.org/core.files"}
+        (self.root / "source-receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            verified_arch_source(self.root)
+
+
+class FedoraHoldoutTests(unittest.TestCase):
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+
+    def primary(self, packages: dict[str, list[str]]) -> Path:
+        from compression.zstd import ZstdFile
+        body = "".join(
+            f'<package type="rpm"><name>{name}</name><version epoch="0"/>'
+            + "".join(f"<file>{path}</file>" for path in files)
+            + "</package>"
+            for name, files in packages.items()
+        )
+        document = f'<?xml version="1.0"?><metadata xmlns="http://linux.duke.edu/metadata/common">{body}</metadata>'
+        path = self.root / "primary.xml.zst"
+        with ZstdFile(path, "wb") as stream:
+            stream.write(document.encode("utf-8"))
+        return path
+
+    def test_the_primary_index_yields_bin_commands_with_their_packages(self) -> None:
+        primary = self.primary({
+            "acl": ["/usr/bin/chacl", "/usr/share/doc/acl/README", "/usr/bin/getfacl"],
+            "zzuf": ["/usr/bin/zzuf"],
+            "other": ["/usr/bin/chacl", "/usr/lib/libz.so", "/usr/bin/x"],
+        })
+        commands = {item.name: item for item in read_fedora_commands(primary)}
+        self.assertEqual(set(commands), {"chacl", "getfacl", "zzuf"})
+        self.assertEqual(commands["chacl"].owners, ("fedora/acl", "fedora/other"))
+        self.assertEqual(commands["zzuf"].paths, ("usr/bin/zzuf",))
+        rows, summary = fedora_holdout_rows(list(commands.values()), empty_exclusions(lexicon=frozenset({"getfacl"})), "ns")
+        by_name = {row.original: row for row in rows}
+        self.assertNotIn("getfacl", by_name)
+        self.assertEqual(by_name["zzuf"].identifier, "fedora-x86_64:command:zzuf")
+        self.assertEqual((by_name["zzuf"].source, by_name["zzuf"].source_file), ("Fedora-x86_64", "primary.xml.zst"))
+        self.assertTrue(by_name["zzuf"].document.startswith("fedora-package-component:"))
+        self.assertEqual(summary["commands_outside_lexicon"], 2)
+
+    def test_the_receipt_must_match_repomd_and_the_payload(self) -> None:
+        primary = self.primary({"acl": ["/usr/bin/chacl"]})
+        digest = checksum(primary)
+        repomd = self.root / "repomd.xml"
+        repomd.write_text(
+            '<?xml version="1.0"?><repomd><data type="primary"><checksum type="sha256">'
+            + digest + '</checksum><location href="repodata/' + digest + '-primary.xml.zst"/></data></repomd>',
+            encoding="utf-8")
+        receipt: dict[str, object] = {
+            "tls_certificate_verification": True, "base_url": FEDORA_BASE,
+            "repomd": {"status": 200, "url": FEDORA_BASE + "repodata/repomd.xml"},
+            "repomd_sha256": checksum(repomd),
+            "primary": {"sha256": digest, "href": "repodata/" + digest + "-primary.xml.zst"},
+        }
+        (self.root / "source-receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
+        path, provenance, metadata = verified_fedora_source(self.root)
+        self.assertEqual(path, primary)
+        self.assertIn(str(repomd), provenance)
+        self.assertIn("OpenPGP signature not verified", str(metadata["verification"]))
+        cast(dict[str, object], receipt["primary"])["href"] = "repodata/other-primary.xml.zst"
+        (self.root / "source-receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            verified_fedora_source(self.root)
+        primary.write_bytes(primary.read_bytes() + b"\x00")
+        with self.assertRaises(ValueError):
+            verified_fedora_source(self.root)
 
 
 class HoldoutAssemblyTests(unittest.TestCase):

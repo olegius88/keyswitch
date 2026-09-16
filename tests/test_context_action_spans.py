@@ -50,7 +50,12 @@ class SpanCurriculumTests(unittest.TestCase):
                 self.assertEqual(item.original, translated(parent.original, cast(int, parent.group)))
             else:
                 self.assertEqual(item.original, parent.original)
-            self.assertIn(item.boundary_text, {" ", ".", ",", ";", "!"})
+            # The control mode now runs the engine's idle callbacks, so a word can also be
+            # decided on pause, before its boundary key arrives; such a frame carries no
+            # boundary character, exactly as the engine passes it at runtime.
+            self.assertIn(item.boundary_text, {"", " ", ".", ",", ";", "!"})
+            self.assertEqual(item.trigger, "pause" if item.boundary_text == "" else "space"
+                             if item.boundary_text == " " else item.trigger)
             self.assertTrue(item.field.before.rstrip() in originals)
             self.assertEqual(frame.parent_family, parent.family)
             mass[frame.parent_family] += frame.sample_weight

@@ -43,6 +43,7 @@ from .windows_system import (
 )
 from .windows_tray import WindowsTray, WindowsTrayActions
 from .windows_ui_model import (
+    APPLICATION_SETTINGS,
     AUTOCORRECTION_SETTINGS,
     DIAGNOSTIC_SETTINGS,
     HOTKEY_SETTINGS,
@@ -665,6 +666,11 @@ class WindowsApplication:
         triggers.columnconfigure(0, weight=1)
         for row, spec in enumerate(TRIGGER_SETTINGS):
             self._add_setting(triggers, spec, row)
+        quirks = ttk.LabelFrame(columns, text="Особенности программ", padding=(18, 14))
+        quirks.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(14, 0))
+        quirks.columnconfigure(0, weight=1)
+        for row, spec in enumerate(APPLICATION_SETTINGS):
+            self._add_setting(quirks, spec, row)
 
     def _build_layouts(self, parent: ttk.Frame) -> None:
         page = self._new_page(
@@ -1349,7 +1355,7 @@ class WindowsApplication:
         if path == "appearance.theme":
             self._apply_theme(str(value))
         elif path in {"general.autostart", "general.start_hidden"}:
-            self._sync_autostart()
+            self._sync_autostart(user_request=True)
         elif path == "appearance.show_indicator":
             self._sync_tray()
         elif path == "appearance.indicator_style" and self.tray is not None:
@@ -1455,15 +1461,29 @@ class WindowsApplication:
             return
         self.learning_prompt.show_prompt(prompt, anchor)
 
-    def _sync_autostart(self) -> None:
+    def _sync_autostart(self, *, user_request: bool = False) -> None:
+        requested = bool(self.settings.get("general.autostart", True))
         try:
             self.autostart.set_enabled(
-                bool(self.settings.get("general.autostart", True)),
+                requested,
                 start_hidden=bool(self.settings.get("general.start_hidden", True)),
+                # Only an explicit toggle overrides a choice the user made in Windows.
+                clear_windows_block=user_request,
             )
+            status = self.autostart.status()
         except OSError as error:
             LOGGER.warning("Не удалось синхронизировать автозагрузку Windows: %s", error)
             self.error_text.set(f"Автозагрузка: {error}")
+            return
+        if requested and status.blocked_by_windows:
+            LOGGER.warning("Автозагрузка отключена в параметрах автозапуска Windows")
+            self.error_text.set(
+                "Автозагрузка выключена в Windows: включите KeySwitch в «Диспетчер задач → "
+                "Автозагрузка приложений» или переключите здесь ещё раз."
+            )
+        elif requested and status.target_missing:
+            LOGGER.warning("Команда автозагрузки указывает на отсутствующий файл: %s", status.command)
+            self.error_text.set("Автозагрузка указывает на другой каталог установки; переключите её заново.")
 
     def _sync_update_schedule(self, *, initial: bool) -> None:
         requested = (

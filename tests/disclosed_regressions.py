@@ -7,6 +7,11 @@ DEFAULT-REGRESSION-TESTS.md). They stay in the suite as expected failures while
 that pair is installed, so the suite is green for a release that ships it, and
 they turn into hard assertions the moment a feature-version-3 context model is
 installed: an unexpected pass is then reported as such by unittest.
+
+Wiring the packaged lexicon supplement into the runtime removed all but one of
+them: an isolated word that neither the onboard lexicon nor the supplement knows
+is still converted, which is the class a feature-version-3 model refuses without
+a licence from the frozen models.
 """
 
 from __future__ import annotations

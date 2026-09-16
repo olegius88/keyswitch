@@ -6,6 +6,9 @@ import winreg
 
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+# Task Manager's Startup tab and Settings -> Apps -> Startup keep one approval value per
+# Run entry here; a value marked disabled is skipped at logon however often Run is rewritten.
+STARTUP_APPROVED_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
 APP_PATHS_KEY = r"Software\Microsoft\Windows\CurrentVersion\App Paths"
 UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall"
 
@@ -33,6 +36,28 @@ class NativeWindowsRegistry:
             with winreg.OpenKey(
                 winreg.HKEY_CURRENT_USER,
                 RUN_KEY,
+                0,
+                winreg.KEY_SET_VALUE,
+            ) as key:
+                winreg.DeleteValue(key, name)
+        except FileNotFoundError:
+            return
+
+    def read_startup_approval(self, name: str) -> bytes | None:
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_APPROVED_KEY) as key:
+                value, _value_type = winreg.QueryValueEx(key, name)
+        except FileNotFoundError:
+            return None
+        return bytes(value) if isinstance(value, (bytes, bytearray)) else None
+
+    def clear_startup_approval(self, name: str) -> None:
+        """Remove the approval record so Windows treats the value as enabled again."""
+
+        try:
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                STARTUP_APPROVED_KEY,
                 0,
                 winreg.KEY_SET_VALUE,
             ) as key:

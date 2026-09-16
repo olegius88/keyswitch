@@ -351,8 +351,12 @@ class MainWindowInteractionTests(unittest.TestCase):
         controls = self.window._settings_controls
         early = controls["detection.early_switch"]
         assert isinstance(early, Adw.SwitchRow)
-        self.assertTrue(early.get_active())
+        # Off since 0.23.0: it changed correctly typed words before they ended.
+        self.assertFalse(early.get_active())
+        self.assertIn("Выключено по умолчанию", early.get_subtitle() or "")
         self.assertIn("без контекста", early.get_subtitle() or "")
+        early.set_active(True)
+        self.assertTrue(self.settings.get("detection.early_switch"))
         context = controls["detection.context_policy"]
         assert isinstance(context, Adw.ComboRow)
         self.assertEqual(context.get_selected(), 0)

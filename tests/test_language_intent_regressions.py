@@ -16,7 +16,6 @@ from keyswitch.engine import KeySwitchEngine
 from keyswitch.history import HistoryStore
 from keyswitch.layouts import LayoutPair
 from test_input_integrity import EditorBackend
-from disclosed_regressions import disclosed_installed_pair_regression
 
 
 class LanguageIntentRegressions(unittest.TestCase):
@@ -70,7 +69,6 @@ class LanguageIntentRegressions(unittest.TestCase):
                 self.assertEqual(backend.submissions, [])
                 return backend.text
 
-    @disclosed_installed_pair_regression
     def test_correct_russian_chat_words_and_typos_keep_their_spelling(self) -> None:
         for word in (
             "гифку", "флуд", "лут", "дюп", "ютуб", "зум", "видос", "скрин", "репост",
@@ -90,7 +88,6 @@ class LanguageIntentRegressions(unittest.TestCase):
         text = "проверь  сообщение!  потом повтори. "
         self.assertEqual(self.replay(((text, 1, 1),)), text)
 
-    @disclosed_installed_pair_regression
     def test_russian_chat_sequence_does_not_change_following_keystrokes(self) -> None:
         text = "флуд закончился  всё нормально. "
         self.assertEqual(self.replay(((text, 1, 1),)), text)
@@ -104,7 +101,6 @@ class LanguageIntentRegressions(unittest.TestCase):
             with self.subTest(word=word):
                 self.assertEqual(self.replay(((word + "  ", 0, 1),)), word + "  ")
 
-    @disclosed_installed_pair_regression
     def test_russian_comment_and_english_insertion_survive_in_code_editor(self) -> None:
         for word in ("гифку", "тыща"):
             with self.subTest(word=word):

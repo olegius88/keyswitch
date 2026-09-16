@@ -27,10 +27,13 @@ class SettingsDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result["defaults_sha256"], expected)
 
     def test_all_known_sections_are_compared_and_private_collections_are_summarized(self) -> None:
-        changes = {"enabled": False, "detection.context_read_field": True,
+        # Every section is represented, and each value differs from its default:
+        # field reading ships on, so the override that proves it is turning it off.
+        changes = {"enabled": False, "detection.context_read_field": False,
                    "general.sound": True, "appearance.theme": "dark",
                    "hotkeys.convert_last": "F12", "updates.check_automatically": False,
-                   "history.limit": 50, "exclusions.words": ["private-token"]}
+                   "history.limit": 50, "exclusions.words": ["private-token"],
+                   "applications.telegram_quote_mention": False}
         for path, value in changes.items():
             self.store.set(path, value, persist=False)
         snapshot = settings_snapshot(self.store)

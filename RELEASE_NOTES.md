@@ -1,146 +1,122 @@
-# KeySwitch 0.22.0
+# KeySwitch 0.23.0
 
 ## Русский
 
-Первый опубликованный выпуск после
-[KeySwitch 0.20.0](https://github.com/olegius88/keyswitch/releases/tag/v0.20.0).
-Тег 0.21.0 существует, но его сборка не была опубликована, поэтому все
-изменения 0.21.0 входят в этот выпуск. Полный перечень — в
+Выпуск убирает две причины, по которым портился правильно набранный текст, и чинит
+автозагрузку в Windows. Модели те же, что в
+[0.22.0](https://github.com/olegius88/keyswitch/releases/tag/v0.22.0); изменилось то,
+какой словарь читает движок и что он делает до конца слова. Полный перечень — в
 [CHANGELOG.md](CHANGELOG.md).
 
 ### Файлы выпуска
 
-- `keyswitch_0.22.0_amd64.deb` — Ubuntu/Xubuntu, сеанс X11.
-- `KeySwitch-Setup-0.22.0-x64.exe` — установщик для Windows 10/11 x64. Он не
-  подписан сертификатом издателя: SmartScreen покажет предупреждение.
-- `KeySwitch-0.22.0-windows-x64.zip` — переносимый архив для Windows.
+- `keyswitch_0.23.0_amd64.deb` — Ubuntu/Xubuntu, сеанс X11.
+- `KeySwitch-Setup-0.23.0-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
+  сертификатом издателя: SmartScreen покажет предупреждение.
+- `KeySwitch-0.23.0-windows-x64.zip` — переносимый архив для Windows.
 - `SHA256SUMS` — контрольные суммы трёх файлов; сверьте их перед установкой.
 
-### Установленные модели
+### Разговорные русские слова больше не переводятся
 
-| Слой | Версия |
-| --- | --- |
-| Намерение раскладки (intent) | `intent-v1-b2a2ec8caa8d` (запечатанный тест v23) |
-| Контекст завершённого слова | `context-v1-a24683995ca4` |
-| Ранний префикс | `prefix-v1-2f0c54bf546b` |
-| Граница слова | `boundary-v2-3b2b1af6693e` |
-| Орфотактика | `ortho-v1-bdb915e4f06f` |
+Движок читает поставляемое дополнение словаря: 199 680 русских форм из частотного
+списка OpenSubtitles 2018, которых нет во встроенном словаре. Файл входил в пакет и
+раньше, но его читали только инструменты обучения. Пять из шести раскрытых дефектов
+0.22.0 исчезли на тех же весах: `гифку`, `флуд`, чат-последовательности и комментарий
+в редакторе кода сохраняют написание.
 
-Контекстная модель переобучена на тех же авторских сценариях относительно
-intent-модели v23: 36 618 синтетических строк, 16 539 из 17 658 желаемых замен
-восстановлены, 0 ложных замен (детектор без неё восстанавливает 13 905). Это
-синтетические сценарии, а не измерение качества на реальном вводе. Веса
-префикса, границы и орфотактики не изменились; их замороженные свидетельства
-заново проверены на движке этого выпуска: граница — 18 из 18
-последовательностей точно, ни одно правильное слово не изменено; префикс —
-128 из 128 желаемых восстановлений без расхождений длины.
+Остался один раскрытый случай: изолированное слово, неизвестное ни встроенному
+словарю, ни дополнению (`дюп`), по-прежнему переводится. Он зафиксирован в наборе
+тестов как ожидаемое падение и закрывается новой контекстной моделью: она прошла независимую
+запечатанную оценку 16.09.2026, но в этот выпуск не входит.
 
-### Известные дефекты
+### Раннее переключение выключено по умолчанию
 
-Эти случаи воспроизведены целыми последовательностями клавиш на моделях
-именно этого выпуска и зафиксированы в тестах как ожидаемые падения
-(`tests/disclosed_regressions.py`). Кандидаты новых моделей, исправляющие
-часть из них, дважды не прошли независимый запечатанный тест и не
-установлены.
+Раньше раскладка менялась уже по первым четырём буквам. На проверочной выборке это
+портило 13 правильно набранных слов из 256 и восстанавливало 116 неверных из 229; без
+него — 4 порчи и 109 восстановлений. Порча уже набранного текста хуже пропущенного
+исправления, а решение по завершённому слову возвращает почти всё, что давало раннее
+переключение. Настройка осталась на месте: «Ранняя смена раскладки» в разделе
+поведения.
 
-- Раннее переключение может преждевременно перевести правильное русское
-  слово, если его начало совпадает с началом английского слова в другой
-  раскладке. Подтверждённый пример: `гифку` в комментарии редактора кода
-  превращается в `ubare`, и проверка завершённого слова уже не возвращает
-  исходный текст.
-- Короткие разговорные русские слова, набранные отдельно (`гифку`, `флуд`,
-  `лут`, `дюп`, `ютуб`, `зум`), могут быть заменены по паузе или по границе
-  слова.
-- Обход: выключить раннее переключение (`detection.early_switch`) или
-  исправление по паузе (`detection.correct_on_pause`), либо добавить слово в
-  исключения (`exclusions.words`). Клавиша отмены (по умолчанию `Ctrl+Alt+Z`)
-  возвращает исходный текст.
+### Автозагрузка в Windows
 
-Нулевые ошибки на выбранных проверках не доказывают отсутствие ошибок при
-любом возможном вводе.
+Windows хранит отдельную отметку разрешения для каждой записи автозапуска
+(«Диспетчер задач → Автозагрузка приложений»). Если KeySwitch там был выключен,
+Windows игнорировала запись при каждом входе, а KeySwitch показывал автозагрузку
+включённой и молча перезаписывал её при каждом старте. Теперь состояние читается
+честно: переключатель показывает, запустится ли приложение при следующем входе,
+`KeySwitch.exe --diagnose` печатает команду, отметку Windows и признак пропавшего
+файла, а окно настроек объясняет, что делать. Переключение автозагрузки в самом
+KeySwitch снимает блокировку Windows; автоматическая синхронизация при каждом запуске
+больше не отменяет выбор, сделанный в Windows.
 
-### Проверка выпуска
+### Известные ограничения
 
-Идентичность intent-модели больше не включает строку с датой сборки Python;
-сведения об окружении сохраняются отдельно в
-[build-environment.json](model/intent_v1/build-environment.json), а код,
-конфигурация и байты модели по-прежнему проверяются по SHA256. Hunspell-словари
-оценки заморожены в репозитории. Проверка strict-отчёта отклоняет отсутствие
-обязательного условия, даже если все остальные условия успешны. Вспомогательные
-модели больше не переобучаются на CI: проверяются неизменность их лексических
-входов, замороженные байты и повтор на текущем движке. См.
-[методику проверки](docs/verification.md).
+- Изолированные слова, неизвестные словарю, всё ещё могут быть переведены (случай
+  `дюп` выше). Обход: добавить слово в исключения (`exclusions.words`) или нажать
+  клавишу отмены (`Ctrl+Alt+Z`).
+- Числа выше измерены на проверочной выборке из 490 последовательностей и не являются
+  независимой оценкой качества на произвольном вводе.
 
-Технический журнал может содержать анализируемые слова. Просматривайте его
-перед передачей. Приватные логи и переписка не входят в состав выпуска.
+Технический журнал может содержать анализируемые слова. Просматривайте его перед
+передачей. Приватные логи и переписка не входят в состав выпуска.
 
 ## English
 
-The first published release after
-[KeySwitch 0.20.0](https://github.com/olegius88/keyswitch/releases/tag/v0.20.0).
-The 0.21.0 tag exists, but its build was never published, so every 0.21.0
-change is part of this release. The full list is in
+This release removes two causes of correctly typed text being changed and fixes
+autostart on Windows. The models are the same as in
+[0.22.0](https://github.com/olegius88/keyswitch/releases/tag/v0.22.0); what changed is
+the lexicon the engine reads and what it does before a word ends. The full list is in
 [CHANGELOG.md](CHANGELOG.md).
 
 ### Release files
 
-- `keyswitch_0.22.0_amd64.deb` — Ubuntu/Xubuntu, X11 session.
-- `KeySwitch-Setup-0.22.0-x64.exe` — installer for Windows 10/11 x64. It is not
-  signed with a publisher certificate, so SmartScreen shows a warning.
-- `KeySwitch-0.22.0-windows-x64.zip` — portable archive for Windows.
+- `keyswitch_0.23.0_amd64.deb` — Ubuntu/Xubuntu, X11 session.
+- `KeySwitch-Setup-0.23.0-x64.exe` — installer for Windows 10/11 x64. It is not signed
+  with a publisher certificate, so SmartScreen shows a warning.
+- `KeySwitch-0.23.0-windows-x64.zip` — portable archive for Windows.
 - `SHA256SUMS` — checksums of the three files; verify them before installing.
 
-### Installed models
+### Colloquial Russian words are no longer converted
 
-| Layer | Version |
-| --- | --- |
-| Layout intent | `intent-v1-b2a2ec8caa8d` (sealed test v23) |
-| Completed-word context | `context-v1-a24683995ca4` |
-| Early prefix | `prefix-v1-2f0c54bf546b` |
-| Word boundary | `boundary-v2-3b2b1af6693e` |
-| Orthotactics | `ortho-v1-bdb915e4f06f` |
+The engine now reads the packaged lexicon supplement: 199,680 Russian forms from the
+OpenSubtitles 2018 frequency list that the onboard lexicon lacks. The file shipped
+before, but only the training tools read it. Five of the six disclosed 0.22.0 defects
+are gone with the same weights: `гифку`, `флуд`, the chat sequences and the
+code-editor comment keep their spelling.
 
-The context model was re-fitted on the same author-written scenarios against
-the v23 intent model: 36,618 synthetic rows, 16,539 of 17,658 desired
-conversions restored, 0 false conversions (the detector alone restores 13,905).
-These are synthetic scenarios, not a measurement of quality on real input. The
-prefix, boundary and orthotactic weights are unchanged; their frozen evidence
-was re-verified on this release's engine: boundary 18 of 18 sequences exact
-with no correct word changed, prefix 128 of 128 desired restorations with no
-length mismatch.
+One disclosed case remains: an isolated word that neither the onboard lexicon nor the
+supplement knows (`дюп`) is still converted. It stays in the test suite as an expected
+failure and is fixed by the new context model, which passed its independent sealed evaluation on
+16 September 2026 but is not part of this release.
 
-### Known defects
+### The early layout switch is off by default
 
-These cases are reproduced as whole keystroke sequences on the models of this
-very release and recorded in the test suite as expected failures
-(`tests/disclosed_regressions.py`). Candidate models that fix some of them
-failed the independent sealed test twice and are not installed.
+The layout used to change after the first four letters. On the development population
+that corrupted 13 correctly typed words out of 256 and restored 116 wrong ones out of
+229; without it, 4 corruptions and 109 restorations. Changing text the user typed
+correctly is the worse failure, and the completed-word decision recovers most of what
+the early switch was restoring. The setting is still there, under the behaviour
+section.
 
-- The early switch can convert a correctly typed Russian word too early when
-  its beginning coincides with the beginning of an English word in the other
-  layout. Confirmed example: `гифку` in a code-editor comment becomes `ubare`,
-  and the completed-word check no longer sees the original text.
-- Short colloquial Russian words typed on their own (`гифку`, `флуд`, `лут`,
-  `дюп`, `ютуб`, `зум`) can be replaced on pause or at a word boundary.
-- Workaround: disable the early switch (`detection.early_switch`) or the
-  pause correction (`detection.correct_on_pause`), or add the word to the
-  exclusions (`exclusions.words`). The undo key (`Ctrl+Alt+Z` by default)
-  restores the original text.
+### Windows autostart
 
-Zero observed errors on selected checks would not prove correctness for every
-possible input.
+Windows keeps a separate approval record for every startup entry (Task Manager,
+Startup apps). If KeySwitch was disabled there, Windows skipped the entry at every
+logon while KeySwitch reported autostart as enabled and silently rewrote it at every
+launch. The state is now reported honestly: the switch says whether the next logon
+will start the application, `KeySwitch.exe --diagnose` prints the command, the Windows
+block and a missing target, and the settings window explains what to do. Toggling
+autostart inside KeySwitch clears a Windows block; the automatic sync at every launch
+no longer overrules a choice made in Windows.
 
-### Release verification
+### Known limitations
 
-The intent-model identity no longer includes the Python build-date string;
-environment details are recorded separately in
-[build-environment.json](model/intent_v1/build-environment.json), while code,
-configuration and model bytes remain bound by SHA256. The Hunspell
-dictionaries used by the evaluation are frozen in the repository. Strict-report
-validation rejects a missing required gate even when every remaining gate
-passes. The auxiliary models are no longer retrained on CI: the checks attest
-their unchanged lexical inputs, their frozen bytes and a replay on the current
-engine. See the [verification procedure](docs/verification.md) (in Russian).
+- Isolated words unknown to the lexicon can still be converted (the `дюп` case above).
+  Workaround: add the word to the exclusions (`exclusions.words`) or press the undo key
+  (`Ctrl+Alt+Z`).
+- The numbers above come from a development population of 490 sequences and are not an
+  independent measurement of quality on arbitrary input.
 
-Technical logs may contain evaluated words. Review them before sharing.
-Private logs and conversations are excluded from the release.
+Technical logs may contain evaluated words. Review them before sharing. Private logs
+and conversations are excluded from the release.

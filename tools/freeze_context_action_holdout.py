@@ -28,7 +28,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import cast
 
-from context_technical_corpus import Command, command_aliases, read_commands
+from context_technical_corpus import COMMAND_PATH, Command, command_aliases, read_commands
 from freeze_context_action_corpus import (
     SPLITS, CorpusRow, Sentence, Union, WORDS, canonical, checksum, digest, exposed_families, family_aliases,
     physical, read_conllu, row_identifier, sentence_rows, typo_variants,
@@ -40,8 +40,21 @@ HASH = re.compile(r"[0-9a-f]{64}\Z")
 PINS = {
     "UD_Russian-GSD": "9acc9d677327043bd416fcc89e4b3407c620d885",
     "UD_English-GUM": "b58e74bc22d17220c9198864c253a50a897bf27f",
+    # corpus v6 (16.09.2026): parallel PUD pair and LinES, release r2.18 tags
+    "UD_Russian-PUD": "1228be1571bca125ac19c922ef52ae71d3cdbb83",
+    "UD_English-PUD": "e173a1be1b442faf34e7d5a502189ad5d9d1e197",
+    "UD_English-LinES": "07a998d3fe0fa4e2bc6aaf651692615f89458a1a",
+    # corpus v7 (16.09.2026)
+    "UD_Russian-SynTagRus": "6377522610550b696fcc70d39074d2ce03da0e7b",
+    "UD_English-ParTUT": "9cb91499ada4e284dfad3ea69b3b1dd10d2c516a",
+    "UD_English-GENTLE": "93a5069df8ded256c3e038938b9ea17baf75c73c",
 }
 SID_CONTENTS_URL = "https://deb.debian.org/debian/dists/sid/main/Contents-amd64.gz"
+ARCH_MIRROR = "https://geo.mirror.pkgbuild.com/"
+ARCH_REPOSITORIES = ("core", "extra")
+ARCH_SOURCE = "Arch-x86_64"
+FEDORA_BASE = "https://dl.fedoraproject.org/pub/fedora/linux/releases/43/Everything/x86_64/os/"
+FEDORA_SOURCE = "Fedora-x86_64"
 SID_RELEASE_URL = "https://deb.debian.org/debian/dists/sid/InRelease"
 SID_SOURCE = "Debian-sid-main-amd64"
 ACTIVE_SPLITS = ("train", "development", "calibration", "test")
@@ -147,8 +160,28 @@ class Exclusions:
     provenance: dict[str, str]
 
 
+def ledger_test_families(ledger: Path) -> tuple[set[str], dict[str, str]]:
+    """Families of every sealed test that was ever accessed, not only the base corpus's own.
+
+    The base corpus carries the membership of the test it was built with; a corpus chain
+    (v5 on v4, v6 on v5, v7 on v6) loses the older ones, and the evaluator's ledger rule
+    refuses a new test that shares a family with any of them. Reading the ledger here keeps
+    the freeze and that rule in agreement instead of discovering the clash at the end.
+    """
+
+    families: set[str] = set()
+    provenance: dict[str, str] = {}
+    for path in sorted(ledger.glob("*.access.json")) if ledger.exists() else []:
+        membership = read_object(path).get("test_membership")
+        if not isinstance(membership, dict):
+            continue
+        families.update(hash_set(membership.get("family_ids_sha256"), "ledger test families"))
+        provenance[str(path)] = checksum(path)
+    return families, provenance
+
+
 def load_exclusions(repository: Path, base: Path, ud_origin: Path, technical_origin: Path, prefix_inventory: Path,
-                    lexicon: Path, extra_exposure: Sequence[Path] = ()) -> Exclusions:
+                    lexicon: Path, extra_exposure: Sequence[Path] = (), ledger: Path | None = None) -> Exclusions:
     provenance: dict[str, str] = {}
     closure_path = ud_origin / "physical-family-closure.json"
     closure = read_object(closure_path)
@@ -175,6 +208,10 @@ def load_exclusions(repository: Path, base: Path, ud_origin: Path, technical_ori
     if checksum(base / "test-membership.json") != read_object(base / "manifest.json").get("test_membership_sha256"):
         raise ValueError("base test membership differs from its manifest")
     prior_families = hash_set(membership.get("family_ids_sha256"), "base test families")
+    if ledger is not None:
+        ledger_families, ledger_provenance = ledger_test_families(ledger)
+        prior_families |= ledger_families
+        provenance.update(ledger_provenance)
     exposed, sources = exposed_families(repository, extra_exposure)
     code = repository / "tools/train_context_model.py"
     historical = historical_code_forms(code.read_text(encoding="utf-8"))
@@ -246,11 +283,30 @@ def ud_holdout_rows(sentences: Sequence[Sentence], exclusions: Exclusions) -> tu
                     "quarantine_reasons": dict(reasons_count)}
 
 
-def command_identifier(name: str) -> str:
-    return SID_SOURCE.lower() + ":command:" + name
+def command_identifier(name: str, source: str = SID_SOURCE) -> str:
+    return source.lower() + ":command:" + name
 
 
 def sid_holdout_rows(commands: Sequence[Command], exclusions: Exclusions, namespace: str) -> tuple[list[CorpusRow], dict[str, object]]:
+    """Debian sid commands absent from the shipped lexicon, as a test-only technical holdout."""
+    return technical_holdout_rows(commands, exclusions, namespace, source=SID_SOURCE, source_file="Contents-amd64.gz",
+                                  document_prefix="debian-package-component:")
+
+
+def arch_holdout_rows(commands: Sequence[Command], exclusions: Exclusions, namespace: str) -> tuple[list[CorpusRow], dict[str, object]]:
+    """Arch Linux core/extra commands absent from the shipped lexicon, as a test-only technical holdout."""
+    return technical_holdout_rows(commands, exclusions, namespace, source=ARCH_SOURCE, source_file="core.files+extra.files",
+                                  document_prefix="arch-package-component:")
+
+
+def fedora_holdout_rows(commands: Sequence[Command], exclusions: Exclusions, namespace: str) -> tuple[list[CorpusRow], dict[str, object]]:
+    """Fedora Everything commands absent from the shipped lexicon, as a test-only technical holdout."""
+    return technical_holdout_rows(commands, exclusions, namespace, source=FEDORA_SOURCE, source_file="primary.xml.zst",
+                                  document_prefix="fedora-package-component:")
+
+
+def technical_holdout_rows(commands: Sequence[Command], exclusions: Exclusions, namespace: str, *, source: str, source_file: str,
+                           document_prefix: str) -> tuple[list[CorpusRow], dict[str, object]]:
     """Commands absent from the shipped lexicon, as a test-only technical holdout; the technical
     corpus family and package grouping and its fixed family cap are reproduced."""
     records = sorted((item for item in commands if item.name not in exclusions.lexicon), key=lambda item: item.name)
@@ -269,12 +325,12 @@ def sid_holdout_rows(commands: Sequence[Command], exclusions: Exclusions, namesp
         anchor = "family:" + families[item.name]
         for owner in item.owners:
             package_union.join(anchor, "package:" + owner.rsplit("/", 1)[-1])
-    documents = {item.name: "debian-package-component:" + digest(package_union.find("family:" + families[item.name])) for item in records}
+    documents = {item.name: document_prefix + digest(package_union.find("family:" + families[item.name])) for item in records}
     members: dict[str, list[str]] = defaultdict(list)
     for item in records:
         members[families[item.name]].append(item.name)
     retained = {name for names in members.values()
-                for name in sorted(names, key=lambda value: digest(namespace + ":family-cap:" + command_identifier(value)))[:2]}
+                for name in sorted(names, key=lambda value: digest(namespace + ":family-cap:" + command_identifier(value, source)))[:2]}
     family_hashes: dict[str, set[str]] = defaultdict(set)
     for item in records:
         family_hashes[families[item.name]].update(aliases[item.name])
@@ -287,9 +343,9 @@ def sid_holdout_rows(commands: Sequence[Command], exclusions: Exclusions, namesp
             reasons.append("fixed-hash-family-cap")
         reasons_count.update(reasons)
         rows.append(CorpusRow(
-            identifier=command_identifier(item.name), original=item.name, group=0, before="", after="", lemma=item.name,
-            family=family, document=documents[item.name], language="en", source=SID_SOURCE, source_file="Contents-amd64.gz",
-            source_sentence=command_identifier(item.name), source_token="1", spacing=" ", space_before="", literal_tail="",
+            identifier=command_identifier(item.name, source), original=item.name, group=0, before="", after="", lemma=item.name,
+            family=family, document=documents[item.name], language="en", source=source, source_file=source_file,
+            source_sentence=command_identifier(item.name, source), source_token="1", spacing=" ", space_before="", literal_tail="",
             upos="X", features="_", misc="_", alignment="declared-command-name", layout_representable=True,
             split="quarantine" if reasons else "test", quarantine_reasons=tuple(reasons)))
     return rows, {"commands_in_index": len(commands), "commands_outside_lexicon": len(records), "families": len(members),
@@ -326,6 +382,125 @@ def verified_sid_source(directory: Path) -> tuple[Path, dict[str, str], dict[str
     return contents, {str(path): checksum(path) for path in (receipt_path, contents, release)}, {
         "source": "Debian sid main amd64 Contents", "receipt": receipt,
         "verification": "HTTPS TLS and Contents SHA256 against downloaded InRelease; OpenPGP signature not verified by this generator"}
+
+
+def read_arch_commands(databases: Sequence[tuple[str, Path]]) -> list[Command]:
+    """Executables of pacman ``.files`` databases: ``usr/bin`` entries of every package, owned as ``repository/package``."""
+    import tarfile
+    paths: dict[str, set[str]] = defaultdict(set)
+    owners: dict[str, set[str]] = defaultdict(set)
+    for repository, database in databases:
+        with tarfile.open(database, "r:gz") as archive:
+            members = {member.name: member for member in archive.getmembers() if member.isfile()}
+            for name, member in sorted(members.items()):
+                if not name.endswith("/files"):
+                    continue
+                package_directory = name.rsplit("/", 1)[0]
+                description = members.get(package_directory + "/desc")
+                if description is None:
+                    raise ValueError("package files without a description: " + package_directory)
+                stream = archive.extractfile(description)
+                if stream is None:
+                    raise ValueError("unreadable package description: " + package_directory)
+                lines = stream.read().decode("utf-8").splitlines()
+                try:
+                    package = lines[lines.index("%NAME%") + 1]
+                except (ValueError, IndexError):
+                    raise ValueError("package description without a name: " + package_directory) from None
+                if re.fullmatch(r"[a-z0-9@._+-]+", package) is None:
+                    raise ValueError("invalid package name in files database: " + package)
+                files = archive.extractfile(member)
+                if files is None:
+                    raise ValueError("unreadable package file list: " + package_directory)
+                for line in files.read().decode("utf-8").splitlines():
+                    match = COMMAND_PATH.fullmatch(line)
+                    if match is None:
+                        continue
+                    paths[match[1]].add(line)
+                    owners[match[1]].add(repository + "/" + package)
+    return [Command(name, tuple(sorted(paths[name])), tuple(sorted(owners[name]))) for name in sorted(paths)]
+
+
+def verified_arch_source(directory: Path) -> tuple[list[tuple[str, Path]], dict[str, str], dict[str, object]]:
+    """The Arch file databases named by a TLS receipt whose SHA-256 and sizes match the files on disk."""
+    receipt_path = directory / "source-receipt.json"
+    receipt = read_object(receipt_path)
+    if receipt.get("tls_certificate_verification") is not True or receipt.get("mirror") != ARCH_MIRROR:
+        raise ValueError("source receipt does not identify verified TLS Arch Linux downloads")
+    databases = receipt.get("databases")
+    if not isinstance(databases, dict) or set(databases) != set(ARCH_REPOSITORIES):
+        raise ValueError("source receipt does not cover the core and extra databases")
+    paths: list[tuple[str, Path]] = []
+    provenance = {str(receipt_path): checksum(receipt_path)}
+    for repository in ARCH_REPOSITORIES:
+        entry = cast(dict[str, object], databases[repository]) if isinstance(databases[repository], dict) else {}
+        download = cast(dict[str, object], entry.get("download")) if isinstance(entry.get("download"), dict) else {}
+        path = directory / f"{repository}.files"
+        if (download.get("status") != 200 or download.get("url") != f"{ARCH_MIRROR}{repository}/os/x86_64/{repository}.files"
+                or entry.get("file") != f"{repository}.files"):
+            raise ValueError("source receipt does not identify the " + repository + " files database download")
+        if checksum(path) != entry.get("sha256") or path.stat().st_size != entry.get("bytes"):
+            raise ValueError("Arch " + repository + " files database checksum mismatch")
+        paths.append((repository, path))
+        provenance[str(path)] = checksum(path)
+    return paths, provenance, {"source": "Arch Linux core and extra x86_64 package file databases", "receipt": receipt,
+                               "verification": "HTTPS TLS and SHA-256 of the downloaded databases; the mirror publishes no detached signature for .files"}
+
+
+def read_fedora_commands(primary: Path) -> list[Command]:
+    """Executables of a Fedora ``primary.xml`` index: the primary filter keeps ``bin`` paths."""
+    import xml.etree.ElementTree as ElementTree
+    from compression.zstd import ZstdFile
+
+    paths: dict[str, set[str]] = defaultdict(set)
+    owners: dict[str, set[str]] = defaultdict(set)
+    with ZstdFile(primary, "rb") as stream:
+        package = ""
+        files: list[str] = []
+        for event, element in ElementTree.iterparse(stream, ("start", "end")):
+            tag = element.tag.rsplit("}", 1)[-1]
+            if event == "start" and tag == "package":
+                package, files = "", []
+                continue
+            if event != "end":
+                continue
+            if tag == "name" and not package:
+                package = (element.text or "").strip()
+            elif tag == "file":
+                files.append((element.text or "").strip())
+            elif tag == "package":
+                # Fedora package names may carry capitals and digits (0xFFFF, ImageMagick).
+                if re.fullmatch(r"[A-Za-z0-9@._+-]+", package) is None:
+                    raise ValueError("invalid package name in the Fedora index: " + package)
+                for name in files:
+                    match = COMMAND_PATH.fullmatch(name.lstrip("/"))
+                    if match is not None:
+                        paths[match[1]].add(name.lstrip("/"))
+                        owners[match[1]].add("fedora/" + package)
+                element.clear()
+    return [Command(name, tuple(sorted(paths[name])), tuple(sorted(owners[name]))) for name in sorted(paths)]
+
+
+def verified_fedora_source(directory: Path) -> tuple[Path, dict[str, str], dict[str, object]]:
+    """The Fedora index named by a TLS receipt whose SHA-256 matches ``repomd.xml`` and the payload."""
+    receipt_path = directory / "source-receipt.json"
+    receipt = read_object(receipt_path)
+    repomd, primary = directory / "repomd.xml", directory / "primary.xml.zst"
+    entry = receipt.get("primary")
+    release = receipt.get("repomd")
+    if (not isinstance(entry, dict) or not isinstance(release, dict)
+            or receipt.get("tls_certificate_verification") is not True
+            or receipt.get("base_url") != FEDORA_BASE or release.get("status") != 200):
+        raise ValueError("source receipt does not identify verified TLS Fedora downloads")
+    if checksum(repomd) != receipt.get("repomd_sha256") or checksum(primary) != entry.get("sha256"):
+        raise ValueError("Fedora index checksum mismatch")
+    href = str(entry.get("href", ""))
+    text = repomd.read_text(encoding="utf-8")
+    if f'href="{href}"' not in text or f'>{entry.get("sha256")}<' not in text:
+        raise ValueError("primary metadata is not the one repomd.xml names")
+    return primary, {str(path): checksum(path) for path in (receipt_path, repomd, primary)}, {
+        "source": "Fedora 43 Everything x86_64 package index", "receipt": receipt,
+        "verification": "HTTPS TLS and the primary SHA-256 from repomd.xml; OpenPGP signature not verified by this generator"}
 
 
 def gzip_member(rows: Sequence[CorpusRow]) -> tuple[bytes, bytes, int]:
@@ -455,7 +630,10 @@ def prior_access_overlap(ledger: Path, membership: Mapping[str, object]) -> dict
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root", type=Path, required=True)
-    parser.add_argument("--sid-directory", type=Path, required=True)
+    parser.add_argument("--sid-directory", type=Path)
+    parser.add_argument("--arch-directory", type=Path)
+    parser.add_argument("--fedora-directory", type=Path)
+    parser.add_argument("--treebank", action="append", default=[], help="pinned treebank to use; default: every pinned treebank")
     parser.add_argument("--base", type=Path, required=True)
     parser.add_argument("--ud-origin", type=Path, required=True)
     parser.add_argument("--technical-origin", type=Path, required=True)
@@ -469,13 +647,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--max-documents", type=int, default=2000)
     parser.add_argument("--max-sentences-per-document", type=int, default=12)
     args = parser.parse_args(argv)
-    paths, sources = holdout_inventory(args.source_root)
-    exclusions = load_exclusions(ROOT, args.base, args.ud_origin, args.technical_origin, args.prefix_inventory, args.lexicon, args.extra_exposure)
+    technical = [name for name, value in (("sid", args.sid_directory), ("arch", args.arch_directory),
+                                          ("fedora", args.fedora_directory)) if value is not None]
+    if len(technical) != 1:
+        raise ValueError("exactly one technical source is required: --sid-directory, --arch-directory or --fedora-directory")
+    if any(name not in PINS for name in args.treebank):
+        raise ValueError("unpinned treebank requested")
+    pins = {name: PINS[name] for name in args.treebank} if args.treebank else PINS
+    paths, sources = holdout_inventory(args.source_root, pins)
+    exclusions = load_exclusions(ROOT, args.base, args.ud_origin, args.technical_origin, args.prefix_inventory,
+                                 args.lexicon, args.extra_exposure, ledger=args.ledger)
     sentences = sentence_documents(sentence for source, path in paths for sentence in read_conllu(path, source))
     selected, sampling = select_holdout_sentences(sentences, args.namespace, args.max_documents, args.max_sentences_per_document)
     ud_rows, ud_summary = ud_holdout_rows(selected, exclusions)
-    contents, sid_provenance, sid_metadata = verified_sid_source(args.sid_directory)
-    sid_rows, sid_summary = sid_holdout_rows(read_commands(contents), exclusions, args.namespace)
+    if args.sid_directory is not None:
+        contents, sid_provenance, sid_metadata = verified_sid_source(args.sid_directory)
+        sid_rows, sid_summary = sid_holdout_rows(read_commands(contents), exclusions, args.namespace)
+    elif args.arch_directory is not None:
+        databases, sid_provenance, sid_metadata = verified_arch_source(args.arch_directory)
+        sid_rows, sid_summary = arch_holdout_rows(read_arch_commands(databases), exclusions, args.namespace)
+    else:
+        primary, sid_provenance, sid_metadata = verified_fedora_source(args.fedora_directory)
+        sid_rows, sid_summary = fedora_holdout_rows(read_fedora_commands(primary), exclusions, args.namespace)
     provenance = {**exclusions.provenance, **sid_provenance}
     for source in sources:
         provenance["holdout-source:" + str(source["repository"])] = str(source["pin_metadata_sha256"])

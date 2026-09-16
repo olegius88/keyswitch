@@ -34,7 +34,7 @@ DEFAULTS: SettingsData = {
         "confidence": 2.0,
         "correct_on_pause": True,
         "pause_delay_seconds": 1.5,
-        "early_switch": True,
+        "early_switch": False,
         "early_switch_min_length": 4,
         "correct_on_space": True,
         "correct_on_enter": True,
@@ -44,7 +44,7 @@ DEFAULTS: SettingsData = {
         "aggressive": False,
         "context_aware": True,
         "context_policy": "assist",
-        "context_read_field": False,
+        "context_read_field": True,
         "protect_code": True,
         "intent_model_enabled": True,
         "learning": True,
@@ -54,6 +54,10 @@ DEFAULTS: SettingsData = {
         "toggle": "Ctrl+Alt+P",
         "convert_last": "Pause",
         "undo": "Ctrl+Alt+Z",
+    },
+    "applications": {
+        # Per-application input conventions; see keyswitch.app_quirks.
+        "telegram_quote_mention": True,
     },
     "exclusions": {
         "applications": ["keepassxc", "1password", "bitwarden"],

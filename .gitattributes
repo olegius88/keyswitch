@@ -145,6 +145,8 @@ src/keyswitch/detector.py text eol=lf
 src/keyswitch/layouts.py text eol=lf
 src/keyswitch/language_model.py text eol=lf
 src/keyswitch/resources/protected_tokens.txt text eol=lf
+src/keyswitch/resources/lexicon-supplement-ru_RU.json text eol=lf
+src/keyswitch/resources/identifiers.json text eol=lf
 
 # Action-model replay records the runtime and editor harness byte for byte.
 # Keep their checkout representation stable on Linux and Windows.

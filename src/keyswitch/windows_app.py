@@ -16,6 +16,16 @@ from .intent_model import LinearNgramModel
 from .context_model import ContextModel
 from .windows_context import probe_uia
 from .windows_backend import WindowsBackend
+from .windows_system import WindowsAutostartManager, WindowsSystemError
+
+
+def autostart_status() -> dict[str, object]:
+    """What the next logon will really do, so a support report needs no registry editor."""
+
+    try:
+        return WindowsAutostartManager().status().as_dict()
+    except (WindowsSystemError, OSError) as error:
+        return {"error": f"{type(error).__name__}: {error}"}
 
 
 def diagnose() -> int:
@@ -37,6 +47,7 @@ def diagnose() -> int:
                 "intent_model": intent_status.as_dict(),
                 "context_model": {"available": context_model is not None, "status": context_status},
                 "context_field_access": probe_uia(),
+                "autostart": autostart_status(),
                 "error": probe.error,
             },
             # Keep redirected output valid even when a legacy Windows console

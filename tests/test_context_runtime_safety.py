@@ -139,7 +139,8 @@ class ContextRuntimeSafetyTests(InputIntegrityTests):
             self.assertEqual(event["fallback_reason"], "" if mode == "assist" else "shadow_mode")
 
     def test_session_reports_context_configuration_without_field_contents(self) -> None:
-        self.settings.set("detection.context_read_field", True)
+        # Field reading ships on, so the override that proves the session reports it is off.
+        self.settings.set("detection.context_read_field", False)
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.engine._technical_session_event("audit")
         event = self.events(logs.output)[0]
@@ -147,7 +148,7 @@ class ContextRuntimeSafetyTests(InputIntegrityTests):
         assert isinstance(settings, dict)
         overrides = settings["overrides"]
         assert isinstance(overrides, dict)
-        self.assertEqual(overrides["detection.context_read_field"], True)
+        self.assertEqual(overrides["detection.context_read_field"], False)
         self.assertEqual(event["field_reader_status"], "not_requested")
         self.engine.context_policy.reader = None
         self.assertEqual(self.engine._field_reader_status(), "not_configured")

@@ -88,6 +88,22 @@ class PhysicalSequenceTests(unittest.TestCase):
             def _handle(self, event: KeyEvent) -> None:
                 pass
 
+            # Both settings modes drive the engine's idle callbacks.
+            def _expire_deferred_action(self) -> None:
+                pass
+
+            def _expire_manual_correction(self) -> None:
+                pass
+
+            def _poll_current_group(self) -> None:
+                pass
+
+            def _maybe_correct_after_pause(self) -> None:
+                pass
+
+            def _expire_learning_prompt(self) -> None:
+                pass
+
         previous = os.environ.get("KEYSWITCH_INTENT_MODEL_PATH")
         with tempfile.TemporaryDirectory(prefix="keyswitch-pinned-intent-") as temporary:
             root = Path(temporary)
@@ -428,7 +444,7 @@ class PhysicalSequenceTests(unittest.TestCase):
             self.assertFalse(cast(dict[str, bool], control["gates"])["net_restorations_at_least_baseline"])
         self.assertIs(report["promotion_passed"], False)
 
-    def test_replay_injects_explicit_prefix_and_default_mode_runs_engine_timers(self) -> None:
+    def test_replay_injects_explicit_prefix_and_both_modes_run_engine_timers(self) -> None:
         intent = cast(LinearNgramModel, Mock(spec=LinearNgramModel, model_version="authored-intent", checksum="f" * 64))
         observed: list[tuple[PrefixModel | None, bool, bool]] = []
         timers: list[int] = []
@@ -474,8 +490,11 @@ class PhysicalSequenceTests(unittest.TestCase):
                     evaluator.replay(plan, authored_model(), {}, prefix=prefix, mode="learning")
         self.assertEqual(observed, [(None, False, True), (prefix, True, True)])
         self.assertEqual((early["mode"], default["mode"]), ("early_off", "default"))
-        # "hi there" has eight keys and two completed words: a timer pass after every key plus one per word.
-        self.assertEqual(timers, [0, 8 + 2])
+        # "hi there" has eight keys and two completed words: a timer pass after every key plus one
+        # per word. Both modes run them, so the control mode differs from the default one only in
+        # its settings: without the callbacks a document that ends without a boundary key would
+        # never reach the completed-word decision, and the control would measure the early switch.
+        self.assertEqual(timers, [8 + 2, 8 + 2])
 
 
 class SealedAccessTests(unittest.TestCase):

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from .app_quirks import SYMBOL_QUIRKS
+
 
 ControlKind = Literal["bool", "choice", "int", "float", "text"]
 
@@ -91,7 +93,7 @@ AUTOCORRECTION_SETTINGS = (
     SettingSpec(
         "detection.early_switch",
         "Ранняя смена раскладки",
-        "Исправлять до конца слова. В assist с учётом контекста — обученная модель префиксов; без контекста или в off/shadow — словарный алгоритм.",
+        "Исправлять до конца слова, не дожидаясь пробела. Выключено по умолчанию: правильно набранное слово иногда переводится по первым буквам. В assist с учётом контекста — обученная модель префиксов; без контекста или в off/shadow — словарный алгоритм.",
         "bool",
     ),
     SettingSpec(
@@ -279,6 +281,11 @@ DIAGNOSTIC_SETTINGS = (
 )
 
 
+APPLICATION_SETTINGS = tuple(
+    SettingSpec(quirk.setting, quirk.title, quirk.description, "bool")
+    for quirk in SYMBOL_QUIRKS
+)
+
 ALL_SETTING_SPECS = (
     *AUTOCORRECTION_SETTINGS,
     *TRIGGER_SETTINGS,
@@ -286,4 +293,5 @@ ALL_SETTING_SPECS = (
     *SYSTEM_SETTINGS,
     *UPDATE_SETTINGS,
     *DIAGNOSTIC_SETTINGS,
+    *APPLICATION_SETTINGS,
 )
