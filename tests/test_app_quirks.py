@@ -90,31 +90,31 @@ class TelegramQuoteMentionTests(unittest.TestCase):
                 patch.object(self.backend, "active_application", side_effect=lambda: self.application):
             self.engine._maybe_correct_after_pause()
 
-    def test_a_quote_left_alone_in_telegram_becomes_a_mention(self) -> None:
+    def test_a_quote_becomes_a_mention_as_soon_as_the_key_is_released(self) -> None:
         self.press(QUOTE_KEY)
-        self.assertEqual(self.backend.text, '"')
-        self.idle()
         self.assertEqual(self.backend.text, "@")
+        self.assertEqual(self.backend.group, 0)
 
     def test_a_quote_after_a_finished_word_is_a_mention_too(self) -> None:
         for _ in range(3):
             self.press(LETTER_KEY)
         self.press(SPACE_KEY)
         self.press(QUOTE_KEY)
-        self.assertEqual(self.backend.text, 'ррр "')
-        self.idle()
         self.assertEqual(self.backend.text, "ррр @")
 
-    def test_a_doubled_quote_and_a_quote_the_user_kept_typing_stay_quotes(self) -> None:
-        self.press(QUOTE_KEY)
-        self.press(QUOTE_KEY)
-        self.idle()
-        self.assertEqual(self.backend.text, '""')
-        self.backend.text = ""
+    def test_the_nickname_follows_the_mention_without_a_pause(self) -> None:
         self.press(QUOTE_KEY)
         self.press(LETTER_KEY)
+        self.assertEqual(self.backend.text, "@h")
+
+    def test_pressing_the_key_again_writes_the_quotes_after_all(self) -> None:
+        self.press(QUOTE_KEY)
+        self.assertEqual(self.backend.text, "@")
+        self.press(QUOTE_KEY)
+        self.assertEqual(self.backend.text, '""')
+        self.assertEqual(self.backend.group, 1)
         self.idle()
-        self.assertEqual(self.backend.text, '"р')
+        self.assertEqual(self.backend.text, '""')
 
     def test_another_application_and_a_disabled_quirk_change_nothing(self) -> None:
         self.application = "Firefox"
@@ -134,6 +134,54 @@ class TelegramQuoteMentionTests(unittest.TestCase):
         self.press(QUOTE_KEY)
         self.idle()
         self.assertEqual(self.backend.text, '"')
+
+    def test_the_undo_declines_when_the_symbol_is_gone_or_a_correction_is_pending(self) -> None:
+        """Both guards of the undo path: nothing to restore, or a plan already waiting."""
+        event = KeyEvent(True, QUOTE_KEY.keycode, '"', '"', QUOTE_KEY.characters, 1, SHIFT_MASK, 0)
+        self.engine._symbol_quirk_keycode = QUOTE_KEY.keycode
+        self.engine._symbol_strokes = []
+        self.assertFalse(self.engine._undo_symbol_quirk(event))
+        self.engine._symbol_quirk_keycode = QUOTE_KEY.keycode
+        self.engine._symbol_strokes = [event]
+        self.engine._pending = self.engine._pending or object()  # type: ignore[assignment]
+        self.assertFalse(self.engine._undo_symbol_quirk(event))
+        self.engine._pending = None
+
+    def test_the_boundary_branch_also_writes_the_quotes_on_a_second_press(self) -> None:
+        """A quote after a word boundary takes the other branch of the same rule."""
+        for _ in range(3):
+            self.press(LETTER_KEY)
+        self.press(SPACE_KEY)
+        self.press(QUOTE_KEY)
+        self.assertEqual(self.backend.text, "ррр @")
+        self.press(QUOTE_KEY)
+        self.assertEqual(self.backend.text, 'ррр ""')
+
+    def test_a_pause_with_nothing_typed_does_nothing(self) -> None:
+        """The word was cleared between the last keystroke and the idle callback."""
+        self.press(LETTER_KEY)
+        self.engine._strokes = []
+        self.idle()
+        self.assertEqual(self.backend.text, "р")
+
+    def test_a_second_press_after_a_committed_word_restores_the_quotes(self) -> None:
+        self.press(LETTER_KEY)
+        self.press(SPACE_KEY)
+        self.press(QUOTE_KEY)
+        self.assertEqual(self.backend.text, "р @")
+        self.press(QUOTE_KEY)
+        self.assertEqual(self.backend.text, 'р ""')
+        self.assertEqual(self.engine._symbol_strokes, [])
+
+    def test_another_symbol_closes_the_undo_window(self) -> None:
+        """Only the key that was rewritten undoes itself, and only right after."""
+        self.press(QUOTE_KEY)
+        self.assertEqual(self.backend.text, "@")
+        self.backend.group = 1
+        other = next(key for key in KEYS if key.characters == ("/", "."))
+        self.press(other)
+        self.assertEqual(self.engine._symbol_quirk_keycode, -1)
+        self.assertEqual(self.backend.text, "@.")
 
     def test_an_excluded_application_is_never_touched(self) -> None:
         self.settings.set("exclusions.applications", ["telegram"])

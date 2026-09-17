@@ -10,7 +10,7 @@ from .identifier_lexicon import IdentifierLexicon
 from .detector import DetectionDecision, LanguageDetector
 from .input_context import FieldContext, FieldReader, InputContext
 from .ortho_model import OrthoEvidence, OrthoModel, shape_of
-from .short_words import is_short_word_override
+from .short_words import ISOLATED_SHORT_WORD_REASON, is_short_word_override
 
 
 @dataclass(frozen=True)
@@ -161,12 +161,17 @@ class ContextPolicy:
                 target_group=target_group, source_score=source, target_score=target,
                 reason="решение контекстной модели", confidence=prediction.probability,
             )
-        elif self.model.feature_version == FEATURE_VERSION and prediction.action != "wait" and is_short_word_override(baseline):
+        elif (prediction.action != "wait" and is_short_word_override(baseline)
+              and (self.model.feature_version == FEATURE_VERSION or baseline.reason == ISOLATED_SHORT_WORD_REASON)):
             # A curated, reviewed exception is an explicit rule, not a guess, so
             # neither a probabilistic `keep` nor an under-confident `convert`
             # cancels it. Only `wait` still delays it, because that is about
             # timing rather than direction and the lookahead may resolve the
             # word jointly. The model's opinion is recorded either way.
+            # A feature-version-3 model is the arbiter of the other curated
+            # rules, but a lone letter opening a message stays an explicit rule
+            # under it too: the corpus holds too few examples per letter for
+            # weights to learn what the treebank counts state outright.
             return ContextResult(baseline, prediction, field, decision_source="short_word_override",
                                  fallback_reason="trusted_short_word")
         else:

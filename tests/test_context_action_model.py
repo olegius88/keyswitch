@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 from keyswitch.context_action_features import extract_action_features
 from keyswitch.context_model import ACTIONS, ContextEvidence, ContextModel, ContextPrediction, extract_context_features
+from keyswitch.short_words import ISOLATED_SHORT_WORD_REASON
 from keyswitch.context_policy import ContextPolicy, evidence_for_decision
 from keyswitch.detector import DetectionDecision, LanguageDetector
 from keyswitch.input_context import FieldContext
@@ -421,6 +422,20 @@ class ContextActionPolicyTests(unittest.TestCase):
             with patch("keyswitch.context_policy.is_short_word_override", return_value=True):
                 result = self.policy.decide(baseline, "привет", 1, self.detector, "space", "assist", field_override=self.field)
             self.assertEqual(result.decision.should_convert, expected)
+        # A lone letter opening a message is the one curated rule the new policy
+        # still honours (see short_words.ISOLATED_SHORT_WORD_REASON), unless the
+        # model asks to wait for the next word.
+        opening = replace(baseline, reason=ISOLATED_SHORT_WORD_REASON)
+        weights = supported_weights(item)
+        weights.update({"bias": (20.0, 0.0, 0.0, 0.0), "app:editor": ZERO})
+        self.policy.model = ContextModel(weights, "fixture", feature_version=3)
+        result = self.policy.decide(opening, "привет", 1, self.detector, "space", "assist", field_override=self.field)
+        self.assertTrue(result.decision.should_convert)
+        self.assertEqual(result.fallback_reason, "trusted_short_word")
+        weights.update({"bias": (0.0, 0.0, 20.0, 0.0)})
+        self.policy.model = ContextModel(weights, "fixture", feature_version=3)
+        waited = self.policy.decide(opening, "привет", 1, self.detector, "space", "assist", field_override=self.field)
+        self.assertEqual((waited.decision.should_convert, waited.prediction.action if waited.prediction else None), (False, "wait"))
 
     def test_artifact_feature_versions_require_their_own_identity(self) -> None:
         weights = {"bias": [0.0, 8.0, 0.0, 0.0]}

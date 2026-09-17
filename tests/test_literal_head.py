@@ -104,7 +104,10 @@ class LiteralHeadTests(InputIntegrityTests):
         cancelled = [event for event in events if event["event"] == "context_wait_cancelled"]
         self.assertEqual([event["reason"] for event in cancelled][-1:], ["literal_head"])
         self.assertIsNone(self.engine._context_waiting)
-        self.assertEqual(self.backend.text, "e /сборки ")
+        # The lone letter itself converts at the space (a Russian message opens
+        # with «у» far more often than an English one with a bare "e"); the head
+        # that follows is still not joined to it.
+        self.assertEqual(self.backend.text, "у /сборки ")
 
     def test_observed_slash_tokens_are_never_half_converted(self) -> None:
         """Real slash tokens from field logs: the head stays, the tail is whole."""

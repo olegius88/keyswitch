@@ -7,10 +7,12 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
 
+import verify_context_action_model as action_verifier
 from context_corpus import ROOT
 from context_evidence import checksum
 from evaluate_prefix_engine import provenance as engine_provenance
 from keyswitch.prefix_model import ARTIFACT, PrefixModel
+from keyswitch.prefix_schema import VersionedPrefixModel
 from prefix_corpus import DIRECTORY, PROFILES, RECEIPT, SPLITS, config
 from train_prefix_model import CANDIDATE, SEAL, REPORT, accepted, evaluate, provenance
 from verify_context_v2 import read_object
@@ -27,7 +29,26 @@ def verify_frozen() -> dict[str, object]:
 
 
 def verify(*, require_active: bool = True, report_path: Path = REPORT,
-           engine_path: Path = DIRECTORY / "engine-report.json", artifact: Path = ARTIFACT) -> dict[str, object]:
+           engine_path: Path = DIRECTORY / "engine-report.json", artifact: Path = ARTIFACT,
+           receipt_path: Path = action_verifier.RECEIPT) -> dict[str, object]:
+    """The active prefix-model gate: prefix-v1 by its frozen evidence, a later schema by the pair receipt.
+
+    A schema-two prefix model is accepted only together with a context model, in
+    one sealed evaluation, so its evidence is the context-action release receipt
+    that binds both artifacts, the ledger outcome and the runtime provenance.
+    """
+
+    if artifact.exists():
+        installed = VersionedPrefixModel.load(artifact)
+        if installed.feature_version != 1:
+            fingerprint = checksum(artifact)
+            receipt = action_verifier.verify(root=ROOT, receipt_path=receipt_path, prefix_artifact=artifact)
+            if checksum(artifact) != fingerprint:
+                raise ValueError("active prefix artifact changed during verification")
+            return {"model_version": installed.version, "feature_version": installed.feature_version, "accepted": True,
+                    "active": True, "artifact_sha256": fingerprint, "engine_passed": True,
+                    "evidence": "context-action release receipt",
+                    "receipt_model_version": receipt["model_version"], "evidence_scope": receipt["scope"]}
     verify_compatibility("prefix_v1")
     corpus, seal, report, engine = (read_object(path) for path in (RECEIPT, SEAL, report_path, engine_path))
     if corpus.get("family_overlap") != 0 or corpus.get("profiles") != list(PROFILES):
@@ -86,8 +107,8 @@ def verify(*, require_active: bool = True, report_path: Path = REPORT,
             raise ValueError("unapproved prefix model must not ship")
     elif require_active:
         raise ValueError("approved prefix model missing from package resources")
-    return {"model_version": model.version, "accepted": True, "active": artifact.exists(),
-            "test": cast(dict[str, object], test), "engine_passed": True}
+    return {"model_version": model.version, "feature_version": 1, "accepted": True, "active": artifact.exists(),
+            "artifact_sha256": checksum(CANDIDATE), "test": cast(dict[str, object], test), "engine_passed": True}
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -446,7 +446,8 @@ class DetectorTests(unittest.TestCase):
         self.assertEqual(with_context.reason, CONTEXT_SHORT_WORD_REASON)
         # ...and even then a more frequent English token stays.
         self.assertIsNone(short("vs", "мы", 1))
-        # A single letter is a word only after a Russian word.
+        # In the curated table a single letter is a word only after a Russian
+        # word; the message-start exception lives in word_decision (tested there).
         self.assertIsNone(short("f", "а", None))
         self.assertIsNone(short("f", "а", 0))
         letter = short("f", "а", 1)

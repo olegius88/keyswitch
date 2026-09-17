@@ -23,15 +23,15 @@ import json
 import re
 import shutil
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import cast
 
 from context_technical_corpus import COMMAND_PATH, Command, command_aliases, read_commands
 from freeze_context_action_corpus import (
-    SPLITS, CorpusRow, Sentence, Union, WORDS, canonical, checksum, digest, exposed_families, family_aliases,
-    physical, read_conllu, row_identifier, sentence_rows, typo_variants,
+    SPLITS, CorpusRow, Sentence, SurfaceToken, Union, WORDS, canonical, checksum, digest, exposed_families,
+    family_aliases, physical, read_conllu, row_identifier, sentence_rows, typo_variants,
 )
 from reconcile_context_action_corpus import expanded_aliases, historical_code_forms
 
@@ -48,6 +48,11 @@ PINS = {
     "UD_Russian-SynTagRus": "6377522610550b696fcc70d39074d2ce03da0e7b",
     "UD_English-ParTUT": "9cb91499ada4e284dfad3ea69b3b1dd10d2c516a",
     "UD_English-GENTLE": "93a5069df8ded256c3e038938b9ea17baf75c73c",
+    # corpus v8 (16.09.2026): the last unused Russian treebank and three English ones
+    "UD_Russian-Poetry": "f23cc60d67743d3229731dca5059650f1ec41532",
+    "UD_English-LittlePrince": "a1936378cd57c9cda6cb57da938b164760a42529",
+    "UD_English-CTeTex": "3208ccc0be5c003d8357ad52ca2b359ae31eb6a4",
+    "UD_English-Atis": "dce409dd1b526745ab0980360ed2b9f803e93531",
 }
 SID_CONTENTS_URL = "https://deb.debian.org/debian/dists/sid/main/Contents-amd64.gz"
 ARCH_MIRROR = "https://geo.mirror.pkgbuild.com/"
@@ -55,8 +60,30 @@ ARCH_REPOSITORIES = ("core", "extra")
 ARCH_SOURCE = "Arch-x86_64"
 FEDORA_BASE = "https://dl.fedoraproject.org/pub/fedora/linux/releases/43/Everything/x86_64/os/"
 FEDORA_SOURCE = "Fedora-x86_64"
+OPENSUSE_BASE = "https://download.opensuse.org/tumbleweed/repo/oss/"
+TATOEBA_BASE = "https://downloads.tatoeba.org/exports/per_language/"
+# Tatoeba exports are weekly, so a receipt pins each file by URL, Last-Modified, size and
+# SHA-256 instead of a commit. Sentences are independent: each is its own document.
+TATOEBA_TOKEN = re.compile(r"[^\W_]+(?:['\u2019\-][^\W_]+)*|[^\w\s]|_")
+TATOEBA_SAMPLE_PER_MILLE = 40
+# RPM repositories the freezer accepts, by the base URL their receipt records:
+# (source label, document prefix, human description).
+RPM_SOURCES: dict[str, tuple[str, str, str]] = {
+    FEDORA_BASE: (FEDORA_SOURCE, "fedora-package-component:", "Fedora 43 Everything x86_64 package index"),
+    OPENSUSE_BASE: ("openSUSE-x86_64", "opensuse-package-component:", "openSUSE Tumbleweed oss x86_64 package index"),
+}
 SID_RELEASE_URL = "https://deb.debian.org/debian/dists/sid/InRelease"
 SID_SOURCE = "Debian-sid-main-amd64"
+UBUNTU_CONTENTS_URL = "https://archive.ubuntu.com/ubuntu/dists/noble/Contents-amd64.gz"
+UBUNTU_RELEASE_URL = "https://archive.ubuntu.com/ubuntu/dists/noble/InRelease"
+# Debian-style Contents indexes the freezer accepts, by the Contents URL their receipt
+# records: (InRelease URL, path as listed in InRelease, source label, document prefix, description).
+DEB_SOURCES: dict[str, tuple[str, str, str, str, str]] = {
+    SID_CONTENTS_URL: (SID_RELEASE_URL, "main/Contents-amd64.gz", SID_SOURCE, "debian-package-component:",
+                       "Debian sid main amd64 Contents"),
+    UBUNTU_CONTENTS_URL: (UBUNTU_RELEASE_URL, "Contents-amd64.gz", "Ubuntu-noble-amd64", "ubuntu-package-component:",
+                          "Ubuntu noble amd64 Contents, all components"),
+}
 ACTIVE_SPLITS = ("train", "development", "calibration", "test")
 PRIOR_TEST = "prior-accessed-test"
 
@@ -101,6 +128,71 @@ def holdout_inventory(source_root: Path, pins: Mapping[str, str] = PINS) -> tupl
                 paths.append((source, path))
         metadata.append({**pin, "pin_metadata_sha256": checksum(directory / "pin.json")})
     return sorted(paths, key=lambda item: (item[0], item[1].name)), metadata
+
+
+def tatoeba_sentence(identifier: str, language: str, text: str, source: str, filename: str) -> Sentence:
+    """A Tatoeba line as the freezer's sentence: tokens tile the text, punctuation stands alone."""
+    tokens = tuple(
+        SurfaceToken(str(index + 1), match.group(), (match.group(),), "PUNCT" if not match.group()[0].isalnum() else "X", "_", "_")
+        for index, match in enumerate(TATOEBA_TOKEN.finditer(text))
+    )
+    return Sentence(f"tatoeba:{language}:{identifier}", f"{source}:sentence:{identifier}", source, filename, text, tokens)
+
+
+def read_tatoeba(path: Path, source: str, language: str, namespace: str,
+                 per_mille: int = TATOEBA_SAMPLE_PER_MILLE) -> Iterator[Sentence]:
+    """Sentences of one Tatoeba export, thinned deterministically by identifier before selection.
+
+    An export holds one to two million sentences; keeping a namespace-hashed slice of them
+    bounds memory and stays reproducible, and the freezer's own document sampling then
+    applies to what is kept. Lines whose language column disagrees are refused.
+    """
+    import bz2
+
+    if not 1 <= per_mille <= 1000:
+        raise ValueError("per-mille sample out of range")
+    with bz2.open(path, "rt", encoding="utf-8") as stream:
+        for raw in stream:
+            line = raw.rstrip("\r\n")
+            if not line:
+                continue
+            columns = line.split("\t")
+            if len(columns) != 3 or not columns[0].isdigit():
+                raise ValueError("Tatoeba export line must be id, language, text: " + path.name)
+            identifier, declared, text = columns
+            if declared != language:
+                raise ValueError(f"Tatoeba export {path.name} holds a {declared} sentence")
+            text = " ".join(text.split())
+            if not text or len(text) > 400:
+                continue
+            if int(digest(namespace + ":tatoeba:" + identifier)[:16], 16) % 1000 >= per_mille:
+                continue
+            yield tatoeba_sentence(identifier, language, text, source, path.name)
+
+
+def verified_tatoeba_source(directory: Path, languages: Sequence[str]) -> tuple[list[tuple[str, str, Path]], dict[str, str], dict[str, object]]:
+    """Tatoeba exports named by a TLS receipt whose per-file size and SHA-256 match the payloads."""
+    receipt_path = directory / "source-receipt.json"
+    receipt = read_object(receipt_path)
+    files = receipt.get("files")
+    if (not isinstance(files, dict) or receipt.get("tls_certificate_verification") is not True
+            or receipt.get("base_url") != TATOEBA_BASE or not isinstance(receipt.get("licence"), str)
+            or "CC BY" not in str(receipt.get("licence"))):
+        raise ValueError("source receipt does not identify verified TLS Tatoeba downloads under CC BY")
+    result: list[tuple[str, str, Path]] = []
+    provenance = {str(receipt_path): checksum(receipt_path)}
+    for language in languages:
+        name = f"{language}_sentences.tsv.bz2"
+        entry = files.get(name)
+        path = directory / name
+        if (not isinstance(entry, dict) or entry.get("status") != 200 or entry.get("language") != language
+                or entry.get("url") != TATOEBA_BASE + f"{language}/{name}"
+                or checksum(path) != entry.get("sha256") or path.stat().st_size != entry.get("bytes")):
+            raise ValueError("Tatoeba export receipt mismatch: " + name)
+        result.append((f"Tatoeba-{language}", language, path))
+        provenance[str(path)] = checksum(path)
+    return result, provenance, {"source": "Tatoeba per-language sentence exports", "receipt": receipt,
+                                "verification": "HTTPS TLS and per-file SHA-256 from the receipt; no upstream signature exists"}
 
 
 def sentence_documents(sentences: Iterable[Sentence]) -> list[Sentence]:
@@ -287,10 +379,12 @@ def command_identifier(name: str, source: str = SID_SOURCE) -> str:
     return source.lower() + ":command:" + name
 
 
-def sid_holdout_rows(commands: Sequence[Command], exclusions: Exclusions, namespace: str) -> tuple[list[CorpusRow], dict[str, object]]:
-    """Debian sid commands absent from the shipped lexicon, as a test-only technical holdout."""
-    return technical_holdout_rows(commands, exclusions, namespace, source=SID_SOURCE, source_file="Contents-amd64.gz",
-                                  document_prefix="debian-package-component:")
+def sid_holdout_rows(commands: Sequence[Command], exclusions: Exclusions, namespace: str,
+                     *, contents_url: str = SID_CONTENTS_URL) -> tuple[list[CorpusRow], dict[str, object]]:
+    """Commands of a Debian-style Contents index absent from the shipped lexicon, as a test-only technical holdout."""
+    _release, _name, source, prefix, _description = DEB_SOURCES[contents_url]
+    return technical_holdout_rows(commands, exclusions, namespace, source=source, source_file="Contents-amd64.gz",
+                                  document_prefix=prefix)
 
 
 def arch_holdout_rows(commands: Sequence[Command], exclusions: Exclusions, namespace: str) -> tuple[list[CorpusRow], dict[str, object]]:
@@ -299,10 +393,12 @@ def arch_holdout_rows(commands: Sequence[Command], exclusions: Exclusions, names
                                   document_prefix="arch-package-component:")
 
 
-def fedora_holdout_rows(commands: Sequence[Command], exclusions: Exclusions, namespace: str) -> tuple[list[CorpusRow], dict[str, object]]:
-    """Fedora Everything commands absent from the shipped lexicon, as a test-only technical holdout."""
-    return technical_holdout_rows(commands, exclusions, namespace, source=FEDORA_SOURCE, source_file="primary.xml.zst",
-                                  document_prefix="fedora-package-component:")
+def fedora_holdout_rows(commands: Sequence[Command], exclusions: Exclusions, namespace: str,
+                        *, base_url: str = FEDORA_BASE) -> tuple[list[CorpusRow], dict[str, object]]:
+    """Commands of an RPM repository absent from the shipped lexicon, as a test-only technical holdout."""
+    source, prefix, _description = RPM_SOURCES[base_url]
+    return technical_holdout_rows(commands, exclusions, namespace, source=source, source_file="primary.xml.zst",
+                                  document_prefix=prefix)
 
 
 def technical_holdout_rows(commands: Sequence[Command], exclusions: Exclusions, namespace: str, *, source: str, source_file: str,
@@ -360,15 +456,18 @@ def verified_sid_source(directory: Path) -> tuple[Path, dict[str, str], dict[str
     contents, release = directory / "Contents-amd64.gz", directory / "InRelease"
     data = receipt.get("contents")
     release_data = receipt.get("release")
+    contents_url = data.get("url") if isinstance(data, dict) else None
     if (not isinstance(data, dict) or not isinstance(release_data, dict)
             or data.get("status") != 200 or release_data.get("status") != 200
             or receipt.get("tls_certificate_verification") is not True
-            or data.get("url") != SID_CONTENTS_URL or release_data.get("url") != SID_RELEASE_URL):
-        raise ValueError("source receipt does not identify verified TLS Debian sid downloads")
+            or not isinstance(contents_url, str) or contents_url not in DEB_SOURCES
+            or release_data.get("url") != DEB_SOURCES[contents_url][0]):
+        raise ValueError("source receipt does not identify verified TLS downloads of a known Contents index")
+    release_url, listed_name, _source, _prefix, description = DEB_SOURCES[contents_url]
     if (checksum(contents) != receipt.get("contents_sha256") or contents.stat().st_size != receipt.get("contents_bytes")
             or checksum(release) != receipt.get("release_sha256")):
-        raise ValueError("Debian sid source checksum mismatch")
-    expected = (str(receipt["contents_sha256"]), str(receipt["contents_bytes"]), "main/Contents-amd64.gz")
+        raise ValueError("Contents index checksum mismatch")
+    expected = (str(receipt["contents_sha256"]), str(receipt["contents_bytes"]), listed_name)
     section = found = False
     for line in release.read_text(encoding="utf-8").splitlines():
         if line == "SHA256:":
@@ -378,10 +477,14 @@ def verified_sid_source(directory: Path) -> tuple[Path, dict[str, str], dict[str
         elif section and tuple(line.split()) == expected:
             found = True
     if not found:
-        raise ValueError("sid Contents checksum absent from InRelease SHA256 section")
+        raise ValueError("Contents checksum absent from InRelease SHA256 section")
+    signature = receipt.get("signature")
+    signed = isinstance(signature, dict) and signature.get("verified") is True
     return contents, {str(path): checksum(path) for path in (receipt_path, contents, release)}, {
-        "source": "Debian sid main amd64 Contents", "receipt": receipt,
-        "verification": "HTTPS TLS and Contents SHA256 against downloaded InRelease; OpenPGP signature not verified by this generator"}
+        "source": description, "contents_url": contents_url, "receipt": receipt,
+        "verification": "HTTPS TLS and Contents SHA256 against downloaded InRelease; "
+                        + ("InRelease OpenPGP signature verified by the fetcher against the local archive keyring"
+                           if signed else "OpenPGP signature not verified by this generator")}
 
 
 def read_arch_commands(databases: Sequence[tuple[str, Path]]) -> list[Command]:
@@ -482,25 +585,38 @@ def read_fedora_commands(primary: Path) -> list[Command]:
 
 
 def verified_fedora_source(directory: Path) -> tuple[Path, dict[str, str], dict[str, object]]:
-    """The Fedora index named by a TLS receipt whose SHA-256 matches ``repomd.xml`` and the payload."""
+    """An RPM index named by a TLS receipt whose checksum matches ``repomd.xml`` and the payload.
+
+    Fedora's index names a SHA-256, openSUSE's a SHA-512; the receipt records the
+    algorithm the index used and the freezer recomputes it, plus its own SHA-256 pin
+    of the file. The base URL selects the source label (RPM_SOURCES).
+    """
     receipt_path = directory / "source-receipt.json"
     receipt = read_object(receipt_path)
     repomd, primary = directory / "repomd.xml", directory / "primary.xml.zst"
     entry = receipt.get("primary")
     release = receipt.get("repomd")
+    base_url = receipt.get("base_url")
     if (not isinstance(entry, dict) or not isinstance(release, dict)
             or receipt.get("tls_certificate_verification") is not True
-            or receipt.get("base_url") != FEDORA_BASE or release.get("status") != 200):
-        raise ValueError("source receipt does not identify verified TLS Fedora downloads")
+            or not isinstance(base_url, str) or base_url not in RPM_SOURCES or release.get("status") != 200):
+        raise ValueError("source receipt does not identify verified TLS RPM index downloads")
     if checksum(repomd) != receipt.get("repomd_sha256") or checksum(primary) != entry.get("sha256"):
-        raise ValueError("Fedora index checksum mismatch")
+        raise ValueError("RPM index checksum mismatch")
+    algorithm = entry.get("checksum_type", "sha256")
+    declared = entry.get("checksum", entry.get("sha256"))
+    if algorithm not in ("sha256", "sha512") or not isinstance(declared, str):
+        raise ValueError("RPM index receipt names an unknown checksum")
+    if hashlib.new(algorithm, primary.read_bytes()).hexdigest() != declared:
+        raise ValueError("RPM index payload does not match the checksum the index names")
     href = str(entry.get("href", ""))
     text = repomd.read_text(encoding="utf-8")
-    if f'href="{href}"' not in text or f'>{entry.get("sha256")}<' not in text:
+    if f'href="{href}"' not in text or f'>{declared}<' not in text:
         raise ValueError("primary metadata is not the one repomd.xml names")
+    _source, _prefix, description = RPM_SOURCES[base_url]
     return primary, {str(path): checksum(path) for path in (receipt_path, repomd, primary)}, {
-        "source": "Fedora 43 Everything x86_64 package index", "receipt": receipt,
-        "verification": "HTTPS TLS and the primary SHA-256 from repomd.xml; OpenPGP signature not verified by this generator"}
+        "source": description, "base_url": base_url, "receipt": receipt,
+        "verification": f"HTTPS TLS and the primary {algorithm} from repomd.xml; OpenPGP signature not verified by this generator"}
 
 
 def gzip_member(rows: Sequence[CorpusRow]) -> tuple[bytes, bytes, int]:
@@ -632,8 +748,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--source-root", type=Path, required=True)
     parser.add_argument("--sid-directory", type=Path)
     parser.add_argument("--arch-directory", type=Path)
-    parser.add_argument("--fedora-directory", type=Path)
-    parser.add_argument("--treebank", action="append", default=[], help="pinned treebank to use; default: every pinned treebank")
+    parser.add_argument("--fedora-directory", "--rpm-directory", dest="fedora_directory", type=Path)
+    parser.add_argument("--treebank", action="append", default=[],
+                        help="pinned treebank to use; default: every pinned treebank; 'none' for receipted sources only")
+    parser.add_argument("--tatoeba-directory", type=Path, help="receipted Tatoeba exports to add as natural sentences")
+    parser.add_argument("--tatoeba-language", action="append", default=[], help="Tatoeba language code to read, repeatable")
     parser.add_argument("--base", type=Path, required=True)
     parser.add_argument("--ud-origin", type=Path, required=True)
     parser.add_argument("--technical-origin", type=Path, required=True)
@@ -651,25 +770,43 @@ def main(argv: Sequence[str] | None = None) -> int:
                                           ("fedora", args.fedora_directory)) if value is not None]
     if len(technical) != 1:
         raise ValueError("exactly one technical source is required: --sid-directory, --arch-directory or --fedora-directory")
-    if any(name not in PINS for name in args.treebank):
+    if args.treebank == ["none"]:
+        pins: dict[str, str] = {}
+    elif any(name not in PINS for name in args.treebank):
         raise ValueError("unpinned treebank requested")
-    pins = {name: PINS[name] for name in args.treebank} if args.treebank else PINS
-    paths, sources = holdout_inventory(args.source_root, pins)
+    else:
+        pins = {name: PINS[name] for name in args.treebank} if args.treebank else PINS
+    paths, sources = holdout_inventory(args.source_root, pins) if pins else ([], [])
     exclusions = load_exclusions(ROOT, args.base, args.ud_origin, args.technical_origin, args.prefix_inventory,
                                  args.lexicon, args.extra_exposure, ledger=args.ledger)
     sentences = sentence_documents(sentence for source, path in paths for sentence in read_conllu(path, source))
+    tatoeba_provenance: dict[str, str] = {}
+    tatoeba_metadata: dict[str, object] | None = None
+    if args.tatoeba_directory is not None:
+        if not args.tatoeba_language:
+            raise ValueError("--tatoeba-directory needs at least one --tatoeba-language")
+        exports, tatoeba_provenance, tatoeba_metadata = verified_tatoeba_source(args.tatoeba_directory, args.tatoeba_language)
+        for label, language, path in exports:
+            sentences.extend(read_tatoeba(path, label, language, args.namespace))
+    elif args.tatoeba_language:
+        raise ValueError("--tatoeba-language needs --tatoeba-directory")
     selected, sampling = select_holdout_sentences(sentences, args.namespace, args.max_documents, args.max_sentences_per_document)
     ud_rows, ud_summary = ud_holdout_rows(selected, exclusions)
     if args.sid_directory is not None:
         contents, sid_provenance, sid_metadata = verified_sid_source(args.sid_directory)
-        sid_rows, sid_summary = sid_holdout_rows(read_commands(contents), exclusions, args.namespace)
+        sid_rows, sid_summary = sid_holdout_rows(read_commands(contents), exclusions, args.namespace,
+                                                 contents_url=str(sid_metadata["contents_url"]))
     elif args.arch_directory is not None:
         databases, sid_provenance, sid_metadata = verified_arch_source(args.arch_directory)
         sid_rows, sid_summary = arch_holdout_rows(read_arch_commands(databases), exclusions, args.namespace)
     else:
         primary, sid_provenance, sid_metadata = verified_fedora_source(args.fedora_directory)
-        sid_rows, sid_summary = fedora_holdout_rows(read_fedora_commands(primary), exclusions, args.namespace)
-    provenance = {**exclusions.provenance, **sid_provenance}
+        sid_rows, sid_summary = fedora_holdout_rows(read_fedora_commands(primary), exclusions, args.namespace,
+                                                    base_url=str(sid_metadata["base_url"]))
+    provenance = {**exclusions.provenance, **sid_provenance, **tatoeba_provenance}
+    if tatoeba_metadata is not None:
+        sampling = {**sampling, "tatoeba": {"languages": list(args.tatoeba_language), "per_mille": TATOEBA_SAMPLE_PER_MILLE,
+                                            "receipt_sha256": tatoeba_provenance[str(args.tatoeba_directory / "source-receipt.json")]}}
     for source in sources:
         provenance["holdout-source:" + str(source["repository"])] = str(source["pin_metadata_sha256"])
     held = [row for row in (*ud_rows, *sid_rows) if row.split == "test"]

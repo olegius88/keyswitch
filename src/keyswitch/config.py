@@ -41,7 +41,7 @@ DEFAULTS: SettingsData = {
         "correct_on_tab": True,
         "correct_on_punctuation": True,
         "respect_manual_layout": True,
-        "aggressive": False,
+        "aggressive": True,
         "context_aware": True,
         "context_policy": "assist",
         "context_read_field": True,

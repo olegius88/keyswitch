@@ -202,5 +202,25 @@ class ContextTechnicalCorpusTests(unittest.TestCase):
             partition_commands([command("zebrina"), command("zebrina")], set())
 
 
+class ContentsOwnershipTests(unittest.TestCase):
+    def test_ubuntu_component_prefixed_ownership_is_read_and_garbage_still_refused(self) -> None:
+        import gzip
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as temporary:
+            contents = Path(temporary) / "Contents-amd64.gz"
+            with gzip.open(contents, "wt", encoding="utf-8") as stream:
+                stream.write("usr/bin/abduco\tuniverse/utils/abduco\n")
+                stream.write("usr/bin/zsh\tshells/zsh,universe/shells/zsh-static\n")
+            commands = {command.name: command for command in read_commands(contents)}
+            self.assertEqual(commands["abduco"].owners, ("universe/utils/abduco",))
+            self.assertEqual(commands["zsh"].owners, ("shells/zsh", "universe/shells/zsh-static"))
+            with gzip.open(contents, "wt", encoding="utf-8") as stream:
+                stream.write("usr/bin/abduco\tUniverse/Utils/Abduco\n")
+            with self.assertRaises(ValueError):
+                read_commands(contents)
+
+
 if __name__ == "__main__":
     unittest.main()

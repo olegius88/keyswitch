@@ -34,8 +34,9 @@ from .context_policy import ContextPolicy, ContextResult
 from .context_access import PlatformFieldReader
 from .input_context import FieldContext, FieldReader
 from .prefix_model import PrefixInput, PrefixModel
+from .prefix_schema import VersionedPrefixModel
 from .settings_diagnostics import setting_change, settings_snapshot
-from .short_words import is_short_word_override
+from .short_words import ISOLATED_SHORT_WORD_REASON, is_short_word_override
 from .word_decision import automatic_word_decision
 
 
@@ -206,7 +207,8 @@ class KeySwitchEngine:
         self.context_policy = ContextPolicy(context_reader or PlatformFieldReader(self.backend))
         self._context_result: ContextResult | None = None
         self.boundary_model: BoundaryModel | None = BoundaryPolicy.default()
-        self.prefix_model = PrefixModel.default()
+        # Typed by the frozen base class: replays and tests substitute schema-one doubles.
+        self.prefix_model: PrefixModel | None = VersionedPrefixModel.default()
         self._early_switch_confidence = EARLY_SWITCH_CONFIDENCE
         self._context_waiting: WaitingContextWord | None = None
         self._context_wait_sequence = 0
@@ -260,6 +262,8 @@ class KeySwitchEngine:
         }
         self._pending: CorrectionPlan | None = None
         self._pending_trigger_keycode = -1
+        # The key an application quirk has just rewritten; pressing it again undoes that.
+        self._symbol_quirk_keycode = -1
         self._manual_release_deadline = 0.0
         self._last_committed: CorrectionPlan | None = None
         self._last_correction: CorrectionPlan | None = None
@@ -735,9 +739,14 @@ class KeySwitchEngine:
             # rewrite the previous word after further input.
             if event.key_name in WORD_BOUNDARY_KEYS:
                 self._symbol_strokes = []
+                self._symbol_quirk_keycode = -1
             elif self._layout_dependent(event):
+                # A quirk writes its replacement in the other layout, where that key
+                # is an ordinary character, so the second press of it arrives in the
+                # branch below. Any other symbol here closes the undo window.
+                self._symbol_quirk_keycode = -1
                 self._symbol_strokes.append(event)
-                self._mark_word_activity()
+                self._schedule_symbol_quirk(event)
             self._last_committed_stale = True
             return
         if event.key_name in NAVIGATION_KEYS:
@@ -759,11 +768,12 @@ class KeySwitchEngine:
                 )
                 return
             if self._layout_dependent(event):
-                # "@" typed in the US layout but meant as the RU quote. A symbol
-                # left alone can also be an application's own syntax, so the idle
-                # pause has to reach it (KeySwitchEngine._correct_pending_symbol).
+                # "@" typed in the US layout but meant as the RU quote, or a symbol
+                # this application's own syntax explains (_schedule_symbol_quirk).
+                if self._undo_symbol_quirk(event):
+                    return
                 self._symbol_strokes.append(event)
-                self._mark_word_activity()
+                self._schedule_symbol_quirk(event)
                 return
             # A leading digit or path marker belongs to the token too:
             # `2ghbdtn` must not be seen as the unrelated word `ghbdtn`.
@@ -1216,23 +1226,14 @@ class KeySwitchEngine:
                 self._pending = plan
                 self._pending_learning_action = None
                 self._pending_trigger_keycode = boundary.keycode
+                # A lone letter converts at once, but a user who keeps typing makes
+                # that correction abort as unsafe; the next word then decides it,
+                # exactly as it did while the letter waited for context.
+                if decision.reason == ISOLATED_SHORT_WORD_REASON:
+                    self._start_context_wait(plan, decision, original, boundary, trailing, head)
             else:
                 self._remember_context(application, source_group, typed[:head] + strokes)
-                result = self._context_result
-                if (
-                    result is not None and result.prediction is not None
-                    and result.prediction.action == "wait" and result.field is not None
-                    and len(original) <= 2 and boundary.character == " "
-                    and not trailing and not head
-                    and not boundary.deferred
-                    and self.settings.get("detection.context_policy", "assist") == "assist"
-                ):
-                    self._context_wait_sequence += 1
-                    self._context_waiting = WaitingContextWord(
-                        plan, decision, result.field, self._focus_window or 0, time.monotonic() + 10.0,
-                        self._context_wait_sequence,
-                    )
-                    self._log_context_wait("context_wait_started", self._context_waiting, "model_wait")
+                self._start_context_wait(plan, decision, original, boundary, trailing, head)
         else:
             self._log_context_wait("context_wait_cancelled", waiting, "analysis_skipped")
             self._remember_context(application, source_group, typed[:head] + strokes)
@@ -1627,6 +1628,35 @@ class KeySwitchEngine:
             result.decision.confidence, application, True, "context_phrase", self._context_field_id(),
         )
 
+    def _start_context_wait(
+        self, plan: CorrectionPlan, decision: DetectionDecision, original: str,
+        boundary: KeyEvent, trailing: tuple[KeyEvent, ...], head: int,
+    ) -> None:
+        """Let a short word at a space wait for its next word.
+
+        The model asks for it with a ``wait`` verdict. A lone letter converted by
+        the message-start rule waits as well, whatever the model said: if the user
+        keeps typing, the immediate correction aborts as unsafe and the next word
+        has to decide the letter; if it went through, the observed text no longer
+        matches and the wait cancels itself.
+        """
+
+        result = self._context_result
+        if (
+            result is not None and result.prediction is not None and result.field is not None
+            and (result.prediction.action == "wait" or decision.reason == ISOLATED_SHORT_WORD_REASON)
+            and len(original) <= 2 and boundary.character == " "
+            and not trailing and not head
+            and not boundary.deferred
+            and self.settings.get("detection.context_policy", "assist") == "assist"
+        ):
+            self._context_wait_sequence += 1
+            self._context_waiting = WaitingContextWord(
+                plan, decision, result.field, self._focus_window or 0, time.monotonic() + 10.0,
+                self._context_wait_sequence,
+            )
+            self._log_context_wait("context_wait_started", self._context_waiting, "model_wait")
+
     def _log_context_wait(
         self, event: str, waiting: WaitingContextWord | None, reason: str, **fields: object,
     ) -> None:
@@ -2005,7 +2035,6 @@ class KeySwitchEngine:
 
         self._pause_correction_pending = False
         if not self._strokes:
-            self._correct_pending_symbol(idle_ms)
             return
         typed = tuple(self._strokes)
         head = self._literal_head(typed, self._source_group)
@@ -2091,17 +2120,18 @@ class KeySwitchEngine:
         self._update(current_word="")
         self._execute_correction(plan, None)
 
-    def _correct_pending_symbol(self, idle_ms: int) -> None:
-        """A symbol left alone in an application whose syntax explains it.
+    def _schedule_symbol_quirk(self, stroke: KeyEvent) -> None:
+        """A symbol this application's own syntax explains, rewritten as it is typed.
 
-        Only a single pending symbol qualifies: a doubled quote and a quote the
-        user kept typing after are ordinary text, and both leave the engine in a
-        state this branch never sees.
+        The user sees the result immediately, which is the point of a mention: the
+        nickname follows the "@" without a pause. Only a symbol that starts a fresh
+        token qualifies, and pressing the same key again writes the symbol after all
+        (_undo_symbol_quirk), so a real quote costs one extra keystroke instead of a
+        wait. Like the early switch, the correction runs on the key's release.
         """
 
-        if len(self._symbol_strokes) != 1:
+        if len(self._symbol_strokes) != 1 or self._pending is not None:
             return
-        stroke = self._symbol_strokes[0]
         source_group = stroke.group
         target = next((group for group in self.models if group != source_group), None)
         if target is None or source_group not in self.models:
@@ -2114,18 +2144,45 @@ class KeySwitchEngine:
         quirk = symbol_quirk(application, typed, meant, lambda path: bool(self.settings.get(path, True)))
         if quirk is None:
             return
-        plan = CorrectionPlan(
+        self._pending = CorrectionPlan(
             (stroke,), None, source_group, target, typed, meant, 99.0, application,
             True, "symbol_quirk",
         )
+        self._pending_learning_action = None
+        self._pending_trigger_keycode = stroke.keycode
+        self._symbol_quirk_keycode = stroke.keycode
         self._technical_event(
-            "symbol_quirk_applied", quirk=quirk.setting, application=application,
+            "symbol_quirk_scheduled", quirk=quirk.setting, application=application,
             original=typed, replacement=meant, source_group=source_group,
-            target_group=target, idle_ms=idle_ms,
+            target_group=target, trigger_keycode=stroke.keycode,
+        )
+
+    def _undo_symbol_quirk(self, stroke: KeyEvent) -> bool:
+        """The same key pressed again: the user wanted the symbol, not what it means here."""
+
+        if self._symbol_quirk_keycode != stroke.keycode or self._strokes:
+            self._symbol_quirk_keycode = -1
+            return False
+        self._symbol_quirk_keycode = -1
+        previous = self._symbol_strokes[-1] if self._symbol_strokes else None
+        if previous is None or self._pending is not None:
+            return False
+        target = previous.group
+        strokes = (previous, replace(stroke, group=target))
+        application = self.backend.active_application()
+        self._technical_event(
+            "symbol_quirk_undone", application=application, target_group=target,
+            trigger_keycode=stroke.keycode,
         )
         self._symbol_strokes = []
-        self._reset_pause_correction()
-        self._execute_correction(plan, None)
+        self._pending = CorrectionPlan(
+            strokes, None, 1 - target, target,
+            self._text_for_group(strokes, 1 - target), self._text_for_group(strokes, target),
+            99.0, application, True, "symbol_quirk_undo",
+        )
+        self._pending_learning_action = None
+        self._pending_trigger_keycode = stroke.keycode
+        return True
 
     def _prune_stale_presses(self, now: float) -> None:
         """Forget presses whose release was never delivered (focus changes)."""

@@ -13,13 +13,14 @@ from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
-from context_technical_corpus import Command
-from freeze_context_action_corpus import CorpusRow, canonical, checksum, digest, freeze, load_split, physical, read_conllu
+from context_technical_corpus import read_commands, Command
+from freeze_context_action_corpus import CorpusRow, Union, canonical, checksum, digest, freeze, load_split, physical, read_conllu
 from freeze_context_action_holdout import (
     PRIOR_TEST, Exclusions, alias_reasons, assemble, base_test_rows_to_quarantine, holdout_inventory, prior_access_overlap,
     select_holdout_sentences, sentence_documents, sid_holdout_rows, ud_holdout_rows, verified_sid_source,
     arch_holdout_rows, read_arch_commands, verified_arch_source, ARCH_MIRROR,
-    fedora_holdout_rows, read_fedora_commands, verified_fedora_source, FEDORA_BASE,
+    fedora_holdout_rows, read_fedora_commands, verified_fedora_source, FEDORA_BASE, OPENSUSE_BASE,
+    read_tatoeba, tatoeba_sentence, verified_tatoeba_source, TATOEBA_BASE, UBUNTU_CONTENTS_URL, UBUNTU_RELEASE_URL,
 )
 from reconcile_context_action_corpus import expanded_aliases
 
@@ -251,6 +252,94 @@ class FedoraHoldoutTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             verified_fedora_source(self.root)
 
+    def test_an_opensuse_receipt_is_verified_with_the_sha512_its_index_names(self) -> None:
+        import hashlib
+
+        primary = self.primary({"zypper": ["/usr/bin/zypper"]})
+        payload = primary.read_bytes()
+        declared, pin = hashlib.sha512(payload).hexdigest(), checksum(primary)
+        repomd = self.root / "repomd.xml"
+        repomd.write_text(
+            '<?xml version="1.0"?><repomd><data type="primary"><checksum type="sha512">' + declared
+            + '</checksum><location href="repodata/' + declared + '-primary.xml.zst"/></data></repomd>', encoding="utf-8")
+        receipt: dict[str, object] = {
+            "tls_certificate_verification": True, "base_url": OPENSUSE_BASE,
+            "repomd": {"status": 200, "url": OPENSUSE_BASE + "repodata/repomd.xml"}, "repomd_sha256": checksum(repomd),
+            "primary": {"sha256": pin, "checksum_type": "sha512", "checksum": declared,
+                        "href": "repodata/" + declared + "-primary.xml.zst"},
+        }
+        (self.root / "source-receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
+        path, _provenance, metadata = verified_fedora_source(self.root)
+        self.assertEqual((path, metadata["base_url"]), (primary, OPENSUSE_BASE))
+        self.assertIn("sha512", str(metadata["verification"]))
+        rows, _summary = fedora_holdout_rows(read_fedora_commands(primary), empty_exclusions(), "ns", base_url=OPENSUSE_BASE)
+        self.assertEqual((rows[0].source, rows[0].identifier), ("openSUSE-x86_64", "opensuse-x86_64:command:zypper"))
+        self.assertTrue(rows[0].document.startswith("opensuse-package-component:"))
+        # A base URL the freezer does not know is refused, whatever the checksums say.
+        receipt["base_url"] = "https://example.invalid/repo/"
+        (self.root / "source-receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            verified_fedora_source(self.root)
+
+
+class TatoebaHoldoutTests(unittest.TestCase):
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+
+    def export(self, language: str, lines: list[tuple[str, str, str]]) -> Path:
+        import bz2
+        path = self.root / f"{language}_sentences.tsv.bz2"
+        with bz2.open(path, "wt", encoding="utf-8") as stream:
+            for identifier, declared, text in lines:
+                stream.write(f"{identifier}\t{declared}\t{text}\n")
+        return path
+
+    def test_tokens_tile_the_sentence_and_punctuation_stands_alone(self) -> None:
+        from freeze_context_action_corpus import aligned_text, sentence_rows
+
+        sentence = tatoeba_sentence("42", "rus", "Давайте что-нибудь попробуем! Это - тест...", "Tatoeba-rus", "rus.tsv.bz2")
+        self.assertEqual([token.form for token in sentence.tokens],
+                         ["Давайте", "что-нибудь", "попробуем", "!", "Это", "-", "тест", ".", ".", "."])
+        self.assertEqual({token.upos for token in sentence.tokens}, {"X", "PUNCT"})
+        text, spans, alignment = aligned_text(sentence)
+        self.assertEqual((alignment, len(spans)), ("exact-text-comment", len(sentence.tokens)))
+        rows = sentence_rows(sentence, Union())
+        by_form = {row.original: row for row in rows}
+        self.assertEqual((by_form["попробуем"].after[:1], by_form["попробуем"].literal_tail), ("!", "! "))
+        self.assertEqual((sentence.identifier, sentence.document), ("tatoeba:rus:42", "Tatoeba-rus:sentence:42"))
+
+    def test_the_reader_thins_deterministically_and_refuses_a_foreign_line(self) -> None:
+        lines = [(str(index), "rus", f"Предложение номер {index}.") for index in range(1, 2001)]
+        path = self.export("rus", lines)
+        kept = list(read_tatoeba(path, "Tatoeba-rus", "rus", "ns", per_mille=100))
+        again = list(read_tatoeba(path, "Tatoeba-rus", "rus", "ns", per_mille=100))
+        self.assertEqual([item.identifier for item in kept], [item.identifier for item in again])
+        self.assertTrue(120 < len(kept) < 280, len(kept))
+        self.assertNotEqual([item.identifier for item in kept], [item.identifier for item in read_tatoeba(path, "Tatoeba-rus", "rus", "other", per_mille=100)])
+        foreign = self.export("eng", [("7", "rus", "Не тот язык.")])
+        with self.assertRaises(ValueError):
+            list(read_tatoeba(foreign, "Tatoeba-eng", "eng", "ns"))
+
+    def test_the_receipt_pins_each_export_by_size_and_digest(self) -> None:
+        path = self.export("rus", [("1", "rus", "Привет.")])
+        receipt: dict[str, object] = {
+            "tls_certificate_verification": True, "base_url": TATOEBA_BASE, "licence": "CC BY 2.0 FR",
+            "files": {"rus_sentences.tsv.bz2": {"status": 200, "language": "rus", "url": TATOEBA_BASE + "rus/rus_sentences.tsv.bz2",
+                                                "sha256": checksum(path), "bytes": path.stat().st_size}},
+        }
+        (self.root / "source-receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
+        exports, provenance, metadata = verified_tatoeba_source(self.root, ["rus"])
+        self.assertEqual(exports, [("Tatoeba-rus", "rus", path)])
+        self.assertIn(str(path), provenance)
+        self.assertIn("no upstream signature", str(metadata["verification"]))
+        with self.assertRaises(ValueError):
+            verified_tatoeba_source(self.root, ["eng"])
+        path.write_bytes(path.read_bytes() + b"\x00")
+        with self.assertRaises(ValueError):
+            verified_tatoeba_source(self.root, ["rus"])
+
 
 class HoldoutAssemblyTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -357,6 +446,25 @@ class HoldoutSourceVerificationTests(unittest.TestCase):
         (self.root / "source-receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
         with self.assertRaises(ValueError):
             verified_sid_source(self.root)
+
+    def test_an_ubuntu_receipt_names_the_merged_contents_and_its_verified_signature(self) -> None:
+        contents = self.root / "Contents-amd64.gz"
+        with gzip.open(contents, "wt", encoding="utf-8") as stream:
+            stream.write("usr/bin/snapcraft\tdevel/snapcraft\n")
+        sha = checksum(contents)
+        release = self.root / "InRelease"
+        release.write_text("SHA256:\n " + sha + " " + str(contents.stat().st_size) + " Contents-amd64.gz\nSHA512:\n", encoding="utf-8")
+        receipt: dict[str, object] = {"contents": {"status": 200, "url": UBUNTU_CONTENTS_URL},
+                   "release": {"status": 200, "url": UBUNTU_RELEASE_URL},
+                   "tls_certificate_verification": True, "contents_sha256": sha, "contents_bytes": contents.stat().st_size,
+                   "release_sha256": checksum(release), "signature": {"verified": True, "exit_code": 0}}
+        (self.root / "source-receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
+        path, provenance, metadata = verified_sid_source(self.root)
+        self.assertEqual((path, metadata["contents_url"]), (contents, UBUNTU_CONTENTS_URL))
+        self.assertIn("signature verified", str(metadata["verification"]))
+        rows, _summary = sid_holdout_rows(read_commands(contents), empty_exclusions(), "ns", contents_url=UBUNTU_CONTENTS_URL)
+        self.assertEqual((rows[0].source, rows[0].identifier), ("Ubuntu-noble-amd64", "ubuntu-noble-amd64:command:snapcraft"))
+        self.assertTrue(rows[0].document.startswith("ubuntu-package-component:"))
 
 
 if __name__ == "__main__":

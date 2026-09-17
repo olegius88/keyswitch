@@ -632,11 +632,14 @@ class PlannedMassBalanceTests(unittest.TestCase):
 
 class PlannedEvidenceTests(unittest.TestCase):
     def test_planned_frame_evidence_uses_the_next_word_as_its_only_context(self) -> None:
+        # "kb" is a real English token, so the two-letter rule needs a Russian
+        # neighbour to read it as "ли"; a lone curated letter would convert at
+        # the start of a message on its own and show no contrast here.
         detector = LanguageDetector({
-            0: LanguageModel("en_US", {"hello": 5000}, "fixture", enable_spellcheck=False),
-            1: LanguageModel("ru_RU", {"этого": 5000, "привет": 5000}, "fixture", enable_spellcheck=False),
+            0: LanguageModel("en_US", {"hello": 5000, "kb": 5000}, "fixture", enable_spellcheck=False),
+            1: LanguageModel("ru_RU", {"этого": 5000, "привет": 5000, "ли": 20000}, "fixture", enable_spellcheck=False),
         })
-        waiting = ActionRow("planned:seed", "e", 0, FieldContext("Telegram", "public-training", "", ""), "space", "", "convert", "layout_intervention", " ")
+        waiting = ActionRow("planned:seed", "kb", 0, FieldContext("Telegram", "public-training", "", ""), "space", "", "convert", "layout_intervention", " ")
         planned = replace(waiting, identifier="planned:frame", field=FieldContext("Telegram", "public-training", "", "этого"), after_origin="planned_next_conversion")
         alone = evidence(waiting, detector, None)
         with_next = evidence(planned, detector, None)

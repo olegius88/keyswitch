@@ -124,7 +124,11 @@ def main() -> int:
         ("ghbdtn", "привет"),
         ("ша", "if"),
         ("ша", "if"),
-        ("e 'njuj", "у этого"),
+        # Since 0.24.0 the lone "e" converts at the space on its own (a Russian
+        # message opens with a single-letter word one time in seven, an English one
+        # never does), so the layout is already Russian when the next word is typed
+        # and the history holds that letter instead of the joint phrase.
+        ("e", "у"),
         ("руддщ", "hello"),
         ("ghj,ktvf", "проблема"),
         ("руддщ", "hello"),

@@ -68,7 +68,8 @@ def read_commands(contents: Path) -> list[Command]:
             if match is None:
                 continue
             packages = fields[1].split(",")
-            if any(re.fullmatch(r"[a-z0-9+.-]+/[a-z0-9][a-z0-9+.-]*", item) is None for item in packages):
+            # Debian lists section/package; Ubuntu prefixes the component (universe/utils/abduco).
+            if any(re.fullmatch(r"(?:[a-z0-9+.-]+/){1,2}[a-z0-9][a-z0-9+.-]*", item) is None for item in packages):
                 raise ValueError("invalid package ownership in selected Contents row")
             name = match[1]
             paths[name].add(fields[0])

@@ -137,8 +137,10 @@ class InputDiagnosticsTests(InputIntegrityTests):
             self.assertIsNone(reader.read("TestEditor", 1))
         self.engine.context_policy.reader = reader
         self.settings.set("detection.context_read_field", True)
+        # "g" is outside the curated single-letter list, so the decision is an
+        # ordinary short-word keep and the diagnostics are what this test is about.
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            self.type("z ")
+            self.type("g ")
         decision = next(e for e in self.events(logs.output) if e["event"] == "context_decision")
         self.assertEqual(decision["field_reader_details"], {
             "status": "unavailable", "failure_stage": "initialization", "failure_type": "import_error",

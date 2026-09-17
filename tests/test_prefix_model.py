@@ -175,5 +175,20 @@ class PrefixModelTests(unittest.TestCase):
                 self.assertIsNone(PrefixModel.default())
 
 
+class VersionedDefaultTests(unittest.TestCase):
+    def test_the_schema_aware_default_answers_none_when_the_artifact_cannot_be_read(self) -> None:
+        from keyswitch.prefix_schema import VersionedPrefixModel
+
+        VersionedPrefixModel.default.cache_clear()
+        self.addCleanup(VersionedPrefixModel.default.cache_clear)
+        for error in (OSError("no such file"), ValueError("unsupported prefix model"), TypeError("bad payload")):
+            with self.subTest(error=type(error).__name__):
+                VersionedPrefixModel.default.cache_clear()
+                with patch.object(VersionedPrefixModel, "load", side_effect=error):
+                    self.assertIsNone(VersionedPrefixModel.default())
+        VersionedPrefixModel.default.cache_clear()
+        self.assertIsNotNone(VersionedPrefixModel.default())
+
+
 if __name__ == "__main__":
     unittest.main()

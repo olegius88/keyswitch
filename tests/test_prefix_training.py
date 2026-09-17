@@ -22,6 +22,7 @@ if TOOLS not in sys.path:
 import prefix_corpus as corpus
 import train_prefix_model as trainer
 import verify_prefix_model as verifier
+import verify_context_action_model as action_verifier
 
 
 class PrefixEvidenceTests(unittest.TestCase):
@@ -89,6 +90,39 @@ class PrefixEvidenceTests(unittest.TestCase):
             modified = copy.deepcopy(report["test"])
             modified["profiles"]["portable"][key] = value
             self.assertFalse(trainer.accepted(modified))
+
+    def test_a_schema_two_prefix_model_is_gated_by_the_pair_receipt(self) -> None:
+        """Once a context-action pair is installed, the prefix artifact's evidence is that receipt."""
+        from keyswitch.context_model import ACTIONS
+        import hashlib
+
+        weights = {"bias": [0.0] * len(ACTIONS), "source:prefix_char:0:1:^a": [0.5] + [0.0] * (len(ACTIONS) - 1)}
+        digest = hashlib.sha256(json.dumps(weights, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        payload = {"kind": "keyswitch.prefix-policy", "feature_version": 2, "prefix_feature_version": 2,
+                   "actions": list(ACTIONS), "version": "prefix-v2-" + digest[:12], "conversion_threshold": 0.985,
+                   "weights": weights, "weights_sha256": digest}
+        with tempfile.TemporaryDirectory() as temporary:
+            artifact = Path(temporary) / "prefix_policy_v1.json"
+            artifact.write_text(json.dumps(payload), encoding="utf-8")
+            receipt: dict[str, object] = {"model_version": "context-v3-000000000000", "scope": "sealed pair evaluation"}
+            with patch.object(action_verifier, "verify", return_value=receipt) as gate:
+                result = verifier.verify(artifact=artifact)
+            self.assertEqual(gate.call_args.kwargs["prefix_artifact"], artifact)
+            self.assertEqual((result["feature_version"], result["model_version"], result["accepted"], result["active"]),
+                             (2, payload["version"], True, True))
+            self.assertEqual(result["receipt_model_version"], receipt["model_version"])
+            # A receipt that does not verify blocks the package, and so does an artifact that moves under the gate.
+            with patch.object(action_verifier, "verify", side_effect=ValueError("ledger outcome missing")):
+                with self.assertRaises(ValueError):
+                    verifier.verify(artifact=artifact)
+
+            def swap(**_kwargs: object) -> dict[str, object]:
+                artifact.write_text(json.dumps({**payload, "conversion_threshold": 0.99}), encoding="utf-8")
+                return receipt
+
+            with patch.object(action_verifier, "verify", side_effect=swap):
+                with self.assertRaises(ValueError):
+                    verifier.verify(artifact=artifact)
 
     def test_package_gate_binds_weights_test_counts_engine_and_runtime(self) -> None:
         self.assertTrue(verifier.verify()["accepted"])

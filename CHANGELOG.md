@@ -4,6 +4,51 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.24.0 — 2026-09-17
+
+- Keep the context-v1 + prefix-v1 pair. The schema-3 candidate
+  `context-v3-adc0a5782e2d` + `prefix-v2-d1ee002d9ab2` passed its sealed evaluation on
+  treebank text (no corrupted rows against 7-28, 301 of 301 preserved) and then, with an
+  authored expectation changed for it, fell short on a second sealed evaluation built
+  from Tatoeba sentences and the Ubuntu package index by two to three restorations
+  out of 247. The gates are not lowered; the pair stays a candidate, and the release
+  ships the runtime changes below on the proven pair. The engine, the prefix gate and
+  the Windows validator can now install a later-schema pair once one is accepted.
+- Rewrite a Telegram quote as `@` on the keystroke instead of after the idle pause.
+  A mention is typed as `@` and the nickname straight after, so waiting a second
+  before the `@` appeared defeated the point. Pressing the same key again now
+  writes the two quotes after all and returns the layout, which is what a user
+  who meant a quotation does.
+- A word may no longer be replaced by something that is not a word. Six Russian
+  letters sit on punctuation keys, so the other reading of a mistyped `рукх` was
+  `her[`, and the character models, scoring the letters alone, could prefer it.
+  The shared automatic decision now refuses a replacement that spells punctuation
+  for a source that spelt only letters; the opposite direction, `[jhjij` to
+  `хорошо`, is untouched. With that in place the wider unknown-word recognition is
+  on by default: on the frozen prefix population it now changes no correctly typed
+  row that the default did not, where before it changed one more.
+- Convert a lone letter at the start of a message. `z` and `b` typed in the
+  English layout are `я` and `и`, but the single-letter rule required a Russian
+  word before them, so the first word of a message never converted. In the
+  Russian training treebank 14% of sentences open with one of the curated
+  single-letter words; in the English one no sentence opens with a lone
+  f/b/c/d/r/e/j/z, while inside English sentences those letters do occur. So the
+  letter converts with no previous word and still stays after an English one. A
+  user who keeps typing without a pause makes that immediate correction abort as
+  unsafe; the letter then waits for its next word and is decided with it. The rule
+  is explicit for the new context model as well, where the other curated short-word
+  rules are the model's to weigh: the corpus holds too few examples per letter for
+  weights to learn what the treebank counts state outright.
+- Let an accepted prefix model of the second schema be installed. The engine
+  loads the installed artifact through the schema-aware loader, the prefix gate
+  accepts a later schema by the context-action pair receipt instead of the
+  prefix-v1 evidence, and the Windows validator compares the bundled model with
+  the artifact the gate accepted rather than with the prefix-v1 seal. The frozen
+  prefix-v1 module and its evidence are untouched.
+- Explain the two recognition settings in plain words: what the wider recognition
+  decides and what it protects against, and why the early layout switch is off by
+  default with the numbers from the independent evaluation.
+
 ## 0.23.1 — 2026-09-16
 
 - Publish what 0.23.0 could not. Its tag exists, but the release job stopped at the

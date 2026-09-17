@@ -188,10 +188,12 @@ class ContextEngineTests(InputIntegrityTests):
         self.assertIn(model.feature_version, (2, 3))
         prefix = "context-v1-" if model.feature_version == 2 else "context-v3-"
         self.assertTrue(model.version.startswith(prefix))
+        # A lone curated letter converts at the start of a message on its own and
+        # the layout follows, so the same physical keys now type the Russian word.
         self.type("e ")
-        self.assertEqual(self.backend.text, "e ")
-        self.assertEqual(self.engine.snapshot.context_action, "wait")
-        self.type("'njuj ")
+        self.assertEqual(self.backend.text, "у ")
+        self.assertEqual(self.backend.group, 1)
+        self.type("этого ")
         self.assertEqual(self.backend.text, "у этого ")
         self.reset_editor()
         self.type("const value = e ")

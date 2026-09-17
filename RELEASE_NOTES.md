@@ -1,124 +1,111 @@
-# KeySwitch 0.23.1
+# KeySwitch 0.24.0
 
 ## Русский
 
-Выпуск убирает две причины, по которым портился правильно набранный текст, и чинит
-автозагрузку в Windows. Номер 0.23.1: тег 0.23.0 существует, но его сборка остановилась
-на проверке покрытия в Windows, и файлы выпуска не были опубликованы. Модели те же, что в
-[0.22.0](https://github.com/olegius88/keyswitch/releases/tag/v0.22.0); изменилось то,
-какой словарь читает движок и что он делает до конца слова. Полный перечень — в
+Выпуск меняет поведение движка там, где вы об этом просили: кавычка в Telegram, одиночные
+буквы в начале сообщения, расширенное распознавание. Модели те же, что в 0.23.1. Полный перечень — в
 [CHANGELOG.md](CHANGELOG.md).
 
 ### Файлы выпуска
 
-- `keyswitch_0.23.1_amd64.deb` — Ubuntu/Xubuntu, сеанс X11.
-- `KeySwitch-Setup-0.23.1-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
+- `keyswitch_0.24.0_amd64.deb` — Ubuntu/Xubuntu, сеанс X11.
+- `KeySwitch-Setup-0.24.0-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
   сертификатом издателя: SmartScreen покажет предупреждение.
-- `KeySwitch-0.23.1-windows-x64.zip` — переносимый архив для Windows.
+- `KeySwitch-0.24.0-windows-x64.zip` — переносимый архив для Windows.
 - `SHA256SUMS` — контрольные суммы трёх файлов; сверьте их перед установкой.
 
-### Разговорные русские слова больше не переводятся
+### Модели те же, кандидат остаётся кандидатом
 
-Движок читает поставляемое дополнение словаря: 199 680 русских форм из частотного
-списка OpenSubtitles 2018, которых нет во встроенном словаре. Файл входил в пакет и
-раньше, но его читали только инструменты обучения. Пять из шести раскрытых дефектов
-0.22.0 исчезли на тех же весах: `гифку`, `флуд`, чат-последовательности и комментарий
-в редакторе кода сохраняют написание.
+Пара context-v1 + prefix-v1 остаётся установленной. Новая пара моделей прошла независимую
+запечатанную оценку на тексте трибанков (ни одной испорченной строки против 7–28 у текущей
+пары), но на второй оценке — предложения Tatoeba и индекс пакетов Ubuntu — восстановила на
+две-три строки из 247 меньше текущей пары. Порог принятия не снижается, поэтому выпуск
+выходит на проверенной паре; путь установки новой пары в движке и воротах уже готов.
+Раскрытый случай `дюп` по-прежнему переводится.
 
-Остался один раскрытый случай: изолированное слово, неизвестное ни встроенному
-словарю, ни дополнению (`дюп`), по-прежнему переводится. Он зафиксирован в наборе
-тестов как ожидаемое падение и закрывается новой контекстной моделью: она прошла независимую
-запечатанную оценку 16.09.2026, но в этот выпуск не входит.
+### Telegram: кавычка сразу становится @
 
-### Раннее переключение выключено по умолчанию
+Кавычка, набранная в русской раскладке в начале слова, заменяется на «@» на самом
+нажатии, и ник печатается следом без паузы. Нужна настоящая кавычка — нажмите ту же
+клавишу ещё раз: получится «""» и раскладка вернётся. Правило живёт в новом разделе
+«Особенности программ», где каждое правило — отдельный переключатель.
 
-Раньше раскладка менялась уже по первым четырём буквам. На проверочной выборке это
-портило 13 правильно набранных слов из 256 и восстанавливало 116 неверных из 229; без
-него — 4 порчи и 109 восстановлений. Порча уже набранного текста хуже пропущенного
-исправления, а решение по завершённому слову возвращает почти всё, что давало раннее
-переключение. Настройка осталась на месте: «Ранняя смена раскладки» в разделе
-поведения.
+### Одиночная буква в начале сообщения
 
-### Автозагрузка в Windows
+`z`, `b`, `f` в английской раскладке без слова перед ними становятся `я`, `и`, `а`: в
+русском тексте так начинается каждое седьмое предложение, в английском одиночная буква в
+начале предложения не встречается. После английского слова буква остаётся как есть. При
+быстром наборе без паузы букву решает следующее слово.
 
-Windows хранит отдельную отметку разрешения для каждой записи автозапуска
-(«Диспетчер задач → Автозагрузка приложений»). Если KeySwitch там был выключен,
-Windows игнорировала запись при каждом входе, а KeySwitch показывал автозагрузку
-включённой и молча перезаписывал её при каждом старте. Теперь состояние читается
-честно: переключатель показывает, запустится ли приложение при следующем входе,
-`KeySwitch.exe --diagnose` печатает команду, отметку Windows и признак пропавшего
-файла, а окно настроек объясняет, что делать. Переключение автозагрузки в самом
-KeySwitch снимает блокировку Windows; автоматическая синхронизация при каждом запуске
-больше не отменяет выбор, сделанный в Windows.
+### Расширенное распознавание включено
+
+Слово больше не может превратиться в строку с пунктуацией (`рукх` не станет `her[`):
+шесть русских букв живут на клавишах пунктуации, и это проверяется отдельно. После
+этого исправления расширенное распознавание незнакомых слов включено по умолчанию — на
+измерении оно больше ничего не портит. Описания настроек «Расширенное распознавание» и
+«Ранняя смена раскладки» переписаны простыми словами; ранняя смена остаётся выключенной
+по цифрам независимой оценки.
 
 ### Известные ограничения
 
-- Изолированные слова, неизвестные словарю, всё ещё могут быть переведены (случай
-  `дюп` выше). Обход: добавить слово в исключения (`exclusions.words`) или нажать
-  клавишу отмены (`Ctrl+Alt+Z`).
-- Числа выше измерены на проверочной выборке из 490 последовательностей и не являются
-  независимой оценкой качества на произвольном вводе.
+- Изолированное слово, неизвестное словарю (`дюп`), всё ещё может быть переведено.
+- Числа выше измерены на запечатанных тестовых корпусах из 311 и 282 строк естественного и
+  технического текста; они не являются оценкой на произвольном вводе.
 
 Технический журнал может содержать анализируемые слова. Просматривайте его перед
 передачей. Приватные логи и переписка не входят в состав выпуска.
 
 ## English
 
-This release removes two causes of correctly typed text being changed and fixes
-autostart on Windows. It is numbered 0.23.1: the 0.23.0 tag exists, but its build stopped
-at the Windows coverage gate and no files were published. The models are the same as in
-[0.22.0](https://github.com/olegius88/keyswitch/releases/tag/v0.22.0); what changed is
-the lexicon the engine reads and what it does before a word ends. The full list is in
+This release changes the engine where you asked for it: the Telegram quote, lone letters
+at the start of a message, the wider recognition. The models are the same as in 0.23.1. The full list is in
 [CHANGELOG.md](CHANGELOG.md).
 
 ### Release files
 
-- `keyswitch_0.23.1_amd64.deb` — Ubuntu/Xubuntu, X11 session.
-- `KeySwitch-Setup-0.23.1-x64.exe` — installer for Windows 10/11 x64. It is not signed
+- `keyswitch_0.24.0_amd64.deb` — Ubuntu/Xubuntu, X11 session.
+- `KeySwitch-Setup-0.24.0-x64.exe` — installer for Windows 10/11 x64. It is not signed
   with a publisher certificate, so SmartScreen shows a warning.
-- `KeySwitch-0.23.1-windows-x64.zip` — portable archive for Windows.
+- `KeySwitch-0.24.0-windows-x64.zip` — portable archive for Windows.
 - `SHA256SUMS` — checksums of the three files; verify them before installing.
 
-### Colloquial Russian words are no longer converted
+### Same models, the candidate stays a candidate
 
-The engine now reads the packaged lexicon supplement: 199,680 Russian forms from the
-OpenSubtitles 2018 frequency list that the onboard lexicon lacks. The file shipped
-before, but only the training tools read it. Five of the six disclosed 0.22.0 defects
-are gone with the same weights: `гифку`, `флуд`, the chat sequences and the
-code-editor comment keep their spelling.
+The context-v1 + prefix-v1 pair stays installed. The new pair passed an independent sealed
+evaluation on treebank text (no corrupted rows against 7-28 for the current pair) but, on a
+second one built from Tatoeba sentences and the Ubuntu package index, restored two to three
+rows out of 247 fewer than the current pair. The acceptance bar is not lowered, so this
+release ships on the proven pair; the path for installing a new pair in the engine and the
+gates is ready. The disclosed `дюп` case is still converted.
 
-One disclosed case remains: an isolated word that neither the onboard lexicon nor the
-supplement knows (`дюп`) is still converted. It stays in the test suite as an expected
-failure and is fixed by the new context model, which passed its independent sealed evaluation on
-16 September 2026 but is not part of this release.
+### Telegram: the quote becomes @ at once
 
-### The early layout switch is off by default
+A quote typed in the Russian layout at the start of a word becomes `@` on the keystroke,
+and the nickname follows without a pause. For a real quote press the same key again: you
+get `""` and the layout returns. The rule lives in the new "Application quirks" section,
+one switch per rule.
 
-The layout used to change after the first four letters. On the development population
-that corrupted 13 correctly typed words out of 256 and restored 116 wrong ones out of
-229; without it, 4 corruptions and 109 restorations. Changing text the user typed
-correctly is the worse failure, and the completed-word decision recovers most of what
-the early switch was restoring. The setting is still there, under the behaviour
-section.
+### A lone letter at the start of a message
 
-### Windows autostart
+`z`, `b`, `f` typed in the English layout with no word before them become `я`, `и`, `а`: one
+Russian sentence in seven opens with such a word, no English sentence opens with a lone
+letter. After an English word the letter stays. When typing continues without a pause, the
+next word decides the letter.
 
-Windows keeps a separate approval record for every startup entry (Task Manager,
-Startup apps). If KeySwitch was disabled there, Windows skipped the entry at every
-logon while KeySwitch reported autostart as enabled and silently rewrote it at every
-launch. The state is now reported honestly: the switch says whether the next logon
-will start the application, `KeySwitch.exe --diagnose` prints the command, the Windows
-block and a missing target, and the settings window explains what to do. Toggling
-autostart inside KeySwitch clears a Windows block; the automatic sync at every launch
-no longer overrules a choice made in Windows.
+### The wider recognition is on
+
+A word can no longer turn into a string with punctuation (`рукх` will not become `her[`):
+six Russian letters sit on punctuation keys, and that is now checked on its own. With that
+fixed, the wider recognition of unknown words is on by default; on the measurement it no
+longer changes anything it should not. The descriptions of the two recognition settings are
+rewritten in plain words; the early switch stays off by the numbers of the independent
+evaluation.
 
 ### Known limitations
 
-- Isolated words unknown to the lexicon can still be converted (the `дюп` case above).
-  Workaround: add the word to the exclusions (`exclusions.words`) or press the undo key
-  (`Ctrl+Alt+Z`).
-- The numbers above come from a development population of 490 sequences and are not an
-  independent measurement of quality on arbitrary input.
+- An isolated word unknown to the lexicon (`дюп`) can still be converted.
+- The numbers above come from sealed test corpora of 311 and 282 rows of natural and
+  technical text; they are not a measurement on arbitrary input.
 
-Technical logs may contain evaluated words. Review them before sharing. Private logs
-and conversations are excluded from the release.
+Technical logs may contain evaluated words. Review them before sharing. Private logs and
+conversations are excluded from the release.

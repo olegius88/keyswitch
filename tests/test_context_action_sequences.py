@@ -451,7 +451,7 @@ class PhysicalSequenceTests(unittest.TestCase):
 
         class RecordingEngine:
             def __init__(self, settings: SettingsStore, history: HistoryStore, backend: evaluator.TracedEditor) -> None:
-                observed.append((PrefixModel.default(), bool(settings.get("detection.early_switch", True)),
+                observed.append((VersionedPrefixModel.default(), bool(settings.get("detection.early_switch", True)),
                                  bool(settings.get("detection.correct_on_pause", True))))
                 timers.append(0)
 

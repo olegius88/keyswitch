@@ -2,9 +2,10 @@
 
 The installed prefix-v1 model, its frozen corpus and the lexical-compatibility gate
 pin ``prefix_model.py`` byte for byte, so schema two (characters of the observed
-prefix) and the schema-aware artifact loader live here instead. The engine keeps
-loading the installed artifact through :class:`keyswitch.prefix_model.PrefixModel`;
-a schema-two artifact reaches the engine only once it is accepted and wired in.
+prefix) and the schema-aware artifact loader live here instead. The engine loads
+the installed artifact through :meth:`VersionedPrefixModel.default`, which reads
+either schema, so an accepted schema-two pair can be installed without touching
+the frozen module.
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ import json
 import math
 import re
 import unicodedata
+from functools import lru_cache
 from pathlib import Path
 
 from .context_model import ACTIONS, ContextModel, ContextPrediction
@@ -92,3 +94,12 @@ class VersionedPrefixModel(PrefixModel):
         if payload.get("weights_sha256") != digest or version != namespace + digest[:12]:
             raise ValueError("prefix checksum mismatch")
         return cls(ContextModel(weights, version, float(threshold)), feature_version=feature_version)
+
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def default() -> VersionedPrefixModel | None:
+        """The installed prefix artifact in whichever schema it was accepted, or none."""
+        try:
+            return VersionedPrefixModel.load()
+        except (OSError, ValueError, TypeError):
+            return None

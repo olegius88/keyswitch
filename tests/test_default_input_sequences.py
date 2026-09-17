@@ -108,7 +108,7 @@ class DefaultInputSequenceTests(unittest.TestCase):
                 "correct_on_pause": True, "pause_delay_seconds": 1.5,
                 "respect_manual_layout": True, "learning": True,
                 "context_policy": "assist", "context_aware": True,
-                "context_read_field": True, "aggressive": False,
+                "context_read_field": True, "aggressive": True,
             }
             self.assertEqual({name: settings.get("detection." + name) for name in expected}, expected)
             backend, clock = EditorBackend(), _Clock()

@@ -3,9 +3,9 @@
 A quirk is a rule about one application's own syntax, not about Russian or
 English. In Telegram a message that begins with the Russian quote is almost
 always a mention: the same physical key carries ``@`` in the English layout, and
-``@name`` is how Telegram addresses somebody. The quote is still a quote when it
-is doubled or when the text continues, so the rule waits for the same idle pause
-the completed-word decision uses and fires only on a symbol left alone.
+``@name`` is how Telegram addresses somebody. The rule fires on the keystroke, so
+the nickname can follow immediately; pressing the same key again writes the two
+quotes after all, which is what a user who meant a quotation does.
 
 Every quirk is one setting the user can turn off, and every condition is
 observable in the engine's own state: which application has focus, which symbol
@@ -40,9 +40,9 @@ TELEGRAM_QUOTE_MENTION = SymbolQuirk(
     setting="applications.telegram_quote_mention",
     title="Telegram: одинокая кавычка — это @",
     description=(
-        "Кавычка, набранная в русской раскладке и оставленная без продолжения, "
-        "заменяется на «@» для упоминания. Две кавычки подряд и кавычка, за которой "
-        "сразу следует текст, остаются кавычками."
+        "Кавычка, набранная в русской раскладке в начале слова, сразу заменяется на «@» "
+        "для упоминания, и ник печатается следом без паузы. Нужна настоящая кавычка — "
+        "нажмите ту же клавишу ещё раз: получится «\"\"» и раскладка вернётся."
     ),
     applications=("telegram", "kotatogram", "ayugram", "unigram", "forkgram"),
     typed='"',

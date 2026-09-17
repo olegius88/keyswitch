@@ -1347,10 +1347,21 @@ Invoke-NativeCommand `
     -Command "python" `
     -Arguments @((Join-Path $ProjectDirectory "tools\verify_boundary_v2.py")) `
     -FailureMessage "Boundary-v2 model or exact-text promotion evidence changed"
-Invoke-NativeCommand `
+# The prefix gate reports which artifact it accepted: prefix-v1 by its frozen
+# evidence, a later schema by the context-action pair receipt. The bundle must
+# carry exactly that artifact, whichever schema it has.
+$ActivePrefixLines = @(Invoke-NativeCommand `
     -Command "python" `
     -Arguments @((Join-Path $ProjectDirectory "tools\verify_prefix_model.py")) `
-    -FailureMessage "Prefix model or exact-text promotion evidence changed"
+    -FailureMessage "Prefix model or exact-text promotion evidence changed")
+$ActivePrefix = ($ActivePrefixLines -join "`n") | ConvertFrom-Json
+if ($ActivePrefix.accepted -isnot [bool] -or $ActivePrefix.accepted -ne $true `
+    -or $ActivePrefix.active -isnot [bool] -or $ActivePrefix.active -ne $true `
+    -or $ActivePrefix.feature_version -notin @(1, 2) `
+    -or $ActivePrefix.artifact_sha256 -cnotmatch '^[a-f0-9]{64}$' `
+    -or $ActivePrefix.model_version -isnot [string] -or $ActivePrefix.model_version.Length -gt 80) {
+    throw "Active prefix verifier returned an invalid identity"
+}
 # Generate the OS type library before freezing. The runtime must not need
 # writable installation files or a Python compiler to open accessibility.
 Invoke-NativeCommand `
@@ -1471,13 +1482,10 @@ $BoundarySeal = Read-BoundedJsonObject `
 if ((Get-BytesSha256 -Bytes $BundledBoundaryBytes) -cne $BoundarySeal.candidate_sha256) {
     throw "Native distribution contains a different boundary model"
 }
-$PrefixSeal = Read-BoundedJsonObject `
-    -Path (Join-Path $ProjectDirectory "model\prefix_v1\seal.json") `
-    -MaximumBytes 1MB -Label "prefix-model seal"
 [byte[]]$BundledPrefixBytes = Read-BoundedFileBytes `
     -Path (Join-Path $NativeDistribution "keyswitch\resources\models\prefix_policy_v1.json") `
     -MaximumBytes 2MB -MinimumBytes 2 -Label "bundled prefix model"
-if ((Get-BytesSha256 -Bytes $BundledPrefixBytes) -cne $PrefixSeal.candidate_sha256) {
+if ((Get-BytesSha256 -Bytes $BundledPrefixBytes) -cne $ActivePrefix.artifact_sha256) {
     throw "Native distribution contains a different prefix model"
 }
 [byte[]]$BundledContextBytes = Read-BoundedFileBytes `

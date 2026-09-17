@@ -491,7 +491,7 @@ def replay(plan: SequencePlan, model: ContextModel, models: dict[int, LanguageMo
         with patch("keyswitch.engine.LanguageModel.load", side_effect=load), \
                 patch("keyswitch.engine.LinearNgramModel.try_load_default", return_value=intent), \
                 patch("keyswitch.context_policy.ContextModel.try_load", return_value=(model, model.version)), \
-                patch.object(PrefixModel, "default", return_value=prefix), \
+                patch.object(VersionedPrefixModel, "default", return_value=prefix), \
                 patch("keyswitch.engine.time.monotonic", side_effect=lambda: clock[0]):
             engine = KeySwitchEngine(settings, HistoryStore(directory / "history.jsonl"), backend)
 

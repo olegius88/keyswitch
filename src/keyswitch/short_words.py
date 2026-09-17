@@ -90,10 +90,15 @@ SINGLE_LETTER_CONFIDENCE: Final[float] = 1.0
 CONTEXT_SHORT_WORD_REASON: Final[str] = (
     "короткое слово из безопасного списка после слова на целевом языке"
 )
+# The reason of the message-start exception applied in keyswitch.word_decision;
+# it is listed here so the context policies treat it as a curated short-word rule.
+ISOLATED_SHORT_WORD_REASON: Final[str] = (
+    "однобуквенное слово из безопасного списка в начале сообщения"
+)
 
 
 SHORT_WORD_REASONS: Final[frozenset[str]] = frozenset(
-    {"частотное короткое слово из безопасного списка", CONTEXT_SHORT_WORD_REASON}
+    {"частотное короткое слово из безопасного списка", CONTEXT_SHORT_WORD_REASON, ISOLATED_SHORT_WORD_REASON}
 )
 
 
@@ -118,7 +123,10 @@ def trusted_short_word_decision(
 
     A single letter is a word only in a sentence: ``f`` alone may be a variable
     name, so one-letter entries need the previous word to be in the target
-    language (``context_group``); two-letter entries stand on their own.
+    language (``context_group``); two-letter entries stand on their own. The
+    message-start exception for a lone letter lives in
+    :func:`keyswitch.word_decision.automatic_word_decision`, outside this table,
+    so the frozen context-v1 training input stays what it was.
     """
 
     ignored_keys = {detector.token_key(word) for word in ignored_words}
