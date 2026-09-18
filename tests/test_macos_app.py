@@ -74,11 +74,21 @@ class PlatformSelectionTests(unittest.TestCase):
         platform_main.assert_called_once_with(["--hidden"])
 
     def test_anything_else_still_goes_to_the_gtk_frontend(self) -> None:
-        with patch.object(launcher_module, "_running_on_windows", return_value=False), \
-                patch.object(launcher_module, "_running_on_macos", return_value=False), \
-                patch("keyswitch.app.main", return_value=3) as platform_main:
+        """The GTK frontend cannot be imported here, only chosen."""
+
+        gtk_frontend = types.ModuleType("keyswitch.app")
+        chosen: list[object] = []
+
+        def main(argv: object) -> int:
+            chosen.append(argv)
+            return 3
+
+        gtk_frontend.main = main  # type: ignore[attr-defined]
+        with patch.dict(sys.modules, {"keyswitch.app": gtk_frontend}), \
+                patch.object(launcher_module, "_running_on_windows", return_value=False), \
+                patch.object(launcher_module, "_running_on_macos", return_value=False):
             self.assertEqual(launcher_module.main(None), 3)
-        platform_main.assert_called_once_with(None)
+        self.assertEqual(chosen, [None])
 
 
 class DiagnoseTests(unittest.TestCase):
