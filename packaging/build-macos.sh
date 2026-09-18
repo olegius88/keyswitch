@@ -70,6 +70,8 @@ PYTHONPATH="$project_dir/src:$project_dir/tools" "$python_bin" "$project_dir/too
 rm -rf "$native_output"
 mkdir -p "$native_output"
 
+# Expanded through the "+" form below: the bash macOS ships treats an empty
+# array under "set -u" as an unset variable and stops the build.
 sign_arguments=()
 if [[ -n "$sign_identity" ]]; then
     sign_arguments+=(--macos-sign-identity="$sign_identity" --macos-sign-notarization)
@@ -89,7 +91,7 @@ PYTHONPATH="${nuitka_path:+$nuitka_path:}$project_dir/src" \
     --macos-app-mode=ui-element \
     --macos-signed-app-name="$bundle_identifier" \
     --macos-prohibit-multiple-instances \
-    "${sign_arguments[@]}" \
+    ${sign_arguments[@]+"${sign_arguments[@]}"} \
     --include-package-data=keyswitch \
     --include-data-files="$frozen_english_model=keyswitch/resources/models/en_US.lm" \
     --include-data-files="$frozen_russian_model=keyswitch/resources/models/ru_RU.lm" \
@@ -125,7 +127,8 @@ if [[ -n "$sign_identity" ]]; then
     # so the signature survives being moved and can be notarized.
     codesign --force --deep --options runtime --timestamp \
         --entitlements "$entitlements" \
-        "${keychain_arguments[@]}" --sign "$sign_identity" "$bundle"
+        ${keychain_arguments[@]+"${keychain_arguments[@]}"} \
+        --sign "$sign_identity" "$bundle"
     codesign --verify --strict --deep --verbose=2 "$bundle"
 fi
 
