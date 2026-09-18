@@ -244,6 +244,21 @@ class AtspiContextTests(unittest.TestCase):
 
 
 class PlatformReaderTests(unittest.TestCase):
+    def test_each_platform_is_read_by_its_own_provider(self) -> None:
+        """A wrong choice here shows up as a silent absence of context."""
+
+        for platform, target in (
+            ("win32", "keyswitch.windows_context.WindowsFieldReader"),
+            ("darwin", "keyswitch.macos_context.MacFieldReader"),
+            ("linux", "keyswitch.atspi_context.AtspiFieldReader"),
+        ):
+            with self.subTest(platform=platform):
+                reader = PlatformFieldReader()
+                with patch("keyswitch.context_access.sys.platform", platform), \
+                        patch(target) as factory:
+                    reader.read("chat", 5)
+                factory.assert_called_once()
+
     def test_diagnostics_start_empty_and_are_independent_snapshots(self) -> None:
         reader = PlatformFieldReader()
         expected = {"status": "not_requested", "failure_stage": None, "failure_type": None}
@@ -259,7 +274,11 @@ class PlatformReaderTests(unittest.TestCase):
             factory.assert_not_called()
 
     def test_failure_diagnostics_categorize_each_stage_without_retry(self) -> None:
-        for platform, target in (("win32", "keyswitch.windows_context.WindowsFieldReader"), ("linux", "keyswitch.atspi_context.AtspiFieldReader")):
+        for platform, target in (
+            ("win32", "keyswitch.windows_context.WindowsFieldReader"),
+            ("darwin", "keyswitch.macos_context.MacFieldReader"),
+            ("linux", "keyswitch.atspi_context.AtspiFieldReader"),
+        ):
             for stage in ("initialization", "read"):
                 for error, category in (
                     (ImportError, "import_error"),

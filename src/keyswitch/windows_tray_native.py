@@ -9,6 +9,7 @@ import pystray
 from pystray._util import win32
 from PIL import Image, ImageDraw, ImageFont
 
+from .tray_model import MenuEntry, menu_entries
 from .windows_tray import (
     WindowsTrayActions,
     WindowsTrayState,
@@ -17,6 +18,44 @@ from .windows_tray import (
 
 
 ICON_SIZE = 64
+
+
+def _menu_items(
+    actions: WindowsTrayActions,
+    state: Callable[[], WindowsTrayState],
+) -> tuple[pystray.MenuItem, ...]:
+    """Render the shared menu description as pystray items.
+
+    Every label, switch and enabled flag is read again when the menu opens, so
+    the items follow the state instead of the moment they were built. The shape
+    of the menu - how many lines and where the separators fall - does not
+    depend on the state, so it is settled once here.
+    """
+
+    def entry_at(index: int) -> MenuEntry:
+        return menu_entries(state(), actions)[index]
+
+    def item(index: int, template: MenuEntry) -> pystray.MenuItem:
+        def run(_icon: object, _item: object) -> None:
+            action = entry_at(index).action
+            if action is not None:
+                action()
+
+        return pystray.MenuItem(
+            lambda _item: entry_at(index).label,
+            run if template.action is not None else None,
+            enabled=lambda _item: entry_at(index).enabled,
+            # A checkbox appears whenever this is not None, so a plain line
+            # has to pass None rather than a callable answering False.
+            checked=(lambda _item: bool(entry_at(index).checked))
+            if template.checked is not None else None,
+            default=template.default,
+        )
+
+    return tuple(
+        pystray.Menu.SEPARATOR if template.separator else item(index, template)
+        for index, template in enumerate(menu_entries(state(), actions))
+    )
 
 
 class LeftClickMenuIcon(pystray.Icon):
@@ -42,57 +81,7 @@ class PystrayWindowsAdapter:
         state: Callable[[], WindowsTrayState],
     ) -> None:
         self._state = state
-        menu = pystray.Menu(
-            pystray.MenuItem(
-                lambda _item: f"Текущая раскладка: {state().label}",
-                None,
-                enabled=False,
-            ),
-            pystray.MenuItem(
-                lambda _item: state().alternate_layout_label,
-                lambda _icon, _item: actions.switch_layout(),
-                enabled=lambda _item: state().can_switch_layout,
-            ),
-            pystray.MenuItem(
-                "Настройки KeySwitch…",
-                lambda _icon, _item: actions.show_settings(),
-                default=True,
-            ),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(
-                "Автопереключение",
-                lambda _icon, _item: actions.toggle_engine(),
-                checked=lambda _item: state().enabled,
-            ),
-            pystray.MenuItem(
-                "Звуковые эффекты",
-                lambda _icon, _item: actions.toggle_sound(),
-                checked=lambda _item: state().sound_enabled,
-            ),
-            pystray.MenuItem(
-                "Уведомления об исправлениях",
-                lambda _icon, _item: actions.toggle_notifications(),
-                checked=lambda _item: state().notifications_enabled,
-            ),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(
-                "История исправлений…",
-                lambda _icon, _item: actions.show_history(),
-            ),
-            pystray.MenuItem(
-                "Программы-исключения…",
-                lambda _icon, _item: actions.show_exclusions(),
-            ),
-            pystray.MenuItem(
-                "О программе…",
-                lambda _icon, _item: actions.show_about(),
-            ),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(
-                "Выход",
-                lambda _icon, _item: actions.quit_application(),
-            ),
-        )
+        menu = pystray.Menu(*_menu_items(actions, state))
         self._icon = LeftClickMenuIcon(
             "keyswitch",
             self._render(state()),

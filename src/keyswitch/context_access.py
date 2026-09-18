@@ -76,6 +76,9 @@ class PlatformFieldReader:
                 if sys.platform == "win32":
                     from .windows_context import WindowsFieldReader
                     self._reader = WindowsFieldReader()
+                elif sys.platform == "darwin":
+                    from .macos_context import MacFieldReader
+                    self._reader = MacFieldReader()
                 else:
                     from .atspi_context import AtspiFieldReader
                     self._reader = AtspiFieldReader(process_for_window=self._process)

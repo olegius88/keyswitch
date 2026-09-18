@@ -12,6 +12,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 
 def _running_on_windows() -> bool:
@@ -27,7 +28,8 @@ def main() -> int:
     from keyswitch.windows_native import CtypesWindowsAPI
     from keyswitch.windows_tray import WindowsTrayState
     from keyswitch.windows_tray_native import ICON_SIZE, PystrayWindowsAdapter
-    from keyswitch.windows_ui import PAGE_NAMES, WindowsApplication
+    from keyswitch.windows_backend import WindowsBackend
+    from keyswitch.windows_ui import PAGE_NAMES, WindowsApplication, WindowsServices
 
     api = CtypesWindowsAPI()
     ready = threading.Event()
@@ -105,7 +107,7 @@ def main() -> int:
         settings.set("updates.check_automatically", False)
 
         print("WINDOWS_UI_INIT_START", flush=True)
-        visual_application = WindowsApplication(hidden=False, no_engine=True)
+        visual_application = WindowsApplication(WindowsServices(), hidden=False, no_engine=True)
         try:
             for page_name, title in PAGE_NAMES:
                 visual_application.show_page(page_name)
@@ -218,7 +220,7 @@ def main() -> int:
         engine_logger.addHandler(_Capture())
 
         print("WINDOWS_ENGINE_INIT_START", flush=True)
-        application = WindowsApplication(hidden=False, no_engine=False)
+        application = WindowsApplication(WindowsServices(), hidden=False, no_engine=False)
         print("WINDOWS_ENGINE_INIT_OK", flush=True)
         scenario_errors: list[Exception] = []
         completed: list[bool] = []
@@ -461,7 +463,7 @@ def main() -> int:
                 application.test_entry.focus_force()
                 clear_editor()
                 application.root.update_idletasks()
-                if not api.request_layout(application.backend.layouts[0]):
+                if not api.request_layout(cast(WindowsBackend, application.backend).layouts[0]):
                     raise RuntimeError(
                         "Cannot select English for the learned-rule pass"
                     )
@@ -613,7 +615,7 @@ def main() -> int:
                 application.test_entry.focus_force()
                 clear_editor()
                 application.root.update_idletasks()
-                if not api.request_layout(application.backend.layouts[0]):
+                if not api.request_layout(cast(WindowsBackend, application.backend).layouts[0]):
                     raise RuntimeError("Cannot select English for learning E2E")
                 learning_deadline[0] = time.monotonic() + 5.0
                 application.root.after(100, wait_for_learning_input_focus)
@@ -674,7 +676,7 @@ def main() -> int:
                     return
                 if api.active_application().casefold() != Path(sys.executable).stem.casefold():
                     raise RuntimeError("KeySwitch E2E lost foreground before RU to EN pass")
-                if not api.request_layout(application.backend.layouts[1]):
+                if not api.request_layout(cast(WindowsBackend, application.backend).layouts[1]):
                     raise RuntimeError("Cannot select the Russian layout for E2E")
                 layout_deadline[0] = time.monotonic() + 5.0
                 application.root.after(100, wait_for_russian_layout)
@@ -727,7 +729,7 @@ def main() -> int:
                     probe_deadline[0] = time.monotonic() + 3.0
                     application.root.after(50, wait_for_input_probe)
                     return
-                if not api.request_layout(application.backend.layouts[0]):
+                if not api.request_layout(cast(WindowsBackend, application.backend).layouts[0]):
                     raise RuntimeError("Cannot select the English layout for E2E")
                 layout_deadline[0] = time.monotonic() + 5.0
                 application.root.after(100, wait_for_english_layout)

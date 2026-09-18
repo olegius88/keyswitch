@@ -54,6 +54,10 @@ RELEASE_ASSETS: Final[tuple[str, ...]] = (
     "keyswitch_{version}_amd64.deb",
     "KeySwitch-Setup-{version}-x64.exe",
     "KeySwitch-{version}-windows-x64.zip",
+    # One archive per kind of Mac: a bundle built for Apple silicon does not run
+    # on an Intel Mac, and neither is a substitute for the other.
+    "KeySwitch-{version}-macos-arm64.zip",
+    "KeySwitch-{version}-macos-x86_64.zip",
     "SHA256SUMS",
 )
 CI_APPEARANCE_TIMEOUT: Final[float] = 180.0

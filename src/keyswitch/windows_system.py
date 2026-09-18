@@ -7,9 +7,10 @@ import shlex
 import subprocess
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path, PurePath
 from typing import Protocol
+
+from .system_model import Application, AutostartStatus as AutostartStatus
 
 
 AUTOSTART_VALUE_NAME = "KeySwitch"
@@ -55,35 +56,8 @@ class WindowsRegistry(Protocol):
     def application_paths(self) -> tuple[tuple[str, str], ...]: ...
 
 
-@dataclass(frozen=True)
-class WindowsApplication:
-    name: str
-    identifier: str
-    executable: str
-
-
-@dataclass(frozen=True)
-class AutostartStatus:
-    """What the user actually gets at the next logon, and why.
-
-    ``requested`` is the KeySwitch setting, ``command`` the value under ``Run``. Windows
-    keeps its own approval byte per value under ``Explorer\\StartupApproved\\Run``: Task
-    Manager's Startup tab and Settings write it, and a value marked disabled there is
-    skipped at logon however often it is rewritten. ``effective`` answers the user's
-    question - will KeySwitch start with Windows.
-    """
-
-    command: str | None
-    blocked_by_windows: bool
-    target_missing: bool
-
-    @property
-    def effective(self) -> bool:
-        return bool(self.command) and not self.blocked_by_windows and not self.target_missing
-
-    def as_dict(self) -> dict[str, object]:
-        return {"command": self.command, "blocked_by_windows": self.blocked_by_windows,
-                "target_missing": self.target_missing, "effective": self.effective}
+# The names the Windows frontend uses, pointing at the shared shapes.
+WindowsApplication = Application
 
 
 def _running_on_windows() -> bool:
@@ -183,8 +157,8 @@ class WindowsAutostartManager:
         program = next(iter(shlex.split(command, posix=False)), "").strip('"')
         return bool(program) and self._exists(program)
 
-    def set_enabled(self, enabled: bool, *, start_hidden: bool = True, clear_windows_block: bool = False) -> None:
-        """Write or remove the value; ``clear_windows_block`` also lifts a Windows block.
+    def set_enabled(self, enabled: bool, *, start_hidden: bool = True, override_system_block: bool = False) -> None:
+        """Write or remove the value; ``override_system_block`` also lifts a Windows block.
 
         The startup sync at every launch must not fight a choice the user made in Windows,
         so only an explicit toggle in the KeySwitch interface clears the approval record.
@@ -195,7 +169,7 @@ class WindowsAutostartManager:
                 start_hidden=start_hidden
             )
             self._registry.write_autostart(AUTOSTART_VALUE_NAME, command)
-            if clear_windows_block:
+            if override_system_block:
                 self._registry.clear_startup_approval(AUTOSTART_VALUE_NAME)
         else:
             self._registry.delete_autostart(AUTOSTART_VALUE_NAME)

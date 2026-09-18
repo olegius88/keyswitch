@@ -836,7 +836,7 @@ class WindowsSystemTests(unittest.TestCase):
         manager.set_enabled(True)
         self.assertFalse(manager.enabled())
         # An explicit toggle in the KeySwitch interface does lift it.
-        manager.set_enabled(True, clear_windows_block=True)
+        manager.set_enabled(True, override_system_block=True)
         self.assertTrue(manager.enabled())
         self.assertNotIn("KeySwitch", registry.startup_approval)
         for approval, expected in ((bytes([0x02]) + bytes(11), True), (bytes([0x06]) + bytes(11), True),
