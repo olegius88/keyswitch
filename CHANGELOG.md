@@ -4,6 +4,29 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.26.0 — 2026-09-19
+
+- Correct the layout on macOS. A Quartz event tap watches the keyboard, the text in
+  front of the caret is read from the accessibility tree, the layout is chosen among the
+  text input sources, and the word is typed again - the same engine and the same two
+  models as on the other systems, which never knew which one they were running on.
+  Typing `ghbdtn ` into a document now leaves `привет ` behind. The menu bar carries the
+  current layout and the switches behind it, and the settings window is the one Windows
+  already had: it moved out of the Windows frontend and takes each platform's answers as
+  an object, so neither system keeps a private copy of the wording.
+- Deliver a withheld Enter or Tab on macOS without the caution Windows needs. An event
+  tap may delete the key it is given, so the key is genuinely withheld rather than raced;
+  the whole difficulty that shaped 0.25.2 and 0.25.3 does not arise there.
+- Ask for the keyboard permission instead of starting without it. macOS grants nothing on
+  request, so KeySwitch shows the system's own dialog, opens the pane where the switch
+  lives, and waits: the moment the permission is given it carries on, with no relaunch. A
+  program that looks alive and corrects nothing is the hardest fault to report, so the
+  engine is not built at all until the permission is there.
+- Sign the macOS application with a Developer ID and carry one entitlement with it. The
+  hardened runtime that notarization requires forbids unsigned executable memory, and
+  Python's foreign-function layer builds its call thunks there; without the entitlement
+  the program does not fail, it hangs before printing anything.
+
 ## 0.25.3 — 2026-09-18
 
 - Forget the keys a window change left held. A key still down when the focus moves
