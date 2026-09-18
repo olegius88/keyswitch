@@ -3198,11 +3198,24 @@ class KeySwitchEngine:
         self.context_policy.stream.clear()
         self._manual_layout_group = None
         self._last_committed_stale = True
+        # A key held while the window changed reports its release to the window that
+        # took over, and often to nobody the hook can see. Such a press then sits in
+        # the engine's books until the stale timer forgets it three seconds later -
+        # long enough for a withheld Enter, which gives up after two, to be dropped
+        # while waiting for a key that will never come up. The moment the focus moves
+        # is when that press stops meaning anything, so it is forgotten here rather
+        # than by a timer. A key that really is still down loses nothing: its release,
+        # if it ever arrives, simply finds nothing to clear.
+        held = sorted(self._pressed | self._modifier_keycodes)
+        self._pressed.clear()
+        self._modifier_keycodes.clear()
+        self._pressed_since.clear()
         self._technical_event(
             "focus_changed",
             previous_window=previous,
             window=window,
             dropped_word_length=dropped,
+            released_keycodes=held,
         )
 
     def _observe_group(self, group: int, *, source: str = "poll") -> None:

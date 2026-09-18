@@ -69,6 +69,29 @@ class InputDiagnosticsTests(InputIntegrityTests):
                 cancelled = next(e for e in self.events(logs.output) if e["event"] == "context_wait_cancelled")
                 self.assertEqual(cancelled["reason"], reason)
 
+    def test_keys_held_across_a_focus_change_are_forgotten_at_once(self) -> None:
+        """A press whose window is gone must not outlive it by three seconds.
+
+        Its release goes to whatever took the focus, so the engine kept the key in its
+        books until the stale timer ran - and a withheld Enter, which gives up a second
+        earlier, was dropped waiting for a key that was never coming up. Recorded on
+        Windows 0.24.0 with `Escape`, right `Shift` and `NumLock`.
+        """
+
+        held = self.key("a", "a")
+        self.send(held)
+        self.assertIn(held.keycode, self.engine._pressed)
+        self.backend.window += 1
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._poll_current_group()
+        self.assertEqual((self.engine._pressed, self.engine._modifier_keycodes, self.engine._pressed_since),
+                         (set(), set(), {}))
+        change = next(e for e in self.events(logs.output) if e["event"] == "focus_changed")
+        self.assertEqual(change["released_keycodes"], [held.keycode])
+        # A release that arrives after all finds nothing to clear and changes nothing.
+        self.send(replace(held, pressed=False))
+        self.assertEqual(self.engine._pressed, set())
+
     def test_edit_diagnostics_are_opt_in_and_suppress_excluded_and_sensitive_fields(self) -> None:
         self.engine._focus_window = self.backend.window
         for mode in ("off", "disabled", "excluded", "sensitive"):

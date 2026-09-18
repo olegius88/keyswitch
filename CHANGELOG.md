@@ -4,6 +4,18 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.25.3 — 2026-09-18
+
+- Forget the keys a window change left held. A key still down when the focus moves
+  reports its release to the window that took over, and often to nobody the hook can
+  see, so the press sits in the engine's books until the stale timer drops it three
+  seconds later. A withheld Enter gives up after two, so it was thrown away while
+  waiting for a key that would never come up - the cause behind the lost Enter presses
+  that 0.25.2 worked around at the deadline. The press is now forgotten at the focus
+  change itself, the moment it stops meaning anything; a key that really is still down
+  loses nothing, because its release simply finds nothing to clear. The technical log
+  names the keycodes released this way.
+
 ## 0.25.2 — 2026-09-18
 
 - Deliver a withheld Enter or Tab that was waiting behind a key whose release was never
