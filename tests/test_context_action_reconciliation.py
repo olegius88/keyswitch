@@ -20,6 +20,7 @@ if TOOLS not in sys.path:
 
 import reconcile_context_action_corpus as repair
 from freeze_context_action_corpus import CorpusRow, Sentence, SurfaceToken, canonical, checksum, digest, row_identifier, typo_variants
+from model_protocol import ALL_SPLITS
 
 
 def fixture(original: str, split: str, *, group: int = 0, identifier: str = "1", lemma: str | None = None,
@@ -123,7 +124,7 @@ class ReconciliationIOTests(unittest.TestCase):
         self.items = (fixture("orange", "train", identifier="train"), fixture("черника", "test", group=1, identifier="test"))
         self.rows = [row for _, row in self.items]
         records: dict[str, dict[str, object]] = {}
-        for split in repair.SPLITS:
+        for split in ALL_SPLITS:
             raw = b"".join(canonical(asdict(row)) for row in self.rows if row.split == split)
             path = self.parent / (split + ".jsonl.gz")
             path.write_bytes(gzip.compress(raw, mtime=0))

@@ -23,19 +23,32 @@ class EpochSelectionTests(unittest.TestCase):
     def test_reaching_runtime_confidence_beats_lower_log_loss(self) -> None:
         early = assess_epoch({"portable": profile(.001, .98)}, thresholds=(.99,), loss=.01)
         later = assess_epoch({"portable": profile(.002, .995)}, thresholds=(.99,), loss=.02)
-        assert early is not None and later is not None
-        self.assertGreater(later.rank, early.rank)
+        self.assertIsNone(early)  # nothing converts at .99: no repairs, so nothing to weigh
+        assert later is not None
         self.assertEqual(later.by_profile["portable"]["converted_correctly"], 1)
+        self.assertEqual((later.net_benefit, later.minimum_net_benefit), (1, 1))
 
-    def test_any_profile_exceeding_false_conversion_budget_rejects_an_epoch(self) -> None:
+    def test_an_epoch_that_breaks_as_much_as_it_repairs_is_not_selected(self) -> None:
+        """The balance decides, per profile: one profile in the red rejects the epoch."""
         profiles = {"portable": profile(.001, .999), "reference": profile(.999, .999)}
         self.assertIsNone(assess_epoch(profiles, thresholds=(.99,), loss=.001))
-        conservative = assess_epoch(profiles, thresholds=(.99, 1.0), loss=.001)
-        assert conservative is not None
-        self.assertEqual(conservative.threshold, 1.0)
-        self.assertEqual(conservative.minimum_recall, 0.0)
+        # A higher threshold that converts nothing nets nothing either, so it does not qualify.
+        self.assertIsNone(assess_epoch(profiles, thresholds=(.99, 1.0), loss=.001))
+        # Two repairs against one breakage in the weaker profile is a net gain.
+        ahead = assess_epoch({"portable": profile(.001, .999, .999),
+                              "reference": profile(.999, .999, .999)}, thresholds=(.99,), loss=.001)
+        assert ahead is not None
+        self.assertEqual((ahead.minimum_net_benefit, ahead.net_benefit), (1, 3))
 
-    def test_selection_protects_the_weaker_profile_before_pooled_recall(self) -> None:
+    def test_a_model_that_repairs_more_beats_one_that_merely_never_errs(self) -> None:
+        """What the removed zero-budget rule could not express."""
+        cautious = assess_epoch({"portable": profile(.001, .999, .5, .5, .5)}, thresholds=(.99,), loss=.01)
+        bolder = assess_epoch({"portable": profile(.999, .999, .999, .999, .999)}, thresholds=(.99,), loss=.01)
+        assert cautious is not None and bolder is not None
+        self.assertEqual((cautious.net_benefit, bolder.net_benefit), (1, 3))
+        self.assertGreater(bolder.rank, cautious.rank)
+
+    def test_selection_protects_the_weaker_profile_before_the_pooled_balance(self) -> None:
         uneven = assess_epoch({"portable": profile(.001, .999, .999, .999),
                                "reference": profile(.001, .999, .5, .5)},
                               thresholds=(.99,), loss=.01)
@@ -43,6 +56,7 @@ class EpochSelectionTests(unittest.TestCase):
                                  "reference": profile(.001, .999, .999, .5)},
                                 thresholds=(.99,), loss=.02)
         assert uneven is not None and balanced is not None
+        self.assertEqual((uneven.minimum_net_benefit, balanced.minimum_net_benefit), (1, 2))
         self.assertGreater(balanced.rank, uneven.rank)
 
     def test_equal_runtime_outcomes_use_loss_then_lower_threshold(self) -> None:

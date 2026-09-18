@@ -21,12 +21,11 @@ from reference_lexicon import reference_models
 from context_optimizer import Kernel, Packed, SOURCE as OPTIMIZER
 from keyswitch.context_model import ACTIONS, ContextModel
 from keyswitch.prefix_schema import CURRENT_PREFIX_FEATURE_VERSION, VersionedPrefixModel
+from model_protocol import FITTING_SPLITS, PROFILES
 from prefix_v2_corpus import PrefixFrame, generate_frames, load_parents, provenance as corpus_provenance
 
 ROOT = Path(__file__).resolve().parents[1]
 RECIPE = ROOT / "model/prefix_v2/recipe.json"
-PROFILES = ("portable", "reference_hunspell")
-SPLITS = ("train", "development", "calibration")
 MASS_TOLERANCE = 1e-9
 
 
@@ -49,7 +48,7 @@ def recipe(path: Path = RECIPE) -> dict[str, object]:
             or schema not in (1, CURRENT_PREFIX_FEATURE_VERSION)):
         raise ValueError("unsupported prefix-v2 recipe")
     limits = cfg.get("maximum_families")
-    if not isinstance(limits, dict) or set(limits) != set(SPLITS):
+    if not isinstance(limits, dict) or set(limits) != set(FITTING_SPLITS):
         raise ValueError("only train/development/calibration are allowed")
     for name, count in limits.items():
         if type(count) is not int or count <= 0:
@@ -310,9 +309,9 @@ def fit(output: Path, recipe_path: Path = RECIPE) -> dict[str, object]:
     output.mkdir(parents=True)
     archive_sources(output, frozen)
     limits = cast(dict[str, int], cfg["maximum_families"])
-    parents = {split: load_parents(split, limits[split], cast(int, cfg["maximum_words_per_family"])) for split in SPLITS}
+    parents = {split: load_parents(split, limits[split], cast(int, cfg["maximum_words_per_family"])) for split in FITTING_SPLITS}
     families = {split: {row.family for row in selected} for split, selected in parents.items()}
-    if any(families[left] & families[right] for left in SPLITS for right in SPLITS if left != right):
+    if any(families[left] & families[right] for left in FITTING_SPLITS for right in FITTING_SPLITS if left != right):
         raise ValueError("source physical families overlap")
     models = {profile: reference_models(profile == "reference_hunspell") for profile in PROFILES}
     environment = environment_snapshot()
@@ -375,7 +374,7 @@ def fit(output: Path, recipe_path: Path = RECIPE) -> dict[str, object]:
     raw = canonical(payload)
     budgets: dict[str, dict[str, float]] = {}
     pair_counts: dict[str, int] = {}
-    for split in SPLITS:
+    for split in FITTING_SPLITS:
         amounts: dict[str, float] = defaultdict(float)
         errors: dict[str, float] = defaultdict(float)
         pairs: set[str] = set()

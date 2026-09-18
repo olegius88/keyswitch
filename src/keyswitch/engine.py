@@ -243,6 +243,7 @@ class KeySwitchEngine:
         # True once anything was typed after the last committed word, so Pause
         # must not rewrite that word any more.
         self._last_committed_stale = False
+        self._caret_moved = False
         self._early_switch_origin: int | None = None
         self._early_switch_at: float | None = None
         self._engine_switch_at: float | None = None
@@ -546,6 +547,9 @@ class KeySwitchEngine:
             self._sensitive_context_window = None
             self._clear_word(reason="pointer_activity")
             self._untracked_token = False
+            # A click often lands in an empty field, which is exactly where the first
+            # word must still be corrected, so it is not treated as a caret move.
+            self._caret_moved = False
             self._contexts.clear()
             self.context_policy.stream.clear()
             return
@@ -669,6 +673,7 @@ class KeySwitchEngine:
             # undone with one BackSpace and safely replayed.
             self._clear_word(reason="action_boundary_already_delivered")
             self._untracked_token = False
+            self._caret_moved = False
             self._contexts.clear()
             self.context_policy.stream.clear()
             self._sensitive_context_window = None
@@ -750,9 +755,11 @@ class KeySwitchEngine:
             self._last_committed_stale = True
             return
         if event.key_name in NAVIGATION_KEYS:
-            # The caret moved: what was typed belongs to another position.
+            # The caret moved: what was typed belongs to another position, and
+            # the engine no longer knows what stands in front of the new one.
             self._last_committed_stale = True
             self._clear_word(reason="navigation")
+            self._caret_moved = True
             return
         if event.character:
             self._last_committed_stale = True
@@ -815,6 +822,29 @@ class KeySwitchEngine:
             minimum = 4
         return EarlySwitchPolicy(minimum_length=max(3, min(8, minimum)))
 
+    def _caret_unknown(self) -> bool:
+        """Whether this word is being typed where the engine cannot see the surroundings.
+
+        An arrow key, Home or Page Up puts the caret somewhere the engine has not
+        watched being typed. Until now the word that followed was analysed as if it
+        opened an empty field, which is the one thing it is least likely to be: the
+        caret is usually moved back *into* text, to finish or fix a word. Feeding
+        that invented emptiness to the models is worse than saying nothing, so the
+        word is left alone and Pause still converts it by hand.
+
+        When the active field can be read, the surroundings are not a guess and the
+        rule does not apply - the models get the real text before the caret.
+        """
+
+        if not self._caret_moved:
+            return False
+        if not bool(self.settings.get("detection.hold_after_caret_move", True)):
+            return False
+        if not bool(self.settings.get("detection.context_read_field", True)):
+            return True
+        reader = self.context_policy.reader
+        return getattr(reader, "status", "not_requested") != "available"
+
     def _maybe_early_switch(self) -> None:
         """Switch the layout as soon as the typed prefix proves it wrong."""
 
@@ -826,6 +856,8 @@ class KeySwitchEngine:
         if not bool(self.settings.get("detection.early_switch", True)):
             return
         if not bool(self.settings.get("enabled", True)):
+            return
+        if self._caret_unknown():
             return
         if self._early_switch_origin is not None or self._pending is not None:
             return
@@ -1186,11 +1218,14 @@ class KeySwitchEngine:
             self._early_switch_undone = False
         enabled = bool(self.settings.get("enabled", True))
         trigger_enabled = self._boundary_enabled(boundary)
+        caret_unknown = self._caret_unknown()
+        self._caret_moved = False
         should_analyze = (
             enabled
             and trigger_enabled
             and not manual_layout_protected
             and segmentation_certain
+            and not caret_unknown
         )
         excluded = self._application_excluded(application)
         decision: DetectionDecision | None = None
@@ -1245,6 +1280,7 @@ class KeySwitchEngine:
             enabled=enabled,
             trigger_enabled=trigger_enabled,
             manual_layout_protected=manual_layout_protected,
+            caret_unknown=caret_unknown,
             application_excluded=excluded,
             decision=decision,
             protection=protection,
@@ -1522,9 +1558,15 @@ class KeySwitchEngine:
         if (
             not context_aware or forced_target is not None or trigger == "boundary_probe"
             or self.detector.token_key(original) in {self.detector.token_key(word) for word in ignored_words}
-            or (protect_code and self.detector.is_protected_token(original))
             or self._application_excluded(application)
         ):
+            # A token the user excluded, a layout they chose by hand and an excluded
+            # application are their own decisions; the model is not asked about those.
+            # "Protect code" is not in that list any more: it used to skip the model for
+            # every token carrying a digit, so `зь2` stayed while the model said convert
+            # with 0.9993 - and the model keeps `pm2`, `npm`, `git` and `h264` on its own
+            # (measured 17.09.2026). The detector still refuses such tokens in the
+            # baseline; telling code from a mistyped word is exactly what the model is for.
             return decision
         candidates = [(group, text) for group, text in alternatives.items() if group not in rejected_targets]
         if not candidates:
@@ -1836,6 +1878,7 @@ class KeySwitchEngine:
         manual_layout_protected: bool,
         application_excluded: bool,
         decision: DetectionDecision | None,
+        caret_unknown: bool = False,
         protection: dict[str, object] | None = None,
         source_group: int | None = None,
         early_switch_origin: int | None = None,
@@ -1865,6 +1908,8 @@ class KeySwitchEngine:
             skipped_reason = "trigger_disabled"
         elif manual_layout_protected:
             skipped_reason = "manual_layout_protected"
+        elif caret_unknown:
+            skipped_reason = "caret_moved"
         # When the detector was not consulted, still record what it would have
         # said so that a missed correction can be told from a wrong verdict.
         shadow_payload: dict[str, object] | None = None
@@ -1892,6 +1937,7 @@ class KeySwitchEngine:
             enabled=enabled,
             trigger_enabled=trigger_enabled,
             manual_layout_protected=manual_layout_protected,
+            caret_unknown=caret_unknown,
             protection=protection,
             application_excluded=application_excluded,
             skipped_reason=skipped_reason,
@@ -1996,7 +2042,47 @@ class KeySwitchEngine:
         self._last_word_input_at = None
         self._pause_correction_pending = False
 
+    def _settle_context_wait_after_pause(self, now: float) -> None:
+        """The user stopped typing: a wait with no next word coming has to decide.
+
+        A waiting word is a word whose direction the model wanted the next word to
+        settle. When the next word arrives, `_resolve_context_wait` decides the pair.
+        When it does not, the wait used to lapse in silence and the word stood as
+        typed - which is a refusal the user never asked for, and it is how `ша ` came
+        to stay itself where the curated table names `if`. The pause is the moment
+        that possibility ends, so the word is decided once more with the pause
+        trigger, where a curated exception applies and the model still decides
+        everything else.
+        """
+
+        waiting = self._context_waiting
+        last = self._last_word_input_at
+        if (waiting is None or self._pending is not None or self._strokes or last is None
+                or now - last < self._pause_delay() or self._last_committed_stale
+                or waiting.window != (self._focus_window or 0)
+                or self.settings.get("detection.context_policy", "assist") != "assist"):
+            return
+        application = self.backend.active_application()
+        if waiting.plan.application != application or self._application_excluded(application):
+            self._log_context_wait("context_wait_cancelled", waiting, "preconditions_changed")
+            self._context_waiting = None
+            return
+        result = self.context_policy.decide(
+            waiting.decision, waiting.plan.replacement, waiting.plan.target_group, self.detector,
+            "pause", str(self.settings.get("detection.context_policy", "assist")),
+            field_override=waiting.field,
+        )
+        self._context_waiting = None
+        if not result.decision.should_convert:
+            self._log_context_wait("context_wait_cancelled", waiting, "pause_kept_the_word")
+            return
+        self._log_context_wait("context_wait_settled", waiting, "pause")
+        self._pending = replace(waiting.plan, confidence=result.decision.confidence)
+        self._pending_learning_action = None
+        self._pending_trigger_keycode = -1
+
     def _maybe_correct_after_pause(self, *, now: float | None = None) -> None:
+        self._settle_context_wait_after_pause(time.monotonic() if now is None else now)
         if not self._pause_correction_pending:
             return
         if not bool(self.settings.get("detection.correct_on_pause", True)):

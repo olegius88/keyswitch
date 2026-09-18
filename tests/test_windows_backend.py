@@ -14,7 +14,7 @@ import threading
 import unittest
 import warnings
 from collections.abc import Callable
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import ModuleType
 from unittest.mock import patch
 
@@ -57,6 +57,7 @@ from keyswitch.windows_backend import (
 from keyswitch.windows_system import (
     AutostartStatus,
     _executable_exists,
+    _installed_executable,
     WindowsApplicationCatalog,
     WindowsAutostartManager,
     WindowsSystemError,
@@ -791,6 +792,33 @@ class WindowsSystemTests(unittest.TestCase):
             for unusable in ("missing\x00path", "x" * 5000, ""):
                 with self.subTest(path=unusable[:12]):
                     self.assertFalse(_executable_exists(unusable))
+
+    def test_the_launcher_registers_the_installed_executable_not_the_interpreter(self) -> None:
+        """A frozen build whose runner reports an interpreter still registers KeySwitch.exe."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "KeySwitch"
+            (root / "keyswitch").mkdir(parents=True)
+            executable = root / "KeySwitch.exe"
+            executable.write_bytes(b"binary")
+            module = root / "keyswitch" / "windows_system.py"
+            module.write_text("", encoding="utf-8")
+            with patch("keyswitch.windows_system.__file__", str(module)):
+                self.assertEqual(_installed_executable(), executable)
+                command = windows_launcher_command(executable=PureWindowsPath(r"C:\Python\python.exe"))  # type: ignore[arg-type]
+            self.assertIn("KeySwitch.exe", command)
+            self.assertNotIn("-m", command)
+            self.assertTrue(command.endswith("--hidden"))
+            # A source checkout has no executable beside the package: the interpreter stays.
+            (root / "KeySwitch.exe").unlink()
+            with patch("keyswitch.windows_system.__file__", str(module)):
+                self.assertIsNone(_installed_executable())
+                fallback = windows_launcher_command(executable=PureWindowsPath(r"C:\Python\python.exe"))  # type: ignore[arg-type]
+            self.assertIn("-m keyswitch", fallback)
+
+    def test_an_unreadable_package_location_falls_back_instead_of_raising(self) -> None:
+        """Autostart registration must not fail because the path could not be resolved."""
+        with patch("keyswitch.windows_system.Path.resolve", side_effect=OSError("no such path")):
+            self.assertIsNone(_installed_executable())
 
     def test_autostart_reports_what_the_next_logon_will_do(self) -> None:
         registry = FakeRegistry()

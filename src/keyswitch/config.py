@@ -45,6 +45,7 @@ DEFAULTS: SettingsData = {
         "context_aware": True,
         "context_policy": "assist",
         "context_read_field": True,
+        "hold_after_caret_move": True,
         "protect_code": True,
         "intent_model_enabled": True,
         "learning": True,

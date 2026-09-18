@@ -30,9 +30,10 @@ from typing import cast
 
 from context_technical_corpus import COMMAND_PATH, Command, command_aliases, read_commands
 from freeze_context_action_corpus import (
-    SPLITS, CorpusRow, Sentence, SurfaceToken, Union, WORDS, canonical, checksum, digest, exposed_families,
+    CorpusRow, Sentence, SurfaceToken, Union, WORDS, canonical, checksum, digest, exposed_families,
     family_aliases, physical, read_conllu, row_identifier, sentence_rows, typo_variants,
 )
+from model_protocol import FITTING_SPLITS
 from reconcile_context_action_corpus import expanded_aliases, historical_code_forms
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -61,6 +62,19 @@ ARCH_SOURCE = "Arch-x86_64"
 FEDORA_BASE = "https://dl.fedoraproject.org/pub/fedora/linux/releases/43/Everything/x86_64/os/"
 FEDORA_SOURCE = "Fedora-x86_64"
 OPENSUSE_BASE = "https://download.opensuse.org/tumbleweed/repo/oss/"
+ALPINE_BASE = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/"
+ALPINE_COMMUNITY_BASE = "https://dl-cdn.alpinelinux.org/alpine/v3.21/community/x86_64/"
+ALPINE_SOURCE = "Alpine-x86_64"
+# Alpine repositories the freezer accepts, by the base URL their receipt records:
+# (source label, document prefix, human description). A package belongs to exactly one
+# repository, so `community` is a package set disjoint from `main` rather than a newer
+# snapshot of it - which is what a later holdout needs once `main` has been tested.
+ALPINE_SOURCES: dict[str, tuple[str, str, str]] = {
+    ALPINE_BASE: (ALPINE_SOURCE, "alpine-package-component:",
+                  "Alpine Linux v3.21 main x86_64 package index"),
+    ALPINE_COMMUNITY_BASE: ("Alpine-community-x86_64", "alpine-community-package-component:",
+                            "Alpine Linux v3.21 community x86_64 package index"),
+}
 TATOEBA_BASE = "https://downloads.tatoeba.org/exports/per_language/"
 # Tatoeba exports are weekly, so a receipt pins each file by URL, Last-Modified, size and
 # SHA-256 instead of a commit. Sentences are independent: each is its own document.
@@ -68,9 +82,15 @@ TATOEBA_TOKEN = re.compile(r"[^\W_]+(?:['\u2019\-][^\W_]+)*|[^\w\s]|_")
 TATOEBA_SAMPLE_PER_MILLE = 40
 # RPM repositories the freezer accepts, by the base URL their receipt records:
 # (source label, document prefix, human description).
+# Rawhide is Fedora's rolling branch: a different package set from the numbered release,
+# published under its own base URL, so a later holdout has technical material after the
+# release itself has been tested.
+RAWHIDE_BASE = "https://dl.fedoraproject.org/pub/fedora/linux/development/rawhide/Everything/x86_64/os/"
 RPM_SOURCES: dict[str, tuple[str, str, str]] = {
     FEDORA_BASE: (FEDORA_SOURCE, "fedora-package-component:", "Fedora 43 Everything x86_64 package index"),
     OPENSUSE_BASE: ("openSUSE-x86_64", "opensuse-package-component:", "openSUSE Tumbleweed oss x86_64 package index"),
+    RAWHIDE_BASE: ("Fedora-rawhide-x86_64", "fedora-rawhide-package-component:",
+                   "Fedora Rawhide Everything x86_64 package index"),
 }
 SID_RELEASE_URL = "https://deb.debian.org/debian/dists/sid/InRelease"
 SID_SOURCE = "Debian-sid-main-amd64"
@@ -84,7 +104,6 @@ DEB_SOURCES: dict[str, tuple[str, str, str, str, str]] = {
     UBUNTU_CONTENTS_URL: (UBUNTU_RELEASE_URL, "Contents-amd64.gz", "Ubuntu-noble-amd64", "ubuntu-package-component:",
                           "Ubuntu noble amd64 Contents, all components"),
 }
-ACTIVE_SPLITS = ("train", "development", "calibration", "test")
 PRIOR_TEST = "prior-accessed-test"
 
 
@@ -250,6 +269,27 @@ class Exclusions:
     historical_aliases: frozenset[str]
     lexicon: frozenset[str]
     provenance: dict[str, str]
+
+
+def ledger_test_rows(ledger: Path) -> tuple[set[str], set[str]]:
+    """Row and document digests every sealed test ever held.
+
+    Families are not enough: two corpora built from the same source under different
+    namespaces can select the same sentence, and the evaluator's ledger rule refuses a
+    test that repeats a row or a document a candidate has already been shown. Excluding
+    them here keeps the freeze and that rule in agreement instead of discovering the
+    clash after the work - v11 hit exactly that, with 7 rows and 8 documents.
+    """
+
+    rows: set[str] = set()
+    documents: set[str] = set()
+    for path in sorted(ledger.glob("*.access.json")) if ledger.exists() else []:
+        membership = read_object(path).get("test_membership")
+        if not isinstance(membership, dict):
+            continue
+        rows.update(hash_set(membership.get("row_ids_sha256"), "ledger test rows"))
+        documents.update(hash_set(membership.get("document_ids_sha256"), "ledger test documents"))
+    return rows, documents
 
 
 def ledger_test_families(ledger: Path) -> tuple[set[str], dict[str, str]]:
@@ -550,6 +590,64 @@ def verified_arch_source(directory: Path) -> tuple[list[tuple[str, Path]], dict[
                                "verification": "HTTPS TLS and SHA-256 of the downloaded databases; the mirror publishes no detached signature for .files"}
 
 
+def read_alpine_commands(archive: Path) -> list[Command]:
+    """Commands an Alpine index declares: every package lists what it provides as ``cmd:name``."""
+    import io
+    import tarfile
+
+    paths: dict[str, set[str]] = defaultdict(set)
+    owners: dict[str, set[str]] = defaultdict(set)
+    with tarfile.open(archive) as bundle:
+        member = bundle.extractfile("APKINDEX")
+        if member is None:
+            raise ValueError("Alpine index archive has no APKINDEX member")
+        text = io.TextIOWrapper(member, encoding="utf-8", errors="strict").read()
+    package = ""
+    for line in text.splitlines():
+        if line.startswith("P:"):
+            package = line[2:].strip()
+        elif line.startswith("p:") and package:
+            if re.fullmatch(r"[A-Za-z0-9@._+-]+", package) is None:
+                raise ValueError("invalid package name in the Alpine index: " + package)
+            for token in line[2:].split():
+                if not token.startswith("cmd:"):
+                    continue
+                name = token[4:].split("=")[0]
+                if re.fullmatch(r"[a-z]{3,16}", name) is None:
+                    continue
+                paths[name].add("usr/bin/" + name)
+                owners[name].add("alpine/" + package)
+    return [Command(name, tuple(sorted(paths[name])), tuple(sorted(owners[name]))) for name in sorted(paths)]
+
+
+def verified_alpine_source(directory: Path) -> tuple[Path, dict[str, str], dict[str, object]]:
+    """The Alpine index named by a TLS receipt whose SHA-256 and size match the archive."""
+    receipt_path = directory / "source-receipt.json"
+    receipt = read_object(receipt_path)
+    archive = directory / "APKINDEX.tar.gz"
+    entry = receipt.get("archive")
+    base_url = receipt.get("base_url")
+    if (not isinstance(entry, dict) or entry.get("status") != 200
+            or receipt.get("tls_certificate_verification") is not True
+            or not isinstance(base_url, str) or base_url not in ALPINE_SOURCES
+            or entry.get("url") != base_url + "APKINDEX.tar.gz"):
+        raise ValueError("source receipt does not identify a verified TLS Alpine download")
+    if checksum(archive) != entry.get("sha256") or archive.stat().st_size != entry.get("bytes"):
+        raise ValueError("Alpine index checksum mismatch")
+    _source, _prefix, description = ALPINE_SOURCES[base_url]
+    return archive, {str(path): checksum(path) for path in (receipt_path, archive)}, {
+        "source": description, "base_url": base_url, "receipt": receipt,
+        "verification": "HTTPS TLS and the archive SHA-256 from the receipt; the detached RSA signature was not verified by this generator"}
+
+
+def alpine_holdout_rows(commands: Sequence[Command], exclusions: Exclusions, namespace: str,
+                        *, base_url: str = ALPINE_BASE) -> tuple[list[CorpusRow], dict[str, object]]:
+    """Alpine commands absent from the shipped lexicon, as a test-only technical holdout."""
+    source, prefix, _description = ALPINE_SOURCES[base_url]
+    return technical_holdout_rows(commands, exclusions, namespace, source=source, source_file="APKINDEX.tar.gz",
+                                  document_prefix=prefix)
+
+
 def read_fedora_commands(primary: Path) -> list[Command]:
     """Executables of a Fedora ``primary.xml`` index: the primary filter keeps ``bin`` paths."""
     import xml.etree.ElementTree as ElementTree
@@ -667,7 +765,7 @@ def assemble(base: Path, output: Path, namespace: str, ud_rows: Sequence[CorpusR
     shutil.copyfile(base / "manifest.json", output / "origins" / "base-manifest.json")
     shutil.copyfile(base / "test-membership.json", output / "origins" / "base-test-membership.json")
     files: dict[str, dict[str, object]] = {}
-    for split in ("train", "development", "calibration"):
+    for split in FITTING_SPLITS:
         source = base / str(base_splits[split]["path"])
         if checksum(source) != base_splits[split]["sha256"]:
             raise ValueError("base split checksum mismatch: " + split)
@@ -749,6 +847,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--sid-directory", type=Path)
     parser.add_argument("--arch-directory", type=Path)
     parser.add_argument("--fedora-directory", "--rpm-directory", dest="fedora_directory", type=Path)
+    parser.add_argument("--alpine-directory", type=Path)
     parser.add_argument("--treebank", action="append", default=[],
                         help="pinned treebank to use; default: every pinned treebank; 'none' for receipted sources only")
     parser.add_argument("--tatoeba-directory", type=Path, help="receipted Tatoeba exports to add as natural sentences")
@@ -767,9 +866,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--max-sentences-per-document", type=int, default=12)
     args = parser.parse_args(argv)
     technical = [name for name, value in (("sid", args.sid_directory), ("arch", args.arch_directory),
-                                          ("fedora", args.fedora_directory)) if value is not None]
+                                          ("fedora", args.fedora_directory), ("alpine", args.alpine_directory))
+                 if value is not None]
     if len(technical) != 1:
-        raise ValueError("exactly one technical source is required: --sid-directory, --arch-directory or --fedora-directory")
+        raise ValueError("exactly one technical source is required: --sid-directory, --arch-directory,"
+                         " --fedora-directory or --alpine-directory")
     if args.treebank == ["none"]:
         pins: dict[str, str] = {}
     elif any(name not in PINS for name in args.treebank):
@@ -796,6 +897,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         contents, sid_provenance, sid_metadata = verified_sid_source(args.sid_directory)
         sid_rows, sid_summary = sid_holdout_rows(read_commands(contents), exclusions, args.namespace,
                                                  contents_url=str(sid_metadata["contents_url"]))
+    elif args.alpine_directory is not None:
+        archive, sid_provenance, sid_metadata = verified_alpine_source(args.alpine_directory)
+        sid_rows, sid_summary = alpine_holdout_rows(read_alpine_commands(archive), exclusions, args.namespace,
+                                                    base_url=str(sid_metadata["base_url"]))
     elif args.arch_directory is not None:
         databases, sid_provenance, sid_metadata = verified_arch_source(args.arch_directory)
         sid_rows, sid_summary = arch_holdout_rows(read_arch_commands(databases), exclusions, args.namespace)
@@ -809,11 +914,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                                             "receipt_sha256": tatoeba_provenance[str(args.tatoeba_directory / "source-receipt.json")]}}
     for source in sources:
         provenance["holdout-source:" + str(source["repository"])] = str(source["pin_metadata_sha256"])
+    prior_rows, prior_documents = ledger_test_rows(args.ledger)
+    repeated = 0
+    for rows in (ud_rows, sid_rows):
+        for index, row in enumerate(rows):
+            if row.split == "test" and (digest(row.identifier) in prior_rows or digest(row.document) in prior_documents):
+                rows[index] = replace(row, split="quarantine",
+                                      quarantine_reasons=(*row.quarantine_reasons, "prior-accessed-test-row"))
+                repeated += 1
     held = [row for row in (*ud_rows, *sid_rows) if row.split == "test"]
     membership = {"row_ids_sha256": sorted(digest(row.identifier) for row in held), "family_ids_sha256": sorted({row.family for row in held}),
                   "document_ids_sha256": sorted({digest(row.document) for row in held})}
     overlap = prior_access_overlap(args.ledger, membership)
     metadata = {"sources": sources, "sampling": sampling, "ud": ud_summary, "technical": sid_summary, "sid_source": sid_metadata,
+                "repeated_rows_quarantined": repeated,
                 "prior_access_overlap": overlap, "exclusion_counts": {"base_aliases": len(exclusions.base_aliases),
                 "prior_test_aliases": len(exclusions.prior_test_aliases), "prefix_aliases": len(exclusions.prefix_aliases),
                 "prior_test_families": len(exclusions.prior_test_families), "exposed_physical": len(exclusions.exposed_physical),

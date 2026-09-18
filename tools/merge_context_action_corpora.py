@@ -15,10 +15,10 @@ import shutil
 from typing import Protocol, cast
 import zlib
 
-from freeze_context_action_corpus import SPLITS, canonical, checksum
+from freeze_context_action_corpus import canonical, checksum
+from model_protocol import ACTIVE_SPLITS, ALL_SPLITS
 
 ROOT = Path(__file__).resolve().parents[1]
-ACTIVE_SPLITS = ("train", "development", "calibration", "test")
 MEMBERSHIP_FIELDS = ("row_ids_sha256", "family_ids_sha256", "document_ids_sha256")
 HEX = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -102,11 +102,11 @@ def verify_origin(directory: Path) -> Origin:
             or not isinstance(namespace, str) or not namespace):
         raise ValueError("invalid corpus manifest identity")
     records = object_value(manifest.get("splits"))
-    if set(records) != set(SPLITS):
+    if set(records) != set(ALL_SPLITS):
         raise ValueError("source manifest must declare all corpus splits")
     pins = {manifest_path: checksum(manifest_path)}
     files = {}
-    for split in SPLITS:
+    for split in ALL_SPLITS:
         record = object_value(records[split])
         if record.get("path") != split + ".jsonl.gz":
             raise ValueError("unexpected source split filename")
@@ -246,7 +246,7 @@ def merge_corpora(base_directory: Path, extension_directory: Path, output: Path)
         })
     (output / "generator-source.py").write_bytes(generator)
     files = {}
-    for split in SPLITS:
+    for split in ALL_SPLITS:
         destination = output / (split + ".jsonl.gz")
         raw_hash = hashlib.sha256()
         count = raw_bytes = 0
@@ -283,7 +283,7 @@ def merge_corpora(base_directory: Path, extension_directory: Path, output: Path)
         "scope": "union of unchanged frozen UD and command-family/package partitions; not new independent evidence",
         "origins": origins, "alias_audit": audit,
         "partitioning": {"mode": "unchanged-source-split-concatenation", "replacements": 0,
-                         "rows_by_split": {split: files[split]["rows"] for split in SPLITS}},
+                         "rows_by_split": {split: files[split]["rows"] for split in ALL_SPLITS}},
         "generator_source": "generator-source.py", "generator_sha256": hashlib.sha256(generator).hexdigest(),
         "test_membership_sha256": checksum(membership_path),
         "provenance": {str(path): expected for path, expected in sorted(pins.items(), key=lambda item: str(item[0]))},

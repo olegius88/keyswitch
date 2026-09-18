@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import cast
 
 from keyswitch.boundary_policy import ARTIFACT, BoundaryPolicy
-from boundary_v2_corpus import CONFIG, DIRECTORY, RECEIPT, SPLITS, rows
+from boundary_v2_corpus import CONFIG, DIRECTORY, RECEIPT, rows
+from model_protocol import ACTIVE_SPLITS
 from context_evidence import canonical, checksum
 from evaluate_boundary_engine import REPORT as ENGINE_REPORT, SCENARIOS, provenance as engine_provenance
 from train_boundary_v2 import CANDIDATE, REPORT, SEAL, acceptable, metrics, provenance
@@ -48,7 +49,7 @@ def verify(*, artifact: Path = ARTIFACT, report_path: Path = REPORT,
            engine_path: Path = ENGINE_REPORT) -> dict[str, object]:
     corpus = read_object(RECEIPT)
     if (corpus.get("family_overlap") != 0 or corpus.get("prior_phrase_test_family_overlap") != 0
-            or corpus.get("sha256") != {split: checksum(DIRECTORY / (split + ".jsonl.gz")) for split in SPLITS}):
+            or corpus.get("sha256") != {split: checksum(DIRECTORY / (split + ".jsonl.gz")) for split in ACTIVE_SPLITS}):
         raise ValueError("boundary-v2 frozen partitions changed")
     raw = evaluate()
     report = json.loads(raw)

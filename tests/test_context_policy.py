@@ -198,6 +198,14 @@ class ContextEngineTests(InputIntegrityTests):
         self.reset_editor()
         self.type("const value = e ")
         self.assertEqual(self.backend.text, "const value = e ")
+        # A command name carries digits, and the model - not a class-wide veto - decides
+        # both readings of it: the Russian keys are the command, the command stays itself.
+        self.reset_editor()
+        self.type("pm2 ")
+        self.assertEqual(self.backend.text, "pm2 ")
+        self.reset_editor(1)
+        self.type("зь2 ")
+        self.assertEqual(self.backend.text, "pm2 ")
 
     def test_explicit_rules_exclusions_and_manual_layout_are_above_model(self) -> None:
         self.choose("convert")
@@ -206,9 +214,6 @@ class ContextEngineTests(InputIntegrityTests):
         self.assertEqual(self.backend.text, "ghbdtn ")
         self.reset_editor()
         self.settings.set("exclusions.words", [])
-        self.type("pm2 ")
-        self.assertEqual(self.backend.text, "pm2 ")
-        self.reset_editor()
         self.engine.learning.reject(0, "ghbdtn", 1)
         self.type("ghbdtn ")
         self.assertEqual(self.backend.text, "ghbdtn ")
@@ -240,16 +245,16 @@ class ContextEngineTests(InputIntegrityTests):
 
     def test_wait_uses_next_word_without_losing_spaces_or_undo(self) -> None:
         self.choose("wait")
-        self.type("e ")
+        self.type("yt ")
         self.assertIsNotNone(self.engine._context_waiting)
         self.choose("convert")
         self.type("'njuj ")
-        self.assertEqual(self.backend.text, "у этого ")
+        self.assertEqual(self.backend.text, "не этого ")
         correction = self.engine._last_correction
         assert correction is not None
         self.assertEqual(correction.mode, "context_phrase")
         self.tap(replace(self.key("z"), state=CONTROL_MASK | 8))
-        self.assertEqual(self.backend.text, "e 'njuj ")
+        self.assertEqual(self.backend.text, "yt 'njuj ")
 
     def test_wait_is_cancelled_on_edit_navigation_and_timeout(self) -> None:
         for reason in ("BackSpace", "Left", "Pointer", "timeout", "space"):
@@ -282,14 +287,14 @@ class ContextEngineTests(InputIntegrityTests):
 
     def test_wait_keeps_previous_word_when_second_inference_is_uncertain(self) -> None:
         self.choose("wait")
-        self.type("e ")
+        self.type("yt ")
         waiting = self.engine._context_waiting
         assert waiting is not None
         next_word = self.engine.detector.decide("'njuj", {1: "этого"}, 0)
         results = [ContextResult(next_word), ContextResult(replace(waiting.decision, should_convert=False))]
         with patch.object(self.engine.context_policy, "decide", side_effect=results):
             self.type("'njuj ")
-        self.assertEqual(self.backend.text, "e этого ")
+        self.assertEqual(self.backend.text, "yt этого ")
 
 
 # Avoid re-running the inherited historical matrix here; that matrix keeps

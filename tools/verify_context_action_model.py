@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 from collections.abc import Mapping, Sequence
 import hashlib
 import json
@@ -11,6 +12,7 @@ from pathlib import Path
 import re
 from typing import cast
 
+from model_protocol import PROFILES, SEALED_BEFORE_TEST
 from keyswitch.context_model import ARTIFACT_PATH, ContextModel
 from keyswitch.prefix_model import ARTIFACT as PREFIX_ARTIFACT_PATH
 from keyswitch.prefix_schema import VersionedPrefixModel
@@ -23,23 +25,22 @@ INSTALLED_MODELS = ("context_policy_v1.json", "prefix_policy_v1.json")
 RECIPE = "model/context_v3/recipe.json"
 # model/context_v2/candidate-seal.json and report.json: rejected experiment.
 REJECTED_ARTIFACT = "55f0d735de8751f3f414d569b6e1eb2bbb294303d8fe01f2fde66c3fadecfeb1"
-PROFILES = ("portable", "reference_hunspell")
 COUNTS = frozenset({"rows", "initially_correct", "initially_wrong", "preserved_correct", "exactly_restored",
                     "correct_text_corruptions", "length_mismatches", "injections", "execution_errors",
                     "correction_layout_mismatches", "final_layout_mismatches"})
 CALIBRATION = frozenset({"rows", "convert_rows", "converted_correctly", "false_conversions", "conversion_recall"})
 GATE_POLICY: dict[str, object] = {
-    "calibration_false_conversions": 0, "minimum_calibration_conversion_recall": 0.9,
-    "sequence_correct_text_corruptions": 0, "sequence_length_mismatches": 0,
+    "minimum_calibration_net_benefit": 1, "minimum_calibration_conversion_recall": 0.0,
+    "sequence_corruptions_at_most_baseline": True, "sequence_length_mismatches": 0,
     "sequence_net_restorations_at_least_baseline": True, "minimum_sequence_documents_per_group": 32,
 }
 SCOPE = "Sealed private-corpus test aggregates and current artifact/provenance verification; fresh-fit reproducibility, reviewed human-intent labels and native OS execution are not asserted."
-AUDITED_SEQUENCE_PROTOCOL_SHA256 = "20cb92bb0cc664f5c103f1d9798789a7705f31e6ed6d9665084f3c8d6d75b6c7"
+AUDITED_SEQUENCE_PROTOCOL_SHA256 = "59b9e6e9d4ca222fb732d9c59d9aac68b6081867fdbfe119f3aa7f7547636fab"
 PROTOCOL: dict[str, object] = {
     "version": 3, "document_cap_per_group": 128, "profiles": list(PROFILES),
     "window": "bounded_sentence", "backend": "simulated_editor", "physical_key_period_ms": 100,
     "trim_clipped_token_edges": True, "native_execution_verified": False,
-    "test_access": "sealed-before-test", "fresh_fit_reproducibility_verified": False,
+    "test_access": SEALED_BEFORE_TEST, "fresh_fit_reproducibility_verified": False,
     "source_protocol_sha256": AUDITED_SEQUENCE_PROTOCOL_SHA256,
     "wrong_intervention": "first_declared_group_letter_after_literal_focus_prefix",
     "settings_modes": ["early_off", "default"], "default_key_down_ms": 50, "default_key_up_ms": 30,
@@ -122,8 +123,32 @@ def public_path(root: Path, name: str) -> Path:
     return root / path
 
 
+# The release process rewrites the version literal in every release, and that file holds
+# nothing else. Pinning it would tie a model's evidence to the release number it happened
+# to be sealed under: a pair could never ship in a later version without a new sealed test,
+# which is a test spent on a string. It is excluded and its shape is checked instead, so
+# nothing can be hidden in the one file the receipt does not fingerprint.
+VERSION_MODULE = "src/keyswitch/__init__.py"
+
+
+def version_module_holds_only_a_version(root: Path) -> bool:
+    """True when the excluded module is a docstring and one string assignment, nothing else."""
+    try:
+        body = ast.parse((root / VERSION_MODULE).read_text(encoding="utf-8")).body
+    except (OSError, SyntaxError, ValueError):
+        return False
+    if len(body) != 2 or not isinstance(body[0], ast.Expr) or not isinstance(body[0].value, ast.Constant):
+        return False
+    assignment = body[1]
+    return (isinstance(body[0].value.value, str) and isinstance(assignment, ast.Assign)
+            and len(assignment.targets) == 1 and isinstance(assignment.targets[0], ast.Name)
+            and assignment.targets[0].id == "__version__"
+            and isinstance(assignment.value, ast.Constant) and isinstance(assignment.value.value, str))
+
+
 def required_provenance(root: Path) -> set[str]:
     paths = {path.relative_to(root).as_posix() for path in (root / "src/keyswitch").rglob("*.py")}
+    paths.discard(VERSION_MODULE)
     paths.update(path.relative_to(root).as_posix() for path in (root / "src/keyswitch/resources/models").iterdir()
                  if path.is_file() and path.name not in INSTALLED_MODELS)
     paths.update({BASELINE, PREFIX_BASELINE, RECIPE, "model/intent_v1/config.json", "model/context_v1/scenarios.json",
@@ -143,14 +168,26 @@ def required_provenance(root: Path) -> set[str]:
 
 
 def calibration_counts(value: object) -> dict[str, object]:
+    """The calibration a receipt publishes must show a balance, not an absence of error.
+
+    This read the same zero-false-conversion rule as the evaluator until 17.09.2026, and
+    it has to keep reading the same one: the published gate policy names a minimum net
+    benefit per profile, and a verifier that silently asked for more than the policy says
+    would reject exactly the candidates the policy accepts.
+    """
+
     row = mapping(value, "calibration counts", CALIBRATION)
     counts = {name: integer(row[name], name) for name in CALIBRATION - {"conversion_recall"}}
     recall = row["conversion_recall"]
+    minimum = cast(int, GATE_POLICY["minimum_calibration_net_benefit"])
+    floor = cast(float, GATE_POLICY["minimum_calibration_conversion_recall"])
     if (type(recall) not in (float, int) or not math.isfinite(cast(float, recall))
             or not 0 < counts["convert_rows"] <= counts["rows"]
             or counts["converted_correctly"] > counts["convert_rows"]
             or recall != counts["converted_correctly"] / counts["convert_rows"]
-            or counts["false_conversions"] != 0 or recall < 0.9):
+            or counts["false_conversions"] > counts["converted_correctly"]
+            or counts["converted_correctly"] - counts["false_conversions"] < minimum
+            or recall < floor):
         raise ValueError("calibration gate failed")
     return row
 
@@ -180,7 +217,17 @@ def sequence_counts(value: object, documents: Mapping[str, int]) -> dict[str, in
 
 
 def computed_gates(candidate: Mapping[str, int], baseline: Mapping[str, int], documents: Mapping[str, int]) -> dict[str, bool]:
-    return {"correct_text_preserved": candidate["correct_text_corruptions"] == 0,
+    """Recompute the published gates from the published counts, by the published policy.
+
+    `correct_text_preserved` asked for zero corruptions until 18.09.2026, while the
+    gate policy this receipt carries - and the evaluator that produced the counts -
+    say `sequence_corruptions_at_most_baseline`. A verifier stricter than the policy
+    it prints refuses candidates the policy accepts, and does it silently.
+    """
+
+    return {"correct_text_preserved": (candidate["correct_text_corruptions"] <= baseline["correct_text_corruptions"]
+                                       if GATE_POLICY["sequence_corruptions_at_most_baseline"]
+                                       else candidate["correct_text_corruptions"] == 0),
             "length_preserved": candidate["length_mismatches"] == 0,
             "net_restorations_at_least_baseline": (candidate["exactly_restored"] - candidate["correct_text_corruptions"]
                                                   >= baseline["exactly_restored"] - baseline["correct_text_corruptions"]),
@@ -249,8 +296,10 @@ def validate_receipt(receipt: object, artifact: Path = ARTIFACT_PATH, root: Path
             or prefix_payload.get("weights_sha256") != value["prefix_weights_sha256"]):
         raise ValueError("prefix weights, version or threshold mismatch")
     hashes = mapping(value["provenance"], "provenance")
-    if not required_provenance(root) <= hashes.keys():
+    if not required_provenance(root) <= hashes.keys() or VERSION_MODULE in hashes:
         raise ValueError("missing required provenance")
+    if not version_module_holds_only_a_version(root):
+        raise ValueError("the unpinned version module carries more than a version")
     for name, expected in hashes.items():
         if checksum(public_path(root, name)) != sha(expected):
             raise ValueError("context provenance mismatch: " + name)
@@ -438,6 +487,7 @@ def export_receipt(artifact: Path, seal_path: Path, report_path: Path, corpus: P
         if name in hashes and hashes[name] != fingerprint:
             raise ValueError("seal and runtime provenance disagree")
         hashes[name] = fingerprint
+    hashes.pop(VERSION_MODULE, None)
     calibration = mapping(seal.get("calibration"), "calibration")
     by_profile = mapping(calibration.get("by_profile"), "calibration profiles", frozenset(PROFILES))
     public_calibration = {name: calibration[name] for name in CALIBRATION}

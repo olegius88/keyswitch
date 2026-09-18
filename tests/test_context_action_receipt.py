@@ -20,6 +20,7 @@ if TOOLS not in sys.path:
 import evaluate_context_action_sequences as evaluator
 import verify_context_action_model as verifier
 from keyswitch.context_model import ContextModel
+from model_protocol import PROFILES
 
 
 def counts(restored: int = 50, corruptions: int = 0) -> dict[str, int]:
@@ -37,6 +38,10 @@ class ContextActionReceiptTests(unittest.TestCase):
         models = self.root / "src/keyswitch/resources/models"
         models.mkdir(parents=True)
         (models / "layout_intent_v1.ksm").write_text("authored intent bytes")
+        # The version module is the one source the receipt does not fingerprint, so the
+        # fixture has to carry it in the shape the verifier insists on.
+        (self.root / verifier.VERSION_MODULE).write_text('"""Fixture."""\n\n__version__ = "0.0.0"\n',
+                                                         encoding="utf-8")
         for name in verifier.required_provenance(self.root):
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -48,7 +53,7 @@ class ContextActionReceiptTests(unittest.TestCase):
         self.prefix_artifact = models / "prefix_policy_v1.json"
         self.write_prefix(self.prefix_artifact)
         self.recipe = {"schema_version": 1, "feature_version": 3, "gate_policy": verifier.GATE_POLICY,
-                       "profiles": list(verifier.PROFILES)}
+                       "profiles": list(PROFILES)}
         (self.root / verifier.RECIPE).write_bytes(verifier.canonical(self.recipe))
         self.hashes = {name: verifier.checksum(self.root / name) for name in verifier.required_provenance(self.root)}
         self.corpus = self.root / ".t/corpus"
@@ -85,7 +90,7 @@ class ContextActionReceiptTests(unittest.TestCase):
             "conversion_threshold": 0.99, "corpus_manifest_sha256": verifier.checksum(self.corpus / "manifest.json"),
             "provenance": self.hashes, "recipe": self.recipe, "gate_policy": verifier.GATE_POLICY,
             "calibration": {"rows": 40, "convert_rows": 20, "converted_correctly": 18, "false_conversions": 0,
-                "conversion_recall": 0.9, "by_profile": {name: dict(profile) for name in verifier.PROFILES}},
+                "conversion_recall": 0.9, "by_profile": {name: dict(profile) for name in PROFILES}},
             "private_note": self.secret}
         self.seal_path.write_bytes(verifier.canonical(self.seal))
         self.prefix_seal_path = self.corpus / "prefix-seal.json"
@@ -104,7 +109,7 @@ class ContextActionReceiptTests(unittest.TestCase):
                 "unsupported": [], "source_ids": self.identifiers},
             "profiles": {name: {**block(), "early_off": block(),
                                 "ablation": {"candidate_context_baseline_prefix": {"counts": counts(), "cases": self.cases()}}}
-                         for name in verifier.PROFILES}, "private_note": self.secret}
+                         for name in PROFILES}, "private_note": self.secret}
         self.key = evaluator.membership_key(identity)
         (self.ledger / (self.key + ".access.json")).write_bytes(verifier.canonical(identity))
         self.save_report()
@@ -196,7 +201,7 @@ class ContextActionReceiptTests(unittest.TestCase):
                 del changed[field]
                 with self.assertRaises(ValueError):
                     self.verify(changed)
-        for profile in verifier.PROFILES:
+        for profile in PROFILES:
             profiles = cast(dict[str, dict[str, object]], cast(dict[str, object], original["test"])["profiles"])
             for gate in cast(dict[str, object], profiles[profile]["gates"]):
                 with self.subTest(profile=profile, gate=gate):
@@ -208,16 +213,20 @@ class ContextActionReceiptTests(unittest.TestCase):
 
     def test_claimed_acceptance_cannot_override_bad_counts_in_either_profile(self) -> None:
         original = self.exported()
-        for profile in verifier.PROFILES:
+        for profile in PROFILES:
             for field in ("correct_text_corruptions", "length_mismatches", "execution_errors", "correction_layout_mismatches",
                           "exactly_restored", "rows", "initially_wrong"):
                 with self.subTest(profile=profile, field=field):
                     changed = deepcopy(original)
                     profiles = cast(dict[str, dict[str, object]], cast(dict[str, object], changed["test"])["profiles"])
-                    current = cast(dict[str, dict[str, int]], profiles[profile]["counts"])["candidate"]
+                    counts = cast(dict[str, dict[str, int]], profiles[profile]["counts"])
+                    current, baseline = counts["candidate"], counts["baseline"]
                     current[field] = 0 if field == "exactly_restored" else current[field] + 1
                     if field == "correct_text_corruptions":
-                        current["preserved_correct"] -= 1
+                        # The gate is relative: breaking more correct text than the pair
+                        # already shipped is what it refuses, not breaking any at all.
+                        current[field] = baseline[field] + 1
+                        current["preserved_correct"] = current["initially_correct"] - current[field]
                     with self.assertRaises(ValueError):
                         self.verify(changed)
         changed = deepcopy(original)
@@ -511,6 +520,37 @@ class ContextActionReceiptTests(unittest.TestCase):
         with patch.object(verifier, "checksum", return_value=verifier.REJECTED_ARTIFACT):
             with self.assertRaisesRegex(ValueError, "unaccepted"):
                 self.verify(receipt)
+
+    def test_the_version_module_is_unpinned_but_may_hold_nothing_else(self) -> None:
+        """A release rewrites the version; a model's evidence must not depend on it.
+
+        Pinning the one file the release process rewrites by construction would tie a
+        pair to the release number it was sealed under, and no pair could ship in a
+        later version without spending a sealed test on a string. It is left out of the
+        fingerprints, so its shape is checked instead: a docstring and one string
+        assignment, nothing that could hide behaviour where the receipt does not look.
+        """
+
+        root = Path(__file__).resolve().parents[1]
+        self.assertNotIn(verifier.VERSION_MODULE, verifier.required_provenance(root))
+        self.assertTrue(verifier.version_module_holds_only_a_version(root))
+        with tempfile.TemporaryDirectory() as temporary:
+            other = Path(temporary)
+            module = other / verifier.VERSION_MODULE
+            module.parent.mkdir(parents=True)
+            for body, allowed in (('"""Doc."""\n\n__version__ = "1.2.3"\n', True),
+                                  ('"""Doc."""\n\n__version__ = "1.2.3"\nimport os\n', False),
+                                  ('__version__ = "1.2.3"\n', False),
+                                  ('"""Doc."""\n\nVERSION = "1.2.3"\n', False),
+                                  ('"""Doc."""\n\n__version__ = 3\n', False),
+                                  ('"""Doc."""\n\n__version__ = version()\n', False),
+                                  ('"""Doc."""\n\nx = y = "1.2.3"\n', False),
+                                  ('"""Doc."""\n\nthis is not python\n', False)):
+                with self.subTest(body=body):
+                    module.write_text(body, encoding="utf-8")
+                    self.assertIs(verifier.version_module_holds_only_a_version(other), allowed)
+            module.unlink()
+            self.assertFalse(verifier.version_module_holds_only_a_version(other))
 
     def test_public_verify_import_does_not_import_editor_or_evaluator(self) -> None:
         root = Path(__file__).resolve().parents[1]

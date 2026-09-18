@@ -1,111 +1,134 @@
-# KeySwitch 0.24.0
+# KeySwitch 0.25.0
 
 ## Русский
 
-Выпуск меняет поведение движка там, где вы об этом просили: кавычка в Telegram, одиночные
-буквы в начале сообщения, расширенное распознавание. Модели те же, что в 0.23.1. Полный перечень — в
-[CHANGELOG.md](CHANGELOG.md).
+Выпуск исправляет то, из-за чего короткие слова и имена команд путались между раскладками,
+и добавляет правило для случая, когда курсор переносят в уже написанный текст. Модели те же,
+что в 0.24.0. Полный перечень — в [CHANGELOG.md](CHANGELOG.md).
 
 ### Файлы выпуска
 
-- `keyswitch_0.24.0_amd64.deb` — Ubuntu/Xubuntu, сеанс X11.
-- `KeySwitch-Setup-0.24.0-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
+- `keyswitch_0.25.0_amd64.deb` — Ubuntu/Xubuntu, сеанс X11.
+- `KeySwitch-Setup-0.25.0-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
   сертификатом издателя: SmartScreen покажет предупреждение.
-- `KeySwitch-0.24.0-windows-x64.zip` — переносимый архив для Windows.
+- `KeySwitch-0.25.0-windows-x64.zip` — переносимый архив для Windows.
 - `SHA256SUMS` — контрольные суммы трёх файлов; сверьте их перед установкой.
 
 ### Модели те же, кандидат остаётся кандидатом
 
-Пара context-v1 + prefix-v1 остаётся установленной. Новая пара моделей прошла независимую
-запечатанную оценку на тексте трибанков (ни одной испорченной строки против 7–28 у текущей
-пары), но на второй оценке — предложения Tatoeba и индекс пакетов Ubuntu — восстановила на
-две-три строки из 247 меньше текущей пары. Порог принятия не снижается, поэтому выпуск
-выходит на проверенной паре; путь установки новой пары в движке и воротах уже готов.
-Раскрытый случай `дюп` по-прежнему переводится.
+Пара context-v1 + prefix-v1 остаётся установленной. Кандидат новой схемы прошёл запечатанную
+оценку — 512 строк из предложений Tatoeba и индекса пакетов Fedora Rawhide, которых не видела
+ни одна прежняя оценка: он восстанавливает 228 неверно набранных строк из 252 против 210 у
+установленной пары и реже портит правильный текст.
 
-### Telegram: кавычка сразу становится @
+Сквозные тесты затем показали то, чего эти числа не видят: три слова из курируемого списка
+коротких слов (`мы`, `вы`, `if`) кандидат предлагает проверить вместо того, чтобы переключить.
+Выпуск выходит на проверенной паре; кандидат ждёт исправления правила, которое решает такие
+слова.
 
-Кавычка, набранная в русской раскладке в начале слова, заменяется на «@» на самом
-нажатии, и ник печатается следом без паузы. Нужна настоящая кавычка — нажмите ту же
-клавишу ещё раз: получится «""» и раскладка вернётся. Правило живёт в новом разделе
-«Особенности программ», где каждое правило — отдельный переключатель.
+### Короткие слова и имена команд
 
-### Одиночная буква в начале сообщения
+- Имена команд с цифрами разбирает модель, а не общее исключение для «похожего на код»:
+  `зь2` становится `pm2`, а набранное как есть `pm2` остаётся собой. Прежде такие токены
+  вовсе не рассматривались, и `зь2` оставалось как есть.
+- Из русского дополнения словаря убраны 467 двухбуквенных «слов», пришедших из субтитров
+  (`зь`, `пм`, `ср`, `фы`). Настоящие двухбуквенные русские слова и так есть в основном
+  словаре, а этот шум выдавал короткую латинскую команду за русское слово.
+- Одиночная буква в начале сообщения переключается сразу на пробеле: `z ` становится `я `,
+  и так же для `f`, `b`, `c`, `d`, `r`, `e`, `j` — восьми клавиш, на которых лежат восемь
+  однобуквенных русских слов. Раньше такая буква ждала следующего слова.
 
-`z`, `b`, `f` в английской раскладке без слова перед ними становятся `я`, `и`, `а`: в
-русском тексте так начинается каждое седьмое предложение, в английском одиночная буква в
-начале предложения не встречается. После английского слова буква остаётся как есть. При
-быстром наборе без паузы букву решает следующее слово.
+### Курсор, перенесённый в готовый текст
 
-### Расширенное распознавание включено
+Стрелки, `Home`, `End` и `Page Up`/`Page Down` уводят курсор туда, где программа ничего не
+видела, а переносят его туда чаще всего затем, чтобы дописать или поправить уже написанное.
+Слово, набранное сразу после такого перемещения, больше не переключается автоматически:
+`Pause` переключит его вручную. Настройка «Не исправлять слово сразу после перемещения
+курсора» отключает это поведение. Если чтение контекста активного поля работает, текст перед
+курсором известен по-настоящему и правило не применяется.
 
-Слово больше не может превратиться в строку с пунктуацией (`рукх` не станет `her[`):
-шесть русских букв живут на клавишах пунктуации, и это проверяется отдельно. После
-этого исправления расширенное распознавание незнакомых слов включено по умолчанию — на
-измерении оно больше ничего не портит. Описания настроек «Расширенное распознавание» и
-«Ранняя смена раскладки» переписаны простыми словами; ранняя смена остаётся выключенной
-по цифрам независимой оценки.
+### Автозапуск в Windows
+
+Если сборка сообщала о себе как об интерпретаторе, в список автозапуска попадал `python.exe`:
+Windows показывала запись «Python» без издателя, и её запуск не запускал KeySwitch. Теперь
+команда берётся из установленной раскладки файлов. Состояние автозапуска — какая команда
+зарегистрирована, не блокирует ли её Windows, существует ли цель — показывает окно
+диагностики, а не только `KeySwitch.exe --diagnose`.
 
 ### Известные ограничения
 
 - Изолированное слово, неизвестное словарю (`дюп`), всё ещё может быть переведено.
-- Числа выше измерены на запечатанных тестовых корпусах из 311 и 282 строк естественного и
+- Числа выше измерены на запечатанном тестовом корпусе из 512 строк естественного и
   технического текста; они не являются оценкой на произвольном вводе.
+- Оценка выполнена на модели ввода в пределах процесса: она не проверяет работу с IME,
+  гонки фокуса и подтверждение ввода операционной системой.
 
 Технический журнал может содержать анализируемые слова. Просматривайте его перед
 передачей. Приватные логи и переписка не входят в состав выпуска.
 
 ## English
 
-This release changes the engine where you asked for it: the Telegram quote, lone letters
-at the start of a message, the wider recognition. The models are the same as in 0.23.1. The full list is in
-[CHANGELOG.md](CHANGELOG.md).
+This release fixes what made short words and command names confuse the two layouts, and adds
+a rule for text typed after the caret is moved into what is already written. The models are
+the ones that shipped in 0.24.0. The full list is in [CHANGELOG.md](CHANGELOG.md).
 
 ### Release files
 
-- `keyswitch_0.24.0_amd64.deb` — Ubuntu/Xubuntu, X11 session.
-- `KeySwitch-Setup-0.24.0-x64.exe` — installer for Windows 10/11 x64. It is not signed
-  with a publisher certificate, so SmartScreen shows a warning.
-- `KeySwitch-0.24.0-windows-x64.zip` — portable archive for Windows.
+- `keyswitch_0.25.0_amd64.deb` — Ubuntu/Xubuntu on an X11 session.
+- `KeySwitch-Setup-0.25.0-x64.exe` — installer for Windows 10/11 x64. It is not signed with
+  a publisher certificate, so SmartScreen shows a warning.
+- `KeySwitch-0.25.0-windows-x64.zip` — portable archive for Windows.
 - `SHA256SUMS` — checksums of the three files; verify them before installing.
 
 ### Same models, the candidate stays a candidate
 
-The context-v1 + prefix-v1 pair stays installed. The new pair passed an independent sealed
-evaluation on treebank text (no corrupted rows against 7-28 for the current pair) but, on a
-second one built from Tatoeba sentences and the Ubuntu package index, restored two to three
-rows out of 247 fewer than the current pair. The acceptance bar is not lowered, so this
-release ships on the proven pair; the path for installing a new pair in the engine and the
-gates is ready. The disclosed `дюп` case is still converted.
+The context-v1 + prefix-v1 pair stays installed. The new-schema candidate passed its sealed
+evaluation — 512 rows from Tatoeba sentences and the Fedora Rawhide package index, none of
+which any earlier evaluation had seen: it restores 228 of 252 wrongly typed rows against 210
+for the installed pair and corrupts correct text less often.
 
-### Telegram: the quote becomes @ at once
+The end-to-end tests then showed what those numbers cannot: three words of the curated
+short-word list (`мы`, `вы`, `if`) are offered as a suggestion instead of being switched.
+This release ships the proven pair; the candidate waits for the rule that decides such words
+to be repaired.
 
-A quote typed in the Russian layout at the start of a word becomes `@` on the keystroke,
-and the nickname follows without a pause. For a real quote press the same key again: you
-get `""` and the layout returns. The rule lives in the new "Application quirks" section,
-one switch per rule.
+### Short words and command names
 
-### A lone letter at the start of a message
+- Command names carrying digits are decided by the models rather than by a blanket
+  exemption for anything that looks like code: `зь2` becomes `pm2`, and `pm2` typed as
+  itself stays. Such tokens used to be left out of the analysis entirely, so `зь2` stood
+  as it was.
+- 467 two-letter "words" that came from subtitles (`зь`, `пм`, `ср`, `фы`) were removed from
+  the Russian lexicon supplement. The real two-letter Russian words are in the main
+  dictionary anyway, and that noise disguised short Latin commands as Russian words.
+- A lone letter opening a message is switched on the space itself: `z ` becomes `я `, and
+  the same for `f`, `b`, `c`, `d`, `r`, `e` and `j` — the eight keys that carry the eight
+  one-letter Russian words. Such a letter used to wait for the next word.
 
-`z`, `b`, `f` typed in the English layout with no word before them become `я`, `и`, `а`: one
-Russian sentence in seven opens with such a word, no English sentence opens with a lone
-letter. After an English word the letter stays. When typing continues without a pause, the
-next word decides the letter.
+### A caret moved into finished text
 
-### The wider recognition is on
+Arrow keys, `Home`, `End` and `Page Up`/`Page Down` put the caret where the program has
+watched nothing being typed, and it is usually moved there to finish or fix what is already
+written. The word typed right after such a move is no longer switched automatically;
+`Pause` switches it by hand. The setting "Do not correct a word right after the caret
+moves" turns the behaviour off. Where the active field can be read, the text before the
+caret is really known and the rule does not apply.
 
-A word can no longer turn into a string with punctuation (`рукх` will not become `her[`):
-six Russian letters sit on punctuation keys, and that is now checked on its own. With that
-fixed, the wider recognition of unknown words is on by default; on the measurement it no
-longer changes anything it should not. The descriptions of the two recognition settings are
-rewritten in plain words; the early switch stays off by the numbers of the independent
-evaluation.
+### Windows startup
+
+A build that reported an interpreter as its own program could register `python.exe` in the
+startup list: Windows showed an entry named "Python" with no publisher, and starting it did
+not start KeySwitch. The command is now taken from the installed layout. The diagnostics
+window, not only `KeySwitch.exe --diagnose`, reports the startup state: the command that is
+registered, whether Windows blocks it and whether its target still exists.
 
 ### Known limitations
 
 - An isolated word unknown to the lexicon (`дюп`) can still be converted.
-- The numbers above come from sealed test corpora of 311 and 282 rows of natural and
-  technical text; they are not a measurement on arbitrary input.
+- The numbers above come from a sealed test corpus of 512 rows of natural and technical
+  text; they are not a measurement on arbitrary input.
+- The evaluation runs against an in-process input model: it does not cover IME input, focus
+  races or acknowledgement of the injected text by the operating system.
 
 Technical logs may contain evaluated words. Review them before sharing. Private logs and
 conversations are excluded from the release.

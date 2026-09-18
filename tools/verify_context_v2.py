@@ -10,9 +10,10 @@ from typing import cast
 
 from keyswitch.context_model import ARTIFACT_PATH, ContextModel
 from context_corpus import CORPUS_ROOT, ROOT
-from context_evidence import CACHE_RECEIPT, PROFILES, all_frames, canonical, checksum, load_cache
+from context_evidence import CACHE_RECEIPT, all_frames, canonical, checksum, load_cache
 from train_context_v2 import ARTIFACT, REPORT, SEAL, audit, config, metrics, promotion_failures
 from verify_context_v2_history import verify_anchors, verify_sources
+from model_protocol import PROFILES, SEALED_BEFORE_TEST
 
 
 def read_object(path: Path) -> dict[str, object]:
@@ -42,7 +43,7 @@ def verify(directory: Path = CORPUS_ROOT, active: Path = ARTIFACT_PATH) -> dict[
     historical = verify_anchors(directory)
     seal = read_object(directory / SEAL)
     verify_sources(seal.get("provenance"))
-    if seal.get("stage") != "sealed-before-test" or seal.get("artifact_sha256") != checksum(directory / ARTIFACT):
+    if seal.get("stage") != SEALED_BEFORE_TEST or seal.get("artifact_sha256") != checksum(directory / ARTIFACT):
         raise ValueError("candidate seal or provenance changed")
     model = ContextModel.load(directory / ARTIFACT)
     if model.feature_version != 2 or seal.get("model_version") != model.version or seal.get("conversion_threshold") != model.conversion_threshold:

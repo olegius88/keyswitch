@@ -29,7 +29,7 @@ class InputDiagnosticsTests(InputIntegrityTests):
 
     def test_wait_start_and_backspace_cancel_share_id_without_word_text(self) -> None:
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            self.type("z ")
+            self.type("g ")
             self.tap(self.key("BackSpace"))
             self.tap(self.key("BackSpace"))
         events = self.events(logs.output)
@@ -54,7 +54,10 @@ class InputDiagnosticsTests(InputIntegrityTests):
         for key, reason in (("Pointer", "pointer_activity"), ("Left", "navigation"), ("shortcut", "modifier_shortcut"), ("settings", "settings_changed")):
             with self.subTest(key=key):
                 self.reset_editor()
-                self.type("z ")
+                # The previous round left the caret somewhere unseen; this one
+                # starts in a field of its own.
+                self.engine._caret_moved = False
+                self.type("g ")
                 with self.assertLogs("keyswitch.engine", level="INFO") as logs:
                     if key == "settings":
                         self.settings.set("detection.context_aware", False)
@@ -88,35 +91,35 @@ class InputDiagnosticsTests(InputIntegrityTests):
         self.assertNotIn("private", logs.output[0])
 
     def test_manual_conversion_reports_pending_wait_without_claiming_editor_verification(self) -> None:
-        self.type("z ")
+        self.type("g ")
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.tap(self.key("Pause"))
         scheduled = next(e for e in self.events(logs.output) if e["event"] == "manual_conversion_scheduled")
         self.assertIsNotNone(scheduled["wait_id"])
         self.assertEqual(scheduled["source"], "last_committed")
-        self.assertEqual(self.backend.text, "я ")
+        self.assertEqual(self.backend.text, "п ")
         self.assertIsNone(self.engine._context_waiting)
         cancelled = next(e for e in self.events(logs.output) if e["event"] == "context_wait_cancelled")
         self.assertEqual(cancelled["wait_id"], scheduled["wait_id"])
         self.assertEqual(cancelled["reason"], "manual_conversion")
 
     def test_manual_intent_cancels_wait_even_while_waiting_for_key_release(self) -> None:
-        self.type("z ")
+        self.type("g ")
         self.engine._pressed.add(1)
         self.tap(self.key("Pause"))
         self.assertIsNone(self.engine._context_waiting)
         self.assertIsNotNone(self.engine._pending)
-        self.assertEqual(self.backend.text, "z ")
+        self.assertEqual(self.backend.text, "g ")
         self.assertEqual(self.backend.injections, [])
 
     def test_delete_switch_layout_and_retype_are_distinct_from_pause(self) -> None:
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            self.type("z ")
+            self.type("g ")
             self.tap(self.key("BackSpace"))
             self.tap(self.key("BackSpace"))
             self.backend.group = 1
             self.engine._poll_current_group()
-            self.type("я ")
+            self.type("п ")
         events = self.events(logs.output)
         names = [e["event"] for e in events]
         self.assertNotIn("manual_conversion_scheduled", names)
@@ -126,8 +129,8 @@ class InputDiagnosticsTests(InputIntegrityTests):
         switched = events[switched_index]
         self.assertEqual(switched["selected_group"], 1)
         self.assertFalse(switched["initiated_by_engine"])
-        self.assertEqual([e["original"] for e in events if e["event"] == "word_evaluation"], ["z", "я"])
-        self.assertEqual(self.backend.text, "я ")
+        self.assertEqual([e["original"] for e in events if e["event"] == "word_evaluation"], ["g", "п"])
+        self.assertEqual(self.backend.text, "п ")
 
     def test_provider_failure_is_visible_in_decision_without_exception_text(self) -> None:
         reader = PlatformFieldReader()

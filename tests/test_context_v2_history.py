@@ -13,7 +13,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
-from context_evidence import PROFILES, canonical, key
+from context_evidence import canonical, key
+from model_protocol import PROFILES
 from context_frames import Frame
 from keyswitch.context_model import ContextModel
 import train_context_v2 as trainer

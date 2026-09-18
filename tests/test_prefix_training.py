@@ -14,6 +14,7 @@ from typing import cast
 from unittest.mock import patch
 
 from keyswitch.layouts import LayoutPair
+from keyswitch.prefix_schema import VersionedPrefixModel
 from keyswitch.prefix_model import ARTIFACT, PrefixModel
 
 TOOLS = str(Path(__file__).resolve().parents[1] / "tools")
@@ -23,13 +24,16 @@ import prefix_corpus as corpus
 import train_prefix_model as trainer
 import verify_prefix_model as verifier
 import verify_context_action_model as action_verifier
+from model_protocol import ACTIVE_SPLITS
 
 
 class PrefixEvidenceTests(unittest.TestCase):
     def test_verifier_cli_preserves_unicode_report_on_legacy_stdout(self) -> None:
         root = Path(TOOLS).parent
         expected = verifier.verify()
-        self.assertFalse(json.dumps(expected, ensure_ascii=False).isascii())
+        # The schema-2 report is English throughout; the schema-1 evidence this
+        # verifier still reads is not, and it is what the escaping is for.
+        self.assertFalse(json.dumps(verifier.verify(artifact=trainer.CANDIDATE), ensure_ascii=False).isascii())
         for encoding in ("cp1252", "ascii", "utf-8"):
             with self.subTest(encoding=encoding):
                 completed = subprocess.run(
@@ -62,7 +66,7 @@ class PrefixEvidenceTests(unittest.TestCase):
         self.assertEqual(corpus.family("привет", 1, pair), corpus.family("ghbdtn", 0, pair))
         self.assertEqual(corpus.family("ghbdtn_value", 0, pair), corpus.family("ghbdtn", 0, pair))
         namespace = str(corpus.config()["namespace"])
-        self.assertEqual({corpus.split_for(str(index), namespace) for index in range(1000)}, set(corpus.SPLITS))
+        self.assertEqual({corpus.split_for(str(index), namespace) for index in range(1000)}, set(ACTIVE_SPLITS))
         with self.assertRaisesRegex(ValueError, "overwrite"):
             corpus.freeze()
         with self.assertRaisesRegex(ValueError, "already observed"):
@@ -125,17 +129,28 @@ class PrefixEvidenceTests(unittest.TestCase):
                     verifier.verify(artifact=artifact)
 
     def test_package_gate_binds_weights_test_counts_engine_and_runtime(self) -> None:
-        self.assertTrue(verifier.verify()["accepted"])
-        self.assertEqual(PrefixModel.load().version, PrefixModel.load(trainer.CANDIDATE).version)
+        accepted = verifier.verify()
+        self.assertTrue(accepted["accepted"])
+        # The shipped artifact is the one its evidence names, in whichever schema
+        # that evidence is written: schema one carries its own report, schema two
+        # is bound by the context-action release receipt.
+        installed = VersionedPrefixModel.load()
+        assert installed is not None
+        self.assertEqual(installed.version, accepted["model_version"])
+        self.assertEqual(PrefixModel.load(trainer.CANDIDATE).version,
+                         verifier.verify(artifact=trainer.CANDIDATE)["model_version"])
         report = json.loads(trainer.REPORT.read_bytes())
         engine = json.loads((corpus.DIRECTORY / "engine-report.json").read_bytes())
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "evidence.json"
             modifications: list[dict[str, object]] = [{"accepted": False}, {"test": {}}, {"candidate_sha256": "changed"}]
+            # The schema-one report gates the schema-one artifact; the installed pair
+            # is schema two and is gated by the release receipt instead, so the report
+            # is tampered with against the artifact it actually describes.
             for modification in modifications:
                 path.write_text(json.dumps({**report, **modification}), encoding="utf-8")
                 with self.assertRaises(ValueError):
-                    verifier.verify(report_path=path)
+                    verifier.verify(report_path=path, artifact=trainer.CANDIDATE)
             variants = [{**engine, "provenance": {}}, {**engine, "passed": False}, {**engine, "sequence_ids": []}]
             modified = copy.deepcopy(engine)
             modified["results"]["portable/observed"]["candidate"]["length_mismatches"] = 1
@@ -143,13 +158,22 @@ class PrefixEvidenceTests(unittest.TestCase):
             for modified in variants:
                 path.write_text(json.dumps(modified), encoding="utf-8")
                 with self.assertRaises(ValueError):
-                    verifier.verify(engine_path=path)
+                    verifier.verify(engine_path=path, artifact=trainer.CANDIDATE)
             path.write_bytes(b"different weights")
             with self.assertRaises(ValueError):
                 verifier.verify(artifact=path)
             with patch.object(verifier, "checksum", return_value="changed"):
                 with self.assertRaises(ValueError):
-                    verifier.verify()
+                    verifier.verify(artifact=trainer.CANDIDATE)
+            # Whatever schema is installed, an artifact its evidence does not name is
+            # refused even when it loads: schema one by its own report, schema two by
+            # the release receipt that binds the pair.
+            other = Path(temporary) / "prefix.json"
+            payload = json.loads(ARTIFACT.read_bytes())
+            other.write_text(json.dumps({**payload, "conversion_threshold": 0.99}), encoding="utf-8")
+            self.assertEqual(VersionedPrefixModel.load(other).feature_version, installed.feature_version)
+            with self.assertRaises(ValueError):
+                verifier.verify(artifact=other)
             self.assertTrue(ARTIFACT.is_file())
 
 

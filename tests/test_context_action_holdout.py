@@ -19,8 +19,9 @@ from freeze_context_action_holdout import (
     PRIOR_TEST, Exclusions, alias_reasons, assemble, base_test_rows_to_quarantine, holdout_inventory, prior_access_overlap,
     select_holdout_sentences, sentence_documents, sid_holdout_rows, ud_holdout_rows, verified_sid_source,
     arch_holdout_rows, read_arch_commands, verified_arch_source, ARCH_MIRROR,
-    fedora_holdout_rows, read_fedora_commands, verified_fedora_source, FEDORA_BASE, OPENSUSE_BASE,
+    fedora_holdout_rows, read_fedora_commands, verified_fedora_source, FEDORA_BASE, OPENSUSE_BASE, RAWHIDE_BASE, RPM_SOURCES,
     read_tatoeba, tatoeba_sentence, verified_tatoeba_source, TATOEBA_BASE, UBUNTU_CONTENTS_URL, UBUNTU_RELEASE_URL,
+    alpine_holdout_rows, read_alpine_commands, verified_alpine_source, ALPINE_BASE, ALPINE_COMMUNITY_BASE,
 )
 from reconcile_context_action_corpus import expanded_aliases
 
@@ -252,6 +253,17 @@ class FedoraHoldoutTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             verified_fedora_source(self.root)
 
+    def test_a_rolling_branch_is_its_own_source_under_its_own_base_url(self) -> None:
+        """Rawhide and the numbered release are different package sets, not one snapshot."""
+        primary = self.primary({"neovim": ["/usr/bin/nvim"]})
+        rows, _summary = fedora_holdout_rows(read_fedora_commands(primary), empty_exclusions(), "ns",
+                                             base_url=RAWHIDE_BASE)
+        row = next(iter(rows))
+        self.assertEqual(row.source, "Fedora-rawhide-x86_64")
+        self.assertTrue(row.document.startswith("fedora-rawhide-package-component:"))
+        self.assertIn(RAWHIDE_BASE, RPM_SOURCES)
+        self.assertNotEqual(RPM_SOURCES[RAWHIDE_BASE], RPM_SOURCES[FEDORA_BASE])
+
     def test_an_opensuse_receipt_is_verified_with_the_sha512_its_index_names(self) -> None:
         import hashlib
 
@@ -280,6 +292,84 @@ class FedoraHoldoutTests(unittest.TestCase):
         (self.root / "source-receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
         with self.assertRaises(ValueError):
             verified_fedora_source(self.root)
+
+
+class AlpineHoldoutTests(unittest.TestCase):
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+
+    def index(self, packages: dict[str, list[str]]) -> Path:
+        import io
+        import tarfile
+        body = "".join(f"P:{name}\nV:1.0\np:{' '.join(provides)}\n\n" for name, provides in packages.items())
+        archive = self.root / "APKINDEX.tar.gz"
+        with tarfile.open(archive, "w:gz") as bundle:
+            payload = body.encode("utf-8")
+            info = tarfile.TarInfo("APKINDEX")
+            info.size = len(payload)
+            bundle.addfile(info, io.BytesIO(payload))
+        return archive
+
+    def test_declared_commands_become_rows_and_garbage_is_refused(self) -> None:
+        archive = self.index({
+            "busybox": ["cmd:ash=1.36", "cmd:zcat=1.36", "so:libc.musl-x86_64.so.1"],
+            "abuild": ["cmd:abuild=3.13", "cmd:ab=3.13", "cmd:abuild-sign=3.13"],
+        })
+        commands = {item.name: item for item in read_alpine_commands(archive)}
+        # Under three letters and names carrying punctuation are outside the command shape.
+        self.assertEqual(set(commands), {"ash", "zcat", "abuild"})
+        self.assertEqual(commands["ash"].owners, ("alpine/busybox",))
+        self.assertEqual(commands["zcat"].paths, ("usr/bin/zcat",))
+        rows, summary = alpine_holdout_rows(list(commands.values()), empty_exclusions(lexicon=frozenset({"zcat"})), "ns")
+        by_name = {row.original: row for row in rows}
+        self.assertNotIn("zcat", by_name)
+        self.assertEqual(by_name["ash"].identifier, "alpine-x86_64:command:ash")
+        self.assertEqual((by_name["ash"].source, by_name["ash"].source_file), ("Alpine-x86_64", "APKINDEX.tar.gz"))
+        self.assertTrue(by_name["ash"].document.startswith("alpine-package-component:"))
+        self.assertEqual(summary["commands_outside_lexicon"], 2)
+        broken = self.index({"bad name": ["cmd:ash=1.0"]})
+        with self.assertRaises(ValueError):
+            read_alpine_commands(broken)
+
+    def test_a_second_repository_is_a_separate_source_the_receipt_has_to_name(self) -> None:
+        """`main` and `community` share no packages, so each is its own holdout source."""
+        archive = self.index({"neovim": ["cmd:nvim=0.10"]})
+        rows, _summary = alpine_holdout_rows(read_alpine_commands(archive), empty_exclusions(), "ns",
+                                             base_url=ALPINE_COMMUNITY_BASE)
+        row = next(iter(rows))
+        self.assertEqual(row.source, "Alpine-community-x86_64")
+        self.assertTrue(row.document.startswith("alpine-community-package-component:"))
+        receipt: dict[str, object] = {
+            "tls_certificate_verification": True, "base_url": ALPINE_COMMUNITY_BASE,
+            "archive": {"status": 200, "url": ALPINE_COMMUNITY_BASE + "APKINDEX.tar.gz",
+                        "sha256": checksum(archive), "bytes": archive.stat().st_size},
+        }
+        (self.root / "source-receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
+        _path, _provenance, metadata = verified_alpine_source(self.root)
+        self.assertEqual(metadata["base_url"], ALPINE_COMMUNITY_BASE)
+        self.assertIn("community", str(metadata["source"]))
+        receipt["base_url"] = "https://dl-cdn.alpinelinux.org/alpine/v3.21/testing/x86_64/"
+        (self.root / "source-receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            verified_alpine_source(self.root)
+
+    def test_the_receipt_pins_the_archive_and_names_the_unverified_signature(self) -> None:
+        archive = self.index({"busybox": ["cmd:ash=1.36"]})
+        receipt: dict[str, object] = {
+            "tls_certificate_verification": True, "base_url": ALPINE_BASE,
+            "archive": {"status": 200, "url": ALPINE_BASE + "APKINDEX.tar.gz",
+                        "sha256": checksum(archive), "bytes": archive.stat().st_size},
+        }
+        (self.root / "source-receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
+        path, provenance, metadata = verified_alpine_source(self.root)
+        self.assertEqual((path, metadata["base_url"]), (archive, ALPINE_BASE))
+        self.assertIn("signature was not verified", str(metadata["verification"]))
+        self.assertIn(str(archive), provenance)
+        archive.write_bytes(archive.read_bytes() + b"\x00")
+        with self.assertRaises(ValueError):
+            verified_alpine_source(self.root)
 
 
 class TatoebaHoldoutTests(unittest.TestCase):

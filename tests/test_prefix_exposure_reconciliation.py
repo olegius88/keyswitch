@@ -23,7 +23,8 @@ TOOLS = str(Path(__file__).resolve().parents[1] / "tools")
 if TOOLS not in sys.path:
     sys.path.insert(0, TOOLS)
 
-from freeze_context_action_corpus import CorpusRow, SPLITS, canonical, checksum, digest, load_split
+from freeze_context_action_corpus import CorpusRow, canonical, checksum, digest, load_split
+from model_protocol import ALL_SPLITS
 from merge_context_action_corpora import Digest, Streamed, inspect_gzip
 import reconcile_prefix_exposure_corpus as transfer
 
@@ -152,7 +153,7 @@ class Fixture:
     def write_origin(self, directory: Path, name: str, rows: dict[str, list[CorpusRow]], sidecar: tuple[str, dict[str, object]]) -> None:
         directory.mkdir()
         files = {}
-        for split in SPLITS:
+        for split in ALL_SPLITS:
             path = directory / (split + ".jsonl.gz")
             path.write_bytes(member(rows[split]))
             raw = b"".join(canonical(asdict(item)) for item in rows[split])
@@ -188,7 +189,7 @@ class Fixture:
             for item in directory.iterdir():
                 pins[str(item)] = checksum(item)
         files = {}
-        for split in SPLITS:
+        for split in ALL_SPLITS:
             path = self.parent / (split + ".jsonl.gz")
             ud_bytes = (self.ud / path.name).read_bytes()
             technical_bytes = (self.technical / path.name).read_bytes()

@@ -11,6 +11,7 @@ from keyswitch.context_model import ContextModel
 from keyswitch.early_switch import EarlySwitchDecision
 from keyswitch.input_context import FieldContext
 from keyswitch.prefix_model import PrefixModel
+from keyswitch.prefix_schema import VersionedPrefixModel
 from test_input_integrity import EditorBackend, InputIntegrityTests
 
 
@@ -67,20 +68,23 @@ class EarlyContextTests(InputIntegrityTests):
         self.assertEqual(self.backend.text, "ghbd")
 
     def test_assist_rollover_waits_for_all_releases_and_preserves_phrase(self) -> None:
-        self.type("я ", group=1)
+        # A word the previous decision has finished with: the early switch stands
+        # down while a context decision is still waiting for its next word, and a
+        # lone curated letter is exactly such a decision.
+        self.type("это ", group=1)
         self.type("ghb", group=0)
         held = self.key("d", "d", group=0)
         rollover = self.key("t", "t", group=0)
         self.send(held)
         self.send(rollover)
-        self.assertEqual(self.backend.text, "я ghbdt")
+        self.assertEqual(self.backend.text, "это ghbdt")
         self.send(replace(held, pressed=False))
-        self.assertEqual(self.backend.text, "я ghbdt")
+        self.assertEqual(self.backend.text, "это ghbdt")
         self.send(replace(rollover, pressed=False))
-        self.assertEqual(self.backend.text, "я приве")
-        self.assertEqual(self.engine.context_policy.stream.text, "я приве")
+        self.assertEqual(self.backend.text, "это приве")
+        self.assertEqual(self.engine.context_policy.stream.text, "это приве")
         self.type("т  ")
-        self.assertEqual(self.backend.text, "я привет  ")
+        self.assertEqual(self.backend.text, "это привет  ")
 
     def test_excluded_words_and_learned_rejections_protect_their_prefix(self) -> None:
         self.settings.set("exclusions.words", ["GHBDTN"])
@@ -235,7 +239,7 @@ class EarlyContextTests(InputIntegrityTests):
                 self.assertEqual(self.backend.text, "ghbd")
 
     def test_bundled_prefix_model_corrects_partial_words_in_both_directions(self) -> None:
-        self.engine.prefix_model = PrefixModel.load()
+        self.engine.prefix_model = VersionedPrefixModel.default()
         for original, source, expected, remaining in (("ghbd", 0, "прив", "ет"), ("рудд", 1, "hell", "o")):
             self.reset_editor(source)
             self.type(original)
@@ -244,7 +248,7 @@ class EarlyContextTests(InputIntegrityTests):
             self.assertEqual(self.backend.text, expected + remaining + "  ")
 
     def test_bundled_model_preserves_native_words_in_comments_and_code_context(self) -> None:
-        self.engine.prefix_model = PrefixModel.load()
+        self.engine.prefix_model = VersionedPrefixModel.default()
         for before, word, group, app in (
             ("// описание ", "hello", 0, "Code"), ("// пояснение ", "привет", 1, "Code"),
             ("# описание ", "программирование", 1, "WindowsTerminal"),

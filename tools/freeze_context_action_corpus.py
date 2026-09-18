@@ -22,10 +22,10 @@ from typing import cast
 import unicodedata
 
 from keyswitch.layouts import LayoutPair
+from model_protocol import ALL_SPLITS
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SPLITS = ("train", "development", "calibration", "test", "quarantine")
 PINS = {
     "UD_Russian-Taiga": "d1e48cd29c1f19b6aad1aec361d9f724db764f66",
     "UD_English-EWT": "b7711cce01cdd4f5fcc0a8199b8a50d951b16c0c",
@@ -485,7 +485,7 @@ def freeze(
     output.mkdir(parents=True)
     (output / "generator-source.py").write_bytes(generator_source)
     files = {}
-    for split in SPLITS:
+    for split in ALL_SPLITS:
         path = output / (split + ".jsonl.gz")
         raw_digest = hashlib.sha256()
         count = 0
@@ -535,7 +535,7 @@ def freeze(
 def load_split(directory: Path, split: str) -> list[CorpusRow]:
     """Read exactly one requested split, never a neighbouring train/test file."""
 
-    if split not in SPLITS:
+    if split not in ALL_SPLITS:
         raise ValueError("unknown corpus split")
     manifest = json.loads((directory / "manifest.json").read_bytes())
     record = manifest["splits"][split]

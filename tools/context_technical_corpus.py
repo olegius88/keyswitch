@@ -19,16 +19,16 @@ import re
 from typing import cast
 
 from freeze_context_action_corpus import (
-    CorpusRow, SPLITS, Union, WORDS, assigned_split, canonical, checksum, digest,
+    CorpusRow, Union, WORDS, assigned_split, canonical, checksum, digest,
     exposed_families, load_split, typo_variants,
 )
 from reconcile_context_action_corpus import expanded_aliases, historical_code_forms
+from model_protocol import ACTIVE_SPLITS, ALL_SPLITS
 
 ROOT = Path(__file__).resolve().parents[1]
 NAMESPACE = "keyswitch:context-action:debian-trixie-20260912-v1"
 COMMAND_PATH = re.compile(r"(?:usr/)?s?bin/([a-z]{3,16})\Z")
 HASH = re.compile(r"[0-9a-f]{64}\Z")
-ACTIVE_SPLITS = ("train", "development", "calibration", "test")
 DEPENDENCIES = (
     "tools/context_technical_corpus.py", "tools/freeze_context_action_corpus.py",
     "tools/reconcile_context_action_corpus.py", "tools/context_physical_keys.py",
@@ -153,9 +153,9 @@ def partition_commands(commands: Sequence[Command], reserved_aliases: set[str]) 
         "package_components": len(set(documents.values())),
         "largest_component_commands": max(Counter(documents.values()).values(), default=0),
         "reserved_families": len(blocked), "family_cap": 2,
-        "rows_by_split": {split: sum(row.split == split for row in rows) for split in SPLITS},
-        "documents_by_split": {split: len({row.document for row in rows if row.split == split}) for split in SPLITS},
-        "families_by_split": {split: len({row.family for row in rows if row.split == split}) for split in SPLITS},
+        "rows_by_split": {split: sum(row.split == split for row in rows) for split in ALL_SPLITS},
+        "documents_by_split": {split: len({row.document for row in rows if row.split == split}) for split in ALL_SPLITS},
+        "families_by_split": {split: len({row.family for row in rows if row.split == split}) for split in ALL_SPLITS},
         "quarantine_reasons": dict(Counter(reason for row in rows for reason in row.quarantine_reasons)),
         "alias_split_overlap": alias_overlap, "package_split_overlap": package_overlap,
         "reserved_alias_overlap": reserved_overlap,
@@ -264,7 +264,7 @@ def freeze_rows(partitioned: Partitioned, output: Path, provenance: Mapping[str,
     output.mkdir(parents=True)
     (output / "generator-source.py").write_bytes(generator)
     files = {}
-    for split in SPLITS:
+    for split in ALL_SPLITS:
         path = output / (split + ".jsonl.gz")
         raw_hash = hashlib.sha256()
         count = 0

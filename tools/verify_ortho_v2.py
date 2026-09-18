@@ -21,6 +21,7 @@ from typing import cast
 
 import ortho_v2_corpus as corpus
 import ortho_v2_verified as verified
+from model_protocol import SEALED_BEFORE_TEST
 from train_ortho_v2 import (
     ARTIFACT, CANDIDATE, CONFIG, REPORT, SEAL, checksum, config, provenance,
 )
@@ -56,7 +57,7 @@ def verify() -> dict[str, object]:
     if labels.get("labels_sha256") != checksum(verified.LABELS):
         raise ValueError("verified labels do not match their receipt")
     seal = read_object(SEAL)
-    if (seal.get("stage") != "sealed-before-test" or seal.get("provenance") != provenance()
+    if (seal.get("stage") != SEALED_BEFORE_TEST or seal.get("provenance") != provenance()
             or seal.get("candidate_sha256") != checksum(CANDIDATE)):
         raise ValueError("orthotactic seal or provenance changed")
     if seal.get("config") != config():

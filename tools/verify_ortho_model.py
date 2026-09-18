@@ -13,6 +13,7 @@ from train_ortho_model import (
 )
 
 from keyswitch.ortho_model import ARTIFACT_PATH, OrthoModel
+from model_protocol import SEALED_BEFORE_TEST
 
 
 def read_object(path: Path) -> dict[str, object]:
@@ -33,7 +34,7 @@ def verify(active: Path = ARTIFACT_PATH) -> dict[str, object]:
     if receipt.get("provenance") != ortho_corpus.provenance():
         raise ValueError("key-space corpus provenance changed")
     seal = read_object(SEAL)
-    if (seal.get("stage") != "sealed-before-test" or seal.get("provenance") != provenance()
+    if (seal.get("stage") != SEALED_BEFORE_TEST or seal.get("provenance") != provenance()
             or seal.get("candidate_sha256") != checksum(CANDIDATE)):
         raise ValueError("orthotactic seal or provenance changed")
     if seal.get("config") != config():

@@ -102,6 +102,20 @@ class ContextAfterOriginTests(unittest.TestCase):
         self.assertEqual(prediction.call_args.args[0].after_origin, "planned_next_conversion")
         self.assertFalse(result.decision.should_convert)
 
+    def test_a_token_the_orthotactic_model_cannot_read_carries_no_such_evidence(self) -> None:
+        """The character model scores keys; with no keys there is nothing to score."""
+
+        detector = LanguageDetector({group: LanguageModel(locale, {}, "fixture", enable_spellcheck=False)
+                                     for group, locale in enumerate(("en_US", "ru_RU"))})
+        ortho = ContextPolicy().ortho
+        assert ortho is not None
+        empty = evidence_for_decision(detector.decide("", {1: ""}, 0), "", 1, detector,
+                                      self.item.field, "space", ortho=ortho)
+        self.assertEqual((empty.ortho_score, empty.ortho_threshold), (None, None))
+        scored = evidence_for_decision(detector.decide("ghbdtn", {1: "привет"}, 0), "привет", 1,
+                                       detector, self.item.field, "space", ortho=ortho)
+        self.assertIsNotNone(scored.ortho_score)
+
     def test_native_field_after_is_not_a_planned_conversion(self) -> None:
         class Reader:
             def read(self, application: str, window: int) -> FieldContext:
@@ -120,27 +134,27 @@ class ContextAfterOriginTests(unittest.TestCase):
         with sequences.session() as current:
             model = TransitionModel(lambda: (current.backend.text, len(current.backend.injections)))
             current.engine.context_policy.model = model
-            current.physical("r ")
+            current.physical("h ")
             current.physical("yfc ")
             self.assertEqual([(item.original, item.after_origin, item.field.after) for item, _ in model.items],
-                             [("r", "none", ""), ("yfc", "none", ""), ("r", "planned_next_conversion", "нас")])
-            self.assertEqual(model.items[-1][1], ("r yfc ", 0))
-            self.assertEqual((current.backend.text, len(current.backend.injections)), ("к нас ", 1))
+                             [("h", "none", ""), ("yfc", "none", ""), ("h", "planned_next_conversion", "нас")])
+            self.assertEqual(model.items[-1][1], ("h yfc ", 0))
+            self.assertEqual((current.backend.text, len(current.backend.injections)), ("р нас ", 1))
 
     def test_planned_keep_preserves_first_word_and_only_executes_the_next_plan(self) -> None:
         with sequences.session() as current:
             model = TransitionModel(lambda: (current.backend.text, len(current.backend.injections)), planned_action="keep")
             current.engine.context_policy.model = model
-            current.physical("r yfc ")
+            current.physical("h yfc ")
             self.assertEqual(model.items[-1][0].after_origin, "planned_next_conversion")
-            self.assertEqual((current.backend.text, len(current.backend.injections)), ("r нас ", 1))
+            self.assertEqual((current.backend.text, len(current.backend.injections)), ("h нас ", 1))
 
     def test_focus_timeout_and_suffix_invalidation_do_not_create_planned_evidence(self) -> None:
         for invalidation in ("focus", "timeout", "suffix"):
             with self.subTest(invalidation=invalidation), sequences.session() as current:
                 model = TransitionModel(lambda: (current.backend.text, len(current.backend.injections)))
                 current.engine.context_policy.model = model
-                current.physical("r ")
+                current.physical("h ")
                 waiting = current.engine._context_waiting
                 assert waiting is not None
                 if invalidation == "focus":
@@ -151,7 +165,7 @@ class ContextAfterOriginTests(unittest.TestCase):
                     current.engine.context_policy.stream.text = "external "
                 current.physical("yfc ")
                 self.assertFalse(any(item.after_origin == "planned_next_conversion" for item, _ in model.items))
-                self.assertTrue(current.backend.text.startswith("r "))
+                self.assertTrue(current.backend.text.startswith("h "))
                 self.assertEqual(current.backend.submissions, [])
 
 

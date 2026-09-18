@@ -14,6 +14,7 @@ from keyswitch.language_model import LanguageModel
 from context_physical_keys import KEYS, PhysicalKey
 from evaluate_context_action_sequences import SequencePlan, TracedEditor, replay
 from freeze_context_action_corpus import CorpusRow
+from model_protocol import FITTING_SPLITS
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -155,7 +156,7 @@ def build_span_curriculum(
         raise ValueError("span family budget must be an even integer from 2 to 128")
     if profile not in ("portable", "reference_hunspell") or set(models) != {0, 1}:
         raise ValueError("span curriculum requires an explicit lexical profile and both models")
-    if expected_split not in ("train", "development", "calibration"):
+    if expected_split not in FITTING_SPLITS:
         raise ValueError("span curriculum never accepts the test split")
     if any(row.split != expected_split or row.quarantine_reasons for row in rows):
         raise ValueError("span curriculum accepts only rows from the declared split")

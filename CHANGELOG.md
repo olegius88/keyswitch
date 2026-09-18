@@ -4,6 +4,65 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.25.0 — 2026-09-18
+
+- Keep the context-v1 + prefix-v1 pair. The context-v3 + prefix-v2 candidate
+  `context-v3-d13d10b579b3` + `prefix-v2-1988a5741fe6` passed its sealed evaluation on
+  512 rows of Tatoeba sentences and the Fedora Rawhide package index, restoring 228 of
+  252 wrongly typed rows against 210 for the shipped pair and corrupting fewer correct
+  rows in both settings modes. The end-to-end tests then found what those aggregates
+  cannot show: three words of the curated short-word table (`мы`, `вы`, `if`) are
+  offered as a suggestion instead of being switched. The release ships the proven pair;
+  the candidate waits for the rule that decides those words to be repaired.
+- Choose the serving threshold inside a band the pinned cases define instead of by the
+  calibration counts alone. The counts are nearly flat across the interval that matters
+  while the two kinds of error are not, so the band names both ends: below it a command
+  name wins over an ordinary word (`лут` became the command `ken`), above it a plain
+  word typed in the wrong layout is left alone (`кот` stayed `rjn` when the user
+  paused). This decides which model is served, not how one is judged.
+- Leave the version literal out of the fingerprints a model receipt carries, and check
+  the shape of that one module instead: a docstring and one string assignment, nothing
+  else. Every release rewrites the version by construction, so pinning it tied a model's
+  evidence to the release number it was sealed under - a pair could not ship in a later
+  version without spending a sealed test on a string.
+- Decide a word once more when the pause arrives and the next word never did. The engine
+  postpones a short word whose neighbour should settle its direction; if the neighbour
+  never comes, the postponement used to end in silence and the word stood as typed.
+- Convert a lone `z`, `f`, `b`, `c`, `d`, `r`, `e` or `j` at the start of a message
+  the moment the space is typed, instead of holding it until the next word arrives.
+  Those eight keys carry the eight one-letter Russian words, and a message that opens
+  with one used to sit in the wrong layout until something followed it - or until it
+  was sent. The letter is also taught to the models now, so a later pair decides it
+  rather than inheriting the rule.
+- Decide command names that carry digits by the models instead of leaving them out of
+  the analysis. `зь2` becomes `pm2`, and `pm2` typed as itself stays, which the blanket
+  exemption for code-like tokens could not tell apart.
+- Drop 467 two-letter forms from the Russian lexicon supplement. Every real two-letter
+  Russian word is in the onboard vocabulary already, and what the frequency list added
+  at that length was subtitle noise - `зь`, `пм`, `ср`, `фы` - each of which disguised
+  a short Latin command as a Russian word.
+- Leave the word that follows an arrow key, `Home` or `Page Up` alone. The caret then
+  sits where the program has not watched anything being typed, and it is usually moved
+  back into existing text to finish or fix a word; analysing that word as the opening
+  of an empty field is the one reading it is least likely to have. `Pause` still
+  converts it by hand, the new setting turns the behaviour off, and when the active
+  field can be read the real text before the caret is used instead.
+- Register the packaged executable in the Windows startup list even when the running
+  build reports an interpreter as its own program. The startup entry could end up
+  pointing at `python.exe`, where Windows shows the entry as "Python" with no
+  publisher and starting it does not start KeySwitch. The command is now taken from
+  the installed layout - `KeySwitch.exe` beside the package directory - and only a
+  source checkout, which has no executable there, keeps the interpreter command.
+- Report the startup state in the diagnostics window, not only in
+  `KeySwitch.exe --diagnose`: the command that is registered, whether Windows blocks
+  it and whether its target still exists. That is the report people copy when
+  autostart does not work.
+- Make the public receipt verifier ask for what the gate policy it publishes says. Two
+  of its checks still demanded no calibration error and no corrupted row at all, a rule
+  the policy replaced with a measured balance against the installed pair; a verifier
+  stricter than the policy it prints refuses the candidates that policy accepts, and
+  does it without saying so.
+
 ## 0.24.0 — 2026-09-17
 
 - Keep the context-v1 + prefix-v1 pair. The schema-3 candidate

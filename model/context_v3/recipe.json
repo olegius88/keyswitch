@@ -2,16 +2,16 @@
  "data_revision": "symmetric-short-actions-balanced-legacy-actions-debian-commands-and-natural-lookahead-v6",
  "epochs": 50,
  "feature_revision": "learned-ortho-script-length-right-context-origin-and-identifier-lexicon-v6",
- "training_revision": "identifier-evidence-dropout-one-family-in-three-planned-mass-balance-and-unlicensed-isolated-mask-v5",
+ "training_revision": "identifier-evidence-dropout-one-family-in-three-planned-mass-balance-and-model-verdict-stands-and-threshold-plateau-under-authored-ceiling",
  "lexicon_supplement": {
-  "ru_RU": "src/keyswitch/resources/lexicon-supplement-ru_RU.json",
-  "scope": "Cyrillic forms of the pinned OpenSubtitles 2018 full Russian frequency list with list count >= 10 absent from the frozen onboard ru_RU.lm vocabulary (199,680 forms; v1 was the top-50k list, 27 209 forms). The count floor is a noise bound chosen from the list itself before any fit: samples at counts 1-9 still carry one-off misspellings and transliterations, loaded as extra known forms with the fallback frequency by LanguageModel.load and by the trainers' reference models alike; a lexical resource, not a training split. Motivation: correctly typed colloquial words, interjections and transliterated names unknown to the portable lexicon were the class behind the isolated short-token deferrals and the residual convert-vs-keep confusions.",
+  "name": "opensubtitles-2018-ru-full-min10-outside-onboard-v2",
   "resource_sha256": "17c9a477925ee8c18d310d021472703fb61ba6fdbfe261d8b2a38ca607f1c12a",
-  "name": "opensubtitles-2018-ru-full-min10-outside-onboard-v2"
+  "ru_RU": "src/keyswitch/resources/lexicon-supplement-ru_RU.json",
+  "scope": "Cyrillic forms of the pinned OpenSubtitles 2018 full Russian frequency list with list count >= 10 absent from the frozen onboard ru_RU.lm vocabulary (199,680 forms; v1 was the top-50k list, 27 209 forms). The count floor is a noise bound chosen from the list itself before any fit: samples at counts 1-9 still carry one-off misspellings and transliterations, loaded as extra known forms with the fallback frequency by LanguageModel.load and by the trainers' reference models alike; a lexical resource, not a training split. Motivation: correctly typed colloquial words, interjections and transliterated names unknown to the portable lexicon were the class behind the isolated short-token deferrals and the residual convert-vs-keep confusions."
  },
  "identifier_lexicon": {
-  "path": "src/keyswitch/resources/identifiers.json",
   "evidence": "source_identifier and target_identifier flags from exact case-insensitive membership; feature identifier:{source}:{target}, and only when a reading is an identifier its combinations with direction, length and left-context script (identifier:0:0 combinations would duplicate existing evidence), plus source:identifier and target:identifier",
+  "path": "src/keyswitch/resources/identifiers.json",
   "scope": "Debian trixie main amd64 executable names, the same index the technical corpus was frozen from; a resource shared byte-for-byte by engine, trainer and evaluator, not a training split. Calibration and test technical rows measure commands present in the shipped index; identifiers outside it are measured by the lexicon-blind development diagnostic and are not gated.",
   "training_dropout": {
    "families": 3,
@@ -19,32 +19,17 @@
   }
  },
  "runtime_policy": {
-  "short_unknown_source": {
-   "action": "suggest",
-   "maximum_length": 3,
-   "cases": [
-    "all uppercase letters in any context",
-    "no word on either side (empty or wordless before and after)"
-   ],
-   "scope": "Both directions. A focus whose own reading is unknown to the profile lexicon, with at most three letters in the longer reading, never converts automatically when it is all uppercase or when it stands alone; ContextModel.predict, calibration and development epoch selection apply the same mask (ContextModel.allows_automatic_conversion). Uppercase: a correctly typed brand acronym against a dictionary reading (KFC vs. the same keys). Isolated: a chat word against a command name typed in the wrong layout (a Russian three-letter word vs. a Debian executable; TRAIN holds 696 CONVERT and 1 KEEP frames of that shape, so the model cannot learn the ambiguity). Consistent with the two-letter short_pair_policy; the bound is a policy choice, not a fitted one. Cost on calibration at exp06 weights: about 110 of 7541 automatic conversions become suggestions; four-letter tokens are untouched."
-  },
-  "unlicensed_isolated": {
-   "action": "suggest",
-   "licences": [
-    "neighbouring_word",
-    "baseline_convert",
-    "ortho_margin_positive",
-    "known_target_and_unknown_source"
-   ],
-   "scope": "Both directions, any length. A focus with no word on either side converts automatically only under a licence from a frozen verdict: the detector's baseline decision, the orthotactic margin above the orthotactic model's own threshold, or a known other reading - a dictionary word or a command name from the packaged index - against an own reading the profile lexicon does not know. Otherwise ContextModel.predict, calibration and development epoch selection turn the conversion into a suggestion (ContextModel.allows_automatic_conversion). Without context and without such a licence the conversion would rest on the learned character weights alone, which cannot tell a rare correctly typed word from the same keys in the wrong layout (люфтваффе, афиши on development at exp12), nor one dictionary word from another (field-initial Еще vs. Tot in the development sequence replay at exp13). Derived from those development cases and measured before fitting: with exp12 weights the unknown-target part covers 9221 development frames (62 CONVERT; one automatic conversion of 62 lost at 0.999, both false conversions removed) and 8713 calibration frames (56 CONVERT; two lost); the two-dictionary-words part has one development frame and no calibration frame, so its cost is unmeasured there and its only observed effect is the replayed sequence. The clauses are the frozen models' own verdicts, not fitted bounds; dfuf (a typo of a command whose other reading is a dictionary word, baseline True) stays outside by design. Amended 16.09.2026: an identifier target alone no longer licenses a conversion, because the enlarged lexicon made chat words known and their other readings are sometimes program names (зум against the pev package); a known own reading is evidence for what was typed and withdraws the lexical licence, leaving the detector's own verdict and the orthotactic margin as the only ones."
+  "model_verdict_stands": {
+   "removed": "unlicensed_isolated and short_uppercase_unknown_source, both class-wide vetoes, were removed on 17.09.2026: they overruled the model on the input it was trained to tell apart, cost 14 of 300 restorations on chat-like first words and prevented no corruption (.t/reliable-release-2026-09-12/SHORT-ISOLATED-CURRICULUM.md). The earlier short_unknown_source entry named the same ban from the training side and is gone with it.",
+   "rule": "The model's verdict decides. This layer refuses nothing for a class of input; a conversion is refused only by an exception the user can see - an excluded word or application, their own switching settings, a rule they taught the engine - or by the model's own calibrated threshold."
   }
  },
  "feature_version": 3,
  "gate_policy": {
-  "calibration_false_conversions": 0,
-  "minimum_calibration_conversion_recall": 0.9,
+  "minimum_calibration_conversion_recall": 0.0,
+  "minimum_calibration_net_benefit": 1,
   "minimum_sequence_documents_per_group": 32,
-  "sequence_correct_text_corruptions": 0,
+  "sequence_corruptions_at_most_baseline": true,
   "sequence_length_mismatches": 0,
   "sequence_net_restorations_at_least_baseline": true
  },
@@ -88,19 +73,19 @@
  "vocabulary_policy": "Kahan-summed pre-class sample mass; presence only; cutoff tolerance 1e-9; mass rounded to 9 decimal places for ranking ties",
  "short_pair_policy": "Both readings of an isolated token of at most two letters share WAIT/SUGGEST when neither neighbour contains a word; digits and punctuation alone are not a language label. Historical KEEP frames of such isolated tokens take the same deferred action, so natural and legacy frames never label one observable situation differently; historical CONVERT frames keep their declared label.",
  "epoch_selection": {
-  "split": "development",
-  "maximum_false_conversions_per_profile": 0,
+  "calibration": "independent final serving-threshold selection after weights are selected, never below the development operating threshold of the selected epoch: a threshold that already converted falsely on development is not a serving candidate whatever calibration says",
+  "minimum_net_benefit_per_profile": 1,
   "ranking": [
    "minimum_profile_runtime_conversion_recall",
    "pooled_runtime_conversion_recall",
    "lower_weighted_log_loss",
    "lower_development_operating_threshold"
   ],
-  "threshold_grid": "threshold_candidates",
-  "support": "same vocabulary-dependent check as runtime",
   "rounding": "nine decimal places before development prediction",
-  "calibration": "independent final serving-threshold selection after weights are selected, never below the development operating threshold of the selected epoch: a threshold that already converted falsely on development is not a serving candidate whatever calibration says",
-  "serving_threshold_floor": "development operating threshold of the selected epoch"
+  "serving_threshold_floor": "development operating threshold of the selected epoch",
+  "split": "development",
+  "support": "same vocabulary-dependent check as runtime",
+  "threshold_grid": "threshold_candidates"
  },
  "lookahead_curriculum": {
   "maximum_families": 64,
@@ -108,18 +93,26 @@
  },
  "natural_lookahead_curriculum": {
   "maximum_families": 1024,
-  "seeds_per_family": 32,
-  "scope": "Every split separately (train, development, calibration): natural one- and two-letter space-boundary frames of a document are seeds, the first word of the same row's own sentence continuation is the anchor, and the observed/empty variants divide their mass between the original frame and a planned_next_conversion variant, so field-start lookahead is trained, selected and calibrated on the same evidence the engine builds. Anchors never cross a split."
+  "scope": "Every split separately (train, development, calibration): natural one- and two-letter space-boundary frames of a document are seeds, the first word of the same row's own sentence continuation is the anchor, and the observed/empty variants divide their mass between the original frame and a planned_next_conversion variant, so field-start lookahead is trained, selected and calibrated on the same evidence the engine builds. Anchors never cross a split.",
+  "seeds_per_family": 32
  },
  "planned_mass_policy": "TRAIN only, after both lookahead curricula: per (direction, focus length of 1 or 2) the planned_next_conversion frames are rescaled to carry exactly the total mass of the isolated deferred (wait/suggest, no word on either side) frames of the same class. The two are the same physical moment seen before and after the next word is known; legacy parent budgets alone left the planned regime at about one hundredth of that mass and the model could not learn the after-context distinction (planned `у этого` stayed below the serving threshold in exp05-exp08). Development and calibration frames are never rescaled.",
  "lookahead_policy": "Replace bounded old TRAIN short-space seeds with original/planned variants of equal total mass. Positives retain annotated next words; KEEP negatives retain their original/before annotation with an explicitly mixed existing TRAIN anchor. A frozen lexical baseline proposal is an entry condition, not a label. No candidate context-model prediction selects labels.",
  "joint_acceptance": {
-  "protocol_version": 3,
+  "policy": "A context candidate is accepted only together with an explicit prefix candidate: the candidate pair is replayed against the frozen baseline context plus the frozen baseline prefix under unmodified application defaults (early switch, pause correction, manual-layout protection) and under the previous early-off control. Every sequence gate must hold in both modes and both lexical profiles. Installed context and prefix bytes are never read by the evaluation; the joint receipt records both evaluated artifacts so packaging installs exactly those bytes.",
   "prefix_baseline_path": "model/prefix_v2/baseline-prefix-v1.json",
+  "protocol_version": 3,
   "settings_modes": [
    "early_off",
    "default"
-  ],
-  "policy": "A context candidate is accepted only together with an explicit prefix candidate: the candidate pair is replayed against the frozen baseline context plus the frozen baseline prefix under unmodified application defaults (early switch, pause correction, manual-layout protection) and under the previous early-off control. Every sequence gate must hold in both modes and both lexical profiles. Installed context and prefix bytes are never read by the evaluation; the joint receipt records both evaluated artifacts so packaging installs exactly those bytes."
+  ]
+ },
+ "acceptance_note": "A model is judged by what it nets: conversions it gets right minus conversions it gets wrong, in each deployment profile. The zero-false-conversion budget was removed on 17.09.2026 together with the class-wide runtime vetoes it depended on; the sealed test still requires no more corrupted text than the installed pair and a net result at least as good.",
+ "threshold_selection": {
+  "net_benefit_tolerance": 0.01,
+  "rule": "Among the thresholds whose calibration balance is within the tolerance of the best, serve the one with the fewest false conversions, the lowest such threshold on a tie. The balance decides which thresholds are admissible; within a plateau of equal value the safer point is served, because the two sides are not equally sensitive to it - on corpus v12 (18.09.2026) moving from 0.95 to 0.995 gave up 0.8 % of the correct conversions and removed two thirds of the false ones.",
+  "maximum_threshold": 0.99,
+  "ceiling_rule": "The served threshold stays inside the band the product's own pinned cases define, which are open data and never a sealed test. Measured 18.09.2026: it must clear the cases that have to stay as typed - `лут` against the command name `ken` at 0.9887 and `Вас` against `Dfc` at 0.9889 - and it must not exceed the tightest case that has to convert, the idle correction of `rjn` to `кот` at 0.994424. Calibration counts rows and can see neither end: outside the band it picks a model that is careless on one side or cautious about the wrong thing on the other.",
+  "authored_floor": 0.9895
  }
 }

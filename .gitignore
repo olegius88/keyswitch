@@ -14,3 +14,4 @@ dist/
 *.deb
 .t/
 /AGENTS.md
+/CLAUDE.md

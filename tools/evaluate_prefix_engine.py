@@ -23,7 +23,8 @@ from context_corpus import ROOT
 from context_evidence import canonical, checksum
 # The engine serves the onboard lexicon plus the packaged supplement, so the replay does too.
 from reference_lexicon import reference_models
-from prefix_corpus import DIRECTORY, PROFILES, rows
+from model_protocol import PROFILES
+from prefix_corpus import DIRECTORY, rows
 from train_prefix_model import CANDIDATE, SEAL
 from verify_lexical_compatibility import verify as verify_compatibility
 from keyswitch.backend import KeyEvent

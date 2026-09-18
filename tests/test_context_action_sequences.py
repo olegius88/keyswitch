@@ -29,6 +29,7 @@ from keyswitch.prefix_model import PrefixInput, PrefixModel
 from keyswitch.prefix_schema import VersionedPrefixModel
 import evaluate_context_action_sequences as evaluator
 from freeze_context_action_corpus import CorpusRow, canonical, checksum, digest
+from model_protocol import PROFILES
 
 
 def row(original: str = "hello", group: int | None = 0, before: str = "", after: str = " ",
@@ -438,7 +439,7 @@ class PhysicalSequenceTests(unittest.TestCase):
             report = evaluator.score_sequences(rows, candidate, baseline,
                                                prefix_candidate=authored_prefix(), prefix_baseline=authored_prefix())
         profiles = cast(dict[str, dict[str, object]], report["profiles"])
-        for profile in evaluator.PROFILES:
+        for profile in PROFILES:
             self.assertTrue(all(cast(dict[str, bool], profiles[profile]["gates"]).values()))
             control = cast(dict[str, object], profiles[profile]["early_off"])
             self.assertFalse(cast(dict[str, bool], control["gates"])["net_restorations_at_least_baseline"])
@@ -508,7 +509,7 @@ class SealedAccessTests(unittest.TestCase):
         self.seal = self.root / "candidate-seal.json"
         self.output = self.root / "report.json"
         self.recipe = {"schema_version": 1, "feature_version": 3, "gate_policy": evaluator.GATE_POLICY,
-                       "profiles": list(evaluator.PROFILES)}
+                       "profiles": list(PROFILES)}
         (self.root / "recipe.json").write_bytes(canonical(self.recipe))
         (self.root / "runtime.py").write_text("# authored runtime identity\n")
         self.write_artifact(self.artifact)
@@ -560,7 +561,7 @@ class SealedAccessTests(unittest.TestCase):
             "provenance": {name: checksum(self.root / name) for name in ("runtime.py", "recipe.json")},
             "recipe": self.recipe, "gate_policy": evaluator.GATE_POLICY,
             "calibration": {"rows": 40, "convert_rows": 20, "converted_correctly": 18, "false_conversions": 0,
-                            "conversion_recall": 0.9, "by_profile": {name: profile.copy() for name in evaluator.PROFILES}},
+                            "conversion_recall": 0.9, "by_profile": {name: profile.copy() for name in PROFILES}},
         }
         self.seal.write_bytes(canonical(value))
         return value

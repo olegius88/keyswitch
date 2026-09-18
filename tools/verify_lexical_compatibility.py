@@ -12,6 +12,7 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
+from model_protocol import ACTIVE_SPLITS
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = "model/intent_v1/config.json"
@@ -20,7 +21,6 @@ GENERATION_REF = "ad4c1af:model/intent_v1/config.json"
 GENERATION_SHA256 = "2a8105d749422e9a8ef2bf6894d848ee8fdaff11df948d42a952fea27eda4116"
 AUDITED_CONFIG_SHA256 = "76fde35bec793c2c1d6a168753e28cb1cb0c62ac63fa1da40a6d36c85c7fd532"
 LEXICAL_SHA256 = "42f4b35de9f96a30f570b116326d20079da665fad4ca53728f1b1185e52cf7fc"
-SPLITS = ("train", "development", "calibration", "test")
 SCOPE = "Unchanged consumed lexical configuration and source bytes; frozen numeric regression only. No new training, independent evaluation, or current-runtime acceptance."
 ANCHORS = {
     "prefix_v1": {
@@ -137,9 +137,9 @@ def verify(kind: str, *, root: Path = ROOT) -> dict[str, object]:
     _verify_files(root, dict(lexical_files(current)))
     corpus = read_object(directory / "corpus.json")
     frozen = _mapping(corpus.get("sha256"))
-    if set(frozen) != set(SPLITS):
+    if set(frozen) != set(ACTIVE_SPLITS):
         raise ValueError("incomplete frozen partitions")
-    _verify_files(root, {f"model/{kind}/{split}.jsonl.gz": frozen[split] for split in SPLITS})
+    _verify_files(root, {f"model/{kind}/{split}.jsonl.gz": frozen[split] for split in ACTIVE_SPLITS})
     original_provenance = _mapping(corpus.get("provenance"))
     if original_provenance.get(CONFIG) != GENERATION_SHA256:
         raise ValueError("corpus generation configuration changed")
@@ -151,7 +151,7 @@ def verify(kind: str, *, root: Path = ROOT) -> dict[str, object]:
     }:
         raise ValueError("frozen trainer or optimizer changed")
     return {"corpus": kind, "compatible": True, "consumed_contract_sha256": LEXICAL_SHA256,
-            "scope": SCOPE, "verified_partitions": list(SPLITS)}
+            "scope": SCOPE, "verified_partitions": list(ACTIVE_SPLITS)}
 
 
 def main(argv: Sequence[str] | None = None) -> int:

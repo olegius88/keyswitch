@@ -16,7 +16,7 @@ import math
 import re
 from array import array
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import cast
@@ -31,8 +31,10 @@ from keyswitch.input_context import FieldContext
 from keyswitch.intent_model import CorrectionTrigger, IntentModelStatus, LinearNgramModel
 from keyswitch.language_model import LanguageModel
 from keyswitch.ortho_model import OrthoModel
+from keyswitch.short_words import TRUSTED_SINGLE_LETTER_WORDS
 from keyswitch.word_decision import automatic_word_decision
 
+from model_protocol import FITTING_SPLITS, REJECTED_BEFORE_TEST, SEALED_BEFORE_TEST
 from reference_lexicon import reference_models
 from action_epoch_selection import EpochSelection, assess_epoch
 from context_action_spans import SpanFrame, build_span_curriculum
@@ -178,10 +180,24 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
             identity = row.identifier + ":" + context_name
             keep_action: ContextAction = "keep"
             action: ContextAction = "convert"
-            if len(row.original) <= 2 and not WORDS.search(before) and not WORDS.search(after):
+            alone = not WORDS.search(before) and not WORDS.search(after)
+            # One curated letter is the exception to that: the intent *is* observable,
+            # and telling the model otherwise is why it answered "wait" for a lone `z`.
+            # A Russian utterance opens with one of а/и/с/в/к/у/о/я once in seven
+            # sentences (UD Taiga, 121 967 sentences); no English sentence in UD EWT
+            # opens with a lone f/b/c/d/r/e/j/z. The lexicon separates the two members -
+            # the own reading is a word or it is not - so this is a decidable label, not
+            # a coin toss. Measured 17.09.2026; see short_words.TRUSTED_SINGLE_LETTER_WORDS.
+            curated_letter = (len(row.original) == 1 and len(alternate) == 1
+                              and (row.original.casefold() in TRUSTED_SINGLE_LETTER_WORDS
+                                   or alternate.casefold() in TRUSTED_SINGLE_LETTER_WORDS))
+            if alone and len(row.original) <= 2 and not curated_letter:
                 # An isolated short reading has no observable intent label.
                 # Digits/punctuation do not supply a neighbouring language.
                 # Both members preserve text and take the same deferred action.
+                # Deferring three-letter readings too was measured on 17.09.2026 and
+                # made the fitted model worse on chat-like first words, not better:
+                # see .t/reliable-release-2026-09-12/SHORT-ISOLATED-CURRICULUM.md.
                 action = "suggest" if trigger in ("enter", "tab", "punctuation") else "wait"
                 keep_action = action
             result.append(ActionRow(identity + ":keep", row.original, group, field,
@@ -542,19 +558,54 @@ def metrics(probabilities: array[float], labels: array[int], threshold: float) -
 
 def choose_threshold(
     predictions: dict[str, tuple[array[float], array[int]]], candidates: list[float],
-    maximum_false: int, minimum_recall: float, *, minimum_threshold: float = 0.0,
+    minimum_net_benefit: int, minimum_recall: float, *, minimum_threshold: float = 0.0,
+    net_benefit_tolerance: float = 0.0, maximum_threshold: float = 1.0,
+    authored_floor: float = 0.0,
 ) -> tuple[float, dict[str, object], bool]:
-    """Choose only on calibration, requiring both deployment profiles to pass.
+    """Choose the serving threshold on calibration by what it nets, in both profiles.
 
     ``minimum_threshold`` is the development operating threshold of the selected
-    epoch: a lower threshold already converted falsely on development, so it is
-    never a serving candidate, whatever calibration says about it.
+    epoch: the balance below it was already worse on development, so it is never a
+    serving candidate, whatever calibration says about it.
+
+    Until 17.09.2026 this took the lowest threshold with zero false conversions. That
+    rule only held because class-wide vetoes removed the rows that convert falsely;
+    with the model deciding, no threshold below 1.0 reaches zero and the rule chose a
+    model that converts nothing. A threshold is now judged by repairs minus breakages,
+    every profile must be ahead by ``minimum_net_benefit``, and among the qualifying
+    thresholds the best balance wins, and among equals the one that converts least
+    falsely - the lowest such threshold on a tie.
+
+    ``net_benefit_tolerance`` reads that balance as the plateau it is rather than a
+    single point. Measured on corpus v12 (18.09.2026), raising the threshold from 0.95
+    to 0.995 gives up 0.8 % of the correct conversions and removes two thirds of the
+    false ones: the two sides are not equally sensitive, so the highest-netting point
+    is not the safest point of nearly equal value. Within the tolerance the threshold
+    with the fewest false conversions wins, the lowest such threshold on a tie. The
+    balance still decides which thresholds are admissible at all.
+
+    ``authored_floor`` and ``maximum_threshold`` are the two ends of the same argument. Calibration counts
+    rows; the product also has cases it has promised to handle, and a threshold above
+    the confidence the model gives those is cautious about the wrong thing. The ceiling
+    is read from them, never from a sealed test: on 18.09.2026 the tightest pinned case
+    was `rjn` to `кот` at 0.994424, which a served threshold of 0.995 refused while the
+    calibration counts showed no reason to go that high. The floor is the same reading
+    from the other side - the pinned cases that must stay as typed, `лут` against the
+    command `ken` at 0.9887 and `Вас` against `Dfc` at 0.9889 - and a threshold at or
+    below those converts them. Calibration counts rows and cannot see either end.
     """
     if not predictions or not candidates:
         raise ValueError("calibration requires profiles and threshold candidates")
-    grid = [threshold for threshold in sorted(candidates) if threshold >= minimum_threshold]
+    threshold_floor = max(minimum_threshold, authored_floor)
+    if not threshold_floor <= maximum_threshold <= 1.0:
+        raise ValueError("threshold ceiling must not fall below the floor it has to clear")
+    grid = [threshold for threshold in sorted(candidates)
+            if threshold_floor <= threshold <= maximum_threshold]
     if not grid:
         raise ValueError("no threshold candidate reaches the development operating threshold")
+    if not 0.0 <= net_benefit_tolerance < 1.0:
+        raise ValueError("net benefit tolerance must be a fraction below one")
+    qualifying: list[tuple[int, int, int, float, dict[str, object]]] = []
     report: dict[str, object] = {}
     for threshold in grid:
         by_profile = {name: metrics(values, labels, threshold)
@@ -562,15 +613,26 @@ def choose_threshold(
         false = sum(int(row["false_conversions"]) for row in by_profile.values())
         true = sum(int(row["converted_correctly"]) for row in by_profile.values())
         possible = sum(int(row["convert_rows"]) for row in by_profile.values())
+        per_profile_net = [int(row["converted_correctly"]) - int(row["false_conversions"])
+                           for row in by_profile.values()]
         report = {"false_conversions": false,
             "conversion_recall": true / possible if possible else 0.0,
             "converted_correctly": true, "convert_rows": possible,
+            "net_benefit": true - false, "minimum_net_benefit": min(per_profile_net),
             "rows": sum(int(row["rows"]) for row in by_profile.values()), "by_profile": by_profile}
-        passed = all(row["false_conversions"] <= maximum_false and row["conversion_recall"] >= minimum_recall
-                     for row in by_profile.values())
-        if passed:
-            return threshold, report, True
-    return threshold, report, False
+        qualifies = (min(per_profile_net) >= minimum_net_benefit
+                     and all(row["conversion_recall"] >= minimum_recall for row in by_profile.values()))
+        if qualifies:
+            qualifying.append((min(per_profile_net), true - false, false, threshold, report))
+    if not qualifying:
+        return grid[-1], report, False
+    ceiling = max((minimum, net) for minimum, net, _false, _threshold, _report in qualifying)
+    floor = (math.floor(ceiling[0] * (1.0 - net_benefit_tolerance)),
+             math.floor(ceiling[1] * (1.0 - net_benefit_tolerance)))
+    admissible = [row for row in qualifying if (row[0], row[1]) >= floor]
+    _minimum, _net, _false, threshold, chosen = min(admissible, key=lambda row: (row[2], row[3]))
+    return threshold, {**chosen, "net_benefit_ceiling": ceiling[1], "net_benefit_floor": floor[1],
+                       "admissible_thresholds": [row[3] for row in admissible]}, True
 
 
 def runtime_masks(features: Iterable[tuple[dict[str, float], int, float]], model: ContextModel) -> tuple[list[bool], list[bool]]:
@@ -619,7 +681,7 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
     before_provenance = provenance()
     corpus_hash = checksum(corpus / "manifest.json")
     maximum = cast(dict[str, int], options["maximum_source_rows"])
-    source_rows = {split: load_split(corpus, split) for split in ("train", "development", "calibration")}
+    source_rows = {split: load_split(corpus, split) for split in FITTING_SPLITS}
     frames = {split: action_rows(select_rows(rows, maximum[split])) for split, rows in source_rows.items()}
     if any(not rows for rows in frames.values()):
         raise ValueError("empty fitting split")
@@ -704,14 +766,15 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
                    for name, data in development.items() for row, label in enumerate(data.labels)) / development_mass
         selection = assess_epoch({name: (apply_support_mask(predictions[name], *development_masks[name]), data.labels)
                                   for name, data in development.items()},
-                                 thresholds=cast(list[float], options["threshold_candidates"]), loss=loss)
+                                 thresholds=cast(list[float], options["threshold_candidates"]), loss=loss,
+                                 minimum_net_benefit=int(cast(dict[str, int], options["epoch_selection"])["minimum_net_benefit_per_profile"]))
         if selection is not None and (best_selection is None or selection.rank > best_selection.rank):
             best, best_epoch, best_loss, best_selection = rounded, epoch + 1, loss, selection
         history.append({"epoch": epoch + 1, "development_loss": loss,
                         "selection": asdict(selection) if selection is not None else None})
         print(f"epoch {epoch + 1}: development_loss={loss:.9f}, best={best_epoch}", flush=True)
     if best_selection is None:
-        raise ValueError("no epoch reached the development false-conversion budget")
+        raise ValueError("no epoch repaired more than it broke on development")
     gates = cast(dict[str, int | float | bool], options["gate_policy"])
     mapping = {name: list(best[index * 4:index * 4 + 4]) for index, name in enumerate(names)}
     candidate = ContextModel({name: tuple(values) for name, values in mapping.items()},
@@ -721,8 +784,11 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
                    for name, data in calibration.items()}
     threshold, calibration_report, passed = choose_threshold(
         calibration_predictions, cast(list[float], options["threshold_candidates"]),
-        int(gates["calibration_false_conversions"]), float(gates["minimum_calibration_conversion_recall"]),
+        int(gates["minimum_calibration_net_benefit"]), float(gates["minimum_calibration_conversion_recall"]),
         minimum_threshold=best_selection.threshold,
+        net_benefit_tolerance=float(cast(float, cast(dict[str, object], options["threshold_selection"])["net_benefit_tolerance"])),
+        maximum_threshold=float(cast(float, cast(dict[str, object], options["threshold_selection"])["maximum_threshold"])),
+        authored_floor=float(cast(float, cast(dict[str, object], options["threshold_selection"])["authored_floor"])),
     )
     weight_hash = hashlib.sha256(json.dumps(mapping, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
     payload = {"actions": list(ACTIONS), "feature_version": 3, "weights": mapping,
@@ -733,7 +799,7 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
     if provenance() != before_provenance or checksum(corpus / "manifest.json") != corpus_hash:
         raise ValueError("training inputs changed while fitting; candidate cannot be sealed")
     seal: dict[str, object] = {"schema_version": 1,
-        "stage": "sealed-before-test" if passed else "rejected-before-test",
+        "stage": SEALED_BEFORE_TEST if passed else REJECTED_BEFORE_TEST,
         "artifact_sha256": checksum(output / ARTIFACT), "model_version": payload["version"],
         "provenance": before_provenance, "corpus_manifest_sha256": corpus_hash,
         "recipe": options, "gate_policy": gates, "calibration": calibration_report,
@@ -764,7 +830,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     seal = fit(args.corpus, args.output)
-    return 0 if seal["stage"] == "sealed-before-test" else 1
+    return 0 if seal["stage"] == SEALED_BEFORE_TEST else 1
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from freeze_context_action_corpus import CorpusRow, typo_variants
-from keyswitch.context_model import SHORT_UNKNOWN_SOURCE_MAX_LENGTH, SHORT_UPPERCASE_UNKNOWN_SOURCE_MAX_LENGTH, ContextEvidence, ContextModel
+from keyswitch.context_model import ContextEvidence, ContextModel
 from train_context_action_model import BLIND_IDENTIFIERS, IDENTIFIER_DROPOUT_FAMILIES, ROOT, ActionRow, FeatureMass, action_rows, apply_runtime_support, apply_support_mask, balance_planned_mass, choose_threshold, identifier_evidence_dropped, identifier_family, natural_lookahead_rows, evidence, historical_curriculum, legacy_lookahead_rows, metrics, previous_context, select_features, select_rows, training_order, translated
 from keyswitch.detector import LanguageDetector
 from keyswitch.intent_model import LinearNgramModel
@@ -227,7 +227,7 @@ class ActionTrainingTests(unittest.TestCase):
         expected = {"space": {"wait"}, "pause": {"wait"},
                     "enter": {"suggest"}, "tab": {"suggest"}, "punctuation": {"suggest"}}
         actual: dict[str, set[str]] = {trigger: set() for trigger in expected}
-        for original, group in (("a", 0), ("we", 0), ("я", 1), ("мы", 1)):
+        for original, group in (("a", 0), ("we", 0), ("мы", 1)):
             sources = [replace(fixture(f"short-pair:{index}", original, group), before="", after="")
                        for index in range(32)]
             for row in action_rows(sources):
@@ -236,6 +236,23 @@ class ActionTrainingTests(unittest.TestCase):
                     # Both readings preserve text and allow the same next step.
                     actual[row.trigger].add(row.action)
         self.assertEqual(actual, expected)
+
+    def test_a_curated_lone_letter_is_labelled_instead_of_deferred(self) -> None:
+        """The eight Russian one-letter words are the named exception to that.
+
+        Their intent is observable - the lexicon says the own reading is a word or
+        it is not - so a deferral would teach the model to hesitate over exactly the
+        keystroke a chat message most often opens with.
+        """
+
+        for original, group in (("f", 0), ("я", 1)):
+            with self.subTest(original=original):
+                sources = [replace(fixture(f"curated-letter:{index}", original, group), before="", after="")
+                           for index in range(32)]
+                rows = [row for row in action_rows(sources) if row.trigger == "space"]
+                natural = {row.action for row in rows if row.category == "natural_surface"}
+                wrong = {row.action for row in rows if row.category == "layout_intervention"}
+                self.assertEqual((natural, wrong), ({"keep"}, {"convert"}))
 
     def test_digits_and_punctuation_do_not_license_a_short_layout_conversion(self) -> None:
         expected = {"space": {"wait"}, "pause": {"wait"},
@@ -366,6 +383,69 @@ class ActionTrainingTests(unittest.TestCase):
         recipe = json.loads((ROOT / "model/context_v3/recipe.json").read_bytes())
         self.assertEqual(recipe["epoch_selection"]["serving_threshold_floor"], "development operating threshold of the selected epoch")
 
+    def test_within_the_tolerance_the_safer_threshold_is_served(self) -> None:
+        """The balance is a plateau; the two sides of it are not equally sensitive.
+
+        A threshold that nets one row less while converting one row less falsely is
+        the same model by the balance and a safer one in the text it touches, which
+        is what corpus v12 measured: 0.95 to 0.995 gave up 0.8 % of the correct
+        conversions and removed two thirds of the false ones.
+        """
+
+        values, labels = array("d"), array("B")
+        for index in range(100):
+            probability = 0.999 if index < 96 else 0.96  # four correct conversions sit low
+            values.extend([1 - probability, probability, 0.0, 0.0])
+            labels.append(1)
+        for index in range(4):
+            probability = 0.96 if index < 3 else 0.999  # three false conversions sit low too
+            values.extend([1 - probability, probability, 0.0, 0.0])
+            labels.append(0)
+        predictions = {"portable": (values, labels)}
+        greedy, greedy_report, _ = choose_threshold(predictions, [0.95, 0.99], 0, 0.0)
+        self.assertEqual((greedy, greedy_report["net_benefit"], greedy_report["false_conversions"]), (0.95, 96, 4))
+        strict, report, passed = choose_threshold(predictions, [0.95, 0.99], 0, 0.0, net_benefit_tolerance=0.05)
+        self.assertEqual((strict, passed), (0.99, True))
+        self.assertEqual((report["net_benefit"], report["false_conversions"]), (95, 1))
+        self.assertEqual(report["admissible_thresholds"], [0.95, 0.99])
+        self.assertEqual((report["net_benefit_ceiling"], report["net_benefit_floor"]), (96, 91))
+        # One row of balance bought three rows of text the model no longer breaks.
+        self.assertGreater(int(cast(int, greedy_report["net_benefit"])), int(cast(int, report["net_benefit"])))
+        with self.assertRaises(ValueError):
+            choose_threshold(predictions, [0.95], 0, 0.0, net_benefit_tolerance=1.0)
+        recipe = json.loads((ROOT / "model/context_v3/recipe.json").read_bytes())
+        self.assertEqual(recipe["threshold_selection"]["net_benefit_tolerance"], 0.01)
+
+    def test_the_band_keeps_the_threshold_among_the_cases_the_product_promised(self) -> None:
+        """Calibration counts rows; the band names the cases those counts cannot see."""
+
+        values, labels = array("d"), array("B")
+        for index in range(100):
+            probability = 0.999 if index < 96 else 0.96
+            values.extend([1 - probability, probability, 0.0, 0.0])
+            labels.append(1)
+        for index in range(4):
+            probability = 0.96 if index < 3 else 0.999
+            values.extend([1 - probability, probability, 0.0, 0.0])
+            labels.append(0)
+        predictions = {"portable": (values, labels)}
+        capped, report, passed = choose_threshold(predictions, [0.95, 0.99], 0, 0.0,
+                                                  net_benefit_tolerance=0.05, maximum_threshold=0.95)
+        self.assertEqual((capped, passed), (0.95, True))
+        self.assertEqual(report["admissible_thresholds"], [0.95])
+        lifted, report, passed = choose_threshold(predictions, [0.95, 0.99], 0, 0.0,
+                                                  net_benefit_tolerance=0.05, authored_floor=0.96)
+        self.assertEqual((lifted, passed), (0.99, True))
+        self.assertEqual(report["admissible_thresholds"], [0.99])
+        with self.assertRaises(ValueError):
+            choose_threshold(predictions, [0.95, 0.99], 0, 0.0, minimum_threshold=0.99, maximum_threshold=0.95)
+        with self.assertRaises(ValueError):
+            choose_threshold(predictions, [0.95, 0.99], 0, 0.0, authored_floor=0.999, maximum_threshold=0.99)
+        recipe = json.loads((ROOT / "model/context_v3/recipe.json").read_bytes())
+        band = recipe["threshold_selection"]
+        self.assertLess(band["authored_floor"], band["maximum_threshold"])
+        self.assertIn("pinned cases", str(band["ceiling_rule"]))
+
     def test_no_conversion_is_not_a_successful_calibration(self) -> None:
         _, report, passed = choose_threshold({"portable": scores(0.99, 0.98)}, [1.0], 0, 0.9)
         self.assertFalse(passed)
@@ -469,45 +549,32 @@ class LegacyLookaheadIntegrationTests(unittest.TestCase):
 
 
 class RuntimePolicyMaskTests(unittest.TestCase):
-    def test_calibration_applies_the_short_uppercase_unknown_source_policy_like_runtime(self) -> None:
+    def test_calibration_and_the_runtime_leave_the_verdict_to_the_model(self) -> None:
+        """Training must weigh exactly what the runtime will do, and neither vetoes a class.
+
+        The class-wide vetoes were removed on 17.09.2026: the model decides, and only an
+        exception the user can see - an excluded word, their settings, a rule they taught -
+        refuses a conversion. What both sides still share is the support check: features the
+        model never saw carry no verdict at all.
+        """
         vocabulary = {"source:char:0:1:k": 1.0, "target:char:0:1:л": 1.0}
         model = ContextModel({name: (0.0,) * 4 for name in vocabulary}, "context-v3-test", feature_version=3)
-        blocked = {**vocabulary, "source:case:upper": 1.0, "source:known:0": 1.0, "length:3": 1.0}
-        longer = {**vocabulary, "source:case:upper": 1.0, "source:known:0": 1.0, "length:4": 1.0}
-        known = {**vocabulary, "source:case:upper": 1.0, "source:known:1": 1.0, "length:3": 1.0}
-        lower = {**vocabulary, "source:case:lower": 1.0, "source:known:0": 1.0, "length:3": 1.0,
-                 "before:script:ru:direction:1": 1.0, "after:script:none:direction:1": 1.0}
-        rows = [(features, 1, 1.0) for features in (blocked, longer, known, lower)]
-        isolated = {**lower, "before:script:none:direction:1": 1.0}
-        del isolated["before:script:ru:direction:1"]
-        self.assertFalse(model.allows_automatic_conversion(isolated))
-        unsupported = {**vocabulary, "source:known:0": 1.0, "target:known:0": 1.0, "target:identifier:0": 1.0, "baseline:0": 1.0,
-                       "length:5": 1.0, "before:script:none:direction:1": 1.0, "after:script:none:direction:1": 1.0}
-        self.assertFalse(model.allows_automatic_conversion(unsupported))
-        self.assertFalse(model.allows_automatic_conversion({**unsupported, "ortho:margin": -0.13}))
-        both_known = {**{k: v for k, v in unsupported.items() if k not in ("source:known:0", "target:known:0")},
-                      "source:known:1": 1.0, "target:known:1": 1.0}
-        self.assertFalse(model.allows_automatic_conversion(both_known))
-        licences: tuple[tuple[str, str, float], ...] = (("baseline:0", "baseline:1", 1.0), ("target:known:0", "target:known:1", 1.0),
-                                                        ("target:identifier:0", "target:identifier:1", 1.0), ("", "ortho:margin", 0.05),
-                                                        ("before:script:none:direction:1", "before:script:ru:direction:1", 1.0))
-        # A known own reading withdraws the lexical licences: two plausible readings, no context.
-        known_source = {**{k: v for k, v in unsupported.items() if k != "source:known:0"}, "source:known:1": 1.0}
-        for added in ("target:known:1", "target:identifier:1"):
-            with self.subTest(withdrawn=added):
-                self.assertFalse(model.allows_automatic_conversion({**known_source, added: 1.0}))
-        self.assertTrue(model.allows_automatic_conversion({**known_source, "baseline:1": 1.0}))
-        for removed, added, value in licences:
-            with self.subTest(licence=added):
-                licensed = {name: weight for name, weight in unsupported.items() if name != removed}
-                self.assertTrue(model.allows_automatic_conversion({**licensed, added: value}))
+        supported = {**vocabulary, "source:case:upper": 1.0, "source:known:0": 1.0, "length:3": 1.0}
+        isolated = {**vocabulary, "source:known:0": 1.0, "target:known:0": 1.0, "length:3": 1.0,
+                    "before:script:none:direction:1": 1.0, "after:script:none:direction:1": 1.0}
+        for features in (supported, isolated, {**isolated, "source:case:upper": 1.0}):
+            with self.subTest(features=sorted(features)):
+                self.assertTrue(model.allows_automatic_conversion(features))
+        rows = [(features, 1, 1.0) for features in (supported, isolated, supported, isolated)]
         convert = [0.001, 0.999, 0.0, 0.0]
         probabilities = array("d", convert * 4)
         guarded = apply_runtime_support(probabilities, rows, model)
-        self.assertEqual(list(guarded[:4]), [0.0, 0.0, 0.0, 1.0])
-        for index in (1, 2, 3):
+        for index in range(4):
             with self.subTest(index=index):
                 self.assertEqual(list(guarded[index * 4:index * 4 + 4]), convert)
+        unseen = [({"source:char:9:9:z": 1.0}, 1, 1.0)]
+        blocked = apply_runtime_support(array("d", convert), unseen, model)
+        self.assertEqual(list(blocked), [0.0, 0.0, 0.0, 1.0])
         keep = array("d", [0.999, 0.001, 0.0, 0.0] * 4)
         self.assertEqual(list(apply_runtime_support(keep, rows, model)), list(keep))
         with self.assertRaises(ValueError):
@@ -528,16 +595,16 @@ class RuntimePolicyMaskTests(unittest.TestCase):
         recipe = json.loads((ROOT / "model/context_v3/recipe.json").read_bytes())
         self.assertEqual(recipe["identifier_lexicon"]["training_dropout"]["families"], IDENTIFIER_DROPOUT_FAMILIES)
 
-    def test_recipe_documents_the_runtime_policy_bound_the_model_enforces(self) -> None:
+    def test_recipe_states_that_the_model_decides_and_names_what_was_removed(self) -> None:
         recipe = json.loads((ROOT / "model/context_v3/recipe.json").read_bytes())
-        policy = recipe["runtime_policy"]["short_unknown_source"]
-        self.assertEqual(policy["maximum_length"], SHORT_UPPERCASE_UNKNOWN_SOURCE_MAX_LENGTH)
-        self.assertEqual(policy["maximum_length"], SHORT_UNKNOWN_SOURCE_MAX_LENGTH)
-        self.assertEqual(policy["action"], "suggest")
-        unlicensed = recipe["runtime_policy"]["unlicensed_isolated"]
-        self.assertEqual(unlicensed["action"], "suggest")
-        self.assertEqual(set(unlicensed["licences"]),
-                         {"neighbouring_word", "baseline_convert", "ortho_margin_positive", "known_target_and_unknown_source"})
+        policy = recipe["runtime_policy"]
+        self.assertEqual(set(policy), {"model_verdict_stands"})
+        rule = policy["model_verdict_stands"]
+        for phrase in ("model's verdict decides", "refuses nothing for a class", "the user can see"):
+            self.assertIn(phrase, rule["rule"])
+        # The removal is part of the record: a later reader must not reintroduce them silently.
+        for name in ("unlicensed_isolated", "short_uppercase_unknown_source"):
+            self.assertIn(name, rule["removed"])
         self.assertEqual(recipe["gate_policy"]["sequence_net_restorations_at_least_baseline"], True)
         self.assertNotIn("sequence_restored_at_least_baseline", recipe["gate_policy"])
 

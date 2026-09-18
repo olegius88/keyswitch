@@ -1821,6 +1821,14 @@ class WindowsApplication:
         ):
             self.settings.reset()
 
+    def _autostart_diagnostics(self) -> dict[str, object]:
+        """What the next logon will do with this installation, in the report users copy."""
+
+        try:
+            return self.autostart.status().as_dict()
+        except (WindowsSystemError, OSError) as error:
+            return {"error": f"{type(error).__name__}: {error}"}
+
     def _diagnostics(self) -> str:
         probe = self.backend.probe()
         payload = {
@@ -1841,6 +1849,7 @@ class WindowsApplication:
                 "read_field": self.settings.get("detection.context_read_field", False),
                 "last_action": self.engine.snapshot.context_action,
             },
+            "autostart": self._autostart_diagnostics(),
             "technical_logging": bool(
                 self.settings.get("diagnostics.technical_logging", False)
             ),

@@ -8,7 +8,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Protocol
 
 
@@ -105,6 +105,30 @@ def _executable_exists(program: str) -> bool:
     return Path(program).is_file()
 
 
+def _exists(path: PurePath) -> bool:
+    """A pure Windows path handed to a test carries no file system of its own."""
+    return isinstance(path, Path) and path.is_file()
+
+
+def _installed_executable() -> Path | None:
+    """The packaged ``KeySwitch.exe`` beside this package, when the package is an install.
+
+    A build whose runner does not report itself as the executable - a launcher, a
+    debugger, an interpreter started by a shortcut - would otherwise register the
+    interpreter in the startup list, where Windows shows it by the interpreter's own
+    name. The packaged layout is ``<install>\\KeySwitch.exe`` next to
+    ``<install>\\keyswitch\\``, so the package's own location names the program; a
+    source checkout has no executable there and keeps the interpreter command.
+    """
+
+    try:
+        root = Path(__file__).resolve().parent.parent
+    except OSError:
+        return None
+    executable = root / "KeySwitch.exe"
+    return executable if executable.is_file() else None
+
+
 def windows_launcher_command(
     *,
     start_hidden: bool = True,
@@ -113,11 +137,12 @@ def windows_launcher_command(
     """Return a correctly quoted per-user startup command."""
 
     program = executable or Path(sys.executable)
-    if program.stem.casefold() == "keyswitch":
-        arguments = [str(program)]
+    installed = program if program.stem.casefold() == "keyswitch" else _installed_executable()
+    if installed is not None:
+        arguments = [str(installed)]
     else:
         pythonw = program.with_name("pythonw.exe")
-        interpreter = pythonw if pythonw.is_file() else program
+        interpreter = pythonw if _exists(pythonw) else program
         arguments = [str(interpreter), "-m", "keyswitch"]
     if start_hidden:
         arguments.append("--hidden")

@@ -217,41 +217,27 @@ class ContextModel:
         )
 
     def allows_automatic_conversion(self, features: Mapping[str, float]) -> bool:
-        """Shared by inference, calibration and epoch selection.
+        """The model's verdict stands; this is where an explicit exception would refuse it.
 
-        Two ambiguous classes may only be suggested. A token of at most three
-        letters whose own reading is unknown to the lexicon, when it is all
-        uppercase (an acronym or a brand against the same keys in the other
-        layout) or when no word stands on either side of it (a chat word against
-        a command name typed in the wrong layout): with so little text both
-        readings stay plausible. And a token of any length standing alone
-        converts automatically only under a licence from a frozen verdict: the
-        detector's baseline decision, an orthotactic margin above that model's
-        own threshold, or a known other reading - a dictionary word or a command
-        name - against an own reading the lexicon does not know. Without one,
-        with no context, the conversion would rest on the learned character
-        weights alone, which cannot tell a rare correctly typed word from the
-        same keys in the wrong layout, nor one dictionary word from another. A
-        word the lexicon knows is evidence for what was typed, so it withdraws
-        the licence even when the other reading is a command name: `зум` is a
-        chat word as much as `pev` is a program.
+        KeySwitch exists because rule-based switching hit a wall: the rules multiplied
+        until they argued with each other over the nuances of two languages. So when the
+        model says convert, the product converts. What may still refuse a conversion is
+        an exception the user can see and name - an excluded word or application, their
+        own switching settings, a rule they taught the engine, or a case analysed one by
+        one - and those live in the engine and the settings, not here.
+
+        Until 17.09.2026 this method carried two class-wide vetoes instead: an isolated
+        token needed a licence from a frozen verdict, and a token of at most three letters
+        with an unknown own reading could only be suggested when it stood alone or was
+        uppercase. They overruled the model on whole classes of input - exactly the input
+        the model was trained to tell apart - and cost 14 of 300 restorations on chat-like
+        first words while preventing no corruption at all
+        (.t/reliable-release-2026-09-12/SHORT-ISOLATED-CURRICULUM.md). A weak class is a
+        training problem; it is answered with the corpus, the labels and the features, and
+        proved by measurement.
         """
 
-        if self.feature_version != 3:
-            return True
-        isolated = any(name.startswith("before:script:none:direction:") for name in features) and any(
-            name.startswith("after:script:none:direction:") for name in features)
-        known_other_reading = "target:known:1" in features or "target:identifier:1" in features
-        licensed = ("baseline:1" in features or features.get("ortho:margin", 0.0) > 0.0
-                    or (known_other_reading and "source:known:0" in features))
-        if isolated and not licensed:
-            return False
-        if "source:known:0" not in features:
-            return True
-        if not any(f"length:{length}" in features for length in range(1, SHORT_UNKNOWN_SOURCE_MAX_LENGTH + 1)):
-            return True
-        uppercase = features.get("source:case:upper") == 1.0
-        return not (uppercase or isolated)
+        return True
 
     def predict(self, item: ContextEvidence) -> ContextPrediction:
         if self.feature_version == 3:

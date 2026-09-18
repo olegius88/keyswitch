@@ -23,12 +23,11 @@ from keyswitch.layouts import LayoutPair
 from keyswitch.prefix_model import PREFIX_FEATURE_VERSION, PrefixInput
 from keyswitch.prefix_schema import features_for_version
 
+from model_protocol import FITTING_SPLITS, PROFILES
 from auxiliary_runtime_evidence import _inside, _lexical_paths
 from context_corpus import ROOT
 from prefix_corpus import DIRECTORY
 
-ALLOWED_SPLITS = ("train", "development", "calibration")
-PROFILES = ("portable", "reference_hunspell")
 SELECTION_NAMESPACE = "keyswitch:prefix-v2:exposed-parent-selection:1"
 SAFETY_CATEGORIES = ("identifier", "command", "mixed_english")
 SOURCE_PATHS = (
@@ -108,7 +107,7 @@ def _object(value: object) -> dict[str, object]:
 
 
 def _split_path(split: str, directory: Path) -> Path:
-    if split not in ALLOWED_SPLITS:
+    if split not in FITTING_SPLITS:
         raise ValueError("prefix-v2 may read only exposed train/development/calibration splits")
     path = directory / (split + ".jsonl.gz")
     if path.is_symlink() or not path.resolve(strict=True).is_relative_to(directory.resolve(strict=True)):
@@ -151,7 +150,7 @@ def _parent(row: dict[str, object], split: str) -> ParentWord:
 def load_parents(split: str, max_families: int, max_words_per_family: int = 2,
                  *, directory: Path = DIRECTORY) -> list[ParentWord]:
     """Hash-select natural parents and matching existing typo forms, never test."""
-    if split not in ALLOWED_SPLITS:
+    if split not in FITTING_SPLITS:
         raise ValueError("prefix-v2 may read only exposed train/development/calibration splits")
     if (type(max_families) is not int or not 1 <= max_families <= 4096
             or type(max_words_per_family) is not int or not 1 <= max_words_per_family <= 4):
@@ -319,7 +318,7 @@ def provenance(root: Path = ROOT, directory: Path = DIRECTORY) -> dict[str, str]
     receipt_bytes = receipt_path.read_bytes()
     receipt = _object(json.loads(receipt_bytes))
     hashes = _object(receipt.get("sha256"))
-    splits = [_split_path(split, directory) for split in ALLOWED_SPLITS]
+    splits = [_split_path(split, directory) for split in FITTING_SPLITS]
     lexical = _lexical_paths(root)
     paths = {_inside(root, Path(name)) for name in SOURCE_PATHS}
     paths.update(lexical)
@@ -327,7 +326,7 @@ def provenance(root: Path = ROOT, directory: Path = DIRECTORY) -> dict[str, str]
     result = {path.relative_to(root).as_posix(): _checksum(path) for path in sorted(paths)}
     if result[receipt_path.relative_to(root).as_posix()] != hashlib.sha256(receipt_bytes).hexdigest():
         raise ValueError("old prefix manifest changed while reading")
-    for split, path in zip(ALLOWED_SPLITS, splits):
+    for split, path in zip(FITTING_SPLITS, splits):
         if result[path.relative_to(root).as_posix()] != hashes.get(split):
             raise ValueError("old prefix split checksum mismatch")
     for path, expected in lexical.items():

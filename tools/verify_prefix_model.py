@@ -13,7 +13,8 @@ from context_evidence import checksum
 from evaluate_prefix_engine import provenance as engine_provenance
 from keyswitch.prefix_model import ARTIFACT, PrefixModel
 from keyswitch.prefix_schema import VersionedPrefixModel
-from prefix_corpus import DIRECTORY, PROFILES, RECEIPT, SPLITS, config
+from model_protocol import ACTIVE_SPLITS, PROFILES
+from prefix_corpus import DIRECTORY, RECEIPT, config
 from train_prefix_model import CANDIDATE, SEAL, REPORT, accepted, evaluate, provenance
 from verify_context_v2 import read_object
 from verify_lexical_compatibility import verify as verify_compatibility
@@ -53,7 +54,7 @@ def verify(*, require_active: bool = True, report_path: Path = REPORT,
     corpus, seal, report, engine = (read_object(path) for path in (RECEIPT, SEAL, report_path, engine_path))
     if corpus.get("family_overlap") != 0 or corpus.get("profiles") != list(PROFILES):
         raise ValueError("prefix corpus provenance changed")
-    if corpus.get("sha256") != {split: checksum(DIRECTORY / (split + ".jsonl.gz")) for split in SPLITS}:
+    if corpus.get("sha256") != {split: checksum(DIRECTORY / (split + ".jsonl.gz")) for split in ACTIVE_SPLITS}:
         raise ValueError("prefix frozen examples changed")
     if (seal.get("provenance") != provenance() or seal.get("config") != config()
             or seal.get("candidate_sha256") != checksum(CANDIDATE)):

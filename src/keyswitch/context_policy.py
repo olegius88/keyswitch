@@ -161,17 +161,32 @@ class ContextPolicy:
                 target_group=target_group, source_score=source, target_score=target,
                 reason="решение контекстной модели", confidence=prediction.probability,
             )
-        elif (prediction.action != "wait" and is_short_word_override(baseline)
-              and (self.model.feature_version == FEATURE_VERSION or baseline.reason == ISOLATED_SHORT_WORD_REASON)):
+        elif (is_short_word_override(baseline)
+              and (baseline.reason == ISOLATED_SHORT_WORD_REASON or trigger == "pause"
+                   or (prediction.action != "wait" and self.model.feature_version == FEATURE_VERSION))):
             # A curated, reviewed exception is an explicit rule, not a guess, so
             # neither a probabilistic `keep` nor an under-confident `convert`
-            # cancels it. Only `wait` still delays it, because that is about
-            # timing rather than direction and the lookahead may resolve the
-            # word jointly. The model's opinion is recorded either way.
+            # cancels it. `wait` still delays it at a boundary, because that is
+            # about timing rather than direction and the lookahead may resolve the
+            # word jointly - thirty-six of the thirty-seven curated entries are
+            # Russian function words, exactly the words a phrase decides.
+            # On the pause trigger the timing has already happened: the user
+            # stopped, no next word is coming, and a delay with nothing left to
+            # wait for is a refusal wearing another name. Letting `wait` lose
+            # everywhere was measured on 18.09.2026 and took the lookahead with
+            # it. The model's opinion is recorded either way.
             # A feature-version-3 model is the arbiter of the other curated
-            # rules, but a lone letter opening a message stays an explicit rule
-            # under it too: the corpus holds too few examples per letter for
-            # weights to learn what the treebank counts state outright.
+            # rules. A lone letter opening a message is the one named exception,
+            # and it beats a "wait" as well: the model cannot have an opinion here,
+            # because every single-letter row of the corpus sits in quarantine -
+            # their families are held by other frozen evidence - so it has never
+            # seen one. Waiting for a next word that may never come would leave
+            # `z ` standing in a sent message. The rule itself is measured: a
+            # Russian utterance opens with one of а/и/с/в/к/у/о/я once in seven
+            # sentences, an English one never opens with a lone f/b/c/d/r/e/j/z
+            # (UD Taiga and UD EWT, 17.09.2026). Teaching this to the model needs
+            # a corpus that keeps those rows; until then it is an exception with
+            # a name, visible in the model card and this comment.
             return ContextResult(baseline, prediction, field, decision_source="short_word_override",
                                  fallback_reason="trusted_short_word")
         else:

@@ -56,13 +56,23 @@ class LiteralHeadTests(InputIntegrityTests):
         evaluation = self.evaluations(logs.output)[-1]
         self.assertEqual((evaluation["trigger"], evaluation["original"], evaluation["literal_head"]), ("pause", "c,jhrb", "/"))
 
-    def test_heads_that_may_be_wrong_layout_words_abstain_and_pause_converts_everything(self) -> None:
-        for typed in ("c,jhrb/ntcns ", "b/bkb ", "rhtp/c,jhrb "):
+    def test_heads_that_may_be_wrong_layout_words_leave_the_whole_token_to_the_model(self) -> None:
+        """No head is claimed when the head itself reads as a word; the model judges the rest.
+
+        Splitting off a literal head would decide the word before anyone looked at
+        it, so the engine hands over the token whole. What happens to it then is
+        the model's answer, and both answers are visible here: two tokens are read
+        as Russian typed in the English layout and converted at the boundary, and
+        the one the model is unsure about is left for the pause.
+        """
+
+        for typed, expected in (("c,jhrb/ntcns ", "c,jhrb/ntcns "), ("b/bkb ", "и/или "),
+                                ("rhtp/c,jhrb ", "крез/сборки ")):
             with self.subTest(typed=typed):
                 self.reset_editor()
                 with self.assertLogs("keyswitch.engine", level="INFO") as logs:
                     self.type(typed, group=0)
-                self.assertEqual(self.backend.text, typed)
+                self.assertEqual(self.backend.text, expected)
                 evaluation = self.evaluations(logs.output)[-1]
                 self.assertEqual((evaluation["original"], evaluation["literal_head"]), (typed.strip(), ""))
         self.reset_editor()

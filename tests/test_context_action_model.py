@@ -63,13 +63,13 @@ class ContextActionEngineTests(unittest.TestCase):
             model = RecordModel()
             current.engine.context_policy.model = model
             with patch.object(ContextModel, "predict", return_value=ContextPrediction("wait", 1.0, (0.0, 0.0, 1.0, 0.0), model.version, True)) as predict:
-                current.physical("e ")
+                current.physical("yt ")
                 self.assertIsNotNone(current.engine._context_waiting)
                 predict.return_value = ContextPrediction("convert", 1.0, (0.0, 1.0, 0.0, 0.0), model.version, True)
                 current.physical("'njuj\u00a0")
             self.assertEqual([(item.original, item.boundary_text, item.field.after) for item in model.items],
-                             [("e", " ", ""), ("'njuj", "\u00a0", ""), ("e", " ", "этого")])
-            self.assertEqual(current.backend.text, "у этого\u00a0")
+                             [("yt", " ", ""), ("'njuj", "\u00a0", ""), ("yt", " ", "этого")])
+            self.assertEqual(current.backend.text, "не этого\u00a0")
             self.assertEqual(len(current.backend.injections), 1)
 
 
@@ -259,183 +259,79 @@ class ContextActionFeatureTests(unittest.TestCase):
         self.assertEqual(prediction.action, "suggest")
 
 
-class ShortUppercaseUnknownSourcePolicyTests(unittest.TestCase):
-    def test_short_uppercase_unknown_source_may_only_be_suggested(self) -> None:
-        field = FieldContext("Telegram", "1", "Мой сын обожает ", "!", "text")
+class ModelVerdictStandsTests(unittest.TestCase):
+    """The model decides; nothing in this layer overrules it for a whole class of input.
+
+    Until 17.09.2026 two class-wide vetoes lived here - a licence for isolated tokens and a
+    ban on short unknown readings standing alone or written in capitals. They overruled the
+    model on the very input it was trained to tell apart, cost 14 of 300 restorations on
+    chat-like first words and prevented no corruption
+    (.t/reliable-release-2026-09-12/SHORT-ISOLATED-CURRICULUM.md). What may still refuse a
+    conversion is an exception the user can see: an excluded word or application, their own
+    settings, a rule they taught the engine - and those live in the engine, not in the model.
+    """
+
+    def test_no_class_of_input_is_refused_by_this_layer(self) -> None:
+        field = FieldContext("Telegram", "1", "", "", "text")
         cases = (
-            ("KFC", "ЛАС", False, "suggest"),      # brand acronym vs. dictionary reading: ambiguous
-            ("EYX", "УНЧ", False, "suggest"),      # the same keys typed in the wrong layout: also only suggested
-            ("ЫЙД", "SQL", False, "suggest"),      # both directions
-            ("KFCN", "ЛАСТ", False, "convert"),    # four letters: outside the policy
-            ("KFC", "ЛАС", True, "convert"),       # a known source reading is not the ambiguous class
-            ("kfc", "лас", False, "convert"),      # lowercase tokens keep the learned decision
-            ("Kfc", "Лас", False, "convert"),
+            ("KFC", "ЛАС", False, True, False),      # uppercase, isolated
+            ("зум", "pev", True, False, True),       # a command name as the other reading
+            ("афиши", "fabib", False, False, False),  # neither reading known, no verdict
+            ("Нщг", "You", False, True, False),      # the chat-like first word
         )
-        for original, alternative, source_known, expected in cases:
-            with self.subTest(original=original, source_known=source_known):
+        for original, alternative, source_known, target_known, target_identifier in cases:
+            with self.subTest(original=original):
                 group = 0 if original.isascii() else 1
-                item = ContextEvidence(original, alternative, group, field, source_known=source_known, target_known=True)
+                item = ContextEvidence(original, alternative, group, field, source_known=source_known,
+                                       target_known=target_known, target_identifier=target_identifier)
                 weights = supported_weights(item)
                 weights["bias"] = (0.0, 20.0, 0.0, 0.0)
                 model = ContextModel(weights, "context-v3-fixture", feature_version=3)
-                features = extract_action_features(item)
-                self.assertEqual(model.allows_automatic_conversion(features), expected == "convert")
+                self.assertTrue(model.allows_automatic_conversion(extract_action_features(item)))
                 prediction = model.predict(item)
-                self.assertTrue(prediction.supported)
-                self.assertEqual(prediction.action, expected)
-                self.assertGreater(prediction.probability, 0.985)
-        keep = supported_weights(ContextEvidence("KFC", "ЛАС", 0, field, target_known=True))
-        keep["bias"] = (20.0, 0.0, 0.0, 0.0)
-        self.assertEqual(ContextModel(keep, "context-v3-fixture", feature_version=3).predict(
-            ContextEvidence("KFC", "ЛАС", 0, field, target_known=True)).action, "keep")
-        legacy = ContextModel({"bias": (0.0, 20.0, 0.0, 0.0)}, "context-v1-fixture")
-        self.assertTrue(legacy.allows_automatic_conversion({"source:case:upper": 1.0, "source:known:0": 1.0, "length:3": 1.0}))
+                self.assertEqual((prediction.action, prediction.supported), ("convert", True))
 
-    def test_isolated_short_unknown_source_may_only_be_suggested(self) -> None:
-        alone = FieldContext("Telegram", "1", "", "", "text")
-        punctuation = FieldContext("Telegram", "1", "12 ", "!", "text")
-        worded = FieldContext("Telegram", "1", "включи ", "", "text")
-        cases = (
-            ("зум", "pev", alone, False, False, "suggest"),        # chat word vs. a command typed in the wrong layout
-            ("зцв", "pwd", alone, False, False, "suggest"),        # the same shape from the other side: also only suggested
-            ("ghb", "при", alone, False, False, "suggest"),
-            ("зум", "pev", punctuation, False, False, "suggest"),  # digits and punctuation are not words
-            ("зум", "pev", worded, False, False, "convert"),       # a neighbouring word makes it a context decision
-            ("зумм", "pevv", alone, False, False, "convert"),      # four letters: outside the short policy; unknown own reading licenses
-            ("зум", "pev", alone, True, True, "convert"),          # a known source reading is not the ambiguous class; the baseline licenses
-            ("зум", "pev", alone, True, False, "suggest"),         # ... but alone, between two dictionary readings, it needs a licence
-        )
-        for original, alternative, field, source_known, baseline, expected in cases:
-            with self.subTest(original=original, before=field.before, source_known=source_known, baseline=baseline):
-                group = 0 if original.isascii() else 1
-                item = ContextEvidence(original, alternative, group, field, baseline_convert=baseline,
-                                       source_known=source_known, target_known=True)
-                weights = supported_weights(item)
-                weights["bias"] = (0.0, 20.0, 0.0, 0.0)
-                model = ContextModel(weights, "context-v3-fixture", feature_version=3)
-                self.assertEqual(model.allows_automatic_conversion(extract_action_features(item)), expected == "convert")
-                prediction = model.predict(item)
-                self.assertTrue(prediction.supported)
-                self.assertEqual(prediction.action, expected)
+    def test_a_refusal_from_the_conversion_policy_is_honoured_when_serving(self) -> None:
+        """The seam is empty today, and serving must still obey it if it is ever filled.
 
-    def test_isolated_token_without_a_frozen_licence_may_only_be_suggested(self) -> None:
-        alone = FieldContext("Telegram", "1", "", "", "text")
-        worded = FieldContext("Telegram", "1", "в городе ", "", "text")
-        unsupported = {"source_known": False, "target_known": False, "baseline_convert": False,
-                       "ortho_score": -6.7, "ortho_threshold": 10.4}
-        cases: tuple[tuple[str, str, FieldContext, dict[str, object], str], ...] = (
-            ("афиши", "fabib", alone, {}, "suggest"),                            # no lexicon, no index, no frozen verdict
-            ("k.andfaat", "люфтваффе", alone, {}, "suggest"),                    # both directions
-            ("афиши", "fabib", alone, {"source_known": True}, "suggest"),        # a known own reading changes nothing here
-            ("Еще", "Tot", alone, {"source_known": True, "target_known": True}, "suggest"),  # two dictionary words: no licence
-            ("hfyj", "рано", alone, {"target_known": True}, "convert"),         # a dictionary reading against an unknown own one
-            ("афиши", "fabib", alone, {"baseline_convert": True}, "convert"),   # the detector's own verdict licenses
-            ("афиши", "fabib", alone, {"ortho_score": 12.0}, "convert"),        # orthotactics above its own threshold licenses
-            ("афиши", "fabib", alone, {"ortho_score": 10.4}, "suggest"),        # exactly at the threshold: no margin
-            ("афиши", "fabib", alone, {"ortho_score": None, "ortho_threshold": None}, "suggest"),  # unsupported: no licence
-            ("афиши", "fabib", alone, {"target_known": True}, "convert"),       # a dictionary reading licenses
-            ("афиши", "fabib", alone, {"target_identifier": True}, "convert"),  # a command name licenses an unknown own reading
-            ("зум", "pev", alone, {"source_known": True, "target_identifier": True}, "suggest"),  # ... but not a known one
-            ("афиши", "fabib", worded, {}, "convert"),                          # a neighbouring word: a context decision
-        )
-        for original, alternative, field, change, expected in cases:
-            with self.subTest(original=original, before=field.before, change=change):
-                group = 0 if original.isascii() else 1
-                item = ContextEvidence(original, alternative, group, field, **{**unsupported, **change})  # type: ignore[arg-type]
-                weights = supported_weights(item)
-                weights["bias"] = (0.0, 20.0, 0.0, 0.0)
-                model = ContextModel(weights, "context-v3-fixture", feature_version=3)
-                self.assertEqual(model.allows_automatic_conversion(extract_action_features(item)), expected == "convert")
-                prediction = model.predict(item)
-                self.assertTrue(prediction.supported)
-                self.assertEqual(prediction.action, expected)
-        legacy = ContextModel({"bias": (0.0, 20.0, 0.0, 0.0)}, "context-v1-fixture")
-        self.assertTrue(legacy.allows_automatic_conversion({"target:known:0": 1.0, "target:identifier:0": 1.0, "baseline:0": 1.0,
-                                                            "before:script:none:direction:1": 1.0, "after:script:none:direction:1": 1.0}))
+        Calibration counts conversions through the same method, so a refusal that the
+        served prediction ignored would make the threshold describe a model nobody runs -
+        the corpus-against-serving gap this project has already paid for once.
+        """
+
+        field = FieldContext("Telegram", "1", "", "", "text")
+        item = ContextEvidence("Нщг", "You", 0, field, target_known=True)
+        weights = supported_weights(item)
+        weights["bias"] = (0.0, 20.0, 0.0, 0.0)
+        model = ContextModel(weights, "context-v3-fixture", feature_version=3)
+        self.assertEqual(model.predict(item).action, "convert")
+        with patch.object(ContextModel, "allows_automatic_conversion", return_value=False):
+            self.assertEqual(model.predict(item).action, "suggest")
+
+    def test_the_model_still_decides_against_a_conversion_on_its_own(self) -> None:
+        """Refusing is the model's own verdict, not a rule applied on top of it."""
+        field = FieldContext("Telegram", "1", "", "", "text")
+        item = ContextEvidence("KFC", "ЛАС", 0, field, target_known=True)
+        weights = supported_weights(item)
+        weights["bias"] = (20.0, 0.0, 0.0, 0.0)
+        self.assertEqual(ContextModel(weights, "context-v3-fixture", feature_version=3).predict(item).action, "keep")
+
+    def test_an_underconfident_conversion_is_offered_rather_than_made(self) -> None:
+        """The threshold is the model's own calibration, not a class-wide ban."""
+        field = FieldContext("Telegram", "1", "", "", "text")
+        item = ContextEvidence("hfyj", "рано", 0, field, target_known=True)
+        weights = supported_weights(item)
+        weights["bias"] = (0.0, 1.0, 0.0, 0.0)
+        prediction = ContextModel(weights, "context-v3-fixture", feature_version=3).predict(item)
+        self.assertEqual(prediction.action, "suggest")
+        self.assertLess(prediction.probability, 0.985)
 
 
-class ContextActionPolicyTests(unittest.TestCase):
+class ArtifactIdentityTests(unittest.TestCase):
     def setUp(self) -> None:
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
-        self.path = Path(directory.name) / "model.json"
-        self.ortho = OrthoModel(2, {}, {}, {}, "ortho-v1-fixture", {"en": 1.0, "ru": 1.0}, 3)
-        en = LanguageModel("en_US", {"hello": 20}, "test", enable_spellcheck=False)
-        ru = LanguageModel("ru_RU", {"привет": 20}, "test", enable_spellcheck=False)
-        self.detector = LanguageDetector({0: en, 1: ru})
-        self.baseline = DetectionDecision(False, "ghbdtn", "ghbdtn", 0, 0, 0, "test", SCORE, SCORE, 0.8, 0.9)
-        self.field = FieldContext("Editor", "1", "", "", "text")
-        with patch.object(ContextModel, "try_load", return_value=(None, "fixture")), patch.object(ContextPolicy, "_shared_ortho", (None, "fixture")):
-            self.policy = ContextPolicy()
-
-    def test_shared_evidence_uses_each_actual_scorer_and_direction(self) -> None:
-        outcome = OrthoScore(2, 3, 5, -10, -5, True)
-        for group, original, alternative in ((0, "ghbdtn", "привет"), (1, "руддщ", "hello")):
-            baseline = replace(self.baseline, original=original, source_group=group)
-            with patch.object(self.ortho, "score", return_value=outcome) as score:
-                item = evidence_for_decision(baseline, alternative, 1 - group, self.detector, self.field, "enter", literal_tail="...", boundary_text="\n", ortho=self.ortho)
-            self.assertEqual(item.source_score, self.detector.models[group].score(original))
-            self.assertEqual(item.target_score, self.detector.models[1 - group].score(alternative))
-            self.assertTrue(item.target_known)
-            self.assertEqual((item.model_probability, item.model_threshold, item.literal_tail, item.ortho_score, item.ortho_threshold), (0.8, 0.9, "...", 5, 1.0))
-            self.assertEqual(item.boundary_text, "\n")
-            score.assert_called_once_with(OrthoEvidence("ghbdtn" if group == 0 else "hello", "lower", "en" if group == 0 else "ru"))
-        with patch.object(self.ortho, "score", return_value=replace(outcome, supported=False)):
-            item = evidence_for_decision(self.baseline, "привет", 1, self.detector, self.field, "space", ortho=self.ortho)
-        self.assertIsNone(item.ortho_score)
-        self.detector.models[2] = self.detector.models[0]
-        with patch.object(self.ortho, "score") as score:
-            evidence_for_decision(replace(self.baseline, source_group=2), "привет", 1, self.detector, self.field, "space", ortho=self.ortho)
-        score.assert_not_called()
-
-    def test_v3_keep_is_not_overridden_by_orthotactic_or_automatic_short_word_rules(self) -> None:
-        item = evidence_for_decision(self.baseline, "привет", 1, self.detector, self.field, "space")
-        weights = supported_weights(item)
-        weights["bias"] = (20.0, 0.0, 0.0, 0.0)
-        self.policy.model = ContextModel(weights, "context-v3-fixture", feature_version=3)
-        self.policy.ortho = self.ortho
-        with patch.object(self.ortho, "score", return_value=OrthoScore(50, 0, 50, -60, -10, True)), patch.object(self.policy, "_licensed") as licensed, patch("keyswitch.context_policy.is_short_word_override", return_value=True):
-            result = self.policy.decide(self.baseline, "привет", 1, self.detector, "space", "assist", field_override=self.field, literal_tail=",")
-        self.assertEqual(result.prediction.action if result.prediction else None, "keep")
-        self.assertFalse(result.decision.should_convert)
-        self.assertTrue(result.policy_applied)
-        licensed.assert_not_called()
-
-    def test_v3_unsupported_baseline_conversion_abstains_and_v2_still_uses_licensing(self) -> None:
-        self.policy.model = ContextModel({"bias": (20.0, 0.0, 0.0, 0.0), "app:editor": ZERO}, "context-v3-fixture", feature_version=3)
-        result = self.policy.decide(replace(self.baseline, should_convert=True), "привет", 1, self.detector, "space", "assist", field_override=self.field)
-        self.assertFalse(result.decision.should_convert)
-        self.assertEqual(result.prediction.action if result.prediction else None, "suggest")
-        self.policy.model = ContextModel({"bias": (20.0, 0.0, 0.0, 0.0), "app:editor": ZERO}, "context-v1-fixture")
-        with patch("keyswitch.context_policy.evidence_for_decision", wraps=evidence_for_decision) as build, patch.object(self.policy, "_licensed", wraps=self.policy._licensed) as licensed:
-            self.policy.decide(self.baseline, "привет", 1, self.detector, "space", "assist", field_override=self.field)
-        self.assertIsNone(build.call_args.kwargs["ortho"])
-        licensed.assert_called_once()
-
-    def test_v2_curated_rule_remains_authoritative_only_for_the_old_policy(self) -> None:
-        baseline = replace(self.baseline, should_convert=True)
-        item = evidence_for_decision(baseline, "привет", 1, self.detector, self.field, "space")
-        for feature_version, expected in ((2, True), (3, False)):
-            weights = supported_weights(item)
-            weights.update({"bias": (20.0, 0.0, 0.0, 0.0), "app:editor": ZERO})
-            self.policy.model = ContextModel(weights, "fixture", feature_version=feature_version)
-            with patch("keyswitch.context_policy.is_short_word_override", return_value=True):
-                result = self.policy.decide(baseline, "привет", 1, self.detector, "space", "assist", field_override=self.field)
-            self.assertEqual(result.decision.should_convert, expected)
-        # A lone letter opening a message is the one curated rule the new policy
-        # still honours (see short_words.ISOLATED_SHORT_WORD_REASON), unless the
-        # model asks to wait for the next word.
-        opening = replace(baseline, reason=ISOLATED_SHORT_WORD_REASON)
-        weights = supported_weights(item)
-        weights.update({"bias": (20.0, 0.0, 0.0, 0.0), "app:editor": ZERO})
-        self.policy.model = ContextModel(weights, "fixture", feature_version=3)
-        result = self.policy.decide(opening, "привет", 1, self.detector, "space", "assist", field_override=self.field)
-        self.assertTrue(result.decision.should_convert)
-        self.assertEqual(result.fallback_reason, "trusted_short_word")
-        weights.update({"bias": (0.0, 0.0, 20.0, 0.0)})
-        self.policy.model = ContextModel(weights, "fixture", feature_version=3)
-        waited = self.policy.decide(opening, "привет", 1, self.detector, "space", "assist", field_override=self.field)
-        self.assertEqual((waited.decision.should_convert, waited.prediction.action if waited.prediction else None), (False, "wait"))
+        self.path = Path(directory.name) / "context-action.json"
 
     def test_artifact_feature_versions_require_their_own_identity(self) -> None:
         weights = {"bias": [0.0, 8.0, 0.0, 0.0]}

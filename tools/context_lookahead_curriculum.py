@@ -22,6 +22,7 @@ from keyswitch.context_action_features import extract_action_features
 from keyswitch.context_model import ACTIONS, ContextAction, ContextEvidence
 from keyswitch.detector import LanguageDetector
 from keyswitch.word_decision import automatic_word_decision
+from model_protocol import FITTING_SPLITS
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -136,7 +137,7 @@ def build_lookahead_curriculum(
         raise ValueError("lookahead budgets must be integers: families 1 to 4096, seeds per family 1 to 128")
     if profile not in ("portable", "reference_hunspell") or set(detector.models) != {0, 1}:
         raise ValueError("lookahead requires an explicit lexical profile and both models")
-    if split not in ("train", "development", "calibration"):
+    if split not in FITTING_SPLITS:
         raise ValueError("lookahead split must be train, development or calibration")
     members: tuple[LookaheadSeed | LookaheadAnchor, ...] = (*seeds, *anchors)
     if any(item.split != split for item in members):

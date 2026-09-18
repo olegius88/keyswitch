@@ -13,7 +13,8 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
-from freeze_context_action_corpus import CorpusRow, SPLITS, canonical, checksum, digest, load_split
+from freeze_context_action_corpus import CorpusRow, canonical, checksum, digest, load_split
+from model_protocol import ALL_SPLITS
 from merge_context_action_corpora import merge_corpora
 
 
@@ -32,7 +33,7 @@ class ContextActionMergeTests(unittest.TestCase):
         generator.write_bytes(b"# fixture generator\n")
         rows: dict[str, CorpusRow] = {}
         files = {}
-        for split in SPLITS:
+        for split in ALL_SPLITS:
             row = CorpusRow(
                 identifier=name + ":" + split, original="orchard" if name == "base" else "nebula", group=0,
                 before="", after="", lemma="fixture", family=digest(name + ":family:" + split),
@@ -66,7 +67,7 @@ class ContextActionMergeTests(unittest.TestCase):
         else:
             sidecar = directory / "physical-family-closure.json"
             sidecar.write_bytes(canonical({"schema_version": 1,
-                "alias_sha256_to_closure_sha256": {digest(name + ":alias:" + split): digest(name + ":closure:" + split) for split in SPLITS}}))
+                "alias_sha256_to_closure_sha256": {digest(name + ":alias:" + split): digest(name + ":closure:" + split) for split in ALL_SPLITS}}))
             manifest["reconciliation"] = {"closure_sha256": checksum(sidecar)}
         (directory / "manifest.json").write_bytes(canonical(manifest))
 
@@ -83,7 +84,7 @@ class ContextActionMergeTests(unittest.TestCase):
         output = self.root / "merged"
         manifest = merge_corpora(self.base, self.extra, output)
         self.assertEqual(manifest["namespace"], "base")
-        for split in SPLITS:
+        for split in ALL_SPLITS:
             source_bytes = (self.base / (split + ".jsonl.gz")).read_bytes() + (self.extra / (split + ".jsonl.gz")).read_bytes()
             self.assertEqual((output / (split + ".jsonl.gz")).read_bytes(), source_bytes)
             rows = load_split(output, split)

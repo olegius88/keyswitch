@@ -17,7 +17,17 @@ from pathlib import Path
 from typing import Final
 
 SUPPLEMENT_ROOT: Final = Path(__file__).parent / "resources"
-SUPPLEMENT_PATTERNS: Final = {"ru_RU": r"[а-яё]{2,}", "en_US": r"[a-z][a-z'-]*"}
+SUPPLEMENT_PATTERNS: Final = {"ru_RU": r"[а-яё]{3,}", "en_US": r"[a-z][a-z'-]*"}
+# Two-letter Cyrillic forms are refused: the onboard vocabulary already holds every real
+# two-letter Russian word, so a frequency list adds only what its count floor misses at that
+# length - doubled letters, transliteration fragments and subtitle noise. Each one disguises a
+# short Latin command as a Russian word, which is how `pm2` came to be rewritten as `зь2`.
+# Russian has exactly eight single-letter words, and "я" is the most frequent token of the
+# frequency list this supplement is built from; the {2,} shape dropped all of them, so the
+# engine could only learn them from a spell checker, which calls every lone Latin letter a
+# word as well and therefore never told `z` from `я` apart. Any other single letter is a
+# letter, not a word, and is still refused.
+SUPPLEMENT_SINGLE_LETTERS: Final = {"ru_RU": frozenset("аисвкуоя"), "en_US": frozenset("ai")}
 MAX_SUPPLEMENT_BYTES: Final = 8 * 1024 * 1024
 
 
@@ -44,7 +54,8 @@ def supplement_words(locale: str) -> tuple[str, ...]:
         raise ValueError("lexicon supplement must be a sorted set for a supported locale")
     result: list[str] = []
     for word in words:
-        if not isinstance(word, str) or re.fullmatch(pattern, word) is None:
+        allowed = SUPPLEMENT_SINGLE_LETTERS.get(locale, frozenset())
+        if not isinstance(word, str) or (re.fullmatch(pattern, word) is None and word not in allowed):
             raise ValueError("invalid lexicon supplement entry")
         result.append(word)
     return tuple(result)

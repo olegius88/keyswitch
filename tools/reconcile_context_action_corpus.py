@@ -25,10 +25,9 @@ from freeze_context_action_corpus import (
 )
 from keyswitch.layouts import LayoutPair
 from keyswitch.short_words import TRUSTED_SHORT_WORDS
+from model_protocol import ACTIVE_SPLITS, ALL_SPLITS, FITTING_SPLITS
 
 ROOT = Path(__file__).resolve().parents[1]
-ACTIVE_SPLITS = ("train", "development", "calibration", "test")
-SPLITS = (*ACTIVE_SPLITS, "quarantine")
 PAIR = LayoutPair()
 POSITIONS = tuple({key.characters[group]: key.keycode for key in reversed(KEYS)} for group in (0, 1))
 
@@ -171,7 +170,7 @@ def test_membership(rows: Sequence[CorpusRow], namespace: str) -> dict[str, obje
 
 def validate_original(directory: Path, manifest: Mapping[str, object], rows: Sequence[CorpusRow]) -> None:
     records = cast(dict[str, dict[str, object]], manifest["splits"])
-    for split in SPLITS:
+    for split in ALL_SPLITS:
         record = records[split]
         if record["path"] != split + ".jsonl.gz" or checksum(directory / str(record["path"])) != record["sha256"]:
             raise ValueError("original compressed split changed")
@@ -225,7 +224,7 @@ def reconcile_rows(sentences: Sequence[Sentence], rows: Sequence[CorpusRow], his
     historical_roots = matching_roots(historical)
     seen_roots = set(historical_roots)
     for row in rows:
-        if row.split not in ("train", "development", "calibration"):
+        if row.split not in FITTING_SPLITS:
             continue
         seen_roots.add(union.find("family:" + row.family))
         # Prior fit saw context words too, including tokens whose focus row was
@@ -262,7 +261,7 @@ def reconcile_rows(sentences: Sequence[Sentence], rows: Sequence[CorpusRow], his
             removed.append({"row_sha256": digest(row.identifier), "previous_split": row.split,
                             "closure_sha256": digest(root), "reasons": sorted(set(reasons))})
             changed.append(replace(row, split="quarantine", quarantine_reasons=tuple(sorted(set(reasons)))))
-        elif row.split in ("train", "development", "calibration"):
+        elif row.split in FITTING_SPLITS:
             changed.append(replace(row, family=digest(root)))
         else:
             changed.append(row)
@@ -361,7 +360,7 @@ def write_derivative(directory: Path, output: Path, result: Reconciled, manifest
     output.mkdir(parents=True)
     files: dict[str, dict[str, object]] = {}
     records = cast(dict[str, dict[str, object]], manifest["splits"])
-    for split in SPLITS:
+    for split in ALL_SPLITS:
         selected = [row for row in result.rows if row.split == split]
         path = output / (split + ".jsonl.gz")
         digestor = hashlib.sha256()

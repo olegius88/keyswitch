@@ -17,6 +17,7 @@ TOOLS = str(Path(__file__).resolve().parents[1] / "tools")
 if TOOLS not in sys.path:
     sys.path.insert(0, TOOLS)
 import verify_lexical_compatibility as compatibility
+from model_protocol import ACTIVE_SPLITS
 
 
 class LexicalCompatibilityTests(unittest.TestCase):
@@ -50,7 +51,7 @@ class LexicalCompatibilityTests(unittest.TestCase):
         for kind in compatibility.ANCHORS:
             self.write(compatibility.TRAINERS[kind], ("frozen trainer " + kind).encode())
             partitions: dict[str, str] = {}
-            for split in compatibility.SPLITS:
+            for split in ACTIVE_SPLITS:
                 relative = f"model/{kind}/{split}.jsonl.gz"
                 self.write(relative, gzip.compress((split + " frozen bytes").encode(), mtime=0))
                 partitions[split] = compatibility.checksum(self.root / relative)
@@ -82,7 +83,7 @@ class LexicalCompatibilityTests(unittest.TestCase):
         for kind in compatibility.ANCHORS:
             result = compatibility.verify(kind, root=self.root)
             self.assertTrue(result["compatible"])
-            self.assertEqual(result["verified_partitions"], list(compatibility.SPLITS))
+            self.assertEqual(result["verified_partitions"], list(ACTIVE_SPLITS))
             self.assertNotIn("accepted", result)
 
     def test_actual_frozen_partitions_sources_trainers_and_anchors_are_required(self) -> None:
@@ -90,7 +91,7 @@ class LexicalCompatibilityTests(unittest.TestCase):
                  "tools/context_optimizer.c", *compatibility.lexical_files(self.generation)]
         for kind in compatibility.ANCHORS:
             files.extend([compatibility.TRAINERS[kind], *(f"model/{kind}/{name}" for name in compatibility.ANCHORS[kind]),
-                          *(f"model/{kind}/{split}.jsonl.gz" for split in compatibility.SPLITS)])
+                          *(f"model/{kind}/{split}.jsonl.gz" for split in ACTIVE_SPLITS)])
         for relative in files:
             with self.subTest(path=relative):
                 path = self.root / relative

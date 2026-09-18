@@ -155,4 +155,5 @@ src/keyswitch/**/*.py text eol=lf
 tests/*.py text eol=lf
 tools/*.py text eol=lf
 model/context_v3/*.json text eol=lf
+model/prefix_v2/*.json text eol=lf
 model/intent_v1/compatibility/*.json text eol=lf
