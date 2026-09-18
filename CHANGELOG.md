@@ -4,6 +4,19 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.25.2 — 2026-09-18
+
+- Deliver a withheld Enter or Tab that was waiting behind a key whose release was never
+  seen. The engine holds the key so the corrected word is submitted rather than the
+  wrong one, and it waits for every key to come up first; a press whose release is lost
+  is only forgotten after three seconds, while the action gave up after two, so the
+  keystroke was dropped one second before the obstacle would have cleared itself. On a
+  Windows session that cost 16 Enter presses, and the user saw a keyboard whose Enter
+  had stopped working until KeySwitch was closed. A key already held when the Enter
+  arrived and still held at the deadline is now forgotten and the key goes through; the
+  cautious answer is kept where it belongs - when the Enter's own release was never
+  seen, or when a key pressed after it is still down.
+
 ## 0.25.1 — 2026-09-18
 
 - Let an erase cancel the hold a caret move puts on the next word. The rule exists

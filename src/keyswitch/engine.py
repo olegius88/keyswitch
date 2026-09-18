@@ -2274,13 +2274,14 @@ class KeySwitchEngine:
         self._pending_trigger_keycode = stroke.keycode
         return True
 
-    def _prune_stale_presses(self, now: float) -> None:
+    def _prune_stale_presses(self, now: float, *, older_than: float = STALE_PRESS_SECONDS,
+                             keep: int | None = None) -> None:
         """Forget presses whose release was never delivered (focus changes)."""
 
         stale = [
             keycode
             for keycode, since in self._pressed_since.items()
-            if now - since > STALE_PRESS_SECONDS
+            if now - since > older_than and keycode != keep
         ]
         if not stale:
             return
@@ -2947,8 +2948,30 @@ class KeySwitchEngine:
             self._update(last_error=str(error), last_action="Ошибка Enter/Tab · проверьте приложение")
 
     def _expire_deferred_action(self) -> None:
-        if self._deferred_action is not None and time.monotonic() >= self._action_deadline:
+        """Enter waited for every key to come up. Decide what a key that never did means.
+
+        A press whose release was lost holds the action hostage: the engine forgets such
+        a press only after three seconds, while the action gives up after two, so an
+        Enter waiting behind an unrelated stuck key was dropped a second before the
+        engine would have freed it - and a dropped Enter is a keystroke that vanishes
+        with nothing on screen to explain it. A key already held when the Enter arrived
+        and still held at the deadline is not coming up; it is forgotten and the action
+        goes through. The action's own key is never forgotten that way: a release nobody
+        saw is a press nobody finished, and that case keeps the cautious answer.
+        """
+
+        action = self._deferred_action
+        if action is None or time.monotonic() < self._action_deadline:
+            return
+        now = time.monotonic()
+        self._prune_stale_presses(now, older_than=now - (self._action_deadline - ACTION_TIMEOUT_SECONDS),
+                                  keep=action.keycode)
+        if self._pressed or self._modifier_keycodes:
+            # Either the Enter itself was never seen to come up, or a key pressed after
+            # it is still down. Both keep the cautious answer.
             self._clear_word(reason="action_release_timeout")
+            return
+        self._maybe_execute_pending(action)
 
     def _expire_manual_correction(self) -> None:
         if (

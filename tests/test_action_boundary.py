@@ -259,6 +259,45 @@ class ActionBoundaryTests(unittest.TestCase):
                 self.assertFalse(self.backend._holding)
                 self.api.text = ""
 
+    def test_a_stuck_unrelated_key_no_longer_swallows_the_enter(self) -> None:
+        """A press whose release was lost must not cost the user a keystroke.
+
+        The engine forgets such a press after three seconds and the deferred action
+        gave up after two, so an Enter waiting behind an unrelated key was dropped one
+        second before the obstacle would have cleared itself. Recorded on Windows
+        0.24.0: twenty-three Enter presses cancelled as `action_release_timeout`,
+        and the user saw a keyboard whose Enter had stopped working.
+        """
+
+        self.api.physical(self.key(ord("A"), SCANS["a"]))  # pressed, never released
+        self.type("ghbdtn")
+        self.api.physical(self.key(VK_RETURN, 28))
+        self.api.physical(self.key(VK_RETURN, 28, pressed=False))
+        self.flush()
+        self.assertEqual(self.api.messages, [])
+        with patch("keyswitch.engine.time.monotonic", return_value=self.engine._action_deadline + 1):
+            self.engine._expire_deferred_action()
+        self.flush()
+        # The stuck key typed its own character before the word; what matters is that
+        # the Enter behind it was submitted rather than swallowed.
+        self.assertEqual(self.api.messages, ["фпривет"])
+        self.assertFalse(self.backend._holding)
+
+    def test_a_key_pressed_after_the_enter_keeps_the_cautious_answer(self) -> None:
+        """Freeing the Enter is about obstacles that predate it, not about new typing."""
+        self.type("ghbdtn")
+        self.api.physical(self.key(VK_RETURN, 28))
+        self.flush()
+        deadline = self.engine._action_deadline
+        # A key held down after the Enter was withheld: still down at the deadline, and
+        # young enough that nothing about it says its release was lost.
+        self.engine._pressed.add(99)
+        self.engine._pressed_since[99] = deadline
+        with patch("keyswitch.engine.time.monotonic", return_value=deadline + 1):
+            self.engine._expire_deferred_action()
+        self.flush()
+        self.assertEqual(self.api.messages, [])
+
     def test_missing_release_times_out_without_sending_and_stop_releases_capture(self) -> None:
         self.type("ghbdtn")
         self.api.physical(self.key(VK_RETURN, 28))
