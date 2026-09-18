@@ -645,6 +645,10 @@ class KeySwitchEngine:
             self._log_pending_dropped("backspace")
             self._pending = None
             self._pending_learning_action = None
+            # Erasing is not appending. A caret moved into finished text makes the next
+            # word untouchable because nobody knows what stands in front of it; a user
+            # who then rubs that text out has answered the question - nothing does.
+            self._caret_moved = False
             if self._strokes:
                 self._strokes.pop()
                 if self._strokes:

@@ -50,6 +50,28 @@ class CaretMoveTests(InputIntegrityTests):
         self.type("ghbdtn ", group=0)
         self.assertEqual(self.backend.text, "ghbdtn привет ")
 
+    def test_erasing_after_the_move_answers_the_question_the_rule_asks(self) -> None:
+        """The rule holds a word because nobody knows what precedes the caret.
+
+        A user who moves the caret and then rubs the text out has said what precedes
+        it: nothing. Holding the next word after that is caution with no question left,
+        and it is what an editor's own "select all, erase, retype" does every time.
+        """
+
+        self.tap(self.key("Left"))
+        self.tap(self.key("BackSpace"))
+        self.type("ghbdtn ", group=0)
+        self.assertEqual(self.backend.text, "привет ")
+        # The shape an editor actually uses to empty a single-line field, and the one
+        # the native Windows end-to-end test drives: Home, Shift+End, BackSpace.
+        self.reset_editor()
+        self.type("руддщ", group=1)
+        self.tap(self.key("Home"))
+        self.tap(self.key("End"))
+        self.tap(self.key("BackSpace"))
+        self.type("ghbdtn ", group=0)
+        self.assertTrue(self.backend.text.endswith("привет "), self.backend.text)
+
     def test_pause_still_converts_the_held_word_by_hand(self) -> None:
         self.tap(self.key("Left"))
         self.type("ghbdtn ", group=0)

@@ -1,4 +1,4 @@
-# KeySwitch 0.25.0
+# KeySwitch 0.25.1
 
 ## Русский
 
@@ -8,10 +8,10 @@
 
 ### Файлы выпуска
 
-- `keyswitch_0.25.0_amd64.deb` — Ubuntu/Xubuntu, сеанс X11.
-- `KeySwitch-Setup-0.25.0-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
+- `keyswitch_0.25.1_amd64.deb` — Ubuntu/Xubuntu, сеанс X11.
+- `KeySwitch-Setup-0.25.1-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
   сертификатом издателя: SmartScreen покажет предупреждение.
-- `KeySwitch-0.25.0-windows-x64.zip` — переносимый архив для Windows.
+- `KeySwitch-0.25.1-windows-x64.zip` — переносимый архив для Windows.
 - `SHA256SUMS` — контрольные суммы трёх файлов; сверьте их перед установкой.
 
 ### Модели те же, кандидат остаётся кандидатом
@@ -45,7 +45,8 @@
 Слово, набранное сразу после такого перемещения, больше не переключается автоматически:
 `Pause` переключит его вручную. Настройка «Не исправлять слово сразу после перемещения
 курсора» отключает это поведение. Если чтение контекста активного поля работает, текст перед
-курсором известен по-настоящему и правило не применяется.
+курсором известен по-настоящему и правило не применяется. Стирание отменяет удержание:
+поле, очищенное через Home, Shift+End и BackSpace, снова начинается с чистого листа.
 
 ### Автозапуск в Windows
 
@@ -74,10 +75,10 @@ the ones that shipped in 0.24.0. The full list is in [CHANGELOG.md](CHANGELOG.md
 
 ### Release files
 
-- `keyswitch_0.25.0_amd64.deb` — Ubuntu/Xubuntu on an X11 session.
-- `KeySwitch-Setup-0.25.0-x64.exe` — installer for Windows 10/11 x64. It is not signed with
+- `keyswitch_0.25.1_amd64.deb` — Ubuntu/Xubuntu on an X11 session.
+- `KeySwitch-Setup-0.25.1-x64.exe` — installer for Windows 10/11 x64. It is not signed with
   a publisher certificate, so SmartScreen shows a warning.
-- `KeySwitch-0.25.0-windows-x64.zip` — portable archive for Windows.
+- `KeySwitch-0.25.1-windows-x64.zip` — portable archive for Windows.
 - `SHA256SUMS` — checksums of the three files; verify them before installing.
 
 ### Same models, the candidate stays a candidate
@@ -112,7 +113,8 @@ watched nothing being typed, and it is usually moved there to finish or fix what
 written. The word typed right after such a move is no longer switched automatically;
 `Pause` switches it by hand. The setting "Do not correct a word right after the caret
 moves" turns the behaviour off. Where the active field can be read, the text before the
-caret is really known and the rule does not apply.
+caret is really known and the rule does not apply. Erasing cancels the hold: a field
+emptied with Home, Shift+End and BackSpace starts from a clean slate again.
 
 ### Windows startup
 

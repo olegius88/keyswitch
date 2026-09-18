@@ -4,6 +4,14 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.25.1 — 2026-09-18
+
+- Let an erase cancel the hold a caret move puts on the next word. The rule exists
+  because nobody knows what stands in front of a caret that was moved into finished
+  text; a user who then rubs that text out has answered the question, and an editor
+  emptied with Home, Shift+End and BackSpace is the commonest way to ask it. Without
+  this, the word typed after clearing a field was left in the layout it was typed in.
+
 ## 0.25.0 — 2026-09-18
 
 - Keep the context-v1 + prefix-v1 pair. The context-v3 + prefix-v2 candidate
