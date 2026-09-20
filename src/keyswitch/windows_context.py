@@ -13,9 +13,15 @@ import importlib
 import sys
 import threading
 from collections.abc import Sequence
-from typing import Protocol, cast
+from typing import Final, Protocol, cast
 
 from .input_context import CONTEXT_LIMIT, FieldContext, FieldRole
+
+
+# The type library the build pre-generates and the runtime opens must name the
+# same file; a typo here would silently trigger code generation at runtime.
+UI_AUTOMATION_LIBRARY: Final = "UIAutomationCore.dll"
+_MISSING: Final = object()
 
 
 class _Range(Protocol):
@@ -100,7 +106,7 @@ class WindowsFieldReader:
             self._com = com
             try:
                 client = cast(_ComClient, importlib.import_module("comtypes.client"))
-                library = client.GetModule("UIAutomationCore.dll")
+                library = _type_library(client)
                 automation = client.CreateObject(library.CUIAutomation8, interface=library.IUIAutomation2)
                 text_interface = library.IUIAutomationTextPattern
             except Exception:
@@ -163,6 +169,32 @@ class WindowsFieldReader:
             return FieldContext(application, field_id, source="uia")
         role: FieldRole = "search" if "search" in element.CurrentAutomationId.casefold() else "text"
         return FieldContext(application, field_id, prefix, suffix, role, source="uia").bounded()
+
+
+def _type_library(client: _ComClient) -> _TypeLibrary:
+    """Open the bundled UI Automation wrapper on any machine, not only the build one.
+
+    comtypes writes the modification time of ``UIAutomationCore.dll`` into the
+    wrapper module it generates and refuses to import that module wherever the
+    file differs, unless ``sys.frozen`` exists (``comtypes/_tlib_version_checker.py``
+    raises ``ImportError("Typelib different than module")``). The build generates
+    the wrapper once on the build machine and Nuitka deliberately does not set
+    ``sys.frozen`` ("Nuitka does *not* ``sys.frozen`` unlike other tools",
+    Nuitka 4.2 README). Every other machine therefore rejected the bundled
+    wrapper, and regenerating it inside a frozen package cannot be imported
+    back, so accessibility reads failed with ImportError from the first run.
+    The flag is set only around this call and restored afterwards.
+    """
+
+    previous = sys.__dict__.get("frozen", _MISSING)
+    sys.__dict__["frozen"] = True
+    try:
+        return client.GetModule(UI_AUTOMATION_LIBRARY)
+    finally:
+        if previous is _MISSING:
+            sys.__dict__.pop("frozen", None)
+        else:
+            sys.__dict__["frozen"] = previous
 
 
 def probe_uia() -> dict[str, object]:

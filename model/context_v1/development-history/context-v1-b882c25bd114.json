@@ -1,0 +1,24 @@
+{
+ "schema_version": "1",
+ "model_version": "context-v1-b882c25bd114",
+ "status": "rejected-on-independent-test",
+ "reason": "Candidate 4 (collision pairs resolved by context, six more applications, holdout-3 folded into development). Scored once on holdout-4.json: 341 false conversions on the independent test, all in two authored negative families - the transliterated loanword `аутлук` (240 rows, every row) and the identifier-like `httpx` (96) plus `htop` after a slash (4) and one `grpc` row. The shipped candidate 3 converts the same `аутлук` and `httpx` rows and 773 rows in total on this file, including Russian collision words after Russian context (`уфе`, `вузе`, `муку`, `лук`); the release policy requires zero false conversions regardless, so the candidate is not promoted. Collision families on test: zero false conversions on all six unseen pairs, contextual recall between 50% and 100% per pair.",
+ "selected_epoch": "27",
+ "development_loss": "0.67030325",
+ "split_namespace": "keyswitch:context-v1:candidate3",
+ "family_counts": "{'development': 143, 'test': 193, 'train': 665}",
+ "test": "{'baseline_converted_correctly': 24878, 'baseline_false_conversions': 336, 'converted_correctly': 32082, 'correct_actions': 67971, 'desired_conversions': 34682, 'false_conversions': 341, 'rows': 71866}",
+ "candidate3_on_the_same_test": "{'correct_actions': 65212, 'converted_correctly': 30421, 'false_conversions': 773}",
+ "evidence_scope": "author-created-synthetic-scenarios-not-real-world-quality; holdout-4.json is now disclosed and may not serve as a new independent test",
+ "sources": "scenarios-candidate4.json, holdout-4.json and candidate4-changes.patch in this directory",
+ "feature_version": 2,
+ "actions": [
+  "keep",
+  "convert",
+  "wait",
+  "suggest"
+ ],
+ "conversion_threshold": 0.985,
+ "weights_sha256": "b882c25bd1148758e2a3d95d81b3c92b9de3b869350b8f4ef1643295e261ce47",
+ "weights_count": "12865"
+}

@@ -1,117 +1,102 @@
-# KeySwitch 0.26.0
+# KeySwitch 0.26.1
 
 ## Русский
 
-KeySwitch теперь работает на macOS. Всё остальное — как в 0.25.3, полный перечень
-в [CHANGELOG.md](CHANGELOG.md).
+Исправление двух ошибок. Одна портила текст на всех системах, вторая держала
+выключенной целую возможность на Windows. Полный перечень — в
+[CHANGELOG.md](CHANGELOG.md).
 
 ### Файлы выпуска
 
-- `KeySwitch-0.26.0-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее), macOS 13 и новее.
-- `KeySwitch-0.26.0-macos-x86_64.zip` — Mac на процессоре Intel, macOS 13 и новее.
-- `keyswitch_0.26.0_amd64.deb` — Ubuntu/Xubuntu, сеанс X11.
-- `KeySwitch-Setup-0.26.0-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
+- `KeySwitch-Setup-0.26.1-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
   сертификатом издателя: SmartScreen покажет предупреждение.
-- `KeySwitch-0.26.0-windows-x64.zip` — переносимый архив для Windows.
+- `KeySwitch-0.26.1-windows-x64.zip` — переносимый архив для Windows.
+- `keyswitch_0.26.1_amd64.deb` — Ubuntu/Xubuntu, сеанс X11.
+- `KeySwitch-0.26.1-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее), macOS 13 и новее.
+- `KeySwitch-0.26.1-macos-x86_64.zip` — Mac на процессоре Intel, macOS 13 и новее.
 - `SHA256SUMS` — контрольные суммы всех файлов; сверьте их перед установкой.
 
 Архив для Mac нужен ровно один: сборка для Apple Silicon не запускается на Intel и
-наоборот. Если не знаете, какой у вас, откройте меню Apple → «Об этом Mac»: там указан
-либо чип Apple, либо процессор Intel.
+наоборот.
 
-### Что умеет macOS-версия
+### Слово больше не превращается в знаки препинания
 
-Она исправляет раскладку тем же движком и теми же двумя моделями, что Linux и Windows, —
-им всё равно, где работать. Напечатанное `ghbdtn ` становится `привет `.
+Шесть русских букв — б, ю, ж, э, х, ъ — стоят на клавишах запятой, точки и кавычек.
+Поэтому у короткого русского слова «другое прочтение» иногда оказывается не словом, а
+россыпью знаков: набранное `дюп` в другой раскладке — это `l.g`. Такую замену
+запрещал только один из слоёв программы, и правильно набранное слово изредка
+превращалось в мусор.
 
-Значок в строке меню показывает текущую раскладку и открывает всё остальное:
-автопереключение, звук, уведомления, историю, исключения, настройки. Окно настроек — то
-же, что на Windows, со всеми десятью разделами.
+Теперь запрет действует на всех слоях. Восстановление имён файлов вроде `.dist` и
+сокращений вроде `don't` работает как прежде: точка в начале и один апостроф внутри
+слова — это по-прежнему слово.
 
-Программа читает текст перед курсором через систему универсального доступа. Это помогает
-там, где слово дописывают к уже набранному, — раньше такие случаи приходилось угадывать.
+### На Windows снова читается текст перед курсором
 
-Отдельная приятная разница: на macOS придержанные Enter и Tab уходят по назначению без
-осторожности, которая нужна на Windows. Там система позволяет придержать клавишу
-по-настоящему, поэтому вся сложность, из-за которой вышли 0.25.2 и 0.25.3, попросту не
-возникает.
+Программа умеет заглядывать в поле ввода и видеть то, что там уже написано: это
+помогает, когда слово дописывают к набранной фразе, и заметно улучшает выбор языка.
+На Windows эта возможность не открывалась ни в одной установленной версии — только на
+той машине, где выпуск собирался.
 
-### Установка
+Причина оказалась в том, как устроена библиотека доступа к интерфейсу Windows: она
+записывает в сгенерированный ею модуль время изменения системного файла
+`UIAutomationCore.dll` и отказывается загружать этот модуль там, где файл другой, —
+если только программа не объявляет себя «замороженной» сборкой. KeySwitch теперь
+объявляет это ровно на время одного вызова. Возможность включена по умолчанию;
+выключается она в настройках, «Автокоррекция» → «Читать контекст активного поля».
 
-1. Распакуйте архив и перенесите `KeySwitch.app` в «Программы».
-2. При первом запуске macOS спросит, можно ли программе следить за клавиатурой. Ответьте
-   «Открыть настройки» и включите KeySwitch в разделе «Конфиденциальность и безопасность»
-   → «Универсальный доступ». Разрешение обязательно: без него клавиатуры не видно, и
-   KeySwitch честно ждёт, а не делает вид, что работает.
-3. Как только переключатель включён, программа продолжает сама — перезапускать не нужно.
-
-Приложение подписано сертификатом разработчика, но ещё не заверено у Apple. Поэтому при
-первом открытии система может не пустить его сразу: откройте «Конфиденциальность и
-безопасность» и нажмите «Открыть всё равно». На macOS 13 и 14 достаточно открыть
-программу через контекстное меню.
-
-### Чего на macOS пока нет
-
-- Проверка обновлений: на macOS она не работает, обновляться нужно вручную.
-- Заверение у Apple: из-за этого разрешение на клавиатуру придётся выдать заново после
-  обновления программы. Программа об этом скажет и снова откроет нужный раздел.
+Убедиться, что всё в порядке, можно командой `KeySwitch.exe --diagnose`: в поле
+`context_field_access` должно быть `"available": true`.
 
 Технический журнал может содержать анализируемые слова. Просматривайте его перед
 передачей. Приватные логи и переписка не входят в состав выпуска.
 
 ## English
 
-KeySwitch now runs on macOS. Everything else is as in 0.25.3; the full list is in
-[CHANGELOG.md](CHANGELOG.md).
+Two fixes. One of them damaged text on every system, the other kept a whole capability
+switched off on Windows. The full list is in [CHANGELOG.md](CHANGELOG.md).
 
 ### Release files
 
-- `KeySwitch-0.26.0-macos-arm64.zip` — Mac with Apple silicon (M1 and later), macOS 13 or newer.
-- `KeySwitch-0.26.0-macos-x86_64.zip` — Mac with an Intel processor, macOS 13 or newer.
-- `keyswitch_0.26.0_amd64.deb` — Ubuntu/Xubuntu on an X11 session.
-- `KeySwitch-Setup-0.26.0-x64.exe` — installer for Windows 10/11 x64. It is not signed with
+- `KeySwitch-Setup-0.26.1-x64.exe` — installer for Windows 10/11 x64. It is not signed with
   a publisher certificate, so SmartScreen shows a warning.
-- `KeySwitch-0.26.0-windows-x64.zip` — portable archive for Windows.
+- `KeySwitch-0.26.1-windows-x64.zip` — portable archive for Windows.
+- `keyswitch_0.26.1_amd64.deb` — Ubuntu/Xubuntu on an X11 session.
+- `KeySwitch-0.26.1-macos-arm64.zip` — Mac with Apple silicon (M1 and later), macOS 13 or newer.
+- `KeySwitch-0.26.1-macos-x86_64.zip` — Mac with an Intel processor, macOS 13 or newer.
 - `SHA256SUMS` — checksums of every file; verify them before installing.
 
 Exactly one Mac archive is the right one: a build for Apple silicon does not run on Intel,
-or the other way round. The Apple menu, "About This Mac", says which you have.
+or the other way round.
 
-### What the macOS build does
+### A word is no longer turned into punctuation
 
-It corrects the layout with the same engine and the same two models as Linux and Windows,
-which never knew which system they were running on. Typing `ghbdtn ` leaves `привет `.
+Six Russian letters — б, ю, ж, э, х, ъ — sit on the comma, period and quote keys, so the
+other reading of a short Russian word is sometimes not a word at all but a scattering of
+marks: typed `дюп` reads `l.g` in the other layout. Only one of the layers inside the
+program refused such a replacement, and a correctly typed word was occasionally turned
+into rubbish.
 
-The menu bar shows the current layout and opens everything else: automatic switching,
-sound, notifications, history, exclusions, settings. The settings window is the one
-Windows already had, with all ten pages.
+The refusal now covers every layer. Restoring a file name such as `.dist` or a
+contraction such as `don't` works as before: a leading dot and one apostrophe inside a
+word still make a word.
 
-The text in front of the caret is read through the accessibility interface, which helps
-where a word is being added to text already on screen - cases that previously had to be
-guessed at.
+### Windows reads the text in front of the caret again
 
-One pleasant difference: on macOS a withheld Enter or Tab goes through without the caution
-Windows needs. There the system allows a key to be genuinely withheld, so the whole
-difficulty that produced 0.25.2 and 0.25.3 never arises.
+KeySwitch can look into the input field and see what is already written there. That helps
+where a word is being added to an existing phrase, and it markedly improves the choice of
+language. On Windows the capability had never opened in any installed version — only on
+the machine where the release was built.
 
-### Installing
+The cause was in the library that reaches the Windows interface: it writes the
+modification time of the system file `UIAutomationCore.dll` into the module it generates
+and then refuses to load that module wherever the file differs, unless the program
+declares itself a frozen build. KeySwitch now declares it for the length of that one
+call. The capability is on by default and is switched off under Autocorrection, "Читать
+контекст активного поля", in the settings.
 
-1. Unpack the archive and move `KeySwitch.app` into Applications.
-2. On the first launch macOS asks whether the program may watch the keyboard. Choose to
-   open the settings and enable KeySwitch under Privacy & Security, Accessibility. The
-   permission is required: without it there is no keyboard to watch, and KeySwitch waits
-   openly rather than pretending to work.
-3. The moment the switch is on it carries on by itself; no relaunch is needed.
-
-The application is signed with a developer certificate but is not notarized by Apple yet,
-so the system may refuse to open it at first: go to Privacy & Security and choose to open
-it anyway. On macOS 13 and 14 opening it from the context menu is enough.
-
-### Not on macOS yet
-
-- Update checking does not work there; updates are installed by hand.
-- Without notarization the keyboard permission has to be granted again after the program
-  is updated. KeySwitch says so and reopens the right pane.
+`KeySwitch.exe --diagnose` confirms it: the `context_field_access` field should read
+`"available": true`.
 
 Technical logs may contain evaluated words. Review them before sharing. Private logs and
 conversations are excluded from the release.

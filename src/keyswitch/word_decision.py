@@ -90,6 +90,11 @@ def opening_letter_decision(
     return None
 
 
+# The refusal the detector path and the context policy share for a replacement
+# that is not a word; the log reader must see one reason from both.
+NOT_A_WORD_REASON = "другая раскладка пишет это не буквами"
+
+
 def word_shape_veto(decision: DetectionDecision) -> DetectionDecision:
     """A word may not be replaced by something that is not a word.
 
@@ -106,8 +111,4 @@ def word_shape_veto(decision: DetectionDecision) -> DetectionDecision:
         return decision
     if decision.replacement.isalpha():
         return decision
-    return replace(
-        decision,
-        should_convert=False,
-        reason="другая раскладка пишет это не буквами",
-    )
+    return replace(decision, should_convert=False, reason=NOT_A_WORD_REASON)

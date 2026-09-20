@@ -1,0 +1,24 @@
+{
+ "schema_version": "1",
+ "model_version": "context-v1-14a128a08245",
+ "status": "rejected-on-independent-test",
+ "reason": "Candidate 5: candidate 4 plus holdout-4 folded into development, 35 transliterated loanwords and 39 identifier-like terms added as training negatives, blind holdout-5 without collision pairs (all 18 pairs of the shipped lexicons are disclosed). Scored once on holdout-5.json: 275 false conversions - `збс` -> `p,c` (208 rows), `хы` -> `[s` (29), `xev` -> `чум` (28), `lz4` (5), `фетч` (5). The shipped candidate 3 converts 476 rows of the same file (`збс` 240, `фетч` 236). Every fresh authored test exposes a correctly typed Russian abbreviation or interjection that the feature-2 character model cannot keep without having seen it; the release policy requires zero false conversions, so the candidate is not promoted and the iteration stops here.",
+ "selected_epoch": "11",
+ "development_loss": "0.857554177",
+ "split_namespace": "keyswitch:context-v1:candidate3",
+ "family_counts": "{'development': 200, 'test': 187, 'train': 875}",
+ "test": "{'baseline_converted_correctly': 22062, 'baseline_false_conversions': 0, 'converted_correctly': 30284, 'correct_actions': 63624, 'desired_conversions': 32498, 'false_conversions': 275, 'rows': 66970}",
+ "candidate3_on_the_same_test": "{'correct_actions': 62962, 'converted_correctly': 29784, 'false_conversions': 476}",
+ "evidence_scope": "author-created-synthetic-scenarios-not-real-world-quality; holdout-5.json is now disclosed and may not serve as a new independent test",
+ "sources": "scenarios-candidate5.json, holdout-5.json and candidate5-changes.patch in this directory",
+ "feature_version": 2,
+ "actions": [
+  "keep",
+  "convert",
+  "wait",
+  "suggest"
+ ],
+ "conversion_threshold": 0.985,
+ "weights_sha256": "14a128a08245e84b01744aab307d120e5f645a7c2c707e8a63eb927addcbf960",
+ "weights_count": "16049"
+}

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import importlib
 import unittest
 import sys
 from dataclasses import replace
+from typing import Protocol, cast
 from unittest.mock import MagicMock, PropertyMock, patch
 
 from keyswitch.atspi_context import AtspiFieldReader, _native_api
@@ -12,8 +14,25 @@ from keyswitch.context_access import PlatformFieldReader
 from keyswitch.context_model import ContextModel
 from keyswitch.context_policy import ContextPolicy
 from keyswitch.input_context import FieldContext
-from keyswitch.windows_context import WindowsFieldReader, probe_uia
+from keyswitch.windows_context import (
+    UI_AUTOMATION_LIBRARY,
+    WindowsFieldReader,
+    probe_uia,
+)
 from test_context_policy import ContextEngineTests
+
+# Read out of the caller's globals by comtypes' `_check_version`; see the
+# Windows-only test below. Any existing file proves the timestamp comparison.
+typelib_path = sys.executable
+
+
+class _VersionChecker(Protocol):
+    def _check_version(self, actual: str, cached_mtime: float) -> None: ...
+
+
+class _CodeGenerator(Protocol):
+    @property
+    def version(self) -> str: ...
 
 
 class WindowsContextTests(unittest.TestCase):
@@ -125,6 +144,63 @@ class WindowsContextTests(unittest.TestCase):
                 WindowsFieldReader()
         com.CoInitializeEx.assert_called_once_with(0)
         com.CoUninitialize.assert_called_once()
+
+    def test_bundled_type_library_is_opened_as_a_frozen_import(self) -> None:
+        """The generated wrapper must import on a machine that is not the build one.
+
+        comtypes rejects its own generated module wherever the modification time
+        of UIAutomationCore.dll differs, unless ``sys.frozen`` exists, and Nuitka
+        never sets it. Without this guard the installed application reported
+        `import_error` on every read from the first run on.
+        """
+
+        seen: list[tuple[str, object]] = []
+
+        def record(name: str) -> MagicMock:
+            seen.append((name, sys.__dict__.get("frozen", "<absent>")))
+            return MagicMock()
+
+        com, client = MagicMock(), MagicMock()
+        client.GetModule.side_effect = record
+        client.CreateObject.return_value = self.automation
+        self.assertNotIn("frozen", sys.__dict__)
+        with patch("keyswitch.windows_context.importlib.import_module", side_effect=[com, client]):
+            WindowsFieldReader().close()
+        self.assertEqual(seen, [(UI_AUTOMATION_LIBRARY, True)])
+        self.assertNotIn("frozen", sys.__dict__)
+
+        seen.clear()
+        com, client = MagicMock(), MagicMock()
+        client.GetModule.side_effect = record
+        client.CreateObject.return_value = self.automation
+        with patch.dict("sys.__dict__", {"frozen": "console_exe"}):
+            with patch("keyswitch.windows_context.importlib.import_module", side_effect=[com, client]):
+                WindowsFieldReader().close()
+            self.assertEqual(sys.__dict__["frozen"], "console_exe")
+        self.assertEqual(seen, [(UI_AUTOMATION_LIBRARY, True)])
+        self.assertNotIn("frozen", sys.__dict__)
+
+    @unittest.skipUnless(sys.platform == "win32", "comtypes ships only on Windows")
+    def test_comtypes_still_rejects_a_foreign_type_library_timestamp(self) -> None:
+        """Pin the reason the guard exists, against the installed comtypes.
+
+        `_check_version` compares the modification time of the type library
+        recorded in the generated module with the one on this machine and
+        raises ImportError unless `sys.frozen` exists. `typelib_path` is read
+        from this caller's globals, so the module-level name below is what it
+        stats; any existing file proves the comparison, and 0.0 is a timestamp
+        no file has. If a future comtypes drops the check, this test fails and
+        the guard in windows_context can go with it.
+        """
+
+        comtypes = cast(_VersionChecker, importlib.import_module("comtypes"))
+        codegenerator = cast(
+            _CodeGenerator, importlib.import_module("comtypes.tools.codegenerator")
+        )
+        with self.assertRaises(ImportError):
+            comtypes._check_version(codegenerator.version, 0.0)
+        with patch.dict("sys.__dict__", {"frozen": True}):
+            comtypes._check_version(codegenerator.version, 0.0)
 
     def test_win32_pid_binding(self) -> None:
         self.pid.stop()

@@ -11,6 +11,7 @@ from .detector import DetectionDecision, LanguageDetector
 from .input_context import FieldContext, FieldReader, InputContext
 from .ortho_model import OrthoEvidence, OrthoModel, shape_of
 from .short_words import ISOLATED_SHORT_WORD_REASON, is_short_word_override
+from .word_decision import NOT_A_WORD_REASON
 
 
 @dataclass(frozen=True)
@@ -197,9 +198,37 @@ class ContextPolicy:
             }[prediction.action])
         result = ContextResult(decision, prediction, field, policy_applied=True,
                                decision_source="context_model")
-        if self.model.feature_version == 3:
+        if self.model.feature_version != 3:
+            result = self._licensed(result, baseline, alternative, target_group, field)
+        return self._spelling_a_word(result)
+
+    @staticmethod
+    def _spelling_a_word(result: ContextResult) -> ContextResult:
+        """A word is never replaced by something that is not one, whichever layer asked.
+
+        Six Russian letters sit on punctuation keys, so the Latin reading of a
+        Russian abbreviation such as ``збс`` is ``p,c`` and of ``дюп`` it is
+        ``l.g``. The detector's own conversions pass :func:`word_shape_veto` in
+        ``automatic_word_decision``; a conversion the model or the orthotactic
+        licence asked for did not, and the shipped model asked for exactly those,
+        with p=0.997, in every application it knows (found 20.09.2026 while
+        scoring a candidate). The model is, however, trained to restore what the
+        detector is not asked about: a dotfile (``ювшые`` is ``.dist``) and a
+        contraction (``вщтэе`` is ``don't``), so a leading dot and one inner
+        apostrophe are the two shapes a Latin reading may keep; a name with a
+        second dot, such as ``.env.local``, is the accepted cost. The refusal is
+        recorded as a safety decision, not as the model's opinion.
+        """
+
+        decision = result.decision
+        if not decision.should_convert or not decision.original.isalpha():
             return result
-        return self._licensed(result, baseline, alternative, target_group, field)
+        body = decision.replacement.removeprefix(".")
+        if body.isalpha() or word_shaped(body):
+            return result
+        vetoed = replace(decision, should_convert=False, reason=NOT_A_WORD_REASON)
+        return ContextResult(vetoed, result.prediction, result.field, policy_applied=result.policy_applied,
+                             decision_source="safety", fallback_reason="replacement_not_a_word")
 
     def _licensed(self, result: ContextResult, baseline: DetectionDecision, alternative: str,
                   target_group: int, field: FieldContext) -> ContextResult:

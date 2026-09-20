@@ -1,0 +1,801 @@
+diff --git a/model/context_v1/scenarios.json b/model/context_v1/scenarios.json
+index dcb7ecc..80e440e 100644
+--- a/model/context_v1/scenarios.json
++++ b/model/context_v1/scenarios.json
+@@ -1,6 +1,6 @@
+ {
+   "schema_version": 1,
+-  "description": "Author-created EN/RU input scenarios, not collected user messages. All variants of a physical token stay in one split. Candidate 3 folds the former holdout-2 families into development and adds technical terms, dotfiles, out-of-lexicon Russian and English tokens and slash contexts; holdout-3.json is the independent test.",
++  "description": "Author-created EN/RU input scenarios, not collected user messages. All variants of a physical token stay in one split. Candidate 5 folds the holdout-3 and holdout-4 families into development, carries the applications the shipped model abstained in and the `collisions` family (every pair of the shipped lexicons whose keys spell a lexicon word in both languages, resolved by the surrounding language), and adds transliterated loanwords and identifier-like terms as training negatives; holdout-5.json is the independent test.",
+   "russian": [
+     "привет",
+     "спасибо",
+@@ -103,7 +103,75 @@
+     "желательно",
+     "действительно",
+     "серьёзно",
+-    "подтверждение"
++    "подтверждение",
++    "разработчик",
++    "изменения",
++    "запуск",
++    "остановка",
++    "перезагрузка",
++    "установка",
++    "удаление",
++    "версия",
++    "папка",
++    "строка",
++    "символ",
++    "клавиша",
++    "кнопка",
++    "вкладка",
++    "курсор",
++    "выделение",
++    "вставка",
++    "копирование",
++    "поиск",
++    "замена",
++    "отчёт",
++    "журнал",
++    "событие",
++    "условие",
++    "причина",
++    "попытка",
++    "успех",
++    "неудача",
++    "внимание",
++    "срочно",
++    "вежливо",
++    "примерно",
++    "точно",
++    "быстро",
++    "спокойно",
++    "открыть",
++    "закрыть",
++    "перенести",
++    "скачать",
++    "загрузить",
++    "распаковать",
++    "настроить",
++    "подключить",
++    "отключить",
++    "перезапустить",
++    "проверено",
++    "готовность",
++    "ожидание",
++    "задержка",
++    "скорость",
++    "память",
++    "диск",
++    "сеть",
++    "сервер",
++    "клиент",
++    "пароль",
++    "логин",
++    "адрес",
++    "номер",
++    "письмо",
++    "звонок",
++    "встреча",
++    "перерыв",
++    "выходной",
++    "праздник",
++    "неделя",
++    "месяц",
++    "минута"
+   ],
+   "english": [
+     "hello",
+@@ -197,7 +265,71 @@
+     "wouldn't",
+     "couldn't",
+     "hasn't",
+-    "we've"
++    "we've",
++    "developer",
++    "changes",
++    "launching",
++    "stopping",
++    "restarting",
++    "install",
++    "remove",
++    "folder",
++    "line",
++    "symbol",
++    "button",
++    "window",
++    "cursor",
++    "selection",
++    "paste",
++    "copying",
++    "search",
++    "replace",
++    "report",
++    "journal",
++    "event",
++    "condition",
++    "reason",
++    "attempt",
++    "success",
++    "failure",
++    "attention",
++    "urgent",
++    "exactly",
++    "quickly",
++    "politely",
++    "roughly",
++    "calmly",
++    "open",
++    "close",
++    "move",
++    "download",
++    "upload",
++    "unpack",
++    "configure",
++    "connect",
++    "disconnect",
++    "verified",
++    "readiness",
++    "waiting",
++    "delay",
++    "speed",
++    "memory",
++    "disk",
++    "network",
++    "server",
++    "client",
++    "password",
++    "login",
++    "address",
++    "number",
++    "letter",
++    "call",
++    "meeting",
++    "break",
++    "weekend",
++    "holiday",
++    "week",
++    "month"
+   ],
+   "short_russian": [
+     "у",
+@@ -234,7 +366,23 @@
+     "ни",
+     "во",
+     "со",
+-    "уж"
++    "уж",
++    "ах",
++    "ох",
++    "эх",
++    "ой",
++    "ай",
++    "ух",
++    "эй",
++    "ум",
++    "эм",
++    "хм",
++    "тю",
++    "аж",
++    "ба",
++    "ха",
++    "хе",
++    "хи"
+   ],
+   "technical": [
+     "pm2",
+@@ -302,7 +450,37 @@
+     "m",
+     "p",
+     "q",
+-    "v"
++    "v",
++    "docker-compose",
++    "ssh-keygen",
++    "x86",
++    "utf-8",
++    "192.168.0.1",
++    "~/.bashrc",
++    "C:\\Users",
++    "user@host",
++    "foo::bar",
++    "a=b",
++    "--verbose",
++    "key_value",
++    "camelCase2",
++    "ID",
++    "URL",
++    "npm-run-all",
++    "git-lfs",
++    "x64",
++    "utf-16",
++    "10.0.0.1",
++    "~/.config",
++    "D:\\Games",
++    "root@localhost",
++    "std::vector",
++    "x=1",
++    "--dry-run",
++    "max_value",
++    "snakeCase3",
++    "PID",
++    "URI"
+   ],
+   "technical_terms": [
+     "mkdir",
+@@ -506,7 +684,132 @@
+     "udp",
+     "https",
+     "smtp",
+-    "imap"
++    "imap",
++    "rmdir",
++    "poetry",
++    "gunicorn",
++    "emacs",
++    "dpkg",
++    "bun",
++    "mocha",
++    "rollup",
++    "nuxt",
++    "koa",
++    "apollo",
++    "dayjs",
++    "confluence",
++    "centos",
++    "xcode",
++    "symfony",
++    "caddy",
++    "traefik",
++    "haproxy",
++    "certbot",
++    "stdin",
++    "argv",
++    "argc",
++    "jpg",
++    "utf",
++    "regexp",
++    "cherry",
++    "semver",
++    "swarm",
++    "kube",
++    "vagrant",
++    "packer",
++    "puppet",
++    "travis",
++    "circleci",
++    "bearer",
++    "digest",
++    "sftp",
++    "chown",
++    "snap",
++    "svelte",
++    "bitbucket",
++    "fedora",
++    "chgrp",
++    "htop",
++    "ncdu",
++    "ffmpeg",
++    "rabbitmq",
++    "kibana",
++    "grafana",
++    "prometheus",
++    "minikube",
++    "podman",
++    "buildah",
++    "skopeo",
++    "flake8",
++    "isort",
++    "ruff",
++    "pyright",
++    "alembic",
++    "pydantic",
++    "httpx",
++    "aiohttp",
++    "numpy",
++    "pandas",
++    "scipy",
++    "fish",
++    "mongosh",
++    "psql",
++    "mysqldump",
++    "pgadmin",
++    "dbeaver",
++    "postman",
++    "insomnia",
++    "swagger",
++    "openapi",
++    "grpc",
++    "protobuf",
++    "msgpack",
++    "choco",
++    "winget",
++    "scoop",
++    "nvm",
++    "pyenv",
++    "rbenv",
++    "flutter",
++    "httpd",
++    "httrack",
++    "xhtml",
++    "libxml",
++    "pyqt",
++    "tsx",
++    "jsx",
++    "pnpx",
++    "xrandr",
++    "xdg",
++    "xinput",
++    "xdotool",
++    "wmctrl",
++    "dconf",
++    "journalctl",
++    "udev",
++    "lsblk",
++    "lsusb",
++    "lspci",
++    "nmcli",
++    "dhcp",
++    "mtls",
++    "ldap",
++    "mqtt",
++    "amqp",
++    "zmq",
++    "etcd",
++    "istio",
++    "cilium",
++    "kubeadm",
++    "eksctl",
++    "gcloud",
++    "doctl",
++    "bcrypt",
++    "argon2",
++    "zlib",
++    "brotli",
++    "zstd",
++    "bzip2"
+   ],
+   "dotted": [
+     ".env",
+@@ -532,7 +835,31 @@
+     ".lock",
+     ".log",
+     ".txt",
+-    ".md"
++    ".md",
++    ".dockerignore",
++    ".prettierrc",
++    ".nvmrc",
++    ".local",
++    ".gitattributes",
++    ".mailmap",
++    ".babelrc",
++    ".stylelintrc",
++    ".pylintrc",
++    ".coveragerc",
++    ".gitmodules",
++    ".env.local",
++    ".flake8",
++    ".ruff.toml",
++    ".terraform",
++    ".helmignore",
++    ".npmignore",
++    ".yarnrc",
++    ".tool-versions",
++    ".python-version",
++    ".node-version",
++    ".kube",
++    ".docker",
++    ".aws"
+   ],
+   "russian_unknown": [
+     "пересборку",
+@@ -612,7 +939,110 @@
+     "настройи",
+     "ошбка",
+     "проврить",
+-    "работет"
++    "работет",
++    "отдебажить",
++    "отревьюить",
++    "релизнуть",
++    "стейджинг",
++    "хотфикс",
++    "докерфайл",
++    "бэкенд",
++    "фронтенд",
++    "эндпоинт",
++    "скриптик",
++    "стендап",
++    "фикстура",
++    "рефакторить",
++    "колбэк",
++    "постгрес",
++    "тайпскрипт",
++    "нгинкс",
++    "убунта",
++    "виндовс",
++    "макось",
++    "вотсап",
++    "конфлюенс",
++    "ваще",
++    "крч",
++    "здрасьте",
++    "капец",
++    "чото",
++    "Санёк",
++    "Серёга",
++    "Новосиб",
++    "пожалуста",
++    "растладка",
++    "обновлени",
++    "испрвить",
++    "закоммитил",
++    "запушил",
++    "смержил",
++    "пофиксил",
++    "задеплоил",
++    "откатил",
++    "ребейзнуть",
++    "черипикнуть",
++    "сквошнуть",
++    "форкнуть",
++    "форматтер",
++    "пайплайн",
++    "воркфлоу",
++    "деплоймент",
++    "инстанс",
++    "оркестратор",
++    "балансер",
++    "джира",
++    "телега",
++    "аутлук",
++    "экселька",
++    "пдфка",
++    "скриншотик",
++    "апдейтнуть",
++    "релизнул",
++    "хотфиксить",
++    "стейдж",
++    "препрод",
++    "локалхост",
++    "Екб",
++    "пжлст",
++    "кста",
++    "нзч",
++    "всм",
++    "фотошоп",
++    "иллюстратор",
++    "паверпоинт",
++    "файрфокс",
++    "скайп",
++    "ютуб",
++    "инста",
++    "вайбер",
++    "тикток",
++    "линкедин",
++    "твиттер",
++    "реддит",
++    "стим",
++    "плейстейшен",
++    "иксбокс",
++    "макбук",
++    "айпад",
++    "дебиан",
++    "федора",
++    "генту",
++    "хостинг",
++    "сабдомен",
++    "бэкап",
++    "снапшот",
++    "апгрейд",
++    "даунгрейд",
++    "спринт",
++    "бэклог",
++    "дейлик",
++    "созвон",
++    "апрув",
++    "реджект",
++    "чекаут",
++    "имхо",
++    "дратути"
+   ],
+   "english_unknown": [
+     "recieve",
+@@ -629,7 +1059,25 @@
+     "acheive",
+     "beleive",
+     "collegue",
+-    "comming"
++    "comming",
++    "dissapoint",
++    "existance",
++    "foriegn",
++    "goverment",
++    "happend",
++    "independant",
++    "knowlege",
++    "liason",
++    "recieved",
++    "definitly",
++    "recomend",
++    "accomodate",
++    "occurence",
++    "tommorow",
++    "begining",
++    "wierd",
++    "thier",
++    "becuase"
+   ],
+   "slash_heads": {
+     "russian": [
+@@ -638,7 +1086,15 @@
+       "да/",
+       "нет/",
+       "тест/",
+-      "прод/"
++      "прод/",
++      "код/",
++      "сборка/",
++      "версия/",
++      "файл/",
++      "папка/",
++      "ветка/",
++      "релиз/",
++      "тесты/"
+     ],
+     "english": [
+       "src/",
+@@ -646,7 +1102,89 @@
+       "lib/",
+       "path/",
+       "docs/",
+-      "/tmp/"
++      "/tmp/",
++      "app/",
++      "build/",
++      "dist/",
++      "/opt/",
++      "assets/",
++      "config/",
++      "/var/log/",
++      "public/"
+     ]
+-  }
++  },
++  "collisions": [
++    {
++      "russian": "внук",
++      "english": "dyer"
++    },
++    {
++      "russian": "дтп",
++      "english": "lng"
++    },
++    {
++      "russian": "душ",
++      "english": "lei"
++    },
++    {
++      "russian": "еще",
++      "english": "tot"
++    },
++    {
++      "russian": "кун",
++      "english": "rey"
++    },
++    {
++      "russian": "луны",
++      "english": "keys"
++    },
++    {
++      "russian": "муки",
++      "english": "verb"
++    },
++    {
++      "russian": "пуд",
++      "english": "gel"
++    },
++    {
++      "russian": "рук",
++      "english": "her"
++    },
++    {
++      "russian": "руку",
++      "english": "here"
++    },
++    {
++      "russian": "рут",
++      "english": "hen"
++    },
++    {
++      "russian": "шее",
++      "english": "itt"
++    },
++    {
++      "russian": "вузе",
++      "english": "dept"
++    },
++    {
++      "russian": "душа",
++      "english": "leif"
++    },
++    {
++      "russian": "лук",
++      "english": "ker"
++    },
++    {
++      "russian": "муку",
++      "english": "vere"
++    },
++    {
++      "russian": "руки",
++      "english": "herb"
++    },
++    {
++      "russian": "уфе",
++      "english": "eat"
++    }
++  ]
+ }
+diff --git a/tests/test_context_training.py b/tests/test_context_training.py
+index f4a9dd7..c453207 100644
+--- a/tests/test_context_training.py
++++ b/tests/test_context_training.py
+@@ -103,6 +103,44 @@ class ContextTrainingTests(unittest.TestCase):
+             with self.assertRaisesRegex(ValueError, "oversized"):
+                 verifier.verify_legacy(root, report_path, artifact)
+ 
++    def test_collision_pairs_are_validated_and_resolved_by_context(self) -> None:
++        """A collision is one key sequence that is a lexicon word in both languages.
++
++        The surrounding language decides it in both directions. Frequency only
++        defers the lone token whose other reading is ten times more frequent in
++        its own lexicon: ``еще``/``tot`` is such a pair (ratio above a thousand),
++        so ``tot`` alone waits and is never converted, while ``еще`` alone stays.
++        """
++
++        def payload(collisions: object) -> str:
++            return json.dumps({"schema_version": 1, "russian": [], "english": [], "short_russian": [],
++                               "technical": [], "technical_terms": [], "collisions": collisions},
++                              ensure_ascii=False)
++
++        with tempfile.TemporaryDirectory() as temporary:
++            path = Path(temporary) / "scenarios.json"
++            for invalid in ([{"russian": "еще"}], [{"russian": "еще", "english": "xxx"}],
++                            [{"russian": "щщщ", "english": "ooo"}], ["еще"]):
++                path.write_text(payload(invalid), encoding="utf-8")
++                with self.assertRaises(ValueError):
++                    trainer.build_corpus(path)
++            path.write_text(payload([{"russian": "еще", "english": "tot"}]), encoding="utf-8")
++            # The curated trusted short words are always added to a training corpus.
++            rows = [row for row in trainer.build_corpus(path) if row.category.startswith("collision")]
++        actions = {(row.evidence.original, row.evidence.field.before, row.evidence.field.after,
++                    row.evidence.trigger): row.action for row in rows}
++        self.assertEqual({row.family for row in rows}, {"tot"})
++        self.assertEqual(actions[("tot", "я думаю что ", "", "space")], "convert")
++        self.assertEqual(actions[("tot", "I think that ", "", "space")], "keep")
++        self.assertEqual(actions[("tot", "", "", "space")], "wait")
++        self.assertEqual(actions[("tot", "", "", "enter")], "suggest")
++        self.assertEqual(actions[("tot", "", "нужно сделать сегодня", "space")], "convert")
++        self.assertEqual(actions[("еще", "I think that ", "", "space")], "convert")
++        self.assertEqual(actions[("еще", "я думаю что ", "", "space")], "keep")
++        self.assertEqual(actions[("еще", "", "needs to be done today", "space")], "convert")
++        self.assertEqual(actions[("еще", "", "", "pause")], "keep")
++        self.assertTrue(all(not row.evidence.baseline_convert for row in rows))
++
+     def test_training_rejects_invalid_scenarios_and_missing_baseline(self) -> None:
+         with tempfile.TemporaryDirectory() as temporary:
+             path = Path(temporary) / "scenarios.json"
+diff --git a/tools/train_context_model.py b/tools/train_context_model.py
+index d7d2281..90e6c2d 100644
+--- a/tools/train_context_model.py
++++ b/tools/train_context_model.py
+@@ -37,8 +37,13 @@ from keyswitch.short_words import (
+ 
+ ROOT = Path(__file__).resolve().parents[1]
+ SCENARIOS = ROOT / "model/context_v1/scenarios.json"
+-HOLDOUT = ROOT / "model/context_v1/holdout-3.json"
++HOLDOUT = ROOT / "model/context_v1/holdout-5.json"
+ REPORT = ROOT / "model/context_v1/report.json"
++# The split salt is the one candidate 3 used, so every family keeps the split it had:
++# a new salt reshuffles train and development, and the reshuffle tried for candidate 4
++# put `pdf` (keys `зва`, an unknown token whose other reading looks like plain Russian)
++# into development, where no epoch of 70 reached zero false conversions. The held-out
++# test file is independent of this salt either way.
+ NAMESPACE = "keyswitch:context-v1:candidate3"
+ EPOCHS = 70
+ KEEP_IMPORTANCE = 1.0
+@@ -48,10 +53,34 @@ CONVERSION_THRESHOLD = 0.985
+ # application, so each application appears both with a declared role and with
+ # `unknown`. Pairing `unknown` only with a stand-in editor left the serving
+ # combination unseen.
++# The feature-2 model only decides in an application it has seen (`supports_features`);
++# elsewhere the engine falls back to the detector. The second row names applications
++# where the shipped candidate 3 abstained for exactly that reason in real Windows use,
++# a browser and a chat window among them; a browser field reads as `text` once the
++# accessibility reader works and as `unknown` until it does.
+ FIELDS = (("Telegram", "text"), ("Code", "text"), ("TestEditor", "unknown"),
+-          ("Telegram", "unknown"), ("chrome", "unknown"), ("Code", "unknown"))
++          ("Telegram", "unknown"), ("chrome", "unknown"), ("Code", "unknown"),
++          ("firefox", "text"), ("firefox", "unknown"), ("ChatGPT", "text"), ("ChatGPT", "unknown"),
++          ("explorer", "unknown"), ("thunderbird", "unknown"))
+ TERMINAL_FIELDS = (("Code", "code"), ("WindowsTerminal", "terminal"),
+-                   ("Telegram", "unknown"), ("Code", "unknown"))
++                   ("Telegram", "unknown"), ("Code", "unknown"),
++                   ("MobaXterm", "terminal"), ("webstorm64", "code"))
++TRIGGERS = ("space", "pause", "enter", "punctuation")
++# A word whose keys spell a lexicon word of the other language is the one class the
++# detector refuses outright ("both layouts give a valid word"), so only this model can
++# resolve it, and only the surrounding language can tell the two readings apart: the
++# reading of the surrounding language wins, in both directions. Frequency decides one
++# thing only, the token typed alone: when the other reading is at least this many times
++# more frequent in its own lexicon (frequency over the lexicon maximum, so the two
++# lexicons compare), the token is deferred rather than kept, because `tot` alone may
++# well be `еще`. Frequency does not veto context: the corpus holds a single pair whose
++# English reading dominates (`her`/`рук`), and a rule carried by one family, which the
++# split placed in development, was converted 36 times out of 36 at the sixth epoch.
++COLLISION_DOMINANCE = 10.0
++COLLISION_CONTEXTS = {1: ("я думаю что ", "подскажи пожалуйста ", "мы обсуждали это вчера "),
++                      0: ("I think that ", "could you please ", "we discussed this yesterday ")}
++COLLISION_LOOKAHEAD = {1: ("нужно сделать сегодня", "не получилось вчера", "будет готово завтра"),
++                       0: ("needs to be done today", "did not work yesterday", "will be ready tomorrow")}
+ 
+ 
+ @dataclass(frozen=True)
+@@ -236,6 +265,41 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
+     unknown_family("english_unknown", 0, ("", "I think that ", "could you please ", "в сообщении написано "), FIELDS)
+     unknown_family("russian_unknown", 1, ("", "я думаю что ", "нужно срочно ", "мы обсуждали это вчера ", "подскажи пожалуйста "), FIELDS)
+ 
++    collisions: object = payload.get("collisions", [])
++    if not isinstance(collisions, list) or any(
++        not isinstance(item, dict) or set(item) != {"russian", "english"}
++        or not all(isinstance(item[side], str) and item[side] for side in ("russian", "english"))
++        for item in collisions
++    ):
++        raise ValueError("invalid collision scenarios")
++    for item in cast(list[dict[str, str]], collisions):
++        words = {1: item["russian"], 0: item["english"]}
++        if pair.translate(words[1], "ru", "us") != words[0]:
++            raise ValueError("collision pair is not one physical key sequence")
++        scores = {group: models[group].score(words[group]) for group in (0, 1)}
++        if not all(score.exact for score in scores.values()):
++            raise ValueError("collision pair must be a lexicon word on both sides")
++        relative = ((scores[1].frequency / models[1].maximum)
++                    / (scores[0].frequency / models[0].maximum))
++        dominant = {1: relative >= COLLISION_DOMINANCE, 0: relative <= 1 / COLLISION_DOMINANCE}
++        for typed_group in (0, 1):
++            typed, other_group = words[typed_group], 1 - typed_group
++            for app, role in FIELDS:
++                for trigger in TRIGGERS:
++                    for before in COLLISION_CONTEXTS[other_group]:
++                        add(typed, typed_group, before, "", app, role, trigger, "convert", "collision_other_context")
++                    for before in COLLISION_CONTEXTS[typed_group]:
++                        add(typed, typed_group, before, "", app, role, trigger, "keep", "collision_own_context")
++                    if dominant[other_group]:
++                        isolated: ContextAction = "suggest" if trigger in {"enter", "punctuation"} else "wait"
++                    else:
++                        isolated = "keep"
++                    add(typed, typed_group, "", "", app, role, trigger, isolated, "collision_isolated")
++                for following in COLLISION_LOOKAHEAD[other_group]:
++                    add(typed, typed_group, "", following, app, role, "space", "convert", "collision_lookahead")
++                for following in COLLISION_LOOKAHEAD[typed_group]:
++                    add(typed, typed_group, "", following, app, role, "space", "keep", "collision_lookahead")
++
+     # A slash is punctuation in both layouts, so the engine hands the word after
+     # it to the model separately. The language of the fragment before the slash
+     # does not decide: a wrong-layout word after `bild/` or after `да/` is still
+diff --git a/tools/verify_context_model.py b/tools/verify_context_model.py
+index 9d298b8..f9299be 100644
+--- a/tools/verify_context_model.py
++++ b/tools/verify_context_model.py
+@@ -33,7 +33,7 @@ def provenance_paths(root: Path = ROOT, artifact: Path = ARTIFACT_PATH) -> dict[
+ 
+     return {
+         "sources_sha256": root / "model/context_v1/scenarios.json",
+-        "holdout_sha256": root / "model/context_v1/holdout-3.json",
++        "holdout_sha256": root / "model/context_v1/holdout-5.json",
+         "runtime_sha256": root / "src/keyswitch/context_model.py",
+         # The corpus reproduces the runtime short-word policy, so its source
+         # is part of the evidence a package must be able to re-check.

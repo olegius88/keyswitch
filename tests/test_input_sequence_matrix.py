@@ -17,7 +17,6 @@ from keyswitch.engine import KeySwitchEngine
 from keyswitch.history import HistoryStore
 from keyswitch.layouts import LayoutPair
 import test_input_integrity as integrity
-from disclosed_regressions import disclosed_installed_pair_regression
 
 
 class PhysicalSession:
@@ -140,8 +139,10 @@ class InputSequenceMatrixTests(unittest.TestCase):
                     self.assertEqual(current.backend.caret, len("/c,jhrb" + suffix + spacing))
                     self.assertEqual(current.backend.group, 0)
 
-    @disclosed_installed_pair_regression
     def test_correct_technical_and_colloquial_words_remain_literal(self) -> None:
+        # `дюп` reads `l.g` in the other layout and the shipped model asks for it;
+        # the replacement-shape refusal in the context policy keeps the word, so
+        # this is no longer a disclosed regression of the installed pair.
         cases = (
             (0, "npm install  ", "npm install  "),
             (0, "don't stop. ", "don't stop. "),

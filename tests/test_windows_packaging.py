@@ -75,6 +75,25 @@ class WindowsPackagingContractTests(unittest.TestCase):
             for module in ("test_language_intent_regressions.py", "test_input_sequence_matrix.py", "test_word_decision.py"):
                 self.assertIn(module, text)
 
+    def test_type_library_is_generated_for_the_name_the_runtime_opens(self) -> None:
+        """The build pre-generates exactly the wrapper the installed app imports.
+
+        Code generation cannot succeed inside the frozen package, so a name that
+        drifts from the runtime constant would move it to the user's machine and
+        leave accessibility reads permanently unavailable.
+        """
+
+        source = (PROJECT_ROOT / "src/keyswitch/windows_context.py").read_text(
+            encoding="utf-8"
+        )
+        declaration = re.search(
+            r'^UI_AUTOMATION_LIBRARY: Final = "([^"]+)"$', source, re.MULTILINE
+        )
+        assert declaration is not None
+        self.assertIn(
+            f"comtypes.client.GetModule('{declaration.group(1)}')", self.script
+        )
+
     def test_native_help_describes_the_v21_model_first_contract(self) -> None:
         for contract in (
             "keyswitch:intent-v23:physical-signature",

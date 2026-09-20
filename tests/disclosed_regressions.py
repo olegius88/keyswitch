@@ -9,9 +9,10 @@ they turn into hard assertions the moment a feature-version-3 context model is
 installed: an unexpected pass is then reported as such by unittest.
 
 Wiring the packaged lexicon supplement into the runtime removed all but one of
-them: an isolated word that neither the onboard lexicon nor the supplement knows
-is still converted, which is the class a feature-version-3 model refuses without
-a licence from the frozen models.
+them, and the replacement-shape refusal in the context policy (a word is never
+replaced by a reading with punctuation in it, ``дюп`` -> ``l.g``) closed that
+last one on 20.09.2026. No test carries the decorator at the moment; it stays
+for the next regression that has to be disclosed rather than hidden.
 """
 
 from __future__ import annotations

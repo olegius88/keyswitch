@@ -207,6 +207,29 @@ class ContextEngineTests(InputIntegrityTests):
         self.type("зь2 ")
         self.assertEqual(self.backend.text, "pm2 ")
 
+    def test_model_conversion_must_still_spell_a_word(self) -> None:
+        """Whichever layer asks, a word is never replaced by something that is not one.
+
+        Six Russian letters sit on punctuation keys, so the Latin reading of a
+        Russian abbreviation such as ``збс`` is ``p,c``. The detector's own
+        conversions already pass ``word_shape_veto``; the model's did not, and
+        the bundled model converts ``збс`` with p=0.997 in every application it
+        knows. The refusal is logged as a safety decision, not as the model's.
+        """
+
+        self.reset_editor(1)
+        self.type("збс ")
+        self.assertEqual(self.backend.text, "збс ")
+        self.choose("convert")
+        self.reset_editor(1)
+        self.type("збс ")
+        self.assertEqual(self.backend.text, "збс ")
+        result = self.engine._context_result
+        assert result is not None
+        self.assertEqual(result.decision_source, "safety")
+        self.assertEqual(result.fallback_reason, "replacement_not_a_word")
+        self.assertFalse(result.decision.should_convert)
+
     def test_explicit_rules_exclusions_and_manual_layout_are_above_model(self) -> None:
         self.choose("convert")
         self.settings.set("exclusions.words", ["ghbdtn"])

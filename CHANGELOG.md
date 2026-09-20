@@ -4,6 +4,22 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.26.1 — 2026-09-20
+
+- Never replace a word with something that is not one. Six Russian letters sit on
+  punctuation keys, so the Latin reading of an abbreviation such as `збс` is `p,c`; the
+  detector's own conversions were already refused on that ground, but a conversion the
+  context model asked for was not, and the shipped model asked for exactly that one in
+  every application it knows. The refusal now covers every layer and is logged as a
+  safety decision next to the model's unchanged opinion.
+- Read the text in front of the caret on Windows. The accessibility reader had never
+  opened on any machine but the one that built the release: comtypes writes the
+  modification time of `UIAutomationCore.dll` into the interface module it generates
+  and refuses that module wherever the file differs, unless the program declares itself
+  frozen, which a Nuitka build does not. KeySwitch now declares it for the length of
+  that one call, so the context model sees what is already in the field instead of only
+  the keys typed since the last click.
+
 ## 0.26.0 — 2026-09-19
 
 - Correct the layout on macOS. A Quartz event tap watches the keyboard, the text in

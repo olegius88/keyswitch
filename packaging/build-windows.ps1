@@ -1364,6 +1364,10 @@ if ($ActivePrefix.accepted -isnot [bool] -or $ActivePrefix.accepted -ne $true `
 }
 # Generate the OS type library before freezing. The runtime must not need
 # writable installation files or a Python compiler to open accessibility.
+# The name below is pinned to keyswitch.windows_context.UI_AUTOMATION_LIBRARY by
+# tests/test_windows_packaging.py: the wrapper generated here is the one the
+# installed application opens, and a divergence would silently move code
+# generation to the user's machine, where it cannot succeed.
 Invoke-NativeCommand `
     -Command "python" `
     -Arguments @("-c", "import comtypes.client; comtypes.client.GetModule('UIAutomationCore.dll')") `
