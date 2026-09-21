@@ -7,11 +7,15 @@ import uuid
 from datetime import datetime, timezone
 
 from .config import Config
-from .store import Store
+from .store import HEAD_DIGEST_KEY, LEGACY_HEAD_KEY, PENDING_KEY, Store
 from .telegram import FILE_ID, MAX_DOWNLOAD, Telegram, TelegramError
 from .versions import MARKER_KIND, VERSION, caption, current_versions
 
 INDEX_LIMIT = 2 * 1024 * 1024
+CATALOG_CAPTION = "LogCourier catalog SHA256 "
+LOST_PIN = (
+    "Закрепление каталога потеряно или изменено. Восстановите последнее закрепление LogCourier."
+)
 HEX = re.compile(r"[a-f0-9]{64}")
 IDENTIFIER = re.compile(r"[a-f0-9]{32}")
 
@@ -95,7 +99,7 @@ def current_catalog(client: Telegram, chat_id: str) -> dict | None:
     file_id = message["document"]["file_id"]
     data = client.download(file_id, INDEX_LIMIT)
     digest = hashlib.sha256(data).hexdigest()
-    if message.get("caption") != "LogCourier catalog SHA256 " + digest:
+    if message.get("caption") != CATALOG_CAPTION + digest:
         raise TelegramError("Контрольная сумма каталога не совпала.")
     return {
         "file_id": file_id,
@@ -123,21 +127,30 @@ def deliver(store: Store, config: Config, client: Telegram, cancelled=lambda: Fa
         raise ValueError("Отправка текста логов не разрешена.")
     if client.bot_id != config.bot_id:
         raise ValueError("Токен относится к другому боту.")
-    key = "catalog_pending:" + config.destination
+    key = PENDING_KEY + config.destination
     checkpoint(cancelled)
     head = current_catalog(client, config.chat_id)
     if head and head["index"]["device_id"] != config.device_id:
         raise TelegramError("Эта группа занята другим сборщиком. Используйте отдельную группу.")
+    current = head["sha256"] if head else None
     pending = store.get(key)
+    if pending and "sha256" not in pending:
+        # Left by a version that recognised the catalog by file_id; that identifier is
+        # already stale, so the interrupted catalog is rebuilt from the queue instead.
+        store.forget(key)
+        pending = None
     if pending:
         checkpoint(cancelled)
         finish_catalog(store, config, client, pending, head)
         return "Каталог восстановлен; отправленные архивы повторно не загружались."
-    expected = store.get("catalog_head:" + config.destination)
-    if expected and expected != (head or {}).get("file_id"):
-        raise TelegramError(
-            "Закрепление каталога потеряно или изменено. Восстановите последнее закрепление LogCourier."
-        )
+    known = store.get(HEAD_DIGEST_KEY + config.destination)
+    if known is None and store.get(LEGACY_HEAD_KEY + config.destination) is not None:
+        # Telegram hands out a new file_id for the same document after a while, so the
+        # identifier stored before 0.1.3 proves nothing beyond "a catalog was pinned":
+        # adopt whatever is pinned now, and keep refusing when nothing is.
+        known = current or ""
+    if known is not None and known != current:
+        raise TelegramError(LOST_PIN)
     for row in store.queue(config.destination)[:4]:
         checkpoint(cancelled)
         if row["file_id"]:
@@ -168,7 +181,7 @@ def deliver(store: Store, config: Config, client: Telegram, cancelled=lambda: Fa
     checkpoint(cancelled)
     # Detect another writer before replacing the catalog pointer.
     latest = current_catalog(client, config.chat_id)
-    if (latest or {}).get("file_id") != (head or {}).get("file_id"):
+    if (latest or {}).get("sha256") != current:
         raise TelegramError("Каталог изменился во время отправки. Повторите позже.")
     index = {
         "schema": 1,
@@ -184,16 +197,15 @@ def deliver(store: Store, config: Config, client: Telegram, cancelled=lambda: Fa
     data = json.dumps(index, ensure_ascii=False).encode()
     if len(data) > INDEX_LIMIT:
         raise TelegramError("Каталог слишком большой; отправка остановлена.")
+    digest = hashlib.sha256(data).hexdigest()
     name = f"lc-index-{uuid.uuid4().hex}.json"
     checkpoint(cancelled)
-    message = client.send_document(
-        config.chat_id, name, data, "LogCourier catalog SHA256 " + hashlib.sha256(data).hexdigest()
-    )
+    message = client.send_document(config.chat_id, name, data, CATALOG_CAPTION + digest)
     pending = {
-        "file_id": message["document"]["file_id"],
+        "sha256": digest,
         "message_id": message["message_id"],
         "ids": [entry["bundle_id"] for entry in entries],
-        "previous_file_id": head["file_id"] if head else None,
+        "previous_sha256": current,
         "previous_message_id": head["message_id"] if head else None,
     }
     store.set(key, pending)
@@ -205,12 +217,12 @@ def deliver(store: Store, config: Config, client: Telegram, cancelled=lambda: Fa
 def finish_catalog(
     store: Store, config: Config, client: Telegram, pending: dict, head: dict | None
 ) -> None:
-    current_id = (head or {}).get("file_id")
-    if current_id not in (pending["previous_file_id"], pending["file_id"]):
+    current = head["sha256"] if head else None
+    if current not in (pending["previous_sha256"], pending["sha256"]):
         raise TelegramError(
             "Закреплённый каталог изменён другим процессом. Восстановление остановлено."
         )
-    if current_id != pending["file_id"]:
+    if current != pending["sha256"]:
         result = client.call(
             "pinChatMessage",
             {
@@ -222,9 +234,9 @@ def finish_catalog(
         if result is not True:
             raise TelegramError("Telegram не подтвердил закрепление каталога.")
         fresh = current_catalog(client, config.chat_id)
-        if not fresh or fresh["file_id"] != pending["file_id"]:
+        if not fresh or fresh["sha256"] != pending["sha256"]:
             raise TelegramError("Новый каталог не виден в закреплении. Проверьте права бота.")
-    store.acknowledge_index(config.destination, pending["ids"], pending["file_id"])
+    store.acknowledge_index(config.destination, pending["ids"], pending["sha256"])
     # Do not unpin anything automatically: never disturb another participant's pins.
 
 

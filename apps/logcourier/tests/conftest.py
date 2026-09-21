@@ -32,17 +32,23 @@ class FakeTelegram:
 
     def __init__(self):
         self.files = {}
+        self.aliases = {}
         self.messages = {}
         self.pinned = None
         self.fail_pin = False
         self.uploads = 0
+        self.reissues = 0
         self.after_upload = lambda: None
 
     def call(self, method, params=None):
         if method == "getChat":
             chat = {"id": -100123, "type": "supergroup", "title": "Private logs"}
             if self.pinned:
-                chat["pinned_message"] = copy.deepcopy(self.messages[self.pinned])
+                message = copy.deepcopy(self.messages[self.pinned])
+                document = message.get("document")
+                if document:
+                    document["file_id"] = self.reissue(document["file_id"])
+                chat["pinned_message"] = message
             return chat
         if method == "getMe":
             return {"id": int(self.bot_id), "username": "log_bot"}
@@ -70,8 +76,21 @@ class FakeTelegram:
         self.after_upload()
         return message
 
+    def reissue(self, file_id):
+        # Telegram names the same document with a new file_id once its reference ages.
+        self.reissues += 1
+        stored = self.aliases.get(file_id, file_id)
+        self.aliases[f"{stored}_r{self.reissues}"] = stored
+        return f"{stored}_r{self.reissues}"
+
+    def content(self, file_id):
+        return self.files[self.aliases.get(file_id, file_id)]
+
+    def replace(self, file_id, data):
+        self.files[self.aliases.get(file_id, file_id)] = data
+
     def download(self, file_id, limit=10 * 1024 * 1024):
-        result = self.files[file_id]
+        result = self.content(file_id)
         assert len(result) <= limit
         return result
 

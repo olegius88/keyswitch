@@ -4,6 +4,14 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- Keep LogCourier delivering after a long pause. The pinned catalog is now recognised by
+  the SHA-256 in its caption instead of the `file_id` that Telegram reissues for the same
+  document over time: a collector idle for days read a new identifier for the catalog it
+  had pinned itself, reported the pin as lost or replaced, and stopped sending anything
+  with no way back. A store written by an earlier version adopts the catalog pinned in the
+  group, while a group with nothing pinned is still refused, so a chain of catalogs never
+  restarts silently. Its installer release is separate.
+
 ## 0.26.1 — 2026-09-20
 
 - Never replace a word with something that is not one. Six Russian letters sit on

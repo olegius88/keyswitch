@@ -7,6 +7,10 @@ import time
 from pathlib import Path
 
 MAX_QUEUE_BYTES = 128 * 1024 * 1024
+PENDING_KEY = "catalog_pending:"
+HEAD_DIGEST_KEY = "catalog_digest:"
+# Written instead of HEAD_DIGEST_KEY before 0.1.3: the file_id of the pinned catalog.
+LEGACY_HEAD_KEY = "catalog_head:"
 
 
 class QueueFull(RuntimeError):
@@ -47,6 +51,10 @@ class Store:
     def set(self, key: str, value) -> None:
         with self.db:
             self.db.execute("INSERT OR REPLACE INTO kv VALUES (?, ?)", (key, json.dumps(value)))
+
+    def forget(self, key: str) -> None:
+        with self.db:
+            self.db.execute("DELETE FROM kv WHERE key=?", (key,))
 
     def queue_bytes(self) -> int:
         return self.db.execute("SELECT COALESCE(SUM(length(payload)), 0) FROM bundles").fetchone()[
@@ -128,17 +136,20 @@ class Store:
                 (file_id, message_id, bundle_id),
             )
 
-    def acknowledge_index(self, destination: str, ids: list[str], head_file_id: str) -> None:
+    def acknowledge_index(self, destination: str, ids: list[str], head_digest: str) -> None:
         with self.db:
             self.db.executemany("UPDATE bundles SET indexed=1 WHERE id=?", [(x,) for x in ids])
-            self.db.execute("DELETE FROM kv WHERE key=?", ("catalog_pending:" + destination,))
+            self.db.execute(
+                "DELETE FROM kv WHERE key IN (?,?)",
+                (PENDING_KEY + destination, LEGACY_HEAD_KEY + destination),
+            )
             self.db.execute(
                 "INSERT OR REPLACE INTO kv VALUES (?,?)",
                 ("success:" + destination, json.dumps(time.time())),
             )
             self.db.execute(
                 "INSERT OR REPLACE INTO kv VALUES (?,?)",
-                ("catalog_head:" + destination, json.dumps(head_file_id)),
+                (HEAD_DIGEST_KEY + destination, json.dumps(head_digest)),
             )
             # Remote linked catalogs preserve older receipts; local history stays bounded.
             self.db.execute(
