@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from .app_quirks import SYMBOL_QUIRKS
+from .app_quirks import MENTION_HEADS
 
 
 ControlKind = Literal["bool", "choice", "int", "float", "text"]
@@ -122,7 +122,7 @@ AUTOCORRECTION_SETTINGS = (
     SettingSpec(
         "detection.learning_confirmations",
         "Подтверждений для правила",
-        "Сколько повторов нужно, если предложение не подтверждено клавишей Enter.",
+        "Порог, при котором правило начинает действовать; Enter в подсказке достигает его сразу.",
         "int",
         minimum=1,
         maximum=10,
@@ -291,8 +291,8 @@ DIAGNOSTIC_SETTINGS = (
 
 
 APPLICATION_SETTINGS = tuple(
-    SettingSpec(quirk.setting, quirk.title, quirk.description, "bool")
-    for quirk in SYMBOL_QUIRKS
+    SettingSpec(head.setting, head.title, head.description, "bool")
+    for head in MENTION_HEADS
 )
 
 ALL_SETTING_SPECS = (

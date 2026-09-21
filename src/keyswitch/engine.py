@@ -13,7 +13,7 @@ from dataclasses import dataclass, replace
 
 from . import __version__
 from .backend import InputBackend, KeyEvent, KeyDisposition
-from .app_quirks import symbol_quirk
+from .app_quirks import mention_head
 from .boundary_model import BoundaryModel, MAX_SUFFIX, features as boundary_features
 from .boundary_policy import BoundaryPolicy, features as boundary_policy_features
 from .config import SettingsStore
@@ -105,6 +105,10 @@ class CorrectionPlan:
     context_field: str = ""
     # Literal punctuation before `boundary`, not replayed in the new layout.
     trailing: tuple[KeyEvent, ...] = ()
+    # A symbol typed in front of the word that this application reads as the
+    # start of a mention. It is judged with the word, not on its own, so it is
+    # kept out of `strokes` until the correction runs (_execute_correction).
+    head: tuple[KeyEvent, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -264,7 +268,6 @@ class KeySwitchEngine:
         self._pending: CorrectionPlan | None = None
         self._pending_trigger_keycode = -1
         # The key an application quirk has just rewritten; pressing it again undoes that.
-        self._symbol_quirk_keycode = -1
         self._manual_release_deadline = 0.0
         self._last_committed: CorrectionPlan | None = None
         self._last_correction: CorrectionPlan | None = None
@@ -324,12 +327,16 @@ class KeySwitchEngine:
             self._prompt_key_deadline = 0.0
             callbacks = tuple(self._learning_prompt_callbacks)
         required = int(self.settings.get("detection.learning_confirmations", 2))
+        # Enter is the only thing that teaches, and it teaches at once: the
+        # manual conversion itself no longer counts towards the threshold, so
+        # counting Enters instead would silently raise the price of a rule.
         confirmations = self.learning.confirm_manual(
             current.source_group,
             current.original,
             current.target_group,
             required,
         )
+        excluded = self._application_excluded(current.application)
         self._technical_event(
             "learning_prompt_confirmed",
             source_group=current.source_group,
@@ -338,10 +345,19 @@ class KeySwitchEngine:
             required_confirmations=required,
             confirmations=confirmations,
         )
+        self._technical_event(
+            "learning_rule_recorded",
+            word="<redacted>" if excluded else current.original,
+            source_group=current.source_group,
+            target_group=current.target_group,
+            confirmations=confirmations,
+            required_confirmations=required,
+            active=True,
+            application=current.application,
+            application_excluded=excluded,
+        )
         self._update(
-            last_action=(
-                f"{current.original} → {current.replacement} · правило выучено"
-            )
+            last_action=f"{current.original} → {current.replacement} · правило выучено"
         )
         for callback in callbacks:
             callback(None)
@@ -746,16 +762,10 @@ class KeySwitchEngine:
             # Nothing typed since the last boundary: remember layout-dependent
             # symbols so Pause converts just them (RU quote -> "@"), and never
             # rewrite the previous word after further input.
-            if event.key_name in WORD_BOUNDARY_KEYS:
+            if event.key_name in WORD_BOUNDARY_KEYS or event.character.isspace():
                 self._symbol_strokes = []
-                self._symbol_quirk_keycode = -1
             elif self._layout_dependent(event):
-                # A quirk writes its replacement in the other layout, where that key
-                # is an ordinary character, so the second press of it arrives in the
-                # branch below. Any other symbol here closes the undo window.
-                self._symbol_quirk_keycode = -1
                 self._symbol_strokes.append(event)
-                self._schedule_symbol_quirk(event)
             self._last_committed_stale = True
             return
         if event.key_name in NAVIGATION_KEYS:
@@ -779,12 +789,10 @@ class KeySwitchEngine:
                 )
                 return
             if self._layout_dependent(event):
-                # "@" typed in the US layout but meant as the RU quote, or a symbol
-                # this application's own syntax explains (_schedule_symbol_quirk).
-                if self._undo_symbol_quirk(event):
-                    return
+                # "@" typed in the US layout but meant as the RU quote, or the
+                # other way round: what it is depends on the word that follows,
+                # so it waits here until that word is decided (_mention_head).
                 self._symbol_strokes.append(event)
-                self._schedule_symbol_quirk(event)
                 return
             # A leading digit or path marker belongs to the token too:
             # `2ghbdtn` must not be seen as the unrelated word `ghbdtn`.
@@ -916,6 +924,7 @@ class KeySwitchEngine:
             True,
             "early",
             context_field=field.field_id if field is not None and field.source != "observed" else "",
+            head=self._mention_head(application),
         )
         # The last letter's key is physically still down: a synthetic press of a
         # held key is ignored by the X server and the retyped letter would be
@@ -1182,6 +1191,7 @@ class KeySwitchEngine:
             self._pending = None
             self._pending_learning_action = None
         typed = tuple(self._strokes)
+        mention = self._mention_head(self.backend.active_application())
         head = self._literal_head(typed, self._source_group)
         strokes, trailing, segmentation_certain = self._completed_word(typed[head:], self._source_group)
         self._reset_pause_correction()
@@ -1254,7 +1264,11 @@ class KeySwitchEngine:
                 self._pending_trigger_keycode = boundary.keycode
                 decision = replace(decision, should_convert=True)
             elif decision.should_convert:
-                plan = replace(self._plan_from_decision(strokes, boundary, application, decision), trailing=trailing)
+                plan = replace(
+                    self._plan_from_decision(strokes, boundary, application, decision),
+                    trailing=trailing,
+                    head=() if mention and self._quotation_closed(mention[0], trailing, boundary) else mention,
+                )
                 if boundary.deferred:
                     # Enter/Tab has not reached the editor. Do not delete it
                     # as a character or include it in the text replacement.
@@ -2202,7 +2216,12 @@ class KeySwitchEngine:
 
         self._early_switch_origin = None
         self._early_switch_at = None
-        plan = replace(self._plan_from_decision(strokes, None, application, decision, "pause"), trailing=trailing)
+        mention = self._mention_head(application)
+        plan = replace(
+            self._plan_from_decision(strokes, None, application, decision, "pause"),
+            trailing=trailing,
+            head=() if mention and self._quotation_closed(mention[0], trailing, None) else mention,
+        )
         self._strokes = []
         self._source_group = -1
         self._early_switch_undone = False
@@ -2210,69 +2229,43 @@ class KeySwitchEngine:
         self._update(current_word="")
         self._execute_correction(plan, None)
 
-    def _schedule_symbol_quirk(self, stroke: KeyEvent) -> None:
-        """A symbol this application's own syntax explains, rewritten as it is typed.
+    @staticmethod
+    def _quotation_closed(
+        head: KeyEvent, trailing: tuple[KeyEvent, ...], boundary: KeyEvent | None
+    ) -> bool:
+        """The same key pressed against the end of the word closes a quotation.
 
-        The user sees the result immediately, which is the point of a mention: the
-        nickname follows the "@" without a pause. Only a symbol that starts a fresh
-        token qualifies, and pressing the same key again writes the symbol after all
-        (_undo_symbol_quirk), so a real quote costs one extra keystroke instead of a
-        wait. Like the early switch, the correction runs on the key's release.
+        `"john"` is a quoted name, not a mention: a quote typed with no space
+        after the word can only be the closing one, and then the quote in front
+        of it was the opening one. The word is still judged on its own, so the
+        name inside the quotation is corrected while both quotes stay.
         """
 
-        if len(self._symbol_strokes) != 1 or self._pending is not None:
-            return
+        tail = trailing + ((boundary,) if boundary is not None else ())
+        return any(stroke.keycode == head.keycode for stroke in tail)
+
+    def _mention_head(self, application: str) -> tuple[KeyEvent, ...]:
+        """The pending symbol in front of the current word that may be a mention.
+
+        The symbol stays out of the analysed word on purpose: the models read
+        `ощрт` and `john`, not `"ощрт` and `@john`, and with the quote attached
+        they fall below their own threshold. The word alone decides, and this
+        head is then replaced together with it (_execute_correction).
+        """
+
+        if len(self._symbol_strokes) != 1 or not self._strokes:
+            return ()
+        stroke = self._symbol_strokes[0]
         source_group = stroke.group
         target = next((group for group in self.models if group != source_group), None)
         if target is None or source_group not in self.models:
-            return
+            return ()
         typed = self._text_for_group((stroke,), source_group)
         meant = self._text_for_group((stroke,), target)
-        application = self.backend.active_application()
-        if self._application_excluded(application):
-            return
-        quirk = symbol_quirk(application, typed, meant, lambda path: bool(self.settings.get(path, True)))
-        if quirk is None:
-            return
-        self._pending = CorrectionPlan(
-            (stroke,), None, source_group, target, typed, meant, 99.0, application,
-            True, "symbol_quirk",
+        head = mention_head(
+            application, typed, meant, lambda path: bool(self.settings.get(path, True))
         )
-        self._pending_learning_action = None
-        self._pending_trigger_keycode = stroke.keycode
-        self._symbol_quirk_keycode = stroke.keycode
-        self._technical_event(
-            "symbol_quirk_scheduled", quirk=quirk.setting, application=application,
-            original=typed, replacement=meant, source_group=source_group,
-            target_group=target, trigger_keycode=stroke.keycode,
-        )
-
-    def _undo_symbol_quirk(self, stroke: KeyEvent) -> bool:
-        """The same key pressed again: the user wanted the symbol, not what it means here."""
-
-        if self._symbol_quirk_keycode != stroke.keycode or self._strokes:
-            self._symbol_quirk_keycode = -1
-            return False
-        self._symbol_quirk_keycode = -1
-        previous = self._symbol_strokes[-1] if self._symbol_strokes else None
-        if previous is None or self._pending is not None:
-            return False
-        target = previous.group
-        strokes = (previous, replace(stroke, group=target))
-        application = self.backend.active_application()
-        self._technical_event(
-            "symbol_quirk_undone", application=application, target_group=target,
-            trigger_keycode=stroke.keycode,
-        )
-        self._symbol_strokes = []
-        self._pending = CorrectionPlan(
-            strokes, None, 1 - target, target,
-            self._text_for_group(strokes, 1 - target), self._text_for_group(strokes, target),
-            99.0, application, True, "symbol_quirk_undo",
-        )
-        self._pending_learning_action = None
-        self._pending_trigger_keycode = stroke.keycode
-        return True
+        return (stroke,) if head is not None else ()
 
     def _prune_stale_presses(self, now: float, *, older_than: float = STALE_PRESS_SECONDS,
                              keep: int | None = None) -> None:
@@ -2665,6 +2658,25 @@ class KeySwitchEngine:
         plan: CorrectionPlan,
         learning_action: tuple[str, int, str, int] | None,
     ) -> bool:
+        if plan.head:
+            # The word decided; the mention head is rewritten with it, and the
+            # rule the user may confirm still names the word alone.
+            plan = replace(
+                plan,
+                strokes=plan.head + plan.strokes,
+                original=self._text_for_group(plan.head, plan.source_group) + plan.original,
+                replacement=self._text_for_group(plan.head, plan.target_group) + plan.replacement,
+                head=(),
+            )
+            self._symbol_strokes = []
+            self._technical_event(
+                "mention_head_applied",
+                mode=plan.mode,
+                application=plan.application,
+                application_excluded=self._application_excluded(plan.application),
+                source_group=plan.source_group,
+                target_group=plan.target_group,
+            )
         if self._track_focus().changed:
             self._technical_event("correction_aborted", mode=plan.mode, reason="focus_changed")
             return False
@@ -2865,30 +2877,19 @@ class KeySwitchEngine:
             if not plan.automatic:
                 self._manual_layout_group = plan.target_group
         self._remember_context(plan.application, plan.target_group, plan.strokes)
-        learned_rule = False
         rejected_rule = False
         learning_prompt: LearningPrompt | None = None
         if learning_action is not None and bool(self.settings.get("detection.learning", True)):
             action, source_group, word, target_group = learning_action
             excluded = self._application_excluded(plan.application)
             if action == "manual":
-                confirmations = self.learning.record_manual(
-                    source_group, word, target_group
-                )
+                # A manual conversion asks, it does not teach. Only Enter on the
+                # prompt records the confirmation; typing on, clicking, changing
+                # focus or letting the prompt time out leaves the rules exactly
+                # as they were, which is what Escape does too.
                 required = int(self.settings.get("detection.learning_confirmations", 2))
-                learned_rule = confirmations >= required
-                self._technical_event(
-                    "learning_rule_recorded",
-                    word="<redacted>" if excluded else word,
-                    source_group=source_group,
-                    target_group=target_group,
-                    confirmations=confirmations,
-                    required_confirmations=required,
-                    active=learned_rule,
-                    application=plan.application,
-                    application_excluded=excluded,
-                )
-                if not learned_rule:
+                rule_target, confirmations = self.learning.rule_state(source_group, word)
+                if not (rule_target == target_group and confirmations >= required):
                     learning_prompt = LearningPrompt(
                         source_group,
                         target_group,
@@ -2909,9 +2910,7 @@ class KeySwitchEngine:
                 )
         count = self.snapshot.correction_count + (1 if plan.automatic else 0)
         action = f"{plan.original} → {plan.replacement}"
-        if learned_rule:
-            action += " · правило выучено"
-        elif rejected_rule:
+        if rejected_rule:
             action += " · ложное срабатывание запомнено"
         self._update(
             current_group=plan.target_group,

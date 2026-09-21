@@ -215,10 +215,14 @@ The complete data, feature, split-policy and limitations card is available in
 
 ## Learning and privacy
 
-Local rules learn only from explicit actions. Enter in a manual-conversion
-prompt activates the rule immediately without submitting a message. Without
-that confirmation, two repeated conversions activate it by default; the UI
-allows 1–5 on Linux and 1–10 on Windows.
+Local rules learn only from explicit actions. A manual conversion teaches
+nothing by itself: it offers a prompt, and only Enter records the rule, without
+submitting a message. Every other answer - typing on, clicking, switching
+windows or letting the prompt expire - counts exactly like Escape and leaves
+the rules unchanged. A single Enter takes the rule straight to the active
+threshold ("confirmations for a rule", 2 by default; the UI allows 1-5 on Linux
+and 1-10 on Windows). The threshold still matters for rules half-confirmed by
+older versions: until it is reached such a rule forces nothing.
 Undoing an automatic correction records a rejection for that source token and
 direction. `learning.json` contains only those tokens, directions and counters,
 not the ordinary input stream. Baseline previous-word context is RAM-only,

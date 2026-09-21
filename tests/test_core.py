@@ -831,9 +831,12 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(self.backend.injections[0][1], 0)
         self.assertIsNone(self.backend.injections[0][2])
 
-    def test_two_manual_conversions_create_an_automatic_rule(self) -> None:
+    def test_repeated_manual_conversions_teach_nothing_until_enter(self) -> None:
+        """Only the answer to the prompt teaches; repeating the fix does not."""
+
         self.settings.set("detection.respect_manual_layout", False)
-        for _attempt in range(2):
+
+        def convert() -> None:
             self.backend.group = 0
             for index, character in enumerate("qwerty", start=30):
                 self.engine._handle(letter_event(character, index, 0, self.pair))
@@ -841,6 +844,24 @@ class EngineTests(unittest.TestCase):
             pause_press = KeyEvent(True, 127, "Pause", "", ("", ""), 0, 0, 2000)
             self.engine._handle(pause_press)
             self.engine._handle(release_event(pause_press))
+
+        for _attempt in range(2):
+            convert()
+        self.assertEqual(self.engine.learning.counts(), (0, 0))
+        self.assertIsNone(self.engine.learning.forced_target(0, "qwerty", 2))
+
+        # The word is still corrected by hand every time, never on its own.
+        self.backend.group = 0
+        for index, character in enumerate("qwerty", start=30):
+            self.engine._handle(letter_event(character, index, 0, self.pair))
+            self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
+        self.engine._handle(boundary_event(True))
+        self.engine._handle(boundary_event(False))
+        self.assertEqual(len(self.backend.injections), 2)
+
+        # Enter on the prompt is what makes the rule, and then it applies itself.
+        convert()
+        self.assertTrue(self.engine.confirm_learning_prompt())
         self.assertEqual(self.engine.learning.forced_target(0, "qwerty", 2), 1)
         self.backend.group = 0
         for index, character in enumerate("qwerty", start=30):
@@ -848,7 +869,7 @@ class EngineTests(unittest.TestCase):
             self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
         self.engine._handle(boundary_event(False))
-        self.assertEqual(len(self.backend.injections), 3)
+        self.assertEqual(len(self.backend.injections), 4)
         self.assertEqual(self.backend.injections[-1][1], 1)
 
     def test_undo_hotkey_restores_previous_layout(self) -> None:

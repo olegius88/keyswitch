@@ -774,7 +774,7 @@ class EngineBranchTests(unittest.TestCase):
             initialized.records[0].getMessage().removeprefix("TECHNICAL ")
         )
         self.assertEqual(initial_payload["event"], "engine_initialized")
-        self.assertEqual(initial_payload["keyswitch_version"], "0.26.1")
+        self.assertEqual(initial_payload["keyswitch_version"], "0.27.0")
         self.assertEqual(initial_payload["settings"]["overrides"], {"diagnostics.technical_logging": True})
 
     def test_start_stop_idempotence_and_backend_failure(self) -> None:
@@ -1006,6 +1006,9 @@ class EngineBranchTests(unittest.TestCase):
         self.engine._pending_learning_action = ("manual", 0, "q", 1)
         self.engine._pending_trigger_keycode = -1
         self.engine._maybe_execute_pending(key("x"))
+        # The conversion itself only offers the rule; Enter writes it down.
+        self.assertEqual(self.engine.snapshot.last_action, "q → й")
+        self.assertTrue(self.engine.confirm_learning_prompt())
         self.assertIn("правило выучено", self.engine.snapshot.last_action)
 
         automatic = CorrectionPlan((letter("a"),), None, 1, 0, "ф", "a", 99, "Editor", False)

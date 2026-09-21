@@ -12,6 +12,7 @@ import ctypes
 import importlib
 import sys
 import threading
+import time
 from collections.abc import Sequence
 from typing import Final, Protocol, cast
 
@@ -45,6 +46,16 @@ class _Unknown(Protocol):
     def QueryInterface(self, interface: object) -> _TextPattern: ...
 
 
+# TextPattern. GetCurrentPattern answers S_OK with a null pointer when the
+# element does not support the pattern, which comtypes hands over as None:
+# a field without text is an ordinary answer, not a broken provider.
+TEXT_PATTERN_ID: Final = 10014
+
+# Milliseconds allowed to reach a provider and to finish one request.
+CONNECTION_TIMEOUT_MS: Final = 200
+TRANSACTION_TIMEOUT_MS: Final = 200
+
+
 class _Element(Protocol):
     @property
     def CurrentProcessId(self) -> int: ...
@@ -53,7 +64,7 @@ class _Element(Protocol):
     @property
     def CurrentAutomationId(self) -> str: ...
     def GetRuntimeId(self) -> Sequence[int]: ...
-    def GetCurrentPattern(self, pattern: int) -> _Unknown: ...
+    def GetCurrentPattern(self, pattern: int) -> _Unknown | None: ...
 
 
 class _Automation(Protocol):
@@ -115,8 +126,16 @@ class WindowsFieldReader:
         self.automation = automation
         self.text_interface = text_interface
         try:
-            self.automation.ConnectionTimeout = 50
-            self.automation.TransactionTimeout = 50
+            # Both are milliseconds. UI Automation's own defaults are seconds
+            # (IUIAutomation2::put_TransactionTimeout: "The default transaction
+            # timeout value is 20 seconds"), which would stall the engine
+            # worker, so KeySwitch bounds them hard. The earlier bound of 50 ms
+            # was tighter than Chromium and Qt windows can answer on a first,
+            # cold request, and every such timeout counted as a broken
+            # provider; the budget below still keeps a word's decision inside a
+            # fraction of a second, and `last_read_ms` reports what it costs.
+            self.automation.ConnectionTimeout = CONNECTION_TIMEOUT_MS
+            self.automation.TransactionTimeout = TRANSACTION_TIMEOUT_MS
         except Exception:
             self.close()
             raise
@@ -147,8 +166,13 @@ class WindowsFieldReader:
         field_id = ":".join(str(value) for value in identity)
         if element.CurrentIsPassword:
             return FieldContext(application, field_id, role="password", sensitive=True, source="uia")
-        pattern = element.GetCurrentPattern(10014).QueryInterface(self.text_interface)
-        ranges = pattern.GetSelection()
+        supported = element.GetCurrentPattern(TEXT_PATTERN_ID)
+        if supported is None:
+            # Chromium and Qt windows expose a focused element long before they
+            # expose its text. That is a field KeySwitch cannot read, not a
+            # provider that has to be rebuilt.
+            return None
+        ranges = supported.QueryInterface(self.text_interface).GetSelection()
         if ranges.Length > 1:
             return FieldContext(application, field_id, selection=True, source="uia")
         if ranges.Length != 1:
@@ -198,10 +222,45 @@ def _type_library(client: _ComClient) -> _TypeLibrary:
 
 
 def probe_uia() -> dict[str, object]:
-    """Explicit diagnostic readiness probe; no focused field or text is read."""
+    """Explicit diagnostic readiness probe; no field text is read.
+
+    Besides building the bridge it asks the focused element whether it offers
+    TextPattern at all and how long that answer took. Both are facts about the
+    provider, not about what the user typed: no range is ever read here.
+    """
+
+    reader: WindowsFieldReader | None = None
     try:
         reader = WindowsFieldReader()
-        reader.close()
     except Exception as error:
-        return {"available": False, "error": type(error).__name__}
-    return {"available": True}
+        return {"available": False, "error": _error_name(error), **_error_code(error)}
+    try:
+        started = time.monotonic()
+        element = reader.automation.GetFocusedElement()
+        pattern = element.GetCurrentPattern(TEXT_PATTERN_ID)
+        elapsed = round((time.monotonic() - started) * 1000)
+        return {
+            "available": True,
+            "focused_text_pattern": pattern is not None,
+            "focused_probe_ms": elapsed,
+        }
+    except Exception as error:
+        return {
+            "available": True,
+            "focused_text_pattern": None,
+            "focused_error": _error_name(error),
+            **_error_code(error),
+        }
+    finally:
+        reader.close()
+
+
+def _error_name(error: BaseException) -> str:
+    return type(error).__name__
+
+
+def _error_code(error: BaseException) -> dict[str, object]:
+    """The provider's HRESULT, when it has one. A number carries no user text."""
+
+    code = getattr(error, "hresult", None)
+    return {"hresult": code} if isinstance(code, int) else {}

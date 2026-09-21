@@ -4,6 +4,42 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.27.0 — 2026-09-21
+
+- Learn a rule only from Enter. A manual conversion used to write the word into the rules
+  the moment it ran, and the prompt that followed merely offered to finish the job, so
+  carrying on typing, clicking elsewhere or letting the prompt expire left a confirmation
+  nobody had given; two such conversions of the same word made the rule active on their
+  own. Over thirteen days of collected logs that produced seventeen recorded rules against
+  a single Enter. A conversion now only asks. Enter records the rule at once, and every
+  other outcome leaves the rules exactly as they were, which is what Escape always did.
+  Rules left half-confirmed by earlier versions stay inactive until they are confirmed or
+  the learning store is cleared.
+
+- Let the word decide what a quote in Telegram was. A quote typed in the Russian layout
+  used to become the `@` of a mention the moment the key came up, which turned every
+  quotation into a mention and switched the layout to English in the middle of a Russian
+  sentence; pressing Pause afterwards repeated the same replacement instead of undoing it.
+  The quote is now judged with the word that follows it, and the word alone is analysed:
+  `ощрт` means nothing in Russian while `john` is a name, so `"john` becomes `@john`, while
+  `"привет` stays a quotation. A quote typed against the end of a word closes a quotation,
+  so `"john"` keeps both quotes and only corrects the name. A quote after a caret move or
+  after the layout was chosen by hand is left alone, because those already stop the engine
+  from touching the word.
+
+- Keep the Windows accessibility reader alive. A focused element that offers no text —
+  the ordinary state of a Chromium or Qt window until its accessibility tree is up —
+  arrived as a null pattern and was treated as a broken provider: one such field marked
+  the bridge unavailable, spent all three recovery attempts and switched reads off for the
+  rest of the session. In collected logs that left 46 successful reads out of 1628, none
+  of them in the editor or the chat client. Such a field is now an unreadable field, not a
+  failure; retries slow down to one a minute instead of stopping for good; a bridge that
+  cannot be closed is released rather than reused; and the request timeouts, previously
+  tighter than a cold Chromium window can answer, are 200 ms. The log now names the
+  exception class, the provider's HRESULT where there is one, and how long the last read
+  took, still without formatting the exception itself, and `--diagnose` reports whether the
+  focused field offers text at all.
+
 - Keep LogCourier delivering after a long pause. The pinned catalog is now recognised by
   the SHA-256 in its caption instead of the `file_id` that Telegram reissues for the same
   document over time: a collector idle for days read a new identifier for the catalog it

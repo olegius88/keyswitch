@@ -21,7 +21,7 @@ gi.require_version("Pango", "1.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from . import __version__
-from .app_quirks import SYMBOL_QUIRKS
+from .app_quirks import MENTION_HEADS
 from .config import SettingsStore
 from .context_policy import ContextPolicy
 from .engine import EngineSnapshot
@@ -447,8 +447,8 @@ class MainWindow(Adw.ApplicationWindow):
             title="Особенности программ",
             description="Правила о синтаксисе самих приложений, а не о языке. Каждое включается отдельно.",
         )
-        for quirk in SYMBOL_QUIRKS:
-            quirks.add(self._switch_row(quirk.setting, quirk.title, quirk.description))
+        for head in MENTION_HEADS:
+            quirks.add(self._switch_row(head.setting, head.title, head.description))
         page.append(quirks)
 
         learning = Adw.PreferencesGroup(
@@ -458,7 +458,7 @@ class MainWindow(Adw.ApplicationWindow):
         learning.add(self._switch_row("detection.learning", "Учиться на моих действиях", "После Pause/Break предложить правило: Enter подтверждает, Esc отклоняет"))
         confirmations = Adw.SpinRow.new_with_range(1, 5, 1)
         confirmations.set_title("Подтверждений для нового правила")
-        confirmations.set_subtitle("Порог повторов действует, если предложение не подтверждено клавишей Enter")
+        confirmations.set_subtitle("Порог, при котором правило начинает действовать; Enter достигает его сразу")
         confirmations.set_value(float(self.settings.get("detection.learning_confirmations", 2)))
         confirmations.connect(
             "notify::value",

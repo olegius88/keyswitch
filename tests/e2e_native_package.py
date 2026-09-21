@@ -20,7 +20,7 @@ from dbus.mainloop.glib import DBusGMainLoop
 gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk
 
-from keyswitch.config import SettingsStore
+from keyswitch.config import DEFAULTS, SettingsStore
 from keyswitch.history import HistoryStore
 from keyswitch.learning import LearningStore
 from keyswitch.tray import ITEM_INTERFACE, MENU_INTERFACE, MENU_PATH, OBJECT_PATH
@@ -366,7 +366,7 @@ def main() -> int:
         return GLib.SOURCE_REMOVE
 
     def verify_learning_confirmation() -> bool:
-        required = 2
+        required = int(DEFAULTS["detection"]["learning_confirmations"])  # type: ignore[index]
         learning.load()
         if learning.forced_target(0, "hello", required) != 1:
             return fail("Enter did not persist the packaged learning rule")

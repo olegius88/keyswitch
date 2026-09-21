@@ -170,6 +170,8 @@ class InputDiagnosticsTests(InputIntegrityTests):
         decision = next(e for e in self.events(logs.output) if e["event"] == "context_decision")
         self.assertEqual(decision["field_reader_details"], {
             "status": "unavailable", "failure_stage": "initialization", "failure_type": "import_error",
+            # The class name says which call failed; the message never appears.
+            "failure_name": "ImportError",
             "retry": {"attempts": 0, "limit": 3, "after_ms": None},
         })
         self.assertEqual(decision["baseline_reason"], "короткое слово")

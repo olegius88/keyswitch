@@ -577,7 +577,8 @@ class EngineBehaviourTests(unittest.TestCase):
             if e["event"] == "manual_conversion_scheduled"
         )
         self.assertIsNone(first["reversal"])
-        self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (1, 1))
+        # The conversion only offers the rule; nothing is written before Enter.
+        self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (None, 0))
         for _ in range(3):
             with self.assertLogs("keyswitch.engine", level="INFO") as logs:
                 self.press_pause()
@@ -586,7 +587,7 @@ class EngineBehaviourTests(unittest.TestCase):
             self.assertEqual(scheduled["reversal"], "manual")
             self.assertFalse(scheduled["learnable"])
             self.assertNotIn("learning_rule_recorded", [e["event"] for e in events])
-        self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (1, 1))
+        self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (None, 0))
         self.assertEqual(len(self.backend.injections), 4)
 
     def test_a_boundary_that_takes_over_an_early_plan_says_so(self) -> None:
@@ -1082,6 +1083,8 @@ class EngineBehaviourTests(unittest.TestCase):
 
     def test_the_log_shows_what_local_learning_knows_about_the_word(self) -> None:
         self.settings.set("detection.respect_manual_layout", False)
+        # Two confirmations make the intermediate state visible in the log.
+        self.settings.set("detection.learning_confirmations", 2)
 
         # No rule yet: the word is evaluated by the model alone.
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
@@ -1100,21 +1103,22 @@ class EngineBehaviourTests(unittest.TestCase):
             },
         )
 
-        # One manual conversion: a rule exists but does not force anything yet.
+        # A rule half-confirmed by an older version stays inactive on its own.
+        self.engine.learning.record_manual(0, "qwerty", 1)
+        self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (1, 1))
+
+        # One manual conversion offers the rule again; it teaches nothing by itself.
         self.backend.group = 0
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.type_word("qwerty")
             self.press_pause()
-        recorded = next(
-            event
-            for event in self.technical_events(logs.output)
-            if event["event"] == "learning_rule_recorded"
+            self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (1, 1))
+            self.assertIsNotNone(self.engine.learning_prompt)
+            self.engine.dismiss_learning_prompt(reason="escape")
+        self.assertNotIn(
+            "learning_rule_recorded",
+            [event["event"] for event in self.technical_events(logs.output)],
         )
-        self.assertEqual(
-            (recorded["word"], recorded["confirmations"], recorded["active"]),
-            ("qwerty", 1, False),
-        )
-        self.assertEqual(recorded["required_confirmations"], 2)
         self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (1, 1))
 
         self.backend.group = 0
@@ -1126,17 +1130,22 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertEqual(pending["rule_target"], 1)
         self.assertIsNone(pending["forced_target"])
 
-        # The second manual conversion turns it into an active rule.
+        # Enter on the prompt is what turns it into an active rule.
         self.backend.group = 0
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.type_word("qwerty")
             self.press_pause()
+            self.assertTrue(self.engine.confirm_learning_prompt())
         recorded = next(
             event
             for event in self.technical_events(logs.output)
             if event["event"] == "learning_rule_recorded"
         )
-        self.assertEqual((recorded["confirmations"], recorded["active"]), (2, True))
+        self.assertEqual(
+            (recorded["word"], recorded["confirmations"], recorded["active"]),
+            ("qwerty", 2, True),
+        )
+        self.assertEqual(recorded["required_confirmations"], 2)
 
         self.backend.group = 0
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
@@ -1476,6 +1485,10 @@ class EngineBehaviourTests(unittest.TestCase):
         self.type_word("yj", group=0, start=80)
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.press_pause()
+        self.assertEqual(self.engine.snapshot.last_action, "yj → но")
+        self.assertEqual(self.engine.learning.counts(), (0, 0))
+        self.assertIsNotNone(self.engine.learning_prompt)
+        self.assertTrue(self.engine.confirm_learning_prompt())
         self.assertEqual(self.engine.snapshot.last_action, "yj → но · правило выучено")
         self.assertEqual(self.engine.learning.counts(), (1, 0))
         scheduled = next(
@@ -1527,6 +1540,85 @@ class EngineBehaviourTests(unittest.TestCase):
             event for event in self.technical_events(logs.output) if event["event"] == "learning_prompt_confirmed"
         )
         self.assertEqual(confirmed["required_confirmations"], 5)
+
+    def test_only_enter_records_what_local_learning_keeps(self) -> None:
+        """Every answer except Enter leaves the rules as they were.
+
+        A manual conversion is a correction, not a lesson: the user may just
+        carry on typing, click elsewhere or leave the prompt alone, and none of
+        that is a decision about the word.
+        """
+
+        self.settings.set("detection.learning_confirmations", 1)
+
+        def offer() -> None:
+            self.backend.group = 0
+            self.type_word("qwerty")
+            self.press_pause()
+            self.assertIsNotNone(self.engine.learning_prompt)
+            self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (None, 0))
+
+        offer()
+        self.engine._handle(plain_key("Escape", 9, 1))
+        self.assertEqual(self.engine.learning.counts(), (0, 0))
+
+        offer()
+        self.engine._handle(letter_event("a", 38, 1, self.pair))
+        self.assertIsNone(self.engine.learning_prompt)
+        self.assertEqual(self.engine.learning.counts(), (0, 0))
+        self.engine._clear_word()
+
+        offer()
+        self.engine._handle(plain_key("Pointer", 1, 0))
+        self.assertIsNone(self.engine.learning_prompt)
+        self.assertEqual(self.engine.learning.counts(), (0, 0))
+
+        offer()
+        deadline = self.engine._learning_prompt_deadline
+        assert deadline is not None
+        self.assertTrue(self.engine._expire_learning_prompt(now=deadline + 1.0))
+        self.assertEqual(self.engine.learning.counts(), (0, 0))
+        self.engine._clear_word()
+
+        offer()
+        self.assertTrue(self.engine.confirm_learning_prompt())
+        self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (1, 1))
+        self.assertEqual(self.engine.learning.forced_target(0, "qwerty", 1), 1)
+        self.assertEqual(self.engine.learning.counts(), (1, 0))
+        self.assertEqual(
+            self.engine.snapshot.last_action, "qwerty → йцукен · правило выучено"
+        )
+
+    def test_a_word_that_already_has_a_rule_is_not_offered_again(self) -> None:
+        """Nothing left to learn: the conversion just happens, without a prompt."""
+
+        self.settings.set("detection.learning_confirmations", 1)
+        self.backend.group = 0
+        self.type_word("qwerty")
+        self.press_pause()
+        self.assertTrue(self.engine.confirm_learning_prompt())
+        self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (1, 1))
+
+        self.settings.set("detection.respect_manual_layout", False)
+        self.backend.group = 0
+        self.type_word("qwerty")
+        self.press_pause()
+        self.assertIsNone(self.engine.learning_prompt)
+        self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (1, 1))
+
+    def test_enter_reaches_the_threshold_whatever_it_is(self) -> None:
+        """A rule costs one Enter; the threshold is what half-confirmed rules need."""
+
+        self.settings.set("detection.learning_confirmations", 3)
+        self.backend.group = 0
+        self.type_word("qwerty")
+        self.press_pause()
+        self.assertTrue(self.engine.confirm_learning_prompt())
+        self.assertEqual(
+            self.engine.snapshot.last_action, "qwerty → йцукен · правило выучено"
+        )
+        self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (1, 3))
+        self.assertEqual(self.engine.learning.forced_target(0, "qwerty", 3), 1)
 
     def test_setting_changes_are_logged_with_loggable_values(self) -> None:
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:

@@ -49,6 +49,8 @@ DEFAULTS: SettingsData = {
         "protect_code": True,
         "intent_model_enabled": True,
         "learning": True,
+        # The threshold a rule must reach to act. Enter on the prompt reaches it
+        # at once; rules left half-confirmed by older versions stay inactive.
         "learning_confirmations": 2,
     },
     "hotkeys": {

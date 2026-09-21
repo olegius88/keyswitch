@@ -15,6 +15,8 @@ from keyswitch.context_model import ContextModel
 from keyswitch.context_policy import ContextPolicy
 from keyswitch.input_context import FieldContext
 from keyswitch.windows_context import (
+    CONNECTION_TIMEOUT_MS,
+    TEXT_PATTERN_ID,
     UI_AUTOMATION_LIBRARY,
     WindowsFieldReader,
     probe_uia,
@@ -108,10 +110,55 @@ class WindowsContextTests(unittest.TestCase):
         assert snapshot is not None
         self.assertTrue(snapshot.sensitive)
         with patch("keyswitch.windows_context.WindowsFieldReader") as factory:
-            self.assertEqual(probe_uia(), {"available": True})
+            probe = probe_uia()
+            self.assertEqual(
+                {key: probe[key] for key in ("available", "focused_text_pattern")},
+                {"available": True, "focused_text_pattern": True},
+            )
+            self.assertIsInstance(probe["focused_probe_ms"], int)
             factory.return_value.close.assert_called_once()
+
+            # A window that offers no text says so; it is not a broken provider.
+            factory.return_value.automation.GetFocusedElement.return_value.GetCurrentPattern.return_value = None
+            self.assertIs(probe_uia()["focused_text_pattern"], False)
+
+            # The provider's own failure is named by class and HRESULT only.
+            class ProviderError(Exception):
+                hresult = -2147220991
+
+            factory.return_value.automation.GetFocusedElement.side_effect = ProviderError("private")
+            probe = probe_uia()
+            self.assertEqual(
+                {key: probe[key] for key in ("available", "focused_text_pattern", "focused_error", "hresult")},
+                {"available": True, "focused_text_pattern": None,
+                 "focused_error": "ProviderError", "hresult": -2147220991},
+            )
+
             factory.side_effect = OSError("provider details are private")
             self.assertEqual(probe_uia(), {"available": False, "error": "OSError"})
+
+    def test_a_window_without_text_is_an_unreadable_field_not_a_broken_provider(self) -> None:
+        """Chromium and Qt expose a focused element long before its text.
+
+        GetCurrentPattern answers S_OK with a null pointer there, which comtypes
+        hands over as None. Treating that as an exception used to mark the whole
+        bridge unavailable and, after three retries, stop accessibility reads for
+        the rest of the session.
+        """
+
+        self.element.GetCurrentPattern.return_value = None
+        self.assertIsNone(self.reader.read("chat", 1))
+        self.element.GetCurrentPattern.assert_called_once_with(TEXT_PATTERN_ID)
+
+        reader = PlatformFieldReader()
+        with patch("keyswitch.context_access.sys.platform", "win32"), patch(
+            "keyswitch.windows_context.WindowsFieldReader",
+        ) as factory:
+            factory.return_value.read.return_value = None
+            self.assertIsNone(reader.read("chat", 1))
+            self.assertEqual(reader.status, "unsupported_field")
+            self.assertIsNone(reader.diagnostics()["failure_type"])
+            self.assertEqual(reader.retry_diagnostics()["after_ms"], None)
 
     def test_timeout_configuration_failure_closes_the_apartment(self) -> None:
         with patch.object(type(self.automation), "TransactionTimeout", new_callable=PropertyMock, create=True) as timeout:
@@ -128,7 +175,7 @@ class WindowsContextTests(unittest.TestCase):
         with patch("keyswitch.windows_context.importlib.import_module", side_effect=[com, client]):
             reader = WindowsFieldReader()
         self.assertEqual(com.CoInitializeEx.call_count, int(imported))
-        self.assertEqual(reader.automation.ConnectionTimeout, 50)
+        self.assertEqual(reader.automation.ConnectionTimeout, CONNECTION_TIMEOUT_MS)
         self.element.CurrentAutomationId = "search-box"
         field = reader.read("chat", 1)
         assert field is not None
@@ -371,7 +418,15 @@ class PlatformReaderTests(unittest.TestCase):
                             failing_call = factory if stage == "initialization" else factory.return_value.read
                             failing_call.side_effect = error("private provider message")
                             self.assertIsNone(reader.read("chat", 1))
-                            expected = {"status": "unavailable", "failure_stage": stage, "failure_type": category}
+                            expected: dict[str, object] = {
+                                "status": "unavailable", "failure_stage": stage,
+                                "failure_type": category, "failure_name": error.__name__,
+                            }
+                            if stage == "read":
+                                # A read that raised still says how long it took.
+                                measured = reader.diagnostics()["last_read_ms"]
+                                self.assertIsInstance(measured, int)
+                                expected["last_read_ms"] = measured
                             self.assertEqual(reader.diagnostics(), expected)
                             factory.assert_called_once()
                             self.assertEqual(factory.return_value.read.call_count, int(stage == "read"))
@@ -403,15 +458,37 @@ class PlatformReaderTests(unittest.TestCase):
                         failing_call.side_effect = None
                         self.assertEqual(reader.read("chat", 1), result)
                         self.assertEqual(factory.call_count, 2)
-                        self.assertEqual(reader.diagnostics(), {
-                            "status": "available" if result is not None else "unsupported_field",
-                            "failure_stage": None, "failure_type": None,
-                        })
+                        after = reader.diagnostics()
+                        self.assertEqual(
+                            {key: after[key] for key in ("status", "failure_stage", "failure_type")},
+                            {
+                                "status": "available" if result is not None else "unsupported_field",
+                                "failure_stage": None, "failure_type": None,
+                            },
+                        )
+                        self.assertIsInstance(after["last_read_ms"], int)
                         reader.close()
                         reader.close()
                         self.assertEqual(reader.diagnostics(), {
                             "status": "not_requested", "failure_stage": None, "failure_type": None,
                         })
+
+    def test_a_provider_hresult_is_reported_as_a_number(self) -> None:
+        """COM failures carry an HRESULT; the number says which call refused."""
+
+        class ProviderError(Exception):
+            hresult = -2147220991
+
+        reader = PlatformFieldReader()
+        with patch("keyswitch.context_access.sys.platform", "linux"), \
+                patch("keyswitch.atspi_context.AtspiFieldReader") as factory:
+            factory.return_value.read.side_effect = ProviderError("private")
+            self.assertIsNone(reader.read("chat", 1))
+            diagnostics = reader.diagnostics()
+            self.assertEqual(diagnostics["failure_name"], "ProviderError")
+            self.assertEqual(diagnostics["failure_code"], -2147220991)
+            reader.close()
+            self.assertNotIn("failure_code", reader.diagnostics())
 
     def test_diagnostics_exclude_field_and_unformatted_exception_details(self) -> None:
         class PrivateProviderError(Exception):
@@ -426,16 +503,22 @@ class PlatformReaderTests(unittest.TestCase):
         with patch("keyswitch.context_access.sys.platform", "linux"), patch("keyswitch.atspi_context.AtspiFieldReader") as factory:
             factory.return_value.read.return_value = field
             self.assertEqual(reader.read(field.application, 1), field)
-            self.assertEqual(reader.diagnostics(), {
-                "status": "available", "failure_stage": None, "failure_type": None,
-            })
+            available = reader.diagnostics()
+            self.assertEqual(
+                {key: available[key] for key in ("status", "failure_stage", "failure_type")},
+                {"status": "available", "failure_stage": None, "failure_type": None},
+            )
+            self.assertIsInstance(available["last_read_ms"], int)
             for stage in ("read", "initialization"):
                 failing_call = factory if stage == "initialization" else factory.return_value.read
                 failing_call.side_effect = PrivateProviderError("private exception text", field)
                 self.assertIsNone(reader.read(field.application, 1))
-                self.assertEqual(reader.diagnostics(), {
-                    "status": "unavailable", "failure_stage": stage, "failure_type": "provider_error",
-                })
+                failed = reader.diagnostics()
+                self.assertEqual(
+                    {key: failed[key] for key in ("status", "failure_stage", "failure_type", "failure_name")},
+                    {"status": "unavailable", "failure_stage": stage,
+                     "failure_type": "provider_error", "failure_name": "PrivateProviderError"},
+                )
                 reader.close()
 
     def test_explicit_lazy_read_and_exception_privacy(self) -> None:
