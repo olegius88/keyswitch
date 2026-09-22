@@ -6,3 +6,9 @@ keyswitch binary: embedded-library expat [usr/lib/keyswitch/*]
 # embedded interpreter, so they intentionally have no DT_NEEDED entries.
 keyswitch binary: shared-library-lacks-prerequisites [usr/lib/keyswitch/_asyncio.so]
 keyswitch binary: shared-library-lacks-prerequisites [usr/lib/keyswitch/_interpqueues.so]
+
+# KeySwitch is published outside the Debian archive, so the package carries the
+# source of the repository it is published in: that source, and the key trusted
+# for it alone, are what let APT keep an installed copy up to date. Both files
+# are conffiles, so disabling or deleting them survives later upgrades.
+keyswitch binary: package-installs-apt-sources [etc/apt/sources.list.d/keyswitch.sources]

@@ -198,6 +198,21 @@ lintian --fail-on error "$package"
   _ "$package"
 ```
 
+Репозиторий APT, из которого установленный пакет получает обновления, собирается
+и проверяется тем же деревом:
+
+```bash
+GNUPGHOME=.t/apt-signing/gnupg python3 tools/apt_repository.py build .t/apt-repo \
+  "$package" --passphrase-file .t/apt-signing/passphrase.txt
+python3 tools/apt_repository.py verify .t/apt-repo --expect-version "$package_version"
+```
+
+`verify` проверяет обе подписи открытым ключом из пакета, сверяет контрольные
+суммы из `Release` и заставляет APT прочитать репозиторий по `file://`.
+Ключ подписи, секреты рабочего процесса и порядок публикации описаны в
+[Репозитории APT](apt-repository.md); без ключа выполняется только `verify`
+уже собранного дерева.
+
 Сохраните нужные отчёты из `$verification_dir` до очистки временных файлов.
 Переданный strict-отчёт принимается только после сверки gates и текущих hashes.
 Без переменной `KEYSWITCH_INTENT_STRICT_REPORT` `build-deb.sh` запускает strict

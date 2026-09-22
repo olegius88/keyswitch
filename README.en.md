@@ -22,7 +22,7 @@ entirely locally and using the active EN/RU system layout pair.
 [Verification, builds and releases](docs/verification.md) (guides in Russian)
 
 The latest published stable release is
-[0.27.0](https://github.com/olegius88/keyswitch/releases/tag/v0.27.0).
+[0.28.0](https://github.com/olegius88/keyswitch/releases/tag/v0.28.0).
 The changes are listed in [CHANGELOG.md](CHANGELOG.md) and the known defects
 of the release in [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
@@ -117,11 +117,11 @@ scenarios and platform limitations.
 
 ## Install on Windows
 
-Download `KeySwitch-Setup-0.27.0-x64.exe` from the
-[published 0.27.0 release](https://github.com/olegius88/keyswitch/releases/tag/v0.27.0) and run
+Download `KeySwitch-Setup-0.28.0-x64.exe` from the
+[published 0.28.0 release](https://github.com/olegius88/keyswitch/releases/tag/v0.28.0) and run
 it. The per-user installation goes to `%LOCALAPPDATA%\Programs\KeySwitch` and
 does not require administrator privileges. The release also includes the
-portable `KeySwitch-0.27.0-windows-x64.zip` archive.
+portable `KeySwitch-0.28.0-windows-x64.zip` archive.
 
 After launch, KeySwitch appears in the notification area. Left- or right-click
 the `EN/RU` or flag icon to open its menu. Its Switch to action always offers
@@ -187,12 +187,12 @@ Probe the system backend without opening the application window:
 
 ## Install the Debian package
 
-Download `keyswitch_0.27.0_amd64.deb` from the
-[published 0.27.0 release](https://github.com/olegius88/keyswitch/releases/tag/v0.27.0), then
+Download `keyswitch_0.28.0_amd64.deb` from the
+[published 0.28.0 release](https://github.com/olegius88/keyswitch/releases/tag/v0.28.0), then
 install it with:
 
 ```bash
-sudo apt install ./keyswitch_0.27.0_amd64.deb
+sudo apt install ./keyswitch_0.28.0_amd64.deb
 ```
 
 The package installs the required system dependencies and adds KeySwitch to the
@@ -202,11 +202,43 @@ ELF executable: `/usr/lib/keyswitch` contains no application `.py` sources or
 interpreter. The native runtime includes `libpython`, so the `amd64` package
 cannot be installed on a different architecture.
 
-Release checking also works on Ubuntu, but KeySwitch does not silently install
-a system DEB itself. When a new version is found, the app shows a notification
-and an Open release button; installation remains an explicit APT action with
-the necessary permissions. Installing a downloaded `.deb` needs no separate
-KeySwitch repository; the app does not configure automatic APT updates.
+### Updates through APT
+
+Along with the application, the package installs the APT source
+`/etc/apt/sources.list.d/keyswitch.sources` and the public key
+`/etc/apt/keyrings/keyswitch-archive-keyring.asc` that signs the repository
+at <https://olegius88.github.io/keyswitch/>. From then on KeySwitch is updated
+with the rest of the system: Software Updater and `sudo apt upgrade` offer a
+new version like any other package. APT refreshes its package lists on the
+`apt-daily.timer` schedule; run `sudo apt update` to see a new version at once.
+
+The key is trusted for this repository alone: the source names it in
+`Signed-By`, and it never joins the set of keys APT trusts everywhere. To stop
+taking updates from here, add `Enabled: no` to the source file or delete it —
+dpkg keeps that decision through later package upgrades and removes the file on
+`sudo apt purge keyswitch`.
+
+To install KeySwitch straight from the repository, without downloading a `.deb`:
+
+```bash
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://olegius88.github.io/keyswitch/keyswitch-archive-keyring.asc \
+  | sudo tee /etc/apt/keyrings/keyswitch-archive-keyring.asc >/dev/null
+sudo tee /etc/apt/sources.list.d/keyswitch.sources <<'EOF'
+Types: deb
+URIs: https://olegius88.github.io/keyswitch/
+Suites: stable
+Components: main
+Architectures: amd64
+Signed-By: /etc/apt/keyrings/keyswitch-archive-keyring.asc
+EOF
+sudo apt update && sudo apt install keyswitch
+```
+
+Release checking inside the application stays a notification: KeySwitch shows
+the version it found and an Open release button, and APT performs the
+installation — the application never installs the system package in the
+background.
 
 ## Install from source for the current user
 
@@ -728,7 +760,7 @@ See [release and recovery procedures](docs/verification.md).
 - On Windows, UIPI prevents a regular process from injecting input into a
   window running at a higher integrity level. KeySwitch needs a matching level
   for that target window.
-- The published Windows 0.27.0 Setup EXE is not signed with a publisher certificate.
+- The published Windows 0.28.0 Setup EXE is not signed with a publisher certificate.
 
 ## License
 

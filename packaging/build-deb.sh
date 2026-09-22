@@ -9,6 +9,11 @@ architecture="${DEB_HOST_ARCH:-$(dpkg --print-architecture)}"
 nuitka_root="${KEYSWITCH_NUITKA_ROOT:-$project_dir/.nuitka}"
 nuitka_version="4.2"
 intent_model="$project_dir/src/keyswitch/resources/models/layout_intent_v1.ksm"
+apt_sources="$project_dir/packaging/debian/keyswitch.sources"
+apt_keyring="$project_dir/packaging/keyswitch-archive-keyring.asc"
+apt_sources_path="/etc/apt/sources.list.d/$(basename "$apt_sources")"
+apt_keyring_path="$(sed -nE 's/^Signed-By:[[:space:]]+([^[:space:]]+)$/\1/p' \
+    "$apt_sources")"
 intent_manifest="$project_dir/model/intent_v1/manifest.json"
 intent_model_max_bytes=$((14 * 1024 * 1024))
 intent_manifest_max_bytes=$((1024 * 1024))
@@ -453,8 +458,22 @@ verify_native_intent_model \
     "$stage_dir/native-diagnose.json" \
     "$stage_dir/native-diagnose.stderr"
 
+if [[ "$apt_keyring_path" != /etc/apt/keyrings/* ]]; then
+    printf 'The APT source must trust a keyring under /etc/apt/keyrings: %s\n' \
+        "$apt_keyring_path" >&2
+    exit 1
+fi
+if ! grep -Fq 'BEGIN PGP PUBLIC KEY BLOCK' "$apt_keyring" \
+    || grep -Fq 'PRIVATE KEY BLOCK' "$apt_keyring"; then
+    printf 'The shipped APT keyring must hold the public key alone: %s\n' \
+        "$apt_keyring" >&2
+    exit 1
+fi
+
 install -d \
     "$package_root/DEBIAN" \
+    "$package_root$(dirname "$apt_sources_path")" \
+    "$package_root$(dirname "$apt_keyring_path")" \
     "$package_root/usr/bin" \
     "$package_root/usr/lib/keyswitch" \
     "$package_root/usr/share/applications" \
@@ -473,6 +492,13 @@ install -m 0644 "$project_dir/packaging/debian/copyright" \
     "$package_root/usr/share/doc/keyswitch/copyright"
 install -m 0644 "$project_dir/packaging/debian/lintian-overrides" \
     "$package_root/usr/share/lintian/overrides/keyswitch"
+# The installed source and its key are what keep an installed KeySwitch up to
+# date through APT. The source is a conffile, so a user who disables or deletes
+# it keeps that decision across upgrades and loses it only when purging.
+install -m 0644 "$apt_sources" "$package_root$apt_sources_path"
+install -m 0644 "$apt_keyring" "$package_root$apt_keyring_path"
+printf '%s\n%s\n' "$apt_sources_path" "$apt_keyring_path" \
+    > "$package_root/DEBIAN/conffiles"
 install -m 0755 "$project_dir/packaging/keyswitch" \
     "$package_root/usr/bin/keyswitch"
 cp -a "$native_dist/." "$package_root/usr/lib/keyswitch/"
@@ -529,6 +555,9 @@ gzip -n -9 -c "$project_dir/packaging/keyswitch.1" \
 find "$package_root" -type d -exec chmod 0755 {} +
 chmod 0644 \
     "$package_root/DEBIAN/control" \
+    "$package_root/DEBIAN/conffiles" \
+    "$package_root$apt_sources_path" \
+    "$package_root$apt_keyring_path" \
     "$package_root/usr/share/doc/keyswitch/changelog.gz" \
     "$package_root/usr/share/man/man1/keyswitch.1.gz"
 find "$package_root" -exec touch --date="@$SOURCE_DATE_EPOCH" {} +

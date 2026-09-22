@@ -4,6 +4,19 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.28.0 — 2026-09-22
+
+- Keep Ubuntu up to date through APT. A new Linux version used to mean opening the
+  release page, downloading the `.deb` and installing it by hand; the notification the
+  application showed was as far as it went. The package now installs its own APT source
+  and the public key that signs it, so Software Updater and `sudo apt upgrade` offer
+  KeySwitch alongside every other package. Each release publishes the signed repository
+  at <https://olegius88.github.io/keyswitch/>, and APT trusts that key for this
+  repository alone rather than system-wide. The source is an ordinary conffile: adding
+  `Enabled: no` to it or deleting it stops the updates, the decision survives later
+  upgrades, and purging the package removes the file. Installing straight from the
+  repository, without downloading a package first, is described in the README.
+
 ## 0.27.0 — 2026-09-21
 
 - Learn a rule only from Enter. A manual conversion used to write the word into the rules

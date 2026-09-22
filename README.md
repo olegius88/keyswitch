@@ -17,7 +17,7 @@ KeySwitch — настольное приложение для Windows 10/11 x64
 [Проверка, сборка и выпуск](docs/verification.md)
 
 Последний опубликованный стабильный выпуск —
-[0.27.0](https://github.com/olegius88/keyswitch/releases/tag/v0.27.0).
+[0.28.0](https://github.com/olegius88/keyswitch/releases/tag/v0.28.0).
 Изменения перечислены в [CHANGELOG.md](CHANGELOG.md), известные дефекты
 выпуска — в [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
@@ -117,11 +117,11 @@ Telegram. Токен бота и ID группы задаются в её инт
 
 ## Установка в Windows
 
-Скачайте `KeySwitch-Setup-0.27.0-x64.exe` со страницы
-[опубликованного выпуска 0.27.0](https://github.com/olegius88/keyswitch/releases/tag/v0.27.0) и
+Скачайте `KeySwitch-Setup-0.28.0-x64.exe` со страницы
+[опубликованного выпуска 0.28.0](https://github.com/olegius88/keyswitch/releases/tag/v0.28.0) и
 запустите его. Установка выполняется для текущего пользователя в
 `%LOCALAPPDATA%\Programs\KeySwitch` и не требует прав администратора. В выпуск
-также входит переносимый архив `KeySwitch-0.27.0-windows-x64.zip`.
+также входит переносимый архив `KeySwitch-0.28.0-windows-x64.zip`.
 
 После запуска KeySwitch появится в области уведомлений. Левый или правый щелчок
 по `EN/RU` либо флагу открывает меню. В нём пункт «Переключить на…» всегда
@@ -189,11 +189,11 @@ cd keyswitch
 
 ## Установка DEB-пакета
 
-Скачайте `keyswitch_0.27.0_amd64.deb` со страницы
-[опубликованного выпуска 0.27.0](https://github.com/olegius88/keyswitch/releases/tag/v0.27.0), затем:
+Скачайте `keyswitch_0.28.0_amd64.deb` со страницы
+[опубликованного выпуска 0.28.0](https://github.com/olegius88/keyswitch/releases/tag/v0.28.0), затем:
 
 ```bash
-sudo apt install ./keyswitch_0.27.0_amd64.deb
+sudo apt install ./keyswitch_0.28.0_amd64.deb
 ```
 
 Пакет установит системные зависимости и добавит KeySwitch в меню приложений.
@@ -203,11 +203,43 @@ sudo apt install ./keyswitch_0.27.0_amd64.deb
 `libpython`, поэтому пакет для `amd64` нельзя устанавливать на другую
 архитектуру.
 
-Проверка новых выпусков доступна и в Ubuntu, но само приложение не выполняет
-фоновую установку системного DEB. При обнаружении версии KeySwitch показывает уведомление и
-кнопку «Открыть выпуск»; установка остаётся явным действием пользователя через
-APT с нужными правами. Для установки скачанного `.deb` отдельный репозиторий
-KeySwitch не требуется; автоматического APT-обновления приложение не настраивает.
+### Обновления через APT
+
+Вместе с приложением пакет ставит источник APT
+`/etc/apt/sources.list.d/keyswitch.sources` и открытый ключ
+`/etc/apt/keyrings/keyswitch-archive-keyring.asc`, которым подписан
+репозиторий <https://olegius88.github.io/keyswitch/>. Дальше KeySwitch
+обновляется вместе с остальной системой: «Обновление приложений» в Ubuntu и
+`sudo apt upgrade` видят новую версию наравне с системными пакетами. Списки
+пакетов APT обновляет по расписанию `apt-daily.timer`; чтобы увидеть новую
+версию сразу, выполните `sudo apt update`.
+
+Ключу доверяет только этот репозиторий: он назван в поле `Signed-By` и не
+попадает в общий набор доверенных ключей APT. Чтобы перестать получать отсюда
+обновления, добавьте в файл источника строку `Enabled: no` или удалите файл:
+dpkg сохранит это решение при последующих обновлениях пакета и удалит файл
+при `sudo apt purge keyswitch`.
+
+Установить KeySwitch сразу из репозитория, без ручной загрузки `.deb`:
+
+```bash
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://olegius88.github.io/keyswitch/keyswitch-archive-keyring.asc \
+  | sudo tee /etc/apt/keyrings/keyswitch-archive-keyring.asc >/dev/null
+sudo tee /etc/apt/sources.list.d/keyswitch.sources <<'EOF'
+Types: deb
+URIs: https://olegius88.github.io/keyswitch/
+Suites: stable
+Components: main
+Architectures: amd64
+Signed-By: /etc/apt/keyrings/keyswitch-archive-keyring.asc
+EOF
+sudo apt update && sudo apt install keyswitch
+```
+
+Проверка новых выпусков внутри приложения остаётся уведомлением: KeySwitch
+показывает найденную версию и кнопку «Открыть выпуск», а установку выполняет
+APT — сам системный пакет приложение в фоне не ставит.
 
 ## Установка из исходников для текущего пользователя
 
@@ -725,7 +757,7 @@ python3 tools/release.py --version X.Y.Z            # коммит, тег, push
 - В Windows механизм UIPI не позволяет обычному процессу вводить текст в окно,
   запущенное с более высоким уровнем целостности. Для такого окна KeySwitch
   также должен быть запущен с сопоставимыми правами.
-- Windows Setup EXE опубликованной версии 0.27.0 не подписан сертификатом издателя.
+- Windows Setup EXE опубликованной версии 0.28.0 не подписан сертификатом издателя.
 
 ## Лицензия
 

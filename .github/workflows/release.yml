@@ -415,9 +415,117 @@ jobs:
           path: dist/KeySwitch-*-macos-*.zip
           if-no-files-found: error
 
+  apt-repository:
+    name: Publish the signed APT repository that serves updates
+    needs: [package, windows, macos]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-26.04
+    # The published repository is what keeps an installed KeySwitch up to date,
+    # and every package carries the source pointing at it, so the repository has
+    # to be live before the release that hands out that package.
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      SIGNING_KEY: ${{ secrets.KEYSWITCH_APT_SIGNING_KEY }}
+      SIGNING_PASSPHRASE: ${{ secrets.KEYSWITCH_APT_SIGNING_PASSPHRASE }}
+      POOL_RELEASES: "5"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Download the built Debian package
+        uses: actions/download-artifact@v8
+        with:
+          name: keyswitch-release-linux
+          path: dist
+
+      - name: Read the GitHub Pages configuration
+        id: pages
+        uses: actions/configure-pages@v6
+
+      - name: Check that Pages publishes the URL the package trusts
+        run: |
+          published="${{ steps.pages.outputs.base_url }}/"
+          trusted="$(sed -nE 's/^URIs:[[:space:]]+([^[:space:]]+)$/\1/p' \
+            packaging/debian/keyswitch.sources)"
+          if [ "$published" != "$trusted" ]; then
+            printf 'Pages serves %s while the package trusts %s\n' \
+              "$published" "$trusted" >&2
+            exit 1
+          fi
+
+      - name: Keep the previously published packages installable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          package_version="$(sed -nE 's/^version = "([^"]+)"/\1/p' pyproject.toml | head -n 1)"
+          current="keyswitch_${package_version}_amd64.deb"
+          test -f "dist/$current"
+          mkdir -p pool-history
+          tags="$(gh release list --repo "$GITHUB_REPOSITORY" \
+            --limit "$POOL_RELEASES" --json tagName --jq '.[].tagName')"
+          for tag in $tags; do
+            asset="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets \
+              --jq '[.assets[].name
+                     | select(startswith("keyswitch_") and endswith("_amd64.deb"))]
+                    | first // empty')"
+            if [ -z "$asset" ] || [ "$asset" = "$current" ]; then
+              continue
+            fi
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+              --pattern "$asset" --dir pool-history
+          done
+          printf 'Kept %d earlier package(s) alongside %s\n' \
+            "$(find pool-history -name '*.deb' | wc -l)" "$current"
+
+      - name: Import the repository signing key
+        run: |
+          if [ -z "$SIGNING_KEY" ] || [ -z "$SIGNING_PASSPHRASE" ]; then
+            printf 'The repository signing secrets are missing: set %s and %s.\n' \
+              KEYSWITCH_APT_SIGNING_KEY KEYSWITCH_APT_SIGNING_PASSPHRASE >&2
+            exit 1
+          fi
+          home="$RUNNER_TEMP/keyswitch-apt-gnupg"
+          install -d -m 0700 "$home"
+          printf '%s' "$SIGNING_KEY" | GNUPGHOME="$home" gpg --batch --import
+          printf '%s' "$SIGNING_PASSPHRASE" > "$RUNNER_TEMP/keyswitch-apt-passphrase"
+          chmod 0600 "$RUNNER_TEMP/keyswitch-apt-passphrase"
+          echo "GNUPGHOME=$home" >> "$GITHUB_ENV"
+
+      - name: Build and sign the repository
+        run: |
+          packages=(dist/*.deb)
+          for candidate in pool-history/*.deb; do
+            if [ -e "$candidate" ]; then
+              packages+=("$candidate")
+            fi
+          done
+          python3 tools/apt_repository.py build site "${packages[@]}" \
+            --passphrase-file "$RUNNER_TEMP/keyswitch-apt-passphrase"
+
+      - name: Verify the repository the way an installed system reads it
+        run: |
+          package_version="$(sed -nE 's/^version = "([^"]+)"/\1/p' pyproject.toml | head -n 1)"
+          python3 tools/apt_repository.py verify site --expect-version "$package_version"
+
+      - name: Upload the repository as the Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+      - name: Deploy the repository to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
+
   release:
     name: Publish GitHub Release
-    needs: [package, windows, macos]
+    needs: [package, windows, macos, apt-repository]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-26.04
 

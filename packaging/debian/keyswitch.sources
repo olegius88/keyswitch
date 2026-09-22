@@ -1,0 +1,14 @@
+# KeySwitch publishes its Debian packages in its own APT repository, and the
+# installed package brings this file with it, so every later version arrives
+# through the system update tools like any other package.
+#
+# To stop taking updates from here, add "Enabled: no" below, or delete the file:
+# dpkg keeps the change through upgrades and removes the file when the package
+# is purged. The repository is signed; APT trusts the key named in Signed-By for
+# this repository only.
+Types: deb
+URIs: https://olegius88.github.io/keyswitch/
+Suites: stable
+Components: main
+Architectures: amd64
+Signed-By: /etc/apt/keyrings/keyswitch-archive-keyring.asc

@@ -12,6 +12,8 @@ frozen_model_sources="$project_dir/model/intent_v1/sources"
 expected_english_model="$frozen_model_sources/en_US.lm"
 expected_russian_model="$frozen_model_sources/ru_RU.lm"
 expected_onboard_copyright="$frozen_model_sources/COPYRIGHT.onboard-data"
+expected_apt_sources="$project_dir/packaging/debian/keyswitch.sources"
+expected_apt_keyring="$project_dir/packaging/keyswitch-archive-keyring.asc"
 
 verify_kslm_packaging_bounds() {
     local model_path="$1"
@@ -188,6 +190,31 @@ grep -Fqx '  2011, 2012, Francesco Fumanti <francesco.fumanti@gmx.net>' \
     "$onboard_copyright"
 grep -Fqx 'License: GPL-3+' "$onboard_copyright"
 grep -q '/usr/lib/keyswitch/keyswitch-bin' "$launcher"
+
+# An installed KeySwitch keeps itself upgradable through APT, so the package
+# must carry the repository source as a conffile and the public key it trusts.
+control_root="$staging/control"
+mkdir -p "$control_root"
+dpkg-deb --control "$package" "$control_root"
+apt_sources_path="/etc/apt/sources.list.d/$(basename "$expected_apt_sources")"
+apt_keyring_path="$(sed -nE 's/^Signed-By:[[:space:]]+([^[:space:]]+)$/\1/p' \
+    "$expected_apt_sources")"
+apt_uri="$(sed -nE 's/^URIs:[[:space:]]+([^[:space:]]+)$/\1/p' \
+    "$expected_apt_sources")"
+grep -Fqx "$apt_sources_path" "$control_root/conffiles"
+grep -Fqx "$apt_keyring_path" "$control_root/conffiles"
+cmp -s "$expected_apt_sources" "$staging$apt_sources_path"
+cmp -s "$expected_apt_keyring" "$staging$apt_keyring_path"
+if [[ "$apt_uri" != https://* || "$apt_uri" != */ ]]; then
+    printf 'The packaged APT source does not serve HTTPS from a directory: %s\n' \
+        "$apt_uri" >&2
+    exit 1
+fi
+if ! grep -Fq 'BEGIN PGP PUBLIC KEY BLOCK' "$staging$apt_keyring_path" \
+    || grep -Fq 'PRIVATE KEY BLOCK' "$staging$apt_keyring_path"; then
+    printf 'The packaged APT keyring must hold the public key alone.\n' >&2
+    exit 1
+fi
 if ! file "$binary" | grep -Eq 'ELF .* (executable|shared object)'; then
     printf 'Packaged application is not an ELF executable: %s\n' \
         "$(file "$binary")" >&2
@@ -295,6 +322,6 @@ raise SystemExit(0 if valid else 1)
     exit 1
 fi
 
-printf 'NATIVE_DEB_OK package=%s architecture=%s elf_files=%d intent_model=%s language_models=en_US.lm,ru_RU.lm binary=%s\n' \
+printf 'NATIVE_DEB_OK package=%s architecture=%s elf_files=%d intent_model=%s language_models=en_US.lm,ru_RU.lm apt_source=%s binary=%s\n' \
     "$package" "$architecture" "$elf_count" \
-    "$(basename "$intent_model")" "$(file -b "$binary")"
+    "$(basename "$intent_model")" "$apt_uri" "$(file -b "$binary")"

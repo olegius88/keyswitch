@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KeySwitch APT repository</title>
+<style>
+:root { color-scheme: light dark; }
+body {
+  margin: 0 auto; padding: 2rem 1rem; max-width: 46rem;
+  font: 16px/1.6 system-ui, sans-serif;
+}
+h1 { font-size: 1.6rem; }
+h2 { font-size: 1.15rem; margin-top: 2rem; }
+pre {
+  padding: 0.9rem; overflow-x: auto; border-radius: 6px;
+  background: rgba(127, 127, 127, 0.14);
+}
+code { font-family: ui-monospace, monospace; }
+footer { margin-top: 2.5rem; font-size: 0.9rem; opacity: 0.8; }
+</style>
+</head>
+<body>
+<h1>KeySwitch APT repository</h1>
+
+<p>Здесь лежат подписанные пакеты KeySwitch для Ubuntu:
+<code>@SUITE@ @COMPONENT@</code>, архитектура <code>@ARCHITECTURE@</code>.
+Установленный пакет добавляет этот репозиторий сам, поэтому новые версии
+приходят вместе с остальными обновлениями системы. Команды ниже нужны только
+для установки сразу отсюда, без ручной загрузки <code>.deb</code>.</p>
+
+<pre><code>sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL @URI@@KEYRING_FILE@ | sudo tee @KEYRING_PATH@ &gt;/dev/null
+sudo tee /etc/apt/sources.list.d/keyswitch.sources &lt;&lt;'EOF'
+Types: deb
+URIs: @URI@
+Suites: @SUITE@
+Components: @COMPONENT@
+Architectures: @ARCHITECTURE@
+Signed-By: @KEYRING_PATH@
+EOF
+sudo apt update &amp;&amp; sudo apt install keyswitch</code></pre>
+
+<h2>English</h2>
+
+<p>This is the signed APT repository for KeySwitch on Ubuntu: suite
+<code>@SUITE@</code>, component <code>@COMPONENT@</code>, architecture
+<code>@ARCHITECTURE@</code>. An installed package registers the repository
+itself, so later versions arrive with the rest of the system updates; the
+commands above install straight from here instead.</p>
+
+<p>To stop taking updates from this repository, add <code>Enabled: no</code> to
+<code>/etc/apt/sources.list.d/keyswitch.sources</code> or delete the file.</p>
+
+<footer>
+<a href="https://github.com/olegius88/keyswitch">Source code and releases</a>
+</footer>
+</body>
+</html>
