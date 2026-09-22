@@ -979,17 +979,30 @@ class DesktopApplication:
             text=(
                 "Правило появляется после ручного преобразования (Pause) и "
                 "начинает действовать, набрав нужное число подтверждений. "
-                "Запрет запоминается, когда вы отменяете автоисправление."
+                "Запрет запоминается, когда вы отменяете автоисправление. "
+                "Правила и запреты удаляются по отдельности."
             ),
             style="Muted.TLabel",
             wraplength=720,
             justify="left",
         ).grid(row=2, column=0, sticky="w", pady=(8, 0))
+        actions = ttk.Frame(learning)
+        actions.grid(row=3, column=0, sticky="w", pady=(10, 0))
         ttk.Button(
-            learning,
-            text="Очистить правила и запреты",
+            actions,
+            text="Удалить выбранное",
+            command=self._delete_selected_learning,
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Button(
+            actions,
+            text="Очистить правила",
             command=self._clear_learning,
-        ).grid(row=3, column=0, sticky="w", pady=(10, 0))
+        ).grid(row=0, column=1, sticky="w", padx=(8, 0))
+        ttk.Button(
+            actions,
+            text="Очистить запреты",
+            command=self._clear_rejections,
+        ).grid(row=0, column=2, sticky="w", padx=(8, 0))
 
         settings = self._section(page, "Настройки", 3)
         ttk.Label(
@@ -1768,6 +1781,7 @@ class DesktopApplication:
             self.learning_tree.insert(
                 "",
                 "end",
+                iid=self._learning_row_id("rule", rule.source_group, rule.word),
                 values=(
                     rule.word,
                     self._other_layout_text(rule.word, rule.source_group),
@@ -1780,6 +1794,12 @@ class DesktopApplication:
             self.learning_tree.insert(
                 "",
                 "end",
+                iid=self._learning_row_id(
+                    "rejection",
+                    rejection.source_group,
+                    rejection.word,
+                    rejection.target_group,
+                ),
                 values=(
                     rejection.word,
                     self._other_layout_text(rejection.word, rejection.source_group),
@@ -1806,13 +1826,43 @@ class DesktopApplication:
             else pair.translate(word, "ru", "us")
         )
 
+    @staticmethod
+    def _learning_row_id(
+        kind: str, source_group: int, word: str, target_group: int | None = None
+    ) -> str:
+        """A tree row id that names the entry exactly, whatever the word holds."""
+
+        return json.dumps([kind, source_group, word, target_group], ensure_ascii=False)
+
+    def _delete_selected_learning(self) -> None:
+        for row_id in self.learning_tree.selection():
+            kind, source_group, word, target_group = json.loads(row_id)
+            if kind == "rule":
+                self.engine.learning.remove_rule(int(source_group), str(word))
+            else:
+                self.engine.learning.remove_rejection(
+                    int(source_group), str(word), int(target_group)
+                )
+        self._refresh_learning()
+
     def _clear_learning(self) -> None:
         if messagebox.askyesno(
-            "Очистить самообучение",
-            "Удалить все выученные правила и сохранённые запреты?",
+            "Очистить правила",
+            "Удалить все выученные правила? Запреты, записанные при отмене "
+            "исправлений, сохранятся.",
             parent=self.root,
         ):
-            self.engine.learning.clear()
+            self.engine.learning.clear_rules()
+            self._refresh_learning()
+
+    def _clear_rejections(self) -> None:
+        if messagebox.askyesno(
+            "Очистить запреты",
+            "Удалить все запреты, записанные при отмене исправлений? "
+            "Выученные правила сохранятся.",
+            parent=self.root,
+        ):
+            self.engine.learning.clear_rejections()
             self._refresh_learning()
 
     def _reset_settings(self) -> None:

@@ -300,6 +300,51 @@ class LearningStore:
                 len(values) for values in rejections.values() if isinstance(values, list)
             )
 
+    def remove_rule(self, source_group: int, word: str) -> bool:
+        """Forget one remembered conversion; True when there was one."""
+
+        with self._lock:
+            removed = self._data["rules"].pop(self._key(source_group, word), None)
+            if removed is None:
+                return False
+            self.save()
+            return True
+
+    def remove_rejection(self, source_group: int, word: str, target_group: int) -> bool:
+        """Allow one forbidden direction again; True when it was forbidden."""
+
+        key = self._key(source_group, word)
+        with self._lock:
+            rejections = self._data["rejections"]
+            targets = rejections.get(key)
+            if not isinstance(targets, list) or target_group not in targets:
+                return False
+            remaining = [item for item in targets if item != target_group]
+            if remaining:
+                rejections[key] = remaining
+            else:
+                rejections.pop(key, None)
+            self.save()
+            return True
+
+    def clear_rules(self) -> None:
+        """Forget every remembered conversion; the user's rejections stay.
+
+        A rejection is the user's own "not this word": clearing rules that
+        went wrong must not silently take those back as well.
+        """
+
+        with self._lock:
+            self._data["rules"] = {}
+            self.save()
+
+    def clear_rejections(self) -> None:
+        """Allow every forbidden direction again; the rules stay."""
+
+        with self._lock:
+            self._data["rejections"] = {}
+            self.save()
+
     def clear(self) -> None:
         with self._lock:
             self._data = {

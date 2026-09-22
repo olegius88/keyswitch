@@ -657,6 +657,7 @@ class KeySwitchEngine:
             self._clear_word(reason="modifier_shortcut")
             return
         if event.key_name == "BackSpace":
+            reopenable = self._reopenable_committed_word()
             self._last_committed_stale = True
             self._log_pending_dropped("backspace")
             self._pending = None
@@ -677,8 +678,26 @@ class KeySwitchEngine:
                 self._update(current_word=self._text_for_group(self._strokes, self._source_group))
             elif self._symbol_strokes:
                 self._symbol_strokes.pop()
-            else:
-                self._last_committed_stale = True
+            elif reopenable is not None:
+                # This Backspace took away the boundary that ended the last
+                # word, so the caret stands right after that word again and
+                # letters typed now continue it: "создаш" + "ь" is judged as
+                # "создашь", not as a lone "ь" that no dictionary knows.
+                # The word was already judged at that boundary, so reopening
+                # alone does not arm the pause timer: a user who stops to
+                # think after the Backspace must not get a second, unasked
+                # judgement of the same letters. The next letter arms it.
+                self._strokes = list(reopenable.strokes)
+                self._source_group = reopenable.source_group
+                self._technical_event(
+                    "committed_word_reopened",
+                    characters=len(self._strokes),
+                    source_group=self._source_group,
+                    boundary=reopenable.boundary.key_name if reopenable.boundary else "",
+                )
+                self._update(
+                    current_word=self._text_for_group(self._strokes, self._source_group)
+                )
             return
         if event.key_name in ACTION_BOUNDARY_KEYS:
             if event.deferred:
@@ -2476,6 +2495,30 @@ class KeySwitchEngine:
             ]
         return tuple(late)
 
+    def _reopenable_committed_word(self) -> CorrectionPlan | None:
+        """The last word, if one Backspace puts the caret right after it.
+
+        Only a word ended by one plain boundary character qualifies: nothing
+        was typed or clicked since (it is not stale), no literal punctuation
+        sits between the word and that boundary, and the boundary is not
+        Enter or Tab, whose effect on the text one Backspace cannot undo.
+        """
+
+        plan = self._last_committed
+        if (
+            plan is None
+            or self._last_committed_stale
+            or self._strokes
+            or self._symbol_strokes
+            or plan.trailing
+            or not plan.strokes
+            or plan.boundary is None
+            or plan.boundary.key_name in ACTION_BOUNDARY_KEYS
+            or len(plan.boundary.character) != 1
+        ):
+            return None
+        return plan
+
     def _reversal_of_last_correction(
         self, plan: CorrectionPlan
     ) -> CorrectionPlan | None:
@@ -2700,8 +2743,17 @@ class KeySwitchEngine:
                 or field.application != plan.application or field.sensitive or field.selection
                 or not field.before.endswith(suffix)
             ):
+                typed_after_boundary = bool(self._strokes)
                 self._clear_word(reason="context_field_changed")
-                self._technical_event("correction_aborted", mode=plan.mode, reason="context_field_changed")
+                # The letters already typed for the next word stand somewhere
+                # the engine can no longer vouch for. The rest of that token is
+                # left alone rather than judged on its own: "все" must not turn
+                # into "в" + "се" with only the tail converted.
+                self._untracked_token = self._untracked_token or typed_after_boundary
+                self._technical_event(
+                    "correction_aborted", mode=plan.mode, reason="context_field_changed",
+                    letters_untracked=typed_after_boundary,
+                )
                 return False
         application_excluded = self._application_excluded(plan.application)
         logged_original = "<redacted>" if application_excluded else plan.original

@@ -276,18 +276,44 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertEqual(self.engine.snapshot.last_error, "boom")
         self.assertEqual(self.engine.snapshot.last_action, "Раскладка не переключена")
 
-    def test_backspace_and_navigation_after_a_word_make_it_stale(self) -> None:
+    def test_backspace_over_the_boundary_reopens_the_word_and_navigation_makes_it_stale(self) -> None:
+        # Pause on the reopened word reverses the correction; with learning on
+        # that would also record a rejection and block the second conversion.
+        self.settings.set("detection.learning", False)
         self.correct_hello()
-        self.engine._handle(plain_key("BackSpace", 22, 1))
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._handle(plain_key("BackSpace", 22, 1))
         self.assertTrue(self.engine._last_committed_stale)
+        self.assertEqual(self.engine.snapshot.current_word, "привет")
+        self.assertEqual(self.engine._source_group, 1)
+        reopened = next(
+            event
+            for event in self.technical_events(logs.output)
+            if event["event"] == "committed_word_reopened"
+        )
+        self.assertEqual(reopened["characters"], 6)
+        self.assertEqual(reopened["boundary"], "space")
+        # The reopened word is the current word again, so Pause converts it back.
         self.press_pause()
-        self.assertEqual(len(self.backend.injections), 1)
+        self.assertEqual(len(self.backend.injections), 2)
         self.assertEqual(self.backend.group, 0)
 
         self.engine._manual_layout_group = None
         self.correct_hello()
         self.engine._handle(plain_key("Left", 100, 1))
         self.assertTrue(self.engine._last_committed_stale)
+        # A moved caret leaves nothing to reopen: the Backspace lands elsewhere.
+        self.engine._handle(plain_key("BackSpace", 22, 1))
+        self.assertEqual(self.engine._strokes, [])
+
+    def test_backspace_after_a_second_boundary_does_not_reopen_the_word(self) -> None:
+        self.correct_hello()
+        self.press_space(1)
+        self.engine._handle(plain_key("BackSpace", 22, 1))
+        self.assertEqual(self.engine._strokes, [])
+        self.assertTrue(self.engine._last_committed_stale)
+        self.press_pause()
+        self.assertEqual(len(self.backend.injections), 1)
 
     def test_pause_without_any_word_reports_nothing_to_convert(self) -> None:
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:

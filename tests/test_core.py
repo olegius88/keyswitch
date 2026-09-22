@@ -227,6 +227,32 @@ class LearningTests(unittest.TestCase):
             self.assertIsNone(learning.forced_target(0, "qwerty", 1))
             self.assertEqual(learning.rejected_targets(0, "qwerty"), {1})
 
+    def test_rules_and_rejections_are_forgotten_separately(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "learning.json"
+            learning = LearningStore(path)
+            learning.record_manual(0, "qwerty", 1)
+            learning.record_manual(1, "йцукен", 0)
+            learning.reject(1, "ты", 0)
+            learning.reject(1, "ты", 2)
+            self.assertTrue(learning.remove_rule(0, "QWERTY"))
+            self.assertFalse(learning.remove_rule(0, "qwerty"))
+            self.assertTrue(learning.remove_rejection(1, "ты", 2))
+            self.assertFalse(learning.remove_rejection(1, "ты", 2))
+            self.assertFalse(learning.remove_rejection(1, "нет", 0))
+            self.assertEqual(learning.rejected_targets(1, "ты"), {0})
+            self.assertEqual(LearningStore(path).counts(), (1, 1))
+            # Clearing what went wrong keeps the user's own "not this word".
+            learning.clear_rules()
+            self.assertEqual(LearningStore(path).counts(), (0, 1))
+            # Removing the last forbidden direction removes the word's entry.
+            self.assertTrue(learning.remove_rejection(1, "ты", 0))
+            self.assertEqual(learning.rejected_targets(1, "ты"), set())
+            learning.record_manual(0, "qwerty", 1)
+            learning.reject(0, "asdf", 1)
+            learning.clear_rejections()
+            self.assertEqual(LearningStore(path).counts(), (1, 0))
+
     def test_layout_punctuation_is_part_of_the_learned_identity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             learning = LearningStore(Path(directory) / "learning.json")

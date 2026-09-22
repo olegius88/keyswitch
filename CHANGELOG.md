@@ -4,6 +4,29 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.29.0 — 2026-09-23
+
+- Let letters added to a finished word belong to it. Deleting the space after a word
+  and typing on used to start a new word from the added letters alone, so "создаш",
+  a Backspace and "ь" were judged as the lone "ь", which no dictionary knows and which
+  the models happily turned into "m". One Backspace over the boundary now reopens the
+  word it ended: the added letters are judged with it, a further Backspace keeps
+  erasing it, and Pause converts it as the current word. Deleting the space alone does
+  not get the word judged a second time; only a new letter does. Nothing is reopened
+  after a caret move, a second boundary, literal punctuation before the space, or Enter.
+
+- Leave a word alone when a correction is abandoned under it. A correction waits for
+  its boundary key to come up, and by then the next word has often begun; when the
+  field then turned out to have changed, the letters already typed were discarded and
+  the rest of that word was judged on its own, so "все" could end up as "вct". The rest
+  of such a word is now left untouched until its own boundary.
+
+- Clear learned rules without losing the rejections. Clearing local learning used to
+  remove the rejections recorded when a false correction was undone along with the
+  rules, so every cleared list brought the rejected corrections back. Rules and
+  rejections are now cleared separately in the settings of every platform, and the
+  Windows and macOS window can also delete a single entry from its list.
+
 ## 0.28.0 — 2026-09-22
 
 - Keep Ubuntu up to date through APT. A new Linux version used to mean opening the

@@ -1290,11 +1290,18 @@ class MainWindow(Adw.ApplicationWindow):
     def _confirm_clear_learning(self) -> None:
         dialog = Adw.AlertDialog(
             heading="Очистить самообучение?",
-            body="Будут удалены выученные правила и запомненные ложные срабатывания. Обычные настройки и история не изменятся.",
+            body=(
+                "«Только правила» удаляет выученные правила и оставляет запреты, "
+                "записанные при отмене ложных исправлений; «Только запреты» — "
+                "наоборот. «Всё» удаляет и то и другое. Обычные настройки и "
+                "история не изменятся."
+            ),
         )
         dialog.add_response("cancel", "Отмена")
-        dialog.add_response("clear", "Очистить")
-        dialog.set_response_appearance("clear", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.add_response("rules", "Только правила")
+        dialog.add_response("rejections", "Только запреты")
+        dialog.add_response("all", "Всё")
+        dialog.set_response_appearance("all", Adw.ResponseAppearance.DESTRUCTIVE)
         dialog.set_default_response("cancel")
         dialog.set_close_response("cancel")
         dialog.connect(
@@ -1303,11 +1310,19 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.present(self)
 
     def _clear_learning_response(self, response: str) -> None:
-        if response != "clear":
+        if response == "rules":
+            self.engine.learning.clear_rules()
+            message = "Правила удалены, запреты сохранены"
+        elif response == "rejections":
+            self.engine.learning.clear_rejections()
+            message = "Запреты удалены, правила сохранены"
+        elif response == "all":
+            self.engine.learning.clear()
+            message = "Самообучение очищено"
+        else:
             return
-        self.engine.learning.clear()
         self._refresh_learning_status()
-        self.toast("Самообучение очищено")
+        self.toast(message)
 
     def _confirm_reset(self) -> None:
         dialog = Adw.AlertDialog(
