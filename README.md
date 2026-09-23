@@ -17,7 +17,7 @@ KeySwitch — настольное приложение для Windows 10/11 x64
 [Проверка, сборка и выпуск](docs/verification.md)
 
 Последний опубликованный стабильный выпуск —
-[0.30.0](https://github.com/olegius88/keyswitch/releases/tag/v0.30.0).
+[0.31.0](https://github.com/olegius88/keyswitch/releases/tag/v0.31.0).
 Изменения перечислены в [CHANGELOG.md](CHANGELOG.md), известные дефекты
 выпуска — в [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
@@ -118,11 +118,11 @@ Telegram. Токен бота и ID группы задаются в её инт
 
 ## Установка в Windows
 
-Скачайте `KeySwitch-Setup-0.30.0-x64.exe` со страницы
-[опубликованного выпуска 0.30.0](https://github.com/olegius88/keyswitch/releases/tag/v0.30.0) и
+Скачайте `KeySwitch-Setup-0.31.0-x64.exe` со страницы
+[опубликованного выпуска 0.31.0](https://github.com/olegius88/keyswitch/releases/tag/v0.31.0) и
 запустите его. Установка выполняется для текущего пользователя в
 `%LOCALAPPDATA%\Programs\KeySwitch` и не требует прав администратора. В выпуск
-также входит переносимый архив `KeySwitch-0.30.0-windows-x64.zip`.
+также входит переносимый архив `KeySwitch-0.31.0-windows-x64.zip`.
 
 После запуска KeySwitch появится в области уведомлений. Левый или правый щелчок
 по `EN/RU` либо флагу открывает меню. В нём пункт «Переключить на…» всегда
@@ -190,11 +190,11 @@ cd keyswitch
 
 ## Установка DEB-пакета
 
-Скачайте `keyswitch_0.30.0_amd64.deb` со страницы
-[опубликованного выпуска 0.30.0](https://github.com/olegius88/keyswitch/releases/tag/v0.30.0), затем:
+Скачайте `keyswitch_0.31.0_amd64.deb` со страницы
+[опубликованного выпуска 0.31.0](https://github.com/olegius88/keyswitch/releases/tag/v0.31.0), затем:
 
 ```bash
-sudo apt install ./keyswitch_0.30.0_amd64.deb
+sudo apt install ./keyswitch_0.31.0_amd64.deb
 ```
 
 Пакет установит системные зависимости и добавит KeySwitch в меню приложений.
@@ -758,7 +758,7 @@ python3 tools/release.py --version X.Y.Z            # коммит, тег, push
 - В Windows механизм UIPI не позволяет обычному процессу вводить текст в окно,
   запущенное с более высоким уровнем целостности. Для такого окна KeySwitch
   также должен быть запущен с сопоставимыми правами.
-- Windows Setup EXE опубликованной версии 0.30.0 не подписан сертификатом издателя.
+- Windows Setup EXE опубликованной версии 0.31.0 не подписан сертификатом издателя.
 
 ## Лицензия
 

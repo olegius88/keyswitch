@@ -4,6 +4,33 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.31.0 — 2026-09-23
+
+- Decide a word in doubt together with the word after it. "еще" typed in the English
+  layout at the start of a message is "tot", an English word too, so the context model
+  asks to wait for the next word; the engine only waited for words of one or two
+  letters, and "tot" stayed even when "тест" after it was converted. A word the model
+  asks to wait for now waits whatever its length. A word it only suggests converting
+  waits for its neighbour as well, and is asked again when the neighbour arrives but
+  never at a pause, which brings no new context. When the next word is not converted,
+  it is asked once more after the waiting word's other reading: "d" after "tot" is a
+  lone letter, after "еще" it is "в". The pair converts only if the model converts both
+  words, so "tot d " becomes "еще в " and "tot is " stays.
+- Retrain the completed-word context model on scenarios where such a word is followed
+  by a converted Russian word, each paired with the same word followed by nothing, so
+  that only the next word teaches the decision. The new model is
+  `context-v1-a5859ddfb70e`, artifact SHA-256
+  `bf894c17fd33d8d0c1dc9baee5b5e9ba32e010f4512883e1a8c0f9fa9b98d4b7`: 0 false
+  conversions on the 51,575 holdout rows and 22,999 desired conversions against 19,714
+  by the detector alone. On 500 new sentences from film subtitles (300 Russian, 200
+  English), each typed through the program in five kinds of fields, this release
+  restored 2,304 sentences typed in the wrong layout where 0.30.0 restored 2,216, and
+  spoiled 24 correctly typed sentences out of 2,500 where 0.30.0 spoiled 26; no
+  sentence 0.30.0 got right came out wrong. Most of the gain is sentences that open
+  with a short word typed in the wrong layout ("ш" for "i", "еру" for "the", "ye" for
+  "ну"). After code or mostly English text "tot" still stays "tot": there the model
+  takes it for the English word.
+
 ## 0.30.0 — 2026-09-23
 
 - Keep Russian words typed after English text or code. The completed-word context

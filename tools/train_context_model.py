@@ -196,6 +196,16 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
                                   "should know that", "have seen this before"):
                     for app, role in FIELDS:
                         add(wrong, 1, "", following, app, role, "space", "convert", "short_lookahead")
+            elif name == "russian_chat" and collision:
+                # A conversational word whose other reading is English waits at the
+                # start of a message (`tot` for `еще`). The engine then asks about it
+                # again with the next word after it, converted, as its only context.
+                # Each has its twin with nothing after it, which waits: the rows differ
+                # only in the next word, so only the next word is what they teach.
+                for following in ("в", "не", "раз", "тест", "работает", "можно", "будет", "немного", "надо", "есть"):
+                    for app, role in FIELDS:
+                        add(wrong, 0, "", following, app, role, "space", "convert", "chat_lookahead")
+                        add(wrong, 0, "", "", app, role, "space", "wait", "chat_lookahead_alone")
             # App identity must not override the actual language of comments.
             add(wrong, 1 - group, "// " + contexts[1], "", "Code", "code", "space", "convert", "code_comment")
             # A legitimate English insertion inside Russian prose is not a

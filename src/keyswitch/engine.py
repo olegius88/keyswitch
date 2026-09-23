@@ -140,6 +140,9 @@ class WaitingContextWord:
     window: int
     deadline: float
     diagnostic_id: int = 0
+    # A word the model only suggested converting is asked again when its neighbour
+    # arrives, never at a pause: a pause brings no new context to decide with.
+    settles_on_pause: bool = True
 
 
 @dataclass(frozen=True)
@@ -1274,11 +1277,12 @@ class KeySwitchEngine:
                 boundary_text=boundary.character,
             )
             excluded = self._application_excluded(application)
-            joint = None if trailing or head else self._resolve_context_wait(waiting, strokes, boundary, decision, application)
+            joint = None if trailing or head else self._resolve_context_wait(
+                waiting, strokes, boundary, decision, application, alternatives)
             if trailing or head:
                 self._log_context_wait("context_wait_cancelled", waiting, "literal_tail" if trailing else "literal_head")
             if joint is not None:
-                self._pending = joint
+                self._pending, decision = joint
                 self._pending_learning_action = None
                 self._pending_trigger_keycode = boundary.keycode
                 decision = replace(decision, should_convert=True)
@@ -1302,10 +1306,10 @@ class KeySwitchEngine:
                 # that correction abort as unsafe; the next word then decides it,
                 # exactly as it did while the letter waited for context.
                 if decision.reason == ISOLATED_SHORT_WORD_REASON:
-                    self._start_context_wait(plan, decision, original, boundary, trailing, head)
+                    self._start_context_wait(plan, decision, boundary, trailing, head)
             else:
                 self._remember_context(application, source_group, typed[:head] + strokes)
-                self._start_context_wait(plan, decision, original, boundary, trailing, head)
+                self._start_context_wait(plan, decision, boundary, trailing, head)
         else:
             self._log_context_wait("context_wait_cancelled", waiting, "analysis_skipped")
             self._remember_context(application, source_group, typed[:head] + strokes)
@@ -1525,11 +1529,12 @@ class KeySwitchEngine:
         self, original: str, alternatives: dict[int, str], source_group: int,
         next_word: str, next_group: int,
     ) -> DetectionDecision:
-        """The detector's verdict on a waiting word once its planned next word is known.
+        """The detector's verdict on a word once a planned neighbour is known.
 
         Same settings as the ordinary word decision; the only context is the
-        converted next word and its language, which is what the corpus curriculum
-        supplies for planned frames.
+        neighbour in its planned layout and that layout's language: the converted
+        next word of a waiting word, which is what the corpus curriculum supplies
+        for planned frames, or the other reading of the waiting word before it.
         """
         ignored_words: list[str] = self.settings.get("exclusions.words", [])
         rejected_targets = (
@@ -1652,7 +1657,8 @@ class KeySwitchEngine:
     def _resolve_context_wait(
         self, waiting: WaitingContextWord | None, strokes: tuple[KeyEvent, ...],
         boundary: KeyEvent, decision: DetectionDecision, application: str,
-    ) -> CorrectionPlan | None:
+        alternatives: dict[int, str],
+    ) -> tuple[CorrectionPlan, DetectionDecision] | None:
         if waiting is None or self.settings.get("detection.context_policy", "assist") != "assist":
             self._log_context_wait("context_wait_cancelled", waiting, "policy_disabled")
             return None
@@ -1661,7 +1667,6 @@ class KeySwitchEngine:
             time.monotonic() > waiting.deadline or waiting.window != (self._focus_window or 0)
             or previous.application != application or previous.boundary is None
             or previous.source_group != decision.source_group
-            or not decision.should_convert
             or any(stroke.group != previous.source_group for stroke in (*previous.strokes, *strokes))
         ):
             self._log_context_wait(
@@ -1671,10 +1676,22 @@ class KeySwitchEngine:
                 same_application=previous.application == application,
                 boundary_available=previous.boundary is not None,
                 same_layout=previous.source_group == decision.source_group,
-                next_word_convert=decision.should_convert,
                 strokes_same_layout=all(stroke.group == previous.source_group for stroke in (*previous.strokes, *strokes)),
             )
             return None
+        if not decision.should_convert:
+            # The next word was judged after the waiting word as it was typed, and
+            # that word is exactly what is in doubt: `tot d` reads as English only
+            # while `tot` is taken for English. The model is asked about the next
+            # word once more after the waiting word's other reading, `еще в`; the
+            # pair converts only if it then converts the next word and, below, the
+            # waiting word with it.
+            converted = self._decide_after_waiting_word(
+                waiting, decision, alternatives, boundary, previous.boundary.character)
+            if converted is None:
+                self._log_context_wait("context_wait_cancelled", waiting, "next_word_not_converted")
+                return None
+            decision = converted
         original = previous.original + previous.boundary.character + decision.original
         suffix = "" if boundary.deferred else boundary.character
         if not self.context_policy.stream.text.endswith(original + suffix):
@@ -1705,26 +1722,56 @@ class KeySwitchEngine:
             None if boundary.deferred else boundary, previous.source_group, group,
             original, alternative + previous.boundary.character + decision.replacement,
             result.decision.confidence, application, True, "context_phrase", self._context_field_id(),
+        ), decision
+
+    def _decide_after_waiting_word(
+        self, waiting: WaitingContextWord, decision: DetectionDecision,
+        alternatives: dict[int, str], boundary: KeyEvent, boundary_character: str,
+    ) -> DetectionDecision | None:
+        """The next word's decision after the waiting word's other reading.
+
+        The detector gets that reading as its previous word and the model gets it
+        in front of the caret, exactly as they would after a word typed in that
+        layout. Nothing is decided here that the model does not decide.
+        """
+
+        previous = waiting.plan
+        group = previous.target_group
+        alternative = alternatives[group]
+        reading = self._text_for_group(previous.strokes, group)
+        baseline = self._planned_baseline(decision.original, {group: alternative}, decision.source_group, reading, group)
+        result = self.context_policy.decide(
+            baseline, alternative, group, self.detector, self._trigger_for_boundary(boundary), "assist",
+            field_override=replace(waiting.field, before=waiting.field.before + reading + boundary_character),
         )
+        return result.decision if result.decision.should_convert else None
 
     def _start_context_wait(
-        self, plan: CorrectionPlan, decision: DetectionDecision, original: str,
+        self, plan: CorrectionPlan, decision: DetectionDecision,
         boundary: KeyEvent, trailing: tuple[KeyEvent, ...], head: int,
     ) -> None:
-        """Let a short word at a space wait for its next word.
+        """Let a word at a space wait for its next word.
 
-        The model asks for it with a ``wait`` verdict. A lone letter converted by
-        the message-start rule waits as well, whatever the model said: if the user
+        The model asks for it with a ``wait`` verdict, whatever the word's length:
+        `tot` at the start of a message may be `еще`, and only its neighbour can
+        tell. A ``suggest`` verdict - the model leans to converting but is not sure
+        enough - waits too, for the same neighbour: `vs` after a Russian sentence
+        was left as it was with p=0.984 even when the next word turned out to be
+        `хотим` typed in the same wrong layout. Such a word is only asked again
+        with its neighbour, not at a pause. A lone letter converted by the
+        message-start rule waits as well, whatever the model said: if the user
         keeps typing, the immediate correction aborts as unsafe and the next word
         has to decide the letter; if it went through, the observed text no longer
         matches and the wait cancels itself.
         """
 
         result = self._context_result
+        settles = result is not None and result.prediction is not None and (
+            result.prediction.action == "wait" or decision.reason == ISOLATED_SHORT_WORD_REASON)
         if (
             result is not None and result.prediction is not None and result.field is not None
-            and (result.prediction.action == "wait" or decision.reason == ISOLATED_SHORT_WORD_REASON)
-            and len(original) <= 2 and boundary.character == " "
+            and (settles or result.prediction.action == "suggest")
+            and boundary.character == " "
             and not trailing and not head
             and not boundary.deferred
             and self.settings.get("detection.context_policy", "assist") == "assist"
@@ -1732,9 +1779,9 @@ class KeySwitchEngine:
             self._context_wait_sequence += 1
             self._context_waiting = WaitingContextWord(
                 plan, decision, result.field, self._focus_window or 0, time.monotonic() + 10.0,
-                self._context_wait_sequence,
+                self._context_wait_sequence, settles,
             )
-            self._log_context_wait("context_wait_started", self._context_waiting, "model_wait")
+            self._log_context_wait("context_wait_started", self._context_waiting, "model_wait" if settles else "model_suggest")
 
     def _log_context_wait(
         self, event: str, waiting: WaitingContextWord | None, reason: str, **fields: object,
@@ -2098,6 +2145,10 @@ class KeySwitchEngine:
                 or now - last < self._pause_delay() or self._last_committed_stale
                 or waiting.window != (self._focus_window or 0)
                 or self.settings.get("detection.context_policy", "assist") != "assist"):
+            return
+        if not waiting.settles_on_pause:
+            self._log_context_wait("context_wait_cancelled", waiting, "suggestion_not_settled")
+            self._context_waiting = None
             return
         application = self.backend.active_application()
         if waiting.plan.application != application or self._application_excluded(application):
