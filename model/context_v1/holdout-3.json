@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "New physical-token families reserved for candidate 3 before training. No model predictions were used to author this file; scored once.",
+  "description": "New physical-token families reserved for candidate 3 before training. No model predictions were used to author this file; scored once. Candidate 6 adds, before training, conversational Russian words and the other ten dictionary collisions together with English-dominant fields and Russian tails that training never sees. Candidate 8 adds short English words disjoint from the training ones.",
   "russian": [
     "разработчик",
     "изменения",
@@ -217,5 +217,71 @@
       "dist/",
       "/opt/"
     ]
-  }
+  },
+  "russian_chat": [
+    "тоже",
+    "тебя",
+    "всегда",
+    "они",
+    "она",
+    "его",
+    "нам",
+    "вам",
+    "было",
+    "потому",
+    "тогда",
+    "пока",
+    "снова",
+    "прям",
+    "зато",
+    "норм",
+    "сюда",
+    "туда",
+    "куда",
+    "зачем",
+    "душа",
+    "шее",
+    "луны",
+    "вузе",
+    "муку",
+    "пуд",
+    "уфе",
+    "руку",
+    "рук"
+  ],
+  "latin_fields": [
+    "import numpy as np\nfrom pathlib import Path\n# ",
+    "docker run --rm -it -v $(pwd):/app node:20 bash\n",
+    "The quick fix is to restart the service and clear the cache. ",
+    "if (response.status !== 200) { throw new Error(message); }\n// "
+  ],
+  "latin_tails": [
+    "",
+    "кажется ",
+    "зачем ",
+    "вот ",
+    "если "
+  ],
+  "short_english": [
+    "hi",
+    "ok",
+    "she",
+    "him",
+    "her",
+    "his",
+    "has",
+    "had",
+    "our",
+    "off",
+    "too",
+    "any",
+    "new",
+    "way",
+    "may",
+    "day",
+    "yet",
+    "put",
+    "got",
+    "did"
+  ]
 }

@@ -4,6 +4,30 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.30.0 — 2026-09-23
+
+- Keep Russian words typed after English text or code. The completed-word context
+  model sees the script that dominates the text in front of the caret, and it had
+  learned that a Russian word after mostly English text is a layout error: in a chat
+  under an editor or in a code comment "еще" became "tot" and "ты" became "ns", even
+  right after "все" or "почему". The scenarios now add conversational Russian words,
+  including the everyday spelling "еще", the short English words they lacked
+  entirely, and fields holding code, logs and English prose in which correctly typed
+  Russian and English words stay and either one typed in the other layout is
+  converted, in equal measure, so the script of the field no longer decides on its
+  own. The training takes the language of the previous word from the last word in
+  front of the caret, as the engine does, rather than from the whole field.
+  The new model is `context-v1-79354d57e0b7`, artifact SHA-256
+  `e95ae15b408192a8b93297790c665fc32bfcbec9b17a0ad37065a2d538c824c6`: 0 false
+  conversions on the 50,495 holdout rows and 22,477 desired conversions against
+  19,714 by the detector alone. On 500 sentences from film subtitles that no model
+  had seen (300 Russian, 200 English), each typed through the engine in five kinds
+  of fields, it spoiled 8 correctly typed sentences out of 2,500 where the previous
+  model spoiled 23 (11 of those were "еще" turned into "tot"), and restored 2,181
+  sentences typed in the wrong layout against 2,172. One case got worse: "мы" typed
+  in the English layout as the first word right after English text or code now
+  stays "vs" (24 of the 1,500 Russian sentences); Pause converts it.
+
 ## 0.29.0 — 2026-09-23
 
 - Let letters added to a finished word belong to it. Deleting the space after a word

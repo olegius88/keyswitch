@@ -52,6 +52,10 @@ FIELDS = (("Telegram", "text"), ("Code", "text"), ("TestEditor", "unknown"),
           ("Telegram", "unknown"), ("chrome", "unknown"), ("Code", "unknown"))
 TERMINAL_FIELDS = (("Code", "code"), ("WindowsTerminal", "terminal"),
                    ("Telegram", "unknown"), ("Code", "unknown"))
+# A field read through accessibility reports its role, and a chat input or an
+# editor pane holding code, logs or English prose is where a correctly typed
+# Russian word most often follows English text.
+LATIN_FIELD_APPS = (("Code", "text"), ("Telegram", "text"))
 
 
 @dataclass(frozen=True)
@@ -86,12 +90,19 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
     cache: dict[tuple[str, int, str, int | None], tuple[bool, bool, bool, float]] = {}
 
     def context_group_of(text: str) -> int | None:
-        """The engine remembers the layout of the previous word, not its text."""
+        """The engine remembers the layout of the previous word, not its text.
 
-        lowered = text.casefold()
-        russian = sum("а" <= char <= "я" or char == "ё" for char in lowered)
-        english = sum("a" <= char <= "z" for char in lowered)
-        return 1 if russian > english else 0 if english > russian else None
+        So the group comes from the last word in front of the caret. A field
+        full of code with a Russian phrase at its end hands the engine a
+        Russian previous word, whatever script dominates the field.
+        """
+
+        for char in reversed(text.casefold()):
+            if "а" <= char <= "я" or char == "ё":
+                return 1
+            if "a" <= char <= "z":
+                return 0
+        return None
 
     def baseline_decision(word: str, group: int, alternate: str, trigger: str,
                           context_group: int | None) -> bool:
@@ -141,7 +152,7 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
         )
         rows.append(Row(item, action, signature, "test" if held_out else family_split(signature), category))
 
-    for name, group in (("russian", 1), ("english", 0), ("short_russian", 1)):
+    for name, group in (("russian", 1), ("english", 0), ("short_russian", 1), ("russian_chat", 1), ("short_english", 0)):
         words: object = payload.get(name)
         if not isinstance(words, list) or any(not isinstance(word, str) for word in words):
             raise ValueError("invalid scenario words")
@@ -152,13 +163,22 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
                 # One- and two-letter words carry the ambiguity the whole policy
                 # rests on, so they keep their share of the corpus as it grows.
                 contexts += ("но ", "мне кажется ", "давай ", "сегодня ")
-            for before in contexts:
+            # A word that stands alone may be meant either way when both readings
+            # are words; short words nearly always are, so they count as such.
+            collision = name in {"short_russian", "short_english"} or models[1 - group].score(wrong).known
+            # A short English word on its own teaches nothing the other families
+            # do not: alone it is judged like any short token. It is taught in
+            # English context and with the words that follow it.
+            for before in (contexts[1:] if name == "short_english" else contexts):
                 for app, role in FIELDS:
                     for trigger in ("space", "pause", "enter", "punctuation"):
                         action: ContextAction = "convert"
                         # A short word without context stays ambiguous only when
-                        # the curated trusted list did not already decide it.
-                        if name == "short_russian" and not before and not baseline_for(wrong, 1 - group, "", trigger):
+                        # the curated trusted list did not already decide it. A
+                        # conversational word whose other reading is an English
+                        # word (`еще` and `tot`) is just as ambiguous on its own.
+                        if name in {"short_russian", "russian_chat", "short_english"} and collision \
+                                and not before and not baseline_for(wrong, 1 - group, "", trigger):
                             action = "suggest" if trigger in {"enter", "punctuation"} else "wait"
                         add(wrong, 1 - group, before, "", app, role, trigger, action, name + "_wrong")
                         # Standalone Latin letters may be variables. Correct
@@ -171,12 +191,48 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
                                   "них уже есть решение"):
                     for app, role in FIELDS:
                         add(wrong, 0, "", following, app, role, "space", "convert", "short_lookahead")
+            elif name == "short_english":
+                for following in ("is not ready yet", "can wait until tomorrow", "will be fine", "was right about it",
+                                  "should know that", "have seen this before"):
+                    for app, role in FIELDS:
+                        add(wrong, 1, "", following, app, role, "space", "convert", "short_lookahead")
             # App identity must not override the actual language of comments.
             add(wrong, 1 - group, "// " + contexts[1], "", "Code", "code", "space", "convert", "code_comment")
             # A legitimate English insertion inside Russian prose is not a
             # layout error, even when the surrounding sentence is Russian.
             if group == 0:
                 add(word, 0, "в сообщении написано ", "", "Telegram", "text", "space", "keep", "mixed_prose")
+
+    # A field whose text is mostly code, logs or English prose still holds
+    # Russian sentences: a chat input under an editor, a comment, a reply. The
+    # model sees the field's dominant script, so without these rows it learned
+    # that a Russian word after English text is a layout error - `почему ты`
+    # became `почему ns` and `все еще` became `все tot` in real use. Every such
+    # field teaches four classes in equal measure, so the script of the field
+    # stays neutral and the token decides: a correctly typed Russian or English
+    # word stays, and either typed in the other layout is converted. A wrong
+    # form that is itself a word of the other language (`tot`, `ns`) is not
+    # taught here: whether it was meant needs more than the field can tell.
+    latin_fields: object = payload.get("latin_fields", [])
+    latin_tails: object = payload.get("latin_tails", [])
+    for scenarios in (latin_fields, latin_tails):
+        if not isinstance(scenarios, list) or any(not isinstance(item, str) for item in scenarios):
+            raise ValueError("invalid latin field scenarios")
+    russian_words: list[str] = []
+    for name in ("russian_chat", "short_russian", "russian"):
+        russian_words += cast(list[str], payload.get(name, []))
+    english_words = cast(list[str], payload.get("english", []))
+    count = min(len(russian_words), len(english_words))
+    for field in cast(list[str], latin_fields):
+        for tail in cast(list[str], latin_tails):
+            before = field + tail
+            for app, role in LATIN_FIELD_APPS:
+                for word, group in [*((word, 1) for word in russian_words[:count]),
+                                    *((word, 0) for word in english_words[:count])]:
+                    add(word, group, before, "", app, role, "space", "keep", "latin_field_correct")
+                    wrong = pair.translate(word, "ru" if group == 1 else "us", "us" if group == 1 else "ru")
+                    if len(word) > 2 and not models[1 - group].score(wrong).known:
+                        add(wrong, 1 - group, before, "", app, role, "space", "convert", "latin_field_wrong")
 
     # The runtime's curated trusted short-word list decides a handful of
     # two-letter tokens on its own, in both directions. Mirroring it here keeps
