@@ -255,7 +255,9 @@ class PrefixV2TrainingTests(unittest.TestCase):
 
     def test_source_archive_preserves_exact_bytes_and_rejects_changed_input(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
+            # Like the production ROOT, resolved: on Windows the raw temporary
+            # path may be an 8.3 short name that resolved sources never match.
+            root = Path(temporary).resolve()
             source = root / "fixture.py"
             raw = b"value = 1\n"
             source.write_bytes(raw)

@@ -796,7 +796,9 @@ class WindowsSystemTests(unittest.TestCase):
     def test_the_launcher_registers_the_installed_executable_not_the_interpreter(self) -> None:
         """A frozen build whose runner reports an interpreter still registers KeySwitch.exe."""
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary) / "KeySwitch"
+            # The code resolves its own location, and Windows hands out 8.3 short
+            # names for a temporary directory under a long user name (RUNNER~1).
+            root = Path(temporary).resolve() / "KeySwitch"
             (root / "keyswitch").mkdir(parents=True)
             executable = root / "KeySwitch.exe"
             executable.write_bytes(b"binary")

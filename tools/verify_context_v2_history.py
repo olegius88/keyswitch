@@ -5,7 +5,7 @@ import ast
 from copy import deepcopy
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 from typing import cast
 
@@ -50,7 +50,9 @@ def normalized_provenance(value: object) -> dict[str, str]:
         if not isinstance(key, str) or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
             raise ValueError("invalid historical source pin")
         name = key.replace("\\", "/")
-        path = Path(name)
+        # Pins are repository-relative POSIX paths whatever the platform: on
+        # Windows Path("/outside.py") has no drive and is not absolute.
+        path = PurePosixPath(name)
         if (path.is_absolute() or ".." in path.parts or path.as_posix() != name
                 or name in result or ":" in name):
             raise ValueError("invalid or duplicate historical source path")

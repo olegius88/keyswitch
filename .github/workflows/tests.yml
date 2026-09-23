@@ -174,6 +174,9 @@ jobs:
 
       - name: Install pinned typing, runtime and build dependencies
         run: |
+          # pwsh reports only the last command's exit code; without this a
+          # failing command earlier in the step would leave it green.
+          $PSNativeCommandUseErrorActionPreference = $true
           python -m pip install coverage==7.15.4 mypy==2.3.1 Nuitka==4.2 ordered-set==4.1.0 pystray==0.19.5 Pillow==12.3.0 comtypes==1.4.16
           python -m pip install --no-deps PyGObject-stubs==2.17.0
 
@@ -193,6 +196,9 @@ jobs:
         env:
           PYTHONPATH: src
         run: |
+          # pwsh reports only the last command's exit code; without this a
+          # failing command earlier in the step would leave it green.
+          $PSNativeCommandUseErrorActionPreference = $true
           python -m mypy --config-file pyproject.toml --exclude "^tools/freeze_intent_development_corpus\.py$"
           python -m mypy --config-file pyproject.toml --platform linux tools/freeze_intent_development_corpus.py
 
@@ -201,6 +207,9 @@ jobs:
           PYTHONPATH: src
           KEYSWITCH_MODEL_PATH: model/intent_v1/sources
         run: |
+          # pwsh reports only the last command's exit code; without this a
+          # failing command earlier in the step would leave it green.
+          $PSNativeCommandUseErrorActionPreference = $true
           python -m coverage erase
           python -m coverage run --branch --source=src/keyswitch tests/test_intent_model.py -v
           python -m coverage run --append --branch --source=src/keyswitch -m unittest discover -s tests -p test_windows_backend.py -v

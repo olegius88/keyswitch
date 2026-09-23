@@ -70,8 +70,8 @@ class HistoricalContextV2Tests(unittest.TestCase):
 
     def test_feature_two_numerics_remain_exact_while_feature_three_branches_are_independent(self) -> None:
         root = history.ROOT
-        archived = (root / history.ARCHIVE / "context_model.py").read_text()
-        current = (root / "src/keyswitch/context_model.py").read_text()
+        archived = (root / history.ARCHIVE / "context_model.py").read_text(encoding="utf-8")
+        current = (root / "src/keyswitch/context_model.py").read_text(encoding="utf-8")
         history.verify_feature_two(archived, archived)
         history.verify_feature_two(current, archived)
         without_docstring = current.replace('"""Use the same language-support gate during calibration and inference."""', "")
@@ -129,8 +129,8 @@ class HistoricalContextV2Tests(unittest.TestCase):
 
     def test_feature_two_normalization_and_weight_loading_cannot_change_silently(self) -> None:
         root = history.ROOT
-        archived = (root / history.ARCHIVE / "context_model.py").read_text()
-        current = (root / "src/keyswitch/context_model.py").read_text()
+        archived = (root / history.ARCHIVE / "context_model.py").read_text(encoding="utf-8")
+        current = (root / "src/keyswitch/context_model.py").read_text(encoding="utf-8")
         for before, after in ((
                 'unicodedata.normalize("NFC", text.casefold())',
                 'unicodedata.normalize("NFKC", text.lower())'),
