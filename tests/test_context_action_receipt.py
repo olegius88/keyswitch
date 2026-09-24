@@ -20,44 +20,55 @@ if TOOLS not in sys.path:
 import evaluate_context_action_sequences as evaluator
 import verify_context_action_model as verifier
 from keyswitch.context_model import ContextModel, FEATURE_VERSION as BASELINE_FEATURE_VERSION
-from model_protocol import PROFILES
+from keyswitch.constants.model_protocol import PROFILES
+from fixture_values.counts import (
+    RECEIPT_ADDED_IDENTIFIER_COUNT,
+    RECEIPT_BASELINE_RESTORED_ROWS,
+    RECEIPT_CANDIDATE_RESTORED_ROWS,
+    RECEIPT_DUPLICATE_ENTRY_COUNT,
+    RECEIPT_FIXTURE_ROWS,
+    RECEIPT_IDENTIFIERS_PER_GROUP,
+    RECEIPT_IDENTIFIER_COUNT,
+    RECEIPT_INVALID_CARET_POSITION,
+    RECEIPT_INVALID_ERROR_VALUE,
+    RECEIPT_MIXED_CASE_TRIMMED_LEFT,
+    SEAL_FIXTURE_CALIBRATION_CONVERTED_CORRECTLY,
+    SEAL_FIXTURE_CALIBRATION_CONVERT_ROWS,
+    SEAL_FIXTURE_CALIBRATION_ROWS,
+    SEAL_FIXTURE_PROFILE_CONVERTED_CORRECTLY,
+    SEAL_FIXTURE_PROFILE_CONVERT_ROWS,
+    SEAL_FIXTURE_PROFILE_CORRECT_CLASSES,
+    SEAL_FIXTURE_PROFILE_ROWS,
+)
+from fixture_values.keys import RECEIPT_INVALID_ACTUAL_GROUP, UNSUPPORTED_LAYOUT_GROUP
+from fixture_values.models import RECEIPT_ALTERED_PREFIX_FEATURE_VERSION
+from fixture_values.scores import (
+    ALTERED_ARTIFACT_WEIGHT,
+    AUTHORED_ARTIFACT_CONVERSION_THRESHOLD,
+    AUTHORED_PREFIX_CONVERSION_THRESHOLD,
+    MISMATCHED_PREFIX_CONVERSION_THRESHOLD,
+    SEAL_FIXTURE_CONVERSION_RECALL,
+)
+from keyswitch.constants.file_formats import SHA256_HEX_CHARACTERS, VERSION_HASH_CHARACTERS
+from keyswitch.constants.models import CONTEXT_ACTION_FEATURE_VERSION
+from keyswitch.constants.training import CONTEXT_ACTION_GATE_POLICY
 
-CONTEXT_FEATURE_VERSION = verifier.CONTEXT_FEATURE_VERSION
-DEFAULT_RESTORED = 50
-FIXTURE_ROWS = 128
-IDENTIFIER_COUNT = FIXTURE_ROWS // 2  # also "initially_correct" and "initially_wrong"
-HALF_IDENTIFIER_COUNT = IDENTIFIER_COUNT // 2  # rows per layout group
-BASELINE_RESTORED = 48
-SHA256_HEX_CHARACTERS = 64
-VERSION_HASH_CHARACTERS = 12
-CALIBRATION_PROFILE_ROWS = 20
-CALIBRATION_PROFILE_CONVERT_ROWS = 10
-CALIBRATION_PROFILE_CONVERTED_CORRECTLY = 9
-SAMPLE_CONVERSION_RECALL = 0.9
-CALIBRATION_PROFILE_CORRECT_CLASSES = 19
-ARTIFACT_CONVERSION_THRESHOLD = 0.99
-SEAL_CALIBRATION_ROWS = 40
-SEAL_CALIBRATION_CONVERT_ROWS = 20
-SEAL_CALIBRATION_CONVERTED_CORRECTLY = 18
-PREFIX_CONVERSION_THRESHOLD = 0.999
-ADDED_IDENTIFIER_COUNT = 2
-MIXED_CASE_TRIMMED_LEFT = 2
-INVALID_ERROR_VALUE = 7
-INVALID_GROUP_VALUE = 2
-INVALID_ACTUAL_GROUP_VALUE = 5
-INVALID_CARET_POSITION = 999
-ALTERED_PREFIX_WEIGHT = 2.0
-ALTERED_PREFIX_FEATURE_VERSION = 2
-ALTERED_PREFIX_CONVERSION_THRESHOLD = 0.995
-DUPLICATE_ENTRY_COUNT = 2
 
-
-def counts(restored: int = DEFAULT_RESTORED, corruptions: int = 0) -> dict[str, int]:
-    return {"rows": FIXTURE_ROWS, "initially_correct": IDENTIFIER_COUNT, "initially_wrong": IDENTIFIER_COUNT,
-            "preserved_correct": IDENTIFIER_COUNT - corruptions,
+def counts(restored: int = RECEIPT_CANDIDATE_RESTORED_ROWS, corruptions: int = 0) -> dict[str, int]:
+    return {"rows": RECEIPT_FIXTURE_ROWS, "initially_correct": RECEIPT_IDENTIFIER_COUNT, "initially_wrong": RECEIPT_IDENTIFIER_COUNT,
+            "preserved_correct": RECEIPT_IDENTIFIER_COUNT - corruptions,
             "exactly_restored": restored, "correct_text_corruptions": corruptions, "length_mismatches": 0,
             "injections": restored + corruptions, "execution_errors": 0, "correction_layout_mismatches": 0,
-            "final_layout_mismatches": IDENTIFIER_COUNT - restored + corruptions}
+            "final_layout_mismatches": RECEIPT_IDENTIFIER_COUNT - restored + corruptions}
+
+
+class AuditedSequenceProtocolTests(unittest.TestCase):
+    def test_the_protocol_built_from_constants_keeps_the_audited_bytes(self) -> None:
+        """Its timings and window sizes come from constants; the audited text must not move."""
+        self.assertEqual(hashlib.sha256(verifier.canonical(evaluator.PROTOCOL)).hexdigest(),
+                         verifier.AUDITED_SEQUENCE_PROTOCOL_SHA256)
+        self.assertIn("50 ms before every key-down, 30 ms before every key-up, engine timer callbacks after every "
+                      "key, 1.7 s idle with timer callbacks after every completed word", evaluator.TYPING_PACE)
 
 
 class ContextActionReceiptTests(unittest.TestCase):
@@ -78,20 +89,20 @@ class ContextActionReceiptTests(unittest.TestCase):
             if not path.exists():
                 path.write_text("# authored source identity\n")
         self.artifact = models / "context_policy_v1.json"
-        self.write_artifact(self.artifact, CONTEXT_FEATURE_VERSION)
+        self.write_artifact(self.artifact, CONTEXT_ACTION_FEATURE_VERSION)
         self.write_artifact(self.root / verifier.BASELINE, BASELINE_FEATURE_VERSION)
         self.prefix_artifact = models / "prefix_policy_v1.json"
         self.write_prefix(self.prefix_artifact)
-        self.recipe = {"schema_version": 1, "feature_version": CONTEXT_FEATURE_VERSION, "gate_policy": verifier.GATE_POLICY,
+        self.recipe = {"schema_version": 1, "feature_version": CONTEXT_ACTION_FEATURE_VERSION, "gate_policy": CONTEXT_ACTION_GATE_POLICY,
                        "profiles": list(PROFILES)}
         (self.root / verifier.RECIPE).write_bytes(verifier.canonical(self.recipe))
         self.hashes = {name: verifier.checksum(self.root / name) for name in verifier.required_provenance(self.root)}
         self.corpus = self.root / ".t/corpus"
         self.corpus.mkdir(parents=True)
         self.secret = "PRIVATE-FIXTURE-MUST-NOT-BE-PUBLISHED"
-        self.identifiers = [self.secret + ":" + str(index) for index in range(IDENTIFIER_COUNT)]
+        self.identifiers = [self.secret + ":" + str(index) for index in range(RECEIPT_IDENTIFIER_COUNT)]
         membership = {"row_ids_sha256": sorted(hashlib.sha256(name.encode()).hexdigest() for name in self.identifiers),
-                      "document_ids_sha256": sorted(hashlib.sha256(("document:" + str(index)).encode()).hexdigest() for index in range(IDENTIFIER_COUNT)),
+                      "document_ids_sha256": sorted(hashlib.sha256(("document:" + str(index)).encode()).hexdigest() for index in range(RECEIPT_IDENTIFIER_COUNT)),
                       "family_ids_sha256": [hashlib.sha256(b"authored-family").hexdigest()]}
         (self.corpus / "test-membership.json").write_bytes(verifier.canonical(membership))
         (self.corpus / "manifest.json").write_bytes(verifier.canonical({"private_note": self.secret,
@@ -113,33 +124,33 @@ class ContextActionReceiptTests(unittest.TestCase):
         runtime_patcher = patch.object(evaluator, "runtime_provenance", return_value=self.hashes)
         runtime_patcher.start()
         self.addCleanup(runtime_patcher.stop)
-        profile = {"rows": CALIBRATION_PROFILE_ROWS, "convert_rows": CALIBRATION_PROFILE_CONVERT_ROWS,
-                   "converted_correctly": CALIBRATION_PROFILE_CONVERTED_CORRECTLY, "false_conversions": 0,
-                   "conversion_recall": SAMPLE_CONVERSION_RECALL,
-                   "correct_classes": CALIBRATION_PROFILE_CORRECT_CLASSES, "private_note": self.secret}
+        profile = {"rows": SEAL_FIXTURE_PROFILE_ROWS, "convert_rows": SEAL_FIXTURE_PROFILE_CONVERT_ROWS,
+                   "converted_correctly": SEAL_FIXTURE_PROFILE_CONVERTED_CORRECTLY, "false_conversions": 0,
+                   "conversion_recall": SEAL_FIXTURE_CONVERSION_RECALL,
+                   "correct_classes": SEAL_FIXTURE_PROFILE_CORRECT_CLASSES, "private_note": self.secret}
         self.seal: dict[str, object] = {"schema_version": 1, "stage": "sealed-before-test", "test_accessed": False,
             "artifact_sha256": verifier.checksum(self.artifact), "model_version": ContextModel.load(self.artifact).version,
-            "conversion_threshold": ARTIFACT_CONVERSION_THRESHOLD,
+            "conversion_threshold": AUTHORED_ARTIFACT_CONVERSION_THRESHOLD,
             "corpus_manifest_sha256": verifier.checksum(self.corpus / "manifest.json"),
-            "provenance": self.hashes, "recipe": self.recipe, "gate_policy": verifier.GATE_POLICY,
-            "calibration": {"rows": SEAL_CALIBRATION_ROWS, "convert_rows": SEAL_CALIBRATION_CONVERT_ROWS,
-                "converted_correctly": SEAL_CALIBRATION_CONVERTED_CORRECTLY, "false_conversions": 0,
-                "conversion_recall": SAMPLE_CONVERSION_RECALL, "by_profile": {name: dict(profile) for name in PROFILES}},
+            "provenance": self.hashes, "recipe": self.recipe, "gate_policy": CONTEXT_ACTION_GATE_POLICY,
+            "calibration": {"rows": SEAL_FIXTURE_CALIBRATION_ROWS, "convert_rows": SEAL_FIXTURE_CALIBRATION_CONVERT_ROWS,
+                "converted_correctly": SEAL_FIXTURE_CALIBRATION_CONVERTED_CORRECTLY, "false_conversions": 0,
+                "conversion_recall": SEAL_FIXTURE_CONVERSION_RECALL, "by_profile": {name: dict(profile) for name in PROFILES}},
             "private_note": self.secret}
         self.seal_path.write_bytes(verifier.canonical(self.seal))
         self.prefix_seal_path = self.corpus / "prefix-seal.json"
         self.write_prefix_seal()
         identity = evaluator.evaluation_identity(self.artifact, self.seal_path, self.corpus, self.prefix_artifact, self.prefix_seal_path)
-        documents = {"0": HALF_IDENTIFIER_COUNT, "1": HALF_IDENTIFIER_COUNT, "None": 0}
+        documents = {"0": RECEIPT_IDENTIFIERS_PER_GROUP, "1": RECEIPT_IDENTIFIERS_PER_GROUP, "None": 0}
 
         def block() -> dict[str, object]:
-            return {"counts": {"candidate": counts(), "baseline": counts(BASELINE_RESTORED, 1)},
-                    "gates": evaluator.profile_gates(counts(), counts(BASELINE_RESTORED, 1), documents),
-                    "cases": {"candidate": self.cases(), "baseline": self.cases(BASELINE_RESTORED, 1)}}
+            return {"counts": {"candidate": counts(), "baseline": counts(RECEIPT_BASELINE_RESTORED_ROWS, 1)},
+                    "gates": evaluator.profile_gates(counts(), counts(RECEIPT_BASELINE_RESTORED_ROWS, 1), documents),
+                    "cases": {"candidate": self.cases(), "baseline": self.cases(RECEIPT_BASELINE_RESTORED_ROWS, 1)}}
 
         self.report: dict[str, object] = {"schema_version": 1, "split": "test", "identity": identity,
-            "protocol": evaluator.PROTOCOL, "gate_policy": evaluator.GATE_POLICY, "promotion_passed": True,
-            "selection": {"replayed_documents": documents, "selected_rows": IDENTIFIER_COUNT, "trimmed_rows": 0,
+            "protocol": evaluator.PROTOCOL, "gate_policy": CONTEXT_ACTION_GATE_POLICY, "promotion_passed": True,
+            "selection": {"replayed_documents": documents, "selected_rows": RECEIPT_IDENTIFIER_COUNT, "trimmed_rows": 0,
                 "unsupported": [], "source_ids": self.identifiers},
             "profiles": {name: {**block(), "early_off": block(),
                                 "ablation": {"candidate_context_baseline_prefix": {"counts": counts(), "cases": self.cases()}}}
@@ -148,10 +159,10 @@ class ContextActionReceiptTests(unittest.TestCase):
         (self.ledger / (self.key + ".access.json")).write_bytes(verifier.canonical(identity))
         self.save_report()
 
-    def cases(self, restored: int = DEFAULT_RESTORED, corruptions: int = 0) -> list[dict[str, object]]:
+    def cases(self, restored: int = RECEIPT_CANDIDATE_RESTORED_ROWS, corruptions: int = 0) -> list[dict[str, object]]:
         cases: list[dict[str, object]] = []
         for index, identifier in enumerate(self.identifiers):
-            group = int(index >= HALF_IDENTIFIER_COUNT)
+            group = int(index >= RECEIPT_IDENTIFIERS_PER_GROUP)
             expected = "hello " if group == 0 else "привет "
             other = ("р" if group == 0 else "g") + expected[1:]
             for wrong in (False, True):
@@ -176,7 +187,7 @@ class ContextActionReceiptTests(unittest.TestCase):
         fingerprint = hashlib.sha256(json.dumps(weights, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
         path.write_bytes(verifier.canonical({"kind": "keyswitch.prefix-policy", "feature_version": 1, "prefix_feature_version": 1,
             "actions": ["keep", "convert", "wait", "suggest"], "version": "prefix-v1-" + fingerprint[:VERSION_HASH_CHARACTERS],
-            "conversion_threshold": PREFIX_CONVERSION_THRESHOLD, "weights_sha256": fingerprint, "weights": weights}))
+            "conversion_threshold": AUTHORED_PREFIX_CONVERSION_THRESHOLD, "weights_sha256": fingerprint, "weights": weights}))
 
     def write_prefix_seal(self, **overrides: object) -> None:
         payload = json.loads(self.prefix_artifact.read_bytes())
@@ -192,9 +203,9 @@ class ContextActionReceiptTests(unittest.TestCase):
         fingerprint = hashlib.sha256(json.dumps(weights, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         path.write_bytes(verifier.canonical({"actions": ["keep", "convert", "wait", "suggest"],
             "feature_version": feature_version, "weights": weights, "weights_sha256": fingerprint,
-            "version": ("context-v3-" if feature_version == CONTEXT_FEATURE_VERSION else "context-v1-")
+            "version": ("context-v3-" if feature_version == CONTEXT_ACTION_FEATURE_VERSION else "context-v1-")
             + fingerprint[:VERSION_HASH_CHARACTERS],
-            "conversion_threshold": ARTIFACT_CONVERSION_THRESHOLD}))
+            "conversion_threshold": AUTHORED_ARTIFACT_CONVERSION_THRESHOLD}))
 
     def save_report(self) -> None:
         raw = verifier.canonical(self.report)
@@ -265,7 +276,7 @@ class ContextActionReceiptTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         self.verify(changed)
         changed = deepcopy(original)
-        cast(dict[str, object], cast(dict[str, object], changed["test"])["documents"])["0"] = HALF_IDENTIFIER_COUNT - 1
+        cast(dict[str, object], cast(dict[str, object], changed["test"])["documents"])["0"] = RECEIPT_IDENTIFIERS_PER_GROUP - 1
         with self.assertRaises(ValueError):
             self.verify(changed)
 
@@ -290,8 +301,8 @@ class ContextActionReceiptTests(unittest.TestCase):
                 changed[name] = "0" * SHA256_HEX_CHARACTERS
                 with self.assertRaises(ValueError):
                     self.verify(changed)
-        for name, value in (("prefix_feature_version", ALTERED_PREFIX_FEATURE_VERSION),
-                             ("prefix_conversion_threshold", ALTERED_PREFIX_CONVERSION_THRESHOLD),
+        for name, value in (("prefix_feature_version", RECEIPT_ALTERED_PREFIX_FEATURE_VERSION),
+                             ("prefix_conversion_threshold", MISMATCHED_PREFIX_CONVERSION_THRESHOLD),
                              ("prefix_baseline_path", "model/prefix_v2/other.json")):
             with self.subTest(name=name):
                 changed = deepcopy(original)
@@ -391,13 +402,13 @@ class ContextActionReceiptTests(unittest.TestCase):
                 profiles = cast(dict[str, dict[str, object]], self.report["profiles"])
                 cases = cast(dict[str, list[dict[str, object]]], profiles["portable"]["cases"])["candidate"]
                 if fault == "selected_count":
-                    selection["selected_rows"] = IDENTIFIER_COUNT - 1
+                    selection["selected_rows"] = RECEIPT_IDENTIFIER_COUNT - 1
                 elif fault == "selected_duplicate":
                     identifiers[1] = identifiers[0]
                 elif fault == "selected_outside":
                     identifiers[0] = "outside-membership"
                 elif fault == "unsupported_duplicate":
-                    selection["unsupported"] = [{"identifier": identifiers[0]}] * DUPLICATE_ENTRY_COUNT
+                    selection["unsupported"] = [{"identifier": identifiers[0]}] * RECEIPT_DUPLICATE_ENTRY_COUNT
                 elif fault == "unsupported_shape":
                     selection["unsupported"] = None
                 elif fault == "case_rows_shape":
@@ -414,7 +425,7 @@ class ContextActionReceiptTests(unittest.TestCase):
                     cases[0]["trimmed_left"] = 1
                 else:
                     selection["replayed_documents"] = {
-                        "0": HALF_IDENTIFIER_COUNT + 1, "1": HALF_IDENTIFIER_COUNT - 1, "None": 0
+                        "0": RECEIPT_IDENTIFIERS_PER_GROUP + 1, "1": RECEIPT_IDENTIFIERS_PER_GROUP - 1, "None": 0
                     }
                 self.save_report()
                 with self.assertRaisesRegex(ValueError, "case"):
@@ -429,11 +440,11 @@ class ContextActionReceiptTests(unittest.TestCase):
         cast(list[str], selection["source_ids"]).extend((mixed_id, unsupported_id))
         membership["row_ids_sha256"].extend(hashlib.sha256(name.encode()).hexdigest() for name in (mixed_id, unsupported_id))
         membership["document_ids_sha256"].append(hashlib.sha256(document.encode()).hexdigest())
-        selection["selected_rows"], selection["trimmed_rows"] = IDENTIFIER_COUNT + ADDED_IDENTIFIER_COUNT, ADDED_IDENTIFIER_COUNT
+        selection["selected_rows"], selection["trimmed_rows"] = RECEIPT_IDENTIFIER_COUNT + RECEIPT_ADDED_IDENTIFIER_COUNT, RECEIPT_ADDED_IDENTIFIER_COUNT
         selection["unsupported"] = [{"identifier": unsupported_id, "codepoints": ["U+00EF"]}]
         cast(dict[str, int], selection["replayed_documents"])["None"] = 1
         mixed = {**self.cases()[0], "identifier": mixed_id, "document": document, "group": None,
-                 "trimmed_left": MIXED_CASE_TRIMMED_LEFT}
+                 "trimmed_left": RECEIPT_MIXED_CASE_TRIMMED_LEFT}
         for profile in cast(dict[str, dict[str, object]], self.report["profiles"]).values():
             for block in (profile, cast(dict[str, object], profile["early_off"])):
                 for model, cases in cast(dict[str, list[dict[str, object]]], block["cases"]).items():
@@ -446,8 +457,8 @@ class ContextActionReceiptTests(unittest.TestCase):
     def test_case_claims_cannot_override_text_layout_intervention_or_injection(self) -> None:
         original = self.cases()
         for index, field, value in ((0, "exact", False), (0, "length_mismatch", True),
-                (0, "final_layout_matches", False), (0, "error", INVALID_ERROR_VALUE), (0, "group", True),
-                (0, "initially_wrong", 0), (0, "final_group", INVALID_GROUP_VALUE), (0, "actual", None),
+                (0, "final_layout_matches", False), (0, "error", RECEIPT_INVALID_ERROR_VALUE), (0, "group", True),
+                (0, "initially_wrong", 0), (0, "final_group", UNSUPPORTED_LAYOUT_GROUP), (0, "actual", None),
                 (0, "trimmed_left", -1), (0, "intervention", {}), (1, "intervention", None),
                 (1, "corrections", []), (1, "corrections", "claimed")):
             with self.subTest(field=field, value=value):
@@ -460,8 +471,8 @@ class ContextActionReceiptTests(unittest.TestCase):
             cast(dict[str, object], case["intervention"])[field] = value
             with self.subTest(intervention=field), self.assertRaisesRegex(ValueError, "case"):
                 verifier.case_evidence(case)
-        for field, value in (("actual_group", INVALID_ACTUAL_GROUP_VALUE), ("event", 0),
-                             ("caret_after", INVALID_CARET_POSITION), ("before", None)):
+        for field, value in (("actual_group", RECEIPT_INVALID_ACTUAL_GROUP), ("event", 0),
+                             ("caret_after", RECEIPT_INVALID_CARET_POSITION), ("before", None)):
             case = deepcopy(original[1])
             cast(list[dict[str, object]], case["corrections"])[0][field] = value
             with self.subTest(correction=field), self.assertRaisesRegex(ValueError, "case"):
@@ -491,10 +502,10 @@ class ContextActionReceiptTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "gates"):
             self.verify(changed)
         self.assertEqual(profiles["portable"]["early_off"], {
-            "counts": {"candidate": counts(), "baseline": counts(BASELINE_RESTORED, 1)},
+            "counts": {"candidate": counts(), "baseline": counts(RECEIPT_BASELINE_RESTORED_ROWS, 1)},
             "gates": evaluator.profile_gates(
-                counts(), counts(BASELINE_RESTORED, 1),
-                {"0": HALF_IDENTIFIER_COUNT, "1": HALF_IDENTIFIER_COUNT, "None": 0},
+                counts(), counts(RECEIPT_BASELINE_RESTORED_ROWS, 1),
+                {"0": RECEIPT_IDENTIFIERS_PER_GROUP, "1": RECEIPT_IDENTIFIERS_PER_GROUP, "None": 0},
             ),
         })
         report_profiles = cast(dict[str, dict[str, object]], self.report["profiles"])
@@ -517,7 +528,7 @@ class ContextActionReceiptTests(unittest.TestCase):
 
     def test_installed_prefix_and_prefix_seal_are_bound_to_the_receipt(self) -> None:
         receipt = self.exported()
-        self.write_prefix(self.prefix_artifact, weight=ALTERED_PREFIX_WEIGHT)
+        self.write_prefix(self.prefix_artifact, weight=ALTERED_ARTIFACT_WEIGHT)
         with self.assertRaisesRegex(ValueError, "prefix"):
             self.verify(receipt)
         self.write_prefix(self.prefix_artifact)

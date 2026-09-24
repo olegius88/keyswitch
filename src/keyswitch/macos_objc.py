@@ -21,8 +21,6 @@ if TYPE_CHECKING:  # ctypes spells its own base type privately.
 else:
     CType = type
 
-CF_STRING_ENCODING_UTF8: Final = 0x08000100
-
 
 class ObjCError(RuntimeError):
     """The Objective-C runtime refused something."""

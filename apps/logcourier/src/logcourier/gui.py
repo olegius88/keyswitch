@@ -35,38 +35,43 @@ from PySide6.QtWidgets import (
 
 from . import __version__, autostart
 from .catalog import current_catalog, verify_connection
-from .config import (
+from .config import Config, Source, data_directory, load_config, save_config
+from .constants.files import (
+    BYTES_PER_MEBIBYTE,
+    BYTES_PER_MEGABYTE,
+    CHUNK_BYTES,
+    PRIVATE_DIRECTORY_MODE,
+)
+from .constants.gui import (
+    EVENTS_LOG_MAX_LINES,
+    ICON_CORNER_RADIUS_PIXELS,
+    ICON_FONT_PIXEL_SIZE,
+    ICON_MARGIN_PIXELS,
+    ICON_PIXELS,
+    ICON_RECT_PIXELS,
+    SHUTDOWN_POLL_MS,
+    SMOKE_TEST_DELAY_MS,
+    SOURCES_TABLE_COLUMNS,
+    STATUS_MESSAGE_DURATION_MS,
+    TRAY_TOOLTIP_MAX_CHARACTERS,
+    WINDOW_INITIAL_HEIGHT,
+    WINDOW_INITIAL_WIDTH,
+    WINDOW_MIN_HEIGHT,
+    WINDOW_MIN_WIDTH,
+)
+from .constants.limits import (
     DEFAULT_ROTATIONS,
     MAX_INTERVAL_MINUTES,
+    MAX_QUEUE_BYTES,
     MAX_ROTATIONS,
-    PRIVATE_DIRECTORY_MODE,
-    Config,
-    Source,
-    data_directory,
-    load_config,
-    save_config,
 )
+from .constants.telegram import GROUP_INTERVAL, MAX_DOWNLOAD
+from .constants.timing import WAKE_POLL_SECONDS
+from .russian_text import SECONDS, quantity, russian_number
 from .secrets import read_token, redact, store_token, token_bot_id
 from .service import Service
 from .store import Store
 from .telegram import Telegram
-
-ICON_PIXELS = 64
-ICON_MARGIN_PIXELS = 2
-ICON_RECT_PIXELS = 60
-ICON_CORNER_RADIUS_PIXELS = 14
-ICON_FONT_PIXEL_SIZE = 29
-WINDOW_INITIAL_WIDTH = 850
-WINDOW_INITIAL_HEIGHT = 640
-WINDOW_MIN_WIDTH = 540
-WINDOW_MIN_HEIGHT = 420
-SOURCES_TABLE_COLUMNS = 4
-EVENTS_LOG_MAX_LINES = 150
-STATUS_MESSAGE_DURATION_MS = 5000
-TRAY_TOOLTIP_MAX_CHARACTERS = 120
-BYTES_PER_KIBIBYTE = 1024
-SHUTDOWN_POLL_MS = 100
-SMOKE_TEST_DELAY_MS = 100
 
 
 def application_icon() -> QIcon:
@@ -296,10 +301,12 @@ class Window(QMainWindow):
         note = QLabel(
             "Логи могут содержать переписку, имена, пути и другие личные данные.\n"
             "Это передача полного содержимого, не обезличенная телеметрия.\n\n"
-            "Сбор каждые 5 секунд; отправка по выбранному интервалу.\n"
-            "Очередь: до 128 МиБ. Локальный фрагмент: до 2 МиБ до сжатия.\n"
-            "Перед отправкой фрагменты объединяются в пакеты до 19 МБ.\n"
-            "Документы и закрепления — не чаще одного раза в 4 секунды.\n"
+            f"Сбор раз в {quantity(WAKE_POLL_SECONDS, SECONDS)}; отправка по выбранному интервалу.\n"
+            f"Очередь: до {russian_number(MAX_QUEUE_BYTES / BYTES_PER_MEBIBYTE)} МиБ. "
+            f"Локальный фрагмент: до {russian_number(CHUNK_BYTES / BYTES_PER_MEBIBYTE)} МиБ до сжатия.\n"
+            "Перед отправкой фрагменты объединяются в пакеты "
+            f"до {russian_number(MAX_DOWNLOAD / BYTES_PER_MEGABYTE)} МБ.\n"
+            f"Документы и закрепления — не чаще одного раза в {quantity(GROUP_INTERVAL, SECONDS)}.\n"
             "Пауза Telegram сохраняется после перезапуска; кнопка её не сбрасывает.\n"
             "При заполнении очереди сбор остановится. Ротация исходной программы\n"
             "может удалить ещё не прочитанные записи — увеличьте её срок хранения.\n\n"
@@ -596,7 +603,7 @@ class Window(QMainWindow):
         self.summary.setText(
             f"{message}\nВ очереди: {stats['queued']}; ждут каталога: {stats['unindexed']}.\n"
             f"Версия KeySwitch: {version_text}.\n"
-            f"Объём очереди: {stats['queue_bytes'] / BYTES_PER_KIBIBYTE / BYTES_PER_KIBIBYTE:.1f} МиБ.\n"
+            f"Объём очереди: {stats['queue_bytes'] / BYTES_PER_MEBIBYTE:.1f} МиБ.\n"
             f"Последняя успешная отправка: {stamp}.\n"
             f"Архивов для других ботов/групп: {stats['other']} (не отправляются сюда)."
         )

@@ -14,15 +14,34 @@ import threading
 from collections.abc import Callable
 from typing import Protocol, cast
 
-from .backend import (
-    ALT_MASK,
-    CONTROL_MASK,
-    LOCK_MASK,
-    SHIFT_MASK,
-    SUPER_MASK,
-    ScreenAnchor,
-)
-from .windows_backend import (
+from .backend import ScreenAnchor
+from .constants.keyboard import ALT_MASK, CONTROL_MASK, LOCK_MASK, SHIFT_MASK, SUPER_MASK
+from .windows_backend import NativeInput, NativeKeyEvent, WindowsBackendError
+from .constants.windows import (
+    GA_ROOT,
+    GWL_EXSTYLE,
+    HC_ACTION,
+    INPUT_KEYBOARD,
+    KEYBOARD_STATE_ARRAY_SIZE,
+    KEYEVENTF_EXTENDEDKEY,
+    KEYEVENTF_KEYUP,
+    KEYEVENTF_SCANCODE,
+    KEYSWITCH_EXTRA_INFO,
+    KEYSWITCH_REPLAY_INFO,
+    LLKHF_EXTENDED,
+    LLKHF_INJECTED,
+    PM_NOREMOVE,
+    POINTER_INVALIDATING_MESSAGES,
+    PROCESS_IMAGE_NAME_BUFFER_CHARACTERS,
+    PROCESS_QUERY_LIMITED_INFORMATION,
+    SWP_FRAMECHANGED,
+    SWP_NOACTIVATE,
+    SWP_NOMOVE,
+    SWP_NOSIZE,
+    SWP_NOZORDER,
+    TO_UNICODE_KEEP_KEYBOARD_STATE_FLAG,
+    TRANSLATED_TEXT_BUFFER_CHARACTERS,
+    VIRTUAL_KEY_BYTE_MASK,
     VK_CAPITAL,
     VK_CONTROL,
     VK_LCONTROL,
@@ -33,64 +52,19 @@ from .windows_backend import (
     VK_RMENU,
     VK_RSHIFT,
     VK_SHIFT,
-    NativeInput,
-    NativeKeyEvent,
-    WindowsBackendError,
+    VK_STATE_DOWN_BIT,
+    WH_KEYBOARD_LL,
+    WH_MOUSE_LL,
+    WM_INPUTLANGCHANGEREQUEST,
+    WM_KEYDOWN,
+    WM_KEYUP,
+    WM_QUIT,
+    WM_SYSKEYDOWN,
+    WM_SYSKEYUP,
+    WM_USER,
+    WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW,
 )
-
-
-WH_KEYBOARD_LL = 13
-WH_MOUSE_LL = 14
-HC_ACTION = 0
-WM_KEYDOWN = 0x0100
-WM_KEYUP = 0x0101
-WM_SYSKEYDOWN = 0x0104
-WM_SYSKEYUP = 0x0105
-WM_QUIT = 0x0012
-WM_USER = 0x0400
-WM_INPUTLANGCHANGEREQUEST = 0x0050
-PM_NOREMOVE = 0x0000
-# Mouse messages that invalidate the caret position; observed only, never
-# suppressed (see run_keyboard_hook's mouse_callback).
-WM_LBUTTONDOWN = 0x0201
-WM_RBUTTONDOWN = 0x0204
-WM_MBUTTONDOWN = 0x0207
-WM_MOUSEWHEEL = 0x020A
-WM_XBUTTONDOWN = 0x020B
-WM_MOUSEHWHEEL = 0x020E
-POINTER_INVALIDATING_MESSAGES = frozenset({
-    WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN,
-    WM_MOUSEWHEEL, WM_XBUTTONDOWN, WM_MOUSEHWHEEL,
-})
-LLKHF_EXTENDED = 0x01
-LLKHF_INJECTED = 0x10
-KEYEVENTF_EXTENDEDKEY = 0x0001
-KEYEVENTF_KEYUP = 0x0002
-KEYEVENTF_SCANCODE = 0x0008
-INPUT_KEYBOARD = 1
-PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-KEYSWITCH_EXTRA_INFO = 0x4B535743
-KEYSWITCH_REPLAY_INFO = 0x4B535752
-GA_ROOT = 2
-GWL_EXSTYLE = -20
-WS_EX_TOOLWINDOW = 0x00000080
-WS_EX_NOACTIVATE = 0x08000000
-SWP_NOSIZE = 0x0001
-SWP_NOMOVE = 0x0002
-SWP_NOZORDER = 0x0004
-SWP_NOACTIVATE = 0x0010
-SWP_FRAMECHANGED = 0x0020
-
-# A pointer to a 256-byte array holding one keyboard-state byte per virtual
-# key (ToUnicodeEx's lpKeyState / GetKeyboardState). High bit set means down.
-KEYBOARD_STATE_ARRAY_SIZE = 256
-VK_STATE_DOWN_BIT = 0x80
-VIRTUAL_KEY_BYTE_MASK = 0xFF
-TRANSLATED_TEXT_BUFFER_CHARACTERS = 8
-# ToUnicodeEx wFlags bit 2 (Windows 10 1607+): keyboard state is not changed.
-TO_UNICODE_KEEP_KEYBOARD_STATE_FLAG = 0x04
-# QueryFullProcessImageNameW's output buffer, in wide characters.
-PROCESS_IMAGE_NAME_BUFFER_CHARACTERS = 32768
 
 
 class KBDLLHOOKSTRUCT(ctypes.Structure):

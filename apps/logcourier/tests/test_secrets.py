@@ -1,8 +1,7 @@
 import pytest
+from fixture_values.keys import SECRETS_TEST_TOKEN
 
 from logcourier import secrets
-
-TOKEN = "123456:" + "B" * 30
 
 
 class Backend:
@@ -21,18 +20,18 @@ def test_keyring_roundtrip(monkeypatch):
     monkeypatch.setattr(secrets, "secure_backend", lambda: backend)
     assert secrets.read_token("") == ""
     assert secrets.read_token("123456") == ""
-    secrets.store_token(TOKEN)
-    assert secrets.read_token("123456") == TOKEN
+    secrets.store_token(SECRETS_TEST_TOKEN)
+    assert secrets.read_token("123456") == SECRETS_TEST_TOKEN
 
 
 def test_keyring_failure_no_plaintext_fallback(monkeypatch):
     def failure():
-        raise OSError(TOKEN)
+        raise OSError(SECRETS_TEST_TOKEN)
 
     monkeypatch.setattr(secrets, "secure_backend", failure)
     with pytest.raises(RuntimeError) as result:
-        secrets.store_token(TOKEN)
-    assert TOKEN not in str(result.value)
+        secrets.store_token(SECRETS_TEST_TOKEN)
+    assert SECRETS_TEST_TOKEN not in str(result.value)
     with pytest.raises(RuntimeError) as result:
         secrets.read_token("123456")
-    assert TOKEN not in str(result.value)
+    assert SECRETS_TEST_TOKEN not in str(result.value)

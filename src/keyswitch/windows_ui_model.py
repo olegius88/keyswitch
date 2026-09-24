@@ -6,13 +6,31 @@ from dataclasses import dataclass
 from typing import Literal
 
 from .app_quirks import MENTION_HEADS
+from .constants.settings_defaults import (
+    CONFIDENCE_SETTING_MAX,
+    CONFIDENCE_SETTING_MIN,
+    CONFIDENCE_SETTING_STEP,
+    EARLY_SWITCH_MIN_LENGTH_SETTING_MAX,
+    EARLY_SWITCH_MIN_LENGTH_SETTING_MIN,
+    HISTORY_LIMIT_SETTING_MAX,
+    HISTORY_LIMIT_SETTING_MIN,
+    HISTORY_LIMIT_SETTING_STEP,
+    LEARNING_CONFIRMATIONS_SETTING_MAX,
+    MINIMUM_WORD_LENGTH_SETTING_MAX,
+    MINIMUM_WORD_LENGTH_SETTING_MIN,
+    PAUSE_DELAY_SETTING_MAX_SECONDS,
+    PAUSE_DELAY_SETTING_MIN_SECONDS,
+    PAUSE_DELAY_SETTING_STEP_SECONDS,
+)
+from .constants.models import PREFIX_MAX_CHARACTERS, PREFIX_MIN_CHARACTERS
+from .constants.timing import UNDO_AVAILABLE_WINDOW_SECONDS
+from .constants.ui_desktop import SETTING_SPEC_DEFAULT_MAXIMUM
+from .constants.units import SECONDS_PER_HOUR
+from .constants.updates import UPDATE_CHECK_INTERVAL_SECONDS
+from .russian_text import HOURS, SECONDS, quantity
 
 
 ControlKind = Literal["bool", "choice", "int", "float", "text"]
-
-# Unused by any control today: every "int"/"float" setting below passes its own
-# maximum, and other kinds ignore the field. Kept as a harmless placeholder.
-DEFAULT_SETTING_MAXIMUM = 100.0
 
 
 @dataclass(frozen=True)
@@ -23,7 +41,7 @@ class SettingSpec:
     kind: ControlKind
     choices: tuple[tuple[str, str], ...] = ()
     minimum: float = 0.0
-    maximum: float = DEFAULT_SETTING_MAXIMUM
+    maximum: float = SETTING_SPEC_DEFAULT_MAXIMUM
     step: float = 1.0
 
 
@@ -39,17 +57,17 @@ AUTOCORRECTION_SETTINGS = (
         "Минимальная длина слова",
         "Минимум для базового детектора; явные правила, короткие исключения и контекстный помощник могут разрешить замену раньше.",
         "int",
-        minimum=2,
-        maximum=12,
+        minimum=MINIMUM_WORD_LENGTH_SETTING_MIN,
+        maximum=MINIMUM_WORD_LENGTH_SETTING_MAX,
     ),
     SettingSpec(
         "detection.confidence",
         "Порог уверенности",
         "Больше — строже резервные эвристики. Пороги обученных моделей не меняются.",
         "float",
-        minimum=0.5,
-        maximum=10.0,
-        step=0.1,
+        minimum=CONFIDENCE_SETTING_MIN,
+        maximum=CONFIDENCE_SETTING_MAX,
+        step=CONFIDENCE_SETTING_STEP,
     ),
     SettingSpec(
         "detection.respect_manual_layout",
@@ -112,10 +130,11 @@ AUTOCORRECTION_SETTINGS = (
     SettingSpec(
         "detection.early_switch_min_length",
         "Символов до ранней смены",
-        "Минимум для проверки; значение 3 действует только в словарном алгоритме. Модель проверяет префиксы длиной 4–12 и ждёт при сомнении.",
+        f"Минимум для проверки; значение {EARLY_SWITCH_MIN_LENGTH_SETTING_MIN} действует только в словарном алгоритме. "
+        f"Модель проверяет префиксы длиной {PREFIX_MIN_CHARACTERS}–{PREFIX_MAX_CHARACTERS} и ждёт при сомнении.",
         "int",
-        minimum=3,
-        maximum=8,
+        minimum=EARLY_SWITCH_MIN_LENGTH_SETTING_MIN,
+        maximum=EARLY_SWITCH_MIN_LENGTH_SETTING_MAX,
     ),
     SettingSpec(
         "detection.learning",
@@ -129,7 +148,7 @@ AUTOCORRECTION_SETTINGS = (
         "Порог, при котором правило начинает действовать; Enter в подсказке достигает его сразу.",
         "int",
         minimum=1,
-        maximum=10,
+        maximum=LEARNING_CONFIRMATIONS_SETTING_MAX,
     ),
 )
 
@@ -146,9 +165,9 @@ TRIGGER_SETTINGS = (
         "Пауза, секунд",
         "Сколько ждать без ввода, прежде чем проверить незавершённое слово.",
         "float",
-        minimum=0.3,
-        maximum=5.0,
-        step=0.1,
+        minimum=PAUSE_DELAY_SETTING_MIN_SECONDS,
+        maximum=PAUSE_DELAY_SETTING_MAX_SECONDS,
+        step=PAUSE_DELAY_SETTING_STEP_SECONDS,
     ),
     SettingSpec(
         "detection.correct_on_space",
@@ -193,7 +212,8 @@ HOTKEY_SETTINGS = (
     SettingSpec(
         "hotkeys.undo",
         "Отменить исправление",
-        "Вернуть последнее автоматическое исправление в течение 10 секунд.",
+        "Вернуть последнее автоматическое исправление. Доступно "
+        f"{quantity(UNDO_AVAILABLE_WINDOW_SECONDS, SECONDS)} после исправления.",
         "text",
     ),
 )
@@ -261,9 +281,9 @@ SYSTEM_SETTINGS = (
         "Размер истории",
         "Максимальное число локально сохранённых исправлений.",
         "int",
-        minimum=10,
-        maximum=5000,
-        step=10,
+        minimum=HISTORY_LIMIT_SETTING_MIN,
+        maximum=HISTORY_LIMIT_SETTING_MAX,
+        step=HISTORY_LIMIT_SETTING_STEP,
     ),
 )
 
@@ -272,7 +292,8 @@ UPDATE_SETTINGS = (
     SettingSpec(
         "updates.check_automatically",
         "Автоматически проверять обновления",
-        "Проверять GitHub Releases после запуска и каждые шесть часов.",
+        "Проверять GitHub Releases после запуска и раз в "
+        f"{quantity(UPDATE_CHECK_INTERVAL_SECONDS / SECONDS_PER_HOUR, HOURS)}.",
         "bool",
     ),
     SettingSpec(

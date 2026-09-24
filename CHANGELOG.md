@@ -4,6 +4,53 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.31.2 — 2026-09-24
+
+- Decide a word in doubt together with its converted neighbour in every application.
+  "tot" at the start of a message waits for the next word, and when "ghbdtn" becomes
+  "привет" the context model is asked about "tot" once more with "привет" after it. It
+  answered "convert" with 0.9993 in Firefox as well, but the model knows only a few
+  applications by name, and outside them its answer was discarded as unsupported, so
+  "tot привет" stayed in Firefox, Edge, WhatsApp, Discord, Slack and the like. That
+  question comes with the neighbour the engine has just decided, so the model's verdict
+  now stands there. The other question - the next word asked again after the waiting
+  word's other reading - keeps the old rule outside the model's vocabulary: letting the
+  model decide there too spoiled one correct sentence in the development sets. On 1,500
+  sentences typed in Firefox the change restores 293 more of them without spoiling any.
+  A pair is also decided together when the next word is corrected at a pause before the
+  space: "привет" used to convert alone, switch the layout and leave "tot" behind.
+- Show the quote typed in the Russian layout as "@" at once in Telegram. Telegram opens
+  its member list only after a real "@", and that list is how mentions are made, so
+  waiting for a word after the quote left it a quote. The layout does not change. Typing
+  on after it writes the quote back, and the word then decides as before ("ощрт" makes
+  "@john", a Russian word keeps the quotation); Pause right after the "@" gives the quote
+  back as well. A quote typed right against text, such as `привет,"`, closes a quotation
+  and is never shown as "@". The setting "Telegram: кавычка в начале слова — это @"
+  turns the convention off.
+- Offer the same range for each setting in both settings windows, and hold a value
+  edited into the settings file by hand to it: the confidence threshold is 0.5–10 in
+  steps of 0.1 (the Linux window offered 0.5–8 in steps of 0.5), rule confirmations go
+  up to 10 (the Linux window stopped at 5), the pause delay is 0.3–5 seconds in the
+  engine too (it accepted 0.2–10), and the application picker waits 3 seconds in both
+  windows (the Linux one waited 2.5). Numbers inside interface texts and messages now
+  come from the values they describe, so a changed value can no longer leave an old
+  number in a sentence, and a check run by the test suite fails on a number written
+  into a text.
+- Keep every named value in one place, declared once. In 0.31.1 the constants sat at
+  the top of the modules that used them, so the same meaning could still be declared in
+  two modules under two names, and one of them could change without the other. All
+  values of the application and its tools now live in `src/keyswitch/constants/`, one
+  module per purpose (`timing`, `settings_defaults`, `keyboard`, `file_formats`,
+  `training`, `release` and so on), and data that only the tests use lives in
+  `tests/fixture_values/`; LogCourier has the same pair of folders. Every other file
+  imports from there. The check run by the test suite now also fails when a name is
+  declared in two of these modules, or when a module outside them gives a second name
+  to a value that already has one. Duplicates merged on the way include the setting
+  ranges of the Windows window, which now come from the same constants as those of the
+  Linux window and the engine, and the modifier masks of the X11 backend. The words of
+  the model sealing protocol moved from `tools/model_protocol.py` to
+  `src/keyswitch/constants/model_protocol.py`. Behaviour does not change.
+
 ## 0.31.1 — 2026-09-24
 
 - Let a word in doubt wait for its neighbour as long as the text around it stays

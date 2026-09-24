@@ -16,9 +16,22 @@ from .backend import InputBackend, KeyEvent, KeyDisposition
 from .app_quirks import mention_head
 from .boundary_model import BoundaryModel, MAX_SUFFIX, features as boundary_features
 from .boundary_policy import BoundaryPolicy, features as boundary_policy_features
-from .config import (
-    DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_EARLY_SWITCH_MIN_LENGTH, DEFAULT_LEARNING_CONFIRMATIONS,
-    DEFAULT_MINIMUM_WORD_LENGTH, DEFAULT_PAUSE_DELAY_SECONDS, SettingsStore,
+from .config import SettingsStore
+from .constants.settings_defaults import (
+    CONFIDENCE_SETTING_MAX,
+    CONFIDENCE_SETTING_MIN,
+    DEFAULT_CONFIDENCE_THRESHOLD,
+    DEFAULT_EARLY_SWITCH_MIN_LENGTH,
+    DEFAULT_LEARNING_CONFIRMATIONS,
+    DEFAULT_MINIMUM_WORD_LENGTH,
+    DEFAULT_PAUSE_DELAY_SECONDS,
+    EARLY_SWITCH_MIN_LENGTH_SETTING_MAX,
+    EARLY_SWITCH_MIN_LENGTH_SETTING_MIN,
+    LEARNING_CONFIRMATIONS_SETTING_MAX,
+    MINIMUM_WORD_LENGTH_SETTING_MAX,
+    MINIMUM_WORD_LENGTH_SETTING_MIN,
+    PAUSE_DELAY_SETTING_MAX_SECONDS,
+    PAUSE_DELAY_SETTING_MIN_SECONDS,
 )
 from .detector import DetectionDecision, LanguageDetector
 from .early_switch import (
@@ -33,14 +46,45 @@ from .language_model import LanguageModel, WordScore
 from .lexicon_supplement import supplement_words
 from .learning import LearningStore
 from .intent_model import CorrectionTrigger, LinearNgramModel
-from .context_policy import ORTHO_FEATURE_VERSION, ContextPolicy, ContextResult
-from .context_access import MILLISECONDS_PER_SECOND, PlatformFieldReader
+from .context_policy import ContextPolicy, ContextResult
+from .constants.models import (
+    CONTEXT_ACTION_FEATURE_VERSION,
+    PREFIX_MAX_CHARACTERS,
+    PREFIX_MIN_CHARACTERS,
+)
+from .context_access import PlatformFieldReader
+from .constants.units import MILLISECONDS_PER_SECOND
 from .input_context import CONTEXT_TTL, FieldContext, FieldReader
 from .prefix_model import PrefixInput, PrefixModel
 from .prefix_schema import VersionedPrefixModel
 from .settings_diagnostics import setting_change, settings_snapshot
 from .short_words import ISOLATED_SHORT_WORD_REASON, is_short_word_override
 from .word_decision import automatic_word_decision
+from .constants.detection import (
+    EARLY_SWITCH_CONFIDENCE,
+    ENGINE_EVENT_QUEUE_MAX_SIZE,
+    MAX_REMEMBERED_APPLICATION_CONTEXTS,
+    MAX_WORD_STROKES as MAX_WORD_STROKES,
+    MINIMUM_LEARNABLE_LETTERS,
+    NATURAL_SOURCE_BOUNDARY_MIN_CHARACTERS,
+    NATURAL_SOURCE_BOUNDARY_NGRAM_FLOOR,
+    UNSCORED_CORRECTION_CONFIDENCE,
+)
+from .constants.keyboard import LAYOUT_GROUP_COUNT
+from .constants.log_files import LOGGED_SCORE_DECIMALS
+from .constants.text import BASIC_MULTILINGUAL_PLANE_MAX_CODEPOINT
+from .constants.timing import (
+    ACTION_TIMEOUT_SECONDS,
+    ENGINE_LOOP_MAX_WAKE_SECONDS,
+    ENGINE_LOOP_MIN_WAKE_SECONDS,
+    ENGINE_SWITCH_GRACE_SECONDS,
+    ENGINE_WORKER_JOIN_TIMEOUT_SECONDS,
+    LATE_STROKE_GRACE_SECONDS,
+    LEARNING_PROMPT_TIMEOUT_SECONDS,
+    MANUAL_RELEASE_TIMEOUT_SECONDS,
+    STALE_PRESS_SECONDS,
+    UNDO_AVAILABLE_WINDOW_SECONDS,
+)
 
 
 MODIFIER_KEYS = {
@@ -52,64 +96,12 @@ NAVIGATION_KEYS = {
     "Escape", "Delete", "Insert", "Pointer",
 }
 PUNCTUATION = set(".,!?;:()[]{}—–-…\"«»")
-PAUSE_CORRECTION_DELAY_SECONDS = DEFAULT_PAUSE_DELAY_SECONDS
-LEARNING_PROMPT_TIMEOUT_SECONDS = 8.0
 # Keys that answer the learning prompt: while it is shown they belong to
 # KeySwitch, not to the text being typed.
 PROMPT_KEYS = {"Return", "KP_Enter", "Escape"}
-# A layout change observed this soon after the engine switched the layout
-# itself (correction, menu action) is the engine's own switch, not the user's.
-ENGINE_SWITCH_GRACE_SECONDS = 1.5
-# A key without a release for this long is treated as a lost key-up so a
-# stuck entry can never block pause correction forever.
-STALE_PRESS_SECONDS = 3.0
-# A letter arriving in the old layout this soon after an early switch was
-# pressed before the switch took effect and is converted on its own.
-LATE_STROKE_GRACE_SECONDS = 0.5
-EARLY_SWITCH_CONFIDENCE = 15.0
 WORD_BOUNDARY_KEYS = {"space", "Return", "Tab", "ISO_Left_Tab"}
 ACTION_BOUNDARY_KEYS = {"Return", "KP_Enter", "Tab", "ISO_Left_Tab"}
 WORD_JOINERS = {"'", "’", "-", "‐", "‑"}
-MAX_WORD_STROKES = 256
-ACTION_TIMEOUT_SECONDS = 2.0
-MANUAL_RELEASE_TIMEOUT_SECONDS = 3.0
-WORKER_JOIN_TIMEOUT_SECONDS = 2.0
-# The main loop wakes on its own at least this often even with nothing
-# pending, and never sleeps for less than this even when a deadline is closer.
-LOOP_MAX_WAKE_SECONDS = 0.5
-LOOP_MIN_WAKE_SECONDS = 0.01
-# Clamp for the user-configurable pause delay (detection.pause_delay_seconds),
-# so a malformed setting cannot freeze pause correction or fire it constantly.
-PAUSE_DELAY_MINIMUM_SECONDS = 0.2
-PAUSE_DELAY_MAXIMUM_SECONDS = 10.0
-# The configured early-switch minimum length is clamped to this range.
-EARLY_SWITCH_MIN_LENGTH_FLOOR = 3
-EARLY_SWITCH_MIN_LENGTH_CEILING = 8
-# Number of language layouts the engine juggles; a third model would need a
-# third physical layout group, which nothing in this codebase supports yet.
-SUPPORTED_LAYOUT_GROUPS = 2
-EVENT_QUEUE_MAX_SIZE = 4096
-# The engine backs up simple single-key text edits; anything above the Basic
-# Multilingual Plane is composed text a backspace cannot safely undo alone.
-BASIC_MULTILINGUAL_PLANE_MAX_CODEPOINT = 0xFFFF
-# A prefix is only offered to the prefix model within this length range.
-PREFIX_WORD_LENGTH_MIN = 4
-PREFIX_WORD_LENGTH_MAX = 12
-# Decimal places kept when a probability, score or confidence is logged.
-LOGGED_SCORE_DECIMALS = 6
-# Per-application remembered context words; oldest is dropped past this cap.
-MAX_REMEMBERED_APPLICATION_CONTEXTS = 32
-# A boundary is natural (not just a configured minimum length) once the word
-# is this long and its own-language score is at least this uncertain.
-NATURAL_SOURCE_BOUNDARY_MIN_LENGTH = 4
-NATURAL_SOURCE_BOUNDARY_NGRAM_FLOOR = -0.25
-# A user-triggered correction (manual toggle, undo) is certain, not scored;
-# this stands in for the confidence a model would have reported.
-MANUAL_CORRECTION_CONFIDENCE = 99.0
-# A replacement needs at least this many letters to be offered as a rule.
-MINIMUM_LEARNABLE_LETTERS = 2
-# Undo stays available for this long after a correction.
-UNDO_AVAILABLE_WINDOW_SECONDS = 10.0
 LOGGER = logging.getLogger(__name__)
 
 
@@ -141,6 +133,7 @@ class CorrectionPlan:
     application: str
     automatic: bool = True
     # boundary | pause | manual | undo | early | symbols | late_stroke
+    # | mention_shown | mention_hidden
     mode: str = "boundary"
     context_field: str = ""
     # Literal punctuation before `boundary`, not replayed in the new layout.
@@ -244,7 +237,7 @@ class KeySwitchEngine:
         )
         self.models = {
             index: LanguageModel.load(locale, supplement_words(locale))
-            for index, locale in enumerate(locales[:SUPPORTED_LAYOUT_GROUPS])
+            for index, locale in enumerate(locales[:LAYOUT_GROUP_COUNT])
         }
         intent_model, self.intent_model_status = LinearNgramModel.try_load_default()
         self.detector = LanguageDetector(self.models, intent_model)
@@ -271,7 +264,7 @@ class KeySwitchEngine:
         self._action_deadline = 0.0
         self._action_keys = self._configured_action_keys()
         self._events: queue.Queue[KeyEvent | _LayoutSelection | None] = queue.Queue(
-            maxsize=EVENT_QUEUE_MAX_SIZE
+            maxsize=ENGINE_EVENT_QUEUE_MAX_SIZE
         )
         self._worker: threading.Thread | None = None
         self._running = threading.Event()
@@ -287,6 +280,14 @@ class KeySwitchEngine:
         # Layout-dependent symbols typed right after a boundary (e.g. the RU
         # quote on Shift+2 meant as "@"); Pause converts them on their own.
         self._symbol_strokes: list[KeyEvent] = []
+        # The quote from _symbol_strokes that is on screen as "@" right now
+        # (_show_mention_head), until the next key writes it back.
+        self._mention_shown: KeyEvent | None = None
+        # The character the previous key typed and the one typed before the
+        # current key: empty at the start of the text, after a click, a caret
+        # move or an erased character, where nothing is known to stand there.
+        self._last_key_character = ""
+        self._character_before_key = ""
         # True once anything was typed after the last committed word, so Pause
         # must not rewrite that word any more.
         self._last_committed_stale = False
@@ -369,7 +370,7 @@ class KeySwitchEngine:
             self._learning_prompt_deadline = None
             self._prompt_key_deadline = 0.0
             callbacks = tuple(self._learning_prompt_callbacks)
-        required = int(self.settings.get("detection.learning_confirmations", DEFAULT_LEARNING_CONFIRMATIONS))
+        required = self._learning_confirmations()
         # Enter is the only thing that teaches, and it teaches at once: the
         # manual conversion itself no longer counts towards the threshold, so
         # counting Enters instead would silently raise the price of a rule.
@@ -464,7 +465,7 @@ class KeySwitchEngine:
         except queue.Full:
             pass
         if self._worker and self._worker is not threading.current_thread():
-            self._worker.join(timeout=WORKER_JOIN_TIMEOUT_SECONDS)
+            self._worker.join(timeout=ENGINE_WORKER_JOIN_TIMEOUT_SECONDS)
         self._worker = None
         self.backend.close()
         self._update(running=False, backend="остановлен", current_word="")
@@ -540,20 +541,43 @@ class KeySwitchEngine:
 
         last_input = self._last_word_input_at
         if not self._pause_correction_pending or last_input is None:
-            return LOOP_MAX_WAKE_SECONDS
+            return ENGINE_LOOP_MAX_WAKE_SECONDS
         remaining = last_input + self._pause_delay() - time.monotonic()
-        return max(LOOP_MIN_WAKE_SECONDS, min(LOOP_MAX_WAKE_SECONDS, remaining))
+        return max(ENGINE_LOOP_MIN_WAKE_SECONDS, min(ENGINE_LOOP_MAX_WAKE_SECONDS, remaining))
+
+    def _bounded_setting(self, path: str, default: float, minimum: float, maximum: float) -> float:
+        """A numeric setting within the range the settings windows offer for it.
+
+        Both windows take their ranges from the same constants, and a value edited
+        into the settings file by hand is brought into that range here; one that is
+        not a number at all falls back to the default.
+        """
+
+        try:
+            value = float(self.settings.get(path, default))
+        except (TypeError, ValueError):
+            value = float(default)
+        return min(maximum, max(minimum, value))
 
     def _pause_delay(self) -> float:
-        try:
-            delay = float(
-                self.settings.get(
-                    "detection.pause_delay_seconds", PAUSE_CORRECTION_DELAY_SECONDS
-                )
-            )
-        except (TypeError, ValueError):
-            delay = PAUSE_CORRECTION_DELAY_SECONDS
-        return min(PAUSE_DELAY_MAXIMUM_SECONDS, max(PAUSE_DELAY_MINIMUM_SECONDS, delay))
+        return self._bounded_setting(
+            "detection.pause_delay_seconds", DEFAULT_PAUSE_DELAY_SECONDS,
+            PAUSE_DELAY_SETTING_MIN_SECONDS, PAUSE_DELAY_SETTING_MAX_SECONDS,
+        )
+
+    def _confidence_threshold(self) -> float:
+        return self._bounded_setting(
+            "detection.confidence", DEFAULT_CONFIDENCE_THRESHOLD, CONFIDENCE_SETTING_MIN, CONFIDENCE_SETTING_MAX)
+
+    def _minimum_word_length(self) -> int:
+        return int(self._bounded_setting(
+            "detection.minimum_length", DEFAULT_MINIMUM_WORD_LENGTH,
+            MINIMUM_WORD_LENGTH_SETTING_MIN, MINIMUM_WORD_LENGTH_SETTING_MAX,
+        ))
+
+    def _learning_confirmations(self) -> int:
+        return int(self._bounded_setting(
+            "detection.learning_confirmations", DEFAULT_LEARNING_CONFIRMATIONS, 1, LEARNING_CONFIRMATIONS_SETTING_MAX))
 
     def _apply_layout_selection(self, group: int) -> None:
         try:
@@ -679,6 +703,10 @@ class KeySwitchEngine:
                 self._modifier_keycodes.discard(event.keycode)
             self._maybe_execute_pending(event)
             return
+        if event.pressed and not event.synthetic:
+            typed = "" if event.key_name in {"BackSpace", "Delete"} else event.character
+            self._character_before_key = self._last_key_character
+            self._last_key_character = typed if typed.isprintable() or typed.isspace() else ""
         if not event.pressed:
             self._maybe_execute_pending(event)
             return
@@ -721,6 +749,9 @@ class KeySwitchEngine:
                 self._update(current_word=self._text_for_group(self._strokes, self._source_group))
             elif self._symbol_strokes:
                 self._symbol_strokes.pop()
+                if not self._symbol_strokes:
+                    # The "@" shown for the quote is what this key erased.
+                    self._mention_shown = None
             elif reopenable is not None:
                 # This Backspace took away the boundary that ended the last
                 # word, so the caret stands right after that word again and
@@ -741,6 +772,10 @@ class KeySwitchEngine:
                 self._update(
                     current_word=self._text_for_group(self._strokes, self._source_group)
                 )
+            if self._mention_shown is not None and self._strokes:
+                # The pending write-back went with the erased letter; the
+                # letters left still stand after the "@".
+                self._hide_mention_head(self._mention_shown, None, event.keycode)
             return
         if event.key_name in ACTION_BOUNDARY_KEYS:
             if event.deferred:
@@ -807,6 +842,7 @@ class KeySwitchEngine:
                 current_word=self._text_for_group(self._strokes, event.group),
                 last_error="",
             )
+            self._after_mention_head(event, None)
             self._maybe_early_switch()
             return
         if self._is_boundary(event):
@@ -814,6 +850,7 @@ class KeySwitchEngine:
                 self._source_group = event.group
                 self._strokes.append(event)
                 self._mark_word_activity()
+                self._after_mention_head(event, None)
                 return
             if self._strokes:
                 self._commit_word(event)
@@ -829,6 +866,10 @@ class KeySwitchEngine:
             elif self._layout_dependent(event):
                 self._symbol_strokes.append(event)
             self._last_committed_stale = True
+            if self._mention_shown is not None:
+                self._after_mention_head(event, event)
+            elif len(self._symbol_strokes) == 1 and self._symbol_strokes[0] is event:
+                self._show_mention_head(event)
             return
         if event.key_name in NAVIGATION_KEYS:
             # The caret moved: what was typed belongs to another position, and
@@ -862,6 +903,7 @@ class KeySwitchEngine:
             self._strokes.append(event)
             self._mark_word_activity()
             self._update(current_word=self._text_for_group(self._strokes, event.group))
+            self._after_mention_head(event, None)
         elif event.key_name not in {"Pause", "Break"}:
             self._clear_word(reason="untracked_key")
             self._untracked_token = True
@@ -890,13 +932,10 @@ class KeySwitchEngine:
         ) > 1
 
     def _early_switch_policy(self) -> EarlySwitchPolicy:
-        try:
-            minimum = int(self.settings.get("detection.early_switch_min_length", DEFAULT_EARLY_SWITCH_MIN_LENGTH))
-        except (TypeError, ValueError):
-            minimum = DEFAULT_EARLY_SWITCH_MIN_LENGTH
-        return EarlySwitchPolicy(
-            minimum_length=max(EARLY_SWITCH_MIN_LENGTH_FLOOR, min(EARLY_SWITCH_MIN_LENGTH_CEILING, minimum))
-        )
+        return EarlySwitchPolicy(minimum_length=int(self._bounded_setting(
+            "detection.early_switch_min_length", DEFAULT_EARLY_SWITCH_MIN_LENGTH,
+            EARLY_SWITCH_MIN_LENGTH_SETTING_MIN, EARLY_SWITCH_MIN_LENGTH_SETTING_MAX,
+        )))
 
     def _caret_unknown(self) -> bool:
         """Whether this word is being typed where the engine cannot see the surroundings.
@@ -1043,7 +1082,7 @@ class KeySwitchEngine:
         mode = str(self.settings.get("detection.context_policy", "assist"))
         if not bool(self.settings.get("detection.context_aware", True)) or mode not in {"assist", "shadow"}:
             return baseline, EARLY_SWITCH_CONFIDENCE
-        supported = (PREFIX_WORD_LENGTH_MIN <= len(baseline.original) <= PREFIX_WORD_LENGTH_MAX
+        supported = (PREFIX_MIN_CHARACTERS <= len(baseline.original) <= PREFIX_MAX_CHARACTERS
                      and baseline.replacement.isalpha()
                      and not any(char.isupper() for char in (baseline.original[1:] + baseline.replacement[1:]))
                      and baseline.source_group in {0, 1} and baseline.target_group == 1 - baseline.source_group
@@ -1256,6 +1295,7 @@ class KeySwitchEngine:
             self._pending = None
             self._pending_learning_action = None
         typed = tuple(self._strokes)
+        shown, self._mention_shown = self._mention_shown, None
         mention = self._mention_head(self.backend.active_application())
         head = self._literal_head(typed, self._source_group)
         strokes, trailing, segmentation_certain = self._completed_word(typed[head:], self._source_group)
@@ -1378,6 +1418,28 @@ class KeySwitchEngine:
         else:
             self._early_switch_origin = None
             self._early_switch_at = None
+        if mention and not (self._pending is not None and self._pending.head):
+            self._technical_event(
+                "mention_head_kept",
+                reason=(
+                    "word_not_analysed" if decision is None
+                    else "converted_without_head" if decision.should_convert else "word_kept"
+                ),
+                shown=shown is not None,
+                application=application,
+                application_excluded=excluded,
+            )
+        if shown is not None and not (self._pending is not None and self._pending.head):
+            # The word ended before the key after the "@" could write the quote
+            # back (keys held over each other). A word that converts took the
+            # head with it above; any other ending means it was not a mention.
+            self._log_pending_dropped("mention_head_written_back")
+            self._pending = self._mention_write_back(
+                shown, typed[:len(typed) - len(trailing)], trailing,
+                None if boundary.deferred else boundary, application,
+            )
+            self._pending_learning_action = None
+            self._pending_trigger_keycode = boundary.keycode
         self._strokes = []
         self._source_group = -1
         self._early_switch_undone = False
@@ -1444,7 +1506,7 @@ class KeySwitchEngine:
             for word in ignored_words
         }
         natural_source_boundary = (
-            effective_length >= NATURAL_SOURCE_BOUNDARY_MIN_LENGTH
+            effective_length >= NATURAL_SOURCE_BOUNDARY_MIN_CHARACTERS
             and decision.source_score.ngram_score >= NATURAL_SOURCE_BOUNDARY_NGRAM_FLOOR
         )
         # A one- or two-letter word from the trusted list is recognisable, but
@@ -1454,7 +1516,7 @@ class KeySwitchEngine:
         return recognisable or protected_boundary or ignored_boundary or (
             decision.source_score.known
             and effective_length
-            >= int(self.settings.get("detection.minimum_length", DEFAULT_MINIMUM_WORD_LENGTH))
+            >= self._minimum_word_length()
         ) or natural_source_boundary
 
     def _completed_word(
@@ -1562,7 +1624,7 @@ class KeySwitchEngine:
         decision = self.detector.decide(
             original, {target: alternative}, source_group,
             minimum_length=1,
-            confidence_threshold=float(self.settings.get("detection.confidence", DEFAULT_CONFIDENCE_THRESHOLD)),
+            confidence_threshold=self._confidence_threshold(),
             aggressive=bool(self.settings.get("detection.aggressive", False)),
             protect_code=True,
             use_intent_model=bool(self.settings.get("detection.intent_model_enabled", True)),
@@ -1589,8 +1651,8 @@ class KeySwitchEngine:
         forced_target = self._forced_target_group(source_group, original)
         return automatic_word_decision(
             self.detector, original, alternatives, source_group,
-            minimum_length=(1 if forced_target is not None else int(self.settings.get("detection.minimum_length", DEFAULT_MINIMUM_WORD_LENGTH))),
-            confidence_threshold=float(self.settings.get("detection.confidence", DEFAULT_CONFIDENCE_THRESHOLD)),
+            minimum_length=(1 if forced_target is not None else self._minimum_word_length()),
+            confidence_threshold=self._confidence_threshold(),
             ignored_words=set(ignored_words),
             aggressive=bool(self.settings.get("detection.aggressive", False)),
             protect_code=bool(self.settings.get("detection.protect_code", True)),
@@ -1626,9 +1688,9 @@ class KeySwitchEngine:
             source_group,
             minimum_length=(
                 1 if forced_target is not None
-                else int(self.settings.get("detection.minimum_length", DEFAULT_MINIMUM_WORD_LENGTH))
+                else self._minimum_word_length()
             ),
-            confidence_threshold=float(self.settings.get("detection.confidence", DEFAULT_CONFIDENCE_THRESHOLD)),
+            confidence_threshold=self._confidence_threshold(),
             ignored_words=set(ignored_words),
             aggressive=bool(self.settings.get("detection.aggressive", False)),
             protect_code=protect_code,
@@ -1700,9 +1762,11 @@ class KeySwitchEngine:
 
     def _resolve_context_wait(
         self, waiting: WaitingContextWord | None, strokes: tuple[KeyEvent, ...],
-        boundary: KeyEvent, decision: DetectionDecision, application: str,
+        boundary: KeyEvent | None, decision: DetectionDecision, application: str,
         alternatives: dict[int, str],
     ) -> tuple[CorrectionPlan, DetectionDecision] | None:
+        """Decide a waiting word together with the next word, at its boundary or at a pause."""
+
         if waiting is None or self.settings.get("detection.context_policy", "assist") != "assist":
             self._log_context_wait("context_wait_cancelled", waiting, "policy_disabled")
             return None
@@ -1737,7 +1801,9 @@ class KeySwitchEngine:
                 return None
             decision = converted
         original = previous.original + previous.boundary.character + decision.original
-        suffix = "" if boundary.deferred else boundary.character
+        # At a pause the next word has no boundary yet; Enter/Tab has not reached the editor.
+        closing = None if boundary is None or boundary.deferred else boundary
+        suffix = "" if closing is None else closing.character
         if not self.context_policy.stream.text.endswith(original + suffix):
             self._log_context_wait("context_wait_cancelled", waiting, "observed_suffix_changed")
             return None
@@ -1750,12 +1816,12 @@ class KeySwitchEngine:
         model = self.context_policy.model
         planned_baseline = (
             self._planned_baseline(previous.original, {group: alternative}, previous.source_group, decision.replacement, group)
-            if model is not None and model.feature_version == ORTHO_FEATURE_VERSION else waiting.decision)
+            if model is not None and model.feature_version == CONTEXT_ACTION_FEATURE_VERSION else waiting.decision)
         result = self.context_policy.decide(
             planned_baseline, alternative, group, self.detector, "space", "assist",
             after=decision.replacement, field_override=waiting.field,
             boundary_text=previous.boundary.character,
-            after_origin="planned_next_conversion",
+            after_origin="planned_next_conversion", planned_context=True,
         )
         if not result.decision.should_convert:
             self._log_context_wait("context_wait_cancelled", waiting, "lookahead_not_converted")
@@ -1763,14 +1829,14 @@ class KeySwitchEngine:
         self._technical_event("context_wait_resolved", wait_id=waiting.diagnostic_id, previous_characters=len(previous.original), next_characters=len(decision.original))
         return CorrectionPlan(
             previous.strokes + (previous.boundary,) + strokes,
-            None if boundary.deferred else boundary, previous.source_group, group,
+            closing, previous.source_group, group,
             original, alternative + previous.boundary.character + decision.replacement,
             result.decision.confidence, application, True, "context_phrase", self._context_field_id(),
         ), decision
 
     def _decide_after_waiting_word(
         self, waiting: WaitingContextWord, decision: DetectionDecision,
-        alternatives: dict[int, str], boundary: KeyEvent, boundary_character: str,
+        alternatives: dict[int, str], boundary: KeyEvent | None, boundary_character: str,
     ) -> DetectionDecision | None:
         """The next word's decision after the waiting word's other reading.
 
@@ -1785,7 +1851,8 @@ class KeySwitchEngine:
         reading = self._text_for_group(previous.strokes, group)
         baseline = self._planned_baseline(decision.original, {group: alternative}, decision.source_group, reading, group)
         result = self.context_policy.decide(
-            baseline, alternative, group, self.detector, self._trigger_for_boundary(boundary), "assist",
+            baseline, alternative, group, self.detector,
+            "pause" if boundary is None else self._trigger_for_boundary(boundary), "assist",
             field_override=replace(waiting.field, before=waiting.field.before + reading + boundary_character),
         )
         return result.decision if result.decision.should_convert else None
@@ -1875,9 +1942,7 @@ class KeySwitchEngine:
     def _forced_target_group(self, source_group: int, word: str) -> int | None:
         if not bool(self.settings.get("detection.learning", True)):
             return None
-        confirmations = int(
-            self.settings.get("detection.learning_confirmations", DEFAULT_LEARNING_CONFIRMATIONS)
-        )
+        confirmations = self._learning_confirmations()
         return self.learning.forced_target(source_group, word, confirmations)
 
     def _context_for(self, application: str) -> tuple[dict[int, str], int | None]:
@@ -2074,12 +2139,8 @@ class KeySwitchEngine:
             protection=protection,
             application_excluded=application_excluded,
             skipped_reason=skipped_reason,
-            minimum_length=int(
-                self.settings.get("detection.minimum_length", DEFAULT_MINIMUM_WORD_LENGTH)
-            ),
-            confidence_threshold=float(
-                self.settings.get("detection.confidence", DEFAULT_CONFIDENCE_THRESHOLD)
-            ),
+            minimum_length=self._minimum_word_length(),
+            confidence_threshold=self._confidence_threshold(),
             context={
                 "group": context_group,
                 "words": {} if application_excluded else context_words,
@@ -2131,9 +2192,7 @@ class KeySwitchEngine:
         target, confirmations = self.learning.rule_state(source_group, word)
         return {
             "enabled": bool(self.settings.get("detection.learning", True)),
-            "required_confirmations": int(
-                self.settings.get("detection.learning_confirmations", DEFAULT_LEARNING_CONFIRMATIONS)
-            ),
+            "required_confirmations": self._learning_confirmations(),
             "rule_target": target,
             "confirmations": confirmations,
             "forced_target": self._forced_target_group(source_group, word),
@@ -2331,16 +2390,34 @@ class KeySwitchEngine:
             literal_head=literal_head,
         )
         if not decision.should_convert:
+            if self._mention_head(application):
+                self._technical_event(
+                    "mention_head_kept", reason="word_kept", shown=False,
+                    application=application, application_excluded=excluded,
+                )
             return
 
         self._early_switch_origin = None
         self._early_switch_at = None
-        mention = self._mention_head(application)
-        plan = replace(
-            self._plan_from_decision(strokes, None, application, decision, "pause"),
-            trailing=trailing,
-            head=() if mention and self._quotation_closed(mention[0], trailing, None) else mention,
-        )
+        # A word converted at a pause is the neighbour a waiting word was waiting
+        # for, exactly as at a space: `tot`, then `ghbdtn` and a pause before the
+        # space converted `привет` alone, switched the layout, and the space in the
+        # other layout ended the wait with `tot` left standing.
+        waiting, self._context_waiting = self._context_waiting, None
+        joint = None
+        if trailing or head:
+            self._log_context_wait("context_wait_cancelled", waiting, "literal_tail" if trailing else "literal_head")
+        else:
+            joint = self._resolve_context_wait(waiting, strokes, None, decision, application, alternatives)
+        if joint is not None:
+            plan = joint[0]
+        else:
+            mention = self._mention_head(application)
+            plan = replace(
+                self._plan_from_decision(strokes, None, application, decision, "pause"),
+                trailing=trailing,
+                head=() if mention and self._quotation_closed(mention[0], trailing, None) else mention,
+            )
         self._strokes = []
         self._source_group = -1
         self._early_switch_undone = False
@@ -2375,16 +2452,109 @@ class KeySwitchEngine:
         if len(self._symbol_strokes) != 1 or not self._strokes:
             return ()
         stroke = self._symbol_strokes[0]
+        return (stroke,) if self._mention_convention(stroke, application) else ()
+
+    def _mention_convention(self, stroke: KeyEvent, application: str) -> bool:
+        """Whether this application reads the symbol on this key as the start of a mention."""
+
         source_group = stroke.group
         target = next((group for group in self.models if group != source_group), None)
         if target is None or source_group not in self.models:
-            return ()
+            return False
         typed = self._text_for_group((stroke,), source_group)
         meant = self._text_for_group((stroke,), target)
-        head = mention_head(
+        return mention_head(
             application, typed, meant, lambda path: bool(self.settings.get(path, True))
+        ) is not None
+
+    def _show_mention_head(self, stroke: KeyEvent) -> None:
+        """Write a lone quote as ``@`` at once where the application reads it as a mention.
+
+        Telegram opens its member list only after a real ``@``, and that list is
+        how a mention is made: in the collected logs every ``@`` in the chat was
+        followed by the arrow keys, Enter or a click, never by letters. Waiting
+        for a word that never comes left the quote a quote. So the ``@`` appears
+        on the key's release, in place, without changing the layout: a message
+        continued in Russian after the list stays Russian. It stays only while
+        nothing is typed after it; the next printable key writes the quote back
+        (_after_mention_head) and the word that follows decides, as before,
+        whether the pair was ``@name`` or a quotation. A quote typed after a
+        caret move or after the layout was chosen by hand is left alone.
+        """
+
+        application = self.backend.active_application()
+        if (
+            not bool(self.settings.get("enabled", True))
+            or self._application_excluded(application)
+            or self._caret_unknown()
+            or self._word_protected(stroke.group)
+            or not self._mention_convention(stroke, application)
+            # A quote typed right against text closes a quotation: `привет,"`.
+            # Only one at the start of the text or after a space, Enter or Tab
+            # can open a mention.
+            or (self._character_before_key and not self._character_before_key.isspace())
+        ):
+            return
+        target = next(group for group in self.models if group != stroke.group)
+        shown = replace(stroke, group=target, character=stroke.character_for(target))
+        # Nothing is retyped in another layout: the "@" goes out as a literal of
+        # the layout it belongs to, and the backends restore the current one after it.
+        self._pending = CorrectionPlan(
+            (), None, stroke.group, stroke.group, stroke.character, shown.character,
+            UNSCORED_CORRECTION_CONFIDENCE, application, True, "mention_shown",
+            trailing=(shown,),
         )
-        return (stroke,) if head is not None else ()
+        self._pending_learning_action = None
+        self._pending_trigger_keycode = stroke.keycode
+
+    def _after_mention_head(self, event: KeyEvent, boundary: KeyEvent | None) -> None:
+        """A key typed after the quote: the member list was not what came next."""
+
+        if self._pending is not None and self._pending.mode == "mention_shown":
+            # Typed before the quote key came up: nothing was rewritten yet.
+            self._log_pending_dropped("typing_continued")
+            self._pending = None
+            return
+        head = self._mention_shown
+        if head is None:
+            return
+        if event.group != head.group:
+            # The user switched the layout after the "@" and typed on: a name
+            # in the other layout after a real "@" is exactly a mention.
+            self._mention_shown = None
+            return
+        self._hide_mention_head(head, boundary, event.keycode)
+
+    def _hide_mention_head(self, head: KeyEvent, boundary: KeyEvent | None, trigger_keycode: int) -> None:
+        if boundary is None and self._pending is not None and self._pending.mode == "mention_hidden":
+            # Already waiting for the first letter to come up; it takes the
+            # letters typed meanwhile along (_maybe_execute_pending).
+            return
+        self._log_pending_dropped("mention_head_written_back")
+        self._pending = self._mention_write_back(
+            head, tuple(self._strokes), (), boundary, self.backend.active_application()
+        )
+        self._pending_learning_action = None
+        self._pending_trigger_keycode = trigger_keycode
+
+    def _mention_write_back(
+        self,
+        head: KeyEvent,
+        strokes: tuple[KeyEvent, ...],
+        trailing: tuple[KeyEvent, ...],
+        boundary: KeyEvent | None,
+        application: str,
+    ) -> CorrectionPlan:
+        """The plan that turns the shown ``@`` back into the quote, keeping what follows it."""
+
+        shown_group = next(group for group in self.models if group != head.group)
+        return CorrectionPlan(
+            (head, *strokes), boundary, shown_group, head.group,
+            self._text_for_group((head,), shown_group) + self._text_for_group(strokes, head.group),
+            self._text_for_group((head, *strokes), head.group),
+            UNSCORED_CORRECTION_CONFIDENCE, application, True, "mention_hidden",
+            trailing=trailing,
+        )
 
     def _prune_stale_presses(self, now: float, *, older_than: float = STALE_PRESS_SECONDS,
                              keep: int | None = None) -> None:
@@ -2423,11 +2593,18 @@ class KeySwitchEngine:
             boundary = None
             application = self.backend.active_application()
             source = "current_word" if not self._symbol_strokes else "symbols_and_word"
+            self._mention_shown = None
             self._early_switch_origin = None
             self._early_switch_at = None
         elif self._symbol_strokes:
             strokes = tuple(self._symbol_strokes)
             source_group = self._symbol_strokes[-1].group
+            if self._mention_shown is not None:
+                # Pause on the "@" shown for a quote asks for the quote back, and
+                # the quote is then kept whatever word follows it.
+                source_group = next(group for group in self.models if group != source_group)
+                self._mention_shown = None
+                self._symbol_strokes = []
             boundary = None
             application = self.backend.active_application()
             source = "symbols"
@@ -2457,7 +2634,7 @@ class KeySwitchEngine:
             target,
             original,
             replacement,
-            MANUAL_CORRECTION_CONFIDENCE,
+            UNSCORED_CORRECTION_CONFIDENCE,
             application,
             False,
             mode,
@@ -2699,7 +2876,7 @@ class KeySwitchEngine:
             origin,
             self._text_for_group(strokes, current_group),
             self._text_for_group(strokes, origin),
-            MANUAL_CORRECTION_CONFIDENCE,
+            UNSCORED_CORRECTION_CONFIDENCE,
             self.backend.active_application(),
             False,
             "early_undo",
@@ -2745,7 +2922,7 @@ class KeySwitchEngine:
             previous.source_group,
             previous.replacement,
             previous.original,
-            MANUAL_CORRECTION_CONFIDENCE,
+            UNSCORED_CORRECTION_CONFIDENCE,
             previous.application,
             False,
             "undo",
@@ -2794,6 +2971,11 @@ class KeySwitchEngine:
                 )
                 return
             plan = refreshed
+        if plan.mode == "mention_hidden" and plan.boundary is None and not plan.trailing:
+            # Letters typed before the first one came up stand after the "@" too.
+            typed = tuple(self._strokes)
+            if len(typed) >= len(plan.strokes) and typed[:len(plan.strokes) - 1] == plan.strokes[1:]:
+                plan = self._mention_write_back(plan.strokes[0], typed, (), None, plan.application)
         self._execute_correction(plan, learning_action)
 
     def _execute_correction(
@@ -2812,6 +2994,7 @@ class KeySwitchEngine:
                 head=(),
             )
             self._symbol_strokes = []
+            self._mention_shown = None
             self._technical_event(
                 "mention_head_applied",
                 mode=plan.mode,
@@ -2926,6 +3109,8 @@ class KeySwitchEngine:
         else:
             self.context_policy.stream.replace_suffix(
                 plan.original, plan.replacement,
+                # The shown "@" is the replacement itself, not a literal after it.
+                "" if plan.mode == "mention_shown" else
                 "".join(stroke.character for stroke in plan.trailing) + (plan.boundary.character if plan.boundary else ""),
             )
         self._technical_event(
@@ -2958,6 +3143,11 @@ class KeySwitchEngine:
             confidence=round(plan.confidence, LOGGED_SCORE_DECIMALS),
             boundary=(None if plan.boundary is None else plan.boundary.key_name),
         )
+        if plan.mode in {"mention_shown", "mention_hidden"}:
+            # Only the head changed; the word being typed goes on as it was.
+            self._mention_shown = self._symbol_strokes[0] if plan.mode == "mention_shown" else None
+            self._update(current_group=plan.target_group, last_error="")
+            return True
         if plan.mode in {"early", "late_stroke"}:
             # The prefix is finished later; only then does it become a
             # correction that can be undone or listed in the history.
@@ -3039,7 +3229,7 @@ class KeySwitchEngine:
                 # prompt records the confirmation; typing on, clicking, changing
                 # focus or letting the prompt time out leaves the rules exactly
                 # as they were, which is what Escape does too.
-                required = int(self.settings.get("detection.learning_confirmations", DEFAULT_LEARNING_CONFIRMATIONS))
+                required = self._learning_confirmations()
                 rule_target, confirmations = self.learning.rule_state(source_group, word)
                 if not (rule_target == target_group and confirmations >= required):
                     learning_prompt = LearningPrompt(
@@ -3268,6 +3458,9 @@ class KeySwitchEngine:
 
     def _clear_word(self, action: str | None = None, *, reason: str = "") -> None:
         self.context_policy.stream.clear()
+        # After a click, a caret move or another window nothing is known to
+        # stand before the next key.
+        self._last_key_character = ""
         self._cancel_context_wait(reason or "word_cleared")
         if self._deferred_action is not None:
             self._complete_deferred_action(False, reason)
@@ -3287,6 +3480,9 @@ class KeySwitchEngine:
         self._early_switch_undone = False
         self._strokes = []
         self._symbol_strokes = []
+        # A shown "@" followed by the arrow keys, a click or Enter was the member
+        # list at work: it stays on screen and is no longer tracked.
+        self._mention_shown = None
         self._source_group = -1
         self._early_switch_origin = None
         self._early_switch_at = None

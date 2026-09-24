@@ -6,16 +6,14 @@ import sqlite3
 import time
 from pathlib import Path
 
-from .config import PRIVATE_DIRECTORY_MODE, PRIVATE_FILE_MODE
+from .constants.files import PRIVATE_DIRECTORY_MODE, PRIVATE_FILE_MODE
+from .constants.limits import MAX_QUEUE_BYTES
+from .constants.timing import DB_CONNECT_TIMEOUT_SECONDS, RETENTION_DAYS, SECONDS_PER_DAY
 
-MAX_QUEUE_BYTES = 128 * 1024 * 1024
 PENDING_KEY = "catalog_pending:"
 HEAD_DIGEST_KEY = "catalog_digest:"
 # Written instead of HEAD_DIGEST_KEY before 0.1.3: the file_id of the pinned catalog.
 LEGACY_HEAD_KEY = "catalog_head:"
-DB_CONNECT_TIMEOUT_SECONDS = 10
-RETENTION_DAYS = 30
-SECONDS_PER_DAY = 86400
 
 
 class QueueFull(RuntimeError):

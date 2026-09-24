@@ -21,18 +21,16 @@ from .context_model import ACTIONS, ContextModel, ContextPrediction
 from .early_switch import PrefixIndex
 from .language_model import LanguageModel
 from .prefix_model import ARTIFACT, PREFIX_FEATURE_VERSION, PrefixInput, PrefixModel, features
-
-CURRENT_PREFIX_FEATURE_VERSION = 2
-# Schema two: characters of the observed prefix, truncated and n-gram orders.
-OBSERVED_PREFIX_MAX_CHARACTERS = 12
-MAX_PREFIX_CHARACTER_NGRAM_ORDER = 4
-PREFIX_CHARACTER_FEATURE_WEIGHT_CAP = 2.0
-# Artifact loading and validation.
-MAX_PREFIX_MODEL_BYTES = 2 * 1024 * 1024
-MIN_PREFIX_CONVERSION_THRESHOLD = 0.985
-MAX_PREFIX_WEIGHTS = 10000
-MAX_PREFIX_FEATURE_NAME_CHARACTERS = 160
-VERSION_HASH_CHARACTERS = 12
+from .constants.file_formats import MAX_PREFIX_MODEL_BYTES, VERSION_HASH_CHARACTERS
+from .constants.models import (
+    CURRENT_PREFIX_FEATURE_VERSION,
+    MAX_PREFIX_CHARACTER_NGRAM_ORDER,
+    MAX_PREFIX_FEATURE_NAME_CHARACTERS,
+    MAX_PREFIX_WEIGHTS,
+    MIN_PREFIX_CONVERSION_THRESHOLD,
+    PREFIX_CHARACTER_FEATURE_WEIGHT_CAP,
+    PREFIX_MAX_CHARACTERS,
+)
 
 
 def features_for_version(item: PrefixInput, indexes: dict[int, PrefixIndex], models: dict[int, LanguageModel],
@@ -49,7 +47,7 @@ def features_for_version(item: PrefixInput, indexes: dict[int, PrefixIndex], mod
         return result
     for side, text, group in (("source", item.original, item.source_group),
                               ("target", item.alternative, 1 - item.source_group)):
-        observed = "^" + unicodedata.normalize("NFC", text[:OBSERVED_PREFIX_MAX_CHARACTERS]).casefold()
+        observed = "^" + unicodedata.normalize("NFC", text[:PREFIX_MAX_CHARACTERS]).casefold()
         for order in range(1, MAX_PREFIX_CHARACTER_NGRAM_ORDER + 1):
             for start in range(len(observed) - order + 1):
                 gram = observed[start:start + order]

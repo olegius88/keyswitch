@@ -21,46 +21,59 @@ from unittest.mock import patch
 from keyswitch import logsetup
 from keyswitch import windows_app as windows_app_module
 from keyswitch import launcher as launcher_module
-from keyswitch.backend import (
+from keyswitch.backend import BackendProbe, FocusInfo, KeyEvent, ScreenAnchor
+from keyswitch.constants.keyboard import (
     ALT_MASK,
     CONTROL_MASK,
-    LAYOUT_SWITCH_POLL_SECONDS,
+    LAYOUT_GROUP_COUNT,
     LOCK_MASK,
     SHIFT_MASK,
     SUPER_MASK,
-    BackendProbe,
-    FocusInfo,
-    KeyEvent,
-    ScreenAnchor,
 )
+from keyswitch.constants.models import PREFIX_MAX_CHARACTERS, PREFIX_MIN_CHARACTERS
+from keyswitch.constants.timing import (
+    LAYOUT_SWITCH_POLL_SECONDS,
+    SMOKE_UI_QUIT_AFTER_MS,
+    UNDO_AVAILABLE_WINDOW_SECONDS,
+)
+from keyswitch.constants.units import SECONDS_PER_HOUR
+from keyswitch.constants.updates import UPDATE_CHECK_INTERVAL_SECONDS
 from keyswitch import config, history
-from keyswitch.config import DEFAULTS
+from keyswitch.constants.settings_defaults import (
+    DEFAULT_EARLY_SWITCH_MIN_LENGTH,
+    DEFAULT_SETTINGS,
+    EARLY_SWITCH_MIN_LENGTH_SETTING_MIN,
+)
+from keyswitch.russian_text import HOURS, SECONDS, quantity
 from keyswitch.engine import _default_backend
 from keyswitch.windows_instance import WindowsSingleInstance
 from keyswitch.windows_backend import (
-    LANG_ENGLISH,
-    LANG_RUSSIAN,
     NativeInput,
     NativeKeyEvent,
-    VK_BACK,
-    VK_CAPITAL,
-    VK_CONTROL,
-    VK_LWIN,
-    VK_MENU,
-    VK_OEM_COMMA,
-    VK_OEM_PERIOD,
-    VK_OEM_7,
-    VK_RETURN,
-    VK_SHIFT,
     WindowsBackend,
     WindowsBackendError,
     key_name,
     primary_language,
     select_layout_pair,
 )
+from keyswitch.constants.windows import (
+    GA_ROOT,
+    LANG_ENGLISH,
+    LANG_RUSSIAN,
+    STARTUP_APPROVAL_ENABLED_BYTES,
+    VK_BACK,
+    VK_CAPITAL,
+    VK_CONTROL,
+    VK_LWIN,
+    VK_MENU,
+    VK_OEM_7,
+    VK_OEM_COMMA,
+    VK_OEM_PERIOD,
+    VK_RETURN,
+    VK_SHIFT,
+)
 from keyswitch.windows_system import (
     AutostartStatus,
-    STARTUP_APPROVAL_ENABLED_BYTES,
     _executable_exists,
     _installed_executable,
     WindowsApplicationCatalog,
@@ -77,41 +90,82 @@ from keyswitch.windows_tray import (
     _native_adapter,
     menu_activation_message,
 )
-from keyswitch.windows_native import CtypesWindowsAPI, GA_ROOT
+from keyswitch.windows_native import CtypesWindowsAPI
 from keyswitch.windows_ui_model import ALL_SETTING_SPECS
+from fixture_values.clock import (
+    LAYOUT_SWITCH_POLL_MONOTONIC_READINGS,
+    SHORT_LISTENER_START_TIMEOUT_SECONDS,
+    WINDOWS_CAPS_LOCK_REPEAT_TIMESTAMP,
+    WINDOWS_FAKE_KEY_TIMESTAMP,
+    WINDOWS_FILTERED_PRESS_TIMESTAMP,
+    WINDOWS_FILTERED_RELEASE_TIMESTAMP,
+    WINDOWS_FILTER_CLEARED_PRESS_TIMESTAMP,
+    WINDOWS_HELD_KEY_PRESS_TIMESTAMP,
+    WINDOWS_HELD_KEY_RELEASE_TIMESTAMP,
+    WINDOWS_INJECTED_KEY_TIMESTAMP,
+    WINDOWS_INJECTED_PRESS_TIMESTAMP,
+    WINDOWS_MODIFIER_RELEASE_TIMESTAMP,
+    WINDOWS_NO_FILTER_PRESS_TIMESTAMP,
+    WINDOWS_NO_LISTENER_RELEASE_TIMESTAMP,
+    WINDOWS_POST_HOLD_PRESS_TIMESTAMP,
+    WINDOWS_UNFILTERED_KEY_PRESS_TIMESTAMP,
+    WINDOWS_UNKNOWN_LAYOUT_PRESS_TIMESTAMP,
+    WINDOWS_UNMATCHED_RELEASE_TIMESTAMP,
+)
+from fixture_values.counts import (
+    EXPECTED_EARLY_SWITCH_MIN_LENGTH_SETTING_MAX,
+    EXPECTED_EARLY_SWITCH_MIN_LENGTH_SETTING_MIN,
+    OVERLONG_PATH_CHARACTERS,
+    WINDOWS_EXPECTED_BACKSPACE_EVENTS,
+    WINDOWS_EXPECTED_DELIVERED_COUNT,
+    WINDOWS_EXPECTED_HELD_COUNT,
+    WINDOWS_EXPECTED_SEND_BATCHES,
+    WINDOWS_SUBTEST_PATH_LABEL_CHARACTERS,
+)
+from fixture_values.keys import (
+    FAKE_FOREGROUND_PROCESS_ID,
+    HELD_KEY_SCAN_CODE,
+    INJECTED_KEY_SCAN_CODE,
+    LATE_KEY_SCAN_CODE,
+    NONEXISTENT_LAYOUT_GROUP,
+    SCAN_CODE_A,
+    SCAN_CODE_ENTER,
+    SCAN_CODE_SEMICOLON,
+    UNSUPPORTED_LAYOUT_GROUP,
+    WINDOWS_FAKE_HWND,
+    WINDOWS_INACTIVE_HWND,
+    WINDOWS_INVALID_SOURCE_GROUP,
+    WINDOWS_OTHER_HWND,
+    WINDOWS_OWN_PROCESS_ID,
+    WINDOWS_ROOT_HWND,
+    WINDOWS_UNNAMED_VIRTUAL_KEY,
+)
+from fixture_values.platform import (
+    ABSTRACT_MENU_CLICK_MESSAGE,
+    ABSTRACT_OTHER_MESSAGE,
+    ABSTRACT_PRIMARY_CLICK_MESSAGE,
+    ENGLISH_HKL,
+    ENGLISH_HKL_WITH_DEVICE_FLAGS,
+    ENGLISH_HKL_WITH_HANDLE,
+    FAKE_DIAGNOSE_EXIT_CODE,
+    FAKE_WINDOWS_UI_EXIT_CODE,
+    GERMAN_HKL,
+    RUSSIAN_HKL,
+    RUSSIAN_HKL_WITH_HANDLE,
+    STARTUP_APPROVAL_DISABLED_BYTE,
+    STARTUP_APPROVAL_PADDING_BYTES,
+)
+from fixture_values.ui import WINDOWS_FAKE_ANCHOR_X, WINDOWS_FAKE_ANCHOR_Y
 
 
-ENGLISH_LAYOUT = 0x00000409
-RUSSIAN_LAYOUT = 0x00000419
-
-# PC/AT Set 1 scan codes the fixtures below inject. The backend never looks
-# their meaning up itself - it only has to keep the same physical key across
-# a press/release pair - but naming them after that key documents intent.
-SCAN_CODE_A = 30
-SCAN_CODE_RETURN = 28
-SCAN_CODE_SEMICOLON = 39
-LATE_KEY_SCAN_CODE = 31  # 'S'; only has to differ from SCAN_CODE_A
-HELD_KEY_SCAN_CODE = 32  # 'D'; the key held back during a correction
-INJECTED_KEY_SCAN_CODE = 45  # 'X'; stands in for the backend's own injection
-
-# A fake HWND and its owning/other process id, reused wherever a test needs
-# some window or process identity and not a particular one.
-FAKE_WINDOW = 300
-OTHER_WINDOW = 301
-FAKE_KEY_TIMESTAMP = 100
-FAKE_ANCHOR = ScreenAnchor(100, 200, FAKE_WINDOW)
-
-# There are only two layout groups (0 and 1); this index is always invalid.
-INVALID_GROUP = 2
+FAKE_ANCHOR = ScreenAnchor(WINDOWS_FAKE_ANCHOR_X, WINDOWS_FAKE_ANCHOR_Y, WINDOWS_FAKE_HWND)
 
 
 class FakeWindowsAPI:
-    OWN_PROCESS_ID = 7777
-    OTHER_PROCESS_ID = 4242
 
     def __init__(self) -> None:
-        self.layout_values: tuple[int, ...] = (ENGLISH_LAYOUT, RUSSIAN_LAYOUT)
-        self.current_layout = ENGLISH_LAYOUT
+        self.layout_values: tuple[int, ...] = (ENGLISH_HKL, RUSSIAN_HKL)
+        self.current_layout = ENGLISH_HKL
         self.application = "Notepad"
         self.caps_lock = False
         self.requests: list[int] = []
@@ -128,9 +182,9 @@ class FakeWindowsAPI:
         self.translation: dict[tuple[int, int], str] = {}
         self.anchor: ScreenAnchor | None = FAKE_ANCHOR
         self.activated_windows: list[int] = []
-        self.foreground = FAKE_WINDOW
-        self.window_owners: dict[int, int] = {FAKE_WINDOW: self.OTHER_PROCESS_ID}
-        self.process_id = self.OWN_PROCESS_ID
+        self.foreground = WINDOWS_FAKE_HWND
+        self.window_owners: dict[int, int] = {WINDOWS_FAKE_HWND: FAKE_FOREGROUND_PROCESS_ID}
+        self.process_id = WINDOWS_OWN_PROCESS_ID
         self.inactive_windows: list[int] = []
 
     def loaded_layouts(self) -> tuple[int, ...]:
@@ -324,17 +378,11 @@ def key_event(
         characters,
         group,
         state,
-        FAKE_KEY_TIMESTAMP,
+        WINDOWS_FAKE_KEY_TIMESTAMP,
     )
 
 
 class WindowsBackendHelperTests(unittest.TestCase):
-    GROUP_COUNT = 2
-    # An HKL with a nonzero device-handle high word but the English low word;
-    # primary_language() must mask that off and still read LANG_ENGLISH.
-    ENGLISH_LAYOUT_WITH_DEVICE_FLAGS = 0xF0010409
-    UNKNOWN_VIRTUAL_KEY = 0xFE  # no KEY_NAMES entry; exercises the VK_xx fallback
-    INVALID_CHARACTER_GROUP = 9  # characters has only two entries, 0 and 1
 
     def test_runtime_platform_helpers_report_the_current_host(self) -> None:
         expected = sys.platform == "win32"
@@ -348,26 +396,26 @@ class WindowsBackendHelperTests(unittest.TestCase):
     def test_engine_default_backend_remains_lazy_and_linux_specific(self) -> None:
         backend = WindowsBackend(FakeWindowsAPI())
         with patch("keyswitch.x11_backend.X11Backend", return_value=backend) as factory:
-            self.assertIs(_default_backend(self.GROUP_COUNT), backend)
-        factory.assert_called_once_with(group_count=self.GROUP_COUNT)
+            self.assertIs(_default_backend(LAYOUT_GROUP_COUNT), backend)
+        factory.assert_called_once_with(group_count=LAYOUT_GROUP_COUNT)
 
     def test_layout_languages_pair_selection_and_key_names(self) -> None:
         self.assertEqual(
-            primary_language(self.ENGLISH_LAYOUT_WITH_DEVICE_FLAGS), LANG_ENGLISH
+            primary_language(ENGLISH_HKL_WITH_DEVICE_FLAGS), LANG_ENGLISH
         )
-        self.assertEqual(primary_language(RUSSIAN_LAYOUT), LANG_RUSSIAN)
+        self.assertEqual(primary_language(RUSSIAN_HKL), LANG_RUSSIAN)
         self.assertEqual(
-            select_layout_pair((RUSSIAN_LAYOUT, ENGLISH_LAYOUT, ENGLISH_LAYOUT)),
-            (ENGLISH_LAYOUT, RUSSIAN_LAYOUT),
+            select_layout_pair((RUSSIAN_HKL, ENGLISH_HKL, ENGLISH_HKL)),
+            (ENGLISH_HKL, RUSSIAN_HKL),
         )
         with self.assertRaisesRegex(WindowsBackendError, "английская и русская"):
-            select_layout_pair((ENGLISH_LAYOUT,))
+            select_layout_pair((ENGLISH_HKL,))
         with self.assertRaisesRegex(WindowsBackendError, "английская и русская"):
-            select_layout_pair((RUSSIAN_LAYOUT,))
+            select_layout_pair((RUSSIAN_HKL,))
         self.assertEqual(key_name(VK_BACK), "BackSpace")
         self.assertEqual(key_name(ord("A")), "a")
         self.assertEqual(key_name(ord("7")), "7")
-        self.assertEqual(key_name(self.UNKNOWN_VIRTUAL_KEY), "VK_FE")
+        self.assertEqual(key_name(WINDOWS_UNNAMED_VIRTUAL_KEY), "VK_FE")
         # Punctuation keys carry the X11 keysym names, so a log line reads
         # "comma", never "VK_BC".
         self.assertEqual(key_name(VK_OEM_COMMA), "comma")
@@ -388,7 +436,7 @@ class WindowsBackendHelperTests(unittest.TestCase):
             patch.dict(sys.modules, {"keyswitch.windows_native": native_module}),
         ):
             backend = WindowsBackend()
-        self.assertEqual(backend.layouts, (ENGLISH_LAYOUT, RUSSIAN_LAYOUT))
+        self.assertEqual(backend.layouts, (ENGLISH_HKL, RUSSIAN_HKL))
 
     def test_modifier_properties_share_one_platform_neutral_contract(self) -> None:
         event = key_event(
@@ -400,11 +448,10 @@ class WindowsBackendHelperTests(unittest.TestCase):
         self.assertTrue(event.alt)
         self.assertTrue(event.super_key)
         self.assertEqual(event.character_for(1), "ф")
-        self.assertEqual(event.character_for(self.INVALID_CHARACTER_GROUP), "")
+        self.assertEqual(event.character_for(NONEXISTENT_LAYOUT_GROUP), "")
 
 
 class WindowsNativeActivationTests(unittest.TestCase):
-    ROOT_WINDOW = 900  # the top-level ancestor GetAncestor(GA_ROOT) hands back
 
     @staticmethod
     def api_with(user32: FakeActivationUser32) -> CtypesWindowsAPI:
@@ -413,49 +460,31 @@ class WindowsNativeActivationTests(unittest.TestCase):
         return api
 
     def test_activate_window_preserves_top_level_show_state(self) -> None:
-        user32 = FakeActivationUser32(root=self.ROOT_WINDOW)
+        user32 = FakeActivationUser32(root=WINDOWS_ROOT_HWND)
         api = self.api_with(user32)
 
-        self.assertTrue(api.activate_window(FAKE_WINDOW))
-        self.assertEqual(user32.ancestor_calls, [(FAKE_WINDOW, GA_ROOT)])
-        self.assertEqual(user32.foreground_calls, [self.ROOT_WINDOW])
+        self.assertTrue(api.activate_window(WINDOWS_FAKE_HWND))
+        self.assertEqual(user32.ancestor_calls, [(WINDOWS_FAKE_HWND, GA_ROOT)])
+        self.assertEqual(user32.foreground_calls, [WINDOWS_ROOT_HWND])
         self.assertEqual(user32.show_calls, [])
 
     def test_activate_window_falls_back_to_child_and_reports_failure(self) -> None:
         user32 = FakeActivationUser32(root=None, activated=False)
         api = self.api_with(user32)
 
-        self.assertFalse(api.activate_window(FAKE_WINDOW))
-        self.assertEqual(user32.ancestor_calls, [(FAKE_WINDOW, GA_ROOT)])
-        self.assertEqual(user32.foreground_calls, [FAKE_WINDOW])
+        self.assertFalse(api.activate_window(WINDOWS_FAKE_HWND))
+        self.assertEqual(user32.ancestor_calls, [(WINDOWS_FAKE_HWND, GA_ROOT)])
+        self.assertEqual(user32.foreground_calls, [WINDOWS_FAKE_HWND])
         self.assertEqual(user32.show_calls, [])
 
 
 class WindowsBackendLifecycleTests(unittest.TestCase):
-    # HKLs with a nonzero device-handle high word, to check that current_group()
-    # keys off the low word (the language id) alone, like primary_language() does.
-    ENGLISH_LAYOUT_WITH_HANDLE = 0x12340409
-    RUSSIAN_LAYOUT_WITH_HANDLE = 0x12340419
-    UNKNOWN_LAYOUT = 0x00000407  # German; matches neither installed layout
-    INACTIVE_TEST_WINDOW = 55
-    SHORT_HOOK_START_TIMEOUT = 0.01  # keeps the timeout test fast
-    CAPS_LOCK_REPEAT_TIMESTAMP = 2
-    MODIFIER_RELEASE_TIMESTAMP = 3
-    UNKNOWN_LAYOUT_PRESS_TIMESTAMP = 4
-    NO_LISTENER_RELEASE_TIMESTAMP = 5
-    INJECTED_PRESS_TIMESTAMP = 123
-    NO_FILTER_PRESS_TIMESTAMP = 124
-    FILTERED_PRESS_TIMESTAMP = 125
-    FILTERED_RELEASE_TIMESTAMP = 126
-    UNMATCHED_RELEASE_TIMESTAMP = 127
-    UNFILTERED_KEY_PRESS_TIMESTAMP = 128
-    FILTER_CLEARED_PRESS_TIMESTAMP = 129
 
     def test_layouts_probe_group_and_application(self) -> None:
         api = FakeWindowsAPI()
         backend = WindowsBackend(api)
-        self.assertEqual(backend.layouts, (ENGLISH_LAYOUT, RUSSIAN_LAYOUT))
-        self.assertEqual(backend.layouts, (ENGLISH_LAYOUT, RUSSIAN_LAYOUT))
+        self.assertEqual(backend.layouts, (ENGLISH_HKL, RUSSIAN_HKL))
+        self.assertEqual(backend.layouts, (ENGLISH_HKL, RUSSIAN_HKL))
         self.assertEqual(api.layout_calls, 1)
         probe = backend.probe()
         self.assertTrue(probe.available)
@@ -465,24 +494,24 @@ class WindowsBackendLifecycleTests(unittest.TestCase):
         self.assertEqual(backend.active_application(), "Notepad")
         self.assertEqual(backend.input_anchor(), FAKE_ANCHOR)
         self.assertFalse(backend.restore_window(None))
-        self.assertTrue(backend.restore_window(FAKE_WINDOW))
-        self.assertEqual(api.activated_windows, [FAKE_WINDOW])
+        self.assertTrue(backend.restore_window(WINDOWS_FAKE_HWND))
+        self.assertEqual(api.activated_windows, [WINDOWS_FAKE_HWND])
 
-        api.current_layout = self.ENGLISH_LAYOUT_WITH_HANDLE
+        api.current_layout = ENGLISH_HKL_WITH_HANDLE
         self.assertEqual(backend.current_group(), 0)
-        api.current_layout = self.RUSSIAN_LAYOUT_WITH_HANDLE
+        api.current_layout = RUSSIAN_HKL_WITH_HANDLE
         self.assertEqual(backend.current_group(), 1)
-        api.current_layout = self.UNKNOWN_LAYOUT
+        api.current_layout = GERMAN_HKL
         self.assertEqual(backend.current_group(), -1)
 
         with self.assertRaisesRegex(WindowsBackendError, "Неизвестная группа"):
-            backend.switch_group(INVALID_GROUP)
+            backend.switch_group(UNSUPPORTED_LAYOUT_GROUP)
         backend.switch_group(1)
-        self.assertEqual(api.requests[-1], RUSSIAN_LAYOUT)
+        self.assertEqual(api.requests[-1], RUSSIAN_HKL)
 
     def test_probe_reports_layout_failure(self) -> None:
         api = FakeWindowsAPI()
-        api.layout_values = (ENGLISH_LAYOUT,)
+        api.layout_values = (ENGLISH_HKL,)
         probe = WindowsBackend(api).probe()
         self.assertFalse(probe.available)
         self.assertEqual(probe.current_group, -1)
@@ -490,8 +519,8 @@ class WindowsBackendLifecycleTests(unittest.TestCase):
 
     def test_start_events_idempotence_stop_and_close(self) -> None:
         api = FakeWindowsAPI()
-        api.translation[(ord("A"), ENGLISH_LAYOUT)] = "a"
-        api.translation[(ord("A"), RUSSIAN_LAYOUT)] = "ф"
+        api.translation[(ord("A"), ENGLISH_HKL)] = "a"
+        api.translation[(ord("A"), RUSSIAN_HKL)] = "ф"
         api.caps_lock = True
         backend = WindowsBackend(api)
         events: list[KeyEvent] = []
@@ -503,7 +532,7 @@ class WindowsBackendLifecycleTests(unittest.TestCase):
         assert listener is not None
         listener(
             NativeKeyEvent(
-                True, ord("A"), SCAN_CODE_A, False, True, self.INJECTED_PRESS_TIMESTAMP
+                True, ord("A"), SCAN_CODE_A, False, True, WINDOWS_INJECTED_PRESS_TIMESTAMP
             )
         )
         self.assertEqual(len(events), 1)
@@ -516,8 +545,8 @@ class WindowsBackendLifecycleTests(unittest.TestCase):
         self.assertFalse(
             listener(
                 NativeKeyEvent(
-                    True, VK_RETURN, SCAN_CODE_RETURN, False, False,
-                    self.NO_FILTER_PRESS_TIMESTAMP,
+                    True, VK_RETURN, SCAN_CODE_ENTER, False, False,
+                    WINDOWS_NO_FILTER_PRESS_TIMESTAMP,
                 )
             )
         )
@@ -534,16 +563,16 @@ class WindowsBackendLifecycleTests(unittest.TestCase):
         self.assertTrue(
             listener(
                 NativeKeyEvent(
-                    True, VK_RETURN, SCAN_CODE_RETURN, False, False,
-                    self.FILTERED_PRESS_TIMESTAMP,
+                    True, VK_RETURN, SCAN_CODE_ENTER, False, False,
+                    WINDOWS_FILTERED_PRESS_TIMESTAMP,
                 )
             )
         )
         self.assertTrue(
             listener(
                 NativeKeyEvent(
-                    False, VK_RETURN, SCAN_CODE_RETURN, False, False,
-                    self.FILTERED_RELEASE_TIMESTAMP,
+                    False, VK_RETURN, SCAN_CODE_ENTER, False, False,
+                    WINDOWS_FILTERED_RELEASE_TIMESTAMP,
                 )
             )
         )
@@ -551,8 +580,8 @@ class WindowsBackendLifecycleTests(unittest.TestCase):
         self.assertFalse(
             listener(
                 NativeKeyEvent(
-                    False, VK_RETURN, SCAN_CODE_RETURN, False, False,
-                    self.UNMATCHED_RELEASE_TIMESTAMP,
+                    False, VK_RETURN, SCAN_CODE_ENTER, False, False,
+                    WINDOWS_UNMATCHED_RELEASE_TIMESTAMP,
                 )
             )
         )
@@ -560,7 +589,7 @@ class WindowsBackendLifecycleTests(unittest.TestCase):
             listener(
                 NativeKeyEvent(
                     True, ord("A"), SCAN_CODE_A, False, False,
-                    self.UNFILTERED_KEY_PRESS_TIMESTAMP,
+                    WINDOWS_UNFILTERED_KEY_PRESS_TIMESTAMP,
                 )
             )
         )
@@ -572,8 +601,8 @@ class WindowsBackendLifecycleTests(unittest.TestCase):
         self.assertFalse(
             listener(
                 NativeKeyEvent(
-                    True, VK_RETURN, SCAN_CODE_RETURN, False, False,
-                    self.FILTER_CLEARED_PRESS_TIMESTAMP,
+                    True, VK_RETURN, SCAN_CODE_ENTER, False, False,
+                    WINDOWS_FILTER_CLEARED_PRESS_TIMESTAMP,
                 )
             )
         )
@@ -597,24 +626,26 @@ class WindowsBackendLifecycleTests(unittest.TestCase):
         api.signal_ready = False
         backend = WindowsBackend(api)
         with patch(
-            "keyswitch.windows_backend.HOOK_START_TIMEOUT", self.SHORT_HOOK_START_TIMEOUT
+            "keyswitch.windows_backend.KEYBOARD_LISTENER_START_TIMEOUT_SECONDS", SHORT_LISTENER_START_TIMEOUT_SECONDS
         ):
-            with self.assertRaisesRegex(WindowsBackendError, "не подтвердил"):
+            with self.assertRaisesRegex(
+                WindowsBackendError, f"не подтвердил запуск за {quantity(SHORT_LISTENER_START_TIMEOUT_SECONDS, SECONDS)}"
+            ):
                 backend.start(lambda _event: None)
         self.assertEqual(api.stop_calls, 1)
 
     def test_focused_window_marks_windows_of_this_process(self) -> None:
         api = FakeWindowsAPI()
         backend = WindowsBackend(api)
-        self.assertEqual(backend.focused_window(), FocusInfo(FAKE_WINDOW, False))
-        api.window_owners[FAKE_WINDOW] = api.process_id
-        self.assertEqual(backend.focused_window(), FocusInfo(FAKE_WINDOW, True, True))
-        api.foreground = OTHER_WINDOW
-        self.assertEqual(backend.focused_window(), FocusInfo(OTHER_WINDOW, False))
+        self.assertEqual(backend.focused_window(), FocusInfo(WINDOWS_FAKE_HWND, False))
+        api.window_owners[WINDOWS_FAKE_HWND] = api.process_id
+        self.assertEqual(backend.focused_window(), FocusInfo(WINDOWS_FAKE_HWND, True, True))
+        api.foreground = WINDOWS_OTHER_HWND
+        self.assertEqual(backend.focused_window(), FocusInfo(WINDOWS_OTHER_HWND, False))
         api.foreground = 0
         self.assertIsNone(backend.focused_window())
-        self.assertTrue(backend.keep_window_inactive(self.INACTIVE_TEST_WINDOW))
-        self.assertEqual(api.inactive_windows, [self.INACTIVE_TEST_WINDOW])
+        self.assertTrue(backend.keep_window_inactive(WINDOWS_INACTIVE_HWND))
+        self.assertEqual(api.inactive_windows, [WINDOWS_INACTIVE_HWND])
 
     def test_stop_does_not_join_current_thread(self) -> None:
         api = FakeWindowsAPI()
@@ -639,7 +670,7 @@ class WindowsBackendLifecycleTests(unittest.TestCase):
         backend._handle_native(
             NativeKeyEvent(
                 True, VK_CAPITAL, VK_CAPITAL, False, False,
-                self.CAPS_LOCK_REPEAT_TIMESTAMP,
+                WINDOWS_CAPS_LOCK_REPEAT_TIMESTAMP,
             )
         )
         self.assertEqual(
@@ -650,16 +681,16 @@ class WindowsBackendLifecycleTests(unittest.TestCase):
             backend._handle_native(
                 NativeKeyEvent(
                     False, virtual_key, virtual_key, False, False,
-                    self.MODIFIER_RELEASE_TIMESTAMP,
+                    WINDOWS_MODIFIER_RELEASE_TIMESTAMP,
                 )
             )
         self.assertEqual(collected[-1].state, LOCK_MASK)
 
-        api.current_layout = self.UNKNOWN_LAYOUT
+        api.current_layout = GERMAN_HKL
         backend._handle_native(
             NativeKeyEvent(
                 True, ord("A"), SCAN_CODE_A, False, False,
-                self.UNKNOWN_LAYOUT_PRESS_TIMESTAMP,
+                WINDOWS_UNKNOWN_LAYOUT_PRESS_TIMESTAMP,
             )
         )
         self.assertEqual(collected[-1].character, "")
@@ -667,24 +698,12 @@ class WindowsBackendLifecycleTests(unittest.TestCase):
         backend._handle_native(
             NativeKeyEvent(
                 False, ord("A"), SCAN_CODE_A, False, False,
-                self.NO_LISTENER_RELEASE_TIMESTAMP,
+                WINDOWS_NO_LISTENER_RELEASE_TIMESTAMP,
             )
         )
 
 
 class WindowsBackendInjectionTests(unittest.TestCase):
-    EXPECTED_SEND_BATCHES = 2  # one SendInput call per distinct layout/boundary leg
-    EXPECTED_HELD_COUNT = 2
-    EXPECTED_BACKSPACE_EVENTS = 4  # two deleted characters, press+release each
-    EXPECTED_DELIVERED_COUNT = 2
-    HELD_KEY_PRESS_TIMESTAMP = 10
-    HELD_KEY_RELEASE_TIMESTAMP = 11
-    INJECTED_KEY_TIMESTAMP = 12
-    POST_HOLD_PRESS_TIMESTAMP = 13
-    INVALID_SOURCE_GROUP = 7  # only groups 0 and 1 exist
-    # time.monotonic() readings that make the poll loop see the deadline pass:
-    # the start, one reading still inside it, one past it.
-    MONOTONIC_TIMEOUT_SEQUENCE = (0.0, 0.1, 0.6)
 
     def test_correction_deletes_switches_replays_shift_and_boundary(self) -> None:
         api = FakeWindowsAPI()
@@ -714,10 +733,10 @@ class WindowsBackendInjectionTests(unittest.TestCase):
         )
         # The boundary keeps its own layout: typed after a switch back.
         self.assertEqual(api.sent[1][0].scan_code, SCAN_CODE_SEMICOLON)
-        self.assertEqual(len(api.sent), self.EXPECTED_SEND_BATCHES)
+        self.assertEqual(len(api.sent), WINDOWS_EXPECTED_SEND_BATCHES)
         self.assertEqual(
             api.requests,
-            [RUSSIAN_LAYOUT, ENGLISH_LAYOUT, RUSSIAN_LAYOUT],
+            [RUSSIAN_HKL, ENGLISH_HKL, RUSSIAN_HKL],
         )
 
     def test_boundary_can_stay_in_target_and_empty_batches_are_skipped(self) -> None:
@@ -727,7 +746,7 @@ class WindowsBackendInjectionTests(unittest.TestCase):
         backend.inject_correction((), 0, None)
         self.assertEqual(api.sent, [])
         backend.inject_correction((key_event(),), 1, boundary)
-        self.assertEqual(api.requests, [RUSSIAN_LAYOUT])
+        self.assertEqual(api.requests, [RUSSIAN_HKL])
         self.assertEqual(len(api.sent), 1)
         self.assertEqual(
             [item.scan_code for item in api.sent[0] if item.scan_code],
@@ -738,10 +757,10 @@ class WindowsBackendInjectionTests(unittest.TestCase):
         api = FakeWindowsAPI()
         backend = WindowsBackend(api)
         with self.assertRaisesRegex(WindowsBackendError, "Неизвестная группа"):
-            backend.inject_correction((), INVALID_GROUP, None)
+            backend.inject_correction((), UNSUPPORTED_LAYOUT_GROUP, None)
         with self.assertRaisesRegex(WindowsBackendError, "исходная группа"):
             backend.inject_correction(
-                (key_event(group=self.INVALID_SOURCE_GROUP),), 1, None
+                (key_event(group=WINDOWS_INVALID_SOURCE_GROUP),), 1, None
             )
 
         api.send_count = 0
@@ -751,7 +770,7 @@ class WindowsBackendInjectionTests(unittest.TestCase):
         api.send_count = None
         # The layout now switches before anything is sent, so the refused
         # switch needs a layout that still has to change.
-        api.current_layout = ENGLISH_LAYOUT
+        api.current_layout = ENGLISH_HKL
         api.accept_switch = False
         with self.assertRaisesRegex(WindowsBackendError, "отклонило"):
             backend.inject_correction((key_event(),), 1, None)
@@ -769,7 +788,7 @@ class WindowsBackendInjectionTests(unittest.TestCase):
             listener(
                 NativeKeyEvent(
                     True, ord("D"), HELD_KEY_SCAN_CODE, False, False,
-                    self.HELD_KEY_PRESS_TIMESTAMP,
+                    WINDOWS_HELD_KEY_PRESS_TIMESTAMP,
                 )
             )
         )
@@ -777,7 +796,7 @@ class WindowsBackendInjectionTests(unittest.TestCase):
             listener(
                 NativeKeyEvent(
                     False, ord("D"), HELD_KEY_SCAN_CODE, False, False,
-                    self.HELD_KEY_RELEASE_TIMESTAMP,
+                    WINDOWS_HELD_KEY_RELEASE_TIMESTAMP,
                 )
             )
         )
@@ -786,7 +805,7 @@ class WindowsBackendInjectionTests(unittest.TestCase):
             listener(
                 NativeKeyEvent(
                     True, ord("X"), INJECTED_KEY_SCAN_CODE, False, True,
-                    self.INJECTED_KEY_TIMESTAMP,
+                    WINDOWS_INJECTED_KEY_TIMESTAMP,
                 )
             )
         )
@@ -794,14 +813,14 @@ class WindowsBackendInjectionTests(unittest.TestCase):
 
         late = key_event(keycode=LATE_KEY_SCAN_CODE)
         held = backend.inject_correction((key_event(),), 1, None, source_group=0, late=(late,))
-        self.assertEqual(held, self.EXPECTED_HELD_COUNT)
-        self.assertEqual(api.requests, [RUSSIAN_LAYOUT])
+        self.assertEqual(held, WINDOWS_EXPECTED_HELD_COUNT)
+        self.assertEqual(api.requests, [RUSSIAN_HKL])
         batch, late_sent, *held_batches = api.sent
         held_sent = tuple(item for batch in held_batches for item in batch)
         # Two characters to delete: the word and the late key after it.
         self.assertEqual(
             sum(1 for item in batch if item.virtual_key == VK_BACK),
-            self.EXPECTED_BACKSPACE_EVENTS,
+            WINDOWS_EXPECTED_BACKSPACE_EVENTS,
         )
         self.assertEqual(
             [item.scan_code for item in batch if item.scan_code],
@@ -833,11 +852,11 @@ class WindowsBackendInjectionTests(unittest.TestCase):
             listener(
                 NativeKeyEvent(
                     True, ord("A"), SCAN_CODE_A, False, False,
-                    self.POST_HOLD_PRESS_TIMESTAMP,
+                    WINDOWS_POST_HOLD_PRESS_TIMESTAMP,
                 )
             )
         )
-        self.assertEqual(len(delivered), self.EXPECTED_DELIVERED_COUNT)
+        self.assertEqual(len(delivered), WINDOWS_EXPECTED_DELIVERED_COUNT)
         backend.stop()
 
     def test_a_failed_injection_still_types_the_held_keys_again(self) -> None:
@@ -855,7 +874,7 @@ class WindowsBackendInjectionTests(unittest.TestCase):
             listener(
                 NativeKeyEvent(
                     True, ord("D"), HELD_KEY_SCAN_CODE, False, False,
-                    self.HELD_KEY_PRESS_TIMESTAMP,
+                    WINDOWS_HELD_KEY_PRESS_TIMESTAMP,
                 )
             )
         )
@@ -884,7 +903,7 @@ class WindowsBackendInjectionTests(unittest.TestCase):
             listener(
                 NativeKeyEvent(
                     False, ord("D"), HELD_KEY_SCAN_CODE, False, False,
-                    self.HELD_KEY_RELEASE_TIMESTAMP,
+                    WINDOWS_HELD_KEY_RELEASE_TIMESTAMP,
                 )
             )
         )
@@ -893,21 +912,21 @@ class WindowsBackendInjectionTests(unittest.TestCase):
             backend.inject_correction(
                 (key_event(),), 1, None, late=(key_event(keycode=LATE_KEY_SCAN_CODE),)
             )
-        self.assertEqual(len(api.sent), self.EXPECTED_SEND_BATCHES)
+        self.assertEqual(len(api.sent), WINDOWS_EXPECTED_SEND_BATCHES)
         self.assertFalse(backend._holding)
 
         # The boundary switch fails after the batch: the late key was deleted,
         # so it is typed again together with the held keys.
         api.send_count = None
         api.sent.clear()
-        api.current_layout = ENGLISH_LAYOUT
+        api.current_layout = ENGLISH_HKL
         boundary = key_event(
             keycode=SCAN_CODE_SEMICOLON, character=";", characters=(";", "ж")
         )
         original_request = api.request_layout
 
         def refuse_second_switch(layout: int) -> bool:
-            if layout == ENGLISH_LAYOUT and len(api.requests) >= 1:
+            if layout == ENGLISH_HKL and len(api.requests) >= 1:
                 api.requests.append(layout)
                 return False
             return original_request(layout)
@@ -938,7 +957,7 @@ class WindowsBackendInjectionTests(unittest.TestCase):
         with (
             patch(
                 "keyswitch.windows_backend.time.monotonic",
-                side_effect=self.MONOTONIC_TIMEOUT_SEQUENCE,
+                side_effect=LAYOUT_SWITCH_POLL_MONOTONIC_READINGS,
             ),
             patch("keyswitch.windows_backend.time.sleep") as sleep,
         ):
@@ -948,12 +967,6 @@ class WindowsBackendInjectionTests(unittest.TestCase):
 
 
 class WindowsSystemTests(unittest.TestCase):
-    OVERLONG_PATH_LENGTH = 5000  # far past any real path limit
-    SUBTEST_LABEL_LENGTH = 12  # how much of the (possibly huge) path to show
-    # The Task Manager Startup-tab "StartupApproved" registry value: a state
-    # byte followed by padding whose length this fixture pins.
-    STARTUP_APPROVAL_PADDING_LENGTH = 11
-    STARTUP_APPROVAL_DISABLED_BYTE = 0x03  # any byte outside the enabled set
 
     def test_profile_paths_use_roaming_and_local_appdata(self) -> None:
         with (
@@ -1002,8 +1015,8 @@ class WindowsSystemTests(unittest.TestCase):
             present.write_bytes(b"binary")
             self.assertTrue(_executable_exists(str(present)))
             self.assertFalse(_executable_exists(str(present / "deeper")))
-            for unusable in ("missing\x00path", "x" * self.OVERLONG_PATH_LENGTH, ""):
-                with self.subTest(path=unusable[: self.SUBTEST_LABEL_LENGTH]):
+            for unusable in ("missing\x00path", "x" * OVERLONG_PATH_CHARACTERS, ""):
+                with self.subTest(path=unusable[: WINDOWS_SUBTEST_PATH_LABEL_CHARACTERS]):
                     self.assertFalse(_executable_exists(unusable))
 
     def test_the_launcher_registers_the_installed_executable_not_the_interpreter(self) -> None:
@@ -1045,8 +1058,8 @@ class WindowsSystemTests(unittest.TestCase):
                          {"command": command, "blocked_by_windows": False, "target_missing": False, "effective": True})
         # Task Manager's Startup tab disables the value; Windows then skips it at every logon.
         registry.startup_approval["KeySwitch"] = bytes(
-            [self.STARTUP_APPROVAL_DISABLED_BYTE]
-        ) + bytes(self.STARTUP_APPROVAL_PADDING_LENGTH)
+            [STARTUP_APPROVAL_DISABLED_BYTE]
+        ) + bytes(STARTUP_APPROVAL_PADDING_BYTES)
         self.assertFalse(manager.enabled())
         self.assertTrue(manager.status().blocked_by_windows)
         # The automatic sync at every launch must not overrule that choice.
@@ -1056,7 +1069,7 @@ class WindowsSystemTests(unittest.TestCase):
         manager.set_enabled(True, override_system_block=True)
         self.assertTrue(manager.enabled())
         self.assertNotIn("KeySwitch", registry.startup_approval)
-        padding = self.STARTUP_APPROVAL_PADDING_LENGTH
+        padding = STARTUP_APPROVAL_PADDING_BYTES
         for approval, expected in (
             (bytes([STARTUP_APPROVAL_ENABLED_BYTES[0]]) + bytes(padding), True),
             (bytes([STARTUP_APPROVAL_ENABLED_BYTES[1]]) + bytes(padding), True),
@@ -1205,25 +1218,19 @@ class WindowsSingleInstanceTests(unittest.TestCase):
 
 
 class WindowsTrayTests(unittest.TestCase):
-    # Abstract message ids for menu_activation_message(); real code passes
-    # pystray's win32.WM_LBUTTONUP/WM_RBUTTONUP, but the mapping logic being
-    # tested here only needs the two configured ids and a third, unrelated one.
-    PRIMARY_CLICK_MESSAGE = 10
-    MENU_CLICK_MESSAGE = 20
-    OTHER_MESSAGE = 30
 
     def test_primary_click_maps_to_the_popup_menu_notification(self) -> None:
         self.assertEqual(
             menu_activation_message(
-                self.PRIMARY_CLICK_MESSAGE, self.PRIMARY_CLICK_MESSAGE, self.MENU_CLICK_MESSAGE
+                ABSTRACT_PRIMARY_CLICK_MESSAGE, ABSTRACT_PRIMARY_CLICK_MESSAGE, ABSTRACT_MENU_CLICK_MESSAGE
             ),
-            self.MENU_CLICK_MESSAGE,
+            ABSTRACT_MENU_CLICK_MESSAGE,
         )
         self.assertEqual(
             menu_activation_message(
-                self.OTHER_MESSAGE, self.PRIMARY_CLICK_MESSAGE, self.MENU_CLICK_MESSAGE
+                ABSTRACT_OTHER_MESSAGE, ABSTRACT_PRIMARY_CLICK_MESSAGE, ABSTRACT_MENU_CLICK_MESSAGE
             ),
-            self.OTHER_MESSAGE,
+            ABSTRACT_OTHER_MESSAGE,
         )
 
     def test_state_updates_notifications_actions_and_idempotent_close(self) -> None:
@@ -1315,11 +1322,6 @@ class WindowsTrayTests(unittest.TestCase):
 
 
 class WindowsUIModelTests(unittest.TestCase):
-    # detection.early_switch_min_length's (minimum, maximum): pinned only inline
-    # in ALL_SETTING_SPECS's SettingSpec(...) call, with no standalone name in
-    # src to import (see the final report for this gap).
-    EARLY_SWITCH_MIN_LENGTH_MINIMUM = 3
-    EARLY_SWITCH_MIN_LENGTH_MAXIMUM = 8
 
     def test_model_settings_distinguish_prefix_support_without_changing_defaults(self) -> None:
         specs = {spec.path: spec for spec in ALL_SETTING_SPECS}
@@ -1331,24 +1333,29 @@ class WindowsUIModelTests(unittest.TestCase):
         self.assertEqual(minimum.title, "Символов до ранней смены")
         self.assertEqual(
             (minimum.minimum, minimum.maximum),
-            (self.EARLY_SWITCH_MIN_LENGTH_MINIMUM, self.EARLY_SWITCH_MIN_LENGTH_MAXIMUM),
+            (EXPECTED_EARLY_SWITCH_MIN_LENGTH_SETTING_MIN, EXPECTED_EARLY_SWITCH_MIN_LENGTH_SETTING_MAX),
         )
-        self.assertIn("4–12", minimum.description)
-        detection = DEFAULTS["detection"]
+        self.assertIn(f"значение {EARLY_SWITCH_MIN_LENGTH_SETTING_MIN} ", minimum.description)
+        self.assertIn(f"{PREFIX_MIN_CHARACTERS}–{PREFIX_MAX_CHARACTERS}", minimum.description)
+        # Each window text names the value the code uses.
+        self.assertIn(f"Доступно {quantity(UNDO_AVAILABLE_WINDOW_SECONDS, SECONDS)} ", specs["hotkeys.undo"].description)
+        self.assertIn(f"раз в {quantity(UPDATE_CHECK_INTERVAL_SECONDS / SECONDS_PER_HOUR, HOURS)}.",
+                      specs["updates.check_automatically"].description)
+        detection = DEFAULT_SETTINGS["detection"]
         assert isinstance(detection, dict)
         # Off by default since 0.23.0: it changed correctly typed words before they ended.
         self.assertFalse(detection["early_switch"])
         self.assertTrue(detection["context_aware"])
         self.assertEqual(detection["context_policy"], "assist")
         self.assertEqual(
-            detection["early_switch_min_length"], config.DEFAULT_EARLY_SWITCH_MIN_LENGTH
+            detection["early_switch_min_length"], DEFAULT_EARLY_SWITCH_MIN_LENGTH
         )
 
     def test_catalogue_is_unique_complete_and_uses_valid_control_metadata(self) -> None:
         paths = [spec.path for spec in ALL_SETTING_SPECS]
         self.assertEqual(len(paths), len(set(paths)))
         for spec in ALL_SETTING_SPECS:
-            value: object = DEFAULTS
+            value: object = DEFAULT_SETTINGS
             for part in spec.path.split("."):
                 self.assertIsInstance(value, dict)
                 assert isinstance(value, dict)
@@ -1365,8 +1372,6 @@ class WindowsUIModelTests(unittest.TestCase):
 
 
 class WindowsApplicationEntrypointTests(unittest.TestCase):
-    FAKE_DIAGNOSE_EXIT_CODE = 7  # arbitrary, only has to round-trip through main()
-    FAKE_UI_EXIT_CODE = 9  # the fake run_windows_application()'s return value
 
     def test_autostart_status_reports_the_state_or_the_reason_it_cannot(self) -> None:
         """Both branches run on either platform: the registry is reachable, or it is not."""
@@ -1401,7 +1406,7 @@ class WindowsApplicationEntrypointTests(unittest.TestCase):
         self.assertEqual(payload["hook"], "WH_KEYBOARD_LL")
 
         failed_api = FakeWindowsAPI()
-        failed_api.layout_values = (ENGLISH_LAYOUT,)
+        failed_api.layout_values = (ENGLISH_HKL,)
         failed = WindowsBackend(failed_api)
         with (
             patch("keyswitch.windows_app.WindowsBackend", return_value=failed),
@@ -1419,11 +1424,11 @@ class WindowsApplicationEntrypointTests(unittest.TestCase):
             patch("keyswitch.windows_app.configure_logging"),
             patch(
                 "keyswitch.windows_app.diagnose",
-                return_value=self.FAKE_DIAGNOSE_EXIT_CODE,
+                return_value=FAKE_DIAGNOSE_EXIT_CODE,
             ) as diagnose,
         ):
             self.assertEqual(
-                windows_app_module.main(["--diagnose"]), self.FAKE_DIAGNOSE_EXIT_CODE
+                windows_app_module.main(["--diagnose"]), FAKE_DIAGNOSE_EXIT_CODE
             )
         diagnose.assert_called_once_with()
 
@@ -1437,7 +1442,7 @@ class WindowsApplicationEntrypointTests(unittest.TestCase):
             quit_after_ms: int | None = None,
         ) -> int:
             calls.append((hidden, no_engine, quit_after_ms))
-            return self.FAKE_UI_EXIT_CODE
+            return FAKE_WINDOWS_UI_EXIT_CODE
 
         setattr(fake_ui, "run_windows_application", run_windows_application)
         guard_apis = (FakeInstanceAPI(), FakeInstanceAPI())
@@ -1452,16 +1457,16 @@ class WindowsApplicationEntrypointTests(unittest.TestCase):
         ):
             self.assertEqual(
                 windows_app_module.main(["--hidden", "--no-engine"]),
-                self.FAKE_UI_EXIT_CODE,
+                FAKE_WINDOWS_UI_EXIT_CODE,
             )
             self.assertEqual(
-                windows_app_module.main(["--smoke-ui"]), self.FAKE_UI_EXIT_CODE
+                windows_app_module.main(["--smoke-ui"]), FAKE_WINDOWS_UI_EXIT_CODE
             )
         self.assertEqual(
             calls,
             [
                 (True, True, None),
-                (False, True, windows_app_module.SMOKE_UI_QUIT_AFTER_MS),
+                (False, True, SMOKE_UI_QUIT_AFTER_MS),
             ],
         )
         self.assertEqual([api.close_calls for api in guard_apis], [1, 1])

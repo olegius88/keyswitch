@@ -3,18 +3,14 @@ import json
 import urllib.error
 
 import pytest
+from fixture_values.clock import TELEGRAM_FAKE_RETRY_AFTER_SECONDS
+from fixture_values.counts import DOWNLOAD_FIXTURE_BYTES, FOUND_REDIRECT_STATUS, SMALL_LIMIT_BYTES
+from fixture_values.keys import TELEGRAM_TEST_CHAT_ID, TELEGRAM_TEST_TOKEN, WRONG_CHAT_ID
 
+from logcourier.constants.telegram import TELEGRAM_RATE_LIMIT_STATUS
+from logcourier.constants.timing import REQUEST_TIMEOUT_SECONDS
 from logcourier.secrets import redact, token_bot_id
-from logcourier.telegram import REQUEST_TIMEOUT_SECONDS, NoRedirect, Telegram, TelegramError
-
-TOKEN = "123456:" + "A" * 30
-CHAT_ID = -100
-WRONG_CHAT_ID = -999
-DOWNLOAD_FIXTURE_BYTES = 3
-SMALL_LIMIT_BYTES = 4
-RETRY_AFTER_SECONDS = 42
-TOO_MANY_REQUESTS_STATUS = 429
-FOUND_REDIRECT_STATUS = 302
+from logcourier.telegram import NoRedirect, Telegram, TelegramError
 
 
 class Opener:
@@ -36,16 +32,20 @@ def ok(result):
 
 
 def test_token_validation_and_redaction():
-    assert token_bot_id(TOKEN) == "123456"
-    assert TOKEN not in redact(f"url/bot{TOKEN}/getMe")
+    assert token_bot_id(TELEGRAM_TEST_TOKEN) == "123456"
+    assert TELEGRAM_TEST_TOKEN not in redact(f"url/bot{TELEGRAM_TEST_TOKEN}/getMe")
     with pytest.raises(ValueError):
         token_bot_id("invalid")
 
 
 def test_send_document_request_and_receipt():
-    message = {"document": {"file_id": "safe_file"}, "message_id": 1, "chat": {"id": CHAT_ID}}
+    message = {
+        "document": {"file_id": "safe_file"},
+        "message_id": 1,
+        "chat": {"id": TELEGRAM_TEST_CHAT_ID},
+    }
     opener = Opener(ok(message))
-    client = Telegram(TOKEN, opener)
+    client = Telegram(TELEGRAM_TEST_TOKEN, opener)
     assert client.send_document("-100", "archive.zip", b"abc") == message
     assert b"abc" in opener.requests[0].data
     with pytest.raises(ValueError):
@@ -55,49 +55,54 @@ def test_send_document_request_and_receipt():
 def test_wrong_chat_receipt_is_not_accepted():
     message = {"document": {"file_id": "safe_file"}, "message_id": 1, "chat": {"id": WRONG_CHAT_ID}}
     with pytest.raises(TelegramError):
-        Telegram(TOKEN, Opener(ok(message))).send_document("-100", "x.zip", b"x")
+        Telegram(TELEGRAM_TEST_TOKEN, Opener(ok(message))).send_document("-100", "x.zip", b"x")
 
 
 @pytest.mark.parametrize(
     "path", ["../secret", "/absolute", "https://attacker.invalid/file", "a/../../b"]
 )
 def test_reject_download_path(path):
-    client = Telegram(TOKEN, Opener(ok({"file_path": path})))
+    client = Telegram(TELEGRAM_TEST_TOKEN, Opener(ok({"file_path": path})))
     with pytest.raises(TelegramError):
         client.download("safe_id")
 
 
 def test_download_and_limit():
     client = Telegram(
-        TOKEN,
+        TELEGRAM_TEST_TOKEN,
         Opener(
             ok({"file_path": "documents/file.zip", "file_size": DOWNLOAD_FIXTURE_BYTES}), b"abc"
         ),
     )
     assert client.download("safe_id") == b"abc"
     with pytest.raises(TelegramError, match="ограничение"):
-        Telegram(TOKEN, Opener(b"12345"))._open(None, SMALL_LIMIT_BYTES)
+        Telegram(TELEGRAM_TEST_TOKEN, Opener(b"12345"))._open(None, SMALL_LIMIT_BYTES)
 
 
 def test_http_retry_and_secret_not_leaked():
     error = urllib.error.HTTPError(
         "secret",
-        TOO_MANY_REQUESTS_STATUS,
+        TELEGRAM_RATE_LIMIT_STATUS,
         "retry",
         {},
         io.BytesIO(
             json.dumps(
-                {"description": TOKEN, "parameters": {"retry_after": RETRY_AFTER_SECONDS}}
+                {
+                    "description": TELEGRAM_TEST_TOKEN,
+                    "parameters": {"retry_after": TELEGRAM_FAKE_RETRY_AFTER_SECONDS},
+                }
             ).encode()
         ),
     )
     with pytest.raises(TelegramError) as caught:
-        Telegram(TOKEN, Opener(error)).call("getMe")
-    assert caught.value.retry_after == RETRY_AFTER_SECONDS
-    assert TOKEN not in str(caught.value)
+        Telegram(TELEGRAM_TEST_TOKEN, Opener(error)).call("getMe")
+    assert caught.value.retry_after == TELEGRAM_FAKE_RETRY_AFTER_SECONDS
+    assert TELEGRAM_TEST_TOKEN not in str(caught.value)
     with pytest.raises(TelegramError) as caught:
-        Telegram(TOKEN, Opener(urllib.error.URLError(TOKEN))).call("getMe")
-    assert TOKEN not in str(caught.value)
+        Telegram(TELEGRAM_TEST_TOKEN, Opener(urllib.error.URLError(TELEGRAM_TEST_TOKEN))).call(
+            "getMe"
+        )
+    assert TELEGRAM_TEST_TOKEN not in str(caught.value)
 
 
 def test_redirect_is_blocked():
@@ -108,11 +113,11 @@ def test_redirect_is_blocked():
 
 
 def test_group_discovery_does_not_acknowledge_updates():
-    chat = {"id": CHAT_ID, "type": "supergroup", "title": "Logs"}
+    chat = {"id": TELEGRAM_TEST_CHAT_ID, "type": "supergroup", "title": "Logs"}
     opener = Opener(ok({"url": ""}), ok([{"message": {"chat": chat}}]))
-    assert Telegram(TOKEN, opener).groups() == [chat]
+    assert Telegram(TELEGRAM_TEST_TOKEN, opener).groups() == [chat]
     assert "offset" not in json.loads(opener.requests[-1].data)
-    client = Telegram(TOKEN, Opener(ok({"url": "https://existing.invalid"})))
+    client = Telegram(TELEGRAM_TEST_TOKEN, Opener(ok({"url": "https://existing.invalid"})))
     with pytest.raises(TelegramError, match="webhook"):
         client.groups()
 

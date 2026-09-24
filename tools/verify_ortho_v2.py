@@ -21,20 +21,20 @@ from typing import cast
 
 import ortho_v2_corpus as corpus
 import ortho_v2_verified as verified
-from model_protocol import SEALED_BEFORE_TEST
+from keyswitch.constants.model_protocol import SEALED_BEFORE_TEST
 from train_ortho_v2 import (
     ARTIFACT, CANDIDATE, CONFIG, REPORT, SEAL, checksum, config, provenance,
 )
-
-MAX_METADATA_BYTES = 4 * 1024 * 1024
-RECALL_ROUNDING_DIGITS = 6
-JSON_INDENT = 2
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from keyswitch.constants.file_formats import ORTHO_METADATA_JSON_LIMIT_BYTES, REPORT_JSON_INDENT
+from keyswitch.constants.training import ORTHO_V2_RECALL_DECIMALS
 
 
 def read_object(path: Path) -> dict[str, object]:
     with path.open("rb") as handle:
-        content = handle.read(MAX_METADATA_BYTES + 1)
-    if len(content) > MAX_METADATA_BYTES:
+        content = handle.read(ORTHO_METADATA_JSON_LIMIT_BYTES + 1)
+    if len(content) > ORTHO_METADATA_JSON_LIMIT_BYTES:
         raise ValueError("oversized orthotactic metadata")
     value: object = json.loads(content)
     if not isinstance(value, dict) or value.get("schema_version") != 1:
@@ -84,7 +84,7 @@ def verify() -> dict[str, object]:
             "negatives": summed(counts, "negative_types"),
             "false_types": summed(counts, "false_types"),
             "recall": round(summed(counts, "recalled_types")
-                            / max(1, summed(counts, "positive_types")), RECALL_ROUNDING_DIGITS),
+                            / max(1, summed(counts, "positive_types")), ORTHO_V2_RECALL_DECIMALS),
         }
     return {
         "schema_version": 1, "model_version": seal["model_version"],
@@ -97,7 +97,7 @@ def verify() -> dict[str, object]:
 
 
 def main() -> int:
-    print(json.dumps(verify(), ensure_ascii=False, indent=JSON_INDENT))
+    print(json.dumps(verify(), ensure_ascii=False, indent=REPORT_JSON_INDENT))
     return 0
 
 

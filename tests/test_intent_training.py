@@ -222,23 +222,360 @@ from train_intent_model import (  # noqa: E402
     veto_metrics,
     wilson_upper_bound,
 )
-
-# A hex sha256 digest is 64 characters; fixtures below spell fake digests as a
-# single repeated character of this length instead of hashing real bytes.
-SHA256_HEX_LENGTH = 64
-DEFAULT_SAMPLES_PER_DIRECTION = 10
-DEFAULT_POSITIVES_PER_DIRECTION = 5
-HARD_NEGATIVE_TRAINING_EXAMPLE_WEIGHT = 3.0
-# The feature-vector dimension every fixture model/config in this module uses.
-TEST_MODEL_DIMENSION = 256
+from fixture_values.clock import INTENT_BARRIER_WAIT_TIMEOUT_SECONDS
+from fixture_values.corpora import (
+    HARD_NEGATIVE_CORPUS_JSON_INDENT,
+    INTENT_DATASET_EXPECTED_HELLO_FREQUENCY,
+    INTENT_DATASET_EXPECTED_KEY_FREQUENCY,
+    INTENT_DATASET_HIGH_FREQUENCY,
+    INTENT_DATASET_LOWER_MID_FREQUENCY,
+    INTENT_DATASET_LOW_FREQUENCY,
+    INTENT_DATASET_MID_FREQUENCY,
+    INTENT_DATASET_UPPER_MID_FREQUENCY,
+    INTENT_EVALUATION_LM_KNOWN_WORD_FREQUENCY,
+    INTENT_LEAKAGE_EXCLUDED_ENTRY_FREQUENCY,
+    INTENT_LEAKAGE_INCLUDED_ENTRY_FREQUENCY,
+    INTENT_LEAKAGE_MUTATED_NON_TRAIN_EN_FREQUENCY,
+    INTENT_LEAKAGE_MUTATED_NON_TRAIN_RU_FREQUENCY,
+    INTENT_LEAKAGE_NON_TRAIN_ENTRY_FREQUENCY,
+    INTENT_LEAKAGE_NON_TRAIN_EN_RECORD_INDEX,
+    INTENT_LEAKAGE_NON_TRAIN_RU_RECORD_INDEX,
+    INTENT_LEAKAGE_POISONED_FREQUENCY,
+    INTENT_LEAKAGE_TRAIN_RECORD_COUNT,
+)
+from fixture_values.counts import (
+    EXPECTED_COMBINED_EXCLUSION_SIGNATURE_COUNT,
+    EXPECTED_HARD_NEGATIVE_PRESEAL_SIGNATURE_COUNT,
+    EXPECTED_INTENT_CONFIG_MINIMUM_WORDS_PER_GROUP,
+    EXPECTED_INTENT_CONFIG_MINIMUM_WORD_LENGTH,
+    EXPECTED_INTENT_PRODUCTION_ROLE_COUNTS,
+    EXPECTED_PRESEAL_EXAMPLES_BY_ROLE,
+    EXPECTED_PRESEAL_ROLE_WORDS_BY_GROUP,
+    EXPECTED_PRESEAL_WORDS_BY_GROUP,
+    EXPECTED_SEALED_EXCLUSION_SIGNATURE_COUNT,
+    FTRL_CACHED_WEIGHTS_EPOCHS,
+    FTRL_KERNEL_COMPARISON_DEV_ROW_COUNT,
+    FTRL_KERNEL_COMPARISON_DEV_SEED,
+    FTRL_KERNEL_COMPARISON_MAX_EPOCHS,
+    FTRL_KERNEL_COMPARISON_ROW_COUNT,
+    FTRL_KERNEL_COMPARISON_SEED,
+    FTRL_KERNEL_DIVERGENCE_TEST_ROW_COUNT,
+    FTRL_KERNEL_DIVERGENCE_TEST_SEED,
+    FTRL_KERNEL_EXPECTED_INDPTR_LENGTH,
+    FTRL_KERNEL_FALLBACK_TEST_DEV_ROW_COUNT,
+    FTRL_KERNEL_FALLBACK_TEST_DEV_SEED,
+    FTRL_KERNEL_FALLBACK_TEST_ROW_COUNT,
+    FTRL_KERNEL_FALLBACK_TEST_SEED,
+    FTRL_KERNEL_MAX_ROW_FEATURE_WIDTH,
+    FTRL_KERNEL_NATIVE_TEST_EPOCH_RANGE_END,
+    FTRL_KERNEL_NATIVE_TEST_ROW_COUNT,
+    FTRL_KERNEL_NATIVE_TEST_SEED,
+    FTRL_KERNEL_PACK_VALIDATION_ROW_COUNT,
+    FTRL_KERNEL_PARTIAL_ORDER_ROW_COUNT,
+    FTRL_KERNEL_PARTIAL_ORDER_SEED,
+    FTRL_KERNEL_PARTIAL_ORDER_SKIP_MODULUS,
+    FTRL_KERNEL_POSITION_PARITY_MODULUS,
+    INTENT_ARTIFACT_EXPECTED_DIAGNOSTIC_COUNT,
+    INTENT_ARTIFACT_FULL_VERIFY_CALL_NUMBER,
+    INTENT_ARTIFACT_PASSED_FULL_VERIFY_CALL_NUMBER,
+    INTENT_ARTIFACT_QUANTIZATION_TEST_METRIC_COUNT,
+    INTENT_ARTIFACT_SEALED_CANDIDATE_POSITIVES_PER_DIRECTION,
+    INTENT_ARTIFACT_SEALED_CANDIDATE_SAMPLES_PER_DIRECTION,
+    INTENT_ARTIFACT_TAMPERED_VETOED_POSITIVE_SAMPLES,
+    INTENT_CONCURRENT_CLAIMANTS,
+    INTENT_DATASET_DIRECTION_PAIR_COUNT,
+    INTENT_DATASET_EXPECTED_CONTEXT_STRESS_PROFILE_COUNT,
+    INTENT_DATASET_EXPECTED_HARD_NEGATIVE_ROLE_SIGNATURES,
+    INTENT_DATASET_EXPECTED_HARD_NEGATIVE_SIGNATURE_COUNT,
+    INTENT_DATASET_EXPECTED_HARD_NEGATIVE_SPLIT_ROWS,
+    INTENT_DATASET_EXPECTED_HARD_NEGATIVE_WORDS_BY_GROUP,
+    INTENT_DATASET_EXPECTED_MERGED_HARD_NEGATIVE_AUDITED_ROWS,
+    INTENT_DATASET_EXPECTED_PREPARED_WORD_COUNT,
+    INTENT_DATASET_EXPECTED_STRESSED_EXAMPLE_COUNT,
+    INTENT_DATASET_FUNCTION_MINIMUM_WORD_LENGTH,
+    INTENT_DATASET_MINIMUM_WORD_LENGTH,
+    INTENT_DEFAULT_POSITIVES_PER_DIRECTION,
+    INTENT_DEFAULT_SAMPLES_PER_DIRECTION,
+    INTENT_EXCESSIVE_REQUESTED_WORKERS,
+    INTENT_EXPECTED_AFFINITY_WORKER_COUNT,
+    INTENT_EXTERNAL_AFFIX_BYTES,
+    INTENT_EXTERNAL_DICTIONARY_BYTES,
+    INTENT_EXTERNAL_EXPECTED_COVERAGE_PER_LABEL_COUNT,
+    INTENT_EXTERNAL_EXPECTED_COVERAGE_SAMPLE_COUNT,
+    INTENT_EXTERNAL_EXPECTED_HARD_GUARD_MODEL_EVALUATED,
+    INTENT_EXTERNAL_EXPECTED_HARD_GUARD_SAMPLES,
+    INTENT_EXTERNAL_EXPECTED_NEGATIVE_ROWS,
+    INTENT_EXTERNAL_EXPECTED_RAW_METRICS_COUNT,
+    INTENT_EXTERNAL_EXPECTED_SAFETY_POLICY_SAMPLES,
+    INTENT_EXTERNAL_EXPECTED_STRICT_SAMPLE_SIZE,
+    INTENT_EXTERNAL_INVALID_AFFIX_BYTES_FLOAT,
+    INTENT_EXTERNAL_MINIMUM_APPLICABLE_DELETION_LENGTH,
+    INTENT_EXTERNAL_MINIMUM_WORDS_PER_GROUP,
+    INTENT_EXTERNAL_SAFETY_TRIGGER_SAMPLE_COUNT,
+    INTENT_EXTERNAL_SOURCE_KNOWN_SAMPLE_COUNT,
+    INTENT_EXTERNAL_THIRD_CANDIDATE_INDEX,
+    INTENT_EXTERNAL_UNDERSIZED_MINIMUM_WORDS_PER_GROUP,
+    INTENT_EXTERNAL_UNKNOWN_TYPO_EXAMPLES_PER_TRIGGER,
+    INTENT_EXTERNAL_UNKNOWN_TYPO_NEGATIVE_EXAMPLES_PER_TRIGGER,
+    INTENT_HARD_NEGATIVE_INPUT_INDEX,
+    INTENT_LABEL_PARITY_MODULUS,
+    INTENT_LEAKAGE_EXCLUDED_WORD_LENGTH,
+    INTENT_LEAKAGE_INCLUDED_WORD_LENGTH,
+    INTENT_LEAKAGE_PARALLEL_FEATURIZATION_EXAMPLE_COUNT,
+    INTENT_LEAKAGE_PARALLEL_FEATURIZATION_WORKER_COUNT,
+    INTENT_LEAKAGE_RUSSIAN_WORD_SIGNATURE_LENGTH,
+    INTENT_LICENSE_INPUT_INDEX,
+    INTENT_MAX_PRESEAL_BYTES,
+    INTENT_MINIMUM_LENGTH_BEFORE_DELETION,
+    INTENT_MINIMUM_SIGNATURE_LENGTH,
+    INTENT_OPTIMIZER_COMPARISONS_PER_TRIGGER,
+    INTENT_OPTIMIZER_CONTEXT_STRESS_SCORE_COUNT_PER_EXAMPLE,
+    INTENT_OPTIMIZER_DELETION_TYPO_STRONG_COUNT,
+    INTENT_OPTIMIZER_DELETION_TYPO_WEAK_COUNT,
+    INTENT_OPTIMIZER_DIRECTIONAL_SAMPLE_DIRECTION_INDEX,
+    INTENT_OPTIMIZER_DIRECTION_GROUP_MODULUS,
+    INTENT_OPTIMIZER_DIRECTION_SWITCH_THRESHOLD,
+    INTENT_OPTIMIZER_EXAMPLES_PER_DIRECTION_DIVISOR,
+    INTENT_OPTIMIZER_EXPECTED_DIRECTIONAL_POSITIVE_COUNT,
+    INTENT_OPTIMIZER_EXPECTED_TRUE_POSITIVE_COUNT,
+    INTENT_OPTIMIZER_FALSE_POSITIVE_BOUND_FALSE_POSITIVES,
+    INTENT_OPTIMIZER_FALSE_POSITIVE_BOUND_TOTAL_NEGATIVES,
+    INTENT_OPTIMIZER_FEATURED_EXAMPLE_COUNT,
+    INTENT_OPTIMIZER_IDENTITY_TYPO_STRONG_COUNT,
+    INTENT_OPTIMIZER_IDENTITY_TYPO_WEAK_COUNT,
+    INTENT_OPTIMIZER_INVALID_SELECTION_BUDGET,
+    INTENT_OPTIMIZER_LABEL_VARIANT_COMBINATION_COUNT,
+    INTENT_OPTIMIZER_MAXIMUM_EPOCHS,
+    INTENT_OPTIMIZER_NEGATIVE_FIXTURE_COUNT,
+    INTENT_OPTIMIZER_NEGATIVE_TAIL_COUNT,
+    INTENT_OPTIMIZER_PARALLEL_WORKER_COUNT,
+    INTENT_OPTIMIZER_PATIENCE,
+    INTENT_OPTIMIZER_POSITIVES_PER_DIRECTION_OVERRIDE,
+    INTENT_OPTIMIZER_SELECTION_FALSE_POSITIVE_BUDGET,
+    INTENT_OPTIMIZER_SINGLE_EXAMPLE_MAX_ITERATIONS,
+    INTENT_OPTIMIZER_TRAINING_ROW_COUNT,
+    INTENT_PATCHED_BYTE_LIMIT,
+    INTENT_PATCHED_MAX_PAYLOAD_BYTES,
+    INTENT_PATCHED_MAX_SUPPORTED_FINGERPRINTS,
+    INTENT_PERFECT_CONFUSION_COUNT,
+    INTENT_PLATT_TEST_MAX_ITERATIONS,
+    INTENT_PRESEALED_VERIFY_CALL_NUMBERS,
+    INTENT_ROW_SCORING_AVAILABLE_ROW_WORKERS_CAP,
+    INTENT_ROW_SCORING_CONTEXT_PROFILE_SAMPLE_COUNT,
+    INTENT_ROW_SCORING_EFFECTIVE_ROW_WORKERS_CAP,
+    INTENT_ROW_SCORING_MISORDERED_CHUNK_COUNT,
+    INTENT_ROW_SCORING_MODERATE_PARALLEL_TEST_WORKERS,
+    INTENT_ROW_SCORING_PARALLEL_TEST_WORKERS,
+    INTENT_ROW_SCORING_REQUESTED_ROW_WORKERS,
+    INTENT_ROW_SCORING_SECONDARY_LABEL_MODULUS,
+    INTENT_ROW_SCORING_WIDE_PARALLEL_TEST_WORKERS,
+    INTENT_RUSSIAN_INPUT_INDEX,
+    INTENT_SAFETY_SAMPLE_MULTIPLIER,
+    INTENT_SIGNATURE_LENGTH_SEARCH_BOUND,
+    INTENT_TAMPERED_TRAINING_SEED,
+    INTENT_TEST_TRAINING_SEED,
+    INTENT_TYPO_AUGMENTATION_FIXTURE_LIMIT,
+    INTENT_UNDERSIZED_CONFIG_MINIMUM_WORDS_PER_GROUP,
+    INTENT_VETO_SELECTION_SAMPLE_COUNT,
+    INTENT_WEAK_SAMPLE_SIZE,
+    WILSON_BOUND_COMPARISON_PLACES,
+    WILSON_BOUND_TEST_FALSE_POSITIVES,
+    WILSON_BOUND_TEST_SAMPLE_SIZE,
+)
+from fixture_values.models import (
+    EXPECTED_INTENT_AGGREGATE_BUDGET_CONFUSION_COUNTS,
+    EXPECTED_INTENT_CONFIG_SCHEMA_VERSION,
+    EXPECTED_INTENT_DIRECTIONAL_BUDGET_CONFUSION_COUNTS,
+    EXPECTED_INTENT_MINIMUM_RUNTIME_TOKEN_LENGTH,
+    EXPECTED_INTENT_PRODUCTION_MODEL_DIMENSION,
+    EXPECTED_INTENT_TYPO_POLICY_CONFUSION_COUNTS,
+    EXPECTED_INTENT_TYPO_POLICY_TYPO_CONFUSION_COUNTS,
+    EXPECTED_INTENT_ZERO_FALSE_POSITIVE_CONFUSION_COUNTS,
+    FTRL_CACHED_WEIGHTS_DIMENSION,
+    FTRL_KERNEL_DIMENSION,
+    FTRL_KERNEL_DUPLICATE_FEATURE_INDEX,
+    FTRL_SMALL_TEST_DIMENSION,
+    INTENT_EXCESSIVE_DIMENSION_EXPONENT,
+    INTENT_EXTERNAL_POLICY_SCHEMA_VERSION,
+    INTENT_HARD_NEGATIVE_CALIBRATION_WORDS_PER_GROUP,
+    INTENT_HARD_NEGATIVE_DEVELOPMENT_WORDS_PER_GROUP,
+    INTENT_HARD_NEGATIVE_POLICY_SCHEMA_VERSION,
+    INTENT_HARD_NEGATIVE_THRESHOLD_WORDS_PER_GROUP,
+    INTENT_HARD_NEGATIVE_TRAIN_WORDS_PER_GROUP,
+    INTENT_HARD_NEGATIVE_UNDERFILLED_TRAIN_WORDS_PER_GROUP,
+    INTENT_INITIAL_SYMMETRIC_CONFUSION_COUNTS,
+    INTENT_INVALID_QUANTIZED_WEIGHT,
+    INTENT_LEAKAGE_ALTERNATE_TEST_DIMENSION,
+    INTENT_LEAKAGE_NON_FINITE_SPARSE_FEATURES,
+    INTENT_LEAKAGE_NORMALIZED_SPARSE_FEATURES,
+    INTENT_LEAKAGE_OUT_OF_RANGE_SPARSE_FEATURES,
+    INTENT_LEAKAGE_SPARSE_FEATURE_TEST_DIMENSION,
+    INTENT_LEAKAGE_UNNORMALIZED_SPARSE_FEATURES,
+    INTENT_MODERATE_SAMPLE_SIZE,
+    INTENT_NONCANONICAL_FEATURE_CASES,
+    INTENT_OPTIMIZER_SECOND_FEATURE_INDEX,
+    INTENT_PASSING_EPOCH_CONFUSION_COUNTS,
+    INTENT_PASSING_EPOCH_POLICY_CHECKS_PASSED,
+    INTENT_PASSING_EPOCH_TYPO_CONFUSION_COUNTS,
+    INTENT_QUANTIZED_FIRST_WEIGHT_INDEX,
+    INTENT_QUANTIZED_SECOND_WEIGHT_INDEX,
+    INTENT_SEALED_CANDIDATE_FINGERPRINTS,
+    INTENT_SEALED_CANDIDATE_QUANTIZE_WEIGHTS,
+    INTENT_STRICT_OVERALL_CONFUSION_COUNTS,
+    INTENT_STRICT_TYPO_CONFUSION_COUNTS,
+    INTENT_STRONG_SAMPLE_SIZE,
+    INTENT_TAIL_DIAGNOSTIC_OVERALL_CONFUSION_COUNTS,
+    INTENT_TAMPERED_FINGERPRINTS,
+    INTENT_TEST_DIMENSION,
+    INTENT_TEST_TRAINING_CONFIG_FIELDS,
+    INTENT_TRAIN_ONLY_SCORER_ALGORITHM_VERSION,
+    INTENT_TRAIN_ONLY_SCORER_NGRAM_ORDERS,
+    INTENT_UNCERTIFIED_EPOCH_CONFUSION_COUNTS,
+    INTENT_UNCERTIFIED_EPOCH_POLICY_CHECKS_PASSED,
+    INTENT_UNCERTIFIED_EPOCH_TYPO_CONFUSION_COUNTS,
+    INTENT_UNSUPPORTED_CONFIG_SCHEMA_VERSION,
+    INTENT_UNSUPPORTED_MANIFEST_SCHEMA_VERSION,
+    INTENT_WILSON_BOUND_CONFUSION_COUNTS,
+    UINT64_BIT_WIDTH,
+)
+from fixture_values.hashes import (
+    INTENT_HASH_SEED_XOR_PERTURBATION,
+    INTENT_MEMBERSHIP_SEED_XOR_PERTURBATION,
+)
+from fixture_values.keys import INTENT_LEAKAGE_ARBITRARY_CONTEXT_GROUP, UNSUPPORTED_LAYOUT_GROUP
+from fixture_values.platform import FAKE_AFFINITY_CORE_IDS, FAKE_CPU_COUNT
+from fixture_values.scores import (
+    EXPECTED_INTENT_CONTEXT_DELTA_MULTIPLIER,
+    EXPECTED_INTENT_CONTEXT_SOURCE_GROUP_PENALTY,
+    EXPECTED_INTENT_CONTEXT_TARGET_GROUP_BONUS,
+    EXPECTED_INTENT_PRODUCTION_LOGIT_MARGIN_CAP,
+    EXPECTED_INTENT_PRODUCTION_SELECTION_RECALLS,
+    EXPECTED_INTENT_PRODUCTION_TRAINING_EXAMPLE_WEIGHT,
+    EXPECTED_WILSON_BOUND_AT_ZERO_FALSE_POSITIVES,
+    FTRL_CACHED_WEIGHTS_ALPHA,
+    FTRL_CACHED_WEIGHTS_CANONICAL_UPDATES,
+    FTRL_CACHED_WEIGHTS_FIRST_RAW_FEATURES,
+    FTRL_CACHED_WEIGHTS_FIRST_SAMPLE_WEIGHT,
+    FTRL_CACHED_WEIGHTS_L1,
+    FTRL_CACHED_WEIGHTS_L2,
+    FTRL_KERNEL_FEATURE_VALUE_LARGE,
+    FTRL_KERNEL_FEATURE_VALUE_NEGATIVE_SMALL,
+    FTRL_KERNEL_FEATURE_VALUE_SMALL,
+    FTRL_KERNEL_LABEL_PROBABILITY_THRESHOLD,
+    FTRL_KERNEL_NATIVE_TEST_ALPHA,
+    FTRL_KERNEL_NATIVE_TEST_L1,
+    FTRL_KERNEL_NATIVE_TEST_L2,
+    FTRL_KERNEL_PARTIAL_ORDER_ALPHA,
+    FTRL_KERNEL_RANDOM_FEATURE_MAGNITUDE,
+    FTRL_KERNEL_WEIGHT_UNIFORM_LOWER_BOUND,
+    FTRL_KERNEL_WEIGHT_VALUE_LARGE,
+    FTRL_SPARSE_TEST_L1,
+    FTRL_TEST_ALPHA,
+    FTRL_TEST_L2,
+    INTENT_ARTIFACT_FIXTURE_VETO_THRESHOLD,
+    INTENT_ARTIFACT_NEGATIVE_MODEL_LOGIT,
+    INTENT_ARTIFACT_PRECISE_TAMPERED_LOGIT,
+    INTENT_ARTIFACT_QUANTIZATION_PLATT_BIAS_MAGNITUDE,
+    INTENT_ARTIFACT_QUANTIZATION_PLATT_SCALE,
+    INTENT_ARTIFACT_QUANTIZATION_TEST_THRESHOLD_LOGIT,
+    INTENT_ARTIFACT_QUANTIZATION_VETO_THRESHOLD,
+    INTENT_ARTIFACT_QUANTIZED_SCORER_BIAS,
+    INTENT_ARTIFACT_SCALE_HALVING_DIVISOR,
+    INTENT_ARTIFACT_SEALED_CANDIDATE_BIAS,
+    INTENT_ARTIFACT_SEALED_CANDIDATE_CALIBRATION_BIAS_MAGNITUDE,
+    INTENT_ARTIFACT_SEALED_CANDIDATE_CALIBRATION_SCALE,
+    INTENT_ARTIFACT_SEALED_CANDIDATE_THRESHOLD_LOGIT,
+    INTENT_ARTIFACT_TAMPERED_BIAS_HEX_VALUE,
+    INTENT_ARTIFACT_TAMPERED_VETO_FALSE_NEGATIVE_RATE,
+    INTENT_ARTIFACT_UNBOUNDED_LOGIT,
+    INTENT_BACKOFF_CONFIG_OVERRIDES,
+    INTENT_DATASET_EXPECTED_CONTEXT_STRESS_DELTAS,
+    INTENT_DATASET_INVALID_TRAINING_EXAMPLE_WEIGHT,
+    INTENT_DETERMINISTIC_LOGIT_OFFSET,
+    INTENT_DETERMINISTIC_PREDICTION_COVERAGE,
+    INTENT_DETERMINISTIC_VETO_THRESHOLD,
+    INTENT_DIRECTIONAL_BUDGET_ROWS,
+    INTENT_EPOCH_FALSE_POSITIVE_RATE_UPPER_BOUND,
+    INTENT_EVALUATION_LM_IMPLAUSIBLE_GRAM_RATIO,
+    INTENT_EVALUATION_LM_IMPLAUSIBLE_INVALID_RATIO,
+    INTENT_EVALUATION_LM_IMPLAUSIBLE_NGRAM_SCORE,
+    INTENT_EVALUATION_LM_IMPLAUSIBLE_WORD_SCORE,
+    INTENT_EVALUATION_LM_KNOWN_WORD_SCORE,
+    INTENT_EVALUATION_LM_PLAUSIBLE_GRAM_RATIO,
+    INTENT_EXTERNAL_COVERAGE_CONFIDENT_LOGIT,
+    INTENT_EXTERNAL_COVERAGE_HIGH_PARTIAL,
+    INTENT_EXTERNAL_COVERAGE_LOW_PARTIAL,
+    INTENT_EXTERNAL_EXPECTED_COVERAGE_MEDIAN,
+    INTENT_EXTERNAL_EXPECTED_COVERAGE_P25,
+    INTENT_EXTERNAL_EXPECTED_COVERAGE_P75,
+    INTENT_EXTERNAL_FIXTURE_THRESHOLD_LOGIT,
+    INTENT_EXTERNAL_NEUTRAL_PREDICTION_LOGIT,
+    INTENT_EXTERNAL_THRESHOLD_TAMPER_DELTA,
+    INTENT_EXTERNAL_VETO_TAMPER_DELTA,
+    INTENT_FULL_TYPO_POLICY_KWARGS,
+    INTENT_HARD_NEGATIVE_TRAINING_EXAMPLE_WEIGHT,
+    INTENT_LEAKAGE_FRACTIONAL_CONTEXT_DELTA,
+    INTENT_LEAKAGE_LARGE_CONTEXT_DELTA_MAGNITUDE,
+    INTENT_LEAKAGE_POISONED_WEIGHT,
+    INTENT_OPTIMIZER_AGGREGATE_NEGATIVE_SCORES,
+    INTENT_OPTIMIZER_AGGREGATE_POSITIVE_SCORES,
+    INTENT_OPTIMIZER_BACKOFF_EXPECTED_MARGIN,
+    INTENT_OPTIMIZER_BACKOFF_NON_PAUSE_SCORE,
+    INTENT_OPTIMIZER_CALIBRATION_BIAS_MAGNITUDE,
+    INTENT_OPTIMIZER_CALIBRATION_SCALE,
+    INTENT_OPTIMIZER_DIRECTIONAL_PLATT_SAMPLES,
+    INTENT_OPTIMIZER_EXPECTED_DIRECTIONAL_RUNTIME_LOGIT,
+    INTENT_OPTIMIZER_EXPECTED_MARGIN_BASE_LOGIT,
+    INTENT_OPTIMIZER_EXPECTED_ORDINARY_TAIL_LOGIT,
+    INTENT_OPTIMIZER_EXPECTED_TYPO_TAIL_LOGIT,
+    INTENT_OPTIMIZER_EXTREME_SAMPLE_LOGIT,
+    INTENT_OPTIMIZER_HIGH_SCORE,
+    INTENT_OPTIMIZER_INVALID_FALSE_POSITIVE_RATE,
+    INTENT_OPTIMIZER_LOGIT_MARGIN_CAP,
+    INTENT_OPTIMIZER_NEGATIVE_LOGIT_STEP_DIVISOR,
+    INTENT_OPTIMIZER_NEGATIVE_TAIL_BASE,
+    INTENT_OPTIMIZER_NON_PAUSE_POSITIVE_SCORES,
+    INTENT_OPTIMIZER_PAUSE_LOGIT_LOWER_BOUND,
+    INTENT_OPTIMIZER_PAUSE_LOGIT_MARGIN_PROBE,
+    INTENT_OPTIMIZER_PAUSE_POSITIVE_SCORES,
+    INTENT_OPTIMIZER_PLATT_THRESHOLD_SAMPLES,
+    INTENT_OPTIMIZER_POSITIVE_ROW_SCORE,
+    INTENT_OPTIMIZER_PROBE_LOGIT,
+    INTENT_OPTIMIZER_RECALL_UNDER_SEALED_MARGIN,
+    INTENT_OPTIMIZER_SEALED_VALUE_BY_FIELD,
+    INTENT_OPTIMIZER_SECOND_FEATURE_VALUE,
+    INTENT_OPTIMIZER_SIGMOID_EDGE_LOGITS,
+    INTENT_OPTIMIZER_STANDARD_TEST_PRECISION_FLOOR,
+    INTENT_OPTIMIZER_STRICT_PRECISION_FLOOR,
+    INTENT_OPTIMIZER_STRICT_TYPO_PRECISION_FLOOR,
+    INTENT_OPTIMIZER_TAIL_DIAGNOSTIC_LOGIT,
+    INTENT_OPTIMIZER_VETO_MARGIN_PROBE,
+    INTENT_PASSING_EPOCH_LOG_LOSS,
+    INTENT_PAUSE_MARGIN_CONFIG_OVERRIDES,
+    INTENT_PLATT_TEST_L2,
+    INTENT_SPY_LOGIT,
+    INTENT_SPY_PROBABILITY,
+    INTENT_SPY_THRESHOLD,
+    INTENT_SPY_VETO_THRESHOLD,
+    INTENT_STRICTER_TYPO_CONFIG_OVERRIDES,
+    INTENT_STRICT_FALSE_POSITIVE_RATE,
+    INTENT_TAIL_DIAGNOSTIC_TEMPLATES,
+    INTENT_TAMPERED_METADATA_VALUE,
+    INTENT_UNCERTIFIED_EPOCH_LOG_LOSS,
+    INTENT_UNCERTIFIED_EPOCH_THRESHOLD_LOGIT,
+    INTENT_WEAK_TRAINING_CONFIG_OVERRIDES,
+    INTENT_WEAK_TYPO_POLICY_KWARGS,
+    INTENT_WILSON_BOUND_GATE_KWARGS,
+)
+from keyswitch.constants.file_formats import SHA256_HEX_CHARACTERS, VERSION_HASH_CHARACTERS
 
 
 def directional_calibration(
     scale: float = 1.0,
     bias: float = 0.0,
     *,
-    samples_per_direction: int = DEFAULT_SAMPLES_PER_DIRECTION,
-    positives_per_direction: int = DEFAULT_POSITIVES_PER_DIRECTION,
+    samples_per_direction: int = INTENT_DEFAULT_SAMPLES_PER_DIRECTION,
+    positives_per_direction: int = INTENT_DEFAULT_POSITIVES_PER_DIRECTION,
 ) -> DirectionalPlattCalibration:
     return DirectionalPlattCalibration(
         PlattCalibration(
@@ -308,9 +645,9 @@ EXPECTED_PRESEALED_PROVENANCE_CHECK_NAMES: frozenset[str] = frozenset(
 # copies it and layers **changes on top so each test can override just the
 # fields it cares about.
 DEFAULT_TRAINING_CONFIG_VALUES: dict[str, object] = {
-    "schema_version": 13,
-    "seed": 17,
-    "dimension": TEST_MODEL_DIMENSION,
+    "schema_version": EXPECTED_INTENT_CONFIG_SCHEMA_VERSION,
+    "seed": INTENT_TEST_TRAINING_SEED,
+    "dimension": INTENT_TEST_DIMENSION,
     "feature_hash_seed": DEFAULT_FNV_SEED,
     "membership_hash_seed": DEFAULT_MEMBERSHIP_FNV_SEED,
     "sources": TrainingSources(
@@ -319,94 +656,62 @@ DEFAULT_TRAINING_CONFIG_VALUES: dict[str, object] = {
         license_declaration="GPL-3+",
         license_evidence=FrozenSourceFile(
             "model/intent_v1/sources/COPYRIGHT.onboard-data",
-            "0" * SHA256_HEX_LENGTH,
+            "0" * SHA256_HEX_CHARACTERS,
             1,
         ),
         english=FrozenLanguageSource(
             "model/intent_v1/sources/en_US.lm",
-            "1" * SHA256_HEX_LENGTH,
+            "1" * SHA256_HEX_CHARACTERS,
             1,
             0,
         ),
         russian=FrozenLanguageSource(
             "model/intent_v1/sources/ru_RU.lm",
-            "2" * SHA256_HEX_LENGTH,
+            "2" * SHA256_HEX_CHARACTERS,
             1,
             1,
         ),
     ),
     "external_evaluation": FrozenExternalEvaluationPolicy(
-        schema_version=2,
-        minimum_words_per_group=5_000,
+        schema_version=INTENT_EXTERNAL_POLICY_SCHEMA_VERSION,
+        minimum_words_per_group=INTENT_EXTERNAL_MINIMUM_WORDS_PER_GROUP,
         trigger_expansion=TRIGGERS,
         english=FrozenExternalLocalePolicy(
-            dictionary_sha256="3" * SHA256_HEX_LENGTH,
+            dictionary_sha256="3" * SHA256_HEX_CHARACTERS,
             dictionary_bytes=1,
-            affix_sha256="4" * SHA256_HEX_LENGTH,
+            affix_sha256="4" * SHA256_HEX_CHARACTERS,
             affix_bytes=1,
         ),
         russian=FrozenExternalLocalePolicy(
-            dictionary_sha256="5" * SHA256_HEX_LENGTH,
+            dictionary_sha256="5" * SHA256_HEX_CHARACTERS,
             dictionary_bytes=1,
-            affix_sha256="6" * SHA256_HEX_LENGTH,
+            affix_sha256="6" * SHA256_HEX_CHARACTERS,
             affix_bytes=1,
         ),
-        lexical_disjoint_corpus_sha256="7" * SHA256_HEX_LENGTH,
-        unknown_typo_development_corpus_sha256="8" * SHA256_HEX_LENGTH,
-        unknown_typo_holdout_corpus_sha256="9" * SHA256_HEX_LENGTH,
+        lexical_disjoint_corpus_sha256="7" * SHA256_HEX_CHARACTERS,
+        unknown_typo_development_corpus_sha256="8" * SHA256_HEX_CHARACTERS,
+        unknown_typo_holdout_corpus_sha256="9" * SHA256_HEX_CHARACTERS,
     ),
     "hard_negative_development": HardNegativeDevelopmentPolicy(
-        schema_version=2,
+        schema_version=INTENT_HARD_NEGATIVE_POLICY_SCHEMA_VERSION,
         source=FrozenSourceFile(
             HARD_NEGATIVE_SOURCE_RELATIVE_PATH,
-            "a" * SHA256_HEX_LENGTH,
+            "a" * SHA256_HEX_CHARACTERS,
             1,
         ),
         role_namespace=HARD_NEGATIVE_ROLE_NAMESPACE,
-        train_words_per_group=3_500,
-        development_words_per_group=500,
-        calibration_words_per_group=500,
-        threshold_words_per_group=500,
-        training_example_weight=HARD_NEGATIVE_TRAINING_EXAMPLE_WEIGHT,
+        train_words_per_group=INTENT_HARD_NEGATIVE_TRAIN_WORDS_PER_GROUP,
+        development_words_per_group=INTENT_HARD_NEGATIVE_DEVELOPMENT_WORDS_PER_GROUP,
+        calibration_words_per_group=INTENT_HARD_NEGATIVE_CALIBRATION_WORDS_PER_GROUP,
+        threshold_words_per_group=INTENT_HARD_NEGATIVE_THRESHOLD_WORDS_PER_GROUP,
+        training_example_weight=INTENT_HARD_NEGATIVE_TRAINING_EXAMPLE_WEIGHT,
     ),
     "sealed_evaluation": SealedEvaluationPolicy(
         schema_version=1,
         split_namespace=SPLIT_NAMESPACE,
         registry_path="model/intent_v1/seal-registry-v23.json",
     ),
-    "minimum_word_length": 3,
-    "maximum_word_length": 18,
-    "maximum_words_per_language": 0,
-    "typo_augmentations": 2,
-    "maximum_epochs": 8,
-    "minimum_epochs": 2,
-    "patience": 2,
-    "ftrl_alpha": 0.2,
-    "ftrl_beta": 1.0,
-    "ftrl_l1": 0.0,
-    "ftrl_l2": 0.01,
-    "calibration_l2": 0.01,
-    "calibration_max_iterations": 80,
-    "threshold_precision_floor": 1.0,
-    "threshold_max_false_positive_rate": 0.0,
-    "pause_threshold_max_false_positive_rate": 0.0,
-    "selection_maximum_false_positives_per_trigger": 0,
-    "threshold_logit_margin_cap": 0.0,
-    "pause_logit_margin": 0.5,
-    "veto_positive_quantile": 0.001,
-    "veto_logit_margin": 0.25,
-    "veto_max_false_negative_rate": 0.01,
-    "selection_minimum_recall": 0.81,
-    "selection_minimum_pause_recall": 0.71,
-    "selection_minimum_typo_recall": 0.71,
-    "selection_minimum_pause_typo_recall": 0.61,
-    "test_minimum_precision": 0.9,
-    "test_minimum_recall": 0.8,
-    "test_minimum_pause_recall": 0.7,
-    "test_minimum_typo_recall": 0.7,
-    "test_minimum_pause_typo_recall": 0.6,
-    "test_minimum_specificity": 0.9,
-    "safety_maximum_guard_failures": 0,
+    **INTENT_TEST_TRAINING_CONFIG_FIELDS,
 }
 
 
@@ -414,14 +719,6 @@ def config(**changes: object) -> TrainingConfig:
     values: dict[str, object] = dict(DEFAULT_TRAINING_CONFIG_VALUES)
     values.update(changes)
     return TrainingConfig(**values)  # type: ignore[arg-type]
-
-
-# Shared by the fixture-search helpers below, which brute-force short
-# alphabetic strings until they land in a wanted split/collision.
-MINIMUM_SIGNATURE_LENGTH = 3
-SIGNATURE_LENGTH_SEARCH_BOUND = 9  # exclusive: try lengths MINIMUM_SIGNATURE_LENGTH..8
-MINIMUM_LENGTH_BEFORE_DELETION = 4  # one more, so a deletion still leaves >= MINIMUM_SIGNATURE_LENGTH
-TYPO_AUGMENTATION_FIXTURE_LIMIT = 3
 
 
 def empty_hard_negative_corpus() -> HardNegativeDevelopmentCorpus:
@@ -434,25 +731,25 @@ def empty_hard_negative_corpus() -> HardNegativeDevelopmentCorpus:
     }
     return HardNegativeDevelopmentCorpus(
         by_split=rows,
-        source_sha256="a" * SHA256_HEX_LENGTH,
+        source_sha256="a" * SHA256_HEX_CHARACTERS,
         source_bytes=1,
-        expanded_corpus_sha256="8" * SHA256_HEX_LENGTH,
-        physical_signatures_sha256="b" * SHA256_HEX_LENGTH,
+        expanded_corpus_sha256="8" * SHA256_HEX_CHARACTERS,
+        physical_signatures_sha256="b" * SHA256_HEX_CHARACTERS,
         signature_count=0,
         words_by_group={0: 0, 1: 0},
         role_words_by_group=role_counts,
-        training_example_weight=HARD_NEGATIVE_TRAINING_EXAMPLE_WEIGHT,
+        training_example_weight=INTENT_HARD_NEGATIVE_TRAINING_EXAMPLE_WEIGHT,
     )
 
 
 def alphabetic_signature_for_split(
     split: SplitName,
     *,
-    minimum_length: int = MINIMUM_SIGNATURE_LENGTH,
+    minimum_length: int = INTENT_MINIMUM_SIGNATURE_LENGTH,
 ) -> str:
     """Find a deterministic keyboard-safe fixture for the active namespace."""
 
-    for length in range(max(MINIMUM_SIGNATURE_LENGTH, minimum_length), SIGNATURE_LENGTH_SEARCH_BOUND):
+    for length in range(max(INTENT_MINIMUM_SIGNATURE_LENGTH, minimum_length), INTENT_SIGNATURE_LENGTH_SEARCH_BOUND):
         for characters in product("abcde", repeat=length):
             signature = "".join(characters)
             if stable_split(signature) == split:
@@ -463,13 +760,13 @@ def alphabetic_signature_for_split(
 def cross_split_deletion_fixture() -> tuple[str, str]:
     """Find an identity/deletion collision across active pre-sealed splits."""
 
-    for length in range(MINIMUM_LENGTH_BEFORE_DELETION, SIGNATURE_LENGTH_SEARCH_BOUND):
+    for length in range(INTENT_MINIMUM_LENGTH_BEFORE_DELETION, INTENT_SIGNATURE_LENGTH_SEARCH_BOUND):
         for characters in product("abcde", repeat=length):
             base = "".join(characters)
             base_split = stable_split(base)
             if base_split not in PRESEALED_SPLITS:
                 continue
-            for variant in typo_variants(base, TYPO_AUGMENTATION_FIXTURE_LIMIT):
+            for variant in typo_variants(base, INTENT_TYPO_AUGMENTATION_FIXTURE_LIMIT):
                 collision = variant.physical_signature
                 collision_split = stable_split(collision)
                 if (
@@ -484,16 +781,16 @@ def cross_split_deletion_fixture() -> tuple[str, str]:
 def sealed_to_candidate_variant_fixture() -> tuple[str, SplitName, str, str]:
     """Find a sealed identity whose typo collides with a candidate identity."""
 
-    for length in range(MINIMUM_SIGNATURE_LENGTH, SIGNATURE_LENGTH_SEARCH_BOUND):
+    for length in range(INTENT_MINIMUM_SIGNATURE_LENGTH, INTENT_SIGNATURE_LENGTH_SEARCH_BOUND):
         for characters in product("abcde", repeat=length):
             sealed = "".join(characters)
             if stable_split(sealed) != "test":
                 continue
-            for variant in typo_variants(sealed, TYPO_AUGMENTATION_FIXTURE_LIMIT):
+            for variant in typo_variants(sealed, INTENT_TYPO_AUGMENTATION_FIXTURE_LIMIT):
                 candidate = variant.physical_signature
                 candidate_split = stable_split(candidate)
                 if (
-                    len(candidate) >= MINIMUM_SIGNATURE_LENGTH
+                    len(candidate) >= INTENT_MINIMUM_SIGNATURE_LENGTH
                     and candidate_split in PRESEALED_SPLITS
                     and candidate != sealed
                 ):
@@ -504,15 +801,15 @@ def sealed_to_candidate_variant_fixture() -> tuple[str, SplitName, str, str]:
 def same_split_variant_collision_fixture() -> tuple[str, str, str, SplitName]:
     """Find a typo and identity collision owned by different languages."""
 
-    for length in range(MINIMUM_SIGNATURE_LENGTH, SIGNATURE_LENGTH_SEARCH_BOUND):
+    for length in range(INTENT_MINIMUM_SIGNATURE_LENGTH, INTENT_SIGNATURE_LENGTH_SEARCH_BOUND):
         for characters in product("abcde", repeat=length):
             base = "".join(characters)
             split = stable_split(base)
-            for variant in typo_variants(base, TYPO_AUGMENTATION_FIXTURE_LIMIT):
+            for variant in typo_variants(base, INTENT_TYPO_AUGMENTATION_FIXTURE_LIMIT):
                 identity = variant.physical_signature
                 if (
                     identity != base
-                    and len(identity) >= MINIMUM_SIGNATURE_LENGTH
+                    and len(identity) >= INTENT_MINIMUM_SIGNATURE_LENGTH
                     and stable_split(identity) == split
                 ):
                     return base, identity, variant.kind, split
@@ -526,17 +823,17 @@ def manifest_schema_fixture() -> dict[str, object]:
         "schema_version": 1,
         "model_id": "keyswitch-layout-intent-v1",
         "calibration_scope": "lexical-synthetic-not-real-world-probability",
-        "config_sha256": "0" * SHA256_HEX_LENGTH,
+        "config_sha256": "0" * SHA256_HEX_CHARACTERS,
         "toolchain": {},
-        "dataset_sha256": "1" * SHA256_HEX_LENGTH,
+        "dataset_sha256": "1" * SHA256_HEX_CHARACTERS,
         "split_namespace": SPLIT_NAMESPACE,
         "sealed_evaluation": {},
         "source_package": {},
         "sources": [],
         "counts": {},
-        "variant_quarantine_sha256": "2" * SHA256_HEX_LENGTH,
-        "sealed_variant_quarantine_sha256": "3" * SHA256_HEX_LENGTH,
-        "sealed_test_exclusion_signatures_sha256": "4" * SHA256_HEX_LENGTH,
+        "variant_quarantine_sha256": "2" * SHA256_HEX_CHARACTERS,
+        "sealed_variant_quarantine_sha256": "3" * SHA256_HEX_CHARACTERS,
+        "sealed_test_exclusion_signatures_sha256": "4" * SHA256_HEX_CHARACTERS,
         "training_language_scorer": {},
         "gate_policy": {},
         "training": {},
@@ -549,10 +846,10 @@ def manifest_schema_fixture() -> dict[str, object]:
         "sealed_test_typos": {},
         "sealed_test_context_stress": {},
         "safety": {},
-        "build_provenance_sha256": "5" * SHA256_HEX_LENGTH,
+        "build_provenance_sha256": "5" * SHA256_HEX_CHARACTERS,
         "quality_gate_breakdown": {},
         "quality_gates_passed": True,
-        "artifact_sha256": "6" * SHA256_HEX_LENGTH,
+        "artifact_sha256": "6" * SHA256_HEX_CHARACTERS,
         "artifact_model_version": "intent-v1-test",
     }
 
@@ -607,13 +904,6 @@ def release_dataset(
 class EvaluationLanguageModel:
     """Tiny real-policy scorer used to prove model reachability in tests."""
 
-    KNOWN_WORD_SCORE = 6.0
-    IMPLAUSIBLE_WORD_SCORE = -4.0
-    KNOWN_WORD_FREQUENCY = 100
-    PLAUSIBLE_GRAM_RATIO = 0.9
-    IMPLAUSIBLE_GRAM_RATIO = 0.05
-    IMPLAUSIBLE_NGRAM_SCORE = -3.0
-    IMPLAUSIBLE_INVALID_RATIO = 0.9
 
     def __init__(self, locale: str, known_words: set[str]) -> None:
         self.locale = locale
@@ -633,15 +923,15 @@ class EvaluationLanguageModel:
                 for character in word
             )
         return WordScore(
-            value=self.KNOWN_WORD_SCORE if known else (0.0 if plausible else self.IMPLAUSIBLE_WORD_SCORE),
+            value=INTENT_EVALUATION_LM_KNOWN_WORD_SCORE if known else (0.0 if plausible else INTENT_EVALUATION_LM_IMPLAUSIBLE_WORD_SCORE),
             known=known,
-            frequency=self.KNOWN_WORD_FREQUENCY if known else 0,
-            gram_ratio=self.PLAUSIBLE_GRAM_RATIO if plausible else self.IMPLAUSIBLE_GRAM_RATIO,
+            frequency=INTENT_EVALUATION_LM_KNOWN_WORD_FREQUENCY if known else 0,
+            gram_ratio=INTENT_EVALUATION_LM_PLAUSIBLE_GRAM_RATIO if plausible else INTENT_EVALUATION_LM_IMPLAUSIBLE_GRAM_RATIO,
             exact=known,
             spell_known=known,
-            ngram_score=0.0 if plausible else self.IMPLAUSIBLE_NGRAM_SCORE,
-            invalid_ratio=0.0 if plausible else self.IMPLAUSIBLE_INVALID_RATIO,
-            raw_ngram_score=0.0 if plausible else self.IMPLAUSIBLE_NGRAM_SCORE,
+            ngram_score=0.0 if plausible else INTENT_EVALUATION_LM_IMPLAUSIBLE_NGRAM_SCORE,
+            invalid_ratio=0.0 if plausible else INTENT_EVALUATION_LM_IMPLAUSIBLE_INVALID_RATIO,
+            raw_ngram_score=0.0 if plausible else INTENT_EVALUATION_LM_IMPLAUSIBLE_NGRAM_SCORE,
         )
 
     def context_score(self, previous: str, word: str) -> float:
@@ -649,12 +939,12 @@ class EvaluationLanguageModel:
 
     def best_single_deletion(self, word: str) -> WordScore:
         return WordScore(
-            self.IMPLAUSIBLE_WORD_SCORE,
+            INTENT_EVALUATION_LM_IMPLAUSIBLE_WORD_SCORE,
             False,
             0,
             0.0,
-            ngram_score=self.IMPLAUSIBLE_NGRAM_SCORE,
-            raw_ngram_score=self.IMPLAUSIBLE_NGRAM_SCORE,
+            ngram_score=INTENT_EVALUATION_LM_IMPLAUSIBLE_NGRAM_SCORE,
+            raw_ngram_score=INTENT_EVALUATION_LM_IMPLAUSIBLE_NGRAM_SCORE,
         )
 
 
@@ -666,13 +956,9 @@ def test_word_scorers() -> dict[int, WordScorer]:
 
 
 class SpyIntentModel:
-    SPY_VETO_THRESHOLD = -999.0
-    SPY_LOGIT = 10.0
-    SPY_PROBABILITY = 0.99999
-    SPY_THRESHOLD = 0.9
 
-    veto_threshold = SPY_VETO_THRESHOLD
-    dimension = TEST_MODEL_DIMENSION
+    veto_threshold = INTENT_SPY_VETO_THRESHOLD
+    dimension = INTENT_TEST_DIMENSION
     fnv_seed = DEFAULT_FNV_SEED
     membership_seed = DEFAULT_MEMBERSHIP_FNV_SEED
 
@@ -682,48 +968,11 @@ class SpyIntentModel:
     def predict(self, item: IntentModelInput) -> LinearPrediction:
         self.inputs.append(item)
         return LinearPrediction(
-            self.SPY_LOGIT, self.SPY_PROBABILITY, self.SPY_THRESHOLD, 1.0, True, "spy"
+            INTENT_SPY_LOGIT, INTENT_SPY_PROBABILITY, INTENT_SPY_THRESHOLD, 1.0, True, "spy"
         )
 
 
 class DatasetConstructionTests(unittest.TestCase):
-    MINIMUM_LENGTH_TEST_OVERRIDE = 5
-    FUNCTION_MINIMUM_WORD_LENGTH_OVERRIDE = 3
-    HIGH_FREQUENCY = 100
-    UPPER_MID_FREQUENCY = 90
-    MID_FREQUENCY = 80
-    LOWER_MID_FREQUENCY = 70
-    LOW_FREQUENCY = 10
-    # How many rows a single identity collision contributes: one per layout
-    # direction, times one per trigger where a trigger multiplier applies.
-    DIRECTION_PAIR_COUNT = 2
-    EXPECTED_PREPARED_WORD_COUNT = 2
-    EXPECTED_STRESSED_EXAMPLE_COUNT = 2
-    TAMPERED_JSON_INDENT = 2
-    EXPECTED_CONTEXT_STRESS_PROFILE_COUNT = 18
-    EXPECTED_CONTEXT_STRESS_DELTAS = {-6.0, -1.25, -0.75, -0.125, 0.0, 0.125, 0.75, 1.25, 6.0}
-    EXPECTED_HELLO_FREQUENCY = 15
-    EXPECTED_KEY_FREQUENCY = 7
-    EXPECTED_HARD_NEGATIVE_SPLIT_ROW_COUNTS = {
-        "train": 84_000,
-        "development": 12_000,
-        "calibration": 12_000,
-        "threshold": 12_000,
-        "test": 0,
-    }
-    EXPECTED_HARD_NEGATIVE_SIGNATURE_COUNT = 10_000
-    EXPECTED_HARD_NEGATIVE_WORDS_BY_GROUP = {0: 5_000, 1: 5_000}
-    EXPECTED_HARD_NEGATIVE_ROLE_SIGNATURE_COUNTS = {
-        "train": 7_000,
-        "development": 1_000,
-        "calibration": 1_000,
-        "threshold": 1_000,
-        "test": 0,
-    }
-    EXPECTED_MERGED_HARD_NEGATIVE_AUDITED_ROWS = 120_000
-    UNDERFILLED_TRAIN_WORDS_PER_GROUP = 3_499
-    INVALID_TRAINING_EXAMPLE_WEIGHT = 8.1
-    HARD_NEGATIVE_EXPECTED_WORDS_PER_GROUP = 5_000
 
     def test_generated_variants_respect_configured_minimum_length(self) -> None:
         signature = "short"
@@ -733,15 +982,15 @@ class DatasetConstructionTests(unittest.TestCase):
                 LexiconWord(
                     signature,
                     0,
-                    self.HIGH_FREQUENCY,
+                    INTENT_DATASET_HIGH_FREQUENCY,
                     signature,
                     split,
                 ),
             )
         )
         training_config = config(
-            minimum_word_length=self.MINIMUM_LENGTH_TEST_OVERRIDE,
-            typo_augmentations=TYPO_AUGMENTATION_FIXTURE_LIMIT,
+            minimum_word_length=INTENT_DATASET_MINIMUM_WORD_LENGTH,
+            typo_augmentations=INTENT_TYPO_AUGMENTATION_FIXTURE_LIMIT,
         )
 
         quarantine = build_variant_quarantine(
@@ -774,7 +1023,7 @@ class DatasetConstructionTests(unittest.TestCase):
         self.assertTrue(
             all(
                 len(physical_signature(item.original, item.source_group))
-                >= self.MINIMUM_LENGTH_TEST_OVERRIDE
+                >= INTENT_DATASET_MINIMUM_WORD_LENGTH
                 for item in lexical_rows
             )
         )
@@ -789,24 +1038,24 @@ class DatasetConstructionTests(unittest.TestCase):
             (candidate_signature, variant_kind),
             tuple(
                 (item.physical_signature, item.kind)
-                for item in typo_variants(sealed_signature, TYPO_AUGMENTATION_FIXTURE_LIMIT)
+                for item in typo_variants(sealed_signature, INTENT_TYPO_AUGMENTATION_FIXTURE_LIMIT)
             ),
         )
         train_word = LexiconWord(
             candidate_signature,
             0,
-            self.HIGH_FREQUENCY,
+            INTENT_DATASET_HIGH_FREQUENCY,
             candidate_signature,
             candidate_split,
         )
         test_word = LexiconWord(
             sealed_signature,
             0,
-            self.UPPER_MID_FREQUENCY,
+            INTENT_DATASET_UPPER_MID_FREQUENCY,
             sealed_signature,
             "test",
         )
-        training_config = config(typo_augmentations=TYPO_AUGMENTATION_FIXTURE_LIMIT)
+        training_config = config(typo_augmentations=INTENT_TYPO_AUGMENTATION_FIXTURE_LIMIT)
         baseline_prepared = prepare_lexicon((train_word,))
         changed_prepared = prepare_lexicon((train_word, test_word))
         baseline = build_dataset(
@@ -830,9 +1079,9 @@ class DatasetConstructionTests(unittest.TestCase):
                 for item in changed.by_split[candidate_split]
             ),
             (
-                self.DIRECTION_PAIR_COUNT
+                INTENT_DATASET_DIRECTION_PAIR_COUNT
                 if candidate_split in ("train", "development")
-                else self.DIRECTION_PAIR_COUNT * len(TRIGGERS)
+                else INTENT_DATASET_DIRECTION_PAIR_COUNT * len(TRIGGERS)
             ),
         )
 
@@ -1002,20 +1251,20 @@ class DatasetConstructionTests(unittest.TestCase):
         pair = LayoutPair()
         russian_collision = pair.translate("test", "us", "ru")
         words = (
-            LexiconWord("test", 0, self.HIGH_FREQUENCY, "test", stable_split("test")),
-            LexiconWord("test", 0, self.LOW_FREQUENCY, "test", stable_split("test")),
+            LexiconWord("test", 0, INTENT_DATASET_HIGH_FREQUENCY, "test", stable_split("test")),
+            LexiconWord("test", 0, INTENT_DATASET_LOW_FREQUENCY, "test", stable_split("test")),
             LexiconWord(
                 russian_collision,
                 1,
-                self.MID_FREQUENCY,
+                INTENT_DATASET_MID_FREQUENCY,
                 physical_signature(russian_collision, 1),
                 stable_split("test"),
             ),
-            LexiconWord("hello", 0, self.UPPER_MID_FREQUENCY, "hello", stable_split("hello")),
+            LexiconWord("hello", 0, INTENT_DATASET_UPPER_MID_FREQUENCY, "hello", stable_split("hello")),
             LexiconWord(
                 "привет",
                 1,
-                self.LOWER_MID_FREQUENCY,
+                INTENT_DATASET_LOWER_MID_FREQUENCY,
                 physical_signature("привет", 1),
                 stable_split(physical_signature("привет", 1)),
             ),
@@ -1025,7 +1274,7 @@ class DatasetConstructionTests(unittest.TestCase):
         self.assertEqual(prepared.collisions[0].physical_signature, "test")
         self.assertEqual(
             sum(len(items) for items in prepared.words_by_split.values()),
-            self.EXPECTED_PREPARED_WORD_COUNT,
+            INTENT_DATASET_EXPECTED_PREPARED_WORD_COUNT,
         )
         dataset = release_dataset(prepared, config())
         assert_no_split_leakage(dataset)
@@ -1054,14 +1303,14 @@ class DatasetConstructionTests(unittest.TestCase):
             LexiconWord(
                 collision_signature,
                 0,
-                self.HIGH_FREQUENCY,
+                INTENT_DATASET_HIGH_FREQUENCY,
                 collision_signature,
                 stable_split(collision_signature),
             ),
             LexiconWord(
                 pair.translate(collision_signature, "us", "ru"),
                 1,
-                self.UPPER_MID_FREQUENCY,
+                INTENT_DATASET_UPPER_MID_FREQUENCY,
                 collision_signature,
                 stable_split(collision_signature),
             ),
@@ -1073,12 +1322,12 @@ class DatasetConstructionTests(unittest.TestCase):
                 LexiconWord(
                     long_signature,
                     0,
-                    self.MID_FREQUENCY,
+                    INTENT_DATASET_MID_FREQUENCY,
                     long_signature,
                     stable_split(long_signature),
                 ),
             ),
-            minimum_training_signature_length=self.MINIMUM_LENGTH_TEST_OVERRIDE,
+            minimum_training_signature_length=INTENT_DATASET_MINIMUM_WORD_LENGTH,
         )
 
         self.assertEqual(
@@ -1095,14 +1344,14 @@ class DatasetConstructionTests(unittest.TestCase):
         )
         dataset = release_dataset(
             prepared,
-            config(minimum_word_length=self.MINIMUM_LENGTH_TEST_OVERRIDE),
+            config(minimum_word_length=INTENT_DATASET_MINIMUM_WORD_LENGTH),
         )
         matching = tuple(
             item
             for item in dataset.safety
             if item.base_signature == collision_signature
         )
-        self.assertEqual(len(matching), self.DIRECTION_PAIR_COUNT * len(TRIGGERS))
+        self.assertEqual(len(matching), INTENT_DATASET_DIRECTION_PAIR_COUNT * len(TRIGGERS))
         audit = audit_guarded_safety_corpus(dataset.safety)
         self.assertGreater(audit.lexical_collision_samples, 0)
         self.assertEqual(audit.lexical_collision_triggers, TRIGGERS)
@@ -1113,11 +1362,11 @@ class DatasetConstructionTests(unittest.TestCase):
         collision_split = stable_split(collision)
         self.assertNotEqual(base_split, collision_split)
         words = (
-            LexiconWord(base, 0, self.HIGH_FREQUENCY, base, base_split),
-            LexiconWord(collision, 0, self.UPPER_MID_FREQUENCY, collision, collision_split),
+            LexiconWord(base, 0, INTENT_DATASET_HIGH_FREQUENCY, base, base_split),
+            LexiconWord(collision, 0, INTENT_DATASET_UPPER_MID_FREQUENCY, collision, collision_split),
         )
         prepared = prepare_lexicon(words)
-        training_config = config(typo_augmentations=TYPO_AUGMENTATION_FIXTURE_LIMIT)
+        training_config = config(typo_augmentations=INTENT_TYPO_AUGMENTATION_FIXTURE_LIMIT)
         quarantine = build_variant_quarantine(
             prepared,
             training_config,
@@ -1214,11 +1463,11 @@ class DatasetConstructionTests(unittest.TestCase):
         self.assertEqual(stable_split(identity), split)
         prepared = prepare_lexicon(
             (
-                LexiconWord(base, 0, self.HIGH_FREQUENCY, base, split),
-                LexiconWord(russian_word, 1, self.UPPER_MID_FREQUENCY, identity, split),
+                LexiconWord(base, 0, INTENT_DATASET_HIGH_FREQUENCY, base, split),
+                LexiconWord(russian_word, 1, INTENT_DATASET_UPPER_MID_FREQUENCY, identity, split),
             )
         )
-        training_config = config(typo_augmentations=TYPO_AUGMENTATION_FIXTURE_LIMIT)
+        training_config = config(typo_augmentations=INTENT_TYPO_AUGMENTATION_FIXTURE_LIMIT)
         dataset = release_dataset(prepared, training_config)
         matching = tuple(
             item
@@ -1297,21 +1546,21 @@ class DatasetConstructionTests(unittest.TestCase):
                 LexiconWord(
                     base_signature,
                     0,
-                    self.HIGH_FREQUENCY,
+                    INTENT_DATASET_HIGH_FREQUENCY,
                     base_signature,
                     stable_split(base_signature),
                 ),
                 LexiconWord(
                     collision_signature,
                     0,
-                    self.UPPER_MID_FREQUENCY,
+                    INTENT_DATASET_UPPER_MID_FREQUENCY,
                     collision_signature,
                     stable_split(collision_signature),
                 ),
                 LexiconWord(
                     russian_collision,
                     1,
-                    self.MID_FREQUENCY,
+                    INTENT_DATASET_MID_FREQUENCY,
                     collision_signature,
                     stable_split(collision_signature),
                 ),
@@ -1322,7 +1571,7 @@ class DatasetConstructionTests(unittest.TestCase):
             {collision_signature},
         )
         dataset = release_dataset(
-            prepared, config(typo_augmentations=TYPO_AUGMENTATION_FIXTURE_LIMIT)
+            prepared, config(typo_augmentations=INTENT_TYPO_AUGMENTATION_FIXTURE_LIMIT)
         )
         quarantined = tuple(
             item
@@ -1386,11 +1635,11 @@ class DatasetConstructionTests(unittest.TestCase):
         self.assertNotEqual(lexical_split, hard_negative_split)
         prepared = prepare_lexicon(
             (
-                LexiconWord(signature, 0, self.HIGH_FREQUENCY, signature, lexical_split),
+                LexiconWord(signature, 0, INTENT_DATASET_HIGH_FREQUENCY, signature, lexical_split),
             )
         )
         dataset = release_dataset(
-            prepared, config(typo_augmentations=TYPO_AUGMENTATION_FIXTURE_LIMIT)
+            prepared, config(typo_augmentations=INTENT_TYPO_AUGMENTATION_FIXTURE_LIMIT)
         )
         matching = tuple(
             item
@@ -1419,20 +1668,20 @@ class DatasetConstructionTests(unittest.TestCase):
         assert_no_split_leakage(dataset)
 
     def test_augmentation_and_trigger_are_stable(self) -> None:
-        variants = typo_variants("keyboard", TYPO_AUGMENTATION_FIXTURE_LIMIT)
-        self.assertEqual(variants, typo_variants("keyboard", TYPO_AUGMENTATION_FIXTURE_LIMIT))
+        variants = typo_variants("keyboard", INTENT_TYPO_AUGMENTATION_FIXTURE_LIMIT)
+        self.assertEqual(variants, typo_variants("keyboard", INTENT_TYPO_AUGMENTATION_FIXTURE_LIMIT))
         self.assertEqual(
             {item.kind for item in variants},
             {"identity", "deletion", "duplication", "transposition"},
         )
-        self.assertEqual(len(typo_variants("ab", TYPO_AUGMENTATION_FIXTURE_LIMIT)), 1)
+        self.assertEqual(len(typo_variants("ab", INTENT_TYPO_AUGMENTATION_FIXTURE_LIMIT)), 1)
         self.assertIn(deterministic_training_trigger("keyboard"), TRIGGERS)
 
     def test_context_stress_profiles_are_fixed_nonempty_and_label_independent(
         self,
     ) -> None:
-        self.assertEqual(len(CONTEXT_STRESS_PROFILES), self.EXPECTED_CONTEXT_STRESS_PROFILE_COUNT)
-        expected_deltas = self.EXPECTED_CONTEXT_STRESS_DELTAS
+        self.assertEqual(len(CONTEXT_STRESS_PROFILES), INTENT_DATASET_EXPECTED_CONTEXT_STRESS_PROFILE_COUNT)
+        expected_deltas = INTENT_DATASET_EXPECTED_CONTEXT_STRESS_DELTAS
         self.assertEqual(
             {
                 profile.delta
@@ -1459,7 +1708,7 @@ class DatasetConstructionTests(unittest.TestCase):
             stressed = context_stress_examples(
                 (positive, negative), profile
             )
-            self.assertEqual(len(stressed), self.EXPECTED_STRESSED_EXAMPLE_COUNT)
+            self.assertEqual(len(stressed), INTENT_DATASET_EXPECTED_STRESSED_EXAMPLE_COUNT)
             self.assertEqual(stressed[0].context_delta, profile.delta)
             self.assertNotEqual(stressed[0].context_group, None)
             self.assertEqual(
@@ -1485,7 +1734,7 @@ class DatasetConstructionTests(unittest.TestCase):
                     LexiconWord(
                         signature,
                         0,
-                        self.HIGH_FREQUENCY,
+                        INTENT_DATASET_HIGH_FREQUENCY,
                         signature,
                         split,
                     ),
@@ -1520,22 +1769,22 @@ class DatasetConstructionTests(unittest.TestCase):
                 path,
                 "en_US",
                 0,
-                config(minimum_word_length=self.MINIMUM_LENGTH_TEST_OVERRIDE),
+                config(minimum_word_length=INTENT_DATASET_MINIMUM_WORD_LENGTH),
             )
             self.assertEqual(
                 [(word.word, word.frequency) for word in words],
-                [("hello", self.EXPECTED_HELLO_FREQUENCY)],
+                [("hello", INTENT_DATASET_EXPECTED_HELLO_FREQUENCY)],
             )
             expanded, _ = load_onboard_unigrams(
                 path,
                 "en_US",
                 0,
-                config(minimum_word_length=self.MINIMUM_LENGTH_TEST_OVERRIDE),
-                minimum_word_length=self.FUNCTION_MINIMUM_WORD_LENGTH_OVERRIDE,
+                config(minimum_word_length=INTENT_DATASET_MINIMUM_WORD_LENGTH),
+                minimum_word_length=INTENT_DATASET_FUNCTION_MINIMUM_WORD_LENGTH,
             )
             self.assertEqual(
                 [(word.word, word.frequency) for word in expanded],
-                [("hello", self.EXPECTED_HELLO_FREQUENCY), ("key", self.EXPECTED_KEY_FREQUENCY)],
+                [("hello", INTENT_DATASET_EXPECTED_HELLO_FREQUENCY), ("key", INTENT_DATASET_EXPECTED_KEY_FREQUENCY)],
             )
             with self.assertRaisesRegex(ValueError, "between two"):
                 load_onboard_unigrams(
@@ -1562,7 +1811,7 @@ class DatasetConstructionTests(unittest.TestCase):
         corpus = load_hard_negative_development_corpus(
             source, training_config
         )
-        expected_rows = self.EXPECTED_HARD_NEGATIVE_SPLIT_ROW_COUNTS
+        expected_rows = INTENT_DATASET_EXPECTED_HARD_NEGATIVE_SPLIT_ROWS
         self.assertEqual(
             {
                 split: len(rows)
@@ -1570,8 +1819,8 @@ class DatasetConstructionTests(unittest.TestCase):
             },
             expected_rows,
         )
-        self.assertEqual(corpus.signature_count, self.EXPECTED_HARD_NEGATIVE_SIGNATURE_COUNT)
-        self.assertEqual(corpus.words_by_group, self.EXPECTED_HARD_NEGATIVE_WORDS_BY_GROUP)
+        self.assertEqual(corpus.signature_count, INTENT_DATASET_EXPECTED_HARD_NEGATIVE_SIGNATURE_COUNT)
+        self.assertEqual(corpus.words_by_group, INTENT_DATASET_EXPECTED_HARD_NEGATIVE_WORDS_BY_GROUP)
         self.assertEqual(
             corpus.expanded_corpus_sha256,
             training_config.external_evaluation
@@ -1586,13 +1835,13 @@ class DatasetConstructionTests(unittest.TestCase):
         }
         self.assertEqual(
             {split: len(values) for split, values in role_signatures.items()},
-            self.EXPECTED_HARD_NEGATIVE_ROLE_SIGNATURE_COUNTS,
+            INTENT_DATASET_EXPECTED_HARD_NEGATIVE_ROLE_SIGNATURES,
         )
         observed: set[str] = set()
         for split in PRESEALED_SPLITS:
             self.assertTrue(observed.isdisjoint(role_signatures[split]))
             observed.update(role_signatures[split])
-        self.assertEqual(len(observed), self.EXPECTED_HARD_NEGATIVE_SIGNATURE_COUNT)
+        self.assertEqual(len(observed), INTENT_DATASET_EXPECTED_HARD_NEGATIVE_SIGNATURE_COUNT)
         self.assertEqual(
             tim.physical_signature_set_fingerprint(observed),
             corpus.physical_signatures_sha256,
@@ -1606,9 +1855,9 @@ class DatasetConstructionTests(unittest.TestCase):
             tim.external_corpus_fingerprint(flattened),
             corpus.expanded_corpus_sha256,
         )
-        self.assertEqual(corpus.training_example_weight, HARD_NEGATIVE_TRAINING_EXAMPLE_WEIGHT)
+        self.assertEqual(corpus.training_example_weight, INTENT_HARD_NEGATIVE_TRAINING_EXAMPLE_WEIGHT)
         self.assertEqual(
-            {row.weight for row in corpus.by_split["train"]}, {HARD_NEGATIVE_TRAINING_EXAMPLE_WEIGHT}
+            {row.weight for row in corpus.by_split["train"]}, {INTENT_HARD_NEGATIVE_TRAINING_EXAMPLE_WEIGHT}
         )
         for split in ("development", "calibration", "threshold"):
             self.assertEqual(
@@ -1624,7 +1873,7 @@ class DatasetConstructionTests(unittest.TestCase):
         merged = merge_hard_negative_development(empty, corpus)
         assert_no_split_leakage(merged)
         audit = audit_dataset_physical_signatures(merged)
-        self.assertEqual(audit.audited_rows, self.EXPECTED_MERGED_HARD_NEGATIVE_AUDITED_ROWS)
+        self.assertEqual(audit.audited_rows, INTENT_DATASET_EXPECTED_MERGED_HARD_NEGATIVE_AUDITED_ROWS)
         self.assertEqual(audit.cross_split_signatures, ())
         self.assertEqual(audit.cross_language_signatures, ())
         self.assertEqual(audit.malformed_rows, ())
@@ -1663,7 +1912,7 @@ class DatasetConstructionTests(unittest.TestCase):
         first["correct_typo"] = cast(str, first["correct_typo"]) + "x"
         tampered = {**decoded, "rows": [first, *rows[1:]]}
         tampered_bytes = (
-            json.dumps(tampered, ensure_ascii=False, indent=self.TAMPERED_JSON_INDENT) + "\n"
+            json.dumps(tampered, ensure_ascii=False, indent=HARD_NEGATIVE_CORPUS_JSON_INDENT) + "\n"
         ).encode("utf-8")
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "hard-negative.json"
@@ -1716,7 +1965,7 @@ class DatasetConstructionTests(unittest.TestCase):
                 "role counts must be positive integers",
             ),
             (
-                replace(baseline, train_words_per_group=self.UNDERFILLED_TRAIN_WORDS_PER_GROUP),
+                replace(baseline, train_words_per_group=INTENT_HARD_NEGATIVE_UNDERFILLED_TRAIN_WORDS_PER_GROUP),
                 "role counts must exhaust",
             ),
             (
@@ -1724,53 +1973,22 @@ class DatasetConstructionTests(unittest.TestCase):
                 "training example weight must be finite",
             ),
             (
-                replace(baseline, training_example_weight=self.INVALID_TRAINING_EXAMPLE_WEIGHT),
+                replace(baseline, training_example_weight=INTENT_DATASET_INVALID_TRAINING_EXAMPLE_WEIGHT),
                 "training example weight must be finite",
             ),
         )
         for policy, message in invalid:
             with self.subTest(message=message):
                 with self.assertRaisesRegex(ValueError, message):
-                    policy.validate(expected_words_per_group=self.HARD_NEGATIVE_EXPECTED_WORDS_PER_GROUP)
+                    policy.validate(expected_words_per_group=INTENT_EXTERNAL_MINIMUM_WORDS_PER_GROUP)
 
 
 class LeakageAndFeatureTests(unittest.TestCase):
-    HASH_SEED_XOR_PERTURBATION = 0x1234
-    MEMBERSHIP_SEED_XOR_PERTURBATION = 0x5678
-    LARGE_CONTEXT_DELTA_MAGNITUDE = 6.0
-    FRACTIONAL_CONTEXT_DELTA = 0.25
-    ARBITRARY_CONTEXT_GROUP = 7
-    ALTERNATE_TEST_DIMENSION = 1024
-    POISONED_WEIGHT = 99.0
-    POISONED_FREQUENCY = 10**9
-    EXCLUDED_WORD_LENGTH = 5
-    INCLUDED_WORD_LENGTH = 6
-    RUSSIAN_WORD_SIGNATURE_LENGTH = 7
-    EXCLUDED_ENTRY_FREQUENCY = 100
-    INCLUDED_ENTRY_FREQUENCY = 80
-    NON_TRAIN_ENTRY_FREQUENCY = 50
-    MUTATED_NON_TRAIN_EN_FREQUENCY = 5_000
-    MUTATED_NON_TRAIN_RU_FREQUENCY = 7_000
-    SPARSE_FEATURE_TEST_DIMENSION = 8
-    UNNORMALIZED_SPARSE_FEATURES = ((2, 1.0), (1, 2.0), (2, -0.5))
-    NORMALIZED_SPARSE_FEATURES = ((1, 2.0), (2, 0.5))
-    OUT_OF_RANGE_SPARSE_FEATURES = ((8, 1.0),)
-    NON_FINITE_SPARSE_FEATURES = ((1, math.inf),)
-    LABEL_PARITY_MODULUS = 2
-    PARALLEL_FEATURIZATION_EXAMPLE_COUNT = 24
-    PARALLEL_FEATURIZATION_WORKER_COUNT = 2
-    FAKE_AFFINITY_CORE_IDS = {2, 4, 6, 8}
-    EXPECTED_AFFINITY_WORKER_COUNT = 4
-    EXCESSIVE_REQUESTED_WORKERS = 99
-    FAKE_CPU_COUNT = 6
-    TRAIN_RECORD_COUNT = 3
-    NON_TRAIN_EN_RECORD_INDEX = 3
-    NON_TRAIN_RU_RECORD_INDEX = 4
 
     def test_training_adapter_exactly_matches_runtime_feature_contract(self) -> None:
         scorers = test_word_scorers()
-        hash_seed = DEFAULT_FNV_SEED ^ self.HASH_SEED_XOR_PERTURBATION
-        membership_seed = DEFAULT_MEMBERSHIP_FNV_SEED ^ self.MEMBERSHIP_SEED_XOR_PERTURBATION
+        hash_seed = DEFAULT_FNV_SEED ^ INTENT_HASH_SEED_XOR_PERTURBATION
+        membership_seed = DEFAULT_MEMBERSHIP_FNV_SEED ^ INTENT_MEMBERSHIP_SEED_XOR_PERTURBATION
         adapter = runtime_feature_extractor(
             hash_seed,
             membership_seed,
@@ -1780,11 +1998,11 @@ class LeakageAndFeatureTests(unittest.TestCase):
         for source_group, target_group in ((0, 1), (1, 0)):
             for trigger in TRIGGERS:
                 for context_delta, context_group in (
-                    (-self.LARGE_CONTEXT_DELTA_MAGNITUDE, None),
+                    (-INTENT_LEAKAGE_LARGE_CONTEXT_DELTA_MAGNITUDE, None),
                     (-1.0, source_group),
                     (0.0, target_group),
-                    (self.FRACTIONAL_CONTEXT_DELTA, self.ARBITRARY_CONTEXT_GROUP),
-                    (self.LARGE_CONTEXT_DELTA_MAGNITUDE, None),
+                    (INTENT_LEAKAGE_FRACTIONAL_CONTEXT_DELTA, INTENT_LEAKAGE_ARBITRARY_CONTEXT_GROUP),
+                    (INTENT_LEAKAGE_LARGE_CONTEXT_DELTA_MAGNITUDE, None),
                 ):
                     row = replace(
                         base,
@@ -1809,13 +2027,13 @@ class LeakageAndFeatureTests(unittest.TestCase):
                     )
                     direct = extract_features(
                         direct_input,
-                        dimension=self.ALTERNATE_TEST_DIMENSION,
+                        dimension=INTENT_LEAKAGE_ALTERNATE_TEST_DIMENSION,
                         hash_seed=hash_seed,
                         membership_seed=membership_seed,
                         ngram_orders=NGRAM_ORDERS,
                     )
                     self.assertEqual(
-                        adapter(row, self.ALTERNATE_TEST_DIMENSION),
+                        adapter(row, INTENT_LEAKAGE_ALTERNATE_TEST_DIMENSION),
                         ExtractedExampleFeatures(
                             direct.values,
                             direct.character_fingerprints,
@@ -1828,12 +2046,12 @@ class LeakageAndFeatureTests(unittest.TestCase):
         poisoned_metadata = replace(
             positive,
             label=False,
-            weight=self.POISONED_WEIGHT,
+            weight=INTENT_LEAKAGE_POISONED_WEIGHT,
             base_signature="poisoned",
             variant_kind="identity",
             source_known=True,
             target_known=True,
-            frequency=self.POISONED_FREQUENCY,
+            frequency=INTENT_LEAKAGE_POISONED_FREQUENCY,
             protected=True,
             safety=True,
         )
@@ -1856,8 +2074,8 @@ class LeakageAndFeatureTests(unittest.TestCase):
             DEFAULT_FNV_SEED,
             scorers=scorers,
         )
-        features_positive = extractor(positive, TEST_MODEL_DIMENSION)
-        features_inverted = extractor(poisoned_metadata, TEST_MODEL_DIMENSION)
+        features_positive = extractor(positive, INTENT_TEST_DIMENSION)
+        features_inverted = extractor(poisoned_metadata, INTENT_TEST_DIMENSION)
         self.assertEqual(features_positive, features_inverted)
         self.assertTrue(features_positive.character_fingerprints)
 
@@ -1870,62 +2088,62 @@ class LeakageAndFeatureTests(unittest.TestCase):
             scorers={0: RaisingScorer(), 1: RaisingScorer()},
         )
         self.assertEqual(
-            scorer_free(positive, TEST_MODEL_DIMENSION),
+            scorer_free(positive, INTENT_TEST_DIMENSION),
             features_positive,
         )
 
     def test_train_only_scorer_is_quarantined_and_non_train_invariant(self) -> None:
         pair = LayoutPair()
         train_en_excluded = alphabetic_signature_for_split(
-            "train", minimum_length=self.EXCLUDED_WORD_LENGTH
+            "train", minimum_length=INTENT_LEAKAGE_EXCLUDED_WORD_LENGTH
         )
         train_en_included = alphabetic_signature_for_split(
-            "train", minimum_length=self.INCLUDED_WORD_LENGTH
+            "train", minimum_length=INTENT_LEAKAGE_INCLUDED_WORD_LENGTH
         )
         train_ru_signature = alphabetic_signature_for_split(
-            "train", minimum_length=self.RUSSIAN_WORD_SIGNATURE_LENGTH
+            "train", minimum_length=INTENT_LEAKAGE_RUSSIAN_WORD_SIGNATURE_LENGTH
         )
         train_ru = pair.translate(train_ru_signature, "us", "ru")
         non_train_en = alphabetic_signature_for_split(
-            "development", minimum_length=self.EXCLUDED_WORD_LENGTH
+            "development", minimum_length=INTENT_LEAKAGE_EXCLUDED_WORD_LENGTH
         )
         non_train_ru_signature = alphabetic_signature_for_split(
-            "calibration", minimum_length=self.EXCLUDED_WORD_LENGTH
+            "calibration", minimum_length=INTENT_LEAKAGE_EXCLUDED_WORD_LENGTH
         )
         non_train_ru = pair.translate(non_train_ru_signature, "us", "ru")
         records = (
             LexiconWord(
                 train_en_excluded,
                 0,
-                self.EXCLUDED_ENTRY_FREQUENCY,
+                INTENT_LEAKAGE_EXCLUDED_ENTRY_FREQUENCY,
                 train_en_excluded,
                 "train",
             ),
             LexiconWord(
                 train_en_included,
                 0,
-                self.INCLUDED_ENTRY_FREQUENCY,
+                INTENT_LEAKAGE_INCLUDED_ENTRY_FREQUENCY,
                 train_en_included,
                 "train",
             ),
             LexiconWord(
                 train_ru,
                 1,
-                self.EXCLUDED_ENTRY_FREQUENCY,
+                INTENT_LEAKAGE_EXCLUDED_ENTRY_FREQUENCY,
                 train_ru_signature,
                 "train",
             ),
             LexiconWord(
                 non_train_en,
                 0,
-                self.NON_TRAIN_ENTRY_FREQUENCY,
+                INTENT_LEAKAGE_NON_TRAIN_ENTRY_FREQUENCY,
                 non_train_en,
                 "development",
             ),
             LexiconWord(
                 non_train_ru,
                 1,
-                self.NON_TRAIN_ENTRY_FREQUENCY,
+                INTENT_LEAKAGE_NON_TRAIN_ENTRY_FREQUENCY,
                 non_train_ru_signature,
                 "calibration",
             ),
@@ -1949,14 +2167,14 @@ class LeakageAndFeatureTests(unittest.TestCase):
         )
         mutated_non_train = prepare_lexicon(
             (
-                *records[: self.TRAIN_RECORD_COUNT],
+                *records[: INTENT_LEAKAGE_TRAIN_RECORD_COUNT],
                 replace(
-                    records[self.NON_TRAIN_EN_RECORD_INDEX],
-                    frequency=self.MUTATED_NON_TRAIN_EN_FREQUENCY,
+                    records[INTENT_LEAKAGE_NON_TRAIN_EN_RECORD_INDEX],
+                    frequency=INTENT_LEAKAGE_MUTATED_NON_TRAIN_EN_FREQUENCY,
                 ),
                 replace(
-                    records[self.NON_TRAIN_RU_RECORD_INDEX],
-                    frequency=self.MUTATED_NON_TRAIN_RU_FREQUENCY,
+                    records[INTENT_LEAKAGE_NON_TRAIN_RU_RECORD_INDEX],
+                    frequency=INTENT_LEAKAGE_MUTATED_NON_TRAIN_RU_FREQUENCY,
                 ),
             )
         )
@@ -2024,16 +2242,16 @@ class LeakageAndFeatureTests(unittest.TestCase):
 
     def test_sparse_normalization_and_runtime_input(self) -> None:
         normalized = normalize_sparse_features(
-            self.UNNORMALIZED_SPARSE_FEATURES, self.SPARSE_FEATURE_TEST_DIMENSION
+            INTENT_LEAKAGE_UNNORMALIZED_SPARSE_FEATURES, INTENT_LEAKAGE_SPARSE_FEATURE_TEST_DIMENSION
         )
-        self.assertEqual(normalized, self.NORMALIZED_SPARSE_FEATURES)
+        self.assertEqual(normalized, INTENT_LEAKAGE_NORMALIZED_SPARSE_FEATURES)
         with self.assertRaisesRegex(ValueError, "outside"):
             normalize_sparse_features(
-                self.OUT_OF_RANGE_SPARSE_FEATURES, self.SPARSE_FEATURE_TEST_DIMENSION
+                INTENT_LEAKAGE_OUT_OF_RANGE_SPARSE_FEATURES, INTENT_LEAKAGE_SPARSE_FEATURE_TEST_DIMENSION
             )
         with self.assertRaisesRegex(ValueError, "finite"):
             normalize_sparse_features(
-                self.NON_FINITE_SPARSE_FEATURES, self.SPARSE_FEATURE_TEST_DIMENSION
+                INTENT_LEAKAGE_NON_FINITE_SPARSE_FEATURES, INTENT_LEAKAGE_SPARSE_FEATURE_TEST_DIMENSION
             )
         evidence = intent_input_for_example(
             lexical_example(True),
@@ -2052,12 +2270,12 @@ class LeakageAndFeatureTests(unittest.TestCase):
         expected: set[int] = set()
         for example in examples:
             expected.update(
-                extractor(example, TEST_MODEL_DIMENSION).character_fingerprints
+                extractor(example, INTENT_TEST_DIMENSION).character_fingerprints
             )
         supported: set[int] = set()
         featured = featurize_examples(
             examples,
-            TEST_MODEL_DIMENSION,
+            INTENT_TEST_DIMENSION,
             extractor,
             supported_fingerprints=supported,
         )
@@ -2068,11 +2286,11 @@ class LeakageAndFeatureTests(unittest.TestCase):
     def test_process_featurization_is_ordered_and_bit_exact(self) -> None:
         examples = tuple(
             lexical_example(
-                index % self.LABEL_PARITY_MODULUS == 0,
+                index % INTENT_LABEL_PARITY_MODULUS == 0,
                 trigger=TRIGGERS[index % len(TRIGGERS)],
                 signature=f"parallel-feature-{index}",
             )
-            for index in range(self.PARALLEL_FEATURIZATION_EXAMPLE_COUNT)
+            for index in range(INTENT_LEAKAGE_PARALLEL_FEATURIZATION_EXAMPLE_COUNT)
         )
         extractor = runtime_feature_extractor(
             DEFAULT_FNV_SEED,
@@ -2083,15 +2301,15 @@ class LeakageAndFeatureTests(unittest.TestCase):
         parallel_support: set[int] = set()
         sequential = featurize_examples(
             examples,
-            TEST_MODEL_DIMENSION,
+            INTENT_TEST_DIMENSION,
             extractor,
             supported_fingerprints=sequential_support,
         )
         parallel = tim.featurize_examples_parallel(
             examples,
-            TEST_MODEL_DIMENSION,
+            INTENT_TEST_DIMENSION,
             extractor,
-            workers=self.PARALLEL_FEATURIZATION_WORKER_COUNT,
+            workers=INTENT_LEAKAGE_PARALLEL_FEATURIZATION_WORKER_COUNT,
             supported_fingerprints=parallel_support,
         )
 
@@ -2106,26 +2324,26 @@ class LeakageAndFeatureTests(unittest.TestCase):
         self.assertEqual(tim.resolve_training_workers(1), 1)
         with patch(
             "train_intent_model.os.sched_getaffinity",
-            return_value=self.FAKE_AFFINITY_CORE_IDS,
+            return_value=FAKE_AFFINITY_CORE_IDS,
         ):
-            self.assertEqual(tim.available_training_workers(), self.EXPECTED_AFFINITY_WORKER_COUNT)
-            self.assertEqual(tim.resolve_training_workers(0), self.EXPECTED_AFFINITY_WORKER_COUNT)
+            self.assertEqual(tim.available_training_workers(), INTENT_EXPECTED_AFFINITY_WORKER_COUNT)
+            self.assertEqual(tim.resolve_training_workers(0), INTENT_EXPECTED_AFFINITY_WORKER_COUNT)
             self.assertEqual(
-                tim.resolve_training_workers(self.EXCESSIVE_REQUESTED_WORKERS),
-                self.EXPECTED_AFFINITY_WORKER_COUNT,
+                tim.resolve_training_workers(INTENT_EXCESSIVE_REQUESTED_WORKERS),
+                INTENT_EXPECTED_AFFINITY_WORKER_COUNT,
             )
         with (
             patch(
                 "train_intent_model.os.sched_getaffinity",
                 side_effect=OSError("unsupported"),
             ),
-            patch("train_intent_model.os.cpu_count", return_value=self.FAKE_CPU_COUNT),
+            patch("train_intent_model.os.cpu_count", return_value=FAKE_CPU_COUNT),
         ):
-            self.assertEqual(tim.available_training_workers(), self.FAKE_CPU_COUNT)
+            self.assertEqual(tim.available_training_workers(), FAKE_CPU_COUNT)
         with self.assertRaisesRegex(ValueError, "at least one worker"):
             tim.featurize_examples_parallel(
                 examples,
-                TEST_MODEL_DIMENSION,
+                INTENT_TEST_DIMENSION,
                 extractor,
                 workers=0,
             )
@@ -2134,253 +2352,62 @@ class LeakageAndFeatureTests(unittest.TestCase):
 
 
 class OptimizerAndCalibrationTests(unittest.TestCase):
-    PERFECT_CONFUSION_COUNT = 2
-    EXAMPLES_PER_DIRECTION_DIVISOR = 2
-    POSITIVES_PER_DIRECTION_OVERRIDE = 2
-    LABEL_VARIANT_COMBINATION_COUNT = 4
-    CONTEXT_STRESS_SCORE_COUNT_PER_EXAMPLE = 19
-    FEATURED_EXAMPLE_COUNT = 30
-    LABEL_PARITY_MODULUS = 2
-    DIRECTION_GROUP_MODULUS = 4
-    DIRECTION_SWITCH_THRESHOLD = 2
-    SECOND_FEATURE_INDEX = 2
-    SECOND_FEATURE_VALUE = 0.25
-    TRAINING_ROW_COUNT = 20
-    SMALL_TEST_DIMENSION = 8
-    TEST_FTRL_ALPHA = 0.1
-    SPARSE_TEST_L1 = 10.0
-    TEST_FTRL_L2 = 0.01
-    PARALLEL_WORKER_COUNT = 2
-    CALIBRATION_SCALE = 1.25
-    CALIBRATION_BIAS_MAGNITUDE = 0.5
-    TEST_MAXIMUM_EPOCHS = 2
-    TEST_PATIENCE = 2
     PASSING_EPOCH_EVALUATION = DevelopmentEpochEvaluation(
-        log_loss=0.2,
+        log_loss=INTENT_PASSING_EPOCH_LOG_LOSS,
         operating_point=ThresholdSelection(
             "space",
             1.0,
-            ConfusionMatrix(95, 5, 10_000, 0),
-            ConfusionMatrix(90, 10, 10_000, 0),
+            ConfusionMatrix(*INTENT_PASSING_EPOCH_CONFUSION_COUNTS),
+            ConfusionMatrix(*INTENT_PASSING_EPOCH_TYPO_CONFUSION_COUNTS),
         ),
-        false_positive_rate_upper_familywise_95=0.000821,
-        typo_false_positive_rate_upper_familywise_95=0.000821,
-        policy_checks_passed=10,
+        false_positive_rate_upper_familywise_95=INTENT_EPOCH_FALSE_POSITIVE_RATE_UPPER_BOUND,
+        typo_false_positive_rate_upper_familywise_95=INTENT_EPOCH_FALSE_POSITIVE_RATE_UPPER_BOUND,
+        policy_checks_passed=INTENT_PASSING_EPOCH_POLICY_CHECKS_PASSED,
         policy_passed=True,
     )
     LOWER_LOSS_UNCERTIFIED_EPOCH_EVALUATION = DevelopmentEpochEvaluation(
-        log_loss=0.01,
+        log_loss=INTENT_UNCERTIFIED_EPOCH_LOG_LOSS,
         operating_point=ThresholdSelection(
             "space",
-            1.1,
-            ConfusionMatrix(94, 6, 10_000, 0),
-            ConfusionMatrix(89, 11, 10_000, 0),
+            INTENT_UNCERTIFIED_EPOCH_THRESHOLD_LOGIT,
+            ConfusionMatrix(*INTENT_UNCERTIFIED_EPOCH_CONFUSION_COUNTS),
+            ConfusionMatrix(*INTENT_UNCERTIFIED_EPOCH_TYPO_CONFUSION_COUNTS),
         ),
-        false_positive_rate_upper_familywise_95=0.000821,
-        typo_false_positive_rate_upper_familywise_95=0.000821,
-        policy_checks_passed=8,
+        false_positive_rate_upper_familywise_95=INTENT_EPOCH_FALSE_POSITIVE_RATE_UPPER_BOUND,
+        typo_false_positive_rate_upper_familywise_95=INTENT_EPOCH_FALSE_POSITIVE_RATE_UPPER_BOUND,
+        policy_checks_passed=INTENT_UNCERTIFIED_EPOCH_POLICY_CHECKS_PASSED,
         policy_passed=False,
     )
-    CACHED_WEIGHTS_DIMENSION = 32
-    CACHED_WEIGHTS_ALPHA = 0.08
-    CACHED_WEIGHTS_L1 = 0.001
-    CACHED_WEIGHTS_L2 = 0.05
     FTRL_CACHED_WEIGHTS_UPDATES = (
         (
             normalize_sparse_features(
-                ((7, 0.25), (2, -0.5), (7, 0.125), (11, 1.0)),
-                CACHED_WEIGHTS_DIMENSION,
+                FTRL_CACHED_WEIGHTS_FIRST_RAW_FEATURES,
+                FTRL_CACHED_WEIGHTS_DIMENSION,
             ),
             True,
-            1.75,
+            FTRL_CACHED_WEIGHTS_FIRST_SAMPLE_WEIGHT,
         ),
-        (((2, 0.5), (7, -0.25), (19, 0.875)), False, 1.0),
-        (((1, -1.0), (11, 0.5), (31, 0.125)), True, 2.25),
-        (((2, -0.75), (19, 0.25)), False, 0.5),
+        *FTRL_CACHED_WEIGHTS_CANONICAL_UPDATES,
     )
-    FTRL_CACHED_WEIGHTS_EPOCHS = 5
-    NONCANONICAL_FEATURE_CASES = (
-        (((2, 1.0), (2, 0.5)), "unique"),
-        (((3, 1.0), (2, 0.5)), "strictly increasing"),
-        (((8, 1.0),), "outside"),
-        (((1, math.inf),), "finite"),
-    )
-    PLATT_THRESHOLD_SAMPLES = ((-3.0, False), (-2.0, False), (2.0, True), (3.0, True))
-    TEST_PLATT_L2 = 0.01
-    TEST_PLATT_MAX_ITERATIONS = 100
-    EXTREME_SAMPLE_LOGIT = 3.0
-    SIGMOID_EDGE_LOGITS = (
-        -math.inf,
-        -1000.0,
-        -746.0,
-        -745.0,
-        -0.0,
-        0.0,
-        745.0,
-        1000.0,
-        math.inf,
-    )
-    SINGLE_EXAMPLE_MAX_ITERATIONS = 10
-    DIRECTIONAL_PLATT_SAMPLES: tuple[tuple[float, bool, LayoutDirection], ...] = (
-        (-2.0, False, "0>1"),
-        (-1.0, False, "0>1"),
-        (1.0, True, "0>1"),
-        (2.0, True, "0>1"),
-        (-6.0, False, "1>0"),
-        (-5.0, False, "1>0"),
-        (-3.0, True, "1>0"),
-        (-2.0, True, "1>0"),
-    )
-    EXPECTED_DIRECTIONAL_POSITIVE_COUNT = 4
-    PROBE_LOGIT = 2.0
-    DIRECTIONAL_SAMPLE_DIRECTION_INDEX = 2
-    HIGH_SCORE = 2.0
-    NEGATIVE_LOGIT_STEP_DIVISOR = 100.0
-    NEGATIVE_FIXTURE_COUNT = 10
-    PAUSE_LOGIT_MARGIN_PROBE = 0.5
-    STRICT_FALSE_POSITIVE_RATE = 0.001
-    VETO_MARGIN_PROBE = 0.25
-    WEAK_SAMPLE_SIZE = 1_000
-    DIRECTIONAL_BUDGET_ROWS = (
-        ("0>1", (10.0, 9.0, 8.0, 7.0, 6.0), 5.0),
-        ("1>0", (4.0, 3.0, 2.0, 1.0, 0.0), 100.0),
-    )
-    NEGATIVE_TAIL_COUNT = 10
-    NEGATIVE_TAIL_BASE = 20.0
-    STANDARD_TEST_PRECISION_FLOOR = 0.9
-    EXPECTED_DIRECTIONAL_METRICS = ConfusionMatrix(10, 0, 19, 1)
-    EXPECTED_DIRECTIONAL_RUNTIME_LOGIT = 6.0
-    EXPECTED_ZERO_FALSE_POSITIVE_METRICS = ConfusionMatrix(5, 5, 20, 0)
-    AGGREGATE_POSITIVE_SCORES = (10.0, 9.0, 5.0)
-    AGGREGATE_NEGATIVE_SCORES = (6.0, -10.0, -11.0)
-    EXPECTED_AGGREGATE_BUDGET_METRICS = ConfusionMatrix(5, 1, 5, 1)
-    STRICT_PRECISION_FLOOR = 0.9995
-    STRICT_TYPO_PRECISION_FLOOR = 0.999
-    SELECTION_FALSE_POSITIVE_BUDGET = 10
-    STRICTER_TYPO_CONFIG_OVERRIDES = {
-        "threshold_precision_floor": 0.9995,
-        "threshold_max_false_positive_rate": 0.001,
-        "pause_threshold_max_false_positive_rate": 0.001,
-        "test_minimum_precision": 0.999,
-        "test_minimum_recall": 0.90,
-        "test_minimum_pause_recall": 0.90,
-        "test_minimum_typo_recall": 0.90,
-        "test_minimum_pause_typo_recall": 0.85,
-        "test_minimum_specificity": 0.999,
-        "selection_maximum_false_positives_per_trigger": 10,
-    }
-    OVERALL_STRICT_METRICS = ConfusionMatrix(20_000, 0, 29_995, 5)
-    TYPO_STRICT_METRICS = ConfusionMatrix(10_000, 0, 29_994, 6)
-    WILSON_BOUND_METRICS = ConfusionMatrix(20_000, 0, 17_212, 8)
-    WILSON_BOUND_GATE_KWARGS = {
-        "minimum_precision": 0.9995,
-        "minimum_recall": 0.95,
-        "minimum_specificity": 0.999,
-        "maximum_false_positive_rate": 0.001,
-    }
-    FALSE_POSITIVE_BOUND_FALSE_POSITIVES = 8
-    FALSE_POSITIVE_BOUND_TOTAL_NEGATIVES = 17_220
-    EXPECTED_MINIMUM_TOKEN_LENGTH = 5
-    COMPARISONS_PER_TRIGGER = 2
-    DELETION_TYPO_STRONG_COUNT = 90
-    DELETION_TYPO_WEAK_COUNT = 10
-    IDENTITY_TYPO_STRONG_COUNT = 9_410
-    IDENTITY_TYPO_WEAK_COUNT = 490
-    NEGATIVE_EXAMPLE_COUNT = 10_000
-    FULL_TYPO_POLICY_KWARGS = {
-        "precision_floor": 0.9995,
-        "maximum_false_positive_rate": 0.001,
-        "minimum_recall": 0.95,
-        "minimum_specificity": 0.999,
-        "typo_precision_floor": 0.999,
-        "minimum_typo_recall": 0.90,
-        "typo_minimum_specificity": 0.999,
-        "typo_maximum_false_positive_rate": 0.001,
-    }
-    WEAK_TYPO_POLICY_KWARGS = {
-        "precision_floor": 0.9995,
-        "maximum_false_positive_rate": 0.001,
-        "minimum_recall": 0.90,
-        "minimum_specificity": 0.999,
-        "typo_precision_floor": 0.999,
-        "minimum_typo_recall": 0.90,
-        "typo_minimum_specificity": 0.999,
-        "typo_maximum_false_positive_rate": 0.001,
-    }
-    EXPECTED_TYPO_POLICY_METRICS = ConfusionMatrix(9_500, 500, 10_000, 0)
-    EXPECTED_TYPO_POLICY_TYPO_METRICS = ConfusionMatrix(90, 10, 10_000, 0)
-    WEAK_TYPO_DELETION_CUTOFF = 1_000
-    WEAK_TRAINING_CONFIG_OVERRIDES = {
-        "threshold_precision_floor": 0.9995,
-        "threshold_max_false_positive_rate": 0.001,
-        "pause_threshold_max_false_positive_rate": 0.001,
-        "test_minimum_precision": 0.999,
-        "test_minimum_recall": 0.90,
-        "test_minimum_pause_recall": 0.90,
-        "test_minimum_typo_recall": 0.90,
-        "test_minimum_pause_typo_recall": 0.90,
-        "test_minimum_specificity": 0.999,
-    }
-    TAIL_DIAGNOSTIC_TEMPLATES = (
-        (True, "deletion", 3.0, 5),
-        (True, "identity", 2.0, 500),
-        (False, "deletion", 1.0, 5),
-        (False, "identity", 0.0, 500),
-    )
-    TAIL_DIAGNOSTIC_LOGIT = 2.5
-    TAIL_DIAGNOSTIC_OVERALL_METRICS = ConfusionMatrix(1, 1, 2, 0)
-    EXPECTED_ORDINARY_TAIL_LOGIT = 2.0
-    EXPECTED_TYPO_TAIL_LOGIT = 3.0
-    PAUSE_POSITIVE_SCORES = (2.6, 2.8)
-    NON_PAUSE_POSITIVE_SCORES = (3.0, 3.1)
-    PAUSE_MARGIN_CONFIG_OVERRIDES = {
-        "threshold_max_false_positive_rate": 0.001,
-        "pause_threshold_max_false_positive_rate": 0.001,
-        "pause_logit_margin": 0.5,
-        "test_minimum_recall": 1.0,
-        "test_minimum_pause_recall": 1.0,
-        "test_minimum_typo_recall": 1.0,
-        "test_minimum_pause_typo_recall": 1.0,
-    }
-    PAUSE_LOGIT_LOWER_BOUND = 3.1
-    POSITIVE_ROW_SCORE = 4.0
-    LOGIT_MARGIN_CAP = 2.0
+    EXPECTED_DIRECTIONAL_METRICS = ConfusionMatrix(*EXPECTED_INTENT_DIRECTIONAL_BUDGET_CONFUSION_COUNTS)
+    EXPECTED_ZERO_FALSE_POSITIVE_METRICS = ConfusionMatrix(*EXPECTED_INTENT_ZERO_FALSE_POSITIVE_CONFUSION_COUNTS)
+    EXPECTED_AGGREGATE_BUDGET_METRICS = ConfusionMatrix(*EXPECTED_INTENT_AGGREGATE_BUDGET_CONFUSION_COUNTS)
+    OVERALL_STRICT_METRICS = ConfusionMatrix(*INTENT_STRICT_OVERALL_CONFUSION_COUNTS)
+    TYPO_STRICT_METRICS = ConfusionMatrix(*INTENT_STRICT_TYPO_CONFUSION_COUNTS)
+    WILSON_BOUND_METRICS = ConfusionMatrix(*INTENT_WILSON_BOUND_CONFUSION_COUNTS)
+    EXPECTED_TYPO_POLICY_METRICS = ConfusionMatrix(*EXPECTED_INTENT_TYPO_POLICY_CONFUSION_COUNTS)
+    EXPECTED_TYPO_POLICY_TYPO_METRICS = ConfusionMatrix(*EXPECTED_INTENT_TYPO_POLICY_TYPO_CONFUSION_COUNTS)
+    TAIL_DIAGNOSTIC_OVERALL_METRICS = ConfusionMatrix(*INTENT_TAIL_DIAGNOSTIC_OVERALL_CONFUSION_COUNTS)
     INITIAL_SYMMETRIC_SELECTION = ThresholdSelection(
         "space",
         1.0,
-        ConfusionMatrix(2, 0, 2, 0),
-        ConfusionMatrix(2, 0, 2, 0),
+        ConfusionMatrix(*INTENT_INITIAL_SYMMETRIC_CONFUSION_COUNTS),
+        ConfusionMatrix(*INTENT_INITIAL_SYMMETRIC_CONFUSION_COUNTS),
         {"0>1": 1.0, "1>0": 1.0},
     )
-    EXPECTED_MARGIN_BASE_LOGIT = 3.0
-    EXPECTED_TRUE_POSITIVE_COUNT = 2
-    BACKOFF_NON_PAUSE_SCORE = 2.5
-    BACKOFF_CONFIG_OVERRIDES = {
-        "threshold_max_false_positive_rate": 1.0,
-        "pause_threshold_max_false_positive_rate": 1.0,
-        "threshold_logit_margin_cap": 2.0,
-        "pause_logit_margin": 0.5,
-        "test_minimum_recall": 1.0,
-        "test_minimum_pause_recall": 1.0,
-        "test_minimum_typo_recall": 1.0,
-        "test_minimum_pause_typo_recall": 1.0,
-    }
-    BACKOFF_EXPECTED_MARGIN = 1.5
-    STRONG_SYMMETRIC_METRICS = ConfusionMatrix(10_000, 0, 10_000, 0)
-    EMPTY_TRIGGER_METRICS = ConfusionMatrix(0, 0, 10_000, 0)
-    SAFETY_SAMPLE_MULTIPLIER = 2
-    VETO_SELECTION_SAMPLE_COUNT = 100
-    WEAK_SAMPLE_METRICS = ConfusionMatrix(1_000, 0, 1_000, 0)
-    EXCESSIVE_DIMENSION_EXPONENT = 22
-    INVALID_FALSE_POSITIVE_RATE = 1.1
-    INVALID_SELECTION_BUDGET = 2
-    SEALED_VALUE_BY_FIELD = (
-        ("selection_minimum_recall", 0.8),
-        ("selection_minimum_pause_recall", 0.7),
-        ("selection_minimum_typo_recall", 0.7),
-        ("selection_minimum_pause_typo_recall", 0.6),
-    )
-    RECALL_UNDER_SEALED_MARGIN = 0.01
+    STRONG_SYMMETRIC_METRICS = ConfusionMatrix(INTENT_STRONG_SAMPLE_SIZE, 0, INTENT_STRONG_SAMPLE_SIZE, 0)
+    EMPTY_TRIGGER_METRICS = ConfusionMatrix(0, 0, INTENT_STRONG_SAMPLE_SIZE, 0)
+    WEAK_SAMPLE_METRICS = ConfusionMatrix(INTENT_WEAK_SAMPLE_SIZE, 0, INTENT_WEAK_SAMPLE_SIZE, 0)
     @staticmethod
     def _reference_ftrl_update(
         model: FTRLProximal,
@@ -2448,7 +2475,7 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
                 raise AssertionError("neutral scores must be reused")
 
         predicted_positive = ConfusionMatrix(
-            self.PERFECT_CONFUSION_COUNT, 0, 0, self.PERFECT_CONFUSION_COUNT
+            INTENT_PERFECT_CONFUSION_COUNT, 0, 0, INTENT_PERFECT_CONFUSION_COUNT
         )
         predicted_positive_typo = ConfusionMatrix(1, 0, 0, 1)
         thresholds = {
@@ -2462,12 +2489,12 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         }
         overall, typos = score_context_stress_profiles(
             examples,
-            dimension=TEST_MODEL_DIMENSION,
+            dimension=INTENT_TEST_DIMENSION,
             extractor=RecordingExtractor(),
             model=ConstantScorer(),
             calibration=directional_calibration(
-                samples_per_direction=len(examples) // self.EXAMPLES_PER_DIRECTION_DIVISOR,
-                positives_per_direction=self.POSITIVES_PER_DIRECTION_OVERRIDE,
+                samples_per_direction=len(examples) // INTENT_OPTIMIZER_EXAMPLES_PER_DIRECTION_DIVISOR,
+                positives_per_direction=INTENT_OPTIMIZER_POSITIVES_PER_DIRECTION_OVERRIDE,
             ),
             thresholds=thresholds,
             neutral_scores=tuple(
@@ -2495,9 +2522,9 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         )
         self.assertEqual(
             len(observed_contexts),
-            self.LABEL_VARIANT_COMBINATION_COUNT
+            INTENT_OPTIMIZER_LABEL_VARIANT_COMBINATION_COUNT
             * len(TRIGGERS)
-            * self.CONTEXT_STRESS_SCORE_COUNT_PER_EXAMPLE,
+            * INTENT_OPTIMIZER_CONTEXT_STRESS_SCORE_COUNT_PER_EXAMPLE,
         )
         self.assertIn((0.0, None), observed_contexts)
 
@@ -2513,16 +2540,16 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "context-sensitive"):
             verify_context_feature_invariance(
-                dimension=TEST_MODEL_DIMENSION,
+                dimension=INTENT_TEST_DIMENSION,
                 extractor=ContextSensitiveExtractor(),
             )
 
     def _featured(self) -> tuple[tuple[FeaturedExample, ...], tuple[FeaturedExample, ...]]:
         rows: list[FeaturedExample] = []
-        for index in range(self.FEATURED_EXAMPLE_COUNT):
-            label = index % self.LABEL_PARITY_MODULUS == 0
+        for index in range(INTENT_OPTIMIZER_FEATURED_EXAMPLE_COUNT):
+            label = index % INTENT_LABEL_PARITY_MODULUS == 0
             direction: LayoutDirection = (
-                "0>1" if index % self.DIRECTION_GROUP_MODULUS < self.DIRECTION_SWITCH_THRESHOLD else "1>0"
+                "0>1" if index % INTENT_OPTIMIZER_DIRECTION_GROUP_MODULUS < INTENT_OPTIMIZER_DIRECTION_SWITCH_THRESHOLD else "1>0"
             )
             example = lexical_example(
                 label,
@@ -2531,12 +2558,12 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
             )
             features = (
                 (1, 1.0 if label else -1.0),
-                (self.SECOND_FEATURE_INDEX, self.SECOND_FEATURE_VALUE),
+                (INTENT_OPTIMIZER_SECOND_FEATURE_INDEX, INTENT_OPTIMIZER_SECOND_FEATURE_VALUE),
             )
             rows.append(FeaturedExample(example, features))
         return (
-            tuple(rows[: self.TRAINING_ROW_COUNT]),
-            tuple(rows[self.TRAINING_ROW_COUNT :]),
+            tuple(rows[: INTENT_OPTIMIZER_TRAINING_ROW_COUNT]),
+            tuple(rows[INTENT_OPTIMIZER_TRAINING_ROW_COUNT :]),
         )
 
     def test_ftrl_is_deterministic_sparse_and_separates(self) -> None:
@@ -2559,7 +2586,7 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         self.assertLess(first.model.score(((1, -1.0),)), 0.0)
 
         sparse = FTRLProximal(
-            FTRLParameters(self.SMALL_TEST_DIMENSION, self.TEST_FTRL_ALPHA, 1.0, self.SPARSE_TEST_L1, 0.0)
+            FTRLParameters(FTRL_SMALL_TEST_DIMENSION, FTRL_TEST_ALPHA, 1.0, FTRL_SPARSE_TEST_L1, 0.0)
         )
         sparse.update(((1, 1.0),), True)
         self.assertEqual(sparse.sparse_weights(), {})
@@ -2568,7 +2595,7 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
 
     def test_parallel_development_scoring_is_bit_exact(self) -> None:
         training, development = self._featured()
-        parameters = FTRLParameters(TEST_MODEL_DIMENSION, self.TEST_FTRL_ALPHA, 1.0, 0.0, self.TEST_FTRL_L2)
+        parameters = FTRLParameters(INTENT_TEST_DIMENSION, FTRL_TEST_ALPHA, 1.0, 0.0, FTRL_TEST_L2)
         model = FTRLProximal(parameters)
         for item in training:
             model.update(
@@ -2580,25 +2607,25 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         expected = evaluate_development_epoch(
             model,
             development,
-            config(dimension=TEST_MODEL_DIMENSION),
+            config(dimension=INTENT_TEST_DIMENSION),
         )
         actual = tim.evaluate_development_epoch_parallel(
             model,
             development,
-            config(dimension=TEST_MODEL_DIMENSION),
-            workers=self.PARALLEL_WORKER_COUNT,
+            config(dimension=INTENT_TEST_DIMENSION),
+            workers=INTENT_OPTIMIZER_PARALLEL_WORKER_COUNT,
         )
 
         self.assertEqual(actual, expected)
         calibration = directional_calibration(
-            scale=self.CALIBRATION_SCALE, bias=-self.CALIBRATION_BIAS_MAGNITUDE
+            scale=INTENT_OPTIMIZER_CALIBRATION_SCALE, bias=-INTENT_OPTIMIZER_CALIBRATION_BIAS_MAGNITUDE
         )
         self.assertEqual(
             tim.score_examples_parallel(
                 model,
                 calibration,
                 development,
-                workers=self.PARALLEL_WORKER_COUNT,
+                workers=INTENT_OPTIMIZER_PARALLEL_WORKER_COUNT,
             ),
             tim.score_examples(model, calibration, development),
         )
@@ -2608,14 +2635,14 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
             tim.evaluate_development_epoch_parallel(
                 model,
                 development,
-                config(dimension=TEST_MODEL_DIMENSION),
+                config(dimension=INTENT_TEST_DIMENSION),
                 workers=0,
             )
         with self.assertRaisesRegex(ValueError, "at least one worker"):
             fit_ftrl(
                 training,
                 development,
-                config(dimension=TEST_MODEL_DIMENSION),
+                config(dimension=INTENT_TEST_DIMENSION),
                 evaluation_workers=0,
             )
 
@@ -2634,9 +2661,9 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
                 training,
                 development,
                 config(
-                    maximum_epochs=self.TEST_MAXIMUM_EPOCHS,
+                    maximum_epochs=INTENT_OPTIMIZER_MAXIMUM_EPOCHS,
                     minimum_epochs=1,
-                    patience=self.TEST_PATIENCE,
+                    patience=INTENT_OPTIMIZER_PATIENCE,
                 ),
             )
 
@@ -2657,11 +2684,11 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         )
 
     def test_development_epoch_rejects_empty_or_zero_weight_data(self) -> None:
-        parameters = FTRLParameters(self.SMALL_TEST_DIMENSION, self.TEST_FTRL_ALPHA, 1.0, 0.0, 0.0)
+        parameters = FTRLParameters(FTRL_SMALL_TEST_DIMENSION, FTRL_TEST_ALPHA, 1.0, 0.0, 0.0)
         model = FTRLProximal(parameters)
         with self.assertRaisesRegex(ValueError, "empty development"):
             evaluate_development_epoch(
-                model, (), config(dimension=self.SMALL_TEST_DIMENSION)
+                model, (), config(dimension=FTRL_SMALL_TEST_DIMENSION)
             )
 
         _training, development = self._featured()
@@ -2676,21 +2703,21 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
             evaluate_development_epoch(
                 model,
                 zero_weight,
-                config(dimension=self.SMALL_TEST_DIMENSION),
+                config(dimension=FTRL_SMALL_TEST_DIMENSION),
             )
 
     def test_ftrl_cached_weights_are_bit_exact_against_reference(self) -> None:
         parameters = FTRLParameters(
-            self.CACHED_WEIGHTS_DIMENSION,
-            self.CACHED_WEIGHTS_ALPHA,
+            FTRL_CACHED_WEIGHTS_DIMENSION,
+            FTRL_CACHED_WEIGHTS_ALPHA,
             1.0,
-            self.CACHED_WEIGHTS_L1,
-            self.CACHED_WEIGHTS_L2,
+            FTRL_CACHED_WEIGHTS_L1,
+            FTRL_CACHED_WEIGHTS_L2,
         )
         optimized = FTRLProximal(parameters)
         reference = FTRLProximal(parameters)
         updates = self.FTRL_CACHED_WEIGHTS_UPDATES
-        for _epoch in range(self.FTRL_CACHED_WEIGHTS_EPOCHS):
+        for _epoch in range(FTRL_CACHED_WEIGHTS_EPOCHS):
             for features, label, sample_weight in updates:
                 expected = self._reference_ftrl_update(
                     reference, features, label, sample_weight
@@ -2711,24 +2738,24 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
 
     def test_ftrl_rejects_noncanonical_sparse_vectors(self) -> None:
         model = FTRLProximal(
-            FTRLParameters(self.SMALL_TEST_DIMENSION, self.TEST_FTRL_ALPHA, 1.0, 0.0, 0.0)
+            FTRLParameters(FTRL_SMALL_TEST_DIMENSION, FTRL_TEST_ALPHA, 1.0, 0.0, 0.0)
         )
-        for features, message in self.NONCANONICAL_FEATURE_CASES:
+        for features, message in INTENT_NONCANONICAL_FEATURE_CASES:
             with self.subTest(features=features):
                 with self.assertRaisesRegex(ValueError, message):
                     model.update(features, True)
 
     def test_platt_thresholds_veto_and_numeric_edges(self) -> None:
-        samples = self.PLATT_THRESHOLD_SAMPLES
+        samples = INTENT_OPTIMIZER_PLATT_THRESHOLD_SAMPLES
         calibration = fit_platt_calibration(
-            samples, l2=self.TEST_PLATT_L2, maximum_iterations=self.TEST_PLATT_MAX_ITERATIONS
+            samples, l2=INTENT_PLATT_TEST_L2, maximum_iterations=INTENT_PLATT_TEST_MAX_ITERATIONS
         )
         self.assertGreater(calibration.slope, 0.0)
         self.assertLess(
-            calibration.confidence(-self.EXTREME_SAMPLE_LOGIT),
-            calibration.confidence(self.EXTREME_SAMPLE_LOGIT),
+            calibration.confidence(-INTENT_OPTIMIZER_EXTREME_SAMPLE_LOGIT),
+            calibration.confidence(INTENT_OPTIMIZER_EXTREME_SAMPLE_LOGIT),
         )
-        for logit in self.SIGMOID_EDGE_LOGITS:
+        for logit in INTENT_OPTIMIZER_SIGMOID_EDGE_LOGITS:
             with self.subTest(logit=logit):
                 self.assertEqual(
                     stable_sigmoid(logit).hex(),
@@ -2740,27 +2767,27 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "both labels"):
             fit_platt_calibration(
                 ((1.0, True),),
-                l2=self.TEST_PLATT_L2,
-                maximum_iterations=self.SINGLE_EXAMPLE_MAX_ITERATIONS,
+                l2=INTENT_PLATT_TEST_L2,
+                maximum_iterations=INTENT_OPTIMIZER_SINGLE_EXAMPLE_MAX_ITERATIONS,
             )
 
         directional_samples: tuple[
             tuple[float, bool, LayoutDirection], ...
-        ] = self.DIRECTIONAL_PLATT_SAMPLES
+        ] = INTENT_OPTIMIZER_DIRECTIONAL_PLATT_SAMPLES
         directional = fit_directional_platt_calibration(
             directional_samples,
-            l2=self.TEST_PLATT_L2,
-            maximum_iterations=self.TEST_PLATT_MAX_ITERATIONS,
+            l2=INTENT_PLATT_TEST_L2,
+            maximum_iterations=INTENT_PLATT_TEST_MAX_ITERATIONS,
         )
-        self.assertEqual(directional.sample_count, len(self.DIRECTIONAL_PLATT_SAMPLES))
-        self.assertEqual(directional.positive_count, self.EXPECTED_DIRECTIONAL_POSITIVE_COUNT)
+        self.assertEqual(directional.sample_count, len(INTENT_OPTIMIZER_DIRECTIONAL_PLATT_SAMPLES))
+        self.assertEqual(directional.positive_count, INTENT_OPTIMIZER_EXPECTED_DIRECTIONAL_POSITIVE_COUNT)
         self.assertGreater(
             directional.for_direction("1>0").intercept,
             directional.for_direction("0>1").intercept,
         )
         self.assertGreater(
-            directional.transform_logit(-self.PROBE_LOGIT, 1, 0),
-            directional.transform_logit(-self.PROBE_LOGIT, 0, 1),
+            directional.transform_logit(-INTENT_OPTIMIZER_PROBE_LOGIT, 1, 0),
+            directional.transform_logit(-INTENT_OPTIMIZER_PROBE_LOGIT, 0, 1),
         )
         self.assertEqual(
             set(directional.runtime_parameters()),
@@ -2775,10 +2802,10 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
                 tuple(
                     item
                     for item in directional_samples
-                    if item[self.DIRECTIONAL_SAMPLE_DIRECTION_INDEX] == "0>1" or item[1]
+                    if item[INTENT_OPTIMIZER_DIRECTIONAL_SAMPLE_DIRECTION_INDEX] == "0>1" or item[1]
                 ),
-                l2=self.TEST_PLATT_L2,
-                maximum_iterations=self.SINGLE_EXAMPLE_MAX_ITERATIONS,
+                l2=INTENT_PLATT_TEST_L2,
+                maximum_iterations=INTENT_OPTIMIZER_SINGLE_EXAMPLE_MAX_ITERATIONS,
             )
 
         scored: list[ScoredExample] = []
@@ -2789,12 +2816,12 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
                         False,
                         trigger=trigger,
                         signature=f"n{index}",
-                        direction="0>1" if index % self.LABEL_PARITY_MODULUS == 0 else "1>0",
+                        direction="0>1" if index % INTENT_LABEL_PARITY_MODULUS == 0 else "1>0",
                     ),
-                    -self.HIGH_SCORE - index / self.NEGATIVE_LOGIT_STEP_DIVISOR,
-                    -self.HIGH_SCORE - index / self.NEGATIVE_LOGIT_STEP_DIVISOR,
+                    -INTENT_OPTIMIZER_HIGH_SCORE - index / INTENT_OPTIMIZER_NEGATIVE_LOGIT_STEP_DIVISOR,
+                    -INTENT_OPTIMIZER_HIGH_SCORE - index / INTENT_OPTIMIZER_NEGATIVE_LOGIT_STEP_DIVISOR,
                 )
-                for index in range(self.NEGATIVE_FIXTURE_COUNT)
+                for index in range(INTENT_OPTIMIZER_NEGATIVE_FIXTURE_COUNT)
             )
             scored.extend(
                 (
@@ -2805,8 +2832,8 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
                     ),
                     ScoredExample(
                         lexical_example(True, trigger=trigger, direction="1>0"),
-                        self.HIGH_SCORE,
-                        self.HIGH_SCORE,
+                        INTENT_OPTIMIZER_HIGH_SCORE,
+                        INTENT_OPTIMIZER_HIGH_SCORE,
                     ),
                 )
             )
@@ -2821,7 +2848,7 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         self.assertGreaterEqual(
             selected["pause"].logit,
             max(item.logit for key, item in selected.items() if key != "pause")
-            + self.PAUSE_LOGIT_MARGIN_PROBE,
+            + INTENT_OPTIMIZER_PAUSE_LOGIT_MARGIN_PROBE,
         )
         direct = choose_threshold(
             tuple(scored),
@@ -2836,17 +2863,17 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
                 -1.0,
                 -1.0,
             )
-            for index in range(self.WEAK_SAMPLE_SIZE)
+            for index in range(INTENT_WEAK_SAMPLE_SIZE)
         ) + (ScoredExample(lexical_example(True), 1.0, 1.0),)
         with self.assertRaisesRegex(RuntimeError, "statistically certified"):
             choose_threshold(
                 statistically_weak,
                 "space",
                 precision_floor=1.0,
-                maximum_false_positive_rate=self.STRICT_FALSE_POSITIVE_RATE,
+                maximum_false_positive_rate=INTENT_STRICT_FALSE_POSITIVE_RATE,
             )
         veto = choose_veto_threshold(
-            tuple(scored), quantile=0.0, margin=self.VETO_MARGIN_PROBE
+            tuple(scored), quantile=0.0, margin=INTENT_OPTIMIZER_VETO_MARGIN_PROBE
         )
         self.assertLess(veto.raw_logit, 1.0)
         self.assertEqual(veto.vetoed_positive_samples, 0)
@@ -2856,7 +2883,7 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         self,
     ) -> None:
         rows: list[ScoredExample] = []
-        for direction, positive_scores, leading_negative in self.DIRECTIONAL_BUDGET_ROWS:
+        for direction, positive_scores, leading_negative in INTENT_DIRECTIONAL_BUDGET_ROWS:
             typed_direction = cast(LayoutDirection, direction)
             for index, score in enumerate(positive_scores):
                 example = lexical_example(
@@ -2866,9 +2893,9 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
                     direction=typed_direction,
                 )
                 rows.append(ScoredExample(example, score, score))
-            for index in range(self.NEGATIVE_TAIL_COUNT):
+            for index in range(INTENT_OPTIMIZER_NEGATIVE_TAIL_COUNT):
                 score = (
-                    leading_negative if index == 0 else -self.NEGATIVE_TAIL_BASE - index
+                    leading_negative if index == 0 else -INTENT_OPTIMIZER_NEGATIVE_TAIL_BASE - index
                 )
                 example = lexical_example(
                     False,
@@ -2881,24 +2908,24 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         scalar = choose_threshold(
             tuple(rows),
             "space",
-            precision_floor=self.STANDARD_TEST_PRECISION_FLOOR,
+            precision_floor=INTENT_OPTIMIZER_STANDARD_TEST_PRECISION_FLOOR,
             maximum_false_positive_rate=1.0,
-            minimum_recall=self.STANDARD_TEST_PRECISION_FLOOR,
+            minimum_recall=INTENT_OPTIMIZER_STANDARD_TEST_PRECISION_FLOOR,
             minimum_specificity=0.0,
-            typo_precision_floor=self.STANDARD_TEST_PRECISION_FLOOR,
-            minimum_typo_recall=self.STANDARD_TEST_PRECISION_FLOOR,
+            typo_precision_floor=INTENT_OPTIMIZER_STANDARD_TEST_PRECISION_FLOOR,
+            minimum_typo_recall=INTENT_OPTIMIZER_STANDARD_TEST_PRECISION_FLOOR,
             typo_minimum_specificity=0.0,
             typo_maximum_false_positive_rate=1.0,
         )
         directional = choose_directional_threshold(
             tuple(rows),
             "space",
-            precision_floor=self.STANDARD_TEST_PRECISION_FLOOR,
+            precision_floor=INTENT_OPTIMIZER_STANDARD_TEST_PRECISION_FLOOR,
             maximum_false_positive_rate=1.0,
-            minimum_recall=self.STANDARD_TEST_PRECISION_FLOOR,
+            minimum_recall=INTENT_OPTIMIZER_STANDARD_TEST_PRECISION_FLOOR,
             minimum_specificity=0.0,
-            typo_precision_floor=self.STANDARD_TEST_PRECISION_FLOOR,
-            minimum_typo_recall=self.STANDARD_TEST_PRECISION_FLOOR,
+            typo_precision_floor=INTENT_OPTIMIZER_STANDARD_TEST_PRECISION_FLOOR,
+            minimum_typo_recall=INTENT_OPTIMIZER_STANDARD_TEST_PRECISION_FLOOR,
             typo_minimum_specificity=0.0,
             typo_maximum_false_positive_rate=1.0,
         )
@@ -2914,17 +2941,17 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         )
         self.assertEqual(
             directional.runtime_logits(),
-            {"0>1": self.EXPECTED_DIRECTIONAL_RUNTIME_LOGIT, "1>0": 0.0},
+            {"0>1": INTENT_OPTIMIZER_EXPECTED_DIRECTIONAL_RUNTIME_LOGIT, "1>0": 0.0},
         )
         zero_false_positive = choose_directional_threshold(
             tuple(rows),
             "space",
-            precision_floor=self.STANDARD_TEST_PRECISION_FLOOR,
+            precision_floor=INTENT_OPTIMIZER_STANDARD_TEST_PRECISION_FLOOR,
             maximum_false_positive_rate=1.0,
-            minimum_recall=self.STANDARD_TEST_PRECISION_FLOOR,
+            minimum_recall=INTENT_OPTIMIZER_STANDARD_TEST_PRECISION_FLOOR,
             minimum_specificity=0.0,
-            typo_precision_floor=self.STANDARD_TEST_PRECISION_FLOOR,
-            minimum_typo_recall=self.STANDARD_TEST_PRECISION_FLOOR,
+            typo_precision_floor=INTENT_OPTIMIZER_STANDARD_TEST_PRECISION_FLOOR,
+            minimum_typo_recall=INTENT_OPTIMIZER_STANDARD_TEST_PRECISION_FLOOR,
             typo_minimum_specificity=0.0,
             typo_maximum_false_positive_rate=1.0,
             maximum_false_positives=0,
@@ -2941,12 +2968,12 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
             choose_directional_threshold(
                 tuple(rows),
                 "space",
-                precision_floor=self.STANDARD_TEST_PRECISION_FLOOR,
+                precision_floor=INTENT_OPTIMIZER_STANDARD_TEST_PRECISION_FLOOR,
                 maximum_false_positive_rate=1.0,
-                minimum_recall=self.STANDARD_TEST_PRECISION_FLOOR,
+                minimum_recall=INTENT_OPTIMIZER_STANDARD_TEST_PRECISION_FLOOR,
                 minimum_specificity=0.0,
-                typo_precision_floor=self.STANDARD_TEST_PRECISION_FLOOR,
-                minimum_typo_recall=self.STANDARD_TEST_PRECISION_FLOOR,
+                typo_precision_floor=INTENT_OPTIMIZER_STANDARD_TEST_PRECISION_FLOOR,
+                minimum_typo_recall=INTENT_OPTIMIZER_STANDARD_TEST_PRECISION_FLOOR,
                 typo_minimum_specificity=0.0,
                 typo_maximum_false_positive_rate=1.0,
                 maximum_false_positives=-1,
@@ -2957,7 +2984,7 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
     ) -> None:
         rows: list[ScoredExample] = []
         for direction in ("0>1", "1>0"):
-            for index, score in enumerate(self.AGGREGATE_POSITIVE_SCORES):
+            for index, score in enumerate(INTENT_OPTIMIZER_AGGREGATE_POSITIVE_SCORES):
                 rows.append(
                     ScoredExample(
                         lexical_example(
@@ -2970,7 +2997,7 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
                         score,
                     )
                 )
-            for index, score in enumerate(self.AGGREGATE_NEGATIVE_SCORES):
+            for index, score in enumerate(INTENT_OPTIMIZER_AGGREGATE_NEGATIVE_SCORES):
                 rows.append(
                     ScoredExample(
                         lexical_example(
@@ -2998,12 +3025,12 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         self.assertEqual(selected.typo_metrics, selected.metrics)
 
     def test_selection_uses_stricter_typo_precision_than_sealed_test(self) -> None:
-        training_config = config(**self.STRICTER_TYPO_CONFIG_OVERRIDES)
+        training_config = config(**INTENT_STRICTER_TYPO_CONFIG_OVERRIDES)
         overall = self.OVERALL_STRICT_METRICS
         typos = self.TYPO_STRICT_METRICS
-        self.assertGreaterEqual(overall.precision, self.STRICT_PRECISION_FLOOR)
-        self.assertGreaterEqual(typos.precision, self.STRICT_TYPO_PRECISION_FLOOR)
-        self.assertLess(typos.precision, self.STRICT_PRECISION_FLOOR)
+        self.assertGreaterEqual(overall.precision, INTENT_OPTIMIZER_STRICT_PRECISION_FLOOR)
+        self.assertGreaterEqual(typos.precision, INTENT_OPTIMIZER_STRICT_TYPO_PRECISION_FLOOR)
+        self.assertLess(typos.precision, INTENT_OPTIMIZER_STRICT_PRECISION_FLOOR)
         selection = ThresholdSelection("space", 1.0, overall, typos)
         selections = {
             trigger: replace(selection, trigger=trigger) for trigger in TRIGGERS
@@ -3031,7 +3058,7 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         )
         self.assertEqual(
             cast(dict[str, float], typo_gate["limits"])["minimum_precision"],
-            self.STRICT_PRECISION_FLOOR,
+            INTENT_OPTIMIZER_STRICT_PRECISION_FLOOR,
         )
 
         policy = gate_policy_payload(training_config)
@@ -3039,17 +3066,17 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
             cast(dict[str, object], policy["selection"])[
                 "minimum_typo_precision"
             ],
-            self.STRICT_PRECISION_FLOOR,
+            INTENT_OPTIMIZER_STRICT_PRECISION_FLOOR,
         )
         self.assertEqual(
             cast(dict[str, object], policy["selection"])[
                 "maximum_false_positives_per_trigger"
             ],
-            self.SELECTION_FALSE_POSITIVE_BUDGET,
+            INTENT_OPTIMIZER_SELECTION_FALSE_POSITIVE_BUDGET,
         )
         self.assertEqual(
             cast(dict[str, object], policy["sealed_test"])["minimum_precision"],
-            self.STRICT_TYPO_PRECISION_FLOOR,
+            INTENT_OPTIMIZER_STRICT_TYPO_PRECISION_FLOOR,
         )
         with patch.object(
             tim,
@@ -3060,7 +3087,7 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         self.assertEqual(choose.call_count, len(TRIGGERS))
         self.assertTrue(
             all(
-                call.kwargs["typo_precision_floor"] == self.STRICT_PRECISION_FLOOR
+                call.kwargs["typo_precision_floor"] == INTENT_OPTIMIZER_STRICT_PRECISION_FLOOR
                 for call in choose.call_args_list
             )
         )
@@ -3071,7 +3098,7 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
                 and call.kwargs["typo_false_positive_z_score"]
                 == SELECTION_WILSON_Z_SCORE
                 and call.kwargs["maximum_false_positives"]
-                == self.SELECTION_FALSE_POSITIVE_BUDGET
+                == INTENT_OPTIMIZER_SELECTION_FALSE_POSITIVE_BUDGET
                 for call in choose.call_args_list
             )
         )
@@ -3117,17 +3144,17 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         metrics = self.WILSON_BOUND_METRICS
         ordinary = binary_gate_breakdown(
             metrics,
-            minimum_precision=self.WILSON_BOUND_GATE_KWARGS["minimum_precision"],
-            minimum_recall=self.WILSON_BOUND_GATE_KWARGS["minimum_recall"],
-            minimum_specificity=self.WILSON_BOUND_GATE_KWARGS["minimum_specificity"],
-            maximum_false_positive_rate=self.WILSON_BOUND_GATE_KWARGS["maximum_false_positive_rate"],
+            minimum_precision=INTENT_WILSON_BOUND_GATE_KWARGS["minimum_precision"],
+            minimum_recall=INTENT_WILSON_BOUND_GATE_KWARGS["minimum_recall"],
+            minimum_specificity=INTENT_WILSON_BOUND_GATE_KWARGS["minimum_specificity"],
+            maximum_false_positive_rate=INTENT_WILSON_BOUND_GATE_KWARGS["maximum_false_positive_rate"],
         )
         familywise = binary_gate_breakdown(
             metrics,
-            minimum_precision=self.WILSON_BOUND_GATE_KWARGS["minimum_precision"],
-            minimum_recall=self.WILSON_BOUND_GATE_KWARGS["minimum_recall"],
-            minimum_specificity=self.WILSON_BOUND_GATE_KWARGS["minimum_specificity"],
-            maximum_false_positive_rate=self.WILSON_BOUND_GATE_KWARGS["maximum_false_positive_rate"],
+            minimum_precision=INTENT_WILSON_BOUND_GATE_KWARGS["minimum_precision"],
+            minimum_recall=INTENT_WILSON_BOUND_GATE_KWARGS["minimum_recall"],
+            minimum_specificity=INTENT_WILSON_BOUND_GATE_KWARGS["minimum_specificity"],
+            maximum_false_positive_rate=INTENT_WILSON_BOUND_GATE_KWARGS["maximum_false_positive_rate"],
             selection_familywise=True,
         )
         self.assertIs(ordinary["passed"], True)
@@ -3161,8 +3188,8 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         )
         self.assertEqual(
             false_positive_bound_payload(
-                self.FALSE_POSITIVE_BOUND_FALSE_POSITIVES,
-                self.FALSE_POSITIVE_BOUND_TOTAL_NEGATIVES,
+                INTENT_OPTIMIZER_FALSE_POSITIVE_BOUND_FALSE_POSITIVES,
+                INTENT_OPTIMIZER_FALSE_POSITIVE_BOUND_TOTAL_NEGATIVES,
                 selection_familywise=True,
             ),
             familywise_bound,
@@ -3173,7 +3200,7 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         )
         self.assertEqual(
             applicability["minimum_normalized_token_length"],
-            self.EXPECTED_MINIMUM_TOKEN_LENGTH,
+            EXPECTED_INTENT_MINIMUM_RUNTIME_TOKEN_LENGTH,
         )
         self.assertEqual(
             applicability["length_comparison"],
@@ -3195,7 +3222,7 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         selection_policy = cast(dict[str, object], bounds["selection"])
         sealed_policy = cast(dict[str, object], bounds["sealed_test"])
         self.assertEqual(
-            selection_policy["comparisons"], len(TRIGGERS) * self.COMPARISONS_PER_TRIGGER
+            selection_policy["comparisons"], len(TRIGGERS) * INTENT_OPTIMIZER_COMPARISONS_PER_TRIGGER
         )
         self.assertEqual(
             selection_policy["familywise_confidence"],
@@ -3212,8 +3239,8 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
                 score,
             )
             for index, score in enumerate(
-                (self.HIGH_SCORE,) * self.DELETION_TYPO_STRONG_COUNT
-                + (1.0,) * self.DELETION_TYPO_WEAK_COUNT
+                (INTENT_OPTIMIZER_HIGH_SCORE,) * INTENT_OPTIMIZER_DELETION_TYPO_STRONG_COUNT
+                + (1.0,) * INTENT_OPTIMIZER_DELETION_TYPO_WEAK_COUNT
             )
         )
         rows.extend(
@@ -3223,8 +3250,8 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
                 score,
             )
             for index, score in enumerate(
-                (self.HIGH_SCORE,) * self.IDENTITY_TYPO_STRONG_COUNT
-                + (1.0,) * self.IDENTITY_TYPO_WEAK_COUNT
+                (INTENT_OPTIMIZER_HIGH_SCORE,) * INTENT_OPTIMIZER_IDENTITY_TYPO_STRONG_COUNT
+                + (1.0,) * INTENT_OPTIMIZER_IDENTITY_TYPO_WEAK_COUNT
             )
         )
         rows.extend(
@@ -3233,23 +3260,23 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
                 1.0 if index == 0 else 0.0,
                 1.0 if index == 0 else 0.0,
             )
-            for index in range(self.NEGATIVE_EXAMPLE_COUNT)
+            for index in range(INTENT_STRONG_SAMPLE_SIZE)
         )
         selected = choose_threshold(
             tuple(rows),
             "space",
-            precision_floor=self.FULL_TYPO_POLICY_KWARGS["precision_floor"],
-            maximum_false_positive_rate=self.FULL_TYPO_POLICY_KWARGS["maximum_false_positive_rate"],
-            minimum_recall=self.FULL_TYPO_POLICY_KWARGS["minimum_recall"],
-            minimum_specificity=self.FULL_TYPO_POLICY_KWARGS["minimum_specificity"],
-            typo_precision_floor=self.FULL_TYPO_POLICY_KWARGS["typo_precision_floor"],
-            minimum_typo_recall=self.FULL_TYPO_POLICY_KWARGS["minimum_typo_recall"],
-            typo_minimum_specificity=self.FULL_TYPO_POLICY_KWARGS["typo_minimum_specificity"],
+            precision_floor=INTENT_FULL_TYPO_POLICY_KWARGS["precision_floor"],
+            maximum_false_positive_rate=INTENT_FULL_TYPO_POLICY_KWARGS["maximum_false_positive_rate"],
+            minimum_recall=INTENT_FULL_TYPO_POLICY_KWARGS["minimum_recall"],
+            minimum_specificity=INTENT_FULL_TYPO_POLICY_KWARGS["minimum_specificity"],
+            typo_precision_floor=INTENT_FULL_TYPO_POLICY_KWARGS["typo_precision_floor"],
+            minimum_typo_recall=INTENT_FULL_TYPO_POLICY_KWARGS["minimum_typo_recall"],
+            typo_minimum_specificity=INTENT_FULL_TYPO_POLICY_KWARGS["typo_minimum_specificity"],
             typo_maximum_false_positive_rate=(
-                self.FULL_TYPO_POLICY_KWARGS["typo_maximum_false_positive_rate"]
+                INTENT_FULL_TYPO_POLICY_KWARGS["typo_maximum_false_positive_rate"]
             ),
         )
-        self.assertEqual(selected.logit, self.HIGH_SCORE)
+        self.assertEqual(selected.logit, INTENT_OPTIMIZER_HIGH_SCORE)
         self.assertEqual(selected.metrics, self.EXPECTED_TYPO_POLICY_METRICS)
         self.assertEqual(selected.typo_metrics, self.EXPECTED_TYPO_POLICY_TYPO_METRICS)
 
@@ -3258,43 +3285,43 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
                 lexical_example(
                     False,
                     variant=(
-                        "deletion" if index < self.WEAK_TYPO_DELETION_CUTOFF else "identity"
+                        "deletion" if index < INTENT_WEAK_SAMPLE_SIZE else "identity"
                     ),
                     signature=f"wn{index}",
                 ),
                 0.0,
                 0.0,
             )
-            for index in range(self.NEGATIVE_EXAMPLE_COUNT)
+            for index in range(INTENT_STRONG_SAMPLE_SIZE)
         ) + tuple(
             ScoredExample(
                 lexical_example(True, variant="deletion", signature=f"wp{index}"),
-                self.HIGH_SCORE,
-                self.HIGH_SCORE,
+                INTENT_OPTIMIZER_HIGH_SCORE,
+                INTENT_OPTIMIZER_HIGH_SCORE,
             )
-            for index in range(self.WEAK_TYPO_DELETION_CUTOFF)
+            for index in range(INTENT_WEAK_SAMPLE_SIZE)
         )
         self.assertLess(
-            wilson_upper_bound(0, self.NEGATIVE_EXAMPLE_COUNT), self.STRICT_FALSE_POSITIVE_RATE
+            wilson_upper_bound(0, INTENT_STRONG_SAMPLE_SIZE), INTENT_STRICT_FALSE_POSITIVE_RATE
         )
         self.assertGreater(
-            wilson_upper_bound(0, self.WEAK_TYPO_DELETION_CUTOFF), self.STRICT_FALSE_POSITIVE_RATE
+            wilson_upper_bound(0, INTENT_WEAK_SAMPLE_SIZE), INTENT_STRICT_FALSE_POSITIVE_RATE
         )
         weak_selection = choose_threshold(
             statistically_weak_typos,
             "space",
-            precision_floor=self.WEAK_TYPO_POLICY_KWARGS["precision_floor"],
-            maximum_false_positive_rate=self.WEAK_TYPO_POLICY_KWARGS["maximum_false_positive_rate"],
-            minimum_recall=self.WEAK_TYPO_POLICY_KWARGS["minimum_recall"],
-            minimum_specificity=self.WEAK_TYPO_POLICY_KWARGS["minimum_specificity"],
-            typo_precision_floor=self.WEAK_TYPO_POLICY_KWARGS["typo_precision_floor"],
-            minimum_typo_recall=self.WEAK_TYPO_POLICY_KWARGS["minimum_typo_recall"],
-            typo_minimum_specificity=self.WEAK_TYPO_POLICY_KWARGS["typo_minimum_specificity"],
+            precision_floor=INTENT_WEAK_TYPO_POLICY_KWARGS["precision_floor"],
+            maximum_false_positive_rate=INTENT_WEAK_TYPO_POLICY_KWARGS["maximum_false_positive_rate"],
+            minimum_recall=INTENT_WEAK_TYPO_POLICY_KWARGS["minimum_recall"],
+            minimum_specificity=INTENT_WEAK_TYPO_POLICY_KWARGS["minimum_specificity"],
+            typo_precision_floor=INTENT_WEAK_TYPO_POLICY_KWARGS["typo_precision_floor"],
+            minimum_typo_recall=INTENT_WEAK_TYPO_POLICY_KWARGS["minimum_typo_recall"],
+            typo_minimum_specificity=INTENT_WEAK_TYPO_POLICY_KWARGS["typo_minimum_specificity"],
             typo_maximum_false_positive_rate=(
-                self.WEAK_TYPO_POLICY_KWARGS["typo_maximum_false_positive_rate"]
+                INTENT_WEAK_TYPO_POLICY_KWARGS["typo_maximum_false_positive_rate"]
             ),
         )
-        weak_config = config(**self.WEAK_TRAINING_CONFIG_OVERRIDES)
+        weak_config = config(**INTENT_WEAK_TRAINING_CONFIG_OVERRIDES)
         weak_selections = {
             trigger: replace(weak_selection, trigger=trigger)
             for trigger in TRIGGERS
@@ -3308,7 +3335,7 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
     def test_selection_tail_diagnostics_explain_targets_without_tokens(self) -> None:
         rows: list[ScoredExample] = []
         for trigger in TRIGGERS:
-            templates = self.TAIL_DIAGNOSTIC_TEMPLATES
+            templates = INTENT_TAIL_DIAGNOSTIC_TEMPLATES
             for index, (label, variant, score, frequency) in enumerate(
                 templates
             ):
@@ -3325,7 +3352,7 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         selections = {
             trigger: ThresholdSelection(
                 trigger,
-                self.TAIL_DIAGNOSTIC_LOGIT,
+                INTENT_OPTIMIZER_TAIL_DIAGNOSTIC_LOGIT,
                 self.TAIL_DIAGNOSTIC_OVERALL_METRICS,
                 ConfusionMatrix(1, 0, 1, 0),
             )
@@ -3348,9 +3375,9 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
             DEFAULT_TRAINING_CONFIG_VALUES["selection_minimum_recall"],
         )
         ordinary = cast(dict[str, object], space["ordinary_target_point"])
-        self.assertEqual(ordinary["logit"], self.EXPECTED_ORDINARY_TAIL_LOGIT)
+        self.assertEqual(ordinary["logit"], INTENT_OPTIMIZER_EXPECTED_ORDINARY_TAIL_LOGIT)
         typo = cast(dict[str, object], space["typo_target_point"])
-        self.assertEqual(typo["logit"], self.EXPECTED_TYPO_TAIL_LOGIT)
+        self.assertEqual(typo["logit"], INTENT_OPTIMIZER_EXPECTED_TYPO_TAIL_LOGIT)
         slices = cast(dict[str, object], space["selected_metric_slices"])
         frequencies = cast(dict[str, object], slices["frequency"])
         self.assertEqual(set(frequencies), {"1-9", "100-999"})
@@ -3366,9 +3393,9 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
     def test_pause_margin_is_rechecked_by_presealed_selection_gate(self) -> None:
         rows: list[ScoredExample] = []
         for trigger in TRIGGERS:
-            negative_score = 0.0 if trigger == "pause" else self.HIGH_SCORE
+            negative_score = 0.0 if trigger == "pause" else INTENT_OPTIMIZER_HIGH_SCORE
             positive_scores = (
-                self.PAUSE_POSITIVE_SCORES if trigger == "pause" else self.NON_PAUSE_POSITIVE_SCORES
+                INTENT_OPTIMIZER_PAUSE_POSITIVE_SCORES if trigger == "pause" else INTENT_OPTIMIZER_NON_PAUSE_POSITIVE_SCORES
             )
             rows.extend(
                 ScoredExample(
@@ -3377,12 +3404,12 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
                         trigger=trigger,
                         variant="deletion",
                         signature=f"{trigger}-n{index}",
-                        direction="0>1" if index % self.LABEL_PARITY_MODULUS == 0 else "1>0",
+                        direction="0>1" if index % INTENT_LABEL_PARITY_MODULUS == 0 else "1>0",
                     ),
                     negative_score,
                     negative_score,
                 )
-                for index in range(self.NEGATIVE_EXAMPLE_COUNT)
+                for index in range(INTENT_STRONG_SAMPLE_SIZE)
             )
             rows.extend(
                 ScoredExample(
@@ -3398,9 +3425,9 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
                 )
                 for index, score in enumerate(positive_scores)
             )
-        gate_config = config(**self.PAUSE_MARGIN_CONFIG_OVERRIDES)
+        gate_config = config(**INTENT_PAUSE_MARGIN_CONFIG_OVERRIDES)
         selected = choose_trigger_thresholds(tuple(rows), gate_config)
-        self.assertGreater(selected["pause"].logit, self.PAUSE_LOGIT_LOWER_BOUND)
+        self.assertGreater(selected["pause"].logit, INTENT_OPTIMIZER_PAUSE_LOGIT_LOWER_BOUND)
         self.assertEqual(selected["pause"].metrics.true_positive, 0)
         breakdown = threshold_selection_gate_breakdown(gate_config, selected)
         self.assertIs(breakdown["passed"], False)
@@ -3437,15 +3464,15 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
                             signature=f"{trigger}-{direction}-positive",
                             direction=direction,
                         ),
-                        self.POSITIVE_ROW_SCORE,
-                        self.POSITIVE_ROW_SCORE,
+                        INTENT_OPTIMIZER_POSITIVE_ROW_SCORE,
+                        INTENT_OPTIMIZER_POSITIVE_ROW_SCORE,
                     )
                 )
         gate_config = config(
             threshold_max_false_positive_rate=1.0,
             pause_threshold_max_false_positive_rate=1.0,
-            threshold_logit_margin_cap=self.LOGIT_MARGIN_CAP,
-            pause_logit_margin=self.PAUSE_LOGIT_MARGIN_PROBE,
+            threshold_logit_margin_cap=INTENT_OPTIMIZER_LOGIT_MARGIN_CAP,
+            pause_logit_margin=INTENT_OPTIMIZER_PAUSE_LOGIT_MARGIN_PROBE,
         )
         initial = self.INITIAL_SYMMETRIC_SELECTION
         with patch.object(
@@ -3454,20 +3481,20 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
             return_value=initial,
         ):
             selected = choose_trigger_thresholds(tuple(rows), gate_config)
-        base = self.EXPECTED_MARGIN_BASE_LOGIT
+        base = INTENT_OPTIMIZER_EXPECTED_MARGIN_BASE_LOGIT
         for trigger in TRIGGERS:
-            expected = base + (self.PAUSE_LOGIT_MARGIN_PROBE if trigger == "pause" else 0.0)
-            self.assertEqual(selected[trigger].global_logit_margin, self.LOGIT_MARGIN_CAP)
+            expected = base + (INTENT_OPTIMIZER_PAUSE_LOGIT_MARGIN_PROBE if trigger == "pause" else 0.0)
+            self.assertEqual(selected[trigger].global_logit_margin, INTENT_OPTIMIZER_LOGIT_MARGIN_CAP)
             for direction in directions:
                 self.assertEqual(
                     selected[trigger].logit_for(direction), expected
                 )
             self.assertEqual(selected[trigger].metrics.false_positive, 0)
             self.assertEqual(
-                selected[trigger].metrics.true_positive, self.EXPECTED_TRUE_POSITIVE_COUNT
+                selected[trigger].metrics.true_positive, INTENT_OPTIMIZER_EXPECTED_TRUE_POSITIVE_COUNT
             )
             self.assertEqual(
-                selected[trigger].typo_metrics.true_positive, self.EXPECTED_TRUE_POSITIVE_COUNT
+                selected[trigger].typo_metrics.true_positive, INTENT_OPTIMIZER_EXPECTED_TRUE_POSITIVE_COUNT
             )
 
     def test_global_threshold_margin_backs_off_to_largest_feasible_value(
@@ -3477,7 +3504,7 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         directions: tuple[LayoutDirection, LayoutDirection] = ("0>1", "1>0")
         for trigger in TRIGGERS:
             positive_score = (
-                self.EXPECTED_MARGIN_BASE_LOGIT if trigger == "pause" else self.BACKOFF_NON_PAUSE_SCORE
+                INTENT_OPTIMIZER_EXPECTED_MARGIN_BASE_LOGIT if trigger == "pause" else INTENT_OPTIMIZER_BACKOFF_NON_PAUSE_SCORE
             )
             for direction in directions:
                 rows.append(
@@ -3506,7 +3533,7 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
                         positive_score,
                     )
                 )
-        gate_config = config(**self.BACKOFF_CONFIG_OVERRIDES)
+        gate_config = config(**INTENT_BACKOFF_CONFIG_OVERRIDES)
         initial = self.INITIAL_SYMMETRIC_SELECTION
         with patch.object(
             tim,
@@ -3517,10 +3544,10 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
 
         for trigger in TRIGGERS:
             expected = (
-                self.EXPECTED_MARGIN_BASE_LOGIT if trigger == "pause" else self.BACKOFF_NON_PAUSE_SCORE
+                INTENT_OPTIMIZER_EXPECTED_MARGIN_BASE_LOGIT if trigger == "pause" else INTENT_OPTIMIZER_BACKOFF_NON_PAUSE_SCORE
             )
             self.assertEqual(
-                selected[trigger].global_logit_margin, self.BACKOFF_EXPECTED_MARGIN
+                selected[trigger].global_logit_margin, INTENT_OPTIMIZER_BACKOFF_EXPECTED_MARGIN
             )
             for direction in directions:
                 self.assertEqual(
@@ -3556,8 +3583,8 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         self,
     ) -> None:
         gate_config = config(
-            threshold_max_false_positive_rate=self.STRICT_FALSE_POSITIVE_RATE,
-            pause_threshold_max_false_positive_rate=self.STRICT_FALSE_POSITIVE_RATE,
+            threshold_max_false_positive_rate=INTENT_STRICT_FALSE_POSITIVE_RATE,
+            pause_threshold_max_false_positive_rate=INTENT_STRICT_FALSE_POSITIVE_RATE,
         )
         strong = self.STRONG_SYMMETRIC_METRICS
         per_trigger = {trigger: strong for trigger in TRIGGERS}
@@ -3612,8 +3639,8 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
 
     def test_quality_gates_reject_empty_slices_and_weak_sample_bounds(self) -> None:
         gate_config = config(
-            threshold_max_false_positive_rate=self.STRICT_FALSE_POSITIVE_RATE,
-            pause_threshold_max_false_positive_rate=self.STRICT_FALSE_POSITIVE_RATE,
+            threshold_max_false_positive_rate=INTENT_STRICT_FALSE_POSITIVE_RATE,
+            pause_threshold_max_false_positive_rate=INTENT_STRICT_FALSE_POSITIVE_RATE,
         )
         strong = self.STRONG_SYMMETRIC_METRICS
         per_trigger = {trigger: strong for trigger in TRIGGERS}
@@ -3622,7 +3649,7 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
             for profile in CONTEXT_STRESS_PROFILES
         }
         safety_audit = GuardedSafetyAudit(
-            samples=len(TRIGGERS) * self.SAFETY_SAMPLE_MULTIPLIER,
+            samples=len(TRIGGERS) * INTENT_SAFETY_SAMPLE_MULTIPLIER,
             protected_samples=len(TRIGGERS),
             lexical_collision_samples=len(TRIGGERS),
             triggers=tuple(TRIGGERS),
@@ -3630,7 +3657,7 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
             lexical_collision_triggers=tuple(TRIGGERS),
             failures=(),
         )
-        veto = VetoSelection(-1.0, self.VETO_SELECTION_SAMPLE_COUNT, 0, 0.0)
+        veto = VetoSelection(-1.0, INTENT_VETO_SELECTION_SAMPLE_COUNT, 0, 0.0)
         self.assertTrue(
             training_quality_gates_pass(
                 gate_config,
@@ -3672,7 +3699,7 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         weak_sample_bound = dict(per_trigger)
         weak_sample_bound["space"] = self.WEAK_SAMPLE_METRICS
         self.assertGreater(
-            wilson_upper_bound(0, self.WEAK_SAMPLE_SIZE), self.STRICT_FALSE_POSITIVE_RATE
+            wilson_upper_bound(0, INTENT_WEAK_SAMPLE_SIZE), INTENT_STRICT_FALSE_POSITIVE_RATE
         )
         self.assertFalse(
             training_quality_gates_pass(
@@ -3701,14 +3728,14 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "between one and three"):
             config(typo_augmentations=0).validate()
         with self.assertRaisesRegex(ValueError, "MAX_DIMENSION"):
-            config(dimension=1 << self.EXCESSIVE_DIMENSION_EXPONENT).validate()
+            config(dimension=1 << INTENT_EXCESSIVE_DIMENSION_EXPONENT).validate()
         with self.assertRaisesRegex(
             ValueError, "pause_threshold_max_false_positive_rate"
         ):
             config(
-                pause_threshold_max_false_positive_rate=self.INVALID_FALSE_POSITIVE_RATE
+                pause_threshold_max_false_positive_rate=INTENT_OPTIMIZER_INVALID_FALSE_POSITIVE_RATE
             ).validate()
-        for invalid_budget in (-1, self.INVALID_SELECTION_BUDGET, True):
+        for invalid_budget in (-1, INTENT_OPTIMIZER_INVALID_SELECTION_BUDGET, True):
             with self.subTest(selection_budget=invalid_budget):
                 with self.assertRaisesRegex(
                     ValueError,
@@ -3719,13 +3746,13 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
                             invalid_budget
                         )
                     ).validate()
-        for field_name, sealed_value in self.SEALED_VALUE_BY_FIELD:
+        for field_name, sealed_value in INTENT_OPTIMIZER_SEALED_VALUE_BY_FIELD:
             with self.subTest(selection_recall=field_name):
                 with self.assertRaisesRegex(
                     ValueError, "must not be below its sealed-test minimum"
                 ):
                     config(
-                        **{field_name: sealed_value - self.RECALL_UNDER_SEALED_MARGIN}
+                        **{field_name: sealed_value - INTENT_OPTIMIZER_RECALL_UNDER_SEALED_MARGIN}
                     ).validate()
         for field_name in ("threshold_logit_margin_cap", "pause_logit_margin"):
             for invalid_margin in (-1.0, math.inf, math.nan):
@@ -3740,55 +3767,17 @@ class OptimizerAndCalibrationTests(unittest.TestCase):
 
 
 class ExternalEvaluationTests(unittest.TestCase):
-    MINIMUM_APPLICABLE_DELETION_LENGTH = 5
-    INVALID_AFFIX_BYTES_FLOAT = 45.0
-    EMPTY_TRIGGER_METRICS = ConfusionMatrix(0, 0, 10_000, 0)
-    WEAK_SAMPLE_METRICS = ConfusionMatrix(1_000, 0, 1_000, 0)
-    WEAK_SAMPLE_SIZE = 1_000
-    UNDERSIZED_MINIMUM_WORDS_PER_GROUP = 2
-    SOURCE_KNOWN_SAMPLE_COUNT = 2
-    EXPECTED_NEGATIVE_ROWS = 2
-    SAFETY_TRIGGER_SAMPLE_COUNT = 100
-    STRICT_FALSE_POSITIVE_RATE = 0.001
-    INVALID_SOURCE_GROUP = 2
-    THIRD_CANDIDATE_INDEX = 2
-    EXPECTED_SAFETY_POLICY_SAMPLES = 2
-    EXPECTED_CONTEXT_DELTA_MULTIPLIER = 1.75
-    EXPECTED_CONTEXT_TARGET_GROUP_BONUS = 0.55
-    EXPECTED_CONTEXT_SOURCE_GROUP_PENALTY = 0.3
-    EXPECTED_HARD_GUARD_SAMPLES = 4
-    EXPECTED_HARD_GUARD_MODEL_EVALUATED = 2
-    UNKNOWN_TYPO_EXAMPLES_PER_TRIGGER = 4
-    UNKNOWN_TYPO_NEGATIVE_EXAMPLES_PER_TRIGGER = 2
-    EXPECTED_RAW_METRICS_COUNT = 2
-    TRAIN_ONLY_SCORER_ALGORITHM_VERSION = 2
-    TRAIN_ONLY_NGRAM_ORDERS = (2, 3, 4)
-    STRONG_SYMMETRIC_METRICS = ConfusionMatrix(10_000, 0, 10_000, 0)
-    FIXTURE_THRESHOLD_LOGIT = 0.6
-    SAFETY_SAMPLE_MULTIPLIER = 2
-    VETO_SELECTION_SAMPLE_COUNT = 100
-    MODEL_VERSION_HASH_PREFIX_LENGTH = 12
-    THRESHOLD_TAMPER_DELTA = 0.25
-    VETO_TAMPER_DELTA = 0.5
-    TAMPERED_METADATA_VALUE = 999.0
-    EXPECTED_STRICT_SAMPLE_SIZE = 5_000
-    EXTERNAL_DICTIONARY_BYTES = 123
-    EXTERNAL_AFFIX_BYTES = 45
-    EXTERNAL_POLICY_SCHEMA_VERSION = 2
-    EXTERNAL_MINIMUM_WORDS_PER_GROUP = 5000
+    EMPTY_TRIGGER_METRICS = ConfusionMatrix(0, 0, INTENT_STRONG_SAMPLE_SIZE, 0)
+    WEAK_SAMPLE_METRICS = ConfusionMatrix(INTENT_WEAK_SAMPLE_SIZE, 0, INTENT_WEAK_SAMPLE_SIZE, 0)
+    STRONG_SYMMETRIC_METRICS = ConfusionMatrix(INTENT_STRONG_SAMPLE_SIZE, 0, INTENT_STRONG_SAMPLE_SIZE, 0)
     COVERAGE_DIAGNOSTIC_ROWS = (
-        ModelPredictionRow(lexical_example(False), False, -2.0, 0.0),
-        ModelPredictionRow(lexical_example(True), True, 2.0, 0.25),
-        ModelPredictionRow(lexical_example(False), False, -1.0, 0.75),
+        ModelPredictionRow(lexical_example(False), False, -INTENT_EXTERNAL_COVERAGE_CONFIDENT_LOGIT, 0.0),
+        ModelPredictionRow(
+            lexical_example(True), True, INTENT_EXTERNAL_COVERAGE_CONFIDENT_LOGIT, INTENT_EXTERNAL_COVERAGE_LOW_PARTIAL
+        ),
+        ModelPredictionRow(lexical_example(False), False, -1.0, INTENT_EXTERNAL_COVERAGE_HIGH_PARTIAL),
         ModelPredictionRow(lexical_example(True), True, 1.0, 1.0),
     )
-    EXPECTED_COVERAGE_SAMPLE_COUNT = 4
-    EXPECTED_COVERAGE_HALF_COUNT = 2
-    EXPECTED_COVERAGE_P25 = 0.25
-    EXPECTED_COVERAGE_MEDIAN = 0.5
-    EXPECTED_COVERAGE_P75 = 0.75
-    PERFECT_CONFUSION_COUNT = 2
-    NEUTRAL_PREDICTION_LOGIT = 10.0
 
     def test_external_provenance_gate_schema_is_exact_and_type_safe(self) -> None:
         passed = {
@@ -3809,8 +3798,8 @@ class ExternalEvaluationTests(unittest.TestCase):
 
     def test_strict_evaluator_sample_sizes_are_canonical(self) -> None:
         canonical = eim._parse_arguments(("--strict",))
-        self.assertEqual(canonical.comparison_sample, self.EXPECTED_STRICT_SAMPLE_SIZE)
-        self.assertEqual(canonical.latency_sample, self.EXPECTED_STRICT_SAMPLE_SIZE)
+        self.assertEqual(canonical.comparison_sample, INTENT_EXTERNAL_EXPECTED_STRICT_SAMPLE_SIZE)
+        self.assertEqual(canonical.latency_sample, INTENT_EXTERNAL_EXPECTED_STRICT_SAMPLE_SIZE)
         for option, value in (
             ("--comparison-sample", "1"),
             ("--comparison-sample", "5001"),
@@ -3837,26 +3826,26 @@ class ExternalEvaluationTests(unittest.TestCase):
     @staticmethod
     def external_policy_payload() -> dict[str, object]:
         locale = {
-            "dictionary_sha256": "1" * SHA256_HEX_LENGTH,
-            "dictionary_bytes": ExternalEvaluationTests.EXTERNAL_DICTIONARY_BYTES,
-            "affix_sha256": "2" * SHA256_HEX_LENGTH,
-            "affix_bytes": ExternalEvaluationTests.EXTERNAL_AFFIX_BYTES,
+            "dictionary_sha256": "1" * SHA256_HEX_CHARACTERS,
+            "dictionary_bytes": INTENT_EXTERNAL_DICTIONARY_BYTES,
+            "affix_sha256": "2" * SHA256_HEX_CHARACTERS,
+            "affix_bytes": INTENT_EXTERNAL_AFFIX_BYTES,
         }
         return {
-            "schema_version": ExternalEvaluationTests.EXTERNAL_POLICY_SCHEMA_VERSION,
-            "minimum_words_per_group": ExternalEvaluationTests.EXTERNAL_MINIMUM_WORDS_PER_GROUP,
+            "schema_version": INTENT_EXTERNAL_POLICY_SCHEMA_VERSION,
+            "minimum_words_per_group": INTENT_EXTERNAL_MINIMUM_WORDS_PER_GROUP,
             "trigger_expansion": list(TRIGGERS),
             "hunspell": {
                 "en_US": dict(locale),
                 "ru_RU": {
                     **locale,
-                    "dictionary_sha256": "3" * SHA256_HEX_LENGTH,
-                    "affix_sha256": "4" * SHA256_HEX_LENGTH,
+                    "dictionary_sha256": "3" * SHA256_HEX_CHARACTERS,
+                    "affix_sha256": "4" * SHA256_HEX_CHARACTERS,
                 },
             },
-            "lexical_disjoint_corpus_sha256": "5" * SHA256_HEX_LENGTH,
-            "unknown_typo_development_corpus_sha256": "6" * SHA256_HEX_LENGTH,
-            "unknown_typo_holdout_corpus_sha256": "7" * SHA256_HEX_LENGTH,
+            "lexical_disjoint_corpus_sha256": "5" * SHA256_HEX_CHARACTERS,
+            "unknown_typo_development_corpus_sha256": "6" * SHA256_HEX_CHARACTERS,
+            "unknown_typo_holdout_corpus_sha256": "7" * SHA256_HEX_CHARACTERS,
         }
 
     def dictionary_words(
@@ -3914,7 +3903,7 @@ class ExternalEvaluationTests(unittest.TestCase):
         }
         development = development_corpus or unknown_corpus
         return ExternalEvaluationPolicy(
-            schema_version=self.EXTERNAL_POLICY_SCHEMA_VERSION,
+            schema_version=INTENT_EXTERNAL_POLICY_SCHEMA_VERSION,
             minimum_words_per_group=minimum_words_per_group,
             trigger_expansion=trigger_expansion,
             hunspell=hunspell,
@@ -3949,13 +3938,13 @@ class ExternalEvaluationTests(unittest.TestCase):
             payload = self.external_policy_payload()
             write(payload)
             parsed = load_external_evaluation_policy(path)
-            self.assertEqual(parsed.schema_version, self.EXTERNAL_POLICY_SCHEMA_VERSION)
+            self.assertEqual(parsed.schema_version, INTENT_EXTERNAL_POLICY_SCHEMA_VERSION)
             self.assertEqual(
-                parsed.minimum_words_per_group, self.EXTERNAL_MINIMUM_WORDS_PER_GROUP
+                parsed.minimum_words_per_group, INTENT_EXTERNAL_MINIMUM_WORDS_PER_GROUP
             )
             self.assertEqual(parsed.trigger_expansion, tuple(TRIGGERS))
             self.assertEqual(
-                parsed.hunspell[0].dictionary.bytes, self.EXTERNAL_DICTIONARY_BYTES
+                parsed.hunspell[0].dictionary.bytes, INTENT_EXTERNAL_DICTIONARY_BYTES
             )
 
             missing_root = dict(base_config)
@@ -3977,13 +3966,13 @@ class ExternalEvaluationTests(unittest.TestCase):
                 load_external_evaluation_policy(path)
 
             float_size = json.loads(json.dumps(payload))
-            float_size["hunspell"]["en_US"]["affix_bytes"] = self.INVALID_AFFIX_BYTES_FLOAT
+            float_size["hunspell"]["en_US"]["affix_bytes"] = INTENT_EXTERNAL_INVALID_AFFIX_BYTES_FLOAT
             write(float_size)
             with self.assertRaisesRegex(ValueError, "must be an integer"):
                 load_external_evaluation_policy(path)
 
             bad_digest = json.loads(json.dumps(payload))
-            bad_digest["hunspell"]["ru_RU"]["affix_sha256"] = "A" * SHA256_HEX_LENGTH
+            bad_digest["hunspell"]["ru_RU"]["affix_sha256"] = "A" * SHA256_HEX_CHARACTERS
             write(bad_digest)
             with self.assertRaisesRegex(ValueError, "exact lowercase SHA-256"):
                 load_external_evaluation_policy(path)
@@ -4032,26 +4021,26 @@ class ExternalEvaluationTests(unittest.TestCase):
         rows = self.COVERAGE_DIAGNOSTIC_ROWS
         diagnostics = coverage_diagnostics(rows)
         overall = diagnostics["overall"]
-        self.assertEqual(overall.samples, self.EXPECTED_COVERAGE_SAMPLE_COUNT)
+        self.assertEqual(overall.samples, INTENT_EXTERNAL_EXPECTED_COVERAGE_SAMPLE_COUNT)
         self.assertEqual(overall.minimum, 0.0)
         self.assertEqual(overall.p05, 0.0)
-        self.assertEqual(overall.p25, self.EXPECTED_COVERAGE_P25)
-        self.assertEqual(overall.median, self.EXPECTED_COVERAGE_MEDIAN)
-        self.assertEqual(overall.p75, self.EXPECTED_COVERAGE_P75)
+        self.assertEqual(overall.p25, INTENT_EXTERNAL_EXPECTED_COVERAGE_P25)
+        self.assertEqual(overall.median, INTENT_EXTERNAL_EXPECTED_COVERAGE_MEDIAN)
+        self.assertEqual(overall.p75, INTENT_EXTERNAL_EXPECTED_COVERAGE_P75)
         self.assertEqual(overall.p95, 1.0)
         self.assertEqual(overall.maximum, 1.0)
-        self.assertEqual(overall.mean, self.EXPECTED_COVERAGE_MEDIAN)
+        self.assertEqual(overall.mean, INTENT_EXTERNAL_EXPECTED_COVERAGE_MEDIAN)
         self.assertEqual(overall.zero_coverage_samples, 1)
         self.assertEqual(overall.full_coverage_samples, 1)
-        self.assertEqual(diagnostics["label_negative"].samples, self.EXPECTED_COVERAGE_HALF_COUNT)
-        self.assertEqual(diagnostics["label_positive"].samples, self.EXPECTED_COVERAGE_HALF_COUNT)
+        self.assertEqual(diagnostics["label_negative"].samples, INTENT_EXTERNAL_EXPECTED_COVERAGE_PER_LABEL_COUNT)
+        self.assertEqual(diagnostics["label_positive"].samples, INTENT_EXTERNAL_EXPECTED_COVERAGE_PER_LABEL_COUNT)
         self.assertEqual(
-            diagnostics["direction_0_to_1"].samples, self.EXPECTED_COVERAGE_HALF_COUNT
+            diagnostics["direction_0_to_1"].samples, INTENT_EXTERNAL_EXPECTED_COVERAGE_PER_LABEL_COUNT
         )
         self.assertEqual(
-            diagnostics["direction_1_to_0"].samples, self.EXPECTED_COVERAGE_HALF_COUNT
+            diagnostics["direction_1_to_0"].samples, INTENT_EXTERNAL_EXPECTED_COVERAGE_PER_LABEL_COUNT
         )
-        self.assertEqual(diagnostics["trigger_space"].samples, self.EXPECTED_COVERAGE_SAMPLE_COUNT)
+        self.assertEqual(diagnostics["trigger_space"].samples, INTENT_EXTERNAL_EXPECTED_COVERAGE_SAMPLE_COUNT)
         self.assertNotIn("trigger_pause", diagnostics)
         with self.assertRaisesRegex(ValueError, "finite"):
             coverage_diagnostics((replace(rows[0], coverage=math.nan),))
@@ -4120,7 +4109,7 @@ class ExternalEvaluationTests(unittest.TestCase):
                 self.assertEqual(
                     overall[profile.name][trigger],
                     ConfusionMatrix(
-                        self.PERFECT_CONFUSION_COUNT, 0, 0, self.PERFECT_CONFUSION_COUNT
+                        INTENT_PERFECT_CONFUSION_COUNT, 0, 0, INTENT_PERFECT_CONFUSION_COUNT
                     ),
                 )
                 self.assertEqual(
@@ -4129,7 +4118,7 @@ class ExternalEvaluationTests(unittest.TestCase):
                 )
 
         neutral_predictions = tuple(
-            ModelPredictionRow(example, True, self.NEUTRAL_PREDICTION_LOGIT, 1.0)
+            ModelPredictionRow(example, True, INTENT_EXTERNAL_NEUTRAL_PREDICTION_LOGIT, 1.0)
             for example in examples
         )
         reused_spy = SpyIntentModel()
@@ -4201,7 +4190,7 @@ class ExternalEvaluationTests(unittest.TestCase):
                 locale,
                 group,
                 str(metadata["logical_path"]),
-                "0" * SHA256_HEX_LENGTH,
+                "0" * SHA256_HEX_CHARACTERS,
                 1,
                 str(metadata["license_declaration"]),
                 str(metadata["license_evidence"]),
@@ -4309,13 +4298,13 @@ class ExternalEvaluationTests(unittest.TestCase):
             )
             training_language_scorer: dict[str, object] = {
                 "kind": "train-only-character-ngram",
-                "algorithm_version": self.TRAIN_ONLY_SCORER_ALGORITHM_VERSION,
-                "ngram_orders": list(self.TRAIN_ONLY_NGRAM_ORDERS),
+                "algorithm_version": INTENT_TRAIN_ONLY_SCORER_ALGORITHM_VERSION,
+                "ngram_orders": list(INTENT_TRAIN_ONLY_SCORER_NGRAM_ORDERS),
                 "score_mode": "character-ngram-only",
                 "spellcheck_enabled": False,
                 "word_counts_by_group": {"0": 1, "1": 1},
                 "excluded_quarantined_identities": 0,
-                "source_sha256": "3" * SHA256_HEX_LENGTH,
+                "source_sha256": "3" * SHA256_HEX_CHARACTERS,
             }
             embedded["training_language_scorer"] = training_language_scorer
             hard_negative_provenance = (
@@ -4331,7 +4320,7 @@ class ExternalEvaluationTests(unittest.TestCase):
                 profile.name: per_trigger
                 for profile in CONTEXT_STRESS_PROFILES
             }
-            threshold_logits = {trigger: self.FIXTURE_THRESHOLD_LOGIT for trigger in TRIGGERS}
+            threshold_logits = {trigger: INTENT_EXTERNAL_FIXTURE_THRESHOLD_LOGIT for trigger in TRIGGERS}
             selections = {
                 trigger: ThresholdSelection(
                     trigger,
@@ -4342,7 +4331,7 @@ class ExternalEvaluationTests(unittest.TestCase):
                 for trigger in TRIGGERS
             }
             safety_audit = GuardedSafetyAudit(
-                samples=len(TRIGGERS) * self.SAFETY_SAMPLE_MULTIPLIER,
+                samples=len(TRIGGERS) * INTENT_SAFETY_SAMPLE_MULTIPLIER,
                 protected_samples=len(TRIGGERS),
                 lexical_collision_samples=len(TRIGGERS),
                 triggers=TRIGGERS,
@@ -4350,7 +4339,7 @@ class ExternalEvaluationTests(unittest.TestCase):
                 lexical_collision_triggers=TRIGGERS,
                 failures=(),
             )
-            veto = VetoSelection(-1.0, self.VETO_SELECTION_SAMPLE_COUNT, 0, 0.0)
+            veto = VetoSelection(-1.0, INTENT_VETO_SELECTION_SAMPLE_COUNT, 0, 0.0)
             embedded["thresholds"] = {
                 trigger: {
                     "global_logit_margin": 0.0,
@@ -4396,7 +4385,7 @@ class ExternalEvaluationTests(unittest.TestCase):
             embedded["quality_gates_passed"] = True
             fixture_model_parameters: dict[str, object] = {
                 "dimension": config_value.dimension,
-                "payload_sha256": "1" * SHA256_HEX_LENGTH,
+                "payload_sha256": "1" * SHA256_HEX_CHARACTERS,
                 "weight_scale_hex": (1.0).hex(),
                 "bias_hex": (0.0).hex(),
                 "platt_calibration_hex": {
@@ -4516,7 +4505,7 @@ class ExternalEvaluationTests(unittest.TestCase):
             ).hexdigest()
             embedded["build_provenance_sha256"] = build_provenance_sha256
             model_version = (
-                "intent-v1-" + build_provenance_sha256[: self.MODEL_VERSION_HASH_PREFIX_LENGTH]
+                "intent-v1-" + build_provenance_sha256[: VERSION_HASH_CHARACTERS]
             )
             manifest = {
                 **embedded,
@@ -4528,7 +4517,7 @@ class ExternalEvaluationTests(unittest.TestCase):
                 "checksum": artifact_digest,
                 "model_version": model_version,
                 "dimension": config_value.dimension,
-                "payload_sha256": "1" * SHA256_HEX_LENGTH,
+                "payload_sha256": "1" * SHA256_HEX_CHARACTERS,
                 "weight_scale": 1.0,
                 "bias": 0.0,
                 "platt_calibration": {
@@ -4623,7 +4612,7 @@ class ExternalEvaluationTests(unittest.TestCase):
             )
 
             tampered_thresholds = dict(threshold_logits)
-            tampered_thresholds["space"] += self.THRESHOLD_TAMPER_DELTA
+            tampered_thresholds["space"] += INTENT_EXTERNAL_THRESHOLD_TAMPER_DELTA
             tampered_model = cast(
                 LinearNgramModel,
                 SimpleNamespace(
@@ -4655,7 +4644,7 @@ class ExternalEvaluationTests(unittest.TestCase):
             tampered_payload_model = cast(
                 LinearNgramModel,
                 SimpleNamespace(
-                    **{**common, "payload_sha256": "2" * SHA256_HEX_LENGTH},
+                    **{**common, "payload_sha256": "2" * SHA256_HEX_CHARACTERS},
                     membership_seed=config_value.membership_hash_seed,
                 ),
             )
@@ -4685,7 +4674,7 @@ class ExternalEvaluationTests(unittest.TestCase):
             tampered_veto_model = cast(
                 LinearNgramModel,
                 SimpleNamespace(
-                    **{**common, "veto_threshold": veto.raw_logit - self.VETO_TAMPER_DELTA},
+                    **{**common, "veto_threshold": veto.raw_logit - INTENT_EXTERNAL_VETO_TAMPER_DELTA},
                     membership_seed=config_value.membership_hash_seed,
                 ),
             )
@@ -4788,9 +4777,9 @@ class ExternalEvaluationTests(unittest.TestCase):
                 checks_for_gate_evidence({"quality_gates_passed": 1})
 
             for metadata_field, tampered_value in (
-                ("training", {"bias": self.TAMPERED_METADATA_VALUE}),
+                ("training", {"bias": INTENT_TAMPERED_METADATA_VALUE}),
                 ("quantization", {"format": "tampered"}),
-                ("calibration", {"slope": self.TAMPERED_METADATA_VALUE}),
+                ("calibration", {"slope": INTENT_TAMPERED_METADATA_VALUE}),
             ):
                 with self.subTest(sealed_metadata=metadata_field):
                     metadata_checks = checks_for_gate_evidence(
@@ -4835,7 +4824,7 @@ class ExternalEvaluationTests(unittest.TestCase):
 
             mismatching_scorer = {
                 **training_language_scorer,
-                "source_sha256": "4" * SHA256_HEX_LENGTH,
+                "source_sha256": "4" * SHA256_HEX_CHARACTERS,
             }
             scorer_checks = verify_provenance(
                 model=matching,
@@ -4877,7 +4866,7 @@ class ExternalEvaluationTests(unittest.TestCase):
 
             stale_toolchain = {
                 **cast(dict[str, object], embedded["toolchain"]),
-                "trainer_sha256": "0" * SHA256_HEX_LENGTH,
+                "trainer_sha256": "0" * SHA256_HEX_CHARACTERS,
             }
             stale_embedded = {**embedded, "toolchain": stale_toolchain}
             stale_manifest = {
@@ -4993,12 +4982,12 @@ class ExternalEvaluationTests(unittest.TestCase):
                 hard_guard.examples,
                 0,
             )
-            self.assertEqual(hard_guard_result.samples, self.EXPECTED_HARD_GUARD_SAMPLES)
+            self.assertEqual(hard_guard_result.samples, INTENT_EXTERNAL_EXPECTED_HARD_GUARD_SAMPLES)
             self.assertEqual(
-                hard_guard_result.model_evaluated_samples, self.EXPECTED_HARD_GUARD_MODEL_EVALUATED
+                hard_guard_result.model_evaluated_samples, INTENT_EXTERNAL_EXPECTED_HARD_GUARD_MODEL_EVALUATED
             )
             self.assertEqual(hard_guard_result.negative_model_evaluated, 0)
-            self.assertEqual(len(hard_guard_spy.inputs), self.EXPECTED_HARD_GUARD_MODEL_EVALUATED)
+            self.assertEqual(len(hard_guard_spy.inputs), INTENT_EXTERNAL_EXPECTED_HARD_GUARD_MODEL_EVALUATED)
 
             unknown_first = build_unknown_typo_disjoint_corpus(
                 {0: set(), 1: set()},
@@ -5019,7 +5008,7 @@ class ExternalEvaluationTests(unittest.TestCase):
             )
             self.assertEqual(unknown_first.words_by_group, {0: 1, 1: 1})
             self.assertEqual(
-                len(unknown_first.examples), self.UNKNOWN_TYPO_EXAMPLES_PER_TRIGGER * len(TRIGGERS)
+                len(unknown_first.examples), INTENT_EXTERNAL_UNKNOWN_TYPO_EXAMPLES_PER_TRIGGER * len(TRIGGERS)
             )
             self.assertEqual(
                 {item.label for item in unknown_first.examples},
@@ -5044,14 +5033,14 @@ class ExternalEvaluationTests(unittest.TestCase):
             )
             self.assertEqual(
                 unknown_result.model_evaluated_samples,
-                self.UNKNOWN_TYPO_EXAMPLES_PER_TRIGGER * len(TRIGGERS),
+                INTENT_EXTERNAL_UNKNOWN_TYPO_EXAMPLES_PER_TRIGGER * len(TRIGGERS),
             )
             self.assertEqual(
                 unknown_result.negative_model_evaluated,
-                self.UNKNOWN_TYPO_NEGATIVE_EXAMPLES_PER_TRIGGER * len(TRIGGERS),
+                INTENT_EXTERNAL_UNKNOWN_TYPO_NEGATIVE_EXAMPLES_PER_TRIGGER * len(TRIGGERS),
             )
             self.assertEqual(
-                len(unknown_spy.inputs), self.UNKNOWN_TYPO_EXAMPLES_PER_TRIGGER * len(TRIGGERS)
+                len(unknown_spy.inputs), INTENT_EXTERNAL_UNKNOWN_TYPO_EXAMPLES_PER_TRIGGER * len(TRIGGERS)
             )
             raw_metrics = prediction_metrics(
                 predict_model_examples(
@@ -5061,8 +5050,8 @@ class ExternalEvaluationTests(unittest.TestCase):
                 )
             )
             for metrics in raw_metrics.values():
-                self.assertEqual(metrics.false_positive, self.EXPECTED_RAW_METRICS_COUNT)
-                self.assertEqual(metrics.true_positive, self.EXPECTED_RAW_METRICS_COUNT)
+                self.assertEqual(metrics.false_positive, INTENT_EXTERNAL_EXPECTED_RAW_METRICS_COUNT)
+                self.assertEqual(metrics.true_positive, INTENT_EXTERNAL_EXPECTED_RAW_METRICS_COUNT)
 
     def test_unknown_typo_corpus_excludes_runtime_inapplicable_deletions(
         self,
@@ -5094,7 +5083,7 @@ class ExternalEvaluationTests(unittest.TestCase):
                     len(LanguageModel.normalize(item.original)),
                     len(LanguageModel.normalize(item.alternative)),
                 )
-                >= self.MINIMUM_APPLICABLE_DELETION_LENGTH
+                >= INTENT_EXTERNAL_MINIMUM_APPLICABLE_DELETION_LENGTH
                 for item in corpus.examples
             )
         )
@@ -5237,15 +5226,15 @@ class ExternalEvaluationTests(unittest.TestCase):
                     (replace(protected, label=True),),
                 )
         self.assertTrue(LanguageDetector.is_protected_token(protected_token))
-        self.assertEqual(policy.samples, self.EXPECTED_SAFETY_POLICY_SAMPLES)
+        self.assertEqual(policy.samples, INTENT_EXTERNAL_EXPECTED_SAFETY_POLICY_SAMPLES)
         self.assertEqual(policy.protected_samples, 1)
         self.assertEqual(policy.lexical_collision_samples, 1)
-        self.assertEqual(policy.pre_model_guarded_samples, self.EXPECTED_SAFETY_POLICY_SAMPLES)
+        self.assertEqual(policy.pre_model_guarded_samples, INTENT_EXTERNAL_EXPECTED_SAFETY_POLICY_SAMPLES)
         self.assertEqual(
-            policy.expected_pre_model_guard_samples, self.EXPECTED_SAFETY_POLICY_SAMPLES
+            policy.expected_pre_model_guard_samples, INTENT_EXTERNAL_EXPECTED_SAFETY_POLICY_SAMPLES
         )
         self.assertEqual(
-            policy.expected_pre_model_guarded_samples, self.EXPECTED_SAFETY_POLICY_SAMPLES
+            policy.expected_pre_model_guarded_samples, INTENT_EXTERNAL_EXPECTED_SAFETY_POLICY_SAMPLES
         )
         self.assertEqual(policy.model_evaluated_samples, 0)
         self.assertEqual(policy.guard_failure_samples, 0)
@@ -5257,8 +5246,8 @@ class ExternalEvaluationTests(unittest.TestCase):
             (collision, protected),
             scorers={0: english, 1: russian},
         )
-        self.assertEqual(raw_metrics["space"].false_positive, self.EXPECTED_SAFETY_POLICY_SAMPLES)
-        self.assertEqual(len(model.inputs), self.EXPECTED_SAFETY_POLICY_SAMPLES)
+        self.assertEqual(raw_metrics["space"].false_positive, INTENT_EXTERNAL_EXPECTED_SAFETY_POLICY_SAMPLES)
+        self.assertEqual(len(model.inputs), INTENT_EXTERNAL_EXPECTED_SAFETY_POLICY_SAMPLES)
 
     def test_production_context_profiles_are_exact_and_cache_is_policy_invariant(
         self,
@@ -5274,9 +5263,9 @@ class ExternalEvaluationTests(unittest.TestCase):
         }
         self.assertEqual(CONTEXT_SCORE_MINIMUM, 0.0)
         self.assertEqual(CONTEXT_SCORE_MAXIMUM, 1.0)
-        self.assertEqual(CONTEXT_DELTA_MULTIPLIER, self.EXPECTED_CONTEXT_DELTA_MULTIPLIER)
-        self.assertEqual(CONTEXT_TARGET_GROUP_BONUS, self.EXPECTED_CONTEXT_TARGET_GROUP_BONUS)
-        self.assertEqual(CONTEXT_SOURCE_GROUP_PENALTY, self.EXPECTED_CONTEXT_SOURCE_GROUP_PENALTY)
+        self.assertEqual(CONTEXT_DELTA_MULTIPLIER, EXPECTED_INTENT_CONTEXT_DELTA_MULTIPLIER)
+        self.assertEqual(CONTEXT_TARGET_GROUP_BONUS, EXPECTED_INTENT_CONTEXT_TARGET_GROUP_BONUS)
+        self.assertEqual(CONTEXT_SOURCE_GROUP_PENALTY, EXPECTED_INTENT_CONTEXT_SOURCE_GROUP_PENALTY)
         self.assertEqual(
             {profile.name: profile.expected_delta.hex() for profile in PRODUCTION_CONTEXT_PROFILES},
             expected_hex,
@@ -5451,10 +5440,10 @@ class ExternalEvaluationTests(unittest.TestCase):
                 (candidates[-1],),
                 language_models=scorers,
             )
-        invalid_group = replace(candidates[0], source_group=self.INVALID_SOURCE_GROUP)
+        invalid_group = replace(candidates[0], source_group=UNSUPPORTED_LAYOUT_GROUP)
         with self.assertRaisesRegex(ValueError, "invalid source group"):
             select_source_known_negative_examples(
-                (invalid_group, candidates[self.THIRD_CANDIDATE_INDEX]),
+                (invalid_group, candidates[INTENT_EXTERNAL_THIRD_CANDIDATE_INDEX]),
                 language_models=scorers,
             )
         with self.assertRaisesRegex(ValueError, "cover groups 0 and 1"):
@@ -5668,8 +5657,8 @@ class ExternalEvaluationTests(unittest.TestCase):
 
         weak_wilson = production_context_ensemble_gate_breakdown(
             config(
-                threshold_max_false_positive_rate=self.STRICT_FALSE_POSITIVE_RATE,
-                pause_threshold_max_false_positive_rate=self.STRICT_FALSE_POSITIVE_RATE,
+                threshold_max_false_positive_rate=INTENT_STRICT_FALSE_POSITIVE_RATE,
+                pause_threshold_max_false_positive_rate=INTENT_STRICT_FALSE_POSITIVE_RATE,
                 test_minimum_precision=0.0,
                 test_minimum_specificity=0.0,
             ),
@@ -5875,7 +5864,7 @@ class ExternalEvaluationTests(unittest.TestCase):
                 if not item.label
             }
             negative_rows = tuple(negative_by_signature.values())
-            self.assertEqual(len(negative_rows), self.EXPECTED_NEGATIVE_ROWS)
+            self.assertEqual(len(negative_rows), INTENT_EXTERNAL_EXPECTED_NEGATIVE_ROWS)
             train_claim = replace(negative_rows[0], safety=False)
             safety_claim = replace(negative_rows[1], safety=True)
             pair = LayoutPair()
@@ -5961,15 +5950,15 @@ class ExternalEvaluationTests(unittest.TestCase):
         strong = self.STRONG_SYMMETRIC_METRICS
         metrics = {trigger: strong for trigger in TRIGGERS}
         safety_metrics = {
-            trigger: ConfusionMatrix(0, 0, self.SAFETY_TRIGGER_SAMPLE_COUNT, 0)
+            trigger: ConfusionMatrix(0, 0, INTENT_EXTERNAL_SAFETY_TRIGGER_SAMPLE_COUNT, 0)
             for trigger in TRIGGERS
         }
-        safety_sample_count = self.SAFETY_TRIGGER_SAMPLE_COUNT * len(TRIGGERS)
+        safety_sample_count = INTENT_EXTERNAL_SAFETY_TRIGGER_SAMPLE_COUNT * len(TRIGGERS)
         safety_policy = SafetyPolicyEvaluation(
             per_trigger=safety_metrics,
             samples=safety_sample_count,
-            protected_samples=self.SAFETY_TRIGGER_SAMPLE_COUNT,
-            lexical_collision_samples=safety_sample_count - self.SAFETY_TRIGGER_SAMPLE_COUNT,
+            protected_samples=INTENT_EXTERNAL_SAFETY_TRIGGER_SAMPLE_COUNT,
+            lexical_collision_samples=safety_sample_count - INTENT_EXTERNAL_SAFETY_TRIGGER_SAMPLE_COUNT,
             pre_model_guarded_samples=safety_sample_count,
             expected_pre_model_guard_samples=safety_sample_count,
             expected_pre_model_guarded_samples=safety_sample_count,
@@ -6056,8 +6045,8 @@ class ExternalEvaluationTests(unittest.TestCase):
             0,
             0,
             0,
-            self.EXPECTED_HARD_GUARD_SAMPLES,
-            self.EXPECTED_HARD_GUARD_MODEL_EVALUATED,
+            INTENT_EXTERNAL_EXPECTED_HARD_GUARD_SAMPLES,
+            INTENT_EXTERNAL_EXPECTED_HARD_GUARD_MODEL_EVALUATED,
             0,
         )
         unknown = PredictionComparison(
@@ -6067,25 +6056,25 @@ class ExternalEvaluationTests(unittest.TestCase):
             0,
             0,
             0,
-            self.UNKNOWN_TYPO_EXAMPLES_PER_TRIGGER * len(TRIGGERS),
-            self.UNKNOWN_TYPO_EXAMPLES_PER_TRIGGER * len(TRIGGERS),
-            self.UNKNOWN_TYPO_NEGATIVE_EXAMPLES_PER_TRIGGER * len(TRIGGERS),
+            INTENT_EXTERNAL_UNKNOWN_TYPO_EXAMPLES_PER_TRIGGER * len(TRIGGERS),
+            INTENT_EXTERNAL_UNKNOWN_TYPO_EXAMPLES_PER_TRIGGER * len(TRIGGERS),
+            INTENT_EXTERNAL_UNKNOWN_TYPO_NEGATIVE_EXAMPLES_PER_TRIGGER * len(TRIGGERS),
         )
         source_known = PredictionComparison(
-            ConfusionMatrix(0, 0, self.SOURCE_KNOWN_SAMPLE_COUNT, 0),
-            ConfusionMatrix(0, 0, self.SOURCE_KNOWN_SAMPLE_COUNT, 0),
+            ConfusionMatrix(0, 0, INTENT_EXTERNAL_SOURCE_KNOWN_SAMPLE_COUNT, 0),
+            ConfusionMatrix(0, 0, INTENT_EXTERNAL_SOURCE_KNOWN_SAMPLE_COUNT, 0),
             0,
             0,
             0,
             0,
-            self.SOURCE_KNOWN_SAMPLE_COUNT,
+            INTENT_EXTERNAL_SOURCE_KNOWN_SAMPLE_COUNT,
             0,
             0,
         )
         arguments: dict[str, object] = {
             "config": config(
-                threshold_max_false_positive_rate=self.STRICT_FALSE_POSITIVE_RATE,
-                pause_threshold_max_false_positive_rate=self.STRICT_FALSE_POSITIVE_RATE,
+                threshold_max_false_positive_rate=INTENT_STRICT_FALSE_POSITIVE_RATE,
+                pause_threshold_max_false_positive_rate=INTENT_STRICT_FALSE_POSITIVE_RATE,
             ),
             "external_policy": self.external_policy(
                 lexical_corpus,
@@ -6197,7 +6186,7 @@ class ExternalEvaluationTests(unittest.TestCase):
         self.assertFalse(schema_gates["external_policy_schema"])
         arguments["external_policy"] = replace(
             baseline_policy,
-            minimum_words_per_group=self.UNDERSIZED_MINIMUM_WORDS_PER_GROUP,
+            minimum_words_per_group=INTENT_EXTERNAL_UNDERSIZED_MINIMUM_WORDS_PER_GROUP,
         )
         self.assertFalse(
             _strict_gates(**arguments)[  # type: ignore[arg-type]
@@ -6218,7 +6207,7 @@ class ExternalEvaluationTests(unittest.TestCase):
             wrong_hunspell[0],
             dictionary=replace(
                 wrong_hunspell[0].dictionary,
-                sha256="f" * SHA256_HEX_LENGTH,
+                sha256="f" * SHA256_HEX_CHARACTERS,
             ),
         )
         arguments["external_policy"] = replace(
@@ -6249,7 +6238,7 @@ class ExternalEvaluationTests(unittest.TestCase):
         )
         arguments["external_policy"] = replace(
             baseline_policy,
-            lexical_disjoint_corpus_sha256="a" * SHA256_HEX_LENGTH,
+            lexical_disjoint_corpus_sha256="a" * SHA256_HEX_CHARACTERS,
         )
         self.assertFalse(
             _strict_gates(**arguments)[  # type: ignore[arg-type]
@@ -6258,7 +6247,7 @@ class ExternalEvaluationTests(unittest.TestCase):
         )
         arguments["external_policy"] = replace(
             baseline_policy,
-            unknown_typo_holdout_corpus_sha256="b" * SHA256_HEX_LENGTH,
+            unknown_typo_holdout_corpus_sha256="b" * SHA256_HEX_CHARACTERS,
         )
         self.assertFalse(
             _strict_gates(**arguments)[  # type: ignore[arg-type]
@@ -6277,20 +6266,20 @@ class ExternalEvaluationTests(unittest.TestCase):
         arguments["safety"] = replace(
             safety_policy,
             per_trigger=no_safety_negatives,
-            samples=safety_sample_count - self.SAFETY_TRIGGER_SAMPLE_COUNT,
-            protected_samples=self.SAFETY_TRIGGER_SAMPLE_COUNT,
+            samples=safety_sample_count - INTENT_EXTERNAL_SAFETY_TRIGGER_SAMPLE_COUNT,
+            protected_samples=INTENT_EXTERNAL_SAFETY_TRIGGER_SAMPLE_COUNT,
             lexical_collision_samples=(
                 safety_sample_count
-                - self.SAFETY_TRIGGER_SAMPLE_COUNT
-                - self.SAFETY_TRIGGER_SAMPLE_COUNT
+                - INTENT_EXTERNAL_SAFETY_TRIGGER_SAMPLE_COUNT
+                - INTENT_EXTERNAL_SAFETY_TRIGGER_SAMPLE_COUNT
             ),
-            pre_model_guarded_samples=safety_sample_count - self.SAFETY_TRIGGER_SAMPLE_COUNT,
-            expected_pre_model_guard_samples=safety_sample_count - self.SAFETY_TRIGGER_SAMPLE_COUNT,
+            pre_model_guarded_samples=safety_sample_count - INTENT_EXTERNAL_SAFETY_TRIGGER_SAMPLE_COUNT,
+            expected_pre_model_guard_samples=safety_sample_count - INTENT_EXTERNAL_SAFETY_TRIGGER_SAMPLE_COUNT,
             expected_pre_model_guarded_samples=(
-                safety_sample_count - self.SAFETY_TRIGGER_SAMPLE_COUNT
+                safety_sample_count - INTENT_EXTERNAL_SAFETY_TRIGGER_SAMPLE_COUNT
             ),
             guard_failure_samples=0,
-            reason_counts={"guarded": safety_sample_count - self.SAFETY_TRIGGER_SAMPLE_COUNT},
+            reason_counts={"guarded": safety_sample_count - INTENT_EXTERNAL_SAFETY_TRIGGER_SAMPLE_COUNT},
         )
         empty_safety = _strict_gates(**arguments)  # type: ignore[arg-type]
         self.assertFalse(empty_safety["safety"])
@@ -6313,7 +6302,7 @@ class ExternalEvaluationTests(unittest.TestCase):
         weak_sample = dict(metrics)
         weak_sample["space"] = self.WEAK_SAMPLE_METRICS
         self.assertGreater(
-            wilson_upper_bound(0, self.WEAK_SAMPLE_SIZE), self.STRICT_FALSE_POSITIVE_RATE
+            wilson_upper_bound(0, INTENT_WEAK_SAMPLE_SIZE), INTENT_STRICT_FALSE_POSITIVE_RATE
         )
         arguments["test"] = weak_sample
         weak_sealed = _strict_gates(**arguments)  # type: ignore[arg-type]
@@ -6322,7 +6311,7 @@ class ExternalEvaluationTests(unittest.TestCase):
 
         arguments["unknown_typo_disjoint"] = replace(
             unknown_corpus,
-            exclusion_signature_sha256="0" * SHA256_HEX_LENGTH,
+            exclusion_signature_sha256="0" * SHA256_HEX_CHARACTERS,
         )
         wrong_provenance = _strict_gates(**arguments)  # type: ignore[arg-type]
         self.assertFalse(
@@ -6355,90 +6344,8 @@ class ExternalEvaluationTests(unittest.TestCase):
 
 
 class ArtifactAndStatisticsTests(unittest.TestCase):
-    STRONG_SYMMETRIC_METRICS = ConfusionMatrix(10_000, 0, 10_000, 0)
-    FIXTURE_VETO_THRESHOLD = 2.0
-    VETO_SELECTION_SAMPLE_COUNT = 100
-    SAFETY_SAMPLE_MULTIPLIER = 2
-    UNSUPPORTED_MANIFEST_SCHEMA_VERSION = 2
-    PRESEALED_VERIFY_CALL_NUMBERS = (1, 3)
-    FULL_VERIFY_CALL_NUMBER = 2
-    PASSED_FULL_VERIFY_CALL_NUMBER = 4
-    EXPECTED_DIAGNOSTIC_COUNT = 2
-    NEGATIVE_MODEL_LOGIT = 2.0
-    CONCURRENT_CLAIMANTS = 2
-    BARRIER_WAIT_TIMEOUT_SECONDS = 5.0
-    SEALED_CANDIDATE_QUANTIZE_WEIGHTS = {2: 1.5, 9: -0.5}
-    MODERATE_SYMMETRIC_METRICS = ConfusionMatrix(100, 0, 100, 0)
-    SEALED_CANDIDATE_THRESHOLD_LOGIT = 0.25
-    SEALED_CANDIDATE_CALIBRATION_SCALE = 1.2
-    SEALED_CANDIDATE_CALIBRATION_BIAS_MAGNITUDE = 0.3
-    SEALED_CANDIDATE_SAMPLES_PER_DIRECTION = 100
-    SEALED_CANDIDATE_POSITIVES_PER_DIRECTION = 50
-    SEALED_CANDIDATE_FINGERPRINTS = frozenset({1, 2, 3})
-    SEALED_CANDIDATE_BIAS = 0.1
-    SEALED_CANDIDATE_TRAINING_SEED = 17
-    TAMPERED_TRAINING_SEED = 18
-    TAMPERED_METADATA_VALUE = 999.0
-    PRECISE_TAMPERED_LOGIT = 0.25000000000000006
-    TAMPERED_FINGERPRINTS = frozenset({1, 2, 4})
-    TAMPERED_VETOED_POSITIVE_SAMPLES = 2
-    TAMPERED_VETO_FALSE_NEGATIVE_RATE = 0.02
-    TAMPERED_BIAS_HEX_VALUE = 0.2
-    UNBOUNDED_LOGIT = 1_000_001.0
-    INVALID_QUANTIZED_WEIGHT = 32768
-    UINT64_BIT_WIDTH = 64
-    PATCHED_MAX_SUPPORTED_FINGERPRINTS = 2
-    PATCHED_MAX_PAYLOAD_BYTES = 512
-    PATCHED_BYTE_LIMIT = 4
-    RUSSIAN_INPUT_INDEX = 2
-    LICENSE_INPUT_INDEX = 3
-    HARD_NEGATIVE_INPUT_INDEX = 4
-    EXPECTED_PRODUCTION_MODEL_DIMENSION = 2_097_152
-    QUANTIZED_WEIGHT_INDEX_A = 2
-    QUANTIZED_WEIGHT_INDEX_B = 9
-    SCALE_HALVING_DIVISOR = 2.0
-    QUANTIZED_SCORER_BIAS = 0.2
-    QUANTIZATION_TEST_THRESHOLD_LOGIT = 0.6
-    QUANTIZATION_VETO_THRESHOLD = 3.0
-    QUANTIZATION_PLATT_SCALE = 1.1
-    QUANTIZATION_PLATT_BIAS_MAGNITUDE = 0.1
-    QUANTIZATION_TEST_METRIC_COUNT = 10
-    EXPECTED_CONFIG_SCHEMA_VERSION = 13
-    EXPECTED_CONFIG_MINIMUM_WORD_LENGTH = 5
-    EXPECTED_CONFIG_MINIMUM_WORDS_PER_GROUP = 5_000
-    EXPECTED_PRODUCTION_ROLE_COUNTS = {
-        "train": 3_500,
-        "development": 500,
-        "calibration": 500,
-        "threshold": 500,
-        "test": 0,
-    }
-    EXPECTED_PRODUCTION_TRAINING_EXAMPLE_WEIGHT = 3.0
-    EXPECTED_PRODUCTION_SELECTION_RECALLS = (0.956, 0.91, 0.91, 0.86)
-    EXPECTED_PRODUCTION_LOGIT_MARGIN_CAP = 2.0
-    MAX_PRESEAL_BYTES = 64 * 1024
-    EXPECTED_HARD_NEGATIVE_PRESEAL_SIGNATURE_COUNT = 10_000
-    EXPECTED_PRESEAL_WORDS_BY_GROUP = {"0": 5_000, "1": 5_000}
-    EXPECTED_PRESEAL_ROLE_WORDS_BY_GROUP = {
-        "train": {"0": 3_500, "1": 3_500},
-        "development": {"0": 500, "1": 500},
-        "calibration": {"0": 500, "1": 500},
-        "threshold": {"0": 500, "1": 500},
-    }
-    EXPECTED_PRESEAL_EXAMPLES_BY_ROLE = {
-        "train": 84_000,
-        "development": 12_000,
-        "calibration": 12_000,
-        "threshold": 12_000,
-    }
-    EXPECTED_SEALED_EXCLUSION_SIGNATURE_COUNT = 288_843
-    EXPECTED_COMBINED_EXCLUSION_SIGNATURE_COUNT = 298_843
-    WILSON_BOUND_TEST_SAMPLE_SIZE = 1_000
-    EXPECTED_WILSON_BOUND_AT_ZERO_FALSE_POSITIVES = 0.003826759
-    WILSON_BOUND_COMPARISON_PLACES = 8
-    WILSON_BOUND_TEST_FALSE_POSITIVES = 2
-    UNSUPPORTED_SCHEMA_VERSION = 2
-    UNDERSIZED_CONFIG_MINIMUM_WORDS_PER_GROUP = 4_999
+    STRONG_SYMMETRIC_METRICS = ConfusionMatrix(INTENT_STRONG_SAMPLE_SIZE, 0, INTENT_STRONG_SAMPLE_SIZE, 0)
+    MODERATE_SYMMETRIC_METRICS = ConfusionMatrix(INTENT_MODERATE_SAMPLE_SIZE, 0, INTENT_MODERATE_SAMPLE_SIZE, 0)
 
     def test_v6_rejection_receipt_is_complete_and_self_consistent(self) -> None:
         repository = Path(__file__).resolve().parents[1]
@@ -6546,9 +6453,9 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             trigger: ThresholdSelection(trigger, 0.0, strong, strong)
             for trigger in TRIGGERS
         }
-        veto = VetoSelection(-self.FIXTURE_VETO_THRESHOLD, self.VETO_SELECTION_SAMPLE_COUNT, 0, 0.0)
+        veto = VetoSelection(-INTENT_ARTIFACT_FIXTURE_VETO_THRESHOLD, INTENT_VETO_SELECTION_SAMPLE_COUNT, 0, 0.0)
         safety_audit = GuardedSafetyAudit(
-            self.SAFETY_SAMPLE_MULTIPLIER * len(TRIGGERS),
+            INTENT_SAFETY_SAMPLE_MULTIPLIER * len(TRIGGERS),
             len(TRIGGERS),
             len(TRIGGERS),
             TRIGGERS,
@@ -6571,21 +6478,21 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         )
         source_arguments = (
             LexiconSource(
-                "en_US", 0, "en.lm", "0" * SHA256_HEX_LENGTH, 1, "GPL-3+", "copyright"
+                "en_US", 0, "en.lm", "0" * SHA256_HEX_CHARACTERS, 1, "GPL-3+", "copyright"
             ),
             LexiconSource(
-                "ru_RU", 1, "ru.lm", "1" * SHA256_HEX_LENGTH, 1, "GPL-3+", "copyright"
+                "ru_RU", 1, "ru.lm", "1" * SHA256_HEX_CHARACTERS, 1, "GPL-3+", "copyright"
             ),
         )
         registry_path = root / training_config.sealed_evaluation.registry_path
         receipt = SealedEvaluationReceipt(
             1,
             SPLIT_NAMESPACE,
-            "a" * SHA256_HEX_LENGTH,
+            "a" * SHA256_HEX_CHARACTERS,
             config_digest,
-            "b" * SHA256_HEX_LENGTH,
+            "b" * SHA256_HEX_CHARACTERS,
             training_config.sealed_evaluation.registry_path,
-            "c" * SHA256_HEX_LENGTH,
+            "c" * SHA256_HEX_CHARACTERS,
             registry_path,
             b"receipt",
         )
@@ -6906,7 +6813,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             ),
             (
                 "future-schema",
-                {**baseline, "schema_version": self.UNSUPPORTED_MANIFEST_SCHEMA_VERSION},
+                {**baseline, "schema_version": INTENT_UNSUPPORTED_MANIFEST_SCHEMA_VERSION},
                 "unsupported model manifest schema",
             ),
             (
@@ -7161,13 +7068,13 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         def verify_phase(**_arguments: object) -> tuple[VerificationCheck, ...]:
             nonlocal verification_calls
             verification_calls += 1
-            if verification_calls in self.PRESEALED_VERIFY_CALL_NUMBERS:
+            if verification_calls in INTENT_PRESEALED_VERIFY_CALL_NUMBERS:
                 events.append("verify:presealed")
                 return presealed_checks
-            if verification_calls == self.FULL_VERIFY_CALL_NUMBER:
+            if verification_calls == INTENT_ARTIFACT_FULL_VERIFY_CALL_NUMBER:
                 events.append("verify:full")
                 return full_checks
-            if verification_calls == self.PASSED_FULL_VERIFY_CALL_NUMBER:
+            if verification_calls == INTENT_ARTIFACT_PASSED_FULL_VERIFY_CALL_NUMBER:
                 events.append("verify:full")
                 return passed_full_checks
             raise AssertionError("unexpected extra provenance verification")
@@ -7323,7 +7230,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                 json.loads(cast(str, call.args[0]))
                 for call in printer.call_args_list
             )
-            self.assertEqual(len(diagnostics), self.EXPECTED_DIAGNOSTIC_COUNT)
+            self.assertEqual(len(diagnostics), INTENT_ARTIFACT_EXPECTED_DIAGNOSTIC_COUNT)
             self.assertEqual(diagnostics[0]["phase"], "full_provenance")
             self.assertIs(diagnostics[0]["sealed_test_evaluated"], False)
             self.assertEqual(
@@ -7373,18 +7280,18 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         runtime_selection: dict[str, object] = {"passed": True}
         test_predictions = tuple(
             ModelPredictionRow(
-                item, item.label, 0.0 if item.label else -self.NEGATIVE_MODEL_LOGIT, 1.0
+                item, item.label, 0.0 if item.label else -INTENT_ARTIFACT_NEGATIVE_MODEL_LOGIT, 1.0
             )
             for item in rows["test"]
         )
         calibration_predictions = tuple(
             ModelPredictionRow(
-                item, item.label, 0.0 if item.label else -self.NEGATIVE_MODEL_LOGIT, 1.0
+                item, item.label, 0.0 if item.label else -INTENT_ARTIFACT_NEGATIVE_MODEL_LOGIT, 1.0
             )
             for item in rows["calibration"]
         )
         safety_predictions = tuple(
-            ModelPredictionRow(item, False, -self.NEGATIVE_MODEL_LOGIT, 1.0)
+            ModelPredictionRow(item, False, -INTENT_ARTIFACT_NEGATIVE_MODEL_LOGIT, 1.0)
             for item in safety_rows
         )
         strong = prediction_metrics(test_predictions)
@@ -7572,21 +7479,21 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         config_value = config()
         config_bytes = b'{"test":"sealed-registry"}\n'
         config_digest = hashlib.sha256(config_bytes).hexdigest()
-        dataset_digest = "a" * SHA256_HEX_LENGTH
+        dataset_digest = "a" * SHA256_HEX_CHARACTERS
         with tempfile.TemporaryDirectory() as temporary:
             (Path(temporary) / "model/intent_v1").mkdir(parents=True)
             config_path = Path(temporary) / "config.json"
             config_path.write_bytes(config_bytes)
             first = claim_sealed_evaluation(
                 config=config_value,
-                candidate_sha256="b" * SHA256_HEX_LENGTH,
+                candidate_sha256="b" * SHA256_HEX_CHARACTERS,
                 config_sha256=config_digest,
                 candidate_dataset_sha256=dataset_digest,
                 repository_root=Path(temporary),
             )
             repeated = claim_sealed_evaluation(
                 config=config_value,
-                candidate_sha256="b" * SHA256_HEX_LENGTH,
+                candidate_sha256="b" * SHA256_HEX_CHARACTERS,
                 config_sha256=config_digest,
                 candidate_dataset_sha256=dataset_digest,
                 repository_root=Path(temporary),
@@ -7598,7 +7505,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                     value=first.payload(),
                     expected_config_sha256=config_digest,
                     expected_candidate_dataset_sha256=dataset_digest,
-                    expected_candidate_sha256="b" * SHA256_HEX_LENGTH,
+                    expected_candidate_sha256="b" * SHA256_HEX_CHARACTERS,
                     repository_root=Path(temporary),
                 )
             )
@@ -7612,7 +7519,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             ):
                 claim_sealed_evaluation(
                     config=config_value,
-                    candidate_sha256="c" * SHA256_HEX_LENGTH,
+                    candidate_sha256="c" * SHA256_HEX_CHARACTERS,
                     config_sha256=config_digest,
                     candidate_dataset_sha256=dataset_digest,
                     repository_root=Path(temporary),
@@ -7626,7 +7533,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                     value=first.payload(),
                     expected_config_sha256=config_digest,
                     expected_candidate_dataset_sha256=dataset_digest,
-                    expected_candidate_sha256="b" * SHA256_HEX_LENGTH,
+                    expected_candidate_sha256="b" * SHA256_HEX_CHARACTERS,
                     repository_root=Path(temporary),
                 )
             )
@@ -7636,29 +7543,29 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "model/intent_v1").mkdir(parents=True)
-            barrier = Barrier(self.CONCURRENT_CLAIMANTS)
+            barrier = Barrier(INTENT_CONCURRENT_CLAIMANTS)
             original_stage = tim._stage_bytes
 
             def staged_together(destination: Path, data: bytes) -> Path:
                 staged = original_stage(destination, data)
-                barrier.wait(timeout=self.BARRIER_WAIT_TIMEOUT_SECONDS)
+                barrier.wait(timeout=INTENT_BARRIER_WAIT_TIMEOUT_SECONDS)
                 return staged
 
             def claim() -> SealedEvaluationReceipt:
                 return claim_sealed_evaluation(
                     config=config_value,
-                    candidate_sha256="f" * SHA256_HEX_LENGTH,
-                    config_sha256="e" * SHA256_HEX_LENGTH,
-                    candidate_dataset_sha256="d" * SHA256_HEX_LENGTH,
+                    candidate_sha256="f" * SHA256_HEX_CHARACTERS,
+                    config_sha256="e" * SHA256_HEX_CHARACTERS,
+                    candidate_dataset_sha256="d" * SHA256_HEX_CHARACTERS,
                     repository_root=root,
                 )
 
             with patch.object(
                 tim, "_stage_bytes", side_effect=staged_together
             ):
-                with ThreadPoolExecutor(max_workers=self.CONCURRENT_CLAIMANTS) as executor:
+                with ThreadPoolExecutor(max_workers=INTENT_CONCURRENT_CLAIMANTS) as executor:
                     receipts = tuple(
-                        executor.map(lambda _index: claim(), range(self.CONCURRENT_CLAIMANTS))
+                        executor.map(lambda _index: claim(), range(INTENT_CONCURRENT_CLAIMANTS))
                     )
             self.assertEqual(receipts[0].payload(), receipts[1].payload())
             self.assertFalse(
@@ -7668,12 +7575,12 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "model/intent_v1").mkdir(parents=True)
-            barrier = Barrier(self.CONCURRENT_CLAIMANTS)
+            barrier = Barrier(INTENT_CONCURRENT_CLAIMANTS)
             original_stage = tim._stage_bytes
 
             def stage_competitors(destination: Path, data: bytes) -> Path:
                 staged = original_stage(destination, data)
-                barrier.wait(timeout=self.BARRIER_WAIT_TIMEOUT_SECONDS)
+                barrier.wait(timeout=INTENT_BARRIER_WAIT_TIMEOUT_SECONDS)
                 return staged
 
             def competing_claim(
@@ -7683,8 +7590,8 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                     return claim_sealed_evaluation(
                         config=config_value,
                         candidate_sha256=candidate,
-                        config_sha256="e" * SHA256_HEX_LENGTH,
-                        candidate_dataset_sha256="d" * SHA256_HEX_LENGTH,
+                        config_sha256="e" * SHA256_HEX_CHARACTERS,
+                        candidate_dataset_sha256="d" * SHA256_HEX_CHARACTERS,
                         repository_root=root,
                     )
                 except RuntimeError as error:
@@ -7693,11 +7600,11 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             with patch.object(
                 tim, "_stage_bytes", side_effect=stage_competitors
             ):
-                with ThreadPoolExecutor(max_workers=self.CONCURRENT_CLAIMANTS) as executor:
+                with ThreadPoolExecutor(max_workers=INTENT_CONCURRENT_CLAIMANTS) as executor:
                     results = tuple(
                         executor.map(
                             competing_claim,
-                            ("a" * SHA256_HEX_LENGTH, "b" * SHA256_HEX_LENGTH),
+                            ("a" * SHA256_HEX_CHARACTERS, "b" * SHA256_HEX_CHARACTERS),
                         )
                     )
             winners = tuple(
@@ -7714,8 +7621,8 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             replay = claim_sealed_evaluation(
                 config=config_value,
                 candidate_sha256=winners[0].candidate_sha256,
-                config_sha256="e" * SHA256_HEX_LENGTH,
-                candidate_dataset_sha256="d" * SHA256_HEX_LENGTH,
+                config_sha256="e" * SHA256_HEX_CHARACTERS,
+                candidate_dataset_sha256="d" * SHA256_HEX_CHARACTERS,
                 repository_root=root,
             )
             self.assertEqual(replay.payload(), winners[0].payload())
@@ -7766,9 +7673,9 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                 ):
                     claim_sealed_evaluation(
                         config=config_value,
-                        candidate_sha256="f" * SHA256_HEX_LENGTH,
-                        config_sha256="e" * SHA256_HEX_LENGTH,
-                        candidate_dataset_sha256="d" * SHA256_HEX_LENGTH,
+                        candidate_sha256="f" * SHA256_HEX_CHARACTERS,
+                        config_sha256="e" * SHA256_HEX_CHARACTERS,
+                        candidate_dataset_sha256="d" * SHA256_HEX_CHARACTERS,
                         repository_root=root,
                     )
             self.assertFalse(registry.exists())
@@ -7785,9 +7692,9 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "unreadable"):
                 claim_sealed_evaluation(
                     config=config_value,
-                    candidate_sha256="f" * SHA256_HEX_LENGTH,
-                    config_sha256="e" * SHA256_HEX_LENGTH,
-                    candidate_dataset_sha256="d" * SHA256_HEX_LENGTH,
+                    candidate_sha256="f" * SHA256_HEX_CHARACTERS,
+                    config_sha256="e" * SHA256_HEX_CHARACTERS,
+                    candidate_dataset_sha256="d" * SHA256_HEX_CHARACTERS,
                     repository_root=root,
                 )
             self.assertEqual(registry.read_bytes(), partial)
@@ -7795,27 +7702,27 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
 
     def test_sealed_candidate_digest_binds_runtime_parameters(self) -> None:
         config_value = config()
-        quantized = quantize_weights(self.SEALED_CANDIDATE_QUANTIZE_WEIGHTS, TEST_MODEL_DIMENSION)
-        toolchain = capture_toolchain_snapshot("d" * SHA256_HEX_LENGTH)
+        quantized = quantize_weights(INTENT_SEALED_CANDIDATE_QUANTIZE_WEIGHTS, INTENT_TEST_DIMENSION)
+        toolchain = capture_toolchain_snapshot("d" * SHA256_HEX_CHARACTERS)
         strong = self.MODERATE_SYMMETRIC_METRICS
         thresholds = {
             trigger: ThresholdSelection(
-                trigger, self.SEALED_CANDIDATE_THRESHOLD_LOGIT, strong, strong
+                trigger, INTENT_ARTIFACT_SEALED_CANDIDATE_THRESHOLD_LOGIT, strong, strong
             )
             for trigger in TRIGGERS
         }
         calibration = directional_calibration(
-            self.SEALED_CANDIDATE_CALIBRATION_SCALE,
-            -self.SEALED_CANDIDATE_CALIBRATION_BIAS_MAGNITUDE,
-            samples_per_direction=self.SEALED_CANDIDATE_SAMPLES_PER_DIRECTION,
-            positives_per_direction=self.SEALED_CANDIDATE_POSITIVES_PER_DIRECTION,
+            INTENT_ARTIFACT_SEALED_CANDIDATE_CALIBRATION_SCALE,
+            -INTENT_ARTIFACT_SEALED_CANDIDATE_CALIBRATION_BIAS_MAGNITUDE,
+            samples_per_direction=INTENT_ARTIFACT_SEALED_CANDIDATE_SAMPLES_PER_DIRECTION,
+            positives_per_direction=INTENT_ARTIFACT_SEALED_CANDIDATE_POSITIVES_PER_DIRECTION,
         )
-        veto = VetoSelection(-self.FIXTURE_VETO_THRESHOLD, self.VETO_SELECTION_SAMPLE_COUNT, 0, 0.0)
+        veto = VetoSelection(-INTENT_ARTIFACT_FIXTURE_VETO_THRESHOLD, INTENT_VETO_SELECTION_SAMPLE_COUNT, 0, 0.0)
         model_parameters = training_candidate_model_parameters(
             config=config_value,
             quantized=quantized,
-            supported_fingerprints=self.SEALED_CANDIDATE_FINGERPRINTS,
-            bias=self.SEALED_CANDIDATE_BIAS,
+            supported_fingerprints=INTENT_SEALED_CANDIDATE_FINGERPRINTS,
+            bias=INTENT_ARTIFACT_SEALED_CANDIDATE_BIAS,
             calibration=calibration,
             thresholds=thresholds,
             veto=veto,
@@ -7836,11 +7743,11 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                 source_package={"name": "test"},
                 sources=(),
                 candidate_counts={"examples": {}},
-                variant_quarantine_sha256="f" * SHA256_HEX_LENGTH,
+                variant_quarantine_sha256="f" * SHA256_HEX_CHARACTERS,
                 training_language_scorer={"kind": "test"},
                 gate_policy={"policy": "test"},
                 training=(
-                    {"seed": self.SEALED_CANDIDATE_TRAINING_SEED}
+                    {"seed": INTENT_TEST_TRAINING_SEED}
                     if training is None
                     else training
                 ),
@@ -7855,7 +7762,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         arguments: dict[str, object] = {
             "split_namespace": SPLIT_NAMESPACE,
             "config_sha256": toolchain.config_sha256,
-            "candidate_dataset_sha256": "e" * SHA256_HEX_LENGTH,
+            "candidate_dataset_sha256": "e" * SHA256_HEX_CHARACTERS,
             "toolchain": asdict(toolchain),
             "training_language_scorer": {"kind": "test"},
             "model_parameters": model_parameters,
@@ -7870,13 +7777,13 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         baseline_metadata = candidate_metadata(model_parameters)
         for field_name, changed_value in (
             ("source_package", {"name": "tampered"}),
-            ("sources", [{"sha256": "0" * SHA256_HEX_LENGTH}]),
+            ("sources", [{"sha256": "0" * SHA256_HEX_CHARACTERS}]),
             ("candidate_counts", {"examples": {"train": 1}}),
             ("gate_policy", {"policy": "tampered"}),
-            ("training", {"seed": self.TAMPERED_TRAINING_SEED}),
+            ("training", {"seed": INTENT_TAMPERED_TRAINING_SEED}),
             ("quantization", {"format": "tampered"}),
-            ("calibration", {"slope": self.TAMPERED_METADATA_VALUE}),
-            ("veto_selection", {"raw_logit": self.TAMPERED_METADATA_VALUE}),
+            ("calibration", {"slope": INTENT_TAMPERED_METADATA_VALUE}),
+            ("veto_selection", {"raw_logit": INTENT_TAMPERED_METADATA_VALUE}),
             ("thresholds", {"tampered": True}),
             ("safety_guard_audit", {"failures": ["tampered"]}),
         ):
@@ -7894,14 +7801,14 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             changed_thresholds["space"],
             direction_logits={
                 **changed_thresholds["space"].runtime_logits(),
-                "0>1": self.PRECISE_TAMPERED_LOGIT,
+                "0>1": INTENT_ARTIFACT_PRECISE_TAMPERED_LOGIT,
             },
         )
         changed_model_parameters = training_candidate_model_parameters(
             config=config_value,
             quantized=quantized,
-            supported_fingerprints=self.SEALED_CANDIDATE_FINGERPRINTS,
-            bias=self.SEALED_CANDIDATE_BIAS,
+            supported_fingerprints=INTENT_SEALED_CANDIDATE_FINGERPRINTS,
+            bias=INTENT_ARTIFACT_SEALED_CANDIDATE_BIAS,
             calibration=calibration,
             thresholds=changed_thresholds,
             veto=veto,
@@ -7917,21 +7824,21 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         arguments["model_parameters"] = model_parameters
         arguments["candidate_metadata"] = candidate_metadata(
             model_parameters,
-            training={"seed": self.TAMPERED_TRAINING_SEED},
+            training={"seed": INTENT_TAMPERED_TRAINING_SEED},
         )
         self.assertNotEqual(
             baseline,
             sealed_candidate_sha256(**arguments),  # type: ignore[arg-type]
         )
         self.assertNotEqual(
-            supported_fingerprints_sha256(self.SEALED_CANDIDATE_FINGERPRINTS),
-            supported_fingerprints_sha256(self.TAMPERED_FINGERPRINTS),
+            supported_fingerprints_sha256(INTENT_SEALED_CANDIDATE_FINGERPRINTS),
+            supported_fingerprints_sha256(INTENT_TAMPERED_FINGERPRINTS),
         )
 
     def test_presealed_candidate_gate_rejects_known_failures(self) -> None:
         config_value = config()
         safety = GuardedSafetyAudit(
-            self.SAFETY_SAMPLE_MULTIPLIER * len(TRIGGERS),
+            INTENT_SAFETY_SAMPLE_MULTIPLIER * len(TRIGGERS),
             len(TRIGGERS),
             len(TRIGGERS),
             TRIGGERS,
@@ -7939,7 +7846,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             TRIGGERS,
             (),
         )
-        veto = VetoSelection(-1.0, self.VETO_SELECTION_SAMPLE_COUNT, 0, 0.0)
+        veto = VetoSelection(-1.0, INTENT_VETO_SELECTION_SAMPLE_COUNT, 0, 0.0)
         passed = presealed_candidate_gate_breakdown(
             config_value, {"passed": True}, safety, veto
         )
@@ -7961,9 +7868,9 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             VetoSelection(-1.0, 0, 0, 0.0),
             VetoSelection(
                 -1.0,
-                self.VETO_SELECTION_SAMPLE_COUNT,
-                self.TAMPERED_VETOED_POSITIVE_SAMPLES,
-                self.TAMPERED_VETO_FALSE_NEGATIVE_RATE,
+                INTENT_VETO_SELECTION_SAMPLE_COUNT,
+                INTENT_ARTIFACT_TAMPERED_VETOED_POSITIVE_SAMPLES,
+                INTENT_ARTIFACT_TAMPERED_VETO_FALSE_NEGATIVE_RATE,
             ),
         ):
             with self.subTest(veto=failed_veto):
@@ -7978,27 +7885,27 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
 
     def test_presealed_runtime_serialization_and_payload_caps(self) -> None:
         config_value = config()
-        quantized = quantize_weights(self.SEALED_CANDIDATE_QUANTIZE_WEIGHTS, TEST_MODEL_DIMENSION)
+        quantized = quantize_weights(INTENT_SEALED_CANDIDATE_QUANTIZE_WEIGHTS, INTENT_TEST_DIMENSION)
         strong = self.MODERATE_SYMMETRIC_METRICS
         thresholds = {
             trigger: ThresholdSelection(
-                trigger, self.SEALED_CANDIDATE_THRESHOLD_LOGIT, strong, strong
+                trigger, INTENT_ARTIFACT_SEALED_CANDIDATE_THRESHOLD_LOGIT, strong, strong
             )
             for trigger in TRIGGERS
         }
         calibration = directional_calibration(
-            self.SEALED_CANDIDATE_CALIBRATION_SCALE,
-            -self.SEALED_CANDIDATE_CALIBRATION_BIAS_MAGNITUDE,
-            samples_per_direction=self.SEALED_CANDIDATE_SAMPLES_PER_DIRECTION,
-            positives_per_direction=self.SEALED_CANDIDATE_POSITIVES_PER_DIRECTION,
+            INTENT_ARTIFACT_SEALED_CANDIDATE_CALIBRATION_SCALE,
+            -INTENT_ARTIFACT_SEALED_CANDIDATE_CALIBRATION_BIAS_MAGNITUDE,
+            samples_per_direction=INTENT_ARTIFACT_SEALED_CANDIDATE_SAMPLES_PER_DIRECTION,
+            positives_per_direction=INTENT_ARTIFACT_SEALED_CANDIDATE_POSITIVES_PER_DIRECTION,
         )
-        veto = VetoSelection(-self.FIXTURE_VETO_THRESHOLD, self.VETO_SELECTION_SAMPLE_COUNT, 0, 0.0)
-        fingerprints = self.SEALED_CANDIDATE_FINGERPRINTS
+        veto = VetoSelection(-INTENT_ARTIFACT_FIXTURE_VETO_THRESHOLD, INTENT_VETO_SELECTION_SAMPLE_COUNT, 0, 0.0)
+        fingerprints = INTENT_SEALED_CANDIDATE_FINGERPRINTS
         expected = training_candidate_model_parameters(
             config=config_value,
             quantized=quantized,
             supported_fingerprints=fingerprints,
-            bias=self.SEALED_CANDIDATE_BIAS,
+            bias=INTENT_ARTIFACT_SEALED_CANDIDATE_BIAS,
             calibration=calibration,
             thresholds=thresholds,
             veto=veto,
@@ -8007,7 +7914,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             config=config_value,
             quantized=quantized,
             supported_fingerprints=fingerprints,
-            bias=self.SEALED_CANDIDATE_BIAS,
+            bias=INTENT_ARTIFACT_SEALED_CANDIDATE_BIAS,
             calibration=calibration,
             thresholds=thresholds,
             veto=veto,
@@ -8018,12 +7925,12 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                 config=config_value,
                 quantized=quantized,
                 supported_fingerprints=fingerprints,
-                bias=self.SEALED_CANDIDATE_BIAS,
+                bias=INTENT_ARTIFACT_SEALED_CANDIDATE_BIAS,
                 calibration=calibration,
                 thresholds=thresholds,
                 veto=veto,
                 expected_parameters={
-                    **expected, "bias_hex": self.TAMPERED_BIAS_HEX_VALUE.hex()
+                    **expected, "bias_hex": INTENT_ARTIFACT_TAMPERED_BIAS_HEX_VALUE.hex()
                 },
             )
         unbounded_thresholds = dict(thresholds)
@@ -8031,7 +7938,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             unbounded_thresholds["space"],
             direction_logits={
                 **unbounded_thresholds["space"].runtime_logits(),
-                "0>1": self.UNBOUNDED_LOGIT,
+                "0>1": INTENT_ARTIFACT_UNBOUNDED_LOGIT,
             },
         )
         with self.assertRaisesRegex(ValueError, "finite and bounded"):
@@ -8039,7 +7946,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                 config=config_value,
                 quantized=quantized,
                 supported_fingerprints=fingerprints,
-                bias=self.SEALED_CANDIDATE_BIAS,
+                bias=INTENT_ARTIFACT_SEALED_CANDIDATE_BIAS,
                 calibration=calibration,
                 thresholds=unbounded_thresholds,
                 veto=veto,
@@ -8051,23 +7958,23 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                 replace(quantized, values=quantized.values[:-1]), fingerprints
             )
         invalid_values = list(quantized.values)
-        invalid_values[0] = self.INVALID_QUANTIZED_WEIGHT
+        invalid_values[0] = INTENT_INVALID_QUANTIZED_WEIGHT
         with self.assertRaisesRegex(ValueError, "signed int16"):
             quantized_model_payload_sha256(
                 replace(quantized, values=tuple(invalid_values)), fingerprints
             )
-        for invalid_fingerprints in ([1, 1], [True], [1 << self.UINT64_BIT_WIDTH]):
+        for invalid_fingerprints in ([1, 1], [True], [1 << UINT64_BIT_WIDTH]):
             with self.subTest(fingerprints=invalid_fingerprints):
                 with self.assertRaisesRegex(ValueError, "unique uint64"):
                     quantized_model_payload_sha256(
                         quantized, invalid_fingerprints
                     )
         with patch.object(
-            tim, "MAX_SUPPORTED_FINGERPRINTS", self.PATCHED_MAX_SUPPORTED_FINGERPRINTS
+            tim, "MAX_SUPPORTED_FINGERPRINTS", INTENT_PATCHED_MAX_SUPPORTED_FINGERPRINTS
         ):
             with self.assertRaisesRegex(ValueError, "fingerprints exceed"):
                 quantized_model_payload_sha256(quantized, fingerprints)
-        with patch.object(tim, "MAX_PAYLOAD_BYTES", self.PATCHED_MAX_PAYLOAD_BYTES):
+        with patch.object(tim, "MAX_PAYLOAD_BYTES", INTENT_PATCHED_MAX_PAYLOAD_BYTES):
             with self.assertRaisesRegex(ValueError, "payload exceeds"):
                 quantized_model_payload_sha256(quantized, {1})
 
@@ -8100,7 +8007,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             history=(),
         )
         safety_audit = GuardedSafetyAudit(
-            self.SAFETY_SAMPLE_MULTIPLIER * len(TRIGGERS),
+            INTENT_SAFETY_SAMPLE_MULTIPLIER * len(TRIGGERS),
             len(TRIGGERS),
             len(TRIGGERS),
             TRIGGERS,
@@ -8112,7 +8019,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             "en_US",
             0,
             "source.lm",
-            "0" * SHA256_HEX_LENGTH,
+            "0" * SHA256_HEX_CHARACTERS,
             1,
             "GPL-3+",
             "copyright",
@@ -8388,20 +8295,20 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             root = Path(temporary)
             oversized_config = root / "oversized.json"
             oversized_config.write_bytes(b"12345")
-            with patch.object(tim, "MAX_TRAINING_CONFIG_BYTES", self.PATCHED_BYTE_LIMIT):
+            with patch.object(tim, "MAX_TRAINING_CONFIG_BYTES", INTENT_PATCHED_BYTE_LIMIT):
                 with self.assertRaisesRegex(ValueError, "exceeds"):
                     load_training_config_snapshot(oversized_config)
 
             destination = root / "existing.ksm"
             destination.write_bytes(b"12345")
-            with patch.object(tim, "MAX_PUBLICATION_BACKUP_BYTES", self.PATCHED_BYTE_LIMIT):
+            with patch.object(tim, "MAX_PUBLICATION_BACKUP_BYTES", INTENT_PATCHED_BYTE_LIMIT):
                 with self.assertRaisesRegex(ValueError, "rollback limit"):
                     publish_bytes_bundle(((destination, b"new"),))
             self.assertEqual(destination.read_bytes(), b"12345")
 
             oversized_manifest = root / "manifest.json"
             oversized_manifest.write_bytes(b"12345")
-            with patch.object(eim, "MAX_EXTERNAL_MANIFEST_BYTES", self.PATCHED_BYTE_LIMIT):
+            with patch.object(eim, "MAX_EXTERNAL_MANIFEST_BYTES", INTENT_PATCHED_BYTE_LIMIT):
                 with self.assertRaisesRegex(ValueError, "model manifest exceeds"):
                     eim._json_object(oversized_manifest)
 
@@ -8418,7 +8325,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                     )
                 ),
             )
-            with patch.object(eim, "MAX_HUNSPELL_DICTIONARY_BYTES", self.PATCHED_BYTE_LIMIT):
+            with patch.object(eim, "MAX_HUNSPELL_DICTIONARY_BYTES", INTENT_PATCHED_BYTE_LIMIT):
                 with self.assertRaisesRegex(ValueError, "dictionary exceeds"):
                     eim._hunspell_dictionary_words(model)
 
@@ -8441,9 +8348,9 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             keyword_arguments = {
                 "config": inputs[0],
                 "english": inputs[1],
-                "russian": inputs[self.RUSSIAN_INPUT_INDEX],
-                "license_evidence": inputs[self.LICENSE_INPUT_INDEX],
-                "hard_negative_source": inputs[self.HARD_NEGATIVE_INPUT_INDEX],
+                "russian": inputs[INTENT_RUSSIAN_INPUT_INDEX],
+                "license_evidence": inputs[INTENT_LICENSE_INPUT_INDEX],
+                "hard_negative_source": inputs[INTENT_HARD_NEGATIVE_INPUT_INDEX],
                 "seal_registry": seal_registry,
                 "seal_outcome": seal_outcome,
                 "artifact": artifact,
@@ -8611,7 +8518,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             config_copy = root / "config.json"
             config_copy.write_bytes(repository_config.read_bytes())
             loaded, digest = load_training_config_snapshot(config_copy)
-            self.assertEqual(loaded.dimension, self.EXPECTED_PRODUCTION_MODEL_DIMENSION)
+            self.assertEqual(loaded.dimension, EXPECTED_INTENT_PRODUCTION_MODEL_DIMENSION)
             self.assertEqual(
                 digest, hashlib.sha256(config_copy.read_bytes()).hexdigest()
             )
@@ -8690,37 +8597,37 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                     )
 
     def test_quantization_support_roundtrip_and_deterministic_writer(self) -> None:
-        quantized = quantize_weights(self.SEALED_CANDIDATE_QUANTIZE_WEIGHTS, TEST_MODEL_DIMENSION)
-        self.assertEqual(len(quantized.values), TEST_MODEL_DIMENSION)
-        self.assertTrue(quantized.support[0] & (1 << self.QUANTIZED_WEIGHT_INDEX_A))
+        quantized = quantize_weights(INTENT_SEALED_CANDIDATE_QUANTIZE_WEIGHTS, INTENT_TEST_DIMENSION)
+        self.assertEqual(len(quantized.values), INTENT_TEST_DIMENSION)
+        self.assertTrue(quantized.support[0] & (1 << INTENT_QUANTIZED_FIRST_WEIGHT_INDEX))
         self.assertTrue(quantized.support[1] & (1 << 1))
         self.assertLessEqual(
-            quantized.maximum_absolute_error, quantized.scale / self.SCALE_HALVING_DIVISOR
+            quantized.maximum_absolute_error, quantized.scale / INTENT_ARTIFACT_SCALE_HALVING_DIVISOR
         )
-        scorer = QuantizedLinearScorer(quantized, self.QUANTIZED_SCORER_BIAS)
+        scorer = QuantizedLinearScorer(quantized, INTENT_ARTIFACT_QUANTIZED_SCORER_BIAS)
         self.assertGreater(
-            scorer.score(((self.QUANTIZED_WEIGHT_INDEX_A, 1.0),)), self.QUANTIZED_SCORER_BIAS
+            scorer.score(((INTENT_QUANTIZED_FIRST_WEIGHT_INDEX, 1.0),)), INTENT_ARTIFACT_QUANTIZED_SCORER_BIAS
         )
 
-        threshold_logits = {trigger: self.QUANTIZATION_TEST_THRESHOLD_LOGIT for trigger in TRIGGERS}
+        threshold_logits = {trigger: INTENT_ARTIFACT_QUANTIZATION_TEST_THRESHOLD_LOGIT for trigger in TRIGGERS}
         with tempfile.TemporaryDirectory() as temporary:
             first_path = Path(temporary) / "first.ksm"
             second_path = Path(temporary) / "second.ksm"
             keyword_arguments = {
                 "model_version": "test-intent-v1",
-                "dimension": TEST_MODEL_DIMENSION,
+                "dimension": INTENT_TEST_DIMENSION,
                 "weights": quantized.dequantized(),
                 "supported_fingerprints": {
-                    self.QUANTIZED_WEIGHT_INDEX_A, self.QUANTIZED_WEIGHT_INDEX_B
+                    INTENT_QUANTIZED_FIRST_WEIGHT_INDEX, INTENT_QUANTIZED_SECOND_WEIGHT_INDEX
                 },
                 "threshold_logits": runtime_threshold_logits(
                     threshold_logits
                 ),
-                "veto_threshold": -self.QUANTIZATION_VETO_THRESHOLD,
-                "bias": self.QUANTIZED_SCORER_BIAS,
+                "veto_threshold": -INTENT_ARTIFACT_QUANTIZATION_VETO_THRESHOLD,
+                "bias": INTENT_ARTIFACT_QUANTIZED_SCORER_BIAS,
                 "platt_calibration": {
                     direction: PlattParameters(
-                        self.QUANTIZATION_PLATT_SCALE, -self.QUANTIZATION_PLATT_BIAS_MAGNITUDE
+                        INTENT_ARTIFACT_QUANTIZATION_PLATT_SCALE, -INTENT_ARTIFACT_QUANTIZATION_PLATT_BIAS_MAGNITUDE
                     )
                     for direction in ("0>1", "1>0")
                 },
@@ -8735,7 +8642,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             self.assertEqual(loaded.checksum, first.checksum)
             self.assertEqual(loaded.checksum, second.checksum)
             strong = ConfusionMatrix(
-                self.QUANTIZATION_TEST_METRIC_COUNT, 0, self.QUANTIZATION_TEST_METRIC_COUNT, 0
+                INTENT_ARTIFACT_QUANTIZATION_TEST_METRIC_COUNT, 0, INTENT_ARTIFACT_QUANTIZATION_TEST_METRIC_COUNT, 0
             )
             selections = {
                 trigger: ThresholdSelection(
@@ -8747,15 +8654,15 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                 config=config(),
                 quantized=quantized,
                 supported_fingerprints={
-                    self.QUANTIZED_WEIGHT_INDEX_A, self.QUANTIZED_WEIGHT_INDEX_B
+                    INTENT_QUANTIZED_FIRST_WEIGHT_INDEX, INTENT_QUANTIZED_SECOND_WEIGHT_INDEX
                 },
-                bias=self.QUANTIZED_SCORER_BIAS,
+                bias=INTENT_ARTIFACT_QUANTIZED_SCORER_BIAS,
                 calibration=directional_calibration(
-                    self.QUANTIZATION_PLATT_SCALE, -self.QUANTIZATION_PLATT_BIAS_MAGNITUDE
+                    INTENT_ARTIFACT_QUANTIZATION_PLATT_SCALE, -INTENT_ARTIFACT_QUANTIZATION_PLATT_BIAS_MAGNITUDE
                 ),
                 thresholds=selections,
                 veto=VetoSelection(
-                    -self.QUANTIZATION_VETO_THRESHOLD, self.QUANTIZATION_TEST_METRIC_COUNT, 0, 0.0
+                    -INTENT_ARTIFACT_QUANTIZATION_VETO_THRESHOLD, INTENT_ARTIFACT_QUANTIZATION_TEST_METRIC_COUNT, 0, 0.0
                 ),
             )
             self.assertEqual(
@@ -8779,15 +8686,15 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             self.assertEqual(
                 prediction.probability.hex(),
                 stable_sigmoid(
-                    (self.QUANTIZATION_PLATT_SCALE * training_logit)
-                    - self.QUANTIZATION_PLATT_BIAS_MAGNITUDE
+                    (INTENT_ARTIFACT_QUANTIZATION_PLATT_SCALE * training_logit)
+                    - INTENT_ARTIFACT_QUANTIZATION_PLATT_BIAS_MAGNITUDE
                 ).hex(),
             )
             self.assertEqual(
                 prediction.should_switch,
                 (
-                    (self.QUANTIZATION_PLATT_SCALE * training_logit)
-                    - self.QUANTIZATION_PLATT_BIAS_MAGNITUDE
+                    (INTENT_ARTIFACT_QUANTIZATION_PLATT_SCALE * training_logit)
+                    - INTENT_ARTIFACT_QUANTIZATION_PLATT_BIAS_MAGNITUDE
                 )
                 >= threshold_logits["space"],
             )
@@ -8797,9 +8704,9 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         repository = Path(__file__).resolve().parents[1]
         config_path = repository / "model/intent_v1/config.json"
         loaded = load_training_config(config_path)
-        self.assertEqual(loaded.schema_version, self.EXPECTED_CONFIG_SCHEMA_VERSION)
-        self.assertEqual(loaded.dimension, self.EXPECTED_PRODUCTION_MODEL_DIMENSION)
-        self.assertEqual(loaded.minimum_word_length, self.EXPECTED_CONFIG_MINIMUM_WORD_LENGTH)
+        self.assertEqual(loaded.schema_version, EXPECTED_INTENT_CONFIG_SCHEMA_VERSION)
+        self.assertEqual(loaded.dimension, EXPECTED_INTENT_PRODUCTION_MODEL_DIMENSION)
+        self.assertEqual(loaded.minimum_word_length, EXPECTED_INTENT_CONFIG_MINIMUM_WORD_LENGTH)
         self.assertEqual(loaded.maximum_words_per_language, 0)
         self.assertEqual(
             loaded.external_evaluation.trigger_expansion,
@@ -8807,7 +8714,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         )
         self.assertEqual(
             loaded.external_evaluation.minimum_words_per_group,
-            self.EXPECTED_CONFIG_MINIMUM_WORDS_PER_GROUP,
+            EXPECTED_INTENT_CONFIG_MINIMUM_WORDS_PER_GROUP,
         )
         self.assertEqual(
             loaded.external_evaluation.english.dictionary_sha256,
@@ -8842,11 +8749,11 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         )
         self.assertEqual(
             loaded.hard_negative_development.role_counts(),
-            self.EXPECTED_PRODUCTION_ROLE_COUNTS,
+            EXPECTED_INTENT_PRODUCTION_ROLE_COUNTS,
         )
         self.assertEqual(
             loaded.hard_negative_development.training_example_weight,
-            self.EXPECTED_PRODUCTION_TRAINING_EXAMPLE_WEIGHT,
+            EXPECTED_INTENT_PRODUCTION_TRAINING_EXAMPLE_WEIGHT,
         )
         self.assertEqual(
             loaded.selection_maximum_false_positives_per_trigger,
@@ -8859,14 +8766,14 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                 loaded.selection_minimum_typo_recall,
                 loaded.selection_minimum_pause_typo_recall,
             ),
-            self.EXPECTED_PRODUCTION_SELECTION_RECALLS,
+            EXPECTED_INTENT_PRODUCTION_SELECTION_RECALLS,
         )
         self.assertEqual(
-            loaded.threshold_logit_margin_cap, self.EXPECTED_PRODUCTION_LOGIT_MARGIN_CAP
+            loaded.threshold_logit_margin_cap, EXPECTED_INTENT_PRODUCTION_LOGIT_MARGIN_CAP
         )
         preseal_path = repository / "model/intent_v1/holdout-v23-preseal.json"
         preseal_bytes = preseal_path.read_bytes()
-        self.assertLessEqual(len(preseal_bytes), self.MAX_PRESEAL_BYTES)
+        self.assertLessEqual(len(preseal_bytes), INTENT_MAX_PRESEAL_BYTES)
         preseal = cast(
             dict[str, object],
             json.loads(preseal_bytes.decode("utf-8")),
@@ -8913,17 +8820,17 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                     loaded.external_evaluation
                     .unknown_typo_development_corpus_sha256
                 ),
-                "signature_count": self.EXPECTED_HARD_NEGATIVE_PRESEAL_SIGNATURE_COUNT,
-                "words_by_group": self.EXPECTED_PRESEAL_WORDS_BY_GROUP,
+                "signature_count": EXPECTED_HARD_NEGATIVE_PRESEAL_SIGNATURE_COUNT,
+                "words_by_group": EXPECTED_PRESEAL_WORDS_BY_GROUP,
                 "frozen_source": {
                     "path": loaded.hard_negative_development.source.path,
                     "sha256": loaded.hard_negative_development.source.sha256,
                     "bytes": loaded.hard_negative_development.source.bytes,
                 },
                 "role_namespace": HARD_NEGATIVE_ROLE_NAMESPACE,
-                "role_words_by_group": self.EXPECTED_PRESEAL_ROLE_WORDS_BY_GROUP,
-                "examples_by_role": self.EXPECTED_PRESEAL_EXAMPLES_BY_ROLE,
-                "training_example_weight": self.EXPECTED_PRODUCTION_TRAINING_EXAMPLE_WEIGHT,
+                "role_words_by_group": EXPECTED_PRESEAL_ROLE_WORDS_BY_GROUP,
+                "examples_by_role": EXPECTED_PRESEAL_EXAMPLES_BY_ROLE,
+                "training_example_weight": EXPECTED_INTENT_PRODUCTION_TRAINING_EXAMPLE_WEIGHT,
             },
         )
         self.assertEqual(
@@ -8936,14 +8843,14 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                     loaded.external_evaluation
                     .unknown_typo_holdout_corpus_sha256
                 ),
-                "signature_count": self.EXPECTED_HARD_NEGATIVE_PRESEAL_SIGNATURE_COUNT,
-                "words_by_group": self.EXPECTED_PRESEAL_WORDS_BY_GROUP,
+                "signature_count": EXPECTED_HARD_NEGATIVE_PRESEAL_SIGNATURE_COUNT,
+                "words_by_group": EXPECTED_PRESEAL_WORDS_BY_GROUP,
             },
         )
         self.assertEqual(
             sealed_exclusions,
             {
-                "signature_count": self.EXPECTED_SEALED_EXCLUSION_SIGNATURE_COUNT,
+                "signature_count": EXPECTED_SEALED_EXCLUSION_SIGNATURE_COUNT,
                 "sha256": (
                     "5d8d55c6277901a33cc72c5a3a526e33deff2b154e15e816eb8889161b1079fa"
                 ),
@@ -8952,7 +8859,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         self.assertEqual(
             combined_exclusions,
             {
-                "signature_count": self.EXPECTED_COMBINED_EXCLUSION_SIGNATURE_COUNT,
+                "signature_count": EXPECTED_COMBINED_EXCLUSION_SIGNATURE_COUNT,
                 "sha256": (
                     "99553887249602e5fee72bac59491b89be58882f383820e9cc0a80cd5b0e8204"
                 ),
@@ -8963,21 +8870,21 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             {"development_holdout": 0, "sealed_holdout": 0},
         )
         self.assertAlmostEqual(
-            wilson_upper_bound(0, self.WILSON_BOUND_TEST_SAMPLE_SIZE),
-            self.EXPECTED_WILSON_BOUND_AT_ZERO_FALSE_POSITIVES,
-            places=self.WILSON_BOUND_COMPARISON_PLACES,
+            wilson_upper_bound(0, WILSON_BOUND_TEST_SAMPLE_SIZE),
+            EXPECTED_WILSON_BOUND_AT_ZERO_FALSE_POSITIVES,
+            places=WILSON_BOUND_COMPARISON_PLACES,
         )
         self.assertGreater(
-            wilson_upper_bound(self.WILSON_BOUND_TEST_FALSE_POSITIVES, self.WILSON_BOUND_TEST_SAMPLE_SIZE),
+            wilson_upper_bound(WILSON_BOUND_TEST_FALSE_POSITIVES, WILSON_BOUND_TEST_SAMPLE_SIZE),
             0.0,
         )
         self.assertEqual(wilson_upper_bound(0, 0), 1.0)
         with self.assertRaisesRegex(ValueError, "binomial"):
-            wilson_upper_bound(self.WILSON_BOUND_TEST_FALSE_POSITIVES, 1)
+            wilson_upper_bound(WILSON_BOUND_TEST_FALSE_POSITIVES, 1)
         for invalid_z_score in (0.0, -1.0, math.inf, math.nan):
             with self.subTest(z_score=invalid_z_score):
                 with self.assertRaisesRegex(ValueError, "z_score"):
-                    wilson_upper_bound(0, self.WILSON_BOUND_TEST_SAMPLE_SIZE, invalid_z_score)
+                    wilson_upper_bound(0, WILSON_BOUND_TEST_SAMPLE_SIZE, invalid_z_score)
 
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "bad.json"
@@ -8998,7 +8905,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             invalid_cases: tuple[tuple[str, dict[str, object], str], ...] = (
                 (
                     "old-schema",
-                    {**baseline, "schema_version": self.UNSUPPORTED_SCHEMA_VERSION},
+                    {**baseline, "schema_version": INTENT_UNSUPPORTED_CONFIG_SCHEMA_VERSION},
                     "unsupported training config schema",
                 ),
                 (
@@ -9046,7 +8953,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             sealed_mutations: tuple[tuple[str, object, str], ...] = (
                 (
                     "schema_version",
-                    self.UNSUPPORTED_SCHEMA_VERSION,
+                    INTENT_UNSUPPORTED_CONFIG_SCHEMA_VERSION,
                     "unsupported sealed_evaluation schema",
                 ),
                 (
@@ -9088,7 +8995,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             policy_mutations: tuple[tuple[str, object, str], ...] = (
                 (
                     "minimum_words_per_group",
-                    self.UNDERSIZED_CONFIG_MINIMUM_WORDS_PER_GROUP,
+                    INTENT_UNDERSIZED_CONFIG_MINIMUM_WORDS_PER_GROUP,
                     "at least 5000 words",
                 ),
                 (
@@ -9118,72 +9025,38 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
 class NativeFTRLKernelTests(unittest.TestCase):
     """The compiled epoch kernel must be indistinguishable from the reference."""
 
-    DIMENSION = 512
-    MAX_ROW_FEATURE_WIDTH = 24
-    FEATURE_VALUE_SMALL = 0.5
-    FEATURE_VALUE_LARGE = 2.0
-    FEATURE_VALUE_NEGATIVE_SMALL = 0.25
-    RANDOM_FEATURE_MAGNITUDE = 3.0
-    POSITION_PARITY_MODULUS = 2
-    LABEL_PROBABILITY_THRESHOLD = 0.5
-    WEIGHT_VALUE_LARGE = 3.0
-    WEIGHT_UNIFORM_LOWER_BOUND = 0.5
-    NATIVE_TEST_ROW_COUNT = 3000
-    NATIVE_TEST_SEED = 11
-    NATIVE_TEST_ALPHA = 0.05
-    NATIVE_TEST_L1 = 0.3
-    NATIVE_TEST_L2 = 0.1
-    NATIVE_TEST_EPOCH_RANGE_END = 5
-    PARTIAL_ORDER_ROW_COUNT = 800
-    PARTIAL_ORDER_SEED = 5
-    PARTIAL_ORDER_ALPHA = 0.5
-    PARTIAL_ORDER_SKIP_MODULUS = 3
-    DIVERGENCE_TEST_ROW_COUNT = 600
-    DIVERGENCE_TEST_SEED = 3
-    PACK_VALIDATION_ROW_COUNT = 4
-    DUPLICATE_FEATURE_INDEX = 5
-    EXPECTED_INDPTR_LENGTH = 5
-    KERNEL_COMPARISON_ROW_COUNT = 1200
-    KERNEL_COMPARISON_SEED = 21
-    KERNEL_COMPARISON_DEV_ROW_COUNT = 300
-    KERNEL_COMPARISON_DEV_SEED = 22
-    KERNEL_COMPARISON_MAX_EPOCHS = 3
-    FALLBACK_TEST_ROW_COUNT = 200
-    FALLBACK_TEST_SEED = 31
-    FALLBACK_TEST_DEV_ROW_COUNT = 60
-    FALLBACK_TEST_DEV_SEED = 32
 
     def _rows(self, count: int, seed: int) -> tuple[FeaturedExample, ...]:
         rng = random.Random(seed)
         rows: list[FeaturedExample] = []
         for position in range(count):
-            width = rng.randint(1, self.MAX_ROW_FEATURE_WIDTH)
+            width = rng.randint(1, FTRL_KERNEL_MAX_ROW_FEATURE_WIDTH)
             features = tuple(
                 (
                     index,
                     rng.choice((
                         1.0,
-                        self.FEATURE_VALUE_SMALL,
-                        self.FEATURE_VALUE_LARGE,
-                        -self.FEATURE_VALUE_NEGATIVE_SMALL,
-                        rng.uniform(-self.RANDOM_FEATURE_MAGNITUDE, self.RANDOM_FEATURE_MAGNITUDE),
+                        FTRL_KERNEL_FEATURE_VALUE_SMALL,
+                        FTRL_KERNEL_FEATURE_VALUE_LARGE,
+                        -FTRL_KERNEL_FEATURE_VALUE_NEGATIVE_SMALL,
+                        rng.uniform(-FTRL_KERNEL_RANDOM_FEATURE_MAGNITUDE, FTRL_KERNEL_RANDOM_FEATURE_MAGNITUDE),
                     )),
                 )
-                for index in sorted(rng.sample(range(self.DIMENSION), width))
+                for index in sorted(rng.sample(range(FTRL_KERNEL_DIMENSION), width))
             )
             direction: LayoutDirection = (
-                "0>1" if position % self.POSITION_PARITY_MODULUS == 0 else "1>0"
+                "0>1" if position % FTRL_KERNEL_POSITION_PARITY_MODULUS == 0 else "1>0"
             )
             example = replace(
                 lexical_example(
-                    rng.random() < self.LABEL_PROBABILITY_THRESHOLD,
+                    rng.random() < FTRL_KERNEL_LABEL_PROBABILITY_THRESHOLD,
                     signature=f"native-{seed}-{position}",
                     direction=direction,
                 ),
                 weight=rng.choice((
                     1.0,
-                    self.WEIGHT_VALUE_LARGE,
-                    rng.uniform(self.WEIGHT_UNIFORM_LOWER_BOUND, self.WEIGHT_VALUE_LARGE),
+                    FTRL_KERNEL_WEIGHT_VALUE_LARGE,
+                    rng.uniform(FTRL_KERNEL_WEIGHT_UNIFORM_LOWER_BOUND, FTRL_KERNEL_WEIGHT_VALUE_LARGE),
                 )),
             )
             rows.append(FeaturedExample(example, features))
@@ -9209,15 +9082,15 @@ class NativeFTRLKernelTests(unittest.TestCase):
 
     def test_native_epochs_are_bit_exact_against_the_reference_update(self) -> None:
         kernel = self._kernel()
-        rows = self._rows(self.NATIVE_TEST_ROW_COUNT, self.NATIVE_TEST_SEED)
+        rows = self._rows(FTRL_KERNEL_NATIVE_TEST_ROW_COUNT, FTRL_KERNEL_NATIVE_TEST_SEED)
         parameters = FTRLParameters(
-            self.DIMENSION, self.NATIVE_TEST_ALPHA, 1.0, self.NATIVE_TEST_L1, self.NATIVE_TEST_L2
+            FTRL_KERNEL_DIMENSION, FTRL_KERNEL_NATIVE_TEST_ALPHA, 1.0, FTRL_KERNEL_NATIVE_TEST_L1, FTRL_KERNEL_NATIVE_TEST_L2
         )
-        packed = tim.pack_training_rows(rows, self.DIMENSION)
+        packed = tim.pack_training_rows(rows, FTRL_KERNEL_DIMENSION)
         reference = FTRLProximal(parameters)
         candidate = FTRLProximal(parameters)
         order = list(range(len(rows)))
-        for epoch in range(1, self.NATIVE_TEST_EPOCH_RANGE_END):
+        for epoch in range(1, FTRL_KERNEL_NATIVE_TEST_EPOCH_RANGE_END):
             random.Random(epoch).shuffle(order)
             for index in order:
                 item = rows[index]
@@ -9229,15 +9102,15 @@ class NativeFTRLKernelTests(unittest.TestCase):
 
     def test_zero_regularisation_and_partial_orders_stay_bit_exact(self) -> None:
         kernel = self._kernel()
-        rows = self._rows(self.PARTIAL_ORDER_ROW_COUNT, self.PARTIAL_ORDER_SEED)
-        parameters = FTRLParameters(self.DIMENSION, self.PARTIAL_ORDER_ALPHA, 0.0, 0.0, 0.0)
-        packed = tim.pack_training_rows(rows, self.DIMENSION)
+        rows = self._rows(FTRL_KERNEL_PARTIAL_ORDER_ROW_COUNT, FTRL_KERNEL_PARTIAL_ORDER_SEED)
+        parameters = FTRLParameters(FTRL_KERNEL_DIMENSION, FTRL_KERNEL_PARTIAL_ORDER_ALPHA, 0.0, 0.0, 0.0)
+        packed = tim.pack_training_rows(rows, FTRL_KERNEL_DIMENSION)
         reference = FTRLProximal(parameters)
         candidate = FTRLProximal(parameters)
         order = [
             index
             for index in range(len(rows))
-            if index % self.PARTIAL_ORDER_SKIP_MODULUS != 0
+            if index % FTRL_KERNEL_PARTIAL_ORDER_SKIP_MODULUS != 0
         ]
         for index in order:
             item = rows[index]
@@ -9247,11 +9120,11 @@ class NativeFTRLKernelTests(unittest.TestCase):
 
     def test_self_check_accepts_the_real_kernel_and_rejects_a_divergent_one(self) -> None:
         kernel = self._kernel()
-        rows = self._rows(self.DIVERGENCE_TEST_ROW_COUNT, self.DIVERGENCE_TEST_SEED)
+        rows = self._rows(FTRL_KERNEL_DIVERGENCE_TEST_ROW_COUNT, FTRL_KERNEL_DIVERGENCE_TEST_SEED)
         parameters = FTRLParameters(
-            self.DIMENSION, self.NATIVE_TEST_ALPHA, 1.0, self.NATIVE_TEST_L1, self.NATIVE_TEST_L2
+            FTRL_KERNEL_DIMENSION, FTRL_KERNEL_NATIVE_TEST_ALPHA, 1.0, FTRL_KERNEL_NATIVE_TEST_L1, FTRL_KERNEL_NATIVE_TEST_L2
         )
-        packed = tim.pack_training_rows(rows, self.DIMENSION)
+        packed = tim.pack_training_rows(rows, FTRL_KERNEL_DIMENSION)
         tim.verify_native_ftrl_kernel(kernel, packed, rows, parameters, range(len(rows)))
 
         class DivergentKernel(tim.NativeFTRLKernel):
@@ -9275,35 +9148,35 @@ class NativeFTRLKernelTests(unittest.TestCase):
             )
 
     def test_pack_training_rows_validates_like_update(self) -> None:
-        good = self._rows(self.PACK_VALIDATION_ROW_COUNT, 1)
+        good = self._rows(FTRL_KERNEL_PACK_VALIDATION_ROW_COUNT, 1)
         bad_weight = FeaturedExample(replace(good[0].example, weight=0.0), good[0].features)
         with self.assertRaisesRegex(ValueError, "sample weight"):
-            tim.pack_training_rows((bad_weight,), self.DIMENSION)
+            tim.pack_training_rows((bad_weight,), FTRL_KERNEL_DIMENSION)
         unordered = FeaturedExample(
             good[0].example,
-            ((self.DUPLICATE_FEATURE_INDEX, 1.0), (self.DUPLICATE_FEATURE_INDEX, 1.0)),
+            ((FTRL_KERNEL_DUPLICATE_FEATURE_INDEX, 1.0), (FTRL_KERNEL_DUPLICATE_FEATURE_INDEX, 1.0)),
         )
         with self.assertRaisesRegex(ValueError, "strictly increasing"):
-            tim.pack_training_rows((unordered,), self.DIMENSION)
-        outside = FeaturedExample(good[0].example, ((self.DIMENSION, 1.0),))
+            tim.pack_training_rows((unordered,), FTRL_KERNEL_DIMENSION)
+        outside = FeaturedExample(good[0].example, ((FTRL_KERNEL_DIMENSION, 1.0),))
         with self.assertRaisesRegex(ValueError, "outside model dimension"):
-            tim.pack_training_rows((outside,), self.DIMENSION)
-        packed = tim.pack_training_rows(good, self.DIMENSION)
-        self.assertEqual(packed.row_count, self.PACK_VALIDATION_ROW_COUNT)
-        self.assertEqual(len(packed.indptr), self.EXPECTED_INDPTR_LENGTH)
+            tim.pack_training_rows((outside,), FTRL_KERNEL_DIMENSION)
+        packed = tim.pack_training_rows(good, FTRL_KERNEL_DIMENSION)
+        self.assertEqual(packed.row_count, FTRL_KERNEL_PACK_VALIDATION_ROW_COUNT)
+        self.assertEqual(len(packed.indptr), FTRL_KERNEL_EXPECTED_INDPTR_LENGTH)
         self.assertEqual(len(packed.indices), sum(len(row.features) for row in good))
 
     def test_fit_ftrl_kernels_produce_identical_models(self) -> None:
         self._kernel()
-        rows = self._rows(self.KERNEL_COMPARISON_ROW_COUNT, self.KERNEL_COMPARISON_SEED)
+        rows = self._rows(FTRL_KERNEL_COMPARISON_ROW_COUNT, FTRL_KERNEL_COMPARISON_SEED)
         development = self._rows(
-            self.KERNEL_COMPARISON_DEV_ROW_COUNT, self.KERNEL_COMPARISON_DEV_SEED
+            FTRL_KERNEL_COMPARISON_DEV_ROW_COUNT, FTRL_KERNEL_COMPARISON_DEV_SEED
         )
         settings = config(
-            dimension=self.DIMENSION,
-            maximum_epochs=self.KERNEL_COMPARISON_MAX_EPOCHS,
+            dimension=FTRL_KERNEL_DIMENSION,
+            maximum_epochs=FTRL_KERNEL_COMPARISON_MAX_EPOCHS,
             minimum_epochs=1,
-            patience=self.KERNEL_COMPARISON_MAX_EPOCHS,
+            patience=FTRL_KERNEL_COMPARISON_MAX_EPOCHS,
         )
         native = fit_ftrl(rows, development, settings, kernel="native")
         python = fit_ftrl(rows, development, settings, kernel="python")
@@ -9312,10 +9185,10 @@ class NativeFTRLKernelTests(unittest.TestCase):
         self.assertTrue(self._same_state(native.model, python.model))
 
     def test_missing_compiler_falls_back_to_python_unless_native_is_required(self) -> None:
-        rows = self._rows(self.FALLBACK_TEST_ROW_COUNT, self.FALLBACK_TEST_SEED)
-        development = self._rows(self.FALLBACK_TEST_DEV_ROW_COUNT, self.FALLBACK_TEST_DEV_SEED)
+        rows = self._rows(FTRL_KERNEL_FALLBACK_TEST_ROW_COUNT, FTRL_KERNEL_FALLBACK_TEST_SEED)
+        development = self._rows(FTRL_KERNEL_FALLBACK_TEST_DEV_ROW_COUNT, FTRL_KERNEL_FALLBACK_TEST_DEV_SEED)
         settings = config(
-            dimension=self.DIMENSION, maximum_epochs=1, minimum_epochs=1, patience=1
+            dimension=FTRL_KERNEL_DIMENSION, maximum_epochs=1, minimum_epochs=1, patience=1
         )
         with patch.object(shutil, "which", return_value=None):
             fallback = fit_ftrl(rows, development, settings, kernel="auto")
@@ -9331,22 +9204,19 @@ class NativeFTRLKernelTests(unittest.TestCase):
 class DeterministicIntentModel:
     """Picklable stand-in whose predictions depend only on the input."""
 
-    DET_VETO_THRESHOLD = 999.0
-    DET_LOGIT_OFFSET = 0.25
-    DET_PREDICTION_COVERAGE = 0.75
 
-    veto_threshold = -DET_VETO_THRESHOLD
-    dimension = TEST_MODEL_DIMENSION
+    veto_threshold = -INTENT_DETERMINISTIC_VETO_THRESHOLD
+    dimension = INTENT_TEST_DIMENSION
     fnv_seed = DEFAULT_FNV_SEED
     membership_seed = DEFAULT_MEMBERSHIP_FNV_SEED
 
     def predict(self, item: IntentModelInput) -> LinearPrediction:
-        logit = float(len(item.original) - len(item.alternative)) + self.DET_LOGIT_OFFSET
+        logit = float(len(item.original) - len(item.alternative)) + INTENT_DETERMINISTIC_LOGIT_OFFSET
         return LinearPrediction(
             logit,
             stable_sigmoid(logit),
             0.0,
-            self.DET_PREDICTION_COVERAGE,
+            INTENT_DETERMINISTIC_PREDICTION_COVERAGE,
             logit > 0.0,
             "deterministic",
         )
@@ -9360,16 +9230,6 @@ def _misordered_worker(bounds: tuple[int, int]) -> tuple[int, list[int]]:
 class ParallelRowScoringTests(unittest.TestCase):
     """Worker processes must reproduce sequential scoring row for row."""
 
-    LABEL_PARITY_MODULUS = 2
-    SECONDARY_LABEL_MODULUS = 3
-    PARALLEL_TEST_WORKERS = 3
-    CONTEXT_PROFILE_SAMPLE_COUNT = 2
-    WIDE_PARALLEL_TEST_WORKERS = 4
-    MODERATE_PARALLEL_TEST_WORKERS = 2
-    EFFECTIVE_ROW_WORKERS_CAP = 10
-    REQUESTED_ROW_WORKERS = 8
-    AVAILABLE_ROW_WORKERS_CAP = 3
-    MISORDERED_CHUNK_COUNT = 2
 
     def setUp(self) -> None:
         pair = LayoutPair()
@@ -9383,7 +9243,7 @@ class ParallelRowScoringTests(unittest.TestCase):
                     source_group=0,
                     target_group=1,
                     trigger="space",
-                    label=index % self.LABEL_PARITY_MODULUS == 0,
+                    label=index % INTENT_LABEL_PARITY_MODULUS == 0,
                     weight=1.0,
                     base_signature=f"parallel-{index}",
                     variant_kind="identity",
@@ -9399,7 +9259,7 @@ class ParallelRowScoringTests(unittest.TestCase):
                     source_group=1,
                     target_group=0,
                     trigger="pause",
-                    label=index % self.SECONDARY_LABEL_MODULUS == 0,
+                    label=index % INTENT_ROW_SCORING_SECONDARY_LABEL_MODULUS == 0,
                     weight=1.0,
                     base_signature=f"parallel-ru-{index}",
                     variant_kind="identity",
@@ -9422,7 +9282,7 @@ class ParallelRowScoringTests(unittest.TestCase):
             self.model, self.rows, scorers=self.language_models, workers=1
         )
         parallel = predict_model_examples(
-            self.model, self.rows, scorers=self.language_models, workers=self.PARALLEL_TEST_WORKERS
+            self.model, self.rows, scorers=self.language_models, workers=INTENT_ROW_SCORING_PARALLEL_TEST_WORKERS
         )
         self.assertEqual(sequential, parallel)
         self.assertEqual(
@@ -9434,7 +9294,7 @@ class ParallelRowScoringTests(unittest.TestCase):
                 self.rows,
                 0,
                 language_models=self.language_models,
-                workers=self.PARALLEL_TEST_WORKERS,
+                workers=INTENT_ROW_SCORING_PARALLEL_TEST_WORKERS,
             ),
         )
 
@@ -9445,7 +9305,7 @@ class ParallelRowScoringTests(unittest.TestCase):
         }
         sequential_cache = eim._ContextInvariantIntentModel(self.model)
         parallel_cache = eim._ContextInvariantIntentModel(self.model)
-        for profile in eim.PRODUCTION_CONTEXT_PROFILES[: self.CONTEXT_PROFILE_SAMPLE_COUNT]:
+        for profile in eim.PRODUCTION_CONTEXT_PROFILES[: INTENT_ROW_SCORING_CONTEXT_PROFILE_SAMPLE_COUNT]:
             sequential = eim._evaluate_production_context_profile_rows(
                 sequential_cache, self.rows, profile, language_models=scorers, workers=1
             )
@@ -9454,7 +9314,7 @@ class ParallelRowScoringTests(unittest.TestCase):
                 self.rows,
                 profile,
                 language_models=scorers,
-                workers=self.WIDE_PARALLEL_TEST_WORKERS,
+                workers=INTENT_ROW_SCORING_WIDE_PARALLEL_TEST_WORKERS,
             )
             self.assertEqual(sequential, parallel)
             self.assertEqual(
@@ -9464,7 +9324,7 @@ class ParallelRowScoringTests(unittest.TestCase):
         self.assertGreater(parallel_cache.cache_hits, 0)
         raw = eim._evaluate_production_context_profile_rows(
             self.model, self.rows, eim.PRODUCTION_CONTEXT_PROFILES[0],
-            language_models=scorers, workers=self.MODERATE_PARALLEL_TEST_WORKERS,
+            language_models=scorers, workers=INTENT_ROW_SCORING_MODERATE_PARALLEL_TEST_WORKERS,
         )
         self.assertEqual(
             raw,
@@ -9478,17 +9338,17 @@ class ParallelRowScoringTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "at least one worker"):
             eim.set_default_row_workers(0)
         with self.assertRaisesRegex(ValueError, "at least one worker"):
-            eim._effective_row_workers(0, self.EFFECTIVE_ROW_WORKERS_CAP)
+            eim._effective_row_workers(0, INTENT_ROW_SCORING_EFFECTIVE_ROW_WORKERS_CAP)
         self.assertEqual(
-            eim._effective_row_workers(self.REQUESTED_ROW_WORKERS, self.AVAILABLE_ROW_WORKERS_CAP),
-            self.AVAILABLE_ROW_WORKERS_CAP,
+            eim._effective_row_workers(INTENT_ROW_SCORING_REQUESTED_ROW_WORKERS, INTENT_ROW_SCORING_AVAILABLE_ROW_WORKERS_CAP),
+            INTENT_ROW_SCORING_AVAILABLE_ROW_WORKERS_CAP,
         )
-        self.assertEqual(eim._effective_row_workers(None, self.AVAILABLE_ROW_WORKERS_CAP), 1)
+        self.assertEqual(eim._effective_row_workers(None, INTENT_ROW_SCORING_AVAILABLE_ROW_WORKERS_CAP), 1)
         with self.assertRaisesRegex(RuntimeError, "not initialised"):
             eim._row_workload()
         with self.assertRaisesRegex(RuntimeError, "changed chunk order"):
             eim._map_row_chunks(
-                _misordered_worker, eim._RowWorkload(examples=self.rows), self.MISORDERED_CHUNK_COUNT
+                _misordered_worker, eim._RowWorkload(examples=self.rows), INTENT_ROW_SCORING_MISORDERED_CHUNK_COUNT
             )
 
     def test_main_restores_the_default_worker_count(self) -> None:

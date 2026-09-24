@@ -9,86 +9,13 @@ import sys
 import threading
 from pathlib import Path
 from typing import Callable, TypeVar, cast, overload
+from .constants.file_formats import USER_DATA_JSON_INDENT
+from .constants.settings_defaults import DEFAULT_SETTINGS
 
 
 SettingsData = dict[str, object]
 SettingCallback = Callable[[str, object], None]
 _T = TypeVar("_T")
-PERSISTED_JSON_INDENT = 2
-# Defaults other modules fall back on when a setting is missing; DEFAULTS
-# below is built from the same names.
-DEFAULT_MINIMUM_WORD_LENGTH = 3
-DEFAULT_CONFIDENCE_THRESHOLD = 2.0
-DEFAULT_PAUSE_DELAY_SECONDS = 1.5
-DEFAULT_EARLY_SWITCH_MIN_LENGTH = 4
-DEFAULT_LEARNING_CONFIRMATIONS = 2
-DEFAULT_HISTORY_LIMIT = 200
-
-
-DEFAULTS: SettingsData = {
-    "schema_version": 6,
-    "enabled": True,
-    "general": {
-        "start_hidden": True,
-        "close_to_tray": True,
-        "autostart": True,
-        "notifications": True,
-        "sound": False,
-        "keep_history": True,
-    },
-    "detection": {
-        "layouts": ["us", "ru"],
-        "language_models": ["en_US", "ru_RU"],
-        "minimum_length": DEFAULT_MINIMUM_WORD_LENGTH,
-        "confidence": DEFAULT_CONFIDENCE_THRESHOLD,
-        "correct_on_pause": True,
-        "pause_delay_seconds": DEFAULT_PAUSE_DELAY_SECONDS,
-        "early_switch": False,
-        "early_switch_min_length": DEFAULT_EARLY_SWITCH_MIN_LENGTH,
-        "correct_on_space": True,
-        "correct_on_enter": True,
-        "correct_on_tab": True,
-        "correct_on_punctuation": True,
-        "respect_manual_layout": True,
-        "aggressive": True,
-        "context_aware": True,
-        "context_policy": "assist",
-        "context_read_field": True,
-        "hold_after_caret_move": True,
-        "protect_code": True,
-        "intent_model_enabled": True,
-        "learning": True,
-        # The threshold a rule must reach to act. Enter on the prompt reaches it
-        # at once; rules left half-confirmed by older versions stay inactive.
-        "learning_confirmations": DEFAULT_LEARNING_CONFIRMATIONS,
-    },
-    "hotkeys": {
-        "toggle": "Ctrl+Alt+P",
-        "convert_last": "Pause",
-        "undo": "Ctrl+Alt+Z",
-    },
-    "applications": {
-        # Per-application input conventions; see keyswitch.app_quirks.
-        "telegram_quote_mention": True,
-    },
-    "exclusions": {
-        "applications": ["keepassxc", "1password", "bitwarden"],
-        "words": [],
-    },
-    "appearance": {
-        "theme": "system",
-        "show_indicator": True,
-        "indicator_style": "letters",
-    },
-    "updates": {
-        "check_automatically": True,
-        "install_automatically": True,
-    },
-    "diagnostics": {
-        "technical_logging": False,
-    },
-    "history": {"limit": DEFAULT_HISTORY_LIMIT},
-}
 
 
 def _string_keyed_mapping(value: object) -> SettingsData | None:
@@ -140,7 +67,7 @@ class SettingsStore:
         self.path = path or config_dir() / "config.json"
         self._lock = threading.RLock()
         self._callbacks: list[SettingCallback] = []
-        self._data: SettingsData = copy.deepcopy(DEFAULTS)
+        self._data: SettingsData = copy.deepcopy(DEFAULT_SETTINGS)
         self.load()
 
     def load(self) -> None:
@@ -151,18 +78,18 @@ class SettingsStore:
                 loaded: object = json.loads(self.path.read_text(encoding="utf-8"))
                 loaded_mapping = _string_keyed_mapping(loaded)
                 if loaded_mapping is not None:
-                    self._data = _deep_merge(DEFAULTS, loaded_mapping)
+                    self._data = _deep_merge(DEFAULT_SETTINGS, loaded_mapping)
             except (OSError, ValueError):
                 # Keep safe defaults. The diagnostics page reports the path so
                 # the user can repair a malformed file without data deletion.
-                self._data = copy.deepcopy(DEFAULTS)
+                self._data = copy.deepcopy(DEFAULT_SETTINGS)
 
     def save(self) -> None:
         with self._lock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             temporary = self.path.with_suffix(".json.tmp")
             temporary.write_text(
-                json.dumps(self._data, ensure_ascii=False, indent=PERSISTED_JSON_INDENT) + "\n",
+                json.dumps(self._data, ensure_ascii=False, indent=USER_DATA_JSON_INDENT) + "\n",
                 encoding="utf-8",
             )
             temporary.replace(self.path)
@@ -208,7 +135,7 @@ class SettingsStore:
     def default(self, dotted_path: str, fallback: object = None) -> object:
         """Return the shipped value for a path without touching stored data."""
 
-        value: object = DEFAULTS
+        value: object = DEFAULT_SETTINGS
         for part in dotted_path.split("."):
             mapping = _string_keyed_mapping(value)
             if mapping is None or part not in mapping:
@@ -247,7 +174,7 @@ class SettingsStore:
 
     def reset(self) -> None:
         with self._lock:
-            self._data = copy.deepcopy(DEFAULTS)
+            self._data = copy.deepcopy(DEFAULT_SETTINGS)
             self.save()
             callbacks = tuple(self._callbacks)
         for callback in callbacks:

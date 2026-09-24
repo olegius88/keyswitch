@@ -1,9 +1,9 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from logcourier import __main__, startup
+from fixture_values.counts import FAKE_BOT_TOKEN_SECRET_CHARACTERS
 
-FAKE_TOKEN_SECRET_CHARACTERS = 30
+from logcourier import __main__, startup
 
 
 def test_gui_error_callback_receives_import_details(monkeypatch):
@@ -24,7 +24,7 @@ def test_windows_error_dialog_without_stderr(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(startup, "sys", SimpleNamespace(platform="win32", stderr=None))
     monkeypatch.setattr(startup, "data_directory", lambda: tmp_path)
-    token = "123456:" + "A" * FAKE_TOKEN_SECRET_CHARACTERS
+    token = "123456:" + "A" * FAKE_BOT_TOKEN_SECRET_CHARACTERS
     startup.report_error(ImportError("missing DLL " + token))
     assert "missing DLL" in (tmp_path / "startup-error.txt").read_text()
     assert token not in (tmp_path / "startup-error.txt").read_text()

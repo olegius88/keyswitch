@@ -21,15 +21,53 @@ from gi.repository import Adw, Gio, GLib, Gtk
 
 from keyswitch import ui
 from keyswitch import logsetup
-from keyswitch.config import DEFAULT_EARLY_SWITCH_MIN_LENGTH, SettingsStore
+from keyswitch.config import SettingsStore
+from keyswitch.constants.models import PREFIX_MAX_CHARACTERS, PREFIX_MIN_CHARACTERS
+from keyswitch.constants.settings_defaults import (
+    DEFAULT_EARLY_SWITCH_MIN_LENGTH,
+    EARLY_SWITCH_MIN_LENGTH_SETTING_MIN,
+)
+from keyswitch.constants.units import MILLISECONDS_PER_SECOND
 from keyswitch.context_policy import ContextPolicy
 from keyswitch.engine import EngineSnapshot
 from keyswitch.history import HistoryEntry, HistoryStore
 from keyswitch.intent_model import IntentModelStatus
 from keyswitch.learning import LearningStore
+from keyswitch.russian_text import SECONDS, quantity
 from keyswitch.ui import ApplicationChoice, MainWindow
 from keyswitch.updates import UpdatePhase, UpdateSnapshot
 from keyswitch.x11_backend import BackendProbe
+from fixture_values.clock import SESSION_BUS_CALL_TIMEOUT_MS
+from fixture_values.corpora import UI_FAKE_WORD_FREQUENCY
+from fixture_values.counts import (
+    EXPECTED_THEME_APPLY_CALLS,
+    GTK_APPLICATION_ROW_COUNT_AFTER_UPDATE,
+    GTK_EXPECTED_ADD_MANUAL_CALLS,
+    GTK_EXPECTED_APPLICATION_ROW_COUNT,
+    GTK_EXPECTED_DIALOG_PRESENT_CALLS,
+    GTK_EXPECTED_HEADER_MENU_ITEM_COUNT,
+    GTK_EXPECTED_NAVIGATION_PAGE_COUNT,
+    GTK_EXPECTED_SAVE_HOTKEY_CALLS,
+    GTK_MINIMUM_LENGTH_UPDATE,
+    GTK_SAMPLE_CONFIRMED_RULES,
+    GTK_SAMPLE_CORRECTION_COUNT,
+    NON_DEFAULT_EARLY_SWITCH_MIN_LENGTH,
+    NON_DEFAULT_LEARNING_CONFIRMATIONS,
+    NON_DEFAULT_MINIMUM_WORD_LENGTH,
+    RUSSIAN_PLURAL_SAMPLE_COUNTS,
+)
+from fixture_values.platform import (
+    GTK_FAKE_TEXT_SAVE_SOURCE_ID,
+    GTK_FRESH_TEXT_SAVE_SOURCE_ID,
+    GTK_STALE_TEXT_SAVE_SOURCE_ID,
+)
+from fixture_values.scores import (
+    NON_DEFAULT_CONFIDENCE_THRESHOLD,
+    UI_SAMPLE_HISTORY_CONFIDENCE,
+    UI_SECOND_HISTORY_CONFIDENCE,
+)
+from fixture_values.ui import EXPECTED_CONTEXT_MODE_OFF_INDEX, GTK_HISTORY_NAVIGATION_INDEX
+from keyswitch.constants.timing import APPLICATION_CAPTURE_DELAY_MS
 
 
 DISPLAY_AVAILABLE = bool(os.environ.get("DISPLAY")) and Gtk.init_check()
@@ -63,15 +101,14 @@ class FakeLanguageModel:
 
 
 class FakeEngine:
-    SAMPLE_WORD_FREQUENCY = 10
 
     def __init__(self, root: Path, *, backend_available: bool = True) -> None:
         self.context_policy = ContextPolicy()
         self.backend = FakeBackend(backend_available)
         self.learning = LearningStore(root / "learning.json")
         self.models: dict[int, FakeLanguageModel] = {
-            0: FakeLanguageModel({"hello": self.SAMPLE_WORD_FREQUENCY}, "test-en"),
-            1: FakeLanguageModel({"привет": self.SAMPLE_WORD_FREQUENCY}, "test-ru"),
+            0: FakeLanguageModel({"hello": UI_FAKE_WORD_FREQUENCY}, "test-en"),
+            1: FakeLanguageModel({"привет": UI_FAKE_WORD_FREQUENCY}, "test-ru"),
         }
         self.intent_model_status = IntentModelStatus(
             True,
@@ -225,30 +262,6 @@ class InstalledApplicationsTests(unittest.TestCase):
 @unittest.skipUnless(DISPLAY_AVAILABLE, "GTK display is required")
 class MainWindowInteractionTests(unittest.TestCase):
     application: ClassVar[Adw.Application]
-    SAMPLE_HISTORY_SCORE = 4.256
-    DBUS_CALL_TIMEOUT_MS = 3000
-    EXPECTED_NAVIGATION_PAGE_COUNT = 9
-    EXPECTED_HEADER_MENU_ITEM_COUNT = 3
-    EXPECTED_APPLICATION_ROW_COUNT = 3
-    SAMPLE_CONFIRMED_RULES = 2
-    SAMPLE_MINIMUM_LENGTH = 5
-    SAMPLE_CONFIDENCE = 3.5
-    SAMPLE_LEARNING_CONFIRMATIONS = 3
-    CHANGED_EARLY_SWITCH_MIN_LENGTH = 3
-    EXPECTED_SAVE_HOTKEY_CALLS = 2
-    EXPECTED_ADD_MANUAL_CALLS = 2
-    OFF_POLICY_INDEX = 2
-    STALE_SOURCE_ID = 999
-    FAKE_TIMEOUT_SOURCE_ID = 123
-    FRESH_TIMEOUT_SOURCE_ID = 124
-    HISTORY_NAV_INDEX = 7
-    SAMPLE_MINIMUM_LENGTH_UPDATE = 7
-    SAMPLE_CORRECTION_COUNT = 5
-    SAMPLE_ALT_HISTORY_SCORE = 2.0
-    PLURAL_TEST_VALUES = (1, 2, 5, 11, 12, 24)
-    EXPECTED_APPLICATION_ROW_COUNT_AFTER_UPDATE = 2
-    EXPECTED_THEME_APPLY_CALLS = 4  # one per theme tried: system, light, dark, invalid
-    EXPECTED_DIALOG_PRESENT_CALLS = 3  # confirm_clear_history, confirm_clear_learning, confirm_reset
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -260,7 +273,7 @@ class MainWindowInteractionTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.settings = SettingsStore(self.root / "config.json")
         self.history = HistoryStore(self.root / "history.jsonl")
-        self.history.append(HistoryEntry.create("ghbdtn", "привет", "", self.SAMPLE_HISTORY_SCORE))
+        self.history.append(HistoryEntry.create("ghbdtn", "привет", "", UI_SAMPLE_HISTORY_CONFIDENCE))
         self.engine = FakeEngine(self.root)
         self.autostart = FakeAutostart()
         self.updates = FakeUpdates()
@@ -299,29 +312,29 @@ class MainWindowInteractionTests(unittest.TestCase):
         bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         names = bus.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus",
                               "org.freedesktop.DBus", "ListNames", None,
-                              GLib.VariantType.new("(as)"), Gio.DBusCallFlags.NONE, self.DBUS_CALL_TIMEOUT_MS, None).unpack()[0]
+                              GLib.VariantType.new("(as)"), Gio.DBusCallFlags.NONE, SESSION_BUS_CALL_TIMEOUT_MS, None).unpack()[0]
         self.assertNotIn("org.freedesktop.portal.Desktop", names)
         self.assertNotIn("org.freedesktop.portal.Documents", names)
 
     def test_full_window_builds_all_pages_and_bound_controls(self) -> None:
         self.assertEqual(self.window.get_title(), "KeySwitch")
-        self.assertEqual(len(self.window.NAVIGATION), self.EXPECTED_NAVIGATION_PAGE_COUNT)
+        self.assertEqual(len(self.window.NAVIGATION), GTK_EXPECTED_NAVIGATION_PAGE_COUNT)
         for name, _label, _icon in self.window.NAVIGATION:
             self.assertIsNotNone(self.window.stack.get_child_by_name(name))
         menu = self.window._header_menu()
-        self.assertEqual(menu.get_n_items(), self.EXPECTED_HEADER_MENU_ITEM_COUNT)
+        self.assertEqual(menu.get_n_items(), GTK_EXPECTED_HEADER_MENU_ITEM_COUNT)
         self.assertEqual(self.window.history_total_label.get_label(), "1 запись")
-        self.assertEqual(len(self.window._application_rows), self.EXPECTED_APPLICATION_ROW_COUNT)
-        self.assertEqual(self.window._learning_summary(self.SAMPLE_CONFIRMED_RULES, 1), "Подтверждённых правил: 2 · запретов после отмены: 1")
+        self.assertEqual(len(self.window._application_rows), GTK_EXPECTED_APPLICATION_ROW_COUNT)
+        self.assertEqual(self.window._learning_summary(GTK_SAMPLE_CONFIRMED_RULES, 1), "Подтверждённых правил: 2 · запретов после отмены: 1")
 
         minimum = self.window._settings_controls["detection.minimum_length"]
         assert isinstance(minimum, Adw.SpinRow)
-        minimum.set_value(self.SAMPLE_MINIMUM_LENGTH)
-        self.assertEqual(self.settings.get("detection.minimum_length"), self.SAMPLE_MINIMUM_LENGTH)
+        minimum.set_value(NON_DEFAULT_MINIMUM_WORD_LENGTH)
+        self.assertEqual(self.settings.get("detection.minimum_length"), NON_DEFAULT_MINIMUM_WORD_LENGTH)
         confidence = self.window._settings_controls["detection.confidence"]
         assert isinstance(confidence, Adw.SpinRow)
-        confidence.set_value(self.SAMPLE_CONFIDENCE)
-        self.assertEqual(self.settings.get("detection.confidence"), self.SAMPLE_CONFIDENCE)
+        confidence.set_value(NON_DEFAULT_CONFIDENCE_THRESHOLD)
+        self.assertEqual(self.settings.get("detection.confidence"), NON_DEFAULT_CONFIDENCE_THRESHOLD)
         switch = self.window._settings_controls["detection.aggressive"]
         assert isinstance(switch, Adw.SwitchRow)
         switch.set_active(True)
@@ -361,8 +374,8 @@ class MainWindowInteractionTests(unittest.TestCase):
             "detection.learning_confirmations"
         ]
         assert isinstance(confirmations, Adw.SpinRow)
-        confirmations.set_value(self.SAMPLE_LEARNING_CONFIRMATIONS)
-        self.assertEqual(self.settings.get("detection.learning_confirmations"), self.SAMPLE_LEARNING_CONFIRMATIONS)
+        confirmations.set_value(NON_DEFAULT_LEARNING_CONFIRMATIONS)
+        self.assertEqual(self.settings.get("detection.learning_confirmations"), NON_DEFAULT_LEARNING_CONFIRMATIONS)
         theme = next(
             widget
             for widget in descendants(self.window)
@@ -390,15 +403,16 @@ class MainWindowInteractionTests(unittest.TestCase):
         minimum = controls["detection.early_switch_min_length"]
         assert isinstance(minimum, Adw.SpinRow)
         self.assertEqual(minimum.get_title(), "Символов до ранней смены")
-        self.assertIn("4–12", minimum.get_subtitle() or "")
+        self.assertIn(f"значение {EARLY_SWITCH_MIN_LENGTH_SETTING_MIN} ", minimum.get_subtitle() or "")
+        self.assertIn(f"{PREFIX_MIN_CHARACTERS}–{PREFIX_MAX_CHARACTERS}", minimum.get_subtitle() or "")
         self.assertEqual(minimum.get_value(), DEFAULT_EARLY_SWITCH_MIN_LENGTH)
         context.set_selected(1)
         early.set_active(False)
-        minimum.set_value(self.CHANGED_EARLY_SWITCH_MIN_LENGTH)
+        minimum.set_value(NON_DEFAULT_EARLY_SWITCH_MIN_LENGTH)
         loaded = SettingsStore(self.settings.path)
         self.assertEqual(loaded.get("detection.context_policy"), "shadow")
         self.assertFalse(loaded.get("detection.early_switch"))
-        self.assertEqual(loaded.get("detection.early_switch_min_length"), self.CHANGED_EARLY_SWITCH_MIN_LENGTH)
+        self.assertEqual(loaded.get("detection.early_switch_min_length"), NON_DEFAULT_EARLY_SWITCH_MIN_LENGTH)
 
     def test_buttons_entries_and_focus_controller_dispatch_callbacks(self) -> None:
         widgets = list(descendants(self.window))
@@ -430,7 +444,7 @@ class MainWindowInteractionTests(unittest.TestCase):
         with patch.object(self.window, "_save_hotkey") as save_hotkey:
             hotkey.emit("activate")
             focus.emit("leave")
-        self.assertEqual(save_hotkey.call_count, self.EXPECTED_SAVE_HOTKEY_CALLS)
+        self.assertEqual(save_hotkey.call_count, GTK_EXPECTED_SAVE_HOTKEY_CALLS)
 
         with (
             patch.object(self.window, "_confirm_clear_learning") as clear_learning,
@@ -468,7 +482,7 @@ class MainWindowInteractionTests(unittest.TestCase):
         clear_learning.assert_called_once_with()
         show_picker.assert_called_once_with()
         capture_application.assert_called_once_with()
-        self.assertEqual(add_manual.call_count, self.EXPECTED_ADD_MANUAL_CALLS)
+        self.assertEqual(add_manual.call_count, GTK_EXPECTED_ADD_MANUAL_CALLS)
         reset.assert_called_once_with()
         clear_history.assert_called_once_with()
         copy_diagnostics.assert_called_once_with(self.engine.backend.probe())
@@ -479,7 +493,7 @@ class MainWindowInteractionTests(unittest.TestCase):
     def test_hotkeys_text_debounce_navigation_and_setting_updates(self) -> None:
         context_control = self.window._settings_controls["detection.context_policy"]
         assert isinstance(context_control, Adw.ComboRow)
-        for mode, selected in (("shadow", 1), ("off", self.OFF_POLICY_INDEX), ("invalid", self.OFF_POLICY_INDEX), ("assist", 0)):
+        for mode, selected in (("shadow", 1), ("off", EXPECTED_CONTEXT_MODE_OFF_INDEX), ("invalid", EXPECTED_CONTEXT_MODE_OFF_INDEX), ("assist", 0)):
             self.window._apply_setting_update("detection.context_policy", mode)
             self.window._apply_setting_update("detection.context_policy", mode)
             self.assertEqual(context_control.get_selected(), selected)
@@ -495,20 +509,20 @@ class MainWindowInteractionTests(unittest.TestCase):
         self.assertEqual(self.settings.get("hotkeys.toggle"), "Ctrl+Shift+K")
 
         buffer = self.window.words_view.get_buffer()
-        self.window._text_save_sources["exclusions.words"] = self.STALE_SOURCE_ID
-        with patch("keyswitch.ui.GLib.source_remove") as remove, patch("keyswitch.ui.GLib.timeout_add", return_value=self.FAKE_TIMEOUT_SOURCE_ID) as timeout:
+        self.window._text_save_sources["exclusions.words"] = GTK_STALE_TEXT_SAVE_SOURCE_ID
+        with patch("keyswitch.ui.GLib.source_remove") as remove, patch("keyswitch.ui.GLib.timeout_add", return_value=GTK_FAKE_TEXT_SAVE_SOURCE_ID) as timeout:
             buffer.set_text("one\n\n two \n")
             callback = timeout.call_args.args[1]
             self.assertFalse(callback())
-        remove.assert_called_with(self.STALE_SOURCE_ID)
+        remove.assert_called_with(GTK_STALE_TEXT_SAVE_SOURCE_ID)
         self.assertEqual(self.settings.get("exclusions.words"), ["one", "two"])
         self.assertNotIn("exclusions.words", self.window._text_save_sources)
-        with patch("keyswitch.ui.GLib.timeout_add", return_value=self.FRESH_TIMEOUT_SOURCE_ID) as fresh_timeout:
+        with patch("keyswitch.ui.GLib.timeout_add", return_value=GTK_FRESH_TEXT_SAVE_SOURCE_ID) as fresh_timeout:
             self.window._debounce_text_save("fresh.path", buffer)
             fresh_timeout.call_args.args[1]()
 
         self.window._navigation_selected(self.window.nav_list, None)
-        history_row = self.window.nav_list.get_row_at_index(self.HISTORY_NAV_INDEX)
+        history_row = self.window.nav_list.get_row_at_index(GTK_HISTORY_NAVIGATION_INDEX)
         automation_row = self.window.nav_list.get_row_at_index(1)
         with patch.object(self.window, "refresh_history") as refresh:
             self.window._navigation_selected(self.window.nav_list, history_row)
@@ -525,8 +539,8 @@ class MainWindowInteractionTests(unittest.TestCase):
             self.window._setting_update_from_thread("enabled", False)
         idle.assert_called_once_with(self.window._apply_setting_update, "enabled", False)
         self.assertFalse(self.window._apply_setting_update("enabled", False))
-        self.window._apply_setting_update("detection.minimum_length", self.SAMPLE_MINIMUM_LENGTH_UPDATE)
-        self.window._apply_setting_update("detection.minimum_length", self.SAMPLE_MINIMUM_LENGTH_UPDATE)
+        self.window._apply_setting_update("detection.minimum_length", GTK_MINIMUM_LENGTH_UPDATE)
+        self.window._apply_setting_update("detection.minimum_length", GTK_MINIMUM_LENGTH_UPDATE)
         self.window._apply_setting_update("detection.minimum_length", "bad")
         self.window._apply_setting_update("appearance.indicator_style", "flags")
         self.window._apply_setting_update("appearance.indicator_style", "flags")
@@ -541,7 +555,7 @@ class MainWindowInteractionTests(unittest.TestCase):
         idle.assert_called_once_with(self.window._apply_engine_snapshot, snapshot)
         self.assertFalse(self.window._apply_engine_snapshot(snapshot))
         self.assertEqual(self.window.hero_pill.get_label(), "АКТИВНО")
-        paused = EngineSnapshot(running=True, enabled=False, current_group=1, current_word="word", correction_count=self.SAMPLE_CORRECTION_COUNT)
+        paused = EngineSnapshot(running=True, enabled=False, current_group=1, current_word="word", correction_count=GTK_SAMPLE_CORRECTION_COUNT)
         self.window._apply_engine_snapshot(paused)
         self.assertEqual(self.window.hero_pill.get_label(), "ПАУЗА")
         self.assertEqual(self.window.stat_layout.get_label(), "RU")
@@ -653,7 +667,7 @@ class MainWindowInteractionTests(unittest.TestCase):
         self.window.refresh_history()
         self.assertEqual(self.window.history_total_label.get_label(), "0 записей")
         self.history.append(HistoryEntry("invalid", "a", "b", "Editor", 1.0))
-        self.history.append(HistoryEntry.create("c", "d", "Editor", self.SAMPLE_ALT_HISTORY_SCORE))
+        self.history.append(HistoryEntry.create("c", "d", "Editor", UI_SECOND_HISTORY_CONFIDENCE))
         self.window.refresh_history()
         self.assertEqual(self.window.history_total_label.get_label(), "2 записи")
         dashboard = self.window.dashboard_history
@@ -663,7 +677,7 @@ class MainWindowInteractionTests(unittest.TestCase):
         self.assertEqual(self.window._format_time("broken"), "broken")
         self.assertIn(".", self.window._format_time("2026-08-26T10:00:00+00:00"))
         self.assertEqual(
-            [self.window._plural_entries(value) for value in self.PLURAL_TEST_VALUES],
+            [self.window._plural_entries(value) for value in RUSSIAN_PLURAL_SAMPLE_COUNTS],
             ["1 запись", "2 записи", "5 записей", "11 записей", "12 записей", "24 записи"],
         )
         listbox = Gtk.ListBox()
@@ -706,7 +720,10 @@ class MainWindowInteractionTests(unittest.TestCase):
         with patch.object(self.window, "set_visible") as visible, patch("keyswitch.ui.GLib.timeout_add") as timeout:
             self.window._start_active_application_capture()
         visible.assert_called_once_with(False)
-        timeout.assert_called_once_with(ui.APPLICATION_CAPTURE_DELAY_MS, self.window._finish_active_application_capture)
+        timeout.assert_called_once_with(APPLICATION_CAPTURE_DELAY_MS, self.window._finish_active_application_capture)
+        # The text names the delay the timer actually waits.
+        self.assertIn(f"через {quantity(APPLICATION_CAPTURE_DELAY_MS / MILLISECONDS_PER_SECOND, SECONDS)}",
+                      self.window.active_app_row.get_subtitle() or "")
         with patch.object(self.window, "present"):
             for name in ("", "keyswitch"):
                 self.engine.backend.application = name
@@ -723,7 +740,7 @@ class MainWindowInteractionTests(unittest.TestCase):
         self.assertEqual(len(self.window._application_rows), 1)
         self.settings.set("exclusions.applications", ["code", "unknown"])
         self.window._refresh_application_exclusions()
-        self.assertEqual(len(self.window._application_rows), self.EXPECTED_APPLICATION_ROW_COUNT_AFTER_UPDATE)
+        self.assertEqual(len(self.window._application_rows), GTK_APPLICATION_ROW_COUNT_AFTER_UPDATE)
 
     def test_picker_filters_activates_choice_and_releases_dialog(self) -> None:
         self.settings.set("exclusions.applications", [])
@@ -783,7 +800,7 @@ class MainWindowInteractionTests(unittest.TestCase):
         with patch("keyswitch.ui.Adw.StyleManager.get_default", return_value=manager):
             for theme in ("system", "light", "dark", "invalid"):
                 self.window._set_theme(theme)
-        self.assertEqual(manager.set_color_scheme.call_count, self.EXPECTED_THEME_APPLY_CALLS)
+        self.assertEqual(manager.set_color_scheme.call_count, EXPECTED_THEME_APPLY_CALLS)
 
         self.window._clear_history_response("cancel")
         self.window._clear_history_response("clear")
@@ -809,13 +826,13 @@ class MainWindowInteractionTests(unittest.TestCase):
             self.window._confirm_clear_history()
             self.window._confirm_clear_learning()
             self.window._confirm_reset()
-        self.assertEqual(dialog.present.call_count, self.EXPECTED_DIALOG_PRESENT_CALLS)
+        self.assertEqual(dialog.present.call_count, GTK_EXPECTED_DIALOG_PRESENT_CALLS)
         callbacks = [
             item.args[1]
             for item in dialog.connect.call_args_list
             if item.args[0] == "response"
         ]
-        self.assertEqual(len(callbacks), self.EXPECTED_DIALOG_PRESENT_CALLS)
+        self.assertEqual(len(callbacks), GTK_EXPECTED_DIALOG_PRESENT_CALLS)
         for callback in callbacks:
             callback(dialog, "cancel")
 

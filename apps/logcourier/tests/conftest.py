@@ -1,15 +1,12 @@
 import copy
 
 import pytest
+from fixture_values.counts import FAKE_DOWNLOAD_LIMIT_BYTES
+from fixture_values.keys import PRIVATE_LOGS_CHAT_ID
 
 from logcourier.config import Config, Source
 from logcourier.store import Store
 from logcourier.telegram import TelegramError
-
-# Numeric form of the "-100123" supergroup chat_id used across the fixtures below.
-PRIVATE_LOGS_CHAT_ID = -100123
-# Generous default so FakeTelegram.download() never trips over test payloads.
-FAKE_DOWNLOAD_LIMIT_BYTES = 10 * 1024 * 1024
 
 
 @pytest.fixture

@@ -26,13 +26,35 @@ from keyswitch.updates import (
     detect_update_target,
     launch_windows_installer,
 )
+from fixture_values.clock import UPDATE_CLIENT_SAMPLE_TIMEOUT_SECONDS, UPDATE_SAMPLE_TIMEOUT_SECONDS
+from fixture_values.counts import (
+    OVERSIZED_RELEASE_NOTES_CHARACTERS,
+    UPDATE_EXPECTED_DOWNLOAD_COUNT,
+    UPDATE_TINY_READ_LIMIT_BYTES,
+)
+from fixture_values.models import NON_STRING_FIELD_VALUE
+from fixture_values.release import (
+    FAKE_DOWNLOAD_FIRST_PROGRESS_DONE,
+    FAKE_DOWNLOAD_SECOND_PROGRESS_DONE,
+    FAKE_DOWNLOAD_SECOND_PROGRESS_TOTAL,
+    NON_STRING_RELEASE_BODY,
+    SAMPLE_RELEASE_ASSET_SIZE_BYTES,
+    UPDATE_SAMPLE_VERSION,
+    WRONG_RELEASE_ASSET_SIZE,
+)
+from keyswitch.constants.file_formats import SHA256_HEX_CHARACTERS
+from keyswitch.constants.updates import (
+    MAX_ASSET_BYTES,
+    MAX_RELEASE_JSON_BYTES,
+    MAX_RELEASE_NOTES_CHARACTERS,
+    PROGRESS_COMPLETE_PERCENT,
+)
 
 
 DOWNLOAD_URL = (
     "https://release-assets.githubusercontent.com/"
     "github-production-release-asset/1/verified"
 )
-SHA256_HEX_LENGTH = 64
 
 
 class FakeResponse:
@@ -121,19 +143,13 @@ def checked_release(
 
 
 class VersionAndValidationTests(unittest.TestCase):
-    SAMPLE_VERSION = SemanticVersion(2, 3, 4)
-    NON_STRING_VALUE = 3
-    SAMPLE_SIZE_BYTES = 3
-    TINY_READ_LIMIT_BYTES = 3
-    SAMPLE_TIMEOUT_SECONDS = 7.0
-
     def test_versions_targets_and_platform_detection(self) -> None:
         self.assertEqual(str(SemanticVersion.parse("v1.2.3")), "1.2.3")
         self.assertLess(SemanticVersion.parse("0.9.9"), SemanticVersion.parse("1.0.0"))
         for invalid in ("", "1.2", "01.2.3", "1.2.3-beta"):
             with self.subTest(invalid=invalid), self.assertRaises(UpdateError):
                 SemanticVersion.parse(invalid)
-        version = self.SAMPLE_VERSION
+        version = UPDATE_SAMPLE_VERSION
         self.assertEqual(
             UpdateTarget.WINDOWS_X64.asset_name(version),
             "KeySwitch-Setup-2.3.4-x64.exe",
@@ -162,17 +178,17 @@ class VersionAndValidationTests(unittest.TestCase):
         with self.assertRaises(UpdateError):
             updates._object_mapping({1: "bad"}, "item")
         self.assertEqual(updates._object_mapping({"ok": 1}, "item"), {"ok": 1})
-        for value in (None, "", self.NON_STRING_VALUE):
+        for value in (None, "", NON_STRING_FIELD_VALUE):
             with self.subTest(value=value), self.assertRaises(UpdateError):
                 updates._required_string({"field": value}, "field")
-        for value in (True, "3", 0, updates.MAX_ASSET_BYTES + 1):
+        for value in (True, "3", 0, MAX_ASSET_BYTES + 1):
             with self.subTest(value=value), self.assertRaises(UpdateError):
                 updates._required_size({"size": value})
-        self.assertEqual(updates._required_size({"size": self.SAMPLE_SIZE_BYTES}), self.SAMPLE_SIZE_BYTES)
+        self.assertEqual(updates._required_size({"size": SAMPLE_RELEASE_ASSET_SIZE_BYTES}), SAMPLE_RELEASE_ASSET_SIZE_BYTES)
 
         oversized = FakeResponse(b"1234", updates.LATEST_RELEASE_URL)
         with self.assertRaises(UpdateError):
-            updates._read_limited(oversized, self.TINY_READ_LIMIT_BYTES)
+            updates._read_limited(oversized, UPDATE_TINY_READ_LIMIT_BYTES)
         with self.assertRaises(UpdateError):
             updates._validate_api_response_url("https://example.invalid/latest")
         updates._validate_api_response_url(updates.LATEST_RELEASE_URL)
@@ -191,12 +207,12 @@ class VersionAndValidationTests(unittest.TestCase):
 
         def open_url(request: Request, *, timeout: float) -> FakeResponse:
             self.assertEqual(request.full_url, updates.LATEST_RELEASE_URL)
-            self.assertEqual(timeout, self.SAMPLE_TIMEOUT_SECONDS)
+            self.assertEqual(timeout, UPDATE_SAMPLE_TIMEOUT_SECONDS)
             return response
 
         with patch("keyswitch.updates.urlopen", side_effect=open_url):
             request = Request(updates.LATEST_RELEASE_URL)
-            self.assertIs(updates._open_url(request, self.SAMPLE_TIMEOUT_SECONDS), response)
+            self.assertIs(updates._open_url(request, UPDATE_SAMPLE_TIMEOUT_SECONDS), response)
 
         thread = Mock()
         with patch("keyswitch.updates.threading.Thread", return_value=thread) as factory:
@@ -211,35 +227,31 @@ class VersionAndValidationTests(unittest.TestCase):
 
 
 class GitHubReleaseClientTests(unittest.TestCase):
-    SAMPLE_CLIENT_TIMEOUT = 9
-    OVERSIZED_NOTES_LENGTH = 5000
-    WRONG_ASSET_SIZE = 2
-    NON_STRING_BODY = 123
 
     def latest(self, payload: object, *, url: str = updates.LATEST_RELEASE_URL) -> UpdateRelease:
         opener = FakeOpener(response_for(payload, url=url))
-        return GitHubReleaseClient("0.4.0", opener=opener, timeout=self.SAMPLE_CLIENT_TIMEOUT).latest_release(
+        return GitHubReleaseClient("0.4.0", opener=opener, timeout=UPDATE_CLIENT_SAMPLE_TIMEOUT_SECONDS).latest_release(
             UpdateTarget.WINDOWS_X64
         )
 
     def test_success_validates_request_and_platform_assets(self) -> None:
         payload = release_payload()
-        payload["body"] = "x" * self.OVERSIZED_NOTES_LENGTH
+        payload["body"] = "x" * OVERSIZED_RELEASE_NOTES_CHARACTERS
         response = response_for(payload)
         opener = FakeOpener(response)
-        release = GitHubReleaseClient("0.4.0", opener=opener, timeout=self.SAMPLE_CLIENT_TIMEOUT).latest_release(
+        release = GitHubReleaseClient("0.4.0", opener=opener, timeout=UPDATE_CLIENT_SAMPLE_TIMEOUT_SECONDS).latest_release(
             UpdateTarget.WINDOWS_X64
         )
         self.assertEqual(str(release.version), "1.2.3")
-        self.assertEqual(len(release.notes), updates.MAX_RELEASE_NOTES_CHARACTERS)
+        self.assertEqual(len(release.notes), MAX_RELEASE_NOTES_CHARACTERS)
         self.assertEqual(release.asset.size, len(b"package"))
         request, timeout = opener.calls[0]
-        self.assertEqual((request.full_url, timeout), (updates.LATEST_RELEASE_URL, self.SAMPLE_CLIENT_TIMEOUT))
+        self.assertEqual((request.full_url, timeout), (updates.LATEST_RELEASE_URL, UPDATE_CLIENT_SAMPLE_TIMEOUT_SECONDS))
         self.assertEqual(request.get_header("User-agent"), "KeySwitch/0.4.0")
         self.assertEqual(response.closed, 1)
 
         linux_payload = release_payload(target=UpdateTarget.UBUNTU_AMD64)
-        linux_payload["body"] = self.NON_STRING_BODY
+        linux_payload["body"] = NON_STRING_RELEASE_BODY
         linux = GitHubReleaseClient(
             "0.4.0",
             opener=FakeOpener(response_for(linux_payload)),
@@ -253,7 +265,7 @@ class GitHubReleaseClientTests(unittest.TestCase):
             FakeResponse(b"\xff", updates.LATEST_RELEASE_URL),
             FakeResponse(b"not-json", updates.LATEST_RELEASE_URL),
             FakeResponse(
-                b"x" * (updates.MAX_RELEASE_JSON_BYTES + 1),
+                b"x" * (MAX_RELEASE_JSON_BYTES + 1),
                 updates.LATEST_RELEASE_URL,
             ),
             response_for(release_payload(), url="https://example.invalid/latest"),
@@ -357,7 +369,7 @@ class GitHubReleaseClientTests(unittest.TestCase):
                         release.tag,
                         release.page_url,
                         release.notes,
-                        ReleaseAsset(release.asset.name, release.asset.url, self.WRONG_ASSET_SIZE, release.asset.sha256),
+                        ReleaseAsset(release.asset.name, release.asset.url, WRONG_RELEASE_ASSET_SIZE, release.asset.sha256),
                     ),
                     FakeResponse(content, DOWNLOAD_URL),
                 ),
@@ -377,7 +389,7 @@ class GitHubReleaseClientTests(unittest.TestCase):
                         release.tag,
                         release.page_url,
                         release.notes,
-                        ReleaseAsset(release.asset.name, release.asset.url, len(content), "0" * SHA256_HEX_LENGTH),
+                        ReleaseAsset(release.asset.name, release.asset.url, len(content), "0" * SHA256_HEX_CHARACTERS),
                     ),
                     FakeResponse(content, DOWNLOAD_URL),
                 ),
@@ -428,9 +440,6 @@ class GitHubReleaseClientTests(unittest.TestCase):
 
 
 class FakeReleaseClient:
-    PROGRESS_FIRST_DONE = 5
-    PROGRESS_SECOND_DONE = 20
-    PROGRESS_SECOND_TOTAL = 10
 
     def __init__(self, release: UpdateRelease) -> None:
         self.release = release
@@ -456,8 +465,8 @@ class FakeReleaseClient:
         progress: Callable[[int, int], None],
     ) -> Path:
         self.downloads += 1
-        progress(self.PROGRESS_FIRST_DONE, 0)
-        progress(self.PROGRESS_SECOND_DONE, self.PROGRESS_SECOND_TOTAL)
+        progress(FAKE_DOWNLOAD_FIRST_PROGRESS_DONE, 0)
+        progress(FAKE_DOWNLOAD_SECOND_PROGRESS_DONE, FAKE_DOWNLOAD_SECOND_PROGRESS_TOTAL)
         if self.download_hook is not None:
             self.download_hook()
         if self.download_error is not None:
@@ -470,7 +479,6 @@ def immediate(action: Callable[[], None]) -> None:
 
 
 class UpdateManagerTests(unittest.TestCase):
-    EXPECTED_DOWNLOAD_COUNT = 2
 
     def setUp(self) -> None:
         self.release = checked_release(version="1.0.0")
@@ -531,7 +539,7 @@ class UpdateManagerTests(unittest.TestCase):
         manager = self.manager(installer=self.installed.append)
         self.assertTrue(manager.check(automatic=True, install_automatically=True))
         self.assertEqual(manager.snapshot.phase, UpdatePhase.INSTALLING)
-        self.assertEqual(manager.snapshot.progress, updates.PROGRESS_COMPLETE_PERCENT)
+        self.assertEqual(manager.snapshot.progress, PROGRESS_COMPLETE_PERCENT)
         self.assertEqual(self.client.downloads, 1)
         self.assertEqual(len(self.installed), 1)
 
@@ -540,7 +548,7 @@ class UpdateManagerTests(unittest.TestCase):
         self.assertEqual(manual.snapshot.phase, UpdatePhase.AVAILABLE)
         self.assertTrue(manual.install_available())
         self.assertEqual(manual.snapshot.phase, UpdatePhase.INSTALLING)
-        self.assertEqual(self.client.downloads, self.EXPECTED_DOWNLOAD_COUNT)
+        self.assertEqual(self.client.downloads, UPDATE_EXPECTED_DOWNLOAD_COUNT)
 
     def test_busy_runner_and_client_errors(self) -> None:
         queued: list[Callable[[], None]] = []

@@ -12,6 +12,8 @@ from .input_context import FieldContext, FieldReader, InputContext
 from .ortho_model import OrthoEvidence, OrthoModel, shape_of
 from .short_words import ISOLATED_SHORT_WORD_REASON, is_short_word_override
 from .word_decision import NOT_A_WORD_REASON
+from .constants.detection import MINIMUM_SHAPED_TOKEN_CHARACTERS
+from .constants.models import CONTEXT_ACTION_FEATURE_VERSION
 
 
 @dataclass(frozen=True)
@@ -25,13 +27,6 @@ class ContextResult:
 
 
 INNER_MARKS: Final[str] = "-'’"
-# The shortest token `word_shaped` can judge: with one character the first-
-# and last-letter checks below look at the same position.
-MINIMUM_SHAPED_TOKEN_LENGTH: Final[int] = 2
-# The frozen context_model.py does not yet name its experimental,
-# orthotactic-aware schema; every place that tests for it here and in
-# engine.py must agree on the same number, so it is named once and shared.
-ORTHO_FEATURE_VERSION: Final[int] = 3
 
 
 def word_shaped(token: str) -> bool:
@@ -45,7 +40,7 @@ def word_shaped(token: str) -> bool:
     a model whole and are ordinary words of their language.
     """
 
-    if len(token) < MINIMUM_SHAPED_TOKEN_LENGTH or not token[0].isalpha() or not token[-1].isalpha():
+    if len(token) < MINIMUM_SHAPED_TOKEN_CHARACTERS or not token[0].isalpha() or not token[-1].isalpha():
         return False
     marks = 0
     for character in token[1:-1]:
@@ -122,7 +117,7 @@ class ContextPolicy:
         *, after: str = "", read_field: bool = False,
         field_override: FieldContext | None = None,
         literal_tail: str = "", boundary_text: str = "",
-        after_origin: AfterOrigin = "none",
+        after_origin: AfterOrigin = "none", planned_context: bool = False,
     ) -> ContextResult:
         if mode not in {"assist", "shadow"} or self.model is None:
             return ContextResult(baseline, fallback_reason="mode_disabled" if mode not in {"assist", "shadow"} else "model_unavailable")
@@ -151,7 +146,7 @@ class ContextPolicy:
         evidence = evidence_for_decision(
             baseline, alternative, target_group, detector, field, trigger,
             literal_tail=literal_tail, boundary_text=boundary_text,
-            ortho=self.ortho if self.model.feature_version == ORTHO_FEATURE_VERSION else None,
+            ortho=self.ortho if self.model.feature_version == CONTEXT_ACTION_FEATURE_VERSION else None,
             after_origin=after_origin,
         )
         source, target = evidence.source_score, evidence.target_score
@@ -161,7 +156,14 @@ class ContextPolicy:
             return ContextResult(baseline, prediction, field, fallback_reason="shadow_mode")
         # Missing context is honest uncertainty, not an instruction to guess.
         # A wait/suggestion can still describe a short ambiguous first word.
-        if not prediction.supported and prediction.action not in {"wait", "suggest"}:
+        # A planned context is not missing: the engine asks about a waiting word
+        # with the neighbour it has just decided. The model's support gate only
+        # asks whether it has a weight for this application or for these exact
+        # neighbour words, and five applications and fifty following words are
+        # all it knows, so in Firefox it started a wait for `tot` and then threw
+        # away its own 0.9993 verdict on `tot` before `привет`: the pair stayed
+        # `tot привет` (0.31.0 and 0.31.1 logs, 24.09.2026). Its verdict stands.
+        if not prediction.supported and prediction.action not in {"wait", "suggest"} and not planned_context:
             return ContextResult(baseline, prediction, field, fallback_reason="unsupported_context")
         if prediction.action == "convert":
             decision = replace(
@@ -205,7 +207,7 @@ class ContextPolicy:
             }[prediction.action])
         result = ContextResult(decision, prediction, field, policy_applied=True,
                                decision_source="context_model")
-        if self.model.feature_version != ORTHO_FEATURE_VERSION:
+        if self.model.feature_version != CONTEXT_ACTION_FEATURE_VERSION:
             result = self._licensed(result, baseline, alternative, target_group, field)
         return self._spelling_a_word(result)
 

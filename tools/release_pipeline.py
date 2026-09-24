@@ -59,11 +59,105 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 
 import environment_probe  # noqa: E402
 from verify_intent_strict_report import strict_gate_problems  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from keyswitch.constants.file_formats import (
+    HASH_CHUNK_BYTES,
+    KSLM_FINGERPRINT_ENTRY_BYTES,
+    KSLM_MAX_CONTAINER_BYTES,
+    KSLM_MAX_FINGERPRINTS,
+    KSLM_MAX_MANIFEST_BYTES,
+    KSLM_MAX_PAYLOAD_BYTES,
+    KSLM_MIN_MANIFEST_BYTES,
+    KSLM_SCHEMA_VERSION,
+    KSLM_WEIGHT_ENTRY_BYTES,
+    PIPELINE_STATE_JSON_INDENT,
+    VERSION_HASH_CHARACTERS,
+)
+from keyswitch.constants.release import (
+    ALREADY_RUNNING_EXIT_CODE,
+    BUILD_DEB_TIMEOUT_SECONDS,
+    COMMAND_PREVIEW_ARGUMENT_COUNT,
+    COMMIT_SHA_PREVIEW_CHARACTERS,
+    COVERAGE_TIMEOUT_SECONDS,
+    CPUS_PER_DEFAULT_JOB,
+    DEFAULT_LOG_TAIL_LINES,
+    DEFAULT_MEMORY_RESERVE_MIB,
+    DEFAULT_PAGE_SIZE_BYTES,
+    DEFAULT_PHASE_TIMEOUT_SECONDS,
+    DEFAULT_WAIT_POLL_SECONDS,
+    DETECTOR_GATES_TIMEOUT_SECONDS,
+    DEVELOPMENT_REPLAY_TIMEOUT_SECONDS,
+    LOG_LINE_PREVIEW_CHARACTERS,
+    MAX_DEFAULT_JOBS,
+    MAX_MEMORY_PRESSURE_EVENTS,
+    MAX_REPLAYS,
+    MINIMUM_WAIT_POLL_SECONDS,
+    MODEL_REPLAYS_BASE_MEMORY_MIB,
+    MODEL_REPLAYS_DEADLINE_SECONDS,
+    PHASE_BUILD_DEB_EXPECTED_SECONDS,
+    PHASE_BUILD_DEB_MEMORY_MIB,
+    PHASE_COVERAGE_EXPECTED_SECONDS,
+    PHASE_COVERAGE_MEMORY_MIB,
+    PHASE_DETECTOR_GATES_EXPECTED_SECONDS,
+    PHASE_DETECTOR_GATES_MEMORY_MIB,
+    PHASE_DURATION_DECIMALS,
+    PHASE_E2E_NATIVE_EXPECTED_SECONDS,
+    PHASE_E2E_NATIVE_MEMORY_MIB,
+    PHASE_E2E_TRAY_EXPECTED_SECONDS,
+    PHASE_E2E_TRAY_MEMORY_MIB,
+    PHASE_E2E_X11_EXPECTED_SECONDS,
+    PHASE_E2E_X11_MEMORY_MIB,
+    PHASE_ENVIRONMENT_EXPECTED_SECONDS,
+    PHASE_ENVIRONMENT_MEMORY_MIB,
+    PHASE_MODEL_DEVELOPMENT_REPLAY_EXPECTED_SECONDS,
+    PHASE_MODEL_DEVELOPMENT_REPLAY_MEMORY_MIB,
+    PHASE_MODEL_INPUTS_EXPECTED_SECONDS,
+    PHASE_MODEL_INPUTS_MEMORY_MIB,
+    PHASE_MODEL_PRESEAL_REPLAY_EXPECTED_SECONDS,
+    PHASE_MODEL_PRESEAL_REPLAY_MEMORY_MIB,
+    PHASE_MODEL_REPLAYS_EXPECTED_SECONDS,
+    PHASE_MODEL_REPLAYS_TIMEOUT_SECONDS,
+    PHASE_MODEL_REPLAY_STRICT_EXPECTED_SECONDS,
+    PHASE_MODEL_REPLAY_STRICT_MEMORY_MIB,
+    PHASE_MODEL_STRICT_EXPECTED_SECONDS,
+    PHASE_MODEL_STRICT_MEMORY_MIB,
+    PHASE_RELEASE_METADATA_EXPECTED_SECONDS,
+    PHASE_RELEASE_METADATA_MEMORY_MIB,
+    PHASE_RELEASE_METADATA_TIMEOUT_SECONDS,
+    PHASE_TYPECHECK_EXPECTED_SECONDS,
+    PHASE_TYPECHECK_MEMORY_MIB,
+    PHASE_VERIFY_DEB_EXPECTED_SECONDS,
+    PHASE_VERIFY_DEB_MEMORY_MIB,
+    PIPELINE_JSON_READ_LIMIT_BYTES,
+    PIPELINE_STATE_SCHEMA_VERSION,
+    PRESEAL_REPLAY_TIMEOUT_SECONDS,
+    PROC_STAT_MIN_FIELDS_AFTER_COMM,
+    PROC_STAT_RSS_PAGES_INDEX,
+    PROC_STAT_SESSION_INDEX,
+    QUICK_CHECK_TIMEOUT_SECONDS,
+    QUICK_VERIFICATION_TIMEOUT_SECONDS,
+    REPLAY_MEMORY_MIB,
+    REPLAY_POLL_SECONDS,
+    REQUIRED_COVERAGE_PERCENT,
+    SAVE_RETRY_ATTEMPTS,
+    SAVE_RETRY_BACKOFF_SECONDS,
+    SCHEDULER_POLL_SECONDS,
+    SIGINT_EXIT_CODE,
+    STILL_RUNNING_EXIT_CODE,
+    STRICT_EVALUATION_TIMEOUT_SECONDS,
+    TERMINATE_GRACE_SECONDS,
+    TYPECHECK_TIMEOUT_SECONDS,
+)
+from keyswitch.constants.units import (
+    BYTES_PER_KIBIBYTE,
+    BYTES_PER_MEBIBYTE,
+    SECONDS_PER_HOUR,
+    SECONDS_PER_MINUTE,
+)
 
 
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 DEFAULT_PIPELINE_ROOT: Final[Path] = PROJECT_ROOT / "dist" / "release-pipeline"
-STATE_SCHEMA_VERSION: Final[int] = 1
 STATE_FILE: Final[str] = "state.json"
 SUMMARY_JSON: Final[str] = "summary.json"
 SUMMARY_MARKDOWN: Final[str] = "SUMMARY.md"
@@ -92,17 +186,6 @@ MODEL_ARTIFACT: Final[Path] = (
     PROJECT_ROOT / "src" / "keyswitch" / "resources" / "models" / "layout_intent_v1.ksm"
 )
 KSLM_HEADER: Final[struct.Struct] = struct.Struct("<4sHHIII32s")
-KSLM_MAX_CONTAINER: Final[int] = 14 * 1024 * 1024
-KSLM_MAX_MANIFEST: Final[int] = 1024 * 1024
-KSLM_MAX_PAYLOAD: Final[int] = 12 * 1024 * 1024
-KSLM_MAX_FINGERPRINTS: Final[int] = 1 << 20
-# Mirrors src/keyswitch/intent_model.py (PENDING_RESEAL): schema 4, a minimal
-# embedded-manifest JSON object, and int16 weight / uint64 fingerprint records.
-KSLM_SCHEMA_VERSION: Final[int] = 4
-KSLM_MIN_MANIFEST_BYTES: Final[int] = 2
-KSLM_WEIGHT_ENTRY_BYTES: Final[int] = 2
-KSLM_FINGERPRINT_ENTRY_BYTES: Final[int] = 8
-JSON_READ_LIMIT: Final[int] = 64 * 1024 * 1024
 
 # Same mapping that packaging/build-windows.ps1 enforces; the preseal receipt
 # path is derived from the registry version at run time.
@@ -192,61 +275,7 @@ REPLAY_FILES: Final[tuple[str, ...]] = (
     "manifest.json",
     "test-report.json",
 )
-# One trainer replay holds ~8 GiB in the parent and forks one worker per CPU in
-# its feature/scoring phases; two replays in parallel plus a desktop exhausted a
-# 32 GiB host on 2026-09-02, so replays run one at a time under this budget.
-REPLAY_MEMORY_MIB: Final[int] = 16000
-REPLAY_POLL_SECONDS: Final[int] = 30
-SCHEDULER_POLL_SECONDS: Final[float] = 5.0
-TERMINATE_GRACE_SECONDS: Final[int] = 30
-DEFAULT_MEMORY_RESERVE_MIB: Final[int] = 2048
 FAILED_STATUSES: Final[frozenset[str]] = frozenset({"failed", "aborted"})
-
-BYTES_PER_KIB: Final[int] = 1024
-HASH_STREAM_CHUNK_BYTES: Final[int] = 1 << 20
-DEFAULT_PAGE_SIZE_BYTES: Final[int] = 4096
-# Indices into `stat.rpartition(")")[2].split()`: the /proc/pid/stat fields
-# that follow the parenthesised command name (see proc(5)), 0-based.
-PROC_STAT_SESSION_INDEX: Final[int] = 3
-PROC_STAT_RSS_PAGES_INDEX: Final[int] = 21
-PROC_STAT_MIN_FIELDS_AFTER_COMM: Final[int] = PROC_STAT_RSS_PAGES_INDEX + 1
-SECONDS_PER_MINUTE: Final[int] = 60
-SECONDS_PER_HOUR: Final[int] = 3600
-DEFAULT_LOG_TAIL_LINES: Final[int] = 40
-COMMAND_PREVIEW_ARGUMENT_COUNT: Final[int] = 2
-
-# Per-phase subprocess timeouts.
-DEVELOPMENT_REPLAY_TIMEOUT_SECONDS: Final[int] = 3 * SECONDS_PER_HOUR
-PRESEAL_REPLAY_TIMEOUT_SECONDS: Final[int] = 3 * SECONDS_PER_HOUR
-STRICT_EVALUATION_TIMEOUT_SECONDS: Final[int] = 4 * SECONDS_PER_HOUR
-MODEL_REPLAYS_DEADLINE_SECONDS: Final[int] = 8 * SECONDS_PER_HOUR
-TYPECHECK_TIMEOUT_SECONDS: Final[int] = SECONDS_PER_HOUR
-COVERAGE_TIMEOUT_SECONDS: Final[int] = 2 * SECONDS_PER_HOUR
-DETECTOR_GATES_TIMEOUT_SECONDS: Final[int] = 2 * SECONDS_PER_HOUR
-BUILD_DEB_TIMEOUT_SECONDS: Final[int] = 6 * SECONDS_PER_HOUR
-DEFAULT_PHASE_TIMEOUT_SECONDS: Final[int] = 30 * SECONDS_PER_MINUTE
-QUICK_VERIFICATION_TIMEOUT_SECONDS: Final[int] = 10 * SECONDS_PER_MINUTE
-# Matches VERSION_HASH_CHARACTERS in src/keyswitch/prefix_schema.py's readable
-# "<namespace>-v<n>-<hash prefix>" version-string convention.
-MODEL_VERSION_HASH_CHARACTERS: Final[int] = 12
-REQUIRED_COVERAGE_PERCENT: Final[int] = 100
-QUICK_CHECK_TIMEOUT_SECONDS: Final[int] = 5 * SECONDS_PER_MINUTE
-COMMIT_SHA_PREVIEW_CHARACTERS: Final[int] = 12
-MODEL_REPLAYS_BASE_MEMORY_MIB: Final[int] = 300
-STATE_JSON_INDENT: Final[int] = 2
-SAVE_RETRY_ATTEMPTS: Final[int] = 3
-SAVE_RETRY_BACKOFF_SECONDS: Final[float] = 0.05
-DURATION_ROUND_DECIMALS: Final[int] = 3
-MAX_MEMORY_PRESSURE_EVENTS: Final[int] = 50
-SIGINT_EXIT_CODE: Final[int] = 130
-ALREADY_RUNNING_EXIT_CODE: Final[int] = 2
-STILL_RUNNING_EXIT_CODE: Final[int] = 3
-LOG_LINE_PREVIEW_CHARACTERS: Final[int] = 160
-MAX_DEFAULT_JOBS: Final[int] = 4
-CPUS_PER_DEFAULT_JOB: Final[int] = 3
-MAX_REPLAYS: Final[int] = 2
-DEFAULT_WAIT_POLL_SECONDS: Final[int] = SECONDS_PER_MINUTE
-MINIMUM_WAIT_POLL_SECONDS: Final[int] = 5
 
 
 class PhaseFailure(Exception):
@@ -279,7 +308,7 @@ def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         while True:
-            chunk = stream.read(HASH_STREAM_CHUNK_BYTES)
+            chunk = stream.read(HASH_CHUNK_BYTES)
             if not chunk:
                 break
             digest.update(chunk)
@@ -339,7 +368,7 @@ def load_json_object(path: Path, label: str) -> dict[str, object]:
     if not path.is_file():
         raise PhaseFailure(f"{label} is missing: {path}")
     try:
-        payload = json.loads(read_bounded(path, JSON_READ_LIMIT, label).decode("utf-8"))
+        payload = json.loads(read_bounded(path, PIPELINE_JSON_READ_LIMIT_BYTES, label).decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise PhaseFailure(f"{label} is not valid JSON: {error}") from error
     return as_object(payload, label)
@@ -415,7 +444,7 @@ def session_rss_mib(session_ids: Sequence[int]) -> int:
     if not wanted:
         return 0
     sysconf = getattr(os, "sysconf", None)
-    page_kib = (sysconf("SC_PAGE_SIZE") if sysconf is not None else DEFAULT_PAGE_SIZE_BYTES) // BYTES_PER_KIB
+    page_kib = (sysconf("SC_PAGE_SIZE") if sysconf is not None else DEFAULT_PAGE_SIZE_BYTES) // BYTES_PER_KIBIBYTE
     total_kib = 0
     proc = Path("/proc")
     if not proc.is_dir():
@@ -448,7 +477,7 @@ def session_rss_mib(session_ids: Sequence[int]) -> int:
         except (OSError, ValueError, IndexError):
             pss_kib = -1
         total_kib += pss_kib if pss_kib >= 0 else rss_pages * page_kib
-    return total_kib // BYTES_PER_KIB
+    return total_kib // BYTES_PER_KIBIBYTE
 
 
 def session_of(pid: int) -> int:
@@ -522,7 +551,7 @@ def memory_info() -> dict[str, int]:
         key, _, rest = line.partition(":")
         if key in {"MemTotal", "MemAvailable", "SwapTotal", "SwapFree"}:
             amount = rest.strip().split()[0]
-            result[f"{key.lower()}_mib"] = int(amount) // BYTES_PER_KIB
+            result[f"{key.lower()}_mib"] = int(amount) // BYTES_PER_KIBIBYTE
     return result
 
 
@@ -944,7 +973,7 @@ def ensure_pip_tool(
 
 
 def kslm_bounds(path: Path) -> dict[str, object]:
-    data = read_bounded(path, KSLM_MAX_CONTAINER, "KSLM container")
+    data = read_bounded(path, KSLM_MAX_CONTAINER_BYTES, "KSLM container")
     if len(data) < KSLM_HEADER.size:
         raise PhaseFailure("KSLM header is truncated")
     magic, schema, flags, manifest_length, payload_length, _crc, _digest = (
@@ -956,10 +985,10 @@ def kslm_bounds(path: Path) -> dict[str, object]:
         raise PhaseFailure(f"KSLM schema {schema} is unsupported")
     if flags != 0:
         raise PhaseFailure("KSLM header flags are unsupported")
-    if not KSLM_MIN_MANIFEST_BYTES <= manifest_length <= KSLM_MAX_MANIFEST:
-        raise PhaseFailure("KSLM embedded manifest exceeds the 1 MiB bound")
-    if not 0 < payload_length <= KSLM_MAX_PAYLOAD:
-        raise PhaseFailure("KSLM payload exceeds the 12 MiB bound")
+    if not KSLM_MIN_MANIFEST_BYTES <= manifest_length <= KSLM_MAX_MANIFEST_BYTES:
+        raise PhaseFailure(f"KSLM embedded manifest exceeds the {KSLM_MAX_MANIFEST_BYTES / BYTES_PER_MEBIBYTE:g} MiB bound")
+    if not 0 < payload_length <= KSLM_MAX_PAYLOAD_BYTES:
+        raise PhaseFailure(f"KSLM payload exceeds the {KSLM_MAX_PAYLOAD_BYTES / BYTES_PER_MEBIBYTE:g} MiB bound")
     if len(data) != KSLM_HEADER.size + manifest_length + payload_length:
         raise PhaseFailure("KSLM header lengths do not match the container")
     embedded = as_object(
@@ -971,7 +1000,7 @@ def kslm_bounds(path: Path) -> dict[str, object]:
     fingerprints = as_int(embedded.get("supported_fingerprint_count"), "fingerprint count")
     dimension = as_int(embedded.get("dimension"), "dimension")
     if not 0 <= fingerprints <= KSLM_MAX_FINGERPRINTS:
-        raise PhaseFailure("KSLM fingerprint count exceeds the 2^20 bound")
+        raise PhaseFailure(f"KSLM fingerprint count exceeds the {KSLM_MAX_FINGERPRINTS} bound")
     if dimension <= 0 or payload_length != dimension * KSLM_WEIGHT_ENTRY_BYTES + fingerprints * KSLM_FINGERPRINT_ENTRY_BYTES:
         raise PhaseFailure("KSLM payload shape does not match its embedded manifest")
     return {
@@ -1055,7 +1084,7 @@ def phase_model_inputs(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
     if sha256_file(MODEL_ARTIFACT) != identity.artifact_sha256:
         problems.append("manifest.artifact_sha256 does not match the bundled KSLM file")
     provenance = as_str(manifest.get("build_provenance_sha256"), "build provenance")
-    if identity.artifact_version != f"intent-v1-{provenance[:MODEL_VERSION_HASH_CHARACTERS]}":
+    if identity.artifact_version != f"intent-v1-{provenance[:VERSION_HASH_CHARACTERS]}":
         problems.append(
             "artifact_model_version is not derived from build_provenance_sha256"
         )
@@ -2039,54 +2068,54 @@ def phase_release_metadata(ctx: Context, log: PhaseLog, state: PhaseState) -> No
         raise PhaseFailure("; ".join(problems))
 
 
-# Memory estimates are conservative peaks (MiB): observed PSS on the reference
-# host on 2026-09-02 plus headroom. Every run records ``observed_peak_rss_mib``
-# per phase so the table can be recalibrated.
+# Each phase's timeout, expected duration and memory estimate (MiB); see the PHASE_ block of
+# keyswitch.constants.release. Every run records ``observed_peak_rss_mib`` per phase so the
+# memory estimates can be recalibrated.
 PHASES: Final[tuple[PhaseSpec, ...]] = (
     PhaseSpec(
         "environment",
         "Host, packages and pinned tools",
         phase_environment,
         (),
-        1800,
-        60,
-        300,
+        DEFAULT_PHASE_TIMEOUT_SECONDS,
+        PHASE_ENVIRONMENT_EXPECTED_SECONDS,
+        PHASE_ENVIRONMENT_MEMORY_MIB,
     ),
     PhaseSpec(
         "model-inputs",
         "Model provenance and internal gates",
         phase_model_inputs,
         ("environment",),
-        600,
-        20,
-        300,
+        QUICK_VERIFICATION_TIMEOUT_SECONDS,
+        PHASE_MODEL_INPUTS_EXPECTED_SECONDS,
+        PHASE_MODEL_INPUTS_MEMORY_MIB,
     ),
     PhaseSpec(
         "model-development-replay",
         "Model-blind development corpus replay",
         phase_model_development_replay,
         ("model-inputs",),
-        3 * 3600,
-        400,
-        1200,
+        DEVELOPMENT_REPLAY_TIMEOUT_SECONDS,
+        PHASE_MODEL_DEVELOPMENT_REPLAY_EXPECTED_SECONDS,
+        PHASE_MODEL_DEVELOPMENT_REPLAY_MEMORY_MIB,
     ),
     PhaseSpec(
         "model-preseal-replay",
         "Model-blind preseal receipt replay",
         phase_model_preseal_replay,
         ("model-inputs",),
-        3 * 3600,
-        400,
-        1200,
+        PRESEAL_REPLAY_TIMEOUT_SECONDS,
+        PHASE_MODEL_PRESEAL_REPLAY_EXPECTED_SECONDS,
+        PHASE_MODEL_PRESEAL_REPLAY_MEMORY_MIB,
     ),
     PhaseSpec(
         "model-strict",
         "Independent strict evaluation",
         phase_model_strict,
         ("model-inputs",),
-        4 * 3600,
-        900,
-        9500,
+        STRICT_EVALUATION_TIMEOUT_SECONDS,
+        PHASE_MODEL_STRICT_EXPECTED_SECONDS,
+        PHASE_MODEL_STRICT_MEMORY_MIB,
         exclusive=True,
     ),
     PhaseSpec(
@@ -2094,8 +2123,8 @@ PHASES: Final[tuple[PhaseSpec, ...]] = (
         "Byte-identical retraining replays",
         phase_model_replays,
         ("model-inputs",),
-        16 * 3600,
-        4 * 3600,
+        PHASE_MODEL_REPLAYS_TIMEOUT_SECONDS,
+        PHASE_MODEL_REPLAYS_EXPECTED_SECONDS,
         REPLAY_MEMORY_MIB,
     ),
     PhaseSpec(
@@ -2103,9 +2132,9 @@ PHASES: Final[tuple[PhaseSpec, ...]] = (
         "Strict evaluation of replay a",
         phase_model_replay_strict,
         ("model-replays",),
-        4 * 3600,
-        900,
-        4000,
+        STRICT_EVALUATION_TIMEOUT_SECONDS,
+        PHASE_MODEL_REPLAY_STRICT_EXPECTED_SECONDS,
+        PHASE_MODEL_REPLAY_STRICT_MEMORY_MIB,
         exclusive=True,
     ),
     PhaseSpec(
@@ -2113,18 +2142,18 @@ PHASES: Final[tuple[PhaseSpec, ...]] = (
         "Maximum strict mypy",
         phase_typecheck,
         ("environment",),
-        3600,
-        120,
-        600,
+        TYPECHECK_TIMEOUT_SECONDS,
+        PHASE_TYPECHECK_EXPECTED_SECONDS,
+        PHASE_TYPECHECK_MEMORY_MIB,
     ),
     PhaseSpec(
         "coverage",
         "Unit and GTK tests with 100% branch coverage",
         phase_coverage,
         ("environment",),
-        2 * 3600,
-        180,
-        800,
+        COVERAGE_TIMEOUT_SECONDS,
+        PHASE_COVERAGE_EXPECTED_SECONDS,
+        PHASE_COVERAGE_MEMORY_MIB,
         "display",
     ),
     PhaseSpec(
@@ -2132,18 +2161,18 @@ PHASES: Final[tuple[PhaseSpec, ...]] = (
         "Detector quality gates",
         phase_detector_gates,
         ("environment",),
-        2 * 3600,
-        600,
-        400,
+        DETECTOR_GATES_TIMEOUT_SECONDS,
+        PHASE_DETECTOR_GATES_EXPECTED_SECONDS,
+        PHASE_DETECTOR_GATES_MEMORY_MIB,
     ),
     PhaseSpec(
         "e2e-x11",
         "Real X11 RECORD/XTEST end-to-end",
         phase_e2e_x11,
         ("environment",),
-        1800,
-        120,
-        500,
+        DEFAULT_PHASE_TIMEOUT_SECONDS,
+        PHASE_E2E_X11_EXPECTED_SECONDS,
+        PHASE_E2E_X11_MEMORY_MIB,
         "display",
     ),
     PhaseSpec(
@@ -2151,9 +2180,9 @@ PHASES: Final[tuple[PhaseSpec, ...]] = (
         "StatusNotifierItem and DBusMenu integration",
         phase_e2e_tray,
         ("environment",),
-        1800,
-        60,
-        200,
+        DEFAULT_PHASE_TIMEOUT_SECONDS,
+        PHASE_E2E_TRAY_EXPECTED_SECONDS,
+        PHASE_E2E_TRAY_MEMORY_MIB,
         "display",
     ),
     PhaseSpec(
@@ -2161,27 +2190,27 @@ PHASES: Final[tuple[PhaseSpec, ...]] = (
         "Native Debian package (Nuitka)",
         phase_build_deb,
         ("environment", "model-inputs", "model-strict"),
-        6 * 3600,
-        600,
-        4000,
+        BUILD_DEB_TIMEOUT_SECONDS,
+        PHASE_BUILD_DEB_EXPECTED_SECONDS,
+        PHASE_BUILD_DEB_MEMORY_MIB,
     ),
     PhaseSpec(
         "verify-deb",
         "Package verifier, desktop file and Lintian",
         phase_verify_deb,
         ("build-deb",),
-        1800,
-        120,
-        300,
+        DEFAULT_PHASE_TIMEOUT_SECONDS,
+        PHASE_VERIFY_DEB_EXPECTED_SECONDS,
+        PHASE_VERIFY_DEB_MEMORY_MIB,
     ),
     PhaseSpec(
         "e2e-native",
         "Packaged executable X11 and tray end-to-end",
         phase_e2e_native,
         ("verify-deb",),
-        1800,
-        120,
-        600,
+        DEFAULT_PHASE_TIMEOUT_SECONDS,
+        PHASE_E2E_NATIVE_EXPECTED_SECONDS,
+        PHASE_E2E_NATIVE_MEMORY_MIB,
         "display",
     ),
     PhaseSpec(
@@ -2189,9 +2218,9 @@ PHASES: Final[tuple[PhaseSpec, ...]] = (
         "Version, changelog and model documentation",
         phase_release_metadata,
         ("environment",),
-        600,
-        10,
-        200,
+        PHASE_RELEASE_METADATA_TIMEOUT_SECONDS,
+        PHASE_RELEASE_METADATA_EXPECTED_SECONDS,
+        PHASE_RELEASE_METADATA_MEMORY_MIB,
     ),
 )
 PHASE_BY_NAME: Final[Mapping[str, PhaseSpec]] = {spec.name: spec for spec in PHASES}
@@ -2301,7 +2330,7 @@ def select_phases(options: Options) -> tuple[str, ...]:
 
 def write_json_atomic(path: Path, payload: Mapping[str, object]) -> None:
     temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=STATE_JSON_INDENT) + "\n", "utf-8")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=PIPELINE_STATE_JSON_INDENT) + "\n", "utf-8")
     os.replace(temporary, path)
 
 
@@ -2319,7 +2348,7 @@ class Pipeline:
 
     def to_json(self) -> dict[str, object]:
         return {
-            "schema_version": STATE_SCHEMA_VERSION,
+            "schema_version": PIPELINE_STATE_SCHEMA_VERSION,
             "pipeline": {
                 "status": self.status,
                 "profile": self.options.profile,
@@ -2456,7 +2485,7 @@ def render_summary_markdown(state: Mapping[str, object]) -> str:
                 lines.append(f"- note: {note}")
         if isinstance(facts, dict) and len(facts) > 0:
             lines.append("```json")
-            lines.append(json.dumps(facts, ensure_ascii=False, indent=STATE_JSON_INDENT))
+            lines.append(json.dumps(facts, ensure_ascii=False, indent=PIPELINE_STATE_JSON_INDENT))
             lines.append("```")
         lines.append("")
     failed = [phase for phase in phases if str(phase.get("status")) in FAILED_STATUSES]
@@ -2556,7 +2585,7 @@ class PhaseWorker(threading.Thread):
             log.write("FAILED with an unexpected exception:\n" + traceback.format_exc())
         finally:
             state.finished_at = utc_now()
-            state.duration_seconds = round(time.monotonic() - started, DURATION_ROUND_DECIMALS)
+            state.duration_seconds = round(time.monotonic() - started, PHASE_DURATION_DECIMALS)
             if state.status in FAILED_STATUSES:
                 state.log_tail = log.tail()
             log.close()
@@ -2823,7 +2852,7 @@ def elapsed_since(started_raw: object) -> float | None:
 def command_status(run_dir: Path, as_json: bool) -> int:
     state = load_state(run_dir)
     if as_json:
-        print(json.dumps(state, ensure_ascii=False, indent=STATE_JSON_INDENT))
+        print(json.dumps(state, ensure_ascii=False, indent=PIPELINE_STATE_JSON_INDENT))
     else:
         pipeline = as_object(state.get("pipeline"), "pipeline")
         print(f"run: {run_dir}")
@@ -2978,7 +3007,7 @@ def split_names(value: str) -> tuple[str, ...]:
 def options_from(arguments: argparse.Namespace) -> Options:
     replays = int(arguments.replays)
     if not 0 <= replays <= MAX_REPLAYS:
-        raise UsageError("--replays must be 0, 1 or 2")
+        raise UsageError(f"--replays must be from 0 to {MAX_REPLAYS}")
     jobs = int(arguments.jobs)
     if jobs < 1:
         raise UsageError("--jobs must be at least 1")

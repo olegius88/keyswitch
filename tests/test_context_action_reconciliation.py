@@ -21,7 +21,7 @@ if TOOLS not in sys.path:
 
 import reconcile_context_action_corpus as repair
 from freeze_context_action_corpus import CorpusRow, Sentence, SurfaceToken, canonical, checksum, digest, row_identifier, typo_variants
-from model_protocol import ALL_SPLITS
+from keyswitch.constants.model_protocol import ALL_SPLITS
 
 
 def fixture(original: str, split: str, *, group: int = 0, identifier: str = "1", lemma: str | None = None,

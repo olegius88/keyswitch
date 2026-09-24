@@ -19,57 +19,52 @@ from collections import deque
 from typing import Callable, Iterable, Protocol, cast
 
 from .backend import (
-    ALT_MASK,
-    CONTROL_MASK as CONTROL_MASK,
-    LOCK_MASK as LOCK_MASK,
-    SHIFT_MASK as SHIFT_MASK,
-    SUPER_MASK,
     BackendProbe as BackendProbe,
     FocusInfo,
     KeyEvent as KeyEvent,
     KeyDisposition,
     ScreenAnchor,
 )
+from .constants.keyboard import (
+    CONTROL_MASK as CONTROL_MASK,
+    LAYOUT_GROUP_COUNT,
+    LOCK_MASK as LOCK_MASK,
+    SHIFT_MASK as SHIFT_MASK,
+)
+from .constants.text import MAX_UNICODE_CODEPOINT
+from .constants.timing import (
+    INJECTION_SECONDS_PER_EVENT,
+    KEYBOARD_LISTENER_START_TIMEOUT_SECONDS,
+    KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS,
+    MIN_INJECTION_DEADLINE_SECONDS,
+)
+from .constants.x11 import (
+    BACKSPACE_KEYSYM,
+    CARDINAL_PROPERTY_FORMAT_BITS,
+    MAX_TRACKED_OWN_WINDOWS,
+    MAX_WINDOW_ANCESTOR_DEPTH,
+    MAX_XKB_GROUPS,
+    SHIFT_L_KEYSYM,
+    X11_BUTTON_PRESS,
+    X11_CURRENT_TIME,
+    X11_KEY_PRESS,
+    X11_KEY_RELEASE,
+    X11_REVERT_TO_PARENT,
+    XA_CARDINAL,
+    XKB_GROUP_STATE_MASK,
+    XKB_GROUP_STATE_SHIFT,
+    XKB_USE_CORE_KBD,
+    XRECORD_ALL_CLIENTS,
+    XRECORD_DATA_UNIT_BYTES,
+    XRECORD_EVENT_SIZE_BYTES,
+    XRECORD_EVENT_TYPE_MASK,
+    XRECORD_FROM_SERVER,
+    XRECORD_START_OF_DATA,
+)
+from .russian_text import SECONDS, quantity
 
 
 LOGGER = logging.getLogger(__name__)
-
-KEY_PRESS = 2
-BUTTON_PRESS = 4
-KEY_RELEASE = 3
-XRECORD_FROM_SERVER = 0
-XRECORD_START_OF_DATA = 4
-XRECORD_ALL_CLIENTS = 3
-XKB_USE_CORE_KBD = 0x0100
-XRECORD_START_TIMEOUT = 5.0
-REVERT_TO_PARENT = 2
-CURRENT_TIME = 0
-XA_CARDINAL = 6
-
-MOD1_MASK = ALT_MASK
-MOD4_MASK = SUPER_MASK
-
-DEFAULT_GROUP_COUNT = 2
-MAX_XKB_GROUPS = 4
-# XRecord delivers each event as a fixed-size, 4-byte-unit record.
-XRECORD_DATA_UNIT_BYTES = 4
-XRECORD_EVENT_SIZE_BYTES = 32
-# Bit 7 of the XRecord event type is the "send event" flag, not part of it.
-XRECORD_EVENT_TYPE_MASK = 0x7F
-# The XKB group occupies bits 13-14 of the X11 key event state field.
-XKB_GROUP_STATE_SHIFT = 13
-XKB_GROUP_STATE_MASK = 0x3
-MAX_UNICODE_CODEPOINT = 0x10FFFF
-MAX_TRACKED_OWN_WINDOWS = 256
-# A toolkit gives the focus to a child window with no properties of its own;
-# the ancestor walk that looks for _NET_WM_PID or the class hint is bounded.
-MAX_WINDOW_ANCESTOR_DEPTH = 16
-CARDINAL_PROPERTY_FORMAT_BITS = 32
-BACKSPACE_KEYSYM = 0xFF08
-SHIFT_L_KEYSYM = 0xFFE1
-MIN_INJECTION_DEADLINE_SECONDS = 1.0
-INJECTION_SECONDS_PER_EVENT = 0.02
-THREAD_JOIN_TIMEOUT_SECONDS = 2.0
 
 
 class XRecordRange8(ctypes.Structure):
@@ -333,8 +328,8 @@ class _Libraries:
 class X11Backend:
     """Observe all core keyboard events and inject deterministic corrections."""
 
-    def __init__(self, group_count: int = DEFAULT_GROUP_COUNT) -> None:
-        self.group_count = max(DEFAULT_GROUP_COUNT, min(group_count, MAX_XKB_GROUPS))
+    def __init__(self, group_count: int = LAYOUT_GROUP_COUNT) -> None:
+        self.group_count = max(LAYOUT_GROUP_COUNT, min(group_count, MAX_XKB_GROUPS))
         self._libraries = _Libraries()
         self._control: int | None = None
         # Own-window verdicts by X window id; ids of another client can never
@@ -464,8 +459,8 @@ class X11Backend:
         if not self._range:
             self.close()
             raise X11Error("XRecordAllocRange не выделил диапазон событий")
-        self._range.contents.device_events.first = KEY_PRESS
-        self._range.contents.device_events.last = BUTTON_PRESS
+        self._range.contents.device_events.first = X11_KEY_PRESS
+        self._range.contents.device_events.last = X11_BUTTON_PRESS
         clients = (ctypes.c_ulong * 1)(XRECORD_ALL_CLIENTS)
         ranges = (ctypes.POINTER(XRecordRange) * 1)(self._range)
         self._context = self._libraries.xtst.XRecordCreateContext(
@@ -490,9 +485,9 @@ class X11Backend:
             daemon=True,
         )
         self._thread.start()
-        if not self._capture_start_finished.wait(XRECORD_START_TIMEOUT):
+        if not self._capture_start_finished.wait(KEYBOARD_LISTENER_START_TIMEOUT_SECONDS):
             self.close()
-            raise X11Error("XRecord не подтвердил запуск за 5 секунд")
+            raise X11Error(f"XRecord не подтвердил запуск за {quantity(KEYBOARD_LISTENER_START_TIMEOUT_SECONDS, SECONDS)}")
         if not self._capture_ready.is_set():
             self.close()
             raise X11Error("XRecord завершился до подтверждения запуска")
@@ -556,11 +551,11 @@ class X11Backend:
             _pad,
         ) = struct.unpack("=BBHIIIIhhhhHBB", payload)
         event_type &= XRECORD_EVENT_TYPE_MASK
-        if event_type == BUTTON_PRESS:
+        if event_type == X11_BUTTON_PRESS:
             return KeyEvent(True, 0, "Pointer", "", ("", ""), -1, 0, timestamp)
-        if event_type not in (KEY_PRESS, KEY_RELEASE):
+        if event_type not in (X11_KEY_PRESS, X11_KEY_RELEASE):
             return None
-        pressed = event_type == KEY_PRESS
+        pressed = event_type == X11_KEY_PRESS
         group = (state >> XKB_GROUP_STATE_SHIFT) & XKB_GROUP_STATE_MASK
         characters = tuple(
             self._character_for_keycode(keycode, candidate_group, state)
@@ -781,7 +776,7 @@ class X11Backend:
         if not self._control or window is None:
             return False
         self._libraries.x11.XSetInputFocus(
-            self._control, window, REVERT_TO_PARENT, CURRENT_TIME
+            self._control, window, X11_REVERT_TO_PARENT, X11_CURRENT_TIME
         )
         self._libraries.x11.XFlush(self._control)
         return True
@@ -992,7 +987,7 @@ class X11Backend:
             self._libraries.xtst.XRecordDisableContext(self._control, self._context)
             self._libraries.x11.XSync(self._control, 0)
         if self._thread and self._thread is not threading.current_thread():
-            self._thread.join(timeout=THREAD_JOIN_TIMEOUT_SECONDS)
+            self._thread.join(timeout=KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS)
         self._thread = None
 
     def close(self) -> None:

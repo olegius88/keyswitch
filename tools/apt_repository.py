@@ -28,6 +28,8 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from keyswitch.constants.release import APT_GZIP_COMPRESSION_LEVEL, APT_INDEX_FILE_VARIANTS
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 SOURCES_STANZA_PATH = PROJECT_DIR / "packaging" / "debian" / "keyswitch.sources"
@@ -47,8 +49,6 @@ LANDING_FILE_NAME = "index.html"
 PLACEHOLDER_PATTERN = re.compile(r"@[A-Z_]+@")
 DIGEST_FIELDS = (("MD5Sum", "md5"), ("SHA256", "sha256"))
 COMPUTED_INDEX_FIELDS = ("Filename", "Size", "MD5sum", "SHA1", "SHA256")
-GZIP_COMPRESSION_LEVEL = 9
-INDEX_FILE_VARIANTS = 2  # the plain index and its .gz
 
 
 @dataclass(frozen=True)
@@ -274,7 +274,7 @@ def build(
         entries.append(_index_entry(package_path, pool_path))
 
     index = ("\n\n".join(entries) + "\n").encode("utf-8")
-    compressed = gzip.compress(index, compresslevel=GZIP_COMPRESSION_LEVEL, mtime=0)
+    compressed = gzip.compress(index, compresslevel=APT_GZIP_COMPRESSION_LEVEL, mtime=0)
     (index_directory / INDEX_FILE_NAME).write_bytes(index)
     (index_directory / f"{INDEX_FILE_NAME}.gz").write_bytes(compressed)
 
@@ -345,7 +345,7 @@ def _verify_release_digests(repository: Path, sources: RepositorySources) -> Non
         if _digests(payload)[algorithm] != digest or len(payload) != int(size):
             raise SystemExit(f"The release file misstates {name}")
         checked += 1
-    if checked != len(DIGEST_FIELDS) * INDEX_FILE_VARIANTS:
+    if checked != len(DIGEST_FIELDS) * APT_INDEX_FILE_VARIANTS:
         raise SystemExit("The release file does not cover both indices")
 
 

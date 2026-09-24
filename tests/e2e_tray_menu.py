@@ -21,21 +21,22 @@ from keyswitch.tray import (
     ITEM_INTERFACE,
     MENU_INTERFACE,
     MENU_PATH,
-    MENU_SETTINGS,
-    MENU_SWITCH_LAYOUT,
     OBJECT_PATH,
     StatusNotifierItem,
+)
+from keyswitch.constants.tray_menu import MENU_SETTINGS, MENU_SWITCH_LAYOUT
+from fixture_values.clock import (
+    GDBUS_CALL_TIMEOUT_SECONDS,
+    TRAY_MENU_E2E_EVENT_WAIT_TIMEOUT_SECONDS,
+    TRAY_MENU_E2E_LOOP_JOIN_TIMEOUT_SECONDS,
+    TRAY_MENU_E2E_READ_LINE_TIMEOUT_SECONDS,
+    TRAY_MENU_E2E_WATCHER_EXIT_TIMEOUT_SECONDS,
 )
 
 
 WATCHER_BUS_NAME = "org.kde.StatusNotifierWatcher"
 WATCHER_INTERFACE = "org.kde.StatusNotifierWatcher"
 WATCHER_PATH = "/StatusNotifierWatcher"
-DBUS_CALL_TIMEOUT_SECONDS = 10
-READ_LINE_TIMEOUT_SECONDS = 5
-EVENT_WAIT_TIMEOUT_SECONDS = 2
-LOOP_JOIN_TIMEOUT_SECONDS = 2
-WATCHER_EXIT_TIMEOUT_SECONDS = 3
 
 
 class TestWatcher(dbus.service.Object):
@@ -97,7 +98,7 @@ def dbus_call(destination: str, object_path: str, method: str, *arguments: str) 
         check=False,
         capture_output=True,
         text=True,
-        timeout=DBUS_CALL_TIMEOUT_SECONDS,
+        timeout=GDBUS_CALL_TIMEOUT_SECONDS,
     )
     if completed.returncode:
         raise RuntimeError(completed.stderr.strip() or completed.stdout.strip())
@@ -115,7 +116,7 @@ def run_probe() -> int:
     loop: GLib.MainLoop | None = None
     loop_thread: threading.Thread | None = None
     try:
-        if read_line(watcher, READ_LINE_TIMEOUT_SECONDS) != "READY":
+        if read_line(watcher, TRAY_MENU_E2E_READ_LINE_TIMEOUT_SECONDS) != "READY":
             raise RuntimeError("StatusNotifierWatcher returned an invalid greeting")
 
         DBusGMainLoop(set_as_default=True)
@@ -134,7 +135,7 @@ def run_probe() -> int:
             on_quit=lambda: None,
         )
         item.set_layout(1)
-        if read_line(watcher, READ_LINE_TIMEOUT_SECONDS) != f"REGISTERED {OBJECT_PATH}":
+        if read_line(watcher, TRAY_MENU_E2E_READ_LINE_TIMEOUT_SECONDS) != f"REGISTERED {OBJECT_PATH}":
             raise RuntimeError("StatusNotifierItem registered an unexpected object path")
 
         loop = GLib.MainLoop()
@@ -198,8 +199,8 @@ def run_probe() -> int:
             "alternate layout menu item": "Переключить на английский (EN)" in layout,
             "autoswitch menu item": "Автопереключение" in layout,
             "quit menu item": "Выход" in layout,
-            "clicked event": settings_opened.wait(timeout=EVENT_WAIT_TIMEOUT_SECONDS),
-            "layout clicked event": layout_switched.wait(timeout=EVENT_WAIT_TIMEOUT_SECONDS),
+            "clicked event": settings_opened.wait(timeout=TRAY_MENU_E2E_EVENT_WAIT_TIMEOUT_SECONDS),
+            "layout clicked event": layout_switched.wait(timeout=TRAY_MENU_E2E_EVENT_WAIT_TIMEOUT_SECONDS),
         }
         failed = [name for name, passed in checks.items() if not passed]
         if failed:
@@ -212,13 +213,13 @@ def run_probe() -> int:
         if loop is not None:
             loop.quit()
         if loop_thread is not None:
-            loop_thread.join(timeout=LOOP_JOIN_TIMEOUT_SECONDS)
+            loop_thread.join(timeout=TRAY_MENU_E2E_LOOP_JOIN_TIMEOUT_SECONDS)
         watcher.terminate()
         try:
-            watcher.wait(timeout=WATCHER_EXIT_TIMEOUT_SECONDS)
+            watcher.wait(timeout=TRAY_MENU_E2E_WATCHER_EXIT_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired:
             watcher.kill()
-            watcher.wait(timeout=WATCHER_EXIT_TIMEOUT_SECONDS)
+            watcher.wait(timeout=TRAY_MENU_E2E_WATCHER_EXIT_TIMEOUT_SECONDS)
 
 
 def build_parser() -> argparse.ArgumentParser:

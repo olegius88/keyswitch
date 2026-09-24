@@ -19,8 +19,9 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import __version__
-from .settings_diagnostics import DIAGNOSTICS_JSON_INDENT
-from .config import DEFAULT_HISTORY_LIMIT, SettingsStore
+from .constants.file_formats import DIAGNOSTICS_JSON_INDENT
+from .config import SettingsStore
+from .constants.settings_defaults import DEFAULT_HISTORY_LIMIT
 from .engine import (
     CorrectionPlan,
     EngineSnapshot,
@@ -35,11 +36,10 @@ from .tray import StatusNotifierItem
 from .ui import MainWindow, RESOURCE_DIR
 from .updates import UpdateManager, UpdatePhase, UpdateSnapshot
 from .x11_backend import X11Backend
+from .constants.updates import UPDATE_CHECK_INITIAL_DELAY_SECONDS, UPDATE_CHECK_INTERVAL_SECONDS
 
 
 LOGGER = logging.getLogger(__name__)
-UPDATE_INITIAL_DELAY_SECONDS = 30
-UPDATE_INTERVAL_SECONDS = 6 * 60 * 60
 
 
 class _WindowController(Protocol):
@@ -261,7 +261,7 @@ class KeySwitchApplication(Adw.Application):
         ):
             return
         self._update_initial_source = GLib.timeout_add_seconds(
-            UPDATE_INITIAL_DELAY_SECONDS,
+            UPDATE_CHECK_INITIAL_DELAY_SECONDS,
             self._initial_update_check,
         )
 
@@ -270,7 +270,7 @@ class KeySwitchApplication(Adw.Application):
         self._automatic_update_check()
         if bool(self.settings.get("updates.check_automatically", True)):
             self._update_periodic_source = GLib.timeout_add_seconds(
-                UPDATE_INTERVAL_SECONDS,
+                UPDATE_CHECK_INTERVAL_SECONDS,
                 self._periodic_update_check,
             )
         return GLib.SOURCE_REMOVE

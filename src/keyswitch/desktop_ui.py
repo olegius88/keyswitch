@@ -22,8 +22,9 @@ from tkinter import filedialog, messagebox, ttk
 
 from . import __version__
 from .backend import ScreenAnchor
-from .settings_diagnostics import DIAGNOSTICS_JSON_INDENT
-from .config import DEFAULT_HISTORY_LIMIT, DEFAULT_LEARNING_CONFIRMATIONS, SettingsStore
+from .constants.file_formats import DIAGNOSTICS_JSON_INDENT
+from .config import SettingsStore
+from .constants.settings_defaults import DEFAULT_HISTORY_LIMIT, DEFAULT_LEARNING_CONFIRMATIONS
 from .engine import (
     CorrectionPlan,
     EngineSnapshot,
@@ -41,6 +42,7 @@ from .logsetup import (
     rotation_summary,
 )
 from .desktop_services import DesktopServices, PromptBackend
+from .russian_text import SECONDS, quantity
 from .system_model import Application as CatalogApplication
 from .tray_model import TrayActions, TrayController
 from .windows_ui_model import (
@@ -59,6 +61,140 @@ from .updates import (
     UpdateSnapshot,
     launch_windows_installer,
 )
+from .constants.geometry import CENTERING_DIVISOR
+from .constants.learning_prompt import (
+    LEARNING_PROMPT_ANCHOR_GAP_PIXELS,
+    LEARNING_PROMPT_CARD_PADDING_X_PIXELS,
+    LEARNING_PROMPT_CARD_PADDING_Y_PIXELS,
+    LEARNING_PROMPT_HINT_FONT_SIZE_POINTS,
+    LEARNING_PROMPT_MINIMUM_WIDTH_PIXELS,
+    LEARNING_PROMPT_SCREEN_MARGIN_PIXELS,
+    LEARNING_PROMPT_TITLE_FONT_SIZE_POINTS,
+    LEARNING_PROMPT_WORD_FONT_SIZE_POINTS,
+    LEARNING_PROMPT_WORD_PADDING_BOTTOM_PIXELS,
+    LEARNING_PROMPT_WORD_PADDING_TOP_PIXELS,
+)
+from .constants.timing import (
+    APPLICATION_CAPTURE_DELAY_MS,
+    EVENT_DRAIN_INITIAL_DELAY_MS,
+    EVENT_DRAIN_INTERVAL_MS,
+    LEARNING_PROMPT_SHOW_DELAY_MS,
+)
+from .constants.ui_desktop import (
+    ABOUT_LICENSE_LABEL_ROW,
+    APPLICATION_LIST_COLUMN_SPAN,
+    APPLICATION_LIST_HEIGHT_ROWS,
+    AUTOCORRECTION_COLUMN_GAP_PIXELS,
+    AUTOCORRECTION_PRIMARY_COLUMN_WEIGHT,
+    AUTOCORRECTION_SECONDARY_COLUMN_WEIGHT,
+    BRAND_LABEL_FONT_SIZE_POINTS,
+    CARD_TITLE_FONT_SIZE_POINTS,
+    CARD_TITLE_GAP_PIXELS,
+    CHOICE_CONTROL_WIDTH_CHARACTERS,
+    CONTENT_TEXT_WRAP_WIDTH_PIXELS,
+    DESCRIPTION_INDENT_PIXELS,
+    DESCRIPTION_INITIAL_WRAP_PIXELS,
+    DESCRIPTION_MARGIN_PIXELS,
+    DESCRIPTION_MINIMUM_WRAP_PIXELS,
+    DESKTOP_SIDEBAR_WIDTH_PIXELS,
+    DIAGNOSTICS_TEXT_HEIGHT_ROWS,
+    EXCLUSIONS_CATALOG_COLUMN_SPAN,
+    EXCLUSIONS_CATALOG_ROW,
+    EXCLUSIONS_MANUAL_ENTRY_COLUMN_SPAN,
+    EXCLUSIONS_MANUAL_ENTRY_ROW,
+    EXCLUSIONS_REFRESH_BUTTON_COLUMN,
+    EXCLUSIONS_REMOVE_BUTTON_COLUMN,
+    EXCLUSIONS_WORDS_SECTION_ROW,
+    GROUP_GAP_PIXELS,
+    HISTORY_APPLICATION_COLUMN_WIDTH_PIXELS,
+    HISTORY_CONFIDENCE_COLUMN_WIDTH_PIXELS,
+    HISTORY_TIME_COLUMN_WIDTH_PIXELS,
+    HISTORY_TREE_ROW,
+    HISTORY_WORD_COLUMN_WIDTH_PIXELS,
+    LABELFRAME_TITLE_FONT_SIZE_POINTS,
+    LAYOUTS_MANUAL_SWITCH_SECTION_ROW,
+    LAYOUTS_REFRESH_BUTTON_ROW,
+    LAYOUTS_RU_HEADING_ROW,
+    LAYOUTS_RU_VALUE_ROW,
+    LAYOUT_LANGUAGE_LABEL_PADDING_BOTTOM_PIXELS,
+    LAYOUT_LANGUAGE_LABEL_PADDING_TOP_PIXELS,
+    LEARNING_CONFIRMATIONS_COLUMN_WIDTH_PIXELS,
+    LEARNING_DIRECTION_COLUMN_WIDTH_PIXELS,
+    LEARNING_STATE_COLUMN_WIDTH_PIXELS,
+    LEARNING_TREE_HEIGHT_ROWS,
+    LEARNING_WORD_COLUMN_WIDTH_PIXELS,
+    MAINTENANCE_CLEAR_REJECTIONS_BUTTON_COLUMN,
+    MAINTENANCE_DESCRIPTION_ROW,
+    MAINTENANCE_DIAGNOSTICS_SECTION_ROW,
+    MAINTENANCE_LEARNING_ACTIONS_ROW,
+    MAINTENANCE_LOCATIONS_SECTION_ROW,
+    MAINTENANCE_SETTINGS_SECTION_ROW,
+    MAIN_WINDOW_MIN_HEIGHT_PIXELS,
+    MAIN_WINDOW_MIN_WIDTH_PIXELS,
+    MANUAL_SWITCH_NOTE_COLUMN_SPAN,
+    MANUAL_SWITCH_NOTE_PADDING_TOP_PIXELS,
+    MODIFIED_MARKER_COLUMN_MIN_PIXELS,
+    MODIFIED_MARKER_WIDTH_PIXELS,
+    NAVIGATION_BUTTON_PADDING_X_PIXELS,
+    NAVIGATION_BUTTON_PADDING_Y_PIXELS,
+    NAVIGATION_BUTTON_SPACING_PIXELS,
+    NUMBER_CONTROL_WIDTH_CHARACTERS,
+    NUMBER_DISPLAY_DECIMAL_PLACES,
+    OVERVIEW_AUTOCORRECTION_PREVIEW_ROW,
+    OVERVIEW_COUNT_ROW,
+    OVERVIEW_ERROR_ROW,
+    OVERVIEW_LAST_ACTION_ROW,
+    OVERVIEW_TEST_HINT_ROW,
+    OVERVIEW_TEST_SECTION_ROW,
+    PAGE_CAPTION_PADDING_BOTTOM_PIXELS,
+    PAGE_CAPTION_PADDING_TOP_PIXELS,
+    PAGE_CONTENT_PADDING_Y_PIXELS,
+    PAGE_FIRST_SECTION_ROW,
+    PAGE_PADDING_SIDES,
+    PAGE_PADDING_X_PIXELS,
+    PAGE_SCROLL_STEP_PIXELS,
+    PAGE_SUBTITLE_WRAP_WIDTH_PIXELS,
+    PAGE_TITLE_FONT_SIZE_POINTS,
+    QUIRKS_COLUMN_SPAN,
+    QUIRKS_TOP_MARGIN_PIXELS,
+    RESET_BUTTON_COLUMN_MIN_PIXELS,
+    RESET_BUTTON_FONT_SIZE_POINTS,
+    RESET_BUTTON_INTERNAL_PADDING_PIXELS,
+    SECTION_BOTTOM_MARGIN_PIXELS,
+    SECTION_PADDING_X_PIXELS,
+    SECTION_PADDING_Y_PIXELS,
+    SETTING_CONTROL_PADDING_LEFT_PIXELS,
+    SETTING_RESET_COLUMN_INDEX,
+    SETTING_ROW_COLUMN_SPAN,
+    SETTING_ROW_PADDING_PIXELS,
+    SIDEBAR_BRAND_PADDING_BOTTOM_PIXELS,
+    SIDEBAR_ITEM_PADDING_X_PIXELS,
+    SIDEBAR_PADDING_X_PIXELS,
+    SIDEBAR_PADDING_Y_PIXELS,
+    SIDEBAR_SEPARATOR_PADDING_Y_PIXELS,
+    SIDEBAR_STATUS_PADDING_TOP_PIXELS,
+    SIDEBAR_SUBTITLE_PADDING_BOTTOM_PIXELS,
+    STANDARD_GAP_PIXELS,
+    STATUS_LINE_GAP_PIXELS,
+    TEST_ENTRY_FONT_SIZE_POINTS,
+    TEST_ENTRY_PADDING_BOTTOM_PIXELS,
+    TEST_ENTRY_PADDING_TOP_PIXELS,
+    TEXT_CONTROL_WIDTH_CHARACTERS,
+    TOOLTIP_PADDING_X_PIXELS,
+    TOOLTIP_PADDING_Y_PIXELS,
+    TOOLTIP_VERTICAL_GAP_PIXELS,
+    UPDATES_ACTIONS_SECTION_ROW,
+    UPDATES_POLICY_SECTION_ROW,
+    UPDATES_PROGRESS_ROW,
+    WHEEL_STEPS_PER_NOTCH,
+    WORD_LIST_COLUMN_SPAN,
+    WORD_LIST_HEIGHT_ROWS,
+    WRAP_WIDTH_DEAD_BAND_PIXELS,
+)
+from .constants.units import BYTES_PER_KIBIBYTE, MILLISECONDS_PER_SECOND
+from .constants.updates import UPDATE_CHECK_INITIAL_DELAY_MS, UPDATE_CHECK_INTERVAL_MS
+from .constants.windows import WINDOWS_WHEEL_UNITS_PER_NOTCH
+from .constants.x11 import X11_WHEEL_DOWN_BUTTON, X11_WHEEL_UP_BUTTON
 
 
 LOGGER = logging.getLogger(__name__)
@@ -74,177 +210,12 @@ PAGE_NAMES = (
     ("maintenance", "Обслуживание"),
     ("about", "О программе"),
 )
-WINDOWS_LEARNING_PROMPT_DELAY_MS = 200
-WINDOWS_UPDATE_INITIAL_DELAY_MS = 30_000
-WINDOWS_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000
-EVENT_DRAIN_INTERVAL_MS = 50
-EVENT_DRAIN_INITIAL_DELAY_MS = 25
-ACTIVE_APPLICATION_CAPTURE_DELAY_MS = 3000
-# One wheel notch moves three of these steps, matching the Windows default.
-PAGE_SCROLL_STEP_PIXELS = 20
-WHEEL_STEPS_PER_NOTCH = 3
-# X11 reports the wheel as button presses; Windows reports a signed delta.
-MOUSE_WHEEL_BUTTON_UP = 4
-MOUSE_WHEEL_BUTTON_DOWN = 5
-WINDOWS_WHEEL_UNITS_PER_NOTCH = 120
-WRAP_WIDTH_DEAD_BAND_PIXELS = 6
-# Reserved gutters keep the layout still while the markers appear and vanish.
-MODIFIED_MARKER_WIDTH = 3
-MODIFIED_MARKER_COLUMN = 12
-RESET_BUTTON_COLUMN = 54
 # A word, not a pictogram: Segoe UI is documented to cover Cyrillic, while the
 # revert arrows live in Segoe UI Symbol and would depend on font fallback.
 RESET_BUTTON_LABEL = "Сброс"
 RESET_BUTTON_HINT = "Вернуть значение по умолчанию"
-RESET_BUTTON_INTERNAL_PADDING_PIXELS = 2
-RESET_BUTTON_FONT_SIZE = 8
-DESCRIPTION_INDENT = 24
-DESCRIPTION_MARGIN = 12
-DESCRIPTION_MINIMUM_WRAP = 120
-DESCRIPTION_INITIAL_WRAP = 260
-PAGE_PADDING = 30
-PAGE_PADDING_SIDES = 2
-PAGE_CONTENT_PADDING_Y_PIXELS = 24
-PAGE_CAPTION_PADDING_TOP_PIXELS = 3
-PAGE_CAPTION_PADDING_BOTTOM_PIXELS = 18
-PAGE_SUBTITLE_WRAP_WIDTH_PIXELS = 760
-# The wraplength most body copy on a page settles into once laid out.
-CONTENT_TEXT_WRAP_WIDTH_PIXELS = 720
-PAGE_TITLE_FONT_SIZE = 22
-CARD_TITLE_FONT_SIZE = 10
-BRAND_LABEL_FONT_SIZE = 20
-LABELFRAME_TITLE_FONT_SIZE = 11
-# Row/column layout of one setting inside its LabelFrame.
-SETTING_ROW_PADDING_PIXELS = 5
-SETTING_CONTROL_COLUMN_INDEX = 2
-SETTING_ROW_COLUMN_SPAN = 2
-SETTING_CONTROL_PADDING_LEFT_PIXELS = 16
-CHOICE_CONTROL_WIDTH_CHARACTERS = 22
-NUMBER_CONTROL_WIDTH_CHARACTERS = 12
-TEXT_CONTROL_WIDTH_CHARACTERS = 25
-NUMBER_DISPLAY_DECIMAL_PLACES = 2
 # Widgets that already answer the wheel and the paging keys themselves.
 SELF_SCROLLING_WIDGETS = (tk.Text, tk.Listbox, ttk.Treeview)
-
-MAIN_WINDOW_MIN_WIDTH_PIXELS = 900
-MAIN_WINDOW_MIN_HEIGHT_PIXELS = 640
-
-SIDEBAR_WIDTH_PIXELS = 225
-SIDEBAR_PADDING_X_PIXELS = 16
-SIDEBAR_PADDING_Y_PIXELS = 18
-SIDEBAR_ITEM_PADDING_X_PIXELS = 8
-SIDEBAR_BRAND_PADDING_BOTTOM_PIXELS = 2
-SIDEBAR_SUBTITLE_PADDING_BOTTOM_PIXELS = 18
-SIDEBAR_SEPARATOR_PADDING_Y_PIXELS = 16
-SIDEBAR_STATUS_PADDING_TOP_PIXELS = 4
-NAVIGATION_BUTTON_PADDING_X_PIXELS = 12
-NAVIGATION_BUTTON_PADDING_Y_PIXELS = 8
-NAVIGATION_BUTTON_SPACING_PIXELS = 2
-
-TOOLTIP_VERTICAL_GAP_PIXELS = 4
-TOOLTIP_PADDING_X_PIXELS = 8
-TOOLTIP_PADDING_Y_PIXELS = 4
-
-LEARNING_PROMPT_CARD_PADDING_X_PIXELS = 16
-LEARNING_PROMPT_CARD_PADDING_Y_PIXELS = 12
-LEARNING_PROMPT_TITLE_FONT_SIZE = 10
-LEARNING_PROMPT_WORD_FONT_SIZE = 11
-LEARNING_PROMPT_WORD_PADDING_TOP_PIXELS = 5
-LEARNING_PROMPT_WORD_PADDING_BOTTOM_PIXELS = 2
-LEARNING_PROMPT_HINT_FONT_SIZE = 9
-LEARNING_PROMPT_MINIMUM_WIDTH_PIXELS = 390
-LEARNING_PROMPT_WIDTH_CENTERING_DIVISOR = 2
-LEARNING_PROMPT_ANCHOR_GAP_PIXELS = 12
-LEARNING_PROMPT_SCREEN_MARGIN_PIXELS = 8
-
-# The (18, 14) padding a ttk.LabelFrame section uses inside, and the margin
-# below it before the next section starts.
-SECTION_PADDING_X_PIXELS = 18
-SECTION_PADDING_Y_PIXELS = 14
-SECTION_BOTTOM_MARGIN_PIXELS = 14
-# The two spacing units the settings window lays rows and controls out on.
-STANDARD_GAP_PIXELS = 8
-GROUP_GAP_PIXELS = 10
-CARD_TITLE_GAP_PIXELS = 6
-STATUS_LINE_GAP_PIXELS = 4
-
-BYTES_PER_KIBIBYTE = 1024
-
-# Grid rows and columns for each page's static layout, in the order the
-# widgets they place appear in the matching _build_* method.
-OVERVIEW_STATUS_SECTION_ROW = 2
-OVERVIEW_COUNT_ROW = 2
-OVERVIEW_LAST_ACTION_ROW = 3
-OVERVIEW_ERROR_ROW = 4
-OVERVIEW_AUTOCORRECTION_PREVIEW_ROW = 5
-OVERVIEW_TEST_SECTION_ROW = 3
-OVERVIEW_TEST_HINT_ROW = 2
-TEST_ENTRY_FONT_SIZE = 14
-TEST_ENTRY_PADDING_TOP_PIXELS = 12
-TEST_ENTRY_PADDING_BOTTOM_PIXELS = 2
-
-AUTOCORRECTION_COLUMNS_ROW = 2
-AUTOCORRECTION_PRIMARY_COLUMN_WEIGHT = 3
-AUTOCORRECTION_SECONDARY_COLUMN_WEIGHT = 2
-AUTOCORRECTION_COLUMN_GAP_PIXELS = 7
-QUIRKS_COLUMN_SPAN = 2
-QUIRKS_TOP_MARGIN_PIXELS = 14
-
-LAYOUTS_SYSTEM_PAIR_SECTION_ROW = 2
-LAYOUT_LANGUAGE_LABEL_PADDING_TOP_PIXELS = 2
-LAYOUT_LANGUAGE_LABEL_PADDING_BOTTOM_PIXELS = 10
-LAYOUTS_RU_HEADING_ROW = 2
-LAYOUTS_RU_VALUE_ROW = 3
-LAYOUTS_REFRESH_BUTTON_ROW = 4
-LAYOUTS_MANUAL_SWITCH_SECTION_ROW = 3
-MANUAL_SWITCH_NOTE_COLUMN_SPAN = 2
-MANUAL_SWITCH_NOTE_PADDING_TOP_PIXELS = 8
-
-HOTKEYS_SECTION_ROW = 2
-
-EXCLUSIONS_APPLICATIONS_SECTION_ROW = 2
-APPLICATION_LIST_HEIGHT_ROWS = 6
-APPLICATION_LIST_COLUMN_SPAN = 4
-EXCLUSIONS_REMOVE_BUTTON_COLUMN = 3
-EXCLUSIONS_CATALOG_ROW = 2
-EXCLUSIONS_CATALOG_COLUMN_SPAN = 2
-EXCLUSIONS_REFRESH_BUTTON_COLUMN = 2
-EXCLUSIONS_MANUAL_ENTRY_ROW = 3
-EXCLUSIONS_MANUAL_ENTRY_COLUMN_SPAN = 3
-EXCLUSIONS_WORDS_SECTION_ROW = 3
-WORD_LIST_HEIGHT_ROWS = 5
-WORD_LIST_COLUMN_SPAN = 2
-
-APPEARANCE_SECTION_ROW = 2
-
-HISTORY_TOOLBAR_ROW = 2
-HISTORY_TIME_COLUMN_WIDTH_PIXELS = 165
-HISTORY_WORD_COLUMN_WIDTH_PIXELS = 130
-HISTORY_APPLICATION_COLUMN_WIDTH_PIXELS = 150
-HISTORY_CONFIDENCE_COLUMN_WIDTH_PIXELS = 100
-HISTORY_TREE_ROW = 3
-
-UPDATES_STATE_SECTION_ROW = 2
-UPDATES_PROGRESS_ROW = 2
-UPDATES_POLICY_SECTION_ROW = 3
-UPDATES_ACTIONS_SECTION_ROW = 4
-
-MAINTENANCE_LEARNING_SECTION_ROW = 2
-LEARNING_TREE_HEIGHT_ROWS = 6
-LEARNING_WORD_COLUMN_WIDTH_PIXELS = 150
-LEARNING_DIRECTION_COLUMN_WIDTH_PIXELS = 105
-LEARNING_CONFIRMATIONS_COLUMN_WIDTH_PIXELS = 115
-LEARNING_STATE_COLUMN_WIDTH_PIXELS = 175
-MAINTENANCE_DESCRIPTION_ROW = 2
-MAINTENANCE_LEARNING_ACTIONS_ROW = 3
-MAINTENANCE_CLEAR_REJECTIONS_BUTTON_COLUMN = 2
-MAINTENANCE_SETTINGS_SECTION_ROW = 3
-MAINTENANCE_DIAGNOSTICS_SECTION_ROW = 4
-MAINTENANCE_LOCATIONS_SECTION_ROW = 5
-
-ABOUT_SECTION_ROW = 2
-DIAGNOSTICS_TEXT_HEIGHT_ROWS = 15
-ABOUT_LICENSE_LABEL_ROW = 3
 
 
 @dataclass(frozen=True)
@@ -337,14 +308,14 @@ class WindowsLearningPrompt:
             text="Добавить слово в правила переключения?",
             background="#171a21",
             foreground="#ffffff",
-            font=("Segoe UI Semibold", LEARNING_PROMPT_TITLE_FONT_SIZE),
+            font=("Segoe UI Semibold", LEARNING_PROMPT_TITLE_FONT_SIZE_POINTS),
             anchor="w",
         ).pack(fill="x")
         self.word = tk.Label(
             card,
             background="#171a21",
             foreground="#9a84ff",
-            font=("Segoe UI Semibold", LEARNING_PROMPT_WORD_FONT_SIZE),
+            font=("Segoe UI Semibold", LEARNING_PROMPT_WORD_FONT_SIZE_POINTS),
             anchor="w",
         )
         self.word.pack(fill="x", pady=(LEARNING_PROMPT_WORD_PADDING_TOP_PIXELS, LEARNING_PROMPT_WORD_PADDING_BOTTOM_PIXELS))
@@ -353,7 +324,7 @@ class WindowsLearningPrompt:
             text="Enter - ДА    Esc - НЕТ",
             background="#171a21",
             foreground="#b7bdc9",
-            font=("Segoe UI", LEARNING_PROMPT_HINT_FONT_SIZE),
+            font=("Segoe UI", LEARNING_PROMPT_HINT_FONT_SIZE_POINTS),
             anchor="w",
         ).pack(fill="x")
         self.window.bind("<Return>", self._confirm_event)
@@ -372,7 +343,7 @@ class WindowsLearningPrompt:
             pointer_x, pointer_y = self.root.winfo_pointerxy()
             anchor = ScreenAnchor(pointer_x, pointer_y)
             self.anchor = anchor
-        x = anchor.x - width // LEARNING_PROMPT_WIDTH_CENTERING_DIVISOR
+        x = anchor.x - width // CENTERING_DIVISOR
         y = anchor.y - height - LEARNING_PROMPT_ANCHOR_GAP_PIXELS
         virtual_x = self.root.winfo_vrootx()
         virtual_y = self.root.winfo_vrooty()
@@ -539,7 +510,7 @@ class DesktopApplication:
         shell = ttk.Frame(self.root, style="App.TFrame")
         shell.pack(fill="both", expand=True)
 
-        sidebar = ttk.Frame(shell, width=SIDEBAR_WIDTH_PIXELS, padding=(SIDEBAR_PADDING_X_PIXELS, SIDEBAR_PADDING_Y_PIXELS), style="Sidebar.TFrame")
+        sidebar = ttk.Frame(shell, width=DESKTOP_SIDEBAR_WIDTH_PIXELS, padding=(SIDEBAR_PADDING_X_PIXELS, SIDEBAR_PADDING_Y_PIXELS), style="Sidebar.TFrame")
         sidebar.pack(side="left", fill="y")
         sidebar.pack_propagate(False)
         ttk.Label(sidebar, text="KeySwitch", style="Brand.TLabel").pack(
@@ -624,7 +595,7 @@ class DesktopApplication:
         viewport.configure(yscrollcommand=scrollbar.set)
         page = ttk.Frame(
             viewport,
-            padding=(PAGE_PADDING, PAGE_CONTENT_PADDING_Y_PIXELS),
+            padding=(PAGE_PADDING_X_PIXELS, PAGE_CONTENT_PADDING_Y_PIXELS),
             style="Content.TFrame",
         )
         window = viewport.create_window(0, 0, window=page, anchor="nw")
@@ -643,7 +614,7 @@ class DesktopApplication:
             justify="left",
         )
         caption.grid(row=1, column=0, sticky="ew", pady=(PAGE_CAPTION_PADDING_TOP_PIXELS, PAGE_CAPTION_PADDING_BOTTOM_PIXELS))
-        self._follow_width(caption, page, PAGE_PADDING_SIDES * PAGE_PADDING + DESCRIPTION_MARGIN)
+        self._follow_width(caption, page, PAGE_PADDING_SIDES * PAGE_PADDING_X_PIXELS + DESCRIPTION_MARGIN_PIXELS)
         self._pages[name] = page
         self._page_holders[name] = holder
         self._page_viewports[name] = viewport
@@ -677,7 +648,7 @@ class DesktopApplication:
         container: tk.Misc,
         reserve: int,
         *,
-        minimum: int = DESCRIPTION_MINIMUM_WRAP,
+        minimum: int = DESCRIPTION_MINIMUM_WRAP_PIXELS,
     ) -> None:
         """Wrap long copy to the real width instead of a fixed pixel guess."""
 
@@ -716,8 +687,8 @@ class DesktopApplication:
 
     @staticmethod
     def _wheel_steps(event: tk.Event[tk.Misc]) -> int:
-        if event.num in {MOUSE_WHEEL_BUTTON_UP, MOUSE_WHEEL_BUTTON_DOWN}:
-            return -WHEEL_STEPS_PER_NOTCH if event.num == MOUSE_WHEEL_BUTTON_UP else WHEEL_STEPS_PER_NOTCH
+        if event.num in {X11_WHEEL_UP_BUTTON, X11_WHEEL_DOWN_BUTTON}:
+            return -WHEEL_STEPS_PER_NOTCH if event.num == X11_WHEEL_UP_BUTTON else WHEEL_STEPS_PER_NOTCH
         delta = int(event.delta)
         if delta == 0:
             return 0
@@ -771,7 +742,7 @@ class DesktopApplication:
             "KeySwitch работает рядом с вами",
             "Автоматическая замена раскладки выполняется локально после завершения слова.",
         )
-        status = self._section(page, "Состояние", OVERVIEW_STATUS_SECTION_ROW)
+        status = self._section(page, "Состояние", PAGE_FIRST_SECTION_ROW)
         ttk.Label(status, textvariable=self.status_text, style="CardTitle.TLabel").grid(
             row=0, column=0, sticky="w"
         )
@@ -791,7 +762,7 @@ class DesktopApplication:
             text="Выберите EN и напечатайте ghbdtn: после паузы появится «привет». Можно также нажать пробел. Потом проверьте обратное направление.",
             wraplength=CONTENT_TEXT_WRAP_WIDTH_PIXELS,
         ).grid(row=0, column=0, sticky="w")
-        self.test_entry = ttk.Entry(test, font=("Segoe UI", TEST_ENTRY_FONT_SIZE))
+        self.test_entry = ttk.Entry(test, font=("Segoe UI", TEST_ENTRY_FONT_SIZE_POINTS))
         self.test_entry.grid(row=1, column=0, sticky="ew", pady=(TEST_ENTRY_PADDING_TOP_PIXELS, TEST_ENTRY_PADDING_BOTTOM_PIXELS))
         ttk.Label(
             test,
@@ -807,7 +778,7 @@ class DesktopApplication:
             "Настройте точность распознавания, обучение и события завершения слова.",
         )
         columns = ttk.Frame(page, style="Content.TFrame")
-        columns.grid(row=AUTOCORRECTION_COLUMNS_ROW, column=0, sticky="nsew")
+        columns.grid(row=PAGE_FIRST_SECTION_ROW, column=0, sticky="nsew")
         columns.columnconfigure(0, weight=AUTOCORRECTION_PRIMARY_COLUMN_WEIGHT)
         columns.columnconfigure(1, weight=AUTOCORRECTION_SECONDARY_COLUMN_WEIGHT)
         behavior = ttk.LabelFrame(columns, text="Распознавание", padding=(SECTION_PADDING_X_PIXELS, SECTION_PADDING_Y_PIXELS))
@@ -833,7 +804,7 @@ class DesktopApplication:
             "Раскладки EN / RU",
             "KeySwitch находит установленные английскую и русскую HKL и сохраняет выбранный пользователем язык.",
         )
-        section = self._section(page, "Системная пара", LAYOUTS_SYSTEM_PAIR_SECTION_ROW)
+        section = self._section(page, "Системная пара", PAGE_FIRST_SECTION_ROW)
         ttk.Label(
             section,
             text="Английская раскладка",
@@ -865,7 +836,7 @@ class DesktopApplication:
             "Горячие клавиши",
             "Комбинации работают глобально. Используйте названия Ctrl, Alt, Shift, Super, Pause и букв.",
         )
-        section = self._section(page, "Глобальные команды", HOTKEYS_SECTION_ROW)
+        section = self._section(page, "Глобальные команды", PAGE_FIRST_SECTION_ROW)
         for row, spec in enumerate(HOTKEY_SETTINGS):
             self._add_setting(section, spec, row)
 
@@ -876,7 +847,7 @@ class DesktopApplication:
             "Исключения",
             "В исключённых программах KeySwitch наблюдает раскладку, но не заменяет введённые слова.",
         )
-        applications = self._section(page, "Программы", EXCLUSIONS_APPLICATIONS_SECTION_ROW)
+        applications = self._section(page, "Программы", PAGE_FIRST_SECTION_ROW)
         applications.columnconfigure(0, weight=1)
         self.application_list = tk.Listbox(applications, height=APPLICATION_LIST_HEIGHT_ROWS, exportselection=False)
         self.application_list.grid(row=0, column=0, columnspan=APPLICATION_LIST_COLUMN_SPAN, sticky="ew")
@@ -925,7 +896,7 @@ class DesktopApplication:
             "Внешний вид и система",
             "Настройте автозагрузку после входа в Windows, трей, уведомления и локальную историю.",
         )
-        section = self._section(page, "Интеграция с Windows", APPEARANCE_SECTION_ROW)
+        section = self._section(page, "Интеграция с Windows", PAGE_FIRST_SECTION_ROW)
         for row, spec in enumerate(SYSTEM_SETTINGS):
             self._add_setting(section, spec, row)
 
@@ -937,7 +908,7 @@ class DesktopApplication:
             "Сохраняются только пары слов, время, приложение и уверенность — не полный поток клавиатуры.",
         )
         toolbar = ttk.Frame(page, style="Content.TFrame")
-        toolbar.grid(row=HISTORY_TOOLBAR_ROW, column=0, sticky="ew", pady=(0, GROUP_GAP_PIXELS))
+        toolbar.grid(row=PAGE_FIRST_SECTION_ROW, column=0, sticky="ew", pady=(0, GROUP_GAP_PIXELS))
         ttk.Button(toolbar, text="Обновить", command=self._refresh_history).pack(side="left")
         ttk.Button(toolbar, text="Очистить историю", command=self._clear_history).pack(side="right")
         columns = ("time", "original", "replacement", "application", "confidence")
@@ -964,7 +935,7 @@ class DesktopApplication:
             "Обновления",
             "KeySwitch проверяет стабильные выпуски, сверяет SHA-256 и может тихо обновиться с автоматическим перезапуском.",
         )
-        state = self._section(page, "Состояние", UPDATES_STATE_SECTION_ROW)
+        state = self._section(page, "Состояние", PAGE_FIRST_SECTION_ROW)
         ttk.Label(
             state,
             textvariable=self.update_version_text,
@@ -1088,7 +1059,7 @@ class DesktopApplication:
             "Обслуживание",
             "Управляйте локальными правилами, настройками и расположением данных KeySwitch.",
         )
-        learning = self._section(page, "Локальное обучение", MAINTENANCE_LEARNING_SECTION_ROW)
+        learning = self._section(page, "Локальное обучение", PAGE_FIRST_SECTION_ROW)
         learning.columnconfigure(0, weight=1)
         ttk.Label(learning, textvariable=self.learning_text).grid(
             row=0,
@@ -1215,7 +1186,7 @@ class DesktopApplication:
             f"KeySwitch {__version__}",
             "Локальное приложение автоматического исправления раскладки для Windows и Linux.",
         )
-        details = self._section(page, "Диагностика Win32 backend", ABOUT_SECTION_ROW)
+        details = self._section(page, "Диагностика Win32 backend", PAGE_FIRST_SECTION_ROW)
         self.diagnostics_text = tk.Text(details, height=DIAGNOSTICS_TEXT_HEIGHT_ROWS, wrap="word", borderwidth=0)
         self.diagnostics_text.grid(row=0, column=0, sticky="nsew")
         buttons = ttk.Frame(details)
@@ -1237,12 +1208,12 @@ class DesktopApplication:
     ) -> None:
         cell = ttk.Frame(parent, style="Content.TFrame")
         cell.grid(row=row, column=0, sticky="ew", pady=SETTING_ROW_PADDING_PIXELS)
-        cell.columnconfigure(0, minsize=MODIFIED_MARKER_COLUMN)
+        cell.columnconfigure(0, minsize=MODIFIED_MARKER_COLUMN_MIN_PIXELS)
         cell.columnconfigure(1, weight=1)
-        cell.columnconfigure(SETTING_CONTROL_COLUMN_INDEX, minsize=RESET_BUTTON_COLUMN)
+        cell.columnconfigure(SETTING_RESET_COLUMN_INDEX, minsize=RESET_BUTTON_COLUMN_MIN_PIXELS)
         marker = tk.Frame(
             cell,
-            width=MODIFIED_MARKER_WIDTH,
+            width=MODIFIED_MARKER_WIDTH_PIXELS,
             background=self._modified_accent,
             borderwidth=0,
             highlightthickness=0,
@@ -1260,7 +1231,7 @@ class DesktopApplication:
             style="Reset.TButton",
             command=partial(self._restore_default, spec.path),
         )
-        reset.grid(row=0, column=SETTING_CONTROL_COLUMN_INDEX, sticky="ne")
+        reset.grid(row=0, column=SETTING_RESET_COLUMN_INDEX, sticky="ne")
         reset.grid_remove()
         _Tooltip(reset, RESET_BUTTON_HINT)
         label: ttk.Label | ttk.Checkbutton
@@ -1281,7 +1252,7 @@ class DesktopApplication:
             label.grid(row=0, column=0, columnspan=SETTING_ROW_COLUMN_SPAN, sticky="w")
             normal_style = "TCheckbutton"
             modified_style = "Modified.TCheckbutton"
-            indent = DESCRIPTION_INDENT
+            indent = DESCRIPTION_INDENT_PIXELS
         else:
             label = ttk.Label(body, text=spec.title, style="CardTitle.TLabel")
             label.grid(row=0, column=0, sticky="w")
@@ -1294,11 +1265,11 @@ class DesktopApplication:
             body,
             text=spec.description,
             style="Muted.TLabel",
-            wraplength=DESCRIPTION_INITIAL_WRAP,
+            wraplength=DESCRIPTION_INITIAL_WRAP_PIXELS,
             justify="left",
         )
         description.grid(row=1, column=0, columnspan=SETTING_ROW_COLUMN_SPAN, sticky="w", padx=(indent, 0))
-        self._follow_width(description, body, indent + DESCRIPTION_MARGIN)
+        self._follow_width(description, body, indent + DESCRIPTION_MARGIN_PIXELS)
         self._setting_indicators.setdefault(spec.path, []).append(
             _SettingIndicator(marker, reset, label, normal_style, modified_style)
         )
@@ -1610,7 +1581,7 @@ class DesktopApplication:
         anchor: ScreenAnchor | None,
     ) -> None:
         self.root.after(
-            WINDOWS_LEARNING_PROMPT_DELAY_MS,
+            LEARNING_PROMPT_SHOW_DELAY_MS,
             self._apply_learning_prompt,
             prompt,
             anchor,
@@ -1666,9 +1637,9 @@ class DesktopApplication:
             self._update_after_id = None
         if requested:
             delay = (
-                WINDOWS_UPDATE_INITIAL_DELAY_MS
+                UPDATE_CHECK_INITIAL_DELAY_MS
                 if initial
-                else WINDOWS_UPDATE_INTERVAL_MS
+                else UPDATE_CHECK_INTERVAL_MS
             )
             self._update_after_id = self.root.after(
                 delay,
@@ -1780,12 +1751,13 @@ class DesktopApplication:
     def _add_active_application(self) -> None:
         messagebox.showinfo(
             "Выбор окна",
-            "После закрытия подсказки переключитесь на нужное приложение. KeySwitch определит его через 3 секунды.",
+            "После закрытия подсказки переключитесь на нужное приложение. KeySwitch определит его через "
+            f"{quantity(APPLICATION_CAPTURE_DELAY_MS / MILLISECONDS_PER_SECOND, SECONDS)}.",
             parent=self.root,
         )
         self.status_text.set("Выберите приложение-исключение…")
         self.root.withdraw()
-        self.root.after(ACTIVE_APPLICATION_CAPTURE_DELAY_MS, self._capture_active_application)
+        self.root.after(APPLICATION_CAPTURE_DELAY_MS, self._capture_active_application)
 
     def _capture_active_application(self) -> None:
         identifier = self.backend.active_application()
@@ -2110,24 +2082,24 @@ class DesktopApplication:
         style.configure("Sidebar.TFrame", background=sidebar)
         style.configure("TCheckbutton", background=content, foreground=foreground)
         style.configure("Modified.TCheckbutton", background=content, foreground=accent)
-        style.configure("Reset.TButton", padding=(RESET_BUTTON_INTERNAL_PADDING_PIXELS, 0), font=("Segoe UI", RESET_BUTTON_FONT_SIZE))
+        style.configure("Reset.TButton", padding=(RESET_BUTTON_INTERNAL_PADDING_PIXELS, 0), font=("Segoe UI", RESET_BUTTON_FONT_SIZE_POINTS))
         style.configure("TLabel", background=content, foreground=foreground)
-        style.configure("PageTitle.TLabel", background=content, foreground=foreground, font=("Segoe UI Semibold", PAGE_TITLE_FONT_SIZE))
+        style.configure("PageTitle.TLabel", background=content, foreground=foreground, font=("Segoe UI Semibold", PAGE_TITLE_FONT_SIZE_POINTS))
         style.configure("PageSubtitle.TLabel", background=content, foreground=muted)
-        style.configure("CardTitle.TLabel", foreground=foreground, font=("Segoe UI Semibold", CARD_TITLE_FONT_SIZE))
+        style.configure("CardTitle.TLabel", foreground=foreground, font=("Segoe UI Semibold", CARD_TITLE_FONT_SIZE_POINTS))
         style.configure(
             "Modified.CardTitle.TLabel",
             foreground=accent,
-            font=("Segoe UI Semibold", CARD_TITLE_FONT_SIZE),
+            font=("Segoe UI Semibold", CARD_TITLE_FONT_SIZE_POINTS),
         )
         style.configure("Muted.TLabel", foreground=muted)
         style.configure("Error.TLabel", foreground="#e5484d")
-        style.configure("Brand.TLabel", background=sidebar, foreground="white", font=("Segoe UI Semibold", BRAND_LABEL_FONT_SIZE))
+        style.configure("Brand.TLabel", background=sidebar, foreground="white", font=("Segoe UI Semibold", BRAND_LABEL_FONT_SIZE_POINTS))
         style.configure("Sidebar.TLabel", background=sidebar, foreground="white")
         style.configure("MutedSidebar.TLabel", background=sidebar, foreground="#aebbd1")
         self._refresh_navigation_style()
         style.configure("TLabelframe", background=content, foreground=foreground)
-        style.configure("TLabelframe.Label", background=content, foreground=foreground, font=("Segoe UI Semibold", LABELFRAME_TITLE_FONT_SIZE))
+        style.configure("TLabelframe.Label", background=content, foreground=foreground, font=("Segoe UI Semibold", LABELFRAME_TITLE_FONT_SIZE_POINTS))
         for viewport in self._page_viewports.values():
             viewport.configure(background=content)
         for indicators in self._setting_indicators.values():

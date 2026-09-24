@@ -2,15 +2,25 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox, QScrollArea, QSystemTrayIcon
+from fixture_values.counts import FAKE_BOT_TOKEN_SECRET_CHARACTERS, FAKE_HEX_ID_LENGTH, TAB_COUNT
+from PySide6.QtWidgets import (
+    QApplication,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QScrollArea,
+    QSystemTrayIcon,
+)
 
 from logcourier import autostart
 from logcourier.config import Config, load_config
-from logcourier.gui import WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH, Window
-
-TAB_COUNT = 4
-BOT_TOKEN_SECRET_LENGTH = 30
-DEVICE_ID_LENGTH = 32
+from logcourier.constants.files import BYTES_PER_MEBIBYTE, BYTES_PER_MEGABYTE, CHUNK_BYTES
+from logcourier.constants.gui import WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH
+from logcourier.constants.limits import MAX_QUEUE_BYTES
+from logcourier.constants.telegram import GROUP_INTERVAL, MAX_DOWNLOAD
+from logcourier.constants.timing import WAKE_POLL_SECONDS
+from logcourier.gui import Window
+from logcourier.russian_text import SECONDS, quantity, russian_number
 
 
 def test_gui_safe_defaults_scroll_and_pause(tmp_path, monkeypatch):
@@ -36,11 +46,29 @@ def test_gui_safe_defaults_scroll_and_pause(tmp_path, monkeypatch):
     app.processEvents()
 
 
+def test_delivery_note_names_the_limits_the_code_uses(tmp_path, monkeypatch):
+    monkeypatch.delenv("LOGCOURIER_BOT_TOKEN", raising=False)
+    QApplication.instance() or QApplication([])
+    window = Window(tmp_path, Config(), start_service=False)
+    note = next(label.text() for label in window.findChildren(QLabel) if "Очередь:" in label.text())
+    for fragment in (
+        f"Сбор раз в {quantity(WAKE_POLL_SECONDS, SECONDS)};",
+        f"Очередь: до {russian_number(MAX_QUEUE_BYTES / BYTES_PER_MEBIBYTE)} МиБ.",
+        f"Локальный фрагмент: до {russian_number(CHUNK_BYTES / BYTES_PER_MEBIBYTE)} МиБ до сжатия.",
+        f"в пакеты до {russian_number(MAX_DOWNLOAD / BYTES_PER_MEGABYTE)} МБ.",
+        f"не чаще одного раза в {quantity(GROUP_INTERVAL, SECONDS)}.",
+    ):
+        assert fragment in note
+    window.exiting = True
+    window.tray.hide()
+    window.close()
+
+
 def test_save_bot_and_group_and_adopt_catalog(tmp_path, monkeypatch):
     monkeypatch.delenv("LOGCOURIER_BOT_TOKEN", raising=False)
     app = QApplication.instance() or QApplication([])
     window = Window(tmp_path, Config(), start_service=False)
-    token = "123456:" + "C" * BOT_TOKEN_SECRET_LENGTH
+    token = "123456:" + "C" * FAKE_BOT_TOKEN_SECRET_CHARACTERS
     window.token.setText(token)
     window.chat.setText("-100123")
     window.persist_token.setChecked(False)
@@ -49,8 +77,8 @@ def test_save_bot_and_group_and_adopt_catalog(tmp_path, monkeypatch):
     assert saved.bot_id == "123456" and saved.chat_id == "-100123"
     assert token not in (tmp_path / "config.json").read_text()
     monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Yes)
-    window.confirm_catalog({"index": {"device_id": "a" * DEVICE_ID_LENGTH}}, "123456", "-100123")
-    assert load_config(tmp_path).device_id == "a" * DEVICE_ID_LENGTH
+    window.confirm_catalog({"index": {"device_id": "a" * FAKE_HEX_ID_LENGTH}}, "123456", "-100123")
+    assert load_config(tmp_path).device_id == "a" * FAKE_HEX_ID_LENGTH
     assert not window.consent.isChecked() and not window.auto.isChecked()
     errors = []
     monkeypatch.setattr(window, "error", errors.append)

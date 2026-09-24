@@ -18,76 +18,42 @@ import threading
 from collections.abc import Callable
 from typing import Final
 
-from .backend import ALT_MASK, CONTROL_MASK, SHIFT_MASK, SUPER_MASK, ScreenAnchor
+from .backend import ScreenAnchor
+from .constants.keyboard import ALT_MASK, CONTROL_MASK, SHIFT_MASK
 from .macos_objc import frontmost_application
 from .macos_backend import NativeInput, NativeKeyEvent
+from .constants.macos import (
+    AX_SUCCESS,
+    AX_VALUE_TYPE_CF_RANGE,
+    CF_NUMBER_SINT32_TYPE,
+    CF_STRING_BUFFER_BYTES,
+    CF_STRING_ENCODING_UTF8,
+    EVENT_FLAG_ALPHA_SHIFT,
+    EVENT_KEY_DOWN,
+    EVENT_MARK_INJECTED,
+    EVENT_MARK_REPLAYED,
+    EVENT_SOURCE_USER_DATA_FIELD,
+    EVENT_TAP_OPTION_DEFAULT,
+    FRONT_WINDOW_NAME_INDEX,
+    HEAD_INSERT_EVENT_TAP,
+    KEYBOARD_EVENT_KEYCODE_FIELD,
+    KEY_EVENTS,
+    NORMAL_WINDOW_LAYER,
+    NULL_WINDOW_ID,
+    POINTER_EVENTS,
+    SESSION_EVENT_TAP,
+    TAP_DISABLED_EVENTS,
+    UC_KEY_ACTION_DISPLAY,
+    UC_KEY_TRANSLATE_BUFFER_CHARACTERS,
+    UC_KEY_TRANSLATE_NO_DEAD_KEYS_MASK,
+    UC_MODIFIER_CONTROL,
+    UC_MODIFIER_OPTION,
+    UC_MODIFIER_SHIFT,
+    WINDOW_LIST_EXCLUDE_DESKTOP,
+    WINDOW_LIST_ON_SCREEN_ONLY,
+)
+from .constants.timing import EVENT_TAP_RUN_LOOP_SLICE_SECONDS
 
-# Event numbers, from IOLLEvent.h through CGEventTypes.h.
-EVENT_LEFT_MOUSE_DOWN: Final = 1
-EVENT_RIGHT_MOUSE_DOWN: Final = 3
-EVENT_KEY_DOWN: Final = 10
-EVENT_KEY_UP: Final = 11
-EVENT_FLAGS_CHANGED: Final = 12
-EVENT_SCROLL_WHEEL: Final = 22
-EVENT_OTHER_MOUSE_DOWN: Final = 25
-EVENT_TAP_DISABLED_BY_TIMEOUT: Final = 0xFFFFFFFE
-EVENT_TAP_DISABLED_BY_USER_INPUT: Final = 0xFFFFFFFF
-
-POINTER_EVENTS: Final = frozenset({
-    EVENT_LEFT_MOUSE_DOWN, EVENT_RIGHT_MOUSE_DOWN, EVENT_OTHER_MOUSE_DOWN, EVENT_SCROLL_WHEEL,
-})
-KEY_EVENTS: Final = frozenset({EVENT_KEY_DOWN, EVENT_KEY_UP, EVENT_FLAGS_CHANGED})
-TAP_DISABLED_EVENTS: Final = frozenset({
-    EVENT_TAP_DISABLED_BY_TIMEOUT, EVENT_TAP_DISABLED_BY_USER_INPUT,
-})
-
-# Modifier bits of a Quartz event, from IOLLEvent.h.
-FLAG_ALPHA_SHIFT: Final = 0x00010000
-FLAG_SHIFT: Final = 0x00020000
-FLAG_CONTROL: Final = 0x00040000
-FLAG_ALTERNATE: Final = 0x00080000
-FLAG_COMMAND: Final = 0x00100000
-
-# Tap placement and options.
-SESSION_EVENT_TAP: Final = 1
-HEAD_INSERT_EVENT_TAP: Final = 0
-EVENT_TAP_OPTION_DEFAULT: Final = 0
-KEYBOARD_EVENT_KEYCODE_FIELD: Final = 9
-EVENT_SOURCE_USER_DATA_FIELD: Final = 42
-
-# The marks the backend puts on events it posts itself. A tap sees its own
-# injections like any other event, and without a mark it would answer its own
-# corrections as though the user had typed them.
-MARK_INJECTED: Final = 0x4B53_0001
-MARK_REPLAYED: Final = 0x4B53_0002
-
-# UCKeyTranslate arguments.
-UC_KEY_ACTION_DISPLAY: Final = 3
-UC_KEY_TRANSLATE_NO_DEAD_KEYS_MASK: Final = 1
-UC_MODIFIER_SHIFT: Final = 2  # shiftKey (0x0200) >> 8, the shape UCKeyTranslate wants.
-UC_MODIFIER_ALPHA_LOCK: Final = 4  # alphaLock (0x0400) >> 8.
-UC_MODIFIER_OPTION: Final = 8  # optionKey (0x0800) >> 8.
-UC_MODIFIER_CONTROL: Final = 16  # controlKey (0x1000) >> 8.
-TRANSLATED_LENGTH: Final = 8
-TEXT_BUFFER_CAPACITY_BYTES: Final = 512
-
-CF_STRING_ENCODING_UTF8: Final = 0x08000100
-CF_NUMBER_SINT32_TYPE: Final = 3
-WINDOW_LIST_ON_SCREEN_ONLY: Final = 1 << 0
-WINDOW_LIST_EXCLUDE_DESKTOP: Final = 1 << 4
-NULL_WINDOW_ID: Final = 0
-# A window the user types into sits on the normal layer; menus, the dock and
-# overlays sit above it and would otherwise be mistaken for the focus.
-NORMAL_WINDOW_LAYER: Final = 0
-# Index of the program name within the (window id, owner pid, name) tuple
-# `CtypesMacAPI._front_window` returns.
-FRONT_WINDOW_NAME_INDEX: Final = 2
-
-RUN_LOOP_SLICE_SECONDS: Final = 0.2
-
-AX_SUCCESS: Final = 0
-# AXValue wrapping a CFRange, from AXValue.h.
-AX_VALUE_TYPE_CF_RANGE: Final = 4
 
 # The pane of System Settings that holds the switch KeySwitch needs. macOS has
 # no call that grants the permission; the most a program may do is ask, and then
@@ -237,7 +203,7 @@ _TAP_CALLBACK = ctypes.CFUNCTYPE(
 def _text(reference: int | None) -> str:
     if not reference:
         return ""
-    buffer = ctypes.create_string_buffer(TEXT_BUFFER_CAPACITY_BYTES)
+    buffer = ctypes.create_string_buffer(CF_STRING_BUFFER_BYTES)
     if not _cf.CFStringGetCString(reference, buffer, len(buffer), CF_STRING_ENCODING_UTF8):
         return ""
     return buffer.value.decode("utf-8", "replace")
@@ -353,7 +319,7 @@ class CtypesMacAPI:
             return ""
         dead_key_state = ctypes.c_uint32(0)
         length = ctypes.c_ulong(0)
-        buffer = (ctypes.c_uint16 * TRANSLATED_LENGTH)()
+        buffer = (ctypes.c_uint16 * UC_KEY_TRANSLATE_BUFFER_CHARACTERS)()
         status = _tis.UCKeyTranslate(
             ctypes.c_void_p(pointer), keycode, UC_KEY_ACTION_DISPLAY,
             _translate_modifiers(state), _tis.LMGetKbdType(),
@@ -375,7 +341,7 @@ class CtypesMacAPI:
             try:
                 _cg.CGEventSetIntegerValueField(
                     event, EVENT_SOURCE_USER_DATA_FIELD,
-                    MARK_REPLAYED if item.replayed else MARK_INJECTED)
+                    EVENT_MARK_REPLAYED if item.replayed else EVENT_MARK_INJECTED)
                 _cg.CGEventPost(SESSION_EVENT_TAP, event)
             finally:
                 _cf.CFRelease(event)
@@ -471,7 +437,7 @@ class CtypesMacAPI:
         if not event:
             return False
         try:
-            return bool(_cg.CGEventGetFlags(event) & FLAG_ALPHA_SHIFT)
+            return bool(_cg.CGEventGetFlags(event) & EVENT_FLAG_ALPHA_SHIFT)
         finally:
             _cf.CFRelease(event)
 
@@ -513,7 +479,7 @@ class CtypesMacAPI:
         ready()
         try:
             while not self._stop.is_set():
-                _cf.CFRunLoopRunInMode(_DEFAULT_MODE, RUN_LOOP_SLICE_SECONDS, False)
+                _cf.CFRunLoopRunInMode(_DEFAULT_MODE, EVENT_TAP_RUN_LOOP_SLICE_SECONDS, False)
         finally:
             self._teardown()
 
@@ -552,8 +518,8 @@ class CtypesMacAPI:
             event_type == EVENT_KEY_DOWN,
             int(_cg.CGEventGetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE_FIELD)),
             timestamp,
-            injected=mark == MARK_INJECTED,
-            replayed=mark == MARK_REPLAYED,
+            injected=mark == EVENT_MARK_INJECTED,
+            replayed=mark == EVENT_MARK_REPLAYED,
             event_type=event_type,
         )
         return None if listener(native) else event

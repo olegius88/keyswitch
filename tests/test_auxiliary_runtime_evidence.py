@@ -16,13 +16,15 @@ if TOOLS not in sys.path:
     sys.path.insert(0, TOOLS)
 import auxiliary_runtime_evidence as evidence
 from keyswitch.intent_model import LinearNgramModel
+from fixture_values.clock import MTIME_BUMP_NANOSECONDS
+from fixture_values.counts import (
+    EVIDENCE_LOAD_CALLS_AFTER_CONTENT_CHANGE,
+    EVIDENCE_LOAD_CALLS_AFTER_MTIME_CHANGE,
+    EXPECTED_REFERENCE_LEXICAL_FILE_COUNT,
+)
 
 
 class AuxiliaryRuntimeEvidenceTests(unittest.TestCase):
-    EXPECTED_LEXICAL_SOURCE_COUNT = 6
-    LOAD_CALLS_AFTER_CONTENT_CHANGE = 2
-    LOAD_CALLS_AFTER_MTIME_CHANGE = 3
-    MTIME_BUMP_NANOSECONDS = 1_000_000
 
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory(prefix="keyswitch-auxiliary-pins-")
@@ -81,7 +83,7 @@ class AuxiliaryRuntimeEvidenceTests(unittest.TestCase):
     def test_lexical_mutation_fails_even_if_config_pin_would_change(self) -> None:
         names = [name for name in evidence.runtime_provenance(self.root, [])
                  if name.startswith("model/intent_v1/sources/")]
-        self.assertEqual(len(names), self.EXPECTED_LEXICAL_SOURCE_COUNT)
+        self.assertEqual(len(names), EXPECTED_REFERENCE_LEXICAL_FILE_COUNT)
         for name in names:
             with self.subTest(name=name):
                 path = self.root / name
@@ -168,11 +170,11 @@ class AuxiliaryRuntimeEvidenceTests(unittest.TestCase):
             loader.assert_called_once_with(path)
             path.write_bytes(b"different size invalidates cache")
             evidence.packaged_intent(self.root)
-            self.assertEqual(loader.call_count, self.LOAD_CALLS_AFTER_CONTENT_CHANGE)
+            self.assertEqual(loader.call_count, EVIDENCE_LOAD_CALLS_AFTER_CONTENT_CHANGE)
             stat = path.stat()
-            os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + self.MTIME_BUMP_NANOSECONDS))
+            os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + MTIME_BUMP_NANOSECONDS))
             evidence.packaged_intent(self.root)
-            self.assertEqual(loader.call_count, self.LOAD_CALLS_AFTER_MTIME_CHANGE)
+            self.assertEqual(loader.call_count, EVIDENCE_LOAD_CALLS_AFTER_MTIME_CHANGE)
 
     def test_packaged_loader_propagates_missing_and_invalid_model_failures(self) -> None:
         with patch("auxiliary_runtime_evidence.LinearNgramModel.load", side_effect=ValueError("invalid fixture")):

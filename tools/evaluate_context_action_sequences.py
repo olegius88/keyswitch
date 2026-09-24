@@ -27,7 +27,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "tests") not in sys.path:
     sys.path.insert(0, str(ROOT / "tests"))
 
-from keyswitch.backend import KeyEvent, SHIFT_MASK
+from keyswitch.backend import KeyEvent
+from keyswitch.constants.keyboard import SHIFT_MASK
 from keyswitch.config import SettingsStore
 from keyswitch.context_model import ContextModel
 from keyswitch.engine import KeySwitchEngine
@@ -38,12 +39,29 @@ from keyswitch.prefix_model import PrefixModel
 from keyswitch.prefix_schema import VersionedPrefixModel
 from test_input_integrity import EditorBackend
 
-from model_protocol import PROFILES, SEALED_BEFORE_TEST
+from keyswitch.constants.model_protocol import PROFILES, SEALED_BEFORE_TEST
 from reference_lexicon import reference_models
 from context_physical_keys import KEYS as KEYS, PhysicalKey as PhysicalKey, physical_keys as physical_keys
-from freeze_context_action_corpus import (
-    AFTER_WINDOW_CHARACTERS, BEFORE_WINDOW_CHARACTERS, CorpusRow, canonical, checksum, digest, load_split,
+from freeze_context_action_corpus import CorpusRow, canonical, checksum, digest, load_split
+from keyswitch.constants.corpus import (
+    CORPUS_AFTER_WINDOW_CHARACTERS,
+    CORPUS_BEFORE_WINDOW_CHARACTERS,
 )
+from keyswitch.constants.file_formats import VERSION_HASH_CHARACTERS
+from keyswitch.constants.models import CONTEXT_ACTION_FEATURE_VERSION
+from keyswitch.constants.settings_defaults import DEFAULT_PAUSE_DELAY_SECONDS
+from keyswitch.constants.training import (
+    CONTEXT_ACTION_GATE_POLICY,
+    CONTEXT_ACTION_SEQUENCE_PROTOCOL_VERSION,
+    MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP,
+    SEQUENCE_DOCUMENT_CAP_PER_GROUP,
+    SIMULATED_CLOCK_START_SECONDS,
+    SIMULATED_KEY_DOWN_SECONDS,
+    SIMULATED_KEY_UP_SECONDS,
+    SIMULATED_WORD_IDLE_SECONDS,
+    TEST_LEDGER_LOCK_FILE_MODE,
+)
+from keyswitch.constants.units import MILLISECONDS_PER_SECOND
 
 CORPUS = ROOT / ".t/reliable-release-2026-09-12/context-action-corpus"
 LEDGER_ROOT = ROOT / ".t/reliable-release-2026-09-12/context-action-test-ledger"
@@ -51,32 +69,12 @@ BASELINE = ROOT / "model/context_v3/baseline-context-v1.json"
 PREFIX_BASELINE = ROOT / "model/prefix_v2/baseline-prefix-v1.json"
 INSTALLED_MODELS = ("context_policy_v1.json", "prefix_policy_v1.json")
 SETTINGS_MODES = ("early_off", "default")
-DEFAULT_KEY_DOWN_SECONDS = 0.05
-DEFAULT_KEY_UP_SECONDS = 0.03
-DEFAULT_WORD_IDLE_SECONDS = 1.7
-# context_model.py is pinned by the context-v1 seal (PENDING_RESEAL), so its
-# "3" for the context-action feature scheme is not yet a constant we can import.
-CONTEXT_FEATURE_VERSION_V3 = 3
-VERSION_HASH_PREFIX_LENGTH = 12
-LOCK_FILE_MODE = 0o600
-SIMULATED_CLOCK_START_SECONDS = 1000.0
-MILLISECONDS_PER_SECOND = 1000
-MINIMUM_DOCUMENTS_PER_LANGUAGE = 32
 PAIRS: dict[str, tuple[tuple[str, str, str], ...]] = {
     "early_off": (("baseline", "baseline", "baseline"), ("candidate", "candidate", "candidate")),
     "default": (("baseline", "baseline", "baseline"), ("candidate", "candidate", "candidate"),
                 ("candidate_context_baseline_prefix", "candidate", "baseline")),
 }
 RECIPE = ROOT / "model/context_v3/recipe.json"
-DOCUMENT_CAP = 128
-GATE_POLICY: dict[str, object] = {
-    "minimum_calibration_net_benefit": 1,
-    "minimum_calibration_conversion_recall": 0.0,
-    "sequence_corruptions_at_most_baseline": True,
-    "sequence_length_mismatches": 0,
-    "sequence_net_restorations_at_least_baseline": True,
-    "minimum_sequence_documents_per_group": 32,
-}
 REQUIRED_PROVENANCE = frozenset({
     "tools/train_context_action_model.py", "tools/freeze_context_action_corpus.py",
     "tools/evaluate_context_action_sequences.py", "tools/context_evidence.py", "tools/reference_lexicon.py",
@@ -108,19 +106,33 @@ REQUIRED_PROVENANCE = frozenset({
     "tests/test_language_intent_regressions.py", "tests/test_input_sequence_matrix.py",
     "tests/test_context_policy.py",
 })
+# How the replay types, as the audited protocol spells it (AUDITED_SEQUENCE_PROTOCOL_SHA256 pins the bytes).
+TYPING_PACE = (
+    f"{round(SIMULATED_KEY_DOWN_SECONDS * MILLISECONDS_PER_SECOND)} ms before every key-down, "
+    f"{round(SIMULATED_KEY_UP_SECONDS * MILLISECONDS_PER_SECOND)} ms before every key-up, "
+    f"engine timer callbacks after every key, {SIMULATED_WORD_IDLE_SECONDS} s idle with timer callbacks after every completed word"
+)
 PROTOCOL: dict[str, object] = {
-    "version": 3,
-    "document_cap_per_group": DOCUMENT_CAP,
+    "version": CONTEXT_ACTION_SEQUENCE_PROTOCOL_VERSION,
+    "document_cap_per_group": SEQUENCE_DOCUMENT_CAP_PER_GROUP,
     "selection": "hash-ranked documents and one hash-ranked focus per document/group, before screenability or scoring; no replacement of unsupported rows",
     "window": "before + original + after; spacing and literal_tail are overlapping metadata and are never appended",
-    "trim": "at a full 96-character left or 64-character right clip beginning/ending inside letters, remove only that outer letter fragment; preserve focus and adjacent whitespace/punctuation",
+    "trim": (f"at a full {CORPUS_BEFORE_WINDOW_CHARACTERS}-character left or {CORPUS_AFTER_WINDOW_CHARACTERS}-character right clip "
+             "beginning/ending inside letters, remove only that outer letter fragment; preserve focus and adjacent whitespace/punctuation"),
     "keyboard": "US/RU key pairs including Shift; natural script changes and focus first-letter layout are explicit user switches; subsequent glyphs follow the live backend group",
     "intervention": "Type leading focus nonletters in intended layouts; explicitly select the intended or opposite layout immediately before the first letter of the declared US/RU group. Wrong mode must produce a different observed glyph at that letter. Nonletter-only focus has no wrong intervention.",
     "punctuation": "physical keys chosen in intended layout, including ambiguous literal signs; no extra terminator or synthetic idle correction",
     "profiles": list(PROFILES),
     "settings_modes": {
-        "early_off": "context assist; early switch, learning, history, field reading and manual-layout cooldown disabled; context tracking enabled; 50 ms before every key-down, 30 ms before every key-up, engine timer callbacks after every key, 1.7 s idle with timer callbacks after every completed word, exactly as in the default mode, so the completed-word decision reaches a document that ends without a boundary key",
-        "default": "application defaults with the early switch enabled explicitly, the configuration a user gets by turning that feature on: early switch from four letters, pause correction after 1.5 s, manual-layout protection, learning, context assist without field reading; 50 ms before every key-down, 30 ms before every key-up, engine timer callbacks after every key, 1.7 s idle with timer callbacks after every completed word; a layout selection is a manual switch only when it changes the live backend group",
+        "early_off": ("context assist; early switch, learning, history, field reading and manual-layout cooldown disabled; "
+                      f"context tracking enabled; {TYPING_PACE}, exactly as in the default mode, so the completed-word "
+                      "decision reaches a document that ends without a boundary key"),
+        # "four letters" spells DEFAULT_EARLY_SWITCH_MIN_LENGTH in the audited words; it stays as written.
+        "default": ("application defaults with the early switch enabled explicitly, the configuration a user gets by "
+                    "turning that feature on: early switch from four letters, "
+                    f"pause correction after {DEFAULT_PAUSE_DELAY_SECONDS} s, manual-layout protection, learning, "
+                    f"context assist without field reading; {TYPING_PACE}; a layout selection is a manual switch only "
+                    "when it changes the live backend group"),
     },
     "models": "candidate and baseline context and prefix artifacts are injected explicitly; installed context and prefix bytes are never loaded; boundary, orthotactic and intent models are the pinned packaged files",
     "pairs": {"early_off": ["baseline: baseline context + baseline prefix", "candidate: candidate context + candidate prefix"],
@@ -196,8 +208,8 @@ def validate_candidate_seal(artifact: Path, seal_path: Path, corpus: Path) -> di
     recipe = object_value(seal.get("recipe"), "recipe")
     if canonical(recipe) != canonical(read_object(RECIPE)):
         raise ValueError("recipe differs from candidate seal")
-    if (canonical(seal.get("gate_policy")) != canonical(GATE_POLICY)
-            or canonical(recipe.get("gate_policy")) != canonical(GATE_POLICY)
+    if (canonical(seal.get("gate_policy")) != canonical(CONTEXT_ACTION_GATE_POLICY)
+            or canonical(recipe.get("gate_policy")) != canonical(CONTEXT_ACTION_GATE_POLICY)
             or recipe.get("profiles") != list(PROFILES)):
         raise ValueError("candidate gate policy differs from required policy")
     hashes = object_value(seal.get("provenance"), "provenance")
@@ -214,8 +226,8 @@ def validate_candidate_seal(artifact: Path, seal_path: Path, corpus: Path) -> di
     model = ContextModel.load(artifact)
     payload = read_object(artifact)
     weights_sha = payload.get("weights_sha256")
-    if (model.feature_version != CONTEXT_FEATURE_VERSION_V3 or not isinstance(weights_sha, str)
-            or model.version != "context-v3-" + weights_sha[:VERSION_HASH_PREFIX_LENGTH]
+    if (model.feature_version != CONTEXT_ACTION_FEATURE_VERSION or not isinstance(weights_sha, str)
+            or model.version != "context-v3-" + weights_sha[:VERSION_HASH_CHARACTERS]
             or seal.get("model_version") != model.version
             or seal.get("conversion_threshold") != model.conversion_threshold):
         raise ValueError("candidate model identity differs from seal")
@@ -326,7 +338,7 @@ def claim_test_access(identity: dict[str, object]) -> str:
     LEDGER_ROOT.mkdir(parents=True, exist_ok=True)
     lock = LEDGER_ROOT / ".access-lock"
     try:
-        descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, LOCK_FILE_MODE)
+        descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, TEST_LEDGER_LOCK_FILE_MODE)
     except FileExistsError:
         raise ValueError("test access ledger is locked; no test was read") from None
     try:
@@ -355,11 +367,11 @@ def script_group(character: str) -> int | None:
 def trimmed_window(row: CorpusRow) -> tuple[str, str, int, int]:
     before, after = row.before, row.after
     left = right = 0
-    if len(before) == BEFORE_WINDOW_CHARACTERS and before[0].isalpha():
+    if len(before) == CORPUS_BEFORE_WINDOW_CHARACTERS and before[0].isalpha():
         while left < len(before) and before[left].isalpha():
             left += 1
         before = before[left:]
-    if len(after) == AFTER_WINDOW_CHARACTERS and after[-1].isalpha():
+    if len(after) == CORPUS_AFTER_WINDOW_CHARACTERS and after[-1].isalpha():
         while right < len(after) and after[-1 - right].isalpha():
             right += 1
         after = after[:-right]
@@ -434,7 +446,7 @@ def select_rows(rows: Sequence[CorpusRow]) -> list[CorpusRow]:
             if row.group == group:
                 documents.setdefault(row.document, []).append(row)
         ranked = sorted(documents, key=lambda name: (digest("context-sequence:document:" + name), name))
-        for document in ranked[:DOCUMENT_CAP]:
+        for document in ranked[:SEQUENCE_DOCUMENT_CAP_PER_GROUP]:
             selected.append(min(documents[document], key=lambda row: (digest("context-sequence:focus:" + row.identifier), row.identifier)))
     return selected
 
@@ -535,13 +547,13 @@ def replay(plan: SequencePlan, model: ContextModel, models: dict[int, LanguageMo
                                         "source_group": backend.group, "target_group": plan.group}
                         if observed == intended:
                             raise ValueError("wrong intervention did not change the focus letter")
-                    clock[0] += DEFAULT_KEY_DOWN_SECONDS
+                    clock[0] += SIMULATED_KEY_DOWN_SECONDS
                     event = KeyEvent(True, key.keycode, "space" if observed == " " else observed,
                                      observed, key.characters, backend.group, SHIFT_MASK if key.shift else 0,
                                      round(clock[0] * MILLISECONDS_PER_SECOND))
                     backend.type(event)
                     engine._handle(event)
-                    clock[0] += DEFAULT_KEY_UP_SECONDS
+                    clock[0] += SIMULATED_KEY_UP_SECONDS
                     released = replace(event, pressed=False, timestamp=round(clock[0] * MILLISECONDS_PER_SECOND))
                     backend.type(released)
                     engine._handle(released)
@@ -552,7 +564,7 @@ def replay(plan: SequencePlan, model: ContextModel, models: dict[int, LanguageMo
                     character = expected[serial - 1]
                     following = expected[serial:serial + 1]
                     if not character.isspace() and (not following or following.isspace()):
-                        clock[0] += DEFAULT_WORD_IDLE_SECONDS
+                        clock[0] += SIMULATED_WORD_IDLE_SECONDS
                         timers()
             except (AssertionError, ValueError, IndexError) as exception:
                 error = type(exception).__name__ + ": " + str(exception)
@@ -568,8 +580,8 @@ def profile_gates(candidate: Mapping[str, int], baseline: Mapping[str, int], doc
             "length_preserved": candidate["length_mismatches"] == 0,
             "net_restorations_at_least_baseline": (candidate["exactly_restored"] - candidate["correct_text_corruptions"]
                                                   >= baseline["exactly_restored"] - baseline["correct_text_corruptions"]),
-            "enough_documents_us": documents.get("0", 0) >= MINIMUM_DOCUMENTS_PER_LANGUAGE,
-            "enough_documents_ru": documents.get("1", 0) >= MINIMUM_DOCUMENTS_PER_LANGUAGE,
+            "enough_documents_us": documents.get("0", 0) >= MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP,
+            "enough_documents_ru": documents.get("1", 0) >= MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP,
             "execution_succeeded": candidate["execution_errors"] == baseline["execution_errors"] == 0,
             "correction_layouts_match": candidate["correction_layout_mismatches"] == 0}
 
@@ -657,7 +669,7 @@ def evaluate(artifact: Path, seal_path: Path, corpus: Path, split: str, output: 
     # No test file, decompression, model scoring or row selection occurs above
     # the access claim. Failed outcomes are recorded below without promotion.
     report: dict[str, object] = {"schema_version": 1, "split": split, "identity": identity,
-                                "protocol": PROTOCOL, "gate_policy": GATE_POLICY, "promotion_passed": False}
+                                "protocol": PROTOCOL, "gate_policy": CONTEXT_ACTION_GATE_POLICY, "promotion_passed": False}
     environment = {"KEYSWITCH_HUNSPELL_PATH": str(ROOT / "model/intent_v1/sources/hunspell"),
                    "KEYSWITCH_INTENT_MODEL_PATH": str(ROOT / "src/keyswitch/resources/models/layout_intent_v1.ksm")}
     try:

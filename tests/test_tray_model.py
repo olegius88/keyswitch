@@ -27,13 +27,13 @@ from keyswitch.tray_model import (
     TrayState,
     menu_entries,
 )
-
-ENGLISH_GROUP = 0
-RUSSIAN_GROUP = 1
-# Standard Windows message codes, reused by the fake pystray win32 module and
-# by the primary/secondary click test below.
-WM_LBUTTONUP = 0x0202
-WM_RBUTTONUP = 0x0205
+from fixture_values.counts import (
+    TRAY_CONTROLLER_EXPECTED_DRAW_COUNT,
+    TRAY_MENU_EXPECTED_SEPARATOR_COUNT,
+    TRAY_MENU_LAYOUT_HEADER_ENTRY_COUNT,
+)
+from fixture_values.keys import ENGLISH_LAYOUT_GROUP, RUSSIAN_LAYOUT_GROUP
+from fixture_values.platform import WM_LBUTTONUP, WM_RBUTTONUP
 
 
 def recording_actions() -> tuple[TrayActions, list[str]]:
@@ -49,12 +49,10 @@ def recording_actions() -> tuple[TrayActions, list[str]]:
 
 
 class MenuDescriptionTests(unittest.TestCase):
-    LAYOUT_HEADER_ENTRY_COUNT = 2
-    EXPECTED_SEPARATOR_COUNT = 3
 
     def test_the_menu_reads_the_layout_and_offers_the_other_one(self) -> None:
         actions, _called = recording_actions()
-        entries = menu_entries(TrayState(group=ENGLISH_GROUP), actions)
+        entries = menu_entries(TrayState(group=ENGLISH_LAYOUT_GROUP), actions)
         self.assertTrue(entries[0].label.startswith(CURRENT_LAYOUT_PREFIX))
         self.assertIn("EN", entries[0].label)
         self.assertFalse(entries[0].enabled)
@@ -68,7 +66,7 @@ class MenuDescriptionTests(unittest.TestCase):
 
     def test_the_switches_follow_the_state(self) -> None:
         actions, _called = recording_actions()
-        state = TrayState(group=RUSSIAN_GROUP, enabled=False, sound_enabled=True,
+        state = TrayState(group=RUSSIAN_LAYOUT_GROUP, enabled=False, sound_enabled=True,
                           notifications_enabled=False)
         switches = {entry.label: entry.checked for entry in menu_entries(state, actions)}
         self.assertFalse(switches[AUTO_SWITCH_LABEL])
@@ -79,13 +77,13 @@ class MenuDescriptionTests(unittest.TestCase):
         """A checkbox on a plain line is how a menu starts lying about state."""
 
         actions, _called = recording_actions()
-        entries = menu_entries(TrayState(group=ENGLISH_GROUP), actions)
+        entries = menu_entries(TrayState(group=ENGLISH_LAYOUT_GROUP), actions)
         switches = {entry.label for entry in entries if entry.checked is not None}
         self.assertEqual(switches, {AUTO_SWITCH_LABEL, SOUND_LABEL, NOTIFICATIONS_LABEL})
 
     def test_every_line_that_can_be_chosen_calls_its_own_action(self) -> None:
         actions, called = recording_actions()
-        for entry in menu_entries(TrayState(group=ENGLISH_GROUP), actions):
+        for entry in menu_entries(TrayState(group=ENGLISH_LAYOUT_GROUP), actions):
             if entry.action is not None:
                 entry.action()
         self.assertEqual(called, [
@@ -96,13 +94,13 @@ class MenuDescriptionTests(unittest.TestCase):
 
     def test_the_menu_keeps_its_shape(self) -> None:
         actions, _called = recording_actions()
-        entries = menu_entries(TrayState(group=ENGLISH_GROUP), actions)
+        entries = menu_entries(TrayState(group=ENGLISH_LAYOUT_GROUP), actions)
         labels = [entry.label for entry in entries if not entry.separator]
-        self.assertEqual(labels[self.LAYOUT_HEADER_ENTRY_COUNT:], [
+        self.assertEqual(labels[TRAY_MENU_LAYOUT_HEADER_ENTRY_COUNT:], [
             SETTINGS_LABEL, AUTO_SWITCH_LABEL, SOUND_LABEL, NOTIFICATIONS_LABEL,
             HISTORY_LABEL, EXCLUSIONS_LABEL, ABOUT_LABEL, QUIT_LABEL,
         ])
-        self.assertEqual(sum(1 for entry in entries if entry.separator), self.EXPECTED_SEPARATOR_COUNT)
+        self.assertEqual(sum(1 for entry in entries if entry.separator), TRAY_MENU_EXPECTED_SEPARATOR_COUNT)
 
 
 class FakeMenuItem:
@@ -161,7 +159,7 @@ class WindowsRenderingTests(unittest.TestCase):
     def setUp(self) -> None:
         self.module = windows_tray_native()
         self.actions, self.called = recording_actions()
-        self.state = TrayState(group=ENGLISH_GROUP)
+        self.state = TrayState(group=ENGLISH_LAYOUT_GROUP)
 
     def items(self) -> tuple[object, ...]:
         return cast(
@@ -192,13 +190,13 @@ class WindowsRenderingTests(unittest.TestCase):
         checked = cast(FakeMenuItem, rendered[index]).checked
         assert callable(checked)
         self.assertFalse(checked(None))
-        self.state = TrayState(group=ENGLISH_GROUP, sound_enabled=True)
+        self.state = TrayState(group=ENGLISH_LAYOUT_GROUP, sound_enabled=True)
         self.assertTrue(checked(None))
 
     def test_the_labels_follow_a_layout_change_without_rebuilding(self) -> None:
         item = cast(FakeMenuItem, self.items()[0])
         self.assertIn("EN", item.label())
-        self.state = TrayState(group=RUSSIAN_GROUP)
+        self.state = TrayState(group=RUSSIAN_LAYOUT_GROUP)
         self.assertIn("RU", item.label())
 
     def test_choosing_a_line_runs_the_action_behind_it(self) -> None:
@@ -225,7 +223,6 @@ if __name__ == "__main__":
 class ControllerTests(unittest.TestCase):
     """The controller between the state and whatever draws it."""
 
-    EXPECTED_DRAW_COUNT = 4  # opening state + set_layout + set_sound_enabled + set_indicator_style
 
     def setUp(self) -> None:
         from keyswitch.tray_model import TrayController
@@ -252,13 +249,13 @@ class ControllerTests(unittest.TestCase):
         self.controller = TrayController(self.actions, cast(object, Adapter()))  # type: ignore[arg-type]
 
     def test_every_change_is_drawn_once(self) -> None:
-        self.controller.set_layout(RUSSIAN_GROUP)
+        self.controller.set_layout(RUSSIAN_LAYOUT_GROUP)
         self.controller.set_sound_enabled(True)
         self.controller.set_indicator_style("flags")
-        self.assertEqual(self.controller.state.group, RUSSIAN_GROUP)
+        self.assertEqual(self.controller.state.group, RUSSIAN_LAYOUT_GROUP)
         self.assertTrue(self.controller.state.sound_enabled)
         self.assertEqual(self.controller.state.indicator_style, "flags")
-        self.assertEqual(len(self.drawn), self.EXPECTED_DRAW_COUNT)  # The first is the opening state.
+        self.assertEqual(len(self.drawn), TRAY_CONTROLLER_EXPECTED_DRAW_COUNT)  # The first is the opening state.
 
     def test_the_remaining_switches_are_published_too(self) -> None:
         self.controller.set_enabled(False)
@@ -274,7 +271,7 @@ class ControllerTests(unittest.TestCase):
         """A closed item has no window left to draw into."""
 
         self.controller.close()
-        self.controller.set_layout(RUSSIAN_GROUP)
+        self.controller.set_layout(RUSSIAN_LAYOUT_GROUP)
         self.controller.notify("KeySwitch", "исправлено")
         self.assertEqual(len(self.drawn), 1)
         self.assertEqual(self.notified, [])

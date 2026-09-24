@@ -14,22 +14,16 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from context_evidence import canonical, key
-from model_protocol import PROFILES
+from keyswitch.constants.model_protocol import PROFILES
 from context_frames import Frame
 from keyswitch.context_model import ACTIONS, ContextModel
 import train_context_v2 as trainer
 import verify_context_v2 as verifier
 import verify_context_v2_history as history
-
-SHA256_HEX_LENGTH = 64
-# context_model.py is pinned by the context-v1 seal (PENDING_RESEAL), so its "3"
-# for the context-action feature scheme is not yet a constant we can import.
-CONTEXT_FEATURE_VERSION_V3 = 3
-# An arbitrary bias large enough to make the fixture model a well-formed,
-# deterministic classifier; its exact magnitude is not asserted anywhere.
-FIXTURE_BIAS_SCORE = 20.0
-# The numeric report's frozen row count in this fixture.
-FIXTURE_ROW_COUNT = 2
+from fixture_values.counts import CONTEXT_V2_HISTORY_REPORT_ROWS
+from fixture_values.scores import DOMINANT_BIAS_WEIGHT
+from keyswitch.constants.file_formats import SHA256_HEX_CHARACTERS
+from keyswitch.constants.models import CONTEXT_ACTION_FEATURE_VERSION
 
 
 class HistoricalContextV2Tests(unittest.TestCase):
@@ -55,20 +49,20 @@ class HistoricalContextV2Tests(unittest.TestCase):
         targets += [root / history.ARCHIVE / Path(name).name for name in history.SOURCES]
         checksum = history.checksum
         for target in targets:
-            with self.subTest(path=target.name), patch.object(history, "checksum", side_effect=lambda path: "0" * SHA256_HEX_LENGTH if path == target else checksum(path)):
+            with self.subTest(path=target.name), patch.object(history, "checksum", side_effect=lambda path: "0" * SHA256_HEX_CHARACTERS if path == target else checksum(path)):
                 with self.assertRaisesRegex(ValueError, "historical"):
                     history.verify_anchors(root / "model/context_v2")
         with tempfile.TemporaryDirectory(prefix="keyswitch-historical-pin-") as temporary:
             root = Path(temporary)
             (root / "source.py").write_text("fixed numeric source")
             with self.assertRaisesRegex(ValueError, "source changed"):
-                history.verify_sources({"source.py": "0" * SHA256_HEX_LENGTH}, root)
+                history.verify_sources({"source.py": "0" * SHA256_HEX_CHARACTERS}, root)
         with patch("verify_context_v2_history.json.loads", return_value=[]):
             with self.assertRaisesRegex(ValueError, "historical evidence object"):
                 history.verify_anchors(history.ROOT / "model/context_v2")
 
     def test_provenance_paths_and_archived_digest_cannot_be_relabeled(self) -> None:
-        digest = "a" * SHA256_HEX_LENGTH
+        digest = "a" * SHA256_HEX_CHARACTERS
         invalid: tuple[object, ...] = ({}, [], {1: digest}, {"tools/file.py": "invalid"}, {"/outside.py": digest},
                      {"../outside.py": digest}, {"C:\\outside.py": digest},
                      {"tools/a.py": digest, "tools\\a.py": digest})
@@ -105,8 +99,8 @@ class HistoricalContextV2Tests(unittest.TestCase):
                         "unknown", "space", action, split + action, "authored")
                   for split in ("test", "lexical_test") for action in ("keep", "convert")]
         cache = {key(row, profile): (False, False, False, 0.0) for row in frames for profile in PROFILES}
-        model = ContextModel({"bias": (FIXTURE_BIAS_SCORE, 0.0, 0.0, 0.0), "app:telegram": (0.0,) * len(ACTIONS)}, "context-v1-fixture")
-        seal = {"schema_version": 1, "model_version": model.version, "artifact_sha256": "f" * SHA256_HEX_LENGTH}
+        model = ContextModel({"bias": (DOMINANT_BIAS_WEIGHT, 0.0, 0.0, 0.0), "app:telegram": (0.0,) * len(ACTIONS)}, "context-v1-fixture")
+        seal = {"schema_version": 1, "model_version": model.version, "artifact_sha256": "f" * SHA256_HEX_CHARACTERS}
         historical = {"historical_evidence_verified": True, "current_runtime_verified": False, "promotion_passed": False}
         with tempfile.TemporaryDirectory(prefix="keyswitch-historical-numeric-") as temporary:
             directory = Path(temporary)
@@ -129,11 +123,11 @@ class HistoricalContextV2Tests(unittest.TestCase):
                 with patch.object(verifier, "all_frames", return_value=[replace(frames[0], original="changed"), *frames[1:]]):
                     with self.assertRaises((ValueError, KeyError)):
                         verifier.verify_frozen(directory)
-                with patch.object(verifier, "metrics", return_value={"counts": {"rows": FIXTURE_ROW_COUNT, "desired_conversions": 1,
+                with patch.object(verifier, "metrics", return_value={"counts": {"rows": CONTEXT_V2_HISTORY_REPORT_ROWS, "desired_conversions": 1,
                         "converted_correctly": 0, "false_conversions": 1, "baseline_false_conversions": 1}, "categories": {}}):
                     with self.assertRaisesRegex(ValueError, "numeric report changed"):
                         verifier.verify_frozen(directory)
-                with patch.object(ContextModel, "load", return_value=ContextModel({}, "context-v3-fixture", feature_version=CONTEXT_FEATURE_VERSION_V3)):
+                with patch.object(ContextModel, "load", return_value=ContextModel({}, "context-v3-fixture", feature_version=CONTEXT_ACTION_FEATURE_VERSION)):
                     with self.assertRaisesRegex(ValueError, "feature-2"):
                         verifier.verify_frozen(directory)
 
@@ -165,7 +159,7 @@ class HistoricalContextV2Tests(unittest.TestCase):
             cache.assert_not_called()
 
     def test_fast_history_gate_cannot_treat_feature_three_as_the_rejected_model(self) -> None:
-        with patch.object(ContextModel, "load", return_value=ContextModel({}, "context-v3-fixture", feature_version=CONTEXT_FEATURE_VERSION_V3)):
+        with patch.object(ContextModel, "load", return_value=ContextModel({}, "context-v3-fixture", feature_version=CONTEXT_ACTION_FEATURE_VERSION)):
             with self.assertRaisesRegex(ValueError, "candidate identity"):
                 verifier.verify()
 

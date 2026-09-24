@@ -14,17 +14,16 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from freeze_context_action_corpus import CorpusRow, canonical, checksum, digest, load_split
-from model_protocol import ALL_SPLITS
+from keyswitch.constants.model_protocol import ALL_SPLITS
 from merge_context_action_corpora import merge_corpora
+from fixture_values.counts import (
+    DUPLICATED_ROW_IDS_FACTOR,
+    MERGED_TEST_MEMBERSHIP_ROW_COUNT,
+    MERGE_FORGED_TRAIN_ROW_COUNT,
+)
 
 
 class ContextActionMergeTests(unittest.TestCase):
-    # base and extra each contribute one row to the merged test membership.
-    MERGED_ROW_COUNT = 2
-    # Repeats row_ids_sha256 to fabricate a duplicate membership entry.
-    DOUBLED_ROW_IDS_FACTOR = 2
-    # Wrong row count (the fixture actually streams one row) to trigger detection.
-    FORGED_TRAIN_ROW_COUNT = 2
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -97,7 +96,7 @@ class ContextActionMergeTests(unittest.TestCase):
             rows = load_split(output, split)
             self.assertEqual([row.identifier for row in rows], ["base:" + split, "extra:" + split])
         membership = self.object(output / "test-membership.json")
-        self.assertEqual(len(membership["row_ids_sha256"]), self.MERGED_ROW_COUNT)  # type: ignore[arg-type]
+        self.assertEqual(len(membership["row_ids_sha256"]), MERGED_TEST_MEMBERSHIP_ROW_COUNT)  # type: ignore[arg-type]
         self.assertNotIn("reconciliation", manifest)
 
     def test_corrupt_compressed_source_is_rejected_before_output_exists(self) -> None:
@@ -152,7 +151,7 @@ class ContextActionMergeTests(unittest.TestCase):
     def test_duplicate_membership_is_not_silently_deduplicated(self) -> None:
         path = self.base / "test-membership.json"
         data = json.loads(path.read_bytes())
-        data["row_ids_sha256"] *= self.DOUBLED_ROW_IDS_FACTOR
+        data["row_ids_sha256"] *= DUPLICATED_ROW_IDS_FACTOR
         path.write_bytes(canonical(data))
         self.repin(self.base, path.name, "test_membership_sha256")
         with self.assertRaisesRegex(ValueError, "duplicate membership"):
@@ -188,7 +187,7 @@ class ContextActionMergeTests(unittest.TestCase):
     def test_source_row_count_and_final_newline_are_checked_without_json_parsing(self) -> None:
         manifest_path = self.base / "manifest.json"
         manifest = json.loads(manifest_path.read_bytes())
-        manifest["splits"]["train"]["rows"] = self.FORGED_TRAIN_ROW_COUNT
+        manifest["splits"]["train"]["rows"] = MERGE_FORGED_TRAIN_ROW_COUNT
         manifest_path.write_bytes(canonical(manifest))
         with self.assertRaisesRegex(ValueError, "streamed row count"):
             merge_corpora(self.base, self.extra, self.root / "merged")

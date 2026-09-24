@@ -13,12 +13,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from keyswitch.language_model import LanguageModel
 from keyswitch.lexicon_supplement import SUPPLEMENT_ROOT, supplement_words
+from fixture_values.counts import (
+    LEXICON_SUPPLEMENT_MINIMUM_SELECTION_COUNT,
+    TINY_RESOURCE_LIMIT_BYTES,
+)
+from fixture_values.hashes import PINNED_SOURCE_SHA256_PREFIX_CHARACTERS
+from fixture_values.models import UNSUPPORTED_LEXICON_SUPPLEMENT_SCHEMA_VERSION
 
 RESOURCE = SUPPLEMENT_ROOT / "lexicon-supplement-ru_RU.json"
-PINNED_SOURCE_SHA256_PREFIX_HEX_CHARS = 16
-MINIMUM_SELECTION_COUNT = 10
-INVALID_SCHEMA_VERSION = 2
-TINY_MAX_SUPPLEMENT_BYTES = 16
 
 
 class LexiconSupplementTests(unittest.TestCase):
@@ -27,9 +29,9 @@ class LexiconSupplementTests(unittest.TestCase):
         self.assertEqual((payload["schema_version"], payload["locale"], payload["name"]), (1, "ru_RU", "opensubtitles-2018-ru-full-min10-outside-onboard-v3"))
         self.assertEqual(
             payload["source"]["sha256"],
-            "32dfd94138aea266" + payload["source"]["sha256"][PINNED_SOURCE_SHA256_PREFIX_HEX_CHARS:],
+            "32dfd94138aea266" + payload["source"]["sha256"][PINNED_SOURCE_SHA256_PREFIX_CHARACTERS:],
         )
-        self.assertEqual(payload["selection"]["minimum_count"], MINIMUM_SELECTION_COUNT)
+        self.assertEqual(payload["selection"]["minimum_count"], LEXICON_SUPPLEMENT_MINIMUM_SELECTION_COUNT)
         self.assertEqual(payload["base_lexicon"]["sha256"], hashlib.sha256((Path(__file__).resolve().parents[1] / "model/intent_v1/sources/ru_RU.lm").read_bytes()).hexdigest())
         words = supplement_words("ru_RU")
         self.assertEqual(len(words), payload["selection"]["selected"])
@@ -63,7 +65,7 @@ class LexiconSupplementTests(unittest.TestCase):
 
     def test_malformed_supplements_are_rejected_not_ignored(self) -> None:
         valid = {"schema_version": 1, "locale": "ru_RU", "words": ["абв", "где"]}
-        for broken in ({**valid, "schema_version": INVALID_SCHEMA_VERSION}, {**valid, "locale": "en_US"}, {**valid, "words": ["где", "абв"]},
+        for broken in ({**valid, "schema_version": UNSUPPORTED_LEXICON_SUPPLEMENT_SCHEMA_VERSION}, {**valid, "locale": "en_US"}, {**valid, "words": ["где", "абв"]},
                        {**valid, "words": ["абв", "абв"]}, {**valid, "words": ["abc"]}, {**valid, "words": ["ы"]},  # a letter, not one of the eight words
                        {**valid, "words": ["аб1"]}, {**valid, "words": []}):
             with self.subTest(broken=broken):
@@ -73,7 +75,7 @@ class LexiconSupplementTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         supplement_words("ru_RU")
         supplement_words.cache_clear()
-        with patch("keyswitch.lexicon_supplement.MAX_SUPPLEMENT_BYTES", TINY_MAX_SUPPLEMENT_BYTES), self.assertRaises(ValueError):
+        with patch("keyswitch.lexicon_supplement.LEXICON_SUPPLEMENT_MAX_BYTES", TINY_RESOURCE_LIMIT_BYTES), self.assertRaises(ValueError):
             supplement_words("ru_RU")
         supplement_words.cache_clear()
         with patch.object(Path, "is_file", return_value=False):

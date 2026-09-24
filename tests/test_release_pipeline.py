@@ -18,24 +18,24 @@ if TOOLS_PATH not in sys.path:
 
 import release_pipeline as pipeline  # noqa: E402
 from test_intent_strict_report import _declared_strict_gates  # noqa: E402
-
-SHA256_HEX_CHARACTERS = 64
-SAMPLE_REPLAYS = 2
-SAMPLE_JOBS = 2
-SAMPLE_MEMORY_RESERVE_MIB = 1024
-SAMPLE_INT_VALUE = 3
-SAMPLE_OPTIONAL_NUMBER_INPUT = 2
-SAMPLE_OPTIONAL_NUMBER_EXPECTED = 2.0
-KSLM_SCHEMA_VERSION = 4
-TYPECHECK_DURATION_SECONDS = 12.5
-TYPECHECK_PEAK_RSS_MIB = 300
-COVERAGE_DURATION_SECONDS = 3661
-COVERAGE_PEAK_RSS_MIB = 400
-COVERAGE_TEST_COUNT = 346
-SECONDS_JUST_UNDER_A_MINUTE = 59
-SECONDS_JUST_OVER_A_MINUTE = 61
-ONE_HOUR_SECONDS = 3600
-SECOND_JSON_VALUE = 2
+from fixture_values.clock import SECONDS_JUST_OVER_A_MINUTE, SECONDS_JUST_UNDER_A_MINUTE
+from fixture_values.release import (
+    EXPECTED_KSLM_SCHEMA_VERSION,
+    PIPELINE_COVERAGE_DURATION_SECONDS,
+    PIPELINE_COVERAGE_PEAK_RSS_MIB,
+    PIPELINE_COVERAGE_TEST_COUNT,
+    PIPELINE_SAMPLE_INT_VALUE,
+    PIPELINE_SAMPLE_JOBS,
+    PIPELINE_SAMPLE_MEMORY_RESERVE_MIB,
+    PIPELINE_SAMPLE_OPTIONAL_NUMBER_EXPECTED,
+    PIPELINE_SAMPLE_OPTIONAL_NUMBER_INPUT,
+    PIPELINE_SAMPLE_REPLAYS,
+    PIPELINE_SECOND_JSON_VALUE,
+    PIPELINE_TYPECHECK_DURATION_SECONDS,
+    PIPELINE_TYPECHECK_PEAK_RSS_MIB,
+)
+from keyswitch.constants.file_formats import SHA256_HEX_CHARACTERS
+from keyswitch.constants.units import SECONDS_PER_HOUR
 
 
 def _options(**overrides: object) -> pipeline.Options:
@@ -44,13 +44,13 @@ def _options(**overrides: object) -> pipeline.Options:
         "only": (),
         "skip": (),
         "start_from": "",
-        "replays": SAMPLE_REPLAYS,
+        "replays": PIPELINE_SAMPLE_REPLAYS,
         "replay_dir": None,
         "replay_strict": False,
         "strict_report": None,
         "workers": 0,
-        "jobs": SAMPLE_JOBS,
-        "memory_reserve_mib": SAMPLE_MEMORY_RESERVE_MIB,
+        "jobs": PIPELINE_SAMPLE_JOBS,
+        "memory_reserve_mib": PIPELINE_SAMPLE_MEMORY_RESERVE_MIB,
         "timeout_scale": 1.0,
         "fail_fast": False,
         "pipeline_root": Path("/nonexistent"),
@@ -272,8 +272,8 @@ class ReportingTests(unittest.TestCase):
                 "run_dir": "/tmp/run",
                 "started_at": "2026-09-02T00:00:00Z",
                 "finished_at": "2026-09-02T00:01:00Z",
-                "jobs": SAMPLE_JOBS,
-                "memory_reserve_mib": SAMPLE_MEMORY_RESERVE_MIB,
+                "jobs": PIPELINE_SAMPLE_JOBS,
+                "memory_reserve_mib": PIPELINE_SAMPLE_MEMORY_RESERVE_MIB,
                 "git": {"branch": "main", "head": "abc", "dirty_files": 0},
                 "not_covered_on_this_host": ["Windows job"],
             },
@@ -281,8 +281,8 @@ class ReportingTests(unittest.TestCase):
                 {
                     "name": "typecheck",
                     "status": "failed",
-                    "duration_seconds": TYPECHECK_DURATION_SECONDS,
-                    "observed_peak_rss_mib": TYPECHECK_PEAK_RSS_MIB,
+                    "duration_seconds": PIPELINE_TYPECHECK_DURATION_SECONDS,
+                    "observed_peak_rss_mib": PIPELINE_TYPECHECK_PEAK_RSS_MIB,
                     "error": "mypy | failed",
                     "log": "/tmp/run/phases/01-typecheck.log",
                     "log_tail": ["error: boom"],
@@ -292,12 +292,12 @@ class ReportingTests(unittest.TestCase):
                 {
                     "name": "coverage",
                     "status": "passed",
-                    "duration_seconds": COVERAGE_DURATION_SECONDS,
-                    "observed_peak_rss_mib": COVERAGE_PEAK_RSS_MIB,
+                    "duration_seconds": PIPELINE_COVERAGE_DURATION_SECONDS,
+                    "observed_peak_rss_mib": PIPELINE_COVERAGE_PEAK_RSS_MIB,
                     "error": None,
                     "log": None,
                     "log_tail": [],
-                    "facts": {"tests": COVERAGE_TEST_COUNT},
+                    "facts": {"tests": PIPELINE_COVERAGE_TEST_COUNT},
                     "notes": [],
                 },
             ],
@@ -316,7 +316,7 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(pipeline.format_duration(None), "-")
         self.assertEqual(pipeline.format_duration(SECONDS_JUST_UNDER_A_MINUTE), "59s")
         self.assertEqual(pipeline.format_duration(SECONDS_JUST_OVER_A_MINUTE), "1m01s")
-        self.assertEqual(pipeline.format_duration(ONE_HOUR_SECONDS), "1h00m00s")
+        self.assertEqual(pipeline.format_duration(SECONDS_PER_HOUR), "1h00m00s")
 
 
 class JsonHelperTests(unittest.TestCase):
@@ -329,7 +329,7 @@ class JsonHelperTests(unittest.TestCase):
             pipeline.lookup(document, "a", "b", "c", "e")
 
     def test_scalar_coercions_reject_wrong_types(self) -> None:
-        self.assertEqual(pipeline.as_int(SAMPLE_INT_VALUE, "n"), SAMPLE_INT_VALUE)
+        self.assertEqual(pipeline.as_int(PIPELINE_SAMPLE_INT_VALUE, "n"), PIPELINE_SAMPLE_INT_VALUE)
         with self.assertRaises(pipeline.PhaseFailure):
             pipeline.as_int(True, "n")
         with self.assertRaises(pipeline.PhaseFailure):
@@ -337,7 +337,7 @@ class JsonHelperTests(unittest.TestCase):
         with self.assertRaises(pipeline.PhaseFailure):
             pipeline.as_str(None, "text")
         self.assertIsNone(pipeline.optional_number(True))
-        self.assertEqual(pipeline.optional_number(SAMPLE_OPTIONAL_NUMBER_INPUT), SAMPLE_OPTIONAL_NUMBER_EXPECTED)
+        self.assertEqual(pipeline.optional_number(PIPELINE_SAMPLE_OPTIONAL_NUMBER_INPUT), PIPELINE_SAMPLE_OPTIONAL_NUMBER_EXPECTED)
 
     def test_load_json_object_enforces_bounds_and_shape(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -355,8 +355,8 @@ class JsonHelperTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"
             pipeline.write_json_atomic(path, {"value": 1})
-            pipeline.write_json_atomic(path, {"value": SECOND_JSON_VALUE})
-            self.assertEqual(json.loads(path.read_text("utf-8")), {"value": SECOND_JSON_VALUE})
+            pipeline.write_json_atomic(path, {"value": PIPELINE_SECOND_JSON_VALUE})
+            self.assertEqual(json.loads(path.read_text("utf-8")), {"value": PIPELINE_SECOND_JSON_VALUE})
             self.assertFalse((Path(directory) / "state.json.tmp").exists())
 
 
@@ -364,7 +364,7 @@ class ModelArtifactTests(unittest.TestCase):
     def test_bundled_kslm_matches_manifest_identity(self) -> None:
         bounds = pipeline.kslm_bounds(pipeline.MODEL_ARTIFACT)
         manifest = pipeline.load_json_object(pipeline.MODEL_MANIFEST, "manifest")
-        self.assertEqual(bounds["schema"], KSLM_SCHEMA_VERSION)
+        self.assertEqual(bounds["schema"], EXPECTED_KSLM_SCHEMA_VERSION)
         self.assertEqual(bounds["embedded_model_version"], manifest["artifact_model_version"])
         self.assertEqual(bounds["bytes"], pipeline.MODEL_ARTIFACT.stat().st_size)
 

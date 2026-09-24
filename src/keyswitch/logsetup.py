@@ -18,6 +18,8 @@ from pathlib import Path
 from . import __version__
 from .config import SettingsStore
 from .history import data_dir
+from .constants.log_files import DEFAULT_LOG_ROTATION, TECHNICAL_LOG_ROTATION
+from .constants.units import BYTES_PER_MEBIBYTE
 
 
 LOGGER = logging.getLogger(__name__)
@@ -26,12 +28,6 @@ LOG_FILE_NAME = "keyswitch.log"
 # not be read as if it came from the version that is installed now.
 LOG_FORMAT = "%(asctime)s %(version)s %(levelname)s %(name)s: %(message)s"
 TECHNICAL_LOGGING_PATH = "diagnostics.technical_logging"
-# Rotation budgets: (bytes per file, backup files), excluding the active file.
-# The diagnostics mode keeps
-# more and larger files because a busy hour of typing fills megabytes.
-BYTES_PER_MEBIBYTE = 1024 * 1024
-DEFAULT_ROTATION = (BYTES_PER_MEBIBYTE, 2)
-TECHNICAL_ROTATION = (5 * BYTES_PER_MEBIBYTE, 5)
 
 
 def log_formatter() -> logging.Formatter:
@@ -51,7 +47,7 @@ def log_path() -> Path:
 
 
 def rotation_limits(technical: bool) -> tuple[int, int]:
-    return TECHNICAL_ROTATION if technical else DEFAULT_ROTATION
+    return TECHNICAL_LOG_ROTATION if technical else DEFAULT_LOG_ROTATION
 
 
 def rotation_summary(technical: bool) -> str:
@@ -92,7 +88,7 @@ def log_status() -> dict[str, object]:
         "installed": handler is not None,
         "level": logging.getLevelName(logging.getLogger().getEffectiveLevel()),
         "size": size,
-        "technical": handler is not None and handler.maxBytes == TECHNICAL_ROTATION[0],
+        "technical": handler is not None and handler.maxBytes == TECHNICAL_LOG_ROTATION[0],
     }
 
 
@@ -116,7 +112,7 @@ def apply_rotation(handler: RotatingFileHandler, *, technical: bool) -> bool:
     maximum, backups = rotation_limits(technical)
     handler.acquire()
     try:
-        was_technical = handler.maxBytes == TECHNICAL_ROTATION[0]
+        was_technical = handler.maxBytes == TECHNICAL_LOG_ROTATION[0]
         handler.maxBytes = maximum
         handler.backupCount = backups
         if was_technical or not technical:

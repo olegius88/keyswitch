@@ -11,14 +11,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__
-from .config import JSON_INDENT_SPACES, Config, Source
+from .config import Config, Source
+from .constants.files import (
+    ARCHIVE_LIMIT,
+    CHUNK_BYTES,
+    FINGERPRINT_WINDOW_BYTES,
+    HEADER_BYTES,
+    JSON_INDENT_SPACES,
+)
+from .constants.limits import DEFAULT_MAX_CHUNKS_PER_SCAN
 from .store import Store
-from .versions import HEADER_BYTES, latest_version, observe_version, take_fragment
-
-CHUNK_BYTES = 2 * 1024 * 1024
-ARCHIVE_LIMIT = 10 * 1024 * 1024
-FINGERPRINT_WINDOW_BYTES = 128
-DEFAULT_MAX_CHUNKS_PER_SCAN = 16
+from .versions import latest_version, observe_version, take_fragment
 
 
 def fingerprint(stream, offset: int) -> str:

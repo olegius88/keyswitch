@@ -26,74 +26,71 @@ from keyswitch.language_model import LanguageModel
 from keyswitch.context_model import ContextPrediction
 from keyswitch.early_switch import PrefixIndex
 from keyswitch.prefix_model import PrefixInput, PrefixModel
-from keyswitch.prefix_schema import VERSION_HASH_CHARACTERS, VersionedPrefixModel
+from keyswitch.prefix_schema import VersionedPrefixModel
+from keyswitch.constants.file_formats import SHA256_HEX_CHARACTERS, VERSION_HASH_CHARACTERS
 import evaluate_context_action_sequences as evaluator
-from freeze_context_action_corpus import AFTER_WINDOW_CHARACTERS, BEFORE_WINDOW_CHARACTERS, CorpusRow, canonical, checksum, digest
-from model_protocol import PROFILES
+from freeze_context_action_corpus import CorpusRow, canonical, checksum, digest
+from keyswitch.constants.corpus import (
+    CORPUS_AFTER_WINDOW_CHARACTERS,
+    CORPUS_BEFORE_WINDOW_CHARACTERS,
+)
+from keyswitch.constants.model_protocol import PROFILES
+from fixture_values.corpora import (
+    SEQUENCE_LEXICON_HIGH_FREQUENCY,
+    SEQUENCE_LEXICON_LOW_FREQUENCY,
+    SEQUENCE_LEXICON_MID_FREQUENCY,
+)
+from fixture_values.counts import (
+    BELOW_MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP,
+    DOCUMENT_SELECTION_FIXTURE_ROWS,
+    DOCUMENT_SELECTION_ROWS_PER_DOCUMENT,
+    HI_THERE_COMPLETED_WORD_COUNT,
+    HI_THERE_KEY_COUNT,
+    RESTORATION_GATE_BASELINE_EXACTLY_RESTORED,
+    RESTORATION_GATE_FURTHER_REDUCED_EXACTLY_RESTORED,
+    RESTORATION_GATE_REDUCED_EXACTLY_RESTORED,
+    SEAL_FIXTURE_CALIBRATION_CONVERTED_CORRECTLY,
+    SEAL_FIXTURE_CALIBRATION_CONVERT_ROWS,
+    SEAL_FIXTURE_CALIBRATION_ROWS,
+    SEAL_FIXTURE_MISMATCHED_CALIBRATION_ROWS,
+    SEAL_FIXTURE_PROFILE_CONVERTED_CORRECTLY,
+    SEAL_FIXTURE_PROFILE_CONVERT_ROWS,
+    SEAL_FIXTURE_PROFILE_ROWS,
+    SEQUENCE_INVALID_INTERVENTION_EVENT,
+    SEQUENCE_LOAD_SPLIT_CALL_COUNT,
+    SEQUENCE_SELECTED_ROWS_TOTAL,
+    SEQUENCE_TRIMMED_LEFT_CHARACTERS,
+    SEQUENCE_TRIMMED_RIGHT_CHARACTERS,
+    SEQUENCE_TRIM_LEFT_PADDING_WORD_REPEATS,
+    SEQUENCE_TRIM_RIGHT_PADDING_LETTER_REPEATS,
+)
+from fixture_values.models import UNSUPPORTED_PREFIX_SCHEMA_VERSION
+from fixture_values.scores import (
+    ALTERED_ARTIFACT_WEIGHT,
+    ALTERED_BASELINE_PREFIX_WEIGHT,
+    AUTHORED_ARTIFACT_CONVERSION_THRESHOLD,
+    AUTHORED_BASELINE_PREFIX_WEIGHT,
+    AUTHORED_PREFIX_CONVERSION_THRESHOLD,
+    AUTHORED_PREFIX_WEIGHT,
+    AUTHORED_SEQUENCE_BIAS_WEIGHT,
+    AUTHORED_SEQUENCE_DIRECTION_WEIGHT,
+    MISMATCHED_ARTIFACT_CONVERSION_THRESHOLD,
+    MISMATCHED_PREFIX_CONVERSION_THRESHOLD,
+    SEAL_FIXTURE_CONVERSION_RECALL,
+)
+from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
+from keyswitch.constants.models import CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_MODEL_FEATURE_VERSION
+from keyswitch.constants.settings_defaults import DEFAULT_EARLY_SWITCH_MIN_LENGTH
+from keyswitch.constants.training import CONTEXT_ACTION_GATE_POLICY, SEQUENCE_DOCUMENT_CAP_PER_GROUP
 
-SHA256_HEX_LENGTH = 64
-# Transparent fixture weights (see authored_model's own comment): large enough
-# to force a specific, executable decision, not tuned for model quality.
-BIAS_WEIGHT = 20.0
-DIRECTION_CONVERSION_WEIGHT = 40.0
-AUTHORED_CONTEXT_FEATURE_VERSION = 3
-BASELINE_FEATURE_VERSION = 2
-DEFAULT_PREFIX_WEIGHT = 10.0
-DEFAULT_PREFIX_THRESHOLD = 0.999
-BASELINE_PREFIX_WEIGHT = 5.0
-CHANGED_WEIGHT = 2.0
-CHANGED_BASELINE_PREFIX_WEIGHT = 7.0
 
-HIGH_WORD_FREQUENCY = 5000
-MID_WORD_FREQUENCY = 4000
-LOW_WORD_FREQUENCY = 3000
-
-INVALID_INTERVENTION_EVENT = 999
-# "early switch from four letters", per evaluator.PROTOCOL["settings_modes"]["default"].
-MINIMUM_EARLY_SWITCH_LENGTH = 4
-
-ROWS_PER_DOCUMENT_GROUP = 3
-DOCUMENT_SELECTION_FIXTURE_ROWS = 420
-
-BASELINE_EXACTLY_RESTORED = 4
-REDUCED_EXACTLY_RESTORED = 3
-FURTHER_REDUCED_EXACTLY_RESTORED = 2
-
-MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP = cast(int, evaluator.GATE_POLICY["minimum_sequence_documents_per_group"])
-BELOW_MINIMUM_DOCUMENTS_PER_GROUP = MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP - 1
+MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP = cast(int, CONTEXT_ACTION_GATE_POLICY["minimum_sequence_documents_per_group"])
 SUFFICIENT_DOCUMENTS_PER_GROUP: dict[str, int] = {
     "0": MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP, "1": MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP,
 }
 # The two-profile corpus below builds exactly the minimum required rows per group.
 FIXTURE_ROWS_PER_GROUP = MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP
-GROUP_COUNT = 2
-SUPPORTED_ROWS_FOR_REPLAY = FIXTURE_ROWS_PER_GROUP * GROUP_COUNT
-SELECTED_ROWS_TOTAL = SUPPORTED_ROWS_FOR_REPLAY + 1
-
-# "hi there": eight physical keys, two completed words (see the test's own comment).
-SEQUENCE_KEY_COUNT = 8
-COMPLETED_WORD_COUNT = 2
-
-TRIMMED_LEFT_CHARACTERS = 8
-TRIMMED_RIGHT_CHARACTERS = 63
-LEFT_PADDING_WORD_REPEATS = 43
-RIGHT_PADDING_LETTER_REPEATS = 62
-
-DEFAULT_ARTIFACT_CONVERSION_THRESHOLD = 0.99
-MISMATCHED_CONVERSION_THRESHOLD = 0.98
-MISMATCHED_PREFIX_THRESHOLD = 0.995
-INVALID_PREFIX_SCHEMA_VERSION = 2
-
-PROFILE_ROWS = 20
-PROFILE_CONVERT_ROWS = 10
-PROFILE_CONVERTED_CORRECTLY = 9
-CONVERSION_RECALL = 0.9
-CALIBRATION_ROWS = 40
-CALIBRATION_CONVERT_ROWS = 20
-CALIBRATION_CONVERTED_CORRECTLY = 18
-MISMATCHED_CALIBRATION_ROWS = 41
-
-LOAD_SPLIT_CALL_COUNT = 2
+SUPPORTED_ROWS_FOR_REPLAY = FIXTURE_ROWS_PER_GROUP * LAYOUT_GROUP_COUNT
 
 
 def row(original: str = "hello", group: int | None = 0, before: str = "", after: str = " ",
@@ -108,14 +105,14 @@ def authored_model(convert_russian: bool = False) -> ContextModel:
     weights = {f"{label}:char:{group}:1:{character}": (0.0, 0.0, 0.0, 0.0)
                for label in ("source", "target") for group in (0, 1)
                for character in "abcdefghijklmnopqrstuvwxyzабвгдеёжзийклмнопрстуфхцчшщъыьэюя"}
-    weights["bias"] = (BIAS_WEIGHT, 0.0, 0.0, 0.0)
+    weights["bias"] = (AUTHORED_SEQUENCE_BIAS_WEIGHT, 0.0, 0.0, 0.0)
     if convert_russian:
-        weights["direction:1"] = (-DIRECTION_CONVERSION_WEIGHT, DIRECTION_CONVERSION_WEIGHT, 0.0, 0.0)
-    return ContextModel(weights, "context-v3-authored", feature_version=AUTHORED_CONTEXT_FEATURE_VERSION)
+        weights["direction:1"] = (-AUTHORED_SEQUENCE_DIRECTION_WEIGHT, AUTHORED_SEQUENCE_DIRECTION_WEIGHT, 0.0, 0.0)
+    return ContextModel(weights, "context-v3-authored", feature_version=CONTEXT_ACTION_FEATURE_VERSION)
 
 
-def write_prefix_artifact(path: Path, *, weight: float = DEFAULT_PREFIX_WEIGHT,
-                          threshold: float = DEFAULT_PREFIX_THRESHOLD, feature_version: int = 1) -> PrefixModel:
+def write_prefix_artifact(path: Path, *, weight: float = AUTHORED_PREFIX_WEIGHT,
+                          threshold: float = AUTHORED_PREFIX_CONVERSION_THRESHOLD, feature_version: int = 1) -> PrefixModel:
     weights = {"bias": [weight, 0.0, 0.0, 0.0]}
     fingerprint = hashlib.sha256(json.dumps(weights, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
     path.write_bytes(canonical({"kind": "keyswitch.prefix-policy", "feature_version": feature_version,
@@ -135,14 +132,14 @@ def write_prefix_seal(path: Path, artifact: Path, provenance: dict[str, str], *,
     return value
 
 
-def authored_prefix(weight: float = DEFAULT_PREFIX_WEIGHT) -> PrefixModel:
+def authored_prefix(weight: float = AUTHORED_PREFIX_WEIGHT) -> PrefixModel:
     return VersionedPrefixModel(ContextModel({"bias": (weight, 0.0, 0.0, 0.0)}, "prefix-v1-authored0000"), feature_version=1)
 
 
 class PhysicalSequenceTests(unittest.TestCase):
     def test_replay_pins_packaged_intent_and_restores_discovery_scope(self) -> None:
         intent = cast(LinearNgramModel, Mock(spec=LinearNgramModel,
-                      model_version="authored-intent", checksum="f" * SHA256_HEX_LENGTH))
+                      model_version="authored-intent", checksum="f" * SHA256_HEX_CHARACTERS))
         observed: list[tuple[LinearNgramModel | None, IntentModelStatus]] = []
         environments: list[str | None] = []
 
@@ -191,7 +188,7 @@ class PhysicalSequenceTests(unittest.TestCase):
                 self.assertEqual(LinearNgramModel.try_load_default(), outside)
                 self.assertEqual(first, second)
                 self.assertEqual(first["actual"], "a")
-                expected = (intent, IntentModelStatus(True, packaged, "authored-intent", "f" * SHA256_HEX_LENGTH, None))
+                expected = (intent, IntentModelStatus(True, packaged, "authored-intent", "f" * SHA256_HEX_CHARACTERS, None))
                 self.assertEqual(observed, [expected, expected])
                 self.assertEqual(environments, ["external-one.ksm", "external-two.ksm"])
                 load.assert_called_once_with(packaged)
@@ -235,13 +232,13 @@ class PhysicalSequenceTests(unittest.TestCase):
         self.assertEqual(len(plan.keys), len(plan.expected))
 
     def test_clipped_outer_fragments_are_trimmed_before_replay(self) -> None:
-        source = row(before="fragment " + "a " * LEFT_PADDING_WORD_REPEATS + "x",
-                     after=" z" + "a" * RIGHT_PADDING_LETTER_REPEATS)
-        self.assertEqual(len(source.before), BEFORE_WINDOW_CHARACTERS)
-        self.assertEqual(len(source.after), AFTER_WINDOW_CHARACTERS)
+        source = row(before="fragment " + "a " * SEQUENCE_TRIM_LEFT_PADDING_WORD_REPEATS + "x",
+                     after=" z" + "a" * SEQUENCE_TRIM_RIGHT_PADDING_LETTER_REPEATS)
+        self.assertEqual(len(source.before), CORPUS_BEFORE_WINDOW_CHARACTERS)
+        self.assertEqual(len(source.after), CORPUS_AFTER_WINDOW_CHARACTERS)
         plan = evaluator.sequence_plan(source, False)
-        self.assertEqual((plan.trimmed_left, plan.trimmed_right), (TRIMMED_LEFT_CHARACTERS, TRIMMED_RIGHT_CHARACTERS))
-        self.assertEqual(plan.expected, source.before[TRIMMED_LEFT_CHARACTERS:] + "hello ")
+        self.assertEqual((plan.trimmed_left, plan.trimmed_right), (SEQUENCE_TRIMMED_LEFT_CHARACTERS, SEQUENCE_TRIMMED_RIGHT_CHARACTERS))
+        self.assertEqual(plan.expected, source.before[SEQUENCE_TRIMMED_LEFT_CHARACTERS:] + "hello ")
         unbounded = evaluator.sequence_plan(row(before="fragment ", after=" tail"), False)
         self.assertEqual((unbounded.trimmed_left, unbounded.trimmed_right), (0, 0))
 
@@ -285,8 +282,8 @@ class PhysicalSequenceTests(unittest.TestCase):
 
     def test_live_editor_observes_effective_wrong_intervention_after_prefix(self) -> None:
         models = {
-            0: LanguageModel("en_US", {"hello": HIGH_WORD_FREQUENCY, "dist": MID_WORD_FREQUENCY}, "authored", enable_spellcheck=False),
-            1: LanguageModel("ru_RU", {"эхо": HIGH_WORD_FREQUENCY}, "authored", enable_spellcheck=False),
+            0: LanguageModel("en_US", {"hello": SEQUENCE_LEXICON_HIGH_FREQUENCY, "dist": SEQUENCE_LEXICON_MID_FREQUENCY}, "authored", enable_spellcheck=False),
+            1: LanguageModel("ru_RU", {"эхо": SEQUENCE_LEXICON_HIGH_FREQUENCY}, "authored", enable_spellcheck=False),
         }
         for original, group in (("№hello", 0), ('"hello', 0), ("Э", 1), ('"Эхо', 1), (".dist", 0), ("don't", 0)):
             with self.subTest(original=original):
@@ -302,14 +299,14 @@ class PhysicalSequenceTests(unittest.TestCase):
         changed = replace(plan, keys=(replace(plan.keys[0], explicit_group=0), *plan.keys[1:]))
         result = evaluator.replay(changed, authored_model(), models)
         self.assertIn("did not change", str(result["error"]))
-        for invalid in (replace(plan, intervention_event=None), replace(plan, intervention_event=INVALID_INTERVENTION_EVENT)):
+        for invalid in (replace(plan, intervention_event=None), replace(plan, intervention_event=SEQUENCE_INVALID_INTERVENTION_EVENT)):
             with self.assertRaisesRegex(ValueError, "intervention"):
                 evaluator.replay(invalid, authored_model(), models)
 
     def test_default_mode_reaches_the_injected_prefix_model_and_early_off_does_not(self) -> None:
         models = {
-            0: LanguageModel("en_US", {"hello": HIGH_WORD_FREQUENCY, "world": MID_WORD_FREQUENCY}, "authored", enable_spellcheck=False),
-            1: LanguageModel("ru_RU", {"привет": HIGH_WORD_FREQUENCY, "мир": MID_WORD_FREQUENCY}, "authored", enable_spellcheck=False),
+            0: LanguageModel("en_US", {"hello": SEQUENCE_LEXICON_HIGH_FREQUENCY, "world": SEQUENCE_LEXICON_MID_FREQUENCY}, "authored", enable_spellcheck=False),
+            1: LanguageModel("ru_RU", {"привет": SEQUENCE_LEXICON_HIGH_FREQUENCY, "мир": SEQUENCE_LEXICON_MID_FREQUENCY}, "authored", enable_spellcheck=False),
         }
         calls: list[int] = []
 
@@ -319,7 +316,7 @@ class PhysicalSequenceTests(unittest.TestCase):
                 calls.append(len(item.original))
                 return super().predict(item, indexes, language_models)
 
-        prefix = Recording(ContextModel({"bias": (DEFAULT_PREFIX_WEIGHT, 0.0, 0.0, 0.0)}, "prefix-v1-authored0000"), feature_version=1)
+        prefix = Recording(ContextModel({"bias": (AUTHORED_PREFIX_WEIGHT, 0.0, 0.0, 0.0)}, "prefix-v1-authored0000"), feature_version=1)
         plan = evaluator.sequence_plan(row("привет", 1, before="", after=" мир "), True)
         with patch.object(ContextModel, "load", side_effect=AssertionError("installed context must not be read")), \
                 patch.object(PrefixModel, "load", side_effect=AssertionError("installed prefix must not be read")):
@@ -329,7 +326,7 @@ class PhysicalSequenceTests(unittest.TestCase):
         self.assertIsNone(early["error"])
         self.assertIsNone(default["error"])
         self.assertTrue(calls)
-        self.assertGreaterEqual(min(calls), MINIMUM_EARLY_SWITCH_LENGTH)
+        self.assertGreaterEqual(min(calls), DEFAULT_EARLY_SWITCH_MIN_LENGTH)
         self.assertEqual(default["mode"], "default")
 
     def test_default_mode_requires_one_key_per_expected_character(self) -> None:
@@ -350,18 +347,18 @@ class PhysicalSequenceTests(unittest.TestCase):
             evaluator.replay(plan, ContextModel({}, "fixture"), {})
 
     def test_document_selection_is_stable_and_one_focus_per_document_group(self) -> None:
-        rows = [row(identifier=f"focus:{index}", document=f"document:{index // ROWS_PER_DOCUMENT_GROUP}")
+        rows = [row(identifier=f"focus:{index}", document=f"document:{index // DOCUMENT_SELECTION_ROWS_PER_DOCUMENT}")
                 for index in range(DOCUMENT_SELECTION_FIXTURE_ROWS)]
         chosen = evaluator.select_rows(rows)
         reversed_chosen = evaluator.select_rows(list(reversed(rows)))
         self.assertEqual(chosen, reversed_chosen)
-        self.assertEqual(len(chosen), evaluator.DOCUMENT_CAP)
-        self.assertEqual(len({item.document for item in chosen}), evaluator.DOCUMENT_CAP)
+        self.assertEqual(len(chosen), SEQUENCE_DOCUMENT_CAP_PER_GROUP)
+        self.assertEqual(len({item.document for item in chosen}), SEQUENCE_DOCUMENT_CAP_PER_GROUP)
 
     def test_live_engine_preserves_correct_mixed_text_and_repeated_spaces(self) -> None:
         models = {
-            0: LanguageModel("en_US", {"hello": HIGH_WORD_FREQUENCY, "world": MID_WORD_FREQUENCY, "api": LOW_WORD_FREQUENCY}, "authored", enable_spellcheck=False),
-            1: LanguageModel("ru_RU", {"привет": HIGH_WORD_FREQUENCY, "мир": MID_WORD_FREQUENCY}, "authored", enable_spellcheck=False),
+            0: LanguageModel("en_US", {"hello": SEQUENCE_LEXICON_HIGH_FREQUENCY, "world": SEQUENCE_LEXICON_MID_FREQUENCY, "api": SEQUENCE_LEXICON_LOW_FREQUENCY}, "authored", enable_spellcheck=False),
+            1: LanguageModel("ru_RU", {"привет": SEQUENCE_LEXICON_HIGH_FREQUENCY, "мир": SEQUENCE_LEXICON_MID_FREQUENCY}, "authored", enable_spellcheck=False),
         }
         keep = authored_model()
         plan = evaluator.sequence_plan(row("hello", before="Привет!  ", after=",  API  мир! "), False)
@@ -377,8 +374,8 @@ class PhysicalSequenceTests(unittest.TestCase):
         # Authored direction weights force one correction through real engine
         # replacement; subsequent keys must use its new layout.
         models = {
-            0: LanguageModel("en_US", {"hello": HIGH_WORD_FREQUENCY, "world": MID_WORD_FREQUENCY}, "authored", enable_spellcheck=False),
-            1: LanguageModel("ru_RU", {"привет": HIGH_WORD_FREQUENCY, "мир": MID_WORD_FREQUENCY}, "authored", enable_spellcheck=False),
+            0: LanguageModel("en_US", {"hello": SEQUENCE_LEXICON_HIGH_FREQUENCY, "world": SEQUENCE_LEXICON_MID_FREQUENCY}, "authored", enable_spellcheck=False),
+            1: LanguageModel("ru_RU", {"привет": SEQUENCE_LEXICON_HIGH_FREQUENCY, "мир": SEQUENCE_LEXICON_MID_FREQUENCY}, "authored", enable_spellcheck=False),
         }
         candidate = authored_model(convert_russian=True)
         plan = evaluator.sequence_plan(row("hello", after=" world "), True)
@@ -393,7 +390,7 @@ class PhysicalSequenceTests(unittest.TestCase):
 
     def test_gates_require_zero_damage_sufficient_documents_and_baseline_recall(self) -> None:
         counts = Counter({"correct_text_corruptions": 0, "length_mismatches": 0,
-                          "exactly_restored": BASELINE_EXACTLY_RESTORED,
+                          "exactly_restored": RESTORATION_GATE_BASELINE_EXACTLY_RESTORED,
                           "execution_errors": 0, "correction_layout_mismatches": 0})
         self.assertTrue(all(evaluator.profile_gates(counts, counts, SUFFICIENT_DOCUMENTS_PER_GROUP).values()))
         for key in ("correct_text_corruptions", "length_mismatches", "execution_errors", "correction_layout_mismatches"):
@@ -402,17 +399,17 @@ class PhysicalSequenceTests(unittest.TestCase):
                 changed[key] = 1
                 self.assertFalse(all(evaluator.profile_gates(changed, counts, SUFFICIENT_DOCUMENTS_PER_GROUP).values()))
         changed = counts.copy()
-        changed["exactly_restored"] = REDUCED_EXACTLY_RESTORED
+        changed["exactly_restored"] = RESTORATION_GATE_REDUCED_EXACTLY_RESTORED
         self.assertFalse(all(evaluator.profile_gates(changed, counts, SUFFICIENT_DOCUMENTS_PER_GROUP).values()))
         self.assertFalse(all(evaluator.profile_gates(
-            counts, counts, {"0": BELOW_MINIMUM_DOCUMENTS_PER_GROUP, "1": MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP}
+            counts, counts, {"0": BELOW_MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP, "1": MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP}
         ).values()))
         # The bar is the baseline's net outcome: restorations bought with
         # corruptions of correct text do not count against the candidate.
         damaged_baseline = counts.copy()
         damaged_baseline["correct_text_corruptions"] = 1
         self.assertTrue(all(evaluator.profile_gates(changed, damaged_baseline, SUFFICIENT_DOCUMENTS_PER_GROUP).values()))
-        changed["exactly_restored"] = FURTHER_REDUCED_EXACTLY_RESTORED
+        changed["exactly_restored"] = RESTORATION_GATE_FURTHER_REDUCED_EXACTLY_RESTORED
         self.assertFalse(all(evaluator.profile_gates(changed, damaged_baseline, SUFFICIENT_DOCUMENTS_PER_GROUP).values()))
         gates = evaluator.profile_gates(counts, counts, SUFFICIENT_DOCUMENTS_PER_GROUP)
         self.assertIn("net_restorations_at_least_baseline", gates)
@@ -456,7 +453,7 @@ class PhysicalSequenceTests(unittest.TestCase):
             active_spelling[0] = spelling
             return {}
 
-        prefix_candidate, prefix_baseline = authored_prefix(), authored_prefix(BASELINE_PREFIX_WEIGHT)
+        prefix_candidate, prefix_baseline = authored_prefix(), authored_prefix(AUTHORED_BASELINE_PREFIX_WEIGHT)
         seen: list[tuple[str, PrefixModel | None, bool]] = []
 
         def replay(plan: evaluator.SequencePlan, model: ContextModel, language_models: dict[int, LanguageModel], *,
@@ -483,7 +480,7 @@ class PhysicalSequenceTests(unittest.TestCase):
         self.assertNotIn("ablation", control)
         self.assertIs(report["promotion_passed"], False)
         selection = cast(dict[str, object], report["selection"])
-        self.assertEqual(selection["selected_rows"], SELECTED_ROWS_TOTAL)
+        self.assertEqual(selection["selected_rows"], SEQUENCE_SELECTED_ROWS_TOTAL)
         self.assertEqual(selection["unsupported"], [{"identifier": "unsupported", "codepoints": ("U+00EF",)}])
         self.assertEqual(
             replayed.call_count,
@@ -521,7 +518,7 @@ class PhysicalSequenceTests(unittest.TestCase):
         self.assertIs(report["promotion_passed"], False)
 
     def test_replay_injects_explicit_prefix_and_both_modes_run_engine_timers(self) -> None:
-        intent = cast(LinearNgramModel, Mock(spec=LinearNgramModel, model_version="authored-intent", checksum="f" * SHA256_HEX_LENGTH))
+        intent = cast(LinearNgramModel, Mock(spec=LinearNgramModel, model_version="authored-intent", checksum="f" * SHA256_HEX_CHARACTERS))
         observed: list[tuple[PrefixModel | None, bool, bool]] = []
         timers: list[int] = []
 
@@ -570,7 +567,7 @@ class PhysicalSequenceTests(unittest.TestCase):
         # per word. Both modes run them, so the control mode differs from the default one only in
         # its settings: without the callbacks a document that ends without a boundary key would
         # never reach the completed-word decision, and the control would measure the early switch.
-        self.assertEqual(timers, [SEQUENCE_KEY_COUNT + COMPLETED_WORD_COUNT, SEQUENCE_KEY_COUNT + COMPLETED_WORD_COUNT])
+        self.assertEqual(timers, [HI_THERE_KEY_COUNT + HI_THERE_COMPLETED_WORD_COUNT, HI_THERE_KEY_COUNT + HI_THERE_COMPLETED_WORD_COUNT])
 
 
 class SealedAccessTests(unittest.TestCase):
@@ -583,16 +580,16 @@ class SealedAccessTests(unittest.TestCase):
         self.artifact = self.root / "context-action.json"
         self.seal = self.root / "candidate-seal.json"
         self.output = self.root / "report.json"
-        self.recipe = {"schema_version": 1, "feature_version": AUTHORED_CONTEXT_FEATURE_VERSION,
-                       "gate_policy": evaluator.GATE_POLICY, "profiles": list(PROFILES)}
+        self.recipe = {"schema_version": 1, "feature_version": CONTEXT_ACTION_FEATURE_VERSION,
+                       "gate_policy": CONTEXT_ACTION_GATE_POLICY, "profiles": list(PROFILES)}
         (self.root / "recipe.json").write_bytes(canonical(self.recipe))
         (self.root / "runtime.py").write_text("# authored runtime identity\n")
         self.write_artifact(self.artifact)
-        self.write_artifact(self.root / "baseline.json", feature_version=BASELINE_FEATURE_VERSION)
+        self.write_artifact(self.root / "baseline.json", feature_version=CONTEXT_MODEL_FEATURE_VERSION)
         self.prefix = self.root / "prefix-candidate.json"
         self.prefix_seal = self.root / "prefix-seal.json"
         write_prefix_artifact(self.prefix)
-        write_prefix_artifact(self.root / "baseline-prefix.json", weight=BASELINE_PREFIX_WEIGHT)
+        write_prefix_artifact(self.root / "baseline-prefix.json", weight=AUTHORED_BASELINE_PREFIX_WEIGHT)
         self.membership = {key: [digest(key)] for key in ("row_ids_sha256", "family_ids_sha256", "document_ids_sha256")}
         (self.corpus / "test-membership.json").write_bytes(canonical(self.membership))
         self.manifest: dict[str, object] = {"test_membership_sha256": checksum(self.corpus / "test-membership.json"),
@@ -619,29 +616,29 @@ class SealedAccessTests(unittest.TestCase):
             self.prefix_seal.write_bytes(canonical(value))
         return value
 
-    def write_artifact(self, path: Path, feature_version: int = AUTHORED_CONTEXT_FEATURE_VERSION, weight: float = 1.0) -> None:
+    def write_artifact(self, path: Path, feature_version: int = CONTEXT_ACTION_FEATURE_VERSION, weight: float = 1.0) -> None:
         weights = {"bias": [weight, 0.0, 0.0, 0.0]}
         fingerprint = hashlib.sha256(json.dumps(weights, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         path.write_bytes(canonical({"actions": ["keep", "convert", "wait", "suggest"], "feature_version": feature_version,
                                    "weights": weights, "weights_sha256": fingerprint,
-                                   "version": ("context-v3-" if feature_version == AUTHORED_CONTEXT_FEATURE_VERSION else "context-v1-")
+                                   "version": ("context-v3-" if feature_version == CONTEXT_ACTION_FEATURE_VERSION else "context-v1-")
                                    + fingerprint[:VERSION_HASH_CHARACTERS],
-                                   "conversion_threshold": DEFAULT_ARTIFACT_CONVERSION_THRESHOLD}))
+                                   "conversion_threshold": AUTHORED_ARTIFACT_CONVERSION_THRESHOLD}))
 
     def write_seal(self) -> dict[str, object]:
-        profile = {"rows": PROFILE_ROWS, "convert_rows": PROFILE_CONVERT_ROWS,
-                   "converted_correctly": PROFILE_CONVERTED_CORRECTLY, "false_conversions": 0,
-                   "conversion_recall": CONVERSION_RECALL}
+        profile = {"rows": SEAL_FIXTURE_PROFILE_ROWS, "convert_rows": SEAL_FIXTURE_PROFILE_CONVERT_ROWS,
+                   "converted_correctly": SEAL_FIXTURE_PROFILE_CONVERTED_CORRECTLY, "false_conversions": 0,
+                   "conversion_recall": SEAL_FIXTURE_CONVERSION_RECALL}
         value: dict[str, object] = {
             "schema_version": 1, "stage": "sealed-before-test", "test_accessed": False,
             "artifact_sha256": checksum(self.artifact), "model_version": ContextModel.load(self.artifact).version,
-            "conversion_threshold": DEFAULT_ARTIFACT_CONVERSION_THRESHOLD,
+            "conversion_threshold": AUTHORED_ARTIFACT_CONVERSION_THRESHOLD,
             "corpus_manifest_sha256": checksum(self.corpus / "manifest.json"),
             "provenance": {name: checksum(self.root / name) for name in ("runtime.py", "recipe.json")},
-            "recipe": self.recipe, "gate_policy": evaluator.GATE_POLICY,
-            "calibration": {"rows": CALIBRATION_ROWS, "convert_rows": CALIBRATION_CONVERT_ROWS,
-                            "converted_correctly": CALIBRATION_CONVERTED_CORRECTLY, "false_conversions": 0,
-                            "conversion_recall": CONVERSION_RECALL, "by_profile": {name: profile.copy() for name in PROFILES}},
+            "recipe": self.recipe, "gate_policy": CONTEXT_ACTION_GATE_POLICY,
+            "calibration": {"rows": SEAL_FIXTURE_CALIBRATION_ROWS, "convert_rows": SEAL_FIXTURE_CALIBRATION_CONVERT_ROWS,
+                            "converted_correctly": SEAL_FIXTURE_CALIBRATION_CONVERTED_CORRECTLY, "false_conversions": 0,
+                            "conversion_recall": SEAL_FIXTURE_CONVERSION_RECALL, "by_profile": {name: profile.copy() for name in PROFILES}},
         }
         self.seal.write_bytes(canonical(value))
         return value
@@ -666,12 +663,12 @@ class SealedAccessTests(unittest.TestCase):
 
     def test_prefix_seal_tampering_never_reads_test(self) -> None:
         faults: dict[str, dict[str, object]] = {
-            "sha": {"candidate_sha256": "0" * SHA256_HEX_LENGTH}, "promotion": {"promotion_accepted": True},
+            "sha": {"candidate_sha256": "0" * SHA256_HEX_CHARACTERS}, "promotion": {"promotion_accepted": True},
             "tested": {"independent_test_evaluated": True},
-            "provenance": {"provenance": {"runtime.py": "0" * SHA256_HEX_LENGTH}},
+            "provenance": {"provenance": {"runtime.py": "0" * SHA256_HEX_CHARACTERS}},
             "version": {"model_version": "prefix-v1-000000000000"},
-            "threshold": {"threshold": MISMATCHED_PREFIX_THRESHOLD},
-            "schema": {"schema_version": INVALID_PREFIX_SCHEMA_VERSION}, "recipe": {"recipe": None},
+            "threshold": {"threshold": MISMATCHED_PREFIX_CONVERSION_THRESHOLD},
+            "schema": {"schema_version": UNSUPPORTED_PREFIX_SCHEMA_VERSION}, "recipe": {"recipe": None},
         }
         for fault, overrides in faults.items():
             with self.subTest(fault=fault), patch.object(evaluator, "load_split") as loader:
@@ -691,7 +688,7 @@ class SealedAccessTests(unittest.TestCase):
         with patch.object(evaluator, "load_split", return_value=[row()]), \
                 patch.object(evaluator, "score_sequences", return_value={"promotion_passed": False}):
             self.evaluate()
-        write_prefix_artifact(self.prefix, weight=CHANGED_WEIGHT)
+        write_prefix_artifact(self.prefix, weight=ALTERED_ARTIFACT_WEIGHT)
         self.write_prefix_seal()
         with patch.object(evaluator, "load_split") as loader:
             with self.assertRaisesRegex(ValueError, "immutable"):
@@ -699,7 +696,7 @@ class SealedAccessTests(unittest.TestCase):
             loader.assert_not_called()
         write_prefix_artifact(self.prefix)
         self.write_prefix_seal()
-        write_prefix_artifact(self.root / "baseline-prefix.json", weight=CHANGED_BASELINE_PREFIX_WEIGHT)
+        write_prefix_artifact(self.root / "baseline-prefix.json", weight=ALTERED_BASELINE_PREFIX_WEIGHT)
         with patch.object(evaluator, "load_split") as loader:
             with self.assertRaisesRegex(ValueError, "immutable"):
                 self.evaluate()
@@ -707,10 +704,10 @@ class SealedAccessTests(unittest.TestCase):
 
     def test_valid_seal_checks_both_profiles_and_exact_policy_without_reading_test(self) -> None:
         self.assertEqual(evaluator.validate_candidate_seal(self.artifact, self.seal, self.corpus)["stage"], "sealed-before-test")
-        for field in evaluator.GATE_POLICY:
+        for field in CONTEXT_ACTION_GATE_POLICY:
             with self.subTest(field=field), patch.object(evaluator, "load_split") as loader:
                 value = self.write_seal()
-                policy = dict(evaluator.GATE_POLICY)
+                policy = dict(CONTEXT_ACTION_GATE_POLICY)
                 del policy[field]
                 value["gate_policy"] = policy
                 self.seal.write_bytes(canonical(value))
@@ -725,20 +722,20 @@ class SealedAccessTests(unittest.TestCase):
                 if fault == "stage":
                     value["stage"] = "rejected-before-test"
                 elif fault == "artifact":
-                    value["artifact_sha256"] = "0" * SHA256_HEX_LENGTH
+                    value["artifact_sha256"] = "0" * SHA256_HEX_CHARACTERS
                 elif fault == "provenance":
                     value["provenance"] = {"runtime.py": checksum(self.root / "runtime.py")}
                 elif fault in {"profile", "aggregate", "recall"}:
                     calibration = cast(dict[str, object], value["calibration"])
                     if fault == "aggregate":
-                        calibration["rows"] = MISMATCHED_CALIBRATION_ROWS
+                        calibration["rows"] = SEAL_FIXTURE_MISMATCHED_CALIBRATION_ROWS
                     elif fault == "recall":
                         calibration["conversion_recall"] = 1.0
                     else:
                         profiles = cast(dict[str, dict[str, object]], calibration["by_profile"])
                         profiles["portable"]["false_conversions"] = 1
                 elif fault == "threshold":
-                    value["conversion_threshold"] = MISMATCHED_CONVERSION_THRESHOLD
+                    value["conversion_threshold"] = MISMATCHED_ARTIFACT_CONVERSION_THRESHOLD
                 else:
                     value["model_version"] = "context-v3-incorrect"
                 self.seal.write_bytes(canonical(value))
@@ -753,7 +750,7 @@ class SealedAccessTests(unittest.TestCase):
             report = self.evaluate()
             self.assertFalse(report["promotion_passed"])
             self.assertEqual(self.evaluate(), report)
-            self.assertEqual(loader.call_count, LOAD_SPLIT_CALL_COUNT)
+            self.assertEqual(loader.call_count, SEQUENCE_LOAD_SPLIT_CALL_COUNT)
         outcomes = list((self.root / "ledger").glob("*.outcome.json"))
         self.assertEqual(len(outcomes), 1)
         original = outcomes[0].read_bytes()
@@ -767,7 +764,7 @@ class SealedAccessTests(unittest.TestCase):
         with patch.object(evaluator, "load_split", return_value=[row()]), \
                 patch.object(evaluator, "score_sequences", return_value={"promotion_passed": False}):
             self.evaluate()
-        self.write_artifact(self.artifact, weight=CHANGED_WEIGHT)
+        self.write_artifact(self.artifact, weight=ALTERED_ARTIFACT_WEIGHT)
         self.write_seal()
         with patch.object(evaluator, "load_split") as loader:
             with self.assertRaisesRegex(ValueError, "immutable"):
@@ -781,7 +778,7 @@ class SealedAccessTests(unittest.TestCase):
         self.manifest["generator_sha256"] = "diagnostic-b"
         self.manifest["namespace"] = "attempt-to-relabel-test"
         (self.corpus / "manifest.json").write_bytes(canonical(self.manifest))
-        self.write_artifact(self.artifact, weight=CHANGED_WEIGHT)
+        self.write_artifact(self.artifact, weight=ALTERED_ARTIFACT_WEIGHT)
         self.write_seal()
         with patch.object(evaluator, "load_split") as loader:
             with self.assertRaisesRegex(ValueError, "immutable"):

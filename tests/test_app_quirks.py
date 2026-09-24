@@ -4,39 +4,38 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 from keyswitch.app_quirks import MENTION_HEADS, TELEGRAM_QUOTE_MENTION, mention_head
-from keyswitch.backend import KeyEvent, SHIFT_MASK
-from keyswitch.config import DEFAULTS, SettingsStore
-from keyswitch.context_access import MILLISECONDS_PER_SECOND
+from keyswitch.backend import KeyEvent
+from keyswitch.constants.keyboard import SHIFT_MASK
+from keyswitch.config import SettingsStore
+from keyswitch.constants.settings_defaults import DEFAULT_SETTINGS
+from keyswitch.constants.units import MILLISECONDS_PER_SECOND
 from keyswitch.engine import KeySwitchEngine
 from keyswitch.history import HistoryStore
 from keyswitch.windows_ui_model import ALL_SETTING_SPECS
 from context_physical_keys import KEYS
 from test_input_integrity import EditorBackend
+from fixture_values.clock import (
+    APP_QUIRKS_IDLE_PAUSE_SECONDS,
+    APP_QUIRKS_SHORT_IDLE_SECONDS,
+    FAKE_CLOCK_START_SECONDS,
+    SIMULATED_KEY_HOLD_SECONDS,
+    SIMULATED_KEY_RELEASE_GAP_SECONDS,
+)
+from fixture_values.keys import NAMED_KEY_PLACEHOLDER_KEYCODE, PAUSE_KEYCODE
 
 # Shift+2 on the digit row: "@" in the English layout, the quote in the Russian one.
 QUOTE_KEY = next(key for key in KEYS if key.characters == ("@", '"'))
 SPACE_KEY = next(key for key in KEYS if key.characters == (" ", " "))
 SLASH_KEY = next(key for key in KEYS if key.characters == ("/", "."))
 BY_LATIN = {key.characters[0]: key for key in KEYS if len(key.characters[0]) == 1}
-
-# Arbitrary, non-zero starting point for the fake monotonic clock.
-INITIAL_CLOCK_SECONDS = 1000.0
-# How long a simulated key stays down, and the gap before the next event.
-KEY_PRESS_HOLD_SECONDS = 0.05
-KEY_RELEASE_GAP_SECONDS = 0.03
-# Placeholder physical keycode for synthetic named-key events (Pause, etc).
-NAMED_KEY_KEYCODE = 200
-# Physical keycode used when the test specifically plays the Pause key.
-PAUSE_KEYCODE = 127
-# Default and short idle gaps fed to idle(), comfortably either side of the
-# real pause-correction delay (DEFAULT_PAUSE_DELAY_SECONDS = 1.5).
-IDLE_PAUSE_SECONDS = 2.0
-SHORT_IDLE_SECONDS = 0.5
+BY_RUSSIAN = {key.characters[1]: key for key in KEYS if len(key.characters[1]) == 1}
 
 
 class MentionHeadTableTests(unittest.TestCase):
@@ -54,7 +53,7 @@ class MentionHeadTableTests(unittest.TestCase):
         self.assertIsNone(mention_head("Telegram", '"', "@", lambda _path: False))
 
     def test_every_convention_is_a_setting_the_user_can_see_and_turn_off(self) -> None:
-        applications = DEFAULTS["applications"]
+        applications = DEFAULT_SETTINGS["applications"]
         assert isinstance(applications, dict)
         paths = {spec.path for spec in ALL_SETTING_SPECS}
         for head in MENTION_HEADS:
@@ -67,11 +66,13 @@ class MentionHeadTableTests(unittest.TestCase):
 
 
 class TelegramQuoteMentionTests(unittest.TestCase):
-    """The word after the quote decides what the quote was.
+    """The quote is shown as `@` at once; what follows it decides what it was.
 
-    Both readings are typed with the same keys: `"` + j,o,h,n is `"ощрт` in the
-    Russian layout and `@john` in the English one, while `"` + g,h,b,d,t,n is
-    the ordinary Russian `"привет`. Nothing is rewritten while the word grows.
+    Telegram offers its member list only after a real `@`, and the list is how
+    a mention is made: the arrow keys, Enter or a click keep the `@`. Anything
+    typed after it writes the quote back, and the word then decides: `"` +
+    j,o,h,n is `"ощрт` in the Russian layout and `@john` in the English one,
+    while `"` + g,h,b,d,t,n is the ordinary Russian `"привет`.
     """
 
     def setUp(self) -> None:
@@ -85,7 +86,7 @@ class TelegramQuoteMentionTests(unittest.TestCase):
         self.backend = EditorBackend()
         self.backend.group = 1
         self.application = "Telegram"
-        self.clock = [INITIAL_CLOCK_SECONDS]
+        self.clock = [FAKE_CLOCK_START_SECONDS]
         with patch("keyswitch.engine.time.monotonic", side_effect=lambda: self.clock[0]), \
                 patch.object(self.backend, "active_application", side_effect=lambda: self.application):
             self.engine = KeySwitchEngine(self.settings, HistoryStore(root / "history.jsonl"), self.backend)
@@ -100,15 +101,15 @@ class TelegramQuoteMentionTests(unittest.TestCase):
             event = replace(event, key_name=key_name)
         with patch("keyswitch.engine.time.monotonic", side_effect=lambda: self.clock[0]), \
                 patch.object(self.backend, "active_application", side_effect=lambda: self.application):
-            self.clock[0] += KEY_PRESS_HOLD_SECONDS
+            self.clock[0] += SIMULATED_KEY_HOLD_SECONDS
             self.backend.type(event)
             self.engine._handle(event)
-            self.clock[0] += KEY_RELEASE_GAP_SECONDS
+            self.clock[0] += SIMULATED_KEY_RELEASE_GAP_SECONDS
             released = replace(event, pressed=False, timestamp=round(self.clock[0] * MILLISECONDS_PER_SECOND))
             self.backend.type(released)
             self.engine._handle(released)
 
-    def named(self, key_name: str, keycode: int = NAMED_KEY_KEYCODE) -> None:
+    def named(self, key_name: str, keycode: int = NAMED_KEY_PLACEHOLDER_KEYCODE) -> None:
         event = replace(
             KeyEvent(
                 True, keycode, "", "", ("", ""), self.backend.group, 0,
@@ -118,18 +119,59 @@ class TelegramQuoteMentionTests(unittest.TestCase):
         )
         with patch("keyswitch.engine.time.monotonic", side_effect=lambda: self.clock[0]), \
                 patch.object(self.backend, "active_application", side_effect=lambda: self.application):
-            self.clock[0] += KEY_PRESS_HOLD_SECONDS
+            self.clock[0] += SIMULATED_KEY_HOLD_SECONDS
             self.engine._handle(event)
-            self.clock[0] += KEY_RELEASE_GAP_SECONDS
+            self.clock[0] += SIMULATED_KEY_RELEASE_GAP_SECONDS
             self.engine._handle(
                 replace(event, pressed=False, timestamp=round(self.clock[0] * MILLISECONDS_PER_SECOND))
             )
+
+    @contextmanager
+    def patched(self) -> Iterator[None]:
+        with patch("keyswitch.engine.time.monotonic", side_effect=lambda: self.clock[0]), \
+                patch.object(self.backend, "active_application", side_effect=lambda: self.application):
+            yield
+
+    def down(self, key: object) -> KeyEvent:
+        """Press a key and keep it down: the next key may come before its release."""
+
+        characters = key.characters  # type: ignore[attr-defined]
+        observed = characters[self.backend.group]
+        self.clock[0] += SIMULATED_KEY_HOLD_SECONDS
+        event = KeyEvent(True, key.keycode, observed, observed, characters,  # type: ignore[attr-defined]
+                         self.backend.group, SHIFT_MASK if key.shift else 0,  # type: ignore[attr-defined]
+                         round(self.clock[0] * MILLISECONDS_PER_SECOND))
+        with self.patched():
+            self.backend.type(event)
+            self.engine._handle(event)
+        return event
+
+    def up(self, event: KeyEvent) -> None:
+        self.clock[0] += SIMULATED_KEY_RELEASE_GAP_SECONDS
+        released = replace(event, pressed=False, timestamp=round(self.clock[0] * MILLISECONDS_PER_SECOND))
+        with self.patched():
+            self.backend.type(released)
+            self.engine._handle(released)
+
+    def edit(self, key_name: str) -> None:
+        """A named key the editor acts on as well (BackSpace)."""
+
+        event = replace(
+            KeyEvent(True, NAMED_KEY_PLACEHOLDER_KEYCODE, "", "", ("", ""), self.backend.group, 0,
+                     round(self.clock[0] * MILLISECONDS_PER_SECOND)),
+            key_name=key_name,
+        )
+        self.backend.type(event)
+        self.named(key_name)
+
+    def events(self, name: str) -> list[str]:
+        return [line for line in self.logs.output if f'"event":"{name}"' in line]
 
     def word(self, latin: str) -> None:
         for character in latin:
             self.press(BY_LATIN[character])
 
-    def idle(self, seconds: float = IDLE_PAUSE_SECONDS) -> None:
+    def idle(self, seconds: float = APP_QUIRKS_IDLE_PAUSE_SECONDS) -> None:
         self.clock[0] += seconds
         with patch("keyswitch.engine.time.monotonic", side_effect=lambda: self.clock[0]), \
                 patch.object(self.backend, "active_application", side_effect=lambda: self.application):
@@ -137,8 +179,10 @@ class TelegramQuoteMentionTests(unittest.TestCase):
 
     def test_a_name_after_the_quote_turns_the_pair_into_a_mention(self) -> None:
         self.press(QUOTE_KEY)
-        self.assertEqual(self.backend.text, '"')
-        self.word("john")
+        self.assertEqual((self.backend.text, self.backend.group), ("@", 1))
+        self.word("j")
+        self.assertEqual(self.backend.text, '"о')
+        self.word("ohn")
         self.press(SPACE_KEY)
         self.assertEqual(self.backend.text, "@john ")
         self.assertEqual(self.backend.group, 0)
@@ -182,6 +226,28 @@ class TelegramQuoteMentionTests(unittest.TestCase):
         self.press(SPACE_KEY)
         self.assertEqual(self.backend.text, '" john ')
 
+    def test_a_quote_right_after_punctuation_closes_a_quotation(self) -> None:
+        """Text right before the quote, with no space, means it closes a quotation."""
+
+        for punctuation in (BY_RUSSIAN[","], SLASH_KEY, BY_RUSSIAN["!"]):
+            with self.subTest(punctuation=punctuation.characters[1]):
+                self.backend.text, self.backend.caret = "", 0
+                self.word("ghbdtn")
+                self.press(punctuation)
+                self.press(QUOTE_KEY)
+                self.assertEqual(self.backend.text, "привет" + punctuation.characters[1] + '"')
+                self.assertIsNone(self.engine._mention_shown)
+
+    def test_a_quote_after_a_space_or_a_new_line_opens_a_mention(self) -> None:
+        self.word("ghbdtn")
+        self.press(SPACE_KEY)
+        self.press(QUOTE_KEY)
+        self.assertEqual(self.backend.text, "привет @")
+        self.named("Pointer")
+        self.backend.text, self.backend.caret = "", 0
+        self.press(QUOTE_KEY)
+        self.assertEqual(self.backend.text, "@")
+
     def test_a_closing_quote_does_not_carry_over_to_the_next_word(self) -> None:
         self.word("ghbdtn")
         self.press(QUOTE_KEY)
@@ -200,17 +266,187 @@ class TelegramQuoteMentionTests(unittest.TestCase):
         self.press(SPACE_KEY)
         self.idle()
         self.assertEqual(self.backend.text, '" ')
-        self.backend.text = ""
+        self.backend.text, self.backend.caret = "", 0
         self.press(QUOTE_KEY)
         self.press(QUOTE_KEY)
         self.idle()
         self.assertEqual(self.backend.text, '""')
 
-    def test_pause_still_converts_a_lone_quote_on_command(self) -> None:
+    def test_pause_on_the_shown_at_gives_the_quote_back_for_good(self) -> None:
         self.press(QUOTE_KEY)
         self.named("Pause", keycode=PAUSE_KEYCODE)
-        self.idle(SHORT_IDLE_SECONDS)
+        self.idle(APP_QUIRKS_SHORT_IDLE_SECONDS)
+        self.assertEqual((self.backend.text, self.backend.group), ('"', 1))
+        self.word("john")
+        self.press(SPACE_KEY)
+        self.assertEqual(self.backend.text, '"john ')
+
+    def test_pause_still_converts_a_lone_quote_where_no_convention_applies(self) -> None:
+        self.application = "Code"
+        self.press(QUOTE_KEY)
+        self.named("Pause", keycode=PAUSE_KEYCODE)
+        self.idle(APP_QUIRKS_SHORT_IDLE_SECONDS)
         self.assertEqual(self.backend.text, "@")
+
+    def test_the_member_list_keys_keep_the_at(self) -> None:
+        """Every `@` in the collected Telegram logs was followed by arrows, Enter or a click."""
+
+        for keys in (("Down", "Return"), ("Pointer",), ("Escape",)):
+            with self.subTest(keys=keys):
+                self.backend.text, self.backend.caret = "", 0
+                self.press(QUOTE_KEY)
+                for key_name in keys:
+                    self.named(key_name)
+                self.assertEqual(self.backend.text, "@")
+                self.assertIsNone(self.engine._mention_shown)
+        self.assertEqual(self.backend.group, 1)
+
+    def test_the_next_key_writes_the_quote_back(self) -> None:
+        for latin, expected in (("g", '"п'), (" ", '" '), ("5", '"5'), ("-", '"-'), ("(", '"(')):
+            with self.subTest(key=latin):
+                self.backend.text, self.backend.caret = "", 0
+                self.engine._clear_word(reason="test")
+                self.press(QUOTE_KEY)
+                self.press(BY_LATIN[latin])
+                self.assertEqual(self.backend.text, expected)
+        self.assertEqual(self.backend.group, 1)
+
+    def test_a_key_pressed_before_the_quote_came_up_cancels_the_at(self) -> None:
+        quote = self.down(QUOTE_KEY)
+        letter = self.down(BY_LATIN["g"])
+        self.up(quote)
+        self.up(letter)
+        self.assertEqual(self.backend.text, '"п')
+
+    def test_letters_held_over_each_other_are_written_back_together(self) -> None:
+        self.press(QUOTE_KEY)
+        first = self.down(BY_LATIN["g"])
+        second = self.down(BY_LATIN["h"])
+        self.up(first)
+        self.assertEqual(self.backend.text, "@пр")
+        self.up(second)
+        self.assertEqual(self.backend.text, '"пр')
+
+    def held_word(self, latin: str, end: object = SPACE_KEY) -> None:
+        """All keys held over each other: the word ends while the "@" is still shown."""
+
+        self.press(QUOTE_KEY)
+        held = [self.down(BY_LATIN[character]) for character in latin]
+        held.append(self.down(end))
+        self.assertTrue(self.backend.text.startswith("@"), self.backend.text)
+        for event in held:
+            self.up(event)
+
+    def test_a_name_finished_before_the_write_back_still_becomes_a_mention(self) -> None:
+        self.held_word("john")
+        self.assertEqual(self.backend.text, "@john ")
+
+    def test_a_russian_word_finished_before_the_write_back_gets_the_quote_back(self) -> None:
+        self.held_word("ghbdtn")
+        self.assertEqual(self.backend.text, '"привет ')
+
+    def test_enter_right_after_a_held_word_writes_the_quote_back_first(self) -> None:
+        submitted: list[str] = []
+
+        def complete_action(deliver: bool) -> int:
+            submitted.append(self.backend.text)
+            return 0
+
+        self.backend.complete_action = complete_action  # type: ignore[method-assign]
+        self.press(QUOTE_KEY)
+        held = [self.down(BY_LATIN[character]) for character in "ghbdtn"]
+        enter = replace(
+            KeyEvent(True, NAMED_KEY_PLACEHOLDER_KEYCODE, "", "", ("", ""), self.backend.group, 0,
+                     round(self.clock[0] * MILLISECONDS_PER_SECOND), deferred=True),
+            key_name="Return",
+        )
+        with self.patched():
+            self.engine._handle(enter)
+        for event in (*held, replace(enter, pressed=False)):
+            self.up(event) if event.pressed else self.engine._handle(event)
+        self.assertEqual(submitted, ['"привет'])
+
+    def test_backspace_on_a_second_symbol_leaves_the_first(self) -> None:
+        self.press(QUOTE_KEY)
+        self.press(QUOTE_KEY)
+        self.edit("BackSpace")
+        self.assertEqual(self.backend.text, '"')
+        self.assertEqual(len(self.engine._symbol_strokes), 1)
+
+    def test_backspace_on_the_shown_at_erases_it(self) -> None:
+        self.press(QUOTE_KEY)
+        self.edit("BackSpace")
+        self.assertEqual(self.backend.text, "")
+        self.assertIsNone(self.engine._mention_shown)
+        self.word("john")
+        self.press(SPACE_KEY)
+        self.assertEqual(self.backend.text, "john ")
+
+    def test_backspace_before_the_write_back_keeps_the_letters_after_the_at(self) -> None:
+        self.press(QUOTE_KEY)
+        first = self.down(BY_LATIN["g"])
+        second = self.down(BY_LATIN["h"])
+        self.edit("BackSpace")
+        self.up(first)
+        self.up(second)
+        self.assertEqual(self.backend.text, '"п')
+
+    def test_backspace_on_the_only_letter_leaves_the_at_shown(self) -> None:
+        self.press(QUOTE_KEY)
+        letter = self.down(BY_LATIN["g"])
+        self.edit("BackSpace")
+        self.up(letter)
+        self.assertEqual(self.backend.text, "@")
+        self.assertIsNotNone(self.engine._mention_shown)
+
+    def test_a_layout_switched_after_the_at_keeps_it_for_the_name(self) -> None:
+        self.press(QUOTE_KEY)
+        self.backend.group = 0
+        self.word("john")
+        self.press(SPACE_KEY)
+        self.assertEqual(self.backend.text, "@john ")
+
+    def test_pause_after_a_letter_converts_the_whole_token(self) -> None:
+        self.press(QUOTE_KEY)
+        letter = self.down(BY_LATIN["j"])
+        self.named("Pause", keycode=PAUSE_KEYCODE)
+        self.up(letter)
+        self.idle(APP_QUIRKS_SHORT_IDLE_SECONDS)
+        self.assertEqual(self.backend.text, "@j")
+        self.assertIsNone(self.engine._mention_shown)
+
+    def test_nothing_is_shown_while_the_engine_is_off(self) -> None:
+        self.settings.set("enabled", False)
+        self.press(QUOTE_KEY)
+        self.assertEqual(self.backend.text, '"')
+
+    def kept_reason(self, latin: str, end: object) -> str:
+        with self.assertLogs("keyswitch.engine", level="INFO") as self.logs:
+            self.press(QUOTE_KEY)
+            self.word(latin)
+            self.press(end)
+        kept = self.events("mention_head_kept")
+        self.assertEqual(len(kept), 1, kept)
+        return kept[0]
+
+    def test_a_quote_kept_before_a_russian_word_is_logged(self) -> None:
+        self.assertIn('"reason":"word_kept"', self.kept_reason("ghbdtn", SPACE_KEY))
+
+    def test_a_closed_quotation_is_logged_as_converted_without_the_head(self) -> None:
+        self.assertIn('"reason":"converted_without_head"', self.kept_reason("john", QUOTE_KEY))
+        self.assertEqual(self.backend.text, '"john"')
+
+    def test_a_word_left_unanalysed_is_logged_with_its_quote(self) -> None:
+        self.settings.set("detection.correct_on_space", False)
+        self.assertIn('"reason":"word_not_analysed"', self.kept_reason("john", SPACE_KEY))
+
+    def test_a_kept_head_is_logged_at_a_pause_too(self) -> None:
+        with self.assertLogs("keyswitch.engine", level="INFO") as self.logs:
+            self.press(QUOTE_KEY)
+            self.word("ghbdtn")
+            self.idle()
+        self.assertEqual(self.backend.text, '"привет')
+        self.assertIn('"reason":"word_kept"', self.events("mention_head_kept")[0])
 
     def test_a_caret_move_before_the_quote_leaves_the_word_alone(self) -> None:
         self.word("ghbdtn")

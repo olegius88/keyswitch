@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping, Set
 from dataclasses import replace
 
-from .config import DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_MINIMUM_WORD_LENGTH
+from .constants.settings_defaults import DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_MINIMUM_WORD_LENGTH
 from .detector import DetectionDecision, LanguageDetector
 from .intent_model import CorrectionTrigger
 from .language_model import LanguageModel

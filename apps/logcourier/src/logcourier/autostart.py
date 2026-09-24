@@ -4,9 +4,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .constants.windows import WINDOWS_MAX_PATH_CHARACTERS
+
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 VALUE_NAME = "LogCourier"
-WINDOWS_MAX_PATH_CHARACTERS = 260
 
 
 def command() -> str:

@@ -9,9 +9,11 @@ import zipfile
 from pathlib import Path
 
 from logcourier.__main__ import main as cli
-from logcourier.catalog import DEFAULT_ENTRY_LIMIT, deliver, list_entries, verify_connection
+from logcourier.catalog import deliver, list_entries, verify_connection
 from logcourier.collector import Collector
-from logcourier.config import JSON_INDENT_SPACES, Source, data_directory, load_config, save_config
+from logcourier.config import Source, data_directory, load_config, save_config
+from logcourier.constants.files import JSON_INDENT_SPACES
+from logcourier.constants.limits import DEFAULT_ENTRY_LIMIT
 from logcourier.secrets import read_token
 from logcourier.store import Store
 from logcourier.telegram import Telegram

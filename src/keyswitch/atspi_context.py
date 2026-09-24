@@ -10,20 +10,12 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from .input_context import CONTEXT_LIMIT, FieldContext
-
-# AT-SPI IPC calls are given this many milliseconds before libatspi gives up.
-ATSPI_TIMEOUT_MS = 50
-# The whole read() call, across every IPC round trip, is bounded by this
-# wall-clock budget so a stuck accessibility bus cannot stall the engine.
-FIELD_READ_DEADLINE_SECONDS = 0.15
-# Bounded traversal width: at most this many children are enumerated at any
-# one level of the accessibility tree, whether under the desktop root or
-# under a node being searched for the focused field.
-MAX_TRAVERSED_CHILDREN = 64
-MAX_VISITED_NODES = 128
-# The "after" side of the caret is read with its own, smaller cap than the
-# "before" side's CONTEXT_LIMIT: it costs one extra IPC round trip per field.
-AFTER_CARET_MAX_CHARACTERS = 128
+from .constants.text import (
+    ATSPI_MAX_TRAVERSED_CHILDREN,
+    ATSPI_MAX_VISITED_NODES,
+    FIELD_AFTER_CARET_MAX_CHARACTERS,
+)
+from .constants.timing import ATSPI_CALL_TIMEOUT_MS, ATSPI_FIELD_READ_DEADLINE_SECONDS
 
 
 class _States(Protocol):
@@ -95,7 +87,7 @@ class AtspiFieldReader:
                 raise RuntimeError("AT-SPI initialization failed")
         self.api = api
         self.process_for_window = process_for_window
-        self.api.set_timeout(ATSPI_TIMEOUT_MS, ATSPI_TIMEOUT_MS)
+        self.api.set_timeout(ATSPI_CALL_TIMEOUT_MS, ATSPI_CALL_TIMEOUT_MS)
 
     def close(self) -> None:
         # No retained accessible objects or per-reader native resources.
@@ -111,18 +103,18 @@ class AtspiFieldReader:
         return application.casefold() in {name, process}
 
     def read(self, application: str, window: int) -> FieldContext | None:
-        deadline = time.monotonic() + FIELD_READ_DEADLINE_SECONDS
+        deadline = time.monotonic() + ATSPI_FIELD_READ_DEADLINE_SECONDS
         pid = self.process_for_window(window) if self.process_for_window is not None else 0
         desktop = self.api.get_desktop(0)
         stack: list[tuple[_Accessible, str]] = []
-        for index in range(min(desktop.get_child_count(), MAX_TRAVERSED_CHILDREN)):
+        for index in range(min(desktop.get_child_count(), ATSPI_MAX_TRAVERSED_CHILDREN)):
             if time.monotonic() >= deadline:
                 return None
             app = desktop.get_child_at_index(index)
             if app is not None and (app.get_process_id() == pid if pid else self._matches(application, app)):
                 stack.append((app, str(index)))
         visited = 0
-        while stack and time.monotonic() < deadline and visited < MAX_VISITED_NODES:
+        while stack and time.monotonic() < deadline and visited < ATSPI_MAX_VISITED_NODES:
             node, path = stack.pop()
             visited += 1
             # Role/focus can change in-place (e.g. reveal/hide password).
@@ -145,7 +137,7 @@ class AtspiFieldReader:
                 # interface explicitly, as exposed by Atspi.Text's typelib.
                 before = self.api.Text.get_text(text, max(0, caret - CONTEXT_LIMIT), caret)
                 after = self.api.Text.get_text(
-                    text, caret, min(text.get_character_count(), caret + AFTER_CARET_MAX_CHARACTERS)
+                    text, caret, min(text.get_character_count(), caret + FIELD_AFTER_CARET_MAX_CHARACTERS)
                 )
                 visible = (before + after).strip()
                 if visible and set(visible) <= {"•", "●", "*"}:
@@ -158,7 +150,7 @@ class AtspiFieldReader:
                 if not node.get_state_set().contains(self.api.StateType.FOCUSED) or text.get_caret_offset() != caret:
                     return FieldContext(application, field_id, source="atspi")
                 return FieldContext(application, field_id, before, after, "text", source="atspi").bounded()
-            for index in reversed(range(min(node.get_child_count(), MAX_TRAVERSED_CHILDREN))):
+            for index in reversed(range(min(node.get_child_count(), ATSPI_MAX_TRAVERSED_CHILDREN))):
                 if time.monotonic() >= deadline:
                     return None
                 child = node.get_child_at_index(index)

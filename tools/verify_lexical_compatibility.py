@@ -12,7 +12,14 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
-from model_protocol import ACTIVE_SPLITS
+from keyswitch.constants.model_protocol import ACTIVE_SPLITS
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from keyswitch.constants.file_formats import (
+    HASH_CHUNK_BYTES,
+    METADATA_JSON_LIMIT_BYTES,
+    REPORT_JSON_INDENT,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = "model/intent_v1/config.json"
@@ -37,15 +44,12 @@ ANCHORS = {
     },
 }
 TRAINERS = {"prefix_v1": "tools/train_prefix_model.py", "boundary_v2": "tools/train_boundary_v2.py"}
-CHECKSUM_CHUNK_BYTES = 1024 * 1024
-MAX_COMPATIBILITY_METADATA_BYTES = 1024 * 1024
-REPORT_JSON_INDENT = 2
 
 
 def checksum(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(CHECKSUM_CHUNK_BYTES), b""):
+        for chunk in iter(lambda: source.read(HASH_CHUNK_BYTES), b""):
             digest.update(chunk)
     return digest.hexdigest()
 
@@ -61,8 +65,8 @@ def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 def read_object(path: Path) -> dict[str, object]:
     with path.open("rb") as source:
-        raw = source.read(MAX_COMPATIBILITY_METADATA_BYTES + 1)
-    if len(raw) > MAX_COMPATIBILITY_METADATA_BYTES:
+        raw = source.read(METADATA_JSON_LIMIT_BYTES + 1)
+    if len(raw) > METADATA_JSON_LIMIT_BYTES:
         raise ValueError("oversized compatibility metadata")
     value: object = json.loads(raw, object_pairs_hook=_object)
     if not isinstance(value, dict):

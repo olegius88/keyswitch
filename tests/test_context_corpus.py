@@ -11,6 +11,7 @@ if TOOLS_PATH not in sys.path:
     sys.path.insert(0, TOOLS_PATH)
 
 from context_corpus import Locale, Phrase, assign, canonical_tokens, load_archive, write_source
+from fixture_values.counts import CONTEXT_CORPUS_FIXTURE_PHRASE_COUNT, CONTEXT_CORPUS_PER_GROUP_CAP
 
 
 class CorpusTests(unittest.TestCase):
@@ -35,18 +36,14 @@ class CorpusTests(unittest.TestCase):
         self.assertEqual(len({row.group for row in rows}), 1)
         self.assertEqual(len({row.split for row in rows}), 1)
 
-    # More source records than PER_GROUP_CAP allows, to see the cap and the
-    # order-independent tie-break both apply.
-    FIXTURE_PHRASE_COUNT = 20
-    PER_GROUP_CAP = 3
 
     def test_source_order_cap_and_empty_input(self) -> None:
         records = [Phrase(index + 1, "eng", f"I would like some item{index}", "")
-                   for index in range(self.FIXTURE_PHRASE_COUNT)]
-        rows, report = assign(records, per_group=self.PER_GROUP_CAP)
-        self.assertEqual(assign(list(reversed(records)), per_group=self.PER_GROUP_CAP), (rows, report))
-        self.assertEqual(report["maximum_group_size"], self.FIXTURE_PHRASE_COUNT)
-        self.assertEqual(len(rows), self.PER_GROUP_CAP)
+                   for index in range(CONTEXT_CORPUS_FIXTURE_PHRASE_COUNT)]
+        rows, report = assign(records, per_group=CONTEXT_CORPUS_PER_GROUP_CAP)
+        self.assertEqual(assign(list(reversed(records)), per_group=CONTEXT_CORPUS_PER_GROUP_CAP), (rows, report))
+        self.assertEqual(report["maximum_group_size"], CONTEXT_CORPUS_FIXTURE_PHRASE_COUNT)
+        self.assertEqual(len(rows), CONTEXT_CORPUS_PER_GROUP_CAP)
         self.assertEqual(assign([])[1]["groups"], 0)
         with self.assertRaises(ValueError):
             assign(records, per_group=0)

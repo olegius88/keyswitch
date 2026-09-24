@@ -1,11 +1,10 @@
 """Pure layout-indicator mapping shared by the tray and tests."""
 
 from __future__ import annotations
+from .constants.keyboard import LAYOUT_LABELS, LAYOUT_NAMES
 
 
 INDICATOR_STYLES = ("letters", "flags")
-LAYOUT_LABELS = {0: "EN", 1: "RU"}
-LAYOUT_NAMES = {0: "английский (EN)", 1: "русский (RU)"}
 
 
 def normalize_indicator_style(value: object) -> str:

@@ -17,6 +17,14 @@ from pathlib import Path
 from typing import Protocol, cast
 from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
+from .constants.updates import (
+    DOWNLOAD_CHUNK_BYTES,
+    MAX_ASSET_BYTES,
+    MAX_RELEASE_JSON_BYTES,
+    MAX_RELEASE_NOTES_CHARACTERS,
+    PROGRESS_COMPLETE_PERCENT,
+    UPDATE_REQUEST_TIMEOUT_SECONDS,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -25,12 +33,6 @@ LATEST_RELEASE_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/latest
 RELEASE_PAGE_PREFIX = f"https://github.com/{REPOSITORY}/releases/tag/"
 RELEASE_DOWNLOAD_PREFIX = f"https://github.com/{REPOSITORY}/releases/download/"
 GITHUB_API_VERSION = "2026-03-10"
-MAX_RELEASE_JSON_BYTES = 1_000_000
-MAX_ASSET_BYTES = 300 * 1024 * 1024
-DOWNLOAD_CHUNK_BYTES = 128 * 1024
-DEFAULT_REQUEST_TIMEOUT_SECONDS = 20.0
-MAX_RELEASE_NOTES_CHARACTERS = 4000
-PROGRESS_COMPLETE_PERCENT = 100
 _VERSION_PATTERN = re.compile(r"(?:v)?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 _DIGEST_PATTERN = re.compile(r"sha256:([0-9a-f]{64})")
 _WINDOWS_INSTALLER_PATTERN = re.compile(
@@ -175,7 +177,7 @@ class GitHubReleaseClient:
         current_version: str,
         *,
         opener: ResponseOpener = _open_url,
-        timeout: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
+        timeout: float = UPDATE_REQUEST_TIMEOUT_SECONDS,
     ) -> None:
         self.current_version = current_version
         self.opener = opener

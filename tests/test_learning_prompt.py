@@ -20,12 +20,44 @@ from gi.repository import Atspi, Gdk, GdkX11, GLib, Gtk
 from keyswitch import learning_prompt as prompt_module
 from keyswitch.backend import ScreenAnchor
 from keyswitch.engine import LearningPrompt
-from keyswitch.learning_prompt import (
-    PROMPT_ANCHOR_GAP,
-    PROMPT_CENTER_DIVISOR,
-    PROMPT_WINDOW_WIDTH,
-    LearningPromptWindow,
-    focused_caret_anchor,
+from keyswitch.learning_prompt import LearningPromptWindow, focused_caret_anchor
+from keyswitch.constants.geometry import CENTERING_DIVISOR
+from keyswitch.constants.learning_prompt import (
+    LEARNING_PROMPT_ANCHOR_GAP_PIXELS,
+    LEARNING_PROMPT_GTK_WIDTH_PIXELS,
+)
+from fixture_values.counts import (
+    LEARNING_PROMPT_CHILD_COUNT_WITH_NULL_SLOT,
+    LEARNING_PROMPT_DISMISS_CALLS_AFTER_CLOSE_WITH_PROMPT,
+    LEARNING_PROMPT_DISMISS_CALLS_AFTER_ESCAPE_AND_STRAY_KEY,
+    LEARNING_PROMPT_FOCUSED_CARET_OFFSET,
+)
+from fixture_values.keys import (
+    A_KEYCODE,
+    ESCAPE_KEYCODE,
+    LEARNING_PROMPT_FIXTURE_WINDOW_ID,
+    RETURN_KEYCODE,
+)
+from fixture_values.ui import (
+    LEARNING_PROMPT_CARET_ONLY_ANCHOR_X,
+    LEARNING_PROMPT_CARET_ONLY_ANCHOR_Y,
+    LEARNING_PROMPT_CARET_OVERRIDE_ANCHOR_X,
+    LEARNING_PROMPT_CARET_OVERRIDE_ANCHOR_Y,
+    LEARNING_PROMPT_CHILD_RECT_HEIGHT,
+    LEARNING_PROMPT_CHILD_RECT_WIDTH,
+    LEARNING_PROMPT_CHILD_RECT_X,
+    LEARNING_PROMPT_CHILD_RECT_Y,
+    LEARNING_PROMPT_FALLBACK_ANCHOR_WINDOW,
+    LEARNING_PROMPT_FALLBACK_ANCHOR_X,
+    LEARNING_PROMPT_FALLBACK_ANCHOR_Y,
+    LEARNING_PROMPT_FIRST_SCREEN_ANCHOR_WINDOW,
+    LEARNING_PROMPT_FIRST_SCREEN_ANCHOR_X,
+    LEARNING_PROMPT_FIRST_SCREEN_ANCHOR_Y,
+    LEARNING_PROMPT_FIXTURE_WINDOW_HEIGHT_PIXELS,
+    LEARNING_PROMPT_FOCUSED_RECT_HEIGHT,
+    LEARNING_PROMPT_FOCUSED_RECT_WIDTH,
+    LEARNING_PROMPT_FOCUSED_RECT_X,
+    LEARNING_PROMPT_FOCUSED_RECT_Y,
 )
 
 
@@ -33,24 +65,35 @@ DISPLAY_AVAILABLE = bool(os.environ.get("DISPLAY")) and Gtk.init_check()
 
 # Accessible-text character-extents fixtures; expected anchors below are derived
 # from these, the same way focused_caret_anchor() derives them from the real ones.
-FOCUSED_RECT = SimpleNamespace(x=100, y=200, width=9, height=18)
-CHILD_RECT = SimpleNamespace(x=10, y=20, width=5, height=10)
-FOCUSED_CARET_OFFSET = 3
-CHILD_COUNT_WITH_NULL_SLOT = 2
+FOCUSED_RECT = SimpleNamespace(
+    x=LEARNING_PROMPT_FOCUSED_RECT_X,
+    y=LEARNING_PROMPT_FOCUSED_RECT_Y,
+    width=LEARNING_PROMPT_FOCUSED_RECT_WIDTH,
+    height=LEARNING_PROMPT_FOCUSED_RECT_HEIGHT,
+)
+CHILD_RECT = SimpleNamespace(
+    x=LEARNING_PROMPT_CHILD_RECT_X,
+    y=LEARNING_PROMPT_CHILD_RECT_Y,
+    width=LEARNING_PROMPT_CHILD_RECT_WIDTH,
+    height=LEARNING_PROMPT_CHILD_RECT_HEIGHT,
+)
 
-FIRST_SCREEN_ANCHOR = ScreenAnchor(500, 400, 77)
-CARET_OVERRIDE_WITH_BACKEND_ANCHOR = ScreenAnchor(700, 300)
-CARET_ONLY_ANCHOR = ScreenAnchor(10, 20)
-FALLBACK_ONLY_ANCHOR = ScreenAnchor(30, 40, 88)
-
-FIXTURE_WINDOW_HEIGHT_PIXELS = 80
-FIXTURE_WINDOW_ID = 123
-
-RETURN_KEYCODE = 36
-ESCAPE_KEYCODE = 9
-KEY_A_KEYCODE = 38
-DISMISS_CALLS_AFTER_ESCAPE_AND_STRAY_KEY = 2
-DISMISS_CALLS_AFTER_CLOSE_WITH_PROMPT = 3
+FIRST_SCREEN_ANCHOR = ScreenAnchor(
+    LEARNING_PROMPT_FIRST_SCREEN_ANCHOR_X,
+    LEARNING_PROMPT_FIRST_SCREEN_ANCHOR_Y,
+    LEARNING_PROMPT_FIRST_SCREEN_ANCHOR_WINDOW,
+)
+CARET_OVERRIDE_WITH_BACKEND_ANCHOR = ScreenAnchor(
+    LEARNING_PROMPT_CARET_OVERRIDE_ANCHOR_X, LEARNING_PROMPT_CARET_OVERRIDE_ANCHOR_Y
+)
+CARET_ONLY_ANCHOR = ScreenAnchor(
+    LEARNING_PROMPT_CARET_ONLY_ANCHOR_X, LEARNING_PROMPT_CARET_ONLY_ANCHOR_Y
+)
+FALLBACK_ONLY_ANCHOR = ScreenAnchor(
+    LEARNING_PROMPT_FALLBACK_ANCHOR_X,
+    LEARNING_PROMPT_FALLBACK_ANCHOR_Y,
+    LEARNING_PROMPT_FALLBACK_ANCHOR_WINDOW,
+)
 
 
 class FakePromptBackend:
@@ -149,7 +192,7 @@ class AccessibilityAnchorTests(unittest.TestCase):
         root.get_state_set.return_value.contains.return_value = True
         text = Mock()
         root.get_text_iface.return_value = text
-        text.get_caret_offset.return_value = FOCUSED_CARET_OFFSET
+        text.get_caret_offset.return_value = LEARNING_PROMPT_FOCUSED_CARET_OFFSET
         text.get_character_extents.return_value = FOCUSED_RECT
         with (
             patch.object(prompt_module, "_accessibility_bus_available", return_value=True),
@@ -175,7 +218,7 @@ class AccessibilityAnchorTests(unittest.TestCase):
         root = Mock()
         root.get_state_set.return_value.contains.return_value = False
         root.get_text_iface.return_value = None
-        root.get_child_count.return_value = CHILD_COUNT_WITH_NULL_SLOT
+        root.get_child_count.return_value = LEARNING_PROMPT_CHILD_COUNT_WITH_NULL_SLOT
         root.get_child_at_index.side_effect = [None, child]
         with (
             patch.object(prompt_module, "_accessibility_bus_available", return_value=True),
@@ -294,21 +337,21 @@ class LearningPromptWindowTests(unittest.TestCase):
         surface = Mock()
         with (
             patch.object(self.window, "get_surface", return_value=surface),
-            patch.object(self.window, "get_width", return_value=PROMPT_WINDOW_WIDTH),
-            patch.object(self.window, "get_height", return_value=FIXTURE_WINDOW_HEIGHT_PIXELS),
+            patch.object(self.window, "get_width", return_value=LEARNING_PROMPT_GTK_WIDTH_PIXELS),
+            patch.object(self.window, "get_height", return_value=LEARNING_PROMPT_FIXTURE_WINDOW_HEIGHT_PIXELS),
             patch.object(
                 GdkX11.X11Surface,
                 "get_xid",
-                return_value=FIXTURE_WINDOW_ID,
+                return_value=LEARNING_PROMPT_FIXTURE_WINDOW_ID,
             ),
         ):
             self.assertFalse(self.window._position_above_anchor())
         self.assertEqual(
             self.backend.positions,
             [(
-                FIXTURE_WINDOW_ID,
-                FIRST_SCREEN_ANCHOR.x - PROMPT_WINDOW_WIDTH // PROMPT_CENTER_DIVISOR,
-                FIRST_SCREEN_ANCHOR.y - FIXTURE_WINDOW_HEIGHT_PIXELS - PROMPT_ANCHOR_GAP,
+                LEARNING_PROMPT_FIXTURE_WINDOW_ID,
+                FIRST_SCREEN_ANCHOR.x - LEARNING_PROMPT_GTK_WIDTH_PIXELS // CENTERING_DIVISOR,
+                FIRST_SCREEN_ANCHOR.y - LEARNING_PROMPT_FIXTURE_WINDOW_HEIGHT_PIXELS - LEARNING_PROMPT_ANCHOR_GAP_PIXELS,
             )],
         )
 
@@ -327,15 +370,15 @@ class LearningPromptWindowTests(unittest.TestCase):
             self.window._on_key_pressed(controller, Gdk.KEY_Escape, ESCAPE_KEYCODE, state)
         )
         self.assertFalse(
-            self.window._on_key_pressed(controller, Gdk.KEY_a, KEY_A_KEYCODE, state)
+            self.window._on_key_pressed(controller, Gdk.KEY_a, A_KEYCODE, state)
         )
-        self.assertEqual(self.dismiss.call_count, DISMISS_CALLS_AFTER_ESCAPE_AND_STRAY_KEY)
+        self.assertEqual(self.dismiss.call_count, LEARNING_PROMPT_DISMISS_CALLS_AFTER_ESCAPE_AND_STRAY_KEY)
 
         self.window.prompt = None
         self.assertTrue(self.window._on_close_request(self.window))
         self.window.prompt = self.prompt
         self.assertTrue(self.window._on_close_request(self.window))
-        self.assertEqual(self.dismiss.call_count, DISMISS_CALLS_AFTER_CLOSE_WITH_PROMPT)
+        self.assertEqual(self.dismiss.call_count, LEARNING_PROMPT_DISMISS_CALLS_AFTER_CLOSE_WITH_PROMPT)
 
 
 if __name__ == "__main__":

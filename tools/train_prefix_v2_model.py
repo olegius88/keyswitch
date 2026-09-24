@@ -20,24 +20,28 @@ from context_evidence import canonical, checksum
 from reference_lexicon import reference_models
 from context_optimizer import Kernel, Packed, SOURCE as OPTIMIZER
 from keyswitch.context_model import ACTIONS, ContextModel
-from keyswitch.prefix_schema import (
-    CURRENT_PREFIX_FEATURE_VERSION, MIN_PREFIX_CONVERSION_THRESHOLD,
-    OBSERVED_PREFIX_MAX_CHARACTERS, VERSION_HASH_CHARACTERS, VersionedPrefixModel,
+from keyswitch.prefix_schema import VersionedPrefixModel
+from keyswitch.constants.file_formats import REPORT_JSON_INDENT, VERSION_HASH_CHARACTERS
+from keyswitch.constants.models import (
+    CURRENT_PREFIX_FEATURE_VERSION,
+    MIN_PREFIX_CONVERSION_THRESHOLD,
+    PREFIX_MAX_CHARACTERS,
+    PREFIX_MIN_CHARACTERS,
 )
-from model_protocol import FITTING_SPLITS, PROFILES
+from keyswitch.constants.model_protocol import FITTING_SPLITS, PROFILES
 from prefix_v2_corpus import PrefixFrame, generate_frames, load_parents, provenance as corpus_provenance
+from keyswitch.constants.training import (
+    DETERMINISTIC_ROUNDING_DECIMALS,
+    FEATURE_MASS_TOLERANCE,
+    LOG_LOSS_PROBABILITY_FLOOR,
+    PREFIX_CALIBRATION_FAILED_EXIT_CODE,
+    PREFIX_MIN_EARLY_RECALL_FLOOR,
+    PROBABILITY_SUM_TOLERANCE,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 RECIPE = ROOT / "model/prefix_v2/recipe.json"
-MASS_TOLERANCE = 1e-9
 ACTION_COUNT = len(ACTIONS)
-MIN_EARLY_RECALL_FLOOR = 0.70
-MIN_SUPPORTED_PREFIX_LENGTH = 4
-PROBABILITY_SUM_TOLERANCE = 1e-8
-LOG_PROBABILITY_FLOOR = 1e-15
-ROUNDING_DECIMALS = 9
-REPORT_JSON_INDENT = 2
-CALIBRATION_FAILED_EXIT_CODE = 2
 
 
 def _positive(value: object, name: str) -> float:
@@ -67,12 +71,12 @@ def recipe(path: Path = RECIPE) -> dict[str, object]:
     for name in ("epochs", "maximum_features", "maximum_words_per_family", "maximum_prefix_length"):
         if type(cfg.get(name)) is not int or cast(int, cfg[name]) <= 0:
             raise ValueError("invalid " + name)
-    if cast(int, cfg["maximum_prefix_length"]) > OBSERVED_PREFIX_MAX_CHARACTERS:
-        raise ValueError("prefix runtime supports at most twelve letters")
+    if cast(int, cfg["maximum_prefix_length"]) > PREFIX_MAX_CHARACTERS:
+        raise ValueError(f"prefix runtime supports at most {PREFIX_MAX_CHARACTERS} letters")
     for name in ("learning_rate", "keep_importance", "wait_importance", "minimum_feature_mass"):
         _positive(cfg.get(name), name)
     recall = _positive(cfg.get("minimum_early_recall"), "minimum_early_recall")
-    if not MIN_EARLY_RECALL_FLOOR <= recall <= 1:
+    if not PREFIX_MIN_EARLY_RECALL_FLOOR <= recall <= 1:
         raise ValueError("invalid recall")
     thresholds = cfg.get("thresholds")
     if not isinstance(thresholds, list) or not thresholds:
@@ -101,8 +105,8 @@ def feature_vocabulary(frames: Iterable[PrefixFrame], minimum: float, maximum: i
             errors[name] = (total - previous) - corrected
             totals[name] = total
     # Quantised ordering and a 1e-9 cutoff tolerate divided-parent roundoff.
-    selected = sorted((name for name, mass in totals.items() if mass + MASS_TOLERANCE >= minimum),
-                      key=lambda name: (-round(totals[name], ROUNDING_DECIMALS), name))[:maximum]
+    selected = sorted((name for name, mass in totals.items() if mass + FEATURE_MASS_TOLERANCE >= minimum),
+                      key=lambda name: (-round(totals[name], DETERMINISTIC_ROUNDING_DECIMALS), name))[:maximum]
     return sorted(selected)
 
 
@@ -140,7 +144,7 @@ def sequence_metadata(row: PrefixFrame) -> SequenceMetadata:
     It is not a joint engine replay or a new runtime policy.
     """
     item = row.item
-    supported = (MIN_SUPPORTED_PREFIX_LENGTH <= row.length <= OBSERVED_PREFIX_MAX_CHARACTERS and len(item.original) == row.length
+    supported = (PREFIX_MIN_CHARACTERS <= row.length <= PREFIX_MAX_CHARACTERS and len(item.original) == row.length
                  and len(item.alternative) == row.length and item.original.isalpha() and item.alternative.isalpha()
                  and item.source_group in (0, 1)
                  and not any(char.isupper() for char in item.original[1:] + item.alternative[1:]))
@@ -237,7 +241,7 @@ def sequence_metrics(scores: Mapping[str, SequenceScore], threshold: float) -> d
 
 
 def calibration_passed(metrics: Mapping[str, Mapping[str, int]], minimum_recall: float) -> bool:
-    if not MIN_EARLY_RECALL_FLOOR <= minimum_recall <= 1 or set(metrics) != set(PROFILES):
+    if not PREFIX_MIN_EARLY_RECALL_FLOOR <= minimum_recall <= 1 or set(metrics) != set(PROFILES):
         return False
     for counts in metrics.values():
         if (any(type(counts.get(key)) is not int or counts[key] < 0 for key in (
@@ -359,9 +363,9 @@ def fit(output: Path, recipe_path: Path = RECIPE) -> dict[str, object]:
     denominator = math.fsum(development.importance)
     for epoch in range(cast(int, cfg["epochs"])):
         kernel.epoch(packed["train"], weights, accumulator, cast(float, cfg["learning_rate"]))
-        rounded = array("d", (round(value, ROUNDING_DECIMALS) for value in weights))
+        rounded = array("d", (round(value, DETERMINISTIC_ROUNDING_DECIMALS) for value in weights))
         probabilities = kernel.predict(development, rounded)
-        loss = math.fsum(-development.importance[index] * math.log(max(LOG_PROBABILITY_FLOOR, probabilities[index * ACTION_COUNT + label]))
+        loss = math.fsum(-development.importance[index] * math.log(max(LOG_LOSS_PROBABILITY_FLOOR, probabilities[index * ACTION_COUNT + label]))
                          for index, label in enumerate(development.labels)) / denominator
         if not math.isfinite(loss):
             raise ValueError("prefix optimisation diverged")
@@ -397,7 +401,7 @@ def fit(output: Path, recipe_path: Path = RECIPE) -> dict[str, object]:
             amounts[row.parent_family] = total
             pairs.add(row.pair_id)
         budgets[split] = dict(sorted(amounts.items()))
-        if any(abs(value - 1.0) > MASS_TOLERANCE for value in budgets[split].values()):
+        if any(abs(value - 1.0) > FEATURE_MASS_TOLERANCE for value in budgets[split].values()):
             raise ValueError("physical-family budget drift")
         pair_counts[split] = len(pairs)
     seal: dict[str, object] = {
@@ -432,7 +436,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     seal = fit(args.output, args.recipe)
     print(json.dumps({key: seal[key] for key in ("model_version", "calibration_passed", "promotion_accepted", "independent_test_evaluated")}, indent=REPORT_JSON_INDENT))
-    return 0 if seal["calibration_passed"] else CALIBRATION_FAILED_EXIT_CODE
+    return 0 if seal["calibration_passed"] else PREFIX_CALIBRATION_FAILED_EXIT_CODE
 
 
 if __name__ == "__main__":

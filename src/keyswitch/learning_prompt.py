@@ -18,20 +18,19 @@ from gi.repository import Atspi, Gdk, GdkX11, GLib, Gtk  # noqa: E402
 
 from .backend import ScreenAnchor
 from .engine import LearningPrompt
+from .constants.geometry import CENTERING_DIVISOR
+from .constants.learning_prompt import (
+    LEARNING_PROMPT_ANCHOR_GAP_PIXELS,
+    LEARNING_PROMPT_GTK_MARGIN_X_PIXELS,
+    LEARNING_PROMPT_GTK_MARGIN_Y_PIXELS,
+    LEARNING_PROMPT_GTK_SPACING_PIXELS,
+    LEARNING_PROMPT_GTK_WIDTH_PIXELS,
+    MAX_CARET_SEARCH_CHILDREN,
+    MAX_CARET_SEARCH_NODES,
+)
 
 
 ACCESSIBILITY_BUS_NAME = "org.a11y.Bus"
-# Bounded traversal of the accessibility tree while looking for the focused
-# caret: a total node budget and a per-node child budget.
-MAX_CARET_SEARCH_NODES = 4096
-MAX_CARET_SEARCH_CHILDREN = 512
-PROMPT_WINDOW_WIDTH = 410
-PROMPT_BOX_SPACING = 5
-PROMPT_MARGIN_VERTICAL = 14
-PROMPT_MARGIN_HORIZONTAL = 18
-# The prompt is centred over the caret and floats this many pixels above it.
-PROMPT_CENTER_DIVISOR = 2
-PROMPT_ANCHOR_GAP = 12
 
 
 class PromptBackend(Protocol):
@@ -120,16 +119,16 @@ class LearningPromptWindow(Gtk.Window):
         self.set_modal(False)
         self.set_hide_on_close(True)
         self.set_focusable(True)
-        self.set_default_size(PROMPT_WINDOW_WIDTH, -1)
+        self.set_default_size(LEARNING_PROMPT_GTK_WIDTH_PIXELS, -1)
         self.add_css_class("learning-prompt")
 
         box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
-            spacing=PROMPT_BOX_SPACING,
-            margin_top=PROMPT_MARGIN_VERTICAL,
-            margin_bottom=PROMPT_MARGIN_VERTICAL,
-            margin_start=PROMPT_MARGIN_HORIZONTAL,
-            margin_end=PROMPT_MARGIN_HORIZONTAL,
+            spacing=LEARNING_PROMPT_GTK_SPACING_PIXELS,
+            margin_top=LEARNING_PROMPT_GTK_MARGIN_Y_PIXELS,
+            margin_bottom=LEARNING_PROMPT_GTK_MARGIN_Y_PIXELS,
+            margin_start=LEARNING_PROMPT_GTK_MARGIN_X_PIXELS,
+            margin_end=LEARNING_PROMPT_GTK_MARGIN_X_PIXELS,
         )
         self.question = Gtk.Label(
             label="Добавить слово в правила переключения?",
@@ -179,8 +178,8 @@ class LearningPromptWindow(Gtk.Window):
             return GLib.SOURCE_REMOVE
         x11_surface = cast(GdkX11.X11Surface, surface)
         window = int(GdkX11.X11Surface.get_xid(x11_surface))
-        x = anchor.x - self.get_width() // PROMPT_CENTER_DIVISOR
-        y = anchor.y - self.get_height() - PROMPT_ANCHOR_GAP
+        x = anchor.x - self.get_width() // CENTERING_DIVISOR
+        y = anchor.y - self.get_height() - LEARNING_PROMPT_ANCHOR_GAP_PIXELS
         self.backend.position_window(window, x, y)
         return GLib.SOURCE_REMOVE
 

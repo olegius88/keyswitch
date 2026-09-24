@@ -15,21 +15,19 @@ from typing import cast
 
 from keyswitch.context_model import ARTIFACT_PATH, FEATURE_VERSION, ContextModel
 import verify_context_action_model as action_verifier
+from keyswitch.constants.file_formats import METADATA_JSON_LIMIT_BYTES, REPORT_JSON_INDENT
+from keyswitch.constants.models import (
+    CONTEXT_ACTION_FEATURE_VERSION,
+    CONTEXT_V1_CONVERSION_THRESHOLD,
+)
+from keyswitch.constants.training import CONTEXT_V1_MINIMUM_TEST_ROWS
 
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORT = ROOT / "model/context_v1/report.json"
 RECEIPT = ROOT / "model/context_v3/release-receipt.json"
 REJECTED_ARTIFACT = action_verifier.REJECTED_ARTIFACT
-MAX_REPORT_BYTES = 1024 * 1024
 LEGACY_FEATURE_VERSION = FEATURE_VERSION
-# The frozen src/keyswitch/context_model.py (PENDING_RESEAL) checks feature_version
-# against this alongside its own FEATURE_VERSION but never names it.
-ACTION_FEATURE_VERSION = 3
-# Mirrors the frozen ContextModel.__init__ default; re-checked independently here.
-LEGACY_CONVERSION_THRESHOLD = 0.985
-MINIMUM_TEST_ROWS = 10_000
-REPORT_JSON_INDENT = 2
 
 
 def provenance_paths(root: Path = ROOT, artifact: Path = ARTIFACT_PATH) -> dict[str, Path]:
@@ -56,8 +54,8 @@ def provenance_paths(root: Path = ROOT, artifact: Path = ARTIFACT_PATH) -> dict[
 def verify_legacy(root: Path = ROOT, report_path: Path = REPORT, artifact: Path = ARTIFACT_PATH) -> dict[str, object]:
     """Preserve the historical feature-2 contract independently of active weights."""
     with report_path.open("rb") as handle:
-        raw = handle.read(MAX_REPORT_BYTES + 1)
-    if len(raw) > MAX_REPORT_BYTES:
+        raw = handle.read(METADATA_JSON_LIMIT_BYTES + 1)
+    if len(raw) > METADATA_JSON_LIMIT_BYTES:
         raise ValueError("oversized context report")
     report: object = json.loads(raw)
     if not isinstance(report, dict) or report.get("schema_version") != 1 or report.get("quality_gates_passed") is not True or report.get("test_overlap") != 0:
@@ -67,7 +65,7 @@ def verify_legacy(root: Path = ROOT, report_path: Path = REPORT, artifact: Path 
         if report.get(name) != hashlib.sha256(path.read_bytes()).hexdigest():
             raise ValueError(f"context provenance mismatch: {name}")
     model = ContextModel.load(artifact)
-    if model.feature_version != LEGACY_FEATURE_VERSION or model.version != report.get("model_version") or model.conversion_threshold != LEGACY_CONVERSION_THRESHOLD:
+    if model.feature_version != LEGACY_FEATURE_VERSION or model.version != report.get("model_version") or model.conversion_threshold != CONTEXT_V1_CONVERSION_THRESHOLD:
         raise ValueError("context model identity or threshold differs from evaluation")
     test = report.get("test")
     counts = test.get("counts") if isinstance(test, dict) else None
@@ -76,7 +74,7 @@ def verify_legacy(root: Path = ROOT, report_path: Path = REPORT, artifact: Path 
     required = ("rows", "desired_conversions", "converted_correctly", "false_conversions", "baseline_converted_correctly")
     if any(type(counts.get(name)) is not int or counts[name] < 0 for name in required):
         raise ValueError("invalid context evaluation counts")
-    if counts["rows"] < MINIMUM_TEST_ROWS or counts["false_conversions"] != 0 or counts["converted_correctly"] < counts["baseline_converted_correctly"]:
+    if counts["rows"] < CONTEXT_V1_MINIMUM_TEST_ROWS or counts["false_conversions"] != 0 or counts["converted_correctly"] < counts["baseline_converted_correctly"]:
         raise ValueError("context evaluation fails release policy")
     return {"model_version": model.version, "artifact_sha256": report["artifact_sha256"], "counts": cast(dict[str, object], counts), "evidence_scope": report.get("evidence_scope")}
 
@@ -97,7 +95,7 @@ def verify(
         from verify_context_v2 import verify as verify_research
 
         verify_research(root / "model/context_v2", artifact)
-    elif model.feature_version == ACTION_FEATURE_VERSION:
+    elif model.feature_version == CONTEXT_ACTION_FEATURE_VERSION:
         receipt = action_verifier.verify(root=root, receipt_path=receipt_path, artifact=artifact)
         result = {"model_version": receipt["model_version"], "artifact_sha256": receipt["artifact_sha256"],
                   "evidence_scope": receipt["scope"]}
@@ -112,7 +110,7 @@ def replay_commands(feature_version: int) -> tuple[tuple[str, ...], ...]:
     if feature_version == LEGACY_FEATURE_VERSION:
         # Rejected context-v2 has its separate historical numeric CI gate.
         return (("tools/train_context_model.py", "--verify"),)
-    if feature_version == ACTION_FEATURE_VERSION:
+    if feature_version == CONTEXT_ACTION_FEATURE_VERSION:
         # Explicit classes fail if a required module/class disappears; an empty
         # discovery pattern would otherwise exit successfully with zero tests.
         return tuple(("-m", "unittest", "-v", target) for target in (

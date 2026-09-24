@@ -11,15 +11,14 @@ import json
 import sys
 
 from . import __version__
-from .settings_diagnostics import DIAGNOSTICS_JSON_INDENT
+from .constants.file_formats import DIAGNOSTICS_JSON_INDENT
 from .logsetup import configure_logging as configure_logging
 from .intent_model import LinearNgramModel
 from .context_model import ContextModel
 from .windows_context import probe_uia
 from .windows_backend import WindowsBackend
 from .windows_system import WindowsAutostartManager, WindowsSystemError
-
-SMOKE_UI_QUIT_AFTER_MS = 300
+from .constants.timing import SMOKE_UI_QUIT_AFTER_MS
 
 
 def autostart_status() -> dict[str, object]:

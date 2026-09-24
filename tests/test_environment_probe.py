@@ -25,21 +25,16 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import environment_probe as probe  # noqa: E402
+from fixture_values.counts import (
+    EXPECTED_ULP_DISTANCE,
+    UNICODE_CODE_POINT_COUNT,
+    UNICODE_PLANE_COUNT,
+)
+from fixture_values.hashes import TRUNCATED_DIGEST_PROBE_CHARACTERS
+from fixture_values.scores import ULP_PROBE_DOUBLE_VALUE
+from keyswitch.constants.file_formats import SHA256_HEX_CHARACTERS
 
 CELL_NAMES = tuple(name for name, _ in probe.CELLS)
-
-# Length of a sha256 hex digest, real or faked for a test.
-SHA256_HEX_LENGTH = 64
-# Unicode has exactly this many code points (U+0000 through U+10FFFF), spread
-# across this many planes (0 through 16).
-UNICODE_CODE_POINT_COUNT = 0x110000
-UNICODE_PLANE_COUNT = 17
-# Prefix length checked against the probe source, shorter than a full digest.
-TRUNCATED_DIGEST_LENGTH = 16
-# An arbitrary double used to probe ULP distance.
-SAMPLE_DOUBLE_VALUE = 0.1
-# Two nextafter() steps apart.
-TWO_ULPS = 2
 
 
 class ProbeShape(unittest.TestCase):
@@ -49,7 +44,7 @@ class ProbeShape(unittest.TestCase):
                 cell = probe.measure_cell(name)
                 self.assertGreater(cell["entries"], 0)
                 self.assertTrue(cell["buckets"])
-                self.assertEqual(len(cell["sha256"]), SHA256_HEX_LENGTH)
+                self.assertEqual(len(cell["sha256"]), SHA256_HEX_CHARACTERS)
 
     def test_unicode_cell_is_exhaustive(self) -> None:
         # The runtime normalises every token it sees, so this is the one cell
@@ -88,7 +83,7 @@ class ProbeShape(unittest.TestCase):
         }
         for digest in digests:
             self.assertNotIn(digest, source)
-            self.assertNotIn(digest[:TRUNCATED_DIGEST_LENGTH], source)
+            self.assertNotIn(digest[:TRUNCATED_DIGEST_PROBE_CHARACTERS], source)
 
 
 class ProbeDeterminism(unittest.TestCase):
@@ -199,8 +194,8 @@ class ProbeExplain(unittest.TestCase):
     def test_a_moved_cell_is_reported_with_its_bucket(self) -> None:
         recorded = self.record(["libm"])
         libm = recorded["cells"]["libm"]
-        libm["buckets"]["exp"] = "0" * SHA256_HEX_LENGTH
-        libm["sha256"] = "0" * SHA256_HEX_LENGTH
+        libm["buckets"]["exp"] = "0" * SHA256_HEX_CHARACTERS
+        libm["sha256"] = "0" * SHA256_HEX_CHARACTERS
         self.assertEqual(probe.explain("libm", recorded), 1)
 
     def test_explain_rejects_an_unknown_cell(self) -> None:
@@ -213,7 +208,7 @@ class ProbeExplain(unittest.TestCase):
 
 class ProbeUlp(unittest.TestCase):
     def test_neighbouring_doubles_are_one_ulp_apart(self) -> None:
-        value = SAMPLE_DOUBLE_VALUE
+        value = ULP_PROBE_DOUBLE_VALUE
         self.assertEqual(probe._ulp_distance(value, math.nextafter(value, math.inf)), 1)
 
     def test_zero_signs_are_adjacent(self) -> None:
@@ -225,8 +220,8 @@ class ProbeUlp(unittest.TestCase):
 
     def test_distance_is_symmetric(self) -> None:
         left, right = 1.0, math.nextafter(math.nextafter(1.0, math.inf), math.inf)
-        self.assertEqual(probe._ulp_distance(left, right), TWO_ULPS)
-        self.assertEqual(probe._ulp_distance(right, left), TWO_ULPS)
+        self.assertEqual(probe._ulp_distance(left, right), EXPECTED_ULP_DISTANCE)
+        self.assertEqual(probe._ulp_distance(right, left), EXPECTED_ULP_DISTANCE)
 
 
 class ProbeCommandLine(unittest.TestCase):

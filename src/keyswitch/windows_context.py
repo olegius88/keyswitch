@@ -17,6 +17,10 @@ from collections.abc import Sequence
 from typing import Final, Protocol, cast
 
 from .input_context import CONTEXT_LIMIT, FieldContext, FieldRole
+from .constants.text import FIELD_AFTER_CARET_MAX_CHARACTERS
+from .constants.timing import UIA_CONNECTION_TIMEOUT_MS, UIA_TRANSACTION_TIMEOUT_MS
+from .constants.units import MILLISECONDS_PER_SECOND
+from .constants.windows import UIA_TEXT_PATTERN_ID
 
 
 # The type library the build pre-generates and the runtime opens must name the
@@ -44,21 +48,6 @@ class _TextPattern(Protocol):
 
 class _Unknown(Protocol):
     def QueryInterface(self, interface: object) -> _TextPattern: ...
-
-
-# TextPattern. GetCurrentPattern answers S_OK with a null pointer when the
-# element does not support the pattern, which comtypes hands over as None:
-# a field without text is an ordinary answer, not a broken provider.
-TEXT_PATTERN_ID: Final = 10014
-
-# Milliseconds allowed to reach a provider and to finish one request.
-CONNECTION_TIMEOUT_MS: Final = 200
-TRANSACTION_TIMEOUT_MS: Final = 200
-
-# Characters read after the caret; CONTEXT_LIMIT (input_context.py) bounds the
-# prefix instead, and the two are not the same limit.
-SUFFIX_LIMIT_CHARACTERS: Final = 128
-SECONDS_TO_MILLISECONDS: Final = 1000
 
 
 class _Element(Protocol):
@@ -139,8 +128,8 @@ class WindowsFieldReader:
             # cold request, and every such timeout counted as a broken
             # provider; the budget below still keeps a word's decision inside a
             # fraction of a second, and `last_read_ms` reports what it costs.
-            self.automation.ConnectionTimeout = CONNECTION_TIMEOUT_MS
-            self.automation.TransactionTimeout = TRANSACTION_TIMEOUT_MS
+            self.automation.ConnectionTimeout = UIA_CONNECTION_TIMEOUT_MS
+            self.automation.TransactionTimeout = UIA_TRANSACTION_TIMEOUT_MS
         except Exception:
             self.close()
             raise
@@ -171,7 +160,7 @@ class WindowsFieldReader:
         field_id = ":".join(str(value) for value in identity)
         if element.CurrentIsPassword:
             return FieldContext(application, field_id, role="password", sensitive=True, source="uia")
-        supported = element.GetCurrentPattern(TEXT_PATTERN_ID)
+        supported = element.GetCurrentPattern(UIA_TEXT_PATTERN_ID)
         if supported is None:
             # Chromium and Qt windows expose a focused element long before they
             # expose its text. That is a field KeySwitch cannot read, not a
@@ -187,8 +176,8 @@ class WindowsFieldReader:
             return FieldContext(application, field_id, selection=True, source="uia")
         before, after = caret.Clone(), caret.Clone()
         before.MoveEndpointByUnit(0, 0, -CONTEXT_LIMIT)
-        after.MoveEndpointByUnit(1, 0, SUFFIX_LIMIT_CHARACTERS)
-        prefix, suffix = before.GetText(CONTEXT_LIMIT), after.GetText(SUFFIX_LIMIT_CHARACTERS)
+        after.MoveEndpointByUnit(1, 0, FIELD_AFTER_CARET_MAX_CHARACTERS)
+        prefix, suffix = before.GetText(CONTEXT_LIMIT), after.GetText(FIELD_AFTER_CARET_MAX_CHARACTERS)
         current = self.automation.GetFocusedElement()
         if current.CurrentIsPassword:
             return FieldContext(application, field_id, role="password", sensitive=True, source="uia")
@@ -242,8 +231,8 @@ def probe_uia() -> dict[str, object]:
     try:
         started = time.monotonic()
         element = reader.automation.GetFocusedElement()
-        pattern = element.GetCurrentPattern(TEXT_PATTERN_ID)
-        elapsed = round((time.monotonic() - started) * SECONDS_TO_MILLISECONDS)
+        pattern = element.GetCurrentPattern(UIA_TEXT_PATTERN_ID)
+        elapsed = round((time.monotonic() - started) * MILLISECONDS_PER_SECOND)
         return {
             "available": True,
             "focused_text_pattern": pattern is not None,

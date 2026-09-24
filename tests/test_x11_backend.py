@@ -16,21 +16,8 @@ from keyswitch import x11_backend as x11
 from keyswitch.backend import ScreenAnchor
 from keyswitch.backend import FocusInfo
 from keyswitch.x11_backend import (
-    BACKSPACE_KEYSYM,
-    BUTTON_PRESS,
-    CARDINAL_PROPERTY_FORMAT_BITS,
-    DEFAULT_GROUP_COUNT,
-    KEY_PRESS,
-    KEY_RELEASE,
     LOCK_MASK,
-    MAX_TRACKED_OWN_WINDOWS,
-    MAX_UNICODE_CODEPOINT,
-    MAX_WINDOW_ANCESTOR_DEPTH,
-    MAX_XKB_GROUPS,
     SHIFT_MASK,
-    XKB_GROUP_STATE_SHIFT,
-    XRECORD_DATA_UNIT_BYTES,
-    XRECORD_START_OF_DATA,
     BackendProbe,
     KeyEvent,
     X11Backend,
@@ -41,73 +28,78 @@ from keyswitch.x11_backend import (
     XRecordRange,
     _Libraries,
 )
-
-# Fake connection handles returned by XOpenDisplay for the control and record
-# X11 connections.
-CONTROL_DISPLAY = 101
-RECORD_DISPLAY = 102
-# A smaller, generic pair of fake handles used once a backend is already "open"
-# in most other tests, where the exact values do not matter.
-FAKE_CONTROL_HANDLE = 1
-FAKE_RECORD_HANDLE = 2
-FAKE_RECORD_CONTEXT = 42
-# Fake keycodes: XKeysymToKeycode returns KEYCODE_BACKSPACE for
-# BACKSPACE_KEYSYM and KEYCODE_SHIFT for every other keysym it is asked about
-# (including Shift_L), and KEYCODE_A/KEYCODE_SPACE/KEYCODE_COMMA are the
-# fixture physical keycodes for the letter "a", the space bar and the comma key.
-KEYCODE_BACKSPACE = 22
-KEYCODE_SHIFT = 50
-KEYCODE_A = 38
-KEYCODE_SPACE = 65
-KEYCODE_COMMA = 59
-# An arbitrary keycode distinct from KEYCODE_A, to see it does not match.
-OTHER_KEYCODE = 39
-FIXTURE_TIMESTAMP = 77
-# One press and one release for an unshifted key (including a backspace).
-EVENTS_PER_TAP = 2
-# Shift down, key down, key up, shift up.
-SHIFTED_TAP_EVENTS = 2 * EVENTS_PER_TAP
-# Two backspace taps: deleting the old word plus a boundary/literal character.
-DELETE_TAP_EVENTS = 2 * EVENTS_PER_TAP
-ASCII_SPACE_CODEPOINT = 32
-# Fake window ids reused across the focus/ancestry fixtures below.
-WINDOW_ROOT = 99
-WINDOW_OWN = 777
-WINDOW_OWN_CHILD = 778
-WINDOW_OTHER_ROOT = 779  # a window that is its own parent, acting as a root
-WINDOW_FOREIGN = 555
-WINDOW_LATER = 780  # examined while its ancestry walk is still in flight
-WINDOW_POSITION_TARGET = 55
-POINTER_CHILD_WINDOW = 100
-FOCUS_WINDOW = 10
-PARENT_WINDOW = 20
-DEEP_TOWER_END = 900
-WINDOW_CACHE_TEST_START = 1000
-POINTER_ROOT_X = 640
-POINTER_ROOT_Y = 480
-POINTER_WINDOW_X = 12
-POINTER_WINDOW_Y = 34
-POSITION_TARGET_X = 10
-POSITION_TARGET_Y = 20
-# A coordinate value that does not matter for the assertion using it.
-PLACEHOLDER_COORDINATE = 2
-SCREEN_NUMBER = 2
-NET_WM_PID_ATOM = 5
-# Deliberately not CARDINAL_PROPERTY_FORMAT_BITS, to see the property is ignored.
-WRONG_PROPERTY_FORMAT_BITS = 8
-EXCESSIVE_GROUP_COUNT = 99
-XKB_VERSION_MINOR = 2
-XTEST_VERSION_COMPONENT = 2
-RECORD_VERSION_MINOR = 13
-XKB_REPORTED_GROUP = 3
-LIBRARY_INIT_COUNT = 2
-EXPECTED_DEADLINE_MARGIN_SECONDS = 5
-MIN_FREE_CALLS = 2
-JOIN_TIMEOUT_SECONDS = 2.0
-# A non-keyboard, non-button event type, arbitrary and unrecognised.
-UNRECOGNIZED_EVENT_TYPE = 12
-# The positional index of the "group" argument in an XkbLockGroup call.
-XKB_LOCK_GROUP_ARG_INDEX = 2
+from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
+from keyswitch.constants.text import MAX_UNICODE_CODEPOINT
+from keyswitch.constants.x11 import (
+    BACKSPACE_KEYSYM,
+    CARDINAL_PROPERTY_FORMAT_BITS,
+    MAX_TRACKED_OWN_WINDOWS,
+    MAX_WINDOW_ANCESTOR_DEPTH,
+    MAX_XKB_GROUPS,
+    X11_BUTTON_PRESS,
+    X11_KEY_PRESS,
+    X11_KEY_RELEASE,
+    XKB_GROUP_STATE_SHIFT,
+    XRECORD_DATA_UNIT_BYTES,
+    XRECORD_START_OF_DATA,
+)
+from fixture_values.clock import X11_EXPECTED_DEADLINE_MARGIN_SECONDS, X11_FIXTURE_EVENT_TIMESTAMP
+from fixture_values.counts import (
+    X11_DELETE_TAP_EVENTS,
+    X11_EVENTS_PER_TAP,
+    X11_EXCESSIVE_GROUP_COUNT,
+    X11_LIBRARY_INIT_COUNT,
+    X11_MIN_FREE_CALLS,
+    X11_SHIFTED_TAP_EVENTS,
+)
+from fixture_values.keys import (
+    ASCII_SPACE_CODEPOINT,
+    A_KEYCODE,
+    BACKSPACE_KEYCODE,
+    COMMA_KEYCODE,
+    SHIFT_L_KEYCODE,
+    SPACE_KEYCODE,
+    X11_DEEP_TOWER_END_WINDOW,
+    X11_FOCUS_WINDOW,
+    X11_FOREIGN_WINDOW,
+    X11_LATER_WINDOW,
+    X11_OTHER_ROOT_WINDOW,
+    X11_OWN_CHILD_WINDOW,
+    X11_OWN_WINDOW,
+    X11_PARENT_WINDOW,
+    X11_POINTER_CHILD_WINDOW,
+    X11_POSITION_TARGET_WINDOW,
+    X11_ROOT_WINDOW,
+    X11_UNMATCHED_KEYCODE,
+    X11_WINDOW_CACHE_TEST_START,
+    X11_XKB_REPORTED_GROUP,
+)
+from fixture_values.platform import (
+    X11_CONTROL_DISPLAY,
+    X11_FAKE_CONTROL_HANDLE,
+    X11_FAKE_RECORD_CONTEXT,
+    X11_FAKE_RECORD_HANDLE,
+    X11_NET_WM_PID_ATOM,
+    X11_RECORD_DISPLAY,
+    X11_RECORD_VERSION_MINOR,
+    X11_SCREEN_NUMBER,
+    X11_UNRECOGNIZED_EVENT_TYPE,
+    X11_WRONG_PROPERTY_FORMAT_BITS,
+    X11_XKB_VERSION_MINOR,
+    X11_XTEST_VERSION_COMPONENT,
+    XKB_LOCK_GROUP_GROUP_ARG_INDEX,
+)
+from fixture_values.ui import (
+    PLACEHOLDER_COORDINATE,
+    X11_POINTER_ROOT_X,
+    X11_POINTER_ROOT_Y,
+    X11_POINTER_WINDOW_X,
+    X11_POINTER_WINDOW_Y,
+    X11_POSITION_TARGET_X,
+    X11_POSITION_TARGET_Y,
+)
+from keyswitch.constants.timing import KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS
+from keyswitch.russian_text import SECONDS, quantity
 
 
 def functions(*names: str) -> SimpleNamespace:
@@ -134,10 +126,10 @@ class FakeLibraries:
         self.xtst = functions(*XTST_FUNCTIONS)
         self.xkb = functions("xkb_keysym_to_utf32")
         self.record_callback_type = lambda callback: callback
-        self.x11.XOpenDisplay.side_effect = [CONTROL_DISPLAY, RECORD_DISPLAY]
+        self.x11.XOpenDisplay.side_effect = [X11_CONTROL_DISPLAY, X11_RECORD_DISPLAY]
         self.x11.XkbQueryExtension.return_value = 1
         self.x11.XkbLockGroup.return_value = 1
-        self.x11.XKeysymToKeycode.side_effect = lambda _display, keysym: KEYCODE_BACKSPACE if keysym == BACKSPACE_KEYSYM else KEYCODE_SHIFT
+        self.x11.XKeysymToKeycode.side_effect = lambda _display, keysym: BACKSPACE_KEYCODE if keysym == BACKSPACE_KEYSYM else SHIFT_L_KEYCODE
         self.x11.XkbKeycodeToKeysym.return_value = ord("a")
         self.x11.XkbLookupKeySym.return_value = 0
         self.x11.XKeysymToString.return_value = b"a"
@@ -148,7 +140,7 @@ class FakeLibraries:
         self.x11.XGetWindowProperty.return_value = 1
         self.x11.XQueryTree.return_value = 0
         self.xtst.XRecordQueryVersion.return_value = 1
-        self.xtst.XRecordCreateContext.return_value = FAKE_RECORD_CONTEXT
+        self.xtst.XRecordCreateContext.return_value = X11_FAKE_RECORD_CONTEXT
         self.xtst.XRecordEnableContext.return_value = 1
         self.xtst.XTestQueryExtension.return_value = 1
         self.xtst.XTestFakeKeyEvent.return_value = 1
@@ -167,14 +159,14 @@ def set_ulong(
     ctypes.cast(pointer, ctypes.POINTER(ctypes.c_ulong)).contents.value = value
 
 
-def backend_with(libraries: FakeLibraries | None = None, group_count: int = DEFAULT_GROUP_COUNT) -> tuple[X11Backend, FakeLibraries]:
+def backend_with(libraries: FakeLibraries | None = None, group_count: int = LAYOUT_GROUP_COUNT) -> tuple[X11Backend, FakeLibraries]:
     libraries = libraries or FakeLibraries()
     with patch("keyswitch.x11_backend._Libraries", return_value=libraries):
         backend = X11Backend(group_count)
     return backend, libraries
 
 
-def payload(event_type: int, *, keycode: int = KEYCODE_A, state: int = 0, timestamp: int = FIXTURE_TIMESTAMP) -> bytes:
+def payload(event_type: int, *, keycode: int = A_KEYCODE, state: int = 0, timestamp: int = X11_FIXTURE_EVENT_TIMESTAMP) -> bytes:
     return struct.pack(
         "=BBHIIIIhhhhHBB",
         event_type,
@@ -224,7 +216,7 @@ class LibraryBindingTests(unittest.TestCase):
         fake_x11.XInitThreads.return_value = 1
         libraries = [fake_x11, fake_xtst, fake_xkb, fake_x11, fake_xtst, fake_xkb]
         with (
-            patch("ctypes.util.find_library", side_effect=["X11", "Xtst", "xkb"] * LIBRARY_INIT_COUNT),
+            patch("ctypes.util.find_library", side_effect=["X11", "Xtst", "xkb"] * X11_LIBRARY_INIT_COUNT),
             patch("ctypes.CDLL", side_effect=libraries),
         ):
             first = _Libraries()
@@ -240,8 +232,8 @@ class LibraryBindingTests(unittest.TestCase):
 class BackendOpenProbeTests(unittest.TestCase):
     def test_group_count_and_running_property_are_clamped(self) -> None:
         low, _ = backend_with(group_count=1)
-        high, _ = backend_with(group_count=EXCESSIVE_GROUP_COUNT)
-        self.assertEqual((low.group_count, high.group_count), (DEFAULT_GROUP_COUNT, MAX_XKB_GROUPS))
+        high, _ = backend_with(group_count=X11_EXCESSIVE_GROUP_COUNT)
+        self.assertEqual((low.group_count, high.group_count), (LAYOUT_GROUP_COUNT, MAX_XKB_GROUPS))
         self.assertFalse(low.running)
         low._running.set()
         self.assertTrue(low.running)
@@ -284,17 +276,17 @@ class BackendOpenProbeTests(unittest.TestCase):
             minor: ctypes._CData | ctypes._CArgObject | int,
         ) -> int:
             set_int(major, 1)
-            set_int(minor, XKB_VERSION_MINOR)
+            set_int(minor, X11_XKB_VERSION_MINOR)
             return 1
 
         libraries.x11.XkbQueryExtension.side_effect = query
         with patch.dict(os.environ, {"DISPLAY": ":9"}, clear=True):
             backend._open()
-        self.assertEqual((backend._control, backend._record, backend._xkb_version), (CONTROL_DISPLAY, RECORD_DISPLAY, "1.2"))
+        self.assertEqual((backend._control, backend._record, backend._xkb_version), (X11_CONTROL_DISPLAY, X11_RECORD_DISPLAY, "1.2"))
 
     def test_probe_success_failure_and_temporary_cleanup(self) -> None:
         backend, libraries = backend_with()
-        backend._control, backend._record = CONTROL_DISPLAY, RECORD_DISPLAY
+        backend._control, backend._record = X11_CONTROL_DISPLAY, X11_RECORD_DISPLAY
 
         def record_version(
             _display: object,
@@ -302,7 +294,7 @@ class BackendOpenProbeTests(unittest.TestCase):
             minor: ctypes._CData | ctypes._CArgObject | int,
         ) -> int:
             set_int(major, 1)
-            set_int(minor, RECORD_VERSION_MINOR)
+            set_int(minor, X11_RECORD_VERSION_MINOR)
             return 1
 
         def xtest_version(
@@ -312,8 +304,8 @@ class BackendOpenProbeTests(unittest.TestCase):
             major: ctypes._CData | ctypes._CArgObject | int,
             minor: ctypes._CData | ctypes._CArgObject | int,
         ) -> int:
-            set_int(major, XTEST_VERSION_COMPONENT)
-            set_int(minor, XTEST_VERSION_COMPONENT)
+            set_int(major, X11_XTEST_VERSION_COMPONENT)
+            set_int(minor, X11_XTEST_VERSION_COMPONENT)
             return 1
 
         def group(
@@ -345,7 +337,7 @@ class BackendOpenProbeTests(unittest.TestCase):
 
     def test_probe_reports_missing_xtest(self) -> None:
         backend, libraries = backend_with()
-        backend._control, backend._record = FAKE_CONTROL_HANDLE, FAKE_RECORD_HANDLE
+        backend._control, backend._record = X11_FAKE_CONTROL_HANDLE, X11_FAKE_RECORD_HANDLE
         libraries.xtst.XTestQueryExtension.return_value = 0
         result = backend.probe()
         self.assertFalse(result.available)
@@ -363,7 +355,7 @@ class BackendCaptureTests(unittest.TestCase):
         for failure, message in (("query", "XRecord"), ("range", "диапазон"), ("context", "контекст")):
             with self.subTest(failure=failure):
                 backend, libraries = backend_with()
-                backend._control, backend._record = FAKE_CONTROL_HANDLE, FAKE_RECORD_HANDLE
+                backend._control, backend._record = X11_FAKE_CONTROL_HANDLE, X11_FAKE_RECORD_HANDLE
                 range_value = XRecordRange()
                 libraries.xtst.XRecordAllocRange.return_value = ctypes.pointer(range_value)
                 if failure == "query":
@@ -377,7 +369,7 @@ class BackendCaptureTests(unittest.TestCase):
 
     def test_successful_start_configures_range_callback_and_thread(self) -> None:
         backend, libraries = backend_with()
-        backend._control, backend._record = FAKE_CONTROL_HANDLE, FAKE_RECORD_HANDLE
+        backend._control, backend._record = X11_FAKE_CONTROL_HANDLE, X11_FAKE_RECORD_HANDLE
         range_value = XRecordRange()
         libraries.xtst.XRecordAllocRange.return_value = ctypes.pointer(range_value)
         thread = Mock()
@@ -389,9 +381,9 @@ class BackendCaptureTests(unittest.TestCase):
         thread.start.side_effect = confirm_backend_start
         with patch("keyswitch.x11_backend.threading.Thread", return_value=thread):
             backend.start(Mock())
-        self.assertEqual(range_value.device_events.first, KEY_PRESS)
-        self.assertEqual(range_value.device_events.last, BUTTON_PRESS)  # button presses invalidate the caret
-        self.assertEqual(backend._context, FAKE_RECORD_CONTEXT)
+        self.assertEqual(range_value.device_events.first, X11_KEY_PRESS)
+        self.assertEqual(range_value.device_events.last, X11_BUTTON_PRESS)  # button presses invalidate the caret
+        self.assertEqual(backend._context, X11_FAKE_RECORD_CONTEXT)
         self.assertTrue(backend.running)
         libraries.x11.XSync.assert_called_once_with(1, 0)
         thread.start.assert_called_once_with()
@@ -401,7 +393,7 @@ class BackendCaptureTests(unittest.TestCase):
         opened_libraries.xtst.XRecordAllocRange.return_value = ctypes.pointer(opened_range)
 
         def open_backend() -> None:
-            opened._control, opened._record = FAKE_CONTROL_HANDLE, FAKE_RECORD_HANDLE
+            opened._control, opened._record = X11_FAKE_CONTROL_HANDLE, X11_FAKE_RECORD_HANDLE
 
         opened_thread = Mock()
 
@@ -414,30 +406,32 @@ class BackendCaptureTests(unittest.TestCase):
             "keyswitch.x11_backend.threading.Thread", return_value=opened_thread
         ):
             opened.start(Mock())
-        self.assertEqual((opened._control, opened._record), (FAKE_CONTROL_HANDLE, FAKE_RECORD_HANDLE))
+        self.assertEqual((opened._control, opened._record), (X11_FAKE_CONTROL_HANDLE, X11_FAKE_RECORD_HANDLE))
 
     def test_start_requires_record_ready_confirmation(self) -> None:
         timed_out, timeout_libraries = backend_with()
-        timed_out._control, timed_out._record = FAKE_CONTROL_HANDLE, FAKE_RECORD_HANDLE
+        timed_out._control, timed_out._record = X11_FAKE_CONTROL_HANDLE, X11_FAKE_RECORD_HANDLE
         timeout_range = XRecordRange()
         timeout_libraries.xtst.XRecordAllocRange.return_value = ctypes.pointer(
             timeout_range
         )
         timeout_thread = Mock()
+        no_wait = 0.0
         with (
-            patch.object(x11, "XRECORD_START_TIMEOUT", 0.0),
+            patch.object(x11, "KEYBOARD_LISTENER_START_TIMEOUT_SECONDS", no_wait),
             patch(
                 "keyswitch.x11_backend.threading.Thread",
                 return_value=timeout_thread,
             ),
         ):
-            with self.assertRaisesRegex(X11Error, "5 секунд"):
+            # The message names the wait the backend was given.
+            with self.assertRaisesRegex(X11Error, f"за {quantity(no_wait, SECONDS)}$"):
                 timed_out.start(Mock())
         self.assertIsNone(timed_out._control)
         self.assertIsNone(timed_out._record)
 
         stopped, stopped_libraries = backend_with()
-        stopped._control, stopped._record = FAKE_CONTROL_HANDLE, FAKE_RECORD_HANDLE
+        stopped._control, stopped._record = X11_FAKE_CONTROL_HANDLE, X11_FAKE_RECORD_HANDLE
         stopped_range = XRecordRange()
         stopped_libraries.xtst.XRecordAllocRange.return_value = ctypes.pointer(
             stopped_range
@@ -454,8 +448,8 @@ class BackendCaptureTests(unittest.TestCase):
 
     def test_record_loop_success_zero_status_and_exception(self) -> None:
         backend, libraries = backend_with()
-        backend._record = FAKE_RECORD_HANDLE
-        backend._context = FAKE_RECORD_CONTEXT
+        backend._record = X11_FAKE_RECORD_HANDLE
+        backend._context = X11_FAKE_RECORD_CONTEXT
         backend._record_callback = Mock()
         backend._running.set()
         libraries.xtst.XRecordEnableContext.return_value = 0
@@ -482,7 +476,7 @@ class BackendCaptureTests(unittest.TestCase):
         backend, libraries = backend_with()
         listener = Mock()
         backend._listener = listener
-        event_payload = payload(KEY_PRESS)
+        event_payload = payload(X11_KEY_PRESS)
         buffer = (ctypes.c_ubyte * len(event_payload)).from_buffer_copy(event_payload)
         record = XRecordInterceptData(
             category=0,
@@ -491,7 +485,7 @@ class BackendCaptureTests(unittest.TestCase):
             data_len=len(event_payload) // XRECORD_DATA_UNIT_BYTES,
         )
         pointer = ctypes.pointer(record)
-        decoded = KeyEvent(True, KEYCODE_A, "a", "a", ("a", "ф"), 0, 0, FIXTURE_TIMESTAMP)
+        decoded = KeyEvent(True, A_KEYCODE, "a", "a", ("a", "ф"), 0, 0, X11_FIXTURE_EVENT_TIMESTAMP)
         with patch.object(backend, "_decode_event", return_value=decoded):
             backend._handle_record_data(0, pointer)
         listener.assert_called_once_with(decoded)
@@ -522,21 +516,21 @@ class BackendCaptureTests(unittest.TestCase):
     def test_decode_ignores_non_keyboard_and_normalizes_special_keys(self) -> None:
         backend, _ = backend_with()
         backend._control = 1
-        self.assertIsNone(backend._decode_event(payload(UNRECOGNIZED_EVENT_TYPE)))
+        self.assertIsNone(backend._decode_event(payload(X11_UNRECOGNIZED_EVENT_TYPE)))
         with (
             patch.object(backend, "_character_for_keycode", side_effect=["a", "ф"]),
             patch.object(backend, "_key_name", return_value="Return"),
             patch.object(backend, "_consume_expected", return_value=True),
         ):
-            event = backend._decode_event(payload(KEY_PRESS, state=1 << XKB_GROUP_STATE_SHIFT))
+            event = backend._decode_event(payload(X11_KEY_PRESS, state=1 << XKB_GROUP_STATE_SHIFT))
         assert event is not None
         self.assertEqual((event.character, event.group, event.synthetic), ("\n", 1, True))
         with patch.object(backend, "_character_for_keycode", side_effect=["a", "ф"]), patch.object(backend, "_key_name", return_value="ISO_Left_Tab"):
-            event = backend._decode_event(payload(KEY_RELEASE))
+            event = backend._decode_event(payload(X11_KEY_RELEASE))
         assert event is not None
         self.assertEqual((event.character, event.pressed), ("\t", False))
         with patch.object(backend, "_character_for_keycode", side_effect=["a", "ф"]), patch.object(backend, "_key_name", return_value="a"):
-            event = backend._decode_event(payload(KEY_PRESS))
+            event = backend._decode_event(payload(X11_KEY_PRESS))
         assert event is not None
         self.assertEqual(event.character, "a")
 
@@ -544,37 +538,37 @@ class BackendCaptureTests(unittest.TestCase):
 class BackendTranslationTests(unittest.TestCase):
     def test_character_conversion_control_bounds_caps_and_printability(self) -> None:
         backend, libraries = backend_with()
-        self.assertEqual(backend._character_for_keycode(KEYCODE_A, 0, 0), "")
+        self.assertEqual(backend._character_for_keycode(A_KEYCODE, 0, 0), "")
         backend._control = 1
         libraries.xkb.xkb_keysym_to_utf32.return_value = 0
-        self.assertEqual(backend._character_for_keycode(KEYCODE_A, 0, 0), "")
+        self.assertEqual(backend._character_for_keycode(A_KEYCODE, 0, 0), "")
         libraries.xkb.xkb_keysym_to_utf32.return_value = MAX_UNICODE_CODEPOINT + 1
-        self.assertEqual(backend._character_for_keycode(KEYCODE_A, 0, 0), "")
+        self.assertEqual(backend._character_for_keycode(A_KEYCODE, 0, 0), "")
         libraries.xkb.xkb_keysym_to_utf32.return_value = ord("a")
-        self.assertEqual(backend._character_for_keycode(KEYCODE_A, 0, LOCK_MASK), "A")
+        self.assertEqual(backend._character_for_keycode(A_KEYCODE, 0, LOCK_MASK), "A")
         libraries.xkb.xkb_keysym_to_utf32.return_value = ord("A")
-        self.assertEqual(backend._character_for_keycode(KEYCODE_A, 0, LOCK_MASK | SHIFT_MASK), "a")
+        self.assertEqual(backend._character_for_keycode(A_KEYCODE, 0, LOCK_MASK | SHIFT_MASK), "a")
         libraries.xkb.xkb_keysym_to_utf32.return_value = 1
-        self.assertEqual(backend._character_for_keycode(KEYCODE_A, 0, 0), "")
+        self.assertEqual(backend._character_for_keycode(A_KEYCODE, 0, 0), "")
         libraries.xkb.xkb_keysym_to_utf32.return_value = ord("\n")
-        self.assertEqual(backend._character_for_keycode(KEYCODE_A, 0, 0), "\n")
+        self.assertEqual(backend._character_for_keycode(A_KEYCODE, 0, 0), "\n")
 
     def test_key_name_and_expected_synthetic_queue(self) -> None:
         backend, libraries = backend_with()
-        self.assertEqual(backend._key_name(KEYCODE_A), "")
+        self.assertEqual(backend._key_name(A_KEYCODE), "")
         backend._control = 1
         libraries.x11.XKeysymToString.return_value = None
-        self.assertEqual(backend._key_name(KEYCODE_A), "")
+        self.assertEqual(backend._key_name(A_KEYCODE), "")
         libraries.x11.XKeysymToString.return_value = b"Return"
-        self.assertEqual(backend._key_name(KEYCODE_A), "Return")
+        self.assertEqual(backend._key_name(A_KEYCODE), "Return")
 
-        backend._expected = deque([(True, KEYCODE_A)])
-        backend._expected_deadline = time.monotonic() + EXPECTED_DEADLINE_MARGIN_SECONDS
-        self.assertTrue(backend._consume_expected(True, KEYCODE_A))
-        self.assertFalse(backend._consume_expected(True, KEYCODE_A))
-        backend._expected = deque([(True, OTHER_KEYCODE)])
+        backend._expected = deque([(True, A_KEYCODE)])
+        backend._expected_deadline = time.monotonic() + X11_EXPECTED_DEADLINE_MARGIN_SECONDS
+        self.assertTrue(backend._consume_expected(True, A_KEYCODE))
+        self.assertFalse(backend._consume_expected(True, A_KEYCODE))
+        backend._expected = deque([(True, X11_UNMATCHED_KEYCODE)])
         backend._expected_deadline = time.monotonic() - 1
-        self.assertFalse(backend._consume_expected(True, OTHER_KEYCODE))
+        self.assertFalse(backend._consume_expected(True, X11_UNMATCHED_KEYCODE))
         self.assertEqual(backend._expected, deque())
 
     def test_current_and_switch_group_paths(self) -> None:
@@ -591,11 +585,11 @@ class BackendTranslationTests(unittest.TestCase):
             _device: object,
             state: ctypes._CData | ctypes._CArgObject | int,
         ) -> int:
-            ctypes.cast(state, ctypes.POINTER(XkbStateRec)).contents.group = XKB_REPORTED_GROUP
+            ctypes.cast(state, ctypes.POINTER(XkbStateRec)).contents.group = X11_XKB_REPORTED_GROUP
             return 0
 
         libraries.x11.XkbGetState.side_effect = state_ok
-        self.assertEqual(backend.current_group(), XKB_REPORTED_GROUP)
+        self.assertEqual(backend.current_group(), X11_XKB_REPORTED_GROUP)
         libraries.x11.XkbGetState.side_effect = None
         libraries.x11.XkbGetState.return_value = 1
         self.assertEqual(backend.current_group(), -1)
@@ -610,26 +604,26 @@ class BackendTranslationTests(unittest.TestCase):
         backend, libraries = backend_with()
         backend._control = 1
         libraries.x11.XkbKeycodeToKeysym.return_value = 0
-        self.assertEqual(backend._character_for_keycode(KEYCODE_SPACE, 1, 0), "")
+        self.assertEqual(backend._character_for_keycode(SPACE_KEYCODE, 1, 0), "")
 
         def lookup(_display: object, code: int, state: int, _mods: object,
                    symbol: ctypes._CData | ctypes._CArgObject | int) -> int:
-            self.assertEqual((code, state), (KEYCODE_SPACE, 1 << XKB_GROUP_STATE_SHIFT))
+            self.assertEqual((code, state), (SPACE_KEYCODE, 1 << XKB_GROUP_STATE_SHIFT))
             set_ulong(symbol, ASCII_SPACE_CODEPOINT)
             return 1
 
         libraries.x11.XkbLookupKeySym.side_effect = lookup
         libraries.xkb.xkb_keysym_to_utf32.side_effect = lambda symbol: symbol
-        self.assertEqual(backend._character_for_keycode(KEYCODE_SPACE, 1, 0), " ")
+        self.assertEqual(backend._character_for_keycode(SPACE_KEYCODE, 1, 0), " ")
 
     def test_pointer_anchor_and_popup_window_positioning(self) -> None:
         backend, libraries = backend_with()
         self.assertIsNone(backend.input_anchor())
-        self.assertFalse(backend.position_window(WINDOW_POSITION_TARGET, 1, PLACEHOLDER_COORDINATE))
-        self.assertFalse(backend.restore_window(WINDOW_POSITION_TARGET))
+        self.assertFalse(backend.position_window(X11_POSITION_TARGET_WINDOW, 1, PLACEHOLDER_COORDINATE))
+        self.assertFalse(backend.restore_window(X11_POSITION_TARGET_WINDOW))
         backend._control = 1
-        libraries.x11.XDefaultScreen.return_value = SCREEN_NUMBER
-        libraries.x11.XRootWindow.return_value = WINDOW_ROOT
+        libraries.x11.XDefaultScreen.return_value = X11_SCREEN_NUMBER
+        libraries.x11.XRootWindow.return_value = X11_ROOT_WINDOW
         libraries.x11.XQueryPointer.return_value = 0
         self.assertIsNone(backend.input_anchor())
 
@@ -644,12 +638,12 @@ class BackendTranslationTests(unittest.TestCase):
             window_y: ctypes._CData | ctypes._CArgObject | int,
             mask: ctypes._CData | ctypes._CArgObject | int,
         ) -> int:
-            set_ulong(root_return, WINDOW_ROOT)
-            set_ulong(child_return, POINTER_CHILD_WINDOW)
-            set_int(root_x, POINTER_ROOT_X)
-            set_int(root_y, POINTER_ROOT_Y)
-            set_int(window_x, POINTER_WINDOW_X)
-            set_int(window_y, POINTER_WINDOW_Y)
+            set_ulong(root_return, X11_ROOT_WINDOW)
+            set_ulong(child_return, X11_POINTER_CHILD_WINDOW)
+            set_int(root_x, X11_POINTER_ROOT_X)
+            set_int(root_y, X11_POINTER_ROOT_Y)
+            set_int(window_x, X11_POINTER_WINDOW_X)
+            set_int(window_y, X11_POINTER_WINDOW_Y)
             set_int(mask, 0)
             return 1
 
@@ -658,20 +652,20 @@ class BackendTranslationTests(unittest.TestCase):
             window: ctypes._CData | ctypes._CArgObject | int,
             revert: ctypes._CData | ctypes._CArgObject | int,
         ) -> int:
-            set_ulong(window, WINDOW_OWN)
+            set_ulong(window, X11_OWN_WINDOW)
             set_int(revert, 0)
             return 1
 
         libraries.x11.XQueryPointer.side_effect = query_pointer
         libraries.x11.XGetInputFocus.side_effect = focused
-        self.assertEqual(backend.input_anchor(), ScreenAnchor(POINTER_ROOT_X, POINTER_ROOT_Y, WINDOW_OWN))
+        self.assertEqual(backend.input_anchor(), ScreenAnchor(X11_POINTER_ROOT_X, X11_POINTER_ROOT_Y, X11_OWN_WINDOW))
         self.assertFalse(backend.position_window(0, 1, PLACEHOLDER_COORDINATE))
         self.assertFalse(backend.restore_window(None))
-        self.assertTrue(backend.position_window(WINDOW_POSITION_TARGET, POSITION_TARGET_X, POSITION_TARGET_Y))
-        self.assertTrue(backend.restore_window(WINDOW_OWN))
-        libraries.x11.XMoveWindow.assert_called_once_with(1, WINDOW_POSITION_TARGET, POSITION_TARGET_X, POSITION_TARGET_Y)
-        libraries.x11.XRaiseWindow.assert_called_once_with(1, WINDOW_POSITION_TARGET)
-        libraries.x11.XSetInputFocus.assert_called_once_with(1, WINDOW_OWN, SCREEN_NUMBER, 0)
+        self.assertTrue(backend.position_window(X11_POSITION_TARGET_WINDOW, X11_POSITION_TARGET_X, X11_POSITION_TARGET_Y))
+        self.assertTrue(backend.restore_window(X11_OWN_WINDOW))
+        libraries.x11.XMoveWindow.assert_called_once_with(1, X11_POSITION_TARGET_WINDOW, X11_POSITION_TARGET_X, X11_POSITION_TARGET_Y)
+        libraries.x11.XRaiseWindow.assert_called_once_with(1, X11_POSITION_TARGET_WINDOW)
+        libraries.x11.XSetInputFocus.assert_called_once_with(1, X11_OWN_WINDOW, X11_SCREEN_NUMBER, 0)
         libraries.x11.XFlush.assert_called_with(1)
 
 
@@ -730,7 +724,7 @@ class BackendTranslationTests(unittest.TestCase):
         ) -> int:
             if window not in parents:
                 return 0  # the window is gone
-            set_ulong(root, WINDOW_ROOT)
+            set_ulong(root, X11_ROOT_WINDOW)
             set_ulong(parent, parents[window])
             ctypes.cast(children, ctypes.POINTER(ctypes.c_void_p)).contents.value = (
                 children_pointer
@@ -752,95 +746,95 @@ class BackendTranslationTests(unittest.TestCase):
         libraries.x11.XGetInputFocus.side_effect = focused
 
         # Without the _NET_WM_PID atom no window can be attributed.
-        focus_value = WINDOW_OWN
+        focus_value = X11_OWN_WINDOW
         libraries.x11.XInternAtom.return_value = 0
-        self.assertEqual(backend.focused_window(), FocusInfo(WINDOW_OWN, False))
+        self.assertEqual(backend.focused_window(), FocusInfo(X11_OWN_WINDOW, False))
         libraries.x11.XGetWindowProperty.assert_not_called()
 
         backend._own_windows.clear()
         backend._net_wm_pid_atom = None
-        libraries.x11.XInternAtom.return_value = NET_WM_PID_ATOM
-        owners[WINDOW_OWN] = os.getpid()
-        owners[WINDOW_FOREIGN] = os.getpid() + 1
-        parents[WINDOW_OWN_CHILD] = WINDOW_OWN  # a child window of ours, as toolkits create them
-        parents[WINDOW_OTHER_ROOT] = WINDOW_OTHER_ROOT  # its own parent: a root window
-        self.assertEqual(backend.focused_window(), FocusInfo(WINDOW_OWN, True))
+        libraries.x11.XInternAtom.return_value = X11_NET_WM_PID_ATOM
+        owners[X11_OWN_WINDOW] = os.getpid()
+        owners[X11_FOREIGN_WINDOW] = os.getpid() + 1
+        parents[X11_OWN_CHILD_WINDOW] = X11_OWN_WINDOW  # a child window of ours, as toolkits create them
+        parents[X11_OTHER_ROOT_WINDOW] = X11_OTHER_ROOT_WINDOW  # its own parent: a root window
+        self.assertEqual(backend.focused_window(), FocusInfo(X11_OWN_WINDOW, True))
         libraries.x11.XFree.assert_called()
-        focus_value = WINDOW_OWN_CHILD
-        self.assertEqual(backend.focused_window(), FocusInfo(WINDOW_OWN_CHILD, True))
-        self.assertEqual(backend.window_process_id(WINDOW_OWN_CHILD), os.getpid())
-        focus_value = WINDOW_FOREIGN
-        self.assertEqual(backend.focused_window(), FocusInfo(WINDOW_FOREIGN, False))
+        focus_value = X11_OWN_CHILD_WINDOW
+        self.assertEqual(backend.focused_window(), FocusInfo(X11_OWN_CHILD_WINDOW, True))
+        self.assertEqual(backend.window_process_id(X11_OWN_CHILD_WINDOW), os.getpid())
+        focus_value = X11_FOREIGN_WINDOW
+        self.assertEqual(backend.focused_window(), FocusInfo(X11_FOREIGN_WINDOW, False))
         # A window whose ancestry ends without the property, one that is gone
         # while it is examined, and one that is its own parent.
-        focus_value = WINDOW_LATER
-        self.assertEqual(backend.focused_window(), FocusInfo(WINDOW_LATER, False))
-        focus_value = WINDOW_OTHER_ROOT
-        self.assertEqual(backend.focused_window(), FocusInfo(WINDOW_OTHER_ROOT, False))
+        focus_value = X11_LATER_WINDOW
+        self.assertEqual(backend.focused_window(), FocusInfo(X11_LATER_WINDOW, False))
+        focus_value = X11_OTHER_ROOT_WINDOW
+        self.assertEqual(backend.focused_window(), FocusInfo(X11_OTHER_ROOT_WINDOW, False))
 
         # Verdicts are cached per window id, and the cache is bounded.
         libraries.x11.XGetWindowProperty.reset_mock()
-        focus_value = WINDOW_OWN
-        self.assertEqual(backend.focused_window(), FocusInfo(WINDOW_OWN, True))
+        focus_value = X11_OWN_WINDOW
+        self.assertEqual(backend.focused_window(), FocusInfo(X11_OWN_WINDOW, True))
         libraries.x11.XGetWindowProperty.assert_not_called()
         backend._own_windows.clear()
-        backend._own_windows.update({index: False for index in range(WINDOW_CACHE_TEST_START, WINDOW_CACHE_TEST_START + MAX_TRACKED_OWN_WINDOWS)})
-        self.assertEqual(backend.focused_window(), FocusInfo(WINDOW_OWN, True))
-        self.assertEqual(backend._own_windows, {WINDOW_OWN: True})
+        backend._own_windows.update({index: False for index in range(X11_WINDOW_CACHE_TEST_START, X11_WINDOW_CACHE_TEST_START + MAX_TRACKED_OWN_WINDOWS)})
+        self.assertEqual(backend.focused_window(), FocusInfo(X11_OWN_WINDOW, True))
+        self.assertEqual(backend._own_windows, {X11_OWN_WINDOW: True})
 
         # A property of an unexpected shape is ignored, and so is a window
         # tower deeper than the bounded walk.
         backend._own_windows.clear()
-        property_format = WRONG_PROPERTY_FORMAT_BITS
-        self.assertEqual(backend.focused_window(), FocusInfo(WINDOW_OWN, False))
+        property_format = X11_WRONG_PROPERTY_FORMAT_BITS
+        self.assertEqual(backend.focused_window(), FocusInfo(X11_OWN_WINDOW, False))
         backend._own_windows.clear()
         property_format = CARDINAL_PROPERTY_FORMAT_BITS
         property_count = 0
-        self.assertEqual(backend.focused_window(), FocusInfo(WINDOW_OWN, False))
+        self.assertEqual(backend.focused_window(), FocusInfo(X11_OWN_WINDOW, False))
         backend._own_windows.clear()
         property_count = 1
-        owners.pop(WINDOW_OWN)
-        parents.update({window: window + 1 for window in range(WINDOW_OWN, DEEP_TOWER_END)})
+        owners.pop(X11_OWN_WINDOW)
+        parents.update({window: window + 1 for window in range(X11_OWN_WINDOW, X11_DEEP_TOWER_END_WINDOW)})
         children_pointer = ctypes.addressof(owner)
         libraries.x11.XQueryTree.reset_mock()
-        self.assertEqual(backend.focused_window(), FocusInfo(WINDOW_OWN, False))
+        self.assertEqual(backend.focused_window(), FocusInfo(X11_OWN_WINDOW, False))
         self.assertEqual(libraries.x11.XQueryTree.call_count, MAX_WINDOW_ANCESTOR_DEPTH)
 
 
 class BackendInjectionTests(unittest.TestCase):
     @staticmethod
     def stroke(*, shifted: bool = False) -> KeyEvent:
-        return KeyEvent(True, KEYCODE_A, "a", "A" if shifted else "a", ("a", "ф"), 0, SHIFT_MASK if shifted else 0, 1)
+        return KeyEvent(True, A_KEYCODE, "a", "A" if shifted else "a", ("a", "ф"), 0, SHIFT_MASK if shifted else 0, 1)
 
     def test_requires_open_backend_and_required_keycodes(self) -> None:
         backend, libraries = backend_with()
         with self.assertRaisesRegex(X11Error, "не запущен"):
             backend.inject_correction([], 1, None)
         backend._control = 1
-        libraries.x11.XKeysymToKeycode.side_effect = [0, KEYCODE_SHIFT]
+        libraries.x11.XKeysymToKeycode.side_effect = [0, SHIFT_L_KEYCODE]
         with self.assertRaisesRegex(X11Error, "BackSpace"):
             backend.inject_correction([], 1, None)
 
     def test_success_includes_shift_delete_boundary_and_expected_events(self) -> None:
         backend, libraries = backend_with()
         backend._control = 1
-        boundary = KeyEvent(True, KEYCODE_COMMA, "comma", ",", (",", "б"), 0, SHIFT_MASK, 1)
+        boundary = KeyEvent(True, COMMA_KEYCODE, "comma", ",", (",", "б"), 0, SHIFT_MASK, 1)
         backend.inject_correction([self.stroke(shifted=True)], 1, boundary, source_group=0)
         self.assertTrue(backend._expected)
         self.assertEqual(libraries.xtst.XTestGrabControl.call_args_list[0].args, (1, 1))
         self.assertEqual(libraries.xtst.XTestGrabControl.call_args_list[-1].args, (1, 0))
-        lock_groups = [call.args[XKB_LOCK_GROUP_ARG_INDEX] for call in libraries.x11.XkbLockGroup.call_args_list]
+        lock_groups = [call.args[XKB_LOCK_GROUP_GROUP_ARG_INDEX] for call in libraries.x11.XkbLockGroup.call_args_list]
         self.assertEqual(lock_groups, [1, 0, 1])
         libraries.x11.XSync.assert_called_once_with(1, 0)
 
     def test_empty_strokes_and_same_layout_boundary_use_main_sequence(self) -> None:
         backend, libraries = backend_with()
         backend._control = 1
-        boundary = KeyEvent(True, KEYCODE_SPACE, "space", " ", (" ", " "), 0, 0, 1)
+        boundary = KeyEvent(True, SPACE_KEYCODE, "space", " ", (" ", " "), 0, 0, 1)
         backend.inject_correction([], 1, boundary)
         self.assertEqual(libraries.x11.XkbLockGroup.call_count, 1)
         # One backspace tap plus one (unshifted) boundary tap.
-        self.assertEqual(libraries.xtst.XTestFakeKeyEvent.call_count, DELETE_TAP_EVENTS)
+        self.assertEqual(libraries.xtst.XTestFakeKeyEvent.call_count, X11_DELETE_TAP_EVENTS)
 
     def test_late_keys_are_deleted_and_typed_again_outside_the_expected_echo(self) -> None:
         backend, libraries = backend_with()
@@ -854,11 +848,11 @@ class BackendInjectionTests(unittest.TestCase):
         # taps are not expected echoes, so the engine sees them as typed.
         self.assertEqual(
             libraries.xtst.XTestFakeKeyEvent.call_count,
-            DELETE_TAP_EVENTS + EVENTS_PER_TAP + SHIFTED_TAP_EVENTS,
+            X11_DELETE_TAP_EVENTS + X11_EVENTS_PER_TAP + X11_SHIFTED_TAP_EVENTS,
         )
-        self.assertEqual(len(backend._expected), DELETE_TAP_EVENTS + EVENTS_PER_TAP)
+        self.assertEqual(len(backend._expected), X11_DELETE_TAP_EVENTS + X11_EVENTS_PER_TAP)
 
-        libraries.xtst.XTestFakeKeyEvent.side_effect = [1] * (DELETE_TAP_EVENTS + EVENTS_PER_TAP) + [0]
+        libraries.xtst.XTestFakeKeyEvent.side_effect = [1] * (X11_DELETE_TAP_EVENTS + X11_EVENTS_PER_TAP) + [0]
         with self.assertRaises(X11Error):
             backend.inject_correction([self.stroke()], 1, None, late=[self.stroke()])
         self.assertEqual(backend._expected, deque())
@@ -881,16 +875,16 @@ class BackendInjectionTests(unittest.TestCase):
     def test_target_boundary_fake_event_error_clears_expected(self) -> None:
         backend, libraries = backend_with()
         backend._control = 1
-        boundary = KeyEvent(True, KEYCODE_SPACE, "space", " ", (" ", " "), 0, 0, 1)
+        boundary = KeyEvent(True, SPACE_KEYCODE, "space", " ", (" ", " "), 0, 0, 1)
         libraries.xtst.XTestFakeKeyEvent.side_effect = [1, 1, 0]
-        with self.assertRaisesRegex(X11Error, f"keycode {KEYCODE_SPACE}"):
+        with self.assertRaisesRegex(X11Error, f"keycode {SPACE_KEYCODE}"):
             backend.inject_correction([], 1, boundary)
         self.assertEqual(backend._expected, deque())
         libraries.xtst.XTestGrabControl.assert_called_with(1, 0)
         libraries.x11.XFlush.assert_called_with(1)
 
     def test_preserved_boundary_group_lock_fake_and_restore_errors(self) -> None:
-        boundary = KeyEvent(True, KEYCODE_COMMA, "comma", ",", (",", "б"), 0, 0, 1)
+        boundary = KeyEvent(True, COMMA_KEYCODE, "comma", ",", (",", "б"), 0, 0, 1)
         for mode in ("source_lock", "boundary_fake", "restore"):
             with self.subTest(mode=mode):
                 backend, libraries = backend_with()
@@ -898,7 +892,7 @@ class BackendInjectionTests(unittest.TestCase):
                 if mode == "source_lock":
                     libraries.x11.XkbLockGroup.side_effect = [1, 0]
                 elif mode == "boundary_fake":
-                    libraries.xtst.XTestFakeKeyEvent.side_effect = [1] * (DELETE_TAP_EVENTS + EVENTS_PER_TAP) + [0]
+                    libraries.xtst.XTestFakeKeyEvent.side_effect = [1] * (X11_DELETE_TAP_EVENTS + X11_EVENTS_PER_TAP) + [0]
                 else:
                     libraries.x11.XkbLockGroup.side_effect = [1, 1, 0]
                 with self.assertRaises(X11Error):
@@ -920,7 +914,7 @@ class BackendApplicationLifecycleTests(unittest.TestCase):
             window: ctypes._CData | ctypes._CArgObject | int,
             _revert: object,
         ) -> int:
-            ctypes.cast(window, ctypes.POINTER(ctypes.c_ulong)).contents.value = WINDOW_POSITION_TARGET
+            ctypes.cast(window, ctypes.POINTER(ctypes.c_ulong)).contents.value = X11_POSITION_TARGET_WINDOW
             return 1
 
         def hint(
@@ -947,7 +941,7 @@ class BackendApplicationLifecycleTests(unittest.TestCase):
             window: ctypes._CData | ctypes._CArgObject | int,
             _revert: object,
         ) -> int:
-            ctypes.cast(window, ctypes.POINTER(ctypes.c_ulong)).contents.value = FOCUS_WINDOW
+            ctypes.cast(window, ctypes.POINTER(ctypes.c_ulong)).contents.value = X11_FOCUS_WINDOW
             return 1
 
         hint_calls = 0
@@ -965,7 +959,7 @@ class BackendApplicationLifecycleTests(unittest.TestCase):
             result.res_name = ctypes.cast(name_buffer, ctypes.c_void_p).value
             return 1
 
-        child_storage = (ctypes.c_ulong * 1)(WINDOW_ROOT)
+        child_storage = (ctypes.c_ulong * 1)(X11_ROOT_WINDOW)
 
         def query(
             _display: object,
@@ -975,7 +969,7 @@ class BackendApplicationLifecycleTests(unittest.TestCase):
             children: ctypes._CData | ctypes._CArgObject | int,
             _count: object,
         ) -> int:
-            ctypes.cast(parent, ctypes.POINTER(ctypes.c_ulong)).contents.value = PARENT_WINDOW
+            ctypes.cast(parent, ctypes.POINTER(ctypes.c_ulong)).contents.value = X11_PARENT_WINDOW
             ctypes.cast(children, ctypes.POINTER(ctypes.POINTER(ctypes.c_ulong)))[0] = ctypes.cast(child_storage, ctypes.POINTER(ctypes.c_ulong))
             return 1
 
@@ -983,7 +977,7 @@ class BackendApplicationLifecycleTests(unittest.TestCase):
         libraries.x11.XGetClassHint.side_effect = hint
         libraries.x11.XQueryTree.side_effect = query
         self.assertEqual(backend.active_application(), "resource-only")
-        self.assertGreaterEqual(libraries.x11.XFree.call_count, MIN_FREE_CALLS)
+        self.assertGreaterEqual(libraries.x11.XFree.call_count, X11_MIN_FREE_CALLS)
 
         libraries.x11.XGetClassHint.side_effect = None
         libraries.x11.XGetClassHint.return_value = 0
@@ -1047,18 +1041,18 @@ class BackendApplicationLifecycleTests(unittest.TestCase):
     def test_stop_close_context_manager_and_all_resources(self) -> None:
         backend, libraries = backend_with()
         backend._control = 1
-        backend._record = FAKE_RECORD_HANDLE
-        backend._context = FAKE_RECORD_CONTEXT
+        backend._record = X11_FAKE_RECORD_HANDLE
+        backend._context = X11_FAKE_RECORD_CONTEXT
         range_value = XRecordRange()
         backend._range = ctypes.pointer(range_value)
         backend._running.set()
         thread = Mock()
         backend._thread = thread
         backend.stop()
-        libraries.xtst.XRecordDisableContext.assert_called_once_with(1, FAKE_RECORD_CONTEXT)
-        thread.join.assert_called_once_with(timeout=JOIN_TIMEOUT_SECONDS)
+        libraries.xtst.XRecordDisableContext.assert_called_once_with(1, X11_FAKE_RECORD_CONTEXT)
+        thread.join.assert_called_once_with(timeout=KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS)
         backend.close()
-        libraries.xtst.XRecordFreeContext.assert_called_once_with(1, FAKE_RECORD_CONTEXT)
+        libraries.xtst.XRecordFreeContext.assert_called_once_with(1, X11_FAKE_RECORD_CONTEXT)
         self.assertIsNone(backend._control)
         self.assertIsNone(backend._record)
         self.assertIsNone(backend._range)

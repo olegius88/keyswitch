@@ -14,9 +14,9 @@ if TOOLS_PATH not in sys.path:
 
 import train_intent_model as trainer  # noqa: E402
 import train_intent_model_release as release  # noqa: E402
+from fixture_values.platform import FAKE_TRAINER_RETURN_CODE
 
 class IntentModelReleaseTests(unittest.TestCase):
-    DELEGATE_RETURN_CODE = 7
 
     def test_trainer_normalizes_tuple_metadata_without_changing_json(self) -> None:
         normalized = trainer.json_native_mapping(
@@ -48,8 +48,8 @@ class IntentModelReleaseTests(unittest.TestCase):
                 trainer.json_native_mapping({"label": "v7"})
 
     def test_main_delegates(self) -> None:
-        with patch.object(trainer, "main", return_value=self.DELEGATE_RETURN_CODE):
-            self.assertEqual(release.main(), self.DELEGATE_RETURN_CODE)
+        with patch.object(trainer, "main", return_value=FAKE_TRAINER_RETURN_CODE):
+            self.assertEqual(release.main(), FAKE_TRAINER_RETURN_CODE)
 
     def test_main_propagates_delegate_failure(self) -> None:
         with patch.object(trainer, "main", side_effect=RuntimeError("boom")):

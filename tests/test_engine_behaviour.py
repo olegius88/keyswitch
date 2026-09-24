@@ -11,151 +11,141 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from keyswitch.backend import ALT_MASK, CONTROL_MASK, FocusInfo, KeyDisposition
-from keyswitch.config import (
+from keyswitch.backend import FocusInfo, KeyDisposition
+from keyswitch.constants.keyboard import ALT_MASK, CONTROL_MASK
+from keyswitch.config import SettingsStore
+from keyswitch.constants.settings_defaults import (
+    CONFIDENCE_SETTING_MAX,
+    CONFIDENCE_SETTING_MIN,
+    DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_EARLY_SWITCH_MIN_LENGTH,
     DEFAULT_LEARNING_CONFIRMATIONS,
+    DEFAULT_MINIMUM_WORD_LENGTH,
     DEFAULT_PAUSE_DELAY_SECONDS,
-    SettingsStore,
+    EARLY_SWITCH_MIN_LENGTH_SETTING_MAX,
+    EARLY_SWITCH_MIN_LENGTH_SETTING_MIN,
+    LEARNING_CONFIRMATIONS_SETTING_MAX,
+    MINIMUM_WORD_LENGTH_SETTING_MAX,
+    MINIMUM_WORD_LENGTH_SETTING_MIN,
+    PAUSE_DELAY_SETTING_MAX_SECONDS,
+    PAUSE_DELAY_SETTING_MIN_SECONDS,
 )
-from keyswitch.engine import (
-    EARLY_SWITCH_MIN_LENGTH_CEILING,
-    EARLY_SWITCH_MIN_LENGTH_FLOOR,
-    ENGINE_SWITCH_GRACE_SECONDS,
-    PAUSE_DELAY_MAXIMUM_SECONDS,
-    PAUSE_DELAY_MINIMUM_SECONDS,
-    KeySwitchEngine,
-    CorrectionPlan,
-)
+from keyswitch.engine import KeySwitchEngine, CorrectionPlan
+from keyswitch.constants.timing import ENGINE_SWITCH_GRACE_SECONDS
 from keyswitch.history import HistoryStore
 from keyswitch.indicator import layout_label
 from keyswitch.layouts import LayoutPair
-from keyswitch.settings_diagnostics import _LOGGABLE_STRING_MAX_CHARACTERS
+from keyswitch.constants.text import LOGGED_SETTING_VALUE_MAX_CHARACTERS
 from keyswitch.x11_backend import BackendProbe, KeyEvent
-
-# -- fixture keycodes for the X11 keys these tests press directly -----------
-# The engine dispatches on `KeyEvent.key_name`, not on the numeric keycode, so
-# a keycode here only has to (a) match the real X11 code for well-known keys
-# where a test cares about realism and (b) stay consistent between a press and
-# the release or trigger lookup that must recognize it again.
-BACKSPACE_KEYCODE = 22
-ESCAPE_KEYCODE = 9
-RETURN_KEYCODE = 36
-LEFT_ARROW_KEYCODE = 100
-LEFT_ARROW_KEYCODE_ALT = 113
-CONTROL_L_KEYCODE = 37
-ALT_L_KEYCODE = 64
-UNDO_Z_KEYCODE = 52
-LETTER_A_KEYCODE = 38
-LETTER_X_KEYCODE = 99
-BOUNDARY_KEYCODE = 65  # the physical Space key; boundary_event's default
-DIGIT_TWO_KEYCODE = 11  # the physical "2" key: "2" unshifted, a quote shifted
-PAUSE_KEYCODE = 127  # the physical Pause key; press_pause's default
-TYPE_WORD_START_KEYCODE = 30  # type_word's default starting synthetic keycode
-EARLY_UNDO_KEYCODE = 200  # schedule_undo's keycode, matched by the "z" release
-IMPOSSIBLE_TRIGGER_KEYCODE = 999  # never matches a real release; forces a guard
-REPLACED_TRIGGER_KEYCODE = 128
-EXCLUDED_APP_TRIGGER_KEYCODE = 129
-
-# Beyond a first typed word (which starts at TYPE_WORD_START_KEYCODE), each of
-# these is just the next free synthetic keycode a test reaches for so a second
-# batch of key events does not collide with keys still held from an earlier
-# one. The exact value carries no meaning beyond distinguishing the event.
-KEYCODE_33 = 33
-KEYCODE_34 = 34
-KEYCODE_35 = 35
-KEYCODE_40 = 40
-KEYCODE_41 = 41
-KEYCODE_43 = 43
-KEYCODE_44 = 44
-KEYCODE_50 = 50
-KEYCODE_53 = 53
-KEYCODE_54 = 54
-KEYCODE_55 = 55
-KEYCODE_60 = 60
-KEYCODE_70 = 70
-KEYCODE_80 = 80
-KEYCODE_90 = 90
-
-# `self.engine._pressed`/`_modifier_keycodes` bookkeeping fixtures that are
-# not built from a real KeyEvent, so they get their own names instead of the
-# generic KEYCODE_* pool above.
-STALE_MODIFIER_KEYCODE = 99
-ACTIVELY_PRESSED_KEYCODE = 50
-HELD_MODIFIER_KEYCODE = 60
-
-# -- fixture timestamps -------------------------------------------------
-# KeyEvent.timestamp is never read by the engine; these only satisfy the
-# dataclass field, so a name just needs to say which fixture event it is.
-BOUNDARY_EVENT_TIMESTAMP = 1000
-QUOTE_EVENT_TIMESTAMP = 500
-PLAIN_KEY_TIMESTAMP = 700
-UNDO_CONTROL_DOWN_TIMESTAMP = 3000
-UNDO_ALT_DOWN_TIMESTAMP = 3001
-UNDO_Z_DOWN_TIMESTAMP = 3002
-UNDO_Z_UP_TIMESTAMP = 3003
-UNDO_ALT_UP_TIMESTAMP = 3004
-UNDO_CONTROL_UP_TIMESTAMP = 3005
-PROMPT_ENTER_TIMESTAMP = 4000
-PROMPT_ESCAPE_TIMESTAMP = 4001
-PROMPT_ENTER_RELEASE_TIMESTAMP = 4004
-PROMPT_ENTER_SHORTCUT_TIMESTAMP = 4005
-MODIFIER_SHORTCUT_EVENT_TIMESTAMP = 800
-EXCLUDED_APP_SHORTCUT_EVENT_TIMESTAMP = 900
-
-# -- fixture window ids ---------------------------------------------------
-SECOND_WINDOW_ID = 2
-THIRD_WINDOW_ID = 3
-FOURTH_WINDOW_ID = 4
-OWN_WINDOW_ID = 9
-
-# -- test-pinned expectations, grouped by the test that pins them ---------
-INJECTIONS_AFTER_QUOTE_PAUSE = 2
-SYMBOL_AND_WORD_STROKE_COUNT = 6
-REOPENED_WORD_CHARACTER_COUNT = 6
-INJECTIONS_AFTER_REOPENED_PAUSE = 2
-REPLAYED_STROKE_COUNT = 6
-REVERSED_CORRECTION_STROKE_COUNT = 6
-DIGIT_WORD_STROKE_COUNT = 3
-DISCARDED_WORD_LENGTH = 2
-EXPIRED_PROMPT_OFFSET_SECONDS = 0.1
-PROMPT_DEADLINE_OFFSET_SECONDS = 5
-INJECTIONS_AFTER_REPEATED_REJECTION = 2
-TOGGLE_REPEAT_COUNT = 3
-INJECTIONS_AFTER_TOGGLES = 4
-HELD_KEYS_DURING_INJECTION = 2
-LATE_KEYS_DURING_INJECTION = 2
-PAUSE_DELAY_OVERRIDE_SECONDS = 0.5
-JUST_BEFORE_PAUSE_DELAY_SECONDS = 0.49
-OVERSIZED_PAUSE_DELAY_SECONDS = 50
-UNDERSIZED_PAUSE_DELAY_SECONDS = 0.01
-STALE_PRESS_AGE_SECONDS = 30.0
-FIRST_PRUNE_CHECK_OFFSET_SECONDS = 2.0
-SECOND_PRUNE_CHECK_OFFSET_SECONDS = 2.1
-MODIFIER_DEFERRAL_CHECK_OFFSET_SECONDS = 2.2
-PENDING_CORRECTION_CHECK_OFFSET_SECONDS = 2.3
-SUCCESSFUL_CORRECTION_CHECK_OFFSET_SECONDS = 2.4
-IDLE_MS_LOWER_BOUND = 2000
-EARLY_SWITCH_PREFIX_STROKE_COUNT = 4
-EARLY_SWITCH_WORD_LENGTH = 6
-INJECTIONS_AFTER_LATE_STROKE = 2
-LATE_STROKE_INJECTION_LENGTH = 5
-INJECTIONS_AFTER_FAILED_LATE_STROKE = 3
-EARLY_SWITCH_STALE_AGE_SECONDS = 5.0
-INVALID_SOURCE_GROUP = 5
-OVERSIZED_EARLY_SWITCH_MIN_LENGTH = 40
-INJECTIONS_AFTER_OVERRIDE = 2
-ROLLOVER_INJECTION_STROKE_COUNT = 5
-DROPPED_WORD_LENGTH = 3
-INJECTIONS_AFTER_UNDO_REVERT = 2
-INJECTIONS_AFTER_SECOND_EARLY_SWITCH = 3
-REQUIRED_CONFIRMATIONS = 2
-LEARNING_PROMPT_REQUIRED_CONFIRMATIONS = 5
-THRESHOLD_CONFIRMATIONS = 3
-CONFIDENCE_OVERRIDE = 3.5
-OVERSIZED_HOTKEY_CHARACTERS = 100
-HOTKEY_CHANGE_INDEX = 2
-MINIMUM_LENGTH_OVERRIDE = 5
+from fixture_values.counts import (
+    DIGIT_WORD_STROKE_COUNT,
+    DISCARDED_WORD_LENGTH,
+    DROPPED_WORD_LENGTH,
+    EARLY_SWITCH_PREFIX_STROKE_COUNT,
+    EARLY_SWITCH_WORD_LENGTH,
+    HELD_KEYS_DURING_INJECTION,
+    HOTKEY_CHANGE_INDEX,
+    INJECTIONS_AFTER_FAILED_LATE_STROKE,
+    INJECTIONS_AFTER_LATE_STROKE,
+    INJECTIONS_AFTER_OVERRIDE,
+    INJECTIONS_AFTER_QUOTE_PAUSE,
+    INJECTIONS_AFTER_REOPENED_PAUSE,
+    INJECTIONS_AFTER_REPEATED_REJECTION,
+    INJECTIONS_AFTER_SECOND_EARLY_SWITCH,
+    INJECTIONS_AFTER_TOGGLES,
+    INJECTIONS_AFTER_UNDO_REVERT,
+    LATE_KEYS_DURING_INJECTION,
+    LATE_STROKE_INJECTION_LENGTH,
+    LEARNING_CONFIRMATIONS_REQUIRED,
+    LEARNING_PROMPT_REQUIRED_CONFIRMATIONS,
+    NON_DEFAULT_LEARNING_CONFIRMATIONS,
+    NON_DEFAULT_MINIMUM_WORD_LENGTH,
+    OVERSIZED_EARLY_SWITCH_MIN_LENGTH,
+    OVERSIZED_SETTING_STRING_CHARACTERS,
+    REOPENED_WORD_CHARACTER_COUNT,
+    REPLAYED_STROKE_COUNT,
+    REVERSED_CORRECTION_STROKE_COUNT,
+    ROLLOVER_INJECTION_STROKE_COUNT,
+    SETTING_VALUE_ABOVE_EVERY_RANGE,
+    SETTING_VALUE_BELOW_EVERY_RANGE,
+    SYMBOL_AND_WORD_STROKE_COUNT,
+    TOGGLE_REPEAT_COUNT,
+)
+from fixture_values.clock import (
+    BOUNDARY_EVENT_TIMESTAMP,
+    EARLY_SWITCH_STALE_AGE_SECONDS,
+    EXCLUDED_APP_SHORTCUT_EVENT_TIMESTAMP,
+    EXPIRED_PROMPT_OFFSET_SECONDS,
+    FIRST_PRUNE_CHECK_OFFSET_SECONDS,
+    IDLE_LOWER_BOUND_MS,
+    JUST_BEFORE_NON_DEFAULT_PAUSE_DELAY_SECONDS,
+    MODIFIER_DEFERRAL_CHECK_OFFSET_SECONDS,
+    MODIFIER_SHORTCUT_EVENT_TIMESTAMP,
+    NON_DEFAULT_PAUSE_DELAY_SECONDS,
+    OVERSIZED_PAUSE_DELAY_SECONDS,
+    PENDING_CORRECTION_CHECK_OFFSET_SECONDS,
+    PLAIN_KEY_TIMESTAMP,
+    PROMPT_DEADLINE_OFFSET_SECONDS,
+    PROMPT_ENTER_RELEASE_TIMESTAMP,
+    PROMPT_ENTER_SHORTCUT_TIMESTAMP,
+    PROMPT_ENTER_TIMESTAMP,
+    PROMPT_ESCAPE_TIMESTAMP,
+    QUOTE_EVENT_TIMESTAMP,
+    SECOND_PRUNE_CHECK_OFFSET_SECONDS,
+    STALE_PRESS_AGE_SECONDS,
+    SUCCESSFUL_CORRECTION_CHECK_OFFSET_SECONDS,
+    UNDERSIZED_PAUSE_DELAY_SECONDS,
+    UNDO_CHORD_ALT_DOWN_TIMESTAMP,
+    UNDO_CHORD_ALT_UP_TIMESTAMP,
+    UNDO_CHORD_CONTROL_DOWN_TIMESTAMP,
+    UNDO_CHORD_CONTROL_UP_TIMESTAMP,
+    UNDO_CHORD_Z_DOWN_TIMESTAMP,
+    UNDO_CHORD_Z_UP_TIMESTAMP,
+)
+from fixture_values.keys import (
+    ACTIVELY_PRESSED_KEYCODE,
+    ALT_L_KEYCODE,
+    A_KEYCODE,
+    BACKSPACE_KEYCODE,
+    CONTROL_L_KEYCODE,
+    DIGIT_TWO_KEYCODE,
+    ENGINE_INVALID_SOURCE_GROUP,
+    ESCAPE_KEYCODE,
+    EXCLUDED_APP_TRIGGER_KEYCODE,
+    FIFTH_LETTER_KEYCODE,
+    FIFTH_WORD_KEYCODE_BASE,
+    FOURTH_LETTER_KEYCODE,
+    FOURTH_WINDOW_ID,
+    FOURTH_WORD_KEYCODE_BASE,
+    HELD_MODIFIER_KEYCODE,
+    LETTER_TYPED_DURING_INJECTION_KEYCODE,
+    OWN_WINDOW_ID,
+    PAUSE_KEYCODE,
+    REPLACED_TRIGGER_KEYCODE,
+    RETURN_KEYCODE,
+    SCHEDULED_UNDO_KEYCODE,
+    SECOND_WINDOW_ID,
+    SECOND_WORD_FIFTH_LETTER_KEYCODE,
+    SECOND_WORD_FOURTH_LETTER_KEYCODE,
+    SECOND_WORD_KEYCODE_BASE,
+    SECOND_WORD_SECOND_LETTER_KEYCODE,
+    SEVENTH_WORD_KEYCODE_BASE,
+    SIXTH_LETTER_KEYCODE,
+    SIXTH_WORD_KEYCODE_BASE,
+    SPACE_KEYCODE,
+    STALE_MODIFIER_KEYCODE,
+    SYNTHETIC_KEYCODE_BASE,
+    SYNTHETIC_LEFT_ARROW_KEYCODE,
+    THIRD_WINDOW_ID,
+    THIRD_WORD_FIFTH_LETTER_KEYCODE,
+    THIRD_WORD_FOURTH_LETTER_KEYCODE,
+    THIRD_WORD_KEYCODE_BASE,
+    THIRD_WORD_SIXTH_LETTER_KEYCODE,
+    UNMATCHED_TRIGGER_KEYCODE,
+    X11_LEFT_ARROW_KEYCODE,
+    Z_KEYCODE,
+)
+from fixture_values.scores import NON_DEFAULT_CONFIDENCE_THRESHOLD
 
 
 class FakeBackend:
@@ -230,7 +220,7 @@ def letter_event(character: str, keycode: int, group: int, pair: LayoutPair) -> 
     return KeyEvent(True, keycode, characters[0], character, characters, group, 0, keycode)
 
 
-def boundary_event(pressed: bool, keycode: int = BOUNDARY_KEYCODE, group: int = 0) -> KeyEvent:
+def boundary_event(pressed: bool, keycode: int = SPACE_KEYCODE, group: int = 0) -> KeyEvent:
     return KeyEvent(pressed, keycode, "space", " ", (" ", " "), group, 0, BOUNDARY_EVENT_TIMESTAMP)
 
 
@@ -269,7 +259,7 @@ class EngineBehaviourTests(unittest.TestCase):
         self.temporary.cleanup()
 
     # -- helpers ---------------------------------------------------------
-    def type_word(self, text: str, group: int = 0, start: int = TYPE_WORD_START_KEYCODE) -> None:
+    def type_word(self, text: str, group: int = 0, start: int = SYNTHETIC_KEYCODE_BASE) -> None:
         for index, character in enumerate(text, start):
             event = letter_event(character, index, group, self.pair)
             self.engine._handle(event)
@@ -317,12 +307,12 @@ class EngineBehaviourTests(unittest.TestCase):
         control, alt = CONTROL_MASK, ALT_MASK
         group = self.engine.snapshot.current_group
         for event in (
-            KeyEvent(True, CONTROL_L_KEYCODE, "Control_L", "", ("", ""), group, 0, UNDO_CONTROL_DOWN_TIMESTAMP),
-            KeyEvent(True, ALT_L_KEYCODE, "Alt_L", "", ("", ""), group, control, UNDO_ALT_DOWN_TIMESTAMP),
-            KeyEvent(True, UNDO_Z_KEYCODE, "z", "", ("z", "я"), group, control | alt, UNDO_Z_DOWN_TIMESTAMP),
-            KeyEvent(False, UNDO_Z_KEYCODE, "z", "", ("z", "я"), group, control | alt, UNDO_Z_UP_TIMESTAMP),
-            KeyEvent(False, ALT_L_KEYCODE, "Alt_L", "", ("", ""), group, control | alt, UNDO_ALT_UP_TIMESTAMP),
-            KeyEvent(False, CONTROL_L_KEYCODE, "Control_L", "", ("", ""), group, control, UNDO_CONTROL_UP_TIMESTAMP),
+            KeyEvent(True, CONTROL_L_KEYCODE, "Control_L", "", ("", ""), group, 0, UNDO_CHORD_CONTROL_DOWN_TIMESTAMP),
+            KeyEvent(True, ALT_L_KEYCODE, "Alt_L", "", ("", ""), group, control, UNDO_CHORD_ALT_DOWN_TIMESTAMP),
+            KeyEvent(True, Z_KEYCODE, "z", "", ("z", "я"), group, control | alt, UNDO_CHORD_Z_DOWN_TIMESTAMP),
+            KeyEvent(False, Z_KEYCODE, "z", "", ("z", "я"), group, control | alt, UNDO_CHORD_Z_UP_TIMESTAMP),
+            KeyEvent(False, ALT_L_KEYCODE, "Alt_L", "", ("", ""), group, control | alt, UNDO_CHORD_ALT_UP_TIMESTAMP),
+            KeyEvent(False, CONTROL_L_KEYCODE, "Control_L", "", ("", ""), group, control, UNDO_CHORD_CONTROL_UP_TIMESTAMP),
         ):
             self.engine._handle(event)
 
@@ -434,7 +424,7 @@ class EngineBehaviourTests(unittest.TestCase):
 
         self.engine._manual_layout_group = None
         self.correct_hello()
-        self.engine._handle(plain_key("Left", LEFT_ARROW_KEYCODE, 1))
+        self.engine._handle(plain_key("Left", SYNTHETIC_LEFT_ARROW_KEYCODE, 1))
         self.assertTrue(self.engine._last_committed_stale)
         # A moved caret leaves nothing to reopen: the Backspace lands elsewhere.
         self.engine._handle(plain_key("BackSpace", BACKSPACE_KEYCODE, 1))
@@ -469,7 +459,7 @@ class EngineBehaviourTests(unittest.TestCase):
 
         def typing_user(*arguments: object, **keywords: object) -> int:
             # The user keeps typing while the correction is being injected.
-            self.engine.enqueue(letter_event("x", LETTER_X_KEYCODE, 0, self.pair))
+            self.engine.enqueue(letter_event("x", LETTER_TYPED_DURING_INJECTION_KEYCODE, 0, self.pair))
             return inject(*arguments, **keywords)  # type: ignore[arg-type]
 
         with (
@@ -489,7 +479,7 @@ class EngineBehaviourTests(unittest.TestCase):
 
         # A failed injection reports the same count.
         self.backend.group = 0
-        self.type_word("ghbdtn", start=KEYCODE_60)
+        self.type_word("ghbdtn", start=FOURTH_WORD_KEYCODE_BASE)
         with (
             patch.object(
                 self.backend, "inject_correction", side_effect=RuntimeError("boom")
@@ -510,7 +500,7 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertIsNotNone(self.engine._pending)
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.engine._handle(
-                KeyEvent(True, LETTER_A_KEYCODE, "a", "a", ("a", "ф"), 0, CONTROL_MASK, MODIFIER_SHORTCUT_EVENT_TIMESTAMP)
+                KeyEvent(True, A_KEYCODE, "a", "a", ("a", "ф"), 0, CONTROL_MASK, MODIFIER_SHORTCUT_EVENT_TIMESTAMP)
             )
         self.assertIsNone(self.engine._pending)
         self.assertEqual(self.backend.injections, [])
@@ -526,7 +516,7 @@ class EngineBehaviourTests(unittest.TestCase):
         # A second Pause replaces an unfinished plan; the first one says so.
         self.type_word("ghbdtn")
         self.engine._schedule_manual_conversion(PAUSE_KEYCODE)
-        self.type_word("ghbdtn", start=KEYCODE_60)
+        self.type_word("ghbdtn", start=FOURTH_WORD_KEYCODE_BASE)
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.engine._schedule_manual_conversion(REPLACED_TRIGGER_KEYCODE)
         self.assertEqual(
@@ -540,11 +530,11 @@ class EngineBehaviourTests(unittest.TestCase):
 
         # Text of an excluded application never reaches the log.
         self.settings.set("exclusions.applications", ["TestEditor"])
-        self.type_word("ghbdtn", start=KEYCODE_90)
+        self.type_word("ghbdtn", start=SEVENTH_WORD_KEYCODE_BASE)
         self.engine._schedule_manual_conversion(EXCLUDED_APP_TRIGGER_KEYCODE)
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.engine._handle(
-                KeyEvent(True, LETTER_A_KEYCODE, "a", "a", ("a", "ф"), 0, CONTROL_MASK, EXCLUDED_APP_SHORTCUT_EVENT_TIMESTAMP)
+                KeyEvent(True, A_KEYCODE, "a", "a", ("a", "ф"), 0, CONTROL_MASK, EXCLUDED_APP_SHORTCUT_EVENT_TIMESTAMP)
             )
         redacted = next(
             event
@@ -621,7 +611,7 @@ class EngineBehaviourTests(unittest.TestCase):
         self.type_word("зь", group=1)
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.engine._handle(
-                KeyEvent(True, LETTER_A_KEYCODE, "a", "a", ("a", "ф"), 1, CONTROL_MASK, MODIFIER_SHORTCUT_EVENT_TIMESTAMP)
+                KeyEvent(True, A_KEYCODE, "a", "a", ("a", "ф"), 1, CONTROL_MASK, MODIFIER_SHORTCUT_EVENT_TIMESTAMP)
             )
         self.assertEqual(self.engine._strokes, [])
         discarded = next(
@@ -636,7 +626,7 @@ class EngineBehaviourTests(unittest.TestCase):
         # Navigation keys still drop the word, and say so.
         self.type_word("зь", group=1)
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            self.engine._handle(plain_key("Left", LEFT_ARROW_KEYCODE, 1))
+            self.engine._handle(plain_key("Left", SYNTHETIC_LEFT_ARROW_KEYCODE, 1))
         self.assertEqual(
             next(
                 event["reason"]
@@ -656,7 +646,7 @@ class EngineBehaviourTests(unittest.TestCase):
         self.settings.set("detection.correct_on_enter", False)
         enter = KeyEvent(True, RETURN_KEYCODE, "Return", "\r", ("\r", "\r"), 1, 0, PROMPT_ENTER_TIMESTAMP)
         escape = KeyEvent(True, ESCAPE_KEYCODE, "Escape", "", ("", ""), 1, 0, PROMPT_ESCAPE_TIMESTAMP)
-        letter = letter_event("a", LETTER_A_KEYCODE, 1, self.pair)
+        letter = letter_event("a", A_KEYCODE, 1, self.pair)
 
         # No prompt: every key belongs to the application.
         self.assertFalse(self.engine.consumes_key(enter))
@@ -753,10 +743,10 @@ class EngineBehaviourTests(unittest.TestCase):
     def test_a_boundary_that_takes_over_an_early_plan_says_so(self) -> None:
         self.settings.set("detection.early_switch", True)
         self.type_word("ghb")
-        self.engine._handle(letter_event("d", KEYCODE_33, 0, self.pair))
+        self.engine._handle(letter_event("d", FOURTH_LETTER_KEYCODE, 0, self.pair))
         assert self.engine._pending is not None
         self.assertEqual(self.engine._pending.mode, "early")
-        for index, character in enumerate("tn", start=KEYCODE_34):
+        for index, character in enumerate("tn", start=FIFTH_LETTER_KEYCODE):
             self.engine._handle(letter_event(character, index, 0, self.pair))
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.engine._handle(boundary_event(True, group=0))
@@ -773,12 +763,12 @@ class EngineBehaviourTests(unittest.TestCase):
         self.engine._handle(boundary_event(False, group=0))
         self.release_keys()
         self.assertEqual(len(self.backend.injections), 1)
-        self.type_word("руд", group=1, start=KEYCODE_40)
-        self.engine._handle(letter_event("д", KEYCODE_43, 1, self.pair))
+        self.type_word("руд", group=1, start=SECOND_WORD_KEYCODE_BASE)
+        self.engine._handle(letter_event("д", SECOND_WORD_FOURTH_LETTER_KEYCODE, 1, self.pair))
         assert self.engine._pending is not None
         self.assertEqual(self.engine._pending.mode, "early")
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            self.engine._schedule_undo(UNDO_Z_KEYCODE)
+            self.engine._schedule_undo(Z_KEYCODE)
         self.assertEqual(
             next(
                 e["reason"] for e in self.technical_events(logs.output)
@@ -794,14 +784,14 @@ class EngineBehaviourTests(unittest.TestCase):
         self.engine._handle(boundary_event(True, group=0))
         assert self.engine._pending is not None
         # Rollover: the next word starts before the space is released.
-        rollover = letter_event("d", KEYCODE_40, 0, self.pair)
+        rollover = letter_event("d", SECOND_WORD_KEYCODE_BASE, 0, self.pair)
         self.engine._handle(rollover)
         self.engine._handle(replace(rollover, pressed=False))
         # Queued: more keys arrived before the engine got to them.
-        queued = letter_event("t", KEYCODE_41, 0, self.pair)
+        queued = letter_event("t", SECOND_WORD_SECOND_LETTER_KEYCODE, 0, self.pair)
         self.engine._events.put_nowait(queued)
         self.engine._events.put_nowait(
-            KeyEvent(False, KEYCODE_41, "t", "t", ("t", "е"), 0, 0, KEYCODE_41)
+            KeyEvent(False, SECOND_WORD_SECOND_LETTER_KEYCODE, "t", "t", ("t", "е"), 0, 0, SECOND_WORD_SECOND_LETTER_KEYCODE)
         )
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.engine._handle(boundary_event(False, group=0))
@@ -822,10 +812,10 @@ class EngineBehaviourTests(unittest.TestCase):
         self.settings.set("detection.respect_manual_layout", False)
         self.type_word("ghbdtn")
         self.engine._handle(boundary_event(True, group=0))
-        rollover = letter_event("d", KEYCODE_40, 0, self.pair)
+        rollover = letter_event("d", SECOND_WORD_KEYCODE_BASE, 0, self.pair)
         self.engine._handle(rollover)
         self.engine._handle(replace(rollover, pressed=False))
-        enter = KeyEvent(True, RETURN_KEYCODE, "Return", "\r", ("\r", "\r"), 0, 0, KEYCODE_41)
+        enter = KeyEvent(True, RETURN_KEYCODE, "Return", "\r", ("\r", "\r"), 0, 0, SECOND_WORD_SECOND_LETTER_KEYCODE)
         self.engine._events.put_nowait(enter)
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.engine._handle(boundary_event(False, group=0))
@@ -840,10 +830,10 @@ class EngineBehaviourTests(unittest.TestCase):
         # A failed injection reports the late keys it was given.
         self.backend.group = 0
         self.engine._strokes = []
-        self.type_word("ghbdtn", start=KEYCODE_60)
+        self.type_word("ghbdtn", start=FOURTH_WORD_KEYCODE_BASE)
         self.engine._handle(boundary_event(True, group=0))
-        self.engine._handle(letter_event("d", KEYCODE_70, 0, self.pair))
-        self.engine._handle(replace(letter_event("d", KEYCODE_70, 0, self.pair), pressed=False))
+        self.engine._handle(letter_event("d", FIFTH_WORD_KEYCODE_BASE, 0, self.pair))
+        self.engine._handle(replace(letter_event("d", FIFTH_WORD_KEYCODE_BASE, 0, self.pair), pressed=False))
         with (
             patch.object(self.backend, "inject_correction", side_effect=RuntimeError("boom")),
             self.assertLogs("keyswitch.engine", level="INFO") as logs,
@@ -855,7 +845,7 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertEqual(failed["late_keys"], 1)
 
     def test_layout_dependent_symbols_only_are_remembered(self) -> None:
-        dot = KeyEvent(True, KEYCODE_60, "period", ".", (".", "."), 0, 0, 1)
+        dot = KeyEvent(True, FOURTH_WORD_KEYCODE_BASE, "period", ".", (".", "."), 0, 0, 1)
         self.assertFalse(self.engine._layout_dependent(dot))
         self.engine._handle(dot)
         self.assertEqual(self.engine._symbol_strokes, [])
@@ -864,31 +854,50 @@ class EngineBehaviourTests(unittest.TestCase):
         self.press_space(0)
         self.assertEqual(self.engine._symbol_strokes, [])
         self.engine._handle(quote_event(group=0))
-        self.engine._handle(plain_key("Left", LEFT_ARROW_KEYCODE, 0))
+        self.engine._handle(plain_key("Left", SYNTHETIC_LEFT_ARROW_KEYCODE, 0))
         self.assertEqual(self.engine._symbol_strokes, [])
+
+    def test_numeric_settings_are_held_to_the_ranges_the_windows_offer(self) -> None:
+        """A value edited into the settings file by hand acts as the nearest one the windows allow."""
+        cases = (
+            ("detection.confidence", self.engine._confidence_threshold,
+             DEFAULT_CONFIDENCE_THRESHOLD, CONFIDENCE_SETTING_MIN, CONFIDENCE_SETTING_MAX),
+            ("detection.minimum_length", self.engine._minimum_word_length,
+             DEFAULT_MINIMUM_WORD_LENGTH, MINIMUM_WORD_LENGTH_SETTING_MIN, MINIMUM_WORD_LENGTH_SETTING_MAX),
+            ("detection.learning_confirmations", self.engine._learning_confirmations,
+             DEFAULT_LEARNING_CONFIRMATIONS, 1, LEARNING_CONFIRMATIONS_SETTING_MAX),
+        )
+        for path, read, default, minimum, maximum in cases:
+            with self.subTest(setting=path):
+                self.settings.set(path, "many")
+                self.assertEqual(read(), default)
+                self.settings.set(path, SETTING_VALUE_ABOVE_EVERY_RANGE)
+                self.assertEqual(read(), maximum)
+                self.settings.set(path, SETTING_VALUE_BELOW_EVERY_RANGE)
+                self.assertEqual(read(), minimum)
 
     # -- pause timing ----------------------------------------------------
     def test_pause_delay_setting_controls_the_timer(self) -> None:
-        self.settings.set("detection.pause_delay_seconds", PAUSE_DELAY_OVERRIDE_SECONDS)
-        self.assertEqual(self.engine._loop_timeout(), PAUSE_DELAY_OVERRIDE_SECONDS)
+        self.settings.set("detection.pause_delay_seconds", NON_DEFAULT_PAUSE_DELAY_SECONDS)
+        self.assertEqual(self.engine._loop_timeout(), NON_DEFAULT_PAUSE_DELAY_SECONDS)
         self.type_word("ghbdtn")
         last_input = self.engine._last_word_input_at
         assert last_input is not None
         timeout = self.engine._loop_timeout()
         self.assertGreater(timeout, 0.0)
-        self.assertLessEqual(timeout, PAUSE_DELAY_OVERRIDE_SECONDS)
-        self.engine._maybe_correct_after_pause(now=last_input + JUST_BEFORE_PAUSE_DELAY_SECONDS)
+        self.assertLessEqual(timeout, NON_DEFAULT_PAUSE_DELAY_SECONDS)
+        self.engine._maybe_correct_after_pause(now=last_input + JUST_BEFORE_NON_DEFAULT_PAUSE_DELAY_SECONDS)
         self.assertEqual(self.backend.injections, [])
-        self.engine._maybe_correct_after_pause(now=last_input + PAUSE_DELAY_OVERRIDE_SECONDS)
+        self.engine._maybe_correct_after_pause(now=last_input + NON_DEFAULT_PAUSE_DELAY_SECONDS)
         self.assertEqual(len(self.backend.injections), 1)
-        self.assertEqual(self.engine._loop_timeout(), PAUSE_DELAY_OVERRIDE_SECONDS)
+        self.assertEqual(self.engine._loop_timeout(), NON_DEFAULT_PAUSE_DELAY_SECONDS)
 
         self.settings.set("detection.pause_delay_seconds", "soon")
         self.assertEqual(self.engine._pause_delay(), DEFAULT_PAUSE_DELAY_SECONDS)
         self.settings.set("detection.pause_delay_seconds", OVERSIZED_PAUSE_DELAY_SECONDS)
-        self.assertEqual(self.engine._pause_delay(), PAUSE_DELAY_MAXIMUM_SECONDS)
+        self.assertEqual(self.engine._pause_delay(), PAUSE_DELAY_SETTING_MAX_SECONDS)
         self.settings.set("detection.pause_delay_seconds", UNDERSIZED_PAUSE_DELAY_SECONDS)
-        self.assertEqual(self.engine._pause_delay(), PAUSE_DELAY_MINIMUM_SECONDS)
+        self.assertEqual(self.engine._pause_delay(), PAUSE_DELAY_SETTING_MIN_SECONDS)
 
     def test_stale_presses_are_pruned_and_deferrals_logged_once(self) -> None:
         self.type_word("ghbdtn")
@@ -908,7 +917,7 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertEqual(events[0]["keycodes"], [STALE_MODIFIER_KEYCODE])
         self.assertEqual(events[1]["reason"], "keys_pressed")
         self.assertEqual(events[1]["pressed_keycodes"], [ACTIVELY_PRESSED_KEYCODE])
-        self.assertGreaterEqual(int(str(events[1]["idle_ms"])), IDLE_MS_LOWER_BOUND)
+        self.assertGreaterEqual(int(str(events[1]["idle_ms"])), IDLE_LOWER_BOUND_MS)
         self.assertEqual(self.engine._modifier_keycodes, set())
         self.assertEqual(self.backend.injections, [])
 
@@ -933,7 +942,7 @@ class EngineBehaviourTests(unittest.TestCase):
             event for event in self.technical_events(logs.output) if event["event"] == "word_evaluation"
         )
         self.assertEqual(evaluation["trigger"], "pause")
-        self.assertGreaterEqual(int(str(evaluation["idle_ms"])), IDLE_MS_LOWER_BOUND)
+        self.assertGreaterEqual(int(str(evaluation["idle_ms"])), IDLE_LOWER_BOUND_MS)
         self.assertEqual(evaluation["source_group"], 0)
 
     # -- early switching -------------------------------------------------
@@ -960,7 +969,7 @@ class EngineBehaviourTests(unittest.TestCase):
         applied = next(event for event in events if event["event"] == "correction_applied")
         self.assertEqual(applied["mode"], "early")
 
-        self.type_word("ет", group=1, start=KEYCODE_34)
+        self.type_word("ет", group=1, start=FIFTH_LETTER_KEYCODE)
         self.assertEqual(self.engine.snapshot.current_word, "привет")
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.press_space(1)
@@ -981,8 +990,8 @@ class EngineBehaviourTests(unittest.TestCase):
         evaluation = next(event for event in events if event["event"] == "word_evaluation")
         self.assertEqual(evaluation["early_switch_origin"], 0)
 
-        self.engine._schedule_undo(EARLY_UNDO_KEYCODE)
-        self.engine._handle(plain_key("z", EARLY_UNDO_KEYCODE, 1, pressed=False))
+        self.engine._schedule_undo(SCHEDULED_UNDO_KEYCODE)
+        self.engine._handle(plain_key("z", SCHEDULED_UNDO_KEYCODE, 1, pressed=False))
         strokes, target, boundary = self.backend.injections[-1]
         self.assertEqual((len(strokes), target), (EARLY_SWITCH_WORD_LENGTH, 0))
         self.assertIsNotNone(boundary)
@@ -992,7 +1001,7 @@ class EngineBehaviourTests(unittest.TestCase):
         self.settings.set("detection.respect_manual_layout", False)
         self.settings.set("detection.early_switch", True)
         self.type_word("ghbd")
-        late = letter_event("t", KEYCODE_34, 0, self.pair)
+        late = letter_event("t", FIFTH_LETTER_KEYCODE, 0, self.pair)
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.engine._handle(late)
         self.assertEqual(len(self.backend.injections), 1)
@@ -1009,7 +1018,7 @@ class EngineBehaviourTests(unittest.TestCase):
 
         with patch.object(self.backend, "inject_correction", side_effect=RuntimeError("xtest")):
             with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-                event = letter_event("n", KEYCODE_35, 0, self.pair)
+                event = letter_event("n", SIXTH_LETTER_KEYCODE, 0, self.pair)
                 self.engine._handle(event)
                 self.engine._handle(replace(event, pressed=False))
         failed = next(
@@ -1022,10 +1031,10 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertIsNone(self.engine._early_switch_origin)
 
         self.engine._clear_word()
-        self.type_word("ghbd", start=KEYCODE_40)
+        self.type_word("ghbd", start=SECOND_WORD_KEYCODE_BASE)
         self.assertEqual(len(self.backend.injections), INJECTIONS_AFTER_FAILED_LATE_STROKE)
         self.engine._early_switch_at = time.monotonic() - EARLY_SWITCH_STALE_AGE_SECONDS
-        self.engine._handle(letter_event("t", KEYCODE_44, 0, self.pair))
+        self.engine._handle(letter_event("t", SECOND_WORD_FIFTH_LETTER_KEYCODE, 0, self.pair))
         self.assertEqual(self.engine.snapshot.current_word, "t")
 
     def test_early_switch_guards(self) -> None:
@@ -1058,13 +1067,13 @@ class EngineBehaviourTests(unittest.TestCase):
 
         self.engine._clear_word()
         self.engine._pending = CorrectionPlan((), None, 0, 1, "", "", 0.0, "", False)
-        self.engine._pending_trigger_keycode = IMPOSSIBLE_TRIGGER_KEYCODE
+        self.engine._pending_trigger_keycode = UNMATCHED_TRIGGER_KEYCODE
         self.type_word("ghbd")
         self.assertEqual(self.backend.injections, [])
         self.engine._clear_word()
 
-        self.engine._strokes = [letter_event(character, TYPE_WORD_START_KEYCODE, 0, self.pair) for character in "ghbd"]
-        self.engine._source_group = INVALID_SOURCE_GROUP
+        self.engine._strokes = [letter_event(character, SYNTHETIC_KEYCODE_BASE, 0, self.pair) for character in "ghbd"]
+        self.engine._source_group = ENGINE_INVALID_SOURCE_GROUP
         self.engine._maybe_early_switch()
         self.assertEqual(self.backend.injections, [])
         self.engine._clear_word()
@@ -1081,22 +1090,22 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertEqual(self.backend.injections, [])
         self.press_space(0)
 
-        self.settings.set("detection.early_switch_min_length", EARLY_SWITCH_MIN_LENGTH_FLOOR)
-        self.type_word("ghb", start=KEYCODE_50)
+        self.settings.set("detection.early_switch_min_length", EARLY_SWITCH_MIN_LENGTH_SETTING_MIN)
+        self.type_word("ghb", start=THIRD_WORD_KEYCODE_BASE)
         self.assertEqual(len(self.backend.injections), 1)
         self.settings.set("detection.early_switch_min_length", "four")
         self.assertEqual(self.engine._early_switch_policy().minimum_length, DEFAULT_EARLY_SWITCH_MIN_LENGTH)
         self.settings.set("detection.early_switch_min_length", 1)
-        self.assertEqual(self.engine._early_switch_policy().minimum_length, EARLY_SWITCH_MIN_LENGTH_FLOOR)
+        self.assertEqual(self.engine._early_switch_policy().minimum_length, EARLY_SWITCH_MIN_LENGTH_SETTING_MIN)
         self.settings.set("detection.early_switch_min_length", OVERSIZED_EARLY_SWITCH_MIN_LENGTH)
-        self.assertEqual(self.engine._early_switch_policy().minimum_length, EARLY_SWITCH_MIN_LENGTH_CEILING)
+        self.assertEqual(self.engine._early_switch_policy().minimum_length, EARLY_SWITCH_MIN_LENGTH_SETTING_MAX)
 
     def test_boundary_detector_can_still_override_an_early_switch(self) -> None:
         self.settings.set("detection.early_switch", True)
         for _ in range(DEFAULT_LEARNING_CONFIRMATIONS):
             self.engine.learning.record_manual(1, "привет", 0)
         self.type_word("ghbd")
-        self.type_word("ет", group=1, start=KEYCODE_34)
+        self.type_word("ет", group=1, start=FIFTH_LETTER_KEYCODE)
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.press_space(1)
         self.assertEqual(len(self.backend.injections), INJECTIONS_AFTER_OVERRIDE)
@@ -1110,7 +1119,7 @@ class EngineBehaviourTests(unittest.TestCase):
         self.settings.set("detection.early_switch", True)
         self.settings.set("general.keep_history", False)
         self.type_word("ghbd")
-        self.type_word("ет", group=1, start=KEYCODE_34)
+        self.type_word("ет", group=1, start=FIFTH_LETTER_KEYCODE)
         self.press_space(1)
         self.assertEqual(self.engine.snapshot.correction_count, 1)
         self.assertEqual(self.history.read(), [])
@@ -1118,7 +1127,7 @@ class EngineBehaviourTests(unittest.TestCase):
     def test_early_switch_waits_for_the_key_release_and_absorbs_rollover(self) -> None:
         self.settings.set("detection.early_switch", True)
         self.type_word("ghb")
-        held = letter_event("d", KEYCODE_33, 0, self.pair)
+        held = letter_event("d", FOURTH_LETTER_KEYCODE, 0, self.pair)
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.engine._handle(held)
         self.assertEqual(self.backend.injections, [])
@@ -1126,10 +1135,10 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertEqual(self.engine._pending.mode, "early")
         names = [event["event"] for event in self.technical_events(logs.output)]
         self.assertIn("early_switch_scheduled", names)
-        rollover = letter_event("t", KEYCODE_34, 0, self.pair)
+        rollover = letter_event("t", FIFTH_LETTER_KEYCODE, 0, self.pair)
         self.engine._handle(rollover)
         self.assertEqual(self.backend.injections, [])
-        self.engine._handle(KeyEvent(False, KEYCODE_33, "d", "d", held.characters, 0, 0, KEYCODE_40))
+        self.engine._handle(KeyEvent(False, FOURTH_LETTER_KEYCODE, "d", "d", held.characters, 0, 0, SECOND_WORD_KEYCODE_BASE))
         self.assertEqual(self.backend.injections, [])
         self.engine._handle(replace(rollover, pressed=False))
         self.assertEqual(len(self.backend.injections), 1)
@@ -1138,17 +1147,17 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertEqual(self.engine.snapshot.current_word, "приве")
         self.assertEqual(self.engine._source_group, 1)
         self.assertEqual(self.engine._early_switch_origin, 0)
-        self.engine._handle(KeyEvent(False, KEYCODE_34, "t", "t", rollover.characters, 1, 0, KEYCODE_41))
+        self.engine._handle(KeyEvent(False, FIFTH_LETTER_KEYCODE, "t", "t", rollover.characters, 1, 0, SECOND_WORD_SECOND_LETTER_KEYCODE))
         self.assertEqual(len(self.backend.injections), 1)
 
     def test_early_switch_is_dropped_when_the_word_changes_before_release(self) -> None:
         self.settings.set("detection.early_switch", True)
         self.type_word("ghb")
-        held = letter_event("d", KEYCODE_33, 0, self.pair)
+        held = letter_event("d", FOURTH_LETTER_KEYCODE, 0, self.pair)
         self.engine._handle(held)
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.engine._handle(plain_key("BackSpace", BACKSPACE_KEYCODE, 0))
-            self.engine._handle(KeyEvent(False, KEYCODE_33, "d", "d", held.characters, 0, 0, KEYCODE_40))
+            self.engine._handle(KeyEvent(False, FOURTH_LETTER_KEYCODE, "d", "d", held.characters, 0, 0, SECOND_WORD_KEYCODE_BASE))
         self.assertEqual(self.backend.injections, [])
         self.assertIsNone(self.engine._pending)
         self.assertIsNone(self.engine._early_switch_origin)
@@ -1158,18 +1167,18 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertEqual(dropped["reason"], "backspace")
 
         self.engine._clear_word()
-        self.type_word("ghb", start=KEYCODE_50)
-        held = letter_event("d", KEYCODE_53, 0, self.pair)
+        self.type_word("ghb", start=THIRD_WORD_KEYCODE_BASE)
+        held = letter_event("d", THIRD_WORD_FOURTH_LETTER_KEYCODE, 0, self.pair)
         self.engine._handle(held)
-        self.engine._handle(letter_event("t", KEYCODE_54, 0, self.pair))
-        self.engine._handle(letter_event("n", KEYCODE_55, 0, self.pair))
+        self.engine._handle(letter_event("t", THIRD_WORD_FIFTH_LETTER_KEYCODE, 0, self.pair))
+        self.engine._handle(letter_event("n", THIRD_WORD_SIXTH_LETTER_KEYCODE, 0, self.pair))
         self.press_space(0)  # the boundary correction takes over the whole word
         self.release_keys()
         self.assertEqual(len(self.backend.injections), 1)
         strokes, target, boundary = self.backend.injections[0]
         self.assertEqual((len(strokes), target), (EARLY_SWITCH_WORD_LENGTH, 1))
         self.assertIsNotNone(boundary)
-        self.engine._handle(KeyEvent(False, KEYCODE_53, "d", "d", held.characters, 1, 0, KEYCODE_60))
+        self.engine._handle(KeyEvent(False, THIRD_WORD_FOURTH_LETTER_KEYCODE, "d", "d", held.characters, 1, 0, FOURTH_WORD_KEYCODE_BASE))
         self.assertEqual(len(self.backend.injections), 1)
 
     def test_backspacing_the_whole_prefix_forgets_the_early_switch(self) -> None:
@@ -1244,7 +1253,7 @@ class EngineBehaviourTests(unittest.TestCase):
     def test_the_log_shows_what_local_learning_knows_about_the_word(self) -> None:
         self.settings.set("detection.respect_manual_layout", False)
         # Two confirmations make the intermediate state visible in the log.
-        self.settings.set("detection.learning_confirmations", REQUIRED_CONFIRMATIONS)
+        self.settings.set("detection.learning_confirmations", LEARNING_CONFIRMATIONS_REQUIRED)
 
         # No rule yet: the word is evaluated by the model alone.
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
@@ -1255,7 +1264,7 @@ class EngineBehaviourTests(unittest.TestCase):
             learning,
             {
                 "enabled": True,
-                "required_confirmations": REQUIRED_CONFIRMATIONS,
+                "required_confirmations": LEARNING_CONFIRMATIONS_REQUIRED,
                 "rule_target": None,
                 "confirmations": 0,
                 "forced_target": None,
@@ -1303,9 +1312,9 @@ class EngineBehaviourTests(unittest.TestCase):
         )
         self.assertEqual(
             (recorded["word"], recorded["confirmations"], recorded["active"]),
-            ("qwerty", REQUIRED_CONFIRMATIONS, True),
+            ("qwerty", LEARNING_CONFIRMATIONS_REQUIRED, True),
         )
-        self.assertEqual(recorded["required_confirmations"], REQUIRED_CONFIRMATIONS)
+        self.assertEqual(recorded["required_confirmations"], LEARNING_CONFIRMATIONS_REQUIRED)
 
         self.backend.group = 0
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
@@ -1313,7 +1322,7 @@ class EngineBehaviourTests(unittest.TestCase):
             self.press_space(0)
         forced = self.learning_field(logs.output, "qwerty")
         self.assertEqual(forced["forced_target"], 1)
-        self.assertEqual(forced["confirmations"], REQUIRED_CONFIRMATIONS)
+        self.assertEqual(forced["confirmations"], LEARNING_CONFIRMATIONS_REQUIRED)
         evaluation = next(
             event
             for event in self.technical_events(logs.output)
@@ -1518,7 +1527,7 @@ class EngineBehaviourTests(unittest.TestCase):
         self.correct_hello()
         self.assertIsNone(self.engine._manual_layout_group)
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            self.type_word("привет", group=1, start=KEYCODE_50)
+            self.type_word("привет", group=1, start=THIRD_WORD_KEYCODE_BASE)
             self.press_space(1)
         evaluation = next(
             event for event in self.technical_events(logs.output) if event["event"] == "word_evaluation"
@@ -1528,7 +1537,7 @@ class EngineBehaviourTests(unittest.TestCase):
     def test_moving_to_another_window_drops_the_unfinished_word(self) -> None:
         self.correct_hello()
         self.assertFalse(self.engine._last_committed_stale)
-        self.type_word("руд", group=1, start=KEYCODE_60)
+        self.type_word("руд", group=1, start=FOURTH_WORD_KEYCODE_BASE)
         self.assertEqual(self.engine.snapshot.current_word, "руд")
         self.backend.window = SECOND_WINDOW_ID
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
@@ -1555,8 +1564,8 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertEqual(self.engine._early_switch_origin, 0)
         self.assertEqual(len(self.backend.injections), 1)
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            self.engine._schedule_undo(EARLY_UNDO_KEYCODE)
-            self.engine._handle(plain_key("z", EARLY_UNDO_KEYCODE, 1, pressed=False))
+            self.engine._schedule_undo(SCHEDULED_UNDO_KEYCODE)
+            self.engine._handle(plain_key("z", SCHEDULED_UNDO_KEYCODE, 1, pressed=False))
         strokes, target, boundary = self.backend.injections[-1]
         self.assertEqual((len(strokes), target, boundary), (EARLY_SWITCH_PREFIX_STROKE_COUNT, 0, None))
         self.assertEqual(self.engine.snapshot.current_group, 0)
@@ -1575,7 +1584,7 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertFalse(applied["automatic"])
         # The rest of the word is neither switched early again nor corrected.
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            self.type_word("tn", group=0, start=KEYCODE_34)
+            self.type_word("tn", group=0, start=FIFTH_LETTER_KEYCODE)
             self.press_space(0)
         self.assertEqual(len(self.backend.injections), INJECTIONS_AFTER_UNDO_REVERT)
         evaluation = next(
@@ -1590,7 +1599,7 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertEqual(self.engine.snapshot.correction_count, 0)
         self.assertEqual(self.history.read(), [])
         # The next wrong-layout word is switched early again.
-        self.type_word("ghbd", start=KEYCODE_90)
+        self.type_word("ghbd", start=SEVENTH_WORD_KEYCODE_BASE)
         self.assertEqual(len(self.backend.injections), INJECTIONS_AFTER_SECOND_EARLY_SWITCH)
         self.assertEqual(self.engine._early_switch_origin, 0)
         self.assertEqual(self.engine.snapshot.current_word, "прив")
@@ -1605,9 +1614,9 @@ class EngineBehaviourTests(unittest.TestCase):
     def test_clearing_an_early_switched_word_records_the_correction(self) -> None:
         self.settings.set("detection.early_switch", True)
         self.type_word("ghbd")
-        self.type_word("ет", group=1, start=KEYCODE_34)
+        self.type_word("ет", group=1, start=FIFTH_LETTER_KEYCODE)
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            self.engine._handle(plain_key("Left", LEFT_ARROW_KEYCODE_ALT, 1))
+            self.engine._handle(plain_key("Left", X11_LEFT_ARROW_KEYCODE, 1))
         completed = next(
             event for event in self.technical_events(logs.output) if event["event"] == "early_switch_completed"
         )
@@ -1621,15 +1630,15 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertEqual(self.engine._strokes, [])
         # Navigation invalidated the position, so undo must not delete elsewhere.
         before = len(self.backend.injections)
-        self.engine._schedule_undo(EARLY_UNDO_KEYCODE)
-        self.engine._handle(plain_key("z", EARLY_UNDO_KEYCODE, 1, pressed=False))
+        self.engine._schedule_undo(SCHEDULED_UNDO_KEYCODE)
+        self.engine._handle(plain_key("z", SCHEDULED_UNDO_KEYCODE, 1, pressed=False))
         self.assertEqual(len(self.backend.injections), before)
 
     def test_learning_is_not_offered_for_a_lone_letter_or_symbols(self) -> None:
         self.settings.set("detection.learning_confirmations", 1)
         self.engine._handle(boundary_event(True, group=1))
         self.engine._handle(boundary_event(False, group=1))
-        self.type_word("б", group=1, start=KEYCODE_70)
+        self.type_word("б", group=1, start=FIFTH_WORD_KEYCODE_BASE)
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.press_pause()
         strokes, target, boundary = self.backend.injections[-1]
@@ -1642,7 +1651,7 @@ class EngineBehaviourTests(unittest.TestCase):
         )
         self.assertFalse(scheduled["learnable"])
         # Two letters still read as a word and become a rule at once.
-        self.type_word("yj", group=0, start=KEYCODE_80)
+        self.type_word("yj", group=0, start=SIXTH_WORD_KEYCODE_BASE)
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.press_pause()
         self.assertEqual(self.engine.snapshot.last_action, "yj → но")
@@ -1676,7 +1685,7 @@ class EngineBehaviourTests(unittest.TestCase):
 
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             manual_conversion()
-            self.engine._handle(letter_event("a", LETTER_A_KEYCODE, 1, self.pair))
+            self.engine._handle(letter_event("a", A_KEYCODE, 1, self.pair))
         reasons = [
             event["reason"] for event in self.technical_events(logs.output) if event["event"] == "learning_prompt_dismissed"
         ]
@@ -1723,7 +1732,7 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertEqual(self.engine.learning.counts(), (0, 0))
 
         offer()
-        self.engine._handle(letter_event("a", LETTER_A_KEYCODE, 1, self.pair))
+        self.engine._handle(letter_event("a", A_KEYCODE, 1, self.pair))
         self.assertIsNone(self.engine.learning_prompt)
         self.assertEqual(self.engine.learning.counts(), (0, 0))
         self.engine._clear_word()
@@ -1769,7 +1778,7 @@ class EngineBehaviourTests(unittest.TestCase):
     def test_enter_reaches_the_threshold_whatever_it_is(self) -> None:
         """A rule costs one Enter; the threshold is what half-confirmed rules need."""
 
-        self.settings.set("detection.learning_confirmations", THRESHOLD_CONFIRMATIONS)
+        self.settings.set("detection.learning_confirmations", NON_DEFAULT_LEARNING_CONFIRMATIONS)
         self.backend.group = 0
         self.type_word("qwerty")
         self.press_pause()
@@ -1777,20 +1786,20 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertEqual(
             self.engine.snapshot.last_action, "qwerty → йцукен · правило выучено"
         )
-        self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (1, THRESHOLD_CONFIRMATIONS))
-        self.assertEqual(self.engine.learning.forced_target(0, "qwerty", THRESHOLD_CONFIRMATIONS), 1)
+        self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (1, NON_DEFAULT_LEARNING_CONFIRMATIONS))
+        self.assertEqual(self.engine.learning.forced_target(0, "qwerty", NON_DEFAULT_LEARNING_CONFIRMATIONS), 1)
 
     def test_setting_changes_are_logged_with_loggable_values(self) -> None:
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            self.settings.set("detection.confidence", CONFIDENCE_OVERRIDE)
+            self.settings.set("detection.confidence", NON_DEFAULT_CONFIDENCE_THRESHOLD)
             self.settings.set("exclusions.applications", ["one"])
-            self.settings.set("hotkeys.undo", "x" * OVERSIZED_HOTKEY_CHARACTERS)
+            self.settings.set("hotkeys.undo", "x" * OVERSIZED_SETTING_STRING_CHARACTERS)
         changes = [
             event for event in self.technical_events(logs.output) if event["event"] == "setting_changed"
         ]
-        self.assertEqual(changes[0]["value"], CONFIDENCE_OVERRIDE)
+        self.assertEqual(changes[0]["value"], NON_DEFAULT_CONFIDENCE_THRESHOLD)
         self.assertEqual(changes[1]["value"], {"type": "list", "items": 1})
-        self.assertEqual(len(str(changes[HOTKEY_CHANGE_INDEX]["value"])), _LOGGABLE_STRING_MAX_CHARACTERS)
+        self.assertEqual(len(str(changes[HOTKEY_CHANGE_INDEX]["value"])), LOGGED_SETTING_VALUE_MAX_CHARACTERS)
         self.assertTrue(all(event["operation"] == "set" for event in changes))
 
     def test_session_event_lists_the_new_settings(self) -> None:
@@ -1818,7 +1827,7 @@ class EngineBehaviourTests(unittest.TestCase):
 
     def test_settings_delta_logs_reset_and_ignores_unknown_keys(self) -> None:
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            self.settings.set("detection.confidence", CONFIDENCE_OVERRIDE)
+            self.settings.set("detection.confidence", NON_DEFAULT_CONFIDENCE_THRESHOLD)
             self.settings.restore_default("detection.confidence")
         changes = [e for e in self.technical_events(logs.output) if e["event"] == "setting_changed"]
         self.assertEqual([e["operation"] for e in changes], ["set", "reset"])
@@ -1837,7 +1846,7 @@ class EngineBehaviourTests(unittest.TestCase):
         with self.assertNoLogs("keyswitch.engine", level="INFO"):
             self.settings.set("diagnostics.technical_logging", False)
             self.settings.restore_default("detection.early_switch")
-            self.settings.set("detection.minimum_length", MINIMUM_LENGTH_OVERRIDE)
+            self.settings.set("detection.minimum_length", NON_DEFAULT_MINIMUM_WORD_LENGTH)
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.settings.set("diagnostics.technical_logging", True)
         session = next(e for e in self.technical_events(logs.output) if e["event"] == "technical_logging_enabled")
@@ -1846,7 +1855,7 @@ class EngineBehaviourTests(unittest.TestCase):
         overrides = settings["overrides"]
         assert isinstance(overrides, dict)
         self.assertNotIn("detection.early_switch", overrides)
-        self.assertEqual(overrides["detection.minimum_length"], MINIMUM_LENGTH_OVERRIDE)
+        self.assertEqual(overrides["detection.minimum_length"], NON_DEFAULT_MINIMUM_WORD_LENGTH)
 
 
 if __name__ == "__main__":

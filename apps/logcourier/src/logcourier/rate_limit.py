@@ -3,12 +3,13 @@
 import time
 
 from .catalog import DeliveryCancelled
+from .constants.telegram import (
+    DEFAULT_RETRY_AFTER_SECONDS,
+    GROUP_INTERVAL,
+    TELEGRAM_RATE_LIMIT_STATUS,
+    WAIT_POLL_SECONDS,
+)
 from .telegram import TelegramError
-
-GROUP_INTERVAL = 4.0  # at most 15 operations/minute, below Telegram's 20 messages/minute
-WAIT_POLL_SECONDS = 0.2
-TELEGRAM_RATE_LIMIT_STATUS = 429
-DEFAULT_RETRY_AFTER_SECONDS = 60  # used when Telegram's 429 omits retry_after
 
 
 class RateLimitedClient:

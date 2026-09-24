@@ -7,15 +7,15 @@ import uuid
 import zipfile
 from datetime import datetime, timezone
 
+from .constants.files import (
+    BATCH_SCHEMA_VERSION,
+    ZIP_ENTRY_OVERHEAD_BYTES,
+    ZIP_MANIFEST_OVERHEAD_BYTES,
+)
+from .constants.limits import MAX_FRAGMENTS_PER_BATCH, MIN_FRAGMENTS_TO_COMPACT
+from .constants.telegram import MAX_DOWNLOAD
 from .store import QueueFull
-from .telegram import MAX_DOWNLOAD
 from .versions import MARKER_KIND
-
-MAX_FRAGMENTS_PER_BATCH = 4096
-ZIP_MANIFEST_OVERHEAD_BYTES = 1024  # initial cost estimate, ahead of any fragment's own overhead
-ZIP_ENTRY_OVERHEAD_BYTES = 512
-MIN_FRAGMENTS_TO_COMPACT = 2
-BATCH_SCHEMA_VERSION = 2
 
 
 def compact(store, config, limit=MAX_DOWNLOAD, max_fragments=MAX_FRAGMENTS_PER_BATCH):

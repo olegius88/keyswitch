@@ -23,15 +23,15 @@ from typing import Final
 
 from .macos_objc import CType, ObjCError, objc_class, runtime, selector, send, string
 from .tray_model import MenuEntry, TrayActions, TrayState, menu_entries
+from .constants.macos import (
+    ACTIVATION_POLICY_ACCESSORY,
+    CONTROL_STATE_OFF,
+    CONTROL_STATE_ON,
+    VARIABLE_STATUS_ITEM_LENGTH,
+)
 
 LOGGER: Final = logging.getLogger(__name__)
 
-# NSApplication presents no dock icon and no menu bar of its own.
-ACTIVATION_POLICY_ACCESSORY: Final = 1
-# NSStatusItem asks for the width its content needs.
-VARIABLE_STATUS_ITEM_LENGTH: Final = -1.0
-CONTROL_STATE_ON: Final = 1
-CONTROL_STATE_OFF: Final = 0
 TARGET_CLASS_NAME: Final = b"KeySwitchMenuTarget"
 # Objective-C type encodings: void return, object and selector, one object.
 VOID_OBJECT_METHOD: Final = b"v@:@"

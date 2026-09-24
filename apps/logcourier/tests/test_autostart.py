@@ -4,15 +4,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from fixture_values.counts import OVER_LONG_PATH_FILLER_CHARACTERS
+from fixture_values.platform import WINREG_KEY_READ, WINREG_KEY_SET_VALUE
 
 from logcourier import autostart
-
-# Fake winreg access-right identifiers; the fixture never checks their value,
-# only that OpenKey/CreateKeyEx were reached, so any distinct numbers do.
-WINREG_KEY_READ = 2
-WINREG_KEY_SET_VALUE = 3
-# Filler length for a path that must exceed autostart.WINDOWS_MAX_PATH_CHARACTERS.
-OVER_LONG_PATH_FILLER_CHARACTERS = 270
 
 
 @pytest.fixture

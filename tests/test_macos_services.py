@@ -16,16 +16,14 @@ from unittest.mock import patch
 from keyswitch.macos_services import BACKEND_LABEL, MacServices
 from keyswitch.macos_system import MacApplicationCatalog, MacAutostartManager, MacSystemError
 from keyswitch.tray_model import TrayActions
-
-# keyswitch.tray_model.TrayActions has this many callback fields.
-TRAY_ACTION_COUNT = 9
+from fixture_values.counts import TRAY_ACTION_CALLBACK_COUNT
 
 
 def actions() -> TrayActions:
     def nothing() -> None:
         return None
 
-    return TrayActions(*[nothing] * TRAY_ACTION_COUNT)
+    return TrayActions(*[nothing] * TRAY_ACTION_CALLBACK_COUNT)
 
 
 class ServiceTests(unittest.TestCase):

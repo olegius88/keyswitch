@@ -1,0 +1,21 @@
+"""Geometry and timing of the LogCourier window."""
+
+from __future__ import annotations
+
+from typing import Final
+
+ICON_PIXELS: Final = 64
+ICON_MARGIN_PIXELS: Final = 2
+ICON_RECT_PIXELS: Final = 60
+ICON_CORNER_RADIUS_PIXELS: Final = 14
+ICON_FONT_PIXEL_SIZE: Final = 29
+WINDOW_INITIAL_WIDTH: Final = 850
+WINDOW_INITIAL_HEIGHT: Final = 640
+WINDOW_MIN_WIDTH: Final = 540
+WINDOW_MIN_HEIGHT: Final = 420
+SOURCES_TABLE_COLUMNS: Final = 4
+EVENTS_LOG_MAX_LINES: Final = 150
+STATUS_MESSAGE_DURATION_MS: Final = 5000
+TRAY_TOOLTIP_MAX_CHARACTERS: Final = 120
+SHUTDOWN_POLL_MS: Final = 100
+SMOKE_TEST_DELAY_MS: Final = 100

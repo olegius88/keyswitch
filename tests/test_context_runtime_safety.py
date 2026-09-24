@@ -11,26 +11,19 @@ from unittest.mock import patch
 
 from keyswitch.backend import KeyEvent
 from keyswitch.context_model import ACTIONS, ContextModel
-from keyswitch.engine import MANUAL_RELEASE_TIMEOUT_SECONDS
+from keyswitch.constants.timing import MANUAL_RELEASE_TIMEOUT_SECONDS
 from test_input_integrity import InputIntegrityTests
-
-# Monotonic-clock fixture instants shared by the manual-release watchdog tests below.
-KEY_PRESS_TIME = 100.0
-KEY_HELD_SINCE_TIME = 90.0
-WITHIN_DEADLINE_TIME = 101.0
-AFTER_DEADLINE_TIME = 104.0
-# A bias large enough that its action wins regardless of the other weights.
-DOMINANT_BIAS = 20.0
+from fixture_values.clock import (
+    MANUAL_RELEASE_AFTER_DEADLINE_SECONDS,
+    MANUAL_RELEASE_KEY_HELD_SINCE_SECONDS,
+    MANUAL_RELEASE_KEY_PRESS_SECONDS,
+    MANUAL_RELEASE_WITHIN_DEADLINE_SECONDS,
+)
+from fixture_values.corpora import HELD_KEY_CONTEXT_REPLAY_CASES
+from fixture_values.scores import DOMINANT_BIAS_WEIGHT
 
 
 class ContextRuntimeSafetyTests(InputIntegrityTests):
-    REPLAY_CASES = (
-        (0, 0, False, "контекст привет"),
-        (1, 1, False, "контекст привет"),
-        (2, 2, False, "контекст привет"),
-        (1, 0, False, ""),
-        (1, 1, True, ""),
-    )
 
     @staticmethod
     def events(lines: list[str]) -> list[dict[str, object]]:
@@ -38,7 +31,7 @@ class ContextRuntimeSafetyTests(InputIntegrityTests):
 
     def test_replayed_releases_preserve_context_but_unknown_or_pressed_events_do_not(self) -> None:
         self.settings.set("detection.context_policy", "shadow")
-        for held, observed, pressed, expected in self.REPLAY_CASES:
+        for held, observed, pressed, expected in HELD_KEY_CONTEXT_REPLAY_CASES:
             with self.subTest(held=held, observed=observed, pressed=pressed):
                 self.reset_editor()
                 self.backend.held_count = held
@@ -70,21 +63,21 @@ class ContextRuntimeSafetyTests(InputIntegrityTests):
                     self.assertEqual(self.backend.text, "контекст приветик")
 
     def test_repeat_pause_does_not_switch_layout_or_replace_waiting_command(self) -> None:
-        with patch("keyswitch.engine.time.monotonic", return_value=KEY_PRESS_TIME):
+        with patch("keyswitch.engine.time.monotonic", return_value=MANUAL_RELEASE_KEY_PRESS_SECONDS):
             self.type("ghbdtn")
             self.engine._pressed.add(1)
-            self.engine._pressed_since[1] = KEY_HELD_SINCE_TIME
+            self.engine._pressed_since[1] = MANUAL_RELEASE_KEY_HELD_SINCE_SECONDS
             self.tap(self.key("Pause"))
         pending = self.engine._pending
         assert pending is not None
-        self.assertEqual(self.engine._manual_release_deadline, KEY_PRESS_TIME + MANUAL_RELEASE_TIMEOUT_SECONDS)
-        with patch("keyswitch.engine.time.monotonic", return_value=WITHIN_DEADLINE_TIME):
+        self.assertEqual(self.engine._manual_release_deadline, MANUAL_RELEASE_KEY_PRESS_SECONDS + MANUAL_RELEASE_TIMEOUT_SECONDS)
+        with patch("keyswitch.engine.time.monotonic", return_value=MANUAL_RELEASE_WITHIN_DEADLINE_SECONDS):
             self.tap(self.key("Pause"))
         self.assertIs(self.engine._pending, pending)
         self.assertEqual(self.backend.group, 0)
         self.assertEqual(self.backend.text, "ghbdtn")
         self.assertEqual(self.backend.injections, [])
-        with patch("keyswitch.engine.time.monotonic", return_value=AFTER_DEADLINE_TIME):
+        with patch("keyswitch.engine.time.monotonic", return_value=MANUAL_RELEASE_AFTER_DEADLINE_SECONDS):
             with self.assertLogs("keyswitch.engine", level="INFO") as logs:
                 self.engine._expire_manual_correction()
         self.assertIsNone(self.engine._pending)
@@ -96,17 +89,17 @@ class ContextRuntimeSafetyTests(InputIntegrityTests):
         self.assertEqual(self.engine.learning.rejected_targets(0, "ghbdtn"), set())
 
     def test_expiry_runs_before_new_input_and_does_not_delete_editor_text(self) -> None:
-        with patch("keyswitch.engine.time.monotonic", return_value=KEY_PRESS_TIME):
+        with patch("keyswitch.engine.time.monotonic", return_value=MANUAL_RELEASE_KEY_PRESS_SECONDS):
             self.type("ghbdtn")
             self.engine._pressed.add(1)
             self.tap(self.key("Pause"))
-        with patch("keyswitch.engine.time.monotonic", return_value=AFTER_DEADLINE_TIME):
+        with patch("keyswitch.engine.time.monotonic", return_value=MANUAL_RELEASE_AFTER_DEADLINE_SECONDS):
             self.type("x")
         self.assertIsNone(self.engine._pending)
         self.assertEqual(self.backend.text, "ghbdtnx")
 
     def test_manual_release_before_deadline_executes_once_and_resets_watchdog(self) -> None:
-        with patch("keyswitch.engine.time.monotonic", return_value=KEY_PRESS_TIME):
+        with patch("keyswitch.engine.time.monotonic", return_value=MANUAL_RELEASE_KEY_PRESS_SECONDS):
             self.type("ghbdtn")
             pause = self.key("Pause")
             self.send(pause)
@@ -120,7 +113,7 @@ class ContextRuntimeSafetyTests(InputIntegrityTests):
         self.settings.set("detection.context_policy", "assist")
         for supported in (False, True):
             self.reset_editor()
-            weights: dict[str, tuple[float, ...]] = {"bias": (0.0, DOMINANT_BIAS, 0.0, 0.0)}
+            weights: dict[str, tuple[float, ...]] = {"bias": (0.0, DOMINANT_BIAS_WEIGHT, 0.0, 0.0)}
             if supported:
                 weights["app:testeditor"] = (0.0,) * len(ACTIONS)
             self.engine.context_policy.model = ContextModel(weights, "context-v1-fixture")
@@ -136,7 +129,7 @@ class ContextRuntimeSafetyTests(InputIntegrityTests):
 
     def test_context_logging_records_shadow_and_keep_policy(self) -> None:
         self.engine.context_policy.model = ContextModel(
-            {"bias": (DOMINANT_BIAS, 0.0, 0.0, 0.0), "app:testeditor": (0.0,) * len(ACTIONS)}, "context-v1-fixture",
+            {"bias": (DOMINANT_BIAS_WEIGHT, 0.0, 0.0, 0.0), "app:testeditor": (0.0,) * len(ACTIONS)}, "context-v1-fixture",
         )
         for mode in ("shadow", "assist"):
             self.reset_editor()

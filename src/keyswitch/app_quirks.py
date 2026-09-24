@@ -5,13 +5,16 @@ Russian one, and in a chat client a word that starts with it is usually a
 mention: ``@name``. That is a fact about the application, not about either
 language, so it lives here.
 
-What the head means is not decided here. The engine analyses the word that
+A lone quote is shown as ``@`` the moment its key comes up, because the
+application offers its list of people only after a real ``@`` and the list is
+how a mention is usually made. The layout stays as it was. Whatever is typed
+next writes the quote back, and from there the engine analyses the word that
 follows on its own - ``ощрт`` is nothing in Russian while ``john`` is a name,
-``привет`` is an ordinary Russian word - and the head simply follows that
-decision: it becomes ``@`` when the word turns out to be the other layout, and
-stays a quote when the word is left alone. A quotation therefore survives, and
-so does a quote typed after the user selected the layout by hand or moved the
-caret, because those already stop the engine from touching the word.
+``привет`` is an ordinary Russian word - and the head follows that decision: it
+becomes ``@`` again when the word turns out to be the other layout, and stays a
+quote when the word is left alone. A quotation therefore survives, and so does
+a quote typed after the user selected the layout by hand or moved the caret,
+because those already stop the engine from touching the word.
 
 Every convention is one setting the user can turn off, and every condition is
 observable in the engine's own state: which application has focus, which symbol
@@ -44,11 +47,12 @@ class MentionHead:
 
 TELEGRAM_QUOTE_MENTION = MentionHead(
     setting="applications.telegram_quote_mention",
-    title="Telegram: кавычка перед словом может быть @",
+    title="Telegram: кавычка в начале слова — это @",
     description=(
-        "Кавычка, набранная в русской раскладке перед словом, становится «@», только если "
-        "само слово оказалось набранным не в той раскладке: «ощрт» → «@john». Русское слово "
-        "после кавычки остаётся цитатой, и кавычка остаётся кавычкой."
+        "Кавычка, набранная в русской раскладке в начале слова, сразу показывается как «@», "
+        "чтобы открылся список участников; раскладка не меняется. Если после неё набрать текст, "
+        "«@» снова становится кавычкой и дальше решает слово: «ощрт» → «@john», а русское "
+        "слово остаётся цитатой. Pause сразу после «@» возвращает кавычку."
     ),
     applications=("telegram", "kotatogram", "ayugram", "unigram", "forkgram"),
     typed='"',

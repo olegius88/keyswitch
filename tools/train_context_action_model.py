@@ -34,7 +34,11 @@ from keyswitch.ortho_model import OrthoModel
 from keyswitch.short_words import TRUSTED_SINGLE_LETTER_WORDS
 from keyswitch.word_decision import automatic_word_decision
 
-from model_protocol import FITTING_SPLITS, REJECTED_BEFORE_TEST, SEALED_BEFORE_TEST
+from keyswitch.constants.model_protocol import (
+    FITTING_SPLITS,
+    REJECTED_BEFORE_TEST,
+    SEALED_BEFORE_TEST,
+)
 from reference_lexicon import reference_models
 from action_epoch_selection import EpochSelection, assess_epoch
 from context_action_spans import SpanFrame, build_span_curriculum
@@ -43,6 +47,27 @@ from context_optimizer import Kernel, Packed
 from context_physical_keys import translated as translated
 from evaluate_context_action_sequences import runtime_provenance
 from freeze_context_action_corpus import CorpusRow, load_split, physical, typo_variants
+from keyswitch.constants.file_formats import HEXADECIMAL_BASE, VERSION_HASH_CHARACTERS
+from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
+from keyswitch.constants.models import CONTEXT_ACTION_FEATURE_VERSION
+from keyswitch.constants.training import (
+    BOUNDARY_EVENT_CHOICES,
+    COMMAND_FAMILY_IDENTIFIER_PARTS,
+    DETERMINISTIC_CHOICE_HEX_DIGITS,
+    DETERMINISTIC_ROUNDING_DECIMALS,
+    FEATURE_MASS_TOLERANCE,
+    FIELD_AFTER_SAMPLE_MODULUS,
+    IDENTIFIER_DROPOUT_FAMILIES,
+    IDENTIFIER_SUFFIX_SEGMENTS,
+    LOG_LOSS_PROBABILITY_FLOOR,
+    LOOKAHEAD_ANCHOR_MAX_CHARACTERS,
+    LOOKAHEAD_ANCHOR_MIN_CHARACTERS,
+    MASS_REPORT_DECIMALS,
+    MAX_CONTEXTS_PER_FAMILY,
+    NET_BENEFIT_FALSE_INDEX,
+    NET_BENEFIT_THRESHOLD_INDEX,
+    SHORT_WORD_MAX_CHARACTERS,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,49 +75,6 @@ RECIPE = ROOT / "model/context_v3/recipe.json"
 ARTIFACT = "context-action.json"
 SEAL = "candidate-seal.json"
 WORDS = re.compile(r"[A-Za-zА-Яа-яЁё]+(?:['’\-][A-Za-zА-Яа-яЁё]+)*")
-
-# How many leading hex digits of a digest feed a deterministic draw, and the
-# base those digits are parsed in.
-DETERMINISTIC_HEX_DIGITS = 8
-HEX_BASE = 16
-# Absolute cutoff tolerance for feature-mass comparisons, and the decimal
-# places mass is rounded to before ranking (see select_features docstring).
-MASS_TOLERANCE = 1e-9
-MASS_ROUNDING_DECIMALS = 9
-# The two physical key layout groups.
-GROUP_COUNT = 2
-# Balance languages before scoring: retain at most this many contexts per family.
-MAX_CONTEXTS_PER_FAMILY = 2
-# A fair coin flip deciding which boundary-event text (newline vs tab) is used.
-BOUNDARY_EVENT_CHOICES = 2
-# Roughly one row in this many keeps its observed field-after context.
-FIELD_AFTER_SAMPLE_MODULUS = 8
-# The "isolated short reading" length ceiling: one or two letters.
-MAX_SHORT_WORD_LENGTH = 2
-# Lookahead anchor candidate word length bounds.
-ANCHOR_MIN_LENGTH = 3
-ANCHOR_MAX_LENGTH = 64
-# Decimal places kept in the mass-balancing report.
-REPORT_ROUNDING_DECIMALS = 4
-# An identifier needs this many colon-separated parts to carry a command
-# family, which is also how many leading parts make up that family key.
-MIN_IDENTIFIER_PARTS = 3
-# Trailing colon-separated segments stripped to recover a base identifier
-# (undoing suffixes like ":keep", ":planned:<anchor>").
-IDENTIFIER_SUFFIX_SEGMENTS = 2
-# Positions of "false" and "threshold" in a qualifying (minimum, net, false,
-# threshold, report) row.
-NET_BENEFIT_FALSE_INDEX = 2
-NET_BENEFIT_THRESHOLD_INDEX = 3
-# context_model.py is pinned by the context-v1 seal (PENDING_RESEAL), so its
-# "3" for the context-action feature scheme is not yet a constant we can import.
-CONTEXT_ACTION_FEATURE_VERSION = 3
-# Decimal places kept when serializing fitted weights for a stable hash.
-WEIGHT_ROUNDING_DECIMALS = 9
-# Floor preventing log(0) in the training loss.
-LOG_LOSS_EPSILON = 1e-15
-# Hex prefix length used in the published model version string.
-VERSION_HASH_PREFIX_LENGTH = 12
 
 
 def canonical(value: object) -> bytes:
@@ -104,7 +86,7 @@ def checksum(path: Path) -> str:
 
 
 def variant_choice(identifier: str, purpose: str, count: int) -> int:
-    return int(hashlib.sha256((purpose + ":" + identifier).encode()).hexdigest()[:DETERMINISTIC_HEX_DIGITS], HEX_BASE) % count
+    return int(hashlib.sha256((purpose + ":" + identifier).encode()).hexdigest()[:DETERMINISTIC_CHOICE_HEX_DIGITS], HEXADECIMAL_BASE) % count
 
 
 @dataclass(frozen=True)
@@ -169,8 +151,8 @@ def select_features(masses: Mapping[str, float], minimum: float, maximum: int) -
         raise ValueError("maximum features must be a positive integer")
     if any(type(value) not in (int, float) or not math.isfinite(value) or value < 0 for value in masses.values()):
         raise ValueError("invalid accumulated feature mass")
-    eligible = (name for name, value in masses.items() if value >= minimum - MASS_TOLERANCE)
-    return sorted(sorted(eligible, key=lambda name: (-round(masses[name], MASS_ROUNDING_DECIMALS), name))[:maximum])
+    eligible = (name for name, value in masses.items() if value >= minimum - FEATURE_MASS_TOLERANCE)
+    return sorted(sorted(eligible, key=lambda name: (-round(masses[name], DETERMINISTIC_ROUNDING_DECIMALS), name))[:maximum])
 
 
 def select_rows(rows: Sequence[CorpusRow], maximum: int) -> list[CorpusRow]:
@@ -187,7 +169,7 @@ def select_rows(rows: Sequence[CorpusRow], maximum: int) -> list[CorpusRow]:
         except ValueError:
             continue
         key = group, row.family
-        if languages[group] >= maximum // GROUP_COUNT or counts[key] >= MAX_CONTEXTS_PER_FAMILY:
+        if languages[group] >= maximum // LAYOUT_GROUP_COUNT or counts[key] >= MAX_CONTEXTS_PER_FAMILY:
             continue
         counts[key] += 1
         languages[group] += 1
@@ -203,7 +185,7 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
             raise ValueError("action rows require a representable single-layout token")
         group = row.group
         alternate = translated(row.original, group)
-        number = int(hashlib.sha256(row.identifier.encode()).hexdigest()[:DETERMINISTIC_HEX_DIGITS], HEX_BASE)
+        number = int(hashlib.sha256(row.identifier.encode()).hexdigest()[:DETERMINISTIC_CHOICE_HEX_DIGITS], HEXADECIMAL_BASE)
         trigger = triggers[number % len(triggers)]
         boundary_text = ""
         if trigger == "space":
@@ -235,7 +217,7 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
             curated_letter = (len(row.original) == 1 and len(alternate) == 1
                               and (row.original.casefold() in TRUSTED_SINGLE_LETTER_WORDS
                                    or alternate.casefold() in TRUSTED_SINGLE_LETTER_WORDS))
-            if alone and len(row.original) <= MAX_SHORT_WORD_LENGTH and not curated_letter:
+            if alone and len(row.original) <= SHORT_WORD_MAX_CHARACTERS and not curated_letter:
                 # An isolated short reading has no observable intent label.
                 # Digits/punctuation do not supply a neighbouring language.
                 # Both members preserve text and take the same deferred action.
@@ -318,7 +300,7 @@ def historical_curriculum(intent: LinearNgramModel | None = None) -> list[Action
                 parent = row.family, row.category, item.trigger
                 parents[identifier] = parent
                 action: ContextAction = row.action
-                if (action == "keep" and 0 < len(item.original) <= MAX_SHORT_WORD_LENGTH
+                if (action == "keep" and 0 < len(item.original) <= SHORT_WORD_MAX_CHARACTERS
                         and not WORDS.search(field.before) and not WORDS.search(field.after)):
                     # The shared isolated-short policy: a correct reading with no
                     # neighbouring word has no observable intent label either, so
@@ -346,7 +328,7 @@ def legacy_lookahead_rows(
 ) -> tuple[list[ActionRow], dict[str, object]]:
     """Replace bounded old TRAIN frames with equal-mass planned variants."""
     selected = {row.identifier: row for row in rows
-                if row.category.startswith("legacy_") and 0 < len(row.original) <= MAX_SHORT_WORD_LENGTH
+                if row.category.startswith("legacy_") and 0 < len(row.original) <= SHORT_WORD_MAX_CHARACTERS
                 and row.trigger == "space" and row.boundary_text == " " and not row.literal_tail
                 and not row.field.sensitive and not row.field.selection and row.field.role != "password"}
     anchors: dict[tuple[str, int], LookaheadAnchor] = {}
@@ -357,7 +339,7 @@ def legacy_lookahead_rows(
         if match is None:
             continue
         text = match.group()
-        if not ANCHOR_MIN_LENGTH <= len(text) <= ANCHOR_MAX_LENGTH or not text.isalpha():
+        if not LOOKAHEAD_ANCHOR_MIN_CHARACTERS <= len(text) <= LOOKAHEAD_ANCHOR_MAX_CHARACTERS or not text.isalpha():
             continue
         group = 1 if any("а" <= char.casefold() <= "я" or char.casefold() == "ё" for char in text) else 0
         try:
@@ -400,7 +382,7 @@ def natural_lookahead_rows(
     by_identifier = {row.identifier: row for row in source_rows}
     selected: dict[str, tuple[ActionRow, str]] = {}
     for row in rows:
-        if (row.category not in ("layout_intervention", "natural_surface") or not 0 < len(row.original) <= MAX_SHORT_WORD_LENGTH
+        if (row.category not in ("layout_intervention", "natural_surface") or not 0 < len(row.original) <= SHORT_WORD_MAX_CHARACTERS
                 or row.trigger != "space" or row.boundary_text != " " or row.literal_tail
                 or row.field.sensitive or row.field.selection or row.field.role == "password" or row.field.after):
             continue
@@ -417,7 +399,7 @@ def natural_lookahead_rows(
         if match is None:
             continue
         text = match.group()
-        if not ANCHOR_MIN_LENGTH <= len(text) <= ANCHOR_MAX_LENGTH or not text.isalpha():
+        if not LOOKAHEAD_ANCHOR_MIN_CHARACTERS <= len(text) <= LOOKAHEAD_ANCHOR_MAX_CHARACTERS or not text.isalpha():
             continue
         group = 1 if any("а" <= char.casefold() <= "я" or char.casefold() == "ё" for char in text) else 0
         try:
@@ -461,7 +443,7 @@ def balance_planned_mass(rows: Sequence[ActionRow]) -> tuple[list[ActionRow], di
     isolated: dict[tuple[int, int], float] = defaultdict(float)
     planned: dict[tuple[int, int], float] = defaultdict(float)
     for row in rows:
-        if not 0 < len(row.original) <= MAX_SHORT_WORD_LENGTH:
+        if not 0 < len(row.original) <= SHORT_WORD_MAX_CHARACTERS:
             continue
         key = (row.group, len(row.original))
         if row.after_origin == "planned_next_conversion":
@@ -477,9 +459,9 @@ def balance_planned_mass(rows: Sequence[ActionRow]) -> tuple[list[ActionRow], di
             row = replace(row, sample_weight=row.sample_weight * scale[key])
         result.append(row)
     report = {"policy": "planned frames per (direction, focus length) carry the total mass of the isolated deferred frames of the same class",
-              "isolated_mass": {f"{group}:{length}": round(value, REPORT_ROUNDING_DECIMALS) for (group, length), value in sorted(isolated.items())},
-              "planned_mass_before": {f"{group}:{length}": round(value, REPORT_ROUNDING_DECIMALS) for (group, length), value in sorted(planned.items())},
-              "scale": {f"{group}:{length}": round(value, REPORT_ROUNDING_DECIMALS) for (group, length), value in sorted(scale.items())},
+              "isolated_mass": {f"{group}:{length}": round(value, MASS_REPORT_DECIMALS) for (group, length), value in sorted(isolated.items())},
+              "planned_mass_before": {f"{group}:{length}": round(value, MASS_REPORT_DECIMALS) for (group, length), value in sorted(planned.items())},
+              "scale": {f"{group}:{length}": round(value, MASS_REPORT_DECIMALS) for (group, length), value in sorted(scale.items())},
               "input_mass": math.fsum(row.sample_weight for row in rows), "output_mass": math.fsum(row.sample_weight for row in result)}
     return result, report
 
@@ -504,15 +486,14 @@ def previous_context(row: ActionRow) -> tuple[dict[int, str], int | None]:
 
 
 BLIND_IDENTIFIERS = IdentifierLexicon(frozenset(), "none", "identifiers-none")
-IDENTIFIER_DROPOUT_FAMILIES = 3
 
 
 def identifier_family(identifier: str) -> str:
     """The unit that shares one identifier-evidence dropout decision: a command with all its
     contexts and spelling variants, otherwise the row itself."""
     parts = identifier.split(":")
-    if len(parts) >= MIN_IDENTIFIER_PARTS and parts[1] == "command":
-        return ":".join(parts[:MIN_IDENTIFIER_PARTS])
+    if len(parts) >= COMMAND_FAMILY_IDENTIFIER_PARTS and parts[1] == "command":
+        return ":".join(parts[:COMMAND_FAMILY_IDENTIFIER_PARTS])
     return identifier
 
 
@@ -806,9 +787,9 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
     history: list[dict[str, object]] = []
     for epoch in range(int(cast(int, options["epochs"]))):
         kernel.epoch(train, weights, accumulators, float(cast(float, options["learning_rate"])))
-        rounded = array("d", (round(value, WEIGHT_ROUNDING_DECIMALS) for value in weights))
+        rounded = array("d", (round(value, DETERMINISTIC_ROUNDING_DECIMALS) for value in weights))
         predictions = {name: kernel.predict(data, rounded) for name, data in development.items()}
-        loss = sum(-data.importance[row] * math.log(max(LOG_LOSS_EPSILON, predictions[name][row * len(ACTIONS) + label]))
+        loss = sum(-data.importance[row] * math.log(max(LOG_LOSS_PROBABILITY_FLOOR, predictions[name][row * len(ACTIONS) + label]))
                    for name, data in development.items() for row, label in enumerate(data.labels)) / development_mass
         selection = assess_epoch({name: (apply_support_mask(predictions[name], *development_masks[name]), data.labels)
                                   for name, data in development.items()},
@@ -838,7 +819,7 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
     )
     weight_hash = hashlib.sha256(json.dumps(mapping, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
     payload = {"actions": list(ACTIONS), "feature_version": CONTEXT_ACTION_FEATURE_VERSION, "weights": mapping,
-               "weights_sha256": weight_hash, "version": "context-v3-" + weight_hash[:VERSION_HASH_PREFIX_LENGTH],
+               "weights_sha256": weight_hash, "version": "context-v3-" + weight_hash[:VERSION_HASH_CHARACTERS],
                "conversion_threshold": threshold}
     (output / ARTIFACT).write_bytes(canonical(payload))
     ContextModel.load(output / ARTIFACT)

@@ -17,17 +17,19 @@ TOOLS = str(Path(__file__).resolve().parents[1] / "tools")
 if TOOLS not in sys.path:
     sys.path.insert(0, TOOLS)
 import verify_lexical_compatibility as compatibility
-from model_protocol import ACTIVE_SPLITS
-
-# "unused_training_version" is not part of the lexical contract; these fixture
-# numbers only have to differ from each other to exercise that indifference.
-GENERATION_UNUSED_VERSION = 21
-CURRENT_UNUSED_VERSION = 23
-FUTURE_UNUSED_VERSION = 24
-# Arbitrary fixture weights for a fabricated candidate.json; their values are
-# never asserted on, only their presence and checksum.
-FIXTURE_CANDIDATE_WEIGHTS = (1, 2, 3)
-SHA256_HEX_LENGTH = 64
+from keyswitch.constants.model_protocol import ACTIVE_SPLITS
+from fixture_values.models import (
+    LEXICAL_CURRENT_UNUSED_TRAINING_VERSION,
+    LEXICAL_FIXTURE_CANDIDATE_WEIGHTS,
+    LEXICAL_FUTURE_UNUSED_TRAINING_VERSION,
+    LEXICAL_GENERATION_UNUSED_TRAINING_VERSION,
+)
+from fixture_values.scores import (
+    FROZEN_GATE_FIXTURE_DECISIVE_WEIGHT,
+    FROZEN_GATE_FIXTURE_THRESHOLD,
+    FROZEN_GATE_MINIMUM_DECIDED_FRACTION_PER_STRATUM,
+)
+from keyswitch.constants.file_formats import SHA256_HEX_CHARACTERS
 
 
 class LexicalCompatibilityTests(unittest.TestCase):
@@ -48,8 +50,8 @@ class LexicalCompatibilityTests(unittest.TestCase):
                 spelling[field] = compatibility.checksum(self.root / relative)
             dictionaries[locale] = spelling
         self.generation: dict[str, object] = {"sources": {"languages": languages},
-            "external_evaluation": {"hunspell": dictionaries}, "unused_training_version": GENERATION_UNUSED_VERSION}
-        self.current = {**self.generation, "unused_training_version": CURRENT_UNUSED_VERSION}
+            "external_evaluation": {"hunspell": dictionaries}, "unused_training_version": LEXICAL_GENERATION_UNUSED_TRAINING_VERSION}
+        self.current = {**self.generation, "unused_training_version": LEXICAL_CURRENT_UNUSED_TRAINING_VERSION}
         self.write_json(compatibility.GENERATION_CONFIG, self.generation)
         self.write_json(compatibility.CONFIG, self.current)
         self.stack.enter_context(patch.object(compatibility, "GENERATION_SHA256", compatibility.checksum(self.root / compatibility.GENERATION_CONFIG)))
@@ -68,7 +70,7 @@ class LexicalCompatibilityTests(unittest.TestCase):
             self.write_json(f"model/{kind}/corpus.json", {"sha256": partitions, "provenance": {
                 compatibility.CONFIG: compatibility.GENERATION_SHA256,
                 "tools/generator.py": compatibility.checksum(self.root / "tools/generator.py")}})
-            self.write_json(f"model/{kind}/candidate.json", {"weights": list(FIXTURE_CANDIDATE_WEIGHTS)})
+            self.write_json(f"model/{kind}/candidate.json", {"weights": list(LEXICAL_FIXTURE_CANDIDATE_WEIGHTS)})
             self.write_json(f"model/{kind}/report.json", {"accepted": True, "scope": "fixture"})
             self.write_json(f"model/{kind}/seal.json", {"provenance": {
                 "corpus": compatibility.checksum(self.root / f"model/{kind}/corpus.json"),
@@ -135,7 +137,7 @@ class LexicalCompatibilityTests(unittest.TestCase):
         good = compatibility.expected_receipt("prefix_v1", self.generation)
         relative = "model/prefix_v1/lexical-compatibility.json"
         for changed in ({**good, "accepted": True}, {**good, "schema_version": True},
-                        {**good, "scope": "fresh evaluation passed"}, {**good, "consumed_contract_sha256": "0" * SHA256_HEX_LENGTH}, {}):
+                        {**good, "scope": "fresh evaluation passed"}, {**good, "consumed_contract_sha256": "0" * SHA256_HEX_CHARACTERS}, {}):
             with self.subTest(changed=changed.get("scope")):
                 self.write_json(relative, changed)
                 with self.assertRaises(ValueError):
@@ -155,7 +157,7 @@ class LexicalCompatibilityTests(unittest.TestCase):
                 compatibility.verify("prefix_v1", root=self.root)
 
     def test_future_unused_config_change_still_requires_a_reviewed_transition(self) -> None:
-        self.write_json(compatibility.CONFIG, {**self.current, "unused_training_version": FUTURE_UNUSED_VERSION})
+        self.write_json(compatibility.CONFIG, {**self.current, "unused_training_version": LEXICAL_FUTURE_UNUSED_TRAINING_VERSION})
         with self.assertRaisesRegex(ValueError, "input changed"):
             compatibility.verify("prefix_v1", root=self.root)
 
@@ -174,11 +176,6 @@ class LexicalCompatibilityTests(unittest.TestCase):
 
 
 class FrozenGateDispatchTests(unittest.TestCase):
-    # Fixture-only gate values for the promotion config and the candidate
-    # below; not sourced from any application default.
-    MINIMUM_DECIDED_FRACTION_PER_STRATUM = 0.8
-    FIXTURE_THRESHOLD = 0.95
-    FIXTURE_DECISIVE_WEIGHT = 10.0
 
     def test_boundary_wrapper_reproduces_original_numeric_evaluation_on_small_fixture(self) -> None:
         import train_boundary_v2 as trainer
@@ -187,12 +184,12 @@ class FrozenGateDispatchTests(unittest.TestCase):
         with ExitStack() as stack:
             directory = Path(stack.enter_context(tempfile.TemporaryDirectory()))
             config: dict[str, object] = {"promotion": {"maximum_errors": 0, "required_recall_strata": ["word_ending"],
-                "minimum_decided_fraction_per_stratum": self.MINIMUM_DECIDED_FRACTION_PER_STRATUM,
+                "minimum_decided_fraction_per_stratum": FROZEN_GATE_MINIMUM_DECIDED_FRACTION_PER_STRATUM,
                 "minimum_test_rows": 1, "minimum_test_word_endings": 1}}
             candidate, seal, cfg, receipt = (directory / name for name in ("candidate.json", "seal.json", "config.json", "corpus.json"))
             candidate.write_text(json.dumps({"feature_version": FEATURE_VERSION, "version": "boundary-v2-fixture",
-                                            "threshold": self.FIXTURE_THRESHOLD,
-                                            "weights": {"decisive": self.FIXTURE_DECISIVE_WEIGHT}}))
+                                            "threshold": FROZEN_GATE_FIXTURE_THRESHOLD,
+                                            "weights": {"decisive": FROZEN_GATE_FIXTURE_DECISIVE_WEIGHT}}))
             cfg.write_text(json.dumps(config))
             data: list[dict[str, object]] = [{"features": [{"decisive": 0.0}, {"decisive": 1.0}],
                                             "labels": [1], "category": "word_ending"}]

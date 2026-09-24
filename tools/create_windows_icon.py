@@ -6,36 +6,39 @@ import argparse
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
-
-ICON_SIZE_PIXELS = 256
-BADGE_BACKGROUND_BOX_PIXELS = (8, 8, 247, 247)
-BADGE_BACKGROUND_RADIUS_PIXELS = 56
-BADGE_BACKGROUND_COLOR = (35, 92, 190, 255)
-BADGE_BORDER_BOX_PIXELS = (31, 31, 224, 224)
-BADGE_BORDER_RADIUS_PIXELS = 40
-BADGE_BORDER_COLOR = (255, 255, 255, 70)
-BADGE_BORDER_WIDTH_PIXELS = 5
-LABEL_FONT_SIZE_POINTS = 86
-TEXT_CENTERING_DIVISOR = 2
-ICON_EXPORT_SIZES_PIXELS = ((16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256))
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from keyswitch.constants.geometry import CENTERING_DIVISOR
+from keyswitch.constants.release import (
+    APP_ICON_BACKGROUND_BOX_PIXELS,
+    APP_ICON_BACKGROUND_RADIUS_PIXELS,
+    APP_ICON_BACKGROUND_RGBA,
+    APP_ICON_BORDER_BOX_PIXELS,
+    APP_ICON_BORDER_RADIUS_PIXELS,
+    APP_ICON_BORDER_RGBA,
+    APP_ICON_BORDER_WIDTH_PIXELS,
+    APP_ICON_EXPORT_SIZES_PIXELS,
+    APP_ICON_LABEL_FONT_SIZE_POINTS,
+    APP_ICON_SIZE_PIXELS,
+)
 
 
 def create_icon(output: Path) -> None:
-    size = ICON_SIZE_PIXELS
+    size = APP_ICON_SIZE_PIXELS
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
     draw.rounded_rectangle(
-        BADGE_BACKGROUND_BOX_PIXELS, radius=BADGE_BACKGROUND_RADIUS_PIXELS, fill=BADGE_BACKGROUND_COLOR
+        APP_ICON_BACKGROUND_BOX_PIXELS, radius=APP_ICON_BACKGROUND_RADIUS_PIXELS, fill=APP_ICON_BACKGROUND_RGBA
     )
     draw.rounded_rectangle(
-        BADGE_BORDER_BOX_PIXELS,
-        radius=BADGE_BORDER_RADIUS_PIXELS,
-        outline=BADGE_BORDER_COLOR,
-        width=BADGE_BORDER_WIDTH_PIXELS,
+        APP_ICON_BORDER_BOX_PIXELS,
+        radius=APP_ICON_BORDER_RADIUS_PIXELS,
+        outline=APP_ICON_BORDER_RGBA,
+        width=APP_ICON_BORDER_WIDTH_PIXELS,
     )
     font: ImageFont.FreeTypeFont | ImageFont.ImageFont
     try:
-        font = ImageFont.truetype("arialbd.ttf", LABEL_FONT_SIZE_POINTS)
+        font = ImageFont.truetype("arialbd.ttf", APP_ICON_LABEL_FONT_SIZE_POINTS)
     except OSError:
         font = ImageFont.load_default()
     text = "KS"
@@ -43,7 +46,7 @@ def create_icon(output: Path) -> None:
     width = right - left
     height = bottom - top
     draw.text(
-        ((size - width) / TEXT_CENTERING_DIVISOR, (size - height) / TEXT_CENTERING_DIVISOR - top),
+        ((size - width) / CENTERING_DIVISOR, (size - height) / CENTERING_DIVISOR - top),
         text,
         font=font,
         fill="white",
@@ -52,7 +55,7 @@ def create_icon(output: Path) -> None:
     image.save(
         output,
         format="ICO",
-        sizes=ICON_EXPORT_SIZES_PIXELS,
+        sizes=APP_ICON_EXPORT_SIZES_PIXELS,
     )
 
 

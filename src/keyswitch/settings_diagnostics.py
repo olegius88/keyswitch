@@ -6,25 +6,23 @@ import hashlib
 import json
 from typing import cast
 
-from .config import DEFAULTS, SettingsData, SettingsStore
-
-# Indentation of every diagnostics report printed or copied for a person to read.
-DIAGNOSTICS_JSON_INDENT = 2
+from .config import SettingsData, SettingsStore
+from .constants.settings_defaults import DEFAULT_SETTINGS
+from .constants.text import LOGGED_SETTING_VALUE_MAX_CHARACTERS
 
 
 _MISSING = object()
 _DEFAULTS_SHA256 = hashlib.sha256(
-    json.dumps(DEFAULTS, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    json.dumps(DEFAULT_SETTINGS, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
 ).hexdigest()
-_LOGGABLE_STRING_MAX_CHARACTERS = 80
-_LOGGABLE_STRING_TRUNCATED_CHARACTERS = _LOGGABLE_STRING_MAX_CHARACTERS - len("...")
+_LOGGABLE_STRING_TRUNCATED_CHARACTERS = LOGGED_SETTING_VALUE_MAX_CHARACTERS - len("...")
 
 
 def _loggable_value(value: object) -> object:
     if isinstance(value, (bool, int, float)) or value is None:
         return value
     if isinstance(value, str):
-        return value if len(value) <= _LOGGABLE_STRING_MAX_CHARACTERS else (
+        return value if len(value) <= LOGGED_SETTING_VALUE_MAX_CHARACTERS else (
             value[:_LOGGABLE_STRING_TRUNCATED_CHARACTERS] + "..."
         )
     if isinstance(value, (list, tuple, set, dict)):
@@ -51,9 +49,9 @@ def settings_snapshot(settings: SettingsStore) -> dict[str, object]:
     """One atomic snapshot; omitted known paths use the shipped defaults."""
     return {
         "format": "overrides-v1",
-        "defaults_schema": DEFAULTS["schema_version"],
+        "defaults_schema": DEFAULT_SETTINGS["schema_version"],
         "defaults_sha256": _DEFAULTS_SHA256,
-        "overrides": _overrides(DEFAULTS, settings.snapshot()),
+        "overrides": _overrides(DEFAULT_SETTINGS, settings.snapshot()),
     }
 
 

@@ -14,20 +14,20 @@ from keyswitch.language_model import LanguageModel
 from context_physical_keys import KEYS, PhysicalKey
 from evaluate_context_action_sequences import SequencePlan, TracedEditor, replay
 from freeze_context_action_corpus import CorpusRow
-from model_protocol import FITTING_SPLITS
+from keyswitch.constants.model_protocol import FITTING_SPLITS
+from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
+from keyswitch.constants.models import CONTEXT_ACTION_FEATURE_VERSION
+from keyswitch.constants.training import (
+    SPAN_ANCHOR_MAX_CHARACTERS,
+    SPAN_ANCHOR_MIN_CHARACTERS,
+    SPAN_DEFAULT_MAXIMUM_FAMILIES,
+    SPAN_MAXIMUM_FAMILIES,
+    SPAN_ORIGINAL_MAX_CHARACTERS,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 VARIANTS = (("", " "), (".", " "), (",", "  "), (";", "   "), ("...", "  "), ("!", "   "))
-MAXIMUM_FAMILIES = 128
-# Half the hard cap: one budget half for each of the two physical key groups.
-DEFAULT_MAXIMUM_FAMILIES = 64
-# Physical key groups: the base layout (0) and its shifted counterpart (1).
-GROUP_COUNT = 2
-MAX_ORIGINAL_LENGTH = 64
-MIN_ANCHOR_LENGTH = 3
-MAX_ANCHOR_LENGTH = 24
-RECORDER_FEATURE_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -79,7 +79,7 @@ def _select(rows: Sequence[CorpusRow], maximum: int) -> tuple[list[CorpusRow], d
     families: dict[str, CorpusRow] = {}
     anchors: dict[int, list[CorpusRow]] = {0: [], 1: []}
     for row in sorted(rows, key=lambda row: (_rank("source", row.identifier), row.identifier)):
-        if row.group not in (0, 1) or not row.layout_representable or not 1 <= len(row.original) <= MAX_ORIGINAL_LENGTH:
+        if row.group not in (0, 1) or not row.layout_representable or not 1 <= len(row.original) <= SPAN_ORIGINAL_MAX_CHARACTERS:
             continue
         if not any(character.isalpha() for character in row.original):
             continue
@@ -88,13 +88,13 @@ def _select(rows: Sequence[CorpusRow], maximum: int) -> tuple[list[CorpusRow], d
         except ValueError:
             continue
         families.setdefault(row.family, row)
-        if row.original.isalpha() and MIN_ANCHOR_LENGTH <= len(row.original) <= MAX_ANCHOR_LENGTH:
+        if row.original.isalpha() and SPAN_ANCHOR_MIN_CHARACTERS <= len(row.original) <= SPAN_ANCHOR_MAX_CHARACTERS:
             anchors[row.group].append(row)
     selected: list[CorpusRow] = []
     per_group: Counter[int] = Counter()
     for row in sorted(families.values(), key=lambda row: (_rank("family", row.family), row.family)):
         assert row.group is not None
-        if not anchors[row.group] or per_group[row.group] >= maximum // GROUP_COUNT:
+        if not anchors[row.group] or per_group[row.group] >= maximum // LAYOUT_GROUP_COUNT:
             continue
         per_group[row.group] += 1
         selected.append(row)
@@ -110,7 +110,7 @@ class _Capture:
 
 class _Recorder(ContextModel):
     def __init__(self) -> None:
-        super().__init__({}, "context-v3-span-capture", feature_version=RECORDER_FEATURE_VERSION)
+        super().__init__({}, "context-v3-span-capture", feature_version=CONTEXT_ACTION_FEATURE_VERSION)
         self.backend: TracedEditor | None = None
         self.records: list[_Capture] = []
 
@@ -149,7 +149,7 @@ def _label(capture: _Capture, expected: str) -> ContextAction | None:
 
 def build_span_curriculum(
     rows: Sequence[CorpusRow], models: dict[int, LanguageModel], *,
-    profile: str, maximum_families: int = DEFAULT_MAXIMUM_FAMILIES, expected_split: str = "train",
+    profile: str, maximum_families: int = SPAN_DEFAULT_MAXIMUM_FAMILIES, expected_split: str = "train",
 ) -> SpanCurriculum:
     """Capture attainable labels without dictionary or candidate predictions.
 
@@ -159,9 +159,9 @@ def build_span_curriculum(
     Each retained family has total sample weight one, before class weighting.
     No split loader, test membership lookup or model-quality scoring is used.
     """
-    if (type(maximum_families) is not int or not GROUP_COUNT <= maximum_families <= MAXIMUM_FAMILIES
-            or maximum_families % GROUP_COUNT):
-        raise ValueError("span family budget must be an even integer from 2 to 128")
+    if (type(maximum_families) is not int or not LAYOUT_GROUP_COUNT <= maximum_families <= SPAN_MAXIMUM_FAMILIES
+            or maximum_families % LAYOUT_GROUP_COUNT):
+        raise ValueError(f"span family budget must be an even integer from {LAYOUT_GROUP_COUNT} to {SPAN_MAXIMUM_FAMILIES}")
     if profile not in ("portable", "reference_hunspell") or set(models) != {0, 1}:
         raise ValueError("span curriculum requires an explicit lexical profile and both models")
     if expected_split not in FITTING_SPLITS:

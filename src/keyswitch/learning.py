@@ -8,8 +8,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
 
-from .config import DEFAULT_LEARNING_CONFIRMATIONS, PERSISTED_JSON_INDENT
+from .constants.file_formats import (
+    LEARNING_STORE_SCHEMA_VERSION,
+    PARTITION_AFTER_SEPARATOR_INDEX,
+    USER_DATA_JSON_INDENT,
+)
+from .constants.settings_defaults import (
+    DEFAULT_LEARNING_CONFIRMATIONS,
+    LEARNING_CONFIRMATIONS_SETTING_MAX,
+)
 from .history import data_dir
+from .constants.detection import MAX_LEARNING_CONFIRMATIONS
 
 
 @dataclass(frozen=True)
@@ -38,15 +47,6 @@ class _LearningData(TypedDict):
     rejections: dict[str, object]
 
 
-# The text after the ":" separator from str.partition(":"), which always
-# returns a 3-tuple (before, separator, after).
-PARTITION_AFTER_SEPARATOR_INDEX = 2
-MAX_CONFIRMATIONS = 999
-# Mirrors the shipped default of detection.learning_confirmations (see
-# config.DEFAULTS); engine.py imports LearningStore from here, so this module
-# cannot import the matching constant back from engine.py.
-
-
 def _string_keyed_dict(value: object) -> dict[str, object] | None:
     if not isinstance(value, dict):
         return None
@@ -66,13 +66,12 @@ class LearningStore:
     Ordinary typed text is never written here.
     """
 
-    SCHEMA_VERSION = 2
 
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or data_dir() / "learning.json"
         self._lock = threading.RLock()
         self._data: _LearningData = {
-            "schema_version": self.SCHEMA_VERSION,
+            "schema_version": LEARNING_STORE_SCHEMA_VERSION,
             "rules": {},
             "rejections": {},
         }
@@ -99,7 +98,7 @@ class LearningStore:
             rejections = _string_keyed_dict(payload.get("rejections", {}))
             if rules is not None and rejections is not None:
                 self._data = {
-                    "schema_version": self.SCHEMA_VERSION,
+                    "schema_version": LEARNING_STORE_SCHEMA_VERSION,
                     "rules": rules,
                     "rejections": rejections,
                 }
@@ -109,7 +108,7 @@ class LearningStore:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             temporary = self.path.with_suffix(".json.tmp")
             temporary.write_text(
-                json.dumps(self._data, ensure_ascii=False, indent=PERSISTED_JSON_INDENT) + "\n",
+                json.dumps(self._data, ensure_ascii=False, indent=USER_DATA_JSON_INDENT) + "\n",
                 encoding="utf-8",
             )
             temporary.replace(self.path)
@@ -125,7 +124,7 @@ class LearningStore:
             current = rules.get(key, {})
             if not isinstance(current, dict) or current.get("target_group") != target_group:
                 current = {"target_group": target_group, "confirmations": 0}
-            confirmations = min(MAX_CONFIRMATIONS, int(current.get("confirmations", 0)) + 1)
+            confirmations = min(MAX_LEARNING_CONFIRMATIONS, int(current.get("confirmations", 0)) + 1)
             rules[key] = {
                 "target_group": target_group,
                 "confirmations": confirmations,
@@ -153,7 +152,7 @@ class LearningStore:
         key = self._key(source_group, word)
         if not key.partition(":")[PARTITION_AFTER_SEPARATOR_INDEX] or source_group == target_group:
             return 0
-        required = max(1, min(MAX_CONFIRMATIONS, confirmations_required))
+        required = max(1, min(LEARNING_CONFIRMATIONS_SETTING_MAX, confirmations_required))
         with self._lock:
             rules = self._data["rules"]
             current = rules.get(key, {})
@@ -358,7 +357,7 @@ class LearningStore:
     def clear(self) -> None:
         with self._lock:
             self._data = {
-                "schema_version": self.SCHEMA_VERSION,
+                "schema_version": LEARNING_STORE_SCHEMA_VERSION,
                 "rules": {},
                 "rejections": {},
             }

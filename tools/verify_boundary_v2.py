@@ -5,19 +5,18 @@ import argparse
 import json
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Final, cast
+from typing import cast
 
 from keyswitch.boundary_policy import ARTIFACT, BoundaryPolicy
 from boundary_v2_corpus import CONFIG, DIRECTORY, RECEIPT, rows
-from model_protocol import ACTIVE_SPLITS
+from keyswitch.constants.model_protocol import ACTIVE_SPLITS
 from context_evidence import canonical, checksum
 from evaluate_boundary_engine import REPORT as ENGINE_REPORT, SCENARIOS, provenance as engine_provenance
 from train_boundary_v2 import CANDIDATE, REPORT, SEAL, acceptable, metrics, provenance
 from verify_context_v2 import read_object
 from verify_lexical_compatibility import read_object as read_compatibility_object
 from verify_lexical_compatibility import verify as verify_compatibility
-
-REPORT_JSON_INDENT: Final = 2
+from keyswitch.constants.file_formats import REPORT_JSON_INDENT
 
 
 def evaluate() -> bytes:

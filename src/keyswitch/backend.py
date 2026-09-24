@@ -5,22 +5,15 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol
+from .constants.keyboard import (
+    ALT_MASK,
+    CONTROL_MASK,
+    LOCK_MASK as LOCK_MASK,
+    SHIFT_MASK as SHIFT_MASK,
+    SUPER_MASK,
+)
 
 
-# Internal modifier bits intentionally match the X11 core masks. Platform
-# backends normalize their native state into these values before emitting an
-# event, keeping the engine independent from an operating system API.
-SHIFT_MASK = 1 << 0
-LOCK_MASK = 1 << 1
-CONTROL_MASK = 1 << 2
-ALT_MASK = 1 << 3
-SUPER_MASK = 1 << 6
-# A layout switch requested from the operating system is asynchronous: a native
-# backend polls for the new layout at this step, and gives up after the timeout.
-LAYOUT_SWITCH_TIMEOUT_SECONDS = 0.5
-LAYOUT_SWITCH_POLL_SECONDS = 0.01
-# The keyboard event pair (down, up) `complete_action` sends for one key.
-COMPLETED_ACTION_EVENT_COUNT = 2
 KeyDisposition = bool | Literal["defer"]
 
 

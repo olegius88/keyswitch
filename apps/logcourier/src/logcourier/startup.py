@@ -3,10 +3,10 @@
 import sys
 import traceback
 
-from .config import PRIVATE_DIRECTORY_MODE, data_directory
+from .config import data_directory
+from .constants.files import PRIVATE_DIRECTORY_MODE
+from .constants.windows import MB_ICONERROR
 from .secrets import redact
-
-MB_ICONERROR = 0x10
 
 
 def report_error(error):

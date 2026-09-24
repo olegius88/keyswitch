@@ -9,9 +9,8 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from logcourier.config import Config
+from logcourier.constants.release import CAPTURE_DELAY_MILLISECONDS
 from logcourier.gui import Window
-
-CAPTURE_DELAY_MILLISECONDS = 500
 
 ROOT = Path(__file__).resolve().parents[1] / ".local" / "smoke"
 ROOT.mkdir(parents=True, exist_ok=True)

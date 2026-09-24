@@ -23,17 +23,25 @@ from keyswitch.macos_context import (
     VALUE_ATTRIBUTE,
     MacFieldReader,
 )
+from fixture_values.counts import (
+    MACOS_CONTEXT_FIRST_WORD_CHARACTERS,
+    MACOS_CONTEXT_NEGATIVE_RANGE_LENGTH,
+    MACOS_CONTEXT_OUT_OF_BOUNDS_CARET_INDEX,
+    MACOS_CONTEXT_OVERSIZED_TEXT_MULTIPLIER,
+    MACOS_CONTEXT_TEXT_AREA_WORD_CHARACTERS,
+    MIDPOINT_DIVISOR,
+)
+from fixture_values.keys import MACOS_CONTEXT_WINDOW_ID
+from fixture_values.platform import MACOS_FAKE_AX_ELEMENT
 
-ELEMENT = 0xF0C5
 APPLICATION = "com.apple.TextEdit"
-WINDOW = 42
 
 
 class FakeAccessibility:
     def __init__(self, **attributes: object) -> None:
         self.attributes: dict[str, object] = {ROLE_ATTRIBUTE: TEXT_FIELD_ROLE}
         self.attributes.update(attributes)
-        self.element = ELEMENT
+        self.element = MACOS_FAKE_AX_ELEMENT
         self.released: list[int] = []
 
     def focused_element(self) -> int:
@@ -57,24 +65,20 @@ def reader(**attributes: object) -> tuple[MacFieldReader, FakeAccessibility]:
 
 
 class ReadingTests(unittest.TestCase):
-    FIRST_WORD_LENGTH = 6
-    TEXT_AREA_WORD_LENGTH = 5
-    OVERSIZED_TEXT_MULTIPLIER = 3
-    MIDPOINT_DIVISOR = 2
 
     def test_the_text_is_split_at_the_caret(self) -> None:
-        field, api = reader(**{VALUE_ATTRIBUTE: "привет мир", SELECTED_RANGE_ATTRIBUTE: (self.FIRST_WORD_LENGTH, 0)})
-        context = field.read(APPLICATION, WINDOW)
+        field, api = reader(**{VALUE_ATTRIBUTE: "привет мир", SELECTED_RANGE_ATTRIBUTE: (MACOS_CONTEXT_FIRST_WORD_CHARACTERS, 0)})
+        context = field.read(APPLICATION, MACOS_CONTEXT_WINDOW_ID)
         assert context is not None
         self.assertEqual(context.before, "привет")
         self.assertEqual(context.after, " мир")
         self.assertFalse(context.selection)
         self.assertEqual(context.role, "text")
-        self.assertEqual(api.released, [ELEMENT])
+        self.assertEqual(api.released, [MACOS_FAKE_AX_ELEMENT])
 
     def test_a_selection_is_reported_and_left_out_of_both_sides(self) -> None:
-        field, _api = reader(**{VALUE_ATTRIBUTE: "привет мир", SELECTED_RANGE_ATTRIBUTE: (0, self.FIRST_WORD_LENGTH)})
-        context = field.read(APPLICATION, WINDOW)
+        field, _api = reader(**{VALUE_ATTRIBUTE: "привет мир", SELECTED_RANGE_ATTRIBUTE: (0, MACOS_CONTEXT_FIRST_WORD_CHARACTERS)})
+        context = field.read(APPLICATION, MACOS_CONTEXT_WINDOW_ID)
         assert context is not None
         self.assertTrue(context.selection)
         self.assertEqual(context.before, "")
@@ -86,10 +90,10 @@ class ReadingTests(unittest.TestCase):
         field, api = reader(**{
             SUBROLE_ATTRIBUTE: SECURE_TEXT_FIELD_SUBROLE,
             VALUE_ATTRIBUTE: "секрет",
-            SELECTED_RANGE_ATTRIBUTE: (self.FIRST_WORD_LENGTH, 0),
+            SELECTED_RANGE_ATTRIBUTE: (MACOS_CONTEXT_FIRST_WORD_CHARACTERS, 0),
         })
         with patch.object(api, "string_attribute", wraps=api.string_attribute) as read:
-            context = field.read(APPLICATION, WINDOW)
+            context = field.read(APPLICATION, MACOS_CONTEXT_WINDOW_ID)
         assert context is not None
         self.assertEqual(context.role, "password")
         self.assertTrue(context.sensitive)
@@ -99,26 +103,26 @@ class ReadingTests(unittest.TestCase):
     def test_a_search_field_is_told_apart_from_ordinary_text(self) -> None:
         field, _api = reader(**{
             SUBROLE_ATTRIBUTE: SEARCH_FIELD_SUBROLE,
-            VALUE_ATTRIBUTE: "запрос", SELECTED_RANGE_ATTRIBUTE: (self.FIRST_WORD_LENGTH, 0),
+            VALUE_ATTRIBUTE: "запрос", SELECTED_RANGE_ATTRIBUTE: (MACOS_CONTEXT_FIRST_WORD_CHARACTERS, 0),
         })
-        context = field.read(APPLICATION, WINDOW)
+        context = field.read(APPLICATION, MACOS_CONTEXT_WINDOW_ID)
         assert context is not None
         self.assertEqual(context.role, "search")
 
     def test_a_text_area_counts_as_text(self) -> None:
         field, _api = reader(**{
             ROLE_ATTRIBUTE: TEXT_AREA_ROLE,
-            VALUE_ATTRIBUTE: "абзац", SELECTED_RANGE_ATTRIBUTE: (self.TEXT_AREA_WORD_LENGTH, 0),
+            VALUE_ATTRIBUTE: "абзац", SELECTED_RANGE_ATTRIBUTE: (MACOS_CONTEXT_TEXT_AREA_WORD_CHARACTERS, 0),
         })
-        context = field.read(APPLICATION, WINDOW)
+        context = field.read(APPLICATION, MACOS_CONTEXT_WINDOW_ID)
         assert context is not None
         self.assertEqual(context.role, "text")
 
     def test_only_a_bounded_amount_of_text_travels(self) -> None:
-        text = "я" * (CONTEXT_LIMIT * self.OVERSIZED_TEXT_MULTIPLIER)
+        text = "я" * (CONTEXT_LIMIT * MACOS_CONTEXT_OVERSIZED_TEXT_MULTIPLIER)
         field, _api = reader(**{
-            VALUE_ATTRIBUTE: text, SELECTED_RANGE_ATTRIBUTE: (len(text) // self.MIDPOINT_DIVISOR, 0)})
-        context = field.read(APPLICATION, WINDOW)
+            VALUE_ATTRIBUTE: text, SELECTED_RANGE_ATTRIBUTE: (len(text) // MIDPOINT_DIVISOR, 0)})
+        context = field.read(APPLICATION, MACOS_CONTEXT_WINDOW_ID)
         assert context is not None
         self.assertEqual(len(context.before), CONTEXT_LIMIT)
         self.assertEqual(len(context.after), CONTEXT_LIMIT)
@@ -127,13 +131,13 @@ class ReadingTests(unittest.TestCase):
         field, _api = reader(**{
             IDENTIFIER_ATTRIBUTE: "search-box",
             VALUE_ATTRIBUTE: "", SELECTED_RANGE_ATTRIBUTE: (0, 0)})
-        context = field.read(APPLICATION, WINDOW)
+        context = field.read(APPLICATION, MACOS_CONTEXT_WINDOW_ID)
         assert context is not None
         self.assertEqual(context.field_id, "search-box")
 
     def test_a_field_without_an_identifier_falls_back_to_its_role(self) -> None:
         field, _api = reader(**{VALUE_ATTRIBUTE: "", SELECTED_RANGE_ATTRIBUTE: (0, 0)})
-        context = field.read(APPLICATION, WINDOW)
+        context = field.read(APPLICATION, MACOS_CONTEXT_WINDOW_ID)
         assert context is not None
         self.assertEqual(context.field_id, TEXT_FIELD_ROLE)
 
@@ -141,45 +145,43 @@ class ReadingTests(unittest.TestCase):
 class RefusalTests(unittest.TestCase):
     """Silence is the right answer more often than a guess is."""
 
-    OUT_OF_BOUNDS_CARET_INDEX = 99
-    NEGATIVE_RANGE_LENGTH = -3
 
     def test_nothing_focused_reads_as_no_context(self) -> None:
         field, api = reader()
         api.element = 0
-        self.assertIsNone(field.read(APPLICATION, WINDOW))
+        self.assertIsNone(field.read(APPLICATION, MACOS_CONTEXT_WINDOW_ID))
         self.assertEqual(api.released, [])
 
     def test_a_field_of_an_unknown_kind_is_not_mistaken_for_an_empty_one(self) -> None:
         """An empty answer would tell the engine the field is genuinely empty."""
 
         field, _api = reader(**{ROLE_ATTRIBUTE: "AXButton"})
-        self.assertIsNone(field.read(APPLICATION, WINDOW))
+        self.assertIsNone(field.read(APPLICATION, MACOS_CONTEXT_WINDOW_ID))
 
     def test_a_field_that_will_not_give_its_text_is_refused(self) -> None:
         field, _api = reader(**{SELECTED_RANGE_ATTRIBUTE: (0, 0)})
-        self.assertIsNone(field.read(APPLICATION, WINDOW))
+        self.assertIsNone(field.read(APPLICATION, MACOS_CONTEXT_WINDOW_ID))
 
     def test_a_field_without_a_caret_is_refused(self) -> None:
         field, _api = reader(**{VALUE_ATTRIBUTE: "текст"})
-        self.assertIsNone(field.read(APPLICATION, WINDOW))
+        self.assertIsNone(field.read(APPLICATION, MACOS_CONTEXT_WINDOW_ID))
 
     def test_a_caret_outside_the_text_is_refused(self) -> None:
         """The application changed the text after it computed the range."""
 
-        field, _api = reader(**{VALUE_ATTRIBUTE: "коротко", SELECTED_RANGE_ATTRIBUTE: (self.OUT_OF_BOUNDS_CARET_INDEX, 0)})
-        self.assertIsNone(field.read(APPLICATION, WINDOW))
+        field, _api = reader(**{VALUE_ATTRIBUTE: "коротко", SELECTED_RANGE_ATTRIBUTE: (MACOS_CONTEXT_OUT_OF_BOUNDS_CARET_INDEX, 0)})
+        self.assertIsNone(field.read(APPLICATION, MACOS_CONTEXT_WINDOW_ID))
 
     def test_a_negative_range_is_refused(self) -> None:
         field, _api = reader(**{VALUE_ATTRIBUTE: "текст", SELECTED_RANGE_ATTRIBUTE: (-1, 0)})
-        self.assertIsNone(field.read(APPLICATION, WINDOW))
-        field, _api = reader(**{VALUE_ATTRIBUTE: "текст", SELECTED_RANGE_ATTRIBUTE: (0, self.NEGATIVE_RANGE_LENGTH)})
-        self.assertIsNone(field.read(APPLICATION, WINDOW))
+        self.assertIsNone(field.read(APPLICATION, MACOS_CONTEXT_WINDOW_ID))
+        field, _api = reader(**{VALUE_ATTRIBUTE: "текст", SELECTED_RANGE_ATTRIBUTE: (0, MACOS_CONTEXT_NEGATIVE_RANGE_LENGTH)})
+        self.assertIsNone(field.read(APPLICATION, MACOS_CONTEXT_WINDOW_ID))
 
     def test_the_element_is_released_even_when_nothing_is_returned(self) -> None:
         field, api = reader(**{ROLE_ATTRIBUTE: "AXButton"})
-        field.read(APPLICATION, WINDOW)
-        self.assertEqual(api.released, [ELEMENT])
+        field.read(APPLICATION, MACOS_CONTEXT_WINDOW_ID)
+        self.assertEqual(api.released, [MACOS_FAKE_AX_ELEMENT])
 
     def test_closing_the_reader_keeps_nothing_open(self) -> None:
         field, _api = reader()

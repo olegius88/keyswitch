@@ -14,7 +14,9 @@ from typing import cast
 from unittest.mock import patch
 
 from keyswitch.layouts import LayoutPair
-from keyswitch.prefix_schema import CURRENT_PREFIX_FEATURE_VERSION, VERSION_HASH_CHARACTERS, VersionedPrefixModel
+from keyswitch.prefix_schema import VersionedPrefixModel
+from keyswitch.constants.file_formats import VERSION_HASH_CHARACTERS
+from keyswitch.constants.models import CURRENT_PREFIX_FEATURE_VERSION, PREFIX_MIN_CHARACTERS
 from keyswitch.prefix_model import ARTIFACT, PrefixModel
 
 TOOLS = str(Path(__file__).resolve().parents[1] / "tools")
@@ -24,22 +26,33 @@ import prefix_corpus as corpus
 import train_prefix_model as trainer
 import verify_prefix_model as verifier
 import verify_context_action_model as action_verifier
-from model_protocol import ACTIVE_SPLITS
+from keyswitch.constants.model_protocol import ACTIVE_SPLITS
+from fixture_values.clock import PREFIX_TRAINING_SUBPROCESS_TIMEOUT_SECONDS
+from fixture_values.counts import (
+    PREFIX_EXPECTED_CHARACTERS_BEFORE_CONVERSION,
+    PREFIX_OUT_OF_RANGE_CONVERTED_COUNT,
+    PREFIX_SPLIT_PROBE_SAMPLE_COUNT,
+)
+from fixture_values.scores import (
+    PREFIX_METRICS_IDENTIFIER_CANDIDATE_PROBABILITY,
+    PREFIX_METRICS_LENIENT_THRESHOLD,
+    PREFIX_METRICS_STRICT_THRESHOLD,
+    PREFIX_METRICS_WRONG_FIRST_CANDIDATE_PROBABILITY,
+    PREFIX_METRICS_WRONG_NEXT_CANDIDATE_PROBABILITY,
+    PREFIX_POLICY_ALTERED_CONVERSION_THRESHOLD,
+    PREFIX_POLICY_SAMPLE_CONVERSION_THRESHOLD,
+    PREFIX_POLICY_SAMPLE_FEATURE_WEIGHT,
+)
 
-SUBPROCESS_TIMEOUT_SECONDS = 30
-SPLIT_PROBE_SAMPLE_COUNT = 1000
-METRICS_THRESHOLD_STRICT = 0.999
-METRICS_THRESHOLD_LENIENT = 0.99
-OUT_OF_RANGE_CONVERTED_COUNT = 10**9
-EXPECTED_CHARACTERS_BEFORE_CONVERSION = 4
 EXAMPLE_SEQUENCE_RESULTS = [
-    trainer.SequenceResult("ghbdtn", "wrong", True, "portable", [(4, .9999), (5, .99999)], 5),
-    trainer.SequenceResult("function", "identifier", False, "portable", [(4, .995)], None),
+    trainer.SequenceResult("ghbdtn", "wrong", True, "portable",
+                           [(PREFIX_MIN_CHARACTERS, PREFIX_METRICS_WRONG_FIRST_CANDIDATE_PROBABILITY),
+                            (PREFIX_MIN_CHARACTERS + 1, PREFIX_METRICS_WRONG_NEXT_CANDIDATE_PROBABILITY)],
+                           PREFIX_MIN_CHARACTERS + 1),
+    trainer.SequenceResult("function", "identifier", False, "portable",
+                           [(PREFIX_MIN_CHARACTERS, PREFIX_METRICS_IDENTIFIER_CANDIDATE_PROBABILITY)], None),
     trainer.SequenceResult("hello", "correct", False, "portable", [], None),
 ]
-FEATURE_WEIGHT_SAMPLE = 0.5
-SAMPLE_CONVERSION_THRESHOLD = 0.985
-ALTERED_CONVERSION_THRESHOLD = 0.99
 
 
 class PrefixEvidenceTests(unittest.TestCase):
@@ -57,7 +70,7 @@ class PrefixEvidenceTests(unittest.TestCase):
                     env={**os.environ, "PYTHONPATH": str(root / "src"),
                          "PYTHONIOENCODING": encoding},
                     capture_output=True,
-                    timeout=SUBPROCESS_TIMEOUT_SECONDS,
+                    timeout=PREFIX_TRAINING_SUBPROCESS_TIMEOUT_SECONDS,
                     check=False,
                 )
                 self.assertEqual(completed.returncode, 0, completed.stderr.decode("utf-8", "replace"))
@@ -82,7 +95,7 @@ class PrefixEvidenceTests(unittest.TestCase):
         self.assertEqual(corpus.family("ghbdtn_value", 0, pair), corpus.family("ghbdtn", 0, pair))
         namespace = str(corpus.config()["namespace"])
         self.assertEqual(
-            {corpus.split_for(str(index), namespace) for index in range(SPLIT_PROBE_SAMPLE_COUNT)},
+            {corpus.split_for(str(index), namespace) for index in range(PREFIX_SPLIT_PROBE_SAMPLE_COUNT)},
             set(ACTIVE_SPLITS),
         )
         with self.assertRaisesRegex(ValueError, "overwrite"):
@@ -96,18 +109,18 @@ class PrefixEvidenceTests(unittest.TestCase):
 
     def test_metrics_count_the_first_conversion_per_sequence_not_each_prefix(self) -> None:
         examples = EXAMPLE_SEQUENCE_RESULTS
-        counts = cast(dict[str, int], trainer.metrics(examples, METRICS_THRESHOLD_STRICT)["counts"])
+        counts = cast(dict[str, int], trainer.metrics(examples, PREFIX_METRICS_STRICT_THRESHOLD)["counts"])
         self.assertEqual(
             (counts["converted"], counts["false"], counts["characters_before_conversion"]),
-            (1, 0, EXPECTED_CHARACTERS_BEFORE_CONVERSION),
+            (1, 0, PREFIX_EXPECTED_CHARACTERS_BEFORE_CONVERSION),
         )
-        counts = cast(dict[str, int], trainer.metrics(examples, METRICS_THRESHOLD_LENIENT)["counts"])
+        counts = cast(dict[str, int], trainer.metrics(examples, PREFIX_METRICS_LENIENT_THRESHOLD)["counts"])
         self.assertEqual((counts["false"], counts["technical_false"]), (1, 1))
         self.assertFalse(trainer.accepted({"profiles": {}}))
         report = json.loads(trainer.REPORT.read_bytes())
         self.assertTrue(trainer.accepted(report["test"]))
         for key, value in (("sequences", True), ("desired", 0), ("false", -1),
-                           ("converted", OUT_OF_RANGE_CONVERTED_COUNT), ("technical_false", 1),
+                           ("converted", PREFIX_OUT_OF_RANGE_CONVERTED_COUNT), ("technical_false", 1),
                            ("converted_before_end", 0)):
             modified = copy.deepcopy(report["test"])
             modified["profiles"]["portable"][key] = value
@@ -120,13 +133,13 @@ class PrefixEvidenceTests(unittest.TestCase):
 
         weights = {
             "bias": [0.0] * len(ACTIONS),
-            "source:prefix_char:0:1:^a": [FEATURE_WEIGHT_SAMPLE] + [0.0] * (len(ACTIONS) - 1),
+            "source:prefix_char:0:1:^a": [PREFIX_POLICY_SAMPLE_FEATURE_WEIGHT] + [0.0] * (len(ACTIONS) - 1),
         }
         digest = hashlib.sha256(json.dumps(weights, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
         payload = {"kind": "keyswitch.prefix-policy", "feature_version": CURRENT_PREFIX_FEATURE_VERSION,
                    "prefix_feature_version": CURRENT_PREFIX_FEATURE_VERSION,
                    "actions": list(ACTIONS), "version": "prefix-v2-" + digest[:VERSION_HASH_CHARACTERS],
-                   "conversion_threshold": SAMPLE_CONVERSION_THRESHOLD,
+                   "conversion_threshold": PREFIX_POLICY_SAMPLE_CONVERSION_THRESHOLD,
                    "weights": weights, "weights_sha256": digest}
         with tempfile.TemporaryDirectory() as temporary:
             artifact = Path(temporary) / "prefix_policy_v1.json"
@@ -145,7 +158,7 @@ class PrefixEvidenceTests(unittest.TestCase):
 
             def swap(**_kwargs: object) -> dict[str, object]:
                 artifact.write_text(
-                    json.dumps({**payload, "conversion_threshold": ALTERED_CONVERSION_THRESHOLD}),
+                    json.dumps({**payload, "conversion_threshold": PREFIX_POLICY_ALTERED_CONVERSION_THRESHOLD}),
                     encoding="utf-8",
                 )
                 return receipt
@@ -197,7 +210,7 @@ class PrefixEvidenceTests(unittest.TestCase):
             other = Path(temporary) / "prefix.json"
             payload = json.loads(ARTIFACT.read_bytes())
             other.write_text(
-                json.dumps({**payload, "conversion_threshold": ALTERED_CONVERSION_THRESHOLD}), encoding="utf-8"
+                json.dumps({**payload, "conversion_threshold": PREFIX_POLICY_ALTERED_CONVERSION_THRESHOLD}), encoding="utf-8"
             )
             self.assertEqual(VersionedPrefixModel.load(other).feature_version, installed.feature_version)
             with self.assertRaises(ValueError):

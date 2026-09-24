@@ -1,0 +1,25 @@
+"""Size and count limits."""
+
+from __future__ import annotations
+
+from typing import Final
+
+DEFAULT_LIST_LIMIT: Final = 20
+MAX_LIST_LIMIT: Final = 10000
+MAX_FRAGMENTS_PER_BATCH: Final = 4096
+MIN_FRAGMENTS_TO_COMPACT: Final = 2
+CATALOG_MAX_ENTRIES: Final = 200
+CATALOG_MAX_VERSION_ENTRIES: Final = 50
+# one cycle sends at most this many queued documents
+DELIVERY_BATCH_LIMIT: Final = 4
+DEFAULT_ENTRY_LIMIT: Final = 100
+MAX_CATALOG_PAGES: Final = 100
+DEFAULT_MAX_CHUNKS_PER_SCAN: Final = 16
+DEFAULT_ROTATIONS: Final = 5
+MAX_ROTATIONS: Final = 20
+MAX_SOURCE_LABEL_CHARACTERS: Final = 80
+DEFAULT_INTERVAL_MINUTES: Final = 15
+MAX_INTERVAL_MINUTES: Final = 1440
+MAX_DEVICE_NAME_CHARACTERS: Final = 80
+MAX_SOURCES: Final = 50
+MAX_QUEUE_BYTES: Final = 128 * 1024 * 1024

@@ -9,8 +9,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from keyswitch.context_model import ACTIONS
-
-PROBABILITY_SUM_TOLERANCE = 1e-8
+from keyswitch.constants.training import PROBABILITY_SUM_TOLERANCE
 
 
 @dataclass(frozen=True)

@@ -6,23 +6,18 @@ import unittest
 from dataclasses import replace
 from unittest.mock import patch
 
-from keyswitch.backend import ALT_MASK, CONTROL_MASK
-from keyswitch.config import DEFAULT_EARLY_SWITCH_MIN_LENGTH
+from keyswitch.constants.keyboard import ALT_MASK, CONTROL_MASK
+from keyswitch.constants.settings_defaults import DEFAULT_EARLY_SWITCH_MIN_LENGTH
 from keyswitch.context_model import ContextModel
 from keyswitch.early_switch import EarlySwitchDecision
-from keyswitch.engine import PREFIX_WORD_LENGTH_MAX, PREFIX_WORD_LENGTH_MIN
+from keyswitch.constants.models import PREFIX_MAX_CHARACTERS, PREFIX_MIN_CHARACTERS
 from keyswitch.input_context import FieldContext
 from keyswitch.prefix_model import PrefixModel
 from keyswitch.prefix_schema import VersionedPrefixModel
 from test_input_integrity import EditorBackend, InputIntegrityTests
-
-# An arbitrary bias large enough to make a fixture model deterministically
-# prefer one action; its exact magnitude is not asserted anywhere.
-FIXTURE_BIAS_SCORE = 20.0
-# A minimum length raised mid-test so a pending early switch is invalidated.
-CHANGED_MIN_LENGTH = 8
-# Not 0 or 1: an out-of-range layout group, to see the guard reject it.
-INVALID_GROUP = 2
+from fixture_values.counts import RAISED_EARLY_SWITCH_MIN_LENGTH
+from fixture_values.keys import UNSUPPORTED_LAYOUT_GROUP
+from fixture_values.scores import DOMINANT_BIAS_WEIGHT
 
 
 class EditorReader:
@@ -46,7 +41,7 @@ class EarlyContextTests(InputIntegrityTests):
         self.settings.set("detection.context_policy", "assist")
         self.settings.set("detection.context_aware", True)
         self.settings.set("detection.early_switch", True)
-        self.engine.prefix_model = PrefixModel(ContextModel({"bias": (0.0, FIXTURE_BIAS_SCORE, 0.0, 0.0)}, "prefix-v1-fixture"))
+        self.engine.prefix_model = PrefixModel(ContextModel({"bias": (0.0, DOMINANT_BIAS_WEIGHT, 0.0, 0.0)}, "prefix-v1-fixture"))
 
     def test_assist_switches_before_boundary_without_classifying_an_unfinished_word(self) -> None:
         model = self.engine.context_policy.model
@@ -168,7 +163,7 @@ class EarlyContextTests(InputIntegrityTests):
         self.assertEqual(self.backend.text, "прив")
 
     def test_model_keep_wait_missing_and_shadow_have_distinct_effects(self) -> None:
-        for scores in ((FIXTURE_BIAS_SCORE, 0., 0., 0.), (0., 1., 0., 0.)):
+        for scores in ((DOMINANT_BIAS_WEIGHT, 0., 0., 0.), (0., 1., 0., 0.)):
             self.reset_editor()
             self.engine.prefix_model = PrefixModel(ContextModel({"bias": scores}, "fixture"))
             self.type("ghbd")
@@ -190,16 +185,16 @@ class EarlyContextTests(InputIntegrityTests):
         field = FieldContext("TestEditor", "1")
         for item, context in (
             (baseline, None), (replace(baseline, original="ghb"), field),
-            (replace(baseline, original="g" * (PREFIX_WORD_LENGTH_MAX + 1)), field), (replace(baseline, replacement="1"), field),
-            (replace(baseline, original="GhBd"), field), (replace(baseline, source_group=INVALID_GROUP), field),
-            (replace(baseline, target_group=INVALID_GROUP), field),
+            (replace(baseline, original="g" * (PREFIX_MAX_CHARACTERS + 1)), field), (replace(baseline, replacement="1"), field),
+            (replace(baseline, original="GhBd"), field), (replace(baseline, source_group=UNSUPPORTED_LAYOUT_GROUP), field),
+            (replace(baseline, target_group=UNSUPPORTED_LAYOUT_GROUP), field),
         ):
             self.assertFalse(self.engine._decide_prefix(item, context)[0].should_switch)
         for group in (0, 1):
             for attribute in ("models", "_prefix_indexes"):
                 with patch.dict(getattr(self.engine, attribute), {}, clear=True):
                     self.assertFalse(self.engine._decide_prefix(replace(baseline, source_group=group, target_group=1-group), field)[0].should_switch)
-        self.settings.set("detection.early_switch_min_length", PREFIX_WORD_LENGTH_MIN - 1)
+        self.settings.set("detection.early_switch_min_length", PREFIX_MIN_CHARACTERS - 1)
         self.type("ghb")
         self.assertEqual(self.backend.text, "ghb")
         self.type("d")
@@ -229,17 +224,17 @@ class EarlyContextTests(InputIntegrityTests):
                 self.settings.set("detection.early_switch", True)
                 self.settings.set("detection.early_switch_min_length", DEFAULT_EARLY_SWITCH_MIN_LENGTH)
                 self.settings.set("detection.context_read_field", False)
-                self.engine.prefix_model = PrefixModel(ContextModel({"bias": (0., FIXTURE_BIAS_SCORE, 0., 0.)}, "fixture"))
+                self.engine.prefix_model = PrefixModel(ContextModel({"bias": (0., DOMINANT_BIAS_WEIGHT, 0., 0.)}, "fixture"))
                 self.type("ghb")
                 held = self.key("d", "d")
                 self.send(held)
                 self.assertIsNotNone(self.engine._pending)
                 if change == "minimum":
-                    self.settings.set("detection.early_switch_min_length", CHANGED_MIN_LENGTH)
+                    self.settings.set("detection.early_switch_min_length", RAISED_EARLY_SWITCH_MIN_LENGTH)
                 elif change == "disabled":
                     self.settings.set("detection.early_switch", False)
                 elif change == "keep":
-                    self.engine.prefix_model = PrefixModel(ContextModel({"bias": (FIXTURE_BIAS_SCORE, 0., 0., 0.)}, "fixture"))
+                    self.engine.prefix_model = PrefixModel(ContextModel({"bias": (DOMINANT_BIAS_WEIGHT, 0., 0., 0.)}, "fixture"))
                 else:
                     reader = EditorReader(self.backend)
                     reader.sensitive, reader.selection = change == "sensitive", change == "selection"

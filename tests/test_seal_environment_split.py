@@ -33,10 +33,9 @@ import evaluate_intent_model as evaluator  # noqa: E402
 import train_intent_model as trainer  # noqa: E402
 
 from test_intent_training import config  # noqa: E402
+from fixture_values.scores import SEALED_TEST_TRIGGER_SCORE, SEAL_ENVIRONMENT_VETO_THRESHOLD
+from keyswitch.constants.file_formats import SHA256_HEX_CHARACTERS
 
-SHA256_HEX_LENGTH = 64
-SEALED_TEST_TRIGGER_SCORE = 0.99
-VETO_THRESHOLD_FIXTURE = 1.25
 
 # Names that describe a machine rather than an input. None of them may appear
 # in anything that reaches sealed_candidate_sha256.
@@ -61,7 +60,7 @@ def outcome_manifest(**changes: object) -> dict[str, object]:
         "sealed_test_typos": {"passed": True, "per_trigger": {}},
         "sealed_test_context_stress": {"passed": True},
         "safety": {"collisions": 0},
-        "veto": {"threshold": -VETO_THRESHOLD_FIXTURE},
+        "veto": {"threshold": -SEAL_ENVIRONMENT_VETO_THRESHOLD},
         "unrelated": {"not": "part of the sealed answer"},
     }
     payload.update(changes)
@@ -79,7 +78,7 @@ class IdentityExcludesTheMachine(unittest.TestCase):
         )
 
     def test_snapshot_is_code_and_config_only(self) -> None:
-        snapshot = trainer.capture_toolchain_snapshot("0" * SHA256_HEX_LENGTH)
+        snapshot = trainer.capture_toolchain_snapshot("0" * SHA256_HEX_CHARACTERS)
         for name, value in asdict(snapshot).items():
             with self.subTest(field=name):
                 self.assertRegex(value, r"^[0-9a-f]{64}$", name)
@@ -95,7 +94,7 @@ class IdentityExcludesTheMachine(unittest.TestCase):
             "environment_probe_sha256",
             {field for field, _ in evaluator._TOOLCHAIN_CODE_PATHS},
         )
-        snapshot = trainer.capture_toolchain_snapshot("0" * SHA256_HEX_LENGTH)
+        snapshot = trainer.capture_toolchain_snapshot("0" * SHA256_HEX_CHARACTERS)
         self.assertEqual(
             snapshot.environment_probe_sha256,
             trainer.sha256_file(trainer.ENVIRONMENT_PROBE_PATH),
@@ -110,8 +109,8 @@ class IdentityExcludesTheMachine(unittest.TestCase):
         """
 
         honest = {
-            "config_sha256": "0" * SHA256_HEX_LENGTH,
-            **{field: "0" * SHA256_HEX_LENGTH for field, _ in evaluator._TOOLCHAIN_CODE_PATHS},
+            "config_sha256": "0" * SHA256_HEX_CHARACTERS,
+            **{field: "0" * SHA256_HEX_CHARACTERS for field, _ in evaluator._TOOLCHAIN_CODE_PATHS},
         }
         self.assertTrue(evaluator._toolchain_code_hashes(honest))
         for name in sorted(ENVIRONMENT_FIELD_NAMES):
@@ -121,8 +120,8 @@ class IdentityExcludesTheMachine(unittest.TestCase):
 
     def test_dropping_a_code_digest_is_rejected_too(self) -> None:
         honest = {
-            "config_sha256": "0" * SHA256_HEX_LENGTH,
-            **{field: "0" * SHA256_HEX_LENGTH for field, _ in evaluator._TOOLCHAIN_CODE_PATHS},
+            "config_sha256": "0" * SHA256_HEX_CHARACTERS,
+            **{field: "0" * SHA256_HEX_CHARACTERS for field, _ in evaluator._TOOLCHAIN_CODE_PATHS},
         }
         del honest["environment_probe_sha256"]
         with self.assertRaises(ValueError):
@@ -164,8 +163,8 @@ class ProvenanceDescribesTheMachine(unittest.TestCase):
 
         provenance = trainer.capture_environment_provenance()
         moved = json.loads(json.dumps(provenance.environment_probe))
-        moved["probe_sha256"] = "0" * SHA256_HEX_LENGTH
-        moved["cells"]["libm"]["sha256"] = "0" * SHA256_HEX_LENGTH
+        moved["probe_sha256"] = "0" * SHA256_HEX_CHARACTERS
+        moved["cells"]["libm"]["sha256"] = "0" * SHA256_HEX_CHARACTERS
         with self.assertRaisesRegex(RuntimeError, "libm"):
             trainer.verify_environment_stability(
                 trainer.TrainingEnvironmentProvenance(
@@ -223,29 +222,29 @@ class TheSealedAnswerIsClaimedOnce(unittest.TestCase):
     def test_an_identical_rerun_is_allowed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = self.prepared_root(temporary)
-            self.claim(root, outcome="a" * SHA256_HEX_LENGTH, candidate="b" * SHA256_HEX_LENGTH)
-            self.claim(root, outcome="a" * SHA256_HEX_LENGTH, candidate="b" * SHA256_HEX_LENGTH)
+            self.claim(root, outcome="a" * SHA256_HEX_CHARACTERS, candidate="b" * SHA256_HEX_CHARACTERS)
+            self.claim(root, outcome="a" * SHA256_HEX_CHARACTERS, candidate="b" * SHA256_HEX_CHARACTERS)
 
     def test_a_different_answer_from_the_same_candidate_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = self.prepared_root(temporary)
-            self.claim(root, outcome="a" * SHA256_HEX_LENGTH, candidate="b" * SHA256_HEX_LENGTH)
+            self.claim(root, outcome="a" * SHA256_HEX_CHARACTERS, candidate="b" * SHA256_HEX_CHARACTERS)
             with self.assertRaisesRegex(RuntimeError, "different answer"):
-                self.claim(root, outcome="c" * SHA256_HEX_LENGTH, candidate="b" * SHA256_HEX_LENGTH)
+                self.claim(root, outcome="c" * SHA256_HEX_CHARACTERS, candidate="b" * SHA256_HEX_CHARACTERS)
 
     def test_a_different_candidate_is_told_to_rotate(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = self.prepared_root(temporary)
-            self.claim(root, outcome="a" * SHA256_HEX_LENGTH, candidate="b" * SHA256_HEX_LENGTH)
+            self.claim(root, outcome="a" * SHA256_HEX_CHARACTERS, candidate="b" * SHA256_HEX_CHARACTERS)
             with self.assertRaisesRegex(RuntimeError, "rotate split_namespace"):
-                self.claim(root, outcome="c" * SHA256_HEX_LENGTH, candidate="d" * SHA256_HEX_LENGTH)
+                self.claim(root, outcome="c" * SHA256_HEX_CHARACTERS, candidate="d" * SHA256_HEX_CHARACTERS)
 
     def test_the_ledger_records_digests_and_no_metric(self) -> None:
         """The ledger must not become a way to read the sealed test."""
 
         with tempfile.TemporaryDirectory() as temporary:
             root = self.prepared_root(temporary)
-            self.claim(root, outcome="a" * SHA256_HEX_LENGTH, candidate="b" * SHA256_HEX_LENGTH)
+            self.claim(root, outcome="a" * SHA256_HEX_CHARACTERS, candidate="b" * SHA256_HEX_CHARACTERS)
             path = trainer.sealed_outcome_path(config(), repository_root=root)
             record = json.loads(path.read_bytes())
             self.assertEqual(
@@ -274,9 +273,9 @@ class RefusalsSayWhichKindOfDivergence(unittest.TestCase):
 
     expected = {
         "split_namespace": "ns:v20",
-        "candidate_sha256": "b" * SHA256_HEX_LENGTH,
-        "config_sha256": "c" * SHA256_HEX_LENGTH,
-        "candidate_dataset_sha256": "d" * SHA256_HEX_LENGTH,
+        "candidate_sha256": "b" * SHA256_HEX_CHARACTERS,
+        "config_sha256": "c" * SHA256_HEX_CHARACTERS,
+        "candidate_dataset_sha256": "d" * SHA256_HEX_CHARACTERS,
     }
 
     def refusal(self, **changes: object) -> str:
@@ -289,12 +288,12 @@ class RefusalsSayWhichKindOfDivergence(unittest.TestCase):
         self.assertIn("wrong registry file", self.refusal(split_namespace="ns:v19"))
 
     def test_a_changed_dataset_advises_rotation(self) -> None:
-        message = self.refusal(candidate_dataset_sha256="9" * SHA256_HEX_LENGTH)
+        message = self.refusal(candidate_dataset_sha256="9" * SHA256_HEX_CHARACTERS)
         self.assertIn("rotate split_namespace", message)
         self.assertIn("candidate_dataset_sha256", message)
 
     def test_identical_inputs_with_different_weights_points_at_the_probe(self) -> None:
-        message = self.refusal(candidate_sha256="a" * SHA256_HEX_LENGTH)
+        message = self.refusal(candidate_sha256="a" * SHA256_HEX_CHARACTERS)
         self.assertIn("environment divergence", message)
         self.assertIn("environment_probe", message)
 

@@ -8,14 +8,17 @@ import time
 import tomllib
 from pathlib import Path
 
+from logcourier.constants.release import (
+    CLI_VERSION_CHECK_TIMEOUT_SECONDS,
+    INSTALLER_TIMEOUT_SECONDS,
+    UNINSTALL_POLL_ATTEMPTS,
+    UNINSTALL_POLL_INTERVAL_SECONDS,
+    VERIFY_FROZEN_TIMEOUT_SECONDS,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 APP_ID = "{60EA65E9-FAEF-4FC9-A0D6-8F1DF258C8EC}_is1"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
-INSTALLER_TIMEOUT_SECONDS = 180
-CLI_VERSION_TIMEOUT_SECONDS = 20
-VERIFY_FROZEN_TIMEOUT_SECONDS = 60
-UNINSTALL_POLL_ATTEMPTS = 50
-UNINSTALL_POLL_INTERVAL_SECONDS = 0.2
 
 
 def main():
@@ -109,7 +112,7 @@ def main():
         check=True,
         capture_output=True,
         text=True,
-        timeout=CLI_VERSION_TIMEOUT_SECONDS,
+        timeout=CLI_VERSION_CHECK_TIMEOUT_SECONDS,
     )
     assert result.stdout.strip() == version
     subprocess.run(

@@ -18,14 +18,18 @@ import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Final
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from keyswitch.constants.file_formats import (
+    INTENT_REJECTION_INPUT_LIMIT_BYTES,
+    INTENT_STRICT_REPORT_LIMIT_BYTES,
+    RECEIPT_COMPACT_MAX_DEPTH,
+    RECEIPT_COMPACT_MAX_INLINE_ITEMS,
+    RECEIPT_JSON_INDENT,
+)
 
 
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 MODEL_DIRECTORY: Final[Path] = PROJECT_ROOT / "model" / "intent_v1"
-LIMIT_BYTES: Final[int] = 64 * 1024 * 1024
-COMPACT_MAX_DEPTH: Final[int] = 3
-COMPACT_MAX_INLINE_ITEMS: Final[int] = 16
-RECEIPT_JSON_INDENT: Final[int] = 2
 FAILURE_SECTIONS: Final[Mapping[str, str]] = {
     "fallback_regression": "model_vs_fallback",
     "unknown_typo_false_positives": "lexical_disjoint_unknown_typos",
@@ -40,16 +44,20 @@ FAILURE_SECTIONS: Final[Mapping[str, str]] = {
 }
 
 
-def sha256_file(path: Path) -> str:
+def read_bounded(path: Path, limit: int = INTENT_REJECTION_INPUT_LIMIT_BYTES) -> bytes:
     with path.open("rb") as stream:
-        payload = stream.read(LIMIT_BYTES + 1)
-    if len(payload) > LIMIT_BYTES:
-        raise ValueError(f"{path} exceeds {LIMIT_BYTES} bytes")
-    return hashlib.sha256(payload).hexdigest()
+        payload = stream.read(limit + 1)
+    if len(payload) > limit:
+        raise ValueError(f"{path} exceeds {limit} bytes")
+    return payload
 
 
-def load_object(path: Path) -> dict[str, object]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+def sha256_file(path: Path, limit: int = INTENT_REJECTION_INPUT_LIMIT_BYTES) -> str:
+    return hashlib.sha256(read_bounded(path, limit)).hexdigest()
+
+
+def load_object(path: Path, limit: int = INTENT_REJECTION_INPUT_LIMIT_BYTES) -> dict[str, object]:
+    payload = json.loads(read_bounded(path, limit).decode("utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"{path} must contain a JSON object")
     return {str(key): value for key, value in payload.items()}
@@ -65,11 +73,11 @@ def compact(value: object, depth: int = 0) -> object:
     """Keep scalar evidence and small mappings, drop bulky per-row payloads."""
 
     if isinstance(value, dict):
-        if depth >= COMPACT_MAX_DEPTH:
+        if depth >= RECEIPT_COMPACT_MAX_DEPTH:
             return {"omitted_keys": sorted(str(key) for key in value)}
         return {str(key): compact(item, depth + 1) for key, item in value.items()}
     if isinstance(value, list):
-        return value if len(value) <= COMPACT_MAX_INLINE_ITEMS else {"omitted_items": len(value)}
+        return value if len(value) <= RECEIPT_COMPACT_MAX_INLINE_ITEMS else {"omitted_items": len(value)}
     return value
 
 
@@ -86,7 +94,7 @@ def build_receipt(
 ) -> dict[str, object]:
     manifest = load_object(manifest_path)
     registry = load_object(registry_path)
-    report = load_object(strict_report)
+    report = load_object(strict_report, INTENT_STRICT_REPORT_LIMIT_BYTES)
     gates = report.get("strict_gates")
     if not isinstance(gates, dict):
         raise ValueError("strict report lacks strict_gates")
@@ -124,7 +132,7 @@ def build_receipt(
         "manifest_sha256": sha256_file(manifest_path),
         "internal_report_sha256": sha256_file(test_report_path),
         "evaluator_sha256": sha256_file(evaluator_path),
-        "strict_report_sha256": sha256_file(strict_report),
+        "strict_report_sha256": sha256_file(strict_report, INTENT_STRICT_REPORT_LIMIT_BYTES),
         "failure": failure,
         "remediation": remediation,
     }

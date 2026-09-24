@@ -13,33 +13,52 @@ import unittest
 from collections.abc import Callable
 from unittest.mock import patch
 
-from keyswitch.backend import (
-    COMPLETED_ACTION_EVENT_COUNT,
-    KeyDisposition,
-    KeyEvent,
-    LOCK_MASK,
-    SHIFT_MASK,
-    ScreenAnchor,
-)
+from keyswitch.backend import KeyDisposition, KeyEvent, ScreenAnchor
+from keyswitch.constants.keyboard import COMPLETED_ACTION_EVENT_COUNT, LOCK_MASK, SHIFT_MASK
 from keyswitch.macos_backend import (
     MacBackend,
     MacBackendError,
     NativeInput,
     NativeKeyEvent,
-    TAP_DISABLED_BY_TIMEOUT,
-    VK_ANSI_Q,
-    VK_ANSI_Z,
-    VK_BACKSPACE,
-    VK_COMMAND,
-    VK_CONTROL,
-    VK_LEFT_ARROW,
-    VK_OPTION,
-    VK_PERIOD,
-    VK_RETURN,
-    VK_SHIFT,
     key_name,
     select_source_pair,
 )
+from keyswitch.constants.macos import (
+    EVENT_TAP_DISABLED_BY_TIMEOUT,
+    MAC_VK_ANSI_Q,
+    MAC_VK_ANSI_Z,
+    MAC_VK_BACKSPACE,
+    MAC_VK_COMMAND,
+    MAC_VK_CONTROL,
+    MAC_VK_LEFT_ARROW,
+    MAC_VK_OPTION,
+    MAC_VK_PERIOD,
+    MAC_VK_RETURN,
+    MAC_VK_SHIFT,
+)
+from fixture_values.clock import MACOS_FAKE_EVENT_TIMESTAMP, MACOS_STOP_WAIT_SAFETY_TIMEOUT_SECONDS
+from fixture_values.counts import (
+    MACOS_BACKSPACE_PRESS_COUNT,
+    MACOS_ERASE_EVENT_COUNT,
+    MACOS_POST_INPUTS_CALLS_BEFORE_FAILURE,
+    MACOS_PRESS_RELEASE_EVENT_COUNT,
+    MACOS_SHIFTED_KEYSTROKE_EVENT_COUNT,
+)
+from fixture_values.keys import (
+    FAKE_FOREGROUND_PROCESS_ID,
+    MACOS_FAKE_WINDOW_ID,
+    MACOS_GROUP_OUTSIDE_PAIR,
+    MACOS_INACTIVE_WINDOW_ID,
+    MACOS_OWN_PROCESS_ID,
+    MACOS_RESTORE_WINDOW_ID,
+    MACOS_UNKNOWN_SOURCE_GROUP,
+    MACOS_UNKNOWN_TARGET_GROUP,
+    MACOS_UNNAMED_VIRTUAL_KEYCODE,
+    MACOS_WINDOW_ID_CHANGED_DURING_DEFERRAL,
+    MACOS_WINDOW_ID_CHANGED_DURING_HOLD,
+    MACOS_WINDOW_ID_DURING_SECOND_HOLD,
+)
+from fixture_values.ui import MACOS_FAKE_CARET_ANCHOR_X, MACOS_FAKE_CARET_ANCHOR_Y
 
 ENGLISH = "com.apple.keylayout.ABC"
 RUSSIAN = "com.apple.keylayout.Russian"
@@ -48,68 +67,22 @@ GERMAN = "com.apple.keylayout.German"
 # What the two layouts make of the keys the tests press, taken from the probe
 # run on a real Mac rather than invented.
 CHARACTERS = {
-    (VK_ANSI_Q, ENGLISH): ("q", "Q"),
-    (VK_ANSI_Q, RUSSIAN): ("й", "Й"),
-    (VK_ANSI_Z, ENGLISH): ("z", "Z"),
-    (VK_ANSI_Z, RUSSIAN): ("я", "Я"),
-    (VK_ANSI_Q, GERMAN): ("q", "Q"),
-    (VK_RETURN, ENGLISH): ("\r", "\r"),
-    (VK_RETURN, RUSSIAN): ("\r", "\r"),
-    (VK_BACKSPACE, ENGLISH): ("", ""),
-    (VK_BACKSPACE, RUSSIAN): ("", ""),
-    (VK_SHIFT, ENGLISH): ("", ""),
-    (VK_SHIFT, RUSSIAN): ("", ""),
-    (VK_LEFT_ARROW, ENGLISH): ("", ""),
-    (VK_LEFT_ARROW, RUSSIAN): ("", ""),
-    (VK_PERIOD, ENGLISH): (".", ">"),
-    (VK_PERIOD, RUSSIAN): (".", ">"),
+    (MAC_VK_ANSI_Q, ENGLISH): ("q", "Q"),
+    (MAC_VK_ANSI_Q, RUSSIAN): ("й", "Й"),
+    (MAC_VK_ANSI_Z, ENGLISH): ("z", "Z"),
+    (MAC_VK_ANSI_Z, RUSSIAN): ("я", "Я"),
+    (MAC_VK_ANSI_Q, GERMAN): ("q", "Q"),
+    (MAC_VK_RETURN, ENGLISH): ("\r", "\r"),
+    (MAC_VK_RETURN, RUSSIAN): ("\r", "\r"),
+    (MAC_VK_BACKSPACE, ENGLISH): ("", ""),
+    (MAC_VK_BACKSPACE, RUSSIAN): ("", ""),
+    (MAC_VK_SHIFT, ENGLISH): ("", ""),
+    (MAC_VK_SHIFT, RUSSIAN): ("", ""),
+    (MAC_VK_LEFT_ARROW, ENGLISH): ("", ""),
+    (MAC_VK_LEFT_ARROW, RUSSIAN): ("", ""),
+    (MAC_VK_PERIOD, ENGLISH): (".", ">"),
+    (MAC_VK_PERIOD, RUSSIAN): (".", ">"),
 }
-
-# Fake identifiers the substitute API hands back, distinctive enough that a
-# mix-up between them would show up immediately.
-FAKE_WINDOW_ID = 101
-FAKE_PROCESS_ID = 4242
-OWN_PROCESS_ID = 7
-
-# The caret anchor the substitute API reports, asserted back against verbatim.
-FAKE_ANCHOR_X = 10
-FAKE_ANCHOR_Y = 20
-
-# The timestamp carried by every synthetic key event; the backend passes it
-# through unlooked-at, so any fixed value will do.
-FAKE_EVENT_TIMESTAMP = 1000
-
-# How long run_event_tap's stand-in blocks before giving up if stop_event is
-# never set, so a stuck test cannot hang the whole suite.
-STOP_WAIT_SAFETY_TIMEOUT_SECONDS = 5.0
-
-# A keycode with no name in KEY_NAMES, to exercise the VK_<hex> fallback.
-UNKNOWN_VK_KEYCODE = 0x5A
-
-# Window ids distinct from FAKE_WINDOW_ID, standing in for the focus having
-# moved somewhere else.
-WINDOW_ID_CHANGED_DURING_DEFERRAL = 999
-WINDOW_ID_CHANGED_DURING_HOLD = 555
-WINDOW_ID_DURING_SECOND_HOLD = 888
-
-# Group indices outside the {0, 1} pair, used to provoke a refusal.
-UNKNOWN_TARGET_GROUP = 5
-GROUP_OUTSIDE_PAIR = 7
-UNKNOWN_SOURCE_GROUP = 9
-
-# Counts of native events a correction is expected to post.
-PRESS_RELEASE_EVENT_COUNT = 2
-ERASE_EVENT_COUNT = 4
-SHIFTED_KEYSTROKE_EVENT_COUNT = 4
-BACKSPACE_PRESS_COUNT = 2
-
-# How many calls into post_inputs succeed before CountingAPI starts refusing.
-FAIL_AFTER_CALLS = 2
-
-# Arbitrary window ids: the backend ignores them on macOS, so any value proves
-# the point.
-RESTORE_WINDOW_ID = 123
-INACTIVE_WINDOW_ID = 456
 
 
 class FakeMacAPI:
@@ -117,9 +90,9 @@ class FakeMacAPI:
         self.sources = sources
         self.current = sources[0]
         self.posted: list[NativeInput] = []
-        self.window = FAKE_WINDOW_ID
+        self.window = MACOS_FAKE_WINDOW_ID
         self.own_window = 0
-        self.process = FAKE_PROCESS_ID
+        self.process = FAKE_FOREGROUND_PROCESS_ID
         self.caps = False
         self.per_window_layout = False
         self.tap_enabled = True
@@ -160,13 +133,13 @@ class FakeMacAPI:
         return self.window
 
     def window_process_id(self, window: int) -> int:
-        return self.process if window != self.own_window else OWN_PROCESS_ID
+        return self.process if window != self.own_window else MACOS_OWN_PROCESS_ID
 
     def current_process_id(self) -> int:
-        return OWN_PROCESS_ID
+        return MACOS_OWN_PROCESS_ID
 
     def input_anchor(self) -> ScreenAnchor | None:
-        return ScreenAnchor(FAKE_ANCHOR_X, FAKE_ANCHOR_Y, self.window)
+        return ScreenAnchor(MACOS_FAKE_CARET_ANCHOR_X, MACOS_FAKE_CARET_ANCHOR_Y, self.window)
 
     def caps_lock_enabled(self) -> bool:
         return self.caps
@@ -191,7 +164,7 @@ class FakeMacAPI:
         self.listener = listener
         ready()
         self.stop_event = threading.Event()
-        self.stop_event.wait(timeout=STOP_WAIT_SAFETY_TIMEOUT_SECONDS)
+        self.stop_event.wait(timeout=MACOS_STOP_WAIT_SAFETY_TIMEOUT_SECONDS)
 
     def enable_event_tap(self) -> None:
         self.enable_calls += 1
@@ -205,7 +178,7 @@ class FakeMacAPI:
 
 
 def press(keycode: int, pressed: bool = True, **extra: object) -> NativeKeyEvent:
-    return NativeKeyEvent(pressed, keycode, FAKE_EVENT_TIMESTAMP, **extra)  # type: ignore[arg-type]
+    return NativeKeyEvent(pressed, keycode, MACOS_FAKE_EVENT_TIMESTAMP, **extra)  # type: ignore[arg-type]
 
 
 class SourcePairTests(unittest.TestCase):
@@ -221,11 +194,11 @@ class SourcePairTests(unittest.TestCase):
             select_source_pair(api.input_sources(), api.translate_key)
 
     def test_key_names_follow_the_vocabulary_the_engine_speaks(self) -> None:
-        self.assertEqual(key_name(VK_BACKSPACE, ""), "BackSpace")
-        self.assertEqual(key_name(VK_RETURN, "\r"), "Return")
-        self.assertEqual(key_name(VK_LEFT_ARROW, ""), "Left")
-        self.assertEqual(key_name(VK_ANSI_Q, "q"), "q")
-        self.assertEqual(key_name(UNKNOWN_VK_KEYCODE, ""), "VK_5A")
+        self.assertEqual(key_name(MAC_VK_BACKSPACE, ""), "BackSpace")
+        self.assertEqual(key_name(MAC_VK_RETURN, "\r"), "Return")
+        self.assertEqual(key_name(MAC_VK_LEFT_ARROW, ""), "Left")
+        self.assertEqual(key_name(MAC_VK_ANSI_Q, "q"), "q")
+        self.assertEqual(key_name(MACOS_UNNAMED_VIRTUAL_KEYCODE, ""), "VK_5A")
 
 
 class BackendTests(unittest.TestCase):
@@ -236,7 +209,7 @@ class BackendTests(unittest.TestCase):
         self.backend._listener = self.seen.append
 
     def test_a_key_carries_a_character_for_every_layout(self) -> None:
-        self.backend._handle_native(press(VK_ANSI_Q))
+        self.backend._handle_native(press(MAC_VK_ANSI_Q))
         event = self.seen[-1]
         self.assertEqual(event.characters, ("q", "й"))
         self.assertEqual(event.character, "q")
@@ -245,14 +218,14 @@ class BackendTests(unittest.TestCase):
 
     def test_the_character_follows_the_layout_in_use(self) -> None:
         self.api.current = RUSSIAN
-        self.backend._handle_native(press(VK_ANSI_Q))
+        self.backend._handle_native(press(MAC_VK_ANSI_Q))
         self.assertEqual(self.seen[-1].character, "й")
         self.assertEqual(self.seen[-1].group, 1)
 
     def test_shift_and_caps_lock_reach_the_engine_as_state(self) -> None:
         self.api.caps = True
-        self.backend._handle_native(press(VK_SHIFT))
-        self.backend._handle_native(press(VK_ANSI_Q))
+        self.backend._handle_native(press(MAC_VK_SHIFT))
+        self.backend._handle_native(press(MAC_VK_ANSI_Q))
         event = self.seen[-1]
         self.assertTrue(event.shift)
         self.assertTrue(event.caps_lock)
@@ -260,7 +233,7 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(event.state & (SHIFT_MASK | LOCK_MASK), SHIFT_MASK | LOCK_MASK)
 
     def test_a_pointer_event_is_named_and_counted(self) -> None:
-        self.backend._handle_native(NativeKeyEvent(True, 0, FAKE_EVENT_TIMESTAMP, pointer=True))
+        self.backend._handle_native(NativeKeyEvent(True, 0, MACOS_FAKE_EVENT_TIMESTAMP, pointer=True))
         self.assertEqual(self.seen[-1].key_name, "Pointer")
         self.assertEqual(self.backend._pointer_epoch, 1)
 
@@ -268,47 +241,47 @@ class BackendTests(unittest.TestCase):
         """Ignoring this message leaves a dead tap and a program gone deaf."""
 
         swallowed = self.backend._handle_native(
-            NativeKeyEvent(True, 0, FAKE_EVENT_TIMESTAMP, event_type=TAP_DISABLED_BY_TIMEOUT))
+            NativeKeyEvent(True, 0, MACOS_FAKE_EVENT_TIMESTAMP, event_type=EVENT_TAP_DISABLED_BY_TIMEOUT))
         self.assertFalse(swallowed)
         self.assertEqual(self.api.enable_calls, 1)
         self.assertEqual(self.backend.tap_revivals, 1)
         self.assertEqual(self.seen, [])
 
     def test_a_swallowed_press_takes_its_release_with_it(self) -> None:
-        self.backend.set_key_filter(lambda event: event.keycode == VK_ANSI_Z)
-        self.assertTrue(self.backend._handle_native(press(VK_ANSI_Z)))
-        self.assertTrue(self.backend._handle_native(press(VK_ANSI_Z, False)))
-        self.assertFalse(self.backend._handle_native(press(VK_ANSI_Q)))
+        self.backend.set_key_filter(lambda event: event.keycode == MAC_VK_ANSI_Z)
+        self.assertTrue(self.backend._handle_native(press(MAC_VK_ANSI_Z)))
+        self.assertTrue(self.backend._handle_native(press(MAC_VK_ANSI_Z, False)))
+        self.assertFalse(self.backend._handle_native(press(MAC_VK_ANSI_Q)))
 
     def test_a_deferred_key_is_held_and_then_delivered(self) -> None:
         self.backend.set_key_filter(
-            lambda event: "defer" if event.keycode == VK_RETURN and event.pressed else False)
-        self.assertTrue(self.backend._handle_native(press(VK_RETURN)))
+            lambda event: "defer" if event.keycode == MAC_VK_RETURN and event.pressed else False)
+        self.assertTrue(self.backend._handle_native(press(MAC_VK_RETURN)))
         self.assertTrue(self.seen[-1].deferred)
         self.assertEqual(self.backend.complete_action(True), COMPLETED_ACTION_EVENT_COUNT)
         self.assertEqual([(item.pressed, item.keycode) for item in self.api.posted],
-                         [(True, VK_RETURN), (False, VK_RETURN)])
+                         [(True, MAC_VK_RETURN), (False, MAC_VK_RETURN)])
 
     def test_a_deferred_key_dropped_after_the_window_changed_is_not_delivered(self) -> None:
         self.backend.set_key_filter(
-            lambda event: "defer" if event.keycode == VK_RETURN and event.pressed else False)
-        self.backend._handle_native(press(VK_RETURN))
-        self.api.window = WINDOW_ID_CHANGED_DURING_DEFERRAL
+            lambda event: "defer" if event.keycode == MAC_VK_RETURN and event.pressed else False)
+        self.backend._handle_native(press(MAC_VK_RETURN))
+        self.api.window = MACOS_WINDOW_ID_CHANGED_DURING_DEFERRAL
         with self.assertRaises(MacBackendError):
             self.backend.complete_action(True)
         self.assertEqual(self.api.posted, [])
 
     def test_keys_typed_during_a_hold_are_posted_again_afterwards(self) -> None:
         self.backend.hold_input()
-        self.assertTrue(self.backend._handle_native(press(VK_ANSI_Z)))
-        self.assertTrue(self.backend._handle_native(press(VK_ANSI_Z, False)))
-        self.assertEqual(self.backend.release_input(), PRESS_RELEASE_EVENT_COUNT)
+        self.assertTrue(self.backend._handle_native(press(MAC_VK_ANSI_Z)))
+        self.assertTrue(self.backend._handle_native(press(MAC_VK_ANSI_Z, False)))
+        self.assertEqual(self.backend.release_input(), MACOS_PRESS_RELEASE_EVENT_COUNT)
         self.assertEqual([(item.pressed, item.keycode, item.replayed) for item in self.api.posted],
-                         [(True, VK_ANSI_Z, True), (False, VK_ANSI_Z, True)])
+                         [(True, MAC_VK_ANSI_Z, True), (False, MAC_VK_ANSI_Z, True)])
 
     def test_an_event_the_backend_posted_is_not_held_again(self) -> None:
         self.backend.hold_input()
-        self.assertFalse(self.backend._handle_native(press(VK_ANSI_Z, replayed=True)))
+        self.assertFalse(self.backend._handle_native(press(MAC_VK_ANSI_Z, replayed=True)))
         self.assertEqual(self.backend._held, [])
 
     def test_switching_the_layout_reports_a_refusal(self) -> None:
@@ -351,28 +324,28 @@ class InjectionTests(unittest.TestCase):
         )
         return KeyEvent(
             True, keycode, key_name(keycode, characters[0]), characters[group],
-            characters, group, 0, FAKE_EVENT_TIMESTAMP, **extra)  # type: ignore[arg-type]
+            characters, group, 0, MACOS_FAKE_EVENT_TIMESTAMP, **extra)  # type: ignore[arg-type]
 
     def test_a_word_is_erased_and_typed_again_in_the_other_layout(self) -> None:
-        strokes = [self.stroke(VK_ANSI_Q), self.stroke(VK_ANSI_Z)]
+        strokes = [self.stroke(MAC_VK_ANSI_Q), self.stroke(MAC_VK_ANSI_Z)]
         self.backend.inject_correction(strokes, 1, None)
         codes = [(item.pressed, item.keycode) for item in self.api.posted]
-        self.assertEqual(codes[:ERASE_EVENT_COUNT], [(True, VK_BACKSPACE), (False, VK_BACKSPACE),
-                                     (True, VK_BACKSPACE), (False, VK_BACKSPACE)])
-        self.assertEqual(codes[ERASE_EVENT_COUNT:], [(True, VK_ANSI_Q), (False, VK_ANSI_Q),
-                                     (True, VK_ANSI_Z), (False, VK_ANSI_Z)])
+        self.assertEqual(codes[:MACOS_ERASE_EVENT_COUNT], [(True, MAC_VK_BACKSPACE), (False, MAC_VK_BACKSPACE),
+                                     (True, MAC_VK_BACKSPACE), (False, MAC_VK_BACKSPACE)])
+        self.assertEqual(codes[MACOS_ERASE_EVENT_COUNT:], [(True, MAC_VK_ANSI_Q), (False, MAC_VK_ANSI_Q),
+                                     (True, MAC_VK_ANSI_Z), (False, MAC_VK_ANSI_Z)])
         self.assertEqual(self.api.current, RUSSIAN)
 
     def test_an_unknown_target_layout_is_refused_before_anything_is_erased(self) -> None:
         with self.assertRaises(MacBackendError):
-            self.backend.inject_correction([self.stroke(VK_ANSI_Q)], UNKNOWN_TARGET_GROUP, None)
+            self.backend.inject_correction([self.stroke(MAC_VK_ANSI_Q)], MACOS_UNKNOWN_TARGET_GROUP, None)
         self.assertEqual(self.api.posted, [])
 
     def test_a_refused_post_does_not_leave_the_keyboard_captured(self) -> None:
         self.backend.hold_input()
         self.api.accept_posts = False
         with self.assertRaises(MacBackendError):
-            self.backend.inject_correction([self.stroke(VK_ANSI_Q)], 1, None)
+            self.backend.inject_correction([self.stroke(MAC_VK_ANSI_Q)], 1, None)
         self.assertFalse(self.backend._holding)
 
 
@@ -413,11 +386,11 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(self.backend.active_application(), "com.apple.TextEdit")
         anchor = self.backend.input_anchor()
         assert anchor is not None
-        self.assertEqual((anchor.x, anchor.y), (FAKE_ANCHOR_X, FAKE_ANCHOR_Y))
+        self.assertEqual((anchor.x, anchor.y), (MACOS_FAKE_CARET_ANCHOR_X, MACOS_FAKE_CARET_ANCHOR_Y))
 
     def test_a_group_outside_the_pair_is_refused(self) -> None:
         with self.assertRaises(MacBackendError):
-            self.backend.switch_group(GROUP_OUTSIDE_PAIR)
+            self.backend.switch_group(MACOS_GROUP_OUTSIDE_PAIR)
 
     def test_an_unknown_current_source_reads_as_the_first_group(self) -> None:
         self.api.current = GERMAN
@@ -453,40 +426,40 @@ class HoldTests(unittest.TestCase):
 
     def defer_return(self) -> None:
         self.backend.set_key_filter(
-            lambda event: "defer" if event.keycode == VK_RETURN and event.pressed else False)
+            lambda event: "defer" if event.keycode == MAC_VK_RETURN and event.pressed else False)
 
     def test_nothing_is_replayed_while_an_action_is_still_waiting(self) -> None:
         self.defer_return()
-        self.backend._handle_native(press(VK_RETURN))
+        self.backend._handle_native(press(MAC_VK_RETURN))
         self.assertEqual(self.backend.release_input(), 0)
         self.assertEqual(self.api.posted, [])
 
     def test_a_release_of_a_key_pressed_before_the_action_reaches_the_engine(self) -> None:
         """Those releases must not be withheld, or the action waits for ever."""
 
-        self.backend._handle_native(press(VK_SHIFT))
+        self.backend._handle_native(press(MAC_VK_SHIFT))
         self.defer_return()
-        self.backend._handle_native(press(VK_RETURN))
-        self.assertFalse(self.backend._handle_native(press(VK_SHIFT, False)))
+        self.backend._handle_native(press(MAC_VK_RETURN))
+        self.assertFalse(self.backend._handle_native(press(MAC_VK_SHIFT, False)))
         self.assertEqual(self.seen[-1].key_name, "Shift_L")
 
     def test_text_typed_after_the_action_waits_for_it(self) -> None:
         self.defer_return()
-        self.backend._handle_native(press(VK_RETURN))
-        self.assertTrue(self.backend._handle_native(press(VK_ANSI_Z)))
+        self.backend._handle_native(press(MAC_VK_RETURN))
+        self.assertTrue(self.backend._handle_native(press(MAC_VK_ANSI_Z)))
         self.assertEqual(self.backend.release_input(), 0)
         self.assertEqual(self.backend.complete_action(False), 0)
         self.assertEqual([(item.pressed, item.keycode) for item in self.api.posted],
-                         [(True, VK_ANSI_Z)])
+                         [(True, MAC_VK_ANSI_Z)])
 
     def test_a_repeat_of_the_action_key_follows_its_own_replay(self) -> None:
         self.defer_return()
-        self.backend._handle_native(press(VK_SHIFT))
-        self.backend._handle_native(press(VK_RETURN))
-        self.backend._held.append(press(VK_SHIFT))
-        self.backend._handle_native(press(VK_SHIFT, False))
+        self.backend._handle_native(press(MAC_VK_SHIFT))
+        self.backend._handle_native(press(MAC_VK_RETURN))
+        self.backend._held.append(press(MAC_VK_SHIFT))
+        self.backend._handle_native(press(MAC_VK_SHIFT, False))
         self.assertEqual([(item.pressed, item.keycode) for item in self.backend._held],
-                         [(True, VK_SHIFT), (False, VK_SHIFT)])
+                         [(True, MAC_VK_SHIFT), (False, MAC_VK_SHIFT)])
 
     def test_completing_an_action_nobody_deferred_changes_nothing(self) -> None:
         self.assertEqual(self.backend.complete_action(True), 0)
@@ -494,7 +467,7 @@ class HoldTests(unittest.TestCase):
 
     def test_a_refused_post_of_a_held_key_still_frees_the_keyboard(self) -> None:
         self.backend.hold_input()
-        self.backend._handle_native(press(VK_ANSI_Z))
+        self.backend._handle_native(press(MAC_VK_ANSI_Z))
         self.api.accept_posts = False
         with self.assertRaises(MacBackendError):
             self.backend.release_input()
@@ -502,7 +475,7 @@ class HoldTests(unittest.TestCase):
 
     def test_an_injected_key_is_never_answered_by_the_filter(self) -> None:
         self.backend.set_key_filter(lambda event: True)
-        self.assertFalse(self.backend._handle_native(press(VK_ANSI_Z, injected=True)))
+        self.assertFalse(self.backend._handle_native(press(MAC_VK_ANSI_Z, injected=True)))
 
     def test_a_key_already_being_swallowed_is_not_asked_about_twice(self) -> None:
         answers: list[KeyEvent] = []
@@ -512,8 +485,8 @@ class HoldTests(unittest.TestCase):
             return True
 
         self.backend.set_key_filter(filter_once)
-        self.backend._handle_native(press(VK_ANSI_Z))
-        self.backend._handle_native(press(VK_ANSI_Z))
+        self.backend._handle_native(press(MAC_VK_ANSI_Z))
+        self.backend._handle_native(press(MAC_VK_ANSI_Z))
         self.assertEqual(len(answers), 1)
         self.assertEqual(len(self.seen), 1)
 
@@ -526,16 +499,16 @@ class InjectionDetailTests(unittest.TestCase):
     def stroke(self, keycode: int, group: int = 0, **extra: object) -> KeyEvent:
         characters = (CHARACTERS[(keycode, ENGLISH)][0], CHARACTERS[(keycode, RUSSIAN)][0])
         return KeyEvent(True, keycode, key_name(keycode, characters[0]), characters[group],
-                        characters, group, 0, FAKE_EVENT_TIMESTAMP, **extra)  # type: ignore[arg-type]
+                        characters, group, 0, MACOS_FAKE_EVENT_TIMESTAMP, **extra)  # type: ignore[arg-type]
 
     def test_an_unknown_source_layout_is_refused(self) -> None:
         with self.assertRaises(MacBackendError):
             self.backend.inject_correction(
-                [self.stroke(VK_ANSI_Q)], 1, None, source_group=UNKNOWN_SOURCE_GROUP)
+                [self.stroke(MAC_VK_ANSI_Q)], 1, None, source_group=MACOS_UNKNOWN_SOURCE_GROUP)
 
     def test_punctuation_typed_in_a_mixture_of_layouts_is_refused(self) -> None:
-        first = self.stroke(VK_ANSI_Q, 0)
-        second = self.stroke(VK_ANSI_Z, 1)
+        first = self.stroke(MAC_VK_ANSI_Q, 0)
+        second = self.stroke(MAC_VK_ANSI_Z, 1)
         with self.assertRaises(MacBackendError):
             self.backend.inject_correction([], 1, None, trailing=(first, second))
         self.assertEqual(self.api.posted, [])
@@ -543,37 +516,37 @@ class InjectionDetailTests(unittest.TestCase):
     def test_a_boundary_that_would_change_letter_keeps_its_own_layout(self) -> None:
         """Typing it in the new layout would put a different character there."""
 
-        boundary = self.stroke(VK_ANSI_Z, 0)
-        self.backend.inject_correction([self.stroke(VK_ANSI_Q)], 1, boundary)
+        boundary = self.stroke(MAC_VK_ANSI_Z, 0)
+        self.backend.inject_correction([self.stroke(MAC_VK_ANSI_Q)], 1, boundary)
         self.assertEqual(self.api.current, RUSSIAN)
         codes = [(item.pressed, item.keycode) for item in self.api.posted]
-        self.assertIn((True, VK_ANSI_Z), codes)
+        self.assertIn((True, MAC_VK_ANSI_Z), codes)
 
     def test_late_keys_are_typed_again_after_the_replacement(self) -> None:
-        late = self.stroke(VK_ANSI_Z)
-        self.backend.inject_correction([self.stroke(VK_ANSI_Q)], 1, None, late=(late,))
+        late = self.stroke(MAC_VK_ANSI_Z)
+        self.backend.inject_correction([self.stroke(MAC_VK_ANSI_Q)], 1, None, late=(late,))
         posted = [(item.pressed, item.keycode, item.replayed) for item in self.api.posted]
-        self.assertEqual(posted[-PRESS_RELEASE_EVENT_COUNT:],
-                         [(True, VK_ANSI_Z, True), (False, VK_ANSI_Z, True)])
+        self.assertEqual(posted[-MACOS_PRESS_RELEASE_EVENT_COUNT:],
+                         [(True, MAC_VK_ANSI_Z, True), (False, MAC_VK_ANSI_Z, True)])
         self.assertEqual(
-            sum(1 for item in posted if item[1] == VK_BACKSPACE and item[0]), BACKSPACE_PRESS_COUNT)
+            sum(1 for item in posted if item[1] == MAC_VK_BACKSPACE and item[0]), MACOS_BACKSPACE_PRESS_COUNT)
 
     def test_a_shifted_stroke_is_typed_with_shift_around_it(self) -> None:
-        stroke = KeyEvent(True, VK_ANSI_Q, "q", "Q", ("Q", "Й"), 0, SHIFT_MASK, FAKE_EVENT_TIMESTAMP)
+        stroke = KeyEvent(True, MAC_VK_ANSI_Q, "q", "Q", ("Q", "Й"), 0, SHIFT_MASK, MACOS_FAKE_EVENT_TIMESTAMP)
         self.backend.inject_correction([stroke], 1, None)
         codes = [(item.pressed, item.keycode) for item in self.api.posted]
-        self.assertEqual(codes[-SHIFTED_KEYSTROKE_EVENT_COUNT:],
-                         [(True, VK_SHIFT), (True, VK_ANSI_Q),
-                          (False, VK_ANSI_Q), (False, VK_SHIFT)])
+        self.assertEqual(codes[-MACOS_SHIFTED_KEYSTROKE_EVENT_COUNT:],
+                         [(True, MAC_VK_SHIFT), (True, MAC_VK_ANSI_Q),
+                          (False, MAC_VK_ANSI_Q), (False, MAC_VK_SHIFT)])
 
     def test_caps_lock_alone_supplies_the_shift_a_letter_needs(self) -> None:
         self.api.caps = True
-        stroke = KeyEvent(True, VK_ANSI_Q, "q", "q", ("q", "й"), 0, 0, FAKE_EVENT_TIMESTAMP)
+        stroke = KeyEvent(True, MAC_VK_ANSI_Q, "q", "q", ("q", "й"), 0, 0, MACOS_FAKE_EVENT_TIMESTAMP)
         self.backend.inject_correction([stroke], 1, None)
         codes = [(item.pressed, item.keycode) for item in self.api.posted]
-        self.assertEqual(codes[-SHIFTED_KEYSTROKE_EVENT_COUNT:],
-                         [(True, VK_SHIFT), (True, VK_ANSI_Q),
-                          (False, VK_ANSI_Q), (False, VK_SHIFT)])
+        self.assertEqual(codes[-MACOS_SHIFTED_KEYSTROKE_EVENT_COUNT:],
+                         [(True, MAC_VK_SHIFT), (True, MAC_VK_ANSI_Q),
+                          (False, MAC_VK_ANSI_Q), (False, MAC_VK_SHIFT)])
 
     def test_a_layout_that_never_arrives_stops_the_replacement(self) -> None:
         class StubbornAPI(FakeMacAPI):
@@ -583,16 +556,16 @@ class InjectionDetailTests(unittest.TestCase):
         api = StubbornAPI()
         backend = MacBackend(api)
         with self.assertRaises(MacBackendError):
-            backend.inject_correction([self.stroke(VK_ANSI_Q)], 1, None)
+            backend.inject_correction([self.stroke(MAC_VK_ANSI_Q)], 1, None)
 
     def test_a_window_change_during_a_hold_cancels_the_replacement(self) -> None:
         self.backend.hold_input()
-        self.api.window = WINDOW_ID_CHANGED_DURING_HOLD
+        self.api.window = MACOS_WINDOW_ID_CHANGED_DURING_HOLD
         with self.assertRaises(MacBackendError):
-            self.backend.inject_correction([self.stroke(VK_ANSI_Q)], 1, None)
+            self.backend.inject_correction([self.stroke(MAC_VK_ANSI_Q)], 1, None)
 
     def test_a_correction_into_the_layout_already_in_use_switches_nothing(self) -> None:
-        self.backend.inject_correction([self.stroke(VK_ANSI_Q)], 0, None)
+        self.backend.inject_correction([self.stroke(MAC_VK_ANSI_Q)], 0, None)
         self.assertEqual(self.api.current, ENGLISH)
 
 
@@ -606,7 +579,7 @@ class UncommonPathTests(unittest.TestCase):
     def stroke(self, keycode: int, group: int = 0) -> KeyEvent:
         characters = (CHARACTERS[(keycode, ENGLISH)][0], CHARACTERS[(keycode, RUSSIAN)][0])
         return KeyEvent(True, keycode, key_name(keycode, characters[0]), characters[group],
-                        characters, group, 0, FAKE_EVENT_TIMESTAMP)
+                        characters, group, 0, MACOS_FAKE_EVENT_TIMESTAMP)
 
     def test_stopping_from_the_tap_thread_does_not_wait_for_itself(self) -> None:
         self.backend._running.set()
@@ -616,28 +589,28 @@ class UncommonPathTests(unittest.TestCase):
 
     def test_holding_twice_keeps_the_place_the_first_hold_recorded(self) -> None:
         self.backend.hold_input()
-        self.api.window = WINDOW_ID_DURING_SECOND_HOLD
+        self.api.window = MACOS_WINDOW_ID_DURING_SECOND_HOLD
         self.backend.hold_input()
-        self.assertEqual(self.backend._hold_window, FAKE_WINDOW_ID)
+        self.assertEqual(self.backend._hold_window, MACOS_FAKE_WINDOW_ID)
 
     def test_every_modifier_reaches_the_engine_as_its_own_bit(self) -> None:
         seen: list[KeyEvent] = []
         self.backend._listener = seen.append
-        for keycode in (VK_CONTROL, VK_OPTION, VK_COMMAND):
+        for keycode in (MAC_VK_CONTROL, MAC_VK_OPTION, MAC_VK_COMMAND):
             self.backend._handle_native(press(keycode))
-        self.backend._handle_native(press(VK_ANSI_Q))
+        self.backend._handle_native(press(MAC_VK_ANSI_Q))
         event = seen[-1]
         self.assertTrue(event.control and event.alt and event.super_key)
 
     def test_a_pointer_event_without_a_listener_is_still_counted(self) -> None:
-        self.backend._handle_native(NativeKeyEvent(True, 0, FAKE_EVENT_TIMESTAMP, pointer=True))
+        self.backend._handle_native(NativeKeyEvent(True, 0, MACOS_FAKE_EVENT_TIMESTAMP, pointer=True))
         self.assertEqual(self.backend._pointer_epoch, 1)
 
     def test_an_action_appearing_during_a_replay_holds_back_the_rest(self) -> None:
         """Reposting a key calls the tap again, which may defer the next Enter."""
 
         backend = self.backend
-        deferred = press(VK_RETURN)
+        deferred = press(MAC_VK_RETURN)
 
         def post_then_defer(inputs: tuple[NativeInput, ...]) -> int:
             if backend._deferred_action is None:
@@ -645,26 +618,26 @@ class UncommonPathTests(unittest.TestCase):
             return FakeMacAPI.post_inputs(self.api, inputs)
 
         backend._holding = True
-        backend._held = [press(VK_ANSI_Z), press(VK_SHIFT, False)]
-        backend._action_prior_keys = {VK_SHIFT}
+        backend._held = [press(MAC_VK_ANSI_Z), press(MAC_VK_SHIFT, False)]
+        backend._action_prior_keys = {MAC_VK_SHIFT}
         self.api.post_inputs = post_then_defer  # type: ignore[method-assign]
-        self.assertEqual(backend.release_input(), PRESS_RELEASE_EVENT_COUNT)
+        self.assertEqual(backend.release_input(), MACOS_PRESS_RELEASE_EVENT_COUNT)
         self.assertEqual([(item.pressed, item.keycode) for item in self.api.posted],
-                         [(True, VK_ANSI_Z), (False, VK_SHIFT)])
+                         [(True, MAC_VK_ANSI_Z), (False, MAC_VK_SHIFT)])
 
     def test_punctuation_is_typed_without_a_shift_it_does_not_need(self) -> None:
         self.api.caps = True
-        self.backend.inject_correction([], 1, self.stroke(VK_PERIOD))
+        self.backend.inject_correction([], 1, self.stroke(MAC_VK_PERIOD))
         codes = [(item.pressed, item.keycode) for item in self.api.posted]
-        self.assertNotIn((True, VK_SHIFT), codes)
-        self.assertIn((True, VK_PERIOD), codes)
+        self.assertNotIn((True, MAC_VK_SHIFT), codes)
+        self.assertIn((True, MAC_VK_PERIOD), codes)
 
     def test_a_failure_to_restore_does_not_hide_the_failure_that_caused_it(self) -> None:
         class CountingAPI(FakeMacAPI):
             def __init__(self) -> None:
                 super().__init__()
                 self.calls = 0
-                self.fail_from = FAIL_AFTER_CALLS
+                self.fail_from = MACOS_POST_INPUTS_CALLS_BEFORE_FAILURE
 
             def post_inputs(self, inputs: tuple[NativeInput, ...]) -> int:
                 self.calls += 1
@@ -674,10 +647,10 @@ class UncommonPathTests(unittest.TestCase):
 
         api = CountingAPI()
         backend = MacBackend(api)
-        boundary = self.stroke(VK_ANSI_Z)
-        late = self.stroke(VK_ANSI_Q)
+        boundary = self.stroke(MAC_VK_ANSI_Z)
+        late = self.stroke(MAC_VK_ANSI_Q)
         with self.assertRaises(MacBackendError):
-            backend.inject_correction([self.stroke(VK_ANSI_Q)], 1, boundary, late=(late,))
+            backend.inject_correction([self.stroke(MAC_VK_ANSI_Q)], 1, boundary, late=(late,))
 
 
 class PermissionTests(unittest.TestCase):
@@ -714,5 +687,5 @@ class PromptWindowTests(unittest.TestCase):
 
     def test_the_prompt_needs_no_help_keeping_the_focus_in_place(self) -> None:
         backend = MacBackend(FakeMacAPI())
-        self.assertFalse(backend.restore_window(RESTORE_WINDOW_ID))
-        self.assertFalse(backend.keep_window_inactive(INACTIVE_WINDOW_ID))
+        self.assertFalse(backend.restore_window(MACOS_RESTORE_WINDOW_ID))
+        self.assertFalse(backend.keep_window_inactive(MACOS_INACTIVE_WINDOW_ID))

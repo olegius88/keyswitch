@@ -29,13 +29,26 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import cast
 
-from context_technical_corpus import COMMAND_PATH, Command, command_aliases, read_commands
+from context_technical_corpus import COMMAND_NAME, COMMAND_PATH, Command, command_aliases, read_commands
 from freeze_context_action_corpus import (
-    CorpusRow, Sentence, SurfaceToken, Union, WORDS, canonical, checksum, digest, exposed_families,
+    CONTEXT_WINDOW_TEXT, CorpusRow, Sentence, SurfaceToken, Union, WORDS, canonical, checksum, digest, exposed_families,
     family_aliases, physical, read_conllu, row_identifier, sentence_rows, typo_variants,
 )
-from model_protocol import FITTING_SPLITS
+from keyswitch.constants.model_protocol import FITTING_SPLITS
 from reconcile_context_action_corpus import expanded_aliases, historical_code_forms
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from keyswitch.constants.corpus import (
+    COMMANDS_PER_ALIAS_FAMILY,
+    DEFAULT_MAX_DOCUMENTS_PER_SOURCE,
+    DEFAULT_MAX_SENTENCES_PER_DOCUMENT,
+    DETERMINISTIC_DRAW_HEX_DIGITS,
+    MAX_TATOEBA_SENTENCE_CHARACTERS,
+    TATOEBA_EXPORT_COLUMNS,
+    TATOEBA_SAMPLE_PER_MILLE,
+)
+from keyswitch.constants.file_formats import HEXADECIMAL_BASE
+from keyswitch.constants.units import PER_MILLE_SCALE
 
 ROOT = Path(__file__).resolve().parents[1]
 HASH = re.compile(r"[0-9a-f]{64}\Z")
@@ -80,16 +93,6 @@ TATOEBA_BASE = "https://downloads.tatoeba.org/exports/per_language/"
 # Tatoeba exports are weekly, so a receipt pins each file by URL, Last-Modified, size and
 # SHA-256 instead of a commit. Sentences are independent: each is its own document.
 TATOEBA_TOKEN = re.compile(r"[^\W_]+(?:['\u2019\-][^\W_]+)*|[^\w\s]|_")
-TATOEBA_SAMPLE_PER_MILLE = 40
-PER_MILLE_SCALE = 1000
-TATOEBA_EXPORT_COLUMNS = 3
-MAX_TATOEBA_SENTENCE_CHARACTERS = 400
-# A deterministic hash prefix turned into an integer for reproducible sampling.
-SAMPLING_DIGEST_HEX_PREFIX_CHARS = 16
-SAMPLING_DIGEST_BASE = 16
-FAMILY_MEMBER_CAP = 2
-DEFAULT_MAX_DOCUMENTS = 2000
-DEFAULT_MAX_SENTENCES_PER_DOCUMENT = 12
 # RPM repositories the freezer accepts, by the base URL their receipt records:
 # (source label, document prefix, human description).
 # Rawhide is Fedora's rolling branch: a different package set from the numbered release,
@@ -194,7 +197,7 @@ def read_tatoeba(path: Path, source: str, language: str, namespace: str,
             text = " ".join(text.split())
             if not text or len(text) > MAX_TATOEBA_SENTENCE_CHARACTERS:
                 continue
-            if int(digest(namespace + ":tatoeba:" + identifier)[:SAMPLING_DIGEST_HEX_PREFIX_CHARS], SAMPLING_DIGEST_BASE) % PER_MILLE_SCALE >= per_mille:
+            if int(digest(namespace + ":tatoeba:" + identifier)[:DETERMINISTIC_DRAW_HEX_DIGITS], HEXADECIMAL_BASE) % PER_MILLE_SCALE >= per_mille:
                 continue
             yield tatoeba_sentence(identifier, language, text, source, path.name)
 
@@ -247,7 +250,7 @@ def select_holdout_sentences(sentences: Sequence[Sentence], namespace: str, max_
         by_key[key] = sentence
         counts[sentence.source] += 1
         heap = heaps[sentence.source].setdefault(sentence.document, [])
-        rank = int(digest(namespace + ":sample:" + sentence.document + ":" + sentence.identifier), SAMPLING_DIGEST_BASE)
+        rank = int(digest(namespace + ":sample:" + sentence.document + ":" + sentence.identifier), HEXADECIMAL_BASE)
         item = (-rank, sentence.filename + "\0" + sentence.identifier)
         if len(heap) < max_sentences:
             heapq.heappush(heap, item)
@@ -476,7 +479,7 @@ def technical_holdout_rows(commands: Sequence[Command], exclusions: Exclusions, 
     for item in records:
         members[families[item.name]].append(item.name)
     retained = {name for names in members.values()
-                for name in sorted(names, key=lambda value: digest(namespace + ":family-cap:" + command_identifier(value, source)))[:FAMILY_MEMBER_CAP]}
+                for name in sorted(names, key=lambda value: digest(namespace + ":family-cap:" + command_identifier(value, source)))[:COMMANDS_PER_ALIAS_FAMILY]}
     family_hashes: dict[str, set[str]] = defaultdict(set)
     for item in records:
         family_hashes[families[item.name]].update(aliases[item.name])
@@ -496,7 +499,7 @@ def technical_holdout_rows(commands: Sequence[Command], exclusions: Exclusions, 
             split="quarantine" if reasons else "test", quarantine_reasons=tuple(reasons)))
     return rows, {"commands_in_index": len(commands), "commands_outside_lexicon": len(records), "families": len(members),
                   "test_rows": sum(row.split == "test" for row in rows), "test_families": len({row.family for row in rows if row.split == "test"}),
-                  "test_documents": len({row.document for row in rows if row.split == "test"}), "family_cap": FAMILY_MEMBER_CAP,
+                  "test_documents": len({row.document for row in rows if row.split == "test"}), "family_cap": COMMANDS_PER_ALIAS_FAMILY,
                   "quarantine_reasons": dict(reasons_count)}
 
 
@@ -623,7 +626,7 @@ def read_alpine_commands(archive: Path) -> list[Command]:
                 if not token.startswith("cmd:"):
                     continue
                 name = token[len("cmd:"):].split("=")[0]
-                if re.fullmatch(r"[a-z]{3,16}", name) is None:
+                if re.fullmatch(COMMAND_NAME, name) is None:
                     continue
                 paths[name].add("usr/bin/" + name)
                 owners[name].add("alpine/" + package)
@@ -818,7 +821,7 @@ def assemble(base: Path, output: Path, namespace: str, ud_rows: Sequence[CorpusR
         "schema_version": 1, "namespace": namespace, "label": "keep", "splits": files,
         "scope": "holdout extension: base train/development/calibration byte-identical; TEST from new treebanks and commands outside the shipped identifier lexicon; not globally unseen lexicon or verified human intent",
         "token_language": "surface alphabet determines RU/Latin group; ASCII command alphabet uses group 0",
-        "context": "within the same sentence only; before<=96 and after<=64 characters; commands have empty before/after",
+        "context": f"within the same sentence only; {CONTEXT_WINDOW_TEXT}; commands have empty before/after",
         "partitioning": {"mode": "test-only-holdout-extension", **dict(metadata)},
         "origins": {"base_manifest_sha256": checksum(base / "manifest.json"), "base_test_membership_sha256": checksum(base / "test-membership.json"),
                     "base_namespace": base_manifest.get("namespace"), "base_test_rows_quarantined": len(prior_rows)},
@@ -872,7 +875,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--extra-exposure", type=Path, action="append", default=[])
-    parser.add_argument("--max-documents", type=int, default=DEFAULT_MAX_DOCUMENTS)
+    parser.add_argument("--max-documents", type=int, default=DEFAULT_MAX_DOCUMENTS_PER_SOURCE)
     parser.add_argument("--max-sentences-per-document", type=int, default=DEFAULT_MAX_SENTENCES_PER_DOCUMENT)
     args = parser.parse_args(argv)
     technical = [name for name, value in (("sid", args.sid_directory), ("arch", args.arch_directory),

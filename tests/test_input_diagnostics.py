@@ -8,15 +8,16 @@ from dataclasses import replace
 from typing import cast
 from unittest.mock import patch
 
-from keyswitch.backend import CONTROL_MASK
-from keyswitch.context_access import PlatformFieldReader, RETRY_DELAYS
+from keyswitch.constants.keyboard import CONTROL_MASK
+from keyswitch.context_access import PlatformFieldReader
+from keyswitch.constants.timing import FIELD_READER_RETRY_DELAYS_SECONDS
 from keyswitch.context_model import ACTIONS, ContextModel
 from test_input_integrity import InputIntegrityTests
-
-# Heavily biases the "wait" action (ACTIONS[2]) so short words wait for context.
-BIAS_WEIGHT_TOWARD_WAIT = 20.0
-EXPECTED_EDIT_COUNT = 2
-FIRST_EDIT_CHARACTERS_BEFORE = 2
+from fixture_values.counts import (
+    INPUT_DIAGNOSTICS_EXPECTED_EDIT_COUNT,
+    INPUT_DIAGNOSTICS_FIRST_EDIT_CHARACTERS_BEFORE,
+)
+from fixture_values.scores import DOMINANT_BIAS_WEIGHT
 
 
 class InputDiagnosticsTests(InputIntegrityTests):
@@ -24,7 +25,7 @@ class InputDiagnosticsTests(InputIntegrityTests):
         super().setUp()
         self.settings.set("detection.context_policy", "assist")
         self.engine.context_policy.model = ContextModel(
-            {"bias": (0.0, 0.0, BIAS_WEIGHT_TOWARD_WAIT, 0.0), "app:testeditor": (0.0,) * len(ACTIONS)},
+            {"bias": (0.0, 0.0, DOMINANT_BIAS_WEIGHT, 0.0), "app:testeditor": (0.0,) * len(ACTIONS)},
             "context-v1-diagnostics-fixture",
         )
 
@@ -43,8 +44,8 @@ class InputDiagnosticsTests(InputIntegrityTests):
         self.assertEqual(started["wait_id"], cancelled["wait_id"])
         self.assertEqual(cancelled["reason"], "backspace")
         edits = [e for e in events if e["event"] == "input_edit_observed"]
-        self.assertEqual(len(edits), EXPECTED_EDIT_COUNT)  # Releases are not extra edits.
-        self.assertEqual(edits[0]["context_characters_before"], FIRST_EDIT_CHARACTERS_BEFORE)
+        self.assertEqual(len(edits), INPUT_DIAGNOSTICS_EXPECTED_EDIT_COUNT)  # Releases are not extra edits.
+        self.assertEqual(edits[0]["context_characters_before"], INPUT_DIAGNOSTICS_FIRST_EDIT_CHARACTERS_BEFORE)
         self.assertEqual(edits[1]["context_characters_before"], 1)
         self.assertEqual(edits[0]["wait_id"], started["wait_id"])
         self.assertEqual(edits[1]["wait_id"], None)
@@ -177,7 +178,7 @@ class InputDiagnosticsTests(InputIntegrityTests):
             "status": "unavailable", "failure_stage": "initialization", "failure_type": "import_error",
             # The class name says which call failed; the message never appears.
             "failure_name": "ImportError",
-            "retry": {"attempts": 0, "limit": len(RETRY_DELAYS), "after_ms": None},
+            "retry": {"attempts": 0, "limit": len(FIELD_READER_RETRY_DELAYS_SECONDS), "after_ms": None},
         })
         self.assertEqual(decision["baseline_reason"], "короткое слово")
         self.assertNotIn("private field content", "\n".join(logs.output))

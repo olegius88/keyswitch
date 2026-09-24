@@ -8,17 +8,21 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-PRIVATE_DIRECTORY_MODE = 0o700  # owner-only: settings, queue and secrets never group/world readable
-PRIVATE_FILE_MODE = 0o600  # owner-only: individual settings and downloaded files
-CONFIG_MAX_BYTES = 1024 * 1024
-DEFAULT_ROTATIONS = 5
-MAX_ROTATIONS = 20
-MAX_SOURCE_LABEL_CHARACTERS = 80
-DEFAULT_INTERVAL_MINUTES = 15
-MAX_INTERVAL_MINUTES = 1440
-MAX_DEVICE_NAME_CHARACTERS = 80
-MAX_SOURCES = 50
-JSON_INDENT_SPACES = 2
+from .constants.files import (
+    CONFIG_MAX_BYTES,
+    JSON_INDENT_SPACES,
+    PRIVATE_DIRECTORY_MODE,
+    PRIVATE_FILE_MODE,
+)
+from .constants.limits import (
+    DEFAULT_INTERVAL_MINUTES,
+    DEFAULT_ROTATIONS,
+    MAX_DEVICE_NAME_CHARACTERS,
+    MAX_INTERVAL_MINUTES,
+    MAX_ROTATIONS,
+    MAX_SOURCE_LABEL_CHARACTERS,
+    MAX_SOURCES,
+)
 
 
 def data_directory() -> Path:
@@ -44,11 +48,13 @@ class Source:
         if not Path(self.path).is_absolute():
             raise ValueError("Выберите абсолютный путь к файлу.")
         if not 0 <= self.rotations <= MAX_ROTATIONS:
-            raise ValueError("Число ротаций должно быть от 0 до 20.")
+            raise ValueError(f"Число ротаций должно быть от 0 до {MAX_ROTATIONS}.")
         if not re.fullmatch(r"[a-f0-9]{32}", self.id):
             raise ValueError("Некорректный идентификатор источника.")
         if not self.label.strip() or len(self.label) > MAX_SOURCE_LABEL_CHARACTERS:
-            raise ValueError("Название источника: от 1 до 80 символов.")
+            raise ValueError(
+                f"Длина названия источника в символах: от 1 до {MAX_SOURCE_LABEL_CHARACTERS}."
+            )
 
 
 @dataclass
@@ -80,11 +86,13 @@ class Config:
         if self.bot_id and not re.fullmatch(r"[1-9][0-9]{0,19}", self.bot_id):
             raise ValueError("Некорректный ID бота.")
         if not 1 <= self.interval_minutes <= MAX_INTERVAL_MINUTES:
-            raise ValueError("Интервал: от 1 до 1440 минут.")
+            raise ValueError(f"Интервал в минутах: от 1 до {MAX_INTERVAL_MINUTES}.")
         if not self.device_name.strip() or len(self.device_name) > MAX_DEVICE_NAME_CHARACTERS:
-            raise ValueError("Название устройства: от 1 до 80 символов.")
+            raise ValueError(
+                f"Длина названия устройства в символах: от 1 до {MAX_DEVICE_NAME_CHARACTERS}."
+            )
         if len(self.sources) > MAX_SOURCES:
-            raise ValueError("Поддерживается до 50 источников.")
+            raise ValueError(f"Число источников: не больше {MAX_SOURCES}.")
         ids: set[str] = set()
         paths: set[str] = set()
         for source in self.sources:

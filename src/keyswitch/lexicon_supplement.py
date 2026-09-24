@@ -15,6 +15,8 @@ import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Final
+from .constants.file_formats import LEXICON_SUPPLEMENT_MAX_BYTES
+from .constants.models import LEXICON_SUPPLEMENT_CACHE_SIZE
 
 SUPPLEMENT_ROOT: Final = Path(__file__).parent / "resources"
 SUPPLEMENT_PATTERNS: Final = {"ru_RU": r"[а-яё]{3,}", "en_US": r"[a-z][a-z'-]*"}
@@ -28,11 +30,9 @@ SUPPLEMENT_PATTERNS: Final = {"ru_RU": r"[а-яё]{3,}", "en_US": r"[a-z][a-z'-]
 # word as well and therefore never told `z` from `я` apart. Any other single letter is a
 # letter, not a word, and is still refused.
 SUPPLEMENT_SINGLE_LETTERS: Final = {"ru_RU": frozenset("аисвкуоя"), "en_US": frozenset("ai")}
-MAX_SUPPLEMENT_BYTES: Final = 8 * 1024 * 1024
-SUPPLEMENT_LOCALE_CACHE_SIZE: Final = 8
 
 
-@lru_cache(maxsize=SUPPLEMENT_LOCALE_CACHE_SIZE)
+@lru_cache(maxsize=LEXICON_SUPPLEMENT_CACHE_SIZE)
 def supplement_words(locale: str) -> tuple[str, ...]:
     """Sorted extra forms for a locale; empty when no supplement is packaged.
 
@@ -43,7 +43,7 @@ def supplement_words(locale: str) -> tuple[str, ...]:
     if not path.is_file():
         return ()
     raw = path.read_bytes()
-    if len(raw) > MAX_SUPPLEMENT_BYTES:
+    if len(raw) > LEXICON_SUPPLEMENT_MAX_BYTES:
         raise ValueError("lexicon supplement is too large")
     payload: object = json.loads(raw)
     if (not isinstance(payload, dict) or payload.get("schema_version") != 1 or payload.get("locale") != locale

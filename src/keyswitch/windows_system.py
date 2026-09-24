@@ -11,12 +11,10 @@ from pathlib import Path, PurePath
 from typing import Protocol
 
 from .system_model import Application, AutostartStatus as AutostartStatus
+from .constants.windows import STARTUP_APPROVAL_ENABLED_BYTES
 
 
 AUTOSTART_VALUE_NAME = "KeySwitch"
-# StartupApproved\Run's first byte: 0x02 and 0x06 mean enabled, anything else
-# (0x03 from Task Manager, 0x01 from older builds) means the value is skipped.
-STARTUP_APPROVAL_ENABLED_BYTES = (0x02, 0x06)
 
 DirectoryOpener = Callable[[list[str]], None]
 

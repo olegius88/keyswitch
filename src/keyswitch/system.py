@@ -7,13 +7,11 @@ import shlex
 import shutil
 import sys
 from pathlib import Path
+from .constants.repository import SOURCE_ROOT_PARENT_LEVELS
 
 
 APP_ID = "io.github.olegius88.KeySwitch"
 APP_NAME = "KeySwitch"
-
-# src/keyswitch/system.py -> src/keyswitch -> src -> repository root
-SOURCE_ROOT_PARENT_LEVELS = 2
 
 
 def source_root() -> Path:

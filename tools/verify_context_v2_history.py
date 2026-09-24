@@ -8,6 +8,9 @@ import json
 from pathlib import Path, PurePosixPath
 import re
 from typing import cast
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from keyswitch.constants.file_formats import HASH_CHUNK_BYTES
 
 ROOT = Path(__file__).resolve().parents[1]
 ARCHIVE = "model/context_v2/compatibility/generation-sources"
@@ -32,13 +35,12 @@ LOADER_AST_SHA256 = {
     "__init__": "8bddcce338377c33d1787e4d02aeae6d2bd2e382606955cd822b26b2265dce64",
     "load": "5b1aecb0d6c8df0d6a7ccdcb135d151b46b29707346d528496e1275f98d8ab9b",
 }
-CHECKSUM_CHUNK_BYTES = 1024 * 1024
 
 
 def checksum(path: Path) -> str:
     result = hashlib.sha256()
     with path.open("rb") as source:
-        for block in iter(lambda: source.read(CHECKSUM_CHUNK_BYTES), b""):
+        for block in iter(lambda: source.read(HASH_CHUNK_BYTES), b""):
             result.update(block)
     return result.hexdigest()
 

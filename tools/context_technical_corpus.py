@@ -23,11 +23,29 @@ from freeze_context_action_corpus import (
     exposed_families, load_split, typo_variants,
 )
 from reconcile_context_action_corpus import expanded_aliases, historical_code_forms
-from model_protocol import ACTIVE_SPLITS, ALL_SPLITS
+from keyswitch.constants.model_protocol import ACTIVE_SPLITS, ALL_SPLITS
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from keyswitch.constants.corpus import (
+    CALIBRATION_SPLIT_PROBABILITY,
+    COMMANDS_PER_ALIAS_FAMILY,
+    COMMAND_NAME_MAX_CHARACTERS,
+    COMMAND_NAME_MIN_CHARACTERS,
+    CONTENTS_INDEX_FIELDS_PER_LINE,
+    DEVELOPMENT_SPLIT_PROBABILITY,
+    HTTP_OK_STATUS,
+    TEST_SPLIT_PROBABILITY,
+    TRAIN_SPLIT_PROBABILITY,
+    TRANSPOSE_TAIL_MARGIN_CHARACTERS,
+    TYPO_SOURCE_MAX_CHARACTERS,
+    TYPO_SOURCE_MIN_CHARACTERS,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 NAMESPACE = "keyswitch:context-action:debian-trixie-20260912-v1"
-COMMAND_PATH = re.compile(r"(?:usr/)?s?bin/([a-z]{3,16})\Z")
+# A command name as the package indexes are filtered: lowercase ASCII of the named lengths.
+COMMAND_NAME = f"[a-z]{{{COMMAND_NAME_MIN_CHARACTERS},{COMMAND_NAME_MAX_CHARACTERS}}}"
+COMMAND_PATH = re.compile(rf"(?:usr/)?s?bin/({COMMAND_NAME})\Z")
 HASH = re.compile(r"[0-9a-f]{64}\Z")
 DEPENDENCIES = (
     "tools/context_technical_corpus.py", "tools/freeze_context_action_corpus.py",
@@ -35,19 +53,6 @@ DEPENDENCIES = (
     "tools/train_context_model.py", "src/keyswitch/short_words.py",
     "src/keyswitch/layouts.py", "tests/test_context_technical_corpus.py",
 )
-FIELDS_PER_CONTENTS_LINE = 2
-# Retained commands per alias family, and the same figure reported in the summary.
-FAMILY_CAP = 2
-# Mirrors freeze_context_action_corpus.assigned_split's train/80/90/100 buckets, for humans reading the report.
-TRAIN_SPLIT_PROBABILITY = 0.7
-DEVELOPMENT_SPLIT_PROBABILITY = 0.1
-CALIBRATION_SPLIT_PROBABILITY = 0.1
-TEST_SPLIT_PROBABILITY = 0.1
-WORD_EDIT_MIN_LENGTH = 4
-WORD_EDIT_MAX_LENGTH = 64
-# Space left at the tail of the word so a two-character transposition stays in bounds.
-TRANSPOSITION_TAIL_MARGIN = 2
-HTTP_OK_STATUS = 200
 
 
 @dataclass(frozen=True)
@@ -75,7 +80,7 @@ def read_commands(contents: Path) -> list[Command]:
     with gzip.open(contents, "rt", encoding="utf-8", errors="strict") as stream:
         for line in stream:
             fields = line.rstrip("\n").rsplit(None, 1)
-            if len(fields) != FIELDS_PER_CONTENTS_LINE:
+            if len(fields) != CONTENTS_INDEX_FIELDS_PER_LINE:
                 continue
             match = COMMAND_PATH.fullmatch(fields[0])
             if match is None:
@@ -125,7 +130,7 @@ def partition_commands(commands: Sequence[Command], reserved_aliases: set[str]) 
     for item in records:
         members[families[item.name]].append(item.name)
     retained = {name for names in members.values()
-                for name in sorted(names, key=lambda value: digest(NAMESPACE + ":family-cap:" + command_identifier(value)))[:FAMILY_CAP]}
+                for name in sorted(names, key=lambda value: digest(NAMESPACE + ":family-cap:" + command_identifier(value)))[:COMMANDS_PER_ALIAS_FAMILY]}
     rows = []
     for item in records:
         family = families[item.name]
@@ -168,7 +173,7 @@ def partition_commands(commands: Sequence[Command], reserved_aliases: set[str]) 
         "commands": len(records), "families": len(members),
         "package_components": len(set(documents.values())),
         "largest_component_commands": max(Counter(documents.values()).values(), default=0),
-        "reserved_families": len(blocked), "family_cap": FAMILY_CAP,
+        "reserved_families": len(blocked), "family_cap": COMMANDS_PER_ALIAS_FAMILY,
         "rows_by_split": {split: sum(row.split == split for row in rows) for split in ALL_SPLITS},
         "documents_by_split": {split: len({row.document for row in rows if row.split == split}) for split in ALL_SPLITS},
         "families_by_split": {split: len({row.family for row in rows if row.split == split}) for split in ALL_SPLITS},
@@ -206,13 +211,13 @@ def all_internal_edits(forms: Iterable[str]) -> set[str]:
     tokens = {word for form in result for word in WORDS.findall(form)}
     result.update(tokens)
     for word in tokens:
-        if not WORD_EDIT_MIN_LENGTH <= len(word) <= WORD_EDIT_MAX_LENGTH:
+        if not TYPO_SOURCE_MIN_CHARACTERS <= len(word) <= TYPO_SOURCE_MAX_CHARACTERS:
             continue
         for index in range(1, len(word) - 1):
             result.add(word[:index] + word[index + 1:])
             result.add(word[:index] + word[index] + word[index:])
-        for index in range(1, len(word) - TRANSPOSITION_TAIL_MARGIN):
-            result.add(word[:index] + word[index + 1] + word[index] + word[index + TRANSPOSITION_TAIL_MARGIN:])
+        for index in range(1, len(word) - TRANSPOSE_TAIL_MARGIN_CHARACTERS):
+            result.add(word[:index] + word[index + 1] + word[index] + word[index + TRANSPOSE_TAIL_MARGIN_CHARACTERS:])
     return result
 
 
@@ -323,7 +328,7 @@ def freeze_rows(partitioned: Partitioned, output: Path, provenance: Mapping[str,
     manifest: dict[str, object] = {
         "schema_version": 1, "namespace": NAMESPACE, "label": "keep", "splits": files,
         "scope": "declared command-family/package holdout; not globally unseen lexicon or verified human intent",
-        "normalization": "exact case-sensitive (usr/)?s?bin/[a-z]{3,16}; command basename deduplicated; all paths and owners retained",
+        "normalization": f"exact case-sensitive (usr/)?s?bin/{COMMAND_NAME}; command basename deduplicated; all paths and owners retained",
         "context": "empty before/after; downstream action_rows adds its existing disclosed mixed contexts and declared layout interventions",
         "token_language": "ASCII command alphabet uses group 0; not an assertion of natural English prose",
         "partitioning": partitioned.summary, "source_metadata": dict(metadata),
@@ -336,7 +341,8 @@ def freeze_rows(partitioned: Partitioned, output: Path, provenance: Mapping[str,
         "compression": "gzip mtime=0; content SHA256 independent of deflate implementation",
         "limitations": ["Contents lists shipped paths, not executable permissions or human command intent",
                         "binary-package ownership is grouped; shared source packages and renamed forks are not identified",
-                        "only lowercase ASCII command names of 3 through 16 characters are in this supplement",
+                        f"only lowercase ASCII command names of {COMMAND_NAME_MIN_CHARACTERS} through "
+                        f"{COMMAND_NAME_MAX_CHARACTERS} characters are in this supplement",
                         "existing dictionaries and pretrained model vocabularies are not globally inventoried",
                         "an intended command typo is labeled by the existing action_rows spelling policy, not human-reviewed commands"],
     }

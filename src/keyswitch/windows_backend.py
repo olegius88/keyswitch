@@ -9,87 +9,76 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from typing import Protocol
 
-from .backend import (
+from .backend import BackendProbe, FocusInfo, KeyEvent, KeyDisposition, ScreenAnchor
+from .constants.keyboard import (
     ALT_MASK,
     COMPLETED_ACTION_EVENT_COUNT,
-    LAYOUT_SWITCH_POLL_SECONDS,
-    LAYOUT_SWITCH_TIMEOUT_SECONDS,
     CONTROL_MASK,
     LOCK_MASK,
     SHIFT_MASK,
     SUPER_MASK,
-    BackendProbe,
-    FocusInfo,
-    KeyEvent,
-    KeyDisposition,
-    ScreenAnchor,
 )
-
-
-LANG_ENGLISH = 0x09
-LANG_RUSSIAN = 0x19
-HOOK_START_TIMEOUT = 5.0
-HOOK_STOP_JOIN_TIMEOUT_SECONDS = 2.0
-# LOWORD(hkl) & PRIMARYLANGID(lgid), the Win32 macros `primary_language` inlines.
-LOWORD_MASK = 0xFFFF
-PRIMARY_LANGID_MASK = 0x03FF
-# The low 32 bits of an HKL, for display; HKL is pointer-sized but only the low
-# word carries the language id and the high word the layout id.
-DWORD_MASK = 0xFFFFFFFF
-
-VK_BACK = 0x08
-VK_TAB = 0x09
-VK_RETURN = 0x0D
-VK_SHIFT = 0x10
-VK_CONTROL = 0x11
-VK_MENU = 0x12
-VK_PAUSE = 0x13
-VK_CAPITAL = 0x14
-VK_ESCAPE = 0x1B
-VK_SPACE = 0x20
-VK_PRIOR = 0x21
-VK_NEXT = 0x22
-VK_END = 0x23
-VK_HOME = 0x24
-VK_LEFT = 0x25
-VK_UP = 0x26
-VK_RIGHT = 0x27
-VK_DOWN = 0x28
-VK_INSERT = 0x2D
-VK_DELETE = 0x2E
-VK_LWIN = 0x5B
-VK_RWIN = 0x5C
-VK_LSHIFT = 0xA0
-VK_RSHIFT = 0xA1
-VK_LCONTROL = 0xA2
-VK_RCONTROL = 0xA3
-VK_LMENU = 0xA4
-VK_RMENU = 0xA5
-# Punctuation keys of the US layout; named after the X11 keysyms so the log
-# reads the same on both platforms instead of showing "VK_BC" for a comma.
-VK_OEM_1 = 0xBA
-VK_OEM_PLUS = 0xBB
-VK_OEM_COMMA = 0xBC
-VK_OEM_MINUS = 0xBD
-VK_OEM_PERIOD = 0xBE
-VK_OEM_2 = 0xBF
-VK_OEM_3 = 0xC0
-VK_OEM_4 = 0xDB
-VK_OEM_5 = 0xDC
-VK_OEM_6 = 0xDD
-VK_OEM_7 = 0xDE
-
-# Alphanumeric keys: winuser.h defines no VK_0.. VK_9 / VK_A.. VK_Z constants
-# because their values equal the ASCII digits and upper-case letters.
-VK_0 = 0x30
-VK_9 = 0x39
-VK_A = 0x41
-VK_Z = 0x5A
-
-SHIFT_KEYS = frozenset((VK_SHIFT, VK_LSHIFT, VK_RSHIFT))
-CONTROL_KEYS = frozenset((VK_CONTROL, VK_LCONTROL, VK_RCONTROL))
-ALT_KEYS = frozenset((VK_MENU, VK_LMENU, VK_RMENU))
-SUPER_KEYS = frozenset((VK_LWIN, VK_RWIN))
+from .constants.timing import (
+    KEYBOARD_LISTENER_START_TIMEOUT_SECONDS,
+    KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS,
+    LAYOUT_SWITCH_POLL_SECONDS,
+    LAYOUT_SWITCH_TIMEOUT_SECONDS,
+)
+from .constants.windows import (
+    ALT_KEYS,
+    CONTROL_KEYS,
+    DWORD_MASK,
+    LANG_ENGLISH,
+    LANG_RUSSIAN,
+    LOWORD_MASK,
+    PRIMARY_LANGID_MASK,
+    SHIFT_KEYS,
+    SUPER_KEYS,
+    VK_0,
+    VK_9,
+    VK_A,
+    VK_BACK,
+    VK_CAPITAL,
+    VK_CONTROL,
+    VK_DELETE,
+    VK_DOWN,
+    VK_END,
+    VK_ESCAPE,
+    VK_HOME,
+    VK_INSERT,
+    VK_LCONTROL,
+    VK_LEFT,
+    VK_LMENU,
+    VK_LSHIFT,
+    VK_LWIN,
+    VK_MENU,
+    VK_NEXT,
+    VK_OEM_1,
+    VK_OEM_2,
+    VK_OEM_3,
+    VK_OEM_4,
+    VK_OEM_5,
+    VK_OEM_6,
+    VK_OEM_7,
+    VK_OEM_COMMA,
+    VK_OEM_MINUS,
+    VK_OEM_PERIOD,
+    VK_OEM_PLUS,
+    VK_PAUSE,
+    VK_PRIOR,
+    VK_RCONTROL,
+    VK_RETURN as VK_RETURN,
+    VK_RIGHT,
+    VK_RMENU,
+    VK_RSHIFT,
+    VK_RWIN,
+    VK_SHIFT as VK_SHIFT,
+    VK_SPACE,
+    VK_TAB,
+    VK_UP,
+    VK_Z,
+)
+from .russian_text import SECONDS, quantity
 
 
 def _running_on_windows() -> bool:
@@ -323,9 +312,11 @@ class WindowsBackend:
             daemon=True,
         )
         self._thread.start()
-        if not self._ready.wait(HOOK_START_TIMEOUT):
+        if not self._ready.wait(KEYBOARD_LISTENER_START_TIMEOUT_SECONDS):
             self.stop()
-            raise WindowsBackendError("Win32 hook не подтвердил запуск за 5 секунд")
+            raise WindowsBackendError(
+                f"Win32 hook не подтвердил запуск за {quantity(KEYBOARD_LISTENER_START_TIMEOUT_SECONDS, SECONDS)}"
+            )
         error = self._startup_error()
         if error is not None:
             self._thread = None
@@ -357,7 +348,7 @@ class WindowsBackend:
             return
         self._api.stop_keyboard_hook()
         if thread is not threading.current_thread():
-            thread.join(timeout=HOOK_STOP_JOIN_TIMEOUT_SECONDS)
+            thread.join(timeout=KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS)
         self._thread = None
         self._running.clear()
 

@@ -23,14 +23,12 @@ import verify_boundary_v2 as verifier
 from boundary_v2_corpus import RECEIPT
 from evaluate_boundary_engine import REPORT as ENGINE_REPORT, SCENARIOS
 from verify_context_v2 import read_object
-
-# Frozen tools/train_boundary_v2.py and src/keyswitch/boundary_policy.py pin
-# these directly (PENDING_RESEAL), so they are mirrored here rather than
-# imported.
-VALID_TEST_THRESHOLD = 0.99
-THRESHOLD_LOWER_BOUND = 0.5
-OVERSIZED_BOUNDARY_POLICY_BYTES = 65537
-PAUSE_TRIGGER_OFFSET_SECONDS = 2
+from fixture_values.clock import PAUSE_TRIGGER_OFFSET_SECONDS
+from fixture_values.counts import OVERSIZED_BOUNDARY_POLICY_BYTES
+from fixture_values.scores import (
+    BOUNDARY_POLICY_THRESHOLD_LOWER_BOUND,
+    BOUNDARY_POLICY_VALID_THRESHOLD,
+)
 
 
 class BoundaryPolicyArtifactTests(unittest.TestCase):
@@ -66,11 +64,11 @@ class BoundaryPolicyArtifactTests(unittest.TestCase):
                 verifier.verify()
 
     def test_version_size_and_numeric_validation(self) -> None:
-        good = {"feature_version": FEATURE_VERSION, "version": "boundary-v2-test", "threshold": VALID_TEST_THRESHOLD, "weights": {"bias": 0.0}}
+        good = {"feature_version": FEATURE_VERSION, "version": "boundary-v2-test", "threshold": BOUNDARY_POLICY_VALID_THRESHOLD, "weights": {"bias": 0.0}}
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "model.json"
             invalid_cases: tuple[object, ...] = ([], {}, {**good, "feature_version": 1}, {**good, "version": "boundary-v1-test"},
-                            {**good, "version": None}, {**good, "threshold": True}, {**good, "threshold": THRESHOLD_LOWER_BOUND},
+                            {**good, "version": None}, {**good, "threshold": True}, {**good, "threshold": BOUNDARY_POLICY_THRESHOLD_LOWER_BOUND},
                             {**good, "threshold": None}, {**good, "weights": {}},
                             {**good, "weights": {"a": float("inf")}}, {**good, "weights": {"a": True}})
             for invalid in invalid_cases:
@@ -86,7 +84,7 @@ class BoundaryPolicyArtifactTests(unittest.TestCase):
         with patch.object(BoundaryPolicy, "load", side_effect=OSError("missing")):
             self.assertIsNone(BoundaryPolicy.default())
         BoundaryPolicy.default.cache_clear()
-        with patch.object(BoundaryPolicy, "load", return_value=BoundaryPolicy({}, VALID_TEST_THRESHOLD, "test")) as load:
+        with patch.object(BoundaryPolicy, "load", return_value=BoundaryPolicy({}, BOUNDARY_POLICY_VALID_THRESHOLD, "test")) as load:
             self.assertIs(BoundaryPolicy.default(), load.return_value)
         BoundaryPolicy.default.cache_clear()
 

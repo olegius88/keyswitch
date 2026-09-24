@@ -22,7 +22,32 @@ from typing import cast
 import unicodedata
 
 from keyswitch.layouts import LayoutPair
-from model_protocol import ALL_SPLITS
+from keyswitch.constants.model_protocol import ALL_SPLITS
+from keyswitch.constants.corpus import (
+    CALIBRATION_SPLIT_CEILING,
+    CONLLU_COLUMN_COUNT,
+    CONLLU_LEMMA_COLUMN_INDEX,
+    CORPUS_AFTER_WINDOW_CHARACTERS,
+    CORPUS_BEFORE_WINDOW_CHARACTERS,
+    CORPUS_LITERAL_TAIL_MAX_CHARACTERS,
+    DEFAULT_MAX_DOCUMENTS_PER_SOURCE,
+    DEFAULT_MAX_SENTENCES_PER_DOCUMENT,
+    DETERMINISTIC_DRAW_HEX_DIGITS,
+    DEVELOPMENT_SPLIT_CEILING,
+    FAMILY_KEY_MIN_PARTS,
+    MAJORITY_DIVISOR,
+    PRIOR_CONTEXT_TSV_FIELD_COUNT,
+    PRIOR_CONTEXT_TSV_TEXT_FIELD_INDEX,
+    SPLIT_BUCKET_COUNT,
+    TRAIN_SPLIT_CEILING,
+    TRANSPOSE_PAIR_CHARACTERS,
+    TRANSPOSE_TAIL_MARGIN_CHARACTERS,
+    TYPO_DELETE_DUPLICATE_MARGIN_CHARACTERS,
+    TYPO_SOURCE_MAX_CHARACTERS,
+    TYPO_SOURCE_MIN_CHARACTERS,
+    TYPO_TRANSPOSE_MARGIN_CHARACTERS,
+)
+from keyswitch.constants.file_formats import HASH_CHUNK_BYTES, HEXADECIMAL_BASE
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,36 +57,8 @@ PINS = {
 }
 PAIR = LayoutPair()
 WORDS = re.compile(r"[^\W\d_]+(?:['’\-][^\W\d_]+)*", re.UNICODE)
-
-CHECKSUM_CHUNK_BYTES = 1024 * 1024
-MIN_TYPO_SOURCE_LENGTH = 4
-# A deterministic seed is drawn from the first 16 hex characters (64 bits) of a
-# SHA-256 digest, read as a base-16 integer.
-HEX_DIGEST_PREFIX_LENGTH = 16
-HEX_BASE = 16
-# typo_variants()'s margins: "inside" (delete/duplicate) needs one character on
-# each side; "adjacent" (transpose) needs itself and the next two in bounds.
-DELETE_DUPLICATE_MARGIN = 2
-TRANSPOSE_MARGIN = 3
-TRANSPOSE_PAIR_LENGTH = 2  # characters consumed by one transposed pair
-LEMMA_COLUMN_INDEX = 2  # CoNLL-U column: ID, FORM, LEMMA, ...
-CONLLU_COLUMN_COUNT = 10
-# The frozen sentence window: how much surrounding text each row keeps.
-BEFORE_WINDOW_CHARACTERS = 96
-AFTER_WINDOW_CHARACTERS = 64
-MAX_LITERAL_TAIL_CHARACTERS = 64
-SPLIT_BUCKET_RANGE = 100
-TRAIN_SPLIT_CEILING = 70
-DEVELOPMENT_SPLIT_CEILING = 80
-CALIBRATION_SPLIT_CEILING = 90
-MAX_TYPO_SOURCE_LENGTH = 64  # old context-v1 edit-expansion upper bound
-OLD_EDIT_TRANSPOSE_RANGE_MARGIN = 2
-KEY_TUPLE_MIN_LENGTH = 2  # a "[family, text]" pair needs at least two elements
-TSV_FIELD_COUNT = 4
-TSV_TEXT_FIELD_INDEX = 2
-MAJORITY_DIVISOR = 2
-DEFAULT_MAX_DOCUMENTS_PER_SOURCE = 2000
-DEFAULT_MAX_SENTENCES_PER_DOCUMENT = 12
+# The context window as the frozen manifests describe it.
+CONTEXT_WINDOW_TEXT = f"before<={CORPUS_BEFORE_WINDOW_CHARACTERS} and after<={CORPUS_AFTER_WINDOW_CHARACTERS} characters"
 
 
 def canonical(value: object) -> bytes:
@@ -75,7 +72,7 @@ def digest(value: str) -> str:
 def checksum(path: Path) -> str:
     result = hashlib.sha256()
     with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(CHECKSUM_CHUNK_BYTES), b""):
+        for chunk in iter(lambda: stream.read(HASH_CHUNK_BYTES), b""):
             result.update(chunk)
     return result.hexdigest()
 
@@ -155,13 +152,13 @@ def physical(token: str) -> str:
 def typo_variants(original: str, identifier: str) -> tuple[str, ...]:
     """Three predetermined internal edits, included in family grouping first."""
 
-    if len(original) < MIN_TYPO_SOURCE_LENGTH:
+    if len(original) < TYPO_SOURCE_MIN_CHARACTERS:
         return ()
-    inside = 1 + int(digest("delete-duplicate:" + identifier)[:HEX_DIGEST_PREFIX_LENGTH], HEX_BASE) % (len(original) - DELETE_DUPLICATE_MARGIN)
-    adjacent = 1 + int(digest("transpose:" + identifier)[:HEX_DIGEST_PREFIX_LENGTH], HEX_BASE) % (len(original) - TRANSPOSE_MARGIN)
+    inside = 1 + int(digest("delete-duplicate:" + identifier)[:DETERMINISTIC_DRAW_HEX_DIGITS], HEXADECIMAL_BASE) % (len(original) - TYPO_DELETE_DUPLICATE_MARGIN_CHARACTERS)
+    adjacent = 1 + int(digest("transpose:" + identifier)[:DETERMINISTIC_DRAW_HEX_DIGITS], HEXADECIMAL_BASE) % (len(original) - TYPO_TRANSPOSE_MARGIN_CHARACTERS)
     variants = (
         original[:inside] + original[inside + 1:],
-        original[:adjacent] + original[adjacent + 1] + original[adjacent] + original[adjacent + TRANSPOSE_PAIR_LENGTH:],
+        original[:adjacent] + original[adjacent + 1] + original[adjacent] + original[adjacent + TRANSPOSE_PAIR_CHARACTERS:],
         original[:inside] + original[inside] + original[inside:],
     )
     return tuple(dict.fromkeys(variant for variant in variants if variant != original))
@@ -200,7 +197,7 @@ def surface_tokens(lines: list[list[str]]) -> tuple[SurfaceToken, ...]:
             if begin > end or any(index in covered or index not in members for index in range(begin, end + 1)):
                 raise ValueError("invalid or overlapping CoNLL-U multiword token")
             covered.update(range(begin, end + 1))
-            lemmas = tuple(members[index][LEMMA_COLUMN_INDEX] if members[index][LEMMA_COLUMN_INDEX] != "_" else members[index][1]
+            lemmas = tuple(members[index][CONLLU_LEMMA_COLUMN_INDEX] if members[index][CONLLU_LEMMA_COLUMN_INDEX] != "_" else members[index][1]
                            for index in range(begin, end + 1))
         elif int(identifier) in covered:
             continue
@@ -295,13 +292,13 @@ def sentence_rows(sentence: Sentence, families: Union) -> list[CorpusRow]:
         previous = spans[index - 1][1] if index else 0
         following = spans[index + 1][0] if index + 1 < len(spans) else len(text)
         tail_end = end
-        while tail_end < len(text) and tail_end - end < MAX_LITERAL_TAIL_CHARACTERS and not text[tail_end].isalnum():
+        while tail_end < len(text) and tail_end - end < CORPUS_LITERAL_TAIL_MAX_CHARACTERS and not text[tail_end].isalnum():
             tail_end += 1
         language, group, representable = token_language(token.form)
         row = CorpusRow(
             identifier=row_identifier(sentence, token),
-            original=token.form, group=group, before=text[max(0, start - BEFORE_WINDOW_CHARACTERS):start],
-            after=text[end:end + AFTER_WINDOW_CHARACTERS], lemma=" ".join(token.lemmas),
+            original=token.form, group=group, before=text[max(0, start - CORPUS_BEFORE_WINDOW_CHARACTERS):start],
+            after=text[end:end + CORPUS_AFTER_WINDOW_CHARACTERS], lemma=" ".join(token.lemmas),
             family=digest(families.find(physical(token.form))), document=sentence.document,
             language=language, source=sentence.source, source_file=sentence.filename,
             source_sentence=sentence.identifier, source_token=token.identifier,
@@ -314,7 +311,7 @@ def sentence_rows(sentence: Sentence, families: Union) -> list[CorpusRow]:
 
 
 def assigned_split(namespace: str, key: str) -> str:
-    bucket = int(digest(namespace + ":" + key)[:HEX_DIGEST_PREFIX_LENGTH], HEX_BASE) % SPLIT_BUCKET_RANGE
+    bucket = int(digest(namespace + ":" + key)[:DETERMINISTIC_DRAW_HEX_DIGITS], HEXADECIMAL_BASE) % SPLIT_BUCKET_COUNT
     return ("train" if bucket < TRAIN_SPLIT_CEILING
             else "development" if bucket < DEVELOPMENT_SPLIT_CEILING
             else "calibration" if bucket < CALIBRATION_SPLIT_CEILING
@@ -339,7 +336,7 @@ def choose_sentences(
         for sentence in read_conllu(path, source):
             counts[source] += 1
             heap = documents[source].setdefault(sentence.document, [])
-            rank = int(digest(namespace + ":sample:" + sentence.document + ":" + sentence.identifier), HEX_BASE)
+            rank = int(digest(namespace + ":sample:" + sentence.document + ":" + sentence.identifier), HEXADECIMAL_BASE)
             item = (-rank, path.name, sentence.identifier)
             if len(heap) < max_sentences:
                 heapq.heappush(heap, item)
@@ -375,12 +372,12 @@ def exposed_families(repository: Path, additional: Sequence[Path] = ()) -> tuple
         exposed.update(physical(token) for token in WORDS.findall(text))
         if expand_old_edits:
             for token in WORDS.findall(text):
-                if MIN_TYPO_SOURCE_LENGTH <= len(token) <= MAX_TYPO_SOURCE_LENGTH:
+                if TYPO_SOURCE_MIN_CHARACTERS <= len(token) <= TYPO_SOURCE_MAX_CHARACTERS:
                     for index in range(1, len(token) - 1):
                         exposed.add(physical(token[:index] + token[index + 1:]))
                         exposed.add(physical(token[:index] + token[index] + token[index:]))
-                    for index in range(1, len(token) - OLD_EDIT_TRANSPOSE_RANGE_MARGIN):
-                        exposed.add(physical(token[:index] + token[index + 1] + token[index] + token[index + TRANSPOSE_PAIR_LENGTH:]))
+                    for index in range(1, len(token) - TRANSPOSE_TAIL_MARGIN_CHARACTERS):
+                        exposed.add(physical(token[:index] + token[index + 1] + token[index] + token[index + TRANSPOSE_PAIR_CHARACTERS:]))
 
     def walk(value: object) -> None:
         if isinstance(value, str):
@@ -392,7 +389,7 @@ def exposed_families(repository: Path, additional: Sequence[Path] = ()) -> tuple
             for key, child in value.items():
                 if isinstance(key, str) and key.startswith("["):
                     parts = json.loads(key)
-                    if isinstance(parts, list) and len(parts) >= KEY_TUPLE_MIN_LENGTH and isinstance(parts[1], str):
+                    if isinstance(parts, list) and len(parts) >= FAMILY_KEY_MIN_PARTS and isinstance(parts[1], str):
                         add(parts[1])
                 elif key in {"word", "original", "alternative", "text", "before", "after", "expected"}:
                     walk(child)
@@ -408,9 +405,9 @@ def exposed_families(repository: Path, additional: Sequence[Path] = ()) -> tuple
             with gzip.open(path, "rt", encoding="utf-8") as stream:
                 for line in stream:
                     fields = line.rstrip("\n").split("\t")
-                    if len(fields) != TSV_FIELD_COUNT:
+                    if len(fields) != PRIOR_CONTEXT_TSV_FIELD_COUNT:
                         raise ValueError("invalid prior context TSV")
-                    add(fields[TSV_TEXT_FIELD_INDEX])
+                    add(fields[PRIOR_CONTEXT_TSV_TEXT_FIELD_INDEX])
         else:
             raw = gzip.decompress(path.read_bytes()) if path.suffix == ".gz" else path.read_bytes()
             walk(json.loads(raw))
@@ -544,7 +541,7 @@ def freeze(
         "schema_version": 1, "namespace": namespace, "label": "keep",
         "scope": "prospective document/physical-lemma sequence holdout; not globally unseen lexicon or verified human language intent",
         "token_language": "surface alphabet determines RU/Latin group; foreign Latin text is not asserted to be English; mixed/und group is null",
-        "context": "within the same sentence only; before<=96 and after<=64 characters; punctuation/whitespace preserved",
+        "context": f"within the same sentence only; {CONTEXT_WINDOW_TEXT}; punctuation/whitespace preserved",
         "sources": list(sources), "sampling": sampling, "partitioning": partitioning,
         "exposure_inputs": dict(exposure_provenance),
         "exposed_physical_families": len(exposed),
@@ -585,7 +582,7 @@ def load_split(directory: Path, split: str) -> list[CorpusRow]:
             value = json.loads(line)
             value["quarantine_reasons"] = tuple(value["quarantine_reasons"])
             row = CorpusRow(**value)
-            if row.split != split or len(row.before) > BEFORE_WINDOW_CHARACTERS or len(row.after) > AFTER_WINDOW_CHARACTERS:
+            if row.split != split or len(row.before) > CORPUS_BEFORE_WINDOW_CHARACTERS or len(row.after) > CORPUS_AFTER_WINDOW_CHARACTERS:
                 raise ValueError("invalid corpus row bounds or split")
             rows.append(row)
     if len(rows) != record["rows"] or content_hash.hexdigest() != record["content_sha256"]:

@@ -11,12 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from .config import DEFAULT_HISTORY_LIMIT
-
-
-# Mirrors config.DEFAULTS["history"]["limit"]; app.py's settings.get fallback
-# reuses this same constant so the two defaults cannot drift apart.
-HISTORY_CONFIDENCE_DECIMALS = 2
+from .constants.settings_defaults import DEFAULT_HISTORY_LIMIT
+from .constants.file_formats import HISTORY_CONFIDENCE_DECIMALS
 
 
 def data_dir() -> Path:

@@ -17,6 +17,18 @@ from keyswitch.early_switch import (  # noqa: E402
 )
 from keyswitch.language_model import LanguageModel, WordScore  # noqa: E402
 from keyswitch.layouts import LayoutPair  # noqa: E402
+from fixture_values.corpora import (
+    EARLY_SWITCH_EN_WORD_FREQUENCIES,
+    EARLY_SWITCH_POLICY_LOW_MINIMUM_FREQUENCY,
+    EARLY_SWITCH_POLICY_UNREACHABLE_DOMINANT_FREQUENCY,
+    EARLY_SWITCH_RU_WORD_FREQUENCIES,
+)
+from fixture_values.counts import (
+    DICTIONARY_TINY_READ_LIMIT_BYTES,
+    EARLY_SWITCH_POLICY_LOW_MINIMUM_COMPLETIONS,
+    PRIV_PREFIX_COMPLETIONS,
+)
+from fixture_values.keys import EARLY_SWITCH_UNKNOWN_SOURCE_GROUP, EARLY_SWITCH_UNKNOWN_TARGET_GROUP
 
 
 class _Scorer:
@@ -28,59 +40,28 @@ class _Scorer:
         return WordScore(1.0 if known else 0.0, known, 1 if known else 0, 0.0)
 
 
-EN_WORDS = {"hello": 500_000, "help": 200_000, "held": 50_000, "xfce": 10}
-RU_WORDS = {
-    "привет": 900_000,
-    "приветствие": 5_000,
-    "привал": 4_000,
-    "приз": 3_000,
-    "почему": 800_000,
-    "почесать": 1_500,
-    "тебя": 600_000,
-}
-
-
 def _indexes() -> dict[int, PrefixIndex]:
-    return {0: PrefixIndex(EN_WORDS, EN_WORDS), 1: PrefixIndex(RU_WORDS, RU_WORDS)}
+    return {0: PrefixIndex(EARLY_SWITCH_EN_WORD_FREQUENCIES, EARLY_SWITCH_EN_WORD_FREQUENCIES), 1: PrefixIndex(EARLY_SWITCH_RU_WORD_FREQUENCIES, EARLY_SWITCH_RU_WORD_FREQUENCIES)}
 
 
 def _scorers() -> dict[int, _Scorer]:
-    return {0: _Scorer(set(EN_WORDS)), 1: _Scorer(set(RU_WORDS))}
-
-
-# Of RU_WORDS, exactly привал/привет/приветствие start with "прив" (приз does not:
-# its fourth letter differs). The frequency values below are read straight out
-# of RU_WORDS so they cannot drift from the fixture they describe.
-PRIV_PREFIX_COMPLETIONS = 3
-# A .dic read bound too small to capture even the shortest stem, used to prove
-# the read is truncated rather than silently unbounded.
-TINY_READ_LIMIT_BYTES = 4
-# A policy tuned to switch on many ordinary-frequency completions rather than
-# on one dominant one: low thresholds, and a dominance bar high enough that it
-# is never crossed by this fixture data.
-LOW_MINIMUM_COMPLETIONS = 2
-LOW_MINIMUM_FREQUENCY = 1_000
-UNREACHABLE_DOMINANT_FREQUENCY = 10**9
-# Group ids absent from _indexes()/_scorers(), used to exercise "no other
-# layout": one collides with neither key, the other differs from it too.
-UNKNOWN_SOURCE_GROUP = 5
-UNKNOWN_TARGET_GROUP = 7
+    return {0: _Scorer(set(EARLY_SWITCH_EN_WORD_FREQUENCIES)), 1: _Scorer(set(EARLY_SWITCH_RU_WORD_FREQUENCIES))}
 
 
 class PrefixIndexTests(unittest.TestCase):
     def test_completions_count_words_and_best_frequency(self) -> None:
-        index = PrefixIndex(RU_WORDS, RU_WORDS)
+        index = PrefixIndex(EARLY_SWITCH_RU_WORD_FREQUENCIES, EARLY_SWITCH_RU_WORD_FREQUENCIES)
         evidence = index.completions("прив")
         self.assertEqual(evidence.completions, PRIV_PREFIX_COMPLETIONS)
-        self.assertEqual(evidence.maximum_frequency, RU_WORDS["привет"])
+        self.assertEqual(evidence.maximum_frequency, EARLY_SWITCH_RU_WORD_FREQUENCIES["привет"])
         self.assertFalse(evidence.known)
         self.assertEqual(index.completions("").completions, 0)
         self.assertTrue(index.completions("ПРИВЕТ").known)
-        self.assertEqual(len(index), len(RU_WORDS))
+        self.assertEqual(len(index), len(EARLY_SWITCH_RU_WORD_FREQUENCIES))
         # The frequency scan is bounded; the count is not.
         self.assertEqual(
             index.completions("прив", limit=1).as_dict(),
-            {"completions": PRIV_PREFIX_COMPLETIONS, "maximum_frequency": RU_WORDS["привал"], "known": False},
+            {"completions": PRIV_PREFIX_COMPLETIONS, "maximum_frequency": EARLY_SWITCH_RU_WORD_FREQUENCIES["привал"], "known": False},
         )
 
     def test_words_without_frequency_are_known_but_zero(self) -> None:
@@ -121,7 +102,7 @@ class HunspellHelpersTests(unittest.TestCase):
                 early_switch._dictionary_stems(dictionary),
                 {"hello", "world", "naïve"},
             )
-            self.assertEqual(early_switch._dictionary_stems(dictionary, limit=TINY_READ_LIMIT_BYTES), set())
+            self.assertEqual(early_switch._dictionary_stems(dictionary, limit=DICTIONARY_TINY_READ_LIMIT_BYTES), set())
             self.assertEqual(
                 early_switch._dictionary_stems(Path(directory) / "missing.dic"), set()
             )
@@ -149,18 +130,18 @@ class EarlySwitchDecisionTests(unittest.TestCase):
         self.assertEqual(decision.reason, "целевой префикс доминирует по частоте")
         payload = decision.as_dict()
         self.assertEqual(payload["source_evidence"], {"completions": 0, "maximum_frequency": 0, "known": False})
-        self.assertEqual(payload["target_evidence"], {"completions": PRIV_PREFIX_COMPLETIONS, "maximum_frequency": RU_WORDS["привет"], "known": False})
+        self.assertEqual(payload["target_evidence"], {"completions": PRIV_PREFIX_COMPLETIONS, "maximum_frequency": EARLY_SWITCH_RU_WORD_FREQUENCIES["привет"], "known": False})
 
     def test_many_frequent_completions_switch_without_dominance(self) -> None:
         policy = EarlySwitchPolicy(
-            minimum_completions=LOW_MINIMUM_COMPLETIONS,
-            minimum_frequency=LOW_MINIMUM_FREQUENCY,
-            dominant_frequency=UNREACHABLE_DOMINANT_FREQUENCY,
+            minimum_completions=EARLY_SWITCH_POLICY_LOW_MINIMUM_COMPLETIONS,
+            minimum_frequency=EARLY_SWITCH_POLICY_LOW_MINIMUM_FREQUENCY,
+            dominant_frequency=EARLY_SWITCH_POLICY_UNREACHABLE_DOMINANT_FREQUENCY,
         )
         decision = self.decide("gjxt", policy=policy)
         self.assertTrue(decision.should_switch)
         self.assertEqual(decision.reason, "исходный префикс невозможен, целевой начинает частотные слова")
-        self.assertEqual(policy.as_dict()["dominant_frequency"], UNREACHABLE_DOMINANT_FREQUENCY)
+        self.assertEqual(policy.as_dict()["dominant_frequency"], EARLY_SWITCH_POLICY_UNREACHABLE_DOMINANT_FREQUENCY)
 
     def test_rejections_carry_reasons(self) -> None:
         self.assertEqual(self.decide("ghb").reason, "слишком короткий префикс")
@@ -201,9 +182,9 @@ class EarlySwitchDecisionTests(unittest.TestCase):
         no_target = early_switch_decision(indexes, _scorers(), "ghbd", {}, 0)
         self.assertEqual(no_target.reason, "нет другой раскладки")
         self.assertIsNone(no_target.as_dict()["source_evidence"])
-        unknown_source = early_switch_decision(indexes, _scorers(), "ghbd", {1: "прив"}, UNKNOWN_SOURCE_GROUP)
+        unknown_source = early_switch_decision(indexes, _scorers(), "ghbd", {1: "прив"}, EARLY_SWITCH_UNKNOWN_SOURCE_GROUP)
         self.assertEqual(unknown_source.reason, "нет другой раскладки")
-        unknown_target = early_switch_decision(indexes, _scorers(), "ghbd", {UNKNOWN_TARGET_GROUP: "прив"}, 0)
+        unknown_target = early_switch_decision(indexes, _scorers(), "ghbd", {EARLY_SWITCH_UNKNOWN_TARGET_GROUP: "прив"}, 0)
         self.assertEqual(unknown_target.reason, "нет другой раскладки")
 
     def test_real_lexicons_switch_common_words_and_keep_english(self) -> None:

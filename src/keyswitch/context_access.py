@@ -7,10 +7,8 @@ import time
 from typing import Protocol, runtime_checkable
 
 from .input_context import FieldContext, FieldReader
-
-
-RETRY_DELAYS = (5.0, 15.0, 60.0)
-MILLISECONDS_PER_SECOND = 1000
+from .constants.timing import FIELD_READER_RETRY_DELAYS_SECONDS
+from .constants.units import MILLISECONDS_PER_SECOND
 
 
 class _ManagedReader(FieldReader, Protocol):
@@ -73,7 +71,7 @@ class PlatformFieldReader:
     def retry_diagnostics(self) -> dict[str, object]:
         return {
             "attempts": self._retry_attempts,
-            "limit": len(RETRY_DELAYS),
+            "limit": len(FIELD_READER_RETRY_DELAYS_SECONDS),
             "after_ms": (
                 None if self._retry_after is None
                 else max(0, round((self._retry_after - time.monotonic()) * MILLISECONDS_PER_SECOND))
@@ -143,7 +141,7 @@ class PlatformFieldReader:
             self._retry_after = (
                 None
                 if isinstance(error, (ImportError, PermissionError))
-                else time.monotonic() + RETRY_DELAYS[min(self._retry_attempts, len(RETRY_DELAYS) - 1)]
+                else time.monotonic() + FIELD_READER_RETRY_DELAYS_SECONDS[min(self._retry_attempts, len(FIELD_READER_RETRY_DELAYS_SECONDS) - 1)]
             )
             return None
         self.status = "available" if result is not None else "unsupported_field"

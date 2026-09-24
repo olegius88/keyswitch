@@ -7,10 +7,10 @@ from pathlib import Path
 from typing import ClassVar
 from unittest.mock import patch
 
-from keyswitch.config import (
+from keyswitch.config import SettingsStore
+from keyswitch.constants.settings_defaults import (
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_LEARNING_CONFIRMATIONS,
-    SettingsStore,
 )
 from keyswitch.detector import DetectionDecision, LanguageDetector
 from keyswitch.engine import Hotkey, KeySwitchEngine, LearningPrompt
@@ -36,63 +36,67 @@ from keyswitch.short_words import (
 from keyswitch.spellcheck import HunspellDictionary
 from keyswitch.system import AutostartManager
 from keyswitch.x11_backend import BackendProbe, KeyEvent
-from keyswitch.backend import ALT_MASK, CONTROL_MASK, KeyDisposition
-
-DEFAULT_BOUNDARY_KEYCODE = 65
-DEFAULT_BOUNDARY_SERIAL = 1000
-# An arbitrary but consistent starting keycode so each letter of a fixture
-# word gets its own distinct fake keycode; a second block after the first
-# word resumes higher up to avoid colliding with the first block's keycodes.
-STARTING_KEYCODE = 30
-SECOND_STARTING_KEYCODE = 70
-THIRD_STARTING_KEYCODE = 90
-FOURTH_STARTING_KEYCODE = 50
-COMMA_KEYCODE = 59
-CONTROL_L_KEYCODE = 37
-ALT_L_KEYCODE = 64
-Z_KEYCODE = 52
-P_KEYCODE = 33
-PAUSE_KEYCODE = 127
-RETURN_KEYCODE = 36
-PAUSE_PRESS_TIMESTAMP = 2000
-PAUSE_RELEASE_TIMESTAMP = 2001
-ENTER_TIMESTAMP = 2002
-CONTROL_PRESS_TIMESTAMP = 3000
-ALT_PRESS_TIMESTAMP = 3001
-Z_PRESS_TIMESTAMP = 3002
-Z_RELEASE_TIMESTAMP = 3003
-ALT_RELEASE_TIMESTAMP = 3004
-CONTROL_RELEASE_TIMESTAMP = 3005
-INVALID_LAYOUT_GROUP = 7
-OUT_OF_RANGE_LAYOUT_GROUP = 3
-CONFIGURED_MINIMUM_LENGTH = 5
-CHANGED_CONFIDENCE = 3.5
-MALFORMED_RULE_CONFIRMATIONS = 3
-EXPECTED_VALID_RULE_COUNT = 2
-SECOND_REJECTED_TARGET = 2
-HISTORY_LIMIT_FIXTURE = 2
-FIRST_ENTRY_CONFIDENCE = 9.5
-SECOND_ENTRY_CONFIDENCE = 8.5
-THIRD_ENTRY_CONFIDENCE = 8.0
-DEFAULT_NGRAM_SCORE = 0.73
-SOURCE_WORD_SCORE = 0.8
-TARGET_WORD_SCORE = 4.2
-TARGET_WORD_FREQUENCY = 54906
-TARGET_NGRAM_SCORE = 4.0
-FIXTURE_DECISION_CONFIDENCE = 4.73
-STRONGER_NGRAM_SCORE = 6.3
-PAUSE_TIME_A = 10.0
-PAUSE_CHECK_JUST_BEFORE = 11.49
-PAUSE_CHECK_AT_THRESHOLD = 11.5
-PAUSE_TIME_B = 20.0
-PAUSE_CHECK_AFTER_B = 22.0
-PAUSE_CHECK_MANUAL_LAYOUT = 12.0
-PAUSE_MARGIN_SECONDS = 2
-TWO_INJECTIONS_EXPECTED = 2
-FOUR_INJECTIONS_EXPECTED = 4
-REPEATED_ATTEMPT_COUNT = 2
-# Index of the boundary event within an (strokes, target_group, boundary) injection tuple.
-INJECTION_BOUNDARY_INDEX = 2
+from keyswitch.backend import KeyDisposition
+from keyswitch.constants.keyboard import ALT_MASK, CONTROL_MASK
+from fixture_values.clock import (
+    BOUNDARY_EVENT_TIMESTAMP,
+    CORE_ENTER_TIMESTAMP,
+    CORE_FIRST_PAUSE_START_SECONDS,
+    CORE_MANUAL_LAYOUT_PAUSE_CHECK_SECONDS,
+    CORE_PAUSE_CHECK_AT_THRESHOLD_SECONDS,
+    CORE_PAUSE_CHECK_JUST_BEFORE_SECONDS,
+    CORE_PAUSE_PRESS_TIMESTAMP,
+    CORE_PAUSE_RELEASE_TIMESTAMP,
+    CORE_SECOND_PAUSE_CHECK_SECONDS,
+    CORE_SECOND_PAUSE_START_SECONDS,
+    PAUSE_TRIGGER_OFFSET_SECONDS,
+    UNDO_CHORD_ALT_DOWN_TIMESTAMP,
+    UNDO_CHORD_ALT_UP_TIMESTAMP,
+    UNDO_CHORD_CONTROL_DOWN_TIMESTAMP,
+    UNDO_CHORD_CONTROL_UP_TIMESTAMP,
+    UNDO_CHORD_Z_DOWN_TIMESTAMP,
+    UNDO_CHORD_Z_UP_TIMESTAMP,
+)
+from fixture_values.corpora import SHORT_SOURCE_VETO_TARGET_WORD_FREQUENCY
+from fixture_values.counts import (
+    CORE_EXPECTED_VALID_RULE_COUNT,
+    CORE_INJECTIONS_AFTER_LEARNED_RULE_APPLIES,
+    CORE_INJECTIONS_AFTER_SECOND_CORRECTION,
+    CORE_MALFORMED_RULE_CONFIRMATIONS,
+    CORE_REPEATED_MANUAL_CONVERSIONS,
+    HISTORY_LIMIT_FIXTURE,
+    INJECTION_BOUNDARY_INDEX,
+    NON_DEFAULT_MINIMUM_WORD_LENGTH,
+)
+from fixture_values.keys import (
+    ALTERNATE_TARGET_GROUP,
+    ALT_L_KEYCODE,
+    COMMA_KEYCODE,
+    CONTROL_L_KEYCODE,
+    CORE_FOURTH_WORD_KEYCODE_BASE,
+    CORE_SECOND_WORD_KEYCODE_BASE,
+    CORE_THIRD_WORD_KEYCODE_BASE,
+    OUT_OF_RANGE_LAYOUT_GROUP,
+    PAUSE_KEYCODE,
+    P_KEYCODE,
+    RETURN_KEYCODE,
+    SPACE_KEYCODE,
+    SYNTHETIC_KEYCODE_BASE,
+    UNLABELLED_LAYOUT_GROUP,
+    Z_KEYCODE,
+)
+from fixture_values.scores import (
+    HISTORY_FIRST_ENTRY_CONFIDENCE,
+    HISTORY_SECOND_ENTRY_CONFIDENCE,
+    HISTORY_THIRD_ENTRY_CONFIDENCE,
+    NON_DEFAULT_CONFIDENCE_THRESHOLD,
+    SHORT_SOURCE_VETO_DECISION_CONFIDENCE,
+    SHORT_SOURCE_VETO_NGRAM_SCORE,
+    SHORT_SOURCE_VETO_SOURCE_WORD_SCORE,
+    SHORT_SOURCE_VETO_STRONGER_NGRAM_SCORE,
+    SHORT_SOURCE_VETO_TARGET_NGRAM_SCORE,
+    SHORT_SOURCE_VETO_TARGET_WORD_SCORE,
+)
 
 
 class FakeBackend:
@@ -169,7 +173,7 @@ def letter_event(character: str, keycode: int, group: int, pair: LayoutPair) -> 
 
 def boundary_event(
     pressed: bool,
-    keycode: int = DEFAULT_BOUNDARY_KEYCODE,
+    keycode: int = SPACE_KEYCODE,
     state: int = 0,
     group: int = 0,
 ) -> KeyEvent:
@@ -181,7 +185,7 @@ def boundary_event(
         (" ", " "),
         group,
         state,
-        DEFAULT_BOUNDARY_SERIAL,
+        BOUNDARY_EVENT_TIMESTAMP,
     )
 
 
@@ -216,7 +220,7 @@ class LayoutTests(unittest.TestCase):
             alternate_layout_action_label(1),
             "Переключить на английский (EN)",
         )
-        self.assertEqual(alternate_layout_action_label(INVALID_LAYOUT_GROUP), "Переключить язык")
+        self.assertEqual(alternate_layout_action_label(UNLABELLED_LAYOUT_GROUP), "Переключить язык")
 
 
 class SettingsTests(unittest.TestCase):
@@ -224,10 +228,10 @@ class SettingsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "config.json"
             path.write_text(
-                f'{{"detection": {{"minimum_length": {CONFIGURED_MINIMUM_LENGTH}}}}}', encoding="utf-8"
+                f'{{"detection": {{"minimum_length": {NON_DEFAULT_MINIMUM_WORD_LENGTH}}}}}', encoding="utf-8"
             )
             store = SettingsStore(path)
-            self.assertEqual(store.get("detection.minimum_length"), CONFIGURED_MINIMUM_LENGTH)
+            self.assertEqual(store.get("detection.minimum_length"), NON_DEFAULT_MINIMUM_WORD_LENGTH)
             self.assertEqual(store.get("detection.confidence"), DEFAULT_CONFIDENCE_THRESHOLD)
             self.assertTrue(store.get("general.autostart"))
             self.assertTrue(store.get("general.start_hidden"))
@@ -253,14 +257,14 @@ class SettingsTests(unittest.TestCase):
             self.assertEqual(store.default("detection.unknown", "—"), "—")
             self.assertTrue(store.is_default("detection.confidence"))
 
-            store.set("detection.confidence", CHANGED_CONFIDENCE)
+            store.set("detection.confidence", NON_DEFAULT_CONFIDENCE_THRESHOLD)
             self.assertFalse(store.is_default("detection.confidence"))
             self.assertTrue(store.restore_default("detection.confidence"))
             self.assertEqual(store.get("detection.confidence"), DEFAULT_CONFIDENCE_THRESHOLD)
             self.assertTrue(store.is_default("detection.confidence"))
             self.assertEqual(
                 changed,
-                [("detection.confidence", CHANGED_CONFIDENCE), ("detection.confidence", DEFAULT_CONFIDENCE_THRESHOLD)],
+                [("detection.confidence", NON_DEFAULT_CONFIDENCE_THRESHOLD), ("detection.confidence", DEFAULT_CONFIDENCE_THRESHOLD)],
             )
 
             # A path outside the shipped schema has no default to restore.
@@ -298,11 +302,11 @@ class LearningTests(unittest.TestCase):
             learning.record_manual(0, "qwerty", 1)
             learning.record_manual(1, "йцукен", 0)
             learning.reject(1, "ты", 0)
-            learning.reject(1, "ты", SECOND_REJECTED_TARGET)
+            learning.reject(1, "ты", ALTERNATE_TARGET_GROUP)
             self.assertTrue(learning.remove_rule(0, "QWERTY"))
             self.assertFalse(learning.remove_rule(0, "qwerty"))
-            self.assertTrue(learning.remove_rejection(1, "ты", SECOND_REJECTED_TARGET))
-            self.assertFalse(learning.remove_rejection(1, "ты", SECOND_REJECTED_TARGET))
+            self.assertTrue(learning.remove_rejection(1, "ты", ALTERNATE_TARGET_GROUP))
+            self.assertFalse(learning.remove_rejection(1, "ты", ALTERNATE_TARGET_GROUP))
             self.assertFalse(learning.remove_rejection(1, "нет", 0))
             self.assertEqual(learning.rejected_targets(1, "ты"), {0})
             self.assertEqual(LearningStore(path).counts(), (1, 1))
@@ -342,7 +346,7 @@ class LearningRuleStateTests(unittest.TestCase):
             self.assertEqual(store.forced_target(0, "qwerty", DEFAULT_LEARNING_CONFIRMATIONS), 1)
 
             # A malformed rule reads as no rule at all.
-            store._data["rules"][store._key(0, "qwerty")] = {"confirmations": MALFORMED_RULE_CONFIRMATIONS}
+            store._data["rules"][store._key(0, "qwerty")] = {"confirmations": CORE_MALFORMED_RULE_CONFIRMATIONS}
             self.assertEqual(store.rule_state(0, "qwerty"), (None, 0))
             store._data["rules"][store._key(0, "qwerty")] = "broken"
             self.assertEqual(store.rule_state(0, "qwerty"), (None, 0))
@@ -386,7 +390,7 @@ class LearningRuleStateTests(unittest.TestCase):
             rejections["broken"] = [1]
             rejections[store._key(0, "word")] = "not a list"
             rejections[store._key(0, "mixed")] = [1, "nonsense"]
-            self.assertEqual(len(store.rules(DEFAULT_LEARNING_CONFIRMATIONS)), EXPECTED_VALID_RULE_COUNT)
+            self.assertEqual(len(store.rules(DEFAULT_LEARNING_CONFIRMATIONS)), CORE_EXPECTED_VALID_RULE_COUNT)
             self.assertEqual(
                 [item.word for item in store.rejections()], ["hjrjdsq", "mixed"]
             )
@@ -436,9 +440,9 @@ class DesktopIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "history.jsonl"
             history = HistoryStore(path, limit=HISTORY_LIMIT_FIXTURE)
-            history.append(HistoryEntry.create("ghbdtn", "привет", "Editor", FIRST_ENTRY_CONFIDENCE))
-            history.append(HistoryEntry.create("руддщ", "hello", "Editor", SECOND_ENTRY_CONFIDENCE))
-            history.append(HistoryEntry.create("цщкдв", "world", "Editor", THIRD_ENTRY_CONFIDENCE))
+            history.append(HistoryEntry.create("ghbdtn", "привет", "Editor", HISTORY_FIRST_ENTRY_CONFIDENCE))
+            history.append(HistoryEntry.create("руддщ", "hello", "Editor", HISTORY_SECOND_ENTRY_CONFIDENCE))
+            history.append(HistoryEntry.create("цщкдв", "world", "Editor", HISTORY_THIRD_ENTRY_CONFIDENCE))
             entries = history.read()
             self.assertEqual(len(entries), HISTORY_LIMIT_FIXTURE)
             self.assertEqual(entries[-1].replacement, "world")
@@ -555,15 +559,15 @@ class DetectorTests(unittest.TestCase):
             reason: str = "слово найдено только в целевом частотном словаре",
             original: str = "дев",
             replacement: str = "ltd",
-            ngram: float = -DEFAULT_NGRAM_SCORE,
+            ngram: float = -SHORT_SOURCE_VETO_NGRAM_SCORE,
         ) -> DetectionDecision:
-            source = WordScore(-SOURCE_WORD_SCORE, False, 0, 0.0, ngram_score=ngram)
+            source = WordScore(-SHORT_SOURCE_VETO_SOURCE_WORD_SCORE, False, 0, 0.0, ngram_score=ngram)
             target = WordScore(
-                TARGET_WORD_SCORE, True, TARGET_WORD_FREQUENCY, 0.0, exact=True,
-                ngram_score=-TARGET_NGRAM_SCORE,
+                SHORT_SOURCE_VETO_TARGET_WORD_SCORE, True, SHORT_SOURCE_VETO_TARGET_WORD_FREQUENCY, 0.0, exact=True,
+                ngram_score=-SHORT_SOURCE_VETO_TARGET_NGRAM_SCORE,
             )
             return DetectionDecision(
-                convert, original, replacement, 1, 0, FIXTURE_DECISION_CONFIDENCE, reason, source, target
+                convert, original, replacement, 1, 0, SHORT_SOURCE_VETO_DECISION_CONFIDENCE, reason, source, target
             )
 
         vetoed = natural_short_source_veto(decision(), context_group=1)
@@ -573,7 +577,7 @@ class DetectorTests(unittest.TestCase):
         # token, another reason or no conversion at all all leave it alone.
         for kept in (
             natural_short_source_veto(decision(), context_group=0),
-            natural_short_source_veto(decision(ngram=-STRONGER_NGRAM_SCORE), context_group=1),
+            natural_short_source_veto(decision(ngram=-SHORT_SOURCE_VETO_STRONGER_NGRAM_SCORE), context_group=1),
             natural_short_source_veto(
                 decision(original="rfrjq", replacement="какой"), context_group=1
             ),
@@ -628,7 +632,7 @@ class EngineTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_word_is_corrected_after_space_release(self) -> None:
-        for index, character in enumerate("ghbdtn", start=STARTING_KEYCODE):
+        for index, character in enumerate("ghbdtn", start=SYNTHETIC_KEYCODE_BASE):
             self.engine._handle(letter_event(character, index, 0, self.pair))
             self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
@@ -642,15 +646,15 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(self.engine.snapshot.last_action, "ghbdtn → привет")
 
     def test_word_is_corrected_after_typing_pause_without_boundary(self) -> None:
-        with patch("keyswitch.engine.time.monotonic", return_value=PAUSE_TIME_A):
-            for index, character in enumerate("ghbdtn", start=STARTING_KEYCODE):
+        with patch("keyswitch.engine.time.monotonic", return_value=CORE_FIRST_PAUSE_START_SECONDS):
+            for index, character in enumerate("ghbdtn", start=SYNTHETIC_KEYCODE_BASE):
                 event = letter_event(character, index, 0, self.pair)
                 self.engine._handle(event)
                 self.engine._handle(release_event(event))
 
-        self.engine._maybe_correct_after_pause(now=PAUSE_CHECK_JUST_BEFORE)
+        self.engine._maybe_correct_after_pause(now=CORE_PAUSE_CHECK_JUST_BEFORE_SECONDS)
         self.assertEqual(self.backend.injections, [])
-        self.engine._maybe_correct_after_pause(now=PAUSE_CHECK_AT_THRESHOLD)
+        self.engine._maybe_correct_after_pause(now=CORE_PAUSE_CHECK_AT_THRESHOLD_SECONDS)
 
         self.assertEqual(len(self.backend.injections), 1)
         strokes, target, boundary = self.backend.injections[0]
@@ -668,13 +672,13 @@ class EngineTests(unittest.TestCase):
 
     def test_pause_correction_can_be_disabled(self) -> None:
         self.settings.set("detection.correct_on_pause", False)
-        with patch("keyswitch.engine.time.monotonic", return_value=PAUSE_TIME_B):
-            for index, character in enumerate("ghbdtn", start=STARTING_KEYCODE):
+        with patch("keyswitch.engine.time.monotonic", return_value=CORE_SECOND_PAUSE_START_SECONDS):
+            for index, character in enumerate("ghbdtn", start=SYNTHETIC_KEYCODE_BASE):
                 event = letter_event(character, index, 0, self.pair)
                 self.engine._handle(event)
                 self.engine._handle(release_event(event))
 
-        self.engine._maybe_correct_after_pause(now=PAUSE_CHECK_AFTER_B)
+        self.engine._maybe_correct_after_pause(now=CORE_SECOND_PAUSE_CHECK_SECONDS)
 
         self.assertEqual(self.backend.injections, [])
         self.assertEqual(self.engine.snapshot.current_word, "ghbdtn")
@@ -686,7 +690,7 @@ class EngineTests(unittest.TestCase):
             with self.subTest(expected=expected):
                 self.backend.injections.clear()
                 self.backend.group = 0
-                for index, character in enumerate(physical, start=STARTING_KEYCODE):
+                for index, character in enumerate(physical, start=SYNTHETIC_KEYCODE_BASE):
                     event = letter_event(character, index, 0, self.pair)
                     self.engine._handle(event)
                     self.engine._handle(release_event(event))
@@ -700,7 +704,7 @@ class EngineTests(unittest.TestCase):
                 )
 
     def test_ambiguous_punctuation_after_a_complete_word_waits_for_a_pause(self) -> None:
-        for index, character in enumerate("ghbdtn", start=STARTING_KEYCODE):
+        for index, character in enumerate("ghbdtn", start=SYNTHETIC_KEYCODE_BASE):
             self.engine._handle(letter_event(character, index, 0, self.pair))
             self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         comma = letter_event(",", COMMA_KEYCODE, 0, self.pair)
@@ -710,7 +714,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(self.backend.injections, [])
         last = self.engine._last_word_input_at
         assert last is not None
-        self.engine._maybe_correct_after_pause(now=last + PAUSE_MARGIN_SECONDS)
+        self.engine._maybe_correct_after_pause(now=last + PAUSE_TRIGGER_OFFSET_SECONDS)
         self.assertEqual(len(self.backend.injections), 1)
         _strokes, target, boundary = self.backend.injections[0]
         self.assertEqual(target, 1)
@@ -720,7 +724,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual("".join(event.character for event in correction.trailing), ",")
 
     def test_punctuation_after_a_protected_unknown_token_waits_for_space(self) -> None:
-        for index, character in enumerate("kubectl", start=STARTING_KEYCODE):
+        for index, character in enumerate("kubectl", start=SYNTHETIC_KEYCODE_BASE):
             event = letter_event(character, index, 0, self.pair)
             self.engine._handle(event)
             self.engine._handle(release_event(event))
@@ -734,7 +738,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(self.engine.snapshot.current_word, "")
         self.assertEqual(self.backend.injections, [])
 
-        for index, character in enumerate("ghbdtn", start=SECOND_STARTING_KEYCODE):
+        for index, character in enumerate("ghbdtn", start=CORE_SECOND_WORD_KEYCODE_BASE):
             event = letter_event(character, index, 0, self.pair)
             self.engine._handle(event)
             self.engine._handle(release_event(event))
@@ -749,7 +753,7 @@ class EngineTests(unittest.TestCase):
 
     def test_disabled_engine_observes_but_does_not_correct(self) -> None:
         self.settings.set("enabled", False)
-        for index, character in enumerate("ghbdtn", start=STARTING_KEYCODE):
+        for index, character in enumerate("ghbdtn", start=SYNTHETIC_KEYCODE_BASE):
             self.engine._handle(letter_event(character, index, 0, self.pair))
             self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
@@ -758,7 +762,7 @@ class EngineTests(unittest.TestCase):
 
     def test_excluded_application_is_not_corrected(self) -> None:
         self.settings.set("exclusions.applications", ["testeditor"])
-        for index, character in enumerate("ghbdtn", start=STARTING_KEYCODE):
+        for index, character in enumerate("ghbdtn", start=SYNTHETIC_KEYCODE_BASE):
             self.engine._handle(letter_event(character, index, 0, self.pair))
             self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
@@ -780,7 +784,7 @@ class EngineTests(unittest.TestCase):
 
     def test_manual_layout_switch_protects_exactly_the_next_word(self) -> None:
         self.engine._update(current_group=1)
-        for index, character in enumerate("ghbdtn", start=STARTING_KEYCODE):
+        for index, character in enumerate("ghbdtn", start=SYNTHETIC_KEYCODE_BASE):
             self.engine._handle(letter_event(character, index, 0, self.pair))
             self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
@@ -793,7 +797,7 @@ class EngineTests(unittest.TestCase):
             "Ручная раскладка сохранена: ghbdtn",
         )
 
-        for index, character in enumerate("ghbdtn", start=SECOND_STARTING_KEYCODE):
+        for index, character in enumerate("ghbdtn", start=CORE_SECOND_WORD_KEYCODE_BASE):
             self.engine._handle(letter_event(character, index, 0, self.pair))
             self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
@@ -807,7 +811,7 @@ class EngineTests(unittest.TestCase):
         self.assertIsNone(self.engine._manual_layout_group)
         self.engine._update(current_group=1)
 
-        for index, character in enumerate("ghbdtn", start=STARTING_KEYCODE):
+        for index, character in enumerate("ghbdtn", start=SYNTHETIC_KEYCODE_BASE):
             self.engine._handle(letter_event(character, index, 0, self.pair))
             self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
@@ -818,20 +822,20 @@ class EngineTests(unittest.TestCase):
     def test_context_is_not_shared_when_application_is_unknown(self) -> None:
         strokes = tuple(
             letter_event(character, index, 0, self.pair)
-            for index, character in enumerate("hello", start=STARTING_KEYCODE)
+            for index, character in enumerate("hello", start=SYNTHETIC_KEYCODE_BASE)
         )
         self.engine._remember_context("", 0, strokes)
         self.assertEqual(self.engine._context_for(""), ({}, None))
 
     def test_pause_manually_converts_last_valid_word(self) -> None:
-        for index, character in enumerate("hello", start=STARTING_KEYCODE):
+        for index, character in enumerate("hello", start=SYNTHETIC_KEYCODE_BASE):
             self.engine._handle(letter_event(character, index, 0, self.pair))
             self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
         self.engine._handle(boundary_event(False))
         self.assertEqual(self.backend.injections, [])
-        pause_press = KeyEvent(True, PAUSE_KEYCODE, "Pause", "", ("", ""), 0, 0, PAUSE_PRESS_TIMESTAMP)
-        pause_release = KeyEvent(False, PAUSE_KEYCODE, "Pause", "", ("", ""), 0, 0, PAUSE_RELEASE_TIMESTAMP)
+        pause_press = KeyEvent(True, PAUSE_KEYCODE, "Pause", "", ("", ""), 0, 0, CORE_PAUSE_PRESS_TIMESTAMP)
+        pause_release = KeyEvent(False, PAUSE_KEYCODE, "Pause", "", ("", ""), 0, 0, CORE_PAUSE_RELEASE_TIMESTAMP)
         self.engine._handle(pause_press)
         self.engine._handle(pause_release)
         self.assertEqual(len(self.backend.injections), 1)
@@ -843,10 +847,10 @@ class EngineTests(unittest.TestCase):
     def test_enter_confirms_manual_conversion_as_an_immediate_rule(self) -> None:
         prompts: list[LearningPrompt | None] = []
         self.engine.subscribe_learning_prompts(prompts.append)
-        for index, character in enumerate("hello", start=STARTING_KEYCODE):
+        for index, character in enumerate("hello", start=SYNTHETIC_KEYCODE_BASE):
             self.engine._handle(letter_event(character, index, 0, self.pair))
             self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
-        pause = KeyEvent(True, PAUSE_KEYCODE, "Pause", "", ("", ""), 0, 0, PAUSE_PRESS_TIMESTAMP)
+        pause = KeyEvent(True, PAUSE_KEYCODE, "Pause", "", ("", ""), 0, 0, CORE_PAUSE_PRESS_TIMESTAMP)
         self.engine._handle(pause)
         self.engine._handle(release_event(pause))
 
@@ -856,7 +860,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual((prompt.original, prompt.replacement), ("hello", "руддщ"))
         self.assertIsNone(self.engine.learning.forced_target(0, "hello", DEFAULT_LEARNING_CONFIRMATIONS))
 
-        enter = KeyEvent(True, RETURN_KEYCODE, "Return", "\n", ("\n", "\n"), 1, 0, ENTER_TIMESTAMP)
+        enter = KeyEvent(True, RETURN_KEYCODE, "Return", "\n", ("\n", "\n"), 1, 0, CORE_ENTER_TIMESTAMP)
         self.engine._handle(enter)
         self.assertIsNone(self.engine.learning_prompt)
         self.assertEqual(self.engine.learning.forced_target(0, "hello", DEFAULT_LEARNING_CONFIRMATIONS), 1)
@@ -864,7 +868,7 @@ class EngineTests(unittest.TestCase):
         self.assertIn("правило выучено", self.engine.snapshot.last_action)
 
         self.engine._manual_layout_group = 0
-        for index, character in enumerate("hello", start=SECOND_STARTING_KEYCODE):
+        for index, character in enumerate("hello", start=CORE_SECOND_WORD_KEYCODE_BASE):
             self.engine._handle(letter_event(character, index, 0, self.pair))
             self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
@@ -873,12 +877,12 @@ class EngineTests(unittest.TestCase):
         self.assertIsNone(self.engine._manual_layout_group)
         self.assertIn("Ручная раскладка сохранена", self.engine.snapshot.last_action)
 
-        for index, character in enumerate("hello", start=THIRD_STARTING_KEYCODE):
+        for index, character in enumerate("hello", start=CORE_THIRD_WORD_KEYCODE_BASE):
             self.engine._handle(letter_event(character, index, 0, self.pair))
             self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
         self.engine._handle(boundary_event(False))
-        self.assertEqual(len(self.backend.injections), TWO_INJECTIONS_EXPECTED)
+        self.assertEqual(len(self.backend.injections), CORE_INJECTIONS_AFTER_SECOND_CORRECTION)
         self.assertEqual(self.backend.injections[-1][1], 1)
 
     def test_manual_russian_selection_protects_short_if_on_pause_and_space(self) -> None:
@@ -887,13 +891,13 @@ class EngineTests(unittest.TestCase):
         self.engine._poll_current_group()
         self.assertEqual(self.engine._manual_layout_group, 1)
 
-        with patch("keyswitch.engine.time.monotonic", return_value=PAUSE_TIME_A):
-            for index, character in enumerate("ша", start=STARTING_KEYCODE):
+        with patch("keyswitch.engine.time.monotonic", return_value=CORE_FIRST_PAUSE_START_SECONDS):
+            for index, character in enumerate("ша", start=SYNTHETIC_KEYCODE_BASE):
                 event = letter_event(character, index, 1, self.pair)
                 self.engine._handle(event)
                 self.engine._handle(release_event(event))
 
-        self.engine._maybe_correct_after_pause(now=PAUSE_CHECK_MANUAL_LAYOUT)
+        self.engine._maybe_correct_after_pause(now=CORE_MANUAL_LAYOUT_PAUSE_CHECK_SECONDS)
         self.assertEqual(self.backend.injections, [])
         self.assertEqual(self.engine._manual_layout_group, 1)
         self.engine._handle(boundary_event(True, group=1))
@@ -901,7 +905,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(self.backend.injections, [])
         self.assertIsNone(self.engine._manual_layout_group)
 
-        for index, character in enumerate("ша", start=FOURTH_STARTING_KEYCODE):
+        for index, character in enumerate("ша", start=CORE_FOURTH_WORD_KEYCODE_BASE):
             event = letter_event(character, index, 1, self.pair)
             self.engine._handle(event)
             self.engine._handle(release_event(event))
@@ -912,13 +916,13 @@ class EngineTests(unittest.TestCase):
 
     def test_short_if_converts_after_pause_without_manual_intent(self) -> None:
         self.engine._update(current_group=1)
-        with patch("keyswitch.engine.time.monotonic", return_value=PAUSE_TIME_B):
-            for index, character in enumerate("ша", start=STARTING_KEYCODE):
+        with patch("keyswitch.engine.time.monotonic", return_value=CORE_SECOND_PAUSE_START_SECONDS):
+            for index, character in enumerate("ша", start=SYNTHETIC_KEYCODE_BASE):
                 event = letter_event(character, index, 1, self.pair)
                 self.engine._handle(event)
                 self.engine._handle(release_event(event))
 
-        self.engine._maybe_correct_after_pause(now=PAUSE_CHECK_AFTER_B)
+        self.engine._maybe_correct_after_pause(now=CORE_SECOND_PAUSE_CHECK_SECONDS)
 
         self.assertEqual(len(self.backend.injections), 1)
         self.assertEqual(self.backend.injections[0][1], 0)
@@ -931,42 +935,42 @@ class EngineTests(unittest.TestCase):
 
         def convert() -> None:
             self.backend.group = 0
-            for index, character in enumerate("qwerty", start=STARTING_KEYCODE):
+            for index, character in enumerate("qwerty", start=SYNTHETIC_KEYCODE_BASE):
                 self.engine._handle(letter_event(character, index, 0, self.pair))
                 self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
-            pause_press = KeyEvent(True, PAUSE_KEYCODE, "Pause", "", ("", ""), 0, 0, PAUSE_PRESS_TIMESTAMP)
+            pause_press = KeyEvent(True, PAUSE_KEYCODE, "Pause", "", ("", ""), 0, 0, CORE_PAUSE_PRESS_TIMESTAMP)
             self.engine._handle(pause_press)
             self.engine._handle(release_event(pause_press))
 
-        for _attempt in range(REPEATED_ATTEMPT_COUNT):
+        for _attempt in range(CORE_REPEATED_MANUAL_CONVERSIONS):
             convert()
         self.assertEqual(self.engine.learning.counts(), (0, 0))
         self.assertIsNone(self.engine.learning.forced_target(0, "qwerty", DEFAULT_LEARNING_CONFIRMATIONS))
 
         # The word is still corrected by hand every time, never on its own.
         self.backend.group = 0
-        for index, character in enumerate("qwerty", start=STARTING_KEYCODE):
+        for index, character in enumerate("qwerty", start=SYNTHETIC_KEYCODE_BASE):
             self.engine._handle(letter_event(character, index, 0, self.pair))
             self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
         self.engine._handle(boundary_event(False))
-        self.assertEqual(len(self.backend.injections), TWO_INJECTIONS_EXPECTED)
+        self.assertEqual(len(self.backend.injections), CORE_INJECTIONS_AFTER_SECOND_CORRECTION)
 
         # Enter on the prompt is what makes the rule, and then it applies itself.
         convert()
         self.assertTrue(self.engine.confirm_learning_prompt())
         self.assertEqual(self.engine.learning.forced_target(0, "qwerty", DEFAULT_LEARNING_CONFIRMATIONS), 1)
         self.backend.group = 0
-        for index, character in enumerate("qwerty", start=STARTING_KEYCODE):
+        for index, character in enumerate("qwerty", start=SYNTHETIC_KEYCODE_BASE):
             self.engine._handle(letter_event(character, index, 0, self.pair))
             self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
         self.engine._handle(boundary_event(False))
-        self.assertEqual(len(self.backend.injections), FOUR_INJECTIONS_EXPECTED)
+        self.assertEqual(len(self.backend.injections), CORE_INJECTIONS_AFTER_LEARNED_RULE_APPLIES)
         self.assertEqual(self.backend.injections[-1][1], 1)
 
     def test_undo_hotkey_restores_previous_layout(self) -> None:
-        for index, character in enumerate("ghbdtn", start=STARTING_KEYCODE):
+        for index, character in enumerate("ghbdtn", start=SYNTHETIC_KEYCODE_BASE):
             self.engine._handle(letter_event(character, index, 0, self.pair))
             self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
@@ -974,19 +978,19 @@ class EngineTests(unittest.TestCase):
         control = CONTROL_MASK
         alt = ALT_MASK
         events = (
-            KeyEvent(True, CONTROL_L_KEYCODE, "Control_L", "", ("", ""), 1, 0, CONTROL_PRESS_TIMESTAMP),
-            KeyEvent(True, ALT_L_KEYCODE, "Alt_L", "", ("", ""), 1, control, ALT_PRESS_TIMESTAMP),
-            KeyEvent(True, Z_KEYCODE, "z", "", ("z", "я"), 1, control | alt, Z_PRESS_TIMESTAMP),
-            KeyEvent(False, Z_KEYCODE, "z", "", ("z", "я"), 1, control | alt, Z_RELEASE_TIMESTAMP),
-            KeyEvent(False, ALT_L_KEYCODE, "Alt_L", "", ("", ""), 1, control | alt, ALT_RELEASE_TIMESTAMP),
-            KeyEvent(False, CONTROL_L_KEYCODE, "Control_L", "", ("", ""), 1, control, CONTROL_RELEASE_TIMESTAMP),
+            KeyEvent(True, CONTROL_L_KEYCODE, "Control_L", "", ("", ""), 1, 0, UNDO_CHORD_CONTROL_DOWN_TIMESTAMP),
+            KeyEvent(True, ALT_L_KEYCODE, "Alt_L", "", ("", ""), 1, control, UNDO_CHORD_ALT_DOWN_TIMESTAMP),
+            KeyEvent(True, Z_KEYCODE, "z", "", ("z", "я"), 1, control | alt, UNDO_CHORD_Z_DOWN_TIMESTAMP),
+            KeyEvent(False, Z_KEYCODE, "z", "", ("z", "я"), 1, control | alt, UNDO_CHORD_Z_UP_TIMESTAMP),
+            KeyEvent(False, ALT_L_KEYCODE, "Alt_L", "", ("", ""), 1, control | alt, UNDO_CHORD_ALT_UP_TIMESTAMP),
+            KeyEvent(False, CONTROL_L_KEYCODE, "Control_L", "", ("", ""), 1, control, UNDO_CHORD_CONTROL_UP_TIMESTAMP),
         )
         for event in events:
             self.engine._handle(event)
         self.assertEqual([item[1] for item in self.backend.injections], [1, 0])
         self.assertEqual(self.engine.learning.rejected_targets(0, "ghbdtn"), {1})
         self.backend.group = 0
-        for index, character in enumerate("ghbdtn", start=STARTING_KEYCODE):
+        for index, character in enumerate("ghbdtn", start=SYNTHETIC_KEYCODE_BASE):
             self.engine._handle(letter_event(character, index, 0, self.pair))
             self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))

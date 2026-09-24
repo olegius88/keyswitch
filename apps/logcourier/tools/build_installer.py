@@ -7,10 +7,10 @@ import shutil
 import subprocess
 import tomllib
 from pathlib import Path
-from typing import Final
+
+from logcourier.constants.release import COMPILER_TIMEOUT_SECONDS
 
 ROOT = Path(__file__).resolve().parents[1]
-COMPILER_TIMEOUT_SECONDS: Final = 600
 
 
 def find_compiler() -> Path:

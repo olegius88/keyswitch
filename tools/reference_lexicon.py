@@ -15,12 +15,9 @@ from keyswitch.language_model import LOCALE_FALLBACKS, LanguageModel
 from keyswitch.lexicon_supplement import supplement_words
 
 from freeze_context_action_corpus import checksum
+from keyswitch.constants.models import SYNTHETIC_FREQUENCY_DIVISOR, SYNTHETIC_FREQUENCY_FLOOR
 
 ROOT = Path(__file__).resolve().parents[1]
-# Mirrors the synthetic-frequency fallback in keyswitch.language_model so a
-# lexicon without frequency data still ranks below any real observed word.
-SYNTHETIC_FREQUENCY_FLOOR = 1000
-SYNTHETIC_FREQUENCY_DIVISOR = 20
 
 
 def reference_models(spelling: bool) -> dict[int, LanguageModel]:

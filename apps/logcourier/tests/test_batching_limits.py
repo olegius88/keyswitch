@@ -5,44 +5,32 @@ import zipfile
 from types import SimpleNamespace
 
 import pytest
+from fixture_values.clock import (
+    BATCHING_RETRY_AFTER_SECONDS,
+    EXPECTED_COOLDOWN,
+    EXPECTED_PACED_MUTATION_TIMES,
+    FIXTURE_CLOCK_START,
+    OTHER_GROUP_CLOCK,
+    PACING_UNTIL_TIMESTAMP,
+    RETRY_AT_OFFSET_SECONDS,
+)
+from fixture_values.counts import (
+    COMPACTION_SIZE_LIMIT_BYTES,
+    FRAGMENT_COUNT,
+    MIN_COMPACTED_BATCHES,
+    SMALL_FRAGMENT_COUNT,
+    UPLOADS_PER_DELIVERY,
+)
 
-from logcourier.batching import MIN_FRAGMENTS_TO_COMPACT, compact
+from logcourier.batching import compact
 from logcourier.catalog import DeliveryCancelled, deliver, list_entries
 from logcourier.collector import Collector
-from logcourier.rate_limit import GROUP_INTERVAL, TELEGRAM_RATE_LIMIT_STATUS, RateLimitedClient
+from logcourier.constants.limits import MIN_FRAGMENTS_TO_COMPACT
+from logcourier.constants.telegram import TELEGRAM_RATE_LIMIT_STATUS
+from logcourier.rate_limit import RateLimitedClient
 from logcourier.service import Service
 from logcourier.store import QueueFull
 from logcourier.telegram import TelegramError
-
-# Fixture fragment counts: the default scanned-and-compacted batch, and a
-# smaller one for the tests that look at partial batching.
-FRAGMENT_COUNT = 32
-SMALL_FRAGMENT_COUNT = 5
-# One data package upload plus one catalog upload, not one document per fragment.
-UPLOADS_PER_DELIVERY = 2
-COMPACTION_SIZE_LIMIT_BYTES = 6000
-# The size-limited compaction above must still split the fragments into at
-# least this many batches.
-MIN_COMPACTED_BATCHES = 2
-
-FIXTURE_CLOCK_START = 100.0
-# Three mutation calls, each paced GROUP_INTERVAL apart from the fixture clock.
-EXPECTED_CALL_TIMES = [
-    FIXTURE_CLOCK_START,
-    FIXTURE_CLOCK_START + GROUP_INTERVAL,
-    FIXTURE_CLOCK_START + GROUP_INTERVAL + GROUP_INTERVAL,
-]
-# Telegram's reported retry_after, fixture-only.
-RETRY_AFTER_SECONDS = 37
-# clock() + delay, where delay = max(1, RETRY_AFTER_SECONDS) + 1 (see RateLimitedClient._perform).
-EXPECTED_COOLDOWN = 138
-# A clock reading for a second pacing group, still short of the first group's cooldown.
-OTHER_GROUP_CLOCK = 110.0
-# A "next allowed send" timestamp comfortably past the fixture clock, so the
-# pacing wait is still in effect when cancellation is checked.
-PACING_UNTIL_TIMESTAMP = 200
-# An arbitrary retry_at offset, unrelated to RETRY_AFTER_SECONDS above.
-RETRY_AT_OFFSET_SECONDS = 37
 
 
 def add_fragments(store, config, path, count=FRAGMENT_COUNT):
@@ -113,7 +101,7 @@ def test_mutations_including_pin_are_paced_and_persistent(store):
     make().send_document("one")
     make().send_document("two")
     make().call("pinChatMessage", {})
-    assert calls == EXPECTED_CALL_TIMES
+    assert calls == EXPECTED_PACED_MUTATION_TIMES
 
 
 def test_retry_after_is_persisted_and_stops_requests(store):
@@ -122,7 +110,9 @@ def test_retry_after_is_persisted_and_stops_requests(store):
     def limited(*args):
         calls.append(True)
         raise TelegramError(
-            "rate limit", retry_after=RETRY_AFTER_SECONDS, status_code=TELEGRAM_RATE_LIMIT_STATUS
+            "rate limit",
+            retry_after=BATCHING_RETRY_AFTER_SECONDS,
+            status_code=TELEGRAM_RATE_LIMIT_STATUS,
         )
 
     client = SimpleNamespace(bot_id="123456", send_document=limited, call=limited)
@@ -130,7 +120,7 @@ def test_retry_after_is_persisted_and_stops_requests(store):
     limited_client = RateLimitedClient(client, store, "-1", lambda: False, lambda: clock[0])
     with pytest.raises(TelegramError) as result:
         limited_client.send_document("one")
-    assert result.value.retry_after >= RETRY_AFTER_SECONDS
+    assert result.value.retry_after >= BATCHING_RETRY_AFTER_SECONDS
     assert store.get("telegram_cooldown:123456") == EXPECTED_COOLDOWN
     other_group = RateLimitedClient(client, store, "-2", lambda: False, lambda: OTHER_GROUP_CLOCK)
     with pytest.raises(TelegramError):

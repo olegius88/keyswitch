@@ -21,7 +21,6 @@ from keyswitch import layouts
 from keyswitch.config import SettingsStore
 from keyswitch.detector import CONTEXT_SOURCE_GROUP_PENALTY, DetectionDecision, LanguageDetector
 from keyswitch.engine import (
-    MAX_REMEMBERED_APPLICATION_CONTEXTS,
     CorrectionPlan,
     EngineSnapshot,
     Hotkey,
@@ -29,6 +28,7 @@ from keyswitch.engine import (
     LanguageContext,
     LearningPrompt,
 )
+from keyswitch.constants.detection import MAX_REMEMBERED_APPLICATION_CONTEXTS
 from keyswitch.history import HistoryStore
 from keyswitch.input_context import CONTEXT_TTL
 from keyswitch.intent_model import CorrectionTrigger, IntentModelInput, LinearPrediction
@@ -38,155 +38,128 @@ from keyswitch.short_words import TRUSTED_SHORT_WORD_MINIMUM_FREQUENCY, trusted_
 from keyswitch.x11_backend import (
     CONTROL_MASK,
     LOCK_MASK,
-    MOD1_MASK,
-    MOD4_MASK,
     SHIFT_MASK,
     BackendProbe,
     KeyEvent,
 )
-
-# --- score() helper fixture internals ---
-NGRAM_DEFAULT = -2.0
-DEFAULT_EXACT_FREQUENCY = 10
-FIXTURE_GRAM_RATIO = 0.5
-FIXTURE_INVALID_RATIO = 0.5
-UNKNOWN_WORD_SCORE = -5.0
-DEFAULT_VETO_THRESHOLD = -3.0
-
-# --- decide() helper defaults (mirror LanguageDetector.decide's own defaults) ---
-DEFAULT_MINIMUM_LENGTH = 3
-DEFAULT_CONFIDENCE_THRESHOLD = 2.0
-
-# --- test_early_guards_and_forced_rules ---
-WEAK_SOURCE_SCORE = -5
-DOMINANT_KNOWN_SCORE = 8
-HIGHER_DOMINANT_KNOWN_SCORE = 9
-SHORT_WORD_MINIMUM_LENGTH = 20
-# Mirrors detector.decide's own forced-group floor: max(20.0, forced_delta).
-FORCED_CONFIDENCE_FLOOR = 20.0
-NONEXISTENT_GROUP_ID = 9
-
-# --- test_trusted_short_words_require_curated_exact_dominant_target ---
-CURATED_SOURCE_SCORE = 5.0
-CURATED_SOURCE_FREQUENCY = 531
-NOT_EXACT_SHORT_WORD_SCORE = -4.0
-TRUSTED_TARGET_SCORE = 4.5
-TRUSTED_TARGET_FREQUENCY = 464_324
-NON_EXACT_TARGET_SCORE = 4.0
-HIGH_CONFIDENCE_SCORE = 8.0
-VERY_HIGH_FREQUENCY = 1_000_000
-# One below/at the curated frequency floor; deliberately below the frequency
-# floor a candidate must clear before the ratio gate is even considered.
-BELOW_MINIMUM_SHORT_WORD_FREQUENCY = TRUSTED_SHORT_WORD_MINIMUM_FREQUENCY - 1
-# Tuned so (frequency + 1) / (SOURCE_FREQUENCY_BELOW_RATIO + 1) falls just
-# under TRUSTED_SHORT_WORD_MINIMUM_RATIO when the target sits at the minimum.
-SOURCE_FREQUENCY_BELOW_RATIO = 100
-
-# --- test_valid_source_guards_ambiguity ---
-SOURCE_ONLY_TARGET_SCORE = -2
-
-# --- test_linear_model_is_residual_and_cannot_bypass_hard_guards ---
-CONFIDENT_SWITCH_LOGIT = 8.0
-CONFIDENT_SWITCH_PROBABILITY = 0.999
-HIGH_MODEL_THRESHOLD = 0.99
-STANDARD_MODEL_THRESHOLD = 0.98
-
-# --- test_linear_model_is_authoritative_after_hard_guards ---
-VETOED_LOGIT = -6.0
-VETOED_PROBABILITY = 0.002
-VETO_THRESHOLD_STRICT = -4.0
-UNCERTAIN_LOGIT = 0.0
-UNCERTAIN_PROBABILITY = 0.5
-RESCUE_LOGIT = 6.0
-RESCUE_PROBABILITY = 0.998
-RESCUE_SOURCE_SCORE = 2
-RESCUE_SOURCE_NGRAM = -2
-RESCUE_TARGET_SCORE = 4
-RESCUE_CONFIDENCE_THRESHOLD = 3.0
-
-# --- test_linear_model_threshold_is_not_overridden_by_secondary_scores ---
-VETO_THRESHOLD_LOOSE = -5.0
-UNSUPPORTED_SOURCE_SCORE = -8
-UNSUPPORTED_SOURCE_NGRAM = -2
-UNSUPPORTED_TARGET_SCORE = 2
-LOW_COVERAGE = 0.2
-SOURCEX_SCORE = -2.5
-SOURCEX_NGRAM = -1.0
-TARGETX_NGRAM_PLAUSIBLE = -1.5
-TARGETX_NGRAM_BELOW_FLOOR = -6.01
-TARGETX_NGRAM_AT_FLOOR = -6.0
-RESCUE_INPUT_CALLS = 3
-
-# --- test_exact_and_morphological_target_outcomes ---
-EXACT_CASE_SOURCE_SCORE = -8
-EXACT_CASE_SOURCE_NGRAM = -4
-EXACT_CASE_CONFIDENCE_THRESHOLD = 9.0
-MORPHOLOGICAL_SOURCE_SCORE = -3
-MORPHOLOGICAL_SOURCE_NGRAM = -2
-MORPHOLOGICAL_TARGET_SCORE = 4
-PLAUSIBLE_TARGET_NGRAM = -4
-IMPLAUSIBLE_TARGET_NGRAM = -5
-LOW_MARGIN_SOURCE_SCORE = 3.5
-LOW_MARGIN_CONFIDENCE_THRESHOLD = 3.0
-
-# --- test_typo_and_unknown_ngram_outcomes ---
-TYPO_SOURCE_SCORE = -8
-TYPO_SOURCE_NGRAM = -3
-TYPO_TARGET_SCORE = -4
-SOURCE_DELETION_SCORE = -6
-TARGET_DELETION_SCORE = 4
-CONVERTING_SOURCE_NGRAM = -2
-CONVERTING_TARGET_SCORE = 2
-UNNATURAL_SOURCE_SCORE = -4
-UNNATURAL_SOURCE_NGRAM = -2
-BAD_TARGET_NGRAM = -3
-LOW_TARGET_SCORE = -3
-AGGRESSIVE_SOURCE_NGRAM = -0.8
-AGGRESSIVE_TARGET_NGRAM = -1.8
-
-# --- test_context_scoring_and_best_of_multiple_candidates ---
-SOURCE_SCORE_MODERATE_NEGATIVE = -2
-CONTEXT_BONUS_SCORE = 2.0
-THIRD_GROUP_ID = 2
-CONTEXT_CONFIDENCE_FLOOR = 3.0
-
-# --- test_structural_token_protection ---
-# One character past detector.is_protected_token's own `len(token) > 64` bound.
-PROTECTED_TOKEN_OVERLENGTH_CHARACTERS = 65
-
-# --- letter()/key() physical-key fixture defaults ---
-DEFAULT_LETTER_KEYCODE = 30
-DEFAULT_KEY_KEYCODE = 65
-KEYCODE_LETTER_B = 31
-KEYCODE_BACKSPACE = 22
-KEYCODE_CTRL_L = 37
-KEYCODE_PAUSE_HOTKEY = 127
-KEYCODE_ESCAPE = 9
-KEYCODE_LOWERCASE_A_HOTKEY = 38
-KEYCODE_APOSTROPHE = 48
-KEYCODE_COMMA = 59
-KEYCODE_COMMA_ALT = 60
-UNDO_HOTKEY_KEYCODE = 52
-
-# --- EngineBranchTests fixtures ---
-CLOSE_CALLS_AFTER_REPEATED_STOP = 2
-FIXTURE_CORRECTION_CONFIDENCE = 99
-INJECTION_ERROR_PLAN_CONFIDENCE = 4
-LEARNING_PROMPT_EARLY_NOW = 10.0
-JUST_BEFORE_DEADLINE_MARGIN = 0.01
-MANUAL_LAYOUT_PAUSE_NOW = 3.0
-MANUAL_RULE_CONFIRMATIONS_REQUIRED = 2
-OUT_OF_RANGE_GROUP_ID = 9
-ARBITRARY_GROUP_ID = 7
-OUT_OF_RANGE_CHARACTER_GROUP = 9
-PAUSE_GUARD_INPUT_AT = 10.0
-PAUSE_GUARD_NOW = 12.0
-CONTEXT_OVERFLOW_MARGIN = 2
-
-# --- Unicode surrogate-range sweep ---
-UNICODE_CODEPOINT_LIMIT = 0x10000
-SURROGATE_RANGE_START = 0xD800
-SURROGATE_RANGE_END = 0xDFFF
+from keyswitch.constants.keyboard import ALT_MASK, SUPER_MASK
+from fixture_values.clock import (
+    JUST_BEFORE_DEADLINE_MARGIN_SECONDS,
+    LEARNING_PROMPT_EARLY_NOW_SECONDS,
+    MANUAL_LAYOUT_PAUSE_NOW_SECONDS,
+    PAUSE_GUARD_INPUT_AT_SECONDS,
+    PAUSE_GUARD_NOW_SECONDS,
+)
+from fixture_values.corpora import (
+    BELOW_TRUSTED_SHORT_WORD_MINIMUM_FREQUENCY,
+    DETECTOR_CURATED_SOURCE_FREQUENCY,
+    DETECTOR_FIXTURE_EXACT_WORD_FREQUENCY,
+    DETECTOR_SOURCE_FREQUENCY_BELOW_RATIO,
+    DETECTOR_TRUSTED_TARGET_FREQUENCY,
+    DETECTOR_VERY_HIGH_FREQUENCY,
+)
+from fixture_values.counts import (
+    APPLICATION_CONTEXT_OVERFLOW_MARGIN,
+    CLOSE_CALLS_AFTER_REPEATED_STOP,
+    DETECTOR_OVERSIZED_MINIMUM_LENGTH,
+    DETECTOR_RESCUE_INPUT_CALLS,
+    LEARNING_CONFIRMATIONS_REQUIRED,
+    PROTECTED_TOKEN_OVERLENGTH_CHARACTERS,
+)
+from fixture_values.keys import (
+    ALTERNATE_COMMA_KEYCODE,
+    APOSTROPHE_KEYCODE,
+    ARBITRARY_BACKEND_GROUP,
+    A_KEYCODE,
+    BACKSPACE_KEYCODE,
+    BMP_SWEEP_CODEPOINT_LIMIT,
+    COMMA_KEYCODE,
+    CONTROL_L_KEYCODE,
+    DETECTOR_DEFAULT_NAMED_KEY_KEYCODE,
+    ESCAPE_KEYCODE,
+    NONEXISTENT_LAYOUT_GROUP,
+    PAUSE_KEYCODE,
+    SECOND_LETTER_KEYCODE,
+    SYNTHETIC_KEYCODE_BASE,
+    THIRD_LANGUAGE_GROUP,
+    UTF16_SURROGATE_FIRST_CODEPOINT,
+    UTF16_SURROGATE_LAST_CODEPOINT,
+    Z_KEYCODE,
+)
+from fixture_values.scores import (
+    CORRECTION_PLAN_CONFIDENCE,
+    DETECTOR_AGGRESSIVE_SOURCE_NGRAM,
+    DETECTOR_AGGRESSIVE_TARGET_NGRAM,
+    DETECTOR_BAD_TARGET_NGRAM,
+    DETECTOR_CONFIDENT_SWITCH_LOGIT,
+    DETECTOR_CONFIDENT_SWITCH_PROBABILITY,
+    DETECTOR_CONTEXT_BONUS_SCORE,
+    DETECTOR_CONTEXT_CONFIDENCE_FLOOR,
+    DETECTOR_CONVERTING_SOURCE_NGRAM,
+    DETECTOR_CONVERTING_TARGET_SCORE,
+    DETECTOR_CURATED_SOURCE_SCORE,
+    DETECTOR_DEFAULT_VETO_THRESHOLD,
+    DETECTOR_DOMINANT_KNOWN_SCORE,
+    DETECTOR_EXACT_CASE_CONFIDENCE_THRESHOLD,
+    DETECTOR_EXACT_CASE_SOURCE_NGRAM,
+    DETECTOR_EXACT_CASE_SOURCE_SCORE,
+    DETECTOR_FIXTURE_DEFAULT_NGRAM_SCORE,
+    DETECTOR_FIXTURE_GRAM_RATIO,
+    DETECTOR_FIXTURE_INVALID_RATIO,
+    DETECTOR_FORCED_CONFIDENCE_FLOOR,
+    DETECTOR_HIGHER_DOMINANT_KNOWN_SCORE,
+    DETECTOR_HIGH_CONFIDENCE_SCORE,
+    DETECTOR_HIGH_MODEL_THRESHOLD,
+    DETECTOR_IMPLAUSIBLE_TARGET_NGRAM,
+    DETECTOR_LOOSE_VETO_THRESHOLD,
+    DETECTOR_LOW_COVERAGE,
+    DETECTOR_LOW_MARGIN_CONFIDENCE_THRESHOLD,
+    DETECTOR_LOW_MARGIN_SOURCE_SCORE,
+    DETECTOR_LOW_TARGET_SCORE,
+    DETECTOR_MODERATE_NEGATIVE_SOURCE_SCORE,
+    DETECTOR_MORPHOLOGICAL_SOURCE_NGRAM,
+    DETECTOR_MORPHOLOGICAL_SOURCE_SCORE,
+    DETECTOR_MORPHOLOGICAL_TARGET_SCORE,
+    DETECTOR_NON_EXACT_TARGET_SCORE,
+    DETECTOR_NOT_EXACT_SHORT_WORD_SCORE,
+    DETECTOR_PLAUSIBLE_TARGET_NGRAM,
+    DETECTOR_RESCUE_CONFIDENCE_THRESHOLD,
+    DETECTOR_RESCUE_LOGIT,
+    DETECTOR_RESCUE_PROBABILITY,
+    DETECTOR_RESCUE_SOURCE_NGRAM,
+    DETECTOR_RESCUE_SOURCE_SCORE,
+    DETECTOR_RESCUE_TARGET_SCORE,
+    DETECTOR_SOURCEX_NGRAM,
+    DETECTOR_SOURCEX_SCORE,
+    DETECTOR_SOURCE_DELETION_SCORE,
+    DETECTOR_SOURCE_ONLY_TARGET_SCORE,
+    DETECTOR_STANDARD_MODEL_THRESHOLD,
+    DETECTOR_STRICT_VETO_THRESHOLD,
+    DETECTOR_TARGETX_NGRAM_AT_FLOOR,
+    DETECTOR_TARGETX_NGRAM_BELOW_FLOOR,
+    DETECTOR_TARGETX_PLAUSIBLE_NGRAM,
+    DETECTOR_TARGET_DELETION_SCORE,
+    DETECTOR_TRUSTED_TARGET_SCORE,
+    DETECTOR_TYPO_SOURCE_NGRAM,
+    DETECTOR_TYPO_SOURCE_SCORE,
+    DETECTOR_TYPO_TARGET_SCORE,
+    DETECTOR_UNCERTAIN_LOGIT,
+    DETECTOR_UNCERTAIN_PROBABILITY,
+    DETECTOR_UNKNOWN_WORD_SCORE,
+    DETECTOR_UNNATURAL_SOURCE_NGRAM,
+    DETECTOR_UNNATURAL_SOURCE_SCORE,
+    DETECTOR_UNSUPPORTED_SOURCE_NGRAM,
+    DETECTOR_UNSUPPORTED_SOURCE_SCORE,
+    DETECTOR_UNSUPPORTED_TARGET_SCORE,
+    DETECTOR_VETOED_LOGIT,
+    DETECTOR_VETOED_PROBABILITY,
+    DETECTOR_WEAK_SOURCE_SCORE,
+    INJECTION_ERROR_PLAN_CONFIDENCE,
+)
+from keyswitch.constants.settings_defaults import (
+    DEFAULT_CONFIDENCE_THRESHOLD,
+    DEFAULT_MINIMUM_WORD_LENGTH,
+)
 
 
 def score(
@@ -195,18 +168,18 @@ def score(
     known: bool = False,
     exact: bool = False,
     spell: bool = False,
-    ngram: float = NGRAM_DEFAULT,
+    ngram: float = DETECTOR_FIXTURE_DEFAULT_NGRAM_SCORE,
     frequency: int | None = None,
 ) -> WordScore:
     return WordScore(
         value,
         known,
-        (DEFAULT_EXACT_FREQUENCY if exact else 0) if frequency is None else frequency,
-        FIXTURE_GRAM_RATIO,
+        (DETECTOR_FIXTURE_EXACT_WORD_FREQUENCY if exact else 0) if frequency is None else frequency,
+        DETECTOR_FIXTURE_GRAM_RATIO,
         exact,
         spell,
         ngram,
-        FIXTURE_INVALID_RATIO,
+        DETECTOR_FIXTURE_INVALID_RATIO,
         ngram,
     )
 
@@ -218,13 +191,13 @@ class StubModel:
         self.deletions: dict[str, WordScore] = {}
 
     def score(self, word: str) -> WordScore:
-        return self.values.get(word, score(UNKNOWN_WORD_SCORE))
+        return self.values.get(word, score(DETECTOR_UNKNOWN_WORD_SCORE))
 
     def context_score(self, previous: str, word: str) -> float:
         return self.context.get((previous, word), 0.0)
 
     def best_single_deletion(self, word: str) -> WordScore:
-        return self.deletions.get(word, score(UNKNOWN_WORD_SCORE))
+        return self.deletions.get(word, score(DETECTOR_UNKNOWN_WORD_SCORE))
 
 
 class StubIntentClassifier:
@@ -232,7 +205,7 @@ class StubIntentClassifier:
         self,
         prediction: LinearPrediction,
         *,
-        veto_threshold: float = DEFAULT_VETO_THRESHOLD,
+        veto_threshold: float = DETECTOR_DEFAULT_VETO_THRESHOLD,
     ) -> None:
         self.prediction = prediction
         self.veto_threshold = veto_threshold
@@ -260,7 +233,7 @@ class DetectorBranchTests(unittest.TestCase):
         original: str = "source",
         alternatives: dict[int, str] | None = None,
         source_group: int = 0,
-        minimum_length: int = DEFAULT_MINIMUM_LENGTH,
+        minimum_length: int = DEFAULT_MINIMUM_WORD_LENGTH,
         confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
         ignored_words: set[str] | None = None,
         aggressive: bool = False,
@@ -287,18 +260,18 @@ class DetectorBranchTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             LanguageDetector({0: StubModel({})})
         detector, _left, _right = self.detector(score(0), score(1))
-        decision = self.decide(detector, alternatives={0: "source", THIRD_GROUP_ID: "other", 1: "source"})
+        decision = self.decide(detector, alternatives={0: "source", THIRD_LANGUAGE_GROUP: "other", 1: "source"})
         self.assertEqual(decision.reason, "нет другой раскладки")
 
     def test_early_guards_and_forced_rules(self) -> None:
-        detector, _left, _right = self.detector(score(WEAK_SOURCE_SCORE), score(DOMINANT_KNOWN_SCORE, known=True, exact=True, ngram=1))
-        self.assertEqual(self.decide(detector, minimum_length=SHORT_WORD_MINIMUM_LENGTH).reason, "короткое слово")
+        detector, _left, _right = self.detector(score(DETECTOR_WEAK_SOURCE_SCORE), score(DETECTOR_DOMINANT_KNOWN_SCORE, known=True, exact=True, ngram=1))
+        self.assertEqual(self.decide(detector, minimum_length=DETECTOR_OVERSIZED_MINIMUM_LENGTH).reason, "короткое слово")
         self.assertEqual(self.decide(detector, ignored_words={" Source "}).reason, "исключение пользователя")
         self.assertEqual(self.decide(detector, rejected_targets={1}).reason, "отклонённое пользователем исправление")
         forced = self.decide(detector, forced_target_group=1)
         self.assertTrue(forced.should_convert)
-        self.assertGreaterEqual(forced.confidence, FORCED_CONFIDENCE_FLOOR)
-        not_found = self.decide(detector, forced_target_group=NONEXISTENT_GROUP_ID)
+        self.assertGreaterEqual(forced.confidence, DETECTOR_FORCED_CONFIDENCE_FLOOR)
+        not_found = self.decide(detector, forced_target_group=NONEXISTENT_LAYOUT_GROUP)
         self.assertTrue(not_found.should_convert)
         protected = self.decide(detector, original="https://host", alternatives={1: "target"})
         self.assertEqual(protected.reason, "код, адрес или аббревиатура")
@@ -306,22 +279,22 @@ class DetectorBranchTests(unittest.TestCase):
     def test_trusted_short_words_require_curated_exact_dominant_target(self) -> None:
         source = StubModel(
             {
-                "ша": score(CURATED_SOURCE_SCORE, known=True, exact=True, frequency=CURATED_SOURCE_FREQUENCY),
-                "щл": score(NOT_EXACT_SHORT_WORD_SCORE),
-                "аб": score(NOT_EXACT_SHORT_WORD_SCORE),
+                "ша": score(DETECTOR_CURATED_SOURCE_SCORE, known=True, exact=True, frequency=DETECTOR_CURATED_SOURCE_FREQUENCY),
+                "щл": score(DETECTOR_NOT_EXACT_SHORT_WORD_SCORE),
+                "аб": score(DETECTOR_NOT_EXACT_SHORT_WORD_SCORE),
             }
         )
         target = StubModel(
             {
                 "if": score(
-                    TRUSTED_TARGET_SCORE,
+                    DETECTOR_TRUSTED_TARGET_SCORE,
                     known=True,
                     exact=True,
                     spell=True,
-                    frequency=TRUSTED_TARGET_FREQUENCY,
+                    frequency=DETECTOR_TRUSTED_TARGET_FREQUENCY,
                 ),
-                "ok": score(NON_EXACT_TARGET_SCORE, known=True, spell=True),
-                "zz": score(HIGH_CONFIDENCE_SCORE, known=True, exact=True, frequency=VERY_HIGH_FREQUENCY),
+                "ok": score(DETECTOR_NON_EXACT_TARGET_SCORE, known=True, spell=True),
+                "zz": score(DETECTOR_HIGH_CONFIDENCE_SCORE, known=True, exact=True, frequency=DETECTOR_VERY_HIGH_FREQUENCY),
             }
         )
         detector = LanguageDetector({0: target, 1: source})
@@ -329,7 +302,7 @@ class DetectorBranchTests(unittest.TestCase):
         trusted = trusted_short_word_decision(
             detector,
             "ша",
-            {1: "ша", THIRD_GROUP_ID: "if", 0: "if"},
+            {1: "ша", THIRD_LANGUAGE_GROUP: "if", 0: "if"},
             1,
             ignored_words=(),
             rejected_targets=set(),
@@ -397,7 +370,7 @@ class DetectorBranchTests(unittest.TestCase):
         self.assertIsNone(not_curated)
 
         target.values["if"] = score(
-            HIGH_CONFIDENCE_SCORE, known=True, exact=True, frequency=BELOW_MINIMUM_SHORT_WORD_FREQUENCY
+            DETECTOR_HIGH_CONFIDENCE_SCORE, known=True, exact=True, frequency=BELOW_TRUSTED_SHORT_WORD_MINIMUM_FREQUENCY
         )
         self.assertIsNone(
             trusted_short_word_decision(
@@ -411,10 +384,10 @@ class DetectorBranchTests(unittest.TestCase):
             )
         )
         target.values["if"] = score(
-            HIGH_CONFIDENCE_SCORE, known=True, exact=True, frequency=TRUSTED_SHORT_WORD_MINIMUM_FREQUENCY
+            DETECTOR_HIGH_CONFIDENCE_SCORE, known=True, exact=True, frequency=TRUSTED_SHORT_WORD_MINIMUM_FREQUENCY
         )
         source.values["ша"] = score(
-            CURATED_SOURCE_SCORE, known=True, exact=True, frequency=SOURCE_FREQUENCY_BELOW_RATIO
+            DETECTOR_CURATED_SOURCE_SCORE, known=True, exact=True, frequency=DETECTOR_SOURCE_FREQUENCY_BELOW_RATIO
         )
         self.assertIsNone(
             trusted_short_word_decision(
@@ -428,9 +401,9 @@ class DetectorBranchTests(unittest.TestCase):
             )
         )
         target.values["if"] = score(
-            HIGH_CONFIDENCE_SCORE, known=True, exact=True, frequency=VERY_HIGH_FREQUENCY
+            DETECTOR_HIGH_CONFIDENCE_SCORE, known=True, exact=True, frequency=DETECTOR_VERY_HIGH_FREQUENCY
         )
-        source.values["шаш"] = score(NOT_EXACT_SHORT_WORD_SCORE)
+        source.values["шаш"] = score(DETECTOR_NOT_EXACT_SHORT_WORD_SCORE)
         self.assertIsNone(
             trusted_short_word_decision(
                 detector,
@@ -456,20 +429,20 @@ class DetectorBranchTests(unittest.TestCase):
 
     def test_valid_source_guards_ambiguity(self) -> None:
         both, _left, _right = self.detector(
-            score(DOMINANT_KNOWN_SCORE, known=True, exact=True, ngram=1),
-            score(HIGHER_DOMINANT_KNOWN_SCORE, known=True, exact=True, ngram=1),
+            score(DETECTOR_DOMINANT_KNOWN_SCORE, known=True, exact=True, ngram=1),
+            score(DETECTOR_HIGHER_DOMINANT_KNOWN_SCORE, known=True, exact=True, ngram=1),
         )
         self.assertIn("обе раскладки", self.decide(both).reason)
         source_only, _left, _right = self.detector(
-            score(DOMINANT_KNOWN_SCORE, known=True, exact=True, ngram=1), score(SOURCE_ONLY_TARGET_SCORE)
+            score(DETECTOR_DOMINANT_KNOWN_SCORE, known=True, exact=True, ngram=1), score(DETECTOR_SOURCE_ONLY_TARGET_SCORE)
         )
         self.assertEqual(self.decide(source_only).reason, "исходное слово допустимо")
 
     def test_linear_model_is_residual_and_cannot_bypass_hard_guards(self) -> None:
-        prediction = LinearPrediction(CONFIDENT_SWITCH_LOGIT, CONFIDENT_SWITCH_PROBABILITY, HIGH_MODEL_THRESHOLD, 1.0, True, "test-v1")
+        prediction = LinearPrediction(DETECTOR_CONFIDENT_SWITCH_LOGIT, DETECTOR_CONFIDENT_SWITCH_PROBABILITY, DETECTOR_HIGH_MODEL_THRESHOLD, 1.0, True, "test-v1")
         model = StubIntentClassifier(prediction)
-        left = StubModel({"source": score(DOMINANT_KNOWN_SCORE, known=True, exact=True, ngram=1)})
-        right = StubModel({"target": score(HIGHER_DOMINANT_KNOWN_SCORE, known=True, exact=True, ngram=1)})
+        left = StubModel({"source": score(DETECTOR_DOMINANT_KNOWN_SCORE, known=True, exact=True, ngram=1)})
+        right = StubModel({"target": score(DETECTOR_HIGHER_DOMINANT_KNOWN_SCORE, known=True, exact=True, ngram=1)})
         detector = LanguageDetector({0: left, 1: right}, model)
         self.assertFalse(self.decide(detector).should_convert)
         self.assertEqual(model.inputs, [])
@@ -484,16 +457,16 @@ class DetectorBranchTests(unittest.TestCase):
 
         short = LanguageDetector(
             {
-                0: StubModel({"abcd": score(WEAK_SOURCE_SCORE)}),
-                1: StubModel({"фисв": score(WEAK_SOURCE_SCORE)}),
+                0: StubModel({"abcd": score(DETECTOR_WEAK_SOURCE_SCORE)}),
+                1: StubModel({"фисв": score(DETECTOR_WEAK_SOURCE_SCORE)}),
             },
             model,
         ).decide(
             "abcd",
             {1: "фисв"},
             0,
-            minimum_length=DEFAULT_MINIMUM_LENGTH,
-            confidence_threshold=FORCED_CONFIDENCE_FLOOR,
+            minimum_length=DEFAULT_MINIMUM_WORD_LENGTH,
+            confidence_threshold=DETECTOR_FORCED_CONFIDENCE_FLOOR,
         )
         self.assertFalse(short.should_convert)
         self.assertIsNone(short.model_probability)
@@ -501,23 +474,23 @@ class DetectorBranchTests(unittest.TestCase):
 
     def test_linear_model_is_authoritative_after_hard_guards(self) -> None:
         veto = StubIntentClassifier(
-            LinearPrediction(VETOED_LOGIT, VETOED_PROBABILITY, STANDARD_MODEL_THRESHOLD, 1.0, False, "test-v1"),
-            veto_threshold=VETO_THRESHOLD_STRICT,
+            LinearPrediction(DETECTOR_VETOED_LOGIT, DETECTOR_VETOED_PROBABILITY, DETECTOR_STANDARD_MODEL_THRESHOLD, 1.0, False, "test-v1"),
+            veto_threshold=DETECTOR_STRICT_VETO_THRESHOLD,
         )
-        left = StubModel({"source": score(TYPO_SOURCE_SCORE, ngram=TYPO_SOURCE_NGRAM)})
-        right = StubModel({"target": score(DOMINANT_KNOWN_SCORE, known=True, exact=True, ngram=1)})
+        left = StubModel({"source": score(DETECTOR_TYPO_SOURCE_SCORE, ngram=DETECTOR_TYPO_SOURCE_NGRAM)})
+        right = StubModel({"target": score(DETECTOR_DOMINANT_KNOWN_SCORE, known=True, exact=True, ngram=1)})
         detector = LanguageDetector({0: left, 1: right}, veto)
         rejected = self.decide(detector)
         self.assertFalse(rejected.should_convert)
         self.assertIn("безопасного порога", rejected.reason)
-        self.assertEqual(rejected.model_probability, VETOED_PROBABILITY)
-        self.assertEqual(rejected.model_threshold, STANDARD_MODEL_THRESHOLD)
+        self.assertEqual(rejected.model_probability, DETECTOR_VETOED_PROBABILITY)
+        self.assertEqual(rejected.model_threshold, DETECTOR_STANDARD_MODEL_THRESHOLD)
         self.assertEqual(rejected.model_version, "test-v1")
         self.assertEqual(veto.inputs[0].trigger, "space")
 
         pause_gate = StubIntentClassifier(
-            LinearPrediction(UNCERTAIN_LOGIT, UNCERTAIN_PROBABILITY, STANDARD_MODEL_THRESHOLD, 1.0, False, "test-v1"),
-            veto_threshold=VETO_THRESHOLD_STRICT,
+            LinearPrediction(DETECTOR_UNCERTAIN_LOGIT, DETECTOR_UNCERTAIN_PROBABILITY, DETECTOR_STANDARD_MODEL_THRESHOLD, 1.0, False, "test-v1"),
+            veto_threshold=DETECTOR_STRICT_VETO_THRESHOLD,
         )
         detector = LanguageDetector({0: left, 1: right}, pause_gate)
         paused = self.decide(detector, trigger="pause")
@@ -525,29 +498,29 @@ class DetectorBranchTests(unittest.TestCase):
         self.assertIn("безопасного порога", paused.reason)
 
         rescue = StubIntentClassifier(
-            LinearPrediction(RESCUE_LOGIT, RESCUE_PROBABILITY, STANDARD_MODEL_THRESHOLD, 1.0, True, "test-v1")
+            LinearPrediction(DETECTOR_RESCUE_LOGIT, DETECTOR_RESCUE_PROBABILITY, DETECTOR_STANDARD_MODEL_THRESHOLD, 1.0, True, "test-v1")
         )
-        left = StubModel({"source": score(RESCUE_SOURCE_SCORE, ngram=RESCUE_SOURCE_NGRAM)})
-        right = StubModel({"target": score(RESCUE_TARGET_SCORE, known=True, spell=True, ngram=0)})
+        left = StubModel({"source": score(DETECTOR_RESCUE_SOURCE_SCORE, ngram=DETECTOR_RESCUE_SOURCE_NGRAM)})
+        right = StubModel({"target": score(DETECTOR_RESCUE_TARGET_SCORE, known=True, spell=True, ngram=0)})
         detector = LanguageDetector({0: left, 1: right}, rescue)
-        recovered = self.decide(detector, confidence_threshold=RESCUE_CONFIDENCE_THRESHOLD)
+        recovered = self.decide(detector, confidence_threshold=DETECTOR_RESCUE_CONFIDENCE_THRESHOLD)
         self.assertTrue(recovered.should_convert)
         self.assertIn("линейной", recovered.reason)
 
     def test_linear_model_threshold_is_not_overridden_by_secondary_scores(self) -> None:
         unsupported = StubIntentClassifier(
-            LinearPrediction(UNCERTAIN_LOGIT, UNCERTAIN_PROBABILITY, STANDARD_MODEL_THRESHOLD, 1.0, False, "test-v1"),
-            veto_threshold=VETO_THRESHOLD_LOOSE,
+            LinearPrediction(DETECTOR_UNCERTAIN_LOGIT, DETECTOR_UNCERTAIN_PROBABILITY, DETECTOR_STANDARD_MODEL_THRESHOLD, 1.0, False, "test-v1"),
+            veto_threshold=DETECTOR_LOOSE_VETO_THRESHOLD,
         )
-        left = StubModel({"source": score(UNSUPPORTED_SOURCE_SCORE, ngram=UNSUPPORTED_SOURCE_NGRAM)})
-        right = StubModel({"target": score(UNSUPPORTED_TARGET_SCORE, ngram=0)})
+        left = StubModel({"source": score(DETECTOR_UNSUPPORTED_SOURCE_SCORE, ngram=DETECTOR_UNSUPPORTED_SOURCE_NGRAM)})
+        right = StubModel({"target": score(DETECTOR_UNSUPPORTED_TARGET_SCORE, ngram=0)})
         detector = LanguageDetector({0: left, 1: right}, unsupported)
         abstained = self.decide(detector)
         self.assertFalse(abstained.should_convert)
         self.assertIn("безопасного порога", abstained.reason)
 
         low_coverage = StubIntentClassifier(
-            LinearPrediction(CONFIDENT_SWITCH_LOGIT, CONFIDENT_SWITCH_PROBABILITY, STANDARD_MODEL_THRESHOLD, LOW_COVERAGE, True, "test-v1")
+            LinearPrediction(DETECTOR_CONFIDENT_SWITCH_LOGIT, DETECTOR_CONFIDENT_SWITCH_PROBABILITY, DETECTOR_STANDARD_MODEL_THRESHOLD, DETECTOR_LOW_COVERAGE, True, "test-v1")
         )
         fallback = LanguageDetector({0: left, 1: right}, low_coverage)
         low_coverage_result = self.decide(fallback)
@@ -555,10 +528,10 @@ class DetectorBranchTests(unittest.TestCase):
         self.assertIn("линейной", low_coverage_result.reason)
 
         rescue = StubIntentClassifier(
-            LinearPrediction(CONFIDENT_SWITCH_LOGIT, CONFIDENT_SWITCH_PROBABILITY, STANDARD_MODEL_THRESHOLD, 1.0, True, "test-v1")
+            LinearPrediction(DETECTOR_CONFIDENT_SWITCH_LOGIT, DETECTOR_CONFIDENT_SWITCH_PROBABILITY, DETECTOR_STANDARD_MODEL_THRESHOLD, 1.0, True, "test-v1")
         )
-        left = StubModel({"sourcex": score(SOURCEX_SCORE, ngram=SOURCEX_NGRAM)})
-        right = StubModel({"targetx": score(0.0, ngram=TARGETX_NGRAM_PLAUSIBLE)})
+        left = StubModel({"sourcex": score(DETECTOR_SOURCEX_SCORE, ngram=DETECTOR_SOURCEX_NGRAM)})
+        right = StubModel({"targetx": score(0.0, ngram=DETECTOR_TARGETX_PLAUSIBLE_NGRAM)})
         detector = LanguageDetector({0: left, 1: right}, rescue)
         rescued = self.decide(
             detector,
@@ -569,7 +542,7 @@ class DetectorBranchTests(unittest.TestCase):
         self.assertIn("линейной", rescued.reason)
 
         implausible_right = StubModel(
-            {"targetx": score(0.0, ngram=TARGETX_NGRAM_BELOW_FLOOR)}
+            {"targetx": score(0.0, ngram=DETECTOR_TARGETX_NGRAM_BELOW_FLOOR)}
         )
         implausible = LanguageDetector(
             {0: left, 1: implausible_right}, rescue
@@ -582,7 +555,7 @@ class DetectorBranchTests(unittest.TestCase):
         self.assertTrue(rejected_target.should_convert)
         self.assertIn("линейной", rejected_target.reason)
 
-        floor_right = StubModel({"targetx": score(0.0, ngram=TARGETX_NGRAM_AT_FLOOR)})
+        floor_right = StubModel({"targetx": score(0.0, ngram=DETECTOR_TARGETX_NGRAM_AT_FLOOR)})
         at_floor = LanguageDetector({0: left, 1: floor_right}, rescue)
         self.assertTrue(
             self.decide(
@@ -599,28 +572,28 @@ class DetectorBranchTests(unittest.TestCase):
             use_intent_model=False,
         )
         self.assertIsNone(disabled.model_probability)
-        self.assertEqual(len(rescue.inputs), RESCUE_INPUT_CALLS)
+        self.assertEqual(len(rescue.inputs), DETECTOR_RESCUE_INPUT_CALLS)
 
     def test_exact_and_morphological_target_outcomes(self) -> None:
         exact, _left, _right = self.detector(
-            score(EXACT_CASE_SOURCE_SCORE, ngram=EXACT_CASE_SOURCE_NGRAM),
-            score(DOMINANT_KNOWN_SCORE, known=True, exact=True, ngram=1),
+            score(DETECTOR_EXACT_CASE_SOURCE_SCORE, ngram=DETECTOR_EXACT_CASE_SOURCE_NGRAM),
+            score(DETECTOR_DOMINANT_KNOWN_SCORE, known=True, exact=True, ngram=1),
         )
-        decision = self.decide(exact, confidence_threshold=EXACT_CASE_CONFIDENCE_THRESHOLD)
+        decision = self.decide(exact, confidence_threshold=DETECTOR_EXACT_CASE_CONFIDENCE_THRESHOLD)
         self.assertTrue(decision.should_convert)
         self.assertIn("частотном", decision.reason)
 
         plausible, _left, _right = self.detector(
-            score(MORPHOLOGICAL_SOURCE_SCORE, ngram=MORPHOLOGICAL_SOURCE_NGRAM),
-            score(MORPHOLOGICAL_TARGET_SCORE, known=True, spell=True, ngram=PLAUSIBLE_TARGET_NGRAM),
+            score(DETECTOR_MORPHOLOGICAL_SOURCE_SCORE, ngram=DETECTOR_MORPHOLOGICAL_SOURCE_NGRAM),
+            score(DETECTOR_MORPHOLOGICAL_TARGET_SCORE, known=True, spell=True, ngram=DETECTOR_PLAUSIBLE_TARGET_NGRAM),
         )
         decision = self.decide(plausible, confidence_threshold=DEFAULT_CONFIDENCE_THRESHOLD)
         self.assertTrue(decision.should_convert)
         self.assertIn("морфологическим", decision.reason)
 
         implausible, _left, _right = self.detector(
-            score(MORPHOLOGICAL_SOURCE_SCORE, ngram=MORPHOLOGICAL_SOURCE_NGRAM),
-            score(MORPHOLOGICAL_TARGET_SCORE, known=True, spell=True, ngram=IMPLAUSIBLE_TARGET_NGRAM),
+            score(DETECTOR_MORPHOLOGICAL_SOURCE_SCORE, ngram=DETECTOR_MORPHOLOGICAL_SOURCE_NGRAM),
+            score(DETECTOR_MORPHOLOGICAL_TARGET_SCORE, known=True, spell=True, ngram=DETECTOR_IMPLAUSIBLE_TARGET_NGRAM),
         )
         decision = self.decide(implausible)
         self.assertFalse(decision.should_convert)
@@ -629,60 +602,60 @@ class DetectorBranchTests(unittest.TestCase):
         self.assertTrue(contextual.should_convert)
 
         low_margin, _left, _right = self.detector(
-            score(LOW_MARGIN_SOURCE_SCORE, ngram=MORPHOLOGICAL_SOURCE_NGRAM),
-            score(MORPHOLOGICAL_TARGET_SCORE, known=True, spell=True, ngram=0),
+            score(DETECTOR_LOW_MARGIN_SOURCE_SCORE, ngram=DETECTOR_MORPHOLOGICAL_SOURCE_NGRAM),
+            score(DETECTOR_MORPHOLOGICAL_TARGET_SCORE, known=True, spell=True, ngram=0),
         )
-        decision = self.decide(low_margin, confidence_threshold=LOW_MARGIN_CONFIDENCE_THRESHOLD)
+        decision = self.decide(low_margin, confidence_threshold=DETECTOR_LOW_MARGIN_CONFIDENCE_THRESHOLD)
         self.assertFalse(decision.should_convert)
         self.assertIn("недостаточный", decision.reason)
 
     def test_typo_and_unknown_ngram_outcomes(self) -> None:
-        detector, left, right = self.detector(score(TYPO_SOURCE_SCORE, ngram=TYPO_SOURCE_NGRAM), score(TYPO_TARGET_SCORE, ngram=-1))
-        left.deletions["source"] = score(SOURCE_DELETION_SCORE)
-        right.deletions["target"] = score(TARGET_DELETION_SCORE, known=True, exact=True, ngram=1)
+        detector, left, right = self.detector(score(DETECTOR_TYPO_SOURCE_SCORE, ngram=DETECTOR_TYPO_SOURCE_NGRAM), score(DETECTOR_TYPO_TARGET_SCORE, ngram=-1))
+        left.deletions["source"] = score(DETECTOR_SOURCE_DELETION_SCORE)
+        right.deletions["target"] = score(DETECTOR_TARGET_DELETION_SCORE, known=True, exact=True, ngram=1)
         typo = self.decide(detector)
         self.assertTrue(typo.should_convert)
         self.assertIn("опечатки", typo.reason)
 
-        converting, _left, _right = self.detector(score(TYPO_SOURCE_SCORE, ngram=CONVERTING_SOURCE_NGRAM), score(CONVERTING_TARGET_SCORE, ngram=0))
+        converting, _left, _right = self.detector(score(DETECTOR_TYPO_SOURCE_SCORE, ngram=DETECTOR_CONVERTING_SOURCE_NGRAM), score(DETECTOR_CONVERTING_TARGET_SCORE, ngram=0))
         result = self.decide(converting)
         self.assertTrue(result.should_convert)
         self.assertIn("символьной", result.reason)
 
-        source_natural, _left, _right = self.detector(score(0, ngram=0), score(CONVERTING_TARGET_SCORE, ngram=0))
+        source_natural, _left, _right = self.detector(score(0, ngram=0), score(DETECTOR_CONVERTING_TARGET_SCORE, ngram=0))
         self.assertIn("исходная", self.decide(source_natural).reason)
         target_bad, _left, _right = self.detector(
-            score(UNNATURAL_SOURCE_SCORE, ngram=UNNATURAL_SOURCE_NGRAM), score(CONVERTING_TARGET_SCORE, ngram=BAD_TARGET_NGRAM)
+            score(DETECTOR_UNNATURAL_SOURCE_SCORE, ngram=DETECTOR_UNNATURAL_SOURCE_NGRAM), score(DETECTOR_CONVERTING_TARGET_SCORE, ngram=DETECTOR_BAD_TARGET_NGRAM)
         )
         self.assertIn("целевая", self.decide(target_bad).reason)
-        low, _left, _right = self.detector(score(UNNATURAL_SOURCE_SCORE, ngram=UNNATURAL_SOURCE_NGRAM), score(LOW_TARGET_SCORE, ngram=0))
+        low, _left, _right = self.detector(score(DETECTOR_UNNATURAL_SOURCE_SCORE, ngram=DETECTOR_UNNATURAL_SOURCE_NGRAM), score(DETECTOR_LOW_TARGET_SCORE, ngram=0))
         self.assertIn("недостаточная", self.decide(low).reason)
 
         aggressive = LanguageDetector(
             {
-                0: StubModel({"sour": score(UNNATURAL_SOURCE_SCORE, ngram=AGGRESSIVE_SOURCE_NGRAM)}),
-                1: StubModel({"targ": score(CONVERTING_TARGET_SCORE, ngram=AGGRESSIVE_TARGET_NGRAM)}),
+                0: StubModel({"sour": score(DETECTOR_UNNATURAL_SOURCE_SCORE, ngram=DETECTOR_AGGRESSIVE_SOURCE_NGRAM)}),
+                1: StubModel({"targ": score(DETECTOR_CONVERTING_TARGET_SCORE, ngram=DETECTOR_AGGRESSIVE_TARGET_NGRAM)}),
             }
         )
         self.assertTrue(self.decide(aggressive, original="sour", alternatives={1: "targ"}, aggressive=True).should_convert)
 
     def test_context_scoring_and_best_of_multiple_candidates(self) -> None:
-        left = StubModel({"source": score(SOURCE_SCORE_MODERATE_NEGATIVE)}, context={("before", "source"): 1.0})
+        left = StubModel({"source": score(DETECTOR_MODERATE_NEGATIVE_SOURCE_SCORE)}, context={("before", "source"): 1.0})
         right = StubModel(
             {"weak": score(-1), "target": score(1, known=True, exact=True, ngram=1)},
-            context={("prior", "target"): CONTEXT_BONUS_SCORE},
+            context={("prior", "target"): DETECTOR_CONTEXT_BONUS_SCORE},
         )
         third = StubModel({"other": score(0)})
-        detector = LanguageDetector({0: left, 1: right, THIRD_GROUP_ID: third})
+        detector = LanguageDetector({0: left, 1: right, THIRD_LANGUAGE_GROUP: third})
         decision = detector.decide(
             "source",
-            {1: "target", THIRD_GROUP_ID: "other"},
+            {1: "target", THIRD_LANGUAGE_GROUP: "other"},
             0,
             previous_words={0: "before", 1: "prior"},
             context_group=1,
         )
         self.assertEqual(decision.target_group, 1)
-        self.assertGreater(decision.confidence, CONTEXT_CONFIDENCE_FLOOR)
+        self.assertGreater(decision.confidence, DETECTOR_CONTEXT_CONFIDENCE_FLOOR)
         penalized = detector._context_delta(0, 1, "source", "target", {}, 0)
         self.assertEqual(penalized, -CONTEXT_SOURCE_GROUP_PENALTY)
 
@@ -785,7 +758,7 @@ class FakeBackend:
 PAIR = LayoutPair()
 
 
-def letter(character: str, keycode: int = DEFAULT_LETTER_KEYCODE, group: int = 0, *, pressed: bool = True, state: int = 0) -> KeyEvent:
+def letter(character: str, keycode: int = SYNTHETIC_KEYCODE_BASE, group: int = 0, *, pressed: bool = True, state: int = 0) -> KeyEvent:
     if group == 0:
         characters = (character, PAIR.translate(character, "us", "ru"))
     else:
@@ -793,7 +766,7 @@ def letter(character: str, keycode: int = DEFAULT_LETTER_KEYCODE, group: int = 0
     return KeyEvent(pressed, keycode, characters[group], character, characters, group, state, keycode)
 
 
-def key(name: str, keycode: int = DEFAULT_KEY_KEYCODE, *, pressed: bool = True, character: str = "", state: int = 0, group: int = 0) -> KeyEvent:
+def key(name: str, keycode: int = DETECTOR_DEFAULT_NAMED_KEY_KEYCODE, *, pressed: bool = True, character: str = "", state: int = 0, group: int = 0) -> KeyEvent:
     return KeyEvent(pressed, keycode, name, character, (character, character), group, state, keycode)
 
 
@@ -819,7 +792,7 @@ class EngineBranchTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def type_word(self, text: str, group: int = 0) -> None:
-        for index, character in enumerate(text, DEFAULT_LETTER_KEYCODE):
+        for index, character in enumerate(text, SYNTHETIC_KEYCODE_BASE):
             event = letter(character, index, group)
             self.engine._handle(event)
             self.engine._handle(released(event))
@@ -842,7 +815,7 @@ class EngineBranchTests(unittest.TestCase):
 
     def test_engine_model_toggle_and_trigger_are_applied_without_restart(self) -> None:
         classifier = StubIntentClassifier(
-            LinearPrediction(CONFIDENT_SWITCH_LOGIT, CONFIDENT_SWITCH_PROBABILITY, STANDARD_MODEL_THRESHOLD, 1.0, True, "test-v1")
+            LinearPrediction(DETECTOR_CONFIDENT_SWITCH_LOGIT, DETECTOR_CONFIDENT_SWITCH_PROBABILITY, DETECTOR_STANDARD_MODEL_THRESHOLD, 1.0, True, "test-v1")
         )
         self.engine.detector.intent_model = classifier
         self.settings.set("detection.intent_model_enabled", False)
@@ -934,7 +907,7 @@ class EngineBranchTests(unittest.TestCase):
             initialized.records[0].getMessage().removeprefix("TECHNICAL ")
         )
         self.assertEqual(initial_payload["event"], "engine_initialized")
-        self.assertEqual(initial_payload["keyswitch_version"], "0.31.1")
+        self.assertEqual(initial_payload["keyswitch_version"], "0.31.2")
         self.assertEqual(initial_payload["settings"]["overrides"], {"diagnostics.technical_logging": True})
 
     def test_start_stop_idempotence_and_backend_failure(self) -> None:
@@ -1031,12 +1004,12 @@ class EngineBranchTests(unittest.TestCase):
 
     def test_hotkeys_modifiers_backspace_navigation_and_group_change(self) -> None:
         self.engine._handle(letter("a", group=0))
-        self.engine._handle(letter("b", keycode=KEYCODE_LETTER_B, group=0))
-        self.engine._handle(key("BackSpace", keycode=KEYCODE_BACKSPACE))
+        self.engine._handle(letter("b", keycode=SECOND_LETTER_KEYCODE, group=0))
+        self.engine._handle(key("BackSpace", keycode=BACKSPACE_KEYCODE))
         self.assertEqual(self.engine.snapshot.current_word, "a")
-        self.engine._handle(key("BackSpace", keycode=KEYCODE_BACKSPACE))
+        self.engine._handle(key("BackSpace", keycode=BACKSPACE_KEYCODE))
         self.assertEqual(self.engine.snapshot.current_word, "")
-        self.engine._handle(key("BackSpace", keycode=KEYCODE_BACKSPACE))
+        self.engine._handle(key("BackSpace", keycode=BACKSPACE_KEYCODE))
 
         self.engine._handle(letter("a", group=0))
         self.engine._handle(letter("ф", group=1))
@@ -1048,7 +1021,7 @@ class EngineBranchTests(unittest.TestCase):
         self.assertEqual(self.engine.snapshot.current_word, "")
         self.engine._handle(key("F1", character=""))
 
-        toggle = key("p", state=CONTROL_MASK | MOD1_MASK)
+        toggle = key("p", state=CONTROL_MASK | ALT_MASK)
         self.engine._handle(toggle)
         self.assertFalse(self.settings.get("enabled"))
         self.engine._handle(toggle)
@@ -1058,84 +1031,84 @@ class EngineBranchTests(unittest.TestCase):
         def arm(text: str = "ghbdtn") -> None:
             self.engine._clear_word()
             self.type_word(text)
-            self.engine._last_word_input_at = PAUSE_GUARD_INPUT_AT
+            self.engine._last_word_input_at = PAUSE_GUARD_INPUT_AT_SECONDS
 
         arm()
         self.settings.set("enabled", False)
-        self.engine._maybe_correct_after_pause(now=PAUSE_GUARD_NOW)
+        self.engine._maybe_correct_after_pause(now=PAUSE_GUARD_NOW_SECONDS)
         self.assertFalse(self.engine._pause_correction_pending)
         self.settings.set("enabled", True)
 
         self.engine._pause_correction_pending = True
         self.engine._last_word_input_at = None
-        self.engine._maybe_correct_after_pause(now=PAUSE_GUARD_NOW)
+        self.engine._maybe_correct_after_pause(now=PAUSE_GUARD_NOW_SECONDS)
         self.assertFalse(self.engine._pause_correction_pending)
 
         arm()
-        self.engine._pressed.add(DEFAULT_LETTER_KEYCODE)
-        self.engine._maybe_correct_after_pause(now=PAUSE_GUARD_NOW)
+        self.engine._pressed.add(SYNTHETIC_KEYCODE_BASE)
+        self.engine._maybe_correct_after_pause(now=PAUSE_GUARD_NOW_SECONDS)
         self.assertTrue(self.engine._pause_correction_pending)
         self.engine._pressed.clear()
 
-        self.engine._modifier_keycodes.add(KEYCODE_CTRL_L)
-        self.engine._maybe_correct_after_pause(now=PAUSE_GUARD_NOW)
+        self.engine._modifier_keycodes.add(CONTROL_L_KEYCODE)
+        self.engine._maybe_correct_after_pause(now=PAUSE_GUARD_NOW_SECONDS)
         self.assertTrue(self.engine._pause_correction_pending)
         self.engine._modifier_keycodes.clear()
 
         self.engine._pending = CorrectionPlan(
-            (letter("a"),), None, 0, 1, "a", "ф", FIXTURE_CORRECTION_CONFIDENCE, "Editor", False
+            (letter("a"),), None, 0, 1, "a", "ф", CORRECTION_PLAN_CONFIDENCE, "Editor", False
         )
-        self.engine._maybe_correct_after_pause(now=PAUSE_GUARD_NOW)
+        self.engine._maybe_correct_after_pause(now=PAUSE_GUARD_NOW_SECONDS)
         self.assertTrue(self.engine._pause_correction_pending)
         self.engine._pending = None
 
         self.engine._manual_layout_group = 0
-        self.engine._maybe_correct_after_pause(now=PAUSE_GUARD_NOW)
+        self.engine._maybe_correct_after_pause(now=PAUSE_GUARD_NOW_SECONDS)
         self.assertFalse(self.engine._pause_correction_pending)
         self.engine._manual_layout_group = None
 
         arm()
         self.settings.set("exclusions.applications", ["testeditor"])
-        self.engine._maybe_correct_after_pause(now=PAUSE_GUARD_NOW)
+        self.engine._maybe_correct_after_pause(now=PAUSE_GUARD_NOW_SECONDS)
         self.assertFalse(self.engine._pause_correction_pending)
         self.settings.set("exclusions.applications", [])
 
         arm("hello")
-        with patch("keyswitch.engine.time.monotonic", return_value=PAUSE_GUARD_NOW):
+        with patch("keyswitch.engine.time.monotonic", return_value=PAUSE_GUARD_NOW_SECONDS):
             self.engine._maybe_correct_after_pause()
         self.assertFalse(self.engine._pause_correction_pending)
         self.assertEqual(self.backend.injections, [])
 
     def test_modifier_release_defers_and_then_executes_pending(self) -> None:
-        plan = CorrectionPlan((letter("a"),), None, 0, 1, "a", "ф", FIXTURE_CORRECTION_CONFIDENCE, "Editor", False)
+        plan = CorrectionPlan((letter("a"),), None, 0, 1, "a", "ф", CORRECTION_PLAN_CONFIDENCE, "Editor", False)
         self.engine._pending = plan
-        self.engine._pending_trigger_keycode = KEYCODE_PAUSE_HOTKEY
-        self.engine._modifier_keycodes.add(KEYCODE_CTRL_L)
-        self.engine._maybe_execute_pending(key("Pause", KEYCODE_PAUSE_HOTKEY, pressed=True))
+        self.engine._pending_trigger_keycode = PAUSE_KEYCODE
+        self.engine._modifier_keycodes.add(CONTROL_L_KEYCODE)
+        self.engine._maybe_execute_pending(key("Pause", PAUSE_KEYCODE, pressed=True))
         self.assertFalse(self.backend.injections)
-        self.engine._maybe_execute_pending(key("Pause", KEYCODE_PAUSE_HOTKEY, pressed=False))
+        self.engine._maybe_execute_pending(key("Pause", PAUSE_KEYCODE, pressed=False))
         self.assertFalse(self.backend.injections)
-        self.engine._handle(key("Control_L", KEYCODE_CTRL_L, pressed=False))
+        self.engine._handle(key("Control_L", CONTROL_L_KEYCODE, pressed=False))
         self.assertEqual(len(self.backend.injections), 1)
 
     def test_manual_conversion_without_word_and_without_target(self) -> None:
-        self.engine._schedule_manual_conversion(KEYCODE_PAUSE_HOTKEY)
+        self.engine._schedule_manual_conversion(PAUSE_KEYCODE)
         self.assertIn("Нет слова", self.engine.snapshot.last_action)
         self.engine._strokes = [letter("a")]
         self.engine._source_group = 0
         original_models = self.engine.models
         self.engine.models = {0: original_models[0]}
-        self.engine._schedule_manual_conversion(KEYCODE_PAUSE_HOTKEY)
+        self.engine._schedule_manual_conversion(PAUSE_KEYCODE)
         self.assertIsNone(self.engine._pending)
         self.engine.models = original_models
 
     def test_stale_undo_and_manual_undo_do_not_record_rejection(self) -> None:
-        self.engine._schedule_undo(UNDO_HOTKEY_KEYCODE)
+        self.engine._schedule_undo(Z_KEYCODE)
         self.assertIn("нельзя отменить", self.engine.snapshot.last_action)
-        plan = CorrectionPlan((letter("a"),), None, 0, 1, "a", "ф", FIXTURE_CORRECTION_CONFIDENCE, "Editor", False)
+        plan = CorrectionPlan((letter("a"),), None, 0, 1, "a", "ф", CORRECTION_PLAN_CONFIDENCE, "Editor", False)
         self.engine._last_correction = plan
         self.engine._last_correction_time = time.monotonic()
-        self.engine._schedule_undo(UNDO_HOTKEY_KEYCODE)
+        self.engine._schedule_undo(Z_KEYCODE)
         self.assertIsNone(self.engine._pending_learning_action)
 
     def test_injection_error_and_disabled_history_learning(self) -> None:
@@ -1161,7 +1134,7 @@ class EngineBranchTests(unittest.TestCase):
 
     def test_learning_action_labels_manual_and_reject(self) -> None:
         self.settings.set("detection.learning_confirmations", 1)
-        manual = CorrectionPlan((letter("q"),), None, 0, 1, "q", "й", FIXTURE_CORRECTION_CONFIDENCE, "Editor", False)
+        manual = CorrectionPlan((letter("q"),), None, 0, 1, "q", "й", CORRECTION_PLAN_CONFIDENCE, "Editor", False)
         self.engine._pending = manual
         self.engine._pending_learning_action = ("manual", 0, "q", 1)
         self.engine._pending_trigger_keycode = -1
@@ -1171,7 +1144,7 @@ class EngineBranchTests(unittest.TestCase):
         self.assertTrue(self.engine.confirm_learning_prompt())
         self.assertIn("правило выучено", self.engine.snapshot.last_action)
 
-        automatic = CorrectionPlan((letter("a"),), None, 1, 0, "ф", "a", FIXTURE_CORRECTION_CONFIDENCE, "Editor", False)
+        automatic = CorrectionPlan((letter("a"),), None, 1, 0, "ф", "a", CORRECTION_PLAN_CONFIDENCE, "Editor", False)
         self.engine._pending = automatic
         self.engine._pending_learning_action = ("reject", 0, "source", 1)
         self.engine._pending_trigger_keycode = -1
@@ -1189,7 +1162,7 @@ class EngineBranchTests(unittest.TestCase):
         self.assertEqual(callbacks, [None])
         self.assertFalse(self.engine.confirm_learning_prompt())
         self.assertFalse(self.engine.dismiss_learning_prompt())
-        self.assertFalse(self.engine._expire_learning_prompt(now=LEARNING_PROMPT_EARLY_NOW))
+        self.assertFalse(self.engine._expire_learning_prompt(now=LEARNING_PROMPT_EARLY_NOW_SECONDS))
 
         prompt = LearningPrompt(0, 1, "hello", "руддщ", "Editor")
         stale = LearningPrompt(0, 1, "world", "цщкдв", "Editor")
@@ -1199,19 +1172,19 @@ class EngineBranchTests(unittest.TestCase):
         self.assertFalse(self.engine.dismiss_learning_prompt(stale))
         deadline = self.engine._learning_prompt_deadline
         assert deadline is not None
-        self.assertFalse(self.engine._expire_learning_prompt(now=deadline - JUST_BEFORE_DEADLINE_MARGIN))
+        self.assertFalse(self.engine._expire_learning_prompt(now=deadline - JUST_BEFORE_DEADLINE_MARGIN_SECONDS))
         self.assertTrue(self.engine._expire_learning_prompt(now=deadline))
         self.assertEqual(callbacks[-1], None)
 
         self.engine._show_learning_prompt(prompt)
-        self.engine._handle(key("Escape", keycode=KEYCODE_ESCAPE))
+        self.engine._handle(key("Escape", keycode=ESCAPE_KEYCODE))
         self.assertIsNone(self.engine.learning_prompt)
         self.engine._show_learning_prompt(prompt)
-        self.engine._handle(key("a", keycode=KEYCODE_LOWERCASE_A_HOTKEY, character="a"))
+        self.engine._handle(key("a", keycode=A_KEYCODE, character="a"))
         self.assertIsNone(self.engine.learning_prompt)
 
         self.engine._show_learning_prompt(prompt)
-        modifier = key("Control_L", keycode=KEYCODE_CTRL_L)
+        modifier = key("Control_L", keycode=CONTROL_L_KEYCODE)
         self.engine._handle(modifier)
         self.assertIs(self.engine.learning_prompt, prompt)
         self.settings.set("detection.learning", False)
@@ -1219,17 +1192,17 @@ class EngineBranchTests(unittest.TestCase):
         self.assertIsNone(self.engine._forced_target_group(0, "hello"))
 
     def test_manual_layout_protection_overrides_learned_rule_on_pause(self) -> None:
-        self.engine.learning.confirm_manual(0, "hello", 1, MANUAL_RULE_CONFIRMATIONS_REQUIRED)
+        self.engine.learning.confirm_manual(0, "hello", 1, LEARNING_CONFIRMATIONS_REQUIRED)
         self.engine._manual_layout_group = 0
         self.engine._strokes = [
             letter(character, keycode)
-            for keycode, character in enumerate("hello", start=DEFAULT_LETTER_KEYCODE)
+            for keycode, character in enumerate("hello", start=SYNTHETIC_KEYCODE_BASE)
         ]
         self.engine._source_group = 0
         self.engine._pause_correction_pending = True
         self.engine._last_word_input_at = 1.0
 
-        self.engine._maybe_correct_after_pause(now=MANUAL_LAYOUT_PAUSE_NOW)
+        self.engine._maybe_correct_after_pause(now=MANUAL_LAYOUT_PAUSE_NOW_SECONDS)
 
         self.assertEqual(self.backend.injections, [])
         self.assertEqual(self.engine._manual_layout_group, 0)
@@ -1238,7 +1211,7 @@ class EngineBranchTests(unittest.TestCase):
     def test_context_expiry_copy_and_lru_limit(self) -> None:
         strokes = (letter("a"),)
         self.engine._remember_context("", 0, strokes)
-        self.engine._remember_context("Editor", OUT_OF_RANGE_GROUP_ID, strokes)
+        self.engine._remember_context("Editor", NONEXISTENT_LAYOUT_GROUP, strokes)
         self.engine._remember_context("Editor", 0, ())
         self.assertEqual(self.engine._contexts, {})
         self.engine._remember_context("Editor", 0, strokes)
@@ -1248,7 +1221,7 @@ class EngineBranchTests(unittest.TestCase):
         self.assertNotEqual(self.engine._contexts["editor"].words[0], "mutated")
         self.engine._contexts["editor"] = LanguageContext(0, {0: "a"}, time.monotonic() - (CONTEXT_TTL + 1))
         self.assertEqual(self.engine._context_for("Editor"), ({}, None))
-        for index in range(MAX_REMEMBERED_APPLICATION_CONTEXTS + CONTEXT_OVERFLOW_MARGIN):
+        for index in range(MAX_REMEMBERED_APPLICATION_CONTEXTS + APPLICATION_CONTEXT_OVERFLOW_MARGIN):
             self.engine._remember_context(f"App{index}", 0, strokes)
         self.assertEqual(len(self.engine._contexts), MAX_REMEMBERED_APPLICATION_CONTEXTS)
 
@@ -1270,7 +1243,7 @@ class EngineBranchTests(unittest.TestCase):
         self.settings.set("exclusions.applications", ["", "secret"])
         self.assertTrue(self.engine._application_excluded("My Secret Editor"))
         self.assertFalse(self.engine._application_excluded("Terminal"))
-        self.backend.group = ARBITRARY_GROUP_ID
+        self.backend.group = ARBITRARY_BACKEND_GROUP
         self.engine._poll_current_group()
         self.backend.group = self.engine.snapshot.current_group
         self.engine._poll_current_group()
@@ -1279,12 +1252,12 @@ class EngineBranchTests(unittest.TestCase):
 
     def test_commit_empty_and_ambiguous_apostrophe_paths(self) -> None:
         self.engine._commit_word(key("space", character=" "))
-        event = letter("'", KEYCODE_APOSTROPHE)
+        event = letter("'", APOSTROPHE_KEYCODE)
         self.engine._strokes = [letter("a")]
         self.engine._source_group = 0
         self.assertFalse(self.engine._ambiguous_key_is_boundary(event))
-        self.engine._strokes.insert(0, letter(",", KEYCODE_COMMA))
-        self.assertFalse(self.engine._ambiguous_key_is_boundary(letter(",", KEYCODE_COMMA_ALT)))
+        self.engine._strokes.insert(0, letter(",", COMMA_KEYCODE))
+        self.assertFalse(self.engine._ambiguous_key_is_boundary(letter(",", ALTERNATE_COMMA_KEYCODE)))
 
 
 class HotkeyAndKeyEventBranchTests(unittest.TestCase):
@@ -1292,13 +1265,13 @@ class HotkeyAndKeyEventBranchTests(unittest.TestCase):
         self.assertFalse(Hotkey("Ctrl").matches(key("Control_L")))
         self.assertFalse(Hotkey("Pause").matches(key("Pause", pressed=False)))
         self.assertTrue(Hotkey("Pause").matches(key("Break")))
-        all_modifiers = SHIFT_MASK | CONTROL_MASK | MOD1_MASK | MOD4_MASK
+        all_modifiers = SHIFT_MASK | CONTROL_MASK | ALT_MASK | SUPER_MASK
         event = key("x", state=all_modifiers)
         self.assertTrue(Hotkey("Control+Alt+Shift+Meta+X").matches(event))
         self.assertTrue(event.shift and event.control and event.alt and event.super_key)
         locked = key("x", state=LOCK_MASK)
         self.assertTrue(locked.caps_lock)
-        self.assertEqual(locked.character_for(OUT_OF_RANGE_CHARACTER_GROUP), "")
+        self.assertEqual(locked.character_for(NONEXISTENT_LAYOUT_GROUP), "")
 
     def test_layout_validation_identity_and_unsupported_pair(self) -> None:
         with self.assertRaises(ValueError):
@@ -1320,8 +1293,8 @@ class HotkeyAndKeyEventBranchTests(unittest.TestCase):
         forward["x"] = "changed"
         self.assertNotEqual(pair.us_to_ru.get("x"), "changed")
         everything = "".join(
-            chr(code) for code in range(UNICODE_CODEPOINT_LIMIT)
-            if not SURROGATE_RANGE_START <= code <= SURROGATE_RANGE_END
+            chr(code) for code in range(BMP_SWEEP_CODEPOINT_LIMIT)
+            if not UTF16_SURROGATE_FIRST_CODEPOINT <= code <= UTF16_SURROGATE_LAST_CODEPOINT
         )
         for source, target, mapping in (
             ("us", "ru", pair.us_to_ru),

@@ -10,11 +10,8 @@ from keyswitch.boundary_model import ARTIFACT
 from context_evidence import checksum
 from train_boundary_model import DIRECTORY, provenance
 from verify_context_v2 import read_object
-
-# Independently re-checked against the sealed report, not imported from the
-# frozen tools/train_boundary_model.py that first declared this gate.
-BOUNDARY_PROMOTION_MIN_DECIDED_FRACTION = 0.80
-VERIFY_REPORT_JSON_INDENT = 2
+from keyswitch.constants.file_formats import REPORT_JSON_INDENT
+from keyswitch.constants.training import BOUNDARY_PROMOTION_MIN_DECIDED_FRACTION
 
 
 def verify(directory: Path = DIRECTORY, active: Path = ARTIFACT) -> dict[str, object]:
@@ -52,4 +49,4 @@ def verify(directory: Path = DIRECTORY, active: Path = ARTIFACT) -> dict[str, ob
 
 
 if __name__ == "__main__":
-    print(json.dumps(verify(), ensure_ascii=False, indent=VERIFY_REPORT_JSON_INDENT))
+    print(json.dumps(verify(), ensure_ascii=False, indent=REPORT_JSON_INDENT))

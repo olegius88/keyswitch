@@ -23,15 +23,18 @@ import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Final
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from keyswitch.constants.file_formats import (
+    INTENT_STRICT_REPORT_LIMIT_BYTES,
+    KSLM_MAX_CONTAINER_BYTES,
+    METADATA_JSON_LIMIT_BYTES,
+    REPORT_JSON_INDENT,
+)
 
 
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
-REPORT_LIMIT_BYTES: Final[int] = 8 * 1024 * 1024
-MANIFEST_LIMIT_BYTES: Final[int] = 1024 * 1024
-ARTIFACT_LIMIT_BYTES: Final[int] = 14 * 1024 * 1024
 SHA256_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
 CURRENT_PATTERN: Final[re.Pattern[str]] = re.compile(r"current=([0-9a-f]{64})")
-SUMMARY_JSON_INDENT: Final[int] = 2
 REQUIRED_STRICT_GATES: Final[frozenset[str]] = frozenset(
     {
         "provenance",
@@ -194,12 +197,12 @@ def verify_report(
 ) -> dict[str, object]:
     """Return a short summary, or raise ``ReportRejected`` with the reason."""
 
-    report = load_object(report_path, REPORT_LIMIT_BYTES, "strict report")
-    manifest = load_object(manifest_path, MANIFEST_LIMIT_BYTES, "model manifest")
+    report = load_object(report_path, INTENT_STRICT_REPORT_LIMIT_BYTES, "strict report")
+    manifest = load_object(manifest_path, METADATA_JSON_LIMIT_BYTES, "model manifest")
     artifact_sha256 = sha256_bytes(
-        read_bounded(artifact_path, ARTIFACT_LIMIT_BYTES, "KSLM artifact")
+        read_bounded(artifact_path, KSLM_MAX_CONTAINER_BYTES, "KSLM artifact")
     )
-    config_sha256 = sha256_bytes(read_bounded(config_path, MANIFEST_LIMIT_BYTES, "config"))
+    config_sha256 = sha256_bytes(read_bounded(config_path, METADATA_JSON_LIMIT_BYTES, "config"))
 
     if report.get("strict_passed") is not True:
         raise ReportRejected("strict_passed is not true")
@@ -251,7 +254,7 @@ def verify_report(
     for name, relative in file_checks.items():
         recorded = current_digest(entries[name].get("detail"), name)
         actual = sha256_bytes(
-            read_bounded(project_root / relative, REPORT_LIMIT_BYTES, relative)
+            read_bounded(project_root / relative, INTENT_STRICT_REPORT_LIMIT_BYTES, relative)
         )
         manifest_field = name.removeprefix("toolchain_")
         if recorded != actual:
@@ -265,7 +268,7 @@ def verify_report(
         "toolchain_preseal_receipt_sha256",
     )
     actual_receipt = sha256_bytes(
-        read_bounded(receipt, REPORT_LIMIT_BYTES, "preseal receipt")
+        read_bounded(receipt, INTENT_STRICT_REPORT_LIMIT_BYTES, "preseal receipt")
     )
     if recorded_receipt != actual_receipt or toolchain.get("preseal_receipt_sha256") != actual_receipt:
         raise ReportRejected("preseal receipt changed since the report was produced")
@@ -273,7 +276,7 @@ def verify_report(
     for name, relative in SOURCE_PATHS.items():
         recorded_source = as_sha256(entries[name].get("detail"), name)
         actual_source = sha256_bytes(
-            read_bounded(project_root / relative, ARTIFACT_LIMIT_BYTES, relative)
+            read_bounded(project_root / relative, KSLM_MAX_CONTAINER_BYTES, relative)
         )
         if recorded_source != actual_source:
             raise ReportRejected(f"{relative} changed since the report was produced")
@@ -281,7 +284,7 @@ def verify_report(
 
     return {
         "report": str(report_path),
-        "report_sha256": sha256_bytes(read_bounded(report_path, REPORT_LIMIT_BYTES, "report")),
+        "report_sha256": sha256_bytes(read_bounded(report_path, INTENT_STRICT_REPORT_LIMIT_BYTES, "report")),
         "model_version": expected_version,
         "artifact_sha256": artifact_sha256,
         "gate_count": len(gates),
@@ -320,7 +323,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ReportRejected as error:
         print(f"strict report rejected: {error}", file=sys.stderr)
         return 1
-    print(json.dumps(summary, ensure_ascii=False, indent=SUMMARY_JSON_INDENT))
+    print(json.dumps(summary, ensure_ascii=False, indent=REPORT_JSON_INDENT))
     return 0
 
 

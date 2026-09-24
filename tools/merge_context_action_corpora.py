@@ -16,12 +16,14 @@ from typing import Protocol, cast
 import zlib
 
 from freeze_context_action_corpus import canonical, checksum
-from model_protocol import ACTIVE_SPLITS, ALL_SPLITS
+from keyswitch.constants.model_protocol import ACTIVE_SPLITS, ALL_SPLITS
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from keyswitch.constants.file_formats import HASH_CHUNK_BYTES
 
 ROOT = Path(__file__).resolve().parents[1]
 MEMBERSHIP_FIELDS = ("row_ids_sha256", "family_ids_sha256", "document_ids_sha256")
 HEX = re.compile(r"[0-9a-f]{64}\Z")
-COPY_CHUNK_BYTES = 1024 * 1024
 
 
 def object_value(value: object) -> dict[str, object]:
@@ -259,7 +261,7 @@ def merge_corpora(base_directory: Path, extension_directory: Path, output: Path)
                     raise ValueError("source changed during corpus composition")
                 copied = hashlib.sha256()
                 with source.open("rb") as incoming:
-                    for chunk in iter(lambda: incoming.read(COPY_CHUNK_BYTES), b""):
+                    for chunk in iter(lambda: incoming.read(HASH_CHUNK_BYTES), b""):
                         copied.update(chunk)
                         stream.write(chunk)
                 if copied.hexdigest() != current.sha256:

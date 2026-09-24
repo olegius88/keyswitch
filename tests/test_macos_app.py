@@ -25,6 +25,13 @@ from keyswitch import launcher as launcher_module
 from keyswitch import macos_app
 from keyswitch.backend import BackendProbe
 from keyswitch.macos_backend import MacBackend
+from fixture_values.platform import (
+    FAKE_DIAGNOSE_EXIT_CODE,
+    FAKE_GTK_MAIN_EXIT_CODE,
+    FAKE_MACOS_MAIN_EXIT_CODE,
+    FAKE_WINDOW_RUN_EXIT_CODE,
+)
+from keyswitch.constants.timing import MACOS_PERMISSION_POLL_SECONDS
 
 
 class FakeBackend:
@@ -58,14 +65,6 @@ def available_probe() -> BackendProbe:
 class LoadedStatus:
     def as_dict(self) -> dict[str, object]:
         return {"available": True}
-
-
-# Fake exit codes, one per mocked entry point, so a test failure names which
-# call's return value went astray instead of pointing at a bare number.
-FAKE_MACOS_MAIN_EXIT_CODE = 11
-FAKE_GTK_MAIN_EXIT_CODE = 3
-FAKE_WINDOW_RUN_EXIT_CODE = 5
-FAKE_DIAGNOSE_EXIT_CODE = 7
 
 
 class PlatformSelectionTests(unittest.TestCase):
@@ -179,7 +178,7 @@ class PermissionTests(unittest.TestCase):
             self.assertTrue(macos_app.ensure_permission(
                 cast(MacBackend, backend), threading.Event(), wait=wait))
         self.assertEqual(backend.requests, 1)
-        self.assertEqual(waits, [macos_app.PERMISSION_POLL_SECONDS])
+        self.assertEqual(waits, [MACOS_PERMISSION_POLL_SECONDS])
         self.assertIn("Универсальный доступ", stream.getvalue())
         self.assertIn(macos_app.PERMISSION_GRANTED_MESSAGE, stream.getvalue())
 

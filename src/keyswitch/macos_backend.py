@@ -25,108 +25,95 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from typing import Protocol
 
-from .backend import (
+from .backend import BackendProbe, FocusInfo, KeyDisposition, KeyEvent, ScreenAnchor
+from .constants.keyboard import (
     ALT_MASK,
     COMPLETED_ACTION_EVENT_COUNT,
-    LAYOUT_SWITCH_POLL_SECONDS,
-    LAYOUT_SWITCH_TIMEOUT_SECONDS,
     CONTROL_MASK,
-    BackendProbe,
-    FocusInfo,
-    KeyDisposition,
-    KeyEvent,
     LOCK_MASK,
+    POINTER_EVENT_GROUP,
     SHIFT_MASK,
     SUPER_MASK,
-    ScreenAnchor,
 )
-
-# Virtual key codes, read from Apple's Events.h. They name physical positions
-# and do not move with the layout, which is what the engine's key codes mean.
-VK_ANSI_Z = 0x06
-VK_ANSI_Q = 0x0C
-VK_PERIOD = 0x2F
-VK_KEYPAD_ENTER = 0x4C
-VK_RETURN = 0x24
-VK_TAB = 0x30
-VK_SPACE = 0x31
-VK_BACKSPACE = 0x33
-VK_ESCAPE = 0x35
-VK_COMMAND = 0x37
-VK_RIGHT_COMMAND = 0x36
-VK_SHIFT = 0x38
-VK_CAPS_LOCK = 0x39
-VK_OPTION = 0x3A
-VK_CONTROL = 0x3B
-VK_RIGHT_SHIFT = 0x3C
-VK_RIGHT_OPTION = 0x3D
-VK_RIGHT_CONTROL = 0x3E
-VK_FUNCTION = 0x3F
-VK_HELP = 0x72
-VK_HOME = 0x73
-VK_PAGE_UP = 0x74
-VK_FORWARD_DELETE = 0x75
-VK_END = 0x77
-VK_PAGE_DOWN = 0x79
-VK_LEFT_ARROW = 0x7B
-VK_RIGHT_ARROW = 0x7C
-VK_DOWN_ARROW = 0x7D
-VK_UP_ARROW = 0x7E
+from .constants.timing import (
+    KEYBOARD_LISTENER_START_TIMEOUT_SECONDS,
+    KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS,
+    LAYOUT_SWITCH_POLL_SECONDS,
+    LAYOUT_SWITCH_TIMEOUT_SECONDS,
+)
+from .constants.macos import (
+    EVENT_TAP_DISABLED_TYPES,
+    MAC_ALT_KEYS,
+    MAC_CONTROL_KEYS,
+    MAC_SCRIPT_PROBE_KEYCODE,
+    MAC_SHIFT_KEYS,
+    MAC_SUPER_KEYS,
+    MAC_VK_BACKSPACE,
+    MAC_VK_CAPS_LOCK,
+    MAC_VK_COMMAND,
+    MAC_VK_CONTROL,
+    MAC_VK_DOWN_ARROW,
+    MAC_VK_END,
+    MAC_VK_ESCAPE,
+    MAC_VK_FORWARD_DELETE,
+    MAC_VK_FUNCTION,
+    MAC_VK_HELP,
+    MAC_VK_HOME,
+    MAC_VK_KEYPAD_ENTER,
+    MAC_VK_LEFT_ARROW,
+    MAC_VK_OPTION,
+    MAC_VK_PAGE_DOWN,
+    MAC_VK_PAGE_UP,
+    MAC_VK_RETURN,
+    MAC_VK_RIGHT_ARROW,
+    MAC_VK_RIGHT_COMMAND,
+    MAC_VK_RIGHT_CONTROL,
+    MAC_VK_RIGHT_OPTION,
+    MAC_VK_RIGHT_SHIFT,
+    MAC_VK_SHIFT,
+    MAC_VK_SPACE,
+    MAC_VK_TAB,
+    MAC_VK_UP_ARROW,
+)
+from .constants.text import CYRILLIC_CODEPOINT_RANGE
 
 
 # The engine speaks X11 key names on every platform; the Windows backend
 # translates into the same vocabulary.
 KEY_NAMES = {
-    VK_RETURN: "Return",
-    VK_KEYPAD_ENTER: "KP_Enter",
-    VK_TAB: "Tab",
-    VK_SPACE: "space",
-    VK_BACKSPACE: "BackSpace",
-    VK_FORWARD_DELETE: "Delete",
-    VK_ESCAPE: "Escape",
-    VK_CAPS_LOCK: "Caps_Lock",
-    VK_SHIFT: "Shift_L",
-    VK_RIGHT_SHIFT: "Shift_R",
-    VK_CONTROL: "Control_L",
-    VK_RIGHT_CONTROL: "Control_R",
-    VK_OPTION: "Alt_L",
-    VK_RIGHT_OPTION: "Alt_R",
-    VK_COMMAND: "Super_L",
-    VK_RIGHT_COMMAND: "Super_R",
-    VK_FUNCTION: "Function",
-    VK_HELP: "Insert",
-    VK_HOME: "Home",
-    VK_END: "End",
-    VK_PAGE_UP: "Page_Up",
-    VK_PAGE_DOWN: "Page_Down",
-    VK_LEFT_ARROW: "Left",
-    VK_RIGHT_ARROW: "Right",
-    VK_UP_ARROW: "Up",
-    VK_DOWN_ARROW: "Down",
+    MAC_VK_RETURN: "Return",
+    MAC_VK_KEYPAD_ENTER: "KP_Enter",
+    MAC_VK_TAB: "Tab",
+    MAC_VK_SPACE: "space",
+    MAC_VK_BACKSPACE: "BackSpace",
+    MAC_VK_FORWARD_DELETE: "Delete",
+    MAC_VK_ESCAPE: "Escape",
+    MAC_VK_CAPS_LOCK: "Caps_Lock",
+    MAC_VK_SHIFT: "Shift_L",
+    MAC_VK_RIGHT_SHIFT: "Shift_R",
+    MAC_VK_CONTROL: "Control_L",
+    MAC_VK_RIGHT_CONTROL: "Control_R",
+    MAC_VK_OPTION: "Alt_L",
+    MAC_VK_RIGHT_OPTION: "Alt_R",
+    MAC_VK_COMMAND: "Super_L",
+    MAC_VK_RIGHT_COMMAND: "Super_R",
+    MAC_VK_FUNCTION: "Function",
+    MAC_VK_HELP: "Insert",
+    MAC_VK_HOME: "Home",
+    MAC_VK_END: "End",
+    MAC_VK_PAGE_UP: "Page_Up",
+    MAC_VK_PAGE_DOWN: "Page_Down",
+    MAC_VK_LEFT_ARROW: "Left",
+    MAC_VK_RIGHT_ARROW: "Right",
+    MAC_VK_UP_ARROW: "Up",
+    MAC_VK_DOWN_ARROW: "Down",
 }
 
-SHIFT_KEYS = frozenset({VK_SHIFT, VK_RIGHT_SHIFT})
-CONTROL_KEYS = frozenset({VK_CONTROL, VK_RIGHT_CONTROL})
-ALT_KEYS = frozenset({VK_OPTION, VK_RIGHT_OPTION})
-SUPER_KEYS = frozenset({VK_COMMAND, VK_RIGHT_COMMAND})
-MODIFIER_KEYCODES = SHIFT_KEYS | CONTROL_KEYS | ALT_KEYS | SUPER_KEYS | {VK_CAPS_LOCK, VK_FUNCTION}
-
-# The key whose character tells one layout from the other: it carries a Latin
-# letter in an English layout and a Cyrillic one in a Russian layout.
-SCRIPT_PROBE_KEYCODE = VK_ANSI_Q
-CYRILLIC_RANGE = (0x0400, 0x04FF)
 
 # A pointer event carries no key; the engine recognises it by this name.
 POINTER_KEY_NAME = "Pointer"
-POINTER_GROUP = -1
 
-# The tap reports these instead of a key when the system disabled it.
-TAP_DISABLED_BY_TIMEOUT = 0xFFFFFFFE
-TAP_DISABLED_BY_USER_INPUT = 0xFFFFFFFF
-TAP_DISABLED_TYPES = frozenset({TAP_DISABLED_BY_TIMEOUT, TAP_DISABLED_BY_USER_INPUT})
 
-TAP_START_TIMEOUT_SECONDS = 5.0
-TAP_STOP_TIMEOUT_SECONDS = 2.0
 # How long a layout change may take to become visible. Selecting an input
 # source is asynchronous: the call returns before the window server has told
 # the focused application, and typing into the old layout in between is exactly
@@ -214,7 +201,7 @@ class MacAPI(Protocol):
 
 
 def is_cyrillic(text: str) -> bool:
-    return bool(text) and CYRILLIC_RANGE[0] <= ord(text[0]) <= CYRILLIC_RANGE[1]
+    return bool(text) and CYRILLIC_CODEPOINT_RANGE[0] <= ord(text[0]) <= CYRILLIC_CODEPOINT_RANGE[1]
 
 
 def select_source_pair(
@@ -232,7 +219,7 @@ def select_source_pair(
     english = ""
     russian = ""
     for source in unique:
-        character = translate(SCRIPT_PROBE_KEYCODE, 0, source)
+        character = translate(MAC_SCRIPT_PROBE_KEYCODE, 0, source)
         if not english and character.isascii() and character.isalpha():
             english = source
         elif not russian and is_cyrillic(character):
@@ -337,7 +324,7 @@ class MacBackend:
         self._running.set()
         self._thread = threading.Thread(target=self._tap_loop, name="keyswitch-tap", daemon=True)
         self._thread.start()
-        self._ready.wait(timeout=TAP_START_TIMEOUT_SECONDS)
+        self._ready.wait(timeout=KEYBOARD_LISTENER_START_TIMEOUT_SECONDS)
         error = self._startup_error()
         if error is not None:
             self._running.clear()
@@ -366,7 +353,7 @@ class MacBackend:
         self._api.stop_event_tap()
         thread = self._thread
         if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout=TAP_STOP_TIMEOUT_SECONDS)
+            thread.join(timeout=KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS)
         self._running.clear()
         self._thread = None
 
@@ -540,7 +527,7 @@ class MacBackend:
     def _handle_native(self, native: NativeKeyEvent) -> bool:
         """Answer the tap: True swallows the event, False lets it through."""
 
-        if native.event_type in TAP_DISABLED_TYPES:
+        if native.event_type in EVENT_TAP_DISABLED_TYPES:
             # The system switches off a tap it considers unresponsive. Reviving
             # it here is the difference between a brief stall and a program
             # that has silently stopped seeing the keyboard.
@@ -552,7 +539,7 @@ class MacBackend:
             listener = self._listener
             if listener is not None:
                 listener(KeyEvent(
-                    True, 0, POINTER_KEY_NAME, "", ("", ""), POINTER_GROUP, 0, native.timestamp
+                    True, 0, POINTER_KEY_NAME, "", ("", ""), POINTER_EVENT_GROUP, 0, native.timestamp
                 ))
             return False
         if not native.injected and not native.replayed:
@@ -605,13 +592,13 @@ class MacBackend:
 
     def _normalized_state(self) -> int:
         state = LOCK_MASK if self._api.caps_lock_enabled() else 0
-        if self._pressed & SHIFT_KEYS:
+        if self._pressed & MAC_SHIFT_KEYS:
             state |= SHIFT_MASK
-        if self._pressed & CONTROL_KEYS:
+        if self._pressed & MAC_CONTROL_KEYS:
             state |= CONTROL_MASK
-        if self._pressed & ALT_KEYS:
+        if self._pressed & MAC_ALT_KEYS:
             state |= ALT_MASK
-        if self._pressed & SUPER_KEYS:
+        if self._pressed & MAC_SUPER_KEYS:
             state |= SUPER_MASK
         return state
 
@@ -658,7 +645,7 @@ class MacBackend:
             )
         delete_count = len(stroke_list) + len(literal) + len(late_list)
         delete_inputs = tuple(
-            NativeInput(pressed, VK_BACKSPACE)
+            NativeInput(pressed, MAC_VK_BACKSPACE)
             for _ in range(delete_count)
             for pressed in (True, False)
         )
@@ -729,13 +716,13 @@ class MacBackend:
             shifted ^= stroke.caps_lock != self._api.caps_lock_enabled()
         replayed = not synthetic
         if shifted:
-            result.append(NativeInput(True, VK_SHIFT, replayed=replayed))
+            result.append(NativeInput(True, MAC_VK_SHIFT, replayed=replayed))
         result.extend((
             NativeInput(True, stroke.keycode, replayed=replayed),
             NativeInput(False, stroke.keycode, replayed=replayed),
         ))
         if shifted:
-            result.append(NativeInput(False, VK_SHIFT, replayed=replayed))
+            result.append(NativeInput(False, MAC_VK_SHIFT, replayed=replayed))
         return tuple(result)
 
     def _switch_group(self, group: int) -> None:

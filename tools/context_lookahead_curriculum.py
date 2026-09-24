@@ -22,18 +22,19 @@ from keyswitch.context_action_features import extract_action_features
 from keyswitch.context_model import ACTIONS, ContextAction, ContextEvidence
 from keyswitch.detector import LanguageDetector
 from keyswitch.word_decision import automatic_word_decision
-from model_protocol import FITTING_SPLITS
+from keyswitch.constants.model_protocol import FITTING_SPLITS
+from keyswitch.constants.training import (
+    LOOKAHEAD_ANCHOR_MAX_CHARACTERS,
+    LOOKAHEAD_ANCHOR_MIN_CHARACTERS,
+    LOOKAHEAD_DEFAULT_MAXIMUM_FAMILIES,
+    LOOKAHEAD_MAXIMUM_FAMILIES_LIMIT,
+    LOOKAHEAD_MAXIMUM_SEEDS_PER_FAMILY,
+    PLANNED_VARIANT_MASS_DIVISOR,
+    SHORT_WORD_MAX_CHARACTERS,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MAXIMUM_SHORT_WORD_CHARACTERS = 2
-DEFAULT_MAXIMUM_FAMILIES = 64
-MAXIMUM_FAMILIES_LIMIT = 4096
-# Also the ceiling `seeds_per_family` may not exceed; the default sits at the cap.
-MAXIMUM_SEEDS_PER_FAMILY = 128
-MINIMUM_ANCHOR_WORD_CHARACTERS = 3
-MAXIMUM_ANCHOR_WORD_CHARACTERS = 64
-PLANNED_VARIANT_MASS_DIVISOR = 2.0
 
 
 @dataclass(frozen=True)
@@ -102,7 +103,7 @@ def _fingerprint(item: ContextEvidence) -> str:
 
 def _eligible(seed: LookaheadSeed) -> bool:
     item = seed.evidence
-    if (not 0 < len(item.original) <= MAXIMUM_SHORT_WORD_CHARACTERS or not item.original.isalpha() or not item.alternative.isalpha()
+    if (not 0 < len(item.original) <= SHORT_WORD_MAX_CHARACTERS or not item.original.isalpha() or not item.alternative.isalpha()
             or item.trigger != "space" or item.boundary_text != " "
             or item.literal_tail or item.after_origin == "planned_next_conversion"):
         return False
@@ -124,8 +125,8 @@ def _eligible(seed: LookaheadSeed) -> bool:
 
 def build_lookahead_curriculum(
     seeds: Sequence[LookaheadSeed], anchors: Sequence[LookaheadAnchor], detector: LanguageDetector, *,
-    profile: str, maximum_families: int = DEFAULT_MAXIMUM_FAMILIES,
-    seeds_per_family: int = MAXIMUM_SEEDS_PER_FAMILY, split: str = "train",
+    profile: str, maximum_families: int = LOOKAHEAD_DEFAULT_MAXIMUM_FAMILIES,
+    seeds_per_family: int = LOOKAHEAD_MAXIMUM_SEEDS_PER_FAMILY, split: str = "train",
 ) -> LookaheadCurriculum:
     """Return original plus labelled, unexecuted planned-context variants.
 
@@ -141,11 +142,11 @@ def build_lookahead_curriculum(
     model enters WAIT or converts the next word. Sequence acceptance remains
     necessary. Original and planned variants divide each input seed's mass.
     """
-    if (type(maximum_families) is not int or not 1 <= maximum_families <= MAXIMUM_FAMILIES_LIMIT
-            or type(seeds_per_family) is not int or not 1 <= seeds_per_family <= MAXIMUM_SEEDS_PER_FAMILY):
+    if (type(maximum_families) is not int or not 1 <= maximum_families <= LOOKAHEAD_MAXIMUM_FAMILIES_LIMIT
+            or type(seeds_per_family) is not int or not 1 <= seeds_per_family <= LOOKAHEAD_MAXIMUM_SEEDS_PER_FAMILY):
         raise ValueError(
-            f"lookahead budgets must be integers: families 1 to {MAXIMUM_FAMILIES_LIMIT}, "
-            f"seeds per family 1 to {MAXIMUM_SEEDS_PER_FAMILY}"
+            f"lookahead budgets must be integers: families 1 to {LOOKAHEAD_MAXIMUM_FAMILIES_LIMIT}, "
+            f"seeds per family 1 to {LOOKAHEAD_MAXIMUM_SEEDS_PER_FAMILY}"
         )
     if profile not in ("portable", "reference_hunspell") or set(detector.models) != {0, 1}:
         raise ValueError("lookahead requires an explicit lexical profile and both models")
@@ -168,7 +169,7 @@ def build_lookahead_curriculum(
     available: dict[int, list[LookaheadAnchor]] = {0: [], 1: []}
     for anchor in sorted(anchors, key=lambda row: row.identifier):
         try:
-            if (not MINIMUM_ANCHOR_WORD_CHARACTERS <= len(anchor.text) <= MAXIMUM_ANCHOR_WORD_CHARACTERS
+            if (not LOOKAHEAD_ANCHOR_MIN_CHARACTERS <= len(anchor.text) <= LOOKAHEAD_ANCHOR_MAX_CHARACTERS
                     or not anchor.text.isalpha()):
                 raise ValueError("anchor is not one complete word")
             translated(anchor.text, anchor.group)

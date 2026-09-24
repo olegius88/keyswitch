@@ -9,11 +9,9 @@ import re
 import uuid
 from datetime import datetime, timezone
 
-from .config import JSON_INDENT_SPACES
+from .constants.files import ASCII_NINE, ASCII_ZERO, HEADER_BYTES, JSON_INDENT_SPACES, PROBE_BYTES
 
 VERSION = re.compile(r"[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}(?:[-+][a-zA-Z0-9.-]{1,40})?")
-HEADER_BYTES = 256
-PROBE_BYTES = 1024 * 1024
 RECORD_START = re.compile(rb"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3} ", re.MULTILINE)
 HEADER = re.compile(
     RECORD_START.pattern + rb"(?P<version>[0-9A-Za-z.+-]+) "
@@ -21,8 +19,6 @@ HEADER = re.compile(
 )
 MARKER_KIND = "keyswitch.version"
 TIMESTAMP_SHAPE = b"0000-00-00 00:00:00,000 "
-ASCII_ZERO = 48  # ord("0")
-ASCII_NINE = 57  # ord("9")
 
 
 def header_version(data: bytes) -> str | None:

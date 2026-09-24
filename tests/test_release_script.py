@@ -16,6 +16,12 @@ if TOOLS_PATH not in sys.path:
 
 import release as driver  # noqa: E402
 import release_pipeline as pipeline  # noqa: E402
+from fixture_values.clock import RELEASE_SCRIPT_CI_TIMEOUT_SECONDS
+from fixture_values.release import (
+    RELEASE_SCRIPT_PIPELINE_FAILURE_RETURN_CODE,
+    RELEASE_SCRIPT_TARGET_RUN_ID,
+)
+from keyswitch.constants.release import CI_APPEARANCE_TIMEOUT_SECONDS, SIGINT_EXIT_CODE
 
 
 CHANGELOG_TEXT = """# Changelog
@@ -39,9 +45,6 @@ NOTES_TEXT = """# KeySwitch 0.9.1
 - KeySwitch-0.9.1-macos-x86_64.zip
 """
 
-TEST_CI_TIMEOUT_SECONDS = 60.0
-PIPELINE_FAILURE_RETURN_CODE = 3
-TARGET_RUN_ID = 2
 WORKFLOW_WATCH_COMMAND = ["gh", "run", "watch"]
 
 
@@ -55,7 +58,7 @@ def options(**overrides: object) -> driver.Options:
         "skip_pipeline": False,
         "skip_ci": False,
         "dry_run": False,
-        "ci_timeout": TEST_CI_TIMEOUT_SECONDS,
+        "ci_timeout": RELEASE_SCRIPT_CI_TIMEOUT_SECONDS,
     }
     base.update(overrides)
     message_file = base["message_file"]
@@ -238,7 +241,7 @@ class PipelineResultTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            completed = Mock(returncode=PIPELINE_FAILURE_RETURN_CODE)
+            completed = Mock(returncode=RELEASE_SCRIPT_PIPELINE_FAILURE_RETURN_CODE)
             with (
                 patch.object(pipeline, "run_identifier", return_value="run"),
                 patch.object(pipeline, "DEFAULT_PIPELINE_ROOT", Path(temporary)),
@@ -291,20 +294,20 @@ class GitHubTests(unittest.TestCase):
             [
                 {"databaseId": 1, "workflowName": "Tests", "event": "push"},
                 {
-                    "databaseId": TARGET_RUN_ID,
+                    "databaseId": RELEASE_SCRIPT_TARGET_RUN_ID,
                     "workflowName": "Build Linux and Windows packages and release",
                     "event": "push",
                 },
             ]
         )
         with patch.object(driver, "gh", return_value=payload):
-            self.assertEqual(driver.workflow_run_id("v0.9.1"), str(TARGET_RUN_ID))
+            self.assertEqual(driver.workflow_run_id("v0.9.1"), str(RELEASE_SCRIPT_TARGET_RUN_ID))
 
     def test_a_run_that_never_appears_stops_the_release(self) -> None:
         payload = json.dumps([{"databaseId": 1, "workflowName": "Tests", "event": "push"}])
         with (
             patch.object(driver, "gh", return_value=payload),
-            patch("release.time.monotonic", side_effect=[0.0, driver.CI_APPEARANCE_TIMEOUT]),
+            patch("release.time.monotonic", side_effect=[0.0, CI_APPEARANCE_TIMEOUT_SECONDS]),
             self.assertRaisesRegex(driver.ReleaseError, "no release workflow run appeared"),
         ):
             driver.workflow_run_id("v0.9.1")
@@ -406,7 +409,7 @@ class CommandLineTests(unittest.TestCase):
         ):
             self.assertEqual(driver.main([]), 1)
         with patch.object(driver, "release", side_effect=KeyboardInterrupt()):
-            self.assertEqual(driver.main([]), driver.SIGINT_EXIT_CODE)
+            self.assertEqual(driver.main([]), SIGINT_EXIT_CODE)
         with patch.object(driver, "release") as released:
             self.assertEqual(driver.main(["--dry-run"]), 0)
         released.assert_called_once()

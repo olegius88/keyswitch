@@ -13,9 +13,7 @@ if TOOLS not in sys.path:
     sys.path.insert(0, TOOLS)
 
 from context_physical_keys import KEYS, physical_keys, translated
-
-# translated() only accepts group 0 or 1; this is one step past the valid range.
-OUT_OF_RANGE_GROUP = 2
+from fixture_values.keys import UNSUPPORTED_LAYOUT_GROUP
 
 
 class ContextPhysicalKeyTests(unittest.TestCase):
@@ -60,6 +58,6 @@ class ContextPhysicalKeyTests(unittest.TestCase):
             for character in ("\t", "\n", "\u00a0", "’", "🙂", "é"):
                 with self.subTest(group=group, codepoint=ord(character)), self.assertRaisesRegex(ValueError, "unsupported physical glyph"):
                     translated(character, group)
-        for invalid_group in (-1, OUT_OF_RANGE_GROUP, True, False, "0", None):
+        for invalid_group in (-1, UNSUPPORTED_LAYOUT_GROUP, True, False, "0", None):
             with self.subTest(group=invalid_group), self.assertRaisesRegex(ValueError, "requires group"):
                 translated("", cast(int, invalid_group))

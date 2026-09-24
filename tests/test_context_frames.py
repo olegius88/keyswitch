@@ -11,9 +11,8 @@ if TOOLS_PATH not in sys.path:
 
 from context_corpus import AssignedPhrase, Phrase
 from context_frames import build, word_spans
-
-SECOND_PHRASE_ID = 2
-PAIRED_ROW_STRIDE = 2
+from fixture_values.corpora import CONTEXT_FRAMES_SECOND_PHRASE_ID
+from fixture_values.counts import CONTEXT_FRAMES_PAIRED_ROW_STRIDE
 
 
 class FrameTests(unittest.TestCase):
@@ -26,10 +25,10 @@ class FrameTests(unittest.TestCase):
     def test_reserve_is_not_expanded_and_interventions_preserve_exact_alternatives(self) -> None:
         reserved = AssignedPhrase(Phrase(1, "rus", "У этого есть смысл.", ""), "first", "reserve")
         self.assertEqual(build([reserved]), [])
-        source = AssignedPhrase(Phrase(SECOND_PHRASE_ID, "rus", "У этого есть смысл.", ""), "second", "train")
+        source = AssignedPhrase(Phrase(CONTEXT_FRAMES_SECOND_PHRASE_ID, "rus", "У этого есть смысл.", ""), "second", "train")
         rows = build([source])
         self.assertTrue(rows)
-        for correct, wrong in zip(rows[::PAIRED_ROW_STRIDE], rows[1::PAIRED_ROW_STRIDE]):
+        for correct, wrong in zip(rows[::CONTEXT_FRAMES_PAIRED_ROW_STRIDE], rows[1::CONTEXT_FRAMES_PAIRED_ROW_STRIDE]):
             self.assertEqual(correct.action, "keep")
             self.assertEqual(correct.original, wrong.alternative)
             self.assertEqual(correct.alternative, wrong.original)

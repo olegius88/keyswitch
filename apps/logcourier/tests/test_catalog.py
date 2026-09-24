@@ -1,4 +1,7 @@
 import pytest
+from fixture_values.counts import EXPECTED_ENTRIES, UPLOADS_PER_DELIVERY
+from fixture_values.hashes import SHA256_HEX_LENGTH
+from fixture_values.keys import FOREIGN_MESSAGE_ID, FOREIGN_USER_ID
 
 from logcourier.catalog import (
     DeliveryCancelled,
@@ -11,17 +14,6 @@ from logcourier.catalog import (
 from logcourier.collector import Collector
 from logcourier.store import HEAD_DIGEST_KEY, LEGACY_HEAD_KEY, PENDING_KEY
 from logcourier.telegram import TelegramError
-
-# One archive upload plus one catalog upload, regardless of whether the pin
-# that follows succeeds.
-UPLOADS_PER_DELIVERY = 2
-# Two archived files delivered across two scan-and-deliver cycles.
-EXPECTED_ENTRIES = 2
-SHA256_HEX_LENGTH = 64
-# A message id/user id fixture standing in for something outside this
-# delivery's own catalog chain (another process's pin, an unrelated sender).
-FOREIGN_MESSAGE_ID = 99
-FOREIGN_USER_ID = 777
 
 
 def test_delivery_catalog_chain_and_restart(store, configured, telegram):

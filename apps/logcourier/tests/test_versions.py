@@ -5,67 +5,40 @@ import os
 import zipfile
 
 import pytest
+from fixture_values.clock import EXPECTED_PACED_MUTATION_TIMES, FIXTURE_CLOCK_START
+from fixture_values.counts import (
+    ALL_ENTRIES_AFTER_SOURCE_REMOVED,
+    ALL_ENTRIES_AFTER_THREE_DELIVERIES,
+    BACKLOG_LINE_COUNT,
+    CHUNK_SIZES,
+    COMPACTION_TEST_CHUNK_SIZE,
+    FAKE_HEX_ID_LENGTH,
+    FILL_BUDGET_LINE_COUNT,
+    FIXTURE_FILE_SIZE,
+    HEADER_SPLIT_OFFSET,
+    INVALID_VERSION_TYPE_VALUE,
+    PARTIAL_SCAN_CHUNK_SIZE,
+    PAST_PROBE_MARGIN_BYTES,
+    RESTART_MARKER_COUNT,
+    SAFETY_LOOP_LIMIT,
+    SUFFICIENT_CAPACITY_BYTES,
+    TINY_CHUNK_SIZE,
+    TWO_COPIES,
+    TWO_DISTINCT_SELECTIONS,
+    TWO_DOWNLOADED_ZIPS,
+    TWO_FRAGMENT_ENTRIES,
+    UNFINISHED_HEADER_LENGTHS,
+    UPLOADS_WITH_VERSION_MARKER,
+)
+from fixture_values.hashes import SHA256_HEX_LENGTH
 
 from logcourier.batching import compact
 from logcourier.catalog import current_catalog, deliver, list_entries
 from logcourier.collector import Collector
-from logcourier.rate_limit import GROUP_INTERVAL, RateLimitedClient
+from logcourier.constants.files import CHUNK_BYTES
+from logcourier.rate_limit import RateLimitedClient
 from logcourier.store import QueueFull, Store
 from logcourier.telegram import TelegramError
-
-# collect_all's default chunk size: enough to read a real log file in one pass.
-DEFAULT_CHUNK_SIZE_BYTES = 2 * 1024 * 1024
-# Generous loop bounds for collect_all/deliver_all: high enough that the real
-# stopping condition always fires first, low enough to fail fast if it never does.
-SAFETY_LOOP_LIMIT = 1000
-# Parametrized read chunk sizes: pathologically small, small, and effectively unbounded.
-CHUNK_SIZES = (7, 71, 100000)
-# A chunk size small enough that Collector.scan(max_chunks=1) stops after one
-# chunk, leaving further sources/rotations unread until the next scan.
-PARTIAL_SCAN_CHUNK_SIZE = 80
-# Arbitrary backlog size for an old rotated file that must not be read first.
-BACKLOG_LINE_COUNT = 20
-# 0.16.1 -> 0.16.2 -> 0.16.2 -> 0.16.1 is three transitions; the repeated
-# 0.16.2 in the middle is not marked again.
-RESTART_MARKER_COUNT = 3
-# A queue capacity comfortably larger than anything this test writes.
-SUFFICIENT_CAPACITY_BYTES = 100000
-# Splits a generated log line mid-header, so a restart is seen to preserve the wait.
-HEADER_SPLIT_OFFSET = 33
-# A chunk size smaller than one log line, forcing multi-chunk partial reads.
-TINY_CHUNK_SIZE = 9
-# How many times a fixture log line is duplicated, to produce that many
-# separate fragments/entries.
-TWO_COPIES = 2
-# A chunk size chosen to split several duplicated source lines across chunks
-# while exercising compaction.
-COMPACTION_TEST_CHUNK_SIZE = 70
-FIXTURE_CLOCK_START = 100.0
-# Three mutation calls (marker, data, catalog), each paced GROUP_INTERVAL apart.
-EXPECTED_CALL_TIMES = [
-    FIXTURE_CLOCK_START,
-    FIXTURE_CLOCK_START + GROUP_INTERVAL,
-    FIXTURE_CLOCK_START + GROUP_INTERVAL + GROUP_INTERVAL,
-]
-# marker + data + catalog uploads for one delivery that includes a fresh version marker.
-UPLOADS_WITH_VERSION_MARKER = 3
-# All catalog entries survive dropping a source from config; only "current" narrows.
-ALL_ENTRIES_AFTER_SOURCE_REMOVED = 2
-ALL_ENTRIES_AFTER_THREE_DELIVERIES = 3
-TWO_DISTINCT_SELECTIONS = 2
-# A deliberately wrong (non-string) "version" field value.
-INVALID_VERSION_TYPE_VALUE = 3
-# Unfinished header lengths that must not let the old version leak through.
-UNFINISHED_HEADER_LENGTHS = (1, 4, 8, 23, 33)
-# Past PROBE_BYTES by this margin, to be sure the probe window is exceeded.
-PAST_PROBE_MARGIN_BYTES = 10
-FILL_BUDGET_LINE_COUNT = 100
-TWO_FRAGMENT_ENTRIES = 2
-TWO_DOWNLOADED_ZIPS = 2
-# Hex-length fixtures for a fabricated catalog entry.
-FAKE_ID_LENGTH = 32
-SHA256_HEX_LENGTH = 64
-FIXTURE_FILE_SIZE = 10
 
 
 def line(version, text="text", time="12:00:00"):
@@ -88,7 +61,7 @@ def markers(store, config):
     ]
 
 
-def collect_all(store, config, chunk_size=DEFAULT_CHUNK_SIZE_BYTES):
+def collect_all(store, config, chunk_size=CHUNK_BYTES):
     for _ in range(SAFETY_LOOP_LIMIT):
         if not Collector(store, chunk_size).scan(config)[0]:
             return
@@ -300,7 +273,7 @@ def test_marker_uses_existing_rate_limit_and_is_not_reuploaded_after_pin_failure
     telegram.fail_pin = True
     with pytest.raises(TelegramError):
         deliver(store, config, client)
-    assert calls == EXPECTED_CALL_TIMES  # marker, data, catalog
+    assert calls == EXPECTED_PACED_MUTATION_TIMES  # marker, data, catalog
     assert "МАРКЕР ВЕРСИИ" in telegram.messages[1]["caption"]
     assert "0.16.2" in telegram.messages[1]["caption"]
     telegram.fail_pin = False
@@ -419,7 +392,8 @@ def test_even_one_unfinished_timestamp_byte_cannot_inherit_old_version(store, co
 
 
 def test_tail_probe_is_bounded_and_ignores_versions_in_message_text():
-    from logcourier.versions import PROBE_BYTES, latest_version
+    from logcourier.constants.files import PROBE_BYTES
+    from logcourier.versions import latest_version
 
     data = line("0.16.1") + b"x" * PROBE_BYTES + b"\n" + line("0.16.2", "model_version=9.9.9")
     assert latest_version(io.BytesIO(data)) == "0.16.2"
@@ -552,8 +526,8 @@ def test_download_selection_refuses_foreign_files_and_links(tmp_path, collision)
     from logcourier.__main__ import selection_directory
 
     entry = {
-        "bundle_id": "a" * FAKE_ID_LENGTH,
-        "source_id": "b" * FAKE_ID_LENGTH,
+        "bundle_id": "a" * FAKE_HEX_ID_LENGTH,
+        "source_id": "b" * FAKE_HEX_ID_LENGTH,
         "keyswitch_version": "0.16.2",
         "sha256": "c" * SHA256_HEX_LENGTH,
         "size": FIXTURE_FILE_SIZE,
@@ -591,7 +565,7 @@ def test_gui_reports_version_only_for_configured_sources(tmp_path, configured, m
             {
                 "keyswitch_versions": {
                     config.sources[0].id: {"source_label": "Active", "version": "0.16.2"},
-                    "f" * FAKE_ID_LENGTH: {"source_label": "Removed", "version": "0.16.1"},
+                    "f" * FAKE_HEX_ID_LENGTH: {"source_label": "Removed", "version": "0.16.1"},
                 }
             },
         )

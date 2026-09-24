@@ -7,22 +7,25 @@ import uuid
 from datetime import datetime, timezone
 
 from .config import Config
+from .constants.files import INDEX_LIMIT
+from .constants.limits import (
+    CATALOG_MAX_ENTRIES,
+    CATALOG_MAX_VERSION_ENTRIES,
+    DEFAULT_ENTRY_LIMIT,
+    DELIVERY_BATCH_LIMIT,
+    MAX_CATALOG_PAGES,
+)
+from .constants.telegram import MAX_DOWNLOAD
 from .store import HEAD_DIGEST_KEY, LEGACY_HEAD_KEY, PENDING_KEY, Store
-from .telegram import FILE_ID, MAX_DOWNLOAD, Telegram, TelegramError
+from .telegram import FILE_ID, Telegram, TelegramError
 from .versions import MARKER_KIND, VERSION, caption, current_versions
 
-INDEX_LIMIT = 2 * 1024 * 1024
 CATALOG_CAPTION = "LogCourier catalog SHA256 "
 LOST_PIN = (
     "Закрепление каталога потеряно или изменено. Восстановите последнее закрепление LogCourier."
 )
 HEX = re.compile(r"[a-f0-9]{64}")
 IDENTIFIER = re.compile(r"[a-f0-9]{32}")
-CATALOG_MAX_ENTRIES = 200
-CATALOG_MAX_VERSION_ENTRIES = 50
-DELIVERY_BATCH_LIMIT = 4  # one cycle sends at most this many queued documents
-DEFAULT_ENTRY_LIMIT = 100
-MAX_CATALOG_PAGES = 100
 
 
 class DeliveryCancelled(RuntimeError):

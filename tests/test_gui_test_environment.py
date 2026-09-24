@@ -7,13 +7,11 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from fixture_values.clock import GUI_TEST_SCRIPT_TIMEOUT_SECONDS
+from fixture_values.platform import RUN_GUI_TEST_USAGE_ERROR_EXIT_CODE
 
 
 ROOT = Path(__file__).resolve().parents[1]
-# Safety timeout for the subprocess calls below, in seconds.
-SUBPROCESS_TIMEOUT_SECONDS = 10
-# run-gui-test.sh's usage-error exit code when given no command.
-USAGE_ERROR_EXIT_CODE = 2
 
 
 @unittest.skipIf(sys.platform == "win32", "Linux GUI test runners")
@@ -25,7 +23,7 @@ class GuiTestEnvironmentTests(unittest.TestCase):
              'import json, os; print(json.dumps({key: os.environ.get(key) for key in '
              '("GDK_DEBUG", "ADW_DISABLE_PORTAL", "GTK_USE_PORTAL", "GIO_USE_VFS", "GDK_BACKEND", "GTK_A11Y")}))'],
             env={**os.environ, "GDK_DEBUG": "settings", "GTK_A11Y": "atspi"},
-            capture_output=True, text=True, timeout=SUBPROCESS_TIMEOUT_SECONDS, check=True,
+            capture_output=True, text=True, timeout=GUI_TEST_SCRIPT_TIMEOUT_SECONDS, check=True,
         )
         self.assertEqual(json.loads(result.stdout), {
             "GDK_DEBUG": "settings,no-portals", "ADW_DISABLE_PORTAL": "1", "GTK_USE_PORTAL": "0",
@@ -34,6 +32,6 @@ class GuiTestEnvironmentTests(unittest.TestCase):
 
     def test_runner_requires_a_command(self) -> None:
         result = subprocess.run([str(ROOT / "tools/run-gui-test.sh"), "--"],
-                                capture_output=True, text=True, timeout=SUBPROCESS_TIMEOUT_SECONDS, check=False)
-        self.assertEqual(result.returncode, USAGE_ERROR_EXIT_CODE)
+                                capture_output=True, text=True, timeout=GUI_TEST_SCRIPT_TIMEOUT_SECONDS, check=False)
+        self.assertEqual(result.returncode, RUN_GUI_TEST_USAGE_ERROR_EXIT_CODE)
         self.assertIn("Usage:", result.stderr)

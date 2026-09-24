@@ -15,45 +15,35 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gio, GLib, Gtk
 
-from keyswitch.config import DEFAULT_LEARNING_CONFIRMATIONS, SettingsStore
+from keyswitch.config import SettingsStore
+from keyswitch.constants.settings_defaults import DEFAULT_LEARNING_CONFIRMATIONS
 from keyswitch.engine import KeySwitchEngine, LearningPrompt
 from keyswitch.history import HistoryStore
 from keyswitch.learning_prompt import LearningPromptWindow
-from keyswitch.x11_backend import BACKSPACE_KEYSYM, KeyEvent, X11Backend, _Libraries
-
-# E2E scratch window/widget geometry (pixels).
-WINDOW_WIDTH_PX = 520
-WINDOW_HEIGHT_PX = 120
-ENTRY_MARGIN_PX = 24
-
-# XTestFakeKeyEvent's last argument is a millisecond delay before the event
-# plays; the two delays this file uses throughout for synthetic key events.
-XTEST_LONG_DELAY_MS = 18
-XTEST_SHORT_DELAY_MS = 8
-
-# X11 keysyms this test taps directly. BackSpace is already named in
-# x11_backend as BACKSPACE_KEYSYM; these three are not named there.
-CONTROL_L_KEYSYM = 0xFFE3
-RETURN_KEYSYM = 0xFF0D
-PAUSE_KEYSYM = 0xFF13  # default "convert_last" hotkey (see config.py)
-
-# Debug capture cap for the printed key-event sample.
-MAX_SAMPLE_EVENTS = 12
-
-# Overall watchdog for the whole scripted run.
-E2E_TIMEOUT_SECONDS = 45
-
-# Pacing between scripted actions and their verification, all in milliseconds.
-INITIAL_STARTUP_DELAY_MS = 450
-INTER_CASE_DELAY_MS = 200
-STANDARD_VERIFY_DELAY_MS = 900
-IDLE_PAUSE_VERIFY_DELAY_MS = 2300
-CONTEXT_RESOLUTION_VERIFY_DELAY_MS = 1200
-LEARNING_CONFIRMATION_VERIFY_DELAY_MS = 500
-MENU_LAYOUT_VERIFY_DELAY_MS = 300
-SLOW_TYPE_CHAR_DELAY_MS = 150
-EARLY_SWITCH_SETUP_DELAY_MS = 600
-DBUS_CALL_TIMEOUT_MS = 3000
+from keyswitch.x11_backend import KeyEvent, X11Backend, _Libraries
+from keyswitch.constants.x11 import BACKSPACE_KEYSYM
+from fixture_values.clock import (
+    E2E_INTER_CASE_DELAY_MS,
+    E2E_LEARNING_CONFIRMATION_VERIFY_DELAY_MS,
+    E2E_VERIFY_SETTLE_DELAY_MS,
+    SESSION_BUS_CALL_TIMEOUT_MS,
+    X11_E2E_CONTEXT_RESOLUTION_VERIFY_DELAY_MS,
+    X11_E2E_EARLY_SWITCH_SETUP_DELAY_MS,
+    X11_E2E_IDLE_PAUSE_VERIFY_DELAY_MS,
+    X11_E2E_INITIAL_STARTUP_DELAY_MS,
+    X11_E2E_MENU_LAYOUT_VERIFY_DELAY_MS,
+    X11_E2E_SLOW_TYPING_CHARACTER_DELAY_MS,
+    X11_E2E_TIMEOUT_SECONDS,
+    XTEST_KEY_PRESS_DELAY_MS,
+    XTEST_KEY_RELEASE_DELAY_MS,
+)
+from fixture_values.counts import X11_E2E_MAX_SAMPLE_EVENTS
+from fixture_values.keys import CONTROL_L_KEYSYM, PAUSE_KEYSYM, RETURN_KEYSYM
+from fixture_values.ui import (
+    E2E_TEST_ENTRY_MARGIN_PIXELS,
+    E2E_TEST_WINDOW_HEIGHT_PIXELS,
+    E2E_TEST_WINDOW_WIDTH_PIXELS,
+)
 
 
 @dataclass
@@ -79,16 +69,16 @@ class PhysicalTyper:
             keycode = int(self.libraries.x11.XKeysymToKeycode(self.display, keysym))
             if not keycode:
                 raise RuntimeError(f"No X11 keycode for {character!r}")
-            self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 1, XTEST_LONG_DELAY_MS)
-            self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 0, XTEST_SHORT_DELAY_MS)
+            self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 1, XTEST_KEY_PRESS_DELAY_MS)
+            self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 0, XTEST_KEY_RELEASE_DELAY_MS)
         self.libraries.x11.XSync(self.display, 0)
 
     def tap_keysym(self, keysym: int) -> None:
         keycode = int(self.libraries.x11.XKeysymToKeycode(self.display, keysym))
         if not keycode:
             raise RuntimeError(f"No X11 keycode for keysym {keysym:#x}")
-        self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 1, XTEST_LONG_DELAY_MS)
-        self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 0, XTEST_SHORT_DELAY_MS)
+        self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 1, XTEST_KEY_PRESS_DELAY_MS)
+        self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 0, XTEST_KEY_RELEASE_DELAY_MS)
         self.libraries.x11.XSync(self.display, 0)
 
     def clear_field(self) -> None:
@@ -97,7 +87,7 @@ class PhysicalTyper:
         control = int(self.libraries.x11.XKeysymToKeycode(self.display, CONTROL_L_KEYSYM))
         select_all = int(self.libraries.x11.XKeysymToKeycode(self.display, ord("a")))
         for pressed, keycode in ((True, control), (True, select_all), (False, select_all), (False, control)):
-            self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, int(pressed), XTEST_SHORT_DELAY_MS)
+            self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, int(pressed), XTEST_KEY_RELEASE_DELAY_MS)
         self.tap_keysym(BACKSPACE_KEYSYM)
 
     def close(self) -> None:
@@ -133,21 +123,21 @@ def main() -> int:
     original_group = -1
     result = E2EResult()
     cases = (
-        ("EN pause correction", 0, "ghbdtn", "привет", 1, IDLE_PAUSE_VERIFY_DELAY_MS),
-        ("RU keys to English", 1, "hello ", "hello ", 0, STANDARD_VERIFY_DELAY_MS),
-        ("punctuation key is a Russian letter", 0, ",fpf ", "база ", 1, STANDARD_VERIFY_DELAY_MS),
-        ("return to EN before punctuation test", 1, "hello ", "hello ", 0, STANDARD_VERIFY_DELAY_MS),
-        ("ambiguous punctuation keeps its glyph after idle", 0, "ghbdtn,", "привет,", 1, IDLE_PAUSE_VERIFY_DELAY_MS),
-        ("manual layout switch protects next word", 0, "ghbdtn ", "ghbdtn ", 0, STANDARD_VERIFY_DELAY_MS),
-        ("manual protection is consumed once", 0, "ghbdtn ", "привет ", 1, STANDARD_VERIFY_DELAY_MS),
-        ("short Russian word switches to English", 1, "if ", "if ", 0, STANDARD_VERIFY_DELAY_MS),
-        ("manual Russian selection protects short word", 1, "if ", "ша ", 1, STANDARD_VERIFY_DELAY_MS),
-        ("short-word protection is consumed once", 1, "if ", "if ", 0, STANDARD_VERIFY_DELAY_MS),
-        ("context resolves a short word with the next word", 0, "e 'njuj ", "у этого ", 1, CONTEXT_RESOLUTION_VERIFY_DELAY_MS),
-        ("return to EN before internal punctuation", 1, "hello ", "hello ", 0, STANDARD_VERIFY_DELAY_MS),
-        ("learned boundaries keep the internal comma key", 0, "ghj,ktvf ", "проблема ", 1, STANDARD_VERIFY_DELAY_MS),
-        ("return to EN before isolated punctuation", 1, "hello ", "hello ", 0, STANDARD_VERIFY_DELAY_MS),
-        ("isolated dot stays literal after idle", 0, ".", ".", 0, IDLE_PAUSE_VERIFY_DELAY_MS),
+        ("EN pause correction", 0, "ghbdtn", "привет", 1, X11_E2E_IDLE_PAUSE_VERIFY_DELAY_MS),
+        ("RU keys to English", 1, "hello ", "hello ", 0, E2E_VERIFY_SETTLE_DELAY_MS),
+        ("punctuation key is a Russian letter", 0, ",fpf ", "база ", 1, E2E_VERIFY_SETTLE_DELAY_MS),
+        ("return to EN before punctuation test", 1, "hello ", "hello ", 0, E2E_VERIFY_SETTLE_DELAY_MS),
+        ("ambiguous punctuation keeps its glyph after idle", 0, "ghbdtn,", "привет,", 1, X11_E2E_IDLE_PAUSE_VERIFY_DELAY_MS),
+        ("manual layout switch protects next word", 0, "ghbdtn ", "ghbdtn ", 0, E2E_VERIFY_SETTLE_DELAY_MS),
+        ("manual protection is consumed once", 0, "ghbdtn ", "привет ", 1, E2E_VERIFY_SETTLE_DELAY_MS),
+        ("short Russian word switches to English", 1, "if ", "if ", 0, E2E_VERIFY_SETTLE_DELAY_MS),
+        ("manual Russian selection protects short word", 1, "if ", "ша ", 1, E2E_VERIFY_SETTLE_DELAY_MS),
+        ("short-word protection is consumed once", 1, "if ", "if ", 0, E2E_VERIFY_SETTLE_DELAY_MS),
+        ("context resolves a short word with the next word", 0, "e 'njuj ", "у этого ", 1, X11_E2E_CONTEXT_RESOLUTION_VERIFY_DELAY_MS),
+        ("return to EN before internal punctuation", 1, "hello ", "hello ", 0, E2E_VERIFY_SETTLE_DELAY_MS),
+        ("learned boundaries keep the internal comma key", 0, "ghj,ktvf ", "проблема ", 1, E2E_VERIFY_SETTLE_DELAY_MS),
+        ("return to EN before isolated punctuation", 1, "hello ", "hello ", 0, E2E_VERIFY_SETTLE_DELAY_MS),
+        ("isolated dot stays literal after idle", 0, ".", ".", 0, X11_E2E_IDLE_PAUSE_VERIFY_DELAY_MS),
     )
     expected_history = [
         ("ghbdtn", "привет"),
@@ -175,12 +165,12 @@ def main() -> int:
         return GLib.SOURCE_REMOVE
 
     window = Gtk.Window(title="KeySwitch E2E")
-    window.set_default_size(WINDOW_WIDTH_PX, WINDOW_HEIGHT_PX)
+    window.set_default_size(E2E_TEST_WINDOW_WIDTH_PIXELS, E2E_TEST_WINDOW_HEIGHT_PIXELS)
     entry = Gtk.Entry(placeholder_text="E2E input")
-    entry.set_margin_top(ENTRY_MARGIN_PX)
-    entry.set_margin_bottom(ENTRY_MARGIN_PX)
-    entry.set_margin_start(ENTRY_MARGIN_PX)
-    entry.set_margin_end(ENTRY_MARGIN_PX)
+    entry.set_margin_top(E2E_TEST_ENTRY_MARGIN_PIXELS)
+    entry.set_margin_bottom(E2E_TEST_ENTRY_MARGIN_PIXELS)
+    entry.set_margin_start(E2E_TEST_ENTRY_MARGIN_PIXELS)
+    entry.set_margin_end(E2E_TEST_ENTRY_MARGIN_PIXELS)
     window.set_child(entry)
     window.present()
     entry.grab_focus()
@@ -207,7 +197,7 @@ def main() -> int:
 
     def observe(event: KeyEvent) -> None:
         result.events += 1
-        if event.pressed and len(result.sample) < MAX_SAMPLE_EVENTS:
+        if event.pressed and len(result.sample) < X11_E2E_MAX_SAMPLE_EVENTS:
             result.sample.append(
                 (event.key_name, event.character, event.characters, event.group)
             )
@@ -216,7 +206,7 @@ def main() -> int:
 
     backend._listener = observe
     original_group = backend.current_group()
-    GLib.timeout_add_seconds(E2E_TIMEOUT_SECONDS, abort_on_timeout)
+    GLib.timeout_add_seconds(X11_E2E_TIMEOUT_SECONDS, abort_on_timeout)
 
     def type_case(index: int) -> bool:
         (
@@ -252,9 +242,9 @@ def main() -> int:
             loop.quit()
             return GLib.SOURCE_REMOVE
         if index + 1 < len(cases):
-            GLib.timeout_add(INTER_CASE_DELAY_MS, type_case, index + 1)
+            GLib.timeout_add(E2E_INTER_CASE_DELAY_MS, type_case, index + 1)
             return GLib.SOURCE_REMOVE
-        GLib.timeout_add(INTER_CASE_DELAY_MS, start_learning_case)
+        GLib.timeout_add(E2E_INTER_CASE_DELAY_MS, start_learning_case)
         return GLib.SOURCE_REMOVE
 
     def start_learning_case() -> bool:
@@ -264,7 +254,7 @@ def main() -> int:
         typer.clear_field()
         typer.type("hello")
         typer.tap_keysym(PAUSE_KEYSYM)
-        GLib.timeout_add(STANDARD_VERIFY_DELAY_MS, verify_learning_prompt)
+        GLib.timeout_add(E2E_VERIFY_SETTLE_DELAY_MS, verify_learning_prompt)
         return GLib.SOURCE_REMOVE
 
     def verify_learning_prompt() -> bool:
@@ -284,7 +274,7 @@ def main() -> int:
             loop.quit()
             return GLib.SOURCE_REMOVE
         typer.tap_keysym(RETURN_KEYSYM)
-        GLib.timeout_add(LEARNING_CONFIRMATION_VERIFY_DELAY_MS, verify_learning_confirmation)
+        GLib.timeout_add(E2E_LEARNING_CONFIRMATION_VERIFY_DELAY_MS, verify_learning_confirmation)
         return GLib.SOURCE_REMOVE
 
     def verify_learning_confirmation() -> bool:
@@ -303,7 +293,7 @@ def main() -> int:
         entry.grab_focus()
         typer.clear_field()
         typer.type("hello ")
-        GLib.timeout_add(STANDARD_VERIFY_DELAY_MS, verify_manual_override_of_learned_rule)
+        GLib.timeout_add(E2E_VERIFY_SETTLE_DELAY_MS, verify_manual_override_of_learned_rule)
         return GLib.SOURCE_REMOVE
 
     def verify_manual_override_of_learned_rule() -> bool:
@@ -318,7 +308,7 @@ def main() -> int:
         entry.grab_focus()
         typer.clear_field()
         typer.type("hello ")
-        GLib.timeout_add(STANDARD_VERIFY_DELAY_MS, verify_learned_rule)
+        GLib.timeout_add(E2E_VERIFY_SETTLE_DELAY_MS, verify_learned_rule)
         return GLib.SOURCE_REMOVE
 
     def verify_learned_rule() -> bool:
@@ -342,7 +332,7 @@ def main() -> int:
             print("E2E_FAILED")
             loop.quit()
             return GLib.SOURCE_REMOVE
-        GLib.timeout_add(MENU_LAYOUT_VERIFY_DELAY_MS, verify_menu_layout_selection)
+        GLib.timeout_add(X11_E2E_MENU_LAYOUT_VERIFY_DELAY_MS, verify_menu_layout_selection)
         return GLib.SOURCE_REMOVE
 
     def verify_menu_layout_selection() -> bool:
@@ -357,15 +347,15 @@ def main() -> int:
             loop.quit()
             return GLib.SOURCE_REMOVE
         print("MENU_LAYOUT_SELECTION_E2E_OK")
-        GLib.timeout_add(INTER_CASE_DELAY_MS, start_early_switch_case)
+        GLib.timeout_add(E2E_INTER_CASE_DELAY_MS, start_early_switch_case)
         return GLib.SOURCE_REMOVE
 
     def type_slowly(physical: str, index: int, done: Callable[[], bool]) -> bool:
         if index >= len(physical):
-            GLib.timeout_add(STANDARD_VERIFY_DELAY_MS, done)
+            GLib.timeout_add(E2E_VERIFY_SETTLE_DELAY_MS, done)
             return GLib.SOURCE_REMOVE
         typer.type(physical[index])
-        GLib.timeout_add(SLOW_TYPE_CHAR_DELAY_MS, type_slowly, physical, index + 1, done)
+        GLib.timeout_add(X11_E2E_SLOW_TYPING_CHARACTER_DELAY_MS, type_slowly, physical, index + 1, done)
         return GLib.SOURCE_REMOVE
 
     def start_early_switch_case() -> bool:
@@ -378,7 +368,7 @@ def main() -> int:
         # The menu selection above protects exactly one word; spend it on a
         # word that stays English anyway, then type the real case slowly.
         typer.type("hello ")
-        GLib.timeout_add(EARLY_SWITCH_SETUP_DELAY_MS, start_slow_early_switch_typing)
+        GLib.timeout_add(X11_E2E_EARLY_SWITCH_SETUP_DELAY_MS, start_slow_early_switch_typing)
         return GLib.SOURCE_REMOVE
 
     def start_slow_early_switch_typing() -> bool:
@@ -424,7 +414,7 @@ def main() -> int:
         bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         names = bus.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus",
                               "org.freedesktop.DBus", "ListNames", None,
-                              GLib.VariantType.new("(as)"), Gio.DBusCallFlags.NONE, DBUS_CALL_TIMEOUT_MS, None).unpack()[0]
+                              GLib.VariantType.new("(as)"), Gio.DBusCallFlags.NONE, SESSION_BUS_CALL_TIMEOUT_MS, None).unpack()[0]
         if any(name in names for name in ("org.freedesktop.portal.Desktop", "org.freedesktop.portal.Documents")):
             print("E2E_FAILED: GUI tests unexpectedly activated a desktop/document portal")
             loop.quit()
@@ -435,7 +425,7 @@ def main() -> int:
         loop.quit()
         return GLib.SOURCE_REMOVE
 
-    GLib.timeout_add(INITIAL_STARTUP_DELAY_MS, type_case, 0)
+    GLib.timeout_add(X11_E2E_INITIAL_STARTUP_DELAY_MS, type_case, 0)
     try:
         loop.run()
     finally:

@@ -11,22 +11,15 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from keyswitch.backend import KeyEvent, SHIFT_MASK
+from keyswitch.backend import KeyEvent
+from keyswitch.constants.keyboard import SHIFT_MASK
 from keyswitch.config import SettingsStore
 from keyswitch.engine import KeySwitchEngine
 from keyswitch.history import HistoryStore
 from keyswitch.layouts import LayoutPair
 import test_input_integrity as integrity
-
-# Starts well above any real key serial so fixture events are never mistaken
-# for the engine's own bookkeeping.
-INITIAL_SERIAL = 100
-# A generous bound on how many queued events one flush() may drain before it
-# is fair to call the replay stuck rather than merely long.
-MAX_FLUSH_ITERATIONS = 100
-# EditorBackend.window starts at 1; handling "Tab"/"ISO_Left_Tab" moves focus
-# to another field and increments it once.
-WINDOW_AFTER_TAB_FOCUS_CHANGE = 2
+from fixture_values.counts import SEQUENCE_MATRIX_MAX_FLUSH_ITERATIONS
+from fixture_values.keys import EDITOR_REPLAY_FIRST_KEY_SERIAL, SECOND_WINDOW_ID
 
 
 class PhysicalSession:
@@ -43,7 +36,7 @@ class PhysicalSession:
         self.engine = KeySwitchEngine(
             self.settings, HistoryStore(root / "history.jsonl"), self.backend,
         )
-        self.serial = INITIAL_SERIAL
+        self.serial = EDITOR_REPLAY_FIRST_KEY_SERIAL
         self.pair = LayoutPair()
 
     def key(self, us: str, *, name: str = "") -> KeyEvent:
@@ -78,7 +71,7 @@ class PhysicalSession:
         self.tap(self.key("", name=name))
 
     def flush(self) -> None:
-        for _ in range(MAX_FLUSH_ITERATIONS):
+        for _ in range(SEQUENCE_MATRIX_MAX_FLUSH_ITERATIONS):
             try:
                 event = self.engine._events.get_nowait()
             except queue.Empty:
@@ -221,7 +214,7 @@ class InputSequenceMatrixTests(unittest.TestCase):
                         self.assertEqual(current.backend.text, "")
                     else:
                         self.assertEqual(current.backend.text, "another field")
-                        self.assertEqual(current.backend.window, WINDOW_AFTER_TAB_FOCUS_CHANGE)
+                        self.assertEqual(current.backend.window, SECOND_WINDOW_ID)
 
     def test_manual_command_survives_release_order_with_an_ambiguous_internal_key(self) -> None:
         for pause_first in (False, True):

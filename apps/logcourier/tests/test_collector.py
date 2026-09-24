@@ -5,15 +5,18 @@ import os
 import zipfile
 
 import pytest
+from fixture_values.counts import RELAXED_QUEUE_CAPACITY_BYTES, SMALL_CHUNK_SIZE_BYTES
 
 from logcourier.collector import Collector, open_regular
 from logcourier.config import Source, load_config, save_config
+from logcourier.constants.limits import (
+    MAX_DEVICE_NAME_CHARACTERS,
+    MAX_INTERVAL_MINUTES,
+    MAX_ROTATIONS,
+    MAX_SOURCE_LABEL_CHARACTERS,
+    MAX_SOURCES,
+)
 from logcourier.store import QueueFull, Store
-
-# Deliberately smaller than CHUNK_BYTES so a short payload still spans several scans.
-SMALL_CHUNK_SIZE_BYTES = 11
-# Comfortably above what a single test payload can queue, to sidestep QueueFull.
-RELAXED_QUEUE_CAPACITY_BYTES = 10000
 
 
 def fragments(store, config):
@@ -49,6 +52,41 @@ def test_invalid_configuration(configured, field, value):
     setattr(config, field, value)
     with pytest.raises(ValueError):
         config.validate()
+
+
+@pytest.mark.parametrize(
+    "change,message",
+    [
+        (
+            lambda config: setattr(config.sources[0], "rotations", MAX_ROTATIONS + 1),
+            f"от 0 до {MAX_ROTATIONS}.",
+        ),
+        (
+            lambda config: setattr(
+                config.sources[0], "label", "x" * (MAX_SOURCE_LABEL_CHARACTERS + 1)
+            ),
+            f"от 1 до {MAX_SOURCE_LABEL_CHARACTERS}.",
+        ),
+        (
+            lambda config: setattr(config, "interval_minutes", MAX_INTERVAL_MINUTES + 1),
+            f"от 1 до {MAX_INTERVAL_MINUTES}.",
+        ),
+        (
+            lambda config: setattr(config, "device_name", "x" * (MAX_DEVICE_NAME_CHARACTERS + 1)),
+            f"от 1 до {MAX_DEVICE_NAME_CHARACTERS}.",
+        ),
+        (
+            lambda config: setattr(config, "sources", config.sources * (MAX_SOURCES + 1)),
+            f"не больше {MAX_SOURCES}.",
+        ),
+    ],
+)
+def test_validation_messages_name_the_limits_the_checks_use(configured, change, message):
+    config, _ = configured
+    change(config)
+    with pytest.raises(ValueError) as raised:
+        config.validate()
+    assert str(raised.value).endswith(message)
 
 
 def test_exact_bytes_and_restart(store, configured):

@@ -5,12 +5,11 @@ from __future__ import annotations
 import ctypes
 
 from .windows_system import WindowsSystemError
+from .constants.windows import ERROR_ALREADY_EXISTS, SW_RESTORE
 
 
 MUTEX_NAME = r"Local\io.github.olegius88.KeySwitch"
 WINDOW_TITLE = "KeySwitch"
-ERROR_ALREADY_EXISTS = 183
-SW_RESTORE = 9
 
 
 class CtypesWindowsInstanceAPI:

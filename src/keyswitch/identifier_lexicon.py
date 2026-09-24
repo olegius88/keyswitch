@@ -14,13 +14,15 @@ import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Final
+from .constants.file_formats import (
+    IDENTIFIER_LEXICON_MAX_BYTES,
+    IDENTIFIER_LEXICON_MAX_ENTRIES,
+    VERSION_HASH_CHARACTERS,
+)
+from .constants.models import IDENTIFIER_LEXICON_CACHE_SIZE
 
 RESOURCE_PATH: Final = Path(__file__).parent / "resources" / "identifiers.json"
-MAX_RESOURCE_BYTES: Final = 4 * 1024 * 1024
-MAX_IDENTIFIERS: Final = 200000
 IDENTIFIER: Final = re.compile(r"[a-z][a-z0-9]{2,63}\Z")
-LOADED_LEXICON_CACHE_SIZE: Final = 4
-VERSION_HASH_CHARACTERS: Final = 12
 
 
 class IdentifierLexicon:
@@ -43,18 +45,18 @@ class IdentifierLexicon:
         return cls._load_cached(path.resolve())
 
     @staticmethod
-    @lru_cache(maxsize=LOADED_LEXICON_CACHE_SIZE)
+    @lru_cache(maxsize=IDENTIFIER_LEXICON_CACHE_SIZE)
     def _load_cached(path: Path) -> IdentifierLexicon:
         with path.open("rb") as handle:
-            raw = handle.read(MAX_RESOURCE_BYTES + 1)
-        if len(raw) > MAX_RESOURCE_BYTES:
+            raw = handle.read(IDENTIFIER_LEXICON_MAX_BYTES + 1)
+        if len(raw) > IDENTIFIER_LEXICON_MAX_BYTES:
             raise ValueError("identifier lexicon is too large")
         payload: object = json.loads(raw)
         if (not isinstance(payload, dict) or payload.get("schema_version") != 1
                 or not isinstance(payload.get("name"), str) or not isinstance(payload.get("identifiers"), list)):
             raise ValueError("invalid identifier lexicon")
         entries: list[object] = payload["identifiers"]
-        if not 0 < len(entries) <= MAX_IDENTIFIERS or entries != sorted(set(entries), key=str):
+        if not 0 < len(entries) <= IDENTIFIER_LEXICON_MAX_ENTRIES or entries != sorted(set(entries), key=str):
             raise ValueError("identifier lexicon must be a sorted set")
         identifiers: set[str] = set()
         for entry in entries:

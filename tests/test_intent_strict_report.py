@@ -16,15 +16,16 @@ if TOOLS_PATH not in sys.path:
     sys.path.insert(0, TOOLS_PATH)
 
 import verify_intent_strict_report as verifier  # noqa: E402
+from fixture_values.counts import (
+    INTENT_STRICT_REPORT_VERIFIED_FILE_COUNT,
+    STRICT_REPORT_SCRIPT_SEARCH_WINDOW_CHARACTERS,
+)
+from keyswitch.constants.file_formats import SHA256_HEX_CHARACTERS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ARTIFACT = PROJECT_ROOT / "src/keyswitch/resources/models/layout_intent_v1.ksm"
 MANIFEST = PROJECT_ROOT / "model/intent_v1/manifest.json"
 CONFIG = PROJECT_ROOT / "model/intent_v1/config.json"
-SHA256_HEX_CHARACTERS = 64
-# Twelve hashed files plus tools/environment_probe.py, certified since v21.
-EXPECTED_VERIFIED_FILE_COUNT = 13
-SEARCH_WINDOW_CHARACTERS = 200
 
 
 def _sha256(path: Path) -> str:
@@ -134,7 +135,7 @@ class StrictReportVerifierTests(unittest.TestCase):
         self.assertEqual(summary["gate_count"], len(_declared_strict_gates()))
         # Twelve hashed files plus tools/environment_probe.py, certified
         # since v21 so the environment probe cannot be quietly weakened.
-        self.assertEqual(summary["verified_files"], EXPECTED_VERIFIED_FILE_COUNT)
+        self.assertEqual(summary["verified_files"], INTENT_STRICT_REPORT_VERIFIED_FILE_COUNT)
         self.assertEqual(summary["model_version"], _manifest()["artifact_model_version"])
 
     def test_failed_or_missing_gates_are_rejected(self) -> None:
@@ -250,7 +251,7 @@ class DebBuildReuseContractTests(unittest.TestCase):
         self.assertIn("tools/verify_intent_strict_report.py", script)
         self.assertIn("Reusable strict report is not bound to the current tree", script)
         self.assertIn(
-            "exit 1", script.split("Reusable strict report is not bound")[1][:SEARCH_WINDOW_CHARACTERS]
+            "exit 1", script.split("Reusable strict report is not bound")[1][:STRICT_REPORT_SCRIPT_SEARCH_WINDOW_CHARACTERS]
         )
         for workflow in ("tests.yml", "release.yml"):
             text = (PROJECT_ROOT / ".github/workflows" / workflow).read_text("utf-8")

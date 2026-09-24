@@ -30,40 +30,58 @@ from keyswitch.engine import CorrectionPlan, EngineSnapshot, LearningPrompt
 from keyswitch.learning_prompt import LearningPromptWindow
 from keyswitch.updates import UpdatePhase, UpdateSnapshot
 from keyswitch.x11_backend import BackendProbe, KeyEvent
+from fixture_values.counts import (
+    DBUSMENU_LAYOUT_CHILDREN_INDEX,
+    DBUSMENU_PROPERTY_COUNT,
+    EXPECTED_THEME_APPLY_CALLS,
+    TRAY_APP_EXPECTED_CLOSE_CALLS,
+    TRAY_APP_EXPECTED_MENU_OPEN_CALLS,
+    TRAY_APP_EXPECTED_PROPERTIES_UPDATED_CALLS,
+    TRAY_APP_EXPECTED_QUIT_CALLS,
+    TRAY_APP_EXPECTED_SCHEDULE_CALLS,
+    TRAY_APP_EXPECTED_SHOW_PROMPT_CALLS,
+    TRAY_APP_EXPECTED_SYNC_AUTOSTART_CALLS,
+    TRAY_APP_FAKE_HISTORY_LIMIT,
+    TRAY_APP_PRESENT_CALLS_AFTER_ALL_PAGES,
+    TRAY_APP_PRESENT_CALLS_AFTER_REACTIVATE,
+)
+from fixture_values.keys import A_KEYCODE
+from fixture_values.platform import (
+    CANCELLED_INITIAL_UPDATE_SOURCE_ID,
+    CANCELLED_PERIODIC_UPDATE_SOURCE_ID,
+    DISABLED_INITIAL_UPDATE_SOURCE_ID,
+    FAKE_APPLICATION_RUN_EXIT_CODE,
+    FAKE_DIAGNOSE_EXIT_CODE,
+    FAKE_LAUNCHER_EXIT_CODE,
+    FAKE_LINUX_MAIN_EXIT_CODE,
+    FAKE_WINDOWS_MAIN_EXIT_CODE,
+    SCHEDULED_INITIAL_UPDATE_SOURCE_ID,
+    SCHEDULED_PERIODIC_UPDATE_SOURCE_ID,
+    STALE_INITIAL_UPDATE_SOURCE_ID,
+    STALE_PERIODIC_UPDATE_SOURCE_ID,
+)
+from fixture_values.scores import TRAY_SAMPLE_CORRECTION_CONFIDENCE
+from fixture_values.ui import INVALID_MENU_ITEM_ID
+from keyswitch.constants.tray_menu import (
+    DBUSMENU_INTERFACE_VERSION,
+    MENU_ABOUT,
+    MENU_AUTOSWITCH,
+    MENU_HISTORY,
+    MENU_ITEM_IDS,
+    MENU_LAYOUT,
+    MENU_NOTIFICATIONS,
+    MENU_QUIT,
+    MENU_SETTINGS,
+    MENU_SOUND,
+    MENU_SWITCH_LAYOUT,
+)
+from keyswitch.constants.updates import (
+    UPDATE_CHECK_INITIAL_DELAY_SECONDS,
+    UPDATE_CHECK_INTERVAL_SECONDS,
+)
 
 
 _T = TypeVar("_T")
-
-EXPECTED_MENU_OPEN_CALL_COUNT = 2
-EXPECTED_CLOSE_CALL_COUNT = 2
-# Version, TextDirection, Status, IconThemePath.
-EXPECTED_MENU_PROPERTY_COUNT = 4
-# Index of the children list within a (id, properties, children) layout tuple.
-LAYOUT_CHILDREN_INDEX = 2
-INVALID_MENU_ITEM_ID = 999
-EXPECTED_PROPERTIES_UPDATED_CALLS = 3
-FAKE_HISTORY_LIMIT = 25
-EXPECTED_PRESENT_CALLS_AFTER_ALL_PAGES = 4
-EXPECTED_QUIT_CALL_COUNT = 2
-EXPECTED_SCHEDULE_CALL_COUNT = 2
-EXPECTED_SYNC_AUTOSTART_CALL_COUNT = 2
-STALE_INITIAL_SOURCE_ID = 8
-STALE_PERIODIC_SOURCE_ID = 9
-SCHEDULED_INITIAL_SOURCE_ID = 10
-SCHEDULED_PERIODIC_SOURCE_ID = 11
-DISABLED_UPDATE_INITIAL_SOURCE_ID = 12
-CANCELLED_INITIAL_SOURCE_ID = 13
-CANCELLED_PERIODIC_SOURCE_ID = 14
-EXPECTED_THEME_APPLY_CALLS = 4
-SAMPLE_KEYCODE = 38
-SAMPLE_CONFIDENCE = 5.0
-EXPECTED_SHOW_PROMPT_CALLS = 2
-SAMPLE_EXIT_CODE = 17
-LINUX_MAIN_EXIT_CODE = 5
-WINDOWS_MAIN_EXIT_CODE = 6
-DIAGNOSE_EXIT_CODE = 7
-APPLICATION_RUN_EXIT_CODE = 3
-EXPECTED_PRESENT_CALLS_AFTER_REACTIVATE = 2
 
 
 def as_int(value: object) -> int:
@@ -165,7 +183,7 @@ class TrayItemTests(unittest.TestCase):
             item.Activate(0, 0)
             item.SecondaryActivate(0, 0)
             item.ContextMenu(0, 0)
-        self.assertEqual(request_open.call_count, EXPECTED_MENU_OPEN_CALL_COUNT)
+        self.assertEqual(request_open.call_count, TRAY_APP_EXPECTED_MENU_OPEN_CALLS)
         idle.assert_called_once_with(callbacks["autoswitch"])
         self.assertIsNone(item.Scroll(1, "vertical"))
         self.assertIsNone(item.NewStatus("Active"))
@@ -203,17 +221,17 @@ class TrayItemTests(unittest.TestCase):
             item.close()
             remove.side_effect = LookupError
             item.close()
-        self.assertEqual(close_menu.call_count, EXPECTED_CLOSE_CALL_COUNT)
+        self.assertEqual(close_menu.call_count, TRAY_APP_EXPECTED_CLOSE_CALLS)
 
     def test_menu_properties_layout_and_property_queries(self) -> None:
         item, _callbacks, _bus, _interface, _mocks = self.make_item()
         menu = item._menu
         self.assertEqual(
-            as_int(menu.Get(tray_module.MENU_INTERFACE, "Version")), tray_module.DBUSMENU_INTERFACE_VERSION
+            as_int(menu.Get(tray_module.MENU_INTERFACE, "Version")), DBUSMENU_INTERFACE_VERSION
         )
         self.assertEqual(str(menu.Get(tray_module.MENU_INTERFACE, "TextDirection")), "ltr")
         self.assertEqual(menu.GetAll("wrong"), {})
-        self.assertEqual(len(menu.GetAll(tray_module.MENU_INTERFACE)), EXPECTED_MENU_PROPERTY_COUNT)
+        self.assertEqual(len(menu.GetAll(tray_module.MENU_INTERFACE)), DBUSMENU_PROPERTY_COUNT)
         with self.assertRaises(dbus.exceptions.DBusException):
             menu.Get("wrong", "Version")
         with self.assertRaises(dbus.exceptions.DBusException):
@@ -225,24 +243,24 @@ class TrayItemTests(unittest.TestCase):
         self.assertEqual(int(revision), 1)
         root_values = as_sequence(root)
         self.assertEqual(as_int(root_values[0]), 0)
-        children = as_sequence(root_values[LAYOUT_CHILDREN_INDEX])
-        self.assertEqual(len(children), len(tray_module.MENU_ITEM_IDS))
+        children = as_sequence(root_values[DBUSMENU_LAYOUT_CHILDREN_INDEX])
+        self.assertEqual(len(children), len(MENU_ITEM_IDS))
         labels: dict[int, str] = {}
         for raw_child in children:
             child = as_sequence(raw_child)
             properties = as_mapping(child[1])
             labels[as_int(child[0])] = str(properties.get("label", ""))
-        self.assertEqual(labels[tray_module.MENU_SETTINGS], "Настройки KeySwitch…")
-        self.assertEqual(labels[tray_module.MENU_SWITCH_LAYOUT], "Переключить язык")
+        self.assertEqual(labels[MENU_SETTINGS], "Настройки KeySwitch…")
+        self.assertEqual(labels[MENU_SWITCH_LAYOUT], "Переключить язык")
         self.assertFalse(
-            menu.GetProperty(tray_module.MENU_SWITCH_LAYOUT, "enabled")
+            menu.GetProperty(MENU_SWITCH_LAYOUT, "enabled")
         )
-        self.assertEqual(labels[tray_module.MENU_AUTOSWITCH], "Автопереключение")
-        self.assertEqual(labels[tray_module.MENU_QUIT], "Выход")
+        self.assertEqual(labels[MENU_AUTOSWITCH], "Автопереключение")
+        self.assertEqual(labels[MENU_QUIT], "Выход")
         _revision, shallow = menu.GetLayout(0, 0, ["label"])
         self.assertEqual(shallow[1], {})
-        self.assertEqual(shallow[LAYOUT_CHILDREN_INDEX], [])
-        _revision, sound = menu.GetLayout(tray_module.MENU_SOUND, -1, ["label"])
+        self.assertEqual(shallow[DBUSMENU_LAYOUT_CHILDREN_INDEX], [])
+        _revision, sound = menu.GetLayout(MENU_SOUND, -1, ["label"])
         sound_values = as_sequence(sound)
         sound_properties = as_mapping(sound_values[1])
         self.assertEqual(str(sound_properties["label"]), "Звуковые эффекты")
@@ -250,28 +268,28 @@ class TrayItemTests(unittest.TestCase):
             menu.GetLayout(INVALID_MENU_ITEM_ID, -1, [])
 
         all_properties = menu.GetGroupProperties([], ["label"])
-        self.assertEqual(len(all_properties), len(tray_module.MENU_ITEM_IDS) + 1)
+        self.assertEqual(len(all_properties), len(MENU_ITEM_IDS) + 1)
         selected = menu.GetGroupProperties(
-            [tray_module.MENU_SETTINGS, INVALID_MENU_ITEM_ID], ["label"]
+            [MENU_SETTINGS, INVALID_MENU_ITEM_ID], ["label"]
         )
         self.assertEqual(len(selected), 1)
-        self.assertEqual(str(menu.GetProperty(tray_module.MENU_SETTINGS, "label")), "Настройки KeySwitch…")
-        self.assertTrue(menu.GetProperty(tray_module.MENU_SETTINGS, "enabled"))
+        self.assertEqual(str(menu.GetProperty(MENU_SETTINGS, "label")), "Настройки KeySwitch…")
+        self.assertTrue(menu.GetProperty(MENU_SETTINGS, "enabled"))
         with self.assertRaises(dbus.exceptions.DBusException):
-            menu.GetProperty(tray_module.MENU_SETTINGS, "unknown")
+            menu.GetProperty(MENU_SETTINGS, "unknown")
 
     def test_menu_events_grouping_open_request_and_protocol_signals(self) -> None:
         item, callbacks, _bus, _interface, _mocks = self.make_item()
         menu = item._menu
         with patch("keyswitch.tray.GLib.idle_add") as idle:
-            menu.Event(tray_module.MENU_SETTINGS, "clicked", dbus.String(""), 0)
-            menu.Event(tray_module.MENU_LAYOUT, "hovered", dbus.String(""), 0)
+            menu.Event(MENU_SETTINGS, "clicked", dbus.String(""), 0)
+            menu.Event(MENU_LAYOUT, "hovered", dbus.String(""), 0)
             menu.Event(INVALID_MENU_ITEM_ID, "clicked", dbus.String(""), 0)
             errors = menu.EventGroup(
                 [
-                    (tray_module.MENU_AUTOSWITCH, "clicked", dbus.String(""), 0),
-                    (tray_module.MENU_SWITCH_LAYOUT, "clicked", dbus.String(""), 0),
-                    (tray_module.MENU_SOUND, "hovered", dbus.String(""), 0),
+                    (MENU_AUTOSWITCH, "clicked", dbus.String(""), 0),
+                    (MENU_SWITCH_LAYOUT, "clicked", dbus.String(""), 0),
+                    (MENU_SOUND, "hovered", dbus.String(""), 0),
                     (INVALID_MENU_ITEM_ID, "clicked", dbus.String(""), 0),
                 ]
             )
@@ -285,7 +303,7 @@ class TrayItemTests(unittest.TestCase):
         )
         self.assertEqual([int(item_id) for item_id in errors], [INVALID_MENU_ITEM_ID])
         self.assertFalse(menu.AboutToShow(0))
-        updates, errors = menu.AboutToShowGroup([0, tray_module.MENU_HISTORY, INVALID_MENU_ITEM_ID])
+        updates, errors = menu.AboutToShowGroup([0, MENU_HISTORY, INVALID_MENU_ITEM_ID])
         self.assertEqual(list(updates), [])
         self.assertEqual([int(item_id) for item_id in errors], [INVALID_MENU_ITEM_ID])
         self.assertIsNone(menu.ItemsPropertiesUpdated([], []))
@@ -301,22 +319,22 @@ class TrayItemTests(unittest.TestCase):
         with patch.object(menu, "ItemsPropertiesUpdated") as properties_updated:
             menu.set_indicator_state(True, -1, "keyswitch")
             menu.set_indicator_state(False, 1, "keyswitch-ru")
-            self.assertEqual(properties_updated.call_count, EXPECTED_PROPERTIES_UPDATED_CALLS)
+            self.assertEqual(properties_updated.call_count, TRAY_APP_EXPECTED_PROPERTIES_UPDATED_CALLS)
             menu.set_indicator_state(False, 1, "keyswitch-ru")
-            self.assertEqual(properties_updated.call_count, EXPECTED_PROPERTIES_UPDATED_CALLS)
+            self.assertEqual(properties_updated.call_count, TRAY_APP_EXPECTED_PROPERTIES_UPDATED_CALLS)
         self.assertEqual(
-            str(menu.GetProperty(tray_module.MENU_LAYOUT, "label")),
+            str(menu.GetProperty(MENU_LAYOUT, "label")),
             "Текущая раскладка: RU",
         )
         self.assertEqual(
-            str(menu.GetProperty(tray_module.MENU_SWITCH_LAYOUT, "label")),
+            str(menu.GetProperty(MENU_SWITCH_LAYOUT, "label")),
             "Переключить на английский (EN)",
         )
         self.assertTrue(
-            menu.GetProperty(tray_module.MENU_SWITCH_LAYOUT, "enabled")
+            menu.GetProperty(MENU_SWITCH_LAYOUT, "enabled")
         )
         self.assertEqual(
-            as_int(menu.GetProperty(tray_module.MENU_AUTOSWITCH, "toggle-state")),
+            as_int(menu.GetProperty(MENU_AUTOSWITCH, "toggle-state")),
             0,
         )
 
@@ -327,20 +345,20 @@ class TrayItemTests(unittest.TestCase):
         menu.set_notifications_enabled(False)
         menu.set_notifications_enabled(False)
         self.assertEqual(
-            as_int(menu.GetProperty(tray_module.MENU_SOUND, "toggle-state")), 1
+            as_int(menu.GetProperty(MENU_SOUND, "toggle-state")), 1
         )
         self.assertEqual(
             as_int(
-                menu.GetProperty(tray_module.MENU_NOTIFICATIONS, "toggle-state")
+                menu.GetProperty(MENU_NOTIFICATIONS, "toggle-state")
             ),
             0,
         )
 
-        menu._actions.pop(tray_module.MENU_ABOUT)
-        self.assertFalse(menu._item_properties(tray_module.MENU_ABOUT)["enabled"])
-        menu._actions.pop(tray_module.MENU_SWITCH_LAYOUT)
+        menu._actions.pop(MENU_ABOUT)
+        self.assertFalse(menu._item_properties(MENU_ABOUT)["enabled"])
+        menu._actions.pop(MENU_SWITCH_LAYOUT)
         self.assertFalse(
-            menu._item_properties(tray_module.MENU_SWITCH_LAYOUT)["enabled"]
+            menu._item_properties(MENU_SWITCH_LAYOUT)["enabled"]
         )
         with self.assertRaises(dbus.exceptions.DBusException):
             menu._item_properties(INVALID_MENU_ITEM_ID)
@@ -353,7 +371,7 @@ class TrayItemTests(unittest.TestCase):
 class FakeSettings:
     def __init__(self) -> None:
         self.values: dict[str, object] = {
-            "history.limit": FAKE_HISTORY_LIMIT,
+            "history.limit": TRAY_APP_FAKE_HISTORY_LIMIT,
             "enabled": True,
             "appearance.theme": "system",
             "appearance.show_indicator": True,
@@ -543,7 +561,7 @@ class ApplicationGlueTests(unittest.TestCase):
             self.application.window.pages,
             ["history", "exceptions", "diagnostics"],
         )
-        self.assertEqual(self.application.window.present_calls, EXPECTED_PRESENT_CALLS_AFTER_ALL_PAGES)
+        self.assertEqual(self.application.window.present_calls, TRAY_APP_PRESENT_CALLS_AFTER_ALL_PAGES)
         self.application.window = None
         self.assertFalse(self.application.show_window())
         self.assertFalse(self.application._show_page("history"))
@@ -564,7 +582,7 @@ class ApplicationGlueTests(unittest.TestCase):
         with patch.object(self.application, "quit") as quit_mock:
             self.assertFalse(self.application.quit_application())
             self.assertFalse(self.application._signal_quit())
-        self.assertEqual(quit_mock.call_count, EXPECTED_QUIT_CALL_COUNT)
+        self.assertEqual(quit_mock.call_count, TRAY_APP_EXPECTED_QUIT_CALLS)
 
     def test_startup_registers_actions_theme_autostart_and_signals(self) -> None:
         with (
@@ -623,7 +641,7 @@ class ApplicationGlueTests(unittest.TestCase):
             self.assertEqual(self.engine.start_calls, 1)
             self.assertEqual(window.present_calls, 1)
             self.application.do_activate()
-            self.assertEqual(window.present_calls, EXPECTED_PRESENT_CALLS_AFTER_REACTIVATE)
+            self.assertEqual(window.present_calls, TRAY_APP_PRESENT_CALLS_AFTER_REACTIVATE)
 
         second = KeySwitchApplication(hidden=True, no_engine=True)
         second._held = True
@@ -742,12 +760,12 @@ class ApplicationGlueTests(unittest.TestCase):
             self.application._apply_setting("updates.check_automatically", True)
             self.application._apply_setting("updates.check_automatically", False)
             self.application._apply_setting("*", {})
-        self.assertEqual(schedule.call_count, EXPECTED_SCHEDULE_CALL_COUNT)
+        self.assertEqual(schedule.call_count, TRAY_APP_EXPECTED_SCHEDULE_CALLS)
         cancel.assert_called_once_with()
         with patch.object(self.application, "_sync_autostart") as sync_autostart:
             self.application._apply_setting("general.autostart", False)
             self.application._apply_setting("general.start_hidden", False)
-        self.assertEqual(sync_autostart.call_count, EXPECTED_SYNC_AUTOSTART_CALL_COUNT)
+        self.assertEqual(sync_autostart.call_count, TRAY_APP_EXPECTED_SYNC_AUTOSTART_CALLS)
         snapshot = EngineSnapshot(enabled=True, current_group=1)
         self.assertFalse(self.application._apply_engine_snapshot(snapshot))
         self.assertEqual(tray.groups[-1], 1)
@@ -768,40 +786,40 @@ class ApplicationGlueTests(unittest.TestCase):
         timeout.assert_not_called()
 
         self.settings.values["updates.check_automatically"] = True
-        self.application._update_initial_source = STALE_INITIAL_SOURCE_ID
+        self.application._update_initial_source = STALE_INITIAL_UPDATE_SOURCE_ID
         with patch("keyswitch.app.GLib.timeout_add_seconds") as timeout:
             self.application._schedule_update_checks()
         timeout.assert_not_called()
         self.application._update_initial_source = None
-        self.application._update_periodic_source = STALE_PERIODIC_SOURCE_ID
+        self.application._update_periodic_source = STALE_PERIODIC_UPDATE_SOURCE_ID
         with patch("keyswitch.app.GLib.timeout_add_seconds") as timeout:
             self.application._schedule_update_checks()
         timeout.assert_not_called()
         self.application._update_periodic_source = None
 
         with patch(
-            "keyswitch.app.GLib.timeout_add_seconds", return_value=SCHEDULED_INITIAL_SOURCE_ID
+            "keyswitch.app.GLib.timeout_add_seconds", return_value=SCHEDULED_INITIAL_UPDATE_SOURCE_ID
         ) as timeout:
             self.application._schedule_update_checks()
-        self.assertEqual(self.application._update_initial_source, SCHEDULED_INITIAL_SOURCE_ID)
+        self.assertEqual(self.application._update_initial_source, SCHEDULED_INITIAL_UPDATE_SOURCE_ID)
         timeout.assert_called_once_with(
-            app_module.UPDATE_INITIAL_DELAY_SECONDS,
+            UPDATE_CHECK_INITIAL_DELAY_SECONDS,
             self.application._initial_update_check,
         )
 
         with (
             patch.object(self.application, "_automatic_update_check") as automatic,
             patch(
-                "keyswitch.app.GLib.timeout_add_seconds", return_value=SCHEDULED_PERIODIC_SOURCE_ID
+                "keyswitch.app.GLib.timeout_add_seconds", return_value=SCHEDULED_PERIODIC_UPDATE_SOURCE_ID
             ) as timeout,
         ):
             self.assertFalse(self.application._initial_update_check())
         automatic.assert_called_once_with()
         timeout.assert_called_once_with(
-            app_module.UPDATE_INTERVAL_SECONDS,
+            UPDATE_CHECK_INTERVAL_SECONDS,
             self.application._periodic_update_check,
         )
-        self.assertEqual(self.application._update_periodic_source, SCHEDULED_PERIODIC_SOURCE_ID)
+        self.assertEqual(self.application._update_periodic_source, SCHEDULED_PERIODIC_UPDATE_SOURCE_ID)
 
         with patch.object(self.application, "_automatic_update_check") as automatic:
             self.assertTrue(self.application._periodic_update_check())
@@ -811,7 +829,7 @@ class ApplicationGlueTests(unittest.TestCase):
         check.assert_called_once_with(automatic=True, install_automatically=False)
 
         self.settings.values["updates.check_automatically"] = False
-        self.application._update_initial_source = DISABLED_UPDATE_INITIAL_SOURCE_ID
+        self.application._update_initial_source = DISABLED_INITIAL_UPDATE_SOURCE_ID
         with (
             patch.object(self.application, "_automatic_update_check"),
             patch("keyswitch.app.GLib.timeout_add_seconds") as timeout,
@@ -819,12 +837,12 @@ class ApplicationGlueTests(unittest.TestCase):
             self.assertFalse(self.application._initial_update_check())
         timeout.assert_not_called()
 
-        self.application._update_initial_source = CANCELLED_INITIAL_SOURCE_ID
-        self.application._update_periodic_source = CANCELLED_PERIODIC_SOURCE_ID
+        self.application._update_initial_source = CANCELLED_INITIAL_UPDATE_SOURCE_ID
+        self.application._update_periodic_source = CANCELLED_PERIODIC_UPDATE_SOURCE_ID
         with patch("keyswitch.app.GLib.source_remove") as remove:
             self.application._cancel_update_checks()
         self.assertEqual(
-            remove.call_args_list, [call(CANCELLED_INITIAL_SOURCE_ID), call(CANCELLED_PERIODIC_SOURCE_ID)]
+            remove.call_args_list, [call(CANCELLED_INITIAL_UPDATE_SOURCE_ID), call(CANCELLED_PERIODIC_UPDATE_SOURCE_ID)]
         )
         self.assertIsNone(self.application._update_initial_source)
         self.assertIsNone(self.application._update_periodic_source)
@@ -883,8 +901,8 @@ class ApplicationGlueTests(unittest.TestCase):
         self.assertEqual(manager.set_color_scheme.call_count, EXPECTED_THEME_APPLY_CALLS)
 
     def test_announce_notification_sound_window_and_thread_marshalling(self) -> None:
-        event = KeyEvent(True, SAMPLE_KEYCODE, "a", "a", ("a", "ф"), 0, 0, 1)
-        plan = CorrectionPlan((event,), None, 0, 1, "a", "ф", SAMPLE_CONFIDENCE, "Editor")
+        event = KeyEvent(True, A_KEYCODE, "a", "a", ("a", "ф"), 0, 0, 1)
+        plan = CorrectionPlan((event,), None, 0, 1, "a", "ф", TRAY_SAMPLE_CORRECTION_CONFIDENCE, "Editor")
         with patch("keyswitch.app.GLib.idle_add") as idle:
             self.application._correction_from_thread(plan)
         idle.assert_called_once_with(self.application._announce_correction, plan)
@@ -924,7 +942,7 @@ class ApplicationGlueTests(unittest.TestCase):
             self.assertFalse(self.application._apply_learning_prompt(prompt))
             self.assertFalse(self.application._apply_learning_prompt(prompt))
         factory.assert_called_once()
-        self.assertEqual(popup.show_prompt.call_count, EXPECTED_SHOW_PROMPT_CALLS)
+        self.assertEqual(popup.show_prompt.call_count, TRAY_APP_EXPECTED_SHOW_PROMPT_CALLS)
         self.assertFalse(self.application._apply_learning_prompt(None))
         popup.hide_prompt.assert_called_once_with()
 
@@ -958,28 +976,28 @@ class ApplicationEntrypointTests(unittest.TestCase):
     def test_package_main_module_delegates_and_exits(self) -> None:
         imported = importlib.import_module("keyswitch.__main__")
         self.assertIs(imported.main, launcher_module.main)
-        with patch("keyswitch.launcher.main", return_value=SAMPLE_EXIT_CODE) as main:
+        with patch("keyswitch.launcher.main", return_value=FAKE_LAUNCHER_EXIT_CODE) as main:
             with warnings.catch_warnings(), self.assertRaises(SystemExit) as stopped:
                 warnings.simplefilter("ignore", RuntimeWarning)
                 runpy.run_module("keyswitch.__main__", run_name="__main__")
-        self.assertEqual(stopped.exception.code, SAMPLE_EXIT_CODE)
+        self.assertEqual(stopped.exception.code, FAKE_LAUNCHER_EXIT_CODE)
         main.assert_called_once_with()
 
     def test_platform_launcher_selects_linux_and_windows_frontends(self) -> None:
         with (
             patch("keyswitch.launcher._running_on_windows", return_value=False),
-            patch("keyswitch.app.main", return_value=LINUX_MAIN_EXIT_CODE) as linux_main,
+            patch("keyswitch.app.main", return_value=FAKE_LINUX_MAIN_EXIT_CODE) as linux_main,
         ):
-            self.assertEqual(launcher_module.main(["--version"]), LINUX_MAIN_EXIT_CODE)
+            self.assertEqual(launcher_module.main(["--version"]), FAKE_LINUX_MAIN_EXIT_CODE)
         linux_main.assert_called_once_with(["--version"])
 
         from keyswitch import windows_app
 
         with (
             patch("keyswitch.launcher._running_on_windows", return_value=True),
-            patch("keyswitch.windows_app.main", return_value=WINDOWS_MAIN_EXIT_CODE) as windows_main,
+            patch("keyswitch.windows_app.main", return_value=FAKE_WINDOWS_MAIN_EXIT_CODE) as windows_main,
         ):
-            self.assertEqual(launcher_module.main(["--hidden"]), WINDOWS_MAIN_EXIT_CODE)
+            self.assertEqual(launcher_module.main(["--hidden"]), FAKE_WINDOWS_MAIN_EXIT_CODE)
         windows_main.assert_called_once_with(["--hidden"])
 
     def test_app_module_direct_execution_uses_diagnostic_exit_code(self) -> None:
@@ -1022,22 +1040,22 @@ class ApplicationEntrypointTests(unittest.TestCase):
         self.assertTrue(arguments.hidden and arguments.no_engine)
         with (
             patch("keyswitch.app.configure_logging"),
-            patch("keyswitch.app.diagnose", return_value=DIAGNOSE_EXIT_CODE) as diagnose,
+            patch("keyswitch.app.diagnose", return_value=FAKE_DIAGNOSE_EXIT_CODE) as diagnose,
             patch("keyswitch.app.GLib.set_prgname"),
             patch("keyswitch.app.GLib.set_application_name"),
         ):
-            self.assertEqual(app_module.main(["--diagnose"]), DIAGNOSE_EXIT_CODE)
+            self.assertEqual(app_module.main(["--diagnose"]), FAKE_DIAGNOSE_EXIT_CODE)
         diagnose.assert_called_once_with()
 
         application = Mock()
-        application.run.return_value = APPLICATION_RUN_EXIT_CODE
+        application.run.return_value = FAKE_APPLICATION_RUN_EXIT_CODE
         with (
             patch("keyswitch.app.configure_logging"),
             patch("keyswitch.app.KeySwitchApplication", return_value=application) as application_class,
             patch("keyswitch.app.GLib.set_prgname"),
             patch("keyswitch.app.GLib.set_application_name"),
         ):
-            self.assertEqual(app_module.main(["--hidden", "--no-engine"]), APPLICATION_RUN_EXIT_CODE)
+            self.assertEqual(app_module.main(["--hidden", "--no-engine"]), FAKE_APPLICATION_RUN_EXIT_CODE)
         application_class.assert_called_once_with(hidden=True, no_engine=True)
 
 

@@ -10,20 +10,17 @@ from pathlib import Path
 
 from . import __version__
 from .catalog import list_entries
-from .config import (
+from .config import data_directory, load_config
+from .constants.files import (
     JSON_INDENT_SPACES,
     PRIVATE_DIRECTORY_MODE,
     PRIVATE_FILE_MODE,
-    data_directory,
-    load_config,
+    SELECTION_HASH_PREFIX_CHARACTERS,
 )
+from .constants.limits import DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT
 from .secrets import read_token, redact
 from .telegram import Telegram
 from .versions import VERSION
-
-DEFAULT_LIST_LIMIT = 20
-MAX_LIST_LIMIT = 10000
-SELECTION_HASH_PREFIX_CHARACTERS = 20
 
 
 def selection_directory(root: Path, entries: list[dict], scope: str | None):
@@ -123,7 +120,7 @@ def main(argv=None, error_handler=None) -> int:
             )
             return 0
         if not 1 <= arguments.limit <= MAX_LIST_LIMIT:
-            parser.error("--limit должен быть от 1 до 10000")
+            parser.error(f"--limit должен быть от 1 до {MAX_LIST_LIMIT}")
         if arguments.keyswitch_version not in (None, "current") and not VERSION.fullmatch(
             arguments.keyswitch_version
         ):

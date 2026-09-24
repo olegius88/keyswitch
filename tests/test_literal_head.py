@@ -7,8 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from test_input_integrity import InputIntegrityTests
-
-PAUSE_TRIGGER_OFFSET_SECONDS = 2
+from fixture_values.clock import PAUSE_TRIGGER_OFFSET_SECONDS
 
 
 class LiteralHeadTests(InputIntegrityTests):

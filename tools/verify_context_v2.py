@@ -13,17 +13,15 @@ from context_corpus import CORPUS_ROOT, ROOT
 from context_evidence import CACHE_RECEIPT, all_frames, canonical, checksum, load_cache
 from train_context_v2 import ARTIFACT, REPORT, SEAL, audit, config, metrics, promotion_failures
 from verify_context_v2_history import verify_anchors, verify_sources
-from model_protocol import PROFILES, SEALED_BEFORE_TEST
-
-METADATA_LIMIT_BYTES = 1024 * 1024
-CONTEXT_MODEL_FEATURE_VERSION = 2
-RECEIPT_INDENT = 2
+from keyswitch.constants.model_protocol import PROFILES, SEALED_BEFORE_TEST
+from keyswitch.constants.file_formats import METADATA_JSON_LIMIT_BYTES, REPORT_JSON_INDENT
+from keyswitch.constants.models import CONTEXT_MODEL_FEATURE_VERSION
 
 
 def read_object(path: Path) -> dict[str, object]:
     with path.open("rb") as source:
-        content = source.read(METADATA_LIMIT_BYTES + 1)
-    if len(content) > METADATA_LIMIT_BYTES:
+        content = source.read(METADATA_JSON_LIMIT_BYTES + 1)
+    if len(content) > METADATA_JSON_LIMIT_BYTES:
         raise ValueError("oversized context evidence metadata")
     value: object = json.loads(content)
     if not isinstance(value, dict) or value.get("schema_version") != 1:
@@ -123,7 +121,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--verify-frozen", action="store_true", help="Repeat historical numeric results without training or current-engine replay")
     args = parser.parse_args(argv)
-    print(json.dumps(verify_frozen() if args.verify_frozen else verify(), ensure_ascii=True, indent=RECEIPT_INDENT))
+    print(json.dumps(verify_frozen() if args.verify_frozen else verify(), ensure_ascii=True, indent=REPORT_JSON_INDENT))
     return 0
 
 

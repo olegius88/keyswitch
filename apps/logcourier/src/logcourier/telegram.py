@@ -7,16 +7,18 @@ import urllib.parse
 import urllib.request
 import uuid
 
+from .constants.telegram import (
+    ERROR_BODY_MAX_BYTES,
+    ERROR_DESCRIPTION_MAX_CHARACTERS,
+    MAX_DOWNLOAD,
+    TELEGRAM_GET_UPDATES_LIMIT,
+    TELEGRAM_MAX_CAPTION_CHARACTERS,
+    TELEGRAM_RESPONSE_MAX_BYTES,
+)
+from .constants.timing import REQUEST_TIMEOUT_SECONDS
 from .secrets import redact, token_bot_id
 
 FILE_ID = re.compile(r"[A-Za-z0-9_-]{1,512}")
-MAX_DOWNLOAD = 19_000_000  # below the cloud Bot API's 20 MB getFile limit
-REQUEST_TIMEOUT_SECONDS = 30
-ERROR_BODY_MAX_BYTES = 8192
-ERROR_DESCRIPTION_MAX_CHARACTERS = 250
-TELEGRAM_RESPONSE_MAX_BYTES = 1024 * 1024
-TELEGRAM_MAX_CAPTION_CHARACTERS = 900
-TELEGRAM_GET_UPDATES_LIMIT = 100
 
 
 class TelegramError(RuntimeError):

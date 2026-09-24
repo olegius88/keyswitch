@@ -18,7 +18,7 @@ from collections.abc import Callable
 from types import FrameType
 
 from . import __version__
-from .settings_diagnostics import DIAGNOSTICS_JSON_INDENT
+from .constants.file_formats import DIAGNOSTICS_JSON_INDENT
 from .context_model import ContextModel
 from .history import HistoryStore, data_dir
 from .intent_model import LinearNgramModel
@@ -26,9 +26,9 @@ from .logsetup import configure_logging as configure_logging
 from .macos_backend import MacBackend
 from .config import SettingsStore
 from .macos_context import SOURCE as CONTEXT_SOURCE
+from .constants.timing import MACOS_PERMISSION_POLL_SECONDS
 
 STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM)
-PERMISSION_POLL_SECONDS = 1.0
 PERMISSION_REQUEST_MESSAGE = (
     "KeySwitch нужен доступ к клавиатуре. Открываю «Конфиденциальность и безопасность» → "
     "«Универсальный доступ»: включите там KeySwitch, и программа продолжит сама."
@@ -106,7 +106,7 @@ def ensure_permission(
             LOGGER.info(PERMISSION_GRANTED_MESSAGE)
             print(PERMISSION_GRANTED_MESSAGE)
             return True
-        wait(PERMISSION_POLL_SECONDS)
+        wait(MACOS_PERMISSION_POLL_SECONDS)
     return False
 
 

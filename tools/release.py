@@ -41,6 +41,25 @@ from typing import Final
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import release_pipeline as pipeline  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from keyswitch.constants.release import (
+    CI_APPEARANCE_TIMEOUT_SECONDS,
+    CI_POLL_SECONDS,
+    COMMIT_SHA_PREVIEW_CHARACTERS,
+    DEFAULT_CI_TIMEOUT_SECONDS,
+    SIGINT_EXIT_CODE,
+    STEP_APPLY_VERSION,
+    STEP_CHECK_RELEASE_NOTES,
+    STEP_CHECK_TREE,
+    STEP_CLOSE_CHANGELOG,
+    STEP_COMMIT_TAG_PUSH,
+    STEP_COUNT_DRY_RUN,
+    STEP_COUNT_FULL,
+    STEP_COUNT_SKIP_CI,
+    STEP_RUN_CONTOUR,
+    STEP_VERIFY_RELEASE,
+    STEP_WAIT_FOR_WORKFLOW,
+)
 
 
 PROJECT_ROOT: Final[Path] = pipeline.PROJECT_ROOT
@@ -60,12 +79,6 @@ RELEASE_ASSETS: Final[tuple[str, ...]] = (
     "KeySwitch-{version}-macos-x86_64.zip",
     "SHA256SUMS",
 )
-CI_APPEARANCE_TIMEOUT: Final[float] = 180.0
-CI_POLL_SECONDS: Final[float] = 5.0
-SHORT_SHA_LENGTH: Final[int] = 12
-DEFAULT_CI_TIMEOUT_SECONDS: Final[float] = 2400.0
-# The shell convention for "killed by signal N" is 128 + N; SIGINT is 2.
-SIGINT_EXIT_CODE: Final[int] = 130
 
 
 class ReleaseError(Exception):
@@ -209,8 +222,8 @@ def check_preconditions(options: Options) -> None:
         tagged = git("rev-parse", f"{tag}^{{commit}}")
         if tagged != head or dirty_paths():
             raise ReleaseError(
-                f"{tag} already exists at {tagged[:SHORT_SHA_LENGTH]} while the tree has moved on "
-                f"(HEAD {head[:SHORT_SHA_LENGTH]}, {len(dirty_paths())} dirty paths); bump the version"
+                f"{tag} already exists at {tagged[:COMMIT_SHA_PREVIEW_CHARACTERS]} while the tree has moved on "
+                f"(HEAD {head[:COMMIT_SHA_PREVIEW_CHARACTERS]}, {len(dirty_paths())} dirty paths); bump the version"
             )
     note(f"branch {branch}, {len(dirty_paths())} paths to release")
 
@@ -459,7 +472,7 @@ def wait_for_workflow(options: Options, tag: str) -> None:
 
 
 def workflow_run_id(tag: str) -> str:
-    deadline = time.monotonic() + CI_APPEARANCE_TIMEOUT
+    deadline = time.monotonic() + CI_APPEARANCE_TIMEOUT_SECONDS
     while True:
         payload = gh(
             "run",
@@ -477,7 +490,7 @@ def workflow_run_id(tag: str) -> str:
         if time.monotonic() >= deadline:
             raise ReleaseError(
                 f"no release workflow run appeared for {tag} within "
-                f"{int(CI_APPEARANCE_TIMEOUT)}s; check the Actions tab"
+                f"{int(CI_APPEARANCE_TIMEOUT_SECONDS)}s; check the Actions tab"
             )
         time.sleep(CI_POLL_SECONDS)
 
@@ -534,20 +547,6 @@ def verify_published_release(version: str, tag: str) -> str:
 # --------------------------------------------------------------------------
 # Orchestration
 # --------------------------------------------------------------------------
-
-
-STEP_CHECK_TREE: Final[int] = 1
-STEP_APPLY_VERSION: Final[int] = 2
-STEP_CLOSE_CHANGELOG: Final[int] = 3
-STEP_CHECK_RELEASE_NOTES: Final[int] = 4
-STEP_RUN_CONTOUR: Final[int] = 5
-STEP_COMMIT_TAG_PUSH: Final[int] = 6
-STEP_WAIT_FOR_WORKFLOW: Final[int] = 7
-STEP_VERIFY_RELEASE: Final[int] = 8
-# How many steps `release()` announces in total, in each mode.
-STEP_COUNT_DRY_RUN: Final[int] = 4
-STEP_COUNT_SKIP_CI: Final[int] = 6
-STEP_COUNT_FULL: Final[int] = 8
 
 
 def release(options: Options) -> None:

@@ -18,6 +18,23 @@ from .indicator import (
     layout_label,
     normalize_indicator_style,
 )
+from .constants.tray_menu import (
+    DBUSMENU_INTERFACE_VERSION,
+    MENU_ABOUT,
+    MENU_AUTOSWITCH,
+    MENU_EXCEPTIONS,
+    MENU_HISTORY,
+    MENU_ITEM_IDS,
+    MENU_LAYOUT,
+    MENU_NOTIFICATIONS,
+    MENU_QUIT,
+    MENU_SEPARATOR_PRIMARY,
+    MENU_SEPARATOR_QUIT,
+    MENU_SEPARATOR_TOOLS,
+    MENU_SETTINGS,
+    MENU_SOUND,
+    MENU_SWITCH_LAYOUT,
+)
 
 
 ITEM_INTERFACE = "org.kde.StatusNotifierItem"
@@ -26,38 +43,6 @@ PROPERTIES_INTERFACE = "org.freedesktop.DBus.Properties"
 OBJECT_PATH = "/StatusNotifierItem"
 MENU_PATH = "/MenuBar"
 
-MENU_LAYOUT = 1
-MENU_SETTINGS = 2
-MENU_SEPARATOR_PRIMARY = 3
-MENU_AUTOSWITCH = 4
-MENU_SOUND = 5
-MENU_NOTIFICATIONS = 6
-MENU_SEPARATOR_TOOLS = 7
-MENU_HISTORY = 8
-MENU_EXCEPTIONS = 9
-MENU_ABOUT = 10
-MENU_SEPARATOR_QUIT = 11
-MENU_QUIT = 12
-MENU_SWITCH_LAYOUT = 13
-
-# The DBusMenu interface version this implementation speaks.
-DBUSMENU_INTERFACE_VERSION = 3
-
-MENU_ITEM_IDS = (
-    MENU_LAYOUT,
-    MENU_SWITCH_LAYOUT,
-    MENU_SETTINGS,
-    MENU_SEPARATOR_PRIMARY,
-    MENU_AUTOSWITCH,
-    MENU_SOUND,
-    MENU_NOTIFICATIONS,
-    MENU_SEPARATOR_TOOLS,
-    MENU_HISTORY,
-    MENU_EXCEPTIONS,
-    MENU_ABOUT,
-    MENU_SEPARATOR_QUIT,
-    MENU_QUIT,
-)
 
 TrayAction = Callable[[], bool | None]
 MenuEvent = tuple[int, str, object, int]

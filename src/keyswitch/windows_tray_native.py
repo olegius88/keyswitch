@@ -15,52 +15,41 @@ from .windows_tray import (
     WindowsTrayState,
     menu_activation_message,
 )
-
-
-ICON_SIZE = 64
-
-# Letter badge (the non-flag indicator style).
-BADGE_INSET_PIXELS = 2
-BADGE_EDGE_PIXELS = 61
-BADGE_CORNER_RADIUS_PIXELS = 13
-BADGE_FONT_SIZE_PIXELS = 27
-CENTER_DIVISOR = 2
-# Indices into PIL's (left, top, right, bottom) textbbox tuple.
-TEXTBBOX_RIGHT_INDEX = 2
-TEXTBBOX_BOTTOM_INDEX = 3
-BADGE_EN_RGBA = (27, 92, 180, 255)
-BADGE_RU_RGBA = (194, 42, 55, 255)
-BADGE_DISABLED_RGBA = (105, 105, 105, 255)
-
-# The diagonal slash drawn over a disabled badge or flag.
-DISABLED_SLASH_NEAR_PIXELS = 12
-DISABLED_SLASH_FAR_PIXELS = 52
-DISABLED_SLASH_WIDTH_PIXELS = 7
-DISABLED_SLASH_RGBA = (255, 255, 255, 235)
-
-ALTERNATE_EVERY_OTHER = 2  # the modulus of every even/odd index or row check below
-
-# Russian flag (group 1, see indicator.LAYOUT_LABELS): three equal
-# horizontal bands, white/blue/red.
-RUSSIAN_FLAG_BAND_COUNT = 3
-RUSSIAN_FLAG_SECOND_BAND_NUMERATOR = 2
-RUSSIAN_FLAG_BLUE_RGBA = (0, 57, 166, 255)
-RUSSIAN_FLAG_RED_RGBA = (213, 43, 30, 255)
-
-# US flag (any other group): 13 stripes, a canton, and a 5-row star field.
-US_FLAG_STRIPE_COUNT = 13
-US_FLAG_STRIPE_RED_RGBA = (178, 34, 52, 255)
-US_FLAG_CANTON_WIDTH_NUMERATOR = 2
-US_FLAG_CANTON_WIDTH_DENOMINATOR = 5
-US_FLAG_CANTON_HEIGHT_STRIPES = 7
-US_FLAG_CANTON_RGBA = (60, 59, 110, 255)
-US_FLAG_STAR_ROWS = 5
-US_FLAG_STARS_PER_LONG_ROW = 4
-US_FLAG_STARS_PER_SHORT_ROW = 3
-US_FLAG_STAR_OFFSET_LONG_ROW_PIXELS = 3
-US_FLAG_STAR_OFFSET_SHORT_ROW_PIXELS = 6
-US_FLAG_STAR_GRID_SPACING_PIXELS = 6
-US_FLAG_STAR_TOP_MARGIN_PIXELS = 3
+from .constants.geometry import CENTERING_DIVISOR
+from .constants.tray_icon import (
+    ALTERNATE_EVERY_OTHER,
+    BADGE_CORNER_RADIUS_PIXELS,
+    BADGE_DISABLED_RGBA,
+    BADGE_EDGE_PIXELS,
+    BADGE_EN_RGBA,
+    BADGE_FONT_SIZE_PIXELS,
+    BADGE_INSET_PIXELS,
+    BADGE_RU_RGBA,
+    DISABLED_SLASH_FAR_PIXELS,
+    DISABLED_SLASH_NEAR_PIXELS,
+    DISABLED_SLASH_RGBA,
+    DISABLED_SLASH_WIDTH_PIXELS,
+    RUSSIAN_FLAG_BAND_COUNT,
+    RUSSIAN_FLAG_BLUE_RGBA,
+    RUSSIAN_FLAG_RED_RGBA,
+    RUSSIAN_FLAG_SECOND_BAND_NUMERATOR,
+    TEXTBBOX_BOTTOM_INDEX,
+    TEXTBBOX_RIGHT_INDEX,
+    TRAY_ICON_SIZE_PIXELS,
+    US_FLAG_CANTON_HEIGHT_STRIPES,
+    US_FLAG_CANTON_RGBA,
+    US_FLAG_CANTON_WIDTH_DENOMINATOR,
+    US_FLAG_CANTON_WIDTH_NUMERATOR,
+    US_FLAG_STARS_PER_LONG_ROW,
+    US_FLAG_STARS_PER_SHORT_ROW,
+    US_FLAG_STAR_GRID_SPACING_PIXELS,
+    US_FLAG_STAR_OFFSET_LONG_ROW_PIXELS,
+    US_FLAG_STAR_OFFSET_SHORT_ROW_PIXELS,
+    US_FLAG_STAR_ROWS,
+    US_FLAG_STAR_TOP_MARGIN_PIXELS,
+    US_FLAG_STRIPE_COUNT,
+    US_FLAG_STRIPE_RED_RGBA,
+)
 
 
 def _menu_items(
@@ -165,7 +154,7 @@ class PystrayWindowsAdapter:
 
     @classmethod
     def _render(cls, state: WindowsTrayState) -> Image.Image:
-        image = Image.new("RGBA", (ICON_SIZE, ICON_SIZE), (0, 0, 0, 0))
+        image = Image.new("RGBA", (TRAY_ICON_SIZE_PIXELS, TRAY_ICON_SIZE_PIXELS), (0, 0, 0, 0))
         draw = ImageDraw.Draw(image)
         flag_indicator = (
             state.indicator_style == "flags" and state.group in (0, 1)
@@ -191,8 +180,8 @@ class PystrayWindowsAdapter:
             height = bounds[TEXTBBOX_BOTTOM_INDEX] - bounds[1]
             draw.text(
                 (
-                    (ICON_SIZE - width) / CENTER_DIVISOR,
-                    (ICON_SIZE - height) / CENTER_DIVISOR - bounds[1],
+                    (TRAY_ICON_SIZE_PIXELS - width) / CENTERING_DIVISOR,
+                    (TRAY_ICON_SIZE_PIXELS - height) / CENTERING_DIVISOR - bounds[1],
                 ),
                 text,
                 font=font,
@@ -211,10 +200,10 @@ class PystrayWindowsAdapter:
 
     @staticmethod
     def _draw_flag(draw: ImageDraw.ImageDraw, group: int) -> None:
-        left, top, right, bottom = 0, 0, ICON_SIZE - 1, ICON_SIZE - 1
+        left, top, right, bottom = 0, 0, TRAY_ICON_SIZE_PIXELS - 1, TRAY_ICON_SIZE_PIXELS - 1
         if group == 1:
-            first_edge = ICON_SIZE // RUSSIAN_FLAG_BAND_COUNT
-            second_edge = ICON_SIZE * RUSSIAN_FLAG_SECOND_BAND_NUMERATOR // RUSSIAN_FLAG_BAND_COUNT
+            first_edge = TRAY_ICON_SIZE_PIXELS // RUSSIAN_FLAG_BAND_COUNT
+            second_edge = TRAY_ICON_SIZE_PIXELS * RUSSIAN_FLAG_SECOND_BAND_NUMERATOR // RUSSIAN_FLAG_BAND_COUNT
             draw.rectangle((left, top, right, first_edge - 1), fill="white")
             draw.rectangle(
                 (left, first_edge, right, second_edge - 1),
@@ -226,15 +215,15 @@ class PystrayWindowsAdapter:
             )
             return
         for index in range(US_FLAG_STRIPE_COUNT):
-            stripe_top = index * ICON_SIZE // US_FLAG_STRIPE_COUNT
-            stripe_bottom = (index + 1) * ICON_SIZE // US_FLAG_STRIPE_COUNT - 1
+            stripe_top = index * TRAY_ICON_SIZE_PIXELS // US_FLAG_STRIPE_COUNT
+            stripe_bottom = (index + 1) * TRAY_ICON_SIZE_PIXELS // US_FLAG_STRIPE_COUNT - 1
             color = US_FLAG_STRIPE_RED_RGBA if index % ALTERNATE_EVERY_OTHER == 0 else "white"
             draw.rectangle(
                 (left, stripe_top, right, stripe_bottom),
                 fill=color,
             )
-        canton_right = ICON_SIZE * US_FLAG_CANTON_WIDTH_NUMERATOR // US_FLAG_CANTON_WIDTH_DENOMINATOR - 1
-        canton_bottom = ICON_SIZE * US_FLAG_CANTON_HEIGHT_STRIPES // US_FLAG_STRIPE_COUNT - 1
+        canton_right = TRAY_ICON_SIZE_PIXELS * US_FLAG_CANTON_WIDTH_NUMERATOR // US_FLAG_CANTON_WIDTH_DENOMINATOR - 1
+        canton_bottom = TRAY_ICON_SIZE_PIXELS * US_FLAG_CANTON_HEIGHT_STRIPES // US_FLAG_STRIPE_COUNT - 1
         draw.rectangle(
             (left, top, canton_right, canton_bottom),
             fill=US_FLAG_CANTON_RGBA,

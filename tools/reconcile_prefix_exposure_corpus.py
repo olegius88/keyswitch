@@ -20,17 +20,16 @@ from typing import cast
 import zlib
 
 from freeze_context_action_corpus import canonical, checksum, digest, load_split
-from model_protocol import ALL_SPLITS
+from keyswitch.constants.model_protocol import ALL_SPLITS
 from merge_context_action_corpora import Origin, hash_list, hash_value, inspect_gzip, object_value, read_object, verify_origin
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from keyswitch.constants.file_formats import ZLIB_GZIP_HEADER_WBITS_OFFSET
 
 ROOT = Path(__file__).resolve().parents[1]
 REASON = "prefix-curriculum-prior-exposure"
 CURRICULUM_SPLITS = ("train", "development", "calibration")
 MEMBERSHIP_FIELDS = ("row_ids_sha256", "family_ids_sha256", "document_ids_sha256")
-# Added to zlib.MAX_WBITS, this tells zlib.decompressobj to read and check the
-# gzip header/trailer itself, so a multi-member gzip file can be split member
-# by member without pre-parsing its framing.
-ZLIB_GZIP_HEADER_WBITS_OFFSET = 16
 
 
 def resolve_pin(name: str) -> Path:

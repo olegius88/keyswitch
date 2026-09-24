@@ -8,18 +8,19 @@ from .batching import compact
 from .catalog import DeliveryCancelled, deliver
 from .collector import Collector
 from .config import Config
+from .constants.timing import (
+    MAX_RETRY_DELAY_SECONDS,
+    PENDING_RETRY_SECONDS,
+    RETRY_BACKOFF_BASE,
+    RETRY_BACKOFF_MAX_EXPONENT,
+    RETRY_BASE_SECONDS,
+    SECONDS_PER_MINUTE,
+    WAKE_POLL_SECONDS,
+)
 from .rate_limit import RateLimitedClient
 from .secrets import redact
 from .store import QueueFull, Store
 from .telegram import Telegram, TelegramError
-
-SECONDS_PER_MINUTE = 60
-WAKE_POLL_SECONDS = 5  # background loop tick; matches README's "every 5 seconds"
-PENDING_RETRY_SECONDS = 5  # retry soon when items remain queued after a send
-MAX_RETRY_DELAY_SECONDS = 900
-RETRY_BASE_SECONDS = 15
-RETRY_BACKOFF_BASE = 2
-RETRY_BACKOFF_MAX_EXPONENT = 6
 
 
 class Service:

@@ -8,16 +8,18 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from keyswitch.config import DEFAULT_MINIMUM_WORD_LENGTH, DEFAULTS, SettingsStore
+from keyswitch.config import SettingsStore
+from keyswitch.constants.settings_defaults import DEFAULT_MINIMUM_WORD_LENGTH, DEFAULT_SETTINGS
 from keyswitch.settings_diagnostics import (
     _LOGGABLE_STRING_TRUNCATED_CHARACTERS,
     setting_change,
     settings_snapshot,
 )
-
-HISTORY_LIMIT_OVERRIDE = 50
-MINIMUM_LENGTH_OVERRIDE = 5
-OVERSIZED_STRING_CHARACTERS = 100
+from fixture_values.counts import (
+    NON_DEFAULT_HISTORY_LIMIT,
+    NON_DEFAULT_MINIMUM_WORD_LENGTH,
+    OVERSIZED_SETTING_STRING_CHARACTERS,
+)
 
 
 class SettingsDiagnosticsTests(unittest.TestCase):
@@ -30,8 +32,8 @@ class SettingsDiagnosticsTests(unittest.TestCase):
         result = settings_snapshot(self.store)
         self.assertEqual(result["format"], "overrides-v1")
         self.assertEqual(result["overrides"], {})
-        self.assertEqual(result["defaults_schema"], DEFAULTS["schema_version"])
-        expected = hashlib.sha256(json.dumps(DEFAULTS, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        self.assertEqual(result["defaults_schema"], DEFAULT_SETTINGS["schema_version"])
+        expected = hashlib.sha256(json.dumps(DEFAULT_SETTINGS, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
         self.assertEqual(result["defaults_sha256"], expected)
 
     def test_all_known_sections_are_compared_and_private_collections_are_summarized(self) -> None:
@@ -40,7 +42,7 @@ class SettingsDiagnosticsTests(unittest.TestCase):
         changes = {"enabled": False, "detection.context_read_field": False,
                    "general.sound": True, "appearance.theme": "dark",
                    "hotkeys.convert_last": "F12", "updates.check_automatically": False,
-                   "history.limit": HISTORY_LIMIT_OVERRIDE, "exclusions.words": ["private-token"],
+                   "history.limit": NON_DEFAULT_HISTORY_LIMIT, "exclusions.words": ["private-token"],
                    "applications.telegram_quote_mention": False}
         for path, value in changes.items():
             self.store.set(path, value, persist=False)
@@ -59,9 +61,9 @@ class SettingsDiagnosticsTests(unittest.TestCase):
             self.assertIsNone(setting_change(self.store, path, "private-token"))
 
     def test_change_and_reset_never_repeat_a_default_value(self) -> None:
-        self.store.set("detection.minimum_length", MINIMUM_LENGTH_OVERRIDE, persist=False)
-        self.assertEqual(setting_change(self.store, "detection.minimum_length", MINIMUM_LENGTH_OVERRIDE), {
-            "path": "detection.minimum_length", "operation": "set", "value": MINIMUM_LENGTH_OVERRIDE,
+        self.store.set("detection.minimum_length", NON_DEFAULT_MINIMUM_WORD_LENGTH, persist=False)
+        self.assertEqual(setting_change(self.store, "detection.minimum_length", NON_DEFAULT_MINIMUM_WORD_LENGTH), {
+            "path": "detection.minimum_length", "operation": "set", "value": NON_DEFAULT_MINIMUM_WORD_LENGTH,
         })
         self.store.restore_default("detection.minimum_length")
         self.assertEqual(setting_change(self.store, "detection.minimum_length", DEFAULT_MINIMUM_WORD_LENGTH), {
@@ -70,7 +72,7 @@ class SettingsDiagnosticsTests(unittest.TestCase):
         self.assertEqual(settings_snapshot(self.store)["overrides"], {})
 
     def test_group_changes_and_reload_are_complete_replacement_snapshots(self) -> None:
-        self.store.set("detection.minimum_length", MINIMUM_LENGTH_OVERRIDE, persist=False)
+        self.store.set("detection.minimum_length", NON_DEFAULT_MINIMUM_WORD_LENGTH, persist=False)
         for path in ("detection", "*"):
             self.assertEqual(setting_change(self.store, path, {}), {
                 "path": path, "operation": "snapshot", "settings": settings_snapshot(self.store),
@@ -91,7 +93,7 @@ class SettingsDiagnosticsTests(unittest.TestCase):
                 raise AssertionError("Do not format arbitrary settings values")
 
         for value, expected in (
-            (None, None), ("x" * OVERSIZED_STRING_CHARACTERS, "x" * _LOGGABLE_STRING_TRUNCATED_CHARACTERS + "..."),
+            (None, None), ("x" * OVERSIZED_SETTING_STRING_CHARACTERS, "x" * _LOGGABLE_STRING_TRUNCATED_CHARACTERS + "..."),
             (("private",), {"type": "tuple", "items": 1}),
             ({"private"}, {"type": "set", "items": 1}),
             ({"private": "value"}, {"type": "dict", "items": 1}),

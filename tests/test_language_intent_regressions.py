@@ -10,14 +10,14 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from keyswitch.backend import KeyEvent, SHIFT_MASK
+from keyswitch.backend import KeyEvent
+from keyswitch.constants.keyboard import SHIFT_MASK
 from keyswitch.config import SettingsStore
 from keyswitch.engine import KeySwitchEngine
 from keyswitch.history import HistoryStore
 from keyswitch.layouts import LayoutPair
 from test_input_integrity import EditorBackend
-
-INITIAL_KEY_SERIAL = 100
+from fixture_values.keys import EDITOR_REPLAY_FIRST_KEY_SERIAL
 
 
 class LanguageIntentRegressions(unittest.TestCase):
@@ -47,7 +47,7 @@ class LanguageIntentRegressions(unittest.TestCase):
                 engine = KeySwitchEngine(
                     settings, HistoryStore(root / "history.jsonl"), backend,
                 )
-                serial = INITIAL_KEY_SERIAL
+                serial = EDITOR_REPLAY_FIRST_KEY_SERIAL
                 for text, intended, initial in segments:
                     if initial is not None:
                         backend.group = initial

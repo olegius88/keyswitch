@@ -25,20 +25,19 @@ from freeze_context_action_corpus import (
 )
 from keyswitch.layouts import LayoutPair
 from keyswitch.short_words import TRUSTED_SHORT_WORDS
-from model_protocol import ACTIVE_SPLITS, ALL_SPLITS, FITTING_SPLITS
+from keyswitch.constants.model_protocol import ACTIVE_SPLITS, ALL_SPLITS, FITTING_SPLITS
+from keyswitch.constants.corpus import (
+    ADD_CALL_AFTER_ARG_INDEX,
+    ADD_CALL_BEFORE_ARG_INDEX,
+    ADD_CALL_MIN_ARGS,
+    PHYSICAL_ALIAS_CACHE_SIZE,
+    UNKNOWN_FAMILY_CALL_CONTEXTS_ARG_INDEX,
+    UNKNOWN_FAMILY_CALL_MIN_ARGS,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 PAIR = LayoutPair()
 POSITIONS = tuple({key.characters[group]: key.keycode for key in reversed(KEYS)} for group in (0, 1))
-PHYSICAL_ALIAS_CACHE_SIZE = 131072
-# Positional indices into add()/unknown_family() calls found in the frozen
-# generator source, matching train_context_model.py's add(word, group, before,
-# after, ...) and unknown_family(name, group, contexts, ...) signatures.
-ADD_CALL_MIN_ARGS = 4
-ADD_CALL_BEFORE_ARG_INDEX = 2
-ADD_CALL_AFTER_ARG_INDEX = 3
-UNKNOWN_FAMILY_CALL_MIN_ARGS = 3
-UNKNOWN_FAMILY_CALL_CONTEXTS_ARG_INDEX = 2
 
 
 class FrozenAPI(Protocol):

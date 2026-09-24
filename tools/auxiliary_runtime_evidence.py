@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import cast
 
 from keyswitch.intent_model import IntentModelStatus, LinearNgramModel
+from keyswitch.constants.file_formats import HASH_CHUNK_BYTES, SHA256_HEX_CHARACTERS
+from keyswitch.constants.training import REFERENCE_LEXICAL_FILE_COUNT
 
 INTENT_PATH = "src/keyswitch/resources/models/layout_intent_v1.ksm"
 CONFIG_PATH = "model/intent_v1/config.json"
@@ -31,9 +33,6 @@ REQUIRED_PATHS = (
     "tests/test_input_integrity.py", "tests/test_engine_behaviour.py",
     "tests/test_windows_backend.py", "tests/test_x11_backend.py",
 )
-HASH_CHUNK_BYTES = 1024 * 1024
-SHA256_HEX_LENGTH = 64
-REFERENCE_LEXICAL_FILE_COUNT = 6
 
 
 def _inside(root: Path, path: Path) -> Path:
@@ -85,7 +84,7 @@ def _lexical_paths(root: Path) -> dict[Path, str]:
             (Path("model/intent_v1/sources/hunspell") / (locale + ".aff"), spelling.get("affix_sha256")),
         )
         for path, expected in specifications:
-            if not isinstance(expected, str) or len(expected) != SHA256_HEX_LENGTH or any(char not in "0123456789abcdef" for char in expected):
+            if not isinstance(expected, str) or len(expected) != SHA256_HEX_CHARACTERS or any(char not in "0123456789abcdef" for char in expected):
                 raise ValueError("invalid reference lexical checksum")
             result[_inside(root, path)] = expected
     if len(result) != REFERENCE_LEXICAL_FILE_COUNT:

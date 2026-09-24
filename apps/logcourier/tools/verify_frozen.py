@@ -8,18 +8,18 @@ import sys
 import tempfile
 from pathlib import Path
 
-# DOS header offset of e_lfanew, the pointer to the PE signature.
-DOS_HEADER_PE_OFFSET_FIELD = 0x3C
-PE_SIGNATURE_BYTES = 4
-COFF_FILE_HEADER_BYTES = 20
-# Where the optional header starts relative to the PE signature.
-PE_SIGNATURE_AND_COFF_HEADER_BYTES = PE_SIGNATURE_BYTES + COFF_FILE_HEADER_BYTES
-# Byte offset of the Subsystem field within the optional header.
-OPTIONAL_HEADER_SUBSYSTEM_OFFSET = 68
-WINDOWS_SUBSYSTEM_GUI = 2
-WINDOWS_SUBSYSTEM_CUI = 3
-CLI_VERSION_CHECK_TIMEOUT_SECONDS = 20
-GUI_SELF_TEST_TIMEOUT_SECONDS = 30
+from logcourier.constants.release import (
+    CLI_VERSION_CHECK_TIMEOUT_SECONDS,
+    GUI_SELF_TEST_TIMEOUT_SECONDS,
+)
+from logcourier.constants.windows import (
+    DOS_HEADER_PE_OFFSET_FIELD,
+    OPTIONAL_HEADER_SUBSYSTEM_OFFSET,
+    PE_SIGNATURE_AND_COFF_HEADER_BYTES,
+    PE_SIGNATURE_BYTES,
+    WINDOWS_SUBSYSTEM_CUI,
+    WINDOWS_SUBSYSTEM_GUI,
+)
 
 root = Path(__file__).resolve().parents[1]
 folder = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else root / "dist/LogCourier"

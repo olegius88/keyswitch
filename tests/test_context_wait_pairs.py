@@ -18,29 +18,40 @@ from collections.abc import Callable
 from unittest.mock import patch
 
 from keyswitch.context_model import ACTIONS, ContextAction, ContextEvidence, ContextModel, ContextPrediction
-from keyswitch.input_context import CONTEXT_TTL
+from keyswitch.input_context import CONTEXT_TTL, FieldContext
 from test_context_policy import ContextEngineTests
-
-CONTEXT_SUFFIX_CHARACTERS = 4  # matches len("tot ") / len("еще ")
-FIRST_TYPING_TIME_SECONDS = 1000.0
-SECOND_TYPING_TIME_WITHIN_TTL_SECONDS = 1012.0
-LAST_WORD_INPUT_AT_SECONDS = 100.0
-PAUSE_CHECK_NOW_SECONDS = 102.0
+from fixture_values.clock import (
+    LAST_WORD_INPUT_AT_SECONDS,
+    WAIT_PAIR_FIRST_TYPING_SECONDS,
+    WAIT_PAIR_PAUSE_CHECK_SECONDS,
+    WAIT_PAIR_SECOND_TYPING_WITHIN_TTL_SECONDS,
+)
+from fixture_values.counts import WAIT_PAIR_CONTEXT_SUFFIX_CHARACTERS
 
 
 class ScriptedModel(ContextModel):
     """Answers each question by what it is asked about, and records the questions."""
 
-    def __init__(self, answer: Callable[[ContextEvidence], ContextAction]) -> None:
+    def __init__(self, answer: Callable[[ContextEvidence], ContextAction], *, supported: bool = True) -> None:
         super().__init__({"bias": (0.0, 0.0, 0.0, 0.0)}, "context-v1-scripted")
         self.answer = answer
+        # False: the application and the neighbour words are outside the model's vocabulary.
+        self.supported = supported
         self.questions: list[tuple[str, str, str]] = []
 
     def predict(self, item: ContextEvidence) -> ContextPrediction:
         action = self.answer(item)
         self.questions.append((item.original, item.field.before, item.field.after))
         probabilities = tuple(1.0 if name == action else 0.0 for name in ACTIONS)
-        return ContextPrediction(action, 1.0, probabilities, self.version, True)
+        return ContextPrediction(action, 1.0, probabilities, self.version, self.supported)
+
+
+def before_greeting(item: ContextEvidence) -> ContextAction:
+    """`tot` waits and follows `привет`, which converts on its own."""
+
+    if item.original == "tot":
+        return "convert" if item.field.after == "привет" else "wait"
+    return "convert"
 
 
 def after_reading(item: ContextEvidence) -> ContextAction:
@@ -52,8 +63,8 @@ def after_reading(item: ContextEvidence) -> ContextAction:
 
 
 class ContextWaitPairTests(ContextEngineTests):
-    def script(self, answer: Callable[[ContextEvidence], ContextAction]) -> ScriptedModel:
-        model = ScriptedModel(answer)
+    def script(self, answer: Callable[[ContextEvidence], ContextAction], *, supported: bool = True) -> ScriptedModel:
+        model = ScriptedModel(answer, supported=supported)
         self.engine.context_policy.model = model
         return model
 
@@ -71,7 +82,7 @@ class ContextWaitPairTests(ContextEngineTests):
         self.assertEqual(self.backend.text, "еще в ")
         self.assertIsNone(self.engine._context_waiting)
         asked = [
-            (original, before[-CONTEXT_SUFFIX_CHARACTERS:], after)
+            (original, before[-WAIT_PAIR_CONTEXT_SUFFIX_CHARACTERS:], after)
             for original, before, after in model.questions
         ]
         # As typed, then after `еще`, then the waiting word with its converted neighbour.
@@ -86,7 +97,7 @@ class ContextWaitPairTests(ContextEngineTests):
         self.assertIsNone(self.engine._pending)
         self.assertIn(
             ("is", "еще "),
-            [(original, before[-CONTEXT_SUFFIX_CHARACTERS:]) for original, before, _after in model.questions],
+            [(original, before[-WAIT_PAIR_CONTEXT_SUFFIX_CHARACTERS:]) for original, before, _after in model.questions],
         )
         # The waiting word is not asked again: nothing converted after it.
         self.assertEqual([original for original, _before, _after in model.questions].count("tot"), 1)
@@ -101,10 +112,10 @@ class ContextWaitPairTests(ContextEngineTests):
     def test_a_wait_lasts_as_long_as_the_context_it_waits_in(self) -> None:
         """`tot`, twelve seconds of thought, then `d`: still one phrase (0.31.0 log, 24.09.2026)."""
         self.script(after_reading)
-        with patch("keyswitch.engine.time.monotonic", return_value=FIRST_TYPING_TIME_SECONDS):
+        with patch("keyswitch.engine.time.monotonic", return_value=WAIT_PAIR_FIRST_TYPING_SECONDS):
             self.type("tot ")
         with patch(
-            "keyswitch.engine.time.monotonic", return_value=SECOND_TYPING_TIME_WITHIN_TTL_SECONDS
+            "keyswitch.engine.time.monotonic", return_value=WAIT_PAIR_SECOND_TYPING_WITHIN_TTL_SECONDS
         ):
             self.type("d ")
         self.assertEqual(self.backend.text, "еще в ")
@@ -112,16 +123,59 @@ class ContextWaitPairTests(ContextEngineTests):
     def test_a_wait_ends_with_the_context_it_waits_in(self) -> None:
         """Once the context has lapsed `tot` stays, and `d` is judged as a letter on its own."""
         model = self.script(after_reading)
-        with patch("keyswitch.engine.time.monotonic", return_value=FIRST_TYPING_TIME_SECONDS):
+        with patch("keyswitch.engine.time.monotonic", return_value=WAIT_PAIR_FIRST_TYPING_SECONDS):
             self.type("tot ")
         with patch(
-            "keyswitch.engine.time.monotonic", return_value=FIRST_TYPING_TIME_SECONDS + CONTEXT_TTL + 1.0
+            "keyswitch.engine.time.monotonic", return_value=WAIT_PAIR_FIRST_TYPING_SECONDS + CONTEXT_TTL + 1.0
         ):
             self.type("d ")
         self.assertEqual(self.backend.text, "tot в ")
         self.assertNotIn(
-            "еще ", [before[-CONTEXT_SUFFIX_CHARACTERS:] for _original, before, _after in model.questions]
+            "еще ", [before[-WAIT_PAIR_CONTEXT_SUFFIX_CHARACTERS:] for _original, before, _after in model.questions]
         )
+
+    def test_the_models_verdict_on_the_pair_stands_outside_the_applications_it_knows(self) -> None:
+        """Firefox is not in the model's vocabulary: it still waited on `tot`, then threw its
+        own verdict away and `tot привет` stayed (0.31.0 and 0.31.1 logs, 24.09.2026)."""
+        self.script(before_greeting, supported=False)
+        self.type("tot ghbdtn ")
+        self.assertEqual(self.backend.text, "еще привет ")
+
+    def test_outside_its_vocabulary_the_model_decides_only_with_a_planned_neighbour(self) -> None:
+        """Asked about `tot` before the `привет` the engine converted, the model's verdict
+        stands; asked about the same word with no such neighbour, the baseline decides."""
+        self.script(lambda _item: "convert", supported=False)
+        baseline = self.engine._planned_baseline("tot", {1: "еще"}, 0, "", 1)
+        self.assertFalse(baseline.should_convert)
+        field = FieldContext("firefox", "1", "", "")
+
+        def decide(planned: bool) -> bool:
+            return self.engine.context_policy.decide(
+                baseline, "еще", 1, self.engine.detector, "space", "assist",
+                after="привет", field_override=field, planned_context=planned,
+            ).decision.should_convert
+
+        self.assertEqual((decide(True), decide(False)), (True, False))
+
+    def test_a_next_word_converted_at_a_pause_takes_the_waiting_word_with_it(self) -> None:
+        """`tot`, then `ghbdtn` and a pause before the space: `привет` used to convert alone,
+        switch the layout and leave `tot` behind when the space ended the wait."""
+        self.script(before_greeting)
+        self.type("tot ghbdtn")
+        self.engine._last_word_input_at = LAST_WORD_INPUT_AT_SECONDS
+        self.engine._maybe_correct_after_pause(now=WAIT_PAIR_PAUSE_CHECK_SECONDS)
+        self.assertEqual(self.backend.text, "еще привет")
+        self.assertIsNone(self.engine._context_waiting)
+
+    def test_a_next_word_with_literal_punctuation_converts_alone_at_a_pause(self) -> None:
+        """As at a space, punctuation typed against the next word ends the wait: the pair is
+        not rewritten across a literal the user put there."""
+        self.script(before_greeting)
+        self.type("tot ghbdtn.")
+        self.engine._last_word_input_at = LAST_WORD_INPUT_AT_SECONDS
+        self.engine._maybe_correct_after_pause(now=WAIT_PAIR_PAUSE_CHECK_SECONDS)
+        self.assertEqual(self.backend.text, "tot привет.")
+        self.assertIsNone(self.engine._context_waiting)
 
     def test_a_suggested_word_follows_its_converted_neighbour(self) -> None:
         """`vs` the model was not sure of becomes `мы` once `хотим` is typed in the same layout."""
@@ -142,7 +196,7 @@ class ContextWaitPairTests(ContextEngineTests):
         self.assertFalse(waiting.settles_on_pause)
         self.engine._last_word_input_at = LAST_WORD_INPUT_AT_SECONDS
         self.choose("convert")
-        self.engine._maybe_correct_after_pause(now=PAUSE_CHECK_NOW_SECONDS)
+        self.engine._maybe_correct_after_pause(now=WAIT_PAIR_PAUSE_CHECK_SECONDS)
         self.assertIsNone(self.engine._context_waiting)
         self.assertIsNone(self.engine._pending)
         self.assertEqual(self.backend.text, "vs ")

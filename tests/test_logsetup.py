@@ -11,14 +11,15 @@ from unittest.mock import patch
 
 from keyswitch import __version__, logsetup
 from keyswitch.config import SettingsStore
+from keyswitch.constants.log_files import DEFAULT_LOG_ROTATION, TECHNICAL_LOG_ROTATION
 
 
 class RotationLimitTests(unittest.TestCase):
     def test_the_diagnostics_mode_gets_the_larger_budget(self) -> None:
         ordinary = logsetup.rotation_limits(False)
         technical = logsetup.rotation_limits(True)
-        self.assertEqual(ordinary, logsetup.DEFAULT_ROTATION)
-        self.assertEqual(technical, logsetup.TECHNICAL_ROTATION)
+        self.assertEqual(ordinary, DEFAULT_LOG_ROTATION)
+        self.assertEqual(technical, TECHNICAL_LOG_ROTATION)
         self.assertGreater(technical[0], ordinary[0])
         self.assertGreater(technical[1], ordinary[1])
         self.assertEqual(logsetup.rotation_summary(True), "5 МБ × 6 файлов")
@@ -36,8 +37,8 @@ class RotationBudgetTests(unittest.TestCase):
         self.directory = Path(self.temporary.name)
         self.handler = RotatingFileHandler(
             self.directory / "keyswitch.log",
-            maxBytes=logsetup.DEFAULT_ROTATION[0],
-            backupCount=logsetup.DEFAULT_ROTATION[1],
+            maxBytes=DEFAULT_LOG_ROTATION[0],
+            backupCount=DEFAULT_LOG_ROTATION[1],
             encoding="utf-8",
         )
 
@@ -57,7 +58,7 @@ class RotationBudgetTests(unittest.TestCase):
         self.assertTrue(logsetup.apply_rotation(self.handler, technical=True))
         self.assertEqual(
             (self.handler.maxBytes, self.handler.backupCount),
-            logsetup.TECHNICAL_ROTATION,
+            TECHNICAL_LOG_ROTATION,
         )
         log = self.directory / "keyswitch.log"
         self.assertEqual(log.read_text(encoding="utf-8"), "")
@@ -72,7 +73,7 @@ class RotationBudgetTests(unittest.TestCase):
         self.assertFalse(logsetup.apply_rotation(self.handler, technical=False))
         self.assertEqual(
             (self.handler.maxBytes, self.handler.backupCount),
-            logsetup.DEFAULT_ROTATION,
+            DEFAULT_LOG_ROTATION,
         )
         self.assertIn("during", log.read_text(encoding="utf-8"))
 
@@ -93,8 +94,8 @@ class SettingsFollowingTests(unittest.TestCase):
         self.settings = SettingsStore(self.directory / "config.json")
         self.handler = RotatingFileHandler(
             self.directory / "keyswitch.log",
-            maxBytes=logsetup.DEFAULT_ROTATION[0],
-            backupCount=logsetup.DEFAULT_ROTATION[1],
+            maxBytes=DEFAULT_LOG_ROTATION[0],
+            backupCount=DEFAULT_LOG_ROTATION[1],
             encoding="utf-8",
         )
 
@@ -105,27 +106,27 @@ class SettingsFollowingTests(unittest.TestCase):
     def test_the_handler_follows_the_setting_and_a_full_reload(self) -> None:
         unsubscribe = logsetup.follow_settings(self.settings, self.handler)
         assert unsubscribe is not None
-        self.assertEqual(self.handler.maxBytes, logsetup.DEFAULT_ROTATION[0])
+        self.assertEqual(self.handler.maxBytes, DEFAULT_LOG_ROTATION[0])
 
         self.settings.set("diagnostics.technical_logging", True)
-        self.assertEqual(self.handler.maxBytes, logsetup.TECHNICAL_ROTATION[0])
+        self.assertEqual(self.handler.maxBytes, TECHNICAL_LOG_ROTATION[0])
 
         # An unrelated setting leaves the budget alone.
         self.settings.set("detection.aggressive", True)
-        self.assertEqual(self.handler.maxBytes, logsetup.TECHNICAL_ROTATION[0])
+        self.assertEqual(self.handler.maxBytes, TECHNICAL_LOG_ROTATION[0])
 
         # Resetting every setting turns the mode off again.
         self.settings.reset()
-        self.assertEqual(self.handler.maxBytes, logsetup.DEFAULT_ROTATION[0])
+        self.assertEqual(self.handler.maxBytes, DEFAULT_LOG_ROTATION[0])
 
         unsubscribe()
         self.settings.set("diagnostics.technical_logging", True)
-        self.assertEqual(self.handler.maxBytes, logsetup.DEFAULT_ROTATION[0])
+        self.assertEqual(self.handler.maxBytes, DEFAULT_LOG_ROTATION[0])
 
     def test_following_starts_from_the_stored_mode(self) -> None:
         self.settings.set("diagnostics.technical_logging", True)
         logsetup.follow_settings(self.settings, self.handler)
-        self.assertEqual(self.handler.maxBytes, logsetup.TECHNICAL_ROTATION[0])
+        self.assertEqual(self.handler.maxBytes, TECHNICAL_LOG_ROTATION[0])
 
     def test_without_a_file_handler_there_is_nothing_to_follow(self) -> None:
         with patch("keyswitch.logsetup.file_handler", return_value=None):
@@ -209,14 +210,14 @@ class ConfigureLoggingTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     (handler.maxBytes, handler.backupCount),
-                    logsetup.TECHNICAL_ROTATION,
+                    TECHNICAL_LOG_ROTATION,
                 )
 
                 # The freshly installed handler keeps following the setting.
                 settings.set("diagnostics.technical_logging", False)
                 self.assertEqual(
                     (handler.maxBytes, handler.backupCount),
-                    logsetup.DEFAULT_ROTATION,
+                    DEFAULT_LOG_ROTATION,
                 )
 
     def test_the_root_logger_is_wired_even_when_it_already_has_handlers(self) -> None:
@@ -259,7 +260,7 @@ class ConfigureLoggingTests(unittest.TestCase):
                 handler = logsetup.configure_logging()
                 self.assertEqual(
                     (handler.maxBytes, handler.backupCount),
-                    logsetup.DEFAULT_ROTATION,
+                    DEFAULT_LOG_ROTATION,
                 )
 
 

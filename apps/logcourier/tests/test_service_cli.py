@@ -1,12 +1,21 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+from fixture_values.clock import SERVICE_BACKOFF_RETRY_AFTER_SECONDS
+
 from logcourier import __main__, service
 from logcourier.collector import Collector
 from logcourier.config import save_config
+from logcourier.constants.limits import MAX_LIST_LIMIT
 from logcourier.store import QueueFull
 
-RETRY_AFTER_SECONDS = 60
+
+def test_cli_limit_message_names_the_largest_limit(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("LOGCOURIER_DATA_DIR", str(tmp_path))
+    with pytest.raises(SystemExit):
+        __main__.main(["list", "--limit", str(MAX_LIST_LIMIT + 1)])
+    assert f"--limit должен быть от 1 до {MAX_LIST_LIMIT}" in capsys.readouterr().err
 
 
 def test_full_queue_still_delivers(tmp_path, configured, monkeypatch):
@@ -46,7 +55,7 @@ def test_service_retry_retains_queue(tmp_path, configured, monkeypatch):
     monkeypatch.setattr(service, "Telegram", lambda _: SimpleNamespace(bot_id=config.bot_id))
 
     def failure(*args):
-        raise service.TelegramError("retry", retry_after=RETRY_AFTER_SECONDS)
+        raise service.TelegramError("retry", retry_after=SERVICE_BACKOFF_RETRY_AFTER_SECONDS)
 
     monkeypatch.setattr(service, "deliver", failure)
     worker.run()
