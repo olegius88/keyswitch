@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, replace
 from contextlib import redirect_stdout
+import errno
 import gzip
 import hashlib
 import io
@@ -182,7 +183,7 @@ class ReconciliationIOTests(unittest.TestCase):
         arguments = ["--corpus", str(self.parent), "--source-root", str(self.root / "sources"),
                      "--report", str(self.root / "summary.json")]
         output = io.StringIO()
-        with patch.object(repair, "audit", side_effect=PermissionError(13, "permission denied", "/fixture/data")), redirect_stdout(output):
+        with patch.object(repair, "audit", side_effect=PermissionError(errno.EACCES, "permission denied", "/fixture/data")), redirect_stdout(output):
             self.assertEqual(repair.main(arguments), 1)
         self.assertEqual(json.loads(output.getvalue())["status"], "access-denied")
         output = io.StringIO()

@@ -69,6 +69,7 @@ UC_MODIFIER_ALPHA_LOCK: Final = 4  # alphaLock (0x0400) >> 8.
 UC_MODIFIER_OPTION: Final = 8  # optionKey (0x0800) >> 8.
 UC_MODIFIER_CONTROL: Final = 16  # controlKey (0x1000) >> 8.
 TRANSLATED_LENGTH: Final = 8
+TEXT_BUFFER_CAPACITY_BYTES: Final = 512
 
 CF_STRING_ENCODING_UTF8: Final = 0x08000100
 CF_NUMBER_SINT32_TYPE: Final = 3
@@ -78,6 +79,9 @@ NULL_WINDOW_ID: Final = 0
 # A window the user types into sits on the normal layer; menus, the dock and
 # overlays sit above it and would otherwise be mistaken for the focus.
 NORMAL_WINDOW_LAYER: Final = 0
+# Index of the program name within the (window id, owner pid, name) tuple
+# `CtypesMacAPI._front_window` returns.
+FRONT_WINDOW_NAME_INDEX: Final = 2
 
 RUN_LOOP_SLICE_SECONDS: Final = 0.2
 
@@ -233,7 +237,7 @@ _TAP_CALLBACK = ctypes.CFUNCTYPE(
 def _text(reference: int | None) -> str:
     if not reference:
         return ""
-    buffer = ctypes.create_string_buffer(512)
+    buffer = ctypes.create_string_buffer(TEXT_BUFFER_CAPACITY_BYTES)
     if not _cf.CFStringGetCString(reference, buffer, len(buffer), CF_STRING_ENCODING_UTF8):
         return ""
     return buffer.value.decode("utf-8", "replace")
@@ -408,7 +412,7 @@ class CtypesMacAPI:
         return 0, focused, name
 
     def active_application(self) -> str:
-        return self._front_window()[2]
+        return self._front_window()[FRONT_WINDOW_NAME_INDEX]
 
     def focused_window(self) -> int:
         return self._front_window()[0]

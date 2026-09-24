@@ -24,17 +24,30 @@ from auxiliary_runtime_evidence import packaged_intent
 from reference_lexicon import reference_models
 from context_physical_keys import KEYS
 from keyswitch.backend import KeyEvent, SHIFT_MASK
-from keyswitch.config import SettingsStore
+from keyswitch.config import DEFAULT_EARLY_SWITCH_MIN_LENGTH, DEFAULT_PAUSE_DELAY_SECONDS, SettingsStore
 from keyswitch.engine import KeySwitchEngine
 from keyswitch.history import HistoryStore
 from keyswitch.intent_model import IntentModelStatus, LinearNgramModel
 from keyswitch.language_model import LanguageModel
 from test_input_integrity import EditorBackend
 
+INITIAL_CLOCK_SECONDS = 1000.0
+# Longer than DEFAULT_PAUSE_DELAY_SECONDS so a plain idle() always crosses it.
+DEFAULT_IDLE_SECONDS = 1.7
+KEY_PRESS_ADVANCE_SECONDS = 0.05
+KEY_RELEASE_ADVANCE_SECONDS = 0.03
+MILLISECONDS_PER_SECOND = 1000
+# End offset of a one-character lookahead slice (`index + 1 : index + LOOKAHEAD_SLICE_END_OFFSET`).
+LOOKAHEAD_SLICE_END_OFFSET = 2
+RETURN_KEYCODE = 104
+SHORT_IDLE_BELOW_PAUSE_SECONDS = 1.3
+REMAINING_IDLE_PAST_PAUSE_SECONDS = 0.4
+EXTENDED_IDLE_SECONDS = 12.0
+
 
 class _Clock:
     def __init__(self) -> None:
-        self.now = 1000.0
+        self.now = INITIAL_CLOCK_SECONDS
 
     def read(self) -> float:
         return self.now
@@ -51,7 +64,7 @@ class _Session:
         self.engine._maybe_correct_after_pause()
         self.engine._expire_learning_prompt()
 
-    def idle(self, seconds: float = 1.7) -> None:
+    def idle(self, seconds: float = DEFAULT_IDLE_SECONDS) -> None:
         self.clock.now += seconds
         self.timers()
 
@@ -60,12 +73,12 @@ class _Session:
         self.engine._poll_current_group()
 
     def tap(self, event: KeyEvent) -> None:
-        self.clock.now += 0.05
-        pressed = replace(event, timestamp=round(self.clock.now * 1000))
+        self.clock.now += KEY_PRESS_ADVANCE_SECONDS
+        pressed = replace(event, timestamp=round(self.clock.now * MILLISECONDS_PER_SECOND))
         self.backend.type(pressed)
         self.engine._handle(pressed)
-        self.clock.now += 0.03
-        released = replace(pressed, pressed=False, timestamp=round(self.clock.now * 1000))
+        self.clock.now += KEY_RELEASE_ADVANCE_SECONDS
+        released = replace(pressed, pressed=False, timestamp=round(self.clock.now * MILLISECONDS_PER_SECOND))
         self.backend.type(released)
         self.engine._handle(released)
         self.timers()
@@ -80,12 +93,12 @@ class _Session:
                 observed, key.characters, self.backend.group,
                 SHIFT_MASK if key.shift else 0, 0,
             ))
-            following = intended[index + 1:index + 2]
+            following = intended[index + 1:index + LOOKAHEAD_SLICE_END_OFFSET]
             if idle_after_words and not intended[index].isspace() and (not following or following.isspace()):
                 self.idle()
 
     def submit(self) -> None:
-        self.tap(KeyEvent(True, 104, "Return", "", ("", ""), self.backend.group, 0, 0))
+        self.tap(KeyEvent(True, RETURN_KEYCODE, "Return", "", ("", ""), self.backend.group, 0, 0))
         self.idle()
 
 
@@ -104,8 +117,8 @@ class DefaultInputSequenceTests(unittest.TestCase):
             root = Path(directory)
             settings = SettingsStore(root / "settings.json")
             expected = {
-                "early_switch": False, "early_switch_min_length": 4,
-                "correct_on_pause": True, "pause_delay_seconds": 1.5,
+                "early_switch": False, "early_switch_min_length": DEFAULT_EARLY_SWITCH_MIN_LENGTH,
+                "correct_on_pause": True, "pause_delay_seconds": DEFAULT_PAUSE_DELAY_SECONDS,
                 "respect_manual_layout": True, "learning": True,
                 "context_policy": "assist", "context_aware": True,
                 "context_read_field": True, "aggressive": True,
@@ -165,9 +178,9 @@ class DefaultInputSequenceTests(unittest.TestCase):
             session.type("кот", 1, idle_after_words=False)
             self.assertEqual(session.backend.text, "rjn")
             self.assertEqual(session.backend.submissions, [])
-            session.idle(1.3)
+            session.idle(SHORT_IDLE_BELOW_PAUSE_SECONDS)
             self.assertEqual(session.backend.text, "rjn")
-            session.idle(0.4)
+            session.idle(REMAINING_IDLE_PAST_PAUSE_SECONDS)
             session.type("  ", 1)
             self.assert_sent_once(session, "кот  ")
 
@@ -179,7 +192,7 @@ class DefaultInputSequenceTests(unittest.TestCase):
     def test_punctuation_and_repeated_spaces_never_submit_without_return(self) -> None:
         with self.session() as session:
             session.type("проверь  письмо!  ответь потом. ", 1)
-            session.idle(12.0)
+            session.idle(EXTENDED_IDLE_SECONDS)
             self.assertEqual(session.backend.text, "проверь  письмо!  ответь потом. ")
             self.assertEqual(session.backend.submissions, [])
 

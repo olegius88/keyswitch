@@ -32,6 +32,7 @@ DOWNLOAD_URL = (
     "https://release-assets.githubusercontent.com/"
     "github-production-release-asset/1/verified"
 )
+SHA256_HEX_LENGTH = 64
 
 
 class FakeResponse:
@@ -120,13 +121,19 @@ def checked_release(
 
 
 class VersionAndValidationTests(unittest.TestCase):
+    SAMPLE_VERSION = SemanticVersion(2, 3, 4)
+    NON_STRING_VALUE = 3
+    SAMPLE_SIZE_BYTES = 3
+    TINY_READ_LIMIT_BYTES = 3
+    SAMPLE_TIMEOUT_SECONDS = 7.0
+
     def test_versions_targets_and_platform_detection(self) -> None:
         self.assertEqual(str(SemanticVersion.parse("v1.2.3")), "1.2.3")
         self.assertLess(SemanticVersion.parse("0.9.9"), SemanticVersion.parse("1.0.0"))
         for invalid in ("", "1.2", "01.2.3", "1.2.3-beta"):
             with self.subTest(invalid=invalid), self.assertRaises(UpdateError):
                 SemanticVersion.parse(invalid)
-        version = SemanticVersion(2, 3, 4)
+        version = self.SAMPLE_VERSION
         self.assertEqual(
             UpdateTarget.WINDOWS_X64.asset_name(version),
             "KeySwitch-Setup-2.3.4-x64.exe",
@@ -155,17 +162,17 @@ class VersionAndValidationTests(unittest.TestCase):
         with self.assertRaises(UpdateError):
             updates._object_mapping({1: "bad"}, "item")
         self.assertEqual(updates._object_mapping({"ok": 1}, "item"), {"ok": 1})
-        for value in (None, "", 3):
+        for value in (None, "", self.NON_STRING_VALUE):
             with self.subTest(value=value), self.assertRaises(UpdateError):
                 updates._required_string({"field": value}, "field")
         for value in (True, "3", 0, updates.MAX_ASSET_BYTES + 1):
             with self.subTest(value=value), self.assertRaises(UpdateError):
                 updates._required_size({"size": value})
-        self.assertEqual(updates._required_size({"size": 3}), 3)
+        self.assertEqual(updates._required_size({"size": self.SAMPLE_SIZE_BYTES}), self.SAMPLE_SIZE_BYTES)
 
         oversized = FakeResponse(b"1234", updates.LATEST_RELEASE_URL)
         with self.assertRaises(UpdateError):
-            updates._read_limited(oversized, 3)
+            updates._read_limited(oversized, self.TINY_READ_LIMIT_BYTES)
         with self.assertRaises(UpdateError):
             updates._validate_api_response_url("https://example.invalid/latest")
         updates._validate_api_response_url(updates.LATEST_RELEASE_URL)
@@ -184,12 +191,12 @@ class VersionAndValidationTests(unittest.TestCase):
 
         def open_url(request: Request, *, timeout: float) -> FakeResponse:
             self.assertEqual(request.full_url, updates.LATEST_RELEASE_URL)
-            self.assertEqual(timeout, 7.0)
+            self.assertEqual(timeout, self.SAMPLE_TIMEOUT_SECONDS)
             return response
 
         with patch("keyswitch.updates.urlopen", side_effect=open_url):
             request = Request(updates.LATEST_RELEASE_URL)
-            self.assertIs(updates._open_url(request, 7.0), response)
+            self.assertIs(updates._open_url(request, self.SAMPLE_TIMEOUT_SECONDS), response)
 
         thread = Mock()
         with patch("keyswitch.updates.threading.Thread", return_value=thread) as factory:
@@ -204,30 +211,35 @@ class VersionAndValidationTests(unittest.TestCase):
 
 
 class GitHubReleaseClientTests(unittest.TestCase):
+    SAMPLE_CLIENT_TIMEOUT = 9
+    OVERSIZED_NOTES_LENGTH = 5000
+    WRONG_ASSET_SIZE = 2
+    NON_STRING_BODY = 123
+
     def latest(self, payload: object, *, url: str = updates.LATEST_RELEASE_URL) -> UpdateRelease:
         opener = FakeOpener(response_for(payload, url=url))
-        return GitHubReleaseClient("0.4.0", opener=opener, timeout=9).latest_release(
+        return GitHubReleaseClient("0.4.0", opener=opener, timeout=self.SAMPLE_CLIENT_TIMEOUT).latest_release(
             UpdateTarget.WINDOWS_X64
         )
 
     def test_success_validates_request_and_platform_assets(self) -> None:
         payload = release_payload()
-        payload["body"] = "x" * 5000
+        payload["body"] = "x" * self.OVERSIZED_NOTES_LENGTH
         response = response_for(payload)
         opener = FakeOpener(response)
-        release = GitHubReleaseClient("0.4.0", opener=opener, timeout=9).latest_release(
+        release = GitHubReleaseClient("0.4.0", opener=opener, timeout=self.SAMPLE_CLIENT_TIMEOUT).latest_release(
             UpdateTarget.WINDOWS_X64
         )
         self.assertEqual(str(release.version), "1.2.3")
-        self.assertEqual(len(release.notes), 4000)
-        self.assertEqual(release.asset.size, 7)
+        self.assertEqual(len(release.notes), updates.MAX_RELEASE_NOTES_CHARACTERS)
+        self.assertEqual(release.asset.size, len(b"package"))
         request, timeout = opener.calls[0]
-        self.assertEqual((request.full_url, timeout), (updates.LATEST_RELEASE_URL, 9))
+        self.assertEqual((request.full_url, timeout), (updates.LATEST_RELEASE_URL, self.SAMPLE_CLIENT_TIMEOUT))
         self.assertEqual(request.get_header("User-agent"), "KeySwitch/0.4.0")
         self.assertEqual(response.closed, 1)
 
         linux_payload = release_payload(target=UpdateTarget.UBUNTU_AMD64)
-        linux_payload["body"] = 123
+        linux_payload["body"] = self.NON_STRING_BODY
         linux = GitHubReleaseClient(
             "0.4.0",
             opener=FakeOpener(response_for(linux_payload)),
@@ -345,7 +357,7 @@ class GitHubReleaseClientTests(unittest.TestCase):
                         release.tag,
                         release.page_url,
                         release.notes,
-                        ReleaseAsset(release.asset.name, release.asset.url, 2, release.asset.sha256),
+                        ReleaseAsset(release.asset.name, release.asset.url, self.WRONG_ASSET_SIZE, release.asset.sha256),
                     ),
                     FakeResponse(content, DOWNLOAD_URL),
                 ),
@@ -365,7 +377,7 @@ class GitHubReleaseClientTests(unittest.TestCase):
                         release.tag,
                         release.page_url,
                         release.notes,
-                        ReleaseAsset(release.asset.name, release.asset.url, len(content), "0" * 64),
+                        ReleaseAsset(release.asset.name, release.asset.url, len(content), "0" * SHA256_HEX_LENGTH),
                     ),
                     FakeResponse(content, DOWNLOAD_URL),
                 ),
@@ -416,6 +428,10 @@ class GitHubReleaseClientTests(unittest.TestCase):
 
 
 class FakeReleaseClient:
+    PROGRESS_FIRST_DONE = 5
+    PROGRESS_SECOND_DONE = 20
+    PROGRESS_SECOND_TOTAL = 10
+
     def __init__(self, release: UpdateRelease) -> None:
         self.release = release
         self.latest_error: Exception | None = None
@@ -440,8 +456,8 @@ class FakeReleaseClient:
         progress: Callable[[int, int], None],
     ) -> Path:
         self.downloads += 1
-        progress(5, 0)
-        progress(20, 10)
+        progress(self.PROGRESS_FIRST_DONE, 0)
+        progress(self.PROGRESS_SECOND_DONE, self.PROGRESS_SECOND_TOTAL)
         if self.download_hook is not None:
             self.download_hook()
         if self.download_error is not None:
@@ -454,6 +470,8 @@ def immediate(action: Callable[[], None]) -> None:
 
 
 class UpdateManagerTests(unittest.TestCase):
+    EXPECTED_DOWNLOAD_COUNT = 2
+
     def setUp(self) -> None:
         self.release = checked_release(version="1.0.0")
         self.client = FakeReleaseClient(self.release)
@@ -513,7 +531,7 @@ class UpdateManagerTests(unittest.TestCase):
         manager = self.manager(installer=self.installed.append)
         self.assertTrue(manager.check(automatic=True, install_automatically=True))
         self.assertEqual(manager.snapshot.phase, UpdatePhase.INSTALLING)
-        self.assertEqual(manager.snapshot.progress, 100)
+        self.assertEqual(manager.snapshot.progress, updates.PROGRESS_COMPLETE_PERCENT)
         self.assertEqual(self.client.downloads, 1)
         self.assertEqual(len(self.installed), 1)
 
@@ -522,7 +540,7 @@ class UpdateManagerTests(unittest.TestCase):
         self.assertEqual(manual.snapshot.phase, UpdatePhase.AVAILABLE)
         self.assertTrue(manual.install_available())
         self.assertEqual(manual.snapshot.phase, UpdatePhase.INSTALLING)
-        self.assertEqual(self.client.downloads, 2)
+        self.assertEqual(self.client.downloads, self.EXPECTED_DOWNLOAD_COUNT)
 
     def test_busy_runner_and_client_errors(self) -> None:
         queued: list[Callable[[], None]] = []

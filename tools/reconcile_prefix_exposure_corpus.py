@@ -27,6 +27,10 @@ ROOT = Path(__file__).resolve().parents[1]
 REASON = "prefix-curriculum-prior-exposure"
 CURRICULUM_SPLITS = ("train", "development", "calibration")
 MEMBERSHIP_FIELDS = ("row_ids_sha256", "family_ids_sha256", "document_ids_sha256")
+# Added to zlib.MAX_WBITS, this tells zlib.decompressobj to read and check the
+# gzip header/trailer itself, so a multi-member gzip file can be split member
+# by member without pre-parsing its framing.
+ZLIB_GZIP_HEADER_WBITS_OFFSET = 16
 
 
 def resolve_pin(name: str) -> Path:
@@ -51,7 +55,7 @@ def gzip_members(path: Path) -> list[tuple[bytes, bytes]]:
     result: list[tuple[bytes, bytes]] = []
     position = 0
     while position < len(data):
-        decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        decoder = zlib.decompressobj(ZLIB_GZIP_HEADER_WBITS_OFFSET + zlib.MAX_WBITS)
         try:
             raw = decoder.decompress(data[position:])
         except zlib.error:

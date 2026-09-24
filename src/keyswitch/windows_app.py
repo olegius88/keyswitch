@@ -11,12 +11,15 @@ import json
 import sys
 
 from . import __version__
+from .settings_diagnostics import DIAGNOSTICS_JSON_INDENT
 from .logsetup import configure_logging as configure_logging
 from .intent_model import LinearNgramModel
 from .context_model import ContextModel
 from .windows_context import probe_uia
 from .windows_backend import WindowsBackend
 from .windows_system import WindowsAutostartManager, WindowsSystemError
+
+SMOKE_UI_QUIT_AFTER_MS = 300
 
 
 def autostart_status() -> dict[str, object]:
@@ -53,7 +56,7 @@ def diagnose() -> int:
             # Keep redirected output valid even when a legacy Windows console
             # exposes a code page that cannot encode Russian diagnostics.
             ensure_ascii=True,
-            indent=2,
+            indent=DIAGNOSTICS_JSON_INDENT,
         )
     )
     backend.close()
@@ -93,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
             return run_windows_application(
                 hidden=False,
                 no_engine=True,
-                quit_after_ms=300,
+                quit_after_ms=SMOKE_UI_QUIT_AFTER_MS,
             )
         return run_windows_application(
             hidden=arguments.hidden,

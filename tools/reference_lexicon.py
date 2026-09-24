@@ -17,6 +17,10 @@ from keyswitch.lexicon_supplement import supplement_words
 from freeze_context_action_corpus import checksum
 
 ROOT = Path(__file__).resolve().parents[1]
+# Mirrors the synthetic-frequency fallback in keyswitch.language_model so a
+# lexicon without frequency data still ranks below any real observed word.
+SYNTHETIC_FREQUENCY_FLOOR = 1000
+SYNTHETIC_FREQUENCY_DIVISOR = 20
 
 
 def reference_models(spelling: bool) -> dict[int, LanguageModel]:
@@ -33,7 +37,10 @@ def reference_models(spelling: bool) -> dict[int, LanguageModel]:
         if checksum(path) != spec["sha256"]:
             raise ValueError("reference lexicon checksum mismatch")
         frequencies, bigrams = LanguageModel._read_arpa(path)
-        frequency = max(max(frequencies.values(), default=1000) // 20, 1000)
+        frequency = max(
+            max(frequencies.values(), default=SYNTHETIC_FREQUENCY_FLOOR) // SYNTHETIC_FREQUENCY_DIVISOR,
+            SYNTHETIC_FREQUENCY_FLOOR,
+        )
         for word in (*LOCALE_FALLBACKS[locale], *supplement_words(locale)):
             normalized = LanguageModel.normalize(word)
             if normalized:

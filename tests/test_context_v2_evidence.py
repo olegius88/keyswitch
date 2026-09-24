@@ -19,20 +19,32 @@ if TOOLS_PATH not in sys.path:
 from context_corpus import CORPUS_ROOT, AssignedPhrase, Phrase, Split, load_source, read_phrases
 from context_evidence import checksum, load_cache
 from evaluate_context_engine import select_phrases
-from verify_context_v2 import read_object, validate_metrics, verify
+from verify_context_v2 import METADATA_LIMIT_BYTES, read_object, validate_metrics, verify
 from keyswitch.context_model import ARTIFACT_PATH
 from verify_context_v2_history import normalized_provenance, verify_sources
+
+EXPECTED_SOURCE_ROWS = 64537
+EXPECTED_RUSSIAN_SOURCE_ROWS = 23034
+EXPECTED_LEXICAL_CACHE_ROWS = 148138
+DUPLICATE_ROW_REPEATS = 2
+# Index of the "test" entry within the (train, development, calibration, test,
+# reserve) splits tuple built below; the only split select_phrases both reads
+# and can pick.
+TEST_SPLIT_INDEX = 3
+TOTAL_ROWS = 2
+INVALID_DESIRED_CONVERSIONS = 3
+INVALID_CONVERTED_CORRECTLY = 2
 
 
 class ContextV2EvidenceTests(unittest.TestCase):
     def test_frozen_public_source_and_lexical_cache_are_readable(self) -> None:
         source = load_source()
-        self.assertEqual(len(source), 64537)
-        self.assertEqual(sum(row.locale == "rus" for row in source), 23034)
-        self.assertEqual(len(load_cache()), 148138)
+        self.assertEqual(len(source), EXPECTED_SOURCE_ROWS)
+        self.assertEqual(sum(row.locale == "rus" for row in source), EXPECTED_RUSSIAN_SOURCE_ROWS)
+        self.assertEqual(len(load_cache()), EXPECTED_LEXICAL_CACHE_ROWS)
 
     def test_tsv_rejects_missing_columns_duplicate_and_invalid_ids(self) -> None:
-        for rows in (["1\trus\ttext"], ["0\trus\ttext\ttime"], ["one\trus\ttext\ttime"], ["1\trus\ttext\ttime"] * 2):
+        for rows in (["1\trus\ttext"], ["0\trus\ttext\ttime"], ["one\trus\ttext\ttime"], ["1\trus\ttext\ttime"] * DUPLICATE_ROW_REPEATS):
             with self.assertRaises(ValueError):
                 read_phrases(rows)
         self.assertEqual(read_phrases(["1\tdeu\tHallo Welt\ttime"]), [])
@@ -51,8 +63,8 @@ class ContextV2EvidenceTests(unittest.TestCase):
     def test_engine_selection_never_reads_training_or_reserve_and_deduplicates_groups(self) -> None:
         splits: tuple[Split, ...] = ("train", "development", "calibration", "test", "reserve")
         source = [AssignedPhrase(Phrase(index, "eng", "A simple sentence.", ""), str(index), split) for index, split in enumerate(splits, 1)]
-        selected = select_phrases(source + [source[3]])
-        self.assertEqual(selected, [source[3]])
+        selected = select_phrases(source + [source[TEST_SPLIT_INDEX]])
+        self.assertEqual(selected, [source[TEST_SPLIT_INDEX]])
         self.assertEqual(select_phrases(list(reversed(source))), selected)
 
     def test_historical_gate_preserves_rejection_without_claiming_current_acceptance(self) -> None:
@@ -110,13 +122,13 @@ class ContextV2EvidenceTests(unittest.TestCase):
     def test_metadata_limits_and_numeric_validation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "report.json"
-            for content in ("[]", "{}", " " * (1024 * 1024 + 1)):
+            for content in ("[]", "{}", " " * (METADATA_LIMIT_BYTES + 1)):
                 path.write_text(content, encoding="utf-8")
                 with self.assertRaises(ValueError):
                     read_object(path)
-        valid: dict[str, object] = {"counts": {"rows": 2, "desired_conversions": 1, "converted_correctly": 1, "false_conversions": 0, "baseline_false_conversions": 0}, "categories": {}}
+        valid: dict[str, object] = {"counts": {"rows": TOTAL_ROWS, "desired_conversions": 1, "converted_correctly": 1, "false_conversions": 0, "baseline_false_conversions": 0}, "categories": {}}
         self.assertEqual(validate_metrics(valid), valid)
-        for field, value in (("rows", True), ("rows", -1), ("desired_conversions", 3), ("converted_correctly", 2)):
+        for field, value in (("rows", True), ("rows", -1), ("desired_conversions", INVALID_DESIRED_CONVERSIONS), ("converted_correctly", INVALID_CONVERTED_CORRECTLY)):
             bad = copy.deepcopy(valid)
             counts = bad["counts"]
             assert isinstance(counts, dict)

@@ -33,6 +33,7 @@ from test_input_integrity import EditorBackend
 
 
 REPORT = DIRECTORY / "engine-regression.json"
+INITIAL_KEY_SERIAL = 100
 SCENARIOS = (
     ("ghj,ktvf", "проблема"), ("ghtlkj;bk", "предложил"), (",b,kbjntrf", "библиотека"),
     ("rjnjhe.", "которую"), ("rjnjhe.,", "которую,"), ("ghbdtn,", "привет,"),
@@ -69,7 +70,7 @@ def replay(original: str, model: BoundaryModel | None, models: dict[int, Languag
             engine = KeySwitchEngine(settings, HistoryStore(root / "history.jsonl"), backend)
         engine.boundary_model = model
         early = 0
-        for serial, char in enumerate(original + " ", 100):
+        for serial, char in enumerate(original + " ", INITIAL_KEY_SERIAL):
             characters = (char, pair.translate(char, "us", "ru"))
             observed = characters[backend.group]
             event = KeyEvent(True, serial, "space" if observed == " " else observed, observed, characters, backend.group, 0, serial)

@@ -27,6 +27,9 @@ from typing import Protocol
 
 from .backend import (
     ALT_MASK,
+    COMPLETED_ACTION_EVENT_COUNT,
+    LAYOUT_SWITCH_POLL_SECONDS,
+    LAYOUT_SWITCH_TIMEOUT_SECONDS,
     CONTROL_MASK,
     BackendProbe,
     FocusInfo,
@@ -69,6 +72,7 @@ VK_LEFT_ARROW = 0x7B
 VK_RIGHT_ARROW = 0x7C
 VK_DOWN_ARROW = 0x7D
 VK_UP_ARROW = 0x7E
+
 
 # The engine speaks X11 key names on every platform; the Windows backend
 # translates into the same vocabulary.
@@ -127,8 +131,6 @@ TAP_STOP_TIMEOUT_SECONDS = 2.0
 # source is asynchronous: the call returns before the window server has told
 # the focused application, and typing into the old layout in between is exactly
 # the error the correction exists to undo.
-LAYOUT_SWITCH_TIMEOUT_SECONDS = 0.5
-LAYOUT_SWITCH_POLL_SECONDS = 0.01
 
 PERMISSION_MISSING_MESSAGE = (
     "Нет разрешения на перехват клавиатуры: включите KeySwitch в разделе "
@@ -533,7 +535,7 @@ class MacBackend:
             self._deferred_action = None
             self._action_prior_keys.clear()
             self.release_input()
-        return 2 if deliver else 0
+        return COMPLETED_ACTION_EVENT_COUNT if deliver else 0
 
     def _handle_native(self, native: NativeKeyEvent) -> bool:
         """Answer the tap: True swallows the event, False lets it through."""

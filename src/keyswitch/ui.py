@@ -22,7 +22,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from . import __version__
 from .app_quirks import MENTION_HEADS
-from .config import SettingsStore
+from .config import DEFAULT_PAUSE_DELAY_SECONDS, SettingsStore
 from .context_policy import ContextPolicy
 from .engine import EngineSnapshot
 from .history import HistoryStore
@@ -35,6 +35,93 @@ from .updates import UpdateController, UpdatePhase, UpdateSnapshot
 
 
 RESOURCE_DIR = Path(__file__).resolve().parent / "resources"
+
+# Window sizing.
+WINDOW_DEFAULT_WIDTH_PIXELS = 1040
+WINDOW_DEFAULT_HEIGHT_PIXELS = 720
+WINDOW_MIN_WIDTH_PIXELS = 850
+WINDOW_MIN_HEIGHT_PIXELS = 600
+
+# The design's recurring gap sizes, reused wherever a Gtk.Box's inter-child
+# spacing matches one of these two tokens.
+STANDARD_SPACING_PIXELS = 12
+COMPACT_SPACING_PIXELS = 10
+
+# Sidebar.
+SIDEBAR_WIDTH_PIXELS = 250
+BRAND_MARGIN_OUTER_PIXELS = 20
+BRAND_MARGIN_BOTTOM_PIXELS = 12
+BRAND_MARGIN_END_PIXELS = 16
+BRAND_ICON_SIZE_PIXELS = 44
+SIDEBAR_PRIVACY_MARGIN_START_PIXELS = 22
+SIDEBAR_PRIVACY_MARGIN_BOTTOM_PIXELS = 18
+
+# Every page built through _new_page shares this heading/description gap.
+PAGE_CONTENT_SPACING_PIXELS = 18
+
+# Dashboard page.
+HERO_TOP_ROW_SPACING_PIXELS = 14
+HERO_COPY_SPACING_PIXELS = 5
+TEST_ENTRY_WIDTH_CHARACTERS = 30
+STAT_CARD_SPACING_PIXELS = 3
+
+# Automation page: detection.minimum_length.
+MINIMUM_LENGTH_RANGE_MIN = 2
+MINIMUM_LENGTH_RANGE_MAX = 12
+MINIMUM_LENGTH_DEFAULT = 3
+# detection.confidence.
+CONFIDENCE_RANGE_MIN = 0.5
+CONFIDENCE_RANGE_MAX = 8.0
+CONFIDENCE_RANGE_STEP = 0.5
+CONFIDENCE_DEFAULT = 2.0
+# detection.context_policy: index of "off" in context_modes/modes below,
+# used as the fallback when the stored value is not one of the known ones.
+CONTEXT_MODE_OFF_INDEX = 2
+# detection.early_switch_min_length.
+EARLY_SWITCH_LENGTH_RANGE_MIN = 3
+EARLY_SWITCH_LENGTH_RANGE_MAX = 8
+EARLY_SWITCH_LENGTH_DEFAULT = 4
+# detection.learning_confirmations.
+LEARNING_CONFIRMATIONS_RANGE_MAX = 5
+LEARNING_CONFIRMATIONS_DEFAULT = 2
+# detection.pause_delay_seconds.
+PAUSE_DELAY_RANGE_MIN_SECONDS = 0.3
+PAUSE_DELAY_RANGE_MAX_SECONDS = 5.0
+PAUSE_DELAY_RANGE_STEP_SECONDS = 0.1
+
+# Languages page.
+CHECKSUM_DISPLAY_LENGTH_CHARACTERS = 12
+
+# Hotkeys page.
+HOTKEY_ENTRY_WIDTH_CHARACTERS = 20
+
+# Exceptions page.
+MANUAL_APP_ENTRY_WIDTH_CHARACTERS = 22
+WORDS_EDITOR_HEIGHT_PIXELS = 100
+TEXT_EDITOR_PADDING_PIXELS = 10
+TEXT_SAVE_DEBOUNCE_MS = 450
+APPLICATION_CAPTURE_DELAY_MS = 2500
+APPLICATION_PICKER_DIALOG_SIDE_PIXELS = 620
+DIALOG_CONTENT_MARGIN_PIXELS = 12
+
+# Updates page.
+UPDATE_BUTTONS_SPACING_PIXELS = 8
+
+# History.
+HISTORY_PAGE_SIZE = 200
+DASHBOARD_RECENT_HISTORY_COUNT = 4
+
+# Adw.SpinRow reports floats; this is the tolerance for "unchanged" when an
+# external settings update is echoed back to the control.
+SPIN_VALUE_EPSILON = 1e-9
+
+# Russian pluralisation of a count (1 запись / 2 записи / 5 записей): the
+# standard "count % 10, with a % 100 teens exception" rule.
+RUSSIAN_PLURAL_MOD_TEN = 10
+RUSSIAN_PLURAL_MOD_HUNDRED = 100
+RUSSIAN_PLURAL_ELEVEN_EXCEPTION = 11
+RUSSIAN_PLURAL_FEW_LAST_DIGITS = (2, 3, 4)
+RUSSIAN_PLURAL_TEEN_EXCEPTIONS = (12, 13, 14)
 
 
 @dataclass(frozen=True)
@@ -158,8 +245,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._application_choices: list[ApplicationChoice] | None = None
         self._application_rows: list[Adw.ActionRow] = []
         self._app_picker_dialog: Adw.Dialog | None = None
-        self.set_default_size(1040, 720)
-        self.set_size_request(850, 600)
+        self.set_default_size(WINDOW_DEFAULT_WIDTH_PIXELS, WINDOW_DEFAULT_HEIGHT_PIXELS)
+        self.set_size_request(WINDOW_MIN_WIDTH_PIXELS, WINDOW_MIN_HEIGHT_PIXELS)
         self.add_css_class("keyswitch-window")
         self._install_css()
         self._build()
@@ -225,16 +312,16 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _build_sidebar(self) -> Gtk.Widget:
         sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        sidebar.set_size_request(250, -1)
+        sidebar.set_size_request(SIDEBAR_WIDTH_PIXELS, -1)
         sidebar.add_css_class("keyswitch-sidebar")
 
-        brand = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        brand.set_margin_top(20)
-        brand.set_margin_bottom(12)
-        brand.set_margin_start(20)
-        brand.set_margin_end(16)
+        brand = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=STANDARD_SPACING_PIXELS)
+        brand.set_margin_top(BRAND_MARGIN_OUTER_PIXELS)
+        brand.set_margin_bottom(BRAND_MARGIN_BOTTOM_PIXELS)
+        brand.set_margin_start(BRAND_MARGIN_OUTER_PIXELS)
+        brand.set_margin_end(BRAND_MARGIN_END_PIXELS)
         icon = Gtk.Image.new_from_file(str(RESOURCE_DIR / "keyswitch.svg"))
-        icon.set_pixel_size(44)
+        icon.set_pixel_size(BRAND_ICON_SIZE_PIXELS)
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
         title = Gtk.Label(label="KeySwitch", xalign=0)
         title.add_css_class("brand-title")
@@ -246,7 +333,7 @@ class MainWindow(Adw.ApplicationWindow):
         brand.append(text)
         sidebar.append(brand)
 
-        status = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        status = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=COMPACT_SPACING_PIXELS)
         status.add_css_class("sidebar-status")
         status_text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
         self.sidebar_status_title = Gtk.Label(label="Автокоррекция", xalign=0)
@@ -270,7 +357,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.nav_list.connect("row-selected", self._navigation_selected)
         for name, label, icon_name in self.NAVIGATION:
             row = _NavigationRow(name)
-            content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=STANDARD_SPACING_PIXELS)
             content.add_css_class("navigation-row")
             content.append(Gtk.Image(icon_name=icon_name))
             text_label = Gtk.Label(label=label, xalign=0)
@@ -285,13 +372,13 @@ class MainWindow(Adw.ApplicationWindow):
         sidebar.append(spacer)
         privacy = Gtk.Label(label="Локальная обработка\nБез облака и кейлогов", xalign=0)
         privacy.add_css_class("muted")
-        privacy.set_margin_start(22)
-        privacy.set_margin_bottom(18)
+        privacy.set_margin_start(SIDEBAR_PRIVACY_MARGIN_START_PIXELS)
+        privacy.set_margin_bottom(SIDEBAR_PRIVACY_MARGIN_BOTTOM_PIXELS)
         sidebar.append(privacy)
         return sidebar
 
     def _new_page(self, name: str, title: str, subtitle: str) -> Gtk.Box:
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=PAGE_CONTENT_SPACING_PIXELS)
         content.add_css_class("page-content")
         heading = Gtk.Label(label=title, xalign=0)
         heading.add_css_class("page-title")
@@ -310,10 +397,10 @@ class MainWindow(Adw.ApplicationWindow):
             "Обзор",
             "Состояние фоновой автокоррекции и быстрая проверка прямо в приложении.",
         )
-        hero = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        hero = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=STANDARD_SPACING_PIXELS)
         hero.add_css_class("hero-card")
-        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
-        hero_copy = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=HERO_TOP_ROW_SPACING_PIXELS)
+        hero_copy = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=HERO_COPY_SPACING_PIXELS)
         self.hero_title = Gtk.Label(label="KeySwitch готов", xalign=0)
         self.hero_title.add_css_class("hero-title")
         self.hero_subtitle = Gtk.Label(
@@ -337,7 +424,7 @@ class MainWindow(Adw.ApplicationWindow):
         hero.append(self.hero_action)
         page.append(hero)
 
-        stats = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        stats = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=STANDARD_SPACING_PIXELS)
         self.stat_corrections = self._stat_card(stats, "0", "исправлений")
         self.stat_layout = self._stat_card(stats, "—", "текущая раскладка")
         self.stat_backend = self._stat_card(stats, "…", "движок ввода")
@@ -350,7 +437,7 @@ class MainWindow(Adw.ApplicationWindow):
         test_row = Adw.ActionRow(title="Тестовое поле", subtitle="Глобальный перехват работает и внутри этого окна")
         self.test_entry = Gtk.Entry(placeholder_text="Начните печатать здесь…")
         self.test_entry.set_hexpand(True)
-        self.test_entry.set_width_chars(30)
+        self.test_entry.set_width_chars(TEST_ENTRY_WIDTH_CHARACTERS)
         self.test_entry.set_valign(Gtk.Align.CENTER)
         test_row.add_suffix(self.test_entry)
         check_group.add(test_row)
@@ -365,7 +452,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.refresh_history()
 
     def _stat_card(self, parent: Gtk.Box, value: str, caption: str) -> Gtk.Label:
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=STAT_CARD_SPACING_PIXELS)
         card.add_css_class("stat-card")
         card.set_hexpand(True)
         label = Gtk.Label(label=value, xalign=0)
@@ -392,20 +479,20 @@ class MainWindow(Adw.ApplicationWindow):
                 "Не исправлять первое завершённое слово после переключения раскладки пользователем",
             )
         )
-        minimum = Adw.SpinRow.new_with_range(2, 12, 1)
+        minimum = Adw.SpinRow.new_with_range(MINIMUM_LENGTH_RANGE_MIN, MINIMUM_LENGTH_RANGE_MAX, 1)
         minimum.set_title("Минимальная длина слова")
         minimum.set_subtitle(
             "Минимум для базового детектора; явные правила, короткие исключения и контекстный помощник могут разрешить замену раньше"
         )
-        minimum.set_value(float(self.settings.get("detection.minimum_length", 3)))
+        minimum.set_value(float(self.settings.get("detection.minimum_length", MINIMUM_LENGTH_DEFAULT)))
         minimum.connect("notify::value", lambda row, _p: self.settings.set("detection.minimum_length", int(row.get_value())))
         self._settings_controls["detection.minimum_length"] = minimum
         behavior.add(minimum)
-        confidence = Adw.SpinRow.new_with_range(0.5, 8.0, 0.5)
+        confidence = Adw.SpinRow.new_with_range(CONFIDENCE_RANGE_MIN, CONFIDENCE_RANGE_MAX, CONFIDENCE_RANGE_STEP)
         confidence.set_title("Порог уверенности")
         confidence.set_subtitle("Выше — строже резервные эвристики; пороги обученных моделей не меняются")
         confidence.set_digits(1)
-        confidence.set_value(float(self.settings.get("detection.confidence", 2.0)))
+        confidence.set_value(float(self.settings.get("detection.confidence", CONFIDENCE_DEFAULT)))
         confidence.connect("notify::value", lambda row, _p: self.settings.set("detection.confidence", float(row.get_value())))
         self._settings_controls["detection.confidence"] = confidence
         behavior.add(confidence)
@@ -415,7 +502,11 @@ class MainWindow(Adw.ApplicationWindow):
         context_mode = Adw.ComboRow(title="Контекстный ИИ-помощник", subtitle="Отдельные локальные модели для слов и префиксов. «Только наблюдать» не применяет их решения; базовая автокоррекция продолжает работать")
         context_mode.set_model(Gtk.StringList.new(["Исправлять и предлагать", "Только наблюдать", "Выключен"]))
         current_context_mode = str(self.settings.get("detection.context_policy", "assist"))
-        context_mode.set_selected(context_modes.index(current_context_mode) if current_context_mode in context_modes else 2)
+        context_mode.set_selected(
+            context_modes.index(current_context_mode)
+            if current_context_mode in context_modes
+            else CONTEXT_MODE_OFF_INDEX
+        )
         context_mode.connect("notify::selected", lambda row, _param: self.settings.set("detection.context_policy", context_modes[row.get_selected()]))
         self._settings_controls["detection.context_policy"] = context_mode
         behavior.add(context_mode)
@@ -429,10 +520,10 @@ class MainWindow(Adw.ApplicationWindow):
                 "Менять раскладку уже по первым буквам, не дожидаясь конца слова. Выключено по умолчанию: на независимой проверке текущая модель префиксов восстанавливала вдвое меньше слов, чем решение по завершённому слову, и портила правильно набранные. В assist с учётом контекста — обученная модель префиксов; без контекста или в off/shadow — словарный алгоритм.",
             )
         )
-        early_length = Adw.SpinRow.new_with_range(3, 8, 1)
+        early_length = Adw.SpinRow.new_with_range(EARLY_SWITCH_LENGTH_RANGE_MIN, EARLY_SWITCH_LENGTH_RANGE_MAX, 1)
         early_length.set_title("Символов до ранней смены")
         early_length.set_subtitle("Минимум для проверки; значение 3 действует только в словарном алгоритме. Модель проверяет префиксы длиной 4–12 и ждёт при сомнении")
-        early_length.set_value(float(self.settings.get("detection.early_switch_min_length", 4)))
+        early_length.set_value(float(self.settings.get("detection.early_switch_min_length", EARLY_SWITCH_LENGTH_DEFAULT)))
         early_length.connect(
             "notify::value",
             lambda row, _parameter: self.settings.set(
@@ -456,10 +547,10 @@ class MainWindow(Adw.ApplicationWindow):
             description="KeySwitch сохраняет только слова, которые вы преобразовали вручную или вернули после ложного исправления.",
         )
         learning.add(self._switch_row("detection.learning", "Учиться на моих действиях", "После Pause/Break предложить правило: Enter подтверждает, Esc отклоняет"))
-        confirmations = Adw.SpinRow.new_with_range(1, 5, 1)
+        confirmations = Adw.SpinRow.new_with_range(1, LEARNING_CONFIRMATIONS_RANGE_MAX, 1)
         confirmations.set_title("Подтверждений для нового правила")
         confirmations.set_subtitle("Порог, при котором правило начинает действовать; Enter достигает его сразу")
-        confirmations.set_value(float(self.settings.get("detection.learning_confirmations", 2)))
+        confirmations.set_value(float(self.settings.get("detection.learning_confirmations", LEARNING_CONFIRMATIONS_DEFAULT)))
         confirmations.connect(
             "notify::value",
             lambda row, _parameter: self.settings.set(
@@ -488,11 +579,13 @@ class MainWindow(Adw.ApplicationWindow):
                 "Проверять текущее слово после паузы без ввода",
             )
         )
-        pause_delay = Adw.SpinRow.new_with_range(0.3, 5.0, 0.1)
+        pause_delay = Adw.SpinRow.new_with_range(
+            PAUSE_DELAY_RANGE_MIN_SECONDS, PAUSE_DELAY_RANGE_MAX_SECONDS, PAUSE_DELAY_RANGE_STEP_SECONDS
+        )
         pause_delay.set_title("Длительность паузы, с")
         pause_delay.set_subtitle("Сколько ждать без ввода, прежде чем проверить незавершённое слово")
         pause_delay.set_digits(1)
-        pause_delay.set_value(float(self.settings.get("detection.pause_delay_seconds", 1.5)))
+        pause_delay.set_value(float(self.settings.get("detection.pause_delay_seconds", DEFAULT_PAUSE_DELAY_SECONDS)))
         pause_delay.connect(
             "notify::value",
             lambda row, _parameter: self.settings.set(
@@ -509,7 +602,7 @@ class MainWindow(Adw.ApplicationWindow):
         triggers.add(self._switch_row("detection.correct_on_punctuation", "Знака препинания", "Точка, запятая, вопросительный знак и другие границы слова"))
         page.append(triggers)
 
-        tip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        tip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=STANDARD_SPACING_PIXELS)
         tip.add_css_class("privacy-card")
         tip.append(Gtk.Image(icon_name="dialog-information-symbolic"))
         label = Gtk.Label(
@@ -558,7 +651,8 @@ class MainWindow(Adw.ApplicationWindow):
         intent_row = Adw.ActionRow(
             title="Линейная модель намерения",
             subtitle=(
-                f"Версия {intent_status.version or 'unknown'} · {(intent_status.checksum or 'unknown')[:12]}"
+                f"Версия {intent_status.version or 'unknown'} · "
+                f"{(intent_status.checksum or 'unknown')[:CHECKSUM_DISPLAY_LENGTH_CHARACTERS]}"
                 if intent_status.available
                 else f"Безопасный fallback · {intent_status.error}"
             ),
@@ -593,7 +687,7 @@ class MainWindow(Adw.ApplicationWindow):
         group.add(self._hotkey_row("hotkeys.convert_last", "Преобразовать последнее слово", "Меняет раскладку принудительно, без решения словаря"))
         group.add(self._hotkey_row("hotkeys.undo", "Отменить исправление", "Возвращает последнее исправленное слово в течение 10 секунд"))
         page.append(group)
-        syntax = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        syntax = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=STANDARD_SPACING_PIXELS)
         syntax.add_css_class("privacy-card")
         syntax.append(Gtk.Image(icon_name="input-keyboard-symbolic"))
         syntax.append(Gtk.Label(label="Формат: Ctrl+Alt+P, Ctrl+Shift+Space или одиночная клавиша Pause. Модификаторы должны совпасть точно.", xalign=0, wrap=True))
@@ -601,7 +695,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _hotkey_row(self, path: str, title: str, subtitle: str) -> Adw.ActionRow:
         row = Adw.ActionRow(title=title, subtitle=subtitle)
-        entry = Gtk.Entry(text=str(self.settings.get(path, "")), width_chars=20)
+        entry = Gtk.Entry(text=str(self.settings.get(path, "")), width_chars=HOTKEY_ENTRY_WIDTH_CHARACTERS)
         entry.set_valign(Gtk.Align.CENTER)
         entry.connect("activate", lambda widget: self._save_hotkey(path, widget))
         focus = Gtk.EventControllerFocus()
@@ -647,7 +741,7 @@ class MainWindow(Adw.ApplicationWindow):
             title="Добавить вручную",
             subtitle="Имя WM_CLASS или executable, например code, firefox или telegram-desktop",
         )
-        self.manual_app_entry = Gtk.Entry(placeholder_text="WM_CLASS", width_chars=22)
+        self.manual_app_entry = Gtk.Entry(placeholder_text="WM_CLASS", width_chars=MANUAL_APP_ENTRY_WIDTH_CHARACTERS)
         self.manual_app_entry.set_valign(Gtk.Align.CENTER)
         self.manual_app_entry.connect("activate", lambda _entry: self._add_manual_application())
         manual_button = Gtk.Button(label="Добавить", valign=Gtk.Align.CENTER)
@@ -668,11 +762,11 @@ class MainWindow(Adw.ApplicationWindow):
             title="Игнорируемые слова",
             description="По одному слову на строку. Проверяется исходная, ошибочно выглядящая форма.",
         )
-        self.words_view = self._text_editor("exclusions.words", 100)
+        self.words_view = self._text_editor("exclusions.words", WORDS_EDITOR_HEIGHT_PIXELS)
         words_group.add(self._editor_row(self.words_view))
         page.append(words_group)
 
-        privacy = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        privacy = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=STANDARD_SPACING_PIXELS)
         privacy.add_css_class("privacy-card")
         privacy.append(Gtk.Image(icon_name="security-high-symbolic"))
         privacy_label = Gtk.Label(
@@ -685,7 +779,13 @@ class MainWindow(Adw.ApplicationWindow):
         page.append(privacy)
 
     def _text_editor(self, path: str, height: int) -> Gtk.TextView:
-        view = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, top_margin=10, bottom_margin=10, left_margin=10, right_margin=10)
+        view = Gtk.TextView(
+            wrap_mode=Gtk.WrapMode.WORD_CHAR,
+            top_margin=TEXT_EDITOR_PADDING_PIXELS,
+            bottom_margin=TEXT_EDITOR_PADDING_PIXELS,
+            left_margin=TEXT_EDITOR_PADDING_PIXELS,
+            right_margin=TEXT_EDITOR_PADDING_PIXELS,
+        )
         view.set_size_request(-1, height)
         values: list[str] = self.settings.get(path, [])
         view.get_buffer().set_text("\n".join(values))
@@ -695,7 +795,7 @@ class MainWindow(Adw.ApplicationWindow):
     @staticmethod
     def _editor_row(view: Gtk.TextView) -> Adw.ActionRow:
         row = Adw.ActionRow()
-        scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, min_content_height=100)
+        scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, min_content_height=WORDS_EDITOR_HEIGHT_PIXELS)
         scroll.set_child(view)
         scroll.set_hexpand(True)
         row.set_child(scroll)
@@ -713,7 +813,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._text_save_sources.pop(path, None)
             return GLib.SOURCE_REMOVE
 
-        self._text_save_sources[path] = GLib.timeout_add(450, save)
+        self._text_save_sources[path] = GLib.timeout_add(TEXT_SAVE_DEBOUNCE_MS, save)
 
     def _add_system_page(self) -> None:
         page = self._new_page(
@@ -825,7 +925,7 @@ class MainWindow(Adw.ApplicationWindow):
             title="GitHub Releases",
             subtitle="Метаданные и SHA-256 загружаются только из официального репозитория",
         )
-        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=UPDATE_BUTTONS_SPACING_PIXELS)
         self.update_check_button = Gtk.Button(label="Проверить сейчас")
         self.update_check_button.connect("clicked", lambda _button: self._check_updates())
         self.update_open_button = Gtk.Button(label="Открыть выпуск")
@@ -888,7 +988,7 @@ class MainWindow(Adw.ApplicationWindow):
             "История исправлений",
             "Здесь хранятся только реально заменённые пары слов, приложение и время.",
         )
-        controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=COMPACT_SPACING_PIXELS)
         self.history_total_label = Gtk.Label(label="0 записей", xalign=0)
         self.history_total_label.add_css_class("section-heading")
         self.history_total_label.set_hexpand(True)
@@ -965,7 +1065,7 @@ class MainWindow(Adw.ApplicationWindow):
         page.append(copy_button)
 
         if not probe.available:
-            warning = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            warning = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=STANDARD_SPACING_PIXELS)
             warning.add_css_class("error-card")
             warning.append(Gtk.Image(icon_name="dialog-error-symbolic"))
             warning.append(Gtk.Label(label=probe.error, xalign=0, wrap=True))
@@ -1026,7 +1126,7 @@ class MainWindow(Adw.ApplicationWindow):
         if isinstance(control, Adw.SwitchRow) and control.get_active() != bool(value):
             control.set_active(bool(value))
         if isinstance(control, Adw.SpinRow) and isinstance(value, (int, float)):
-            if abs(control.get_value() - float(value)) > 1e-9:
+            if abs(control.get_value() - float(value)) > SPIN_VALUE_EPSILON:
                 control.set_value(float(value))
         if path == "appearance.indicator_style" and isinstance(control, Adw.ComboRow):
             selected = 1 if value == "flags" else 0
@@ -1034,7 +1134,7 @@ class MainWindow(Adw.ApplicationWindow):
                 control.set_selected(selected)
         if path == "detection.context_policy" and isinstance(control, Adw.ComboRow):
             modes = ["assist", "shadow", "off"]
-            selected = modes.index(str(value)) if str(value) in modes else 2
+            selected = modes.index(str(value)) if str(value) in modes else CONTEXT_MODE_OFF_INDEX
             if control.get_selected() != selected:
                 control.set_selected(selected)
         if path == "exclusions.applications" and hasattr(self, "apps_group"):
@@ -1044,7 +1144,7 @@ class MainWindow(Adw.ApplicationWindow):
         return GLib.SOURCE_REMOVE
 
     def refresh_history(self) -> bool:
-        entries = self.history.read(200)
+        entries = self.history.read(HISTORY_PAGE_SIZE)
         if hasattr(self, "history_list"):
             self._clear_list(self.history_list)
             if not entries:
@@ -1062,7 +1162,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._clear_list(self.dashboard_history)
             if not entries:
                 self.dashboard_history.append(Adw.ActionRow(title="Пока нет исправлений", subtitle="Попробуйте тестовое поле выше"))
-            for entry in reversed(entries[-4:]):
+            for entry in reversed(entries[-DASHBOARD_RECENT_HISTORY_COUNT:]):
                 row = Adw.ActionRow(title=f"{entry.original}  →  {entry.replacement}", subtitle=self._format_time(entry.timestamp))
                 self.dashboard_history.append(row)
         return GLib.SOURCE_REMOVE
@@ -1082,9 +1182,15 @@ class MainWindow(Adw.ApplicationWindow):
 
     @staticmethod
     def _plural_entries(count: int) -> str:
-        if count % 10 == 1 and count % 100 != 11:
+        if (
+            count % RUSSIAN_PLURAL_MOD_TEN == 1
+            and count % RUSSIAN_PLURAL_MOD_HUNDRED != RUSSIAN_PLURAL_ELEVEN_EXCEPTION
+        ):
             word = "запись"
-        elif count % 10 in (2, 3, 4) and count % 100 not in (12, 13, 14):
+        elif (
+            count % RUSSIAN_PLURAL_MOD_TEN in RUSSIAN_PLURAL_FEW_LAST_DIGITS
+            and count % RUSSIAN_PLURAL_MOD_HUNDRED not in RUSSIAN_PLURAL_TEEN_EXCEPTIONS
+        ):
             word = "записи"
         else:
             word = "записей"
@@ -1168,7 +1274,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.active_app_row.set_subtitle("Переключитесь в нужное приложение — захват через 2,5 секунды…")
         self.toast("KeySwitch скрыт: активируйте окно, которое нужно исключить")
         self.set_visible(False)
-        GLib.timeout_add(2500, self._finish_active_application_capture)
+        GLib.timeout_add(APPLICATION_CAPTURE_DELAY_MS, self._finish_active_application_capture)
 
     def _finish_active_application_capture(self) -> bool:
         application = self.engine.backend.active_application().strip()
@@ -1183,8 +1289,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _show_application_picker(self) -> None:
         dialog = Adw.Dialog()
-        dialog.set_content_width(620)
-        dialog.set_content_height(620)
+        dialog.set_content_width(APPLICATION_PICKER_DIALOG_SIDE_PIXELS)
+        dialog.set_content_height(APPLICATION_PICKER_DIALOG_SIDE_PIXELS)
         toolbar = Adw.ToolbarView()
         header = Adw.HeaderBar()
         title = Gtk.Label(label="Выберите приложение")
@@ -1195,11 +1301,11 @@ class MainWindow(Adw.ApplicationWindow):
         header.pack_start(close)
         toolbar.add_top_bar(header)
 
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        content.set_margin_top(12)
-        content.set_margin_bottom(12)
-        content.set_margin_start(12)
-        content.set_margin_end(12)
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=STANDARD_SPACING_PIXELS)
+        content.set_margin_top(DIALOG_CONTENT_MARGIN_PIXELS)
+        content.set_margin_bottom(DIALOG_CONTENT_MARGIN_PIXELS)
+        content.set_margin_start(DIALOG_CONTENT_MARGIN_PIXELS)
+        content.set_margin_end(DIALOG_CONTENT_MARGIN_PIXELS)
         search = Gtk.SearchEntry(placeholder_text="Поиск по названию, WM_CLASS или executable")
         content.append(search)
         applications = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)

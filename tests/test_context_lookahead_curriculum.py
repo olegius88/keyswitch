@@ -9,25 +9,41 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
-from context_lookahead_curriculum import LookaheadAnchor, LookaheadSeed, build_lookahead_curriculum, provenance
+from context_lookahead_curriculum import (
+    MAXIMUM_ANCHOR_WORD_CHARACTERS, MAXIMUM_FAMILIES_LIMIT, MAXIMUM_SEEDS_PER_FAMILY,
+    PLANNED_VARIANT_MASS_DIVISOR,
+    LookaheadAnchor, LookaheadSeed, build_lookahead_curriculum, provenance,
+)
 from keyswitch.context_model import ContextEvidence
 from keyswitch.detector import LanguageDetector
 from keyswitch.input_context import FieldContext
 from keyswitch.language_model import LanguageModel
 
+WORD_FREQUENCY = 5000
+
 
 class LookaheadCurriculumTests(unittest.TestCase):
+    POSITIVE_SEED_WEIGHT = 0.25
+    NEGATIVE_SEED_WEIGHT = 0.75
+    VARIANTS_PER_SEED = 2
+    CONFLICT_TEST_FRAME_COUNT = 2
+    SAMPLING_MAXIMUM_FAMILIES = 2
+    SAMPLING_SEEDS_PER_FAMILY = 2
+    SEEDS_PER_GENERATED_FAMILY = 4
+    TOTAL_SEED_FIXTURES = 12
+    SHA256_HEX_LENGTH = 64
+
     def setUp(self) -> None:
         self.detector = LanguageDetector({
-            0: LanguageModel("en_US", {"hello": 5000, "world": 5000}, "fixture", enable_spellcheck=False),
-            1: LanguageModel("ru_RU", {"привет": 5000, "работа": 5000}, "fixture", enable_spellcheck=False),
+            0: LanguageModel("en_US", {"hello": WORD_FREQUENCY, "world": WORD_FREQUENCY}, "fixture", enable_spellcheck=False),
+            1: LanguageModel("ru_RU", {"привет": WORD_FREQUENCY, "работа": WORD_FREQUENCY}, "fixture", enable_spellcheck=False),
         })
         self.positive = LookaheadSeed("positive", "short-physical-family", ContextEvidence(
             "r", "к", 0, FieldContext("Editor", "stream", "", "привет дальше"), boundary_text=" "),
-            "convert", "legacy_short_lookahead", 0.25)
+            "convert", "legacy_short_lookahead", self.POSITIVE_SEED_WEIGHT)
         self.negative = LookaheadSeed("negative", "short-physical-family", ContextEvidence(
             "r", "к", 0, FieldContext("Editor", "stream", "const value = ", "", "code"), boundary_text=" "),
-            "keep", "legacy_technical", 0.75)
+            "keep", "legacy_technical", self.NEGATIVE_SEED_WEIGHT)
         self.anchor = LookaheadAnchor("anchor", "russian-anchor-family", "привет", 1)
 
     def test_planned_positive_and_negative_keep_their_labels_before_and_parent_mass(self) -> None:
@@ -40,15 +56,19 @@ class LookaheadCurriculumTests(unittest.TestCase):
         self.assertEqual({frame.anchor_family for frame in planned}, {self.anchor.parent_family})
         for seed in (self.positive, self.negative):
             variants = [frame for frame in result.frames if frame.source_identifier == seed.identifier]
-            self.assertEqual(len(variants), 2)
+            self.assertEqual(len(variants), self.VARIANTS_PER_SEED)
             self.assertAlmostEqual(sum(frame.sample_weight for frame in variants), seed.sample_weight)
             for frame in variants:
                 self.assertEqual((frame.action, frame.parent_family, frame.evidence.original,
                                   frame.evidence.alternative, frame.evidence.field.before),
                                  (seed.action, seed.parent_family, seed.evidence.original,
                                   seed.evidence.alternative, seed.evidence.field.before))
-        self.assertEqual(result.mass_by_origin_action, {"field:convert": .125, "planned_next_conversion:convert": .125,
-                                                      "none:keep": .375, "planned_next_conversion:keep": .375})
+        self.assertEqual(result.mass_by_origin_action, {
+            "field:convert": self.POSITIVE_SEED_WEIGHT / PLANNED_VARIANT_MASS_DIVISOR,
+            "planned_next_conversion:convert": self.POSITIVE_SEED_WEIGHT / PLANNED_VARIANT_MASS_DIVISOR,
+            "none:keep": self.NEGATIVE_SEED_WEIGHT / PLANNED_VARIANT_MASS_DIVISOR,
+            "planned_next_conversion:keep": self.NEGATIVE_SEED_WEIGHT / PLANNED_VARIANT_MASS_DIVISOR,
+        })
 
     def test_literal_right_context_does_not_become_a_negative_planned_label(self) -> None:
         negative = replace(self.negative, evidence=replace(self.negative.evidence,
@@ -57,7 +77,7 @@ class LookaheadCurriculumTests(unittest.TestCase):
                         field=replace(self.negative.evidence.field, before="")))
         result = build_lookahead_curriculum([negative, empty], [self.anchor], self.detector, profile="portable")
         self.assertEqual([frame.kind for frame in result.frames], ["original", "original"])
-        self.assertEqual(sum(frame.sample_weight for frame in result.frames), 1.5)
+        self.assertEqual(sum(frame.sample_weight for frame in result.frames), negative.sample_weight + empty.sample_weight)
 
     def test_missing_train_anchor_and_nonproposed_next_word_do_not_invent_labels(self) -> None:
         for anchors in ([], [replace(self.anchor, text="неизвестно")]):
@@ -79,19 +99,20 @@ class LookaheadCurriculumTests(unittest.TestCase):
                                                baseline_convert=True))
         result = build_lookahead_curriculum([self.positive, conflicting], [self.anchor], self.detector, profile="portable")
         self.assertEqual(result.counts["skipped_label_conflict"], 1)
-        self.assertEqual(len(result.frames), 2)
+        self.assertEqual(len(result.frames), self.CONFLICT_TEST_FRAME_COUNT)
 
     def test_sampling_is_order_independent_and_bounded_per_family(self) -> None:
-        seeds = [replace(self.negative, identifier=f"seed-{index}", parent_family=f"family-{index // 4}")
-                 for index in range(12)]
+        seeds = [replace(self.negative, identifier=f"seed-{index}", parent_family=f"family-{index // self.SEEDS_PER_GENERATED_FAMILY}")
+                 for index in range(self.TOTAL_SEED_FIXTURES)]
         anchors = [self.anchor, replace(self.anchor, identifier="second", text="работа")]
-        first = build_lookahead_curriculum(seeds, anchors, self.detector, profile="portable", maximum_families=2, seeds_per_family=2)
+        first = build_lookahead_curriculum(seeds, anchors, self.detector, profile="portable",
+                                           maximum_families=self.SAMPLING_MAXIMUM_FAMILIES, seeds_per_family=self.SAMPLING_SEEDS_PER_FAMILY)
         second = build_lookahead_curriculum(list(reversed(seeds)), list(reversed(anchors)), self.detector,
-                                            profile="portable", maximum_families=2, seeds_per_family=2)
+                                            profile="portable", maximum_families=self.SAMPLING_MAXIMUM_FAMILIES, seeds_per_family=self.SAMPLING_SEEDS_PER_FAMILY)
         self.assertEqual(first, second)
-        self.assertEqual(first.counts["selected_families"], 2)
-        self.assertEqual(first.counts["selected_seeds"], 4)
-        self.assertEqual(first.counts["planned_keep"], 4)
+        self.assertEqual(first.counts["selected_families"], self.SAMPLING_MAXIMUM_FAMILIES)
+        self.assertEqual(first.counts["selected_seeds"], self.SAMPLING_MAXIMUM_FAMILIES * self.SAMPLING_SEEDS_PER_FAMILY)
+        self.assertEqual(first.counts["planned_keep"], self.SAMPLING_MAXIMUM_FAMILIES * self.SAMPLING_SEEDS_PER_FAMILY)
         self.assertEqual(sum(frame.sample_weight for frame in first.frames), sum(seed.sample_weight for seed in seeds))
 
     def test_nontrain_and_unsafe_inputs_are_rejected_before_generation(self) -> None:
@@ -118,16 +139,17 @@ class LookaheadCurriculumTests(unittest.TestCase):
         ))]
         result = build_lookahead_curriculum(variants, [self.anchor], self.detector, profile="portable")
         self.assertEqual(result.counts["selected_seeds"], 0)
-        anchors = [replace(self.anchor, identifier=str(index), text=text) for index, text in enumerate(("", "x", "café", "a b", "x" * 65))]
+        texts = ("", "x", "café", "a b", "x" * (MAXIMUM_ANCHOR_WORD_CHARACTERS + 1))
+        anchors = [replace(self.anchor, identifier=str(index), text=text) for index, text in enumerate(texts)]
         result = build_lookahead_curriculum([self.negative], anchors, self.detector, profile="portable")
-        self.assertEqual(result.counts["skipped_anchor"], 5)
+        self.assertEqual(result.counts["skipped_anchor"], len(texts))
         self.assertEqual(len(result.frames), 1)
 
     def test_configuration_weights_identity_and_provenance_are_explicit(self) -> None:
-        for maximum in (0, 4097, True):
+        for maximum in (0, MAXIMUM_FAMILIES_LIMIT + 1, True):
             with self.assertRaises(ValueError):
                 build_lookahead_curriculum([], [], self.detector, profile="portable", maximum_families=maximum)
-        for maximum in (0, 129, True):
+        for maximum in (0, MAXIMUM_SEEDS_PER_FAMILY + 1, True):
             with self.assertRaises(ValueError):
                 build_lookahead_curriculum([], [], self.detector, profile="portable", seeds_per_family=maximum)
         with self.assertRaises(ValueError):
@@ -141,7 +163,7 @@ class LookaheadCurriculumTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_lookahead_curriculum([self.negative, self.negative], [], self.detector, profile="portable")
         self.assertIn("src/keyswitch/engine.py", provenance())
-        self.assertTrue(all(len(value) == 64 for value in provenance().values()))
+        self.assertTrue(all(len(value) == self.SHA256_HEX_LENGTH for value in provenance().values()))
 
 
 if __name__ == "__main__":
@@ -151,8 +173,8 @@ if __name__ == "__main__":
 class NaturalLookaheadSeedTests(unittest.TestCase):
     def setUp(self) -> None:
         self.detector = LanguageDetector({
-            0: LanguageModel("en_US", {"hello": 5000, "world": 5000}, "fixture", enable_spellcheck=False),
-            1: LanguageModel("ru_RU", {"привет": 5000, "этого": 5000, "работа": 5000}, "fixture", enable_spellcheck=False),
+            0: LanguageModel("en_US", {"hello": WORD_FREQUENCY, "world": WORD_FREQUENCY}, "fixture", enable_spellcheck=False),
+            1: LanguageModel("ru_RU", {"привет": WORD_FREQUENCY, "этого": WORD_FREQUENCY, "работа": WORD_FREQUENCY}, "fixture", enable_spellcheck=False),
         })
         # A field-start frame: `у` typed as `e`, the sentence continues with `этого`.
         self.start = LookaheadSeed("natural:1:empty:wrong", "natural:doc-1", ContextEvidence(
@@ -171,7 +193,10 @@ class NaturalLookaheadSeedTests(unittest.TestCase):
         self.assertEqual(kinds["planned"].evidence.field.before, "")
         self.assertEqual({frame.action for frame in result.frames}, {"convert"})
         self.assertAlmostEqual(sum(frame.sample_weight for frame in result.frames), 1.0)
-        self.assertEqual(result.mass_by_origin_action, {"none:convert": 0.5, "planned_next_conversion:convert": 0.5})
+        self.assertEqual(result.mass_by_origin_action, {
+            "none:convert": self.start.sample_weight / PLANNED_VARIANT_MASS_DIVISOR,
+            "planned_next_conversion:convert": self.start.sample_weight / PLANNED_VARIANT_MASS_DIVISOR,
+        })
 
     def test_natural_seed_needs_its_own_continuation_and_the_matching_anchor(self) -> None:
         silent = replace(self.start, identifier="silent", next_words="")
@@ -197,7 +222,10 @@ class NaturalLookaheadSeedTests(unittest.TestCase):
         result = build_lookahead_curriculum([deferred], [self.anchor], self.detector, profile="portable")
         kinds = {frame.kind: frame for frame in result.frames}
         self.assertEqual((kinds["original"].action, kinds["planned"].action), ("wait", "convert"))
-        self.assertEqual(result.mass_by_origin_action, {"none:wait": 0.5, "planned_next_conversion:convert": 0.5})
+        self.assertEqual(result.mass_by_origin_action, {
+            "none:wait": deferred.sample_weight / PLANNED_VARIANT_MASS_DIVISOR,
+            "planned_next_conversion:convert": deferred.sample_weight / PLANNED_VARIANT_MASS_DIVISOR,
+        })
         self.assertEqual(result.counts["planned_convert"], 1)
 
     def test_planned_frame_carries_the_baseline_verdict_given_its_next_word(self) -> None:

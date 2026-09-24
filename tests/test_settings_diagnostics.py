@@ -8,8 +8,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from keyswitch.config import DEFAULTS, SettingsStore
-from keyswitch.settings_diagnostics import setting_change, settings_snapshot
+from keyswitch.config import DEFAULT_MINIMUM_WORD_LENGTH, DEFAULTS, SettingsStore
+from keyswitch.settings_diagnostics import (
+    _LOGGABLE_STRING_TRUNCATED_CHARACTERS,
+    setting_change,
+    settings_snapshot,
+)
+
+HISTORY_LIMIT_OVERRIDE = 50
+MINIMUM_LENGTH_OVERRIDE = 5
+OVERSIZED_STRING_CHARACTERS = 100
 
 
 class SettingsDiagnosticsTests(unittest.TestCase):
@@ -32,7 +40,7 @@ class SettingsDiagnosticsTests(unittest.TestCase):
         changes = {"enabled": False, "detection.context_read_field": False,
                    "general.sound": True, "appearance.theme": "dark",
                    "hotkeys.convert_last": "F12", "updates.check_automatically": False,
-                   "history.limit": 50, "exclusions.words": ["private-token"],
+                   "history.limit": HISTORY_LIMIT_OVERRIDE, "exclusions.words": ["private-token"],
                    "applications.telegram_quote_mention": False}
         for path, value in changes.items():
             self.store.set(path, value, persist=False)
@@ -51,18 +59,18 @@ class SettingsDiagnosticsTests(unittest.TestCase):
             self.assertIsNone(setting_change(self.store, path, "private-token"))
 
     def test_change_and_reset_never_repeat_a_default_value(self) -> None:
-        self.store.set("detection.minimum_length", 5, persist=False)
-        self.assertEqual(setting_change(self.store, "detection.minimum_length", 5), {
-            "path": "detection.minimum_length", "operation": "set", "value": 5,
+        self.store.set("detection.minimum_length", MINIMUM_LENGTH_OVERRIDE, persist=False)
+        self.assertEqual(setting_change(self.store, "detection.minimum_length", MINIMUM_LENGTH_OVERRIDE), {
+            "path": "detection.minimum_length", "operation": "set", "value": MINIMUM_LENGTH_OVERRIDE,
         })
         self.store.restore_default("detection.minimum_length")
-        self.assertEqual(setting_change(self.store, "detection.minimum_length", 3), {
+        self.assertEqual(setting_change(self.store, "detection.minimum_length", DEFAULT_MINIMUM_WORD_LENGTH), {
             "path": "detection.minimum_length", "operation": "reset",
         })
         self.assertEqual(settings_snapshot(self.store)["overrides"], {})
 
     def test_group_changes_and_reload_are_complete_replacement_snapshots(self) -> None:
-        self.store.set("detection.minimum_length", 5, persist=False)
+        self.store.set("detection.minimum_length", MINIMUM_LENGTH_OVERRIDE, persist=False)
         for path in ("detection", "*"):
             self.assertEqual(setting_change(self.store, path, {}), {
                 "path": path, "operation": "snapshot", "settings": settings_snapshot(self.store),
@@ -83,7 +91,7 @@ class SettingsDiagnosticsTests(unittest.TestCase):
                 raise AssertionError("Do not format arbitrary settings values")
 
         for value, expected in (
-            (None, None), ("x" * 100, "x" * 77 + "..."),
+            (None, None), ("x" * OVERSIZED_STRING_CHARACTERS, "x" * _LOGGABLE_STRING_TRUNCATED_CHARACTERS + "..."),
             (("private",), {"type": "tuple", "items": 1}),
             ({"private"}, {"type": "set", "items": 1}),
             ({"private": "value"}, {"type": "dict", "items": 1}),

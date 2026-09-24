@@ -21,6 +21,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ARTIFACT = PROJECT_ROOT / "src/keyswitch/resources/models/layout_intent_v1.ksm"
 MANIFEST = PROJECT_ROOT / "model/intent_v1/manifest.json"
 CONFIG = PROJECT_ROOT / "model/intent_v1/config.json"
+SHA256_HEX_CHARACTERS = 64
+# Twelve hashed files plus tools/environment_probe.py, certified since v21.
+EXPECTED_VERIFIED_FILE_COUNT = 13
+SEARCH_WINDOW_CHARACTERS = 200
 
 
 def _sha256(path: Path) -> str:
@@ -130,7 +134,7 @@ class StrictReportVerifierTests(unittest.TestCase):
         self.assertEqual(summary["gate_count"], len(_declared_strict_gates()))
         # Twelve hashed files plus tools/environment_probe.py, certified
         # since v21 so the environment probe cannot be quietly weakened.
-        self.assertEqual(summary["verified_files"], 13)
+        self.assertEqual(summary["verified_files"], EXPECTED_VERIFIED_FILE_COUNT)
         self.assertEqual(summary["model_version"], _manifest()["artifact_model_version"])
 
     def test_failed_or_missing_gates_are_rejected(self) -> None:
@@ -172,7 +176,7 @@ class StrictReportVerifierTests(unittest.TestCase):
         report = _synthetic_report()
         model = report["model"]
         assert isinstance(model, dict)
-        model["checksum"] = "0" * 64
+        model["checksum"] = "0" * SHA256_HEX_CHARACTERS
         self._assert_rejected(report, "checksum differs from the current artifact")
         report = _synthetic_report()
         model = report["model"]
@@ -206,7 +210,7 @@ class StrictReportVerifierTests(unittest.TestCase):
         for entry in provenance:
             assert isinstance(entry, dict)
             if entry["name"] == "toolchain_trainer_sha256":
-                entry["detail"] = "current=" + "1" * 64
+                entry["detail"] = "current=" + "1" * SHA256_HEX_CHARACTERS
         self._assert_rejected(report, "train_intent_model.py changed")
 
     def test_changed_toolchain_file_on_disk_is_rejected(self) -> None:
@@ -245,7 +249,9 @@ class DebBuildReuseContractTests(unittest.TestCase):
         self.assertIn('reusable_strict_report="${KEYSWITCH_INTENT_STRICT_REPORT:-}"', script)
         self.assertIn("tools/verify_intent_strict_report.py", script)
         self.assertIn("Reusable strict report is not bound to the current tree", script)
-        self.assertIn("exit 1", script.split("Reusable strict report is not bound")[1][:200])
+        self.assertIn(
+            "exit 1", script.split("Reusable strict report is not bound")[1][:SEARCH_WINDOW_CHARACTERS]
+        )
         for workflow in ("tests.yml", "release.yml"):
             text = (PROJECT_ROOT / ".github/workflows" / workflow).read_text("utf-8")
             self.assertIn("--report build/keyswitch-intent-strict.json", text)

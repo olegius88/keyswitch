@@ -40,6 +40,9 @@ MENU_SEPARATOR_QUIT = 11
 MENU_QUIT = 12
 MENU_SWITCH_LAYOUT = 13
 
+# The DBusMenu interface version this implementation speaks.
+DBUSMENU_INTERFACE_VERSION = 3
+
 MENU_ITEM_IDS = (
     MENU_LAYOUT,
     MENU_SWITCH_LAYOUT,
@@ -81,7 +84,7 @@ class StatusNotifierMenu(dbus.service.Object):
 
     def _menu_properties(self) -> dict[str, object]:
         return {
-            "Version": dbus.UInt32(3),
+            "Version": dbus.UInt32(DBUSMENU_INTERFACE_VERSION),
             "TextDirection": dbus.String("ltr"),
             "Status": dbus.String("normal"),
             "IconThemePath": dbus.Array([self._icon_theme_path], signature="s"),

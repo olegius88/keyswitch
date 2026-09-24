@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
 
+from .config import DEFAULT_LEARNING_CONFIRMATIONS, PERSISTED_JSON_INDENT
 from .history import data_dir
 
 
@@ -35,6 +36,15 @@ class _LearningData(TypedDict):
     schema_version: int
     rules: dict[str, object]
     rejections: dict[str, object]
+
+
+# The text after the ":" separator from str.partition(":"), which always
+# returns a 3-tuple (before, separator, after).
+PARTITION_AFTER_SEPARATOR_INDEX = 2
+MAX_CONFIRMATIONS = 999
+# Mirrors the shipped default of detection.learning_confirmations (see
+# config.DEFAULTS); engine.py imports LearningStore from here, so this module
+# cannot import the matching constant back from engine.py.
 
 
 def _string_keyed_dict(value: object) -> dict[str, object] | None:
@@ -99,7 +109,7 @@ class LearningStore:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             temporary = self.path.with_suffix(".json.tmp")
             temporary.write_text(
-                json.dumps(self._data, ensure_ascii=False, indent=2) + "\n",
+                json.dumps(self._data, ensure_ascii=False, indent=PERSISTED_JSON_INDENT) + "\n",
                 encoding="utf-8",
             )
             temporary.replace(self.path)
@@ -108,14 +118,14 @@ class LearningStore:
         self, source_group: int, word: str, target_group: int
     ) -> int:
         key = self._key(source_group, word)
-        if not key.partition(":")[2] or source_group == target_group:
+        if not key.partition(":")[PARTITION_AFTER_SEPARATOR_INDEX] or source_group == target_group:
             return 0
         with self._lock:
             rules = self._data["rules"]
             current = rules.get(key, {})
             if not isinstance(current, dict) or current.get("target_group") != target_group:
                 current = {"target_group": target_group, "confirmations": 0}
-            confirmations = min(999, int(current.get("confirmations", 0)) + 1)
+            confirmations = min(MAX_CONFIRMATIONS, int(current.get("confirmations", 0)) + 1)
             rules[key] = {
                 "target_group": target_group,
                 "confirmations": confirmations,
@@ -141,9 +151,9 @@ class LearningStore:
         """Immediately confirm a rule offered after a manual conversion."""
 
         key = self._key(source_group, word)
-        if not key.partition(":")[2] or source_group == target_group:
+        if not key.partition(":")[PARTITION_AFTER_SEPARATOR_INDEX] or source_group == target_group:
             return 0
-        required = max(1, min(999, confirmations_required))
+        required = max(1, min(MAX_CONFIRMATIONS, confirmations_required))
         with self._lock:
             rules = self._data["rules"]
             current = rules.get(key, {})
@@ -171,7 +181,7 @@ class LearningStore:
 
     def reject(self, source_group: int, word: str, target_group: int) -> None:
         key = self._key(source_group, word)
-        if not key.partition(":")[2] or source_group == target_group:
+        if not key.partition(":")[PARTITION_AFTER_SEPARATOR_INDEX] or source_group == target_group:
             return
         with self._lock:
             rejections = self._data["rejections"]
@@ -186,7 +196,7 @@ class LearningStore:
             self.save()
 
     def forced_target(
-        self, source_group: int, word: str, confirmations_required: int = 2
+        self, source_group: int, word: str, confirmations_required: int = DEFAULT_LEARNING_CONFIRMATIONS
     ) -> int | None:
         key = self._key(source_group, word)
         with self._lock:
@@ -244,7 +254,7 @@ class LearningStore:
         except ValueError:
             return None
 
-    def rules(self, confirmations_required: int = 2) -> tuple[LearnedRule, ...]:
+    def rules(self, confirmations_required: int = DEFAULT_LEARNING_CONFIRMATIONS) -> tuple[LearnedRule, ...]:
         """Every remembered rule, including those still short of the threshold."""
 
         required = max(1, confirmations_required)

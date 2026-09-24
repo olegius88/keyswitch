@@ -12,8 +12,17 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from keyswitch.intent_model import SCHEMA_VERSION
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+# Mirror the KSLM_MAXIMUM_* names embedded in packaging/build-windows.ps1 and
+# the matching intent_*_max_bytes shell variables in packaging/build-deb.sh.
+KSLM_MAXIMUM_CONTAINER_BYTES = 14 * 1024 * 1024
+KSLM_MAXIMUM_MANIFEST_BYTES = 1024 * 1024
+KSLM_MAXIMUM_PAYLOAD_BYTES = 12 * 1024 * 1024
+KSLM_MAXIMUM_FINGERPRINTS = 1 << 20
+INVALID_KSLM_SCHEMA_VERSION = SCHEMA_VERSION - 1
+PYTHON_SERIES_COMPONENTS = 2
 
 
 class WindowsPackagingContractTests(unittest.TestCase):
@@ -454,7 +463,10 @@ class WindowsPackagingContractTests(unittest.TestCase):
         self,
     ) -> None:
         header = struct.Struct("<4sHHIII32s")
-        limits = (14 * 1024 * 1024, 1024 * 1024, 12 * 1024 * 1024, 1 << 20)
+        limits = (
+            KSLM_MAXIMUM_CONTAINER_BYTES, KSLM_MAXIMUM_MANIFEST_BYTES,
+            KSLM_MAXIMUM_PAYLOAD_BYTES, KSLM_MAXIMUM_FINGERPRINTS,
+        )
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -482,7 +494,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
                 valid_path.write_bytes(
                     header.pack(
                         b"KSLM",
-                        4,
+                        SCHEMA_VERSION,
                         0,
                         len(valid_manifest),
                         len(payload),
@@ -501,8 +513,8 @@ class WindowsPackagingContractTests(unittest.TestCase):
                 self.assertEqual(accepted.returncode, 0, accepted.stderr)
 
                 for label, schema, flags, expected_error in (
-                    ("schema", 3, 0, "schema is unsupported"),
-                    ("flags", 4, 1, "header flags are unsupported"),
+                    ("schema", INVALID_KSLM_SCHEMA_VERSION, 0, "schema is unsupported"),
+                    ("flags", SCHEMA_VERSION, 1, "header flags are unsupported"),
                 ):
                     header_invalid_path = root / f"{label}-{index}.ksm"
                     header_invalid_path.write_bytes(
@@ -536,7 +548,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
                 oversized_fingerprint_manifest = json.dumps(
                     {
                         "dimension": 1,
-                        "supported_fingerprint_count": (1 << 20) + 1,
+                        "supported_fingerprint_count": KSLM_MAXIMUM_FINGERPRINTS + 1,
                     },
                     separators=(",", ":"),
                     sort_keys=True,
@@ -545,7 +557,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
                 invalid_path.write_bytes(
                     header.pack(
                         b"KSLM",
-                        4,
+                        SCHEMA_VERSION,
                         0,
                         len(oversized_fingerprint_manifest),
                         len(payload),
@@ -647,7 +659,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
             model.write_bytes(
                 header.pack(
                     b"KSLM",
-                    4,
+                    SCHEMA_VERSION,
                     0,
                     len(manifest),
                     len(payload),
@@ -690,8 +702,8 @@ class WindowsPackagingContractTests(unittest.TestCase):
                         validator,
                         str(diagnostic),
                         str(model),
-                        str(14 * 1024 * 1024),
-                        str(1024 * 1024),
+                        str(KSLM_MAXIMUM_CONTAINER_BYTES),
+                        str(KSLM_MAXIMUM_MANIFEST_BYTES),
                     ],
                     check=False,
                     capture_output=True,
@@ -709,8 +721,8 @@ class WindowsPackagingContractTests(unittest.TestCase):
                         validator,
                         str(diagnostic),
                         str(model),
-                        str(14 * 1024 * 1024),
-                        str(1024 * 1024),
+                        str(KSLM_MAXIMUM_CONTAINER_BYTES),
+                        str(KSLM_MAXIMUM_MANIFEST_BYTES),
                     ],
                     check=False,
                     capture_output=True,
@@ -730,7 +742,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
             )
         )
         training_python = str(environment["python_version"])
-        training_python_series = ".".join(training_python.split(".")[:2])
+        training_python_series = ".".join(training_python.split(".")[:PYTHON_SERIES_COMPONENTS])
         for relative in (
             ".github/workflows/tests.yml",
             ".github/workflows/release.yml",

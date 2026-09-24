@@ -35,24 +35,58 @@ from PySide6.QtWidgets import (
 
 from . import __version__, autostart
 from .catalog import current_catalog, verify_connection
-from .config import Config, Source, data_directory, load_config, save_config
+from .config import (
+    DEFAULT_ROTATIONS,
+    MAX_INTERVAL_MINUTES,
+    MAX_ROTATIONS,
+    PRIVATE_DIRECTORY_MODE,
+    Config,
+    Source,
+    data_directory,
+    load_config,
+    save_config,
+)
 from .secrets import read_token, redact, store_token, token_bot_id
 from .service import Service
 from .store import Store
 from .telegram import Telegram
 
+ICON_PIXELS = 64
+ICON_MARGIN_PIXELS = 2
+ICON_RECT_PIXELS = 60
+ICON_CORNER_RADIUS_PIXELS = 14
+ICON_FONT_PIXEL_SIZE = 29
+WINDOW_INITIAL_WIDTH = 850
+WINDOW_INITIAL_HEIGHT = 640
+WINDOW_MIN_WIDTH = 540
+WINDOW_MIN_HEIGHT = 420
+SOURCES_TABLE_COLUMNS = 4
+EVENTS_LOG_MAX_LINES = 150
+STATUS_MESSAGE_DURATION_MS = 5000
+TRAY_TOOLTIP_MAX_CHARACTERS = 120
+BYTES_PER_KIBIBYTE = 1024
+SHUTDOWN_POLL_MS = 100
+SMOKE_TEST_DELAY_MS = 100
+
 
 def application_icon() -> QIcon:
-    pixmap = QPixmap(64, 64)
+    pixmap = QPixmap(ICON_PIXELS, ICON_PIXELS)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setBrush(QColor("#2563eb"))
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.drawRoundedRect(2, 2, 60, 60, 14, 14)
+    painter.drawRoundedRect(
+        ICON_MARGIN_PIXELS,
+        ICON_MARGIN_PIXELS,
+        ICON_RECT_PIXELS,
+        ICON_RECT_PIXELS,
+        ICON_CORNER_RADIUS_PIXELS,
+        ICON_CORNER_RADIUS_PIXELS,
+    )
     painter.setPen(QColor("white"))
     font = painter.font()
-    font.setPixelSize(29)
+    font.setPixelSize(ICON_FONT_PIXEL_SIZE)
     font.setBold(True)
     painter.setFont(font)
     painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "LC")
@@ -90,8 +124,8 @@ class SourceDialog(QDialog):
         self.path = QLineEdit(path)
         self.label = QLineEdit(Path(path).name)
         self.rotations = QSpinBox()
-        self.rotations.setRange(0, 20)
-        self.rotations.setValue(5)
+        self.rotations.setRange(0, MAX_ROTATIONS)
+        self.rotations.setValue(DEFAULT_ROTATIONS)
         self.existing = QCheckBox("Включить уже существующие записи и ротации")
         note = QLabel(
             "Без этого флажка сбор начнётся с конца файлов при первом запуске сбора.\n"
@@ -129,8 +163,8 @@ class Window(QMainWindow):
         self.last_message = ""
         self.setWindowTitle(f"LogCourier {__version__} — сборщик логов")
         self.setWindowIcon(application_icon())
-        self.resize(850, 640)
-        self.setMinimumSize(540, 420)
+        self.resize(WINDOW_INITIAL_WIDTH, WINDOW_INITIAL_HEIGHT)
+        self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
         self.make_connection_page()
@@ -229,7 +263,7 @@ class Window(QMainWindow):
         )
         note.setWordWrap(True)
         layout.addWidget(note)
-        self.table = QTableWidget(0, 4)
+        self.table = QTableWidget(0, SOURCES_TABLE_COLUMNS)
         self.table.setHorizontalHeaderLabels(["Название", "Файл", "Ротаций", "Старые записи"])
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -256,7 +290,7 @@ class Window(QMainWindow):
         self.auto = QCheckBox("Автоматически собирать и отправлять логи")
         self.auto.setChecked(self.config.auto_send)
         self.interval = QSpinBox()
-        self.interval.setRange(1, 1440)
+        self.interval.setRange(1, MAX_INTERVAL_MINUTES)
         self.interval.setValue(self.config.interval_minutes)
         self.interval.setSuffix(" мин")
         note = QLabel(
@@ -311,7 +345,7 @@ class Window(QMainWindow):
         layout.addWidget(self.summary)
         self.events = QTextEdit()
         self.events.setReadOnly(True)
-        self.events.document().setMaximumBlockCount(150)
+        self.events.document().setMaximumBlockCount(EVENTS_LOG_MAX_LINES)
         layout.addWidget(self.events)
         info = QLabel(
             f"Локальные настройки и очередь: {self.root}\n"
@@ -400,7 +434,7 @@ class Window(QMainWindow):
             save_config(self.root, config)
             self.config = config
             self.service.update(config, token)
-            self.statusBar().showMessage("Настройки сохранены.", 5000)
+            self.statusBar().showMessage("Настройки сохранены.", STATUS_MESSAGE_DURATION_MS)
             return True
         except (ValueError, RuntimeError, OSError) as error:
             self.error(
@@ -562,7 +596,7 @@ class Window(QMainWindow):
         self.summary.setText(
             f"{message}\nВ очереди: {stats['queued']}; ждут каталога: {stats['unindexed']}.\n"
             f"Версия KeySwitch: {version_text}.\n"
-            f"Объём очереди: {stats['queue_bytes'] / 1024 / 1024:.1f} МиБ.\n"
+            f"Объём очереди: {stats['queue_bytes'] / BYTES_PER_KIBIBYTE / BYTES_PER_KIBIBYTE:.1f} МиБ.\n"
             f"Последняя успешная отправка: {stamp}.\n"
             f"Архивов для других ботов/групп: {stats['other']} (не отправляются сюда)."
         )
@@ -570,7 +604,7 @@ class Window(QMainWindow):
             self.events.moveCursor(self.events.textCursor().MoveOperation.End)
             self.events.insertPlainText(f"{datetime.now():%H:%M:%S} {redact(message)}\n")
             self.last_message = message
-        self.tray.setToolTip(("LogCourier — " + message)[:120])
+        self.tray.setToolTip(("LogCourier — " + message)[:TRAY_TOOLTIP_MAX_CHARACTERS])
 
     def error(self, message):
         QMessageBox.warning(self, "LogCourier", redact(str(message)))
@@ -604,7 +638,7 @@ class Window(QMainWindow):
         self.service.stop()
         self.setEnabled(False)
         self.statusBar().showMessage("Завершение текущего запроса…")
-        self.exit_timer.start(100)
+        self.exit_timer.start(SHUTDOWN_POLL_MS)
 
     def finish_shutdown(self):
         if not self.service.thread.is_alive() and not any(task.isRunning() for task in self.tasks):
@@ -619,7 +653,7 @@ def run(minimized: bool = False) -> int:
     app.setOrganizationName("LogCourier")
     app.setQuitOnLastWindowClosed(False)
     root = data_directory()
-    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    root.mkdir(parents=True, exist_ok=True, mode=PRIVATE_DIRECTORY_MODE)
     lock = QLockFile(str(root / "instance.lock"))
     lock.setStaleLockTime(0)
     if not lock.tryLock(0):
@@ -662,7 +696,7 @@ def smoke_test(output: Path) -> int:
             window.setProperty("smokePassed", True)
             window.shutdown()
 
-        QTimer.singleShot(100, exercise)
+        QTimer.singleShot(SMOKE_TEST_DELAY_MS, exercise)
         code = app.exec()
         passed = bool(window.property("smokePassed")) and not window.service.thread.is_alive()
         output.write_text(

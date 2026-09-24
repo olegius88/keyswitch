@@ -11,6 +11,7 @@ from unittest.mock import patch
 from keyswitch.app_quirks import MENTION_HEADS, TELEGRAM_QUOTE_MENTION, mention_head
 from keyswitch.backend import KeyEvent, SHIFT_MASK
 from keyswitch.config import DEFAULTS, SettingsStore
+from keyswitch.context_access import MILLISECONDS_PER_SECOND
 from keyswitch.engine import KeySwitchEngine
 from keyswitch.history import HistoryStore
 from keyswitch.windows_ui_model import ALL_SETTING_SPECS
@@ -22,6 +23,20 @@ QUOTE_KEY = next(key for key in KEYS if key.characters == ("@", '"'))
 SPACE_KEY = next(key for key in KEYS if key.characters == (" ", " "))
 SLASH_KEY = next(key for key in KEYS if key.characters == ("/", "."))
 BY_LATIN = {key.characters[0]: key for key in KEYS if len(key.characters[0]) == 1}
+
+# Arbitrary, non-zero starting point for the fake monotonic clock.
+INITIAL_CLOCK_SECONDS = 1000.0
+# How long a simulated key stays down, and the gap before the next event.
+KEY_PRESS_HOLD_SECONDS = 0.05
+KEY_RELEASE_GAP_SECONDS = 0.03
+# Placeholder physical keycode for synthetic named-key events (Pause, etc).
+NAMED_KEY_KEYCODE = 200
+# Physical keycode used when the test specifically plays the Pause key.
+PAUSE_KEYCODE = 127
+# Default and short idle gaps fed to idle(), comfortably either side of the
+# real pause-correction delay (DEFAULT_PAUSE_DELAY_SECONDS = 1.5).
+IDLE_PAUSE_SECONDS = 2.0
+SHORT_IDLE_SECONDS = 0.5
 
 
 class MentionHeadTableTests(unittest.TestCase):
@@ -70,7 +85,7 @@ class TelegramQuoteMentionTests(unittest.TestCase):
         self.backend = EditorBackend()
         self.backend.group = 1
         self.application = "Telegram"
-        self.clock = [1000.0]
+        self.clock = [INITIAL_CLOCK_SECONDS]
         with patch("keyswitch.engine.time.monotonic", side_effect=lambda: self.clock[0]), \
                 patch.object(self.backend, "active_application", side_effect=lambda: self.application):
             self.engine = KeySwitchEngine(self.settings, HistoryStore(root / "history.jsonl"), self.backend)
@@ -80,36 +95,41 @@ class TelegramQuoteMentionTests(unittest.TestCase):
         observed = characters[self.backend.group]
         event = KeyEvent(True, key.keycode, observed, observed, characters,  # type: ignore[attr-defined]
                          self.backend.group, SHIFT_MASK if key.shift else 0,  # type: ignore[attr-defined]
-                         round(self.clock[0] * 1000))
+                         round(self.clock[0] * MILLISECONDS_PER_SECOND))
         if key_name is not None:
             event = replace(event, key_name=key_name)
         with patch("keyswitch.engine.time.monotonic", side_effect=lambda: self.clock[0]), \
                 patch.object(self.backend, "active_application", side_effect=lambda: self.application):
-            self.clock[0] += 0.05
+            self.clock[0] += KEY_PRESS_HOLD_SECONDS
             self.backend.type(event)
             self.engine._handle(event)
-            self.clock[0] += 0.03
-            released = replace(event, pressed=False, timestamp=round(self.clock[0] * 1000))
+            self.clock[0] += KEY_RELEASE_GAP_SECONDS
+            released = replace(event, pressed=False, timestamp=round(self.clock[0] * MILLISECONDS_PER_SECOND))
             self.backend.type(released)
             self.engine._handle(released)
 
-    def named(self, key_name: str, keycode: int = 200) -> None:
+    def named(self, key_name: str, keycode: int = NAMED_KEY_KEYCODE) -> None:
         event = replace(
-            KeyEvent(True, keycode, "", "", ("", ""), self.backend.group, 0, round(self.clock[0] * 1000)),
+            KeyEvent(
+                True, keycode, "", "", ("", ""), self.backend.group, 0,
+                round(self.clock[0] * MILLISECONDS_PER_SECOND),
+            ),
             key_name=key_name,
         )
         with patch("keyswitch.engine.time.monotonic", side_effect=lambda: self.clock[0]), \
                 patch.object(self.backend, "active_application", side_effect=lambda: self.application):
-            self.clock[0] += 0.05
+            self.clock[0] += KEY_PRESS_HOLD_SECONDS
             self.engine._handle(event)
-            self.clock[0] += 0.03
-            self.engine._handle(replace(event, pressed=False, timestamp=round(self.clock[0] * 1000)))
+            self.clock[0] += KEY_RELEASE_GAP_SECONDS
+            self.engine._handle(
+                replace(event, pressed=False, timestamp=round(self.clock[0] * MILLISECONDS_PER_SECOND))
+            )
 
     def word(self, latin: str) -> None:
         for character in latin:
             self.press(BY_LATIN[character])
 
-    def idle(self, seconds: float = 2.0) -> None:
+    def idle(self, seconds: float = IDLE_PAUSE_SECONDS) -> None:
         self.clock[0] += seconds
         with patch("keyswitch.engine.time.monotonic", side_effect=lambda: self.clock[0]), \
                 patch.object(self.backend, "active_application", side_effect=lambda: self.application):
@@ -188,8 +208,8 @@ class TelegramQuoteMentionTests(unittest.TestCase):
 
     def test_pause_still_converts_a_lone_quote_on_command(self) -> None:
         self.press(QUOTE_KEY)
-        self.named("Pause", keycode=127)
-        self.idle(0.5)
+        self.named("Pause", keycode=PAUSE_KEYCODE)
+        self.idle(SHORT_IDLE_SECONDS)
         self.assertEqual(self.backend.text, "@")
 
     def test_a_caret_move_before_the_quote_leaves_the_word_alone(self) -> None:

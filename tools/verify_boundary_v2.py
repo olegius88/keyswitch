@@ -5,7 +5,7 @@ import argparse
 import json
 from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
+from typing import Final, cast
 
 from keyswitch.boundary_policy import ARTIFACT, BoundaryPolicy
 from boundary_v2_corpus import CONFIG, DIRECTORY, RECEIPT, rows
@@ -16,6 +16,8 @@ from train_boundary_v2 import CANDIDATE, REPORT, SEAL, acceptable, metrics, prov
 from verify_context_v2 import read_object
 from verify_lexical_compatibility import read_object as read_compatibility_object
 from verify_lexical_compatibility import verify as verify_compatibility
+
+REPORT_JSON_INDENT: Final = 2
 
 
 def evaluate() -> bytes:
@@ -83,7 +85,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--verify-frozen", action="store_true", help="verify existing numeric evidence, without fitting or engine replay")
     args = parser.parse_args(argv)
-    print(json.dumps(verify_frozen() if args.verify_frozen else verify(), ensure_ascii=True, indent=2))
+    print(json.dumps(verify_frozen() if args.verify_frozen else verify(), ensure_ascii=True, indent=REPORT_JSON_INDENT))
     return 0
 
 

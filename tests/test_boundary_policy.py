@@ -10,7 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from keyswitch.boundary_policy import BoundaryPolicy, features
+from keyswitch.boundary_policy import FEATURE_VERSION, BoundaryPolicy, features
 from test_input_integrity import InputIntegrityTests
 
 
@@ -21,8 +21,16 @@ if str(ROOT / "tools") not in sys.path:
 
 import verify_boundary_v2 as verifier
 from boundary_v2_corpus import RECEIPT
-from evaluate_boundary_engine import REPORT as ENGINE_REPORT
+from evaluate_boundary_engine import REPORT as ENGINE_REPORT, SCENARIOS
 from verify_context_v2 import read_object
+
+# Frozen tools/train_boundary_v2.py and src/keyswitch/boundary_policy.py pin
+# these directly (PENDING_RESEAL), so they are mirrored here rather than
+# imported.
+VALID_TEST_THRESHOLD = 0.99
+THRESHOLD_LOWER_BOUND = 0.5
+OVERSIZED_BOUNDARY_POLICY_BYTES = 65537
+PAUSE_TRIGGER_OFFSET_SECONDS = 2
 
 
 class BoundaryPolicyArtifactTests(unittest.TestCase):
@@ -51,25 +59,25 @@ class BoundaryPolicyArtifactTests(unittest.TestCase):
         assert isinstance(results, dict)
         active = results["active_v2"]
         assert isinstance(active, dict)
-        invalid_results: tuple[dict[str, object], ...] = ({"exact": 0}, {"changed_correct": 1}, {"rows": []}, {"rows": [{}] * 18})
+        invalid_results: tuple[dict[str, object], ...] = ({"exact": 0}, {"changed_correct": 1}, {"rows": []}, {"rows": [{}] * len(SCENARIOS)})
         for changes in invalid_results:
             changed_engine = {**engine, "results": {**results, "active_v2": {**active, **changes}}}
             with patch.object(verifier, "read_object", side_effect=[corpus, changed_engine]), self.assertRaises(ValueError):
                 verifier.verify()
 
     def test_version_size_and_numeric_validation(self) -> None:
-        good = {"feature_version": 2, "version": "boundary-v2-test", "threshold": .99, "weights": {"bias": 0.0}}
+        good = {"feature_version": FEATURE_VERSION, "version": "boundary-v2-test", "threshold": VALID_TEST_THRESHOLD, "weights": {"bias": 0.0}}
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "model.json"
             invalid_cases: tuple[object, ...] = ([], {}, {**good, "feature_version": 1}, {**good, "version": "boundary-v1-test"},
-                            {**good, "version": None}, {**good, "threshold": True}, {**good, "threshold": .5},
+                            {**good, "version": None}, {**good, "threshold": True}, {**good, "threshold": THRESHOLD_LOWER_BOUND},
                             {**good, "threshold": None}, {**good, "weights": {}},
                             {**good, "weights": {"a": float("inf")}}, {**good, "weights": {"a": True}})
             for invalid in invalid_cases:
                 path.write_text(json.dumps(invalid))
                 with self.assertRaises(ValueError):
                     BoundaryPolicy.load(path)
-            path.write_bytes(b" " * 65537)
+            path.write_bytes(b" " * OVERSIZED_BOUNDARY_POLICY_BYTES)
             with self.assertRaisesRegex(ValueError, "oversized"):
                 BoundaryPolicy.load(path)
             path.write_text(json.dumps(good))
@@ -78,7 +86,7 @@ class BoundaryPolicyArtifactTests(unittest.TestCase):
         with patch.object(BoundaryPolicy, "load", side_effect=OSError("missing")):
             self.assertIsNone(BoundaryPolicy.default())
         BoundaryPolicy.default.cache_clear()
-        with patch.object(BoundaryPolicy, "load", return_value=BoundaryPolicy({}, .99, "test")) as load:
+        with patch.object(BoundaryPolicy, "load", return_value=BoundaryPolicy({}, VALID_TEST_THRESHOLD, "test")) as load:
             self.assertIs(BoundaryPolicy.default(), load.return_value)
         BoundaryPolicy.default.cache_clear()
 
@@ -118,7 +126,7 @@ class BoundaryPolicyEngineTests(InputIntegrityTests):
                 self.physical(key)
                 last = self.engine._last_word_input_at
                 assert last is not None
-                self.engine._maybe_correct_after_pause(now=last + 2)
+                self.engine._maybe_correct_after_pause(now=last + PAUSE_TRIGGER_OFFSET_SECONDS)
                 self.assertEqual(self.backend.text, before + key)
                 self.assertEqual(self.backend.group, 0)
 
@@ -156,7 +164,7 @@ class BoundaryPolicyEngineTests(InputIntegrityTests):
         last = self.engine._last_word_input_at
         assert last is not None
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            self.engine._maybe_correct_after_pause(now=last + 2)
+            self.engine._maybe_correct_after_pause(now=last + PAUSE_TRIGGER_OFFSET_SECONDS)
         guards = [json.loads(line.split("TECHNICAL ", 1)[1]) for line in logs.output if "TECHNICAL " in line]
         self.assertTrue(any(event["event"] == "boundary_guard" and event["reason"] == "no_word" for event in guards))
         self.assertFalse(any(event["event"] == "context_decision" for event in guards))

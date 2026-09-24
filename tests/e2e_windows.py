@@ -19,11 +19,61 @@ def _running_on_windows() -> bool:
     return sys.platform == "win32"
 
 
+VK_F24 = 0x87
+# A UI or hook step gets this long before the scenario reports it as timed out.
+STANDARD_DEADLINE_SECONDS = 5.0
+LONG_DEADLINE_SECONDS = 10.0
+ENTER_SUBMIT_TIMEOUT_SECONDS = 10
+# English flag: near-black top-left corner, red bottom-right stripe.
+# Russian flag: white top-left stripe, red bottom-right stripe.
+FLAG_PIXEL_EXPECTATIONS = {
+    0: ((60, 59, 110, 255), (178, 34, 52, 255)),
+    1: ((255, 255, 255, 255), (213, 43, 30, 255)),
+}
+EXPECTED_SCROLLREGION_FIELD_COUNT = 4
+SCROLLREGION_BOTTOM_INDEX = 3
+MOUSEWHEEL_DELTA = 120
+WHEEL_EVENT_OFFSET = 20
+DIAGNOSTIC_LOG_TAIL_LINES = 30
+DIAGNOSTIC_LINE_CHARACTERS = 600
+VK_HOME = 0x24
+VK_SHIFT = 0x10
+VK_END = 0x23
+VK_BACK = 0x08
+# Short retry poll interval, in milliseconds, for the async wait_for_* steps.
+POLL_INTERVAL_MS = 50
+# Slightly longer delay before starting the next phase of a scenario.
+PHASE_START_DELAY_MS = 100
+# UI settle delay, in milliseconds, after a phase completes.
+PHASE_SETTLE_DELAY_MS = 300
+ENTER_PREP_DELAY_MS = 200
+# Physical (hardware) scan codes; together they spell "ghbdtn" (-> привет)
+# or "hello" (-> руддщ) in the layout under test, plus Enter and Space.
+SCAN_G = 0x22
+SCAN_H = 0x23
+SCAN_B = 0x30
+SCAN_D = 0x20
+SCAN_T = 0x14
+SCAN_N = 0x31
+SCAN_ENTER = 0x1C
+SCAN_E = 0x12
+SCAN_L = 0x26
+SCAN_O = 0x18
+SCAN_SPACE = 0x39
+VK_RETURN = 0x0D
+VK_PAUSE = 0x13
+MAX_PROBE_ATTEMPTS = 3
+PROBE_TIMEOUT_SECONDS = 3.0
+HISTORY_TAIL_PAIR_COUNT = 2
+HISTORY_TAIL_TRIPLE_COUNT = 3
+WATCHDOG_SECONDS = 90
+
+
 def main() -> int:
     if not _running_on_windows():
         raise RuntimeError("Windows E2E must run on Windows")
 
-    from keyswitch.config import SettingsStore
+    from keyswitch.config import DEFAULT_LEARNING_CONFIRMATIONS, SettingsStore
     from keyswitch.windows_backend import NativeInput, NativeKeyEvent
     from keyswitch.windows_native import CtypesWindowsAPI
     from keyswitch.windows_tray import WindowsTrayState
@@ -39,7 +89,7 @@ def main() -> int:
 
     def listener(event: NativeKeyEvent) -> bool:
         events.append(event)
-        if event.virtual_key == 0x87:
+        if event.virtual_key == VK_F24:
             received.set()
         return False
 
@@ -52,33 +102,29 @@ def main() -> int:
 
     thread = threading.Thread(target=hook_loop, name="keyswitch-win32-e2e")
     thread.start()
-    if not ready.wait(5.0):
+    if not ready.wait(STANDARD_DEADLINE_SECONDS):
         raise RuntimeError("WH_KEYBOARD_LL did not become ready")
     if errors:
         raise errors[0]
     try:
         inputs = (
-            NativeInput(True, virtual_key=0x87),
-            NativeInput(False, virtual_key=0x87),
+            NativeInput(True, virtual_key=VK_F24),
+            NativeInput(False, virtual_key=VK_F24),
         )
         if api.send_inputs(inputs) != len(inputs):
             raise RuntimeError("SendInput did not accept the F24 smoke sequence")
-        if not received.wait(5.0):
+        if not received.wait(STANDARD_DEADLINE_SECONDS):
             raise RuntimeError("WH_KEYBOARD_LL did not observe the injected F24 event")
-        if not any(event.injected for event in events if event.virtual_key == 0x87):
+        if not any(event.injected for event in events if event.virtual_key == VK_F24):
             raise RuntimeError("Injected Win32 event was not marked synthetic")
     finally:
         api.stop_keyboard_hook()
-        thread.join(timeout=5.0)
+        thread.join(timeout=STANDARD_DEADLINE_SECONDS)
     if thread.is_alive():
         raise RuntimeError("Win32 hook thread did not stop")
     print("WINDOWS_HOOK_E2E_OK", flush=True)
 
-    flag_expectations = {
-        0: ((60, 59, 110, 255), (178, 34, 52, 255)),
-        1: ((255, 255, 255, 255), (213, 43, 30, 255)),
-    }
-    for group, (top_left, bottom_right) in flag_expectations.items():
+    for group, (top_left, bottom_right) in FLAG_PIXEL_EXPECTATIONS.items():
         flag = PystrayWindowsAdapter._render(
             WindowsTrayState(group=group, indicator_style="flags")
         )
@@ -115,9 +161,9 @@ def main() -> int:
                 page = visual_application._pages[page_name]
                 viewport = visual_application._page_viewports[page_name]
                 region = str(viewport.cget("scrollregion")).split()
-                if len(region) != 4:
+                if len(region) != EXPECTED_SCROLLREGION_FIELD_COUNT:
                     raise RuntimeError(f"Page {page_name} has no scroll region")
-                if int(float(region[3])) < page.winfo_reqheight():
+                if int(float(region[SCROLLREGION_BOTTOM_INDEX])) < page.winfo_reqheight():
                     raise RuntimeError(
                         f"Page {page_name} cannot scroll to its full height"
                     )
@@ -171,11 +217,11 @@ def main() -> int:
             if settings_viewport.yview()[1] < 1.0:
                 settings_viewport.event_generate(
                     "<MouseWheel>",
-                    delta=-120,
-                    x=20,
-                    y=20,
-                    rootx=settings_viewport.winfo_rootx() + 20,
-                    rooty=settings_viewport.winfo_rooty() + 20,
+                    delta=-MOUSEWHEEL_DELTA,
+                    x=WHEEL_EVENT_OFFSET,
+                    y=WHEEL_EVENT_OFFSET,
+                    rootx=settings_viewport.winfo_rootx() + WHEEL_EVENT_OFFSET,
+                    rooty=settings_viewport.winfo_rooty() + WHEEL_EVENT_OFFSET,
                 )
                 visual_application.root.update()
                 if settings_viewport.yview()[0] <= 0.0:
@@ -254,8 +300,8 @@ def main() -> int:
                     f"focus={application.root.focus_get()!r}",
                     flush=True,
                 )
-                for line in recorded[-30:]:
-                    print(line[:600], flush=True)
+                for line in recorded[-DIAGNOSTIC_LOG_TAIL_LINES:]:
+                    print(line[:DIAGNOSTIC_LINE_CHARACTERS], flush=True)
                 print("WINDOWS_E2E_DIAGNOSTICS_END", flush=True)
             finally:
                 application.shutdown()
@@ -285,14 +331,14 @@ def main() -> int:
             # Tk's Ctrl+A binding is layout-dependent on Windows. Home and
             # Shift+End select the single-line field in both EN and RU.
             inputs = (
-                NativeInput(True, virtual_key=0x24, extended=True, synthetic=False),
-                NativeInput(False, virtual_key=0x24, extended=True, synthetic=False),
-                NativeInput(True, virtual_key=0x10, synthetic=False),
-                NativeInput(True, virtual_key=0x23, extended=True, synthetic=False),
-                NativeInput(False, virtual_key=0x23, extended=True, synthetic=False),
-                NativeInput(False, virtual_key=0x10, synthetic=False),
-                NativeInput(True, virtual_key=0x08, synthetic=False),
-                NativeInput(False, virtual_key=0x08, synthetic=False),
+                NativeInput(True, virtual_key=VK_HOME, extended=True, synthetic=False),
+                NativeInput(False, virtual_key=VK_HOME, extended=True, synthetic=False),
+                NativeInput(True, virtual_key=VK_SHIFT, synthetic=False),
+                NativeInput(True, virtual_key=VK_END, extended=True, synthetic=False),
+                NativeInput(False, virtual_key=VK_END, extended=True, synthetic=False),
+                NativeInput(False, virtual_key=VK_SHIFT, synthetic=False),
+                NativeInput(True, virtual_key=VK_BACK, synthetic=False),
+                NativeInput(False, virtual_key=VK_BACK, synthetic=False),
             )
             if api.send_inputs(inputs) != len(inputs):
                 raise RuntimeError("Could not clear the editor through its keyboard")
@@ -311,22 +357,22 @@ def main() -> int:
 
         def wait_for_enter_submission(deadline: float) -> None:
             if entered_messages:
-                application.root.after(300, finish_enter_submission)
+                application.root.after(PHASE_SETTLE_DELAY_MS, finish_enter_submission)
             elif time.monotonic() >= deadline:
                 fail(RuntimeError("The intercepted Enter never reached the editor"))
             else:
-                application.root.after(50, lambda: wait_for_enter_submission(deadline))
+                application.root.after(POLL_INTERVAL_MS, lambda: wait_for_enter_submission(deadline))
 
         def type_and_submit() -> None:
             try:
                 inputs = tuple(
                     NativeInput(pressed, scan_code=scan, synthetic=False)
-                    for scan in (0x22, 0x23, 0x30, 0x20, 0x14, 0x31, 0x1C)
+                    for scan in (SCAN_G, SCAN_H, SCAN_B, SCAN_D, SCAN_T, SCAN_N, SCAN_ENTER)
                     for pressed in (True, False)
                 )
                 if api.send_inputs(inputs) != len(inputs):
                     raise RuntimeError("The word and Enter were not accepted")
-                wait_for_enter_submission(time.monotonic() + 10)
+                wait_for_enter_submission(time.monotonic() + ENTER_SUBMIT_TIMEOUT_SECONDS)
             except Exception as error:
                 fail(error)
 
@@ -337,7 +383,7 @@ def main() -> int:
             application.settings.set("detection.correct_on_enter", True)
             application.test_entry.focus_force()
             clear_editor()
-            application.root.after(200, type_and_submit)
+            application.root.after(ENTER_PREP_DELAY_MS, type_and_submit)
 
         def wait_for_text(
             expected: str,
@@ -360,7 +406,7 @@ def main() -> int:
                 )
                 return
             application.root.after(
-                50,
+                POLL_INTERVAL_MS,
                 lambda: wait_for_text(
                     expected,
                     expected_group,
@@ -374,18 +420,18 @@ def main() -> int:
                 (entry.original, entry.replacement)
                 for entry in application.history.read()
             ]
-            if pairs[-2:] != [("ghbdtn", "привет"), ("руддщ", "hello")]:
+            if pairs[-HISTORY_TAIL_PAIR_COUNT:] != [("ghbdtn", "привет"), ("руддщ", "hello")]:
                 fail(RuntimeError(f"Unexpected Windows correction history: {pairs}"))
                 return
             print("WINDOWS_RU_TO_EN_E2E_OK", flush=True)
-            application.root.after(300, prepare_learning)
+            application.root.after(PHASE_SETTLE_DELAY_MS, prepare_learning)
 
         def finish_learning() -> None:
             pairs = [
                 (entry.original, entry.replacement)
                 for entry in application.history.read()
             ]
-            if pairs[-3:] != [
+            if pairs[-HISTORY_TAIL_TRIPLE_COUNT:] != [
                 ("ghbdtn", "привет"),
                 ("руддщ", "hello"),
                 ("hello", "руддщ"),
@@ -394,8 +440,8 @@ def main() -> int:
                 return
             print("WINDOWS_LEARNING_PROMPT_E2E_OK", flush=True)
             application._select_alternate_layout()
-            menu_layout_deadline[0] = time.monotonic() + 5.0
-            application.root.after(50, wait_for_menu_layout_selection)
+            menu_layout_deadline[0] = time.monotonic() + STANDARD_DEADLINE_SECONDS
+            application.root.after(POLL_INTERVAL_MS, wait_for_menu_layout_selection)
 
         def wait_for_menu_layout_selection() -> None:
             try:
@@ -413,7 +459,7 @@ def main() -> int:
                             f"engine={application.engine.snapshot.current_group}, "
                             f"tray={tray_group}"
                         )
-                    application.root.after(50, wait_for_menu_layout_selection)
+                    application.root.after(POLL_INTERVAL_MS, wait_for_menu_layout_selection)
                     return
                 print("WINDOWS_MENU_LAYOUT_SELECTION_E2E_OK", flush=True)
                 prepare_enter_submission()
@@ -422,9 +468,9 @@ def main() -> int:
 
         def type_learned_word() -> None:
             try:
-                send_scans((0x23, 0x12, 0x26, 0x26, 0x18, 0x39))
+                send_scans((SCAN_H, SCAN_E, SCAN_L, SCAN_L, SCAN_O, SCAN_SPACE))
                 wait_for_text(
-                    "руддщ ", 1, finish_learning, time.monotonic() + 10.0
+                    "руддщ ", 1, finish_learning, time.monotonic() + LONG_DEADLINE_SECONDS
                 )
             except Exception as error:
                 fail(error)
@@ -450,7 +496,7 @@ def main() -> int:
                             f"expected_app={expected!r}, actual_app={foreground!r}, "
                             f"focus={application.root.focus_get()!r}"
                         )
-                    application.root.after(50, wait_for_learned_input_focus)
+                    application.root.after(POLL_INTERVAL_MS, wait_for_learned_input_focus)
                     return
                 type_learned_word()
             except Exception as error:
@@ -467,8 +513,8 @@ def main() -> int:
                     raise RuntimeError(
                         "Cannot select English for the learned-rule pass"
                     )
-                learning_deadline[0] = time.monotonic() + 5.0
-                application.root.after(100, wait_for_learned_input_focus)
+                learning_deadline[0] = time.monotonic() + STANDARD_DEADLINE_SECONDS
+                application.root.after(PHASE_START_DELAY_MS, wait_for_learned_input_focus)
             except Exception as error:
                 fail(error)
 
@@ -476,7 +522,7 @@ def main() -> int:
             try:
                 required = int(
                     application.settings.get(
-                        "detection.learning_confirmations", 2
+                        "detection.learning_confirmations", DEFAULT_LEARNING_CONFIRMATIONS
                     )
                 )
                 confirmed = (
@@ -495,7 +541,7 @@ def main() -> int:
                             "window_state="
                             f"{application.learning_prompt.window.state()!r}"
                         )
-                    application.root.after(50, wait_for_learning_confirmation)
+                    application.root.after(POLL_INTERVAL_MS, wait_for_learning_confirmation)
                     return
                 if application.root.state() != "zoomed":
                     raise RuntimeError(
@@ -530,7 +576,7 @@ def main() -> int:
                             f"group={application.backend.current_group()}, "
                             f"prompt={prompt!r}, window={popup.window.state()!r}"
                         )
-                    application.root.after(50, wait_for_learning_prompt)
+                    application.root.after(POLL_INTERVAL_MS, wait_for_learning_prompt)
                     return
                 anchor = popup.anchor
                 if anchor is None or anchor.window is None:
@@ -540,17 +586,17 @@ def main() -> int:
                     raise RuntimeError(
                         "Learning prompt was not positioned above the caret"
                     )
-                send_virtual_key(0x0D)
-                learning_deadline[0] = time.monotonic() + 5.0
-                application.root.after(50, wait_for_learning_confirmation)
+                send_virtual_key(VK_RETURN)
+                learning_deadline[0] = time.monotonic() + STANDARD_DEADLINE_SECONDS
+                application.root.after(POLL_INTERVAL_MS, wait_for_learning_confirmation)
             except Exception as error:
                 fail(error)
 
         def start_learning_input() -> None:
             try:
-                send_scans((0x23, 0x12, 0x26, 0x26, 0x18))
-                learning_deadline[0] = time.monotonic() + 10.0
-                application.root.after(50, wait_for_typed_learning_word)
+                send_scans((SCAN_H, SCAN_E, SCAN_L, SCAN_L, SCAN_O))
+                learning_deadline[0] = time.monotonic() + LONG_DEADLINE_SECONDS
+                application.root.after(POLL_INTERVAL_MS, wait_for_typed_learning_word)
             except Exception as error:
                 fail(error)
 
@@ -570,11 +616,11 @@ def main() -> int:
                             f"{application.engine.snapshot.current_word!r}, "
                             f"group={application.backend.current_group()}"
                         )
-                    application.root.after(50, wait_for_typed_learning_word)
+                    application.root.after(POLL_INTERVAL_MS, wait_for_typed_learning_word)
                     return
-                send_virtual_key(0x13)
-                learning_deadline[0] = time.monotonic() + 10.0
-                application.root.after(50, wait_for_learning_prompt)
+                send_virtual_key(VK_PAUSE)
+                learning_deadline[0] = time.monotonic() + LONG_DEADLINE_SECONDS
+                application.root.after(POLL_INTERVAL_MS, wait_for_learning_prompt)
             except Exception as error:
                 fail(error)
 
@@ -601,7 +647,7 @@ def main() -> int:
                             f"focus={application.root.focus_get()!r}, "
                             f"window_state={application.root.state()!r}"
                         )
-                    application.root.after(50, wait_for_learning_input_focus)
+                    application.root.after(POLL_INTERVAL_MS, wait_for_learning_input_focus)
                     return
                 start_learning_input()
             except Exception as error:
@@ -617,15 +663,15 @@ def main() -> int:
                 application.root.update_idletasks()
                 if not api.request_layout(cast(WindowsBackend, application.backend).layouts[0]):
                     raise RuntimeError("Cannot select English for learning E2E")
-                learning_deadline[0] = time.monotonic() + 5.0
-                application.root.after(100, wait_for_learning_input_focus)
+                learning_deadline[0] = time.monotonic() + STANDARD_DEADLINE_SECONDS
+                application.root.after(PHASE_START_DELAY_MS, wait_for_learning_input_focus)
             except Exception as error:
                 fail(error)
 
         def start_reverse() -> None:
             try:
-                send_scans((0x23, 0x12, 0x26, 0x26, 0x18, 0x39))
-                wait_for_text("hello ", 0, finish_reverse, time.monotonic() + 10.0)
+                send_scans((SCAN_H, SCAN_E, SCAN_L, SCAN_L, SCAN_O, SCAN_SPACE))
+                wait_for_text("hello ", 0, finish_reverse, time.monotonic() + LONG_DEADLINE_SECONDS)
             except Exception as error:
                 fail(error)
 
@@ -650,7 +696,7 @@ def main() -> int:
                             f"expected_app={expected!r}, actual_app={foreground!r}, "
                             f"focus={application.root.focus_get()!r}"
                         )
-                    application.root.after(50, wait_for_russian_layout)
+                    application.root.after(POLL_INTERVAL_MS, wait_for_russian_layout)
                     return
                 start_reverse()
             except Exception as error:
@@ -662,8 +708,8 @@ def main() -> int:
                 api.activate_window(application.root.winfo_id())
                 application.test_entry.focus_force()
                 clear_editor()
-                layout_deadline[0] = time.monotonic() + 5.0
-                application.root.after(50, wait_for_cleared_reverse_field)
+                layout_deadline[0] = time.monotonic() + STANDARD_DEADLINE_SECONDS
+                application.root.after(POLL_INTERVAL_MS, wait_for_cleared_reverse_field)
             except Exception as error:
                 fail(error)
 
@@ -672,20 +718,20 @@ def main() -> int:
                 if application.test_entry.get():
                     if time.monotonic() >= layout_deadline[0]:
                         raise RuntimeError("KeySwitch E2E field did not clear")
-                    application.root.after(50, wait_for_cleared_reverse_field)
+                    application.root.after(POLL_INTERVAL_MS, wait_for_cleared_reverse_field)
                     return
                 if api.active_application().casefold() != Path(sys.executable).stem.casefold():
                     raise RuntimeError("KeySwitch E2E lost foreground before RU to EN pass")
                 if not api.request_layout(cast(WindowsBackend, application.backend).layouts[1]):
                     raise RuntimeError("Cannot select the Russian layout for E2E")
-                layout_deadline[0] = time.monotonic() + 5.0
-                application.root.after(100, wait_for_russian_layout)
+                layout_deadline[0] = time.monotonic() + STANDARD_DEADLINE_SECONDS
+                application.root.after(PHASE_START_DELAY_MS, wait_for_russian_layout)
             except Exception as error:
                 fail(error)
 
         def finish_forward() -> None:
             print("WINDOWS_EN_TO_RU_E2E_OK", flush=True)
-            application.root.after(300, prepare_reverse)
+            application.root.after(PHASE_SETTLE_DELAY_MS, prepare_reverse)
 
         def start_forward() -> None:
             try:
@@ -693,7 +739,7 @@ def main() -> int:
                 if application.tray is None:
                     raise RuntimeError("Native Windows notification-area icon is missing")
                 application.tray.set_indicator_style("flags")
-                focus_deadline[0] = time.monotonic() + 5.0
+                focus_deadline[0] = time.monotonic() + STANDARD_DEADLINE_SECONDS
                 wait_for_test_focus()
             except Exception as error:
                 fail(error)
@@ -712,12 +758,12 @@ def main() -> int:
                             "KeySwitch E2E window did not become foreground; "
                             f"expected={expected!r}, actual={foreground!r}"
                         )
-                    application.root.after(50, wait_for_test_focus)
+                    application.root.after(POLL_INTERVAL_MS, wait_for_test_focus)
                     return
                 if application.root.focus_get() is not application.test_entry:
                     if time.monotonic() >= focus_deadline[0]:
                         raise RuntimeError("KeySwitch E2E entry did not receive focus")
-                    application.root.after(50, wait_for_test_focus)
+                    application.root.after(POLL_INTERVAL_MS, wait_for_test_focus)
                     return
                 if not probe_confirmed[0]:
                     # Foreground and Tk focus can both hold while injected keys
@@ -725,14 +771,14 @@ def main() -> int:
                     # before the scenario starts depending on it: a lone space
                     # leaves the engine's word buffer empty.
                     clear_editor()
-                    send_scans((0x39,))
-                    probe_deadline[0] = time.monotonic() + 3.0
-                    application.root.after(50, wait_for_input_probe)
+                    send_scans((SCAN_SPACE,))
+                    probe_deadline[0] = time.monotonic() + PROBE_TIMEOUT_SECONDS
+                    application.root.after(POLL_INTERVAL_MS, wait_for_input_probe)
                     return
                 if not api.request_layout(cast(WindowsBackend, application.backend).layouts[0]):
                     raise RuntimeError("Cannot select the English layout for E2E")
-                layout_deadline[0] = time.monotonic() + 5.0
-                application.root.after(100, wait_for_english_layout)
+                layout_deadline[0] = time.monotonic() + STANDARD_DEADLINE_SECONDS
+                application.root.after(PHASE_START_DELAY_MS, wait_for_english_layout)
             except Exception as error:
                 fail(error)
 
@@ -742,13 +788,13 @@ def main() -> int:
                     probe_confirmed[0] = True
                     clear_editor()
                     application.root.update_idletasks()
-                    focus_deadline[0] = time.monotonic() + 5.0
+                    focus_deadline[0] = time.monotonic() + STANDARD_DEADLINE_SECONDS
                     wait_for_test_focus()
                     return
                 if time.monotonic() < probe_deadline[0]:
-                    application.root.after(50, wait_for_input_probe)
+                    application.root.after(POLL_INTERVAL_MS, wait_for_input_probe)
                     return
-                if probe_attempts[0] >= 3:
+                if probe_attempts[0] >= MAX_PROBE_ATTEMPTS:
                     raise RuntimeError(
                         "Injected input never reached the KeySwitch E2E field; "
                         f"field={application.test_entry.get()!r}, "
@@ -758,8 +804,8 @@ def main() -> int:
                 # activated and focused and still not be the input target yet.
                 probe_attempts[0] += 1
                 print("WINDOWS_E2E_INPUT_RETRY", flush=True)
-                focus_deadline[0] = time.monotonic() + 5.0
-                application.root.after(100, wait_for_test_focus)
+                focus_deadline[0] = time.monotonic() + STANDARD_DEADLINE_SECONDS
+                application.root.after(PHASE_START_DELAY_MS, wait_for_test_focus)
             except Exception as error:
                 fail(error)
 
@@ -768,14 +814,14 @@ def main() -> int:
                 if application.backend.current_group() != 0:
                     if time.monotonic() >= layout_deadline[0]:
                         raise RuntimeError("English layout selection timed out")
-                    application.root.after(50, wait_for_english_layout)
+                    application.root.after(POLL_INTERVAL_MS, wait_for_english_layout)
                     return
-                send_scans((0x22, 0x23, 0x30, 0x20, 0x14, 0x31))
-                wait_for_text("привет", 1, finish_forward, time.monotonic() + 10.0)
+                send_scans((SCAN_G, SCAN_H, SCAN_B, SCAN_D, SCAN_T, SCAN_N))
+                wait_for_text("привет", 1, finish_forward, time.monotonic() + LONG_DEADLINE_SECONDS)
             except Exception as error:
                 fail(error)
 
-        application.root.after(300, start_forward)
+        application.root.after(PHASE_SETTLE_DELAY_MS, start_forward)
         if application.run() != 0:
             raise RuntimeError("Tk Windows UI smoke test returned a failure")
         if scenario_errors:
@@ -791,7 +837,7 @@ if __name__ == "__main__":
     for stream in (sys.stdout, sys.stderr):
         if isinstance(stream, io.TextIOWrapper):
             stream.reconfigure(encoding="utf-8", errors="backslashreplace")
-    faulthandler.dump_traceback_later(90, exit=True)
+    faulthandler.dump_traceback_later(WATCHDOG_SECONDS, exit=True)
     try:
         raise SystemExit(main())
     finally:

@@ -8,6 +8,8 @@ from unittest.mock import patch
 
 from test_input_integrity import InputIntegrityTests
 
+PAUSE_TRIGGER_OFFSET_SECONDS = 2
+
 
 class LiteralHeadTests(InputIntegrityTests):
     def setUp(self) -> None:
@@ -51,7 +53,7 @@ class LiteralHeadTests(InputIntegrityTests):
             self.type("/c,jhrb", group=0)
             last = self.engine._last_word_input_at
             assert last is not None
-            self.engine._maybe_correct_after_pause(now=last + 2)
+            self.engine._maybe_correct_after_pause(now=last + PAUSE_TRIGGER_OFFSET_SECONDS)
         self.assertEqual(self.backend.text, "/сборки")
         evaluation = self.evaluations(logs.output)[-1]
         self.assertEqual((evaluation["trigger"], evaluation["original"], evaluation["literal_head"]), ("pause", "c,jhrb", "/"))

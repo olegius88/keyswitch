@@ -27,15 +27,33 @@ if TOOLS_PATH not in sys.path:
 import train_context_model as trainer
 import verify_context_action_model as action_verifier
 import verify_context_model as verifier
+from verify_context_model import ACTION_FEATURE_VERSION, LEGACY_FEATURE_VERSION
+
+SAMPLE_CONVERSION_THRESHOLD = 0.985
+VERSION_HASH_CHARACTERS = 12
+MINIMUM_HELD_OUT_ROWS = 10000
+TEST_EPOCHS = 2
+HISTORICAL_TEST_COUNTS = {
+    "rows": 10000, "desired_conversions": 5000,
+    "converted_correctly": 4900, "baseline_converted_correctly": 4800, "false_conversions": 0,
+}
+ONE_MEBIBYTE_BYTES = 1024 * 1024
+SHA256_HEX_CHARACTERS = 64
+INVALID_FEATURE_VERSION = 99
+UNSUPPORTED_REPLAY_FEATURE_VERSION = 4
+EXPECTED_ACTION_REPLAY_COMMAND_COUNT = 4
+SAMPLE_PROCESS_RETURN_CODE = 2
+EXPECTED_VERIFY_CALL_COUNT_DURING_REPLAY = 2
 
 
-def write_fixture_artifact(path: Path, feature_version: int = 2) -> ContextModel:
+def write_fixture_artifact(path: Path, feature_version: int = LEGACY_FEATURE_VERSION) -> ContextModel:
     weights = {"bias": [1.0, 0.0, 0.0, 0.0]}
     fingerprint = hashlib.sha256(json.dumps(weights, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"feature_version": feature_version, "actions": list(ACTIONS),
-        "weights": weights, "weights_sha256": fingerprint, "conversion_threshold": 0.985,
-        "version": ("context-v1-" if feature_version == 2 else "context-v3-") + fingerprint[:12]}))
+        "weights": weights, "weights_sha256": fingerprint, "conversion_threshold": SAMPLE_CONVERSION_THRESHOLD,
+        "version": ("context-v1-" if feature_version == LEGACY_FEATURE_VERSION else "context-v3-")
+        + fingerprint[:VERSION_HASH_CHARACTERS]}))
     return ContextModel.load(path)
 
 
@@ -47,7 +65,7 @@ class ContextTrainingTests(unittest.TestCase):
         for row in development:
             self.assertEqual(seen.setdefault(row.family, row.split), row.split)
             self.assertIn(row.split, {"train", "development"})
-        self.assertGreater(len(held_out), 10000)
+        self.assertGreater(len(held_out), MINIMUM_HELD_OUT_ROWS)
         self.assertFalse(set(seen) & {row.family for row in held_out})
         self.assertEqual({row.split for row in held_out}, {"test"})
         self.assertEqual(trainer.family_split("test"), trainer.family_split("test"))
@@ -57,7 +75,7 @@ class ContextTrainingTests(unittest.TestCase):
             trainer.Row(ContextEvidence(action, action, 0, FieldContext("test", "1", action)), action, action, split, "fixture")
             for action in ACTIONS for split in ("train", "development")
         ]
-        with patch.object(trainer, "EPOCHS", 2):
+        with patch.object(trainer, "EPOCHS", TEST_EPOCHS):
             first = trainer.train(rows)
             second = trainer.train(rows + [replace(rows[0], split="test", action="convert")])
         self.assertEqual(first, second)
@@ -66,7 +84,7 @@ class ContextTrainingTests(unittest.TestCase):
             trainer.train([])
         model = ContextModel({name: tuple(values) for name, values in first[0].items()}, "test")
         metrics = trainer.evaluate(model, rows, "development")
-        self.assertEqual(cast(dict[str, int], metrics["counts"])["rows"], 4)
+        self.assertEqual(cast(dict[str, int], metrics["counts"])["rows"], len(ACTIONS))
 
     def test_historical_report_fixture_is_bound_to_artifact_and_quality_counts(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -81,8 +99,7 @@ class ContextTrainingTests(unittest.TestCase):
                 "test_overlap": 0, "model_version": model.version, "evidence_scope": "synthetic fixture",
                 **{name: hashlib.sha256(path.read_bytes()).hexdigest()
                    for name, path in verifier.provenance_paths(root, artifact).items()},
-                "test": {"counts": {"rows": 10000, "desired_conversions": 5000,
-                    "converted_correctly": 4900, "baseline_converted_correctly": 4800, "false_conversions": 0}}}
+                "test": {"counts": HISTORICAL_TEST_COUNTS}}
             report_path = root / "report.json"
             report_path.write_text(json.dumps(original))
             valid = verifier.verify_legacy(root, report_path, artifact)
@@ -99,7 +116,7 @@ class ContextTrainingTests(unittest.TestCase):
                 report_path.write_text(json.dumps(payload), encoding="utf-8")
                 with self.assertRaises(ValueError):
                     verifier.verify_legacy(root, report_path, artifact)
-            report_path.write_bytes(b" " * (1024 * 1024 + 1))
+            report_path.write_bytes(b" " * (ONE_MEBIBYTE_BYTES + 1))
             with self.assertRaisesRegex(ValueError, "oversized"):
                 verifier.verify_legacy(root, report_path, artifact)
 
@@ -132,8 +149,8 @@ class ActiveContextGateTests(unittest.TestCase):
 
     def test_active_shipping_schema_uses_its_declared_model_generation(self) -> None:
         model = ContextModel.load()
-        self.assertIn(model.feature_version, (2, 3))
-        prefix = "context-v1-" if model.feature_version == 2 else "context-v3-"
+        self.assertIn(model.feature_version, (LEGACY_FEATURE_VERSION, ACTION_FEATURE_VERSION))
+        prefix = "context-v1-" if model.feature_version == LEGACY_FEATURE_VERSION else "context-v3-"
         self.assertTrue(model.version.startswith(prefix))
         # Acceptance is an explicit CLI gate, never inferred from this loader test.
 
@@ -144,14 +161,16 @@ class ActiveContextGateTests(unittest.TestCase):
             result = self.verify()
         legacy.assert_called_once_with(self.root, self.report, self.artifact)
         research.assert_called_once_with(self.root / "model/context_v2", self.artifact)
-        self.assertEqual(result, {**self.identity, "feature_version": 2, "quality_gates_passed": True})
+        self.assertEqual(
+            result, {**self.identity, "feature_version": LEGACY_FEATURE_VERSION, "quality_gates_passed": True}
+        )
         with patch.object(verifier, "verify_legacy", return_value=self.identity), \
                 patch("verify_context_v2.verify", side_effect=ValueError("research seal mutated")):
             with self.assertRaisesRegex(ValueError, "research seal"):
                 self.verify()
 
     def test_feature_three_requires_its_receipt_without_historical_fallback(self) -> None:
-        model = write_fixture_artifact(self.artifact, 3)
+        model = write_fixture_artifact(self.artifact, ACTION_FEATURE_VERSION)
         with patch.object(verifier, "verify_legacy", side_effect=AssertionError("historical fallback forbidden")), \
                 patch("verify_context_v2.verify", side_effect=AssertionError("historical replay forbidden")):
             with self.assertRaises(FileNotFoundError):
@@ -164,7 +183,7 @@ class ActiveContextGateTests(unittest.TestCase):
             with patch.object(action_verifier, "verify", return_value=accepted) as validate:
                 result = self.verify()
             validate.assert_called_once_with(root=self.root, receipt_path=self.receipt, artifact=self.artifact)
-            self.assertEqual(result["feature_version"], 3)
+            self.assertEqual(result["feature_version"], ACTION_FEATURE_VERSION)
             self.assertEqual(result["artifact_sha256"], accepted["artifact_sha256"])
 
     def test_rejected_artifact_and_changes_during_verification_fail_closed(self) -> None:
@@ -172,12 +191,15 @@ class ActiveContextGateTests(unittest.TestCase):
                 patch.object(verifier, "verify_legacy", side_effect=AssertionError("rejected bytes reached report")):
             with self.assertRaisesRegex(ValueError, "rejected context-v2"):
                 self.verify()
-        with patch.object(action_verifier, "checksum", side_effect=["a" * 64, "b" * 64]), \
+        with patch.object(
+            action_verifier, "checksum",
+            side_effect=["a" * SHA256_HEX_CHARACTERS, "b" * SHA256_HEX_CHARACTERS],
+        ), \
                 patch.object(verifier, "verify_legacy", return_value=self.identity), patch("verify_context_v2.verify"):
             with self.assertRaisesRegex(ValueError, "changed during"):
                 self.verify()
         payload = cast(dict[str, object], json.loads(self.artifact.read_bytes()))
-        payload["feature_version"] = 99
+        payload["feature_version"] = INVALID_FEATURE_VERSION
         self.artifact.write_text(json.dumps(payload))
         with self.assertRaises(ValueError):
             self.verify()
@@ -191,13 +213,13 @@ class ActiveContextGateTests(unittest.TestCase):
                 verifier.verify(artifact=rejected)
 
     def test_replay_dispatch_keeps_exact_protocols_and_propagates_failure(self) -> None:
-        self.assertEqual(verifier.replay_commands(2), (
+        self.assertEqual(verifier.replay_commands(LEGACY_FEATURE_VERSION), (
             ("tools/train_context_model.py", "--verify"),))
         with self.assertRaises(ValueError):
-            verifier.replay_commands(4)
+            verifier.replay_commands(UNSUPPORTED_REPLAY_FEATURE_VERSION)
         with patch("verify_context_model.subprocess.run") as run:
-            verifier.replay(self.root, 3)
-        self.assertEqual(run.call_count, 4)
+            verifier.replay(self.root, ACTION_FEATURE_VERSION)
+        self.assertEqual(run.call_count, EXPECTED_ACTION_REPLAY_COMMAND_COUNT)
         for call, target in zip(run.call_args_list, (
                 "test_language_intent_regressions.LanguageIntentRegressions",
                 "test_input_sequence_matrix.InputSequenceMatrixTests",
@@ -207,24 +229,27 @@ class ActiveContextGateTests(unittest.TestCase):
             self.assertIs(call.kwargs["check"], True)
             self.assertEqual(call.kwargs["cwd"], self.root)
             self.assertEqual(call.kwargs["env"]["PYTHONPATH"], os.pathsep.join(str(self.root / name) for name in ("src", "tools", "tests")))
-        with patch("verify_context_model.subprocess.run", side_effect=subprocess.CalledProcessError(2, ["fixture"])) as run:
+        with patch(
+            "verify_context_model.subprocess.run",
+            side_effect=subprocess.CalledProcessError(SAMPLE_PROCESS_RETURN_CODE, ["fixture"]),
+        ) as run:
             with self.assertRaises(subprocess.CalledProcessError):
-                verifier.replay(self.root, 2)
+                verifier.replay(self.root, LEGACY_FEATURE_VERSION)
         self.assertEqual(run.call_count, 1)
         with patch("verify_context_model.subprocess.run", side_effect=[
                 None, None, None, subprocess.CalledProcessError(1, ["default input regressions"])]) as run:
             with self.assertRaises(subprocess.CalledProcessError):
-                verifier.replay(self.root, 3)
-        self.assertEqual(run.call_count, 4)
+                verifier.replay(self.root, ACTION_FEATURE_VERSION)
+        self.assertEqual(run.call_count, EXPECTED_ACTION_REPLAY_COMMAND_COUNT)
 
     def test_cli_rechecks_evidence_after_replay_and_prints_only_verified_identity(self) -> None:
-        identity = {**self.identity, "feature_version": 3, "quality_gates_passed": True}
+        identity = {**self.identity, "feature_version": ACTION_FEATURE_VERSION, "quality_gates_passed": True}
         output = io.StringIO()
         with patch.object(verifier, "verify", return_value=identity) as verify, \
                 patch.object(verifier, "replay") as replay, redirect_stdout(output):
             self.assertEqual(verifier.main(["--replay"]), 0)
-        self.assertEqual(verify.call_count, 2)
-        replay.assert_called_once_with(verifier.ROOT, 3)
+        self.assertEqual(verify.call_count, EXPECTED_VERIFY_CALL_COUNT_DURING_REPLAY)
+        replay.assert_called_once_with(verifier.ROOT, ACTION_FEATURE_VERSION)
         self.assertEqual(json.loads(output.getvalue()), identity)
         with patch.object(verifier, "verify", side_effect=[identity, {**identity, "artifact_sha256": "mutated"}]), \
                 patch.object(verifier, "replay"):

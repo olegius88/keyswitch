@@ -6,6 +6,9 @@ from .catalog import DeliveryCancelled
 from .telegram import TelegramError
 
 GROUP_INTERVAL = 4.0  # at most 15 operations/minute, below Telegram's 20 messages/minute
+WAIT_POLL_SECONDS = 0.2
+TELEGRAM_RATE_LIMIT_STATUS = 429
+DEFAULT_RETRY_AFTER_SECONDS = 60  # used when Telegram's 429 omits retry_after
 
 
 class RateLimitedClient:
@@ -29,7 +32,7 @@ class RateLimitedClient:
             while until > self.clock():
                 if self.cancelled():
                     raise DeliveryCancelled("Отправка остановлена. Очередь сохранена.")
-                self.sleep(min(0.2, until - self.clock()))
+                self.sleep(min(WAIT_POLL_SECONDS, until - self.clock()))
             if self.cancelled():
                 raise DeliveryCancelled("Отправка остановлена. Очередь сохранена.")
             self.store.set(key, self.clock() + GROUP_INTERVAL)
@@ -37,13 +40,13 @@ class RateLimitedClient:
         try:
             return action()
         except TelegramError as error:
-            if error.retry_after or error.status_code == 429:
-                delay = max(1, error.retry_after or 60) + 1
+            if error.retry_after or error.status_code == TELEGRAM_RATE_LIMIT_STATUS:
+                delay = max(1, error.retry_after or DEFAULT_RETRY_AFTER_SECONDS) + 1
                 self.store.set(self.cooldown_key, self.clock() + delay)
                 raise TelegramError(
                     "Telegram запросил паузу; автоматический повтор после её окончания.",
                     retry_after=delay,
-                    status_code=429,
+                    status_code=TELEGRAM_RATE_LIMIT_STATUS,
                 ) from None
             raise
 

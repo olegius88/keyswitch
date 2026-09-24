@@ -14,6 +14,15 @@ from typing import Callable, TypeVar, cast, overload
 SettingsData = dict[str, object]
 SettingCallback = Callable[[str, object], None]
 _T = TypeVar("_T")
+PERSISTED_JSON_INDENT = 2
+# Defaults other modules fall back on when a setting is missing; DEFAULTS
+# below is built from the same names.
+DEFAULT_MINIMUM_WORD_LENGTH = 3
+DEFAULT_CONFIDENCE_THRESHOLD = 2.0
+DEFAULT_PAUSE_DELAY_SECONDS = 1.5
+DEFAULT_EARLY_SWITCH_MIN_LENGTH = 4
+DEFAULT_LEARNING_CONFIRMATIONS = 2
+DEFAULT_HISTORY_LIMIT = 200
 
 
 DEFAULTS: SettingsData = {
@@ -30,12 +39,12 @@ DEFAULTS: SettingsData = {
     "detection": {
         "layouts": ["us", "ru"],
         "language_models": ["en_US", "ru_RU"],
-        "minimum_length": 3,
-        "confidence": 2.0,
+        "minimum_length": DEFAULT_MINIMUM_WORD_LENGTH,
+        "confidence": DEFAULT_CONFIDENCE_THRESHOLD,
         "correct_on_pause": True,
-        "pause_delay_seconds": 1.5,
+        "pause_delay_seconds": DEFAULT_PAUSE_DELAY_SECONDS,
         "early_switch": False,
-        "early_switch_min_length": 4,
+        "early_switch_min_length": DEFAULT_EARLY_SWITCH_MIN_LENGTH,
         "correct_on_space": True,
         "correct_on_enter": True,
         "correct_on_tab": True,
@@ -51,7 +60,7 @@ DEFAULTS: SettingsData = {
         "learning": True,
         # The threshold a rule must reach to act. Enter on the prompt reaches it
         # at once; rules left half-confirmed by older versions stay inactive.
-        "learning_confirmations": 2,
+        "learning_confirmations": DEFAULT_LEARNING_CONFIRMATIONS,
     },
     "hotkeys": {
         "toggle": "Ctrl+Alt+P",
@@ -78,7 +87,7 @@ DEFAULTS: SettingsData = {
     "diagnostics": {
         "technical_logging": False,
     },
-    "history": {"limit": 200},
+    "history": {"limit": DEFAULT_HISTORY_LIMIT},
 }
 
 
@@ -153,7 +162,7 @@ class SettingsStore:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             temporary = self.path.with_suffix(".json.tmp")
             temporary.write_text(
-                json.dumps(self._data, ensure_ascii=False, indent=2) + "\n",
+                json.dumps(self._data, ensure_ascii=False, indent=PERSISTED_JSON_INDENT) + "\n",
                 encoding="utf-8",
             )
             temporary.replace(self.path)

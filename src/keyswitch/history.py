@@ -11,6 +11,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
+from .config import DEFAULT_HISTORY_LIMIT
+
+
+# Mirrors config.DEFAULTS["history"]["limit"]; app.py's settings.get fallback
+# reuses this same constant so the two defaults cannot drift apart.
+HISTORY_CONFIDENCE_DECIMALS = 2
+
 
 def data_dir() -> Path:
     override = os.environ.get("KEYSWITCH_DATA_DIR")
@@ -46,12 +53,12 @@ class HistoryEntry:
             original,
             replacement,
             application,
-            round(confidence, 2),
+            round(confidence, HISTORY_CONFIDENCE_DECIMALS),
         )
 
 
 class HistoryStore:
-    def __init__(self, path: Path | None = None, limit: int = 200) -> None:
+    def __init__(self, path: Path | None = None, limit: int = DEFAULT_HISTORY_LIMIT) -> None:
         self.path = path or data_dir() / "history.jsonl"
         self.limit = max(1, limit)
         self._lock = threading.RLock()

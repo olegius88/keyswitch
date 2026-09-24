@@ -39,6 +39,11 @@ NOTES_TEXT = """# KeySwitch 0.9.1
 - KeySwitch-0.9.1-macos-x86_64.zip
 """
 
+TEST_CI_TIMEOUT_SECONDS = 60.0
+PIPELINE_FAILURE_RETURN_CODE = 3
+TARGET_RUN_ID = 2
+WORKFLOW_WATCH_COMMAND = ["gh", "run", "watch"]
+
 
 def options(**overrides: object) -> driver.Options:
     base: dict[str, object] = {
@@ -50,7 +55,7 @@ def options(**overrides: object) -> driver.Options:
         "skip_pipeline": False,
         "skip_ci": False,
         "dry_run": False,
-        "ci_timeout": 60.0,
+        "ci_timeout": TEST_CI_TIMEOUT_SECONDS,
     }
     base.update(overrides)
     message_file = base["message_file"]
@@ -233,7 +238,7 @@ class PipelineResultTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            completed = Mock(returncode=3)
+            completed = Mock(returncode=PIPELINE_FAILURE_RETURN_CODE)
             with (
                 patch.object(pipeline, "run_identifier", return_value="run"),
                 patch.object(pipeline, "DEFAULT_PIPELINE_ROOT", Path(temporary)),
@@ -286,14 +291,14 @@ class GitHubTests(unittest.TestCase):
             [
                 {"databaseId": 1, "workflowName": "Tests", "event": "push"},
                 {
-                    "databaseId": 2,
+                    "databaseId": TARGET_RUN_ID,
                     "workflowName": "Build Linux and Windows packages and release",
                     "event": "push",
                 },
             ]
         )
         with patch.object(driver, "gh", return_value=payload):
-            self.assertEqual(driver.workflow_run_id("v0.9.1"), "2")
+            self.assertEqual(driver.workflow_run_id("v0.9.1"), str(TARGET_RUN_ID))
 
     def test_a_run_that_never_appears_stops_the_release(self) -> None:
         payload = json.dumps([{"databaseId": 1, "workflowName": "Tests", "event": "push"}])
@@ -318,7 +323,7 @@ class GitHubTests(unittest.TestCase):
             patch("release.subprocess.run", return_value=Mock(returncode=0)) as run,
         ):
             driver.wait_for_workflow(options(), "v0.9.1")
-        self.assertEqual(run.call_args.args[0][:3], ["gh", "run", "watch"])
+        self.assertEqual(run.call_args.args[0][: len(WORKFLOW_WATCH_COMMAND)], WORKFLOW_WATCH_COMMAND)
 
     def test_the_published_release_must_carry_every_package(self) -> None:
         complete = json.dumps(
@@ -401,7 +406,7 @@ class CommandLineTests(unittest.TestCase):
         ):
             self.assertEqual(driver.main([]), 1)
         with patch.object(driver, "release", side_effect=KeyboardInterrupt()):
-            self.assertEqual(driver.main([]), 130)
+            self.assertEqual(driver.main([]), driver.SIGINT_EXIT_CODE)
         with patch.object(driver, "release") as released:
             self.assertEqual(driver.main(["--dry-run"]), 0)
         released.assert_called_once()

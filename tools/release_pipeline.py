@@ -96,6 +96,12 @@ KSLM_MAX_CONTAINER: Final[int] = 14 * 1024 * 1024
 KSLM_MAX_MANIFEST: Final[int] = 1024 * 1024
 KSLM_MAX_PAYLOAD: Final[int] = 12 * 1024 * 1024
 KSLM_MAX_FINGERPRINTS: Final[int] = 1 << 20
+# Mirrors src/keyswitch/intent_model.py (PENDING_RESEAL): schema 4, a minimal
+# embedded-manifest JSON object, and int16 weight / uint64 fingerprint records.
+KSLM_SCHEMA_VERSION: Final[int] = 4
+KSLM_MIN_MANIFEST_BYTES: Final[int] = 2
+KSLM_WEIGHT_ENTRY_BYTES: Final[int] = 2
+KSLM_FINGERPRINT_ENTRY_BYTES: Final[int] = 8
 JSON_READ_LIMIT: Final[int] = 64 * 1024 * 1024
 
 # Same mapping that packaging/build-windows.ps1 enforces; the preseal receipt
@@ -196,6 +202,52 @@ TERMINATE_GRACE_SECONDS: Final[int] = 30
 DEFAULT_MEMORY_RESERVE_MIB: Final[int] = 2048
 FAILED_STATUSES: Final[frozenset[str]] = frozenset({"failed", "aborted"})
 
+BYTES_PER_KIB: Final[int] = 1024
+HASH_STREAM_CHUNK_BYTES: Final[int] = 1 << 20
+DEFAULT_PAGE_SIZE_BYTES: Final[int] = 4096
+# Indices into `stat.rpartition(")")[2].split()`: the /proc/pid/stat fields
+# that follow the parenthesised command name (see proc(5)), 0-based.
+PROC_STAT_SESSION_INDEX: Final[int] = 3
+PROC_STAT_RSS_PAGES_INDEX: Final[int] = 21
+PROC_STAT_MIN_FIELDS_AFTER_COMM: Final[int] = PROC_STAT_RSS_PAGES_INDEX + 1
+SECONDS_PER_MINUTE: Final[int] = 60
+SECONDS_PER_HOUR: Final[int] = 3600
+DEFAULT_LOG_TAIL_LINES: Final[int] = 40
+COMMAND_PREVIEW_ARGUMENT_COUNT: Final[int] = 2
+
+# Per-phase subprocess timeouts.
+DEVELOPMENT_REPLAY_TIMEOUT_SECONDS: Final[int] = 3 * SECONDS_PER_HOUR
+PRESEAL_REPLAY_TIMEOUT_SECONDS: Final[int] = 3 * SECONDS_PER_HOUR
+STRICT_EVALUATION_TIMEOUT_SECONDS: Final[int] = 4 * SECONDS_PER_HOUR
+MODEL_REPLAYS_DEADLINE_SECONDS: Final[int] = 8 * SECONDS_PER_HOUR
+TYPECHECK_TIMEOUT_SECONDS: Final[int] = SECONDS_PER_HOUR
+COVERAGE_TIMEOUT_SECONDS: Final[int] = 2 * SECONDS_PER_HOUR
+DETECTOR_GATES_TIMEOUT_SECONDS: Final[int] = 2 * SECONDS_PER_HOUR
+BUILD_DEB_TIMEOUT_SECONDS: Final[int] = 6 * SECONDS_PER_HOUR
+DEFAULT_PHASE_TIMEOUT_SECONDS: Final[int] = 30 * SECONDS_PER_MINUTE
+QUICK_VERIFICATION_TIMEOUT_SECONDS: Final[int] = 10 * SECONDS_PER_MINUTE
+# Matches VERSION_HASH_CHARACTERS in src/keyswitch/prefix_schema.py's readable
+# "<namespace>-v<n>-<hash prefix>" version-string convention.
+MODEL_VERSION_HASH_CHARACTERS: Final[int] = 12
+REQUIRED_COVERAGE_PERCENT: Final[int] = 100
+QUICK_CHECK_TIMEOUT_SECONDS: Final[int] = 5 * SECONDS_PER_MINUTE
+COMMIT_SHA_PREVIEW_CHARACTERS: Final[int] = 12
+MODEL_REPLAYS_BASE_MEMORY_MIB: Final[int] = 300
+STATE_JSON_INDENT: Final[int] = 2
+SAVE_RETRY_ATTEMPTS: Final[int] = 3
+SAVE_RETRY_BACKOFF_SECONDS: Final[float] = 0.05
+DURATION_ROUND_DECIMALS: Final[int] = 3
+MAX_MEMORY_PRESSURE_EVENTS: Final[int] = 50
+SIGINT_EXIT_CODE: Final[int] = 130
+ALREADY_RUNNING_EXIT_CODE: Final[int] = 2
+STILL_RUNNING_EXIT_CODE: Final[int] = 3
+LOG_LINE_PREVIEW_CHARACTERS: Final[int] = 160
+MAX_DEFAULT_JOBS: Final[int] = 4
+CPUS_PER_DEFAULT_JOB: Final[int] = 3
+MAX_REPLAYS: Final[int] = 2
+DEFAULT_WAIT_POLL_SECONDS: Final[int] = SECONDS_PER_MINUTE
+MINIMUM_WAIT_POLL_SECONDS: Final[int] = 5
+
 
 class PhaseFailure(Exception):
     """A phase failed with a reviewer-readable reason."""
@@ -227,7 +279,7 @@ def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         while True:
-            chunk = stream.read(1 << 20)
+            chunk = stream.read(HASH_STREAM_CHUNK_BYTES)
             if not chunk:
                 break
             digest.update(chunk)
@@ -363,7 +415,7 @@ def session_rss_mib(session_ids: Sequence[int]) -> int:
     if not wanted:
         return 0
     sysconf = getattr(os, "sysconf", None)
-    page_kib = (sysconf("SC_PAGE_SIZE") if sysconf is not None else 4096) // 1024
+    page_kib = (sysconf("SC_PAGE_SIZE") if sysconf is not None else DEFAULT_PAGE_SIZE_BYTES) // BYTES_PER_KIB
     total_kib = 0
     proc = Path("/proc")
     if not proc.is_dir():
@@ -376,12 +428,13 @@ def session_rss_mib(session_ids: Sequence[int]) -> int:
         except OSError:
             continue
         # Fields after the parenthesised command name: state ppid pgrp session ...
-        tail = stat.rpartition(")")[2].split()
-        if len(tail) < 22:
+        _, _, stat_tail = stat.rpartition(")")
+        tail = stat_tail.split()
+        if len(tail) < PROC_STAT_MIN_FIELDS_AFTER_COMM:
             continue
         try:
-            session = int(tail[3])
-            rss_pages = int(tail[21])
+            session = int(tail[PROC_STAT_SESSION_INDEX])
+            rss_pages = int(tail[PROC_STAT_RSS_PAGES_INDEX])
         except ValueError:
             continue
         if session not in wanted:
@@ -395,7 +448,7 @@ def session_rss_mib(session_ids: Sequence[int]) -> int:
         except (OSError, ValueError, IndexError):
             pss_kib = -1
         total_kib += pss_kib if pss_kib >= 0 else rss_pages * page_kib
-    return total_kib // 1024
+    return total_kib // BYTES_PER_KIB
 
 
 def session_of(pid: int) -> int:
@@ -405,11 +458,12 @@ def session_of(pid: int) -> int:
         stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="replace")
     except OSError:
         return 0
-    tail = stat.rpartition(")")[2].split()
-    if len(tail) < 4:
+    _, _, stat_tail = stat.rpartition(")")
+    tail = stat_tail.split()
+    if len(tail) < PROC_STAT_SESSION_INDEX + 1:
         return 0
     try:
-        return int(tail[3])
+        return int(tail[PROC_STAT_SESSION_INDEX])
     except ValueError:
         return 0
 
@@ -468,7 +522,7 @@ def memory_info() -> dict[str, int]:
         key, _, rest = line.partition(":")
         if key in {"MemTotal", "MemAvailable", "SwapTotal", "SwapFree"}:
             amount = rest.strip().split()[0]
-            result[f"{key.lower()}_mib"] = int(amount) // 1024
+            result[f"{key.lower()}_mib"] = int(amount) // BYTES_PER_KIB
     return result
 
 
@@ -489,8 +543,8 @@ def format_duration(seconds: float | None) -> str:
     if seconds is None:
         return "-"
     total = int(seconds)
-    hours, remainder = divmod(total, 3600)
-    minutes, secs = divmod(remainder, 60)
+    hours, remainder = divmod(total, SECONDS_PER_HOUR)
+    minutes, secs = divmod(remainder, SECONDS_PER_MINUTE)
     if hours:
         return f"{hours}h{minutes:02d}m{secs:02d}s"
     if minutes:
@@ -604,7 +658,7 @@ class PhaseLog:
     def text(self) -> str:
         return self.path.read_bytes().decode("utf-8", "replace")
 
-    def tail(self, lines: int = 40) -> list[str]:
+    def tail(self, lines: int = DEFAULT_LOG_TAIL_LINES) -> list[str]:
         return [line.rstrip() for line in self.text().splitlines()[-lines:]]
 
     def contains(self, marker: str) -> bool:
@@ -628,7 +682,7 @@ class Context:
         self._external_sessions: dict[str, list[int]] = {}
 
     def timeout(self, seconds: int) -> int:
-        return max(60, int(seconds * self.options.timeout_scale))
+        return max(SECONDS_PER_MINUTE, int(seconds * self.options.timeout_scale))
 
     def replay_root(self) -> Path:
         if self.options.replay_dir is not None:
@@ -726,7 +780,7 @@ class Context:
         if self.stop_requested:
             raise PipelineAborted()
         if check and returncode != 0:
-            raise PhaseFailure(f"{shlex.join(argv[:2])} exited with status {returncode}")
+            raise PhaseFailure(f"{shlex.join(argv[:COMMAND_PREVIEW_ARGUMENT_COUNT])} exited with status {returncode}")
         return returncode
 
     @staticmethod
@@ -792,7 +846,8 @@ def phase_environment(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
     if release.is_file():
         for line in release.read_text(encoding="utf-8").splitlines():
             if line.startswith("PRETTY_NAME="):
-                facts["os"] = line.partition("=")[2].strip().strip('"')
+                _, _, pretty_name = line.partition("=")
+                facts["os"] = pretty_name.strip().strip('"')
 
     missing_commands = [
         name
@@ -880,7 +935,7 @@ def ensure_pip_tool(
         return found
     log.write(f"{root.name}: found {found or 'nothing'}, expected {expected}; installing")
     ctx.run_command(
-        "environment", log, [str(installer), str(root)], timeout=ctx.timeout(1800)
+        "environment", log, [str(installer), str(root)], timeout=ctx.timeout(DEFAULT_PHASE_TIMEOUT_SECONDS)
     )
     found = probe_version()
     if not found.startswith(expected):
@@ -897,11 +952,11 @@ def kslm_bounds(path: Path) -> dict[str, object]:
     )
     if magic != b"KSLM":
         raise PhaseFailure("KSLM magic is invalid")
-    if schema != 4:
+    if schema != KSLM_SCHEMA_VERSION:
         raise PhaseFailure(f"KSLM schema {schema} is unsupported")
     if flags != 0:
         raise PhaseFailure("KSLM header flags are unsupported")
-    if not 2 <= manifest_length <= KSLM_MAX_MANIFEST:
+    if not KSLM_MIN_MANIFEST_BYTES <= manifest_length <= KSLM_MAX_MANIFEST:
         raise PhaseFailure("KSLM embedded manifest exceeds the 1 MiB bound")
     if not 0 < payload_length <= KSLM_MAX_PAYLOAD:
         raise PhaseFailure("KSLM payload exceeds the 12 MiB bound")
@@ -917,7 +972,7 @@ def kslm_bounds(path: Path) -> dict[str, object]:
     dimension = as_int(embedded.get("dimension"), "dimension")
     if not 0 <= fingerprints <= KSLM_MAX_FINGERPRINTS:
         raise PhaseFailure("KSLM fingerprint count exceeds the 2^20 bound")
-    if dimension <= 0 or payload_length != dimension * 2 + fingerprints * 8:
+    if dimension <= 0 or payload_length != dimension * KSLM_WEIGHT_ENTRY_BYTES + fingerprints * KSLM_FINGERPRINT_ENTRY_BYTES:
         raise PhaseFailure("KSLM payload shape does not match its embedded manifest")
     return {
         "bytes": len(data),
@@ -978,7 +1033,7 @@ def phase_model_inputs(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
         log,
         ["sha256sum", "--check", "SHA256SUMS"],
         cwd=MODEL_SOURCES,
-        timeout=ctx.timeout(600),
+        timeout=ctx.timeout(QUICK_VERIFICATION_TIMEOUT_SECONDS),
     )
     identity = model_identity()
     config, manifest = identity.config, identity.manifest
@@ -1000,7 +1055,7 @@ def phase_model_inputs(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
     if sha256_file(MODEL_ARTIFACT) != identity.artifact_sha256:
         problems.append("manifest.artifact_sha256 does not match the bundled KSLM file")
     provenance = as_str(manifest.get("build_provenance_sha256"), "build provenance")
-    if identity.artifact_version != f"intent-v1-{provenance[:12]}":
+    if identity.artifact_version != f"intent-v1-{provenance[:MODEL_VERSION_HASH_CHARACTERS]}":
         problems.append(
             "artifact_model_version is not derived from build_provenance_sha256"
         )
@@ -1176,7 +1231,7 @@ def phase_model_development_replay(ctx: Context, log: PhaseLog, state: PhaseStat
             str(output),
         ],
         env=python_env(),
-        timeout=ctx.timeout(3 * 3600),
+        timeout=ctx.timeout(DEVELOPMENT_REPLAY_TIMEOUT_SECONDS),
     )
     identical = output.read_bytes() == identity.hard_negative_path.read_bytes()
     state.facts.update(
@@ -1206,7 +1261,7 @@ def phase_model_preseal_replay(ctx: Context, log: PhaseLog, state: PhaseState) -
         ],
         env=python_env(),
         stdout_path=output,
-        timeout=ctx.timeout(3 * 3600),
+        timeout=ctx.timeout(PRESEAL_REPLAY_TIMEOUT_SECONDS),
     )
     identical = output.read_bytes() == identity.receipt_path.read_bytes()
     state.facts.update(
@@ -1297,7 +1352,7 @@ def run_strict_evaluator(
         ],
         env=python_env(),
         stdout_path=output,
-        timeout=ctx.timeout(4 * 3600),
+        timeout=ctx.timeout(STRICT_EVALUATION_TIMEOUT_SECONDS),
         check=False,
     )
 
@@ -1320,7 +1375,7 @@ def phase_model_strict(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
                     "--report",
                     str(provided),
                 ],
-                timeout=ctx.timeout(600),
+                timeout=ctx.timeout(QUICK_VERIFICATION_TIMEOUT_SECONDS),
                 check=False,
             )
             == 0
@@ -1440,7 +1495,7 @@ def run_one_replay(ctx: Context, log: PhaseLog, phase: str, directory: Path) -> 
             start_new_session=True,
         )
         ctx.register(key, process)
-    deadline = time.monotonic() + ctx.timeout(8 * 3600)
+    deadline = time.monotonic() + ctx.timeout(MODEL_REPLAYS_DEADLINE_SECONDS)
     last_progress = ""
     try:
         while True:
@@ -1676,7 +1731,7 @@ def phase_typecheck(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
         log,
         [str(PROJECT_ROOT / "tools" / "typecheck.sh")],
         env={"KEYSWITCH_TYPING_ROOT": str(TYPING_ROOT)},
-        timeout=ctx.timeout(3600),
+        timeout=ctx.timeout(TYPECHECK_TIMEOUT_SECONDS),
     )
     match = re.search(r"Success: no issues found in (\d+) source files", log.text())
     if match is None:
@@ -1689,22 +1744,22 @@ def phase_coverage(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
         state.name,
         log,
         ctx.display_command([str(PROJECT_ROOT / "tests" / "run_coverage.sh")]),
-        timeout=ctx.timeout(2 * 3600),
+        timeout=ctx.timeout(COVERAGE_TIMEOUT_SECONDS),
     )
     text = log.text()
-    ran = re.search(r"^Ran (\d+) tests? in ([\d.]+)s", text, re.MULTILINE)
-    total = re.search(r"^TOTAL\s+.*?\s(\d+)%\s*$", text, re.MULTILINE)
+    ran = re.search(r"^Ran (?P<tests>\d+) tests? in (?P<seconds>[\d.]+)s", text, re.MULTILINE)
+    total = re.search(r"^TOTAL\s+.*?\s(?P<percent>\d+)%\s*$", text, re.MULTILINE)
     if ran is None or total is None:
         raise PhaseFailure("coverage output lacks the unittest or TOTAL summary line")
     state.facts.update(
         {
-            "tests": int(ran.group(1)),
-            "test_seconds": float(ran.group(2)),
-            "coverage_percent": int(total.group(1)),
+            "tests": int(ran.group("tests")),
+            "test_seconds": float(ran.group("seconds")),
+            "coverage_percent": int(total.group("percent")),
         }
     )
-    if int(total.group(1)) != 100:
-        raise PhaseFailure(f"coverage is {total.group(1)}%, 100% is required")
+    if int(total.group("percent")) != REQUIRED_COVERAGE_PERCENT:
+        raise PhaseFailure(f"coverage is {total.group('percent')}%, {REQUIRED_COVERAGE_PERCENT}% is required")
 
 
 def phase_detector_gates(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
@@ -1723,7 +1778,7 @@ def phase_detector_gates(ctx: Context, log: PhaseLog, state: PhaseState) -> None
         ],
         env=python_env(),
         stdout_path=output,
-        timeout=ctx.timeout(2 * 3600),
+        timeout=ctx.timeout(DETECTOR_GATES_TIMEOUT_SECONDS),
     )
     payload = load_json_object(output, "detector report")
     failures = payload.get("curated_failures")
@@ -1755,7 +1810,7 @@ def phase_e2e_x11(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
         state.name,
         log,
         ctx.display_command(["bash", "-c", script], noreset=True),
-        timeout=ctx.timeout(1800),
+        timeout=ctx.timeout(DEFAULT_PHASE_TIMEOUT_SECONDS),
     )
     require_markers(log, state, ("E2E_OK", "MENU_LAYOUT_SELECTION_E2E_OK"))
 
@@ -1772,7 +1827,7 @@ def phase_e2e_tray(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
             "python3",
             str(PROJECT_ROOT / "tests" / "e2e_tray_menu.py"),
         ],
-        timeout=ctx.timeout(1800),
+        timeout=ctx.timeout(DEFAULT_PHASE_TIMEOUT_SECONDS),
     )
     require_markers(log, state, ("TRAY_MENU_E2E_OK",))
 
@@ -1795,7 +1850,7 @@ def phase_build_deb(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
         log,
         [str(PROJECT_ROOT / "packaging" / "build-deb.sh"), str(ctx.artifacts_dir)],
         env=env,
-        timeout=ctx.timeout(6 * 3600),
+        timeout=ctx.timeout(BUILD_DEB_TIMEOUT_SECONDS),
     )
     if not package.is_file():
         raise PhaseFailure(f"build-deb.sh did not produce {package}")
@@ -1822,7 +1877,7 @@ def phase_verify_deb(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
         state.name,
         log,
         [str(PROJECT_ROOT / "tools" / "verify-native-deb.sh"), str(package)],
-        timeout=ctx.timeout(1800),
+        timeout=ctx.timeout(DEFAULT_PHASE_TIMEOUT_SECONDS),
     )
     require_markers(log, state, ("NATIVE_DEB_OK",))
     ctx.run_command(
@@ -1832,13 +1887,13 @@ def phase_verify_deb(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
             "desktop-file-validate",
             str(PROJECT_ROOT / "packaging" / "io.github.olegius88.KeySwitch.desktop"),
         ],
-        timeout=ctx.timeout(300),
+        timeout=ctx.timeout(QUICK_CHECK_TIMEOUT_SECONDS),
     )
     ctx.run_command(
         state.name,
         log,
         ["lintian", "--fail-on", "error", str(package)],
-        timeout=ctx.timeout(1800),
+        timeout=ctx.timeout(DEFAULT_PHASE_TIMEOUT_SECONDS),
     )
     state.facts.update({"package": str(package), "package_sha256": sha256_file(package)})
 
@@ -1855,7 +1910,7 @@ def phase_e2e_native(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
         state.name,
         log,
         ctx.display_command(["bash", "-c", script, "_", str(package)], noreset=True),
-        timeout=ctx.timeout(1800),
+        timeout=ctx.timeout(DEFAULT_PHASE_TIMEOUT_SECONDS),
     )
     require_markers(log, state, ("NATIVE_E2E_OK", "NATIVE_LEARNING_PROMPT_E2E_OK"))
 
@@ -1865,7 +1920,7 @@ def changelog_sections(text: str) -> dict[str, list[str]]:
     current = ""
     for line in text.splitlines():
         if line.startswith("## "):
-            current = line[3:].strip()
+            current = line[len("## "):].strip()
             sections.setdefault(current, [])
         elif current and line.startswith("- "):
             sections[current].append(line)
@@ -1914,7 +1969,7 @@ def phase_release_metadata(ctx: Context, log: PhaseLog, state: PhaseState) -> No
             "move them under the release version before tagging"
         )
 
-    ctx.run_command(state.name, log, ["git", "diff", "--check"], timeout=ctx.timeout(300))
+    ctx.run_command(state.name, log, ["git", "diff", "--check"], timeout=ctx.timeout(QUICK_CHECK_TIMEOUT_SECONDS))
 
     head = git_output("rev-parse", "HEAD")
     dirty = [line for line in git_output("status", "--porcelain").splitlines() if line.strip()]
@@ -1927,8 +1982,8 @@ def phase_release_metadata(ctx: Context, log: PhaseLog, state: PhaseState) -> No
     }
     if tag_commit and (tag_commit != head or dirty):
         release_problems.append(
-            f"v{version} is already tagged at {tag_commit[:12]} while the tree differs "
-            f"(HEAD {head[:12]}, {len(dirty)} dirty paths); bump the version for a new release"
+            f"v{version} is already tagged at {tag_commit[:COMMIT_SHA_PREVIEW_CHARACTERS]} while the tree differs "
+            f"(HEAD {head[:COMMIT_SHA_PREVIEW_CHARACTERS]}, {len(dirty)} dirty paths); bump the version for a new release"
         )
 
     identity = model_identity()
@@ -2205,7 +2260,7 @@ def phase_memory_estimate(ctx: Context, name: str) -> int:
     if name == "model-replays":
         # Replays run one at a time; an adopted trainer that is still running
         # counts fully because its worker pool may not have forked yet.
-        return 300 + (REPLAY_MEMORY_MIB if replay_work_remaining(ctx) > 0 else 0)
+        return MODEL_REPLAYS_BASE_MEMORY_MIB + (REPLAY_MEMORY_MIB if replay_work_remaining(ctx) > 0 else 0)
     return spec.memory_mib
 
 
@@ -2246,7 +2301,7 @@ def select_phases(options: Options) -> tuple[str, ...]:
 
 def write_json_atomic(path: Path, payload: Mapping[str, object]) -> None:
     temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", "utf-8")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=STATE_JSON_INDENT) + "\n", "utf-8")
     os.replace(temporary, path)
 
 
@@ -2295,13 +2350,13 @@ class Pipeline:
 
     def save(self) -> None:
         with self.lock:
-            for _attempt in range(3):
+            for _attempt in range(SAVE_RETRY_ATTEMPTS):
                 try:
                     payload = self.to_json()
                     break
                 except RuntimeError:
                     # A phase thread mutated its facts while serialising; retry.
-                    time.sleep(0.05)
+                    time.sleep(SAVE_RETRY_BACKOFF_SECONDS)
             else:
                 return
             write_json_atomic(self.run_dir / STATE_FILE, payload)
@@ -2401,7 +2456,7 @@ def render_summary_markdown(state: Mapping[str, object]) -> str:
                 lines.append(f"- note: {note}")
         if isinstance(facts, dict) and len(facts) > 0:
             lines.append("```json")
-            lines.append(json.dumps(facts, ensure_ascii=False, indent=2))
+            lines.append(json.dumps(facts, ensure_ascii=False, indent=STATE_JSON_INDENT))
             lines.append("```")
         lines.append("")
     failed = [phase for phase in phases if str(phase.get("status")) in FAILED_STATUSES]
@@ -2501,7 +2556,7 @@ class PhaseWorker(threading.Thread):
             log.write("FAILED with an unexpected exception:\n" + traceback.format_exc())
         finally:
             state.finished_at = utc_now()
-            state.duration_seconds = round(time.monotonic() - started, 3)
+            state.duration_seconds = round(time.monotonic() - started, DURATION_ROUND_DECIMALS)
             if state.status in FAILED_STATUSES:
                 state.log_tail = log.tail()
             log.close()
@@ -2667,7 +2722,7 @@ def command_run(options: Options, run_dir: Path, resume: bool) -> int:
                     "running": sorted(running),
                 }
             )
-            del pressure_events[:-50]
+            del pressure_events[:-MAX_MEMORY_PRESSURE_EVENTS]
             print(
                 f"[{utc_now()}] memory pressure: {available} MiB available below the "
                 f"{options.memory_reserve_mib} MiB reserve while running {sorted(running)}",
@@ -2697,7 +2752,7 @@ def command_run(options: Options, run_dir: Path, resume: bool) -> int:
     write_summary(pipeline)
     print(f"{pipeline.status.upper()}: {run_dir / SUMMARY_MARKDOWN}")
     if aborted:
-        return 130
+        return SIGINT_EXIT_CODE
     return 1 if failed else 0
 
 
@@ -2717,7 +2772,7 @@ def command_start(options: Options, run_dir: Path, resume: bool) -> int:
         print("another pipeline run is active; refusing to start a second one:", file=sys.stderr)
         for line in running:
             print("  " + line, file=sys.stderr)
-        return 2
+        return ALREADY_RUNNING_EXIT_CODE
     run_dir.mkdir(parents=True, exist_ok=True)
     argv = [sys.executable, str(Path(__file__).resolve()), "run", *options.to_argv()]
     argv.extend(["--run-dir", str(run_dir)])
@@ -2768,7 +2823,7 @@ def elapsed_since(started_raw: object) -> float | None:
 def command_status(run_dir: Path, as_json: bool) -> int:
     state = load_state(run_dir)
     if as_json:
-        print(json.dumps(state, ensure_ascii=False, indent=2))
+        print(json.dumps(state, ensure_ascii=False, indent=STATE_JSON_INDENT))
     else:
         pipeline = as_object(state.get("pipeline"), "pipeline")
         print(f"run: {run_dir}")
@@ -2794,7 +2849,7 @@ def command_status(run_dir: Path, as_json: bool) -> int:
                 if status == "running":
                     tail = last_log_line(record.get("log"))
                     if tail:
-                        line += f"\n           last: {tail[:160]}"
+                        line += f"\n           last: {tail[:LOG_LINE_PREVIEW_CHARACTERS]}"
                 waiting = optional_str(record.get("waiting_reason"))
                 if status == "pending" and waiting:
                     line += f"\n           {waiting}"
@@ -2809,7 +2864,7 @@ def command_status(run_dir: Path, as_json: bool) -> int:
     if pipeline_status == "passed":
         return 0
     if pipeline_status == "running":
-        return 3
+        return STILL_RUNNING_EXIT_CODE
     return 1
 
 
@@ -2848,14 +2903,14 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     commands = parser.add_subparsers(dest="command", required=True)
-    default_jobs = max(1, min(4, available_cpus() // 3))
+    default_jobs = max(1, min(MAX_DEFAULT_JOBS, available_cpus() // CPUS_PER_DEFAULT_JOB))
 
     def add_run_options(target: argparse.ArgumentParser) -> None:
         target.add_argument("--profile", choices=sorted(PROFILES), default="app")
         target.add_argument("--only", default="", help="comma-separated phases to run")
         target.add_argument("--skip", default="", help="comma-separated phases to skip")
         target.add_argument("--from", dest="start_from", default="", help="first phase to run")
-        target.add_argument("--replays", type=int, default=2, help="retraining replays (0-2)")
+        target.add_argument("--replays", type=int, default=MAX_REPLAYS, help="retraining replays (0-2)")
         target.add_argument(
             "--replay-dir",
             default="",
@@ -2910,7 +2965,7 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--pipeline-root", default=str(DEFAULT_PIPELINE_ROOT))
     wait = commands.add_parser("wait", help="block until a run finishes")
     wait.add_argument("run", nargs="?", default=LATEST_LINK)
-    wait.add_argument("--poll", type=int, default=60)
+    wait.add_argument("--poll", type=int, default=DEFAULT_WAIT_POLL_SECONDS)
     wait.add_argument("--pipeline-root", default=str(DEFAULT_PIPELINE_ROOT))
     commands.add_parser("phases", help="list phases, budgets and profiles")
     return parser
@@ -2922,7 +2977,7 @@ def split_names(value: str) -> tuple[str, ...]:
 
 def options_from(arguments: argparse.Namespace) -> Options:
     replays = int(arguments.replays)
-    if not 0 <= replays <= 2:
+    if not 0 <= replays <= MAX_REPLAYS:
         raise UsageError("--replays must be 0, 1 or 2")
     jobs = int(arguments.jobs)
     if jobs < 1:
@@ -2959,7 +3014,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_dir = resolve_run_dir(pipeline_root, str(arguments.run))
             if command == "status":
                 return command_status(run_dir, bool(arguments.json))
-            return command_wait(run_dir, max(5, int(arguments.poll)))
+            return command_wait(run_dir, max(MINIMUM_WAIT_POLL_SECONDS, int(arguments.poll)))
         options = options_from(arguments)
         select_phases(options)
         resume_argument = str(arguments.resume)

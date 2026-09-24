@@ -11,6 +11,20 @@ from typing import Protocol, cast
 
 from .input_context import CONTEXT_LIMIT, FieldContext
 
+# AT-SPI IPC calls are given this many milliseconds before libatspi gives up.
+ATSPI_TIMEOUT_MS = 50
+# The whole read() call, across every IPC round trip, is bounded by this
+# wall-clock budget so a stuck accessibility bus cannot stall the engine.
+FIELD_READ_DEADLINE_SECONDS = 0.15
+# Bounded traversal width: at most this many children are enumerated at any
+# one level of the accessibility tree, whether under the desktop root or
+# under a node being searched for the focused field.
+MAX_TRAVERSED_CHILDREN = 64
+MAX_VISITED_NODES = 128
+# The "after" side of the caret is read with its own, smaller cap than the
+# "before" side's CONTEXT_LIMIT: it costs one extra IPC round trip per field.
+AFTER_CARET_MAX_CHARACTERS = 128
+
 
 class _States(Protocol):
     def contains(self, state: object) -> bool: ...
@@ -81,7 +95,7 @@ class AtspiFieldReader:
                 raise RuntimeError("AT-SPI initialization failed")
         self.api = api
         self.process_for_window = process_for_window
-        self.api.set_timeout(50, 50)
+        self.api.set_timeout(ATSPI_TIMEOUT_MS, ATSPI_TIMEOUT_MS)
 
     def close(self) -> None:
         # No retained accessible objects or per-reader native resources.
@@ -97,18 +111,18 @@ class AtspiFieldReader:
         return application.casefold() in {name, process}
 
     def read(self, application: str, window: int) -> FieldContext | None:
-        deadline = time.monotonic() + 0.15
+        deadline = time.monotonic() + FIELD_READ_DEADLINE_SECONDS
         pid = self.process_for_window(window) if self.process_for_window is not None else 0
         desktop = self.api.get_desktop(0)
         stack: list[tuple[_Accessible, str]] = []
-        for index in range(min(desktop.get_child_count(), 64)):
+        for index in range(min(desktop.get_child_count(), MAX_TRAVERSED_CHILDREN)):
             if time.monotonic() >= deadline:
                 return None
             app = desktop.get_child_at_index(index)
             if app is not None and (app.get_process_id() == pid if pid else self._matches(application, app)):
                 stack.append((app, str(index)))
         visited = 0
-        while stack and time.monotonic() < deadline and visited < 128:
+        while stack and time.monotonic() < deadline and visited < MAX_VISITED_NODES:
             node, path = stack.pop()
             visited += 1
             # Role/focus can change in-place (e.g. reveal/hide password).
@@ -130,7 +144,9 @@ class AtspiFieldReader:
                 # get_text() shadows Text.get_text(start, end): call the
                 # interface explicitly, as exposed by Atspi.Text's typelib.
                 before = self.api.Text.get_text(text, max(0, caret - CONTEXT_LIMIT), caret)
-                after = self.api.Text.get_text(text, caret, min(text.get_character_count(), caret + 128))
+                after = self.api.Text.get_text(
+                    text, caret, min(text.get_character_count(), caret + AFTER_CARET_MAX_CHARACTERS)
+                )
                 visible = (before + after).strip()
                 if visible and set(visible) <= {"•", "●", "*"}:
                     # GTK4 can expose a hidden Entry as ordinary TEXT while
@@ -142,7 +158,7 @@ class AtspiFieldReader:
                 if not node.get_state_set().contains(self.api.StateType.FOCUSED) or text.get_caret_offset() != caret:
                     return FieldContext(application, field_id, source="atspi")
                 return FieldContext(application, field_id, before, after, "text", source="atspi").bounded()
-            for index in reversed(range(min(node.get_child_count(), 64))):
+            for index in reversed(range(min(node.get_child_count(), MAX_TRAVERSED_CHILDREN))):
                 if time.monotonic() >= deadline:
                     return None
                 child = node.get_child_at_index(index)

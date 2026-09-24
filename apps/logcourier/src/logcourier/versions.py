@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import re
 import uuid
 from datetime import datetime, timezone
+
+from .config import JSON_INDENT_SPACES
 
 VERSION = re.compile(r"[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}(?:[-+][a-zA-Z0-9.-]{1,40})?")
 HEADER_BYTES = 256
@@ -18,6 +21,8 @@ HEADER = re.compile(
 )
 MARKER_KIND = "keyswitch.version"
 TIMESTAMP_SHAPE = b"0000-00-00 00:00:00,000 "
+ASCII_ZERO = 48  # ord("0")
+ASCII_NINE = 57  # ord("9")
 
 
 def header_version(data: bytes) -> str | None:
@@ -31,7 +36,7 @@ def header_version(data: bytes) -> str | None:
 
 def latest_version(stream) -> str | None:
     """Bounded tail probe; an unrecognized last record is not assigned an old version."""
-    size = stream.seek(0, 2)
+    size = stream.seek(0, io.SEEK_END)
     start = max(0, size - PROBE_BYTES)
     stream.seek(start)
     data = stream.read(PROBE_BYTES)
@@ -61,7 +66,7 @@ def take_fragment(data: bytes, previous: str | None, line_start: bool, lookahead
                 # Even a single digit can be the start of the next version's
                 # timestamp. Do not consume it before the writer finishes the header.
                 if all(
-                    48 <= char <= 57 if expected == 48 else char == expected
+                    ASCII_ZERO <= char <= ASCII_NINE if expected == ASCII_ZERO else char == expected
                     for char, expected in zip(prefix, TIMESTAMP_SHAPE)
                 ):
                     return data[:offset], version
@@ -109,7 +114,7 @@ def observe_version(store, config, source, version: str) -> None:
         "keyswitch_version": version,
         "previous_version": previous,
     }
-    payload = json.dumps(metadata, ensure_ascii=False, indent=2).encode()
+    payload = json.dumps(metadata, ensure_ascii=False, indent=JSON_INDENT_SPACES).encode()
     metadata.update(size=len(payload), sha256=hashlib.sha256(payload).hexdigest())
     values[source.id] = state
     # Both the marker and current pointer commit together, even when the queue fills.

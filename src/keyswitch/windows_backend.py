@@ -11,6 +11,9 @@ from typing import Protocol
 
 from .backend import (
     ALT_MASK,
+    COMPLETED_ACTION_EVENT_COUNT,
+    LAYOUT_SWITCH_POLL_SECONDS,
+    LAYOUT_SWITCH_TIMEOUT_SECONDS,
     CONTROL_MASK,
     LOCK_MASK,
     SHIFT_MASK,
@@ -25,8 +28,14 @@ from .backend import (
 
 LANG_ENGLISH = 0x09
 LANG_RUSSIAN = 0x19
-LAYOUT_SWITCH_TIMEOUT = 0.5
 HOOK_START_TIMEOUT = 5.0
+HOOK_STOP_JOIN_TIMEOUT_SECONDS = 2.0
+# LOWORD(hkl) & PRIMARYLANGID(lgid), the Win32 macros `primary_language` inlines.
+LOWORD_MASK = 0xFFFF
+PRIMARY_LANGID_MASK = 0x03FF
+# The low 32 bits of an HKL, for display; HKL is pointer-sized but only the low
+# word carries the language id and the high word the layout id.
+DWORD_MASK = 0xFFFFFFFF
 
 VK_BACK = 0x08
 VK_TAB = 0x09
@@ -69,6 +78,13 @@ VK_OEM_4 = 0xDB
 VK_OEM_5 = 0xDC
 VK_OEM_6 = 0xDD
 VK_OEM_7 = 0xDE
+
+# Alphanumeric keys: winuser.h defines no VK_0.. VK_9 / VK_A.. VK_Z constants
+# because their values equal the ASCII digits and upper-case letters.
+VK_0 = 0x30
+VK_9 = 0x39
+VK_A = 0x41
+VK_Z = 0x5A
 
 SHIFT_KEYS = frozenset((VK_SHIFT, VK_LSHIFT, VK_RSHIFT))
 CONTROL_KEYS = frozenset((VK_CONTROL, VK_LCONTROL, VK_RCONTROL))
@@ -195,7 +211,7 @@ KEY_NAMES = {
 
 
 def primary_language(layout: int) -> int:
-    return (layout & 0xFFFF) & 0x03FF
+    return (layout & LOWORD_MASK) & PRIMARY_LANGID_MASK
 
 
 def select_layout_pair(layouts: Iterable[int]) -> tuple[int, int]:
@@ -218,7 +234,7 @@ def select_layout_pair(layouts: Iterable[int]) -> tuple[int, int]:
 def key_name(virtual_key: int) -> str:
     if virtual_key in KEY_NAMES:
         return KEY_NAMES[virtual_key]
-    if 0x30 <= virtual_key <= 0x39 or 0x41 <= virtual_key <= 0x5A:
+    if VK_0 <= virtual_key <= VK_9 or VK_A <= virtual_key <= VK_Z:
         return chr(virtual_key).casefold()
     return f"VK_{virtual_key:02X}"
 
@@ -271,7 +287,7 @@ class WindowsBackend:
         try:
             layouts = self.layouts
             group = self._group_for_layout(self._api.foreground_layout())
-            layout_names = ",".join(f"{layout & 0xFFFFFFFF:08X}" for layout in layouts)
+            layout_names = ",".join(f"{layout & DWORD_MASK:08X}" for layout in layouts)
             return BackendProbe(
                 True,
                 "windows",
@@ -341,7 +357,7 @@ class WindowsBackend:
             return
         self._api.stop_keyboard_hook()
         if thread is not threading.current_thread():
-            thread.join(timeout=2.0)
+            thread.join(timeout=HOOK_STOP_JOIN_TIMEOUT_SECONDS)
         self._thread = None
         self._running.clear()
 
@@ -492,7 +508,7 @@ class WindowsBackend:
             self._deferred_action = None
             self._action_prior_keys.clear()
             self.release_input()
-        return 2 if deliver else 0
+        return COMPLETED_ACTION_EVENT_COUNT if deliver else 0
 
     def _handle_native(self, native: NativeKeyEvent) -> bool:
         if native.virtual_key == 0:
@@ -716,9 +732,9 @@ class WindowsBackend:
             return
         if not self._api.request_layout(layout):
             raise WindowsBackendError("Окно отклонило запрос смены раскладки")
-        deadline = time.monotonic() + LAYOUT_SWITCH_TIMEOUT
+        deadline = time.monotonic() + LAYOUT_SWITCH_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
             if self._group_for_layout(self._api.foreground_layout()) == group:
                 return
-            time.sleep(0.01)
+            time.sleep(LAYOUT_SWITCH_POLL_SECONDS)
         raise WindowsBackendError("Приложение не подтвердило смену раскладки")

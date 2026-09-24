@@ -26,6 +26,14 @@ from model_protocol import FITTING_SPLITS
 
 
 ROOT = Path(__file__).resolve().parents[1]
+MAXIMUM_SHORT_WORD_CHARACTERS = 2
+DEFAULT_MAXIMUM_FAMILIES = 64
+MAXIMUM_FAMILIES_LIMIT = 4096
+# Also the ceiling `seeds_per_family` may not exceed; the default sits at the cap.
+MAXIMUM_SEEDS_PER_FAMILY = 128
+MINIMUM_ANCHOR_WORD_CHARACTERS = 3
+MAXIMUM_ANCHOR_WORD_CHARACTERS = 64
+PLANNED_VARIANT_MASS_DIVISOR = 2.0
 
 
 @dataclass(frozen=True)
@@ -94,7 +102,7 @@ def _fingerprint(item: ContextEvidence) -> str:
 
 def _eligible(seed: LookaheadSeed) -> bool:
     item = seed.evidence
-    if (not 0 < len(item.original) <= 2 or not item.original.isalpha() or not item.alternative.isalpha()
+    if (not 0 < len(item.original) <= MAXIMUM_SHORT_WORD_CHARACTERS or not item.original.isalpha() or not item.alternative.isalpha()
             or item.trigger != "space" or item.boundary_text != " "
             or item.literal_tail or item.after_origin == "planned_next_conversion"):
         return False
@@ -116,7 +124,8 @@ def _eligible(seed: LookaheadSeed) -> bool:
 
 def build_lookahead_curriculum(
     seeds: Sequence[LookaheadSeed], anchors: Sequence[LookaheadAnchor], detector: LanguageDetector, *,
-    profile: str, maximum_families: int = 64, seeds_per_family: int = 128, split: str = "train",
+    profile: str, maximum_families: int = DEFAULT_MAXIMUM_FAMILIES,
+    seeds_per_family: int = MAXIMUM_SEEDS_PER_FAMILY, split: str = "train",
 ) -> LookaheadCurriculum:
     """Return original plus labelled, unexecuted planned-context variants.
 
@@ -132,9 +141,12 @@ def build_lookahead_curriculum(
     model enters WAIT or converts the next word. Sequence acceptance remains
     necessary. Original and planned variants divide each input seed's mass.
     """
-    if (type(maximum_families) is not int or not 1 <= maximum_families <= 4096
-            or type(seeds_per_family) is not int or not 1 <= seeds_per_family <= 128):
-        raise ValueError("lookahead budgets must be integers: families 1 to 4096, seeds per family 1 to 128")
+    if (type(maximum_families) is not int or not 1 <= maximum_families <= MAXIMUM_FAMILIES_LIMIT
+            or type(seeds_per_family) is not int or not 1 <= seeds_per_family <= MAXIMUM_SEEDS_PER_FAMILY):
+        raise ValueError(
+            f"lookahead budgets must be integers: families 1 to {MAXIMUM_FAMILIES_LIMIT}, "
+            f"seeds per family 1 to {MAXIMUM_SEEDS_PER_FAMILY}"
+        )
     if profile not in ("portable", "reference_hunspell") or set(detector.models) != {0, 1}:
         raise ValueError("lookahead requires an explicit lexical profile and both models")
     if split not in FITTING_SPLITS:
@@ -156,7 +168,8 @@ def build_lookahead_curriculum(
     available: dict[int, list[LookaheadAnchor]] = {0: [], 1: []}
     for anchor in sorted(anchors, key=lambda row: row.identifier):
         try:
-            if not 3 <= len(anchor.text) <= 64 or not anchor.text.isalpha():
+            if (not MINIMUM_ANCHOR_WORD_CHARACTERS <= len(anchor.text) <= MAXIMUM_ANCHOR_WORD_CHARACTERS
+                    or not anchor.text.isalpha()):
                 raise ValueError("anchor is not one complete word")
             translated(anchor.text, anchor.group)
         except ValueError:
@@ -179,7 +192,7 @@ def build_lookahead_curriculum(
         for seed in sorted(families[family], key=lambda row: (_rank("seed", row.identifier), row.identifier)):
             ranked.append((action_index[seed.action], _rank("seed", seed.identifier), seed.identifier, seed))
             action_index[seed.action] += 1
-        selected.extend(value[3] for value in sorted(ranked)[:seeds_per_family])
+        selected.extend(seed for *_rank, seed in sorted(ranked)[:seeds_per_family])
     counts.update({"selected_families": len(selected_families), "selected_seeds": len(selected)})
     proposals: dict[str, tuple[ContextEvidence, LookaheadAnchor, str]] = {}
     for seed in selected:
@@ -221,7 +234,7 @@ def build_lookahead_curriculum(
         if proposal is not None and len(labels[_fingerprint(proposal[0])]) != 1:
             counts["skipped_label_conflict"] += 1
             proposal = None
-        weight = seed.sample_weight if proposal is None else seed.sample_weight / 2.0
+        weight = seed.sample_weight if proposal is None else seed.sample_weight / PLANNED_VARIANT_MASS_DIVISOR
         frames.append(LookaheadFrame(seed.identifier, seed.parent_family, seed.evidence, seed.action, weight))
         mass[seed.evidence.after_origin + ":" + seed.action] += weight
         if proposal is not None:

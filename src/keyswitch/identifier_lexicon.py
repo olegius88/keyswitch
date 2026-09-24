@@ -19,6 +19,8 @@ RESOURCE_PATH: Final = Path(__file__).parent / "resources" / "identifiers.json"
 MAX_RESOURCE_BYTES: Final = 4 * 1024 * 1024
 MAX_IDENTIFIERS: Final = 200000
 IDENTIFIER: Final = re.compile(r"[a-z][a-z0-9]{2,63}\Z")
+LOADED_LEXICON_CACHE_SIZE: Final = 4
+VERSION_HASH_CHARACTERS: Final = 12
 
 
 class IdentifierLexicon:
@@ -41,7 +43,7 @@ class IdentifierLexicon:
         return cls._load_cached(path.resolve())
 
     @staticmethod
-    @lru_cache(maxsize=4)
+    @lru_cache(maxsize=LOADED_LEXICON_CACHE_SIZE)
     def _load_cached(path: Path) -> IdentifierLexicon:
         with path.open("rb") as handle:
             raw = handle.read(MAX_RESOURCE_BYTES + 1)
@@ -60,7 +62,7 @@ class IdentifierLexicon:
                 raise ValueError("invalid identifier entry")
             identifiers.add(entry)
         return IdentifierLexicon(frozenset(identifiers), str(payload["name"]),
-                                 "identifiers-" + hashlib.sha256(raw).hexdigest()[:12])
+                                 "identifiers-" + hashlib.sha256(raw).hexdigest()[:VERSION_HASH_CHARACTERS])
 
     @classmethod
     def try_load(cls, path: Path = RESOURCE_PATH) -> tuple[IdentifierLexicon | None, str]:

@@ -11,6 +11,8 @@ from PySide6.QtWidgets import QApplication
 from logcourier.config import Config
 from logcourier.gui import Window
 
+CAPTURE_DELAY_MILLISECONDS = 500
+
 ROOT = Path(__file__).resolve().parents[1] / ".local" / "smoke"
 ROOT.mkdir(parents=True, exist_ok=True)
 app = QApplication([])
@@ -27,5 +29,5 @@ def capture():
     window.shutdown()
 
 
-QTimer.singleShot(500, capture)
+QTimer.singleShot(CAPTURE_DELAY_MILLISECONDS, capture)
 raise SystemExit(app.exec())

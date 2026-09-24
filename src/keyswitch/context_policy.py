@@ -25,6 +25,13 @@ class ContextResult:
 
 
 INNER_MARKS: Final[str] = "-'’"
+# The shortest token `word_shaped` can judge: with one character the first-
+# and last-letter checks below look at the same position.
+MINIMUM_SHAPED_TOKEN_LENGTH: Final[int] = 2
+# The frozen context_model.py does not yet name its experimental,
+# orthotactic-aware schema; every place that tests for it here and in
+# engine.py must agree on the same number, so it is named once and shared.
+ORTHO_FEATURE_VERSION: Final[int] = 3
 
 
 def word_shaped(token: str) -> bool:
@@ -38,7 +45,7 @@ def word_shaped(token: str) -> bool:
     a model whole and are ordinary words of their language.
     """
 
-    if len(token) < 2 or not token[0].isalpha() or not token[-1].isalpha():
+    if len(token) < MINIMUM_SHAPED_TOKEN_LENGTH or not token[0].isalpha() or not token[-1].isalpha():
         return False
     marks = 0
     for character in token[1:-1]:
@@ -144,7 +151,7 @@ class ContextPolicy:
         evidence = evidence_for_decision(
             baseline, alternative, target_group, detector, field, trigger,
             literal_tail=literal_tail, boundary_text=boundary_text,
-            ortho=self.ortho if self.model.feature_version == 3 else None,
+            ortho=self.ortho if self.model.feature_version == ORTHO_FEATURE_VERSION else None,
             after_origin=after_origin,
         )
         source, target = evidence.source_score, evidence.target_score
@@ -198,7 +205,7 @@ class ContextPolicy:
             }[prediction.action])
         result = ContextResult(decision, prediction, field, policy_applied=True,
                                decision_source="context_model")
-        if self.model.feature_version != 3:
+        if self.model.feature_version != ORTHO_FEATURE_VERSION:
             result = self._licensed(result, baseline, alternative, target_group, field)
         return self._spelling_a_word(result)
 

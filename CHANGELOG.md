@@ -4,6 +4,26 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.31.1 — 2026-09-24
+
+- Let a word in doubt wait for its neighbour as long as the text around it stays
+  context. The wait lapsed after ten seconds, so "tot", a pause to think and "ghbdtn"
+  twelve seconds later gave "tot привет": "привет" was converted, but "tot" was no
+  longer waiting to be decided with it. A wait now lasts the 45 seconds the engine
+  keeps the neighbouring text as context, and still ends at once on another window, a
+  caret move, Backspace or a changed field. Nothing else changes; the models are the
+  same as in 0.31.0.
+- Give every number in the code, the tests and the tools a name. A number written in
+  place hides what it means and lets two places that must agree drift apart without
+  anything failing: the ten-second wait above lived next to a forty-five-second context
+  as two unrelated literals. Every number other than 0 and 1 is now a named constant,
+  declared once in the module it belongs to and imported by the others; the defaults of
+  the settings, for instance, are named in `config.py` and used both by the settings
+  and by every fallback. `tools/check_named_values.py`, run by the test suite, fails on
+  a new unnamed number. The files whose bytes are pinned by the seals of the shipped
+  models follow when those models are trained and sealed again; until then they are
+  listed in the checker. Behaviour does not change.
+
 ## 0.31.0 — 2026-09-23
 
 - Decide a word in doubt together with the word after it. "еще" typed in the English

@@ -15,9 +15,17 @@ from __future__ import annotations
 
 import unittest
 from collections.abc import Callable
+from unittest.mock import patch
 
 from keyswitch.context_model import ACTIONS, ContextAction, ContextEvidence, ContextModel, ContextPrediction
+from keyswitch.input_context import CONTEXT_TTL
 from test_context_policy import ContextEngineTests
+
+CONTEXT_SUFFIX_CHARACTERS = 4  # matches len("tot ") / len("еще ")
+FIRST_TYPING_TIME_SECONDS = 1000.0
+SECOND_TYPING_TIME_WITHIN_TTL_SECONDS = 1012.0
+LAST_WORD_INPUT_AT_SECONDS = 100.0
+PAUSE_CHECK_NOW_SECONDS = 102.0
 
 
 class ScriptedModel(ContextModel):
@@ -62,7 +70,10 @@ class ContextWaitPairTests(ContextEngineTests):
         self.type("tot d ")
         self.assertEqual(self.backend.text, "еще в ")
         self.assertIsNone(self.engine._context_waiting)
-        asked = [(original, before[-4:], after) for original, before, after in model.questions]
+        asked = [
+            (original, before[-CONTEXT_SUFFIX_CHARACTERS:], after)
+            for original, before, after in model.questions
+        ]
         # As typed, then after `еще`, then the waiting word with its converted neighbour.
         self.assertEqual(asked[1:], [("d", "tot ", ""), ("d", "еще ", ""), ("tot", "", "в")])
 
@@ -73,7 +84,10 @@ class ContextWaitPairTests(ContextEngineTests):
         self.assertEqual(self.backend.text, "tot is ")
         self.assertIsNone(self.engine._context_waiting)
         self.assertIsNone(self.engine._pending)
-        self.assertIn(("is", "еще "), [(original, before[-4:]) for original, before, _after in model.questions])
+        self.assertIn(
+            ("is", "еще "),
+            [(original, before[-CONTEXT_SUFFIX_CHARACTERS:]) for original, before, _after in model.questions],
+        )
         # The waiting word is not asked again: nothing converted after it.
         self.assertEqual([original for original, _before, _after in model.questions].count("tot"), 1)
 
@@ -83,6 +97,31 @@ class ContextWaitPairTests(ContextEngineTests):
         self.type("tot d ")
         self.assertEqual(self.backend.text, "tot d ")
         self.assertIsNone(self.engine._pending)
+
+    def test_a_wait_lasts_as_long_as_the_context_it_waits_in(self) -> None:
+        """`tot`, twelve seconds of thought, then `d`: still one phrase (0.31.0 log, 24.09.2026)."""
+        self.script(after_reading)
+        with patch("keyswitch.engine.time.monotonic", return_value=FIRST_TYPING_TIME_SECONDS):
+            self.type("tot ")
+        with patch(
+            "keyswitch.engine.time.monotonic", return_value=SECOND_TYPING_TIME_WITHIN_TTL_SECONDS
+        ):
+            self.type("d ")
+        self.assertEqual(self.backend.text, "еще в ")
+
+    def test_a_wait_ends_with_the_context_it_waits_in(self) -> None:
+        """Once the context has lapsed `tot` stays, and `d` is judged as a letter on its own."""
+        model = self.script(after_reading)
+        with patch("keyswitch.engine.time.monotonic", return_value=FIRST_TYPING_TIME_SECONDS):
+            self.type("tot ")
+        with patch(
+            "keyswitch.engine.time.monotonic", return_value=FIRST_TYPING_TIME_SECONDS + CONTEXT_TTL + 1.0
+        ):
+            self.type("d ")
+        self.assertEqual(self.backend.text, "tot в ")
+        self.assertNotIn(
+            "еще ", [before[-CONTEXT_SUFFIX_CHARACTERS:] for _original, before, _after in model.questions]
+        )
 
     def test_a_suggested_word_follows_its_converted_neighbour(self) -> None:
         """`vs` the model was not sure of becomes `мы` once `хотим` is typed in the same layout."""
@@ -101,9 +140,9 @@ class ContextWaitPairTests(ContextEngineTests):
         waiting = self.engine._context_waiting
         assert waiting is not None
         self.assertFalse(waiting.settles_on_pause)
-        self.engine._last_word_input_at = 100.0
+        self.engine._last_word_input_at = LAST_WORD_INPUT_AT_SECONDS
         self.choose("convert")
-        self.engine._maybe_correct_after_pause(now=102.0)
+        self.engine._maybe_correct_after_pause(now=PAUSE_CHECK_NOW_SECONDS)
         self.assertIsNone(self.engine._context_waiting)
         self.assertIsNone(self.engine._pending)
         self.assertEqual(self.backend.text, "vs ")

@@ -11,6 +11,12 @@ from .secrets import redact, token_bot_id
 
 FILE_ID = re.compile(r"[A-Za-z0-9_-]{1,512}")
 MAX_DOWNLOAD = 19_000_000  # below the cloud Bot API's 20 MB getFile limit
+REQUEST_TIMEOUT_SECONDS = 30
+ERROR_BODY_MAX_BYTES = 8192
+ERROR_DESCRIPTION_MAX_CHARACTERS = 250
+TELEGRAM_RESPONSE_MAX_BYTES = 1024 * 1024
+TELEGRAM_MAX_CAPTION_CHARACTERS = 900
+TELEGRAM_GET_UPDATES_LIMIT = 100
 
 
 class TelegramError(RuntimeError):
@@ -34,15 +40,17 @@ class Telegram:
 
     def _open(self, request, limit: int) -> bytes:
         try:
-            with self.opener.open(request, timeout=30) as response:
+            with self.opener.open(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
                 data = response.read(limit + 1)
                 if len(data) > limit:
                     raise TelegramError("Ответ Telegram превышает ограничение размера.")
                 return data
         except urllib.error.HTTPError as error:
             try:
-                payload = json.loads(error.read(8192))
-                description = str(payload.get("description", "Ошибка Telegram"))[:250]
+                payload = json.loads(error.read(ERROR_BODY_MAX_BYTES))
+                description = str(payload.get("description", "Ошибка Telegram"))[
+                    :ERROR_DESCRIPTION_MAX_CHARACTERS
+                ]
                 retry_after = int(payload.get("parameters", {}).get("retry_after", 0))
             except (ValueError, TypeError, AttributeError):
                 description, retry_after = "Ошибка Telegram", 0
@@ -71,7 +79,7 @@ class Telegram:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        return self._decode(self._open(request, 1024 * 1024))
+        return self._decode(self._open(request, TELEGRAM_RESPONSE_MAX_BYTES))
 
     @staticmethod
     def _decode(data: bytes):
@@ -90,7 +98,7 @@ class Telegram:
         parts = []
         for name, value in {
             "chat_id": chat_id,
-            "caption": caption[:900],
+            "caption": caption[:TELEGRAM_MAX_CAPTION_CHARACTERS],
             "disable_notification": "true",
         }.items():
             parts.append(
@@ -112,7 +120,7 @@ class Telegram:
             data=b"".join(parts),
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
         )
-        result = self._decode(self._open(request, 1024 * 1024))
+        result = self._decode(self._open(request, TELEGRAM_RESPONSE_MAX_BYTES))
         try:
             if not FILE_ID.fullmatch(result["document"]["file_id"]):
                 raise ValueError
@@ -147,7 +155,7 @@ class Telegram:
                 "У бота настроен webhook. Введите Chat ID вручную; webhook не изменён."
             )
         # No offset: do not acknowledge or discard updates belonging to another client.
-        updates = self.call("getUpdates", {"timeout": 0, "limit": 100})
+        updates = self.call("getUpdates", {"timeout": 0, "limit": TELEGRAM_GET_UPDATES_LIMIT})
         found = {}
         for update in updates:
             for key in ("message", "my_chat_member", "channel_post"):

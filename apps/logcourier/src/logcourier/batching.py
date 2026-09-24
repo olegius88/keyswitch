@@ -11,8 +11,14 @@ from .store import QueueFull
 from .telegram import MAX_DOWNLOAD
 from .versions import MARKER_KIND
 
+MAX_FRAGMENTS_PER_BATCH = 4096
+ZIP_MANIFEST_OVERHEAD_BYTES = 1024  # initial cost estimate, ahead of any fragment's own overhead
+ZIP_ENTRY_OVERHEAD_BYTES = 512
+MIN_FRAGMENTS_TO_COMPACT = 2
+BATCH_SCHEMA_VERSION = 2
 
-def compact(store, config, limit=MAX_DOWNLOAD, max_fragments=4096):
+
+def compact(store, config, limit=MAX_DOWNLOAD, max_fragments=MAX_FRAGMENTS_PER_BATCH):
     rows = store.db.execute(
         "SELECT * FROM bundles WHERE destination=? AND indexed=0 AND file_id IS NULL ORDER BY created,id",
         (config.destination,),
@@ -24,17 +30,19 @@ def compact(store, config, limit=MAX_DOWNLOAD, max_fragments=4096):
             continue
         version = meta.get("keyswitch_version")
         key = (meta.get("source_id") if version else None, version)
-        selected, estimated, full = groups.setdefault(key, ([], 1024, False))
+        selected, estimated, full = groups.setdefault(key, ([], ZIP_MANIFEST_OVERHEAD_BYTES, False))
         if full:
             continue
         # ZIP_STORED: payload lengths plus conservative per-entry/manifest overhead.
-        cost = len(row["payload"]) + len(row["meta"].encode("utf-8")) + 512
+        cost = len(row["payload"]) + len(row["meta"].encode("utf-8")) + ZIP_ENTRY_OVERHEAD_BYTES
         if estimated + cost > limit or len(selected) >= max_fragments:
             groups[key] = (selected, estimated, True)
             continue
         selected.append(row)
         groups[key] = (selected, estimated + cost, False)
-    selected = next((group[0] for group in groups.values() if len(group[0]) >= 2), [])
+    selected = next(
+        (group[0] for group in groups.values() if len(group[0]) >= MIN_FRAGMENTS_TO_COMPACT), []
+    )
     if not selected:
         return 0
     buffer = io.BytesIO()
@@ -53,7 +61,7 @@ def compact(store, config, limit=MAX_DOWNLOAD, max_fragments=4096):
         raise ValueError("Пакет превысил допустимый размер; исходная очередь сохранена.")
     identifier = uuid.uuid4().hex
     meta = {
-        "schema": 2,
+        "schema": BATCH_SCHEMA_VERSION,
         "batch": True,
         "bundle_id": identifier,
         "device_id": config.device_id,

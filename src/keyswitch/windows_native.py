@@ -50,6 +50,18 @@ WM_QUIT = 0x0012
 WM_USER = 0x0400
 WM_INPUTLANGCHANGEREQUEST = 0x0050
 PM_NOREMOVE = 0x0000
+# Mouse messages that invalidate the caret position; observed only, never
+# suppressed (see run_keyboard_hook's mouse_callback).
+WM_LBUTTONDOWN = 0x0201
+WM_RBUTTONDOWN = 0x0204
+WM_MBUTTONDOWN = 0x0207
+WM_MOUSEWHEEL = 0x020A
+WM_XBUTTONDOWN = 0x020B
+WM_MOUSEHWHEEL = 0x020E
+POINTER_INVALIDATING_MESSAGES = frozenset({
+    WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN,
+    WM_MOUSEWHEEL, WM_XBUTTONDOWN, WM_MOUSEHWHEEL,
+})
 LLKHF_EXTENDED = 0x01
 LLKHF_INJECTED = 0x10
 KEYEVENTF_EXTENDEDKEY = 0x0001
@@ -68,6 +80,17 @@ SWP_NOMOVE = 0x0002
 SWP_NOZORDER = 0x0004
 SWP_NOACTIVATE = 0x0010
 SWP_FRAMECHANGED = 0x0020
+
+# A pointer to a 256-byte array holding one keyboard-state byte per virtual
+# key (ToUnicodeEx's lpKeyState / GetKeyboardState). High bit set means down.
+KEYBOARD_STATE_ARRAY_SIZE = 256
+VK_STATE_DOWN_BIT = 0x80
+VIRTUAL_KEY_BYTE_MASK = 0xFF
+TRANSLATED_TEXT_BUFFER_CHARACTERS = 8
+# ToUnicodeEx wFlags bit 2 (Windows 10 1607+): keyboard state is not changed.
+TO_UNICODE_KEEP_KEYBOARD_STATE_FLAG = 0x04
+# QueryFullProcessImageNameW's output buffer, in wide characters.
+PROCESS_IMAGE_NAME_BUFFER_CHARACTERS = 32768
 
 
 class KBDLLHOOKSTRUCT(ctypes.Structure):
@@ -463,22 +486,22 @@ class CtypesWindowsAPI:
         state: int,
         layout: int,
     ) -> str:
-        keys = (ctypes.c_ubyte * 256)()
+        keys = (ctypes.c_ubyte * KEYBOARD_STATE_ARRAY_SIZE)()
         if state & SHIFT_MASK:
             for key in (VK_SHIFT, VK_LSHIFT, VK_RSHIFT):
-                keys[key] = 0x80
+                keys[key] = VK_STATE_DOWN_BIT
         if state & CONTROL_MASK:
             for key in (VK_CONTROL, VK_LCONTROL, VK_RCONTROL):
-                keys[key] = 0x80
+                keys[key] = VK_STATE_DOWN_BIT
         if state & ALT_MASK:
             for key in (VK_MENU, VK_LMENU, VK_RMENU):
-                keys[key] = 0x80
+                keys[key] = VK_STATE_DOWN_BIT
         if state & LOCK_MASK:
             keys[VK_CAPITAL] = 0x01
         if state & SUPER_MASK:
             return ""
-        keys[virtual_key & 0xFF] |= 0x80
-        buffer = ctypes.create_unicode_buffer(8)
+        keys[virtual_key & VIRTUAL_KEY_BYTE_MASK] |= VK_STATE_DOWN_BIT
+        buffer = ctypes.create_unicode_buffer(TRANSLATED_TEXT_BUFFER_CHARACTERS)
         written = int(
             self.user32.ToUnicodeEx(
                 virtual_key,
@@ -486,7 +509,7 @@ class CtypesWindowsAPI:
                 keys,
                 buffer,
                 len(buffer),
-                0x04,
+                TO_UNICODE_KEEP_KEYBOARD_STATE_FLAG,
                 layout,
             )
         )
@@ -532,7 +555,7 @@ class CtypesWindowsAPI:
         if not process:
             return ""
         try:
-            size = ctypes.c_ulong(32768)
+            size = ctypes.c_ulong(PROCESS_IMAGE_NAME_BUFFER_CHARACTERS)
             buffer = ctypes.create_unicode_buffer(size.value)
             if not self.kernel32.QueryFullProcessImageNameW(
                 process,
@@ -556,7 +579,7 @@ class CtypesWindowsAPI:
         def mouse_callback(code: int, message: int, data: int) -> int:
             # Button-down and wheel events invalidate the caret position.
             # Observe only: never suppress the user's pointer action.
-            if code == HC_ACTION and message in {0x0201, 0x0204, 0x0207, 0x020A, 0x020B, 0x020E}:
+            if code == HC_ACTION and message in POINTER_INVALIDATING_MESSAGES:
                 listener(NativeKeyEvent(True, 0, 0, False, False, 0))
             return int(self.user32.CallNextHookEx(None, code, message, data))
 

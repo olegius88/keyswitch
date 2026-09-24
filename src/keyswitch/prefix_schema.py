@@ -23,6 +23,16 @@ from .language_model import LanguageModel
 from .prefix_model import ARTIFACT, PREFIX_FEATURE_VERSION, PrefixInput, PrefixModel, features
 
 CURRENT_PREFIX_FEATURE_VERSION = 2
+# Schema two: characters of the observed prefix, truncated and n-gram orders.
+OBSERVED_PREFIX_MAX_CHARACTERS = 12
+MAX_PREFIX_CHARACTER_NGRAM_ORDER = 4
+PREFIX_CHARACTER_FEATURE_WEIGHT_CAP = 2.0
+# Artifact loading and validation.
+MAX_PREFIX_MODEL_BYTES = 2 * 1024 * 1024
+MIN_PREFIX_CONVERSION_THRESHOLD = 0.985
+MAX_PREFIX_WEIGHTS = 10000
+MAX_PREFIX_FEATURE_NAME_CHARACTERS = 160
+VERSION_HASH_CHARACTERS = 12
 
 
 def features_for_version(item: PrefixInput, indexes: dict[int, PrefixIndex], models: dict[int, LanguageModel],
@@ -32,19 +42,19 @@ def features_for_version(item: PrefixInput, indexes: dict[int, PrefixIndex], mod
     The start marker describes an observed boundary. There is no end marker:
     an incremental prefix is not evidence that the word has finished.
     """
-    if type(feature_version) is not int or feature_version not in (1, 2):
+    if type(feature_version) is not int or feature_version not in (1, CURRENT_PREFIX_FEATURE_VERSION):
         raise ValueError("unsupported prefix features")
     result = features(item, indexes, models)
     if feature_version == 1:
         return result
     for side, text, group in (("source", item.original, item.source_group),
                               ("target", item.alternative, 1 - item.source_group)):
-        observed = "^" + unicodedata.normalize("NFC", text[:12]).casefold()
-        for order in range(1, 5):
+        observed = "^" + unicodedata.normalize("NFC", text[:OBSERVED_PREFIX_MAX_CHARACTERS]).casefold()
+        for order in range(1, MAX_PREFIX_CHARACTER_NGRAM_ORDER + 1):
             for start in range(len(observed) - order + 1):
                 gram = observed[start:start + order]
                 name = f"{side}:prefix_char:{group}:{order}:{gram}"
-                result[name] = min(2.0, result.get(name, 0.0) + 1.0)
+                result[name] = min(PREFIX_CHARACTER_FEATURE_WEIGHT_CAP, result.get(name, 0.0) + 1.0)
     return result
 
 
@@ -63,12 +73,13 @@ class VersionedPrefixModel(PrefixModel):
     @classmethod
     def load(cls, path: Path = ARTIFACT) -> VersionedPrefixModel:
         with path.open("rb") as stream:
-            raw = stream.read(2 * 1024 * 1024 + 1)
-        if len(raw) > 2 * 1024 * 1024:
+            raw = stream.read(MAX_PREFIX_MODEL_BYTES + 1)
+        if len(raw) > MAX_PREFIX_MODEL_BYTES:
             raise ValueError("oversized prefix model")
         payload: object = json.loads(raw)
         if (not isinstance(payload, dict) or payload.get("kind") != "keyswitch.prefix-policy"
-                or type(payload.get("feature_version")) is not int or payload.get("feature_version") not in (1, 2)
+                or type(payload.get("feature_version")) is not int
+                or payload.get("feature_version") not in (1, CURRENT_PREFIX_FEATURE_VERSION)
                 or payload.get("actions") != list(ACTIONS)):
             raise ValueError("unsupported prefix model")
         feature_version = int(payload["feature_version"])
@@ -79,19 +90,20 @@ class VersionedPrefixModel(PrefixModel):
         namespace = f"prefix-v{feature_version}-"
         if not isinstance(version, str) or not re.fullmatch(namespace + r"[a-f0-9]{12}", version):
             raise ValueError("invalid prefix version")
-        if isinstance(threshold, bool) or not isinstance(threshold, (float, int)) or not 0.985 <= threshold <= 1.0:
+        if (isinstance(threshold, bool) or not isinstance(threshold, (float, int))
+                or not MIN_PREFIX_CONVERSION_THRESHOLD <= threshold <= 1.0):
             raise ValueError("unsafe prefix threshold")
-        if not isinstance(stored, dict) or not stored or len(stored) > 10000:
+        if not isinstance(stored, dict) or not stored or len(stored) > MAX_PREFIX_WEIGHTS:
             raise ValueError("invalid prefix weights")
         weights: dict[str, tuple[float, ...]] = {}
         for name, vector in stored.items():
-            if (not isinstance(name, str) or not name or len(name) > 160
+            if (not isinstance(name, str) or not name or len(name) > MAX_PREFIX_FEATURE_NAME_CHARACTERS
                     or not isinstance(vector, list) or len(vector) != len(ACTIONS)
                     or any(type(value) not in (int, float) or not math.isfinite(value) for value in vector)):
                 raise ValueError("invalid prefix coefficient")
             weights[name] = tuple(float(value) for value in vector)
         digest = hashlib.sha256(json.dumps(stored, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
-        if payload.get("weights_sha256") != digest or version != namespace + digest[:12]:
+        if payload.get("weights_sha256") != digest or version != namespace + digest[:VERSION_HASH_CHARACTERS]:
             raise ValueError("prefix checksum mismatch")
         return cls(ContextModel(weights, version, float(threshold)), feature_version=feature_version)
 

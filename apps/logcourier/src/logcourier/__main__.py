@@ -10,16 +10,26 @@ from pathlib import Path
 
 from . import __version__
 from .catalog import list_entries
-from .config import data_directory, load_config
+from .config import (
+    JSON_INDENT_SPACES,
+    PRIVATE_DIRECTORY_MODE,
+    PRIVATE_FILE_MODE,
+    data_directory,
+    load_config,
+)
 from .secrets import read_token, redact
 from .telegram import Telegram
 from .versions import VERSION
+
+DEFAULT_LIST_LIMIT = 20
+MAX_LIST_LIMIT = 10000
+SELECTION_HASH_PREFIX_CHARACTERS = 20
 
 
 def selection_directory(root: Path, entries: list[dict], scope: str | None):
     """A complete, content-addressed selection never shares a folder with old downloads."""
     if scope is None:
-        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        root.mkdir(parents=True, exist_ok=True, mode=PRIVATE_DIRECTORY_MODE)
         return root, None
     manifest = {
         "schema": 1,
@@ -36,11 +46,14 @@ def selection_directory(root: Path, entries: list[dict], scope: str | None):
             for entry in entries
         ],
     }
-    data = json.dumps(manifest, sort_keys=True, ensure_ascii=False, indent=2).encode()
-    root = root / f"keyswitch-{scope}-{hashlib.sha256(data).hexdigest()[:20]}"
+    data = json.dumps(
+        manifest, sort_keys=True, ensure_ascii=False, indent=JSON_INDENT_SPACES
+    ).encode()
+    digest_prefix = hashlib.sha256(data).hexdigest()[:SELECTION_HASH_PREFIX_CHARACTERS]
+    root = root / f"keyswitch-{scope}-{digest_prefix}"
     if root.is_symlink():
         raise ValueError("Папка подборки является ссылкой; сохранение запрещено.")
-    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    root.mkdir(parents=True, exist_ok=True, mode=PRIVATE_DIRECTORY_MODE)
     expected = {entry["name"] for entry in manifest["files"]} | {"selection.json"}
     if any(path.name not in expected for path in root.iterdir()):
         raise ValueError("В папке подборки есть посторонние файлы. Выберите другой --output.")
@@ -66,7 +79,7 @@ def main(argv=None, error_handler=None) -> int:
         )
         command.add_argument("--chat-id", help="ID группы; иначе из настроек")
         command.add_argument("--bot-id", help="ID бота для системного хранилища")
-        command.add_argument("--limit", type=int, default=20)
+        command.add_argument("--limit", type=int, default=DEFAULT_LIST_LIMIT)
         scope = command.add_mutually_exclusive_group()
         scope.add_argument(
             "--keyswitch-version",
@@ -109,7 +122,7 @@ def main(argv=None, error_handler=None) -> int:
                 )
             )
             return 0
-        if not 1 <= arguments.limit <= 10000:
+        if not 1 <= arguments.limit <= MAX_LIST_LIMIT:
             parser.error("--limit должен быть от 1 до 10000")
         if arguments.keyswitch_version not in (None, "current") and not VERSION.fullmatch(
             arguments.keyswitch_version
@@ -129,7 +142,7 @@ def main(argv=None, error_handler=None) -> int:
             client, chat_id, arguments.limit, keyswitch_version=arguments.keyswitch_version
         )
         if arguments.command == "list":
-            print(json.dumps(entries, ensure_ascii=False, indent=2))
+            print(json.dumps(entries, ensure_ascii=False, indent=JSON_INDENT_SPACES))
             return 0
         if arguments.since:
             since = datetime.fromisoformat(arguments.since).date()
@@ -162,14 +175,14 @@ def main(argv=None, error_handler=None) -> int:
                     raise ValueError("Путь результата занят другим файлом; перезапись запрещена.")
                 continue
             with target.open("xb") as stream:
-                os.chmod(target, 0o600)
+                os.chmod(target, PRIVATE_FILE_MODE)
                 stream.write(data)
             print(target)
         if selection is not None:
             target = root / "selection.json"
             if not target.exists():
                 with target.open("xb") as stream:
-                    os.chmod(target, 0o600)
+                    os.chmod(target, PRIVATE_FILE_MODE)
                     stream.write(selection)
             print(f"Готовая подборка только выбранных версий: {target}", file=sys.stderr)
         return 0

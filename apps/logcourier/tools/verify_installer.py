@@ -11,6 +11,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 APP_ID = "{60EA65E9-FAEF-4FC9-A0D6-8F1DF258C8EC}_is1"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+INSTALLER_TIMEOUT_SECONDS = 180
+CLI_VERSION_TIMEOUT_SECONDS = 20
+VERIFY_FROZEN_TIMEOUT_SECONDS = 60
+UNINSTALL_POLL_ATTEMPTS = 50
+UNINSTALL_POLL_INTERVAL_SECONDS = 0.2
 
 
 def main():
@@ -66,7 +71,7 @@ def main():
                 f"/LOG={work / (label + '.log')}",
             ],
             check=True,
-            timeout=180,
+            timeout=INSTALLER_TIMEOUT_SECONDS,
         )
         assert (installed / "LogCourier.exe").is_file()
         check_profile()
@@ -83,12 +88,12 @@ def main():
                 f"/LOG={work / (label + '.log')}",
             ],
             check=True,
-            timeout=180,
+            timeout=INSTALLER_TIMEOUT_SECONDS,
         )
-        for _ in range(50):
+        for _ in range(UNINSTALL_POLL_ATTEMPTS):
             if not (installed / "LogCourier.exe").exists():
                 break
-            time.sleep(0.2)
+            time.sleep(UNINSTALL_POLL_INTERVAL_SECONDS)
         assert not (installed / "LogCourier.exe").exists(), "Uninstall left the GUI executable"
         assert not (installed / "LogCourier-cli.exe").exists(), "Uninstall left the CLI executable"
         check_profile()
@@ -104,13 +109,13 @@ def main():
         check=True,
         capture_output=True,
         text=True,
-        timeout=20,
+        timeout=CLI_VERSION_TIMEOUT_SECONDS,
     )
     assert result.stdout.strip() == version
     subprocess.run(
         [sys.executable, str(ROOT / "tools/verify_frozen.py"), str(installed)],
         check=True,
-        timeout=60,
+        timeout=VERIFY_FROZEN_TIMEOUT_SECONDS,
     )
     startup = subprocess.list2cmdline([str(installed / "LogCourier.exe"), "gui", "--minimized"])
     set_startup(startup)

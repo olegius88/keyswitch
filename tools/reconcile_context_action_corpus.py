@@ -30,6 +30,15 @@ from model_protocol import ACTIVE_SPLITS, ALL_SPLITS, FITTING_SPLITS
 ROOT = Path(__file__).resolve().parents[1]
 PAIR = LayoutPair()
 POSITIONS = tuple({key.characters[group]: key.keycode for key in reversed(KEYS)} for group in (0, 1))
+PHYSICAL_ALIAS_CACHE_SIZE = 131072
+# Positional indices into add()/unknown_family() calls found in the frozen
+# generator source, matching train_context_model.py's add(word, group, before,
+# after, ...) and unknown_family(name, group, contexts, ...) signatures.
+ADD_CALL_MIN_ARGS = 4
+ADD_CALL_BEFORE_ARG_INDEX = 2
+ADD_CALL_AFTER_ARG_INDEX = 3
+UNKNOWN_FAMILY_CALL_MIN_ARGS = 3
+UNKNOWN_FAMILY_CALL_CONTEXTS_ARG_INDEX = 2
 
 
 class FrozenAPI(Protocol):
@@ -62,7 +71,7 @@ def frozen_api(directory: Path, manifest: Mapping[str, object]) -> FrozenAPI:
     return cast(FrozenAPI, module)
 
 
-@lru_cache(maxsize=131072)
+@lru_cache(maxsize=PHYSICAL_ALIAS_CACHE_SIZE)
 def physical_aliases(form: str) -> frozenset[str]:
     """Hash every supported whole-layout or script-guided physical reading."""
     text = unicodedata.normalize("NFC", form).casefold().replace("’", "'")
@@ -128,11 +137,11 @@ def historical_code_forms(source: str) -> set[str]:
         elif isinstance(node, ast.For) and isinstance(node.target, ast.Name) and node.target.id in {"before", "following"}:
             include(node.iter)
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            if node.func.id == "add" and len(node.args) >= 4:
-                include(node.args[2])
-                include(node.args[3])
-            elif node.func.id == "unknown_family" and len(node.args) >= 3:
-                include(node.args[2])
+            if node.func.id == "add" and len(node.args) >= ADD_CALL_MIN_ARGS:
+                include(node.args[ADD_CALL_BEFORE_ARG_INDEX])
+                include(node.args[ADD_CALL_AFTER_ARG_INDEX])
+            elif node.func.id == "unknown_family" and len(node.args) >= UNKNOWN_FAMILY_CALL_MIN_ARGS:
+                include(node.args[UNKNOWN_FAMILY_CALL_CONTEXTS_ARG_INDEX])
     return forms
 
 

@@ -6,6 +6,7 @@ from pathlib import Path
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 VALUE_NAME = "LogCourier"
+WINDOWS_MAX_PATH_CHARACTERS = 260
 
 
 def command() -> str:
@@ -18,7 +19,7 @@ def command() -> str:
             raise RuntimeError("Для автозапуска из исходников нужен pythonw.exe.")
         args = [str(pythonw), "-m", "logcourier", "gui", "--minimized"]
     result = subprocess.list2cmdline(args)
-    if len(result) > 260:
+    if len(result) > WINDOWS_MAX_PATH_CHARACTERS:
         raise ValueError(
             "Путь для автозапуска Windows слишком длинный. Переместите программу ближе к корню диска."
         )

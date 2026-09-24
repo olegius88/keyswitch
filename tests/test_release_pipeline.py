@@ -19,6 +19,24 @@ if TOOLS_PATH not in sys.path:
 import release_pipeline as pipeline  # noqa: E402
 from test_intent_strict_report import _declared_strict_gates  # noqa: E402
 
+SHA256_HEX_CHARACTERS = 64
+SAMPLE_REPLAYS = 2
+SAMPLE_JOBS = 2
+SAMPLE_MEMORY_RESERVE_MIB = 1024
+SAMPLE_INT_VALUE = 3
+SAMPLE_OPTIONAL_NUMBER_INPUT = 2
+SAMPLE_OPTIONAL_NUMBER_EXPECTED = 2.0
+KSLM_SCHEMA_VERSION = 4
+TYPECHECK_DURATION_SECONDS = 12.5
+TYPECHECK_PEAK_RSS_MIB = 300
+COVERAGE_DURATION_SECONDS = 3661
+COVERAGE_PEAK_RSS_MIB = 400
+COVERAGE_TEST_COUNT = 346
+SECONDS_JUST_UNDER_A_MINUTE = 59
+SECONDS_JUST_OVER_A_MINUTE = 61
+ONE_HOUR_SECONDS = 3600
+SECOND_JSON_VALUE = 2
+
 
 def _options(**overrides: object) -> pipeline.Options:
     base: dict[str, object] = {
@@ -26,13 +44,13 @@ def _options(**overrides: object) -> pipeline.Options:
         "only": (),
         "skip": (),
         "start_from": "",
-        "replays": 2,
+        "replays": SAMPLE_REPLAYS,
         "replay_dir": None,
         "replay_strict": False,
         "strict_report": None,
         "workers": 0,
-        "jobs": 2,
-        "memory_reserve_mib": 1024,
+        "jobs": SAMPLE_JOBS,
+        "memory_reserve_mib": SAMPLE_MEMORY_RESERVE_MIB,
         "timeout_scale": 1.0,
         "fail_fast": False,
         "pipeline_root": Path("/nonexistent"),
@@ -175,16 +193,16 @@ class ReportingTests(unittest.TestCase):
                         "strict_gates": {
                             name: True for name in required if name != missing
                         },
-                        "model": {"checksum": "a" * 64, "version": "intent-test"},
-                        "environment": {"probe": {"probe_sha256": "b" * 64}},
+                        "model": {"checksum": "a" * SHA256_HEX_CHARACTERS, "version": "intent-test"},
+                        "environment": {"probe": {"probe_sha256": "b" * SHA256_HEX_CHARACTERS}},
                     }
                     path.write_text(json.dumps(report), "utf-8")
                     with patch(
                         "release_pipeline.environment_probe.measure",
-                        return_value={"probe_sha256": "b" * 64},
+                        return_value={"probe_sha256": "b" * SHA256_HEX_CHARACTERS},
                     ):
                         _facts, problems = pipeline.strict_report_facts(
-                            path, "a" * 64, "intent-test"
+                            path, "a" * SHA256_HEX_CHARACTERS, "intent-test"
                         )
                     self.assertEqual(
                         problems,
@@ -254,8 +272,8 @@ class ReportingTests(unittest.TestCase):
                 "run_dir": "/tmp/run",
                 "started_at": "2026-09-02T00:00:00Z",
                 "finished_at": "2026-09-02T00:01:00Z",
-                "jobs": 2,
-                "memory_reserve_mib": 1024,
+                "jobs": SAMPLE_JOBS,
+                "memory_reserve_mib": SAMPLE_MEMORY_RESERVE_MIB,
                 "git": {"branch": "main", "head": "abc", "dirty_files": 0},
                 "not_covered_on_this_host": ["Windows job"],
             },
@@ -263,8 +281,8 @@ class ReportingTests(unittest.TestCase):
                 {
                     "name": "typecheck",
                     "status": "failed",
-                    "duration_seconds": 12.5,
-                    "observed_peak_rss_mib": 300,
+                    "duration_seconds": TYPECHECK_DURATION_SECONDS,
+                    "observed_peak_rss_mib": TYPECHECK_PEAK_RSS_MIB,
                     "error": "mypy | failed",
                     "log": "/tmp/run/phases/01-typecheck.log",
                     "log_tail": ["error: boom"],
@@ -274,12 +292,12 @@ class ReportingTests(unittest.TestCase):
                 {
                     "name": "coverage",
                     "status": "passed",
-                    "duration_seconds": 3661,
-                    "observed_peak_rss_mib": 400,
+                    "duration_seconds": COVERAGE_DURATION_SECONDS,
+                    "observed_peak_rss_mib": COVERAGE_PEAK_RSS_MIB,
                     "error": None,
                     "log": None,
                     "log_tail": [],
-                    "facts": {"tests": 346},
+                    "facts": {"tests": COVERAGE_TEST_COUNT},
                     "notes": [],
                 },
             ],
@@ -296,9 +314,9 @@ class ReportingTests(unittest.TestCase):
 
     def test_format_duration(self) -> None:
         self.assertEqual(pipeline.format_duration(None), "-")
-        self.assertEqual(pipeline.format_duration(59), "59s")
-        self.assertEqual(pipeline.format_duration(61), "1m01s")
-        self.assertEqual(pipeline.format_duration(3600), "1h00m00s")
+        self.assertEqual(pipeline.format_duration(SECONDS_JUST_UNDER_A_MINUTE), "59s")
+        self.assertEqual(pipeline.format_duration(SECONDS_JUST_OVER_A_MINUTE), "1m01s")
+        self.assertEqual(pipeline.format_duration(ONE_HOUR_SECONDS), "1h00m00s")
 
 
 class JsonHelperTests(unittest.TestCase):
@@ -311,7 +329,7 @@ class JsonHelperTests(unittest.TestCase):
             pipeline.lookup(document, "a", "b", "c", "e")
 
     def test_scalar_coercions_reject_wrong_types(self) -> None:
-        self.assertEqual(pipeline.as_int(3, "n"), 3)
+        self.assertEqual(pipeline.as_int(SAMPLE_INT_VALUE, "n"), SAMPLE_INT_VALUE)
         with self.assertRaises(pipeline.PhaseFailure):
             pipeline.as_int(True, "n")
         with self.assertRaises(pipeline.PhaseFailure):
@@ -319,7 +337,7 @@ class JsonHelperTests(unittest.TestCase):
         with self.assertRaises(pipeline.PhaseFailure):
             pipeline.as_str(None, "text")
         self.assertIsNone(pipeline.optional_number(True))
-        self.assertEqual(pipeline.optional_number(2), 2.0)
+        self.assertEqual(pipeline.optional_number(SAMPLE_OPTIONAL_NUMBER_INPUT), SAMPLE_OPTIONAL_NUMBER_EXPECTED)
 
     def test_load_json_object_enforces_bounds_and_shape(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -337,8 +355,8 @@ class JsonHelperTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"
             pipeline.write_json_atomic(path, {"value": 1})
-            pipeline.write_json_atomic(path, {"value": 2})
-            self.assertEqual(json.loads(path.read_text("utf-8")), {"value": 2})
+            pipeline.write_json_atomic(path, {"value": SECOND_JSON_VALUE})
+            self.assertEqual(json.loads(path.read_text("utf-8")), {"value": SECOND_JSON_VALUE})
             self.assertFalse((Path(directory) / "state.json.tmp").exists())
 
 
@@ -346,7 +364,7 @@ class ModelArtifactTests(unittest.TestCase):
     def test_bundled_kslm_matches_manifest_identity(self) -> None:
         bounds = pipeline.kslm_bounds(pipeline.MODEL_ARTIFACT)
         manifest = pipeline.load_json_object(pipeline.MODEL_MANIFEST, "manifest")
-        self.assertEqual(bounds["schema"], 4)
+        self.assertEqual(bounds["schema"], KSLM_SCHEMA_VERSION)
         self.assertEqual(bounds["embedded_model_version"], manifest["artifact_model_version"])
         self.assertEqual(bounds["bytes"], pipeline.MODEL_ARTIFACT.stat().st_size)
 

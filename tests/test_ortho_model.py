@@ -15,19 +15,45 @@ from keyswitch.detector import DetectionDecision
 from keyswitch.input_context import FieldContext
 from keyswitch.language_model import WordScore
 from keyswitch.context_policy import word_shaped
-from keyswitch.ortho_model import ARTIFACT_PATH, OrthoEvidence, OrthoModel, shape_of
+from keyswitch.ortho_model import ARTIFACT_PATH, MAX_ARTIFACT_BYTES, OrthoEvidence, OrthoModel, shape_of
 
 SCORE = WordScore(0.0, False, 0, 0.0)
 KNOWN = WordScore(0.0, True, 0, 0.0)
 
+# channel()'s fixture: order-1 grams "a"/"b" share one stored logprob, the
+# order-2 gram "ab" has its own, backoff off either order-1 gram costs the
+# same, and anything unseen falls all the way to the uniform logprob.
+GRAM_LOGPROB_SHORT = -512
+GRAM_LOGPROB_LONG = -256
+BACKOFF_WEIGHT = -128
+UNIFORM_LOGPROB = -1024
+# shape_table()'s fixture: "initial"/"inner" share a moderate penalty, "upper"
+# a severe one ("lower" is the unpenalized default, 0).
+SHAPE_PENALTY_MODERATE = -512
+SHAPE_PENALTY_SEVERE = -2048
+# minimal()'s own fixture values. FIXTURE_SCALE doubles as both "scale" and
+# each language's raw "thresholds" entry, so the loaded, normalized threshold
+# comes out to exactly 1.0.
+FIXTURE_ORDER = 3
+FIXTURE_SCALE = 512
+FIXTURE_MINIMUM_LENGTH = 3
+WRONG_SCHEMA_VERSION = 2
+OUT_OF_RANGE_ORDER = 99
+NON_INTEGER_PROBE = 1.5
+NON_INTEGER_LOGPROB = 0.5
+PLACEHOLDER_INT = 2  # an arbitrary int where a gram name (text) is required
+# A floor the shipped production artifact (not the minimal() fixture) is
+# expected to clear.
+SHIPPED_MINIMUM_LENGTH_FLOOR = 3
+
 
 def channel() -> dict[str, object]:
-    return {"grams": "a\nb\nab", "logprob": [-512, -512, -256],
-            "backoff": [["a", -128], ["b", -128]], "uniform": -1024}
+    return {"grams": "a\nb\nab", "logprob": [GRAM_LOGPROB_SHORT, GRAM_LOGPROB_SHORT, GRAM_LOGPROB_LONG],
+            "backoff": [["a", BACKOFF_WEIGHT], ["b", BACKOFF_WEIGHT]], "uniform": UNIFORM_LOGPROB}
 
 
 def shape_table() -> dict[str, object]:
-    return {"lower": 0, "initial": -512, "inner": -512, "upper": -2048}
+    return {"lower": 0, "initial": SHAPE_PENALTY_MODERATE, "inner": SHAPE_PENALTY_MODERATE, "upper": SHAPE_PENALTY_SEVERE}
 
 
 def minimal() -> dict[str, object]:
@@ -35,11 +61,11 @@ def minimal() -> dict[str, object]:
 
     shape = shape_table()
     return {
-        "schema_version": 1, "version": "ortho-v1-000000000000", "order": 3, "scale": 512,
+        "schema_version": 1, "version": "ortho-v1-000000000000", "order": FIXTURE_ORDER, "scale": FIXTURE_SCALE,
         "models": {"en": channel(), "ru": channel()},
         "prose_shape": {"en": dict(shape), "ru": dict(shape)},
         "acronym_shape": {"en": dict(shape), "ru": dict(shape)},
-        "thresholds": {"en": 512, "ru": 512}, "minimum_length": 3,
+        "thresholds": {"en": FIXTURE_SCALE, "ru": FIXTURE_SCALE}, "minimum_length": FIXTURE_MINIMUM_LENGTH,
     }
 
 
@@ -55,7 +81,7 @@ class OrthoArtifactTests(unittest.TestCase):
 
     def test_a_complete_artifact_loads_and_scores(self) -> None:
         model = OrthoModel.load(self.write(minimal()))
-        self.assertEqual((model.order, model.minimum_length), (3, 3))
+        self.assertEqual((model.order, model.minimum_length), (FIXTURE_ORDER, FIXTURE_MINIMUM_LENGTH))
         self.assertEqual(model.thresholds, {"en": 1.0, "ru": 1.0})
         score = model.score(OrthoEvidence("ab", "lower", "ru"))
         self.assertTrue(score.supported)
@@ -66,9 +92,9 @@ class OrthoArtifactTests(unittest.TestCase):
     def test_scoring_walks_the_backoff_chain_and_falls_back_to_uniform(self) -> None:
         model = OrthoModel.load(self.write(minimal()))
         channel = model.channels["en"]
-        self.assertEqual(channel._conditional("ab"), -0.5)          # stored directly
-        self.assertEqual(channel._conditional("ba"), -0.25 - 1.0)   # backoff on "b", then "a"
-        self.assertEqual(channel._conditional("z"), -2.0)           # unigram falls to uniform
+        self.assertEqual(channel._conditional("ab"), GRAM_LOGPROB_LONG / FIXTURE_SCALE)          # stored directly
+        self.assertEqual(channel._conditional("ba"), BACKOFF_WEIGHT / FIXTURE_SCALE + GRAM_LOGPROB_SHORT / FIXTURE_SCALE)   # backoff on "b", then "a"
+        self.assertEqual(channel._conditional("z"), UNIFORM_LOGPROB / FIXTURE_SCALE)           # unigram falls to uniform
 
     def test_an_unusable_source_or_empty_token_is_not_scored(self) -> None:
         model = OrthoModel.load(self.write(minimal()))
@@ -80,16 +106,16 @@ class OrthoArtifactTests(unittest.TestCase):
     def test_every_structural_guard_refuses_its_own_defect(self) -> None:
         cases: list[tuple[str, object]] = [
             ("not an object", []),
-            ("wrong schema", {**minimal(), "schema_version": 2}),
+            ("wrong schema", {**minimal(), "schema_version": WRONG_SCHEMA_VERSION}),
             ("order not a number", {**minimal(), "order": "3"}),
-            ("order out of range", {**minimal(), "order": 99}),
+            ("order out of range", {**minimal(), "order": OUT_OF_RANGE_ORDER}),
             ("version not a string", {**minimal(), "version": 1}),
             ("foreign version", {**minimal(), "version": "context-v1-0"}),
             ("scale not a number", {**minimal(), "scale": "512"}),
             ("scale out of range", {**minimal(), "scale": 0}),
             ("models missing", {**minimal(), "models": {"en": channel()}}),
             ("thresholds missing", {**minimal(), "thresholds": {"en": 1}}),
-            ("threshold not a number", {**minimal(), "thresholds": {"en": 1.5, "ru": 1}}),
+            ("threshold not a number", {**minimal(), "thresholds": {"en": NON_INTEGER_PROBE, "ru": 1}}),
             ("minimum length absent", {**minimal(), "minimum_length": None}),
             ("minimum length out of range", {**minimal(), "minimum_length": 0}),
             ("shape channel missing", {**minimal(), "prose_shape": {"en": {}}}),
@@ -111,10 +137,10 @@ class OrthoArtifactTests(unittest.TestCase):
             ("grams not text", broken({**base, "grams": 1})),
             ("weights not a list", broken({**base, "logprob": {}})),
             ("counts disagree", broken({**base, "logprob": [-1]})),
-            ("weight not a number", broken({**base, "logprob": [-1, -1, 0.5]})),
+            ("weight not a number", broken({**base, "logprob": [-1, -1, NON_INTEGER_LOGPROB]})),
             ("gram longer than the order", broken({**base, "grams": "a\nb\nabcd"})),
             ("backoff entry malformed", broken({**base, "backoff": [["a"]]})),
-            ("backoff name not text", broken({**base, "backoff": [[1, 2]]})),
+            ("backoff name not text", broken({**base, "backoff": [[1, PLACEHOLDER_INT]]})),
             ("uniform not a number", broken({**base, "uniform": None})),
         ]
         shape = shape_table()
@@ -123,7 +149,7 @@ class OrthoArtifactTests(unittest.TestCase):
             ("shape missing a case", {**minimal(),
                                       "prose_shape": {"en": {"lower": 0}, "ru": shape}}),
             ("shape value not a number", {**minimal(),
-                                          "prose_shape": {"en": {**shape, "upper": 1.5},
+                                          "prose_shape": {"en": {**shape, "upper": NON_INTEGER_PROBE},
                                                           "ru": shape}}),
         ]
         for label, payload in cases:
@@ -132,7 +158,7 @@ class OrthoArtifactTests(unittest.TestCase):
                     OrthoModel.load(self.write(payload))
 
     def test_an_oversized_or_missing_artifact_is_reported_not_raised(self) -> None:
-        self.path.write_bytes(b"[" + b" " * (24 * 1024 * 1024))
+        self.path.write_bytes(b"[" + b" " * MAX_ARTIFACT_BYTES)
         with self.assertRaisesRegex(ValueError, "oversized"):
             OrthoModel.load(self.path)
         model, status = OrthoModel.try_load(self.path.parent / "absent.json")
@@ -246,5 +272,5 @@ class OrthoLicenceTests(unittest.TestCase):
     def test_the_shipped_artifact_is_the_one_the_package_declares(self) -> None:
         model = OrthoModel.load(ARTIFACT_PATH)
         self.assertTrue(model.version.startswith("ortho-v1-"))
-        self.assertGreaterEqual(model.minimum_length, 3)
+        self.assertGreaterEqual(model.minimum_length, SHIPPED_MINIMUM_LENGTH_FLOOR)
         self.assertEqual(set(model.thresholds), {"en", "ru"})

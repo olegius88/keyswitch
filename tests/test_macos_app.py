@@ -60,6 +60,14 @@ class LoadedStatus:
         return {"available": True}
 
 
+# Fake exit codes, one per mocked entry point, so a test failure names which
+# call's return value went astray instead of pointing at a bare number.
+FAKE_MACOS_MAIN_EXIT_CODE = 11
+FAKE_GTK_MAIN_EXIT_CODE = 3
+FAKE_WINDOW_RUN_EXIT_CODE = 5
+FAKE_DIAGNOSE_EXIT_CODE = 7
+
+
 class PlatformSelectionTests(unittest.TestCase):
     def test_the_helper_reports_the_host_it_runs_on(self) -> None:
         expected = sys.platform == "darwin"
@@ -69,8 +77,9 @@ class PlatformSelectionTests(unittest.TestCase):
     def test_a_mac_is_sent_to_the_macos_frontend(self) -> None:
         with patch.object(launcher_module, "_running_on_windows", return_value=False), \
                 patch.object(launcher_module, "_running_on_macos", return_value=True), \
-                patch("keyswitch.macos_app.main", return_value=11) as platform_main:
-            self.assertEqual(launcher_module.main(["--hidden"]), 11)
+                patch("keyswitch.macos_app.main",
+                      return_value=FAKE_MACOS_MAIN_EXIT_CODE) as platform_main:
+            self.assertEqual(launcher_module.main(["--hidden"]), FAKE_MACOS_MAIN_EXIT_CODE)
         platform_main.assert_called_once_with(["--hidden"])
 
     def test_anything_else_still_goes_to_the_gtk_frontend(self) -> None:
@@ -81,13 +90,13 @@ class PlatformSelectionTests(unittest.TestCase):
 
         def main(argv: object) -> int:
             chosen.append(argv)
-            return 3
+            return FAKE_GTK_MAIN_EXIT_CODE
 
         gtk_frontend.main = main  # type: ignore[attr-defined]
         with patch.dict(sys.modules, {"keyswitch.app": gtk_frontend}), \
                 patch.object(launcher_module, "_running_on_windows", return_value=False), \
                 patch.object(launcher_module, "_running_on_macos", return_value=False):
-            self.assertEqual(launcher_module.main(None), 3)
+            self.assertEqual(launcher_module.main(None), FAKE_GTK_MAIN_EXIT_CODE)
         self.assertEqual(chosen, [None])
 
 
@@ -194,7 +203,7 @@ class WindowRunTests(unittest.TestCase):
 
         def run_application(services: object, **arguments: object) -> int:
             self.opened.append({"services": services, **arguments})
-            return 5
+            return FAKE_WINDOW_RUN_EXIT_CODE
 
         self.window.run_application = run_application  # type: ignore[attr-defined]
         patcher = patch.dict(sys.modules, {"keyswitch.desktop_ui": self.window})
@@ -215,7 +224,8 @@ class WindowRunTests(unittest.TestCase):
         with patch.dict(sys.modules, {"keyswitch.macos_services": services}), \
                 patch("keyswitch.macos_app.MacBackend", return_value=backend), \
                 patch("keyswitch.macos_app.ensure_permission", return_value=True) as granted:
-            self.assertEqual(macos_app.run_window(hidden=True, no_engine=False), 5)
+            self.assertEqual(
+                macos_app.run_window(hidden=True, no_engine=False), FAKE_WINDOW_RUN_EXIT_CODE)
         self.assertEqual(built, [backend])
         self.assertIs(granted.call_args.args[0], backend)
         self.assertEqual(self.opened, [{"services": "services", "hidden": True, "no_engine": False}])
@@ -236,9 +246,10 @@ class CommandLineTests(unittest.TestCase):
 
     def test_diagnose_is_answered_without_starting_anything(self) -> None:
         with patch("keyswitch.macos_app.configure_logging"), \
-                patch("keyswitch.macos_app.diagnose", return_value=7) as report, \
+                patch("keyswitch.macos_app.diagnose",
+                      return_value=FAKE_DIAGNOSE_EXIT_CODE) as report, \
                 patch("keyswitch.macos_app.run_window") as run:
-            self.assertEqual(macos_app.main(["--diagnose"]), 7)
+            self.assertEqual(macos_app.main(["--diagnose"]), FAKE_DIAGNOSE_EXIT_CODE)
         report.assert_called_once_with()
         run.assert_not_called()
 

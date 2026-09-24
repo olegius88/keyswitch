@@ -14,7 +14,7 @@ from typing import cast
 from unittest.mock import patch
 
 from keyswitch.layouts import LayoutPair
-from keyswitch.prefix_schema import VersionedPrefixModel
+from keyswitch.prefix_schema import CURRENT_PREFIX_FEATURE_VERSION, VERSION_HASH_CHARACTERS, VersionedPrefixModel
 from keyswitch.prefix_model import ARTIFACT, PrefixModel
 
 TOOLS = str(Path(__file__).resolve().parents[1] / "tools")
@@ -25,6 +25,21 @@ import train_prefix_model as trainer
 import verify_prefix_model as verifier
 import verify_context_action_model as action_verifier
 from model_protocol import ACTIVE_SPLITS
+
+SUBPROCESS_TIMEOUT_SECONDS = 30
+SPLIT_PROBE_SAMPLE_COUNT = 1000
+METRICS_THRESHOLD_STRICT = 0.999
+METRICS_THRESHOLD_LENIENT = 0.99
+OUT_OF_RANGE_CONVERTED_COUNT = 10**9
+EXPECTED_CHARACTERS_BEFORE_CONVERSION = 4
+EXAMPLE_SEQUENCE_RESULTS = [
+    trainer.SequenceResult("ghbdtn", "wrong", True, "portable", [(4, .9999), (5, .99999)], 5),
+    trainer.SequenceResult("function", "identifier", False, "portable", [(4, .995)], None),
+    trainer.SequenceResult("hello", "correct", False, "portable", [], None),
+]
+FEATURE_WEIGHT_SAMPLE = 0.5
+SAMPLE_CONVERSION_THRESHOLD = 0.985
+ALTERED_CONVERSION_THRESHOLD = 0.99
 
 
 class PrefixEvidenceTests(unittest.TestCase):
@@ -42,7 +57,7 @@ class PrefixEvidenceTests(unittest.TestCase):
                     env={**os.environ, "PYTHONPATH": str(root / "src"),
                          "PYTHONIOENCODING": encoding},
                     capture_output=True,
-                    timeout=30,
+                    timeout=SUBPROCESS_TIMEOUT_SECONDS,
                     check=False,
                 )
                 self.assertEqual(completed.returncode, 0, completed.stderr.decode("utf-8", "replace"))
@@ -66,7 +81,10 @@ class PrefixEvidenceTests(unittest.TestCase):
         self.assertEqual(corpus.family("привет", 1, pair), corpus.family("ghbdtn", 0, pair))
         self.assertEqual(corpus.family("ghbdtn_value", 0, pair), corpus.family("ghbdtn", 0, pair))
         namespace = str(corpus.config()["namespace"])
-        self.assertEqual({corpus.split_for(str(index), namespace) for index in range(1000)}, set(ACTIVE_SPLITS))
+        self.assertEqual(
+            {corpus.split_for(str(index), namespace) for index in range(SPLIT_PROBE_SAMPLE_COUNT)},
+            set(ACTIVE_SPLITS),
+        )
         with self.assertRaisesRegex(ValueError, "overwrite"):
             corpus.freeze()
         with self.assertRaisesRegex(ValueError, "already observed"):
@@ -77,20 +95,20 @@ class PrefixEvidenceTests(unittest.TestCase):
             next(corpus.rows("private"))
 
     def test_metrics_count_the_first_conversion_per_sequence_not_each_prefix(self) -> None:
-        examples = [
-            trainer.SequenceResult("ghbdtn", "wrong", True, "portable", [(4, .9999), (5, .99999)], 5),
-            trainer.SequenceResult("function", "identifier", False, "portable", [(4, .995)], None),
-            trainer.SequenceResult("hello", "correct", False, "portable", [], None),
-        ]
-        counts = cast(dict[str, int], trainer.metrics(examples, .999)["counts"])
-        self.assertEqual((counts["converted"], counts["false"], counts["characters_before_conversion"]), (1, 0, 4))
-        counts = cast(dict[str, int], trainer.metrics(examples, .99)["counts"])
+        examples = EXAMPLE_SEQUENCE_RESULTS
+        counts = cast(dict[str, int], trainer.metrics(examples, METRICS_THRESHOLD_STRICT)["counts"])
+        self.assertEqual(
+            (counts["converted"], counts["false"], counts["characters_before_conversion"]),
+            (1, 0, EXPECTED_CHARACTERS_BEFORE_CONVERSION),
+        )
+        counts = cast(dict[str, int], trainer.metrics(examples, METRICS_THRESHOLD_LENIENT)["counts"])
         self.assertEqual((counts["false"], counts["technical_false"]), (1, 1))
         self.assertFalse(trainer.accepted({"profiles": {}}))
         report = json.loads(trainer.REPORT.read_bytes())
         self.assertTrue(trainer.accepted(report["test"]))
         for key, value in (("sequences", True), ("desired", 0), ("false", -1),
-                           ("converted", 10**9), ("technical_false", 1), ("converted_before_end", 0)):
+                           ("converted", OUT_OF_RANGE_CONVERTED_COUNT), ("technical_false", 1),
+                           ("converted_before_end", 0)):
             modified = copy.deepcopy(report["test"])
             modified["profiles"]["portable"][key] = value
             self.assertFalse(trainer.accepted(modified))
@@ -100,10 +118,15 @@ class PrefixEvidenceTests(unittest.TestCase):
         from keyswitch.context_model import ACTIONS
         import hashlib
 
-        weights = {"bias": [0.0] * len(ACTIONS), "source:prefix_char:0:1:^a": [0.5] + [0.0] * (len(ACTIONS) - 1)}
+        weights = {
+            "bias": [0.0] * len(ACTIONS),
+            "source:prefix_char:0:1:^a": [FEATURE_WEIGHT_SAMPLE] + [0.0] * (len(ACTIONS) - 1),
+        }
         digest = hashlib.sha256(json.dumps(weights, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
-        payload = {"kind": "keyswitch.prefix-policy", "feature_version": 2, "prefix_feature_version": 2,
-                   "actions": list(ACTIONS), "version": "prefix-v2-" + digest[:12], "conversion_threshold": 0.985,
+        payload = {"kind": "keyswitch.prefix-policy", "feature_version": CURRENT_PREFIX_FEATURE_VERSION,
+                   "prefix_feature_version": CURRENT_PREFIX_FEATURE_VERSION,
+                   "actions": list(ACTIONS), "version": "prefix-v2-" + digest[:VERSION_HASH_CHARACTERS],
+                   "conversion_threshold": SAMPLE_CONVERSION_THRESHOLD,
                    "weights": weights, "weights_sha256": digest}
         with tempfile.TemporaryDirectory() as temporary:
             artifact = Path(temporary) / "prefix_policy_v1.json"
@@ -113,7 +136,7 @@ class PrefixEvidenceTests(unittest.TestCase):
                 result = verifier.verify(artifact=artifact)
             self.assertEqual(gate.call_args.kwargs["prefix_artifact"], artifact)
             self.assertEqual((result["feature_version"], result["model_version"], result["accepted"], result["active"]),
-                             (2, payload["version"], True, True))
+                             (CURRENT_PREFIX_FEATURE_VERSION, payload["version"], True, True))
             self.assertEqual(result["receipt_model_version"], receipt["model_version"])
             # A receipt that does not verify blocks the package, and so does an artifact that moves under the gate.
             with patch.object(action_verifier, "verify", side_effect=ValueError("ledger outcome missing")):
@@ -121,7 +144,10 @@ class PrefixEvidenceTests(unittest.TestCase):
                     verifier.verify(artifact=artifact)
 
             def swap(**_kwargs: object) -> dict[str, object]:
-                artifact.write_text(json.dumps({**payload, "conversion_threshold": 0.99}), encoding="utf-8")
+                artifact.write_text(
+                    json.dumps({**payload, "conversion_threshold": ALTERED_CONVERSION_THRESHOLD}),
+                    encoding="utf-8",
+                )
                 return receipt
 
             with patch.object(action_verifier, "verify", side_effect=swap):
@@ -170,7 +196,9 @@ class PrefixEvidenceTests(unittest.TestCase):
             # the release receipt that binds the pair.
             other = Path(temporary) / "prefix.json"
             payload = json.loads(ARTIFACT.read_bytes())
-            other.write_text(json.dumps({**payload, "conversion_threshold": 0.99}), encoding="utf-8")
+            other.write_text(
+                json.dumps({**payload, "conversion_threshold": ALTERED_CONVERSION_THRESHOLD}), encoding="utf-8"
+            )
             self.assertEqual(VersionedPrefixModel.load(other).feature_version, installed.feature_version)
             with self.assertRaises(ValueError):
                 verifier.verify(artifact=other)

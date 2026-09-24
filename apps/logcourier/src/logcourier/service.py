@@ -13,6 +13,14 @@ from .secrets import redact
 from .store import QueueFull, Store
 from .telegram import Telegram, TelegramError
 
+SECONDS_PER_MINUTE = 60
+WAKE_POLL_SECONDS = 5  # background loop tick; matches README's "every 5 seconds"
+PENDING_RETRY_SECONDS = 5  # retry soon when items remain queued after a send
+MAX_RETRY_DELAY_SECONDS = 900
+RETRY_BASE_SECONDS = 15
+RETRY_BACKOFF_BASE = 2
+RETRY_BACKOFF_MAX_EXPONENT = 6
+
 
 class Service:
     """One worker owns collection and delivery; UI never performs network requests."""
@@ -25,7 +33,7 @@ class Service:
         self.wake = threading.Event()
         self.manual = False
         self.manual_pending = False
-        self.next_send = time.monotonic() + config.interval_minutes * 60
+        self.next_send = time.monotonic() + config.interval_minutes * SECONDS_PER_MINUTE
         self.retry_at = 0.0
         self.failures = 0
         self.revision = 0
@@ -37,7 +45,7 @@ class Service:
     def update(self, config: Config, token: str):
         with self.lock:
             self._config, self._token = copy.deepcopy(config), token
-            self.next_send = time.monotonic() + config.interval_minutes * 60
+            self.next_send = time.monotonic() + config.interval_minutes * SECONDS_PER_MINUTE
             self.revision += 1
             self.manual = False
             self.manual_pending = False
@@ -117,14 +125,20 @@ class Service:
                             if not pending:
                                 self.manual_pending = False
                             self.next_send = time.monotonic() + (
-                                5 if pending else config.interval_minutes * 60
+                                PENDING_RETRY_SECONDS
+                                if pending
+                                else config.interval_minutes * SECONDS_PER_MINUTE
                             )
                     self.notify(message, store.stats(config.destination))
                 except DeliveryCancelled as error:
                     self.notify(str(error), store.stats(config.destination))
                 except Exception as error:
                     self.failures += 1
-                    delay = min(900, 15 * 2 ** min(self.failures - 1, 6))
+                    delay = min(
+                        MAX_RETRY_DELAY_SECONDS,
+                        RETRY_BASE_SECONDS
+                        * RETRY_BACKOFF_BASE ** min(self.failures - 1, RETRY_BACKOFF_MAX_EXPONENT),
+                    )
                     if isinstance(error, TelegramError):
                         delay = max(delay, error.retry_after)
                     self.retry_at = time.monotonic() + delay
@@ -136,7 +150,7 @@ class Service:
                             f"Операция не завершена ({type(error).__name__}). Очередь сохранена."
                         )
                     self.notify(message, store.stats(config.destination))
-                self.wake.wait(5)
+                self.wake.wait(WAKE_POLL_SECONDS)
                 self.wake.clear()
         finally:
             store.close()

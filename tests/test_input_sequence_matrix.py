@@ -18,6 +18,16 @@ from keyswitch.history import HistoryStore
 from keyswitch.layouts import LayoutPair
 import test_input_integrity as integrity
 
+# Starts well above any real key serial so fixture events are never mistaken
+# for the engine's own bookkeeping.
+INITIAL_SERIAL = 100
+# A generous bound on how many queued events one flush() may drain before it
+# is fair to call the replay stuck rather than merely long.
+MAX_FLUSH_ITERATIONS = 100
+# EditorBackend.window starts at 1; handling "Tab"/"ISO_Left_Tab" moves focus
+# to another field and increments it once.
+WINDOW_AFTER_TAB_FOCUS_CHANGE = 2
+
 
 class PhysicalSession:
     def __init__(self, root: Path, group: int) -> None:
@@ -33,7 +43,7 @@ class PhysicalSession:
         self.engine = KeySwitchEngine(
             self.settings, HistoryStore(root / "history.jsonl"), self.backend,
         )
-        self.serial = 100
+        self.serial = INITIAL_SERIAL
         self.pair = LayoutPair()
 
     def key(self, us: str, *, name: str = "") -> KeyEvent:
@@ -68,7 +78,7 @@ class PhysicalSession:
         self.tap(self.key("", name=name))
 
     def flush(self) -> None:
-        for _ in range(100):
+        for _ in range(MAX_FLUSH_ITERATIONS):
             try:
                 event = self.engine._events.get_nowait()
             except queue.Empty:
@@ -211,7 +221,7 @@ class InputSequenceMatrixTests(unittest.TestCase):
                         self.assertEqual(current.backend.text, "")
                     else:
                         self.assertEqual(current.backend.text, "another field")
-                        self.assertEqual(current.backend.window, 2)
+                        self.assertEqual(current.backend.window, WINDOW_AFTER_TAB_FOCUS_CHANGE)
 
     def test_manual_command_survives_release_order_with_an_ambiguous_internal_key(self) -> None:
         for pause_first in (False, True):
@@ -253,7 +263,7 @@ class InputSequenceMatrixTests(unittest.TestCase):
                 self.assertEqual(current.backend.text, "проблема")
                 current.command("Pause")
                 self.assertEqual(current.backend.text, "ghj,ktvf")
-                self.assertEqual(current.backend.caret, 8)
+                self.assertEqual(current.backend.caret, len("ghj,ktvf"))
 
 
 if __name__ == "__main__":

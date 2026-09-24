@@ -18,6 +18,15 @@ from keyswitch.context_model import ACTIONS, ContextEvidence, ContextModel, Cont
 from keyswitch.input_context import FieldContext
 import test_input_sequence_matrix as sequences
 
+# context_model.py is pinned by the context-v1 seal (PENDING_RESEAL), so its
+# "3" for the context-action feature scheme is not yet a constant we can import.
+CONTEXT_FEATURE_VERSION_V3 = 3
+# "стол" has this many letters; the reopened event reports the committed word.
+REOPENED_WORD_CHARACTERS = 4
+# Comfortably longer than any possible pause delay (clamped to 10s at most),
+# so the pause always fires regardless of the configured delay.
+PAUSE_ELAPSED_SECONDS = 60
+
 
 def technical_events(lines: list[str]) -> list[dict[str, object]]:
     events: list[dict[str, object]] = []
@@ -38,7 +47,7 @@ class ConvertingModel(ContextModel):
     """A context model that converts every finished word it is shown."""
 
     def __init__(self) -> None:
-        super().__init__({}, "context-v3-convert", feature_version=3)
+        super().__init__({}, "context-v3-convert", feature_version=CONTEXT_FEATURE_VERSION_V3)
 
     def predict(self, item: ContextEvidence) -> ContextPrediction:
         scores = tuple(float(name == "convert") for name in ACTIONS)
@@ -70,7 +79,7 @@ class ReopenedWordTests(unittest.TestCase):
             events = technical_events(logs.output)
             self.assertEqual(evaluated_words(events), ["стол", "столы"])
             reopened = next(event for event in events if event["event"] == "committed_word_reopened")
-            self.assertEqual(reopened["characters"], 4)
+            self.assertEqual(reopened["characters"], REOPENED_WORD_CHARACTERS)
 
     def test_reopening_alone_asks_for_no_second_judgement(self) -> None:
         with sequences.session(1) as current:
@@ -81,9 +90,9 @@ class ReopenedWordTests(unittest.TestCase):
                 current.command("BackSpace")
                 # The user stops to think: the word judged at its space is
                 # not judged again just because the space went away.
-                current.engine._maybe_correct_after_pause(now=time.monotonic() + 60)
+                current.engine._maybe_correct_after_pause(now=time.monotonic() + PAUSE_ELAPSED_SECONDS)
                 current.physical("s")
-                current.engine._maybe_correct_after_pause(now=time.monotonic() + 60)
+                current.engine._maybe_correct_after_pause(now=time.monotonic() + PAUSE_ELAPSED_SECONDS)
             judged = [
                 (event["original"], event["trigger"])
                 for event in technical_events(logs.output)

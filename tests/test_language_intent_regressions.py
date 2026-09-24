@@ -17,6 +17,8 @@ from keyswitch.history import HistoryStore
 from keyswitch.layouts import LayoutPair
 from test_input_integrity import EditorBackend
 
+INITIAL_KEY_SERIAL = 100
+
 
 class LanguageIntentRegressions(unittest.TestCase):
     def replay(
@@ -45,7 +47,7 @@ class LanguageIntentRegressions(unittest.TestCase):
                 engine = KeySwitchEngine(
                     settings, HistoryStore(root / "history.jsonl"), backend,
                 )
-                serial = 100
+                serial = INITIAL_KEY_SERIAL
                 for text, intended, initial in segments:
                     if initial is not None:
                         backend.group = initial

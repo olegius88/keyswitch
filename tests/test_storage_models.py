@@ -13,9 +13,9 @@ from unittest.mock import Mock, patch
 
 from keyswitch import config, history, language_model, learning, spellcheck, system
 from keyswitch.config import DEFAULTS, SettingsStore, _deep_merge
-from keyswitch.history import HistoryEntry, HistoryStore
+from keyswitch.history import HISTORY_CONFIDENCE_DECIMALS, HistoryEntry, HistoryStore
 from keyswitch.language_model import LanguageModel
-from keyswitch.learning import LearningStore
+from keyswitch.learning import MAX_CONFIRMATIONS, LearningStore
 from keyswitch.spellcheck import HunspellDictionary
 from keyswitch.system import AutostartManager
 
@@ -34,9 +34,15 @@ class EnvironmentPathTests(unittest.TestCase):
 
 
 class SettingsStoreBranchTests(unittest.TestCase):
+    BASE_CONFIG: dict[str, object] = {"a": {"b": 1, "c": 2}, "d": 3}
+    OVERRIDE_CONFIG: dict[str, object] = {"a": {"b": 4}, "d": {"e": 5}}
+    MERGED_CONFIG = {"a": {"b": 4, "c": 2}, "d": {"e": 5}}
+    CHILD_LIST = [1, 2]
+    APPENDED_VALUE = 3
+
     def test_deep_merge_replaces_scalars_and_merges_nested_values(self) -> None:
-        merged = _deep_merge({"a": {"b": 1, "c": 2}, "d": 3}, {"a": {"b": 4}, "d": {"e": 5}})
-        self.assertEqual(merged, {"a": {"b": 4, "c": 2}, "d": {"e": 5}})
+        merged = _deep_merge(self.BASE_CONFIG, self.OVERRIDE_CONFIG)
+        self.assertEqual(merged, self.MERGED_CONFIG)
         self.assertIsNone(config._string_keyed_mapping({1: "invalid key"}))
 
     def test_malformed_and_non_mapping_files_keep_defaults(self) -> None:
@@ -56,8 +62,8 @@ class SettingsStoreBranchTests(unittest.TestCase):
 
             store.set("temporary", 1, persist=False)
             self.assertFalse(path.exists())
-            store.set("temporary.child", [1, 2])
-            self.assertEqual(store.get("temporary.child"), [1, 2])
+            store.set("temporary.child", self.CHILD_LIST)
+            self.assertEqual(store.get("temporary.child"), self.CHILD_LIST)
             self.assertEqual(store.get("missing.path", "fallback"), "fallback")
 
             snapshot = store.snapshot()
@@ -67,11 +73,11 @@ class SettingsStoreBranchTests(unittest.TestCase):
             child_value = temporary_value["child"]
             self.assertIsInstance(child_value, list)
             assert isinstance(child_value, list)
-            child_value.append(3)
-            self.assertEqual(store.get("temporary.child"), [1, 2])
+            child_value.append(self.APPENDED_VALUE)
+            self.assertEqual(store.get("temporary.child"), self.CHILD_LIST)
 
             before = len(calls)
-            store.set("temporary.child", [1, 2])
+            store.set("temporary.child", self.CHILD_LIST)
             self.assertEqual(len(calls), before)
             unsubscribe()
             unsubscribe()
@@ -87,34 +93,43 @@ class SettingsStoreBranchTests(unittest.TestCase):
 
 
 class HistoryStoreBranchTests(unittest.TestCase):
+    STORE_LIMIT = 2
+    ENTRY_COUNT = 3
+    CONFIDENCE_OFFSET = 0.126
+
     def test_entry_rounding_trimming_callbacks_and_invalid_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "history.jsonl"
-            store = HistoryStore(path, limit=2)
+            store = HistoryStore(path, limit=self.STORE_LIMIT)
             callbacks: list[bool] = []
             store.subscribe(lambda: callbacks.append(True))
             entries = [
-                HistoryEntry.create(f"bad-{index}", f"good-{index}", "editor", index + 0.126)
-                for index in range(3)
+                HistoryEntry.create(f"bad-{index}", f"good-{index}", "editor", index + self.CONFIDENCE_OFFSET)
+                for index in range(self.ENTRY_COUNT)
             ]
             for entry in entries:
                 store.append(entry)
             self.assertEqual([item.original for item in store.read()], ["bad-1", "bad-2"])
-            self.assertEqual(store.read(1)[0].confidence, 2.13)
-            self.assertEqual(len(callbacks), 3)
+            self.assertEqual(store.read(1)[0].confidence,
+                             round((self.ENTRY_COUNT - 1) + self.CONFIDENCE_OFFSET, HISTORY_CONFIDENCE_DECIMALS))
+            expected_callbacks = self.ENTRY_COUNT
+            self.assertEqual(len(callbacks), expected_callbacks)
 
             with path.open("a", encoding="utf-8") as handle:
                 handle.write("not json\n")
                 handle.write(json.dumps({"unexpected": True}) + "\n")
-            self.assertEqual(len(store.read()), 2)
+            self.assertEqual(len(store.read()), self.STORE_LIMIT)
             store.clear()
             self.assertEqual(store.read(), [])
-            self.assertEqual(len(callbacks), 4)
+            expected_callbacks += 1
+            self.assertEqual(len(callbacks), expected_callbacks)
             store.clear()
-            self.assertEqual(len(callbacks), 5)
+            expected_callbacks += 1
+            self.assertEqual(len(callbacks), expected_callbacks)
             path.unlink()
             store.clear()
-            self.assertEqual(len(callbacks), 6)
+            expected_callbacks += 1
+            self.assertEqual(len(callbacks), expected_callbacks)
 
     def test_missing_file_read_error_and_minimum_limit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -128,6 +143,13 @@ class HistoryStoreBranchTests(unittest.TestCase):
 
 
 class LearningStoreBranchTests(unittest.TestCase):
+    ALTERNATE_TARGET_GROUP = 2
+    FIXTURE_CONFIRMATIONS = 2
+    SCALAR_RULE_VALUE = 5
+    CONFIRMATIONS_REQUIRED = 2
+    FULL_CONFIRMATIONS = 5
+    MALFORMED_RULE_VALUE = 9
+
     def test_invalid_persisted_shapes_are_ignored(self) -> None:
         self.assertIsNone(learning._string_keyed_dict({1: "invalid key"}))
         with tempfile.TemporaryDirectory() as temporary:
@@ -143,16 +165,18 @@ class LearningStoreBranchTests(unittest.TestCase):
             store = LearningStore(path)
             self.assertEqual(store.record_manual(0, "   ", 1), 0)
             self.assertEqual(store.record_manual(0, "word", 0), 0)
-            self.assertEqual(store.record_manual(0, "Word", 1), 1)
-            self.assertEqual(store.record_manual(0, "word", 1), 2)
-            self.assertEqual(store.forced_target(0, "word", 3), None)
-            self.assertEqual(store.forced_target(0, "word", 2), 1)
+            first_confirmation = store.record_manual(0, "Word", 1)
+            self.assertEqual(first_confirmation, 1)
+            second_confirmation = store.record_manual(0, "word", 1)
+            self.assertEqual(second_confirmation, first_confirmation + 1)
+            self.assertEqual(store.forced_target(0, "word", second_confirmation + 1), None)
+            self.assertEqual(store.forced_target(0, "word", second_confirmation), 1)
 
-            self.assertEqual(store.record_manual(0, "word", 2), 1)
-            self.assertEqual(store.forced_target(0, "word", 1), 2)
-            store.reject(0, "word", 2)
+            self.assertEqual(store.record_manual(0, "word", self.ALTERNATE_TARGET_GROUP), 1)
+            self.assertEqual(store.forced_target(0, "word", 1), self.ALTERNATE_TARGET_GROUP)
+            store.reject(0, "word", self.ALTERNATE_TARGET_GROUP)
             self.assertEqual(store.forced_target(0, "word", 1), None)
-            self.assertEqual(store.rejected_targets(0, "word"), {2})
+            self.assertEqual(store.rejected_targets(0, "word"), {self.ALTERNATE_TARGET_GROUP})
             self.assertEqual(store.counts(), (0, 1))
 
             store.reject(0, "", 1)
@@ -162,9 +186,9 @@ class LearningStoreBranchTests(unittest.TestCase):
             self.assertEqual(store.rejected_targets(0, "invalid"), {1})
             self.assertEqual(store.rejected_targets(0, "not-list"), set())
 
-            store._data["rules"]["0:broken"] = {"confirmations": 2}
+            store._data["rules"]["0:broken"] = {"confirmations": self.FIXTURE_CONFIRMATIONS}
             self.assertIsNone(store.forced_target(0, "broken"))
-            store._data["rules"]["0:scalar"] = 5
+            store._data["rules"]["0:scalar"] = self.SCALAR_RULE_VALUE
             self.assertIsNone(store.forced_target(0, "scalar"))
             store._data["rules"]["0:low"] = {"target_group": 1, "confirmations": 0}
             self.assertIsNone(store.forced_target(0, "low", 0))
@@ -172,9 +196,9 @@ class LearningStoreBranchTests(unittest.TestCase):
             store._data["rejections"]["0:word"] = "bad"
             store.reject(0, "word", 1)
             self.assertEqual(store.rejected_targets(0, "word"), {1})
-            store.reject(0, "word", 2)
+            store.reject(0, "word", self.ALTERNATE_TARGET_GROUP)
             store.record_manual(0, "word", 1)
-            self.assertEqual(store.rejected_targets(0, "word"), {2})
+            self.assertEqual(store.rejected_targets(0, "word"), {self.ALTERNATE_TARGET_GROUP})
             store.reject(0, "solo", 1)
             store.record_manual(0, "solo", 1)
             self.assertEqual(store.rejected_targets(0, "solo"), set())
@@ -184,27 +208,46 @@ class LearningStoreBranchTests(unittest.TestCase):
     def test_explicit_confirmation_activates_and_reconciles_rule(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             store = LearningStore(Path(temporary) / "learning.json")
-            self.assertEqual(store.confirm_manual(0, "", 1, 2), 0)
-            self.assertEqual(store.confirm_manual(0, "word", 0, 2), 0)
+            self.assertEqual(store.confirm_manual(0, "", 1, self.CONFIRMATIONS_REQUIRED), 0)
+            self.assertEqual(store.confirm_manual(0, "word", 0, self.CONFIRMATIONS_REQUIRED), 0)
 
             store.reject(0, "word", 1)
-            store.reject(0, "word", 2)
-            self.assertEqual(store.confirm_manual(0, "word", 1, 5), 5)
-            self.assertEqual(store.forced_target(0, "WORD", 5), 1)
-            self.assertEqual(store.rejected_targets(0, "word"), {2})
+            store.reject(0, "word", self.ALTERNATE_TARGET_GROUP)
+            self.assertEqual(store.confirm_manual(0, "word", 1, self.FULL_CONFIRMATIONS), self.FULL_CONFIRMATIONS)
+            self.assertEqual(store.forced_target(0, "WORD", self.FULL_CONFIRMATIONS), 1)
+            self.assertEqual(store.rejected_targets(0, "word"), {self.ALTERNATE_TARGET_GROUP})
 
-            self.assertEqual(store.confirm_manual(0, "word", 1, 2), 5)
+            self.assertEqual(store.confirm_manual(0, "word", 1, self.CONFIRMATIONS_REQUIRED), self.FULL_CONFIRMATIONS)
             store.reject(0, "solo", 1)
             self.assertEqual(store.confirm_manual(0, "solo", 1, 0), 1)
             self.assertEqual(store.rejected_targets(0, "solo"), set())
 
-            store._data["rules"]["0:reset"] = 9
+            store._data["rules"]["0:reset"] = self.MALFORMED_RULE_VALUE
             store._data["rejections"]["0:reset"] = "invalid"
-            self.assertEqual(store.confirm_manual(0, "reset", 1, 1000), 999)
-            self.assertEqual(store.forced_target(0, "reset", 999), 1)
+            self.assertEqual(store.confirm_manual(0, "reset", 1, MAX_CONFIRMATIONS + 1), MAX_CONFIRMATIONS)
+            self.assertEqual(store.forced_target(0, "reset", MAX_CONFIRMATIONS), 1)
 
 
 class LanguageModelBranchTests(unittest.TestCase):
+    HIGH_FREQUENCY = 100
+    LOW_FREQUENCY = 20
+    LOWEST_FREQUENCY = 10
+    MODEL_HELPER_WORLD_FREQUENCY = 50
+    ALPHABET_SIZE = 26
+    CALIBRATION_WORD_LIMIT = 12_000
+    SCORE_CACHE_MAXSIZE = 65_536
+    EXPECTED_HELLO_UNIGRAM_COUNT = 15
+    EXPECTED_HELLO_WORLD_BIGRAM_COUNT = 7
+    UNIFORM_WORD_FREQUENCY = 7
+    OVERFLOW_TRIGRAM_FREQUENCY = 2**40
+    BUILT_GRAM_FREQUENCY = 10
+    SINGLE_WORD_FREQUENCY = 2
+    PUNCTUATION_ONLY_SCORE = -30.0
+    NEAR_ZERO_DEVIATION = 0.01
+    BEST_DELETION_WORD_LENGTH = 30
+    BEST_DELETION_LIMIT = 3
+    TRIGRAM_ORDER = 3
+
     def _model(
         self,
         frequencies: dict[str, int] | None = None,
@@ -212,7 +255,7 @@ class LanguageModelBranchTests(unittest.TestCase):
     ) -> LanguageModel:
         fake_speller = SimpleNamespace(available=False, source="", check=lambda _word: False)
         with patch("keyswitch.language_model.HunspellDictionary", return_value=fake_speller):
-            return LanguageModel("en_US", frequencies or {"hello": 100, "world": 50}, "test", bigrams)
+            return LanguageModel("en_US", frequencies or {"hello": self.HIGH_FREQUENCY, "world": self.MODEL_HELPER_WORLD_FREQUENCY}, "test", bigrams)
 
     def tearDown(self) -> None:
         LanguageModel._load_cached.cache_clear()
@@ -221,7 +264,7 @@ class LanguageModelBranchTests(unittest.TestCase):
     def test_disabled_spellcheck_is_host_independent_and_matches_noop_speller(
         self,
     ) -> None:
-        frequencies = {"hello": 100, "help": 20, "world": 10}
+        frequencies = {"hello": self.HIGH_FREQUENCY, "help": self.LOW_FREQUENCY, "world": self.LOWEST_FREQUENCY}
         fake_speller = SimpleNamespace(
             available=False,
             source="",
@@ -255,12 +298,12 @@ class LanguageModelBranchTests(unittest.TestCase):
     def test_equal_frequency_calibration_cutoff_has_canonical_tie_order(self) -> None:
         def alpha_word(index: int) -> str:
             return "w" + "".join(
-                chr(ord("a") + (index // divisor) % 26)
-                for divisor in (26 * 26, 26, 1)
+                chr(ord("a") + (index // divisor) % self.ALPHABET_SIZE)
+                for divisor in (self.ALPHABET_SIZE * self.ALPHABET_SIZE, self.ALPHABET_SIZE, 1)
             )
 
-        words = tuple(alpha_word(index) for index in range(12_001))
-        expected = tuple(sorted(words)[:12_000])
+        words = tuple(alpha_word(index) for index in range(self.CALIBRATION_WORD_LIMIT + 1))
+        expected = tuple(sorted(words)[:self.CALIBRATION_WORD_LIMIT])
         observed: list[str] = []
 
         def record_raw_score(_model: LanguageModel, word: str) -> float:
@@ -284,7 +327,7 @@ class LanguageModelBranchTests(unittest.TestCase):
         ):
             forward = LanguageModel(
                 "en_US",
-                {word: 7 for word in words},
+                {word: self.UNIFORM_WORD_FREQUENCY for word in words},
                 "sealed",
                 enable_spellcheck=False,
             )
@@ -292,7 +335,7 @@ class LanguageModelBranchTests(unittest.TestCase):
             observed.clear()
             reverse = LanguageModel(
                 "en_US",
-                {word: 7 for word in reversed(words)},
+                {word: self.UNIFORM_WORD_FREQUENCY for word in reversed(words)},
                 "sealed",
                 enable_spellcheck=False,
             )
@@ -307,7 +350,7 @@ class LanguageModelBranchTests(unittest.TestCase):
         LanguageModel.score.cache_clear()
         model = LanguageModel(
             "en_US",
-            {"hello": 100, "help": 20},
+            {"hello": self.HIGH_FREQUENCY, "help": self.LOW_FREQUENCY},
             "sealed",
             enable_spellcheck=False,
         )
@@ -319,17 +362,19 @@ class LanguageModelBranchTests(unittest.TestCase):
             first = model.score("hello")
             second = model.score("hello")
             self.assertIs(second, first)
-            self.assertEqual(ngram_score.call_count, 1)
+            expected_calls = 1
+            self.assertEqual(ngram_score.call_count, expected_calls)
 
             cache = LanguageModel.score.cache_info()
-            self.assertEqual(cache.maxsize, 65_536)
-            self.assertLessEqual(cache.currsize, 65_536)
+            self.assertEqual(cache.maxsize, self.SCORE_CACHE_MAXSIZE)
+            self.assertLessEqual(cache.currsize, self.SCORE_CACHE_MAXSIZE)
             self.assertEqual((cache.hits, cache.misses), (1, 1))
 
             LanguageModel.score.cache_clear()
             recomputed = model.score("hello")
             self.assertEqual(recomputed, first)
-            self.assertEqual(ngram_score.call_count, 2)
+            expected_calls += 1
+            self.assertEqual(ngram_score.call_count, expected_calls)
 
     def test_normalization_arpa_parsing_and_read_failure(self) -> None:
         self.assertEqual(LanguageModel.normalize(" HeL-lo_42! "), "hel-lo")
@@ -341,24 +386,24 @@ class LanguageModelBranchTests(unittest.TestCase):
                 encoding="utf-8",
             )
             unigrams, bigrams = LanguageModel._read_arpa(path)
-            self.assertEqual(unigrams, {"hello": 15})
-            self.assertEqual(bigrams, {("hello", "world"): 7})
+            self.assertEqual(unigrams, {"hello": self.EXPECTED_HELLO_UNIGRAM_COUNT})
+            self.assertEqual(bigrams, {("hello", "world"): self.EXPECTED_HELLO_WORLD_BIGRAM_COUNT})
             self.assertEqual(LanguageModel._read_arpa_unigrams(path), unigrams)
             self.assertEqual(LanguageModel._read_arpa(Path(temporary) / "absent"), ({}, {}))
 
     def test_gram_building_scores_context_and_typo_candidates(self) -> None:
-        counts = LanguageModel._build_gram_counts({"a": 1, "can't": 10, "hello": 2**40})
-        self.assertTrue(counts[3])
-        self.assertEqual(LanguageModel._build_grams({"hello": 2}), set(counts[3]))
-        model = self._model({"hello": 100, "help": 20}, {("hello", "help"): 10})
-        self.assertEqual(model._raw_ngram_score("!!!"), -30.0)
+        counts = LanguageModel._build_gram_counts({"a": 1, "can't": self.BUILT_GRAM_FREQUENCY, "hello": self.OVERFLOW_TRIGRAM_FREQUENCY})
+        self.assertTrue(counts[self.TRIGRAM_ORDER])
+        self.assertEqual(LanguageModel._build_grams({"hello": self.SINGLE_WORD_FREQUENCY}), set(counts[self.TRIGRAM_ORDER]))
+        model = self._model({"hello": self.HIGH_FREQUENCY, "help": self.LOW_FREQUENCY}, {("hello", "help"): self.BUILT_GRAM_FREQUENCY})
+        self.assertEqual(model._raw_ngram_score("!!!"), self.PUNCTUATION_ONLY_SCORE)
         self.assertEqual(model.context_score("missing", "help"), 0.0)
         self.assertGreater(model.context_score("hello", "help"), 0.0)
         self.assertFalse(model.score("").known)
         self.assertTrue(model.score("hello").exact)
         self.assertFalse(model.score("hello!").exact)
         self.assertFalse(model.best_single_deletion("abc").known)
-        self.assertEqual(model.best_single_deletion("h" * 30, limit=3).__class__.__name__, "WordScore")
+        self.assertEqual(model.best_single_deletion("h" * self.BEST_DELETION_WORD_LENGTH, limit=self.BEST_DELETION_LIMIT).__class__.__name__, "WordScore")
 
     def test_spell_only_source_and_nearly_constant_calibration(self) -> None:
         fake_speller = SimpleNamespace(available=True, source="dictionary.dic", check=lambda word: word == "morph")
@@ -371,9 +416,9 @@ class LanguageModelBranchTests(unittest.TestCase):
 
         with (
             patch("keyswitch.language_model.HunspellDictionary", return_value=fake_speller),
-            patch("keyswitch.language_model.statistics.pstdev", return_value=0.01),
+            patch("keyswitch.language_model.statistics.pstdev", return_value=self.NEAR_ZERO_DEVIATION),
         ):
-            clamped = LanguageModel("en_US", {"alpha": 2, "bravo": 2}, "lexicon")
+            clamped = LanguageModel("en_US", {"alpha": self.SINGLE_WORD_FREQUENCY, "bravo": self.SINGLE_WORD_FREQUENCY}, "lexicon")
         self.assertEqual(clamped._ngram_deviation, 1.0)
 
     def test_load_uses_arpa_fallbacks_extras_and_cache(self) -> None:
@@ -409,6 +454,9 @@ class LanguageModelBranchTests(unittest.TestCase):
 
 
 class HunspellBranchTests(unittest.TestCase):
+    FAKE_HANDLE = 123
+    MAX_CHECK_LENGTH = 128
+
     def setUp(self) -> None:
         self.original_library = HunspellDictionary._library
         self.original_attempted = HunspellDictionary._library_attempted
@@ -420,7 +468,7 @@ class HunspellBranchTests(unittest.TestCase):
         HunspellDictionary._library_attempted = self.original_attempted
 
     @staticmethod
-    def _fake_library(encoding: bytes = b"UTF-8", handle: int = 123) -> Mock:
+    def _fake_library(encoding: bytes = b"UTF-8", handle: int = FAKE_HANDLE) -> Mock:
         library = Mock()
         library.Hunspell_create.return_value = handle
         library.Hunspell_get_dic_encoding.return_value = encoding
@@ -436,7 +484,8 @@ class HunspellBranchTests(unittest.TestCase):
             (second / "en.dic").write_text("", encoding="utf-8")
             with patch.dict(os.environ, {"KEYSWITCH_HUNSPELL_PATH": f"{first}{os.pathsep}{second}", "XDG_DATA_HOME": temporary}, clear=True):
                 roots = HunspellDictionary._dictionary_roots()
-                self.assertEqual(roots[:2], (first, second))
+                expected_roots = (first, second)
+                self.assertEqual(roots[:len(expected_roots)], expected_roots)
                 with patch.object(HunspellDictionary, "_dictionary_roots", return_value=(second,)):
                     self.assertEqual(HunspellDictionary._find_dictionary("en_ZZ"), (second / "en.aff", second / "en.dic"))
                     self.assertIsNone(HunspellDictionary._find_dictionary("zz_ZZ"))
@@ -458,7 +507,7 @@ class HunspellBranchTests(unittest.TestCase):
             self.assertEqual(instance._encoding, "utf-8")
             self.assertTrue(instance.check(" hello "))
             self.assertFalse(instance.check(""))
-            self.assertFalse(instance.check("x" * 129))
+            self.assertFalse(instance.check("x" * (self.MAX_CHECK_LENGTH + 1)))
             instance._encoding = "ascii"
             self.assertFalse(instance.check("привет"))
             instance._encoding = "utf-8"
@@ -467,7 +516,7 @@ class HunspellBranchTests(unittest.TestCase):
             HunspellDictionary._library = library
             instance.close()
             instance.close()
-            library.Hunspell_destroy.assert_called_once_with(123)
+            library.Hunspell_destroy.assert_called_once_with(self.FAKE_HANDLE)
 
             library = self._fake_library(encoding=b"")
             HunspellDictionary._library = library

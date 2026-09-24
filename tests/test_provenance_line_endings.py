@@ -30,6 +30,10 @@ import verify_context_v2_history  # noqa: E402
 # recorded evidence instead of importing every trainer keeps future provenance
 # lists covered without another edit here.
 PROVENANCE_KEYS = ("provenance", "source_hashes")
+# `git check-attr` prints "<path>: <attribute>: <value>"; splitting from the
+# right on ": " at most twice yields exactly these three fields.
+MAX_ATTR_LINE_SPLITS = 2
+EXPECTED_ATTR_FIELD_COUNT = 3
 
 
 def recorded_paths() -> Iterator[Path]:
@@ -68,8 +72,8 @@ def unprotected(paths: list[Path]) -> list[str]:
     for line in result.stdout.splitlines():
         # `git check-attr` prints `<path>: <attribute>: <value>`; only the last
         # two fields are fixed, so split from the right and keep the path whole.
-        fields = line.rsplit(": ", 2)
-        if len(fields) != 3:
+        fields = line.rsplit(": ", MAX_ATTR_LINE_SPLITS)
+        if len(fields) != EXPECTED_ATTR_FIELD_COUNT:
             continue
         path, attribute, value = fields
         attributes.setdefault(path, set()).add(f"{attribute}={value}")
@@ -81,13 +85,15 @@ def unprotected(paths: list[Path]) -> list[str]:
 
 
 class ProvenanceLineEndingTests(unittest.TestCase):
+    MINIMUM_HASHED_FILE_COUNT = 30
+
     def setUp(self) -> None:
         if not (ROOT / ".git").exists():
             self.skipTest("attributes can only be resolved inside a git checkout")
 
     def test_every_hashed_file_is_pinned_against_eol_conversion(self) -> None:
         paths = hashed_files()
-        self.assertGreater(len(paths), 30, "provenance discovery collected almost nothing")
+        self.assertGreater(len(paths), self.MINIMUM_HASHED_FILE_COUNT, "provenance discovery collected almost nothing")
         self.assertIn(ROOT / "src/keyswitch/short_words.py", paths)
         self.assertEqual(
             unprotected(paths), [],

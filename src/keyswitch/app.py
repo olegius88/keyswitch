@@ -19,7 +19,8 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import __version__
-from .config import SettingsStore
+from .settings_diagnostics import DIAGNOSTICS_JSON_INDENT
+from .config import DEFAULT_HISTORY_LIMIT, SettingsStore
 from .engine import (
     CorrectionPlan,
     EngineSnapshot,
@@ -75,7 +76,7 @@ class KeySwitchApplication(Adw.Application):
         self.settings = SettingsStore()
         follow_settings(self.settings)
         self.autostart = AutostartManager()
-        self.history = HistoryStore(limit=int(self.settings.get("history.limit", 200)))
+        self.history = HistoryStore(limit=int(self.settings.get("history.limit", DEFAULT_HISTORY_LIMIT)))
         self.engine = KeySwitchEngine(self.settings, self.history)
         self.updates = UpdateManager(__version__, data_dir() / "updates")
         self.window: _WindowController | None = None
@@ -419,7 +420,7 @@ def diagnose() -> int:
         "context_model": {"available": context_model is not None, "status": context_status},
         "error": probe.error,
     }
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    print(json.dumps(payload, ensure_ascii=False, indent=DIAGNOSTICS_JSON_INDENT))
     return 0 if probe.available else 1
 
 

@@ -23,6 +23,9 @@ from typing import Final
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 MODEL_DIRECTORY: Final[Path] = PROJECT_ROOT / "model" / "intent_v1"
 LIMIT_BYTES: Final[int] = 64 * 1024 * 1024
+COMPACT_MAX_DEPTH: Final[int] = 3
+COMPACT_MAX_INLINE_ITEMS: Final[int] = 16
+RECEIPT_JSON_INDENT: Final[int] = 2
 FAILURE_SECTIONS: Final[Mapping[str, str]] = {
     "fallback_regression": "model_vs_fallback",
     "unknown_typo_false_positives": "lexical_disjoint_unknown_typos",
@@ -62,11 +65,11 @@ def compact(value: object, depth: int = 0) -> object:
     """Keep scalar evidence and small mappings, drop bulky per-row payloads."""
 
     if isinstance(value, dict):
-        if depth >= 3:
+        if depth >= COMPACT_MAX_DEPTH:
             return {"omitted_keys": sorted(str(key) for key in value)}
         return {str(key): compact(item, depth + 1) for key, item in value.items()}
     if isinstance(value, list):
-        return value if len(value) <= 16 else {"omitted_items": len(value)}
+        return value if len(value) <= COMPACT_MAX_INLINE_ITEMS else {"omitted_items": len(value)}
     return value
 
 
@@ -168,7 +171,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"cannot write the rejection receipt: {error}", file=sys.stderr)
         return 1
-    output.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", "utf-8")
+    output.write_text(json.dumps(receipt, ensure_ascii=False, indent=RECEIPT_JSON_INDENT) + "\n", "utf-8")
     print(output)
     return 0
 

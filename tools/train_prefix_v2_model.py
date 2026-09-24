@@ -20,13 +20,24 @@ from context_evidence import canonical, checksum
 from reference_lexicon import reference_models
 from context_optimizer import Kernel, Packed, SOURCE as OPTIMIZER
 from keyswitch.context_model import ACTIONS, ContextModel
-from keyswitch.prefix_schema import CURRENT_PREFIX_FEATURE_VERSION, VersionedPrefixModel
+from keyswitch.prefix_schema import (
+    CURRENT_PREFIX_FEATURE_VERSION, MIN_PREFIX_CONVERSION_THRESHOLD,
+    OBSERVED_PREFIX_MAX_CHARACTERS, VERSION_HASH_CHARACTERS, VersionedPrefixModel,
+)
 from model_protocol import FITTING_SPLITS, PROFILES
 from prefix_v2_corpus import PrefixFrame, generate_frames, load_parents, provenance as corpus_provenance
 
 ROOT = Path(__file__).resolve().parents[1]
 RECIPE = ROOT / "model/prefix_v2/recipe.json"
 MASS_TOLERANCE = 1e-9
+ACTION_COUNT = len(ACTIONS)
+MIN_EARLY_RECALL_FLOOR = 0.70
+MIN_SUPPORTED_PREFIX_LENGTH = 4
+PROBABILITY_SUM_TOLERANCE = 1e-8
+LOG_PROBABILITY_FLOOR = 1e-15
+ROUNDING_DECIMALS = 9
+REPORT_JSON_INDENT = 2
+CALIBRATION_FAILED_EXIT_CODE = 2
 
 
 def _positive(value: object, name: str) -> float:
@@ -56,18 +67,18 @@ def recipe(path: Path = RECIPE) -> dict[str, object]:
     for name in ("epochs", "maximum_features", "maximum_words_per_family", "maximum_prefix_length"):
         if type(cfg.get(name)) is not int or cast(int, cfg[name]) <= 0:
             raise ValueError("invalid " + name)
-    if cast(int, cfg["maximum_prefix_length"]) > 12:
+    if cast(int, cfg["maximum_prefix_length"]) > OBSERVED_PREFIX_MAX_CHARACTERS:
         raise ValueError("prefix runtime supports at most twelve letters")
     for name in ("learning_rate", "keep_importance", "wait_importance", "minimum_feature_mass"):
         _positive(cfg.get(name), name)
     recall = _positive(cfg.get("minimum_early_recall"), "minimum_early_recall")
-    if not .70 <= recall <= 1:
+    if not MIN_EARLY_RECALL_FLOOR <= recall <= 1:
         raise ValueError("invalid recall")
     thresholds = cfg.get("thresholds")
     if not isinstance(thresholds, list) or not thresholds:
         raise ValueError("thresholds missing")
     parsed = [_positive(item, "threshold") for item in thresholds]
-    if parsed != sorted(set(parsed)) or parsed[0] < .985 or parsed[-1] > 1:
+    if parsed != sorted(set(parsed)) or parsed[0] < MIN_PREFIX_CONVERSION_THRESHOLD or parsed[-1] > 1:
         raise ValueError("thresholds must increase within the runtime range")
     return cfg
 
@@ -91,12 +102,12 @@ def feature_vocabulary(frames: Iterable[PrefixFrame], minimum: float, maximum: i
             totals[name] = total
     # Quantised ordering and a 1e-9 cutoff tolerate divided-parent roundoff.
     selected = sorted((name for name, mass in totals.items() if mass + MASS_TOLERANCE >= minimum),
-                      key=lambda name: (-round(totals[name], 9), name))[:maximum]
+                      key=lambda name: (-round(totals[name], ROUNDING_DECIMALS), name))[:maximum]
     return sorted(selected)
 
 
 def importance(row: PrefixFrame, cfg: Mapping[str, object]) -> float:
-    factor = cfg["keep_importance"] if row.label == 0 else cfg["wait_importance"] if row.label == 2 else 1.0
+    factor = cfg["keep_importance"] if row.label == 0 else cfg["wait_importance"] if row.label == ACTIONS.index("wait") else 1.0
     return _positive(row.sample_weight, "sample weight") * _positive(factor, "class multiplier")
 
 
@@ -129,7 +140,7 @@ def sequence_metadata(row: PrefixFrame) -> SequenceMetadata:
     It is not a joint engine replay or a new runtime policy.
     """
     item = row.item
-    supported = (4 <= row.length <= 12 and len(item.original) == row.length
+    supported = (MIN_SUPPORTED_PREFIX_LENGTH <= row.length <= OBSERVED_PREFIX_MAX_CHARACTERS and len(item.original) == row.length
                  and len(item.alternative) == row.length and item.original.isalpha() and item.alternative.isalpha()
                  and item.source_group in (0, 1)
                  and not any(char.isupper() for char in item.original[1:] + item.alternative[1:]))
@@ -151,12 +162,12 @@ def scores_from_probabilities(metadata: Sequence[SequenceMetadata], probabilitie
         raise ValueError("invalid prefix probability dimensions")
     results: dict[str, SequenceScore] = {}
     for index, row in enumerate(metadata):
-        scores = probabilities[index * 4:index * 4 + 4]
+        scores = probabilities[index * ACTION_COUNT:index * ACTION_COUNT + ACTION_COUNT]
         if (any(not math.isfinite(value) or not 0 <= value <= 1 for value in scores)
-                or not math.isclose(sum(scores), 1., rel_tol=0., abs_tol=1e-8)):
+                or not math.isclose(sum(scores), 1., rel_tol=0., abs_tol=PROBABILITY_SUM_TOLERANCE)):
             raise ValueError("invalid prefix probabilities")
         value = _sequence(results, row)
-        if row.supported and max(range(4), key=scores.__getitem__) == 1:
+        if row.supported and max(range(ACTION_COUNT), key=scores.__getitem__) == 1:
             value.candidates.append((row.length, scores[1]))
     return results
 
@@ -171,7 +182,7 @@ def sequence_scores(model: VersionedPrefixModel, frames: Iterable[PrefixFrame]) 
         if not metadata.supported:
             continue
         prediction = model.predict_features(row.values)
-        if max(range(4), key=prediction.probabilities.__getitem__) == 1:
+        if max(range(ACTION_COUNT), key=prediction.probabilities.__getitem__) == 1:
             value.candidates.append((row.length, prediction.probabilities[1]))
     return results
 
@@ -185,7 +196,7 @@ def assess_prefix_epoch(scores: Mapping[str, SequenceScore], *, thresholds: Sequ
     """
     if not math.isfinite(loss) or loss < 0 or not thresholds:
         raise ValueError("invalid prefix development selection")
-    if any(type(value) not in (float, int) or not math.isfinite(value) or not .985 <= value <= 1 for value in thresholds):
+    if any(type(value) not in (float, int) or not math.isfinite(value) or not MIN_PREFIX_CONVERSION_THRESHOLD <= value <= 1 for value in thresholds):
         raise ValueError("invalid prefix development threshold")
     best: EpochSelection | None = None
     for threshold in sorted(set(thresholds)):
@@ -226,7 +237,7 @@ def sequence_metrics(scores: Mapping[str, SequenceScore], threshold: float) -> d
 
 
 def calibration_passed(metrics: Mapping[str, Mapping[str, int]], minimum_recall: float) -> bool:
-    if not .70 <= minimum_recall <= 1 or set(metrics) != set(PROFILES):
+    if not MIN_EARLY_RECALL_FLOOR <= minimum_recall <= 1 or set(metrics) != set(PROFILES):
         return False
     for counts in metrics.values():
         if (any(type(counts.get(key)) is not int or counts[key] < 0 for key in (
@@ -251,12 +262,12 @@ def artifact_payload(weights: dict[str, tuple[float, ...]], feature_version: int
     """Use one schema namespace for training, exported checksums and runtime loading."""
     if type(feature_version) is not int or feature_version not in (1, CURRENT_PREFIX_FEATURE_VERSION):
         raise ValueError("unsupported prefix artifact features")
-    if type(threshold) not in (float, int) or not .985 <= threshold <= 1:
+    if type(threshold) not in (float, int) or not MIN_PREFIX_CONVERSION_THRESHOLD <= threshold <= 1:
         raise ValueError("unsafe prefix artifact threshold")
     digest = hashlib.sha256(json.dumps(weights, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
     return {"kind": "keyswitch.prefix-policy", "feature_version": feature_version,
             "prefix_feature_version": feature_version, "actions": list(ACTIONS),
-            "version": f"prefix-v{feature_version}-" + digest[:12], "conversion_threshold": threshold,
+            "version": f"prefix-v{feature_version}-" + digest[:VERSION_HASH_CHARACTERS], "conversion_threshold": threshold,
             "weights_sha256": digest, "weights": weights}
 
 
@@ -340,7 +351,7 @@ def fit(output: Path, recipe_path: Path = RECIPE) -> dict[str, object]:
     kernel = Kernel.load()
     environment["optimizer_library"] = {"path": str(kernel.library._name), "sha256": checksum(Path(kernel.library._name))}
     (output / "environment.json").write_bytes(canonical(environment))
-    weights, accumulator = array("d", [0.0]) * (len(names) * 4), array("d", [1.0]) * (len(names) * 4)
+    weights, accumulator = array("d", [0.0]) * (len(names) * ACTION_COUNT), array("d", [1.0]) * (len(names) * ACTION_COUNT)
     best, selected_epoch = array("d", weights), 0
     selected: EpochSelection | None = None
     history: list[dict[str, object]] = []
@@ -348,9 +359,9 @@ def fit(output: Path, recipe_path: Path = RECIPE) -> dict[str, object]:
     denominator = math.fsum(development.importance)
     for epoch in range(cast(int, cfg["epochs"])):
         kernel.epoch(packed["train"], weights, accumulator, cast(float, cfg["learning_rate"]))
-        rounded = array("d", (round(value, 9) for value in weights))
+        rounded = array("d", (round(value, ROUNDING_DECIMALS) for value in weights))
         probabilities = kernel.predict(development, rounded)
-        loss = math.fsum(-development.importance[index] * math.log(max(1e-15, probabilities[index * 4 + label]))
+        loss = math.fsum(-development.importance[index] * math.log(max(LOG_PROBABILITY_FLOOR, probabilities[index * ACTION_COUNT + label]))
                          for index, label in enumerate(development.labels)) / denominator
         if not math.isfinite(loss):
             raise ValueError("prefix optimisation diverged")
@@ -364,7 +375,7 @@ def fit(output: Path, recipe_path: Path = RECIPE) -> dict[str, object]:
         print(f"prefix-v2 epoch {epoch + 1}: development loss {loss:.9f}, early recall {recall}", flush=True)
     if selected is None:
         raise ValueError("no zero-false development epoch frontier")
-    learned = {name: tuple(best[index * 4 + action] for action in range(4)) for index, name in enumerate(names)}
+    learned = {name: tuple(best[index * ACTION_COUNT + action] for action in range(ACTION_COUNT)) for index, name in enumerate(names)}
     initial_payload = artifact_payload(learned, feature_version, 1.0)
     version = cast(str, initial_payload["version"])
     model = VersionedPrefixModel(ContextModel(learned, version), feature_version=feature_version)
@@ -420,8 +431,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--recipe", type=Path, default=RECIPE)
     args = parser.parse_args(argv)
     seal = fit(args.output, args.recipe)
-    print(json.dumps({key: seal[key] for key in ("model_version", "calibration_passed", "promotion_accepted", "independent_test_evaluated")}, indent=2))
-    return 0 if seal["calibration_passed"] else 2
+    print(json.dumps({key: seal[key] for key in ("model_version", "calibration_passed", "promotion_accepted", "independent_test_evaluated")}, indent=REPORT_JSON_INDENT))
+    return 0 if seal["calibration_passed"] else CALIBRATION_FAILED_EXIT_CODE
 
 
 if __name__ == "__main__":

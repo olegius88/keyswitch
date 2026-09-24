@@ -18,6 +18,7 @@ from collections.abc import Callable
 from types import FrameType
 
 from . import __version__
+from .settings_diagnostics import DIAGNOSTICS_JSON_INDENT
 from .context_model import ContextModel
 from .history import HistoryStore, data_dir
 from .intent_model import LinearNgramModel
@@ -65,7 +66,7 @@ def diagnose() -> int:
         "context_field_access": {"available": permission, "source": CONTEXT_SOURCE},
         "accessibility_permission": permission,
         "error": probe.error,
-    }, ensure_ascii=False, indent=2))
+    }, ensure_ascii=False, indent=DIAGNOSTICS_JSON_INDENT))
     backend.close()
     return 0 if probe.available else 1
 

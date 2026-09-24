@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from contextlib import redirect_stdout
 from dataclasses import asdict, replace
+import errno
 import gzip
 import hashlib
 import io
@@ -31,6 +32,22 @@ import reconcile_prefix_exposure_corpus as transfer
 REASON = "prefix-curriculum-prior-exposure"
 SECRET_WORDS = ("orchard", "nebula", "marigold", "quasar", "saffron", "lantern", "cobalt", "zephyr")
 
+# Fixture invariants: the ud and technical origins are built so these counts
+# hold everywhere they are asserted below.
+EXPOSED_UNITS_PER_ORIGIN = 2
+MOVED_ROWS_PER_ORIGIN = 3
+TOTAL_MOVED_ROWS = 6
+PARENT_TEST_ROW_COUNT = 8
+FIXTURE_ROWS_PER_SPLIT = 2
+QUARANTINE_ROWS_AFTER_TRANSFER = 8
+QUARANTINE_GZIP_MEMBERS_AFTER_TRANSFER = 3
+REMAINING_ROWS_START_INDEX = 2
+SHA256_HEX_LENGTH = 64
+FIXTURE_LINE_REPEAT_COUNT = 64
+TRUNCATED_TRAILING_BYTES = 6
+MISMATCHED_TRAIN_ROWS = 9
+INVALID_SCHEMA_VERSION = 2
+
 
 def row(identifier: str, original: str, split: str, family: str, document: str, *, reasons: tuple[str, ...] = (),
         alignment: str = "exact-text-comment") -> CorpusRow:
@@ -50,7 +67,7 @@ def members(path: Path) -> list[bytes]:
     result = []
     position = 0
     while position < len(data):
-        decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        decoder = zlib.decompressobj(transfer.ZLIB_GZIP_HEADER_WBITS_OFFSET + zlib.MAX_WBITS)
         decoder.decompress(data[position:])
         used = len(data) - position - len(decoder.unused_data)
         result.append(data[position:position + used])
@@ -315,10 +332,10 @@ class PrefixExposureReconciliationTests(unittest.TestCase):
     def test_units_are_re_derived_from_inventory_and_whole_families_are_moved(self) -> None:
         plan = self.fixture.plan()
         summary = plan.summary
-        self.assertEqual(summary["units_by_origin"], {"ud": 2, "technical": 2})
-        self.assertEqual(summary["moved_rows_by_origin"], {"ud": 3, "technical": 3})
-        self.assertEqual(summary["parent_test_rows"], 8)
-        self.assertEqual(summary["retained_test_rows"], 2)
+        self.assertEqual(summary["units_by_origin"], {"ud": EXPOSED_UNITS_PER_ORIGIN, "technical": EXPOSED_UNITS_PER_ORIGIN})
+        self.assertEqual(summary["moved_rows_by_origin"], {"ud": MOVED_ROWS_PER_ORIGIN, "technical": MOVED_ROWS_PER_ORIGIN})
+        self.assertEqual(summary["parent_test_rows"], PARENT_TEST_ROW_COUNT)
+        self.assertEqual(summary["retained_test_rows"], FIXTURE_ROWS_PER_SPLIT)
         self.assertEqual(summary["replacements"], 0)
         moved = {digest(name) for name in ("ud:test:1", "ud:test:1b", "ud:test:3", "tech:test:1", "tech:test:2", "tech:test:4")}
         self.assertEqual(set(cast(list[str], plan.sidecar["moved_row_ids_sha256"])), moved)
@@ -357,7 +374,7 @@ class PrefixExposureReconciliationTests(unittest.TestCase):
         parent_quarantine = before[str(self.fixture.parent / "quarantine.jsonl.gz")]
         derived_quarantine = (self.output / "quarantine.jsonl.gz").read_bytes()
         self.assertTrue(derived_quarantine.startswith(parent_quarantine))
-        self.assertEqual(len(members(self.output / "quarantine.jsonl.gz")), 3)
+        self.assertEqual(len(members(self.output / "quarantine.jsonl.gz")), QUARANTINE_GZIP_MEMBERS_AFTER_TRANSFER)
         retained = [canonical(asdict(item)) for item in self.fixture.ud_rows["test"] if item.identifier == "ud:test:2"]
         retained += [canonical(asdict(item)) for item in self.fixture.technical_rows["test"] if item.identifier == "tech:test:3"]
         with gzip.open(self.output / "test.jsonl.gz", "rb") as stream:
@@ -374,11 +391,11 @@ class PrefixExposureReconciliationTests(unittest.TestCase):
         self.assertEqual(sum(item.identifier == "ud:quarantine" for item in rows), 1)
         self.assertEqual([item.identifier for item in load_split(self.output, "test")], ["ud:test:2", "tech:test:3"])
         for split in ("train", "development", "calibration"):
-            self.assertEqual(len(load_split(self.output, split)), 2)
+            self.assertEqual(len(load_split(self.output, split)), FIXTURE_ROWS_PER_SPLIT)
         self.assertEqual(manifest["namespace"], "ud")
         splits = cast(dict[str, dict[str, object]], manifest["splits"])
-        self.assertEqual(splits["test"]["rows"], 2)
-        self.assertEqual(splits["quarantine"]["rows"], 8)
+        self.assertEqual(splits["test"]["rows"], FIXTURE_ROWS_PER_SPLIT)
+        self.assertEqual(splits["quarantine"]["rows"], QUARANTINE_ROWS_AFTER_TRANSFER)
         self.assertEqual(splits["quarantine"]["gzip_members_from"], ["base", "technical", REASON])
         self.assertEqual(cast(dict[str, object], manifest["exposure_reconciliation"])["summary"], plan.summary)
         self.assertEqual(manifest["test_membership_sha256"], checksum(self.output / "test-membership.json"))
@@ -401,7 +418,7 @@ class PrefixExposureReconciliationTests(unittest.TestCase):
         technical_member = members(self.fixture.parent / "test.jsonl.gz")[1]
         self.assertEqual(members(self.output / "test.jsonl.gz")[1], technical_member)
         self.assertEqual(cast(dict[str, dict[str, object]], manifest["splits"])["test"]["members_rewritten"], ["base"])
-        self.assertEqual(plan.summary["units_by_origin"], {"ud": 2, "technical": 0})
+        self.assertEqual(plan.summary["units_by_origin"], {"ud": EXPOSED_UNITS_PER_ORIGIN, "technical": 0})
 
     def test_fake_disjoint_flags_do_not_hide_actual_alias_overlap(self) -> None:
         self.fixture.write_inventory({"disjoint": True, "collisions": []})
@@ -412,7 +429,7 @@ class PrefixExposureReconciliationTests(unittest.TestCase):
         self.fixture.repin(self.fixture.technical, path.name, "family_aliases_sha256")
         self.fixture.rebuild_parent()
         plan = self.fixture.plan()
-        self.assertEqual(plan.summary["units_by_origin"], {"ud": 2, "technical": 2})
+        self.assertEqual(plan.summary["units_by_origin"], {"ud": EXPOSED_UNITS_PER_ORIGIN, "technical": EXPOSED_UNITS_PER_ORIGIN})
 
     def test_collision_cross_check_must_match_re_derived_units(self) -> None:
         stale = self.fixture.root / "stale.json"
@@ -422,7 +439,7 @@ class PrefixExposureReconciliationTests(unittest.TestCase):
 
     def test_tampered_inventory_sidecar_or_source_is_rejected_before_output_exists(self) -> None:
         with self.assertRaisesRegex(ValueError, "inventory checksum"):
-            self.fixture.plan(inventory_sha256="0" * 64)
+            self.fixture.plan(inventory_sha256="0" * SHA256_HEX_LENGTH)
         self.fixture.write_inventory({"aliases_sha256": [digest("alias:unrelated")]})
         with self.assertRaisesRegex(ValueError, "inventory alias"):
             self.fixture.plan()
@@ -464,7 +481,7 @@ class PrefixExposureReconciliationTests(unittest.TestCase):
             self.fixture.plan()
         loose = json.dumps(asdict(rows[1]), ensure_ascii=False).encode() + b"\n"
         self.assertNotEqual(loose, canonical(asdict(rows[1])))
-        self.fixture.rewrite_ud_test([canonical(asdict(rows[0])), loose, *(canonical(asdict(item)) for item in rows[2:])], rows)
+        self.fixture.rewrite_ud_test([canonical(asdict(rows[0])), loose, *(canonical(asdict(item)) for item in rows[REMAINING_ROWS_START_INDEX:])], rows)
         with self.assertRaisesRegex(ValueError, "canonical"):
             self.fixture.plan()
 
@@ -507,10 +524,10 @@ class PrefixExposureReconciliationTests(unittest.TestCase):
         with redirect_stdout(output):
             self.assertEqual(transfer.main(arguments), 0)
         printed = output.getvalue()
-        self.assertEqual(json.loads(printed)["summary"]["moved_rows"], 6)
+        self.assertEqual(json.loads(printed)["summary"]["moved_rows"], TOTAL_MOVED_ROWS)
         self.assertFalse(self.output.exists())
         preview = json.loads(report.read_bytes())
-        self.assertEqual(preview["summary"]["retained_test_rows"], 2)
+        self.assertEqual(preview["summary"]["retained_test_rows"], FIXTURE_ROWS_PER_SPLIT)
         blob = printed + report.read_text(encoding="utf-8") + canonical(preview).decode()
         for word in SECRET_WORDS:
             self.assertNotIn(word, blob)
@@ -529,7 +546,7 @@ class PrefixExposureReconciliationTests(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue())["status"], "blind-reconciliation-failed")
         self.assertNotIn("PRIVATE_TEST_TEXT", output.getvalue())
         output = io.StringIO()
-        with patch.object(transfer, "reconcile", side_effect=PermissionError(13, "denied", "/fixture")), redirect_stdout(output):
+        with patch.object(transfer, "reconcile", side_effect=PermissionError(errno.EACCES, "denied", "/fixture")), redirect_stdout(output):
             self.assertEqual(transfer.main(arguments), 1)
         self.assertEqual(json.loads(output.getvalue())["status"], "access-denied")
         with redirect_stdout(io.StringIO()):
@@ -549,7 +566,7 @@ class PrefixExposureGuardTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "invalid gzip member"):
             transfer.gzip_members(damaged)
         truncated = self.fixture.root / "truncated.gz"
-        truncated.write_bytes(gzip.compress(b"a\n" * 64, mtime=0)[:-6])
+        truncated.write_bytes(gzip.compress(b"a\n" * FIXTURE_LINE_REPEAT_COUNT, mtime=0)[:-TRUNCATED_TRAILING_BYTES])
         with self.assertRaisesRegex(ValueError, "truncated gzip member"):
             transfer.gzip_members(truncated)
         with self.assertRaisesRegex(ValueError, "newline"):
@@ -559,7 +576,7 @@ class PrefixExposureGuardTests(unittest.TestCase):
         self.assertEqual(transfer.raw_lines(b""), ())
 
     def test_inventory_identity_attestation_and_split_names_are_required(self) -> None:
-        self.fixture.write_inventory({"schema_version": 2})
+        self.fixture.write_inventory({"schema_version": INVALID_SCHEMA_VERSION})
         with self.assertRaisesRegex(ValueError, "inventory identity"):
             self.fixture.plan()
         self.fixture.write_inventory({"test_json_opened": True})
@@ -594,7 +611,7 @@ class PrefixExposureGuardTests(unittest.TestCase):
             self.fixture.plan()
         self.fixture.rebuild_parent()
         self.fixture.edit_parent_manifest(
-            lambda manifest: cast(dict[str, dict[str, object]], cast(list[dict[str, object]], manifest["origins"])[0]["splits"])["train"].update(rows=9))
+            lambda manifest: cast(dict[str, dict[str, object]], cast(list[dict[str, object]], manifest["origins"])[0]["splits"])["train"].update(rows=MISMATCHED_TRAIN_ROWS))
         with self.assertRaisesRegex(ValueError, "split records differ"):
             self.fixture.plan()
         self.fixture.rebuild_parent()
@@ -607,7 +624,7 @@ class PrefixExposureGuardTests(unittest.TestCase):
             self.fixture.plan()
         self.fixture.rebuild_parent()
         self.fixture.edit_parent_manifest(
-            lambda manifest: cast(dict[str, dict[str, object]], manifest["splits"])["train"].update(content_sha256="0" * 64))
+            lambda manifest: cast(dict[str, dict[str, object]], manifest["splits"])["train"].update(content_sha256="0" * SHA256_HEX_LENGTH))
         with self.assertRaisesRegex(ValueError, "content differs"):
             self.fixture.plan()
 

@@ -24,12 +24,56 @@ from keyswitch.config import DEFAULTS, SettingsStore
 from keyswitch.history import HistoryStore
 from keyswitch.learning import LearningStore
 from keyswitch.tray import ITEM_INTERFACE, MENU_INTERFACE, MENU_PATH, OBJECT_PATH
-from keyswitch.x11_backend import XKB_USE_CORE_KBD, XkbStateRec, _Libraries
+from keyswitch.x11_backend import BACKSPACE_KEYSYM, XKB_USE_CORE_KBD, XkbStateRec, _Libraries
 
 
 WATCHER_BUS_NAME = "org.kde.StatusNotifierWatcher"
 WATCHER_INTERFACE = "org.kde.StatusNotifierWatcher"
 WATCHER_PATH = "/StatusNotifierWatcher"
+
+# X11 keysyms this driver taps directly; BackSpace already has a name in
+# src/keyswitch/x11_backend.py and is imported above instead of repeated here.
+XK_CONTROL_L = 0xFFE3
+XK_PAUSE = 0xFF13
+XK_RETURN = 0xFF0D
+
+# XTestFakeKeyEvent's last argument is a delay in milliseconds before the
+# event plays; these are the values the packaged E2E has always used.
+FAKE_KEY_PRESS_DELAY_MS = 18
+FAKE_KEY_RELEASE_DELAY_MS = 8
+
+DBUS_CALL_TIMEOUT_SECONDS = 10
+GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 8
+FORCED_SHUTDOWN_TIMEOUT_SECONDS = 3
+
+TEST_WINDOW_WIDTH = 520
+TEST_WINDOW_HEIGHT = 120
+ENTRY_MARGIN_PIXELS = 24
+
+OVERALL_TIMEOUT_SECONDS = 50
+APPLICATION_POLL_INTERVAL_MS = 100
+TRAY_READY_TO_TYPING_DELAY_MS = 300
+BETWEEN_CASES_DELAY_MS = 200
+# Time to let a correction/learning prompt settle before the next check.
+CORRECTION_SETTLE_DELAY_MS = 900
+LEARNING_CONFIRMATION_DELAY_MS = 500
+
+# (name, source group, physical keys, expected text, expected group, delay
+# before verifying, in ms) for each scripted native-package typing scenario.
+TYPING_CASES = (
+    ("EN pause correction", 0, "ghbdtn", "привет", 1, 2300),
+    ("RU keys to English", 1, "hello ", "hello ", 0, 1000),
+    ("punctuation key is a Russian letter", 0, ",fpf ", "база ", 1, 1000),
+    ("return to EN before punctuation test", 1, "hello ", "hello ", 0, 1000),
+    # Ambiguous punctuation now waits for the default 1.5-second idle boundary.
+    ("punctuation boundary keeps its glyph", 0, "ghbdtn,", "привет,", 1, 2300),
+    ("manual layout switch protects next word", 0, "ghbdtn ", "ghbdtn ", 0, 1000),
+    ("manual protection is consumed once", 0, "ghbdtn ", "привет ", 1, 1000),
+    ("short Russian word switches to English", 1, "if ", "if ", 0, 1000),
+    ("manual Russian selection protects short word", 1, "if ", "ша ", 1, 1000),
+    ("short-word protection is consumed once", 1, "if ", "if ", 0, 1000),
+    ("context resolves a short word with the next word", 0, "e 'njuj ", "у этого ", 1, 1200),
+)
 
 
 class TestWatcher(dbus.service.Object):
@@ -62,16 +106,16 @@ class PhysicalTyper:
             keycode = int(self.libraries.x11.XKeysymToKeycode(self.display, keysym))
             if not keycode:
                 raise RuntimeError(f"No X11 keycode for {character!r}")
-            self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 1, 18)
-            self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 0, 8)
+            self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 1, FAKE_KEY_PRESS_DELAY_MS)
+            self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 0, FAKE_KEY_RELEASE_DELAY_MS)
         self.libraries.x11.XSync(self.display, 0)
 
     def tap_keysym(self, keysym: int) -> None:
         keycode = int(self.libraries.x11.XKeysymToKeycode(self.display, keysym))
         if not keycode:
             raise RuntimeError(f"No X11 keycode for keysym {keysym:#x}")
-        self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 1, 18)
-        self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 0, 8)
+        self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 1, FAKE_KEY_PRESS_DELAY_MS)
+        self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, 0, FAKE_KEY_RELEASE_DELAY_MS)
         self.libraries.x11.XSync(self.display, 0)
 
     def current_group(self) -> int:
@@ -85,11 +129,11 @@ class PhysicalTyper:
 
     def clear_field(self) -> None:
         """Clear through real input so the packaged observer sees the edit."""
-        control = int(self.libraries.x11.XKeysymToKeycode(self.display, 0xFFE3))
+        control = int(self.libraries.x11.XKeysymToKeycode(self.display, XK_CONTROL_L))
         letter_a = int(self.libraries.x11.XKeysymToKeycode(self.display, ord("a")))
         for keycode, pressed in ((control, 1), (letter_a, 1), (letter_a, 0), (control, 0)):
-            self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, pressed, 8)
-        self.tap_keysym(0xFF08)
+            self.libraries.xtst.XTestFakeKeyEvent(self.display, keycode, pressed, FAKE_KEY_RELEASE_DELAY_MS)
+        self.tap_keysym(BACKSPACE_KEYSYM)
 
     def switch_group(self, group: int) -> None:
         if not self.libraries.x11.XkbLockGroup(
@@ -127,7 +171,7 @@ def dbus_call(destination: str, object_path: str, method: str, *args: str) -> st
         check=False,
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=DBUS_CALL_TIMEOUT_SECONDS,
     )
     if completed.returncode:
         raise RuntimeError(completed.stderr.strip() or completed.stdout.strip())
@@ -140,10 +184,10 @@ def stop_process(process: subprocess.Popen[str]) -> tuple[str, str]:
     if process.poll() is None:
         process.send_signal(signal.SIGTERM)
     try:
-        stdout, stderr = process.communicate(timeout=8)
+        stdout, stderr = process.communicate(timeout=GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
         process.kill()
-        stdout, stderr = process.communicate(timeout=3)
+        stdout, stderr = process.communicate(timeout=FORCED_SHUTDOWN_TIMEOUT_SECONDS)
     return stdout, stderr
 
 
@@ -200,27 +244,14 @@ def main() -> int:
     result = NativeResult()
     loop = GLib.MainLoop()
     original_group = typer.current_group()
-    cases = (
-        ("EN pause correction", 0, "ghbdtn", "привет", 1, 2300),
-        ("RU keys to English", 1, "hello ", "hello ", 0, 1000),
-        ("punctuation key is a Russian letter", 0, ",fpf ", "база ", 1, 1000),
-        ("return to EN before punctuation test", 1, "hello ", "hello ", 0, 1000),
-        # Ambiguous punctuation now waits for the default 1.5-second idle boundary.
-        ("punctuation boundary keeps its glyph", 0, "ghbdtn,", "привет,", 1, 2300),
-        ("manual layout switch protects next word", 0, "ghbdtn ", "ghbdtn ", 0, 1000),
-        ("manual protection is consumed once", 0, "ghbdtn ", "привет ", 1, 1000),
-        ("short Russian word switches to English", 1, "if ", "if ", 0, 1000),
-        ("manual Russian selection protects short word", 1, "if ", "ша ", 1, 1000),
-        ("short-word protection is consumed once", 1, "if ", "if ", 0, 1000),
-        ("context resolves a short word with the next word", 0, "e 'njuj ", "у этого ", 1, 1200),
-    )
+    cases = TYPING_CASES
     window = Gtk.Window(title="KeySwitch native package E2E")
-    window.set_default_size(520, 120)
+    window.set_default_size(TEST_WINDOW_WIDTH, TEST_WINDOW_HEIGHT)
     entry = Gtk.Entry(placeholder_text="Native package E2E input")
-    entry.set_margin_top(24)
-    entry.set_margin_bottom(24)
-    entry.set_margin_start(24)
-    entry.set_margin_end(24)
+    entry.set_margin_top(ENTRY_MARGIN_PIXELS)
+    entry.set_margin_bottom(ENTRY_MARGIN_PIXELS)
+    entry.set_margin_start(ENTRY_MARGIN_PIXELS)
+    entry.set_margin_end(ENTRY_MARGIN_PIXELS)
     window.set_child(entry)
     window.present()
     entry.grab_focus()
@@ -280,7 +311,7 @@ def main() -> int:
         failed = [name for name, passed in checks.items() if not passed]
         if failed:
             return fail(f"packaged tray checks failed: {', '.join(failed)}")
-        GLib.timeout_add(300, type_case, 0)
+        GLib.timeout_add(TRAY_READY_TO_TYPING_DELAY_MS, type_case, 0)
         return GLib.SOURCE_REMOVE
 
     def type_case(index: int) -> bool:
@@ -314,7 +345,7 @@ def main() -> int:
         if actual_text != expected_text or actual_group != expected_group:
             return fail(f"wrong correction in {name!r}")
         if index + 1 < len(cases):
-            GLib.timeout_add(200, type_case, index + 1)
+            GLib.timeout_add(BETWEEN_CASES_DELAY_MS, type_case, index + 1)
             return GLib.SOURCE_REMOVE
         actual_history = [
             (item.original, item.replacement) for item in history.read()
@@ -336,7 +367,7 @@ def main() -> int:
         ]
         if actual_history != expected_history:
             return fail(f"wrong correction history: {actual_history!r}")
-        GLib.timeout_add(200, start_learning_case)
+        GLib.timeout_add(BETWEEN_CASES_DELAY_MS, start_learning_case)
         return GLib.SOURCE_REMOVE
 
     def start_learning_case() -> bool:
@@ -346,10 +377,10 @@ def main() -> int:
             entry.grab_focus()
             typer.clear_field()
             typer.type("hello")
-            typer.tap_keysym(0xFF13)
+            typer.tap_keysym(XK_PAUSE)
         except (OSError, RuntimeError) as error:
             return fail(f"cannot start packaged learning scenario: {error}")
-        GLib.timeout_add(900, confirm_learning_prompt)
+        GLib.timeout_add(CORRECTION_SETTLE_DELAY_MS, confirm_learning_prompt)
         return GLib.SOURCE_REMOVE
 
     def confirm_learning_prompt() -> bool:
@@ -359,10 +390,10 @@ def main() -> int:
                 f"text={entry.get_text()!r} group={typer.current_group()}"
             )
         try:
-            typer.tap_keysym(0xFF0D)
+            typer.tap_keysym(XK_RETURN)
         except RuntimeError as error:
             return fail(f"cannot confirm packaged learning prompt: {error}")
-        GLib.timeout_add(500, verify_learning_confirmation)
+        GLib.timeout_add(LEARNING_CONFIRMATION_DELAY_MS, verify_learning_confirmation)
         return GLib.SOURCE_REMOVE
 
     def verify_learning_confirmation() -> bool:
@@ -378,7 +409,7 @@ def main() -> int:
             typer.type("hello ")
         except (OSError, RuntimeError) as error:
             return fail(f"cannot type the learned packaged word: {error}")
-        GLib.timeout_add(900, verify_manual_override_of_learned_rule)
+        GLib.timeout_add(CORRECTION_SETTLE_DELAY_MS, verify_manual_override_of_learned_rule)
         return GLib.SOURCE_REMOVE
 
     def verify_manual_override_of_learned_rule() -> bool:
@@ -394,7 +425,7 @@ def main() -> int:
             typer.type("hello ")
         except (OSError, RuntimeError) as error:
             return fail(f"cannot repeat the learned packaged word: {error}")
-        GLib.timeout_add(900, verify_learned_rule)
+        GLib.timeout_add(CORRECTION_SETTLE_DELAY_MS, verify_learned_rule)
         return GLib.SOURCE_REMOVE
 
     def verify_learned_rule() -> bool:
@@ -430,8 +461,8 @@ def main() -> int:
         loop.quit()
         return GLib.SOURCE_REMOVE
 
-    GLib.timeout_add_seconds(50, abort_on_timeout)
-    GLib.timeout_add(100, wait_for_application)
+    GLib.timeout_add_seconds(OVERALL_TIMEOUT_SECONDS, abort_on_timeout)
+    GLib.timeout_add(APPLICATION_POLL_INTERVAL_MS, wait_for_application)
     captured_stdout = ""
     captured_stderr = ""
     captured_log = ""

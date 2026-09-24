@@ -15,6 +15,12 @@ LOCK_MASK = 1 << 1
 CONTROL_MASK = 1 << 2
 ALT_MASK = 1 << 3
 SUPER_MASK = 1 << 6
+# A layout switch requested from the operating system is asynchronous: a native
+# backend polls for the new layout at this step, and gives up after the timeout.
+LAYOUT_SWITCH_TIMEOUT_SECONDS = 0.5
+LAYOUT_SWITCH_POLL_SECONDS = 0.01
+# The keyboard event pair (down, up) `complete_action` sends for one key.
+COMPLETED_ACTION_EVENT_COUNT = 2
 KeyDisposition = bool | Literal["defer"]
 
 

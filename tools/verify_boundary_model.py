@@ -11,6 +11,11 @@ from context_evidence import checksum
 from train_boundary_model import DIRECTORY, provenance
 from verify_context_v2 import read_object
 
+# Independently re-checked against the sealed report, not imported from the
+# frozen tools/train_boundary_model.py that first declared this gate.
+BOUNDARY_PROMOTION_MIN_DECIDED_FRACTION = 0.80
+VERIFY_REPORT_JSON_INDENT = 2
+
 
 def verify(directory: Path = DIRECTORY, active: Path = ARTIFACT) -> dict[str, object]:
     seal = read_object(directory / "seal.json")
@@ -20,7 +25,9 @@ def verify(directory: Path = DIRECTORY, active: Path = ARTIFACT) -> dict[str, ob
         raise ValueError("boundary candidate/provenance changed")
     if report.get("seal_sha256") != checksum(directory / "seal.json") or report.get("candidate_sha256") != seal.get("candidate_sha256"):
         raise ValueError("boundary test identity changed")
-    if seal.get("promotion_gates") != {"test_errors_max": 0, "test_decided_fraction_min": .80}:
+    if seal.get("promotion_gates") != {
+        "test_errors_max": 0, "test_decided_fraction_min": BOUNDARY_PROMOTION_MIN_DECIDED_FRACTION
+    }:
         raise ValueError("boundary promotion gates changed")
     metrics = report.get("test")
     if not isinstance(metrics, dict):
@@ -36,7 +43,7 @@ def verify(directory: Path = DIRECTORY, active: Path = ARTIFACT) -> dict[str, ob
             or counts["literal"] + counts["word"] != counts["rows"]
             or counts["lost_punctuation"] + counts["split_word"] != counts["errors"]):
         raise ValueError("inconsistent boundary counts")
-    accepted = counts["errors"] == 0 and counts["correct"] / counts["rows"] >= .80
+    accepted = counts["errors"] == 0 and counts["correct"] / counts["rows"] >= BOUNDARY_PROMOTION_MIN_DECIDED_FRACTION
     if report.get("accepted") is not accepted:
         raise ValueError("boundary promotion contradicts metrics")
     if active.exists() and (not accepted or checksum(active) != seal["candidate_sha256"]):
@@ -45,4 +52,4 @@ def verify(directory: Path = DIRECTORY, active: Path = ARTIFACT) -> dict[str, ob
 
 
 if __name__ == "__main__":
-    print(json.dumps(verify(), ensure_ascii=False, indent=2))
+    print(json.dumps(verify(), ensure_ascii=False, indent=VERIFY_REPORT_JSON_INDENT))

@@ -21,7 +21,7 @@ import unittest
 from collections.abc import Callable
 from typing import NoReturn, TypeVar
 
-from keyswitch.context_model import ContextModel
+from keyswitch.context_model import FEATURE_VERSION, ContextModel
 
 # NoReturn is the bottom type, so any one-argument test method satisfies the bound
 # (parameters are contravariant) without an explicit Any in the signature.
@@ -30,7 +30,7 @@ T = TypeVar("T", bound=Callable[[NoReturn], None])
 
 def installed_pair_is_disclosed() -> bool:
     model, _status = ContextModel.try_load()
-    return model is None or model.feature_version == 2
+    return model is None or model.feature_version == FEATURE_VERSION
 
 
 def disclosed_installed_pair_regression(test: T) -> T:

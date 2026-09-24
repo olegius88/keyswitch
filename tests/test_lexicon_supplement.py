@@ -15,14 +15,21 @@ from keyswitch.language_model import LanguageModel
 from keyswitch.lexicon_supplement import SUPPLEMENT_ROOT, supplement_words
 
 RESOURCE = SUPPLEMENT_ROOT / "lexicon-supplement-ru_RU.json"
+PINNED_SOURCE_SHA256_PREFIX_HEX_CHARS = 16
+MINIMUM_SELECTION_COUNT = 10
+INVALID_SCHEMA_VERSION = 2
+TINY_MAX_SUPPLEMENT_BYTES = 16
 
 
 class LexiconSupplementTests(unittest.TestCase):
     def test_packaged_supplement_is_the_pinned_derivation(self) -> None:
         payload = json.loads(RESOURCE.read_bytes())
         self.assertEqual((payload["schema_version"], payload["locale"], payload["name"]), (1, "ru_RU", "opensubtitles-2018-ru-full-min10-outside-onboard-v3"))
-        self.assertEqual(payload["source"]["sha256"], "32dfd94138aea266" + payload["source"]["sha256"][16:])
-        self.assertEqual(payload["selection"]["minimum_count"], 10)
+        self.assertEqual(
+            payload["source"]["sha256"],
+            "32dfd94138aea266" + payload["source"]["sha256"][PINNED_SOURCE_SHA256_PREFIX_HEX_CHARS:],
+        )
+        self.assertEqual(payload["selection"]["minimum_count"], MINIMUM_SELECTION_COUNT)
         self.assertEqual(payload["base_lexicon"]["sha256"], hashlib.sha256((Path(__file__).resolve().parents[1] / "model/intent_v1/sources/ru_RU.lm").read_bytes()).hexdigest())
         words = supplement_words("ru_RU")
         self.assertEqual(len(words), payload["selection"]["selected"])
@@ -56,7 +63,7 @@ class LexiconSupplementTests(unittest.TestCase):
 
     def test_malformed_supplements_are_rejected_not_ignored(self) -> None:
         valid = {"schema_version": 1, "locale": "ru_RU", "words": ["абв", "где"]}
-        for broken in ({**valid, "schema_version": 2}, {**valid, "locale": "en_US"}, {**valid, "words": ["где", "абв"]},
+        for broken in ({**valid, "schema_version": INVALID_SCHEMA_VERSION}, {**valid, "locale": "en_US"}, {**valid, "words": ["где", "абв"]},
                        {**valid, "words": ["абв", "абв"]}, {**valid, "words": ["abc"]}, {**valid, "words": ["ы"]},  # a letter, not one of the eight words
                        {**valid, "words": ["аб1"]}, {**valid, "words": []}):
             with self.subTest(broken=broken):
@@ -66,7 +73,7 @@ class LexiconSupplementTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         supplement_words("ru_RU")
         supplement_words.cache_clear()
-        with patch("keyswitch.lexicon_supplement.MAX_SUPPLEMENT_BYTES", 16), self.assertRaises(ValueError):
+        with patch("keyswitch.lexicon_supplement.MAX_SUPPLEMENT_BYTES", TINY_MAX_SUPPLEMENT_BYTES), self.assertRaises(ValueError):
             supplement_words("ru_RU")
         supplement_words.cache_clear()
         with patch.object(Path, "is_file", return_value=False):

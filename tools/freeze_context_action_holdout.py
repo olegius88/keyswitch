@@ -19,6 +19,7 @@ import argparse
 import gzip
 import hashlib
 import heapq
+from http import HTTPStatus
 import json
 import re
 import shutil
@@ -80,6 +81,15 @@ TATOEBA_BASE = "https://downloads.tatoeba.org/exports/per_language/"
 # SHA-256 instead of a commit. Sentences are independent: each is its own document.
 TATOEBA_TOKEN = re.compile(r"[^\W_]+(?:['\u2019\-][^\W_]+)*|[^\w\s]|_")
 TATOEBA_SAMPLE_PER_MILLE = 40
+PER_MILLE_SCALE = 1000
+TATOEBA_EXPORT_COLUMNS = 3
+MAX_TATOEBA_SENTENCE_CHARACTERS = 400
+# A deterministic hash prefix turned into an integer for reproducible sampling.
+SAMPLING_DIGEST_HEX_PREFIX_CHARS = 16
+SAMPLING_DIGEST_BASE = 16
+FAMILY_MEMBER_CAP = 2
+DEFAULT_MAX_DOCUMENTS = 2000
+DEFAULT_MAX_SENTENCES_PER_DOCUMENT = 12
 # RPM repositories the freezer accepts, by the base URL their receipt records:
 # (source label, document prefix, human description).
 # Rawhide is Fedora's rolling branch: a different package set from the numbered release,
@@ -168,7 +178,7 @@ def read_tatoeba(path: Path, source: str, language: str, namespace: str,
     """
     import bz2
 
-    if not 1 <= per_mille <= 1000:
+    if not 1 <= per_mille <= PER_MILLE_SCALE:
         raise ValueError("per-mille sample out of range")
     with bz2.open(path, "rt", encoding="utf-8") as stream:
         for raw in stream:
@@ -176,15 +186,15 @@ def read_tatoeba(path: Path, source: str, language: str, namespace: str,
             if not line:
                 continue
             columns = line.split("\t")
-            if len(columns) != 3 or not columns[0].isdigit():
+            if len(columns) != TATOEBA_EXPORT_COLUMNS or not columns[0].isdigit():
                 raise ValueError("Tatoeba export line must be id, language, text: " + path.name)
             identifier, declared, text = columns
             if declared != language:
                 raise ValueError(f"Tatoeba export {path.name} holds a {declared} sentence")
             text = " ".join(text.split())
-            if not text or len(text) > 400:
+            if not text or len(text) > MAX_TATOEBA_SENTENCE_CHARACTERS:
                 continue
-            if int(digest(namespace + ":tatoeba:" + identifier)[:16], 16) % 1000 >= per_mille:
+            if int(digest(namespace + ":tatoeba:" + identifier)[:SAMPLING_DIGEST_HEX_PREFIX_CHARS], SAMPLING_DIGEST_BASE) % PER_MILLE_SCALE >= per_mille:
                 continue
             yield tatoeba_sentence(identifier, language, text, source, path.name)
 
@@ -204,7 +214,7 @@ def verified_tatoeba_source(directory: Path, languages: Sequence[str]) -> tuple[
         name = f"{language}_sentences.tsv.bz2"
         entry = files.get(name)
         path = directory / name
-        if (not isinstance(entry, dict) or entry.get("status") != 200 or entry.get("language") != language
+        if (not isinstance(entry, dict) or entry.get("status") != HTTPStatus.OK or entry.get("language") != language
                 or entry.get("url") != TATOEBA_BASE + f"{language}/{name}"
                 or checksum(path) != entry.get("sha256") or path.stat().st_size != entry.get("bytes")):
             raise ValueError("Tatoeba export receipt mismatch: " + name)
@@ -237,7 +247,7 @@ def select_holdout_sentences(sentences: Sequence[Sentence], namespace: str, max_
         by_key[key] = sentence
         counts[sentence.source] += 1
         heap = heaps[sentence.source].setdefault(sentence.document, [])
-        rank = int(digest(namespace + ":sample:" + sentence.document + ":" + sentence.identifier), 16)
+        rank = int(digest(namespace + ":sample:" + sentence.document + ":" + sentence.identifier), SAMPLING_DIGEST_BASE)
         item = (-rank, sentence.filename + "\0" + sentence.identifier)
         if len(heap) < max_sentences:
             heapq.heappush(heap, item)
@@ -466,7 +476,7 @@ def technical_holdout_rows(commands: Sequence[Command], exclusions: Exclusions, 
     for item in records:
         members[families[item.name]].append(item.name)
     retained = {name for names in members.values()
-                for name in sorted(names, key=lambda value: digest(namespace + ":family-cap:" + command_identifier(value, source)))[:2]}
+                for name in sorted(names, key=lambda value: digest(namespace + ":family-cap:" + command_identifier(value, source)))[:FAMILY_MEMBER_CAP]}
     family_hashes: dict[str, set[str]] = defaultdict(set)
     for item in records:
         family_hashes[families[item.name]].update(aliases[item.name])
@@ -486,7 +496,7 @@ def technical_holdout_rows(commands: Sequence[Command], exclusions: Exclusions, 
             split="quarantine" if reasons else "test", quarantine_reasons=tuple(reasons)))
     return rows, {"commands_in_index": len(commands), "commands_outside_lexicon": len(records), "families": len(members),
                   "test_rows": sum(row.split == "test" for row in rows), "test_families": len({row.family for row in rows if row.split == "test"}),
-                  "test_documents": len({row.document for row in rows if row.split == "test"}), "family_cap": 2,
+                  "test_documents": len({row.document for row in rows if row.split == "test"}), "family_cap": FAMILY_MEMBER_CAP,
                   "quarantine_reasons": dict(reasons_count)}
 
 
@@ -498,7 +508,7 @@ def verified_sid_source(directory: Path) -> tuple[Path, dict[str, str], dict[str
     release_data = receipt.get("release")
     contents_url = data.get("url") if isinstance(data, dict) else None
     if (not isinstance(data, dict) or not isinstance(release_data, dict)
-            or data.get("status") != 200 or release_data.get("status") != 200
+            or data.get("status") != HTTPStatus.OK or release_data.get("status") != HTTPStatus.OK
             or receipt.get("tls_certificate_verification") is not True
             or not isinstance(contents_url, str) or contents_url not in DEB_SOURCES
             or release_data.get("url") != DEB_SOURCES[contents_url][0]):
@@ -579,7 +589,7 @@ def verified_arch_source(directory: Path) -> tuple[list[tuple[str, Path]], dict[
         entry = cast(dict[str, object], databases[repository]) if isinstance(databases[repository], dict) else {}
         download = cast(dict[str, object], entry.get("download")) if isinstance(entry.get("download"), dict) else {}
         path = directory / f"{repository}.files"
-        if (download.get("status") != 200 or download.get("url") != f"{ARCH_MIRROR}{repository}/os/x86_64/{repository}.files"
+        if (download.get("status") != HTTPStatus.OK or download.get("url") != f"{ARCH_MIRROR}{repository}/os/x86_64/{repository}.files"
                 or entry.get("file") != f"{repository}.files"):
             raise ValueError("source receipt does not identify the " + repository + " files database download")
         if checksum(path) != entry.get("sha256") or path.stat().st_size != entry.get("bytes"):
@@ -605,14 +615,14 @@ def read_alpine_commands(archive: Path) -> list[Command]:
     package = ""
     for line in text.splitlines():
         if line.startswith("P:"):
-            package = line[2:].strip()
+            package = line[len("P:"):].strip()
         elif line.startswith("p:") and package:
             if re.fullmatch(r"[A-Za-z0-9@._+-]+", package) is None:
                 raise ValueError("invalid package name in the Alpine index: " + package)
-            for token in line[2:].split():
+            for token in line[len("p:"):].split():
                 if not token.startswith("cmd:"):
                     continue
-                name = token[4:].split("=")[0]
+                name = token[len("cmd:"):].split("=")[0]
                 if re.fullmatch(r"[a-z]{3,16}", name) is None:
                     continue
                 paths[name].add("usr/bin/" + name)
@@ -627,7 +637,7 @@ def verified_alpine_source(directory: Path) -> tuple[Path, dict[str, str], dict[
     archive = directory / "APKINDEX.tar.gz"
     entry = receipt.get("archive")
     base_url = receipt.get("base_url")
-    if (not isinstance(entry, dict) or entry.get("status") != 200
+    if (not isinstance(entry, dict) or entry.get("status") != HTTPStatus.OK
             or receipt.get("tls_certificate_verification") is not True
             or not isinstance(base_url, str) or base_url not in ALPINE_SOURCES
             or entry.get("url") != base_url + "APKINDEX.tar.gz"):
@@ -697,7 +707,7 @@ def verified_fedora_source(directory: Path) -> tuple[Path, dict[str, str], dict[
     base_url = receipt.get("base_url")
     if (not isinstance(entry, dict) or not isinstance(release, dict)
             or receipt.get("tls_certificate_verification") is not True
-            or not isinstance(base_url, str) or base_url not in RPM_SOURCES or release.get("status") != 200):
+            or not isinstance(base_url, str) or base_url not in RPM_SOURCES or release.get("status") != HTTPStatus.OK):
         raise ValueError("source receipt does not identify verified TLS RPM index downloads")
     if checksum(repomd) != receipt.get("repomd_sha256") or checksum(primary) != entry.get("sha256"):
         raise ValueError("RPM index checksum mismatch")
@@ -794,7 +804,7 @@ def assemble(base: Path, output: Path, namespace: str, ud_rows: Sequence[CorpusR
             for line in stream:
                 raw_digest.update(line)
                 count += 1
-        if count != prefix_rows + sum(member[2] for member in members):
+        if count != prefix_rows + sum(member_count for _compressed, _raw, member_count in members):
             raise ValueError("assembled split row count mismatch: " + split)
         files[split] = {"path": path.name, "sha256": checksum(path), "content_sha256": raw_digest.hexdigest(), "rows": count}
     held = [row for row in (*ud_rows, *sid_rows) if row.split == "test"]
@@ -862,8 +872,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--extra-exposure", type=Path, action="append", default=[])
-    parser.add_argument("--max-documents", type=int, default=2000)
-    parser.add_argument("--max-sentences-per-document", type=int, default=12)
+    parser.add_argument("--max-documents", type=int, default=DEFAULT_MAX_DOCUMENTS)
+    parser.add_argument("--max-sentences-per-document", type=int, default=DEFAULT_MAX_SENTENCES_PER_DOCUMENT)
     args = parser.parse_args(argv)
     technical = [name for name, value in (("sid", args.sid_directory), ("arch", args.arch_directory),
                                           ("fedora", args.fedora_directory), ("alpine", args.alpine_directory))

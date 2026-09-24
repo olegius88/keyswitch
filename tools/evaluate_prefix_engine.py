@@ -43,6 +43,10 @@ from test_input_integrity import EditorBackend
 
 REPORT = DIRECTORY / "engine-report.json"
 PER_CATEGORY = 32
+MAX_RECORDED_FAILURES = 24
+SYNTHETIC_KEYCODE_BASE = 100
+SYNTHETIC_TIMESTAMP_BASE = 100
+EARLY_RESTORED_MINIMUM_RATIO = 0.7
 
 
 def provenance() -> dict[str, str]:
@@ -103,7 +107,7 @@ def replay(row: dict[str, object], model: PrefixModel | None, models: dict[int, 
                 other = pair.translate(char, "ru" if source else "us", "us" if source else "ru")
                 characters = (other, char) if source else (char, other)
                 observed = characters[backend.group]
-                event = KeyEvent(True, index + 100, "space" if observed == " " else observed, observed, characters, backend.group, 0, index + 100)
+                event = KeyEvent(True, index + SYNTHETIC_KEYCODE_BASE, "space" if observed == " " else observed, observed, characters, backend.group, 0, index + SYNTHETIC_TIMESTAMP_BASE)
                 backend.type(event)
                 engine._handle(event)
                 engine._handle(replace(event, pressed=False))
@@ -138,7 +142,7 @@ def evaluate(split: str) -> dict[str, object]:
                                    "early_restored": int(desired and exact and early),
                                    "length_mismatches": int(len(str(result["actual"])) != len(str(result["expected"]))),
                                    "injections": cast(int, result["injections"])})
-                    if not exact and len(failures) < 24:
+                    if not exact and len(failures) < MAX_RECORDED_FAILURES:
                         failures.append({"variant": name, "profile": context, "sequence": row["sequence"],
                                          "category": row["category"], "desired": desired, **result})
                 results.setdefault(context, {})[name] = dict(sorted(counts.items()))
@@ -147,7 +151,7 @@ def evaluate(split: str) -> dict[str, object]:
         variant["candidate"]["length_mismatches"] == 0
         and variant["candidate"]["changed_correct"] <= variant["shipping_no_prefix"]["changed_correct"]
         and variant["candidate"]["restored"] >= variant["shipping_no_prefix"]["restored"]
-        and variant["candidate"]["early_restored"] >= .7 * variant["candidate"]["desired"]
+        and variant["candidate"]["early_restored"] >= EARLY_RESTORED_MINIMUM_RATIO * variant["candidate"]["desired"]
         for variant in results.values()
     )
     if provenance() != runtime:

@@ -20,15 +20,42 @@ from gi.repository import Atspi, Gdk, GdkX11, GLib, Gtk
 from keyswitch import learning_prompt as prompt_module
 from keyswitch.backend import ScreenAnchor
 from keyswitch.engine import LearningPrompt
-from keyswitch.learning_prompt import LearningPromptWindow, focused_caret_anchor
+from keyswitch.learning_prompt import (
+    PROMPT_ANCHOR_GAP,
+    PROMPT_CENTER_DIVISOR,
+    PROMPT_WINDOW_WIDTH,
+    LearningPromptWindow,
+    focused_caret_anchor,
+)
 
 
 DISPLAY_AVAILABLE = bool(os.environ.get("DISPLAY")) and Gtk.init_check()
 
+# Accessible-text character-extents fixtures; expected anchors below are derived
+# from these, the same way focused_caret_anchor() derives them from the real ones.
+FOCUSED_RECT = SimpleNamespace(x=100, y=200, width=9, height=18)
+CHILD_RECT = SimpleNamespace(x=10, y=20, width=5, height=10)
+FOCUSED_CARET_OFFSET = 3
+CHILD_COUNT_WITH_NULL_SLOT = 2
+
+FIRST_SCREEN_ANCHOR = ScreenAnchor(500, 400, 77)
+CARET_OVERRIDE_WITH_BACKEND_ANCHOR = ScreenAnchor(700, 300)
+CARET_ONLY_ANCHOR = ScreenAnchor(10, 20)
+FALLBACK_ONLY_ANCHOR = ScreenAnchor(30, 40, 88)
+
+FIXTURE_WINDOW_HEIGHT_PIXELS = 80
+FIXTURE_WINDOW_ID = 123
+
+RETURN_KEYCODE = 36
+ESCAPE_KEYCODE = 9
+KEY_A_KEYCODE = 38
+DISMISS_CALLS_AFTER_ESCAPE_AND_STRAY_KEY = 2
+DISMISS_CALLS_AFTER_CLOSE_WITH_PROMPT = 3
+
 
 class FakePromptBackend:
     def __init__(self) -> None:
-        self.anchor: ScreenAnchor | None = ScreenAnchor(500, 400, 77)
+        self.anchor: ScreenAnchor | None = FIRST_SCREEN_ANCHOR
         self.positions: list[tuple[int, int, int]] = []
         self.restored: list[int | None] = []
 
@@ -122,18 +149,21 @@ class AccessibilityAnchorTests(unittest.TestCase):
         root.get_state_set.return_value.contains.return_value = True
         text = Mock()
         root.get_text_iface.return_value = text
-        text.get_caret_offset.return_value = 3
-        text.get_character_extents.return_value = SimpleNamespace(
-            x=100, y=200, width=9, height=18
-        )
+        text.get_caret_offset.return_value = FOCUSED_CARET_OFFSET
+        text.get_character_extents.return_value = FOCUSED_RECT
         with (
             patch.object(prompt_module, "_accessibility_bus_available", return_value=True),
             patch.object(Atspi, "get_desktop_count", return_value=1),
             patch.object(Atspi, "get_desktop", return_value=root),
         ):
-            self.assertEqual(focused_caret_anchor(), ScreenAnchor(109, 218))
+            self.assertEqual(
+                focused_caret_anchor(),
+                ScreenAnchor(FOCUSED_RECT.x + FOCUSED_RECT.width, FOCUSED_RECT.y + FOCUSED_RECT.height),
+            )
             text.get_caret_offset.return_value = 0
-            self.assertEqual(focused_caret_anchor(), ScreenAnchor(100, 218))
+            self.assertEqual(
+                focused_caret_anchor(), ScreenAnchor(FOCUSED_RECT.x, FOCUSED_RECT.y + FOCUSED_RECT.height)
+            )
 
     def test_tree_traversal_skips_null_children_and_has_a_safety_limit(self) -> None:
         child = Mock()
@@ -141,20 +171,20 @@ class AccessibilityAnchorTests(unittest.TestCase):
         child_text = Mock()
         child.get_text_iface.return_value = child_text
         child_text.get_caret_offset.return_value = 1
-        child_text.get_character_extents.return_value = SimpleNamespace(
-            x=10, y=20, width=5, height=10
-        )
+        child_text.get_character_extents.return_value = CHILD_RECT
         root = Mock()
         root.get_state_set.return_value.contains.return_value = False
         root.get_text_iface.return_value = None
-        root.get_child_count.return_value = 2
+        root.get_child_count.return_value = CHILD_COUNT_WITH_NULL_SLOT
         root.get_child_at_index.side_effect = [None, child]
         with (
             patch.object(prompt_module, "_accessibility_bus_available", return_value=True),
             patch.object(Atspi, "get_desktop_count", return_value=1),
             patch.object(Atspi, "get_desktop", return_value=root),
         ):
-            self.assertEqual(focused_caret_anchor(), ScreenAnchor(15, 30))
+            self.assertEqual(
+                focused_caret_anchor(), ScreenAnchor(CHILD_RECT.x + CHILD_RECT.width, CHILD_RECT.y + CHILD_RECT.height)
+            )
 
         loop = Mock()
         loop.get_state_set.return_value.contains.return_value = False
@@ -205,14 +235,19 @@ class LearningPromptWindowTests(unittest.TestCase):
             patch.object(
                 prompt_module,
                 "focused_caret_anchor",
-                return_value=ScreenAnchor(700, 300),
+                return_value=CARET_OVERRIDE_WITH_BACKEND_ANCHOR,
             ),
             patch.object(GLib, "idle_add") as idle,
             patch.object(self.window, "present") as present,
             patch.object(self.window, "grab_focus") as focus,
         ):
             self.window.show_prompt(self.prompt)
-        self.assertEqual(self.window.anchor, ScreenAnchor(700, 300, 77))
+        self.assertEqual(
+            self.window.anchor,
+            ScreenAnchor(
+                CARET_OVERRIDE_WITH_BACKEND_ANCHOR.x, CARET_OVERRIDE_WITH_BACKEND_ANCHOR.y, FIRST_SCREEN_ANCHOR.window
+            ),
+        )
         self.assertEqual(self.window.word.get_text(), "hello  →  руддщ")
         present.assert_called_once_with()
         focus.assert_called_once_with()
@@ -223,16 +258,16 @@ class LearningPromptWindowTests(unittest.TestCase):
             patch.object(
                 prompt_module,
                 "focused_caret_anchor",
-                return_value=ScreenAnchor(10, 20),
+                return_value=CARET_ONLY_ANCHOR,
             ),
             patch.object(GLib, "idle_add"),
             patch.object(self.window, "present"),
             patch.object(self.window, "grab_focus"),
         ):
             self.window.show_prompt(self.prompt)
-        self.assertEqual(self.window.anchor, ScreenAnchor(10, 20, None))
+        self.assertEqual(self.window.anchor, ScreenAnchor(CARET_ONLY_ANCHOR.x, CARET_ONLY_ANCHOR.y, None))
 
-        self.backend.anchor = ScreenAnchor(30, 40, 88)
+        self.backend.anchor = FALLBACK_ONLY_ANCHOR
         with (
             patch.object(prompt_module, "focused_caret_anchor", return_value=None),
             patch.object(GLib, "idle_add"),
@@ -240,60 +275,67 @@ class LearningPromptWindowTests(unittest.TestCase):
             patch.object(self.window, "grab_focus"),
         ):
             self.window.show_prompt(self.prompt)
-        self.assertEqual(self.window.anchor, ScreenAnchor(30, 40, 88))
+        self.assertEqual(self.window.anchor, FALLBACK_ONLY_ANCHOR)
         self.window.hide_prompt()
         self.assertIsNone(self.window.prompt)
         self.assertIsNone(self.window.anchor)
-        self.assertEqual(self.backend.restored, [88])
+        self.assertEqual(self.backend.restored, [FALLBACK_ONLY_ANCHOR.window])
         self.window.hide_prompt()
-        self.assertEqual(self.backend.restored, [88])
+        self.assertEqual(self.backend.restored, [FALLBACK_ONLY_ANCHOR.window])
 
     def test_positioning_handles_missing_and_x11_surfaces(self) -> None:
         self.window.anchor = None
         with patch.object(self.window, "get_surface", return_value=Mock()):
             self.assertFalse(self.window._position_above_anchor())
-        self.window.anchor = ScreenAnchor(500, 400, 77)
+        self.window.anchor = FIRST_SCREEN_ANCHOR
         with patch.object(self.window, "get_surface", return_value=None):
             self.assertFalse(self.window._position_above_anchor())
 
         surface = Mock()
         with (
             patch.object(self.window, "get_surface", return_value=surface),
-            patch.object(self.window, "get_width", return_value=410),
-            patch.object(self.window, "get_height", return_value=80),
+            patch.object(self.window, "get_width", return_value=PROMPT_WINDOW_WIDTH),
+            patch.object(self.window, "get_height", return_value=FIXTURE_WINDOW_HEIGHT_PIXELS),
             patch.object(
                 GdkX11.X11Surface,
                 "get_xid",
-                return_value=123,
+                return_value=FIXTURE_WINDOW_ID,
             ),
         ):
             self.assertFalse(self.window._position_above_anchor())
-        self.assertEqual(self.backend.positions, [(123, 295, 308)])
+        self.assertEqual(
+            self.backend.positions,
+            [(
+                FIXTURE_WINDOW_ID,
+                FIRST_SCREEN_ANCHOR.x - PROMPT_WINDOW_WIDTH // PROMPT_CENTER_DIVISOR,
+                FIRST_SCREEN_ANCHOR.y - FIXTURE_WINDOW_HEIGHT_PIXELS - PROMPT_ANCHOR_GAP,
+            )],
+        )
 
     def test_keyboard_and_close_paths(self) -> None:
         controller = Mock()
         state = Gdk.ModifierType(0)
         self.assertFalse(
-            self.window._on_key_pressed(controller, Gdk.KEY_Return, 36, state)
+            self.window._on_key_pressed(controller, Gdk.KEY_Return, RETURN_KEYCODE, state)
         )
         self.window.prompt = self.prompt
         self.assertTrue(
-            self.window._on_key_pressed(controller, Gdk.KEY_Return, 36, state)
+            self.window._on_key_pressed(controller, Gdk.KEY_Return, RETURN_KEYCODE, state)
         )
         self.confirm.assert_called_once_with(self.prompt)
         self.assertTrue(
-            self.window._on_key_pressed(controller, Gdk.KEY_Escape, 9, state)
+            self.window._on_key_pressed(controller, Gdk.KEY_Escape, ESCAPE_KEYCODE, state)
         )
         self.assertFalse(
-            self.window._on_key_pressed(controller, Gdk.KEY_a, 38, state)
+            self.window._on_key_pressed(controller, Gdk.KEY_a, KEY_A_KEYCODE, state)
         )
-        self.assertEqual(self.dismiss.call_count, 2)
+        self.assertEqual(self.dismiss.call_count, DISMISS_CALLS_AFTER_ESCAPE_AND_STRAY_KEY)
 
         self.window.prompt = None
         self.assertTrue(self.window._on_close_request(self.window))
         self.window.prompt = self.prompt
         self.assertTrue(self.window._on_close_request(self.window))
-        self.assertEqual(self.dismiss.call_count, 3)
+        self.assertEqual(self.dismiss.call_count, DISMISS_CALLS_AFTER_CLOSE_WITH_PROMPT)
 
 
 if __name__ == "__main__":

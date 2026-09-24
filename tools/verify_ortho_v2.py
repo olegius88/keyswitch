@@ -27,6 +27,8 @@ from train_ortho_v2 import (
 )
 
 MAX_METADATA_BYTES = 4 * 1024 * 1024
+RECALL_ROUNDING_DIGITS = 6
+JSON_INDENT = 2
 
 
 def read_object(path: Path) -> dict[str, object]:
@@ -82,7 +84,7 @@ def verify() -> dict[str, object]:
             "negatives": summed(counts, "negative_types"),
             "false_types": summed(counts, "false_types"),
             "recall": round(summed(counts, "recalled_types")
-                            / max(1, summed(counts, "positive_types")), 6),
+                            / max(1, summed(counts, "positive_types")), RECALL_ROUNDING_DIGITS),
         }
     return {
         "schema_version": 1, "model_version": seal["model_version"],
@@ -95,7 +97,7 @@ def verify() -> dict[str, object]:
 
 
 def main() -> int:
-    print(json.dumps(verify(), ensure_ascii=False, indent=2))
+    print(json.dumps(verify(), ensure_ascii=False, indent=JSON_INDENT))
     return 0
 
 

@@ -19,6 +19,18 @@ from keyswitch.atspi_context import AtspiFieldReader
 from keyswitch.input_context import FieldContext
 from keyswitch.x11_backend import X11Backend
 
+SUBPROCESS_TIMEOUT_SECONDS = 10
+TOTAL_STAGES = 3
+READ_DEADLINE_SECONDS = 3
+PASSWORD_STAGE = 2
+SELECTION_LENGTH = 3
+PREPARE_SETTLE_DELAY_MS = 300
+START_READ_DELAY_MS = 100
+INITIAL_PREPARE_DELAY_MS = 600
+OVERALL_TIMEOUT_SECONDS = 15
+WORKER_JOIN_TIMEOUT_SECONDS = 4
+POLL_INTERVAL_SECONDS = 0.05
+
 
 def verify_unavailable_bus() -> None:
     # Native g_error()/SIGABRT is not a Python exception. Exercise the actual
@@ -36,7 +48,7 @@ print('AT_SPI_UNAVAILABLE_OK')
         result = subprocess.run(
             [sys.executable, "-c", script],
             env={**os.environ, "AT_SPI_BUS_ADDRESS": f"unix:path={directory}/missing-bus"},
-            capture_output=True, text=True, timeout=10, check=False,
+            capture_output=True, text=True, timeout=SUBPROCESS_TIMEOUT_SECONDS, check=False,
         )
     assert result.returncode == 0, (result.returncode, result.stderr)
     assert "AT_SPI_UNAVAILABLE_OK" in result.stdout, result.stdout
@@ -82,7 +94,7 @@ def main() -> int:
             loop.quit()
             return GLib.SOURCE_REMOVE
         stage += 1
-        if stage == 3:
+        if stage == TOTAL_STAGES:
             success = True
             loop.quit()
         else:
@@ -94,7 +106,7 @@ def main() -> int:
         error = ""
         try:
             reader = AtspiFieldReader(process_for_window=backend.window_process_id)
-            deadline = time.monotonic() + 3
+            deadline = time.monotonic() + READ_DEADLINE_SECONDS
             while snapshot is None and time.monotonic() < deadline:
                 focus = backend.focused_window()
                 if focus is not None:
@@ -105,12 +117,12 @@ def main() -> int:
                 ready = snapshot is not None and (
                     (stage == 0 and snapshot.before == prefix and snapshot.after == suffix)
                     or (stage == 1 and snapshot.selection)
-                    or (stage == 2 and snapshot.sensitive)
+                    or (stage == PASSWORD_STAGE and snapshot.sensitive)
                 )
                 if not ready:
                     snapshot = None
                 if snapshot is None:
-                    time.sleep(0.05)
+                    time.sleep(POLL_INTERVAL_SECONDS)
         except Exception as failure:
             error = str(failure)
         GLib.idle_add(checked, snapshot, error)
@@ -123,28 +135,28 @@ def main() -> int:
 
     def prepare() -> bool:
         entry.grab_focus()
-        entry.set_visibility(stage != 2)
+        entry.set_visibility(stage != PASSWORD_STAGE)
         entry.set_text(prefix + suffix)
         # Focus/old PRIMARY ownership can enqueue SelectionClear. Let those
         # notifications drain before creating the selection we intend to test.
-        GLib.timeout_add(300, select_prepared)
+        GLib.timeout_add(PREPARE_SETTLE_DELAY_MS, select_prepared)
         return GLib.SOURCE_REMOVE
 
     def select_prepared() -> bool:
         entry.set_position(len(prefix))
         if stage == 1:
-            entry.select_region(0, 3)
+            entry.select_region(0, SELECTION_LENGTH)
             print(f"GTK_SELECTED: {entry.get_selection_bounds()}")
-        GLib.timeout_add(100, start_read)
+        GLib.timeout_add(START_READ_DELAY_MS, start_read)
         return GLib.SOURCE_REMOVE
 
-    GLib.timeout_add(600, prepare)
-    GLib.timeout_add_seconds(15, finish)
+    GLib.timeout_add(INITIAL_PREPARE_DELAY_MS, prepare)
+    GLib.timeout_add_seconds(OVERALL_TIMEOUT_SECONDS, finish)
     try:
         loop.run()
     finally:
         if worker is not None:
-            worker.join(timeout=4)
+            worker.join(timeout=WORKER_JOIN_TIMEOUT_SECONDS)
         window.destroy()
         backend.close()
     return 0 if success else 1

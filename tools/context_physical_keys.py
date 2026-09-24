@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from typing import Final
 
 
+# Synthetic keycodes for the US/RU physical pairs; the actual hardware code
+# never matters here, only that each pair gets its own stable number.
+KEYCODE_BASE: Final = 20
+
+
 @dataclass(frozen=True)
 class PhysicalKey:
     characters: tuple[str, str]
@@ -19,7 +24,7 @@ def physical_keys() -> tuple[PhysicalKey, ...]:
     plain_ru = "ё1234567890-=йцукенгшщзхъ\\фывапролджэячсмитьбю. "
     shift_us = '~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:"ZXCVBNM<>? '
     shift_ru = 'Ё!"№;%:?*()_+ЙЦУКЕНГШЩЗХЪ/ФЫВАПРОЛДЖЭЯЧСМИТЬБЮ, '
-    return tuple(PhysicalKey((left, right), shift, index + 20)
+    return tuple(PhysicalKey((left, right), shift, index + KEYCODE_BASE)
                  for shift, us, ru in ((False, plain_us, plain_ru), (True, shift_us, shift_ru))
                  for index, (left, right) in enumerate(zip(us, ru, strict=True)))
 

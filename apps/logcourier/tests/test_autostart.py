@@ -7,13 +7,22 @@ import pytest
 
 from logcourier import autostart
 
+# Fake winreg access-right identifiers; the fixture never checks their value,
+# only that OpenKey/CreateKeyEx were reached, so any distinct numbers do.
+WINREG_KEY_READ = 2
+WINREG_KEY_SET_VALUE = 3
+# Filler length for a path that must exceed autostart.WINDOWS_MAX_PATH_CHARACTERS.
+OVER_LONG_PATH_FILLER_CHARACTERS = 270
+
 
 @pytest.fixture
 def registry(monkeypatch):
     values = {"OtherProgram": "keep"}
     handle = MagicMock()
     handle.__enter__.return_value = handle
-    module = SimpleNamespace(HKEY_CURRENT_USER=1, KEY_READ=2, KEY_SET_VALUE=3, REG_SZ=1)
+    module = SimpleNamespace(
+        HKEY_CURRENT_USER=1, KEY_READ=WINREG_KEY_READ, KEY_SET_VALUE=WINREG_KEY_SET_VALUE, REG_SZ=1
+    )
 
     def open_key(hive, key, reserved, access):
         assert hive == 1 and key == autostart.RUN_KEY
@@ -64,7 +73,11 @@ def test_registry_error_is_not_hidden(registry):
 
 
 def test_long_path_rejected(registry, monkeypatch):
-    monkeypatch.setattr(autostart.sys, "executable", "C:/" + "x" * 270 + "/LogCourier.exe")
+    monkeypatch.setattr(
+        autostart.sys,
+        "executable",
+        "C:/" + "x" * OVER_LONG_PATH_FILLER_CHARACTERS + "/LogCourier.exe",
+    )
     with pytest.raises(ValueError):
         autostart.set_enabled(True)
 

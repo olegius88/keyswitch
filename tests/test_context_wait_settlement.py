@@ -16,7 +16,17 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+from keyswitch.engine import PAUSE_CORRECTION_DELAY_SECONDS
 from test_context_policy import ContextEngineTests
+
+FIXTURE_LAST_WORD_INPUT_AT_SECONDS = 100.0
+# How far past (or short of) the pause-correction delay the fixture "now" sits.
+PAST_PAUSE_THRESHOLD_MARGIN_SECONDS = 0.5
+BEFORE_PAUSE_THRESHOLD_MARGIN_SECONDS = 0.1
+SETTLED_NOW_SECONDS = (
+    FIXTURE_LAST_WORD_INPUT_AT_SECONDS + PAUSE_CORRECTION_DELAY_SECONDS + PAST_PAUSE_THRESHOLD_MARGIN_SECONDS
+)
+TOO_SOON_NOW_SECONDS = FIXTURE_LAST_WORD_INPUT_AT_SECONDS + BEFORE_PAUSE_THRESHOLD_MARGIN_SECONDS
 
 
 class ContextWaitSettlementTests(ContextEngineTests):
@@ -28,9 +38,9 @@ class ContextWaitSettlementTests(ContextEngineTests):
         self.assertEqual(self.backend.text, "yt ")
         # The boundary commit clears the pause timer's own bookkeeping, so the idle
         # moment is supplied the way the engine's timers supply it.
-        self.engine._last_word_input_at = 100.0
+        self.engine._last_word_input_at = FIXTURE_LAST_WORD_INPUT_AT_SECONDS
         self.choose("convert")
-        self.engine._maybe_correct_after_pause(now=102.0)
+        self.engine._maybe_correct_after_pause(now=SETTLED_NOW_SECONDS)
         self.assertIsNone(self.engine._context_waiting)
         plan = self.engine._pending
         assert plan is not None
@@ -42,9 +52,9 @@ class ContextWaitSettlementTests(ContextEngineTests):
         self.type("yt ")
         assert self.engine._context_waiting is not None
         before = self.backend.text
-        self.engine._last_word_input_at = 100.0
+        self.engine._last_word_input_at = FIXTURE_LAST_WORD_INPUT_AT_SECONDS
         self.choose("keep")
-        self.engine._maybe_correct_after_pause(now=102.0)
+        self.engine._maybe_correct_after_pause(now=SETTLED_NOW_SECONDS)
         self.assertIsNone(self.engine._context_waiting)
         self.assertIsNone(self.engine._pending)
         self.assertEqual(self.backend.text, before)
@@ -54,10 +64,10 @@ class ContextWaitSettlementTests(ContextEngineTests):
         self.choose("wait")
         self.type("yt ")
         assert self.engine._context_waiting is not None
-        self.engine._last_word_input_at = 100.0
+        self.engine._last_word_input_at = FIXTURE_LAST_WORD_INPUT_AT_SECONDS
         self.choose("convert")
         with patch.object(self.backend, "active_application", return_value="AnotherEditor"):
-            self.engine._maybe_correct_after_pause(now=102.0)
+            self.engine._maybe_correct_after_pause(now=SETTLED_NOW_SECONDS)
         self.assertIsNone(self.engine._context_waiting)
         self.assertIsNone(self.engine._pending)
         self.assertEqual(self.backend.text, "yt ")
@@ -69,15 +79,15 @@ class ContextWaitSettlementTests(ContextEngineTests):
                 self.choose("wait")
                 self.type("yt ")
                 assert self.engine._context_waiting is not None
-                self.engine._last_word_input_at = 100.0
-                moment = 102.0
+                self.engine._last_word_input_at = FIXTURE_LAST_WORD_INPUT_AT_SECONDS
+                moment = SETTLED_NOW_SECONDS
                 if reason == "window":
                     self.backend.window += 1
                     self.engine._focus_window = self.backend.window
                 elif reason == "pending":
                     self.engine._pending = self.engine._context_waiting.plan
                 else:
-                    moment = 100.1
+                    moment = TOO_SOON_NOW_SECONDS
                 self.choose("convert")
                 self.engine._maybe_correct_after_pause(now=moment)
                 if reason == "too_soon":

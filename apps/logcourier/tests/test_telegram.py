@@ -5,9 +5,16 @@ import urllib.error
 import pytest
 
 from logcourier.secrets import redact, token_bot_id
-from logcourier.telegram import NoRedirect, Telegram, TelegramError
+from logcourier.telegram import REQUEST_TIMEOUT_SECONDS, NoRedirect, Telegram, TelegramError
 
 TOKEN = "123456:" + "A" * 30
+CHAT_ID = -100
+WRONG_CHAT_ID = -999
+DOWNLOAD_FIXTURE_BYTES = 3
+SMALL_LIMIT_BYTES = 4
+RETRY_AFTER_SECONDS = 42
+TOO_MANY_REQUESTS_STATUS = 429
+FOUND_REDIRECT_STATUS = 302
 
 
 class Opener:
@@ -16,7 +23,7 @@ class Opener:
         self.requests = []
 
     def open(self, request, timeout):
-        assert timeout == 30
+        assert timeout == REQUEST_TIMEOUT_SECONDS
         self.requests.append(request)
         response = next(self.responses)
         if isinstance(response, Exception):
@@ -36,7 +43,7 @@ def test_token_validation_and_redaction():
 
 
 def test_send_document_request_and_receipt():
-    message = {"document": {"file_id": "safe_file"}, "message_id": 1, "chat": {"id": -100}}
+    message = {"document": {"file_id": "safe_file"}, "message_id": 1, "chat": {"id": CHAT_ID}}
     opener = Opener(ok(message))
     client = Telegram(TOKEN, opener)
     assert client.send_document("-100", "archive.zip", b"abc") == message
@@ -46,7 +53,7 @@ def test_send_document_request_and_receipt():
 
 
 def test_wrong_chat_receipt_is_not_accepted():
-    message = {"document": {"file_id": "safe_file"}, "message_id": 1, "chat": {"id": -999}}
+    message = {"document": {"file_id": "safe_file"}, "message_id": 1, "chat": {"id": WRONG_CHAT_ID}}
     with pytest.raises(TelegramError):
         Telegram(TOKEN, Opener(ok(message))).send_document("-100", "x.zip", b"x")
 
@@ -62,24 +69,31 @@ def test_reject_download_path(path):
 
 def test_download_and_limit():
     client = Telegram(
-        TOKEN, Opener(ok({"file_path": "documents/file.zip", "file_size": 3}), b"abc")
+        TOKEN,
+        Opener(
+            ok({"file_path": "documents/file.zip", "file_size": DOWNLOAD_FIXTURE_BYTES}), b"abc"
+        ),
     )
     assert client.download("safe_id") == b"abc"
     with pytest.raises(TelegramError, match="ограничение"):
-        Telegram(TOKEN, Opener(b"12345"))._open(None, 4)
+        Telegram(TOKEN, Opener(b"12345"))._open(None, SMALL_LIMIT_BYTES)
 
 
 def test_http_retry_and_secret_not_leaked():
     error = urllib.error.HTTPError(
         "secret",
-        429,
+        TOO_MANY_REQUESTS_STATUS,
         "retry",
         {},
-        io.BytesIO(json.dumps({"description": TOKEN, "parameters": {"retry_after": 42}}).encode()),
+        io.BytesIO(
+            json.dumps(
+                {"description": TOKEN, "parameters": {"retry_after": RETRY_AFTER_SECONDS}}
+            ).encode()
+        ),
     )
     with pytest.raises(TelegramError) as caught:
         Telegram(TOKEN, Opener(error)).call("getMe")
-    assert caught.value.retry_after == 42
+    assert caught.value.retry_after == RETRY_AFTER_SECONDS
     assert TOKEN not in str(caught.value)
     with pytest.raises(TelegramError) as caught:
         Telegram(TOKEN, Opener(urllib.error.URLError(TOKEN))).call("getMe")
@@ -88,11 +102,13 @@ def test_http_retry_and_secret_not_leaked():
 
 def test_redirect_is_blocked():
     with pytest.raises(TelegramError):
-        NoRedirect().redirect_request(None, None, 302, "", {}, "https://example.com")
+        NoRedirect().redirect_request(
+            None, None, FOUND_REDIRECT_STATUS, "", {}, "https://example.com"
+        )
 
 
 def test_group_discovery_does_not_acknowledge_updates():
-    chat = {"id": -100, "type": "supergroup", "title": "Logs"}
+    chat = {"id": CHAT_ID, "type": "supergroup", "title": "Logs"}
     opener = Opener(ok({"url": ""}), ok([{"message": {"chat": chat}}]))
     assert Telegram(TOKEN, opener).groups() == [chat]
     assert "offset" not in json.loads(opener.requests[-1].data)

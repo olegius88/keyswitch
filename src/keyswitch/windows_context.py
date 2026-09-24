@@ -55,6 +55,11 @@ TEXT_PATTERN_ID: Final = 10014
 CONNECTION_TIMEOUT_MS: Final = 200
 TRANSACTION_TIMEOUT_MS: Final = 200
 
+# Characters read after the caret; CONTEXT_LIMIT (input_context.py) bounds the
+# prefix instead, and the two are not the same limit.
+SUFFIX_LIMIT_CHARACTERS: Final = 128
+SECONDS_TO_MILLISECONDS: Final = 1000
+
 
 class _Element(Protocol):
     @property
@@ -182,8 +187,8 @@ class WindowsFieldReader:
             return FieldContext(application, field_id, selection=True, source="uia")
         before, after = caret.Clone(), caret.Clone()
         before.MoveEndpointByUnit(0, 0, -CONTEXT_LIMIT)
-        after.MoveEndpointByUnit(1, 0, 128)
-        prefix, suffix = before.GetText(CONTEXT_LIMIT), after.GetText(128)
+        after.MoveEndpointByUnit(1, 0, SUFFIX_LIMIT_CHARACTERS)
+        prefix, suffix = before.GetText(CONTEXT_LIMIT), after.GetText(SUFFIX_LIMIT_CHARACTERS)
         current = self.automation.GetFocusedElement()
         if current.CurrentIsPassword:
             return FieldContext(application, field_id, role="password", sensitive=True, source="uia")
@@ -238,7 +243,7 @@ def probe_uia() -> dict[str, object]:
         started = time.monotonic()
         element = reader.automation.GetFocusedElement()
         pattern = element.GetCurrentPattern(TEXT_PATTERN_ID)
-        elapsed = round((time.monotonic() - started) * 1000)
+        elapsed = round((time.monotonic() - started) * SECONDS_TO_MILLISECONDS)
         return {
             "available": True,
             "focused_text_pattern": pattern is not None,

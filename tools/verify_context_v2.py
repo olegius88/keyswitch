@@ -15,11 +15,15 @@ from train_context_v2 import ARTIFACT, REPORT, SEAL, audit, config, metrics, pro
 from verify_context_v2_history import verify_anchors, verify_sources
 from model_protocol import PROFILES, SEALED_BEFORE_TEST
 
+METADATA_LIMIT_BYTES = 1024 * 1024
+CONTEXT_MODEL_FEATURE_VERSION = 2
+RECEIPT_INDENT = 2
+
 
 def read_object(path: Path) -> dict[str, object]:
     with path.open("rb") as source:
-        content = source.read(1024 * 1024 + 1)
-    if len(content) > 1024 * 1024:
+        content = source.read(METADATA_LIMIT_BYTES + 1)
+    if len(content) > METADATA_LIMIT_BYTES:
         raise ValueError("oversized context evidence metadata")
     value: object = json.loads(content)
     if not isinstance(value, dict) or value.get("schema_version") != 1:
@@ -46,7 +50,7 @@ def verify(directory: Path = CORPUS_ROOT, active: Path = ARTIFACT_PATH) -> dict[
     if seal.get("stage") != SEALED_BEFORE_TEST or seal.get("artifact_sha256") != checksum(directory / ARTIFACT):
         raise ValueError("candidate seal or provenance changed")
     model = ContextModel.load(directory / ARTIFACT)
-    if model.feature_version != 2 or seal.get("model_version") != model.version or seal.get("conversion_threshold") != model.conversion_threshold:
+    if model.feature_version != CONTEXT_MODEL_FEATURE_VERSION or seal.get("model_version") != model.version or seal.get("conversion_threshold") != model.conversion_threshold:
         raise ValueError("candidate identity changed")
     report = read_object(directory / REPORT)
     engine = read_object(directory / "engine-report.json")
@@ -97,7 +101,7 @@ def verify_frozen(directory: Path = CORPUS_ROOT, active: Path = ARTIFACT_PATH) -
     frames, cache = all_frames(), load_cache()
     candidate = ContextModel.load(directory / ARTIFACT)
     baseline = ContextModel.load(directory / "baseline-context-v1.json")
-    if candidate.feature_version != 2 or baseline.feature_version != 2:
+    if candidate.feature_version != CONTEXT_MODEL_FEATURE_VERSION or baseline.feature_version != CONTEXT_MODEL_FEATURE_VERSION:
         raise ValueError("historical numeric replay requires feature-2 models")
     results: dict[str, object] = {}
     failures: dict[str, list[str]] = {}
@@ -119,7 +123,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--verify-frozen", action="store_true", help="Repeat historical numeric results without training or current-engine replay")
     args = parser.parse_args(argv)
-    print(json.dumps(verify_frozen() if args.verify_frozen else verify(), ensure_ascii=True, indent=2))
+    print(json.dumps(verify_frozen() if args.verify_frozen else verify(), ensure_ascii=True, indent=RECEIPT_INDENT))
     return 0
 
 

@@ -16,7 +16,10 @@ from .backend import InputBackend, KeyEvent, KeyDisposition
 from .app_quirks import mention_head
 from .boundary_model import BoundaryModel, MAX_SUFFIX, features as boundary_features
 from .boundary_policy import BoundaryPolicy, features as boundary_policy_features
-from .config import SettingsStore
+from .config import (
+    DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_EARLY_SWITCH_MIN_LENGTH, DEFAULT_LEARNING_CONFIRMATIONS,
+    DEFAULT_MINIMUM_WORD_LENGTH, DEFAULT_PAUSE_DELAY_SECONDS, SettingsStore,
+)
 from .detector import DetectionDecision, LanguageDetector
 from .early_switch import (
     EarlySwitchDecision,
@@ -30,9 +33,9 @@ from .language_model import LanguageModel, WordScore
 from .lexicon_supplement import supplement_words
 from .learning import LearningStore
 from .intent_model import CorrectionTrigger, LinearNgramModel
-from .context_policy import ContextPolicy, ContextResult
-from .context_access import PlatformFieldReader
-from .input_context import FieldContext, FieldReader
+from .context_policy import ORTHO_FEATURE_VERSION, ContextPolicy, ContextResult
+from .context_access import MILLISECONDS_PER_SECOND, PlatformFieldReader
+from .input_context import CONTEXT_TTL, FieldContext, FieldReader
 from .prefix_model import PrefixInput, PrefixModel
 from .prefix_schema import VersionedPrefixModel
 from .settings_diagnostics import setting_change, settings_snapshot
@@ -49,7 +52,7 @@ NAVIGATION_KEYS = {
     "Escape", "Delete", "Insert", "Pointer",
 }
 PUNCTUATION = set(".,!?;:()[]{}—–-…\"«»")
-PAUSE_CORRECTION_DELAY_SECONDS = 1.5
+PAUSE_CORRECTION_DELAY_SECONDS = DEFAULT_PAUSE_DELAY_SECONDS
 LEARNING_PROMPT_TIMEOUT_SECONDS = 8.0
 # Keys that answer the learning prompt: while it is shown they belong to
 # KeySwitch, not to the text being typed.
@@ -70,6 +73,43 @@ WORD_JOINERS = {"'", "’", "-", "‐", "‑"}
 MAX_WORD_STROKES = 256
 ACTION_TIMEOUT_SECONDS = 2.0
 MANUAL_RELEASE_TIMEOUT_SECONDS = 3.0
+WORKER_JOIN_TIMEOUT_SECONDS = 2.0
+# The main loop wakes on its own at least this often even with nothing
+# pending, and never sleeps for less than this even when a deadline is closer.
+LOOP_MAX_WAKE_SECONDS = 0.5
+LOOP_MIN_WAKE_SECONDS = 0.01
+# Clamp for the user-configurable pause delay (detection.pause_delay_seconds),
+# so a malformed setting cannot freeze pause correction or fire it constantly.
+PAUSE_DELAY_MINIMUM_SECONDS = 0.2
+PAUSE_DELAY_MAXIMUM_SECONDS = 10.0
+# The configured early-switch minimum length is clamped to this range.
+EARLY_SWITCH_MIN_LENGTH_FLOOR = 3
+EARLY_SWITCH_MIN_LENGTH_CEILING = 8
+# Number of language layouts the engine juggles; a third model would need a
+# third physical layout group, which nothing in this codebase supports yet.
+SUPPORTED_LAYOUT_GROUPS = 2
+EVENT_QUEUE_MAX_SIZE = 4096
+# The engine backs up simple single-key text edits; anything above the Basic
+# Multilingual Plane is composed text a backspace cannot safely undo alone.
+BASIC_MULTILINGUAL_PLANE_MAX_CODEPOINT = 0xFFFF
+# A prefix is only offered to the prefix model within this length range.
+PREFIX_WORD_LENGTH_MIN = 4
+PREFIX_WORD_LENGTH_MAX = 12
+# Decimal places kept when a probability, score or confidence is logged.
+LOGGED_SCORE_DECIMALS = 6
+# Per-application remembered context words; oldest is dropped past this cap.
+MAX_REMEMBERED_APPLICATION_CONTEXTS = 32
+# A boundary is natural (not just a configured minimum length) once the word
+# is this long and its own-language score is at least this uncertain.
+NATURAL_SOURCE_BOUNDARY_MIN_LENGTH = 4
+NATURAL_SOURCE_BOUNDARY_NGRAM_FLOOR = -0.25
+# A user-triggered correction (manual toggle, undo) is certain, not scored;
+# this stands in for the confidence a model would have reported.
+MANUAL_CORRECTION_CONFIDENCE = 99.0
+# A replacement needs at least this many letters to be offered as a rule.
+MINIMUM_LEARNABLE_LETTERS = 2
+# Undo stays available for this long after a correction.
+UNDO_AVAILABLE_WINDOW_SECONDS = 10.0
 LOGGER = logging.getLogger(__name__)
 
 
@@ -204,7 +244,7 @@ class KeySwitchEngine:
         )
         self.models = {
             index: LanguageModel.load(locale, supplement_words(locale))
-            for index, locale in enumerate(locales[:2])
+            for index, locale in enumerate(locales[:SUPPORTED_LAYOUT_GROUPS])
         }
         intent_model, self.intent_model_status = LinearNgramModel.try_load_default()
         self.detector = LanguageDetector(self.models, intent_model)
@@ -231,7 +271,7 @@ class KeySwitchEngine:
         self._action_deadline = 0.0
         self._action_keys = self._configured_action_keys()
         self._events: queue.Queue[KeyEvent | _LayoutSelection | None] = queue.Queue(
-            maxsize=4096
+            maxsize=EVENT_QUEUE_MAX_SIZE
         )
         self._worker: threading.Thread | None = None
         self._running = threading.Event()
@@ -329,7 +369,7 @@ class KeySwitchEngine:
             self._learning_prompt_deadline = None
             self._prompt_key_deadline = 0.0
             callbacks = tuple(self._learning_prompt_callbacks)
-        required = int(self.settings.get("detection.learning_confirmations", 2))
+        required = int(self.settings.get("detection.learning_confirmations", DEFAULT_LEARNING_CONFIRMATIONS))
         # Enter is the only thing that teaches, and it teaches at once: the
         # manual conversion itself no longer counts towards the threshold, so
         # counting Enters instead would silently raise the price of a rule.
@@ -424,7 +464,7 @@ class KeySwitchEngine:
         except queue.Full:
             pass
         if self._worker and self._worker is not threading.current_thread():
-            self._worker.join(timeout=2.0)
+            self._worker.join(timeout=WORKER_JOIN_TIMEOUT_SECONDS)
         self._worker = None
         self.backend.close()
         self._update(running=False, backend="остановлен", current_word="")
@@ -500,9 +540,9 @@ class KeySwitchEngine:
 
         last_input = self._last_word_input_at
         if not self._pause_correction_pending or last_input is None:
-            return 0.5
+            return LOOP_MAX_WAKE_SECONDS
         remaining = last_input + self._pause_delay() - time.monotonic()
-        return max(0.01, min(0.5, remaining))
+        return max(LOOP_MIN_WAKE_SECONDS, min(LOOP_MAX_WAKE_SECONDS, remaining))
 
     def _pause_delay(self) -> float:
         try:
@@ -513,7 +553,7 @@ class KeySwitchEngine:
             )
         except (TypeError, ValueError):
             delay = PAUSE_CORRECTION_DELAY_SECONDS
-        return min(10.0, max(0.2, delay))
+        return min(PAUSE_DELAY_MAXIMUM_SECONDS, max(PAUSE_DELAY_MINIMUM_SECONDS, delay))
 
     def _apply_layout_selection(self, group: int) -> None:
         try:
@@ -836,7 +876,7 @@ class KeySwitchEngine:
 
         return all(
             len(char) == 1
-            and ord(char) <= 0xFFFF
+            and ord(char) <= BASIC_MULTILINGUAL_PLANE_MAX_CODEPOINT
             and unicodedata.category(char)[0] not in {"M", "C"}
             for char in event.characters
         )
@@ -851,10 +891,12 @@ class KeySwitchEngine:
 
     def _early_switch_policy(self) -> EarlySwitchPolicy:
         try:
-            minimum = int(self.settings.get("detection.early_switch_min_length", 4))
+            minimum = int(self.settings.get("detection.early_switch_min_length", DEFAULT_EARLY_SWITCH_MIN_LENGTH))
         except (TypeError, ValueError):
-            minimum = 4
-        return EarlySwitchPolicy(minimum_length=max(3, min(8, minimum)))
+            minimum = DEFAULT_EARLY_SWITCH_MIN_LENGTH
+        return EarlySwitchPolicy(
+            minimum_length=max(EARLY_SWITCH_MIN_LENGTH_FLOOR, min(EARLY_SWITCH_MIN_LENGTH_CEILING, minimum))
+        )
 
     def _caret_unknown(self) -> bool:
         """Whether this word is being typed where the engine cannot see the surroundings.
@@ -1001,7 +1043,8 @@ class KeySwitchEngine:
         mode = str(self.settings.get("detection.context_policy", "assist"))
         if not bool(self.settings.get("detection.context_aware", True)) or mode not in {"assist", "shadow"}:
             return baseline, EARLY_SWITCH_CONFIDENCE
-        supported = (4 <= len(baseline.original) <= 12 and baseline.replacement.isalpha()
+        supported = (PREFIX_WORD_LENGTH_MIN <= len(baseline.original) <= PREFIX_WORD_LENGTH_MAX
+                     and baseline.replacement.isalpha()
                      and not any(char.isupper() for char in (baseline.original[1:] + baseline.replacement[1:]))
                      and baseline.source_group in {0, 1} and baseline.target_group == 1 - baseline.source_group
                      and 0 in self.models and 1 in self.models and 0 in self._prefix_indexes and 1 in self._prefix_indexes)
@@ -1011,7 +1054,7 @@ class KeySwitchEngine:
             return (replace(baseline, should_switch=False, reason=reason) if mode == "assist" else baseline), EARLY_SWITCH_CONFIDENCE
         prediction = model.predict(PrefixInput(baseline.original, baseline.replacement, baseline.source_group, field), self._prefix_indexes, self.models)
         self._technical_event(
-            "prefix_decision", action=prediction.action, score=round(prediction.probability, 6),
+            "prefix_decision", action=prediction.action, score=round(prediction.probability, LOGGED_SCORE_DECIMALS),
             model_version=prediction.model_version, mode=mode, baseline_convert=baseline.should_switch,
             policy_applied=mode == "assist", decision_source="prefix_model" if mode == "assist" else "prefix_index",
             final_action=prediction.action if mode == "assist" else "convert" if baseline.should_switch else "wait",
@@ -1091,7 +1134,7 @@ class KeySwitchEngine:
         delay_ms = (
             None
             if self._early_switch_at is None
-            else round((time.monotonic() - self._early_switch_at) * 1000)
+            else round((time.monotonic() - self._early_switch_at) * MILLISECONDS_PER_SECOND)
         )
         converted = replace(event, character=event.character_for(target_group), group=target_group)
         strokes = tuple(self._strokes) + (converted,)
@@ -1142,7 +1185,7 @@ class KeySwitchEngine:
             "observed_ms_ago": (
                 None
                 if observed_at is None
-                else round((time.monotonic() - observed_at) * 1000)
+                else round((time.monotonic() - observed_at) * MILLISECONDS_PER_SECOND)
             ),
         }
 
@@ -1401,7 +1444,8 @@ class KeySwitchEngine:
             for word in ignored_words
         }
         natural_source_boundary = (
-            effective_length >= 4 and decision.source_score.ngram_score >= -0.25
+            effective_length >= NATURAL_SOURCE_BOUNDARY_MIN_LENGTH
+            and decision.source_score.ngram_score >= NATURAL_SOURCE_BOUNDARY_NGRAM_FLOOR
         )
         # A one- or two-letter word from the trusted list is recognisable, but
         # it is just as often the start of a longer word whose next letter
@@ -1410,7 +1454,7 @@ class KeySwitchEngine:
         return recognisable or protected_boundary or ignored_boundary or (
             decision.source_score.known
             and effective_length
-            >= int(self.settings.get("detection.minimum_length", 3))
+            >= int(self.settings.get("detection.minimum_length", DEFAULT_MINIMUM_WORD_LENGTH))
         ) or natural_source_boundary
 
     def _completed_word(
@@ -1454,7 +1498,7 @@ class KeySwitchEngine:
         self._technical_event(
             "boundary_decision", model_version=prediction.version,
             action="abstain" if length is None else "literal" if length else "word",
-            score=round(prediction.probability, 6), preserved_characters=length,
+            score=round(prediction.probability, LOGGED_SCORE_DECIMALS), preserved_characters=length,
             candidates=tail + 1, observed_characters=len(strokes),
         )
         if length is None:
@@ -1518,7 +1562,7 @@ class KeySwitchEngine:
         decision = self.detector.decide(
             original, {target: alternative}, source_group,
             minimum_length=1,
-            confidence_threshold=float(self.settings.get("detection.confidence", 2.0)),
+            confidence_threshold=float(self.settings.get("detection.confidence", DEFAULT_CONFIDENCE_THRESHOLD)),
             aggressive=bool(self.settings.get("detection.aggressive", False)),
             protect_code=True,
             use_intent_model=bool(self.settings.get("detection.intent_model_enabled", True)),
@@ -1545,8 +1589,8 @@ class KeySwitchEngine:
         forced_target = self._forced_target_group(source_group, original)
         return automatic_word_decision(
             self.detector, original, alternatives, source_group,
-            minimum_length=(1 if forced_target is not None else int(self.settings.get("detection.minimum_length", 3))),
-            confidence_threshold=float(self.settings.get("detection.confidence", 2.0)),
+            minimum_length=(1 if forced_target is not None else int(self.settings.get("detection.minimum_length", DEFAULT_MINIMUM_WORD_LENGTH))),
+            confidence_threshold=float(self.settings.get("detection.confidence", DEFAULT_CONFIDENCE_THRESHOLD)),
             ignored_words=set(ignored_words),
             aggressive=bool(self.settings.get("detection.aggressive", False)),
             protect_code=bool(self.settings.get("detection.protect_code", True)),
@@ -1582,9 +1626,9 @@ class KeySwitchEngine:
             source_group,
             minimum_length=(
                 1 if forced_target is not None
-                else int(self.settings.get("detection.minimum_length", 3))
+                else int(self.settings.get("detection.minimum_length", DEFAULT_MINIMUM_WORD_LENGTH))
             ),
-            confidence_threshold=float(self.settings.get("detection.confidence", 2.0)),
+            confidence_threshold=float(self.settings.get("detection.confidence", DEFAULT_CONFIDENCE_THRESHOLD)),
             ignored_words=set(ignored_words),
             aggressive=bool(self.settings.get("detection.aggressive", False)),
             protect_code=protect_code,
@@ -1632,7 +1676,7 @@ class KeySwitchEngine:
             field = result.field
             self._technical_event(
                 "context_decision", action=prediction.action,
-                score=round(prediction.probability, 6), model_version=prediction.model_version,
+                score=round(prediction.probability, LOGGED_SCORE_DECIMALS), model_version=prediction.model_version,
                 mode=self.settings.get("detection.context_policy", "assist"),
                 applied=result.decision.should_convert, baseline_convert=decision.should_convert,
                 baseline_reason=decision.reason,
@@ -1706,7 +1750,7 @@ class KeySwitchEngine:
         model = self.context_policy.model
         planned_baseline = (
             self._planned_baseline(previous.original, {group: alternative}, previous.source_group, decision.replacement, group)
-            if model is not None and model.feature_version == 3 else waiting.decision)
+            if model is not None and model.feature_version == ORTHO_FEATURE_VERSION else waiting.decision)
         result = self.context_policy.decide(
             planned_baseline, alternative, group, self.detector, "space", "assist",
             after=decision.replacement, field_override=waiting.field,
@@ -1777,8 +1821,13 @@ class KeySwitchEngine:
             and self.settings.get("detection.context_policy", "assist") == "assist"
         ):
             self._context_wait_sequence += 1
+            # A word waits as long as the text around it stays context. The wait
+            # used to lapse after ten seconds, so `tot`, a thought and then `ghbdtn`
+            # twelve seconds later gave `tot привет` (0.31.0 log, 24.09.2026).
+            # Anything that makes the pair stale ends the wait sooner: another
+            # window, a caret move, Backspace, a changed field.
             self._context_waiting = WaitingContextWord(
-                plan, decision, result.field, self._focus_window or 0, time.monotonic() + 10.0,
+                plan, decision, result.field, self._focus_window or 0, time.monotonic() + CONTEXT_TTL,
                 self._context_wait_sequence, settles,
             )
             self._log_context_wait("context_wait_started", self._context_waiting, "model_wait" if settles else "model_suggest")
@@ -1792,7 +1841,7 @@ class KeySwitchEngine:
             event, wait_id=waiting.diagnostic_id, reason=reason,
             word_characters=len(waiting.plan.original),
             source_group=waiting.plan.source_group, target_group=waiting.plan.target_group,
-            remaining_ms=max(0, round((waiting.deadline - time.monotonic()) * 1000)),
+            remaining_ms=max(0, round((waiting.deadline - time.monotonic()) * MILLISECONDS_PER_SECOND)),
             **fields,
         )
 
@@ -1827,7 +1876,7 @@ class KeySwitchEngine:
         if not bool(self.settings.get("detection.learning", True)):
             return None
         confirmations = int(
-            self.settings.get("detection.learning_confirmations", 2)
+            self.settings.get("detection.learning_confirmations", DEFAULT_LEARNING_CONFIRMATIONS)
         )
         return self.learning.forced_target(source_group, word, confirmations)
 
@@ -1836,7 +1885,7 @@ class KeySwitchEngine:
             return {}, None
         key = application.casefold()
         context = self._contexts.get(key)
-        if context is None or time.monotonic() - context.updated_at > 45.0:
+        if context is None or time.monotonic() - context.updated_at > CONTEXT_TTL:
             return {}, None
         return dict(context.words), context.group
 
@@ -1855,7 +1904,7 @@ class KeySwitchEngine:
         key = application.casefold()
         self._contexts.pop(key, None)
         self._contexts[key] = LanguageContext(group, words, time.monotonic())
-        while len(self._contexts) > 32:
+        while len(self._contexts) > MAX_REMEMBERED_APPLICATION_CONTEXTS:
             self._contexts.pop(next(iter(self._contexts)))
 
     def _plan_from_decision(
@@ -1887,13 +1936,13 @@ class KeySwitchEngine:
     @staticmethod
     def _score_diagnostics(score: WordScore) -> dict[str, object]:
         return {
-            "value": round(score.value, 6),
+            "value": round(score.value, LOGGED_SCORE_DECIMALS),
             "known": score.known,
             "frequency": score.frequency,
             "exact": score.exact,
             "spell_known": score.spell_known,
-            "ngram_score": round(score.ngram_score, 6),
-            "invalid_ratio": round(score.invalid_ratio, 6),
+            "ngram_score": round(score.ngram_score, LOGGED_SCORE_DECIMALS),
+            "invalid_ratio": round(score.invalid_ratio, LOGGED_SCORE_DECIMALS),
         }
 
     @classmethod
@@ -1905,7 +1954,7 @@ class KeySwitchEngine:
             "replacement": decision.replacement,
             "source_group": decision.source_group,
             "target_group": decision.target_group,
-            "confidence": round(decision.confidence, 6),
+            "confidence": round(decision.confidence, LOGGED_SCORE_DECIMALS),
             "reason": decision.reason,
             "source_score": cls._score_diagnostics(decision.source_score),
             "target_score": cls._score_diagnostics(decision.target_score),
@@ -2026,10 +2075,10 @@ class KeySwitchEngine:
             application_excluded=application_excluded,
             skipped_reason=skipped_reason,
             minimum_length=int(
-                self.settings.get("detection.minimum_length", 3)
+                self.settings.get("detection.minimum_length", DEFAULT_MINIMUM_WORD_LENGTH)
             ),
             confidence_threshold=float(
-                self.settings.get("detection.confidence", 2.0)
+                self.settings.get("detection.confidence", DEFAULT_CONFIDENCE_THRESHOLD)
             ),
             context={
                 "group": context_group,
@@ -2083,7 +2132,7 @@ class KeySwitchEngine:
         return {
             "enabled": bool(self.settings.get("detection.learning", True)),
             "required_confirmations": int(
-                self.settings.get("detection.learning_confirmations", 2)
+                self.settings.get("detection.learning_confirmations", DEFAULT_LEARNING_CONFIRMATIONS)
             ),
             "rule_target": target,
             "confirmations": confirmations,
@@ -2184,7 +2233,7 @@ class KeySwitchEngine:
             self._reset_pause_correction()
             return
         current_time = time.monotonic() if now is None else now
-        idle_ms = round((current_time - last_input) * 1000)
+        idle_ms = round((current_time - last_input) * MILLISECONDS_PER_SECOND)
         if current_time - last_input < self._pause_delay():
             return
         self._prune_stale_presses(current_time)
@@ -2408,7 +2457,7 @@ class KeySwitchEngine:
             target,
             original,
             replacement,
-            99.0,
+            MANUAL_CORRECTION_CONFIDENCE,
             application,
             False,
             mode,
@@ -2480,7 +2529,7 @@ class KeySwitchEngine:
         """
 
         letters = sum(1 for character in replacement if character.isalpha())
-        return letters >= 2 and all(
+        return letters >= MINIMUM_LEARNABLE_LETTERS and all(
             character.isalpha() or character in "'-" for character in replacement
         )
 
@@ -2650,7 +2699,7 @@ class KeySwitchEngine:
             origin,
             self._text_for_group(strokes, current_group),
             self._text_for_group(strokes, origin),
-            99.0,
+            MANUAL_CORRECTION_CONFIDENCE,
             self.backend.active_application(),
             False,
             "early_undo",
@@ -2683,7 +2732,7 @@ class KeySwitchEngine:
             or self._last_committed_stale
             or bool(self._strokes and tuple(self._strokes) != previous.strokes)
             or self._symbol_strokes
-            or time.monotonic() - getattr(self, "_last_correction_time", 0.0) > 10.0
+            or time.monotonic() - getattr(self, "_last_correction_time", 0.0) > UNDO_AVAILABLE_WINDOW_SECONDS
         ):
             self._technical_event("undo_unavailable", reason="text_changed_or_expired")
             self._update(last_action="Последнее исправление уже нельзя отменить")
@@ -2696,7 +2745,7 @@ class KeySwitchEngine:
             previous.source_group,
             previous.replacement,
             previous.original,
-            99.0,
+            MANUAL_CORRECTION_CONFIDENCE,
             previous.application,
             False,
             "undo",
@@ -2894,7 +2943,7 @@ class KeySwitchEngine:
             literal_characters=len(plan.trailing),
             replayed_strokes=len(plan.strokes),
             boundary_replayed=plan.boundary is not None,
-            injection_ms=round((time.monotonic() - started) * 1000),
+            injection_ms=round((time.monotonic() - started) * MILLISECONDS_PER_SECOND),
             # Legacy field counts presses AND releases, not typed characters.
             keys_during_injection=self._typed_events - typed_before,
             keypresses_during_injection=self._typed_presses - presses_before,
@@ -2906,7 +2955,7 @@ class KeySwitchEngine:
             application=plan.application,
             application_excluded=application_excluded,
             automatic=plan.automatic,
-            confidence=round(plan.confidence, 6),
+            confidence=round(plan.confidence, LOGGED_SCORE_DECIMALS),
             boundary=(None if plan.boundary is None else plan.boundary.key_name),
         )
         if plan.mode in {"early", "late_stroke"}:
@@ -2990,7 +3039,7 @@ class KeySwitchEngine:
                 # prompt records the confirmation; typing on, clicking, changing
                 # focus or letting the prompt time out leaves the rules exactly
                 # as they were, which is what Escape does too.
-                required = int(self.settings.get("detection.learning_confirmations", 2))
+                required = int(self.settings.get("detection.learning_confirmations", DEFAULT_LEARNING_CONFIRMATIONS))
                 rule_target, confirmations = self.learning.rule_state(source_group, word)
                 if not (rule_target == target_group and confirmations >= required):
                     learning_prompt = LearningPrompt(
@@ -3348,14 +3397,14 @@ class KeySwitchEngine:
         engine_switch_ms = (
             None
             if switched_at is None
-            else round((time.monotonic() - switched_at) * 1000)
+            else round((time.monotonic() - switched_at) * MILLISECONDS_PER_SECOND)
         )
         # Only a change *to* the layout the engine itself just selected is the
         # engine's own switch; the user switching away right after a wrong
         # correction is manual and must protect the retyped word.
         initiated_by_engine = (
             engine_switch_ms is not None
-            and engine_switch_ms <= ENGINE_SWITCH_GRACE_SECONDS * 1000
+            and engine_switch_ms <= ENGINE_SWITCH_GRACE_SECONDS * MILLISECONDS_PER_SECOND
             and group == self._engine_switch_group
         )
         application = self.backend.active_application()

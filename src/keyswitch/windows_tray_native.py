@@ -19,6 +19,49 @@ from .windows_tray import (
 
 ICON_SIZE = 64
 
+# Letter badge (the non-flag indicator style).
+BADGE_INSET_PIXELS = 2
+BADGE_EDGE_PIXELS = 61
+BADGE_CORNER_RADIUS_PIXELS = 13
+BADGE_FONT_SIZE_PIXELS = 27
+CENTER_DIVISOR = 2
+# Indices into PIL's (left, top, right, bottom) textbbox tuple.
+TEXTBBOX_RIGHT_INDEX = 2
+TEXTBBOX_BOTTOM_INDEX = 3
+BADGE_EN_RGBA = (27, 92, 180, 255)
+BADGE_RU_RGBA = (194, 42, 55, 255)
+BADGE_DISABLED_RGBA = (105, 105, 105, 255)
+
+# The diagonal slash drawn over a disabled badge or flag.
+DISABLED_SLASH_NEAR_PIXELS = 12
+DISABLED_SLASH_FAR_PIXELS = 52
+DISABLED_SLASH_WIDTH_PIXELS = 7
+DISABLED_SLASH_RGBA = (255, 255, 255, 235)
+
+ALTERNATE_EVERY_OTHER = 2  # the modulus of every even/odd index or row check below
+
+# Russian flag (group 1, see indicator.LAYOUT_LABELS): three equal
+# horizontal bands, white/blue/red.
+RUSSIAN_FLAG_BAND_COUNT = 3
+RUSSIAN_FLAG_SECOND_BAND_NUMERATOR = 2
+RUSSIAN_FLAG_BLUE_RGBA = (0, 57, 166, 255)
+RUSSIAN_FLAG_RED_RGBA = (213, 43, 30, 255)
+
+# US flag (any other group): 13 stripes, a canton, and a 5-row star field.
+US_FLAG_STRIPE_COUNT = 13
+US_FLAG_STRIPE_RED_RGBA = (178, 34, 52, 255)
+US_FLAG_CANTON_WIDTH_NUMERATOR = 2
+US_FLAG_CANTON_WIDTH_DENOMINATOR = 5
+US_FLAG_CANTON_HEIGHT_STRIPES = 7
+US_FLAG_CANTON_RGBA = (60, 59, 110, 255)
+US_FLAG_STAR_ROWS = 5
+US_FLAG_STARS_PER_LONG_ROW = 4
+US_FLAG_STARS_PER_SHORT_ROW = 3
+US_FLAG_STAR_OFFSET_LONG_ROW_PIXELS = 3
+US_FLAG_STAR_OFFSET_SHORT_ROW_PIXELS = 6
+US_FLAG_STAR_GRID_SPACING_PIXELS = 6
+US_FLAG_STAR_TOP_MARGIN_PIXELS = 3
+
 
 def _menu_items(
     actions: WindowsTrayActions,
@@ -131,63 +174,81 @@ class PystrayWindowsAdapter:
             cls._draw_flag(draw, state.group)
         else:
             if not state.enabled:
-                background = (105, 105, 105, 255)
+                background = BADGE_DISABLED_RGBA
             elif state.group == 1:
-                background = (194, 42, 55, 255)
+                background = BADGE_RU_RGBA
             else:
-                background = (27, 92, 180, 255)
-            draw.rounded_rectangle((2, 2, 61, 61), radius=13, fill=background)
+                background = BADGE_EN_RGBA
+            draw.rounded_rectangle(
+                (BADGE_INSET_PIXELS, BADGE_INSET_PIXELS, BADGE_EDGE_PIXELS, BADGE_EDGE_PIXELS),
+                radius=BADGE_CORNER_RADIUS_PIXELS,
+                fill=background,
+            )
             text = state.label if state.group >= 0 else "?"
-            font = cls._font(27)
+            font = cls._font(BADGE_FONT_SIZE_PIXELS)
             bounds = draw.textbbox((0, 0), text, font=font)
-            width = bounds[2] - bounds[0]
-            height = bounds[3] - bounds[1]
+            width = bounds[TEXTBBOX_RIGHT_INDEX] - bounds[0]
+            height = bounds[TEXTBBOX_BOTTOM_INDEX] - bounds[1]
             draw.text(
-                ((ICON_SIZE - width) / 2, (ICON_SIZE - height) / 2 - bounds[1]),
+                (
+                    (ICON_SIZE - width) / CENTER_DIVISOR,
+                    (ICON_SIZE - height) / CENTER_DIVISOR - bounds[1],
+                ),
                 text,
                 font=font,
                 fill="white",
             )
         if not state.enabled:
-            draw.line((12, 52, 52, 12), fill=(255, 255, 255, 235), width=7)
+            draw.line(
+                (
+                    DISABLED_SLASH_NEAR_PIXELS, DISABLED_SLASH_FAR_PIXELS,
+                    DISABLED_SLASH_FAR_PIXELS, DISABLED_SLASH_NEAR_PIXELS,
+                ),
+                fill=DISABLED_SLASH_RGBA,
+                width=DISABLED_SLASH_WIDTH_PIXELS,
+            )
         return image
 
     @staticmethod
     def _draw_flag(draw: ImageDraw.ImageDraw, group: int) -> None:
         left, top, right, bottom = 0, 0, ICON_SIZE - 1, ICON_SIZE - 1
         if group == 1:
-            first_edge = ICON_SIZE // 3
-            second_edge = ICON_SIZE * 2 // 3
+            first_edge = ICON_SIZE // RUSSIAN_FLAG_BAND_COUNT
+            second_edge = ICON_SIZE * RUSSIAN_FLAG_SECOND_BAND_NUMERATOR // RUSSIAN_FLAG_BAND_COUNT
             draw.rectangle((left, top, right, first_edge - 1), fill="white")
             draw.rectangle(
                 (left, first_edge, right, second_edge - 1),
-                fill=(0, 57, 166, 255),
+                fill=RUSSIAN_FLAG_BLUE_RGBA,
             )
             draw.rectangle(
                 (left, second_edge, right, bottom),
-                fill=(213, 43, 30, 255),
+                fill=RUSSIAN_FLAG_RED_RGBA,
             )
             return
-        for index in range(13):
-            stripe_top = index * ICON_SIZE // 13
-            stripe_bottom = (index + 1) * ICON_SIZE // 13 - 1
-            color = (178, 34, 52, 255) if index % 2 == 0 else "white"
+        for index in range(US_FLAG_STRIPE_COUNT):
+            stripe_top = index * ICON_SIZE // US_FLAG_STRIPE_COUNT
+            stripe_bottom = (index + 1) * ICON_SIZE // US_FLAG_STRIPE_COUNT - 1
+            color = US_FLAG_STRIPE_RED_RGBA if index % ALTERNATE_EVERY_OTHER == 0 else "white"
             draw.rectangle(
                 (left, stripe_top, right, stripe_bottom),
                 fill=color,
             )
-        canton_right = ICON_SIZE * 2 // 5 - 1
-        canton_bottom = ICON_SIZE * 7 // 13 - 1
+        canton_right = ICON_SIZE * US_FLAG_CANTON_WIDTH_NUMERATOR // US_FLAG_CANTON_WIDTH_DENOMINATOR - 1
+        canton_bottom = ICON_SIZE * US_FLAG_CANTON_HEIGHT_STRIPES // US_FLAG_STRIPE_COUNT - 1
         draw.rectangle(
             (left, top, canton_right, canton_bottom),
-            fill=(60, 59, 110, 255),
+            fill=US_FLAG_CANTON_RGBA,
         )
-        for row in range(5):
-            stars_in_row = 4 if row % 2 == 0 else 3
-            offset = 3 if stars_in_row == 4 else 6
+        for row in range(US_FLAG_STAR_ROWS):
+            stars_in_row = US_FLAG_STARS_PER_LONG_ROW if row % ALTERNATE_EVERY_OTHER == 0 else US_FLAG_STARS_PER_SHORT_ROW
+            offset = (
+                US_FLAG_STAR_OFFSET_LONG_ROW_PIXELS
+                if stars_in_row == US_FLAG_STARS_PER_LONG_ROW
+                else US_FLAG_STAR_OFFSET_SHORT_ROW_PIXELS
+            )
             for column in range(stars_in_row):
-                center_x = offset + column * 6
-                center_y = 3 + row * 6
+                center_x = offset + column * US_FLAG_STAR_GRID_SPACING_PIXELS
+                center_y = US_FLAG_STAR_TOP_MARGIN_PIXELS + row * US_FLAG_STAR_GRID_SPACING_PIXELS
                 draw.ellipse(
                     (center_x - 1, center_y - 1, center_x + 1, center_y + 1),
                     fill="white",

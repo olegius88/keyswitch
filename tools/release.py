@@ -62,6 +62,10 @@ RELEASE_ASSETS: Final[tuple[str, ...]] = (
 )
 CI_APPEARANCE_TIMEOUT: Final[float] = 180.0
 CI_POLL_SECONDS: Final[float] = 5.0
+SHORT_SHA_LENGTH: Final[int] = 12
+DEFAULT_CI_TIMEOUT_SECONDS: Final[float] = 2400.0
+# The shell convention for "killed by signal N" is 128 + N; SIGINT is 2.
+SIGINT_EXIT_CODE: Final[int] = 130
 
 
 class ReleaseError(Exception):
@@ -205,8 +209,8 @@ def check_preconditions(options: Options) -> None:
         tagged = git("rev-parse", f"{tag}^{{commit}}")
         if tagged != head or dirty_paths():
             raise ReleaseError(
-                f"{tag} already exists at {tagged[:12]} while the tree has moved on "
-                f"(HEAD {head[:12]}, {len(dirty_paths())} dirty paths); bump the version"
+                f"{tag} already exists at {tagged[:SHORT_SHA_LENGTH]} while the tree has moved on "
+                f"(HEAD {head[:SHORT_SHA_LENGTH]}, {len(dirty_paths())} dirty paths); bump the version"
             )
     note(f"branch {branch}, {len(dirty_paths())} paths to release")
 
@@ -532,18 +536,34 @@ def verify_published_release(version: str, tag: str) -> str:
 # --------------------------------------------------------------------------
 
 
+STEP_CHECK_TREE: Final[int] = 1
+STEP_APPLY_VERSION: Final[int] = 2
+STEP_CLOSE_CHANGELOG: Final[int] = 3
+STEP_CHECK_RELEASE_NOTES: Final[int] = 4
+STEP_RUN_CONTOUR: Final[int] = 5
+STEP_COMMIT_TAG_PUSH: Final[int] = 6
+STEP_WAIT_FOR_WORKFLOW: Final[int] = 7
+STEP_VERIFY_RELEASE: Final[int] = 8
+# How many steps `release()` announces in total, in each mode.
+STEP_COUNT_DRY_RUN: Final[int] = 4
+STEP_COUNT_SKIP_CI: Final[int] = 6
+STEP_COUNT_FULL: Final[int] = 8
+
+
 def release(options: Options) -> None:
-    total = 4 if options.dry_run else (8 if not options.skip_ci else 6)
-    announce(1, total, f"checking the working tree for KeySwitch {options.version}")
+    total = STEP_COUNT_DRY_RUN if options.dry_run else (
+        STEP_COUNT_FULL if not options.skip_ci else STEP_COUNT_SKIP_CI
+    )
+    announce(STEP_CHECK_TREE, total, f"checking the working tree for KeySwitch {options.version}")
     check_preconditions(options)
 
-    announce(2, total, "propagating the version")
+    announce(STEP_APPLY_VERSION, total, "propagating the version")
     apply_version(options)
 
-    announce(3, total, "closing the changelog section")
+    announce(STEP_CLOSE_CHANGELOG, total, "closing the changelog section")
     close_changelog(options.version, dry_run=options.dry_run)
 
-    announce(4, total, "checking the release notes")
+    announce(STEP_CHECK_RELEASE_NOTES, total, "checking the release notes")
     check_release_notes(options.version)
 
     if options.dry_run:
@@ -552,12 +572,12 @@ def release(options: Options) -> None:
 
     run_directory: Path | None = None
     if options.skip_pipeline:
-        announce(5, total, "skipping the verification contour (--skip-pipeline)")
+        announce(STEP_RUN_CONTOUR, total, "skipping the verification contour (--skip-pipeline)")
     else:
-        announce(5, total, "running the verification contour")
+        announce(STEP_RUN_CONTOUR, total, "running the verification contour")
         run_directory = run_pipeline(options)
 
-    announce(6, total, "committing, tagging and pushing")
+    announce(STEP_COMMIT_TAG_PUSH, total, "committing, tagging and pushing")
     commit_release(options, build_commit_message(options, run_directory))
     tag = tag_release(options.version)
     push_release(options, tag)
@@ -566,10 +586,10 @@ def release(options: Options) -> None:
         note("skipping the release workflow (--skip-ci)")
         return
 
-    announce(7, total, "waiting for the release workflow")
+    announce(STEP_WAIT_FOR_WORKFLOW, total, "waiting for the release workflow")
     wait_for_workflow(options, tag)
 
-    announce(8, total, "verifying the published release")
+    announce(STEP_VERIFY_RELEASE, total, "verifying the published release")
     url = verify_published_release(options.version, tag)
     print(f"\nKeySwitch {options.version} is released: {url}", flush=True)
 
@@ -609,7 +629,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="check the tree, version, changelog and notes, then stop",
     )
-    parser.add_argument("--ci-timeout", type=float, default=2400.0)
+    parser.add_argument("--ci-timeout", type=float, default=DEFAULT_CI_TIMEOUT_SECONDS)
     return parser
 
 
@@ -647,7 +667,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     except KeyboardInterrupt:
         print("release: interrupted", file=sys.stderr, flush=True)
-        return 130
+        return SIGINT_EXIT_CODE
     return 0
 
 

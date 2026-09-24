@@ -10,6 +10,7 @@ from .input_context import FieldContext, FieldReader
 
 
 RETRY_DELAYS = (5.0, 15.0, 60.0)
+MILLISECONDS_PER_SECOND = 1000
 
 
 class _ManagedReader(FieldReader, Protocol):
@@ -73,7 +74,10 @@ class PlatformFieldReader:
         return {
             "attempts": self._retry_attempts,
             "limit": len(RETRY_DELAYS),
-            "after_ms": None if self._retry_after is None else max(0, round((self._retry_after - time.monotonic()) * 1000)),
+            "after_ms": (
+                None if self._retry_after is None
+                else max(0, round((self._retry_after - time.monotonic()) * MILLISECONDS_PER_SECOND))
+            ),
         }
 
     def read(self, application: str, window: int) -> FieldContext | None:
@@ -113,7 +117,7 @@ class PlatformFieldReader:
                 # How long the provider took is a fact about the provider, and
                 # the only way to tell "too slow for the timeout" from "cannot
                 # do it at all" without printing anything the user typed.
-                self._last_read_ms = round((time.monotonic() - started) * 1000)
+                self._last_read_ms = round((time.monotonic() - started) * MILLISECONDS_PER_SECOND)
         except Exception as error:
             # Never format provider exceptions: they may contain user text.
             # Missing dependencies, access denial and failed cleanup require

@@ -30,6 +30,10 @@ from keyswitch.tray_model import (
 
 ENGLISH_GROUP = 0
 RUSSIAN_GROUP = 1
+# Standard Windows message codes, reused by the fake pystray win32 module and
+# by the primary/secondary click test below.
+WM_LBUTTONUP = 0x0202
+WM_RBUTTONUP = 0x0205
 
 
 def recording_actions() -> tuple[TrayActions, list[str]]:
@@ -45,6 +49,9 @@ def recording_actions() -> tuple[TrayActions, list[str]]:
 
 
 class MenuDescriptionTests(unittest.TestCase):
+    LAYOUT_HEADER_ENTRY_COUNT = 2
+    EXPECTED_SEPARATOR_COUNT = 3
+
     def test_the_menu_reads_the_layout_and_offers_the_other_one(self) -> None:
         actions, _called = recording_actions()
         entries = menu_entries(TrayState(group=ENGLISH_GROUP), actions)
@@ -91,11 +98,11 @@ class MenuDescriptionTests(unittest.TestCase):
         actions, _called = recording_actions()
         entries = menu_entries(TrayState(group=ENGLISH_GROUP), actions)
         labels = [entry.label for entry in entries if not entry.separator]
-        self.assertEqual(labels[2:], [
+        self.assertEqual(labels[self.LAYOUT_HEADER_ENTRY_COUNT:], [
             SETTINGS_LABEL, AUTO_SWITCH_LABEL, SOUND_LABEL, NOTIFICATIONS_LABEL,
             HISTORY_LABEL, EXCLUSIONS_LABEL, ABOUT_LABEL, QUIT_LABEL,
         ])
-        self.assertEqual(sum(1 for entry in entries if entry.separator), 3)
+        self.assertEqual(sum(1 for entry in entries if entry.separator), self.EXPECTED_SEPARATOR_COUNT)
 
 
 class FakeMenuItem:
@@ -132,8 +139,8 @@ def windows_tray_native() -> types.ModuleType:
     pystray.MenuItem = FakeMenuItem  # type: ignore[attr-defined]
     util = types.ModuleType("pystray._util")
     win32 = types.ModuleType("pystray._util.win32")
-    win32.WM_LBUTTONUP = 0x0202  # type: ignore[attr-defined]
-    win32.WM_RBUTTONUP = 0x0205  # type: ignore[attr-defined]
+    win32.WM_LBUTTONUP = WM_LBUTTONUP  # type: ignore[attr-defined]
+    win32.WM_RBUTTONUP = WM_RBUTTONUP  # type: ignore[attr-defined]
     util.win32 = win32  # type: ignore[attr-defined]
     pillow = types.ModuleType("PIL")
     for name in ("Image", "ImageDraw", "ImageFont"):
@@ -207,8 +214,8 @@ class WindowsRenderingTests(unittest.TestCase):
         self.assertIsNone(cast(FakeMenuItem, self.items()[0]).action)
 
     def test_a_primary_click_opens_the_same_menu_as_the_secondary_one(self) -> None:
-        self.assertEqual(self.module.menu_activation_message(0x0202, 0x0202, 0x0205), 0x0205)
-        self.assertEqual(self.module.menu_activation_message(0x0205, 0x0202, 0x0205), 0x0205)
+        self.assertEqual(self.module.menu_activation_message(WM_LBUTTONUP, WM_LBUTTONUP, WM_RBUTTONUP), WM_RBUTTONUP)
+        self.assertEqual(self.module.menu_activation_message(WM_RBUTTONUP, WM_LBUTTONUP, WM_RBUTTONUP), WM_RBUTTONUP)
 
 
 if __name__ == "__main__":
@@ -217,6 +224,8 @@ if __name__ == "__main__":
 
 class ControllerTests(unittest.TestCase):
     """The controller between the state and whatever draws it."""
+
+    EXPECTED_DRAW_COUNT = 4  # opening state + set_layout + set_sound_enabled + set_indicator_style
 
     def setUp(self) -> None:
         from keyswitch.tray_model import TrayController
@@ -249,7 +258,7 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.controller.state.group, RUSSIAN_GROUP)
         self.assertTrue(self.controller.state.sound_enabled)
         self.assertEqual(self.controller.state.indicator_style, "flags")
-        self.assertEqual(len(self.drawn), 4)  # The first is the opening state.
+        self.assertEqual(len(self.drawn), self.EXPECTED_DRAW_COUNT)  # The first is the opening state.
 
     def test_the_remaining_switches_are_published_too(self) -> None:
         self.controller.set_enabled(False)

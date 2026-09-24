@@ -6,11 +6,16 @@ import sqlite3
 import time
 from pathlib import Path
 
+from .config import PRIVATE_DIRECTORY_MODE, PRIVATE_FILE_MODE
+
 MAX_QUEUE_BYTES = 128 * 1024 * 1024
 PENDING_KEY = "catalog_pending:"
 HEAD_DIGEST_KEY = "catalog_digest:"
 # Written instead of HEAD_DIGEST_KEY before 0.1.3: the file_id of the pinned catalog.
 LEGACY_HEAD_KEY = "catalog_head:"
+DB_CONNECT_TIMEOUT_SECONDS = 10
+RETENTION_DAYS = 30
+SECONDS_PER_DAY = 86400
 
 
 class QueueFull(RuntimeError):
@@ -19,10 +24,10 @@ class QueueFull(RuntimeError):
 
 class Store:
     def __init__(self, root: Path, capacity: int = MAX_QUEUE_BYTES):
-        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        root.mkdir(parents=True, exist_ok=True, mode=PRIVATE_DIRECTORY_MODE)
         self.capacity = capacity
-        self.db = sqlite3.connect(root / "state.sqlite", timeout=10)
-        os.chmod(root / "state.sqlite", 0o600)
+        self.db = sqlite3.connect(root / "state.sqlite", timeout=DB_CONNECT_TIMEOUT_SECONDS)
+        os.chmod(root / "state.sqlite", PRIVATE_FILE_MODE)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
@@ -153,5 +158,6 @@ class Store:
             )
             # Remote linked catalogs preserve older receipts; local history stays bounded.
             self.db.execute(
-                "DELETE FROM bundles WHERE indexed=1 AND created<?", (time.time() - 30 * 86400,)
+                "DELETE FROM bundles WHERE indexed=1 AND created<?",
+                (time.time() - RETENTION_DAYS * SECONDS_PER_DAY,),
             )

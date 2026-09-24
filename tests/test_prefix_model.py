@@ -15,7 +15,32 @@ from keyswitch.early_switch import PrefixIndex
 from keyswitch.input_context import FieldContext
 from keyswitch.language_model import LanguageModel
 from keyswitch.prefix_model import PrefixInput, PrefixModel, features
-from keyswitch.prefix_schema import VersionedPrefixModel, features_for_version
+from keyswitch.prefix_schema import (
+    CURRENT_PREFIX_FEATURE_VERSION, MAX_PREFIX_FEATURE_NAME_CHARACTERS, MAX_PREFIX_MODEL_BYTES,
+    MAX_PREFIX_WEIGHTS, OBSERVED_PREFIX_MAX_CHARACTERS, VERSION_HASH_CHARACTERS,
+    VersionedPrefixModel, features_for_version,
+)
+
+HIGH_WORD_FREQUENCY = 100
+LOW_WORD_FREQUENCY = 50
+# Bias magnitudes for the fixture ContextModel weight vectors below: enough to
+# force a single action to win regardless of the other (zero) weights.
+BASE_FIXTURE_BIAS = 10.0
+UNCERTAIN_BIAS = 2.0
+DOMINANT_BIAS = 20.0
+FIXTURE_CONVERSION_THRESHOLD = 0.999
+BELOW_MINIMUM_THRESHOLD = 0.9
+ABOVE_MAXIMUM_THRESHOLD = 1.1
+UNSUPPORTED_FEATURE_VERSION = 3
+PREFIX_CHAR_FEATURE_VALUE_CEILING = 2
+SUBTEST_PAYLOAD_PREVIEW_CHARACTERS = 150
+OVER_LENGTH_CAP_CHARACTERS = 30
+LONG_APPLICATION_NAME_REPEATS = 100
+# Trailing filler past OBSERVED_PREFIX_MAX_CHARACTERS: must never surface in features.
+TRAILING_FILLER_CHARACTERS = 100
+# Mirrors the frozen src/keyswitch/prefix_model.py before[-512:] context window.
+FIELD_BEFORE_WINDOW_CHARACTERS = 512
+SHA256_HEX_LENGTH = 64
 
 
 class PrefixModelTests(unittest.TestCase):
@@ -25,8 +50,8 @@ class PrefixModelTests(unittest.TestCase):
         self.path = Path(temporary.name) / "prefix.json"
         self.models = {
             group: LanguageModel(locale, words, "fixture", enable_spellcheck=False)
-            for group, locale, words in ((0, "en_US", {"hello": 100, "world": 50}),
-                                         (1, "ru_RU", {"привет": 100, "привод": 50}))
+            for group, locale, words in ((0, "en_US", {"hello": HIGH_WORD_FREQUENCY, "world": LOW_WORD_FREQUENCY}),
+                                         (1, "ru_RU", {"привет": HIGH_WORD_FREQUENCY, "привод": LOW_WORD_FREQUENCY}))
         }
         self.indexes = {group: PrefixIndex(model.frequencies, model.frequencies) for group, model in self.models.items()}
         self.item = PrefixInput("ghbd", "прив", 0, FieldContext("Code", "1", "// проверим ", role="code"))
@@ -35,10 +60,10 @@ class PrefixModelTests(unittest.TestCase):
 
     @staticmethod
     def payload() -> dict[str, object]:
-        weights = {"bias": [0.0, 10.0, 0.0, 0.0]}
+        weights = {"bias": [0.0, BASE_FIXTURE_BIAS, 0.0, 0.0]}
         digest = hashlib.sha256(json.dumps(weights, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
         return {"kind": "keyswitch.prefix-policy", "feature_version": 1, "actions": list(ACTIONS),
-                "version": "prefix-v1-" + digest[:12], "conversion_threshold": 0.999,
+                "version": "prefix-v1-" + digest[:VERSION_HASH_CHARACTERS], "conversion_threshold": FIXTURE_CONVERSION_THRESHOLD,
                 "weights": weights, "weights_sha256": digest}
 
     def test_load_predict_and_cache_without_completed_word_extractor(self) -> None:
@@ -55,52 +80,52 @@ class PrefixModelTests(unittest.TestCase):
             loader.assert_called_once()
 
     def test_uncertainty_waits_and_keep_is_not_a_conversion(self) -> None:
-        uncertain = PrefixModel(ContextModel({"bias": (0., 2., 0., 0.)}, "fixture"))
+        uncertain = PrefixModel(ContextModel({"bias": (0., UNCERTAIN_BIAS, 0., 0.)}, "fixture"))
         prediction = uncertain.predict_features({"bias": 1., "unknown": 1.})
         self.assertEqual(prediction.action, "wait")
         self.assertAlmostEqual(sum(prediction.probabilities), 1.)
-        keep = PrefixModel(ContextModel({"bias": (20., 0., 0., 0.)}, "fixture"))
+        keep = PrefixModel(ContextModel({"bias": (DOMINANT_BIAS, 0., 0., 0.)}, "fixture"))
         self.assertEqual(keep.predict_features({"bias": 1.}).action, "keep")
 
     def test_schema_two_adds_observed_prefix_characters_without_word_end(self) -> None:
         legacy = features(self.item, self.indexes, self.models)
         self.assertEqual(features_for_version(self.item, self.indexes, self.models), legacy)
-        current = features_for_version(self.item, self.indexes, self.models, feature_version=2)
+        current = features_for_version(self.item, self.indexes, self.models, feature_version=CURRENT_PREFIX_FEATURE_VERSION)
         self.assertEqual({name: current[name] for name in legacy}, legacy)
         self.assertIn("source:prefix_char:0:4:ghbd", current)
         self.assertIn("target:prefix_char:1:4:прив", current)
         self.assertIn("source:prefix_char:0:2:^g", current)
         self.assertFalse(any("$" in name for name in current if "prefix_char:" in name))
         other = features_for_version(replace(self.item, original="abcd", alternative="фисв"),
-                                     self.indexes, self.models, feature_version=2)
+                                     self.indexes, self.models, feature_version=CURRENT_PREFIX_FEATURE_VERSION)
         self.assertNotIn("source:prefix_char:0:4:ghbd", other)
-        long = features_for_version(replace(self.item, original="a" * 12 + "z" * 100,
-                                            alternative="ф" * 12 + "я" * 100),
-                                    self.indexes, self.models, feature_version=2)
+        long = features_for_version(replace(self.item, original="a" * OBSERVED_PREFIX_MAX_CHARACTERS + "z" * TRAILING_FILLER_CHARACTERS,
+                                            alternative="ф" * OBSERVED_PREFIX_MAX_CHARACTERS + "я" * TRAILING_FILLER_CHARACTERS),
+                                    self.indexes, self.models, feature_version=CURRENT_PREFIX_FEATURE_VERSION)
         chars = {name: value for name, value in long.items() if "prefix_char:" in name}
         self.assertTrue(chars)
-        self.assertTrue(all("z" not in name and "я" not in name and value <= 2 for name, value in chars.items()))
-        for invalid in (0, 3, True):
+        self.assertTrue(all("z" not in name and "я" not in name and value <= PREFIX_CHAR_FEATURE_VALUE_CEILING for name, value in chars.items()))
+        for invalid in (0, UNSUPPORTED_FEATURE_VERSION, True):
             with self.assertRaises(ValueError):
                 features_for_version(self.item, self.indexes, self.models, feature_version=invalid)
 
     def test_schema_two_roundtrip_keeps_prefix_and_completed_models_separate(self) -> None:
-        weights = {"source:prefix_char:0:4:ghbd": [0.0, 20.0, 0.0, 0.0]}
+        weights = {"source:prefix_char:0:4:ghbd": [0.0, DOMINANT_BIAS, 0.0, 0.0]}
         digest = hashlib.sha256(json.dumps(weights, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
-        payload = {**self.payload(), "feature_version": 2, "prefix_feature_version": 2,
-                   "version": "prefix-v2-" + digest[:12], "weights": weights, "weights_sha256": digest}
+        payload = {**self.payload(), "feature_version": CURRENT_PREFIX_FEATURE_VERSION, "prefix_feature_version": CURRENT_PREFIX_FEATURE_VERSION,
+                   "version": "prefix-v2-" + digest[:VERSION_HASH_CHARACTERS], "weights": weights, "weights_sha256": digest}
         self.path.write_text(json.dumps(payload), encoding="utf-8")
         with self.assertRaises(ValueError):
             PrefixModel.load(self.path)  # the frozen loader knows schema one only
         model = VersionedPrefixModel.load(self.path)
-        self.assertEqual(model.feature_version, 2)
+        self.assertEqual(model.feature_version, CURRENT_PREFIX_FEATURE_VERSION)
         with patch.object(ContextModel, "predict", side_effect=AssertionError("completed word extractor")):
             self.assertEqual(model.predict(self.item, self.indexes, self.models).action, "convert")
             changed = replace(self.item, original="abcd", alternative="фисв")
             self.assertEqual(model.predict(changed, self.indexes, self.models).action, "keep")
         for change in ({"feature_version": 1}, {"feature_version": True}, {"prefix_feature_version": 1},
                        {"prefix_feature_version": True}, {"prefix_feature_version": None},
-                       {"version": "prefix-v1-" + digest[:12]}, {"weights_sha256": "0" * 64}):
+                       {"version": "prefix-v1-" + digest[:VERSION_HASH_CHARACTERS]}, {"weights_sha256": "0" * SHA256_HEX_LENGTH}):
             self.path.write_text(json.dumps({**payload, **change}), encoding="utf-8")
             with self.subTest(change=change), self.assertRaises(ValueError):
                 VersionedPrefixModel.load(self.path)
@@ -112,7 +137,7 @@ class PrefixModelTests(unittest.TestCase):
         self.assertEqual(model.predict(self.item, self.indexes, self.models),
                          model.predict_features(features(self.item, self.indexes, self.models)))
         with self.assertRaises(ValueError):
-            VersionedPrefixModel(model.model, feature_version=3)
+            VersionedPrefixModel(model.model, feature_version=UNSUPPORTED_FEATURE_VERSION)
 
     def test_prefix_and_context_features_are_bounded_and_distinguish_code_from_comments(self) -> None:
         values = features(self.item, self.indexes, self.models)
@@ -133,7 +158,7 @@ class PrefixModelTests(unittest.TestCase):
         self.assertEqual((rich["token:capitals"], rich["token:digits"]), (1., 1.))
         reverse = features(PrefixInput("привет", "ghbdtn", 1, FieldContext("Terminal", "1", "English ё")), self.indexes, self.models)
         self.assertEqual(reverse["source:known"], 1.)
-        long = features(replace(self.item, original="x" * 30, field=FieldContext("A " * 100, "1", "secret " + "x" * 512)), self.indexes, self.models)
+        long = features(replace(self.item, original="x" * OVER_LENGTH_CAP_CHARACTERS, field=FieldContext("A " * LONG_APPLICATION_NAME_REPEATS, "1", "secret " + "x" * FIELD_BEFORE_WINDOW_CHARACTERS)), self.indexes, self.models)
         self.assertEqual(long["length"], 1.)
         self.assertNotIn("before:word:secret", long)
 
@@ -142,12 +167,12 @@ class PrefixModelTests(unittest.TestCase):
             {**self.payload(), "feature_version": 0}, {**self.payload(), "actions": []}]
         updates: list[dict[str, object]] = [
             {"version": 0}, {"version": "prefix-v2-other"},
-            {"weights_sha256": "bad"}, {"version": "prefix-v1-" + "0" * 12},
+            {"weights_sha256": "bad"}, {"version": "prefix-v1-" + "0" * VERSION_HASH_CHARACTERS},
         ]
-        thresholds: list[object] = [True, "1", .9, 1.1, math.nan]
-        weights: list[object] = [[], {}, {str(i): [0.] * 4 for i in range(10001)}]
+        thresholds: list[object] = [True, "1", BELOW_MINIMUM_THRESHOLD, ABOVE_MAXIMUM_THRESHOLD, math.nan]
+        weights: list[object] = [[], {}, {str(i): [0.] * len(ACTIONS) for i in range(MAX_PREFIX_WEIGHTS + 1)}]
         coefficients: list[tuple[str, object]] = [
-            ("", [0.] * 4), ("x" * 161, [0.] * 4), ("x", "vector"),
+            ("", [0.] * len(ACTIONS)), ("x" * (MAX_PREFIX_FEATURE_NAME_CHARACTERS + 1), [0.] * len(ACTIONS)), ("x", "vector"),
             ("x", [1.]), ("x", [True, 0., 0., 0.]), ("x", [math.inf, 0., 0., 0.]),
         ]
         updates.extend({"conversion_threshold": value} for value in thresholds)
@@ -158,15 +183,15 @@ class PrefixModelTests(unittest.TestCase):
         for payload in variants:
             self.path.write_text(json.dumps(payload), encoding="utf-8")
             for loader in loaders:
-                with self.subTest(loader=loader.__name__, payload=str(payload)[:150]), self.assertRaises(ValueError):
+                with self.subTest(loader=loader.__name__, payload=str(payload)[:SUBTEST_PAYLOAD_PREVIEW_CHARACTERS]), self.assertRaises(ValueError):
                     loader.load(self.path)
-        self.path.write_bytes(b" " * (2 * 1024 * 1024 + 1))
+        self.path.write_bytes(b" " * (MAX_PREFIX_MODEL_BYTES + 1))
         for loader in loaders:
             with self.subTest(loader=loader.__name__), self.assertRaises(ValueError):
                 loader.load(self.path)
         self.path.write_text("{}", encoding="utf-8")
         for loader in loaders:
-            with patch("keyswitch.prefix_model.json.loads", return_value={**self.payload(), "weights": {1: [0.] * 4}}), \
+            with patch("keyswitch.prefix_model.json.loads", return_value={**self.payload(), "weights": {1: [0.] * len(ACTIONS)}}), \
                     self.subTest(loader=loader.__name__), self.assertRaises(ValueError):
                 loader.load(self.path)
         for error in (OSError, ValueError, TypeError):

@@ -29,8 +29,9 @@ TECHNICAL_LOGGING_PATH = "diagnostics.technical_logging"
 # Rotation budgets: (bytes per file, backup files), excluding the active file.
 # The diagnostics mode keeps
 # more and larger files because a busy hour of typing fills megabytes.
-DEFAULT_ROTATION = (1024 * 1024, 2)
-TECHNICAL_ROTATION = (5 * 1024 * 1024, 5)
+BYTES_PER_MEBIBYTE = 1024 * 1024
+DEFAULT_ROTATION = (BYTES_PER_MEBIBYTE, 2)
+TECHNICAL_ROTATION = (5 * BYTES_PER_MEBIBYTE, 5)
 
 
 def log_formatter() -> logging.Formatter:
@@ -57,7 +58,7 @@ def rotation_summary(technical: bool) -> str:
     """Human wording of the current budget, shown on the diagnostics page."""
 
     maximum, backups = rotation_limits(technical)
-    return f"{maximum // (1024 * 1024)} МБ × {backups + 1} файлов"
+    return f"{maximum // BYTES_PER_MEBIBYTE} МБ × {backups + 1} файлов"
 
 
 def install_handler(handler: logging.Handler) -> None:

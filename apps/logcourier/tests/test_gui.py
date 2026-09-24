@@ -6,7 +6,11 @@ from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox, QScrollArea,
 
 from logcourier import autostart
 from logcourier.config import Config, load_config
-from logcourier.gui import Window
+from logcourier.gui import WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH, Window
+
+TAB_COUNT = 4
+BOT_TOKEN_SECRET_LENGTH = 30
+DEVICE_ID_LENGTH = 32
 
 
 def test_gui_safe_defaults_scroll_and_pause(tmp_path, monkeypatch):
@@ -14,10 +18,10 @@ def test_gui_safe_defaults_scroll_and_pause(tmp_path, monkeypatch):
     app = QApplication.instance() or QApplication([])
     window = Window(tmp_path, Config(), start_service=False)
     window.show()
-    window.resize(540, 420)
+    window.resize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
     app.processEvents()
-    assert window.tabs.count() == 4
-    assert all(isinstance(window.tabs.widget(i), QScrollArea) for i in range(4))
+    assert window.tabs.count() == TAB_COUNT
+    assert all(isinstance(window.tabs.widget(i), QScrollArea) for i in range(TAB_COUNT))
     assert window.token.echoMode() == QLineEdit.EchoMode.Password
     assert not window.auto.isChecked() and not window.consent.isChecked()
     window.consent.setChecked(True)
@@ -36,7 +40,7 @@ def test_save_bot_and_group_and_adopt_catalog(tmp_path, monkeypatch):
     monkeypatch.delenv("LOGCOURIER_BOT_TOKEN", raising=False)
     app = QApplication.instance() or QApplication([])
     window = Window(tmp_path, Config(), start_service=False)
-    token = "123456:" + "C" * 30
+    token = "123456:" + "C" * BOT_TOKEN_SECRET_LENGTH
     window.token.setText(token)
     window.chat.setText("-100123")
     window.persist_token.setChecked(False)
@@ -45,8 +49,8 @@ def test_save_bot_and_group_and_adopt_catalog(tmp_path, monkeypatch):
     assert saved.bot_id == "123456" and saved.chat_id == "-100123"
     assert token not in (tmp_path / "config.json").read_text()
     monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Yes)
-    window.confirm_catalog({"index": {"device_id": "a" * 32}}, "123456", "-100123")
-    assert load_config(tmp_path).device_id == "a" * 32
+    window.confirm_catalog({"index": {"device_id": "a" * DEVICE_ID_LENGTH}}, "123456", "-100123")
+    assert load_config(tmp_path).device_id == "a" * DEVICE_ID_LENGTH
     assert not window.consent.isChecked() and not window.auto.isChecked()
     errors = []
     monkeypatch.setattr(window, "error", errors.append)

@@ -51,6 +51,49 @@ ARTIFACT = "context-action.json"
 SEAL = "candidate-seal.json"
 WORDS = re.compile(r"[A-Za-zА-Яа-яЁё]+(?:['’\-][A-Za-zА-Яа-яЁё]+)*")
 
+# How many leading hex digits of a digest feed a deterministic draw, and the
+# base those digits are parsed in.
+DETERMINISTIC_HEX_DIGITS = 8
+HEX_BASE = 16
+# Absolute cutoff tolerance for feature-mass comparisons, and the decimal
+# places mass is rounded to before ranking (see select_features docstring).
+MASS_TOLERANCE = 1e-9
+MASS_ROUNDING_DECIMALS = 9
+# The two physical key layout groups.
+GROUP_COUNT = 2
+# Balance languages before scoring: retain at most this many contexts per family.
+MAX_CONTEXTS_PER_FAMILY = 2
+# A fair coin flip deciding which boundary-event text (newline vs tab) is used.
+BOUNDARY_EVENT_CHOICES = 2
+# Roughly one row in this many keeps its observed field-after context.
+FIELD_AFTER_SAMPLE_MODULUS = 8
+# The "isolated short reading" length ceiling: one or two letters.
+MAX_SHORT_WORD_LENGTH = 2
+# Lookahead anchor candidate word length bounds.
+ANCHOR_MIN_LENGTH = 3
+ANCHOR_MAX_LENGTH = 64
+# Decimal places kept in the mass-balancing report.
+REPORT_ROUNDING_DECIMALS = 4
+# An identifier needs this many colon-separated parts to carry a command
+# family, which is also how many leading parts make up that family key.
+MIN_IDENTIFIER_PARTS = 3
+# Trailing colon-separated segments stripped to recover a base identifier
+# (undoing suffixes like ":keep", ":planned:<anchor>").
+IDENTIFIER_SUFFIX_SEGMENTS = 2
+# Positions of "false" and "threshold" in a qualifying (minimum, net, false,
+# threshold, report) row.
+NET_BENEFIT_FALSE_INDEX = 2
+NET_BENEFIT_THRESHOLD_INDEX = 3
+# context_model.py is pinned by the context-v1 seal (PENDING_RESEAL), so its
+# "3" for the context-action feature scheme is not yet a constant we can import.
+CONTEXT_ACTION_FEATURE_VERSION = 3
+# Decimal places kept when serializing fitted weights for a stable hash.
+WEIGHT_ROUNDING_DECIMALS = 9
+# Floor preventing log(0) in the training loss.
+LOG_LOSS_EPSILON = 1e-15
+# Hex prefix length used in the published model version string.
+VERSION_HASH_PREFIX_LENGTH = 12
+
 
 def canonical(value: object) -> bytes:
     return (json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")) + "\n").encode()
@@ -61,7 +104,7 @@ def checksum(path: Path) -> str:
 
 
 def variant_choice(identifier: str, purpose: str, count: int) -> int:
-    return int(hashlib.sha256((purpose + ":" + identifier).encode()).hexdigest()[:8], 16) % count
+    return int(hashlib.sha256((purpose + ":" + identifier).encode()).hexdigest()[:DETERMINISTIC_HEX_DIGITS], HEX_BASE) % count
 
 
 @dataclass(frozen=True)
@@ -126,8 +169,8 @@ def select_features(masses: Mapping[str, float], minimum: float, maximum: int) -
         raise ValueError("maximum features must be a positive integer")
     if any(type(value) not in (int, float) or not math.isfinite(value) or value < 0 for value in masses.values()):
         raise ValueError("invalid accumulated feature mass")
-    eligible = (name for name, value in masses.items() if value >= minimum - 1e-9)
-    return sorted(sorted(eligible, key=lambda name: (-round(masses[name], 9), name))[:maximum])
+    eligible = (name for name, value in masses.items() if value >= minimum - MASS_TOLERANCE)
+    return sorted(sorted(eligible, key=lambda name: (-round(masses[name], MASS_ROUNDING_DECIMALS), name))[:maximum])
 
 
 def select_rows(rows: Sequence[CorpusRow], maximum: int) -> list[CorpusRow]:
@@ -144,7 +187,7 @@ def select_rows(rows: Sequence[CorpusRow], maximum: int) -> list[CorpusRow]:
         except ValueError:
             continue
         key = group, row.family
-        if languages[group] >= maximum // 2 or counts[key] >= 2:
+        if languages[group] >= maximum // GROUP_COUNT or counts[key] >= MAX_CONTEXTS_PER_FAMILY:
             continue
         counts[key] += 1
         languages[group] += 1
@@ -160,19 +203,20 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
             raise ValueError("action rows require a representable single-layout token")
         group = row.group
         alternate = translated(row.original, group)
-        number = int(hashlib.sha256(row.identifier.encode()).hexdigest()[:8], 16)
+        number = int(hashlib.sha256(row.identifier.encode()).hexdigest()[:DETERMINISTIC_HEX_DIGITS], HEX_BASE)
         trigger = triggers[number % len(triggers)]
         boundary_text = ""
         if trigger == "space":
             boundary_text = row.spacing[:1] or " "
         elif trigger == "punctuation":
             boundary_text = next((char for char in row.literal_tail if not char.isspace()), ".")
-        elif trigger in {"enter", "tab"} and variant_choice(row.identifier, "boundary-event", 2):
+        elif trigger in {"enter", "tab"} and variant_choice(row.identifier, "boundary-event", BOUNDARY_EVENT_CHOICES):
             boundary_text = "\n" if trigger == "enter" else "\t"
-        application = ("Telegram", "Code", "chrome", "UnseenEditor")[variant_choice(row.identifier, "application", 4)]
+        applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+        application = applications[variant_choice(row.identifier, "application", len(applications))]
         for context_name, before in (("observed", row.before), ("empty", "")):
             # Lookahead is optional field evidence, never assumed available.
-            after = row.after if context_name == "observed" and variant_choice(row.identifier, "field-after", 8) == 0 else ""
+            after = row.after if context_name == "observed" and variant_choice(row.identifier, "field-after", FIELD_AFTER_SAMPLE_MODULUS) == 0 else ""
             field = FieldContext(application, "public-training", before, after, "unknown")
             # Corpus punctuation/spacing is not the engine's segmented trailing
             # strokes. These frames describe a word at a direct boundary.
@@ -191,7 +235,7 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
             curated_letter = (len(row.original) == 1 and len(alternate) == 1
                               and (row.original.casefold() in TRUSTED_SINGLE_LETTER_WORDS
                                    or alternate.casefold() in TRUSTED_SINGLE_LETTER_WORDS))
-            if alone and len(row.original) <= 2 and not curated_letter:
+            if alone and len(row.original) <= MAX_SHORT_WORD_LENGTH and not curated_letter:
                 # An isolated short reading has no observable intent label.
                 # Digits/punctuation do not supply a neighbouring language.
                 # Both members preserve text and take the same deferred action.
@@ -274,7 +318,7 @@ def historical_curriculum(intent: LinearNgramModel | None = None) -> list[Action
                 parent = row.family, row.category, item.trigger
                 parents[identifier] = parent
                 action: ContextAction = row.action
-                if (action == "keep" and 0 < len(item.original) <= 2
+                if (action == "keep" and 0 < len(item.original) <= MAX_SHORT_WORD_LENGTH
                         and not WORDS.search(field.before) and not WORDS.search(field.after)):
                     # The shared isolated-short policy: a correct reading with no
                     # neighbouring word has no observable intent label either, so
@@ -302,7 +346,7 @@ def legacy_lookahead_rows(
 ) -> tuple[list[ActionRow], dict[str, object]]:
     """Replace bounded old TRAIN frames with equal-mass planned variants."""
     selected = {row.identifier: row for row in rows
-                if row.category.startswith("legacy_") and 0 < len(row.original) <= 2
+                if row.category.startswith("legacy_") and 0 < len(row.original) <= MAX_SHORT_WORD_LENGTH
                 and row.trigger == "space" and row.boundary_text == " " and not row.literal_tail
                 and not row.field.sensitive and not row.field.selection and row.field.role != "password"}
     anchors: dict[tuple[str, int], LookaheadAnchor] = {}
@@ -313,7 +357,7 @@ def legacy_lookahead_rows(
         if match is None:
             continue
         text = match.group()
-        if not 3 <= len(text) <= 64 or not text.isalpha():
+        if not ANCHOR_MIN_LENGTH <= len(text) <= ANCHOR_MAX_LENGTH or not text.isalpha():
             continue
         group = 1 if any("а" <= char.casefold() <= "я" or char.casefold() == "ё" for char in text) else 0
         try:
@@ -356,11 +400,11 @@ def natural_lookahead_rows(
     by_identifier = {row.identifier: row for row in source_rows}
     selected: dict[str, tuple[ActionRow, str]] = {}
     for row in rows:
-        if (row.category not in ("layout_intervention", "natural_surface") or not 0 < len(row.original) <= 2
+        if (row.category not in ("layout_intervention", "natural_surface") or not 0 < len(row.original) <= MAX_SHORT_WORD_LENGTH
                 or row.trigger != "space" or row.boundary_text != " " or row.literal_tail
                 or row.field.sensitive or row.field.selection or row.field.role == "password" or row.field.after):
             continue
-        source = by_identifier.get(row.identifier.rsplit(":", 2)[0])
+        source = by_identifier.get(row.identifier.rsplit(":", IDENTIFIER_SUFFIX_SEGMENTS)[0])
         if source is None:
             continue
         if row.category == "layout_intervention":
@@ -373,7 +417,7 @@ def natural_lookahead_rows(
         if match is None:
             continue
         text = match.group()
-        if not 3 <= len(text) <= 64 or not text.isalpha():
+        if not ANCHOR_MIN_LENGTH <= len(text) <= ANCHOR_MAX_LENGTH or not text.isalpha():
             continue
         group = 1 if any("а" <= char.casefold() <= "я" or char.casefold() == "ё" for char in text) else 0
         try:
@@ -383,7 +427,7 @@ def natural_lookahead_rows(
         anchors.setdefault((text, group), LookaheadAnchor(
             source.identifier + ":first-after", "natural-after:" + hashlib.sha256(physical(text).encode()).hexdigest(),
             text, group, split))
-    seeds = [LookaheadSeed(row.identifier, "natural:" + by_identifier[row.identifier.rsplit(":", 2)[0]].document,
+    seeds = [LookaheadSeed(row.identifier, "natural:" + by_identifier[row.identifier.rsplit(":", IDENTIFIER_SUFFIX_SEGMENTS)[0]].document,
                           evidence(row, detector, ortho),
                           row.action, "natural_short_lookahead" if row.category == "layout_intervention" else row.category,
                           row.sample_weight, split, next_words,
@@ -417,7 +461,7 @@ def balance_planned_mass(rows: Sequence[ActionRow]) -> tuple[list[ActionRow], di
     isolated: dict[tuple[int, int], float] = defaultdict(float)
     planned: dict[tuple[int, int], float] = defaultdict(float)
     for row in rows:
-        if not 0 < len(row.original) <= 2:
+        if not 0 < len(row.original) <= MAX_SHORT_WORD_LENGTH:
             continue
         key = (row.group, len(row.original))
         if row.after_origin == "planned_next_conversion":
@@ -433,9 +477,9 @@ def balance_planned_mass(rows: Sequence[ActionRow]) -> tuple[list[ActionRow], di
             row = replace(row, sample_weight=row.sample_weight * scale[key])
         result.append(row)
     report = {"policy": "planned frames per (direction, focus length) carry the total mass of the isolated deferred frames of the same class",
-              "isolated_mass": {f"{group}:{length}": round(value, 4) for (group, length), value in sorted(isolated.items())},
-              "planned_mass_before": {f"{group}:{length}": round(value, 4) for (group, length), value in sorted(planned.items())},
-              "scale": {f"{group}:{length}": round(value, 4) for (group, length), value in sorted(scale.items())},
+              "isolated_mass": {f"{group}:{length}": round(value, REPORT_ROUNDING_DECIMALS) for (group, length), value in sorted(isolated.items())},
+              "planned_mass_before": {f"{group}:{length}": round(value, REPORT_ROUNDING_DECIMALS) for (group, length), value in sorted(planned.items())},
+              "scale": {f"{group}:{length}": round(value, REPORT_ROUNDING_DECIMALS) for (group, length), value in sorted(scale.items())},
               "input_mass": math.fsum(row.sample_weight for row in rows), "output_mass": math.fsum(row.sample_weight for row in result)}
     return result, report
 
@@ -467,8 +511,8 @@ def identifier_family(identifier: str) -> str:
     """The unit that shares one identifier-evidence dropout decision: a command with all its
     contexts and spelling variants, otherwise the row itself."""
     parts = identifier.split(":")
-    if len(parts) >= 3 and parts[1] == "command":
-        return ":".join(parts[:3])
+    if len(parts) >= MIN_IDENTIFIER_PARTS and parts[1] == "command":
+        return ":".join(parts[:MIN_IDENTIFIER_PARTS])
     return identifier
 
 
@@ -544,8 +588,8 @@ def provenance() -> dict[str, str]:
 def metrics(probabilities: array[float], labels: array[int], threshold: float) -> dict[str, int | float]:
     false = true = possible = correct = 0
     for index, label in enumerate(labels):
-        scores = probabilities[index * 4:index * 4 + 4]
-        predicted = max(range(4), key=scores.__getitem__)
+        scores = probabilities[index * len(ACTIONS):index * len(ACTIONS) + len(ACTIONS)]
+        predicted = max(range(len(ACTIONS)), key=scores.__getitem__)
         converted = predicted == 1 and scores[1] >= threshold
         false += int(converted and label != 1)
         true += int(converted and label == 1)
@@ -630,9 +674,11 @@ def choose_threshold(
     floor = (math.floor(ceiling[0] * (1.0 - net_benefit_tolerance)),
              math.floor(ceiling[1] * (1.0 - net_benefit_tolerance)))
     admissible = [row for row in qualifying if (row[0], row[1]) >= floor]
-    _minimum, _net, _false, threshold, chosen = min(admissible, key=lambda row: (row[2], row[3]))
+    _minimum, _net, _false, threshold, chosen = min(
+        admissible, key=lambda row: (row[NET_BENEFIT_FALSE_INDEX], row[NET_BENEFIT_THRESHOLD_INDEX])
+    )
     return threshold, {**chosen, "net_benefit_ceiling": ceiling[1], "net_benefit_floor": floor[1],
-                       "admissible_thresholds": [row[3] for row in admissible]}, True
+                       "admissible_thresholds": [row[NET_BENEFIT_THRESHOLD_INDEX] for row in admissible]}, True
 
 
 def runtime_masks(features: Iterable[tuple[dict[str, float], int, float]], model: ContextModel) -> tuple[list[bool], list[bool]]:
@@ -661,14 +707,14 @@ def apply_support_mask(
     """
     if automatic is None:
         automatic = [True] * len(supported)
-    if len(supported) * 4 != len(probabilities) or len(automatic) != len(supported):
+    if len(supported) * len(ACTIONS) != len(probabilities) or len(automatic) != len(supported):
         raise ValueError("calibration feature and prediction counts differ")
     result = array("d", probabilities)
     for index, (available, allowed) in enumerate(zip(supported, automatic)):
-        scores = result[index * 4:index * 4 + 4]
-        selected = max(range(4), key=scores.__getitem__)
+        scores = result[index * len(ACTIONS):index * len(ACTIONS) + len(ACTIONS)]
+        selected = max(range(len(ACTIONS)), key=scores.__getitem__)
         if (not available and selected in (0, 1)) or (not allowed and selected == 1):
-            result[index * 4:index * 4 + 4] = array("d", [0.0, 0.0, 0.0, 1.0])
+            result[index * len(ACTIONS):index * len(ACTIONS) + len(ACTIONS)] = array("d", [0.0, 0.0, 0.0, 1.0])
     return result
 
 
@@ -676,7 +722,7 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
     if output.exists():
         raise ValueError("candidate directory already exists; never overwrite an experiment")
     options = cast(dict[str, object], json.loads(RECIPE.read_bytes()))
-    if options.get("schema_version") != 1 or options.get("feature_version") != 3:
+    if options.get("schema_version") != 1 or options.get("feature_version") != CONTEXT_ACTION_FEATURE_VERSION:
         raise ValueError("invalid action recipe")
     before_provenance = provenance()
     corpus_hash = checksum(corpus / "manifest.json")
@@ -748,21 +794,21 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
     train = Packed.build(combined("train"), names)
     development = {name: Packed.build(feature_rows(feature_paths[name, "development"]), names) for name in profiles}
     calibration = {name: Packed.build(feature_rows(feature_paths[name, "calibration"]), names) for name in profiles}
-    support_model = ContextModel({name: (0.0,) * 4 for name in names}, "context-v3-vocabulary", feature_version=3)
+    support_model = ContextModel({name: (0.0,) * len(ACTIONS) for name in names}, "context-v3-vocabulary", feature_version=CONTEXT_ACTION_FEATURE_VERSION)
     development_masks = {name: runtime_masks(feature_rows(feature_paths[name, "development"]), support_model)
                          for name in profiles}
     development_mass = sum(sum(data.importance) for data in development.values())
     kernel = Kernel.load()
-    weights = array("d", [0.0]) * (len(names) * 4)
-    accumulators = array("d", [1.0]) * (len(names) * 4)
+    weights = array("d", [0.0]) * (len(names) * len(ACTIONS))
+    accumulators = array("d", [1.0]) * (len(names) * len(ACTIONS))
     best, best_epoch, best_loss = array("d"), 0, math.inf
     best_selection: EpochSelection | None = None
     history: list[dict[str, object]] = []
     for epoch in range(int(cast(int, options["epochs"]))):
         kernel.epoch(train, weights, accumulators, float(cast(float, options["learning_rate"])))
-        rounded = array("d", (round(value, 9) for value in weights))
+        rounded = array("d", (round(value, WEIGHT_ROUNDING_DECIMALS) for value in weights))
         predictions = {name: kernel.predict(data, rounded) for name, data in development.items()}
-        loss = sum(-data.importance[row] * math.log(max(1e-15, predictions[name][row * 4 + label]))
+        loss = sum(-data.importance[row] * math.log(max(LOG_LOSS_EPSILON, predictions[name][row * len(ACTIONS) + label]))
                    for name, data in development.items() for row, label in enumerate(data.labels)) / development_mass
         selection = assess_epoch({name: (apply_support_mask(predictions[name], *development_masks[name]), data.labels)
                                   for name, data in development.items()},
@@ -776,9 +822,9 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
     if best_selection is None:
         raise ValueError("no epoch repaired more than it broke on development")
     gates = cast(dict[str, int | float | bool], options["gate_policy"])
-    mapping = {name: list(best[index * 4:index * 4 + 4]) for index, name in enumerate(names)}
+    mapping = {name: list(best[index * len(ACTIONS):index * len(ACTIONS) + len(ACTIONS)]) for index, name in enumerate(names)}
     candidate = ContextModel({name: tuple(values) for name, values in mapping.items()},
-                             "context-v3-fitting", feature_version=3)
+                             "context-v3-fitting", feature_version=CONTEXT_ACTION_FEATURE_VERSION)
     calibration_predictions = {name: (apply_runtime_support(kernel.predict(data, best),
                         feature_rows(feature_paths[name, "calibration"]), candidate), data.labels)
                    for name, data in calibration.items()}
@@ -791,8 +837,8 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
         authored_floor=float(cast(float, cast(dict[str, object], options["threshold_selection"])["authored_floor"])),
     )
     weight_hash = hashlib.sha256(json.dumps(mapping, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
-    payload = {"actions": list(ACTIONS), "feature_version": 3, "weights": mapping,
-               "weights_sha256": weight_hash, "version": "context-v3-" + weight_hash[:12],
+    payload = {"actions": list(ACTIONS), "feature_version": CONTEXT_ACTION_FEATURE_VERSION, "weights": mapping,
+               "weights_sha256": weight_hash, "version": "context-v3-" + weight_hash[:VERSION_HASH_PREFIX_LENGTH],
                "conversion_threshold": threshold}
     (output / ARTIFACT).write_bytes(canonical(payload))
     ContextModel.load(output / ARTIFACT)

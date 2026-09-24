@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping, Set
 from dataclasses import replace
 
+from .config import DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_MINIMUM_WORD_LENGTH
 from .detector import DetectionDecision, LanguageDetector
 from .intent_model import CorrectionTrigger
 from .language_model import LanguageModel
@@ -13,11 +14,15 @@ from .short_words import (
     natural_short_source_veto, trusted_short_word_decision,
 )
 
+# Mirrors config.DEFAULTS["detection"]["minimum_length"/"confidence"]; engine.py
+# imports this function, so this module cannot import its constants back from
+# engine.py, which declares the same defaults locally.
+
 
 def automatic_word_decision(
     detector: LanguageDetector, original: str, alternatives: dict[int, str],
-    source_group: int, *, minimum_length: int = 3,
-    confidence_threshold: float = 2.0, ignored_words: set[str] | None = None,
+    source_group: int, *, minimum_length: int = DEFAULT_MINIMUM_WORD_LENGTH,
+    confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD, ignored_words: set[str] | None = None,
     aggressive: bool = False, protect_code: bool = True,
     previous_words: dict[int, str] | None = None, context_group: int | None = None,
     forced_target_group: int | None = None, rejected_targets: set[int] | None = None,

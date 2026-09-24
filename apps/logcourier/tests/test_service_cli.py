@@ -6,6 +6,8 @@ from logcourier.collector import Collector
 from logcourier.config import save_config
 from logcourier.store import QueueFull
 
+RETRY_AFTER_SECONDS = 60
+
 
 def test_full_queue_still_delivers(tmp_path, configured, monkeypatch):
     config, _ = configured
@@ -44,7 +46,7 @@ def test_service_retry_retains_queue(tmp_path, configured, monkeypatch):
     monkeypatch.setattr(service, "Telegram", lambda _: SimpleNamespace(bot_id=config.bot_id))
 
     def failure(*args):
-        raise service.TelegramError("retry", retry_after=60)
+        raise service.TelegramError("retry", retry_after=RETRY_AFTER_SECONDS)
 
     monkeypatch.setattr(service, "deliver", failure)
     worker.run()

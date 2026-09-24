@@ -5,7 +5,7 @@ import argparse
 import json
 from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
+from typing import Final, cast
 
 import verify_context_action_model as action_verifier
 from context_corpus import ROOT
@@ -18,6 +18,12 @@ from prefix_corpus import DIRECTORY, RECEIPT, config
 from train_prefix_model import CANDIDATE, SEAL, REPORT, accepted, evaluate, provenance
 from verify_context_v2 import read_object
 from verify_lexical_compatibility import verify as verify_compatibility
+
+# Below this many sequence ids, the engine comparison is too small to trust.
+MIN_SELECTED_SEQUENCES: Final = 250
+# The candidate must restore this share of its desired prefixes early, or more.
+MIN_EARLY_RESTORED_FRACTION: Final = 0.7
+REPORT_JSON_INDENT: Final = 2
 
 
 def verify_frozen() -> dict[str, object]:
@@ -74,7 +80,7 @@ def verify(*, require_active: bool = True, report_path: Path = REPORT,
             or set(results) != {profile + "/" + context for profile in PROFILES for context in ("observed", "field")}):
         raise ValueError("prefix engine quality evidence missing")
     ids = engine.get("sequence_ids")
-    if not isinstance(ids, list) or len(ids) < 250 or len(set(ids)) != len(ids):
+    if not isinstance(ids, list) or len(ids) < MIN_SELECTED_SEQUENCES or len(set(ids)) != len(ids):
         raise ValueError("prefix engine selection incomplete")
     for variants in results.values():
         if not isinstance(variants, dict) or set(variants) != {"candidate", "shipping_no_prefix"}:
@@ -92,7 +98,8 @@ def verify(*, require_active: bool = True, report_path: Path = REPORT,
             counts_by_name[name] = counts
         current, previous = counts_by_name["candidate"], counts_by_name["shipping_no_prefix"]
         if (current["length_mismatches"] or current["changed_correct"] > previous["changed_correct"]
-                or current["restored"] < previous["restored"] or current["early_restored"] < .7 * current["desired"]):
+                or current["restored"] < previous["restored"]
+                or current["early_restored"] < MIN_EARLY_RESTORED_FRACTION * current["desired"]):
             raise ValueError("prefix engine quality gates failed")
     regression = engine.get("runtime_regression")
     if regression is not None:
@@ -118,7 +125,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     # Windows build pipes may use cp1252. JSON escapes preserve Unicode values
     # without requiring a Unicode-capable stdout or changing validation gates.
-    print(json.dumps(verify_frozen() if args.verify_frozen else verify(), ensure_ascii=True, indent=2))
+    print(json.dumps(verify_frozen() if args.verify_frozen else verify(), ensure_ascii=True, indent=REPORT_JSON_INDENT))
     return 0
 
 

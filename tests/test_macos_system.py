@@ -43,6 +43,8 @@ class LauncherCommandTests(unittest.TestCase):
 
 
 class AutostartTests(unittest.TestCase):
+    NON_MAPPING_PLIST = [1, 2, 3]
+
     def setUp(self) -> None:
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -111,7 +113,7 @@ class AutostartTests(unittest.TestCase):
 
     def test_a_list_that_is_not_a_dictionary_is_read_as_none(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_bytes(plistlib.dumps([1, 2, 3]))
+        self.path.write_bytes(plistlib.dumps(self.NON_MAPPING_PLIST))
         self.assertIsNone(self.manager().status().command)
 
     def test_a_directory_that_cannot_be_written_is_reported(self) -> None:
@@ -141,6 +143,8 @@ class AutostartTests(unittest.TestCase):
 
 
 class CatalogTests(unittest.TestCase):
+    EXPECTED_INSTALLED_COUNT = 3
+
     def setUp(self) -> None:
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -163,7 +167,7 @@ class CatalogTests(unittest.TestCase):
 
     def test_a_directory_that_is_not_there_is_simply_not_a_source(self) -> None:
         catalog = MacApplicationCatalog([self.root / "missing", self.root])
-        self.assertEqual(len(catalog.installed()), 3)
+        self.assertEqual(len(catalog.installed()), self.EXPECTED_INSTALLED_COUNT)
 
     def test_the_same_program_in_two_places_is_listed_once(self) -> None:
         second = self.root / "second"

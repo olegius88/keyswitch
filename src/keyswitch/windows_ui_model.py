@@ -10,6 +10,10 @@ from .app_quirks import MENTION_HEADS
 
 ControlKind = Literal["bool", "choice", "int", "float", "text"]
 
+# Unused by any control today: every "int"/"float" setting below passes its own
+# maximum, and other kinds ignore the field. Kept as a harmless placeholder.
+DEFAULT_SETTING_MAXIMUM = 100.0
+
 
 @dataclass(frozen=True)
 class SettingSpec:
@@ -19,7 +23,7 @@ class SettingSpec:
     kind: ControlKind
     choices: tuple[tuple[str, str], ...] = ()
     minimum: float = 0.0
-    maximum: float = 100.0
+    maximum: float = DEFAULT_SETTING_MAXIMUM
     step: float = 1.0
 
 

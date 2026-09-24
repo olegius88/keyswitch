@@ -9,9 +9,9 @@ import zipfile
 from pathlib import Path
 
 from logcourier.__main__ import main as cli
-from logcourier.catalog import deliver, list_entries, verify_connection
+from logcourier.catalog import DEFAULT_ENTRY_LIMIT, deliver, list_entries, verify_connection
 from logcourier.collector import Collector
-from logcourier.config import Source, data_directory, load_config, save_config
+from logcourier.config import JSON_INDENT_SPACES, Source, data_directory, load_config, save_config
 from logcourier.secrets import read_token
 from logcourier.store import Store
 from logcourier.telegram import Telegram
@@ -55,7 +55,7 @@ def main():
         assert not errors, errors
         print("Synthetic fragments collected:", count, flush=True)
         print(deliver(store, test, client), flush=True)
-        entries = list_entries(client, test.chat_id, limit=100)
+        entries = list_entries(client, test.chat_id, limit=DEFAULT_ENTRY_LIMIT)
         expected = [item for item in entries if item["source_id"] == test.sources[0].id]
         assert len(expected) == 1, "Expected one synthetic archive in catalog"
         entry = expected[0]
@@ -90,8 +90,10 @@ def main():
             "real_log_consent": config.consent,
             "real_sources": len(config.sources),
         }
-        (test_root / "result.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
-        print(json.dumps(report, indent=2), flush=True)
+        (test_root / "result.json").write_text(
+            json.dumps(report, indent=JSON_INDENT_SPACES), encoding="utf-8"
+        )
+        print(json.dumps(report, indent=JSON_INDENT_SPACES), flush=True)
     finally:
         store.close()
 

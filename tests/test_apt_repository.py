@@ -28,16 +28,20 @@ CONTROL_STANZA = "\n".join(
         " A description that continues on its own line.",
     )
 )
+FIELD_COMMAND_PREFIX_LENGTH = 2
+STANZA_COMMAND_LENGTH = 3
+FIELD_NAME_INDEX = 3
+BUILD_TIMESTAMP = datetime(2026, 9, 22, 10, 0, 0, tzinfo=timezone.utc)
 
 
 def _fake_run(command: list[str], **overrides: str) -> str:
     """Answer the dpkg-deb queries the builder makes about a package."""
 
-    if command[:2] != ["dpkg-deb", "--field"]:
+    if command[:FIELD_COMMAND_PREFIX_LENGTH] != ["dpkg-deb", "--field"]:
         raise AssertionError(f"unexpected command: {command}")
-    if len(command) == 3:
+    if len(command) == STANZA_COMMAND_LENGTH:
         return CONTROL_STANZA + "\n"
-    field = command[3]
+    field = command[FIELD_NAME_INDEX]
     for line in CONTROL_STANZA.splitlines():
         if line.startswith(f"{field}:"):
             return line.split(":", 1)[1].strip() + "\n"
@@ -116,7 +120,7 @@ class BuildTest(unittest.TestCase):
                 repository,
                 [package],
                 None,
-                datetime(2026, 9, 22, 10, 0, 0, tzinfo=timezone.utc),
+                BUILD_TIMESTAMP,
             )
         return repository, sources
 
@@ -198,7 +202,7 @@ class BuildTest(unittest.TestCase):
                     Path(raw) / "site",
                     [package],
                     None,
-                    datetime(2026, 9, 22, 10, 0, 0, tzinfo=timezone.utc),
+                    BUILD_TIMESTAMP,
                 )
             self.assertIn("arm64", str(raised.exception))
 
@@ -209,7 +213,7 @@ class BuildTest(unittest.TestCase):
                     Path(raw) / "site",
                     [],
                     None,
-                    datetime(2026, 9, 22, 10, 0, 0, tzinfo=timezone.utc),
+                    BUILD_TIMESTAMP,
                 )
 
 

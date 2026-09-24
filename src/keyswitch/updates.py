@@ -28,6 +28,9 @@ GITHUB_API_VERSION = "2026-03-10"
 MAX_RELEASE_JSON_BYTES = 1_000_000
 MAX_ASSET_BYTES = 300 * 1024 * 1024
 DOWNLOAD_CHUNK_BYTES = 128 * 1024
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 20.0
+MAX_RELEASE_NOTES_CHARACTERS = 4000
+PROGRESS_COMPLETE_PERCENT = 100
 _VERSION_PATTERN = re.compile(r"(?:v)?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 _DIGEST_PATTERN = re.compile(r"sha256:([0-9a-f]{64})")
 _WINDOWS_INSTALLER_PATTERN = re.compile(
@@ -172,7 +175,7 @@ class GitHubReleaseClient:
         current_version: str,
         *,
         opener: ResponseOpener = _open_url,
-        timeout: float = 20.0,
+        timeout: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
     ) -> None:
         self.current_version = current_version
         self.opener = opener
@@ -239,7 +242,7 @@ class GitHubReleaseClient:
         if digest_match is None:
             raise UpdateError("GitHub не вернул обязательную контрольную сумму SHA-256")
         notes_value = payload.get("body", "")
-        notes = notes_value[:4000] if isinstance(notes_value, str) else ""
+        notes = notes_value[:MAX_RELEASE_NOTES_CHARACTERS] if isinstance(notes_value, str) else ""
         return UpdateRelease(
             version,
             tag,
@@ -560,7 +563,7 @@ class UpdateManager:
             UpdatePhase.INSTALLING,
             f"Запускаем установку версии {release.version}",
             release,
-            progress=100,
+            progress=PROGRESS_COMPLETE_PERCENT,
         )
         if not self._transition(installing, busy=False):
             return
@@ -579,7 +582,9 @@ class UpdateManager:
         downloaded: int,
         total: int,
     ) -> None:
-        percentage = min(100, int(downloaded * 100 / max(1, total)))
+        percentage = min(
+            PROGRESS_COMPLETE_PERCENT, int(downloaded * PROGRESS_COMPLETE_PERCENT / max(1, total))
+        )
         self._transition(
             self._release_snapshot(
                 UpdatePhase.DOWNLOADING,

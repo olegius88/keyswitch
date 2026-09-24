@@ -7,12 +7,15 @@ from keyswitch.language_model import LanguageModel, WordScore
 from keyswitch.short_words import ISOLATED_SHORT_WORD_REASON
 from keyswitch.word_decision import automatic_word_decision, word_shape_veto
 
+WORD_FREQUENCY = 100_000
+HIGHER_WORD_FREQUENCY = 200_000
+
 
 class AutomaticWordDecisionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.detector = LanguageDetector({
-            0: LanguageModel("en_US", {"hello": 100_000, "if": 200_000}, "test", enable_spellcheck=False),
-            1: LanguageModel("ru_RU", {"привет": 100_000, "не": 200_000}, "test", enable_spellcheck=False),
+            0: LanguageModel("en_US", {"hello": WORD_FREQUENCY, "if": HIGHER_WORD_FREQUENCY}, "test", enable_spellcheck=False),
+            1: LanguageModel("ru_RU", {"привет": WORD_FREQUENCY, "не": HIGHER_WORD_FREQUENCY}, "test", enable_spellcheck=False),
         })
 
     def test_default_and_engine_options_preserve_the_same_conversion(self) -> None:
@@ -74,8 +77,8 @@ class OpeningLetterTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.detector = LanguageDetector({
-            0: LanguageModel("en_US", {"hello": 100_000}, "test", enable_spellcheck=False),
-            1: LanguageModel("ru_RU", {"привет": 100_000}, "test", enable_spellcheck=False),
+            0: LanguageModel("en_US", {"hello": WORD_FREQUENCY}, "test", enable_spellcheck=False),
+            1: LanguageModel("ru_RU", {"привет": WORD_FREQUENCY}, "test", enable_spellcheck=False),
         })
 
     def decide(self, original: str, replacement: str, context_group: int | None, **options: object) -> DetectionDecision:

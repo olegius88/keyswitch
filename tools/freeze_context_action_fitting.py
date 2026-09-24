@@ -54,11 +54,18 @@ ROOT = Path(__file__).resolve().parents[1]
 # The base corpus uses 70/10/10/10 over four splits; the extension has no test share, so the
 # same proportions renormalise to these cumulative buckets over a hundred.
 FITTING_SHARES = ((78, "train"), (89, "development"), (100, "calibration"))
+# How many leading hex digits of the digest feed the bucket draw, and the base
+# those digits are parsed in.
+BUCKET_DIGEST_HEX_DIGITS = 16
+HEX_BASE = 16
+BUCKET_RANGE = 100
+DEFAULT_MAX_DOCUMENTS = 12000
+DEFAULT_MAX_SENTENCES_PER_DOCUMENT = 12
 
 
 def fitting_split(namespace: str, family: str) -> str:
     """Which fitting split a new family belongs to, deterministically."""
-    bucket = int(digest(namespace + ":fitting:" + family)[:16], 16) % 100
+    bucket = int(digest(namespace + ":fitting:" + family)[:BUCKET_DIGEST_HEX_DIGITS], HEX_BASE) % BUCKET_RANGE
     for limit, split in FITTING_SHARES:
         if bucket < limit:
             return split
@@ -215,8 +222,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--lexicon", type=Path, default=ROOT / "src/keyswitch/resources/identifiers.json")
     parser.add_argument("--ledger", type=Path, default=ROOT / ".t/reliable-release-2026-09-12/context-action-test-ledger")
     parser.add_argument("--extra-exposure", action="append", type=Path, default=[])
-    parser.add_argument("--max-documents", type=int, default=12000)
-    parser.add_argument("--max-sentences-per-document", type=int, default=12)
+    parser.add_argument("--max-documents", type=int, default=DEFAULT_MAX_DOCUMENTS)
+    parser.add_argument("--max-sentences-per-document", type=int, default=DEFAULT_MAX_SENTENCES_PER_DOCUMENT)
     parser.add_argument("--report", type=Path)
     args = parser.parse_args(argv)
 

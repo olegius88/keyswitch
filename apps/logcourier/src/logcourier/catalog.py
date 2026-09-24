@@ -18,6 +18,11 @@ LOST_PIN = (
 )
 HEX = re.compile(r"[a-f0-9]{64}")
 IDENTIFIER = re.compile(r"[a-f0-9]{32}")
+CATALOG_MAX_ENTRIES = 200
+CATALOG_MAX_VERSION_ENTRIES = 50
+DELIVERY_BATCH_LIMIT = 4  # one cycle sends at most this many queued documents
+DEFAULT_ENTRY_LIMIT = 100
+MAX_CATALOG_PAGES = 100
 
 
 class DeliveryCancelled(RuntimeError):
@@ -39,7 +44,7 @@ def decode_index(data: bytes, chat_id: str, bot_id: str) -> dict:
         if not IDENTIFIER.fullmatch(result["device_id"]):
             raise ValueError
         entries = result["entries"]
-        if not isinstance(entries, list) or len(entries) > 200:
+        if not isinstance(entries, list) or len(entries) > CATALOG_MAX_ENTRIES:
             raise ValueError
         for entry in entries:
             if not IDENTIFIER.fullmatch(entry["bundle_id"]):
@@ -60,7 +65,7 @@ def decode_index(data: bytes, chat_id: str, bot_id: str) -> dict:
             if entry.get("kind") == MARKER_KIND and version is None:
                 raise ValueError
         versions = result.get("keyswitch_versions", {})
-        if not isinstance(versions, dict) or len(versions) > 50:
+        if not isinstance(versions, dict) or len(versions) > CATALOG_MAX_VERSION_ENTRIES:
             raise ValueError
         for source, state in versions.items():
             if not IDENTIFIER.fullmatch(source) or not VERSION.fullmatch(state["version"]):
@@ -151,7 +156,7 @@ def deliver(store: Store, config: Config, client: Telegram, cancelled=lambda: Fa
         known = current or ""
     if known is not None and known != current:
         raise TelegramError(LOST_PIN)
-    for row in store.queue(config.destination)[:4]:
+    for row in store.queue(config.destination)[:DELIVERY_BATCH_LIMIT]:
         checkpoint(cancelled)
         if row["file_id"]:
             continue
@@ -173,7 +178,7 @@ def deliver(store: Store, config: Config, client: Telegram, cancelled=lambda: Fa
                     "message_id": row["message_id"],
                 }
             )
-        if len(entries) == 200:
+        if len(entries) == CATALOG_MAX_ENTRIES:
             break
     versions = current_versions(store, config)
     if not entries and versions == (head or {}).get("index", {}).get("keyswitch_versions", {}):
@@ -243,8 +248,8 @@ def finish_catalog(
 def list_entries(
     client: Telegram,
     chat_id: str,
-    limit: int = 100,
-    pages: int = 100,
+    limit: int = DEFAULT_ENTRY_LIMIT,
+    pages: int = MAX_CATALOG_PAGES,
     *,
     keyswitch_version: str | None = None,
 ) -> list[dict]:

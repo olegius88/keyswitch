@@ -57,8 +57,13 @@ def reader(**attributes: object) -> tuple[MacFieldReader, FakeAccessibility]:
 
 
 class ReadingTests(unittest.TestCase):
+    FIRST_WORD_LENGTH = 6
+    TEXT_AREA_WORD_LENGTH = 5
+    OVERSIZED_TEXT_MULTIPLIER = 3
+    MIDPOINT_DIVISOR = 2
+
     def test_the_text_is_split_at_the_caret(self) -> None:
-        field, api = reader(**{VALUE_ATTRIBUTE: "привет мир", SELECTED_RANGE_ATTRIBUTE: (6, 0)})
+        field, api = reader(**{VALUE_ATTRIBUTE: "привет мир", SELECTED_RANGE_ATTRIBUTE: (self.FIRST_WORD_LENGTH, 0)})
         context = field.read(APPLICATION, WINDOW)
         assert context is not None
         self.assertEqual(context.before, "привет")
@@ -68,7 +73,7 @@ class ReadingTests(unittest.TestCase):
         self.assertEqual(api.released, [ELEMENT])
 
     def test_a_selection_is_reported_and_left_out_of_both_sides(self) -> None:
-        field, _api = reader(**{VALUE_ATTRIBUTE: "привет мир", SELECTED_RANGE_ATTRIBUTE: (0, 6)})
+        field, _api = reader(**{VALUE_ATTRIBUTE: "привет мир", SELECTED_RANGE_ATTRIBUTE: (0, self.FIRST_WORD_LENGTH)})
         context = field.read(APPLICATION, WINDOW)
         assert context is not None
         self.assertTrue(context.selection)
@@ -81,7 +86,7 @@ class ReadingTests(unittest.TestCase):
         field, api = reader(**{
             SUBROLE_ATTRIBUTE: SECURE_TEXT_FIELD_SUBROLE,
             VALUE_ATTRIBUTE: "секрет",
-            SELECTED_RANGE_ATTRIBUTE: (6, 0),
+            SELECTED_RANGE_ATTRIBUTE: (self.FIRST_WORD_LENGTH, 0),
         })
         with patch.object(api, "string_attribute", wraps=api.string_attribute) as read:
             context = field.read(APPLICATION, WINDOW)
@@ -94,7 +99,7 @@ class ReadingTests(unittest.TestCase):
     def test_a_search_field_is_told_apart_from_ordinary_text(self) -> None:
         field, _api = reader(**{
             SUBROLE_ATTRIBUTE: SEARCH_FIELD_SUBROLE,
-            VALUE_ATTRIBUTE: "запрос", SELECTED_RANGE_ATTRIBUTE: (6, 0),
+            VALUE_ATTRIBUTE: "запрос", SELECTED_RANGE_ATTRIBUTE: (self.FIRST_WORD_LENGTH, 0),
         })
         context = field.read(APPLICATION, WINDOW)
         assert context is not None
@@ -103,16 +108,16 @@ class ReadingTests(unittest.TestCase):
     def test_a_text_area_counts_as_text(self) -> None:
         field, _api = reader(**{
             ROLE_ATTRIBUTE: TEXT_AREA_ROLE,
-            VALUE_ATTRIBUTE: "абзац", SELECTED_RANGE_ATTRIBUTE: (5, 0),
+            VALUE_ATTRIBUTE: "абзац", SELECTED_RANGE_ATTRIBUTE: (self.TEXT_AREA_WORD_LENGTH, 0),
         })
         context = field.read(APPLICATION, WINDOW)
         assert context is not None
         self.assertEqual(context.role, "text")
 
     def test_only_a_bounded_amount_of_text_travels(self) -> None:
-        text = "я" * (CONTEXT_LIMIT * 3)
+        text = "я" * (CONTEXT_LIMIT * self.OVERSIZED_TEXT_MULTIPLIER)
         field, _api = reader(**{
-            VALUE_ATTRIBUTE: text, SELECTED_RANGE_ATTRIBUTE: (len(text) // 2, 0)})
+            VALUE_ATTRIBUTE: text, SELECTED_RANGE_ATTRIBUTE: (len(text) // self.MIDPOINT_DIVISOR, 0)})
         context = field.read(APPLICATION, WINDOW)
         assert context is not None
         self.assertEqual(len(context.before), CONTEXT_LIMIT)
@@ -135,6 +140,9 @@ class ReadingTests(unittest.TestCase):
 
 class RefusalTests(unittest.TestCase):
     """Silence is the right answer more often than a guess is."""
+
+    OUT_OF_BOUNDS_CARET_INDEX = 99
+    NEGATIVE_RANGE_LENGTH = -3
 
     def test_nothing_focused_reads_as_no_context(self) -> None:
         field, api = reader()
@@ -159,13 +167,13 @@ class RefusalTests(unittest.TestCase):
     def test_a_caret_outside_the_text_is_refused(self) -> None:
         """The application changed the text after it computed the range."""
 
-        field, _api = reader(**{VALUE_ATTRIBUTE: "коротко", SELECTED_RANGE_ATTRIBUTE: (99, 0)})
+        field, _api = reader(**{VALUE_ATTRIBUTE: "коротко", SELECTED_RANGE_ATTRIBUTE: (self.OUT_OF_BOUNDS_CARET_INDEX, 0)})
         self.assertIsNone(field.read(APPLICATION, WINDOW))
 
     def test_a_negative_range_is_refused(self) -> None:
         field, _api = reader(**{VALUE_ATTRIBUTE: "текст", SELECTED_RANGE_ATTRIBUTE: (-1, 0)})
         self.assertIsNone(field.read(APPLICATION, WINDOW))
-        field, _api = reader(**{VALUE_ATTRIBUTE: "текст", SELECTED_RANGE_ATTRIBUTE: (0, -3)})
+        field, _api = reader(**{VALUE_ATTRIBUTE: "текст", SELECTED_RANGE_ATTRIBUTE: (0, self.NEGATIVE_RANGE_LENGTH)})
         self.assertIsNone(field.read(APPLICATION, WINDOW))
 
     def test_the_element_is_released_even_when_nothing_is_returned(self) -> None:

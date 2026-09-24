@@ -17,7 +17,7 @@ from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
-from typing import cast
+from typing import Final, cast
 from unittest.mock import Mock, mock_open, patch
 
 from keyswitch import intent_model as im
@@ -52,6 +52,48 @@ THRESHOLD_LOGITS: dict[CorrectionTrigger, float] = {
     "tab": 0.77,
     "punctuation": 0.72,
 }
+
+# evidence()'s default source/target WordScore fixtures: an implausible source
+# reading against a plausible, known, frequent target reading.
+DEFAULT_SOURCE_WORD_VALUE = -4.0
+DEFAULT_SOURCE_NGRAM_SCORE = -3.0
+DEFAULT_TARGET_WORD_VALUE = 5.0
+DEFAULT_TARGET_FREQUENCY = 100
+DEFAULT_TARGET_GRAM_RATIO = 0.9
+
+# model_bytes()'s own defaults, reused across most tests that only need *a*
+# valid model.
+DEFAULT_TEST_DIMENSION = 256
+DEFAULT_TEST_VETO_THRESHOLD = -0.25
+DEFAULT_TEST_BIAS = 0.5
+# A second, smaller dimension reused across classes wherever a full-size model
+# would just add noise.
+SMALL_TEST_DIMENSION = 64
+# A larger dimension for tests that want more distinct buckets to work with.
+LARGE_TEST_DIMENSION = 1024
+# im.NGRAM_ORDERS is (1, 2, 3, 4, 5); this fixture is missing 1 and 5 and
+# recurs wherever a test needs "some ngram_orders, but not the real ones".
+INCOMPLETE_NGRAM_ORDERS = (2, 3, 4)
+BYTES_PER_WEIGHT = 2  # each weight is a little-endian int16
+BYTES_PER_FINGERPRINT = 8  # each fingerprint is a little-endian uint64
+
+# encode_test_case()'s default dimension, small enough to keep malformed-input
+# fixtures cheap.
+MINI_TEST_DIMENSION = 8
+
+# Indices within the tuple im.HEADER.unpack_from() returns
+# (magic, schema, flags, manifest_length, payload_length, crc, digest).
+HEADER_MANIFEST_LENGTH_INDEX: Final = 3
+HEADER_PAYLOAD_LENGTH_INDEX: Final = 4
+HEADER_CRC_INDEX: Final = 5
+HEADER_DIGEST_INDEX: Final = 6
+CRC32_MASK = 0xFFFFFFFF
+
+SHA256_HEX_LENGTH = 64
+# One past the largest representable uint64, and the largest one itself; both
+# recur throughout as fingerprint/seed boundary fixtures.
+UINT64_OVERFLOW = 1 << 64
+UINT64_MAX = UINT64_OVERFLOW - 1
 
 
 def platt_calibration(
@@ -118,13 +160,13 @@ def evidence(
         source_group,
         target_group,
         trigger,
-        source_score or word_score(-4.0, ngram_score=-3.0),
+        source_score or word_score(DEFAULT_SOURCE_WORD_VALUE, ngram_score=DEFAULT_SOURCE_NGRAM_SCORE),
         target_score
         or word_score(
-            5.0,
+            DEFAULT_TARGET_WORD_VALUE,
             known=True,
-            frequency=100,
-            gram_ratio=0.9,
+            frequency=DEFAULT_TARGET_FREQUENCY,
+            gram_ratio=DEFAULT_TARGET_GRAM_RATIO,
             exact=True,
             ngram_score=1.0,
             invalid_ratio=0.0,
@@ -136,12 +178,12 @@ def evidence(
 
 def model_bytes(
     *,
-    dimension: int = 256,
+    dimension: int = DEFAULT_TEST_DIMENSION,
     weights: list[float] | None = None,
     fingerprints: set[int] | None = None,
     threshold_logits: Mapping[CorrectionTrigger, float] = THRESHOLD_LOGITS,
-    veto_threshold: float = -0.25,
-    bias: float = 0.5,
+    veto_threshold: float = DEFAULT_TEST_VETO_THRESHOLD,
+    bias: float = DEFAULT_TEST_BIAS,
     platt_scale: float = 1.0,
     platt_bias: float = 0.0,
     directional_platt: Mapping[LayoutDirection, PlattParameters] | None = None,
@@ -178,7 +220,7 @@ def model_bytes(
 def encode_test_case(
     *,
     model_version: object = "v1",
-    dimension: object = 8,
+    dimension: object = MINI_TEST_DIMENSION,
     weights: object = None,
     supported_fingerprints: object = None,
     threshold_logits: object = THRESHOLD_LOGITS,
@@ -193,7 +235,7 @@ def encode_test_case(
 ) -> bytes:
     """Pass deliberately malformed runtime values without weakening mypy."""
 
-    actual_weights = [0.0] * 8 if weights is None else weights
+    actual_weights = [0.0] * MINI_TEST_DIMENSION if weights is None else weights
     actual_support = (
         set() if supported_fingerprints is None else supported_fingerprints
     )
@@ -249,7 +291,7 @@ def unpack_artifact(data: bytes) -> tuple[dict[str, object], bytes]:
         tuple[bytes, int, int, int, int, int, bytes],
         im.HEADER.unpack_from(data),
     )
-    manifest_length = header[3]
+    manifest_length = header[HEADER_MANIFEST_LENGTH_INDEX]
     start = im.HEADER.size
     manifest = cast(
         dict[str, object],
@@ -281,22 +323,38 @@ def repack_artifact(
         0,
         len(final_manifest),
         len(final_payload),
-        zlib.crc32(final_payload) & 0xFFFFFFFF,
+        zlib.crc32(final_payload) & CRC32_MASK,
         hashlib.sha256(final_manifest).digest(),
     )
     return header + final_manifest + final_payload
 
 
 class StatusAndPrimitiveTests(unittest.TestCase):
+    EXPECTED_MINIMUM_RUNTIME_TOKEN_LENGTH = 5
+    EXPECTED_MAX_SUPPORTED_FINGERPRINTS_LOG2 = 20  # im.MAX_SUPPORTED_FINGERPRINTS == 1 << this
+    MEBIBYTE = 1024 * 1024
+    EXPECTED_MAX_PAYLOAD_MEBIBYTES = 12
+    EXPECTED_MAX_CONTAINER_MEBIBYTES = 14
+    FNV_HASH_OF_A = 0xAF63DC4C8601EC8C
+    FNV_HASH_OF_FOOBAR = 0x85944171F73967E8
+    FNV_HASH_OF_PRIVET = 0x1BD8A912173E871F
+    SIGNED_HASH_BUCKET_FOR_A = 140
+    SIGNED_HASH_BUCKET_FOR_KSLM = 136
+    MEMBERSHIP_HASH_CHAR_G0_N2 = 0xFB09B815328338F3
+    MEMBERSHIP_HASH_CHAR_G1_N5 = 0x5D034BC6D9921B20
+    NON_ZERO_INVALID_DIMENSION = 3
+    SIGMOID_OF_ZERO = 0.5
+    SATURATING_LOGIT_MAGNITUDE = 1000.0
+
     def test_hard_size_caps_are_exact_and_internally_consistent(self) -> None:
-        self.assertEqual(im.MINIMUM_RUNTIME_TOKEN_LENGTH, 5)
-        self.assertEqual(im.MAX_SUPPORTED_FINGERPRINTS, 1 << 20)
-        self.assertEqual(im.MAX_PAYLOAD_BYTES, 12 * 1024 * 1024)
-        self.assertEqual(im.MAX_MANIFEST_BYTES, 1 * 1024 * 1024)
-        self.assertEqual(im.MAX_CONTAINER_BYTES, 14 * 1024 * 1024)
+        self.assertEqual(im.MINIMUM_RUNTIME_TOKEN_LENGTH, self.EXPECTED_MINIMUM_RUNTIME_TOKEN_LENGTH)
+        self.assertEqual(im.MAX_SUPPORTED_FINGERPRINTS, 1 << self.EXPECTED_MAX_SUPPORTED_FINGERPRINTS_LOG2)
+        self.assertEqual(im.MAX_PAYLOAD_BYTES, self.EXPECTED_MAX_PAYLOAD_MEBIBYTES * self.MEBIBYTE)
+        self.assertEqual(im.MAX_MANIFEST_BYTES, 1 * self.MEBIBYTE)
+        self.assertEqual(im.MAX_CONTAINER_BYTES, self.EXPECTED_MAX_CONTAINER_MEBIBYTES * self.MEBIBYTE)
         self.assertEqual(
-            (im.MAX_DIMENSION * 2)
-            + (im.MAX_SUPPORTED_FINGERPRINTS * 8),
+            (im.MAX_DIMENSION * BYTES_PER_WEIGHT)
+            + (im.MAX_SUPPORTED_FINGERPRINTS * BYTES_PER_FINGERPRINT),
             im.MAX_PAYLOAD_BYTES,
         )
         self.assertGreaterEqual(
@@ -308,7 +366,7 @@ class StatusAndPrimitiveTests(unittest.TestCase):
 
     def test_status_summary_and_dictionary_are_diagnostics_safe(self) -> None:
         path = Path("/tmp/model.ksm")
-        status = IntentModelStatus(True, path, "v1", "a" * 64, None)
+        status = IntentModelStatus(True, path, "v1", "a" * SHA256_HEX_LENGTH, None)
         self.assertEqual(status.summary, "v1 · sha256:aaaaaaaaaaaa")
         self.assertEqual(
             status.as_dict(),
@@ -316,7 +374,7 @@ class StatusAndPrimitiveTests(unittest.TestCase):
                 "available": True,
                 "path": str(path),
                 "version": "v1",
-                "checksum": "a" * 64,
+                "checksum": "a" * SHA256_HEX_LENGTH,
                 "error": None,
                 "summary": "v1 · sha256:aaaaaaaaaaaa",
             },
@@ -334,38 +392,38 @@ class StatusAndPrimitiveTests(unittest.TestCase):
     def test_unicode_normalization_and_raw_limit(self) -> None:
         self.assertEqual(normalize_token("A\u030A"), "å")
         self.assertEqual(normalize_token("Straße"), "strasse")
-        self.assertEqual(normalize_token("A" * 64 + "B"), "a" * 64)
+        self.assertEqual(normalize_token("A" * im.RAW_TOKEN_LIMIT + "B"), "a" * im.RAW_TOKEN_LIMIT)
 
     def test_fnv_golden_vectors_and_signed_buckets(self) -> None:
-        self.assertEqual(fnv1a64(""), 0xCBF29CE484222325)
-        self.assertEqual(fnv1a64("a"), 0xAF63DC4C8601EC8C)
-        self.assertEqual(fnv1a64("foobar"), 0x85944171F73967E8)
-        self.assertEqual(fnv1a64("привет"), 0x1BD8A912173E871F)
-        self.assertEqual(signed_feature_hash("a", 256), (140, -1))
-        self.assertEqual(signed_feature_hash("KSLM", 256), (136, 1))
+        self.assertEqual(fnv1a64(""), im.DEFAULT_FNV_SEED)
+        self.assertEqual(fnv1a64("a"), self.FNV_HASH_OF_A)
+        self.assertEqual(fnv1a64("foobar"), self.FNV_HASH_OF_FOOBAR)
+        self.assertEqual(fnv1a64("привет"), self.FNV_HASH_OF_PRIVET)
+        self.assertEqual(signed_feature_hash("a", DEFAULT_TEST_DIMENSION), (self.SIGNED_HASH_BUCKET_FOR_A, -1))
+        self.assertEqual(signed_feature_hash("KSLM", DEFAULT_TEST_DIMENSION), (self.SIGNED_HASH_BUCKET_FOR_KSLM, 1))
         self.assertEqual(
             fnv1a64("char:g0:n2:^a", im.DEFAULT_MEMBERSHIP_FNV_SEED),
-            0xFB09B815328338F3,
+            self.MEMBERSHIP_HASH_CHAR_G0_N2,
         )
         self.assertEqual(
             fnv1a64("char:g1:n5:вет$", im.DEFAULT_MEMBERSHIP_FNV_SEED),
-            0x5D034BC6D9921B20,
+            self.MEMBERSHIP_HASH_CHAR_G1_N5,
         )
         self.assertNotEqual(
             fnv1a64("char:g0:n2:^a", im.DEFAULT_MEMBERSHIP_FNV_SEED),
             fnv1a64("char:g0:n2:^a", im.DEFAULT_FNV_SEED),
         )
-        for invalid in (-1, 1 << 64, True):
+        for invalid in (-1, UINT64_OVERFLOW, True):
             with self.assertRaises(ValueError):
                 fnv1a64("x", invalid)
-        for invalid_dimension in (0, 3, (1 << 21) + 1, True):
+        for invalid_dimension in (0, self.NON_ZERO_INVALID_DIMENSION, im.MAX_DIMENSION + 1, True):
             with self.assertRaises(ValueError):
                 signed_feature_hash("x", invalid_dimension)
 
     def test_stable_sigmoid_extremes_and_nan(self) -> None:
-        self.assertEqual(stable_sigmoid(0.0), 0.5)
-        self.assertEqual(stable_sigmoid(1000.0), 1.0)
-        self.assertEqual(stable_sigmoid(-1000.0), 0.0)
+        self.assertEqual(stable_sigmoid(0.0), self.SIGMOID_OF_ZERO)
+        self.assertEqual(stable_sigmoid(self.SATURATING_LOGIT_MAGNITUDE), 1.0)
+        self.assertEqual(stable_sigmoid(-self.SATURATING_LOGIT_MAGNITUDE), 0.0)
         self.assertEqual(stable_sigmoid(math.inf), 1.0)
         self.assertEqual(stable_sigmoid(-math.inf), 0.0)
         with self.assertRaises(ValueError):
@@ -373,6 +431,39 @@ class StatusAndPrimitiveTests(unittest.TestCase):
 
 
 class FeatureExtractionTests(unittest.TestCase):
+    EXTREME_GROUP = 100
+    IMPLAUSIBLE_FREQUENCY_MAGNITUDE = 10
+    HUGE_FREQUENCY = 2_000_000_000
+    ARBITRARY_CONTEXT_GROUP = 42
+    SHORT_TOKEN_LENGTH = 8
+    MEDIUM_TOKEN_LENGTH = 12
+    LONG_TOKEN_LENGTH = 20
+    SOURCE_CHARACTER_GRAM_RATIO = 0.2
+    SOURCE_CHARACTER_INVALID_RATIO = 0.8
+    SOURCE_CHARACTER_RAW_NGRAM_SCORE = -3.5
+    TARGET_CHARACTER_GRAM_RATIO = 0.8
+    TARGET_CHARACTER_NGRAM_SCORE = 0.5
+    TARGET_CHARACTER_INVALID_RATIO = 0.2
+    TARGET_CHARACTER_RAW_NGRAM_SCORE = 0.75
+    SCORER_ONLY_MAGNITUDE = 1_000.0
+    SCORER_ONLY_SOURCE_FREQUENCY = 1_000_000_000
+    SCORER_ONLY_TARGET_FREQUENCY = 999_999_999
+    SCORER_ONLY_HIGH_RATIO = 0.99
+    SCORER_ONLY_LOW_RATIO = 0.01
+    SCORER_ONLY_NGRAM_MAGNITUDE = 4.0
+    SCORER_ONLY_TARGET_RAW_NGRAM_SCORE = -15.0
+    GOLDEN_CONTEXT_DELTA = 0.75
+    GOLDEN_CONTEXT_GROUP = 1
+    GOLDEN_FEATURE_VALUE_COUNT = 64
+    GOLDEN_FINGERPRINT_COUNT = 60
+    GOLDEN_FEATURE_HASH = "c3062140658b4b743391d85d649b1530adeaa8b891cb554d25cf524c3ec0c01c"
+    MATRIX_LENGTHS = (1, 4, 5, 7, 8, 11, 12, 19, 20)
+    MATRIX_DELTAS = (-6.0, -1.0, -0.25, 0.0, 0.25, 1.0, 6.0, math.nan, math.inf)
+    MATRIX_UNKNOWN_CONTEXT_GROUP = 7
+    MATRIX_DIMENSION = 2048
+    GOLDEN_MATRIX_HASH = "8e6a2c648f3ed046a0b6cbdbdba1c2181d545dfa62b6bfcff1050a4e8ec4969a"
+    ALTERNATION_MODULUS = 2  # toggles source/target direction every other row
+
     def test_character_features_are_count_normalized_and_antisymmetric(self) -> None:
         left: dict[str, float] = {}
         right: dict[str, float] = {}
@@ -396,34 +487,34 @@ class FeatureExtractionTests(unittest.TestCase):
 
     def test_feature_vector_is_deterministic_bounded_and_sparse(self) -> None:
         item = evidence(
-            original="G" * 64 + "ignored",
-            alternative="П" * 64 + "лишнее",
-            source_group=-100,
-            target_group=100,
+            original="G" * im.RAW_TOKEN_LIMIT + "ignored",
+            alternative="П" * im.RAW_TOKEN_LIMIT + "лишнее",
+            source_group=-self.EXTREME_GROUP,
+            target_group=self.EXTREME_GROUP,
             source_score=word_score(
                 -math.inf,
-                frequency=-10,
+                frequency=-self.IMPLAUSIBLE_FREQUENCY_MAGNITUDE,
                 gram_ratio=math.nan,
                 ngram_score=-math.inf,
                 invalid_ratio=math.inf,
             ),
             target_score=word_score(
                 math.inf,
-                frequency=2_000_000_000,
+                frequency=self.HUGE_FREQUENCY,
                 gram_ratio=math.inf,
                 ngram_score=math.inf,
                 invalid_ratio=-math.inf,
             ),
             context_delta=math.inf,
-            context_group=42,
+            context_group=self.ARBITRARY_CONTEXT_GROUP,
         )
-        first = extract_features(item, dimension=256)
-        second = extract_features(item, dimension=256)
+        first = extract_features(item, dimension=DEFAULT_TEST_DIMENSION)
+        second = extract_features(item, dimension=DEFAULT_TEST_DIMENSION)
         self.assertEqual(first, second)
         self.assertIsInstance(first, FeatureVector)
         self.assertTrue(first.values)
         self.assertTrue(first.character_fingerprints)
-        self.assertTrue(all(0 <= bucket < 256 for bucket, _value in first.values))
+        self.assertTrue(all(0 <= bucket < DEFAULT_TEST_DIMENSION for bucket, _value in first.values))
         self.assertTrue(all(math.isfinite(value) for _bucket, value in first.values))
 
     def test_feature_categories_cover_lengths_directions_triggers_and_collisions(
@@ -439,64 +530,64 @@ class FeatureExtractionTests(unittest.TestCase):
                 source_group=1,
                 target_group=0,
             ),
-            evidence(original="a" * 8, alternative="b" * 8),
-            evidence(original="a" * 12, alternative="b" * 12),
-            evidence(original="a" * 20, alternative="b" * 20, trigger="pause"),
+            evidence(original="a" * self.SHORT_TOKEN_LENGTH, alternative="b" * self.SHORT_TOKEN_LENGTH),
+            evidence(original="a" * self.MEDIUM_TOKEN_LENGTH, alternative="b" * self.MEDIUM_TOKEN_LENGTH),
+            evidence(original="a" * self.LONG_TOKEN_LENGTH, alternative="b" * self.LONG_TOKEN_LENGTH, trigger="pause"),
             evidence(trigger="punctuation"),
         )
-        vectors = [extract_features(item, dimension=64) for item in cases]
+        vectors = [extract_features(item, dimension=SMALL_TEST_DIMENSION) for item in cases]
         self.assertEqual(len(set(vectors)), len(vectors))
         collided = extract_features(evidence(), dimension=1)
         self.assertLessEqual(len(collided.values), 1)
 
     def test_classifier_projection_ignores_every_language_model_field(self) -> None:
         source_character = word_score(
-            -4.0,
-            gram_ratio=0.2,
-            ngram_score=-3.0,
-            invalid_ratio=0.8,
-            raw_ngram_score=-3.5,
+            DEFAULT_SOURCE_WORD_VALUE,
+            gram_ratio=self.SOURCE_CHARACTER_GRAM_RATIO,
+            ngram_score=DEFAULT_SOURCE_NGRAM_SCORE,
+            invalid_ratio=self.SOURCE_CHARACTER_INVALID_RATIO,
+            raw_ngram_score=self.SOURCE_CHARACTER_RAW_NGRAM_SCORE,
         )
         target_character = word_score(
             1.0,
-            gram_ratio=0.8,
-            ngram_score=0.5,
-            invalid_ratio=0.2,
-            raw_ngram_score=0.75,
+            gram_ratio=self.TARGET_CHARACTER_GRAM_RATIO,
+            ngram_score=self.TARGET_CHARACTER_NGRAM_SCORE,
+            invalid_ratio=self.TARGET_CHARACTER_INVALID_RATIO,
+            raw_ngram_score=self.TARGET_CHARACTER_RAW_NGRAM_SCORE,
         )
         baseline = extract_features(
             evidence(
                 source_score=source_character,
                 target_score=target_character,
             ),
-            dimension=1024,
+            dimension=LARGE_TEST_DIMENSION,
         )
         scorer_only_change = extract_features(
             evidence(
                 source_score=word_score(
-                    1_000.0,
+                    self.SCORER_ONLY_MAGNITUDE,
                     known=True,
-                    frequency=1_000_000_000,
-                    gram_ratio=0.99,
+                    frequency=self.SCORER_ONLY_SOURCE_FREQUENCY,
+                    gram_ratio=self.SCORER_ONLY_HIGH_RATIO,
                     exact=True,
                     spell_known=True,
-                    ngram_score=4.0,
-                    invalid_ratio=0.01,
-                    raw_ngram_score=4.0,
+                    ngram_score=self.SCORER_ONLY_NGRAM_MAGNITUDE,
+                    invalid_ratio=self.SCORER_ONLY_LOW_RATIO,
+                    raw_ngram_score=self.SCORER_ONLY_NGRAM_MAGNITUDE,
                 ),
                 target_score=word_score(
-                    -1_000.0,
+                    -self.SCORER_ONLY_MAGNITUDE,
                     known=True,
-                    frequency=999_999_999,
-                    gram_ratio=0.01,
+                    frequency=self.SCORER_ONLY_TARGET_FREQUENCY,
+                    gram_ratio=self.SCORER_ONLY_LOW_RATIO,
                     exact=True,
                     spell_known=True,
-                    ngram_score=-4.0,
-                    invalid_ratio=0.99,
-                    raw_ngram_score=-15.0,
+                    ngram_score=-self.SCORER_ONLY_NGRAM_MAGNITUDE,
+                    invalid_ratio=self.SCORER_ONLY_HIGH_RATIO,
+                    raw_ngram_score=self.SCORER_ONLY_TARGET_RAW_NGRAM_SCORE,
                 ),
             ),
-            dimension=1024,
+            dimension=LARGE_TEST_DIMENSION,
         )
         self.assertEqual(baseline, scorer_only_change)
         changed_token = extract_features(
@@ -505,7 +596,7 @@ class FeatureExtractionTests(unittest.TestCase):
                 source_score=source_character,
                 target_score=target_character,
             ),
-            dimension=1024,
+            dimension=LARGE_TEST_DIMENSION,
         )
         self.assertNotEqual(baseline, changed_token)
 
@@ -513,10 +604,10 @@ class FeatureExtractionTests(unittest.TestCase):
         item = evidence(
             original="ghbdtn",
             alternative="привет",
-            context_delta=0.75,
-            context_group=1,
+            context_delta=self.GOLDEN_CONTEXT_DELTA,
+            context_group=self.GOLDEN_CONTEXT_GROUP,
         )
-        vector = extract_features(item, dimension=1024)
+        vector = extract_features(item, dimension=LARGE_TEST_DIMENSION)
         canonical = {
             "values": [
                 [bucket, value.hex()]
@@ -535,14 +626,14 @@ class FeatureExtractionTests(unittest.TestCase):
         ).encode("ascii")
         self.assertEqual(
             hashlib.sha256(encoded).hexdigest(),
-            "c3062140658b4b743391d85d649b1530adeaa8b891cb554d25cf524c3ec0c01c",
+            self.GOLDEN_FEATURE_HASH,
         )
-        self.assertEqual(len(vector.values), 64)
-        self.assertEqual(len(vector.character_fingerprints), 60)
+        self.assertEqual(len(vector.values), self.GOLDEN_FEATURE_VALUE_COUNT)
+        self.assertEqual(len(vector.character_fingerprints), self.GOLDEN_FINGERPRINT_COUNT)
 
         changed_feature_hash = extract_features(
             item,
-            dimension=1024,
+            dimension=LARGE_TEST_DIMENSION,
             hash_seed=im.DEFAULT_FNV_SEED ^ 1,
         )
         self.assertNotEqual(vector.values, changed_feature_hash.values)
@@ -553,7 +644,7 @@ class FeatureExtractionTests(unittest.TestCase):
 
         changed_membership_hash = extract_features(
             item,
-            dimension=1024,
+            dimension=LARGE_TEST_DIMENSION,
             membership_seed=im.DEFAULT_MEMBERSHIP_FNV_SEED ^ 1,
         )
         self.assertEqual(vector.values, changed_membership_hash.values)
@@ -563,25 +654,15 @@ class FeatureExtractionTests(unittest.TestCase):
         )
 
         matrix: list[dict[str, object]] = []
-        lengths = (1, 4, 5, 7, 8, 11, 12, 19, 20)
-        deltas = (
-            -6.0,
-            -1.0,
-            -0.25,
-            0.0,
-            0.25,
-            1.0,
-            6.0,
-            math.nan,
-            math.inf,
-        )
+        lengths = self.MATRIX_LENGTHS
+        deltas = self.MATRIX_DELTAS
         for index, (length, delta) in enumerate(
             zip(lengths, deltas, strict=True)
         ):
             source_group, target_group = (
-                (0, 1) if index % 2 == 0 else (1, 0)
+                (0, 1) if index % self.ALTERNATION_MODULUS == 0 else (1, 0)
             )
-            context_groups = (None, source_group, target_group, 7)
+            context_groups = (None, source_group, target_group, self.MATRIX_UNKNOWN_CONTEXT_GROUP)
             matrix_vector = extract_features(
                 evidence(
                     original=("a" if source_group == 0 else "б") * length,
@@ -592,7 +673,7 @@ class FeatureExtractionTests(unittest.TestCase):
                     context_delta=delta,
                     context_group=context_groups[index % len(context_groups)],
                 ),
-                dimension=2048,
+                dimension=self.MATRIX_DIMENSION,
             )
             matrix.append(
                 {
@@ -616,66 +697,112 @@ class FeatureExtractionTests(unittest.TestCase):
         ).encode("ascii")
         self.assertEqual(
             hashlib.sha256(matrix_bytes).hexdigest(),
-            "8e6a2c648f3ed046a0b6cbdbdba1c2181d545dfa62b6bfcff1050a4e8ec4969a",
+            self.GOLDEN_MATRIX_HASH,
         )
 
     def test_invalid_feature_contract_is_rejected(self) -> None:
         invalid_trigger = evidence()
         object.__setattr__(invalid_trigger, "trigger", cast(CorrectionTrigger, "timer"))
         with self.assertRaises(ValueError):
-            extract_features(invalid_trigger, dimension=64)
+            extract_features(invalid_trigger, dimension=SMALL_TEST_DIMENSION)
         with self.assertRaises(ValueError):
-            extract_features(evidence(), dimension=64, hash_seed=-1)
+            extract_features(evidence(), dimension=SMALL_TEST_DIMENSION, hash_seed=-1)
         with self.assertRaises(ValueError):
-            extract_features(evidence(), dimension=64, membership_seed=-1)
+            extract_features(evidence(), dimension=SMALL_TEST_DIMENSION, membership_seed=-1)
         with self.assertRaises(ValueError):
             extract_features(
                 evidence(),
-                dimension=64,
+                dimension=SMALL_TEST_DIMENSION,
                 membership_seed=im.DEFAULT_FNV_SEED,
             )
         with self.assertRaises(ValueError):
-            extract_features(evidence(), dimension=64, ngram_orders=(2, 3, 4))
+            extract_features(evidence(), dimension=SMALL_TEST_DIMENSION, ngram_orders=INCOMPLETE_NGRAM_ORDERS)
         with self.assertRaises(ValueError):
-            extract_features(evidence(), dimension=64, ngram_orders=(2, 3, 4, True))
+            extract_features(evidence(), dimension=SMALL_TEST_DIMENSION, ngram_orders=(*INCOMPLETE_NGRAM_ORDERS, True))
 
 
 class EncodingAndPredictionTests(unittest.TestCase):
+    # A deterministic pseudo-random-looking weight pattern: index % modulus
+    # shifted and scaled into a small float range.
+    RUNTIME_MATRIX_WEIGHT_MODULUS = 17
+    RUNTIME_MATRIX_WEIGHT_OFFSET = 8
+    RUNTIME_MATRIX_WEIGHT_SCALE = 8.0
+    RUNTIME_MATRIX_BIAS = 0.125
+    RUNTIME_MATRIX_PLATT_SCALE = 0.75
+    RUNTIME_MATRIX_PLATT_BIAS = -0.25
+    CONTEXT_DELTA_MATRIX = (
+        -math.inf,
+        -6.0,
+        -1.25,
+        -1.0,
+        -0.75,
+        -0.25,
+        -0.125,
+        -0.0,
+        0.125,
+        0.25,
+        0.75,
+        1.0,
+        1.25,
+        6.0,
+        math.inf,
+        math.nan,
+    )
+    MAX_PLAUSIBLE_CONTEXT_GROUP = 63
+    DETERMINISTIC_WEIGHT_MODULUS = 9
+    DETERMINISTIC_WEIGHT_OFFSET = 4
+    DETERMINISTIC_WEIGHT_SCALE = 10.0
+    METADATA_EXAMPLE_COUNT = 1234
+    METADATA_LOSS = 0.125
+    SAMPLE_FINGERPRINT = 3
+    EXPECTED_FINGERPRINT_COUNT = 3
+    PLATT_SCALE_DOUBLING = 2.0
+    BIAS_MAGNITUDE = 2.0
+    CALIBRATED_SCALE_QUARTER = 0.25
+    CALIBRATED_SCALE_HALF = 0.5
+    SATURATED_BIAS = 40.0
+    SATURATED_LOGIT = 50.0
+    DIRECTIONAL_PLATT_BIAS = 2.0
+    SAMPLE_FINGERPRINTS = (1, 2, 3)
+    MUTATION_PROBE_VALUE = 9
+    IMMUTABLE_WRITE_PROBE = 2
+    THRESHOLD_WRITE_PROBE = 0.1
+    TINY_FINGERPRINT_CAP = 2
+    MIDPOINT_DIVISOR = 2
+    PERMISSION_MASK = 0o777
+    EXPECTED_FILE_MODE = 0o644
+    NON_ZERO_INVALID_DIMENSION = 3
+    SECOND_SAMPLE_FINGERPRINT = 2
+    MODEL_VERSION_MAX_LENGTH = 128  # src/keyswitch/intent_model.py's own bound, not yet named there (PENDING_RESEAL)
+    TINY_PAYLOAD_CAP_BYTES = 32
+    ARBITRARY_THRESHOLD_VALUE = 0.5
+    # _validated_json_value() rejects metadata nested past depth 16 (not yet
+    # named there; PENDING_RESEAL); this goes comfortably past that.
+    NESTING_DEPTH_OVER_LIMIT = 18
+    OVERSIZED_METADATA_INT = 1 << 65
+
     def tearDown(self) -> None:
         clear_model_cache()
 
     def test_feature_v5_is_exactly_context_invariant_across_runtime_matrix(
         self,
     ) -> None:
-        dimension = 1024
+        dimension = LARGE_TEST_DIMENSION
         model = im._decode_container(
             model_bytes(
                 dimension=dimension,
-                weights=[((index % 17) - 8) / 8.0 for index in range(dimension)],
-                bias=0.125,
-                platt_scale=0.75,
-                platt_bias=-0.25,
+                weights=[
+                    ((index % self.RUNTIME_MATRIX_WEIGHT_MODULUS) - self.RUNTIME_MATRIX_WEIGHT_OFFSET)
+                    / self.RUNTIME_MATRIX_WEIGHT_SCALE
+                    for index in range(dimension)
+                ],
+                bias=self.RUNTIME_MATRIX_BIAS,
+                platt_scale=self.RUNTIME_MATRIX_PLATT_SCALE,
+                platt_bias=self.RUNTIME_MATRIX_PLATT_BIAS,
             ),
             None,
         )
-        context_deltas = (
-            -math.inf,
-            -6.0,
-            -1.25,
-            -1.0,
-            -0.75,
-            -0.25,
-            -0.125,
-            -0.0,
-            0.125,
-            0.25,
-            0.75,
-            1.0,
-            1.25,
-            6.0,
-            math.inf,
-            math.nan,
-        )
+        context_deltas = self.CONTEXT_DELTA_MATRIX
         for source_group, target_group in ((0, 1), (1, 0)):
             for trigger in TRIGGERS:
                 baseline_input = evidence(
@@ -695,7 +822,7 @@ class EncodingAndPredictionTests(unittest.TestCase):
                     source_group,
                     target_group,
                     -1,
-                    63,
+                    self.MAX_PLAUSIBLE_CONTEXT_GROUP,
                 )
                 for context_group in context_groups:
                     for context_delta in context_deltas:
@@ -738,25 +865,29 @@ class EncodingAndPredictionTests(unittest.TestCase):
                             )
 
     def test_deterministic_roundtrip_metadata_and_trigger_thresholds(self) -> None:
-        weights = [((index % 9) - 4) / 10.0 for index in range(256)]
+        weights = [
+            ((index % self.DETERMINISTIC_WEIGHT_MODULUS) - self.DETERMINISTIC_WEIGHT_OFFSET)
+            / self.DETERMINISTIC_WEIGHT_SCALE
+            for index in range(DEFAULT_TEST_DIMENSION)
+        ]
         metadata: dict[str, object] = {
-            "training": {"examples": 1234, "loss": 0.125},
+            "training": {"examples": self.METADATA_EXAMPLE_COUNT, "loss": self.METADATA_LOSS},
             "tags": ["deterministic", True, None],
         }
         first = model_bytes(
             weights=weights,
-            fingerprints={0, 3, (1 << 64) - 1},
+            fingerprints={0, self.SAMPLE_FINGERPRINT, UINT64_MAX},
             metadata=metadata,
         )
         second = model_bytes(
             weights=weights,
-            fingerprints={(1 << 64) - 1, 3, 0},
+            fingerprints={UINT64_MAX, self.SAMPLE_FINGERPRINT, 0},
             metadata=metadata,
         )
         self.assertEqual(first, second)
         manifest, payload = unpack_artifact(first)
-        self.assertEqual(manifest["schema"], 4)
-        self.assertEqual(manifest["feature_version"], 5)
+        self.assertEqual(manifest["schema"], im.SCHEMA_VERSION)
+        self.assertEqual(manifest["feature_version"], im.FEATURE_VERSION)
         self.assertEqual(
             manifest["membership_algorithm"],
             im.MEMBERSHIP_ALGORITHM,
@@ -765,10 +896,10 @@ class EncodingAndPredictionTests(unittest.TestCase):
             manifest["membership_seed"],
             im.DEFAULT_MEMBERSHIP_FNV_SEED,
         )
-        self.assertEqual(manifest["supported_fingerprint_count"], 3)
+        self.assertEqual(manifest["supported_fingerprint_count"], self.EXPECTED_FINGERPRINT_COUNT)
         self.assertEqual(
-            im._decode_uint64_little_endian(payload[256 * 2 :]).tolist(),
-            [0, 3, (1 << 64) - 1],
+            im._decode_uint64_little_endian(payload[DEFAULT_TEST_DIMENSION * BYTES_PER_WEIGHT :]).tolist(),
+            [0, self.SAMPLE_FINGERPRINT, UINT64_MAX],
         )
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "model.ksm"
@@ -783,7 +914,7 @@ class EncodingAndPredictionTests(unittest.TestCase):
                 model = LinearNgramModel.load(path)
             self.assertEqual(model.source_path, path)
             self.assertEqual(model.model_version, "intent-test-1")
-            self.assertEqual(model.veto_threshold, -0.25)
+            self.assertEqual(model.veto_threshold, DEFAULT_TEST_VETO_THRESHOLD)
             self.assertEqual(
                 model.membership_seed,
                 im.DEFAULT_MEMBERSHIP_FNV_SEED,
@@ -792,7 +923,7 @@ class EncodingAndPredictionTests(unittest.TestCase):
             snapshot = model.metadata
             self.assertEqual(snapshot, metadata)
             cast(dict[str, object], snapshot["training"])["examples"] = 0
-            self.assertEqual(cast(dict[str, object], model.metadata["training"])["examples"], 1234)
+            self.assertEqual(cast(dict[str, object], model.metadata["training"])["examples"], self.METADATA_EXAMPLE_COUNT)
 
             space = model.predict(evidence(trigger="space"))
             pause = model.predict(evidence(trigger="pause"))
@@ -811,7 +942,7 @@ class EncodingAndPredictionTests(unittest.TestCase):
     def test_prediction_calibration_switch_and_coverage(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "model.ksm"
-            path.write_bytes(model_bytes(bias=1.0, platt_scale=2.0, platt_bias=-1.0))
+            path.write_bytes(model_bytes(bias=1.0, platt_scale=self.PLATT_SCALE_DOUBLING, platt_bias=-1.0))
             model = LinearNgramModel.load(path)
             prediction = model.predict(evidence(trigger="space"))
             self.assertEqual(prediction.logit, 1.0)
@@ -824,8 +955,8 @@ class EncodingAndPredictionTests(unittest.TestCase):
             }
             path.write_bytes(
                 model_bytes(
-                    bias=2.0,
-                    platt_scale=0.25,
+                    bias=self.BIAS_MAGNITUDE,
+                    platt_scale=self.CALIBRATED_SCALE_QUARTER,
                     platt_bias=-1.0,
                     threshold_logits=zero_thresholds,
                 )
@@ -835,15 +966,15 @@ class EncodingAndPredictionTests(unittest.TestCase):
             )
             self.assertGreater(raw_above_but_calibrated_below.logit, 0.0)
             self.assertLess(
-                (0.25 * raw_above_but_calibrated_below.logit) - 1.0,
+                (self.CALIBRATED_SCALE_QUARTER * raw_above_but_calibrated_below.logit) - 1.0,
                 0.0,
             )
             self.assertFalse(raw_above_but_calibrated_below.should_switch)
 
             path.write_bytes(
                 model_bytes(
-                    bias=-2.0,
-                    platt_scale=0.25,
+                    bias=-self.BIAS_MAGNITUDE,
+                    platt_scale=self.CALIBRATED_SCALE_QUARTER,
                     platt_bias=1.0,
                     threshold_logits=zero_thresholds,
                 )
@@ -853,15 +984,15 @@ class EncodingAndPredictionTests(unittest.TestCase):
             )
             self.assertLess(raw_below_but_calibrated_above.logit, 0.0)
             self.assertGreater(
-                (0.25 * raw_below_but_calibrated_above.logit) + 1.0,
+                (self.CALIBRATED_SCALE_QUARTER * raw_below_but_calibrated_above.logit) + 1.0,
                 0.0,
             )
             self.assertTrue(raw_below_but_calibrated_above.should_switch)
 
             path.write_bytes(
                 model_bytes(
-                    bias=2.0,
-                    platt_scale=0.5,
+                    bias=self.BIAS_MAGNITUDE,
+                    platt_scale=self.CALIBRATED_SCALE_HALF,
                     platt_bias=-1.0,
                     threshold_logits=zero_thresholds,
                 )
@@ -869,7 +1000,7 @@ class EncodingAndPredictionTests(unittest.TestCase):
             exact_boundary = LinearNgramModel.load(path).predict(
                 evidence(trigger="space")
             )
-            self.assertEqual((0.5 * exact_boundary.logit) - 1.0, 0.0)
+            self.assertEqual((self.CALIBRATED_SCALE_HALF * exact_boundary.logit) - 1.0, 0.0)
             self.assertTrue(exact_boundary.should_switch)
 
             path.write_bytes(model_bytes(fingerprints=set(), bias=0.0))
@@ -885,11 +1016,11 @@ class EncodingAndPredictionTests(unittest.TestCase):
             self.assertEqual(no_characters.coverage, 0.0)
 
             saturated_logits: dict[CorrectionTrigger, float] = {
-                trigger: 50.0 for trigger in TRIGGERS
+                trigger: self.SATURATED_LOGIT for trigger in TRIGGERS
             }
             path.write_bytes(
                 model_bytes(
-                    bias=40.0,
+                    bias=self.SATURATED_BIAS,
                     threshold_logits=saturated_logits,
                 )
             )
@@ -903,8 +1034,8 @@ class EncodingAndPredictionTests(unittest.TestCase):
             trigger: 0.0 for trigger in TRIGGERS
         }
         calibration: dict[LayoutDirection, PlattParameters] = {
-            "0>1": PlattParameters(1.0, 2.0),
-            "1>0": PlattParameters(0.5, -2.0),
+            "0>1": PlattParameters(1.0, self.DIRECTIONAL_PLATT_BIAS),
+            "1>0": PlattParameters(self.CALIBRATED_SCALE_HALF, -self.DIRECTIONAL_PLATT_BIAS),
         }
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "directional.ksm"
@@ -923,8 +1054,8 @@ class EncodingAndPredictionTests(unittest.TestCase):
                 evidence(source_group=1, target_group=0)
             )
             self.assertEqual(forward.logit, reverse.logit)
-            self.assertEqual(forward.probability, stable_sigmoid(2.0))
-            self.assertEqual(reverse.probability, stable_sigmoid(-2.0))
+            self.assertEqual(forward.probability, stable_sigmoid(self.DIRECTIONAL_PLATT_BIAS))
+            self.assertEqual(reverse.probability, stable_sigmoid(-self.DIRECTIONAL_PLATT_BIAS))
             self.assertTrue(forward.should_switch)
             self.assertFalse(reverse.should_switch)
             self.assertEqual(model.platt_calibration, calibration)
@@ -940,18 +1071,18 @@ class EncodingAndPredictionTests(unittest.TestCase):
             fingerprints_value: array[int] | None = None,
             weight_scale: float = 1.0,
             platt_scale: float = 1.0,
-            payload_sha256: str = "1" * 64,
-            checksum: str = "0" * 64,
+            payload_sha256: str = "1" * SHA256_HEX_LENGTH,
+            checksum: str = "0" * SHA256_HEX_LENGTH,
         ) -> LinearNgramModel:
             return LinearNgramModel(
-                dimension=256,
+                dimension=DEFAULT_TEST_DIMENSION,
                 weights=(
-                    array("h", [1] * 256)
+                    array("h", [1] * DEFAULT_TEST_DIMENSION)
                     if weights_value is None
                     else weights_value
                 ),
                 supported_fingerprints=(
-                    array("Q", [1, 2, 3])
+                    array("Q", self.SAMPLE_FINGERPRINTS)
                     if fingerprints_value is None
                     else fingerprints_value
                 ),
@@ -970,52 +1101,52 @@ class EncodingAndPredictionTests(unittest.TestCase):
                 metadata={},
             )
 
-        weights = array("h", [1] * 256)
-        fingerprints = array("Q", [1, 2, 3])
+        weights = array("h", [1] * DEFAULT_TEST_DIMENSION)
+        fingerprints = array("Q", self.SAMPLE_FINGERPRINTS)
         model = construct(
             weights_value=weights,
             fingerprints_value=fingerprints,
         )
-        weights[0] = 9
-        fingerprints[0] = 9
+        weights[0] = self.MUTATION_PROBE_VALUE
+        fingerprints[0] = self.MUTATION_PROBE_VALUE
         self.assertEqual(model._weights[0], 1)
-        self.assertEqual(model._supported_fingerprints.tolist(), [1, 2, 3])
+        self.assertEqual(model._supported_fingerprints.tolist(), list(self.SAMPLE_FINGERPRINTS))
         self.assertIsInstance(model._weights.obj, bytes)
         self.assertIsInstance(model._supported_fingerprints.obj, bytes)
         with self.assertRaisesRegex(AttributeError, "immutable"):
-            setattr(model, "bias", 2.0)
+            setattr(model, "bias", self.BIAS_MAGNITUDE)
         with self.assertRaises(TypeError):
-            model._weights[0] = 2
+            model._weights[0] = self.IMMUTABLE_WRITE_PROBE
         with self.assertRaises(TypeError):
             cast(bytearray, model._weights.obj)[0] = 0
         with self.assertRaises(TypeError):
             cast(bytearray, model._supported_fingerprints.obj)[0] = 0
         with self.assertRaises(TypeError):
-            model.thresholds["space"] = 0.1  # type: ignore[index]
+            model.thresholds["space"] = self.THRESHOLD_WRITE_PROBE  # type: ignore[index]
         with self.assertRaises(TypeError):
-            model.threshold_logits["space"] = 0.1  # type: ignore[index]
+            model.threshold_logits["space"] = self.THRESHOLD_WRITE_PROBE  # type: ignore[index]
         with self.assertRaises(TypeError):
-            model.threshold_logits["space"]["0>1"] = 0.1  # type: ignore[index]
+            model.threshold_logits["space"]["0>1"] = self.THRESHOLD_WRITE_PROBE  # type: ignore[index]
         with self.assertRaises(TypeError):
-            model.thresholds["space"]["0>1"] = 0.1  # type: ignore[index]
+            model.thresholds["space"]["0>1"] = self.THRESHOLD_WRITE_PROBE  # type: ignore[index]
 
         invalid_cases = (
-            {"weights_value": array("i", [1] * 256)},
-            {"weights_value": array("h", [1] * 255)},
-            {"fingerprints_value": array("I", [1, 2, 3])},
+            {"weights_value": array("i", [1] * DEFAULT_TEST_DIMENSION)},
+            {"weights_value": array("h", [1] * (DEFAULT_TEST_DIMENSION - 1))},
+            {"fingerprints_value": array("I", self.SAMPLE_FINGERPRINTS)},
             {"weight_scale": 0.0},
             {"platt_scale": 0.0},
             {"payload_sha256": ""},
-            {"payload_sha256": "g" * 64},
+            {"payload_sha256": "g" * SHA256_HEX_LENGTH},
             {"checksum": ""},
-            {"checksum": "g" * 64},
+            {"checksum": "g" * SHA256_HEX_LENGTH},
         )
         for arguments in invalid_cases:
             with self.assertRaises(ValueError):
                 construct(**arguments)
-        with patch.object(im, "MAX_SUPPORTED_FINGERPRINTS", 2):
+        with patch.object(im, "MAX_SUPPORTED_FINGERPRINTS", self.TINY_FINGERPRINT_CAP):
             with self.assertRaisesRegex(ValueError, "fingerprint count"):
-                construct(fingerprints_value=array("Q", [1, 2, 3]))
+                construct(fingerprints_value=array("Q", self.SAMPLE_FINGERPRINTS))
 
     def test_coverage_uses_exact_feature_membership_not_weight_buckets(self) -> None:
         known = evidence(original="a", alternative="б")
@@ -1054,7 +1185,7 @@ class EncodingAndPredictionTests(unittest.TestCase):
             )
             ordered = sorted(known_features.character_fingerprints)
             self.assertTrue(model._is_supported(ordered[0]))
-            self.assertTrue(model._is_supported(ordered[len(ordered) // 2]))
+            self.assertTrue(model._is_supported(ordered[len(ordered) // self.MIDPOINT_DIVISOR]))
             self.assertTrue(model._is_supported(ordered[-1]))
             missing_inside = next(
                 candidate
@@ -1062,12 +1193,12 @@ class EncodingAndPredictionTests(unittest.TestCase):
                 if candidate not in known_features.character_fingerprints
             )
             self.assertFalse(model._is_supported(missing_inside))
-            self.assertFalse(model._is_supported((1 << 64) - 1))
+            self.assertFalse(model._is_supported(UINT64_MAX))
 
             path.write_bytes(
                 model_bytes(
                     dimension=1,
-                    fingerprints={ordered[len(ordered) // 2]},
+                    fingerprints={ordered[len(ordered) // self.MIDPOINT_DIVISOR]},
                 )
             )
             partial = LinearNgramModel.load(path).predict(known)
@@ -1082,21 +1213,21 @@ class EncodingAndPredictionTests(unittest.TestCase):
             model = write_model(
                 path,
                 model_version="atomic-v1",
-                dimension=64,
-                weights=[0.0] * 64,
-                supported_fingerprints={1, 2},
+                dimension=SMALL_TEST_DIMENSION,
+                weights=[0.0] * SMALL_TEST_DIMENSION,
+                supported_fingerprints={1, self.SECOND_SAMPLE_FINGERPRINT},
                 threshold_logits=directional_threshold_logits(),
                 veto_threshold=-1.0,
                 metadata={"source": "test"},
             )
             self.assertEqual(model.model_version, "atomic-v1")
             if os.name == "posix":
-                self.assertEqual(path.stat().st_mode & 0o777, 0o644)
+                self.assertEqual(path.stat().st_mode & self.PERMISSION_MASK, self.EXPECTED_FILE_MODE)
             self.assertFalse(list(path.parent.glob("*.tmp")))
             self.assertEqual(LinearNgramModel.load(path).metadata, {"source": "test"})
 
     def test_writer_validation_rejects_invalid_arguments(self) -> None:
-        invalid_dimensions = (0, 3, (1 << 21) + 1, True)
+        invalid_dimensions = (0, self.NON_ZERO_INVALID_DIMENSION, im.MAX_DIMENSION + 1, True)
         for dimension in invalid_dimensions:
             with self.assertRaises(ValueError):
                 encode_test_case(dimension=dimension)
@@ -1105,46 +1236,46 @@ class EncodingAndPredictionTests(unittest.TestCase):
 
         class UnderreportedWeights(list[float]):
             def __len__(self) -> int:
-                return 8
+                return MINI_TEST_DIMENSION
 
         with self.assertRaises(ValueError):
-            encode_test_case(weights=UnderreportedWeights([0.0] * 9))
+            encode_test_case(weights=UnderreportedWeights([0.0] * (MINI_TEST_DIMENSION + 1)))
 
         class OverreportedWeights(list[float]):
             def __len__(self) -> int:
-                return 8
+                return MINI_TEST_DIMENSION
 
         with self.assertRaises(ValueError):
-            encode_test_case(weights=OverreportedWeights([0.0] * 7))
+            encode_test_case(weights=OverreportedWeights([0.0] * (MINI_TEST_DIMENSION - 1)))
 
         class WeightBomb:
             def __len__(self) -> int:
-                return 8
+                return MINI_TEST_DIMENSION
 
             def __iter__(self) -> Iterator[float]:
-                yield from (0.0 for _index in range(9))
+                yield from (0.0 for _index in range(MINI_TEST_DIMENSION + 1))
                 raise AssertionError("writer read past dimension + 1")
 
         with self.assertRaises(ValueError):
             encode_test_case(weights=WeightBomb())
-        for invalid_weight in (math.nan, math.inf, 1_000_001.0, True, "bad"):
-            weights: list[object] = [0.0] * 8
+        for invalid_weight in (math.nan, math.inf, im._MAX_MODEL_FLOAT + 1, True, "bad"):
+            weights: list[object] = [0.0] * MINI_TEST_DIMENSION
             weights[0] = invalid_weight
             with self.assertRaises(ValueError):
                 encode_test_case(weights=weights)
         for invalid_support in (
             {-1},
-            {1 << 64},
+            {UINT64_OVERFLOW},
             {True},
             cast(set[int], {"bad"}),
             [1, 1],
         ):
             with self.assertRaises(ValueError):
                 encode_test_case(supported_fingerprints=invalid_support)
-        for invalid_version in ("", "x" * 129, "line\nbreak", 1):
+        for invalid_version in ("", "x" * (self.MODEL_VERSION_MAX_LENGTH + 1), "line\nbreak", 1):
             with self.assertRaises(ValueError):
                 encode_test_case(model_version=invalid_version)
-        for invalid_seed in (-1, 1 << 64, True):
+        for invalid_seed in (-1, UINT64_OVERFLOW, True):
             with self.assertRaises(ValueError):
                 encode_test_case(fnv_seed=invalid_seed)
             with self.assertRaises(ValueError):
@@ -1153,14 +1284,16 @@ class EncodingAndPredictionTests(unittest.TestCase):
             encode_test_case(membership_seed=im.DEFAULT_FNV_SEED)
         with patch.object(im, "MAX_SUPPORTED_FINGERPRINTS", 1):
             with self.assertRaises(ValueError):
-                encode_test_case(supported_fingerprints={1, 2})
+                encode_test_case(supported_fingerprints={1, self.SECOND_SAMPLE_FINGERPRINT})
+
+            second_fingerprint = self.SECOND_SAMPLE_FINGERPRINT
 
             class UnderreportedFingerprints(Collection[int]):
                 def __contains__(self, value: object) -> bool:
-                    return value in (1, 2)
+                    return value in (1, second_fingerprint)
 
                 def __iter__(self) -> Iterator[int]:
-                    return iter((1, 2))
+                    return iter((1, second_fingerprint))
 
                 def __len__(self) -> int:
                     return 0
@@ -1172,11 +1305,11 @@ class EncodingAndPredictionTests(unittest.TestCase):
 
             class FingerprintBomb(Collection[int]):
                 def __contains__(self, value: object) -> bool:
-                    return value in (1, 2)
+                    return value in (1, second_fingerprint)
 
                 def __iter__(self) -> Iterator[int]:
                     yield 1
-                    yield 2
+                    yield second_fingerprint
                     raise AssertionError(
                         "writer read past MAX_SUPPORTED_FINGERPRINTS + 1"
                     )
@@ -1186,37 +1319,37 @@ class EncodingAndPredictionTests(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 encode_test_case(supported_fingerprints=FingerprintBomb())
-        with patch.object(im, "MAX_SUPPORTED_FINGERPRINTS", 2):
+        with patch.object(im, "MAX_SUPPORTED_FINGERPRINTS", self.TINY_FINGERPRINT_CAP):
             exact_fingerprint_cap = encode_test_case(
-                supported_fingerprints={1, 2}
+                supported_fingerprints={1, self.SECOND_SAMPLE_FINGERPRINT}
             )
             exact_manifest, _exact_payload = unpack_artifact(
                 exact_fingerprint_cap
             )
             self.assertEqual(
                 exact_manifest["supported_fingerprint_count"],
-                2,
+                self.TINY_FINGERPRINT_CAP,
             )
             with self.assertRaises(ValueError):
-                encode_test_case(supported_fingerprints={1, 2, 3})
-        with patch.object(im, "MAX_PAYLOAD_BYTES", 32):
+                encode_test_case(supported_fingerprints={1, self.SECOND_SAMPLE_FINGERPRINT, self.SAMPLE_FINGERPRINT})
+        with patch.object(im, "MAX_PAYLOAD_BYTES", self.TINY_PAYLOAD_CAP_BYTES):
             exact_payload_cap = encode_test_case(
-                dimension=8,
-                supported_fingerprints={1, 2},
+                dimension=MINI_TEST_DIMENSION,
+                supported_fingerprints={1, self.SECOND_SAMPLE_FINGERPRINT},
             )
             _exact_manifest, exact_payload = unpack_artifact(
                 exact_payload_cap
             )
-            self.assertEqual(len(exact_payload), 32)
+            self.assertEqual(len(exact_payload), self.TINY_PAYLOAD_CAP_BYTES)
             with self.assertRaisesRegex(
                 IntentModelFormatError,
                 "payload length",
             ):
                 encode_test_case(
-                    dimension=8,
-                    supported_fingerprints={1, 2, 3},
+                    dimension=MINI_TEST_DIMENSION,
+                    supported_fingerprints={1, self.SECOND_SAMPLE_FINGERPRINT, self.SAMPLE_FINGERPRINT},
                 )
-        for invalid_orders in ((2, 3, 4), (2, 3, 4, True), (2, 3, 4, "5")):
+        for invalid_orders in (INCOMPLETE_NGRAM_ORDERS, (*INCOMPLETE_NGRAM_ORDERS, True), (*INCOMPLETE_NGRAM_ORDERS, "5")):
             with self.assertRaises(ValueError):
                 encode_test_case(ngram_orders=invalid_orders)
 
@@ -1225,11 +1358,11 @@ class EncodingAndPredictionTests(unittest.TestCase):
             trigger: value for trigger, value in THRESHOLD_LOGITS.items()
         }
         bad_threshold_logits: list[Mapping[str, object]] = [
-            {"space": 0.5},
-            {**threshold_logit_objects, "extra": 0.5},
+            {"space": self.ARBITRARY_THRESHOLD_VALUE},
+            {**threshold_logit_objects, "extra": self.ARBITRARY_THRESHOLD_VALUE},
             {**threshold_logit_objects, "space": math.nan},
             {**threshold_logit_objects, "space": True},
-            {**threshold_logit_objects, "space": 1_000_001.0},
+            {**threshold_logit_objects, "space": im._MAX_MODEL_FLOAT + 1},
         ]
         for threshold_logits in bad_threshold_logits:
             with self.assertRaises(ValueError):
@@ -1252,11 +1385,11 @@ class EncodingAndPredictionTests(unittest.TestCase):
                     encode_test_case(platt_scale=invalid)
 
         nested: object = None
-        for _index in range(18):
+        for _index in range(self.NESTING_DEPTH_OVER_LIMIT):
             nested = [nested]
         bad_metadata: tuple[Mapping[str, object], ...] = (
             {"nan": math.nan},
-            {"large": 1 << 65},
+            {"large": self.OVERSIZED_METADATA_INT},
             {"object": object()},
             {"nested": nested},
             cast(Mapping[str, object], {1: "non-string key"}),
@@ -1269,8 +1402,24 @@ class EncodingAndPredictionTests(unittest.TestCase):
 
 
 class LoaderCorruptionTests(unittest.TestCase):
+    LOADER_FIXTURE_FINGERPRINT = 7
+    SHA256_DIGEST_BYTES = 32
+    JSON_NESTING_OVERFLOW_DEPTH = 1200
+    WRONG_SCHEMA_FLOAT = 3.0
+    WRONG_FEATURE_VERSION_FLOAT = 5.0
+    NON_ZERO_INVALID_DIMENSION = 3
+    ARBITRARY_THRESHOLD_VALUE = 0.5
+    WRONG_DIMENSION_FOR_PAYLOAD = 16
+    WRONG_FINGERPRINT_COUNT_FOR_PAYLOAD = 3
+    EXPECTED_MAX_CONTAINER_BYTES = 14 * 1024 * 1024
+    GC_TEST_FINGERPRINTS = {1, 2}
+    THREAD_POOL_WORKERS = 2
+    EXPECTED_DECODE_CALLS = 2
+    WAIT_TIMEOUT_SECONDS = 5.0
+    SHORT_POLL_SECONDS = 0.1
+
     def setUp(self) -> None:
-        self.valid = model_bytes(dimension=8, fingerprints={0, 7})
+        self.valid = model_bytes(dimension=MINI_TEST_DIMENSION, fingerprints={0, self.LOADER_FIXTURE_FINGERPRINT})
 
     def load_bytes(self, data: bytes) -> LinearNgramModel:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1304,10 +1453,10 @@ class LoaderCorruptionTests(unittest.TestCase):
             magic,
             schema,
             flags,
-            header[3] if manifest_length is None else manifest_length,
-            header[4] if payload_length is None else payload_length,
-            header[5] if crc is None else crc,
-            header[6] if digest is None else digest,
+            header[HEADER_MANIFEST_LENGTH_INDEX] if manifest_length is None else manifest_length,
+            header[HEADER_PAYLOAD_LENGTH_INDEX] if payload_length is None else payload_length,
+            header[HEADER_CRC_INDEX] if crc is None else crc,
+            header[HEADER_DIGEST_INDEX] if digest is None else digest,
         ) + (self.valid[im.HEADER.size :] if body is None else body)
 
     def test_header_magic_schema_flags_and_bounds(self) -> None:
@@ -1337,7 +1486,7 @@ class LoaderCorruptionTests(unittest.TestCase):
         self.assert_format_error(self.valid[:-1], "file length")
 
     def test_manifest_digest_payload_crc_and_json_failures(self) -> None:
-        self.assert_format_error(self.replace_header(digest=b"0" * 32), "manifest checksum")
+        self.assert_format_error(self.replace_header(digest=b"0" * self.SHA256_DIGEST_BYTES), "manifest checksum")
         self.assert_format_error(self.replace_header(crc=0), "CRC32")
         manifest, payload = unpack_artifact(self.valid)
         del manifest
@@ -1347,9 +1496,9 @@ class LoaderCorruptionTests(unittest.TestCase):
         self.assert_format_error(invalid_json, "UTF-8 JSON")
         deep_json = (
             b'{"deep":'
-            + (b"[" * 1200)
+            + (b"[" * self.JSON_NESTING_OVERFLOW_DEPTH)
             + b"null"
-            + (b"]" * 1200)
+            + (b"]" * self.JSON_NESTING_OVERFLOW_DEPTH)
             + b"}"
         )
         self.assert_format_error(
@@ -1381,7 +1530,7 @@ class LoaderCorruptionTests(unittest.TestCase):
             0,
             len(old_manifest_bytes),
             len(changed_payload),
-            zlib.crc32(changed_payload) & 0xFFFFFFFF,
+            zlib.crc32(changed_payload) & CRC32_MASK,
             hashlib.sha256(old_manifest_bytes).digest(),
         )
         self.assert_format_error(header + old_manifest_bytes + changed_payload, "SHA256")
@@ -1393,10 +1542,10 @@ class LoaderCorruptionTests(unittest.TestCase):
             (manifest_setter("extra", 1), "fields"),
             (manifest_setter("format", "OTHER"), "format/schema"),
             (manifest_setter("schema", 1), "format/schema"),
-            (manifest_setter("schema", 3.0), "schema must be an integer"),
+            (manifest_setter("schema", self.WRONG_SCHEMA_FLOAT), "schema must be an integer"),
             (manifest_setter("feature_version", 1), "feature version"),
             (
-                manifest_setter("feature_version", 5.0),
+                manifest_setter("feature_version", self.WRONG_FEATURE_VERSION_FLOAT),
                 "feature_version must be an integer",
             ),
             (manifest_setter("hash_algorithm", "python-hash"), "hash algorithm"),
@@ -1411,7 +1560,7 @@ class LoaderCorruptionTests(unittest.TestCase):
     def test_manifest_dimension_seed_orders_version_and_float_validation(self) -> None:
         cases: tuple[tuple[str, object, str], ...] = (
             ("dimension", True, "dimension"),
-            ("dimension", 3, "dimension"),
+            ("dimension", self.NON_ZERO_INVALID_DIMENSION, "dimension"),
             ("fnv_seed", True, "fnv_seed"),
             ("fnv_seed", -1, "FNV seed"),
             ("membership_seed", True, "membership_seed"),
@@ -1425,8 +1574,8 @@ class LoaderCorruptionTests(unittest.TestCase):
                 "size limit",
             ),
             ("ngram_orders", "bad", "array"),
-            ("ngram_orders", [2, 3, 4], "n-gram"),
-            ("ngram_orders", [2, 3, 4, True], "integers"),
+            ("ngram_orders", list(INCOMPLETE_NGRAM_ORDERS), "n-gram"),
+            ("ngram_orders", [*INCOMPLETE_NGRAM_ORDERS, True], "integers"),
             ("model_version", 1, "model_version"),
             ("weight_scale", 0.0, "positive"),
             ("bias", "bad", "numeric"),
@@ -1440,7 +1589,7 @@ class LoaderCorruptionTests(unittest.TestCase):
 
         for direction, field, value, message in (
             ("0>1", "scale", 0.0, "positive"),
-            ("1>0", "bias", 1_000_001.0, "bounded"),
+            ("1>0", "bias", im._MAX_MODEL_FLOAT + 1, "bounded"),
         ):
             def mutate_calibration(
                 manifest: dict[str, object],
@@ -1468,7 +1617,7 @@ class LoaderCorruptionTests(unittest.TestCase):
             0,
             len(raw),
             len(payload),
-            zlib.crc32(payload) & 0xFFFFFFFF,
+            zlib.crc32(payload) & CRC32_MASK,
             hashlib.sha256(raw).digest(),
         ) + raw + payload
         self.assert_format_error(nan_artifact, "finite")
@@ -1478,12 +1627,12 @@ class LoaderCorruptionTests(unittest.TestCase):
             ("threshold_logits", [], "object"),
             (
                 "threshold_logits",
-                {"space": 0.5},
+                {"space": self.ARBITRARY_THRESHOLD_VALUE},
                 "every correction trigger",
             ),
             ("payload_sha256", 1, "lowercase hexadecimal"),
-            ("payload_sha256", "A" * 64, "lowercase hexadecimal"),
-            ("payload_sha256", "g" * 64, "lowercase hexadecimal"),
+            ("payload_sha256", "A" * SHA256_HEX_LENGTH, "lowercase hexadecimal"),
+            ("payload_sha256", "g" * SHA256_HEX_LENGTH, "lowercase hexadecimal"),
         )
         for key, value, message in cases:
             self.assert_format_error(
@@ -1496,9 +1645,9 @@ class LoaderCorruptionTests(unittest.TestCase):
             for trigger, values in directional_threshold_logits().items()
         }
         malformed_thresholds: tuple[tuple[dict[str, object], str], ...] = (
-            ({**valid_thresholds, "space": 0.5}, "space must be an object"),
+            ({**valid_thresholds, "space": self.ARBITRARY_THRESHOLD_VALUE}, "space must be an object"),
             (
-                {**valid_thresholds, "space": {"0>1": 0.5}},
+                {**valid_thresholds, "space": {"0>1": self.ARBITRARY_THRESHOLD_VALUE}},
                 "space must contain both directions",
             ),
         )
@@ -1535,22 +1684,22 @@ class LoaderCorruptionTests(unittest.TestCase):
                 message,
             )
         self.assert_format_error(
-            repack_artifact(self.valid, mutate=manifest_setter("dimension", 16)),
+            repack_artifact(self.valid, mutate=manifest_setter("dimension", self.WRONG_DIMENSION_FOR_PAYLOAD)),
             "payload shape",
         )
         self.assert_format_error(
             repack_artifact(
                 self.valid,
-                mutate=manifest_setter("supported_fingerprint_count", 3),
+                mutate=manifest_setter("supported_fingerprint_count", self.WRONG_FINGERPRINT_COUNT_FOR_PAYLOAD),
             ),
             "payload shape",
         )
 
         manifest, payload = unpack_artifact(self.valid)
         del manifest
-        weights = payload[: 8 * 2]
-        unsorted = weights + im._uint64_little_endian_bytes(array("Q", [7, 0]))
-        duplicate = weights + im._uint64_little_endian_bytes(array("Q", [7, 7]))
+        weights = payload[: MINI_TEST_DIMENSION * BYTES_PER_WEIGHT]
+        unsorted = weights + im._uint64_little_endian_bytes(array("Q", [self.LOADER_FIXTURE_FINGERPRINT, 0]))
+        duplicate = weights + im._uint64_little_endian_bytes(array("Q", [self.LOADER_FIXTURE_FINGERPRINT, self.LOADER_FIXTURE_FINGERPRINT]))
         self.assert_format_error(
             repack_artifact(self.valid, payload=unsorted),
             "sorted and unique",
@@ -1570,7 +1719,7 @@ class LoaderCorruptionTests(unittest.TestCase):
             self.assert_format_error(self.valid, "fingerprint count")
 
     def test_file_size_bound_and_missing_file(self) -> None:
-        self.assertEqual(im.MAX_CONTAINER_BYTES, 14 * 1024 * 1024)
+        self.assertEqual(im.MAX_CONTAINER_BYTES, self.EXPECTED_MAX_CONTAINER_BYTES)
         opener = mock_open(read_data=b"short")
         with patch.object(Path, "open", opener):
             self.assertEqual(im._read_bounded(Path("bounded.ksm")), b"short")
@@ -1587,7 +1736,7 @@ class LoaderCorruptionTests(unittest.TestCase):
                 LinearNgramModel.load(Path(temporary) / "missing.ksm")
 
     def test_load_restores_cyclic_gc_after_success_and_failure(self) -> None:
-        encoded = model_bytes(dimension=8, fingerprints={1, 2})
+        encoded = model_bytes(dimension=MINI_TEST_DIMENSION, fingerprints=self.GC_TEST_FINGERPRINTS)
         original_gc_state = gc.isenabled()
         try:
             gc.enable()
@@ -1644,7 +1793,7 @@ class LoaderCorruptionTests(unittest.TestCase):
                 gc.disable()
 
     def test_concurrent_loads_serialize_the_process_global_gc_guard(self) -> None:
-        encoded = model_bytes(dimension=8, fingerprints={1, 2})
+        encoded = model_bytes(dimension=MINI_TEST_DIMENSION, fingerprints=self.GC_TEST_FINGERPRINTS)
         first_decode_entered = threading.Event()
         second_worker_started = threading.Event()
         second_decode_entered = threading.Event()
@@ -1663,7 +1812,7 @@ class LoaderCorruptionTests(unittest.TestCase):
                 call_number = decode_calls
             if call_number == 1:
                 first_decode_entered.set()
-                if not release_first_decode.wait(5.0):
+                if not release_first_decode.wait(self.WAIT_TIMEOUT_SECONDS):
                     raise AssertionError("first decoder was not released")
             else:
                 second_decode_entered.set()
@@ -1677,22 +1826,31 @@ class LoaderCorruptionTests(unittest.TestCase):
             im,
             "_decode_container",
             side_effect=controlled_decoder,
-        ), ThreadPoolExecutor(max_workers=2) as executor:
+        ), ThreadPoolExecutor(max_workers=self.THREAD_POOL_WORKERS) as executor:
             first = executor.submit(LinearNgramModel.load, "first.ksm")
-            self.assertTrue(first_decode_entered.wait(5.0))
+            self.assertTrue(first_decode_entered.wait(self.WAIT_TIMEOUT_SECONDS))
             second = executor.submit(second_load)
-            self.assertTrue(second_worker_started.wait(5.0))
+            self.assertTrue(second_worker_started.wait(self.WAIT_TIMEOUT_SECONDS))
             try:
-                self.assertFalse(second_decode_entered.wait(0.1))
+                self.assertFalse(second_decode_entered.wait(self.SHORT_POLL_SECONDS))
             finally:
                 release_first_decode.set()
-            self.assertIs(first.result(timeout=5.0), sentinel)
-            self.assertIs(second.result(timeout=5.0), sentinel)
+            self.assertIs(first.result(timeout=self.WAIT_TIMEOUT_SECONDS), sentinel)
+            self.assertIs(second.result(timeout=self.WAIT_TIMEOUT_SECONDS), sentinel)
         self.assertTrue(second_decode_entered.is_set())
-        self.assertEqual(decode_calls, 2)
+        self.assertEqual(decode_calls, self.EXPECTED_DECODE_CALLS)
 
 
 class DiscoveryCacheAndSystemBranchTests(unittest.TestCase):
+    MTIME_BUMP_NANOSECONDS = 1_000_000
+    SECOND_LOAD_CALL_COUNT = 2
+    THIRD_LOAD_CALL_COUNT = 3
+    EXPECTED_RELOAD_CALLS = 2
+    INT16_MAX = 32767
+    SAMPLE_NEGATIVE_WEIGHT = 2
+    FAKE_FILE_DESCRIPTOR = 42
+    WRONG_ITEM_SIZE = 4
+
     def tearDown(self) -> None:
         clear_model_cache()
 
@@ -1717,14 +1875,14 @@ class DiscoveryCacheAndSystemBranchTests(unittest.TestCase):
                 replacement = model_bytes(version="cache-v2")
                 override.write_bytes(replacement)
                 status = override.stat()
-                os.utime(override, ns=(status.st_atime_ns, status.st_mtime_ns + 1_000_000))
+                os.utime(override, ns=(status.st_atime_ns, status.st_mtime_ns + self.MTIME_BUMP_NANOSECONDS))
                 third, _third_status = LinearNgramModel.try_load_default()
                 self.assertIsNot(first, third)
                 self.assertEqual(cast(LinearNgramModel, third).model_version, "cache-v2")
-                self.assertEqual(loader.call_count, 2)
+                self.assertEqual(loader.call_count, self.SECOND_LOAD_CALL_COUNT)
                 clear_model_cache()
                 LinearNgramModel.try_load_default()
-                self.assertEqual(loader.call_count, 3)
+                self.assertEqual(loader.call_count, self.THIRD_LOAD_CALL_COUNT)
 
     def test_invalid_override_falls_back_to_package_and_reports_failures(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1786,17 +1944,17 @@ class DiscoveryCacheAndSystemBranchTests(unittest.TestCase):
                 if calls == 1:
                     path.write_bytes(second_bytes)
                     status = path.stat()
-                    os.utime(path, ns=(status.st_atime_ns, status.st_mtime_ns + 1_000_000))
+                    os.utime(path, ns=(status.st_atime_ns, status.st_mtime_ns + self.MTIME_BUMP_NANOSECONDS))
                 return model
 
             with patch.object(LinearNgramModel, "load", side_effect=changing_load):
                 model = im._load_cached(path)
-            self.assertEqual(calls, 2)
+            self.assertEqual(calls, self.EXPECTED_RELOAD_CALLS)
             self.assertEqual(model.model_version, "after")
 
     def test_endian_array_and_fsync_error_branches(self) -> None:
-        values: array[int] = array("h", [1, -2, 32767])
-        fingerprints: array[int] = array("Q", [0, 1, (1 << 64) - 1])
+        values: array[int] = array("h", [1, -self.SAMPLE_NEGATIVE_WEIGHT, self.INT16_MAX])
+        fingerprints: array[int] = array("Q", [0, 1, UINT64_MAX])
         with patch.object(sys, "byteorder", "big"):
             encoded = im._int16_little_endian_bytes(values)
             self.assertEqual(im._decode_int16_little_endian(encoded).tolist(), values.tolist())
@@ -1808,15 +1966,15 @@ class DiscoveryCacheAndSystemBranchTests(unittest.TestCase):
 
         with patch.object(os, "open", side_effect=OSError("unsupported")):
             im._fsync_directory(Path("/tmp"))
-        with patch.object(os, "open", return_value=42), patch.object(
+        with patch.object(os, "open", return_value=self.FAKE_FILE_DESCRIPTOR), patch.object(
             os,
             "fsync",
             side_effect=OSError("denied"),
         ), patch.object(os, "close") as close:
             im._fsync_directory(Path("/tmp"))
-            close.assert_called_once_with(42)
+            close.assert_called_once_with(self.FAKE_FILE_DESCRIPTOR)
 
-        fake_array = cast(array[int], Mock(itemsize=4))
+        fake_array = cast(array[int], Mock(itemsize=self.WRONG_ITEM_SIZE))
         with self.assertRaises(RuntimeError):
             im._int16_little_endian_bytes(fake_array)
         with patch.object(im, "array", return_value=fake_array):
@@ -1848,8 +2006,8 @@ class DiscoveryCacheAndSystemBranchTests(unittest.TestCase):
                     write_model(
                         destination,
                         model_version="v1",
-                        dimension=8,
-                        weights=[0.0] * 8,
+                        dimension=MINI_TEST_DIMENSION,
+                        weights=[0.0] * MINI_TEST_DIMENSION,
                         supported_fingerprints=set(),
                         threshold_logits=directional_threshold_logits(),
                         veto_threshold=0.0,
@@ -1868,8 +2026,8 @@ class DiscoveryCacheAndSystemBranchTests(unittest.TestCase):
                     write_model(
                         destination,
                         model_version="v1",
-                        dimension=8,
-                        weights=[0.0] * 8,
+                        dimension=MINI_TEST_DIMENSION,
+                        weights=[0.0] * MINI_TEST_DIMENSION,
                         supported_fingerprints=set(),
                         threshold_logits=directional_threshold_logits(),
                         veto_threshold=0.0,
@@ -1885,8 +2043,8 @@ class DiscoveryCacheAndSystemBranchTests(unittest.TestCase):
                     write_model(
                         destination,
                         model_version="v1",
-                        dimension=8,
-                        weights=[0.0] * 8,
+                        dimension=MINI_TEST_DIMENSION,
+                        weights=[0.0] * MINI_TEST_DIMENSION,
                         supported_fingerprints=set(),
                         threshold_logits=directional_threshold_logits(),
                         veto_threshold=0.0,

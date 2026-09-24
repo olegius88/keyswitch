@@ -12,9 +12,12 @@ from pathlib import Path
 APP_ID = "io.github.olegius88.KeySwitch"
 APP_NAME = "KeySwitch"
 
+# src/keyswitch/system.py -> src/keyswitch -> src -> repository root
+SOURCE_ROOT_PARENT_LEVELS = 2
+
 
 def source_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[SOURCE_ROOT_PARENT_LEVELS]
 
 
 def launcher_command() -> str:

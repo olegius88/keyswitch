@@ -6,6 +6,11 @@ from logcourier.config import Config, Source
 from logcourier.store import Store
 from logcourier.telegram import TelegramError
 
+# Numeric form of the "-100123" supergroup chat_id used across the fixtures below.
+PRIVATE_LOGS_CHAT_ID = -100123
+# Generous default so FakeTelegram.download() never trips over test payloads.
+FAKE_DOWNLOAD_LIMIT_BYTES = 10 * 1024 * 1024
+
 
 @pytest.fixture
 def configured(tmp_path):
@@ -42,7 +47,7 @@ class FakeTelegram:
 
     def call(self, method, params=None):
         if method == "getChat":
-            chat = {"id": -100123, "type": "supergroup", "title": "Private logs"}
+            chat = {"id": PRIVATE_LOGS_CHAT_ID, "type": "supergroup", "title": "Private logs"}
             if self.pinned:
                 message = copy.deepcopy(self.messages[self.pinned])
                 document = message.get("document")
@@ -89,7 +94,7 @@ class FakeTelegram:
     def replace(self, file_id, data):
         self.files[self.aliases.get(file_id, file_id)] = data
 
-    def download(self, file_id, limit=10 * 1024 * 1024):
+    def download(self, file_id, limit=FAKE_DOWNLOAD_LIMIT_BYTES):
         result = self.content(file_id)
         assert len(result) <= limit
         return result

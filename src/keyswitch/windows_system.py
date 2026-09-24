@@ -14,6 +14,9 @@ from .system_model import Application, AutostartStatus as AutostartStatus
 
 
 AUTOSTART_VALUE_NAME = "KeySwitch"
+# StartupApproved\Run's first byte: 0x02 and 0x06 mean enabled, anything else
+# (0x03 from Task Manager, 0x01 from older builds) means the value is skipped.
+STARTUP_APPROVAL_ENABLED_BYTES = (0x02, 0x06)
 
 DirectoryOpener = Callable[[list[str]], None]
 
@@ -147,9 +150,8 @@ class WindowsAutostartManager:
     def status(self) -> AutostartStatus:
         command = self._registry.read_autostart(AUTOSTART_VALUE_NAME)
         approval = self._registry.read_startup_approval(AUTOSTART_VALUE_NAME)
-        # The first byte carries the state; 0x02 and 0x06 mean enabled, anything else
-        # (0x03 from Task Manager, 0x01 from older builds) means the value is skipped.
-        blocked = approval is not None and (not approval or approval[0] not in (0x02, 0x06))
+        # The first byte carries the state; see STARTUP_APPROVAL_ENABLED_BYTES above.
+        blocked = approval is not None and (not approval or approval[0] not in STARTUP_APPROVAL_ENABLED_BYTES)
         missing = bool(command) and not self._target_exists(str(command))
         return AutostartStatus(command, blocked, missing)
 

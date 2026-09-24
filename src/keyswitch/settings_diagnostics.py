@@ -8,18 +8,25 @@ from typing import cast
 
 from .config import DEFAULTS, SettingsData, SettingsStore
 
+# Indentation of every diagnostics report printed or copied for a person to read.
+DIAGNOSTICS_JSON_INDENT = 2
+
 
 _MISSING = object()
 _DEFAULTS_SHA256 = hashlib.sha256(
     json.dumps(DEFAULTS, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
 ).hexdigest()
+_LOGGABLE_STRING_MAX_CHARACTERS = 80
+_LOGGABLE_STRING_TRUNCATED_CHARACTERS = _LOGGABLE_STRING_MAX_CHARACTERS - len("...")
 
 
 def _loggable_value(value: object) -> object:
     if isinstance(value, (bool, int, float)) or value is None:
         return value
     if isinstance(value, str):
-        return value if len(value) <= 80 else value[:77] + "..."
+        return value if len(value) <= _LOGGABLE_STRING_MAX_CHARACTERS else (
+            value[:_LOGGABLE_STRING_TRUNCATED_CHARACTERS] + "..."
+        )
     if isinstance(value, (list, tuple, set, dict)):
         return {"type": type(value).__name__, "items": len(value)}
     return "<unsupported>"

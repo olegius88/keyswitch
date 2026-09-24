@@ -12,32 +12,41 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from keyswitch.backend import CONTROL_MASK, KeyEvent
+from keyswitch.backend import ALT_MASK, CONTROL_MASK, KeyEvent
 from keyswitch.context_model import (
     ACTIONS, FEATURE_VERSION, ContextAction, ContextEvidence, ContextModel,
     extract_context_features, softmax,
 )
 from keyswitch.context_policy import ContextPolicy, ContextResult
 from keyswitch.engine import KeySwitchEngine
-from keyswitch.input_context import CONTEXT_LIMIT, FieldContext, InputContext
+from keyswitch.input_context import CONTEXT_LIMIT, CONTEXT_TTL, FieldContext, InputContext
 from test_input_integrity import InputIntegrityTests
+
+# An arbitrary non-zero/non-one keycode for a synthesized key fixture.
+FIXTURE_KEYCODE = 10
 
 
 class InputContextTests(unittest.TestCase):
+    OTHER_WINDOW_ID = 2
+    FILLER_LENGTH = 700
+    APPLICATION_FIELD_LIMIT = 128
+    OVERLONG_NAME_LENGTH = 200
+    OVERLONG_TEXT_LENGTH = 900
+
     def setUp(self) -> None:
         self.stream = InputContext()
         self.stream.focus("chat", 1)
 
     @staticmethod
     def event(character: str = "", name: str = "") -> KeyEvent:
-        return KeyEvent(True, 10, name or character, character, (character, character), 0, 0, 1)
+        return KeyEvent(True, FIXTURE_KEYCODE, name or character, character, (character, character), 0, 0, 1)
 
     def type(self, text: str) -> None:
         for character in text:
             self.stream.observe(self.event(character))
 
     def test_bounded_field_history_and_suffix_anchoring(self) -> None:
-        self.type("а" * 700 + " привет")
+        self.type("а" * self.FILLER_LENGTH + " привет")
         self.assertEqual(len(self.stream.text), CONTEXT_LIMIT)
         prefix = self.stream.before_word("привет")
         self.assertTrue(prefix.endswith(" "))
@@ -50,7 +59,7 @@ class InputContextTests(unittest.TestCase):
         self.assertEqual(snapshot.field_id, "1")
         self.stream.focus("chat", 1)
         self.assertNotEqual(self.stream.text, "")
-        self.stream.focus("chat", 2)
+        self.stream.focus("chat", self.OTHER_WINDOW_ID)
         self.assertEqual(self.stream.text, "")
 
     def test_edit_invalidation_and_ignored_events(self) -> None:
@@ -78,7 +87,7 @@ class InputContextTests(unittest.TestCase):
         self.stream.replace_suffix("old", "new", " ")
         self.assertEqual(self.stream.text, "")
         self.type("stale")
-        self.stream.updated_at = time.monotonic() - 46
+        self.stream.updated_at = time.monotonic() - (CONTEXT_TTL + 1)
         self.assertEqual(self.stream.before_word("stale"), "")
         self.type("new")
         self.assertEqual(self.stream.text, "new")
@@ -89,12 +98,22 @@ class InputContextTests(unittest.TestCase):
             bounded = field.bounded()
             self.assertTrue(bounded.sensitive)
             self.assertEqual((bounded.before, bounded.after), ("", ""))
-        field = FieldContext("x" * 200, "y" * 200, "z" * 900, "w" * 900).bounded()
+        field = FieldContext(
+            "x" * self.OVERLONG_NAME_LENGTH, "y" * self.OVERLONG_NAME_LENGTH,
+            "z" * self.OVERLONG_TEXT_LENGTH, "w" * self.OVERLONG_TEXT_LENGTH,
+        ).bounded()
         self.assertEqual(len(field.before), CONTEXT_LIMIT)
-        self.assertEqual(len(field.application), 128)
+        self.assertEqual(len(field.application), self.APPLICATION_FIELD_LIMIT)
 
 
 class ContextModelTests(unittest.TestCase):
+    CONVERT_BIAS_WEIGHT = 8.0
+    DEFAULT_CONVERSION_THRESHOLD = 0.985
+    INVALID_CONVERSION_THRESHOLD = 0.5
+    NON_STRING_VERSION = 3
+    HIGH_LOGIT = 10000.0
+    NEAR_HIGH_LOGIT = 9999.0
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -102,9 +121,9 @@ class ContextModelTests(unittest.TestCase):
         self.item = ContextEvidence("ghbdtn", "привет", 0, FieldContext("Telegram", "1", "я думаю ", "", "text"), baseline_convert=True)
 
     def payload(self) -> dict[str, object]:
-        weights = {"bias": [0.0, 8.0, 0.0, 0.0]}
+        weights = {"bias": [0.0, self.CONVERT_BIAS_WEIGHT, 0.0, 0.0]}
         checksum = hashlib.sha256(json.dumps(weights, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
-        return {"feature_version": FEATURE_VERSION, "actions": list(ACTIONS), "weights": weights, "weights_sha256": checksum, "version": "context-v1-test", "conversion_threshold": 0.985}
+        return {"feature_version": FEATURE_VERSION, "actions": list(ACTIONS), "weights": weights, "weights_sha256": checksum, "version": "context-v1-test", "conversion_threshold": self.DEFAULT_CONVERSION_THRESHOLD}
 
     def save(self, value: object) -> None:
         self.path.write_text(json.dumps(value), encoding="utf-8")
@@ -117,8 +136,8 @@ class ContextModelTests(unittest.TestCase):
             {"feature_version": -1}, {"actions": []}, {"weights": []}, {"weights": {}},
             {"weights": {"x": [1]}}, {"weights": {"x": [True, 0, 0, 0]}},
             {"weights": {"x": [math.inf, 0, 0, 0]}},
-            {"weights_sha256": "bad"}, {"version": 3},
-            {"conversion_threshold": 0.5}, {"conversion_threshold": True},
+            {"weights_sha256": "bad"}, {"version": self.NON_STRING_VERSION},
+            {"conversion_threshold": self.INVALID_CONVERSION_THRESHOLD}, {"conversion_threshold": True},
         )
         for updates in updates_list:
             with self.subTest(updates=updates):
@@ -148,7 +167,7 @@ class ContextModelTests(unittest.TestCase):
         other = replace(self.item, field=FieldContext("Code", "1", "const a = ", "hello", "code"))
         self.assertNotEqual(features, extract_context_features(other))
         self.assertNotEqual(features, extract_context_features(replace(self.item, source_group=1)))
-        self.assertAlmostEqual(sum(softmax([10000.0, 9999.0])), 1.0)
+        self.assertAlmostEqual(sum(softmax([self.HIGH_LOGIT, self.NEAR_HIGH_LOGIT])), 1.0)
         self.assertEqual(len(extract_context_features(replace(self.item, original="", alternative=""))) > 0, True)
         rich = replace(self.item, original="a_2", alternative="ф_2", field=FieldContext("test", "1", "// привет =", "hello"))
         self.assertEqual(extract_context_features(rich)["token:digits"], 1.0)
@@ -157,14 +176,19 @@ class ContextModelTests(unittest.TestCase):
 class ContextEngineTests(InputIntegrityTests):
     """Inherited physical-editor harness; only context tests are collected."""
 
+    CONFIDENT_BIAS_WEIGHT = 20.0
+    OTHER_WINDOW_ID = 2
+    CONFIRMATIONS_REQUIRED = 2
+    NEXT_FEATURE_VERSION = 3
+
     def setUp(self) -> None:
         super().setUp()
         self.settings.set("detection.context_policy", "assist")
 
     def choose(self, action: ContextAction) -> None:
-        scores = [0.0] * 4
-        scores[list(ACTIONS).index(action)] = 20.0
-        self.engine.context_policy.model = ContextModel({"bias": tuple(scores), "app:testeditor": (0.0,) * 4}, "context-v1-fixture")
+        scores = [0.0] * len(ACTIONS)
+        scores[list(ACTIONS).index(action)] = self.CONFIDENT_BIAS_WEIGHT
+        self.engine.context_policy.model = ContextModel({"bias": tuple(scores), "app:testeditor": (0.0,) * len(ACTIONS)}, "context-v1-fixture")
 
     def test_context_keep_convert_shadow_and_off(self) -> None:
         self.choose("keep")
@@ -185,8 +209,8 @@ class ContextEngineTests(InputIntegrityTests):
     def test_bundled_trained_model_resolves_user_phrase_and_retains_code(self) -> None:
         model = self.engine.context_policy.model
         assert model is not None
-        self.assertIn(model.feature_version, (2, 3))
-        prefix = "context-v1-" if model.feature_version == 2 else "context-v3-"
+        self.assertIn(model.feature_version, (FEATURE_VERSION, self.NEXT_FEATURE_VERSION))
+        prefix = "context-v1-" if model.feature_version == FEATURE_VERSION else "context-v3-"
         self.assertTrue(model.version.startswith(prefix))
         # A lone curated letter converts at the start of a message on its own and
         # the layout follows, so the same physical keys now type the Russian word.
@@ -242,7 +266,7 @@ class ContextEngineTests(InputIntegrityTests):
         self.assertEqual(self.backend.text, "ghbdtn ")
         self.reset_editor()
         self.choose("keep")
-        self.engine.learning.confirm_manual(0, "ghbdtn", 1, 2)
+        self.engine.learning.confirm_manual(0, "ghbdtn", 1, self.CONFIRMATIONS_REQUIRED)
         self.type("ghbdtn ")
         self.assertEqual(self.backend.text, "привет ")
 
@@ -250,7 +274,7 @@ class ContextEngineTests(InputIntegrityTests):
         self.choose("keep")
         self.type("hello ")
         self.assertEqual(self.engine.context_policy.stream.text, "hello ")
-        self.backend.window = 2
+        self.backend.window = self.OTHER_WINDOW_ID
         self.type("next")
         self.assertEqual(self.engine.context_policy.stream.text, "next")
         self.settings.set("detection.context_policy", "off")
@@ -276,7 +300,7 @@ class ContextEngineTests(InputIntegrityTests):
         correction = self.engine._last_correction
         assert correction is not None
         self.assertEqual(correction.mode, "context_phrase")
-        self.tap(replace(self.key("z"), state=CONTROL_MASK | 8))
+        self.tap(replace(self.key("z"), state=CONTROL_MASK | ALT_MASK))
         self.assertEqual(self.backend.text, "yt 'njuj ")
 
     def test_wait_is_cancelled_on_edit_navigation_and_timeout(self) -> None:

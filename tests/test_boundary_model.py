@@ -10,13 +10,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 from keyswitch.backend import KeyEvent
-from keyswitch.boundary_model import BoundaryModel, BoundaryPrediction
+from keyswitch.boundary_model import MAX_SUFFIX, BoundaryModel, BoundaryPrediction
+from keyswitch.config import DEFAULT_LEARNING_CONFIRMATIONS
+from keyswitch.engine import MAX_WORD_STROKES
 from keyswitch.input_context import FieldContext
 from keyswitch.windows_backend import VK_BACK, WindowsBackend, WindowsBackendError
 from keyswitch.x11_backend import X11Error
 from test_input_integrity import InputIntegrityTests
 from test_windows_backend import FakeWindowsAPI
-from test_x11_backend import backend_with
+from test_x11_backend import KEYCODE_BACKSPACE, backend_with
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,6 +31,14 @@ from verify_context_v2 import read_object
 
 
 class BoundaryArtifactTests(unittest.TestCase):
+    # A weight and threshold picked so predict() lands decisively on the
+    # weighted candidate, well above any threshold checked here.
+    FEATURE_WEIGHT = 20
+    CONSTRUCTED_MODEL_THRESHOLD = .9
+    # A threshold inside the model's accepted (0.5, 1.0] range, and one below it.
+    VALID_THRESHOLD = .99
+    INVALID_THRESHOLD_BELOW_RANGE = .4
+
     def test_rejected_weights_cannot_ship_and_metrics_cannot_be_relabelled(self) -> None:
         self.assertEqual(verify()["accepted"], False)
         with self.assertRaisesRegex(ValueError, "must not ship"):
@@ -45,13 +55,14 @@ class BoundaryArtifactTests(unittest.TestCase):
         model = BoundaryModel.load(CANDIDATE)
         self.assertIsNone(model.predict(({}, {})).suffix_length)
         self.assertEqual(model.predict(({},)).suffix_length, 0)
-        self.assertEqual(BoundaryModel({"a": 20}, .9, "test").predict(({}, {"a": 1})).suffix_length, 1)
+        self.assertEqual(BoundaryModel({"a": self.FEATURE_WEIGHT}, self.CONSTRUCTED_MODEL_THRESHOLD, "test")
+                         .predict(({}, {"a": 1})).suffix_length, 1)
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "model.json"
-            good = {"feature_version": 1, "version": "test", "threshold": .99, "weights": {"bias": 0}}
+            good = {"feature_version": 1, "version": "test", "threshold": self.VALID_THRESHOLD, "weights": {"bias": 0}}
             cases: list[object] = [[], {}, {**good, "weights": {}}, {**good, "weights": {"a": "bad"}},
                                   {**good, "weights": {"a": float("inf")}}, {**good, "threshold": None},
-                                  {**good, "threshold": True}, {**good, "threshold": .4},
+                                  {**good, "threshold": True}, {**good, "threshold": self.INVALID_THRESHOLD_BELOW_RANGE},
                                   {**good, "version": ""}, {**good, "version": None}]
             for value in cases:
                 path.write_text(json.dumps(value))
@@ -69,6 +80,29 @@ class BoundaryArtifactTests(unittest.TestCase):
 
 
 class BoundaryExecutionTests(InputIntegrityTests):
+    # Seconds past the last word input `idle()` reports as elapsed, enough to
+    # count as a pause regardless of the exact idle gate.
+    IDLE_GAP_SECONDS = 2
+    # A probability paired with an abstaining (suffix_length=None) prediction.
+    UNCERTAIN_PROBABILITY = .51
+    EXCLUDED_TOKEN_PROBABILITY = .5
+    # An arbitrary keycode used only as a sentinel to match a scheduled undo
+    # with the synthetic key-up event that should trigger it.
+    UNDO_TRIGGER_KEYCODE = 999
+    # Index of the boolean "segmentation is certain" element _completed_word returns.
+    SEGMENTATION_CERTAIN_INDEX = 2
+    # A source group that is never in self.models, forcing the early guard.
+    UNKNOWN_GROUP = 20
+    # Number of keystrokes (word + trailing comma + space) the undo must erase.
+    EXPECTED_BACKSPACE_COUNT = 3
+    # Positional argument index of the recorded fake-call fields under test:
+    # XTestFakeKeyEvent(display, keycode, is_press, ...) and
+    # XkbLockGroup(display, device_spec, group, ...).
+    IS_PRESS_ARG_INDEX = 2
+    GROUP_ARG_INDEX = 2
+    # A keyboard-layout group outside what the fixtures define.
+    INVALID_GROUP = 99
+
     def setUp(self) -> None:
         super().setUp()
         # Explicit experimental injection, never an implicit production rollout.
@@ -78,7 +112,7 @@ class BoundaryExecutionTests(InputIntegrityTests):
     def idle(self) -> None:
         last = self.engine._last_word_input_at
         assert last is not None
-        self.engine._maybe_correct_after_pause(now=last + 2)
+        self.engine._maybe_correct_after_pause(now=last + self.IDLE_GAP_SECONDS)
 
     def test_inner_punctuation_no_longer_cuts_a_prefix(self) -> None:
         for original, expected in (("ghj,ktvf", "проблема"), ("ghtlkj;bk", "предложил"), (",b,kbjntrf", "библиотека")):
@@ -92,7 +126,7 @@ class BoundaryExecutionTests(InputIntegrityTests):
                 self.backend.injections.clear()
 
     def test_uncertainty_keeps_whole_token_and_manual_command_still_works(self) -> None:
-        with patch.object(self.model, "predict", return_value=BoundaryPrediction(None, .51, "uncertain")):
+        with patch.object(self.model, "predict", return_value=BoundaryPrediction(None, self.UNCERTAIN_PROBABILITY, "uncertain")):
             self.type("rjnjhe.")
             self.assertEqual(self.engine.snapshot.current_word, "rjnjhe.")
             self.idle()
@@ -126,8 +160,8 @@ class BoundaryExecutionTests(InputIntegrityTests):
         self.assertEqual(self.backend.text, "привет,")
         self.assertEqual(self.engine.context_policy.stream.text, "привет,")
         self.assertEqual(self.engine._strokes, [])
-        self.engine._schedule_undo(999)
-        self.tap(replace(self.key("Pause"), keycode=999, pressed=False))
+        self.engine._schedule_undo(self.UNDO_TRIGGER_KEYCODE)
+        self.tap(replace(self.key("Pause"), keycode=self.UNDO_TRIGGER_KEYCODE, pressed=False))
         self.assertEqual(self.backend.text, "ghbdtn,")
 
     def test_deferred_enter_converts_word_and_preserves_punctuation_before_submit(self) -> None:
@@ -170,19 +204,21 @@ class BoundaryExecutionTests(InputIntegrityTests):
         with patch.object(self.model, "predict", return_value=BoundaryPrediction(0, 1, "test-span")):
             self.type("rjnjhe. ")
         self.assertEqual(self.backend.text, "которую ")
-        for token in ("...", "a" + "." * 9, "path/word,", "ghbdtn,", "hello,world", "don’t", "unknown.xyz", "a" * 270):
+        for token in ("...", "a" + "." * (MAX_SUFFIX + 1), "path/word,", "ghbdtn,", "hello,world", "don’t",
+                     "unknown.xyz", "a" * (MAX_WORD_STROKES + 1)):
             self.reset_editor()
             self.settings.set("exclusions.words", ["ghbdtn,"])
-            with patch.object(self.model, "predict", return_value=BoundaryPrediction(None, .5, "uncertain")):
+            with patch.object(self.model, "predict",
+                              return_value=BoundaryPrediction(None, self.EXCLUDED_TOKEN_PROBABILITY, "uncertain")):
                 self.type(token + " ", group=0)
             self.assertEqual(self.backend.text, token + " ")
         strokes = (self.key("a", "a"), self.key("comma", ","))
-        self.assertTrue(self.engine._completed_word(strokes, 20)[2])
+        self.assertTrue(self.engine._completed_word(strokes, self.UNKNOWN_GROUP)[self.SEGMENTATION_CERTAIN_INDEX])
         with patch.object(self.engine, "models", {0: self.engine.models[0]}):
-            self.assertFalse(self.engine._completed_word(strokes, 0)[2])
+            self.assertFalse(self.engine._completed_word(strokes, 0)[self.SEGMENTATION_CERTAIN_INDEX])
 
     def test_explicit_full_token_rule_and_rejection_outrank_segmentation(self) -> None:
-        self.engine.learning.confirm_manual(0, "rjnjhe.", 1, 2)
+        self.engine.learning.confirm_manual(0, "rjnjhe.", 1, DEFAULT_LEARNING_CONFIRMATIONS)
         with patch.object(self.model, "predict", side_effect=AssertionError("must not override user rule")):
             self.type("rjnjhe. ")
         self.assertEqual(self.backend.text, "которую ")
@@ -230,15 +266,19 @@ class BoundaryExecutionTests(InputIntegrityTests):
             backend = WindowsBackend(api)
             backend.inject_correction((word,), target, space, source, trailing=(comma,))
             sent = [event for batch in api.sent for event in batch]
-            self.assertEqual(sum(event.pressed and event.virtual_key == VK_BACK for event in sent), 3)
+            self.assertEqual(sum(event.pressed and event.virtual_key == VK_BACK for event in sent),
+                             self.EXPECTED_BACKSPACE_COUNT)
             self.assertEqual([event.scan_code for event in sent if event.pressed and event.scan_code], [word.keycode, comma.keycode, space.keycode])
             x11, libraries = backend_with()
             x11._control = 1
             x11.inject_correction((word,), target, space, source, trailing=(comma,))
-            taps = [call.args[1] for call in libraries.xtst.XTestFakeKeyEvent.call_args_list if call.args[2]]
-            self.assertEqual(taps, [22, 22, 22, word.keycode, comma.keycode, space.keycode])
-            self.assertEqual([call.args[2] for call in libraries.x11.XkbLockGroup.call_args_list], [1, 0, 1] if target else [0])
-        for group in (1, 99):
+            taps = [call.args[1] for call in libraries.xtst.XTestFakeKeyEvent.call_args_list
+                   if call.args[self.IS_PRESS_ARG_INDEX]]
+            self.assertEqual(taps, [KEYCODE_BACKSPACE, KEYCODE_BACKSPACE,
+                             KEYCODE_BACKSPACE, word.keycode, comma.keycode, space.keycode])
+            self.assertEqual([call.args[self.GROUP_ARG_INDEX] for call in libraries.x11.XkbLockGroup.call_args_list],
+                             [1, 0, 1] if target else [0])
+        for group in (1, self.INVALID_GROUP):
             api = FakeWindowsAPI()
             backend = WindowsBackend(api)
             with self.assertRaises(WindowsBackendError):

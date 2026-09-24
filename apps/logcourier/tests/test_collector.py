@@ -10,6 +10,11 @@ from logcourier.collector import Collector, open_regular
 from logcourier.config import Source, load_config, save_config
 from logcourier.store import QueueFull, Store
 
+# Deliberately smaller than CHUNK_BYTES so a short payload still spans several scans.
+SMALL_CHUNK_SIZE_BYTES = 11
+# Comfortably above what a single test payload can queue, to sidestep QueueFull.
+RELAXED_QUEUE_CAPACITY_BYTES = 10000
+
 
 def fragments(store, config):
     result = []
@@ -50,7 +55,7 @@ def test_exact_bytes_and_restart(store, configured):
     config, path = configured
     data = "Привет, мир! ghbdtn\r\nзь2 — pm2; ёЁ / ".encode() + b"\xff\x00end"
     path.write_bytes(data)
-    collector = Collector(store, chunk_size=11)
+    collector = Collector(store, chunk_size=SMALL_CHUNK_SIZE_BYTES)
     while collector.scan(config)[0]:
         pass
     assert fragments(store, config) == data
@@ -101,7 +106,7 @@ def test_queue_full_does_not_advance_cursor(tmp_path, configured):
         Collector(store).scan(config)
     assert not store.queue(config.destination)
     assert not store.db.execute("SELECT * FROM cursors").fetchall()
-    store.capacity = 10000
+    store.capacity = RELAXED_QUEUE_CAPACITY_BYTES
     assert Collector(store).scan(config)[0] == 1
     store.close()
 

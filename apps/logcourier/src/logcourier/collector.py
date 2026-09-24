@@ -11,17 +11,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__
-from .config import Config, Source
+from .config import JSON_INDENT_SPACES, Config, Source
 from .store import Store
 from .versions import HEADER_BYTES, latest_version, observe_version, take_fragment
 
 CHUNK_BYTES = 2 * 1024 * 1024
 ARCHIVE_LIMIT = 10 * 1024 * 1024
+FINGERPRINT_WINDOW_BYTES = 128
+DEFAULT_MAX_CHUNKS_PER_SCAN = 16
 
 
 def fingerprint(stream, offset: int) -> str:
-    stream.seek(max(0, offset - 128))
-    return hashlib.sha256(stream.read(min(offset, 128))).hexdigest()
+    stream.seek(max(0, offset - FINGERPRINT_WINDOW_BYTES))
+    return hashlib.sha256(stream.read(min(offset, FINGERPRINT_WINDOW_BYTES))).hexdigest()
 
 
 def open_regular(path: Path):
@@ -43,7 +45,9 @@ def open_regular(path: Path):
 def make_archive(data: bytes, metadata: dict) -> bytes:
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("metadata.json", json.dumps(metadata, ensure_ascii=False, indent=2))
+        archive.writestr(
+            "metadata.json", json.dumps(metadata, ensure_ascii=False, indent=JSON_INDENT_SPACES)
+        )
         archive.writestr("fragment.log", data)
     return output.getvalue()
 
@@ -53,7 +57,9 @@ class Collector:
         self.store = store
         self.chunk_size = chunk_size
 
-    def scan(self, config: Config, max_chunks: int = 16) -> tuple[int, list[str]]:
+    def scan(
+        self, config: Config, max_chunks: int = DEFAULT_MAX_CHUNKS_PER_SCAN
+    ) -> tuple[int, list[str]]:
         if not config.consent:
             return 0, []
         if not config.bot_id or not config.chat_id:

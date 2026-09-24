@@ -8,6 +8,10 @@ from bisect import bisect_left
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from keyswitch.context_model import ACTIONS
+
+PROBABILITY_SUM_TOLERANCE = 1e-8
+
 
 @dataclass(frozen=True)
 class EpochSelection:
@@ -56,19 +60,19 @@ def assess_epoch(
         raise ValueError("invalid development threshold")
     observations: dict[str, tuple[list[float], list[float], int, int]] = {}
     for profile, (values, labels) in predictions.items():
-        if not labels or len(values) != len(labels) * 4:
+        if not labels or len(values) != len(labels) * len(ACTIONS):
             raise ValueError("invalid development prediction dimensions")
         positives: list[float] = []
         negatives: list[float] = []
         possible = 0
         for row, label in enumerate(labels):
-            scores = values[row * 4:row * 4 + 4]
-            if label not in (0, 1, 2, 3) or any(not math.isfinite(value) or not 0 <= value <= 1 for value in scores):
+            scores = values[row * len(ACTIONS):row * len(ACTIONS) + len(ACTIONS)]
+            if label not in range(len(ACTIONS)) or any(not math.isfinite(value) or not 0 <= value <= 1 for value in scores):
                 raise ValueError("invalid development labels or probabilities")
-            if not math.isclose(sum(scores), 1.0, rel_tol=0.0, abs_tol=1e-8):
+            if not math.isclose(sum(scores), 1.0, rel_tol=0.0, abs_tol=PROBABILITY_SUM_TOLERANCE):
                 raise ValueError("development probabilities are not normalized")
             possible += int(label == 1)
-            if max(range(4), key=scores.__getitem__) == 1:
+            if max(range(len(ACTIONS)), key=scores.__getitem__) == 1:
                 (positives if label == 1 else negatives).append(scores[1])
         if not possible:
             raise ValueError("development profile has no conversion targets")

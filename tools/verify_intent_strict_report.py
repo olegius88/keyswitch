@@ -31,6 +31,7 @@ MANIFEST_LIMIT_BYTES: Final[int] = 1024 * 1024
 ARTIFACT_LIMIT_BYTES: Final[int] = 14 * 1024 * 1024
 SHA256_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
 CURRENT_PATTERN: Final[re.Pattern[str]] = re.compile(r"current=([0-9a-f]{64})")
+SUMMARY_JSON_INDENT: Final[int] = 2
 REQUIRED_STRICT_GATES: Final[frozenset[str]] = frozenset(
     {
         "provenance",
@@ -319,7 +320,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ReportRejected as error:
         print(f"strict report rejected: {error}", file=sys.stderr)
         return 1
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    print(json.dumps(summary, ensure_ascii=False, indent=SUMMARY_JSON_INDENT))
     return 0
 
 

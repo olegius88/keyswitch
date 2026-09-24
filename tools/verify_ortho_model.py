@@ -15,11 +15,14 @@ from train_ortho_model import (
 from keyswitch.ortho_model import ARTIFACT_PATH, OrthoModel
 from model_protocol import SEALED_BEFORE_TEST
 
+MAX_METADATA_BYTES = 4 * 1024 * 1024
+JSON_INDENT = 2
+
 
 def read_object(path: Path) -> dict[str, object]:
     with path.open("rb") as handle:
-        content = handle.read(4 * 1024 * 1024 + 1)
-    if len(content) > 4 * 1024 * 1024:
+        content = handle.read(MAX_METADATA_BYTES + 1)
+    if len(content) > MAX_METADATA_BYTES:
         raise ValueError("oversized orthotactic metadata")
     value: object = json.loads(content)
     if not isinstance(value, dict) or value.get("schema_version") != 1:
@@ -73,7 +76,7 @@ def verify(active: Path = ARTIFACT_PATH) -> dict[str, object]:
 
 
 def main() -> int:
-    print(json.dumps(verify(), ensure_ascii=False, indent=2))
+    print(json.dumps(verify(), ensure_ascii=False, indent=JSON_INDENT))
     return 0
 
 

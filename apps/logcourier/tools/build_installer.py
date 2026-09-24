@@ -7,8 +7,10 @@ import shutil
 import subprocess
 import tomllib
 from pathlib import Path
+from typing import Final
 
 ROOT = Path(__file__).resolve().parents[1]
+COMPILER_TIMEOUT_SECONDS: Final = 600
 
 
 def find_compiler() -> Path:
@@ -52,7 +54,7 @@ def build(root: Path = ROOT) -> Path:
             ],
             cwd=root,
             check=True,
-            timeout=600,
+            timeout=COMPILER_TIMEOUT_SECONDS,
         )
         compiled = Path(directory) / output.name
         if not compiled.is_file() or compiled.stat().st_size == 0:

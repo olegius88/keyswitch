@@ -58,6 +58,26 @@ FIELDS = frozenset({"schema_version", "feature_version", "model_version", "conve
                     "prefix_artifact_sha256", "prefix_weights_sha256", "prefix_candidate_seal_sha256",
                     "prefix_baseline_path", "prefix_baseline_sha256"})
 
+CHECKSUM_CHUNK_BYTES = 1024 * 1024
+DEFAULT_METADATA_LIMIT_BYTES = 1024 * 1024
+ARTIFACT_PAYLOAD_LIMIT_BYTES = 8 * 1024 * 1024
+FULL_REPORT_LIMIT_BYTES = 64 * 1024 * 1024
+# The feature version this whole module verifies; mirrors PROTOCOL["version"] above.
+CONTEXT_FEATURE_VERSION = 3
+# Hex characters of a weights SHA256 folded into a model_version string.
+VERSION_SHA_PREFIX_CHARACTERS = 12
+# The excluded version module must hold a docstring and one assignment, nothing else.
+VERSION_MODULE_STATEMENT_COUNT = 2
+# Mirrors GATE_POLICY["minimum_sequence_documents_per_group"] above.
+MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP = 32
+# Mirrors PROTOCOL["document_cap_per_group"] above, times the three document
+# groups (US, RU, correct-only) the cap is applied to.
+MAXIMUM_DOCUMENTS_PER_GROUP = 128
+MAXIMUM_SELECTED_ROWS = 384
+# Positions of trimmed_left/trimmed_right in case_evidence's `inputs` tuple.
+TRIMMED_LEFT_FIELD = 3
+TRIMMED_RIGHT_FIELD = 4
+
 
 def canonical(value: object) -> bytes:
     return (json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n").encode()
@@ -66,7 +86,7 @@ def canonical(value: object) -> bytes:
 def checksum(path: Path) -> str:
     result = hashlib.sha256()
     with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
+        for block in iter(lambda: stream.read(CHECKSUM_CHUNK_BYTES), b""):
             result.update(block)
     return result.hexdigest()
 
@@ -89,7 +109,7 @@ def unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
-def read_object(path: Path, limit: int = 1024 * 1024) -> dict[str, object]:
+def read_object(path: Path, limit: int = DEFAULT_METADATA_LIMIT_BYTES) -> dict[str, object]:
     with path.open("rb") as stream:
         raw = stream.read(limit + 1)
     if len(raw) > limit:
@@ -137,7 +157,8 @@ def version_module_holds_only_a_version(root: Path) -> bool:
         body = ast.parse((root / VERSION_MODULE).read_text(encoding="utf-8")).body
     except (OSError, SyntaxError, ValueError):
         return False
-    if len(body) != 2 or not isinstance(body[0], ast.Expr) or not isinstance(body[0].value, ast.Constant):
+    if (len(body) != VERSION_MODULE_STATEMENT_COUNT or not isinstance(body[0], ast.Expr)
+            or not isinstance(body[0].value, ast.Constant)):
         return False
     assignment = body[1]
     return (isinstance(body[0].value.value, str) and isinstance(assignment, ast.Assign)
@@ -231,7 +252,8 @@ def computed_gates(candidate: Mapping[str, int], baseline: Mapping[str, int], do
             "length_preserved": candidate["length_mismatches"] == 0,
             "net_restorations_at_least_baseline": (candidate["exactly_restored"] - candidate["correct_text_corruptions"]
                                                   >= baseline["exactly_restored"] - baseline["correct_text_corruptions"]),
-            "enough_documents_us": documents["0"] >= 32, "enough_documents_ru": documents["1"] >= 32,
+            "enough_documents_us": documents["0"] >= MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP,
+            "enough_documents_ru": documents["1"] >= MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP,
             "execution_succeeded": candidate["execution_errors"] == baseline["execution_errors"] == 0,
             "correction_layouts_match": candidate["correction_layout_mismatches"] == 0}
 
@@ -241,7 +263,7 @@ def validate_test(value: object) -> None:
     raw_documents = mapping(test["documents"], "documents", frozenset({"0", "1", "None"}))
     documents = {name: integer(count, "documents") for name, count in raw_documents.items()}
     selected = integer(test["selected_rows"], "selected_rows")
-    if (any(count > 128 for count in documents.values()) or selected > 384
+    if (any(count > MAXIMUM_DOCUMENTS_PER_GROUP for count in documents.values()) or selected > MAXIMUM_SELECTED_ROWS
             or selected != sum(documents.values()) + integer(test["unsupported_rows"], "unsupported_rows")
             or integer(test["trimmed_rows"], "trimmed_rows") > selected):
         raise ValueError("inconsistent sequence selection")
@@ -265,7 +287,7 @@ def validate_receipt(receipt: object, artifact: Path = ARTIFACT_PATH, root: Path
                      prefix_artifact: Path = PREFIX_ARTIFACT_PATH) -> dict[str, object]:
     value = mapping(receipt, "receipt", FIELDS)
     if (type(value["schema_version"]) is not int or value["schema_version"] != 1
-            or type(value["feature_version"]) is not int or value["feature_version"] != 3
+            or type(value["feature_version"]) is not int or value["feature_version"] != CONTEXT_FEATURE_VERSION
             or value["quality_gates_passed"] is not True or value["scope"] != SCOPE
             or canonical(value["protocol"]) != canonical(PROTOCOL)
             or canonical(value["gate_policy"]) != canonical(GATE_POLICY)
@@ -279,19 +301,20 @@ def validate_receipt(receipt: object, artifact: Path = ARTIFACT_PATH, root: Path
     if actual == REJECTED_ARTIFACT or actual != value["artifact_sha256"]:
         raise ValueError("unaccepted or changed context artifact")
     model = ContextModel.load(artifact)
-    payload = read_object(artifact, 8 * 1024 * 1024)
+    payload = read_object(artifact, ARTIFACT_PAYLOAD_LIMIT_BYTES)
     if (type(value["conversion_threshold"]) not in (int, float)
-            or model.feature_version != 3 or model.version != "context-v3-" + sha(value["weights_sha256"])[:12]
+            or model.feature_version != CONTEXT_FEATURE_VERSION
+            or model.version != "context-v3-" + sha(value["weights_sha256"])[:VERSION_SHA_PREFIX_CHARACTERS]
             or value["model_version"] != model.version or value["conversion_threshold"] != model.conversion_threshold
             or payload.get("weights_sha256") != value["weights_sha256"]):
         raise ValueError("context weights, version or threshold mismatch")
-    prefix_payload = read_object(prefix_artifact, 8 * 1024 * 1024)
+    prefix_payload = read_object(prefix_artifact, ARTIFACT_PAYLOAD_LIMIT_BYTES)
     prefix = VersionedPrefixModel.load(prefix_artifact)
     if (checksum(prefix_artifact) != value["prefix_artifact_sha256"]
             or type(value["prefix_feature_version"]) is not int or prefix.feature_version != value["prefix_feature_version"]
             or type(value["prefix_conversion_threshold"]) not in (int, float)
             or prefix.model.conversion_threshold != value["prefix_conversion_threshold"]
-            or prefix.version != f"prefix-v{prefix.feature_version}-" + sha(value["prefix_weights_sha256"])[:12]
+            or prefix.version != f"prefix-v{prefix.feature_version}-" + sha(value["prefix_weights_sha256"])[:VERSION_SHA_PREFIX_CHARACTERS]
             or value["prefix_model_version"] != prefix.version
             or prefix_payload.get("weights_sha256") != value["prefix_weights_sha256"]):
         raise ValueError("prefix weights, version or threshold mismatch")
@@ -308,7 +331,7 @@ def validate_receipt(receipt: object, artifact: Path = ARTIFACT_PATH, root: Path
     recipe = read_object(root / RECIPE)
     if (hashes.get(BASELINE) != value["baseline_sha256"] or hashes.get(RECIPE) != value["recipe_sha256"]
             or type(recipe.get("schema_version")) is not int or recipe["schema_version"] != 1
-            or type(recipe.get("feature_version")) is not int or recipe["feature_version"] != 3
+            or type(recipe.get("feature_version")) is not int or recipe["feature_version"] != CONTEXT_FEATURE_VERSION
             or recipe.get("profiles") != list(PROFILES)
             or canonical(recipe.get("gate_policy")) != canonical(GATE_POLICY)):
         raise ValueError("baseline, recipe or gate policy mismatch")
@@ -455,7 +478,7 @@ def validate_full_report(report: Mapping[str, object], identity: Mapping[str, ob
     if (sum(documents.values()) != len(correct)
             or canonical(documents) != canonical(selection.get("replayed_documents"))):
         raise ValueError("case document counts or one-focus-per-document policy differ")
-    trimmed = sum(bool(values[3] or values[4]) for values in correct.values())
+    trimmed = sum(bool(values[TRIMMED_LEFT_FIELD] or values[TRIMMED_RIGHT_FIELD]) for values in correct.values())
     if not trimmed <= integer(selection.get("trimmed_rows"), "trimmed case rows") <= trimmed + len(omitted):
         raise ValueError("case trim count differs from selection")
 
@@ -470,7 +493,7 @@ def export_receipt(artifact: Path, seal_path: Path, report_path: Path, corpus: P
     seal = evaluator.validate_candidate_seal(artifact, seal_path, corpus)
     evaluator.validate_prefix_seal(prefix_artifact, prefix_seal_path, require_calibration=True)
     identity = evaluator.evaluation_identity(artifact, seal_path, corpus, prefix_artifact, prefix_seal_path)
-    report = read_object(report_path, 64 * 1024 * 1024)
+    report = read_object(report_path, FULL_REPORT_LIMIT_BYTES)
     if (type(report.get("schema_version")) is not int or report["schema_version"] != 1 or report.get("split") != "test"
             or canonical(report.get("identity")) != canonical(identity)
             or canonical(report.get("protocol")) != canonical(evaluator.PROTOCOL)
@@ -504,11 +527,11 @@ def export_receipt(artifact: Path, seal_path: Path, report_path: Path, corpus: P
         control = mapping(private.get("early_off"), "early-off control")
         public_profiles[profile] = {"counts": private["counts"], "gates": private["gates"],
                                     "early_off": {"counts": control["counts"], "gates": control["gates"]}}
-    payload = read_object(artifact, 8 * 1024 * 1024)
-    prefix_payload = read_object(prefix_artifact, 8 * 1024 * 1024)
+    payload = read_object(artifact, ARTIFACT_PAYLOAD_LIMIT_BYTES)
+    prefix_payload = read_object(prefix_artifact, ARTIFACT_PAYLOAD_LIMIT_BYTES)
     prefix = VersionedPrefixModel.load(prefix_artifact)
     receipt: dict[str, object] = {
-        "schema_version": 1, "feature_version": 3, "model_version": seal["model_version"],
+        "schema_version": 1, "feature_version": CONTEXT_FEATURE_VERSION, "model_version": seal["model_version"],
         "conversion_threshold": seal["conversion_threshold"], "artifact_sha256": checksum(artifact),
         "weights_sha256": payload["weights_sha256"], "baseline_path": BASELINE,
         "baseline_sha256": identity["baseline_sha256"], "recipe_path": RECIPE, "recipe_sha256": hashes[RECIPE],

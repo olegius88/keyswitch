@@ -41,7 +41,9 @@ from test_input_integrity import EditorBackend
 from model_protocol import PROFILES, SEALED_BEFORE_TEST
 from reference_lexicon import reference_models
 from context_physical_keys import KEYS as KEYS, PhysicalKey as PhysicalKey, physical_keys as physical_keys
-from freeze_context_action_corpus import CorpusRow, canonical, checksum, digest, load_split
+from freeze_context_action_corpus import (
+    AFTER_WINDOW_CHARACTERS, BEFORE_WINDOW_CHARACTERS, CorpusRow, canonical, checksum, digest, load_split,
+)
 
 CORPUS = ROOT / ".t/reliable-release-2026-09-12/context-action-corpus"
 LEDGER_ROOT = ROOT / ".t/reliable-release-2026-09-12/context-action-test-ledger"
@@ -52,6 +54,14 @@ SETTINGS_MODES = ("early_off", "default")
 DEFAULT_KEY_DOWN_SECONDS = 0.05
 DEFAULT_KEY_UP_SECONDS = 0.03
 DEFAULT_WORD_IDLE_SECONDS = 1.7
+# context_model.py is pinned by the context-v1 seal (PENDING_RESEAL), so its
+# "3" for the context-action feature scheme is not yet a constant we can import.
+CONTEXT_FEATURE_VERSION_V3 = 3
+VERSION_HASH_PREFIX_LENGTH = 12
+LOCK_FILE_MODE = 0o600
+SIMULATED_CLOCK_START_SECONDS = 1000.0
+MILLISECONDS_PER_SECOND = 1000
+MINIMUM_DOCUMENTS_PER_LANGUAGE = 32
 PAIRS: dict[str, tuple[tuple[str, str, str], ...]] = {
     "early_off": (("baseline", "baseline", "baseline"), ("candidate", "candidate", "candidate")),
     "default": (("baseline", "baseline", "baseline"), ("candidate", "candidate", "candidate"),
@@ -204,8 +214,8 @@ def validate_candidate_seal(artifact: Path, seal_path: Path, corpus: Path) -> di
     model = ContextModel.load(artifact)
     payload = read_object(artifact)
     weights_sha = payload.get("weights_sha256")
-    if (model.feature_version != 3 or not isinstance(weights_sha, str)
-            or model.version != "context-v3-" + weights_sha[:12]
+    if (model.feature_version != CONTEXT_FEATURE_VERSION_V3 or not isinstance(weights_sha, str)
+            or model.version != "context-v3-" + weights_sha[:VERSION_HASH_PREFIX_LENGTH]
             or seal.get("model_version") != model.version
             or seal.get("conversion_threshold") != model.conversion_threshold):
         raise ValueError("candidate model identity differs from seal")
@@ -316,7 +326,7 @@ def claim_test_access(identity: dict[str, object]) -> str:
     LEDGER_ROOT.mkdir(parents=True, exist_ok=True)
     lock = LEDGER_ROOT / ".access-lock"
     try:
-        descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, LOCK_FILE_MODE)
     except FileExistsError:
         raise ValueError("test access ledger is locked; no test was read") from None
     try:
@@ -345,11 +355,11 @@ def script_group(character: str) -> int | None:
 def trimmed_window(row: CorpusRow) -> tuple[str, str, int, int]:
     before, after = row.before, row.after
     left = right = 0
-    if len(before) == 96 and before[0].isalpha():
+    if len(before) == BEFORE_WINDOW_CHARACTERS and before[0].isalpha():
         while left < len(before) and before[left].isalpha():
             left += 1
         before = before[left:]
-    if len(after) == 64 and after[-1].isalpha():
+    if len(after) == AFTER_WINDOW_CHARACTERS and after[-1].isalpha():
         while right < len(after) and after[-1 - right].isalpha():
             right += 1
         after = after[:-right]
@@ -487,7 +497,7 @@ def replay(plan: SequencePlan, model: ContextModel, models: dict[int, LanguageMo
             }.items():
                 settings.set(setting, value)
         backend = TracedEditor()
-        clock = [1000.0]
+        clock = [SIMULATED_CLOCK_START_SECONDS]
         expected = plan.expected
         if mode == "default" and len(plan.keys) != len(expected):
             raise ValueError("default settings replay requires one key per expected character")
@@ -528,11 +538,11 @@ def replay(plan: SequencePlan, model: ContextModel, models: dict[int, LanguageMo
                     clock[0] += DEFAULT_KEY_DOWN_SECONDS
                     event = KeyEvent(True, key.keycode, "space" if observed == " " else observed,
                                      observed, key.characters, backend.group, SHIFT_MASK if key.shift else 0,
-                                     round(clock[0] * 1000))
+                                     round(clock[0] * MILLISECONDS_PER_SECOND))
                     backend.type(event)
                     engine._handle(event)
                     clock[0] += DEFAULT_KEY_UP_SECONDS
-                    released = replace(event, pressed=False, timestamp=round(clock[0] * 1000))
+                    released = replace(event, pressed=False, timestamp=round(clock[0] * MILLISECONDS_PER_SECOND))
                     backend.type(released)
                     engine._handle(released)
                     # Both modes run the engine's idle callbacks: without them a document that
@@ -558,8 +568,8 @@ def profile_gates(candidate: Mapping[str, int], baseline: Mapping[str, int], doc
             "length_preserved": candidate["length_mismatches"] == 0,
             "net_restorations_at_least_baseline": (candidate["exactly_restored"] - candidate["correct_text_corruptions"]
                                                   >= baseline["exactly_restored"] - baseline["correct_text_corruptions"]),
-            "enough_documents_us": documents.get("0", 0) >= 32,
-            "enough_documents_ru": documents.get("1", 0) >= 32,
+            "enough_documents_us": documents.get("0", 0) >= MINIMUM_DOCUMENTS_PER_LANGUAGE,
+            "enough_documents_ru": documents.get("1", 0) >= MINIMUM_DOCUMENTS_PER_LANGUAGE,
             "execution_succeeded": candidate["execution_errors"] == baseline["execution_errors"] == 0,
             "correction_layouts_match": candidate["correction_layout_mismatches"] == 0}
 

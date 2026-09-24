@@ -8,7 +8,7 @@ from typing import cast
 import unittest
 from unittest.mock import patch
 
-from keyswitch.context_action_features import extract_action_features
+from keyswitch.context_action_features import PLANNED_AFTER_MAX_CHARACTERS, extract_action_features
 from keyswitch.context_model import ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, ContextPrediction, extract_context_features
 from keyswitch.context_policy import ContextPolicy, evidence_for_decision
 from keyswitch.detector import LanguageDetector
@@ -16,19 +16,40 @@ from keyswitch.input_context import FieldContext
 from keyswitch.language_model import LanguageModel
 import test_input_sequence_matrix as sequences
 
+# context_model.py is pinned by the context-v1 seal (PENDING_RESEAL), so its
+# "3" for the context-action feature scheme is not yet a constant we can import.
+CONTEXT_FEATURE_VERSION_V3 = 3
+# TransitionModel's own fixture rule: a token this short or shorter waits rather
+# than converts, independent of the real model's logic.
+PENDING_TOKEN_MAX_LENGTH = 2
+# Fixture bias/weight magnitudes for the small four-class model: KEEP_BIAS_SCORE
+# is a modest default preference for "keep"; ORIGIN_OVERRIDE_WEIGHT is large
+# enough to flip the argmax away from it via a single feature; DECISIVE_BIAS_SCORE
+# is large enough that a plain bias alone guarantees its action wins.
+KEEP_BIAS_SCORE = 4.0
+ORIGIN_OVERRIDE_WEIGHT = 20.0
+DECISIVE_BIAS_SCORE = 30.0
+CONVERT_BIAS_SCORE = 10.0
+# A value of the wrong type (not str) for after_origin, used only to prove the
+# type check rejects it.
+NON_STRING_ORIGIN = 3
+
 
 class TransitionModel(ContextModel):
     """Drive a waiting transaction; record evidence before any injection."""
 
     def __init__(self, observe: Callable[[], tuple[str, int]], *, planned_action: ContextAction = "convert") -> None:
-        super().__init__({}, "context-v3-transition", feature_version=3)
+        super().__init__({}, "context-v3-transition", feature_version=CONTEXT_FEATURE_VERSION_V3)
         self.observe = observe
         self.planned_action = planned_action
         self.items: list[tuple[ContextEvidence, tuple[str, int]]] = []
 
     def predict(self, item: ContextEvidence) -> ContextPrediction:
         self.items.append((item, self.observe()))
-        action: ContextAction = self.planned_action if item.field.after else "wait" if len(item.original) <= 2 else "convert"
+        action: ContextAction = (
+            self.planned_action if item.field.after
+            else "wait" if len(item.original) <= PENDING_TOKEN_MAX_LENGTH else "convert"
+        )
         scores = tuple(float(name == action) for name in ACTIONS)
         return ContextPrediction(action, 1.0, scores, self.version, True)
 
@@ -38,7 +59,7 @@ class ContextAfterOriginTests(unittest.TestCase):
         self.item = ContextEvidence("r", "к", 0, FieldContext("Editor", "1", "", "нас"), boundary_text=" ")
 
     def weights(self) -> dict[str, tuple[float, ...]]:
-        return {name: (0.0,) * 4 for name in extract_action_features(self.item)
+        return {name: (0.0,) * len(ACTIONS) for name in extract_action_features(self.item)
                 if name.startswith(("source:char:", "target:char:"))}
 
     def test_default_origin_follows_literal_field_after_and_dataclass_replacement(self) -> None:
@@ -58,19 +79,19 @@ class ContextAfterOriginTests(unittest.TestCase):
         self.assertIn("after_origin:planned_next_conversion:script:ru:direction:0:length:1", planned_features)
         self.assertNotEqual(field_features, planned_features)
         weights = self.weights()
-        weights.update({"bias": (4.0, 0.0, 0.0, 0.0), "after_origin:planned_next_conversion": (0.0, 20.0, 0.0, 0.0)})
-        learned = ContextModel(weights, "context-v3-origin", feature_version=3)
+        weights.update({"bias": (KEEP_BIAS_SCORE, 0.0, 0.0, 0.0), "after_origin:planned_next_conversion": (0.0, ORIGIN_OVERRIDE_WEIGHT, 0.0, 0.0)})
+        learned = ContextModel(weights, "context-v3-origin", feature_version=CONTEXT_FEATURE_VERSION_V3)
         self.assertEqual(learned.predict(self.item).action, "keep")
         self.assertEqual(learned.predict(planned).action, "convert")
-        weights["after_origin:planned_next_conversion"] = (20.0, 0.0, 0.0, 0.0)
-        self.assertEqual(ContextModel(weights, "context-v3-opposite", feature_version=3).predict(planned).action, "keep")
+        weights["after_origin:planned_next_conversion"] = (ORIGIN_OVERRIDE_WEIGHT, 0.0, 0.0, 0.0)
+        self.assertEqual(ContextModel(weights, "context-v3-opposite", feature_version=CONTEXT_FEATURE_VERSION_V3).predict(planned).action, "keep")
 
     def test_impossible_planned_metadata_and_unknown_origins_fail_closed_in_v3(self) -> None:
-        model = ContextModel({**self.weights(), "bias": (0.0, 30.0, 0.0, 0.0)}, "context-v3-origin", feature_version=3)
+        model = ContextModel({**self.weights(), "bias": (0.0, DECISIVE_BIAS_SCORE, 0.0, 0.0)}, "context-v3-origin", feature_version=CONTEXT_FEATURE_VERSION_V3)
         planned = replace(self.item, after_origin="planned_next_conversion")
-        invalid_origins: tuple[object, ...] = ("verified", "", None, 3, [])
+        invalid_origins: tuple[object, ...] = ("verified", "", None, NON_STRING_ORIGIN, [])
         invalid = [replace(self.item, after_origin=cast(AfterOrigin, value)) for value in invalid_origins]
-        invalid += [replace(planned, field=replace(planned.field, after=after)) for after in ("", "нас завтра", "нас\u00a0", "я" * 65)]
+        invalid += [replace(planned, field=replace(planned.field, after=after)) for after in ("", "нас завтра", "нас\u00a0", "я" * (PLANNED_AFTER_MAX_CHARACTERS + 1))]
         invalid += [replace(planned, trigger="enter"), replace(planned, boundary_text="\t"),
                     replace(planned, original="long"), replace(planned, original="")]
         for item in invalid:
@@ -79,7 +100,7 @@ class ContextAfterOriginTests(unittest.TestCase):
                 self.assertEqual((result.action, result.supported), ("suggest", False))
 
     def test_v2_features_and_predictions_ignore_origin_entirely(self) -> None:
-        model = ContextModel({"bias": (0.0, 10.0, 0.0, 0.0), "app:editor": (0.0,) * 4}, "context-v1-origin")
+        model = ContextModel({"bias": (0.0, CONVERT_BIAS_SCORE, 0.0, 0.0), "app:editor": (0.0,) * len(ACTIONS)}, "context-v1-origin")
         for origin in ("none", "field", "planned_next_conversion", "invalid"):
             with self.subTest(origin=origin):
                 changed = replace(self.item, after_origin=cast(AfterOrigin, origin))
@@ -92,7 +113,7 @@ class ContextAfterOriginTests(unittest.TestCase):
         baseline = detector.decide("r", {1: "к"}, 0)
         direct = evidence_for_decision(baseline, "к", 1, detector, self.item.field, "space", boundary_text=" ")
         self.assertEqual(direct.after_origin, "field")
-        model = ContextModel({**self.weights(), "bias": (30.0, 0.0, 0.0, 0.0)}, "context-v3-keep", feature_version=3)
+        model = ContextModel({**self.weights(), "bias": (DECISIVE_BIAS_SCORE, 0.0, 0.0, 0.0)}, "context-v3-keep", feature_version=CONTEXT_FEATURE_VERSION_V3)
         policy = ContextPolicy()
         policy.model = model
         with patch.object(model, "predict", wraps=model.predict) as prediction:

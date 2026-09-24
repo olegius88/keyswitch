@@ -21,7 +21,7 @@ from keyswitch.input_context import FieldContext, FieldRole
 from keyswitch.language_model import LanguageModel
 from keyswitch.layouts import LayoutPair
 from keyswitch.prefix_model import PREFIX_FEATURE_VERSION, PrefixInput
-from keyswitch.prefix_schema import features_for_version
+from keyswitch.prefix_schema import CURRENT_PREFIX_FEATURE_VERSION, features_for_version
 
 from model_protocol import FITTING_SPLITS, PROFILES
 from auxiliary_runtime_evidence import _inside, _lexical_paths
@@ -30,6 +30,24 @@ from prefix_corpus import DIRECTORY
 
 SELECTION_NAMESPACE = "keyswitch:prefix-v2:exposed-parent-selection:1"
 SAFETY_CATEGORIES = ("identifier", "command", "mixed_english")
+HASH_CHUNK_BYTES = 1024 * 1024
+PARENT_TEXT_MAX_CHARACTERS = 32
+PARENT_FAMILY_MAX_CHARACTERS = 3
+PARENT_BEFORE_CONTEXT_MAX_CHARACTERS = 160
+APPLICATION_NAME_MAX_CHARACTERS = 128
+DEFAULT_MAX_WORDS_PER_FAMILY = 2
+MAX_FAMILIES_BUDGET_LIMIT = 4096
+MAX_WORDS_PER_FAMILY_LIMIT = 4
+PARENT_IDENTIFIER_BUDGET_LIMIT = 32768
+# `original[:LEGACY_DELETION_INDEX] + original[LEGACY_DELETION_INDEX + 1:]` reproduces
+# the fixed-position deletion typo surface already exposed by the old prefix corpus.
+LEGACY_DELETION_INDEX = 3
+CONTEXT_BEFORE_MAX_CHARACTERS = 512
+MAX_CONTEXTS_PER_PARENT = 64
+INDEX_CACHE_MAX_ENTRIES = 4
+PREFIX_LENGTH_LIMIT = 12
+SHORT_PREFIX_LENGTH_THRESHOLD = 4
+AMBIGUOUS_POSITIVE_LABEL = 2
 SOURCE_PATHS = (
     "tools/auxiliary_runtime_evidence.py", "tools/context_corpus.py",
     "tools/context_evidence.py", "tools/reference_lexicon.py", "tools/context_frames.py",
@@ -95,7 +113,7 @@ def _digest(value: object) -> str:
 def _checksum(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        for chunk in iter(lambda: stream.read(HASH_CHUNK_BYTES), b""):
             digest.update(chunk)
     return digest.hexdigest()
 
@@ -136,10 +154,11 @@ def _parent(row: dict[str, object], split: str) -> ParentWord:
             or any(not isinstance(row.get(key), str) for key in ("text", "family", "before", "category"))):
         raise ValueError("invalid old prefix parent metadata")
     text, family, before = str(row["text"]), str(row["family"]), str(row["before"])
-    if not text or len(text) > 32 or not family or len(family) > 3 or len(before) > 160:
+    if (not text or len(text) > PARENT_TEXT_MAX_CHARACTERS or not family
+            or len(family) > PARENT_FAMILY_MAX_CHARACTERS or len(before) > PARENT_BEFORE_CONTEXT_MAX_CHARACTERS):
         raise ValueError("unbounded old prefix parent metadata")
     application, role = row.get("application", ""), row.get("role", "unknown")
-    if (not isinstance(application, str) or len(application) > 128
+    if (not isinstance(application, str) or len(application) > APPLICATION_NAME_MAX_CHARACTERS
             or role not in ("unknown", "text", "code", "search", "terminal")):
         raise ValueError("invalid old prefix application metadata")
     return ParentWord(text, row["source"], family, before,
@@ -147,13 +166,13 @@ def _parent(row: dict[str, object], split: str) -> ParentWord:
                       application=application, role=role)
 
 
-def load_parents(split: str, max_families: int, max_words_per_family: int = 2,
+def load_parents(split: str, max_families: int, max_words_per_family: int = DEFAULT_MAX_WORDS_PER_FAMILY,
                  *, directory: Path = DIRECTORY) -> list[ParentWord]:
     """Hash-select natural parents and matching existing typo forms, never test."""
     if split not in FITTING_SPLITS:
         raise ValueError("prefix-v2 may read only exposed train/development/calibration splits")
-    if (type(max_families) is not int or not 1 <= max_families <= 4096
-            or type(max_words_per_family) is not int or not 1 <= max_words_per_family <= 4):
+    if (type(max_families) is not int or not 1 <= max_families <= MAX_FAMILIES_BUDGET_LIMIT
+            or type(max_words_per_family) is not int or not 1 <= max_words_per_family <= MAX_WORDS_PER_FAMILY_LIMIT):
         raise ValueError("invalid bounded prefix parent budget")
     natural: dict[str, list[ParentWord]] = defaultdict(list)
     typos: dict[tuple[str, int, str, str], ParentWord] = {}
@@ -166,7 +185,7 @@ def load_parents(split: str, max_families: int, max_words_per_family: int = 2,
         if parent.identifier in identifiers:
             raise ValueError("duplicate old prefix parent identifier")
         identifiers.add(parent.identifier)
-        if len(identifiers) > 32768:
+        if len(identifiers) > PARENT_IDENTIFIER_BUDGET_LIMIT:
             raise ValueError("old prefix parent metadata exceeds the bounded source budget")
         if parent.category == "correct":
             natural[parent.family].append(parent)
@@ -193,7 +212,8 @@ def load_parents(split: str, max_families: int, max_words_per_family: int = 2,
             selected.add(word_key)
             result.append(replace(parent, parent_identifier=parent.identifier))
             # Match the legacy deletion surface; do not synthesize a new row.
-            typo = typos.get((parent.family, parent.group, parent.before, parent.original[:3] + parent.original[4:]))
+            typo = typos.get((parent.family, parent.group, parent.before,
+                             parent.original[:LEGACY_DELETION_INDEX] + parent.original[LEGACY_DELETION_INDEX + 1:]))
             if typo is not None:
                 result.append(replace(typo, identifier=typo.identifier + ":parent:" + parent.identifier,
                                       parent_identifier=parent.identifier))
@@ -235,16 +255,17 @@ def contexts_for(parent: ParentWord) -> tuple[PrefixContext, ...]:
 def _contexts(values: Sequence[PrefixContext]) -> tuple[PrefixContext, ...]:
     unique: dict[tuple[str, str, FieldRole], PrefixContext] = {}
     for item in sorted(values, key=lambda value: value.identifier):
-        if (not item.identifier or len(item.before) > 512 or not item.application or len(item.application) > 128
+        if (not item.identifier or len(item.before) > CONTEXT_BEFORE_MAX_CHARACTERS or not item.application
+                or len(item.application) > APPLICATION_NAME_MAX_CHARACTERS
                 or item.role not in ("unknown", "text", "code", "search", "terminal")):
             raise ValueError("invalid bounded prefix context")
         unique.setdefault((item.before, item.application, item.role), item)
-    if not unique or len(unique) > 64:
+    if not unique or len(unique) > MAX_CONTEXTS_PER_PARENT:
         raise ValueError("invalid prefix context count")
     return tuple(unique[key] for key in sorted(unique))
 
 
-@lru_cache(maxsize=4)
+@lru_cache(maxsize=INDEX_CACHE_MAX_ENTRIES)
 def _indexes(profile: str, first: LanguageModel, second: LanguageModel) -> dict[int, PrefixIndex]:
     # Keep the supplied frozen models; the runtime cache reloads system lexicons.
     return {
@@ -256,22 +277,24 @@ def _indexes(profile: str, first: LanguageModel, second: LanguageModel) -> dict[
 
 def generate_frames(parents: Sequence[ParentWord], models_by_profile: dict[str, dict[int, LanguageModel]],
                     *, contexts: Sequence[PrefixContext] | None = None,
-                    maximum_prefix_length: int = 12, feature_version: int = PREFIX_FEATURE_VERSION) -> Iterator[PrefixFrame]:
+                    maximum_prefix_length: int = PREFIX_LENGTH_LIMIT,
+                    feature_version: int = PREFIX_FEATURE_VERSION) -> Iterator[PrefixFrame]:
     """Emit paired snapshots with unit total sampling mass per physical family.
 
     Each selected surface has equal family mass. Contexts, lexical profiles and
     correct/wrong states divide that mass equally, then prefixes divide their
     sequence mass. No class multiplier is applied here.
     """
-    if (type(maximum_prefix_length) is not int or not 1 <= maximum_prefix_length <= 12
+    if (type(maximum_prefix_length) is not int or not 1 <= maximum_prefix_length <= PREFIX_LENGTH_LIMIT
             or "portable" not in models_by_profile or not set(models_by_profile) <= set(PROFILES)
             or any(set(models) != {0, 1} for models in models_by_profile.values())
-            or type(feature_version) is not int or feature_version not in (1, 2)):
+            or type(feature_version) is not int
+            or feature_version not in (1, CURRENT_PREFIX_FEATURE_VERSION)):
         raise ValueError("invalid prefix feature configuration")
     identifiers: set[str] = set()
     for parent in parents:
         if (parent.category not in ("correct", "typo", *SAFETY_CATEGORIES) or type(parent.group) is not int or parent.group not in (0, 1)
-                or not parent.original or len(parent.original) > 32 or not parent.family
+                or not parent.original or len(parent.original) > PARENT_TEXT_MAX_CHARACTERS or not parent.family
                 or not parent.identifier or parent.identifier in identifiers):
             raise ValueError("invalid or duplicate prefix parent")
         identifiers.add(parent.identifier)
@@ -298,7 +321,7 @@ def generate_frames(parents: Sequence[ParentWord], models_by_profile: dict[str, 
                         original = full[:length]
                         alternate = pair.translate(original, "ru" if source else "us", "us" if source else "ru")
                         ambiguous = indexes["portable"][source].completions(original).completions > 0
-                        label = (2 if length < 4 or ambiguous else 1) if desired else 0
+                        label = (AMBIGUOUS_POSITIVE_LABEL if length < SHORT_PREFIX_LENGTH_THRESHOLD or ambiguous else 1) if desired else 0
                         item = PrefixInput(original, alternate, source,
                                            FieldContext(context.application, pair_id, context.before, role=context.role))
                         yield PrefixFrame(item, label, parent.family, sequence_id, length, desired,

@@ -11,7 +11,10 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
-from context_action_spans import _Capture, _body, _capture, _keys, _label, _select, build_span_curriculum, provenance
+from context_action_spans import (
+    GROUP_COUNT, MAX_ORIGINAL_LENGTH, MAXIMUM_FAMILIES,
+    _Capture, _body, _capture, _keys, _label, _select, build_span_curriculum, provenance,
+)
 from context_physical_keys import translated
 from evaluate_context_action_sequences import SequencePlan
 from freeze_context_action_corpus import CorpusRow
@@ -27,15 +30,24 @@ def row(word: str, group: int, family: str = "") -> CorpusRow:
 
 
 class SpanCurriculumTests(unittest.TestCase):
+    WORD_FREQUENCY = 5000
+    REAL_ENGINE_FAMILY_BUDGET = 4
+    EXPECTED_SEQUENCES = 48
+    SLASH_TEST_FAMILY_BUDGET = 8
+    CAPTURE_EVENT_SERIAL = 100
+    EXPECTED_SKIPPED_INEXPRESSIBLE = 12
+    ODD_FAMILY_BUDGET = 3
+    SHA256_HEX_LENGTH = 64
+
     def models(self) -> dict[int, LanguageModel]:
-        return {0: LanguageModel("en_US", {"hello": 5000, "world": 5000}, "fixture", enable_spellcheck=False),
-                1: LanguageModel("ru_RU", {"привет": 5000, "работа": 5000}, "fixture", enable_spellcheck=False)}
+        return {0: LanguageModel("en_US", {"hello": self.WORD_FREQUENCY, "world": self.WORD_FREQUENCY}, "fixture", enable_spellcheck=False),
+                1: LanguageModel("ru_RU", {"привет": self.WORD_FREQUENCY, "работа": self.WORD_FREQUENCY}, "fixture", enable_spellcheck=False)}
 
     def test_real_engine_produces_correct_and_wrong_frames_with_actual_tails_and_spacing(self) -> None:
         rows = [row("hello", 0), row("world", 0), row("привет", 1), row("работа", 1)]
-        actual = build_span_curriculum(rows, self.models(), profile="portable", maximum_families=4)
-        self.assertEqual(actual.counts["selected_families"], 4)
-        self.assertEqual(actual.counts["sequences"], 48)
+        actual = build_span_curriculum(rows, self.models(), profile="portable", maximum_families=self.REAL_ENGINE_FAMILY_BUDGET)
+        self.assertEqual(actual.counts["selected_families"], self.REAL_ENGINE_FAMILY_BUDGET)
+        self.assertEqual(actual.counts["sequences"], self.EXPECTED_SEQUENCES)
         self.assertEqual({frame.action for frame in actual.frames}, {"keep", "convert"})
         self.assertGreater(actual.counts["tail_nonempty"], 0)
         self.assertGreater(actual.counts["repeated_space_before"], 0)
@@ -65,14 +77,15 @@ class SpanCurriculumTests(unittest.TestCase):
 
     def test_internal_slash_fragments_never_become_new_supervised_families(self) -> None:
         rows = [row("hello", 0), row("world", 0), row("hello/world", 0, "slash")]
-        actual = build_span_curriculum(rows, self.models(), profile="portable", maximum_families=8)
+        actual = build_span_curriculum(rows, self.models(), profile="portable", maximum_families=self.SLASH_TEST_FAMILY_BUDGET)
         self.assertGreater(actual.counts.get("skipped_nonparent_body", 0), 0)
         self.assertNotIn("slash", {frame.parent_family for frame in actual.frames})
 
     def test_counterfactual_requires_exact_whole_prefix_and_preserves_literal_tail(self) -> None:
         item = ContextEvidence("ghbdtn", "привет", 0, FieldContext("editor", "stream", "hello  ", "", "unknown"),
                                literal_tail="...", boundary_text=" ")
-        capture = _Capture(item, "hello  ghbdtn... ", 17)
+        observed = "hello  ghbdtn... "
+        capture = _Capture(item, observed, len(observed))
         self.assertEqual(_label(capture, "hello  привет... "), "convert")
         self.assertEqual(_label(capture, capture.observed), "keep")
         self.assertIsNone(_label(capture, "hello привет... "))
@@ -81,23 +94,23 @@ class SpanCurriculumTests(unittest.TestCase):
 
     def test_inexpressible_whole_prefix_is_counted_without_inventing_an_action(self) -> None:
         item = ContextEvidence("hello", "руддщ", 0, FieldContext("editor", "stream", "", "", "unknown"), boundary_text=" ")
-        capture = _Capture(item, "externally changed hello ", 100)
+        capture = _Capture(item, "externally changed hello ", self.CAPTURE_EVENT_SERIAL)
         with patch("context_action_spans._capture", return_value=[capture]):
-            actual = build_span_curriculum([row("hello", 0)], self.models(), profile="portable", maximum_families=2)
-        self.assertEqual(actual.counts["skipped_inexpressible"], 12)
+            actual = build_span_curriculum([row("hello", 0)], self.models(), profile="portable", maximum_families=GROUP_COUNT)
+        self.assertEqual(actual.counts["skipped_inexpressible"], self.EXPECTED_SKIPPED_INEXPRESSIBLE)
         self.assertEqual(actual.frames, ())
         self.assertEqual(actual.counts["retained_families"], 0)
 
     def test_sampling_is_deterministic_group_capped_and_rejects_unrepresentable_sources(self) -> None:
         rows = [row("hello", 0), row("world", 0), row("привет", 1), row("работа", 1),
-                row("café", 0), row("123", 0), row("x" * 65, 0),
+                row("café", 0), row("123", 0), row("x" * (MAX_ORIGINAL_LENGTH + 1), 0),
                 replace(row("mixed", 0), group=None), replace(row("hidden", 0), layout_representable=False)]
-        selected, _ = _select(rows, 2)
-        reverse, _ = _select(list(reversed(rows)), 2)
+        selected, _ = _select(rows, GROUP_COUNT)
+        reverse, _ = _select(list(reversed(rows)), GROUP_COUNT)
         self.assertEqual(selected, reverse)
         self.assertEqual({item.group for item in selected}, {0, 1})
-        self.assertEqual(len(selected), 2)
-        self.assertEqual(_select([row("x", 0)], 2)[0], [])
+        self.assertEqual(len(selected), GROUP_COUNT)
+        self.assertEqual(_select([row("x", 0)], GROUP_COUNT)[0], [])
         self.assertEqual(_body("ПРИВЕТ", 1), _body("привет", 1))
         self.assertNotEqual(_body("привет", 1), _body("приве", 1))
         with self.assertRaisesRegex(ValueError, "unrepresentable"):
@@ -110,7 +123,7 @@ class SpanCurriculumTests(unittest.TestCase):
                     build_span_curriculum([replace(row("hello", 0), split=split)], self.models(), profile="portable")
             with self.assertRaisesRegex(ValueError, "declared split"):
                 build_span_curriculum([replace(row("hello", 0), quarantine_reasons=("exposed",))], self.models(), profile="portable")
-            for invalid in (0, 1, 3, 130, True):
+            for invalid in (0, 1, self.ODD_FAMILY_BUDGET, MAXIMUM_FAMILIES + GROUP_COUNT, True):
                 with self.assertRaisesRegex(ValueError, "family budget"):
                     build_span_curriculum([], self.models(), profile="portable", maximum_families=invalid)
             with self.assertRaisesRegex(ValueError, "explicit lexical profile"):
@@ -134,4 +147,4 @@ class SpanCurriculumTests(unittest.TestCase):
         hashes = provenance()
         self.assertIn("tools/context_action_spans.py", hashes)
         self.assertIn("src/keyswitch/engine.py", hashes)
-        self.assertTrue(all(len(value) == 64 for value in hashes.values()))
+        self.assertTrue(all(len(value) == self.SHA256_HEX_LENGTH for value in hashes.values()))

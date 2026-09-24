@@ -9,8 +9,63 @@ import pytest
 from logcourier.batching import compact
 from logcourier.catalog import current_catalog, deliver, list_entries
 from logcourier.collector import Collector
+from logcourier.rate_limit import GROUP_INTERVAL, RateLimitedClient
 from logcourier.store import QueueFull, Store
 from logcourier.telegram import TelegramError
+
+# collect_all's default chunk size: enough to read a real log file in one pass.
+DEFAULT_CHUNK_SIZE_BYTES = 2 * 1024 * 1024
+# Generous loop bounds for collect_all/deliver_all: high enough that the real
+# stopping condition always fires first, low enough to fail fast if it never does.
+SAFETY_LOOP_LIMIT = 1000
+# Parametrized read chunk sizes: pathologically small, small, and effectively unbounded.
+CHUNK_SIZES = (7, 71, 100000)
+# A chunk size small enough that Collector.scan(max_chunks=1) stops after one
+# chunk, leaving further sources/rotations unread until the next scan.
+PARTIAL_SCAN_CHUNK_SIZE = 80
+# Arbitrary backlog size for an old rotated file that must not be read first.
+BACKLOG_LINE_COUNT = 20
+# 0.16.1 -> 0.16.2 -> 0.16.2 -> 0.16.1 is three transitions; the repeated
+# 0.16.2 in the middle is not marked again.
+RESTART_MARKER_COUNT = 3
+# A queue capacity comfortably larger than anything this test writes.
+SUFFICIENT_CAPACITY_BYTES = 100000
+# Splits a generated log line mid-header, so a restart is seen to preserve the wait.
+HEADER_SPLIT_OFFSET = 33
+# A chunk size smaller than one log line, forcing multi-chunk partial reads.
+TINY_CHUNK_SIZE = 9
+# How many times a fixture log line is duplicated, to produce that many
+# separate fragments/entries.
+TWO_COPIES = 2
+# A chunk size chosen to split several duplicated source lines across chunks
+# while exercising compaction.
+COMPACTION_TEST_CHUNK_SIZE = 70
+FIXTURE_CLOCK_START = 100.0
+# Three mutation calls (marker, data, catalog), each paced GROUP_INTERVAL apart.
+EXPECTED_CALL_TIMES = [
+    FIXTURE_CLOCK_START,
+    FIXTURE_CLOCK_START + GROUP_INTERVAL,
+    FIXTURE_CLOCK_START + GROUP_INTERVAL + GROUP_INTERVAL,
+]
+# marker + data + catalog uploads for one delivery that includes a fresh version marker.
+UPLOADS_WITH_VERSION_MARKER = 3
+# All catalog entries survive dropping a source from config; only "current" narrows.
+ALL_ENTRIES_AFTER_SOURCE_REMOVED = 2
+ALL_ENTRIES_AFTER_THREE_DELIVERIES = 3
+TWO_DISTINCT_SELECTIONS = 2
+# A deliberately wrong (non-string) "version" field value.
+INVALID_VERSION_TYPE_VALUE = 3
+# Unfinished header lengths that must not let the old version leak through.
+UNFINISHED_HEADER_LENGTHS = (1, 4, 8, 23, 33)
+# Past PROBE_BYTES by this margin, to be sure the probe window is exceeded.
+PAST_PROBE_MARGIN_BYTES = 10
+FILL_BUDGET_LINE_COUNT = 100
+TWO_FRAGMENT_ENTRIES = 2
+TWO_DOWNLOADED_ZIPS = 2
+# Hex-length fixtures for a fabricated catalog entry.
+FAKE_ID_LENGTH = 32
+SHA256_HEX_LENGTH = 64
+FIXTURE_FILE_SIZE = 10
 
 
 def line(version, text="text", time="12:00:00"):
@@ -33,15 +88,15 @@ def markers(store, config):
     ]
 
 
-def collect_all(store, config, chunk_size=2 * 1024 * 1024):
-    for _ in range(1000):
+def collect_all(store, config, chunk_size=DEFAULT_CHUNK_SIZE_BYTES):
+    for _ in range(SAFETY_LOOP_LIMIT):
         if not Collector(store, chunk_size).scan(config)[0]:
             return
     raise AssertionError("collector did not finish")
 
 
 def deliver_all(store, config, telegram):
-    for _ in range(1000):
+    for _ in range(SAFETY_LOOP_LIMIT):
         if not store.queue(config.destination):
             return
         deliver(store, config, telegram)
@@ -57,7 +112,7 @@ def raw(row):
         return data
 
 
-@pytest.mark.parametrize("chunk_size", [7, 71, 100000])
+@pytest.mark.parametrize("chunk_size", CHUNK_SIZES)
 def test_mixed_file_is_split_without_changing_bytes(store, configured, chunk_size):
     config, path = configured
     old = line("0.16.1", "старое") + b"Traceback: continuation\r\n"
@@ -78,9 +133,9 @@ def test_mixed_file_is_split_without_changing_bytes(store, configured, chunk_siz
 
 def test_latest_is_observed_before_reading_old_rotation_backlog(store, configured, telegram):
     config, path = configured
-    path.with_name(path.name + ".1").write_bytes(line("0.15.0") * 20)
+    path.with_name(path.name + ".1").write_bytes(line("0.15.0") * BACKLOG_LINE_COUNT)
     path.write_bytes(line("0.16.2"))
-    Collector(store, chunk_size=80).scan(config, max_chunks=1)
+    Collector(store, chunk_size=PARTIAL_SCAN_CHUNK_SIZE).scan(config, max_chunks=1)
     deliver_all(store, config, telegram)
     head = current_catalog(telegram, config.chat_id)["index"]
     assert head["keyswitch_versions"][config.sources[0].id]["version"] == "0.16.2"
@@ -107,7 +162,7 @@ def test_restart_same_version_and_rollback_mark_once(tmp_path, store, configured
     reopened = Store(tmp_path / "state")
     try:
         collect_all(reopened, config)
-        assert len(markers(reopened, config)) == 3
+        assert len(markers(reopened, config)) == RESTART_MARKER_COUNT
     finally:
         reopened.close()
 
@@ -138,7 +193,7 @@ def test_current_selection_filters_before_limit_and_excludes_legacy(store, confi
     deliver_all(store, config, telegram)
     current = list_entries(telegram, config.chat_id, limit=1, keyswitch_version="current")
     assert len(current) == 1 and current[0]["keyswitch_version"] == "0.16.2"
-    assert len(list_entries(telegram, config.chat_id)) == 3
+    assert len(list_entries(telegram, config.chat_id)) == ALL_ENTRIES_AFTER_THREE_DELIVERIES
 
 
 def test_full_queue_does_not_acknowledge_version_change(tmp_path, configured):
@@ -149,7 +204,7 @@ def test_full_queue_does_not_acknowledge_version_change(tmp_path, configured):
         with pytest.raises(QueueFull):
             Collector(store).scan(config)
         assert not store.get("keyswitch_versions:" + config.destination)
-        store.capacity = 100000
+        store.capacity = SUFFICIENT_CAPACITY_BYTES
         collect_all(store, config)
         assert len(markers(store, config)) == 1
     finally:
@@ -160,17 +215,17 @@ def test_partial_header_waits_and_continuations_survive_restart(tmp_path, store,
     config, path = configured
     first = line("0.16.1")
     next_line = line("0.16.2", "новый текст")
-    path.write_bytes(first + next_line[:33])
-    collect_all(store, config, 9)
+    path.write_bytes(first + next_line[:HEADER_SPLIT_OFFSET])
+    collect_all(store, config, TINY_CHUNK_SIZE)
     assert b"".join(raw(row) for row in logs(store, config)) == first
     with path.open("ab") as stream:
-        stream.write(next_line[33:] + b"traceback part one")
-    collect_all(store, config, 9)
+        stream.write(next_line[HEADER_SPLIT_OFFSET:] + b"traceback part one")
+    collect_all(store, config, TINY_CHUNK_SIZE)
     reopened = Store(tmp_path / "state")
     try:
         with path.open("ab") as stream:
             stream.write(b" part two\n")
-        collect_all(reopened, config, 9)
+        collect_all(reopened, config, TINY_CHUNK_SIZE)
         new = [
             row
             for row in logs(reopened, config)
@@ -199,8 +254,10 @@ def test_compaction_keeps_source_versions_separate_and_skips_markers(store, conf
     second = path.with_name("other.log")
     second.write_bytes(line("0.16.2"))
     config.sources.append(Source(str(second), include_existing=True))
-    path.write_bytes(b"unknown prefix\n" + line("0.16.1") * 2 + line("0.16.2") * 2)
-    collect_all(store, config, 70)
+    path.write_bytes(
+        b"unknown prefix\n" + line("0.16.1") * TWO_COPIES + line("0.16.2") * TWO_COPIES
+    )
+    collect_all(store, config, COMPACTION_TEST_CHUNK_SIZE)
     before_markers = markers(store, config)
     originals = {row["id"]: row["payload"] for row in logs(store, config)}
     assert compact(store, config)
@@ -227,12 +284,10 @@ def test_compaction_keeps_source_versions_separate_and_skips_markers(store, conf
 def test_marker_uses_existing_rate_limit_and_is_not_reuploaded_after_pin_failure(
     store, configured, telegram
 ):
-    from logcourier.rate_limit import RateLimitedClient
-
     config, path = configured
     path.write_bytes(line("0.16.2"))
     collect_all(store, config)
-    clock = [100.0]
+    clock = [FIXTURE_CLOCK_START]
     calls = []
     telegram.after_upload = lambda: calls.append(clock[0])
 
@@ -245,12 +300,12 @@ def test_marker_uses_existing_rate_limit_and_is_not_reuploaded_after_pin_failure
     telegram.fail_pin = True
     with pytest.raises(TelegramError):
         deliver(store, config, client)
-    assert calls == [100.0, 104.0, 108.0]  # marker, data, catalog
+    assert calls == EXPECTED_CALL_TIMES  # marker, data, catalog
     assert "МАРКЕР ВЕРСИИ" in telegram.messages[1]["caption"]
     assert "0.16.2" in telegram.messages[1]["caption"]
     telegram.fail_pin = False
     deliver(store, config, client)
-    assert telegram.uploads == 3
+    assert telegram.uploads == UPLOADS_WITH_VERSION_MARKER
     assert len(list_entries(telegram, config.chat_id, keyswitch_version="current")) == 1
 
 
@@ -274,7 +329,7 @@ def test_current_versions_are_per_source_and_removed_sources_are_not_current(
         e["keyswitch_version"]
         for e in list_entries(telegram, config.chat_id, keyswitch_version="current")
     } == {"0.16.2"}
-    assert len(list_entries(telegram, config.chat_id)) == 2
+    assert len(list_entries(telegram, config.chat_id)) == ALL_ENTRIES_AFTER_SOURCE_REMOVED
 
 
 def test_cli_default_download_is_isolated_from_old_logs(
@@ -305,7 +360,7 @@ def test_cli_default_download_is_isolated_from_old_logs(
     assert list(output.glob("*/selection.json")) == manifests
     assert (output / "old.zip").read_bytes() == b"old version from a previous fetch"
     assert __main__.main(["fetch", "--keyswitch-version", "0.16.1", "--output", str(output)]) == 0
-    assert len(list(output.glob("*/selection.json"))) == 2
+    assert len(list(output.glob("*/selection.json"))) == TWO_DISTINCT_SELECTIONS
     capsys.readouterr()
     assert __main__.main(["list"]) == 0
     assert {e["keyswitch_version"] for e in json.loads(capsys.readouterr().out)} == {"0.16.2"}
@@ -325,7 +380,7 @@ def test_legacy_catalog_requires_explicit_history_access(store, configured, tele
     "field,value",
     [
         ("version", "0.16.2/../../file"),
-        ("version", 3),
+        ("version", INVALID_VERSION_TYPE_VALUE),
         ("version", None),
         ("marker_id", "bad"),
         ("previous_version", []),
@@ -345,7 +400,7 @@ def test_invalid_catalog_version_metadata_is_rejected(store, configured, telegra
         decode_index(json.dumps(index).encode(), config.chat_id, config.bot_id)
 
 
-@pytest.mark.parametrize("length", [1, 4, 8, 23, 33])
+@pytest.mark.parametrize("length", UNFINISHED_HEADER_LENGTHS)
 def test_even_one_unfinished_timestamp_byte_cannot_inherit_old_version(store, configured, length):
     config, path = configured
     old, new = line("0.16.1"), line("0.16.2", "новая запись")
@@ -368,7 +423,10 @@ def test_tail_probe_is_bounded_and_ignores_versions_in_message_text():
 
     data = line("0.16.1") + b"x" * PROBE_BYTES + b"\n" + line("0.16.2", "model_version=9.9.9")
     assert latest_version(io.BytesIO(data)) == "0.16.2"
-    assert latest_version(io.BytesIO(line("0.16.2") + b"x" * (PROBE_BYTES + 10))) is None
+    assert (
+        latest_version(io.BytesIO(line("0.16.2") + b"x" * (PROBE_BYTES + PAST_PROBE_MARGIN_BYTES)))
+        is None
+    )
     assert latest_version(io.BytesIO(b"model_version=0.16.2\n")) is None
     assert latest_version(io.BytesIO(line("0.16.2") + line("unknown"))) is None
     assert latest_version(io.BytesIO(line("0.16.3-rc.1"))) == "0.16.3-rc.1"
@@ -391,11 +449,11 @@ def test_version_probes_all_sources_even_if_first_fills_read_budget(store, confi
     from logcourier.config import Source
 
     config, path = configured
-    path.write_bytes(line("0.16.1") * 100)
+    path.write_bytes(line("0.16.1") * FILL_BUDGET_LINE_COUNT)
     second = path.with_name("other.log")
     second.write_bytes(line("0.16.2"))
     config.sources.append(Source(str(second), include_existing=True))
-    count, errors = Collector(store, chunk_size=80).scan(config, max_chunks=1)
+    count, errors = Collector(store, chunk_size=PARTIAL_SCAN_CHUNK_SIZE).scan(config, max_chunks=1)
     assert count == 1 and not errors
     assert [m["keyswitch_version"] for m in markers(store, config)] == ["0.16.1", "0.16.2"]
 
@@ -447,11 +505,11 @@ def test_failed_download_does_not_publish_completed_selection(
     from logcourier.config import save_config
 
     config, path = configured
-    path.write_bytes(line("0.16.2") * 2)
+    path.write_bytes(line("0.16.2") * TWO_COPIES)
     collect_all(store, config, len(line("0.16.2")))
     deliver_all(store, config, telegram)
     entries = list_entries(telegram, config.chat_id, keyswitch_version="current")
-    assert len(entries) == 2
+    assert len(entries) == TWO_FRAGMENT_ENTRIES
     last = entries[-1]["file_id"]
     original = telegram.files[last]
     telegram.files[last] = b"corrupt"
@@ -467,7 +525,7 @@ def test_failed_download_does_not_publish_completed_selection(
     assert not list(output.glob("*/selection.json"))
     telegram.files[last] = original
     assert __main__.main(args) == 0
-    assert len(list(output.glob("*/*.zip"))) == 2
+    assert len(list(output.glob("*/*.zip"))) == TWO_DOWNLOADED_ZIPS
     assert len(list(output.glob("*/selection.json"))) == 1
 
 
@@ -494,11 +552,11 @@ def test_download_selection_refuses_foreign_files_and_links(tmp_path, collision)
     from logcourier.__main__ import selection_directory
 
     entry = {
-        "bundle_id": "a" * 32,
-        "source_id": "b" * 32,
+        "bundle_id": "a" * FAKE_ID_LENGTH,
+        "source_id": "b" * FAKE_ID_LENGTH,
         "keyswitch_version": "0.16.2",
-        "sha256": "c" * 64,
-        "size": 10,
+        "sha256": "c" * SHA256_HEX_LENGTH,
+        "size": FIXTURE_FILE_SIZE,
     }
     folder, _ = selection_directory(tmp_path, [entry], "current")
     unrelated = tmp_path / "unrelated"
@@ -533,7 +591,7 @@ def test_gui_reports_version_only_for_configured_sources(tmp_path, configured, m
             {
                 "keyswitch_versions": {
                     config.sources[0].id: {"source_label": "Active", "version": "0.16.2"},
-                    "f" * 32: {"source_label": "Removed", "version": "0.16.1"},
+                    "f" * FAKE_ID_LENGTH: {"source_label": "Removed", "version": "0.16.1"},
                 }
             },
         )

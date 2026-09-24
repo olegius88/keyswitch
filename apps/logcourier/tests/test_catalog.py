@@ -12,6 +12,17 @@ from logcourier.collector import Collector
 from logcourier.store import HEAD_DIGEST_KEY, LEGACY_HEAD_KEY, PENDING_KEY
 from logcourier.telegram import TelegramError
 
+# One archive upload plus one catalog upload, regardless of whether the pin
+# that follows succeeds.
+UPLOADS_PER_DELIVERY = 2
+# Two archived files delivered across two scan-and-deliver cycles.
+EXPECTED_ENTRIES = 2
+SHA256_HEX_LENGTH = 64
+# A message id/user id fixture standing in for something outside this
+# delivery's own catalog chain (another process's pin, an unrelated sender).
+FOREIGN_MESSAGE_ID = 99
+FOREIGN_USER_ID = 777
+
 
 def test_delivery_catalog_chain_and_restart(store, configured, telegram):
     config, path = configured
@@ -21,7 +32,7 @@ def test_delivery_catalog_chain_and_restart(store, configured, telegram):
             stream.write(text)
         Collector(store).scan(config)
         assert "1 архивов" in deliver(store, config, telegram)
-    assert len(list_entries(telegram, config.chat_id)) == 2
+    assert len(list_entries(telegram, config.chat_id)) == EXPECTED_ENTRIES
     assert len(list_entries(telegram, config.chat_id, limit=1)) == 1
     assert store.stats(config.destination)["queued"] == 0
     assert store.stats(config.destination)["unindexed"] == 0
@@ -38,10 +49,10 @@ def test_pin_failure_resumes_without_reupload(store, configured, telegram):
     with pytest.raises(TelegramError):
         deliver(store, config, telegram)
     assert store.stats(config.destination)["unindexed"] == 1
-    assert telegram.uploads == 2
+    assert telegram.uploads == UPLOADS_PER_DELIVERY
     telegram.fail_pin = False
     assert "восстановлен" in deliver(store, config, telegram)
-    assert telegram.uploads == 2
+    assert telegram.uploads == UPLOADS_PER_DELIVERY
     assert len(list_entries(telegram, config.chat_id)) == 1
 
 
@@ -52,7 +63,7 @@ def test_lost_pin_does_not_replace_catalog(store, configured, telegram):
     telegram.pinned = None
     with pytest.raises(TelegramError, match="потеряно"):
         deliver(store, config, telegram)
-    assert telegram.uploads == 2
+    assert telegram.uploads == UPLOADS_PER_DELIVERY
 
 
 def test_reissued_file_id_does_not_block_delivery(store, configured, telegram):
@@ -65,7 +76,7 @@ def test_reissued_file_id_does_not_block_delivery(store, configured, telegram):
     Collector(store).scan(config)
     assert "1 архивов" in deliver(store, config, telegram)
     assert telegram.reissues > reissued
-    assert len(list_entries(telegram, config.chat_id)) == 2
+    assert len(list_entries(telegram, config.chat_id)) == EXPECTED_ENTRIES
 
 
 def test_head_stored_as_file_id_adopts_the_pinned_catalog(store, configured, telegram):
@@ -92,7 +103,7 @@ def test_head_stored_as_file_id_still_requires_a_pinned_catalog(store, configure
     telegram.pinned = None
     with pytest.raises(TelegramError, match="потеряно"):
         deliver(store, config, telegram)
-    assert telegram.uploads == 2
+    assert telegram.uploads == UPLOADS_PER_DELIVERY
 
 
 def test_pending_catalog_from_an_older_version_is_rebuilt(store, configured, telegram):
@@ -140,10 +151,10 @@ def test_pending_catalog_of_another_head_stops_recovery(store, configured, teleg
     store.set(
         PENDING_KEY + config.destination,
         {
-            "sha256": "1" * 64,
-            "message_id": 99,
+            "sha256": "1" * SHA256_HEX_LENGTH,
+            "message_id": FOREIGN_MESSAGE_ID,
             "ids": [],
-            "previous_sha256": "0" * 64,
+            "previous_sha256": "0" * SHA256_HEX_LENGTH,
             "previous_message_id": None,
         },
     )
@@ -152,11 +163,11 @@ def test_pending_catalog_of_another_head_stops_recovery(store, configured, teleg
 
 
 def test_unrelated_pin_is_preserved(telegram):
-    telegram.pinned = 99
-    telegram.messages[99] = {"from": {"id": 777}, "text": "Important"}
+    telegram.pinned = FOREIGN_MESSAGE_ID
+    telegram.messages[FOREIGN_MESSAGE_ID] = {"from": {"id": FOREIGN_USER_ID}, "text": "Important"}
     with pytest.raises(TelegramError, match="другое сообщение"):
         current_catalog(telegram, "-100123")
-    assert telegram.pinned == 99
+    assert telegram.pinned == FOREIGN_MESSAGE_ID
 
 
 def test_catalog_hash_and_destination_validation(store, configured, telegram):
@@ -182,7 +193,7 @@ def test_cancel_after_upload_preserves_receipt(store, configured, telegram):
     assert store.stats(config.destination)["unindexed"] == 1
     telegram.after_upload = lambda: None
     deliver(store, config, telegram)
-    assert telegram.uploads == 2
+    assert telegram.uploads == UPLOADS_PER_DELIVERY
 
 
 def test_no_consent_or_wrong_bot(store, configured, telegram):

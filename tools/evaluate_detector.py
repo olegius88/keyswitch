@@ -7,10 +7,33 @@ import argparse
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Final
 
 from keyswitch.detector import PROTECTED_TOKENS, LanguageDetector
 from keyswitch.language_model import LanguageModel
 from keyswitch.layouts import LayoutPair
+
+# Words shorter than this or longer than this are outside what the detector
+# is meant to judge, so evaluation samples skip them.
+MIN_WORD_LENGTH: Final = 3
+MAX_WORD_LENGTH: Final = 18
+# How many decimal places reported precision/recall/specificity keep.
+METRIC_ROUNDING_DECIMALS: Final = 6
+# Per-direction cap on how many miss examples are kept for the report.
+MAX_LOGGED_MISSES: Final = 20
+# How many leading .aff lines are scanned for the file's declared encoding.
+AFFIX_HEADER_SCAN_LINES: Final = 40
+# CLI sample-size defaults and the floor applied to whatever is requested.
+DEFAULT_SAMPLE_SIZE: Final = 5000
+MIN_SAMPLE_SIZE: Final = 100
+REPORT_JSON_INDENT: Final = 2
+# Quality gates for --strict: precision/specificity are held to the same bar
+# for the frequency-based and the Hunspell-based samples; recall is allowed
+# to be looser against the broader Hunspell vocabulary.
+MIN_PRECISION: Final = 0.999
+MIN_SPECIFICITY: Final = 0.999
+MIN_RECALL: Final = 0.985
+MIN_DICTIONARY_RECALL: Final = 0.90
 
 
 @dataclass
@@ -40,9 +63,9 @@ class DirectionMetrics:
     def payload(self) -> dict[str, object]:
         result = asdict(self)
         result.update(
-            precision=round(self.precision, 6),
-            recall=round(self.recall, 6),
-            specificity=round(self.specificity, 6),
+            precision=round(self.precision, METRIC_ROUNDING_DECIMALS),
+            recall=round(self.recall, METRIC_ROUNDING_DECIMALS),
+            specificity=round(self.specificity, METRIC_ROUNDING_DECIMALS),
         )
         return result
 
@@ -67,7 +90,7 @@ def evaluate_direction(
             key=lambda item: item[1],
             reverse=True,
         )
-        if 3 <= len(word) <= 18 and word.isalpha()
+        if MIN_WORD_LENGTH <= len(word) <= MAX_WORD_LENGTH and word.isalpha()
     ][:sample_size]
     return evaluate_words(detector, pair, group, locale, words)
 
@@ -86,7 +109,7 @@ def evaluate_words(
         negative = detector.decide(word, {1 - group: other}, group)
         if negative.should_convert:
             metrics.false_positive += 1
-            if len(misses) < 20:
+            if len(misses) < MAX_LOGGED_MISSES:
                 misses.append(
                     {
                         "kind": "false_positive",
@@ -103,7 +126,7 @@ def evaluate_words(
             metrics.true_positive += 1
         else:
             metrics.false_negative += 1
-            if len(misses) < 20:
+            if len(misses) < MAX_LOGGED_MISSES:
                 misses.append(
                     {
                         "kind": "false_negative",
@@ -124,9 +147,9 @@ def hunspell_words(model: LanguageModel, sample_size: int) -> list[str]:
     affix_path = dictionary_path.with_suffix(".aff")
     encoding = "utf-8"
     try:
-        for raw_line in affix_path.read_bytes().splitlines()[:40]:
+        for raw_line in affix_path.read_bytes().splitlines()[:AFFIX_HEADER_SCAN_LINES]:
             if raw_line.startswith(b"SET "):
-                encoding = raw_line[4:].decode("ascii", "replace")
+                encoding = raw_line[len(b"SET "):].decode("ascii", "replace")
                 break
         candidates = {
             line.split("/", 1)[0].replace(r"\/", "/").strip().casefold()
@@ -137,7 +160,7 @@ def hunspell_words(model: LanguageModel, sample_size: int) -> list[str]:
     except OSError:
         return []
     words = sorted(
-        word for word in candidates if 3 <= len(word) <= 18 and word.isalpha()
+        word for word in candidates if MIN_WORD_LENGTH <= len(word) <= MAX_WORD_LENGTH and word.isalpha()
     )
     if len(words) <= sample_size:
         return words
@@ -182,7 +205,7 @@ def curated_cases(
         "here", "руку", "foobar", "docker", "kubectl", "xfce", "API",
         "camelCase", "user_name", "abc123", "localhost", "github", "qwerty",
     }
-    negative_words.update(token for token in PROTECTED_TOKENS if len(token) >= 3)
+    negative_words.update(token for token in PROTECTED_TOKENS if len(token) >= MIN_WORD_LENGTH)
     for word in sorted(negative_words):
         group = 0 if word[0].isascii() else 1
         decision = detector.decide(word, {1 - group: converted(pair, word, group)}, group)
@@ -200,8 +223,8 @@ def curated_cases(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--sample", type=int, default=5000)
-    parser.add_argument("--dictionary-sample", type=int, default=5000)
+    parser.add_argument("--sample", type=int, default=DEFAULT_SAMPLE_SIZE)
+    parser.add_argument("--dictionary-sample", type=int, default=DEFAULT_SAMPLE_SIZE)
     parser.add_argument("--strict", action="store_true")
     arguments = parser.parse_args()
     models = {
@@ -215,12 +238,12 @@ def main() -> int:
     misses: list[dict[str, object]] = []
     for group in models:
         metrics, direction_misses = evaluate_direction(
-            detector, models, pair, group, max(100, arguments.sample)
+            detector, models, pair, group, max(MIN_SAMPLE_SIZE, arguments.sample)
         )
         directions.append(metrics)
         misses.extend(direction_misses)
         dictionary_words = hunspell_words(
-            models[group], max(100, arguments.dictionary_sample)
+            models[group], max(MIN_SAMPLE_SIZE, arguments.dictionary_sample)
         )
         if dictionary_words:
             dictionary_metrics, dictionary_misses = evaluate_words(
@@ -252,19 +275,19 @@ def main() -> int:
         "curated_failures": curated_failures,
         "sample_failures": misses,
     }
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    print(json.dumps(payload, ensure_ascii=False, indent=REPORT_JSON_INDENT))
     if not arguments.strict:
         return 0
     quality_ok = all(
-        metrics.precision >= 0.999
-        and metrics.specificity >= 0.999
-        and metrics.recall >= 0.985
+        metrics.precision >= MIN_PRECISION
+        and metrics.specificity >= MIN_SPECIFICITY
+        and metrics.recall >= MIN_RECALL
         for metrics in directions
     )
     dictionary_quality_ok = len(dictionary_directions) == len(models) and all(
-        metrics.precision >= 0.999
-        and metrics.specificity >= 0.999
-        and metrics.recall >= 0.90
+        metrics.precision >= MIN_PRECISION
+        and metrics.specificity >= MIN_SPECIFICITY
+        and metrics.recall >= MIN_DICTIONARY_RECALL
         for metrics in dictionary_directions
     )
     return (

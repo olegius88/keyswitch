@@ -35,6 +35,19 @@ DEPENDENCIES = (
     "tools/train_context_model.py", "src/keyswitch/short_words.py",
     "src/keyswitch/layouts.py", "tests/test_context_technical_corpus.py",
 )
+FIELDS_PER_CONTENTS_LINE = 2
+# Retained commands per alias family, and the same figure reported in the summary.
+FAMILY_CAP = 2
+# Mirrors freeze_context_action_corpus.assigned_split's train/80/90/100 buckets, for humans reading the report.
+TRAIN_SPLIT_PROBABILITY = 0.7
+DEVELOPMENT_SPLIT_PROBABILITY = 0.1
+CALIBRATION_SPLIT_PROBABILITY = 0.1
+TEST_SPLIT_PROBABILITY = 0.1
+WORD_EDIT_MIN_LENGTH = 4
+WORD_EDIT_MAX_LENGTH = 64
+# Space left at the tail of the word so a two-character transposition stays in bounds.
+TRANSPOSITION_TAIL_MARGIN = 2
+HTTP_OK_STATUS = 200
 
 
 @dataclass(frozen=True)
@@ -62,7 +75,7 @@ def read_commands(contents: Path) -> list[Command]:
     with gzip.open(contents, "rt", encoding="utf-8", errors="strict") as stream:
         for line in stream:
             fields = line.rstrip("\n").rsplit(None, 1)
-            if len(fields) != 2:
+            if len(fields) != FIELDS_PER_CONTENTS_LINE:
                 continue
             match = COMMAND_PATH.fullmatch(fields[0])
             if match is None:
@@ -112,7 +125,7 @@ def partition_commands(commands: Sequence[Command], reserved_aliases: set[str]) 
     for item in records:
         members[families[item.name]].append(item.name)
     retained = {name for names in members.values()
-                for name in sorted(names, key=lambda value: digest(NAMESPACE + ":family-cap:" + command_identifier(value)))[:2]}
+                for name in sorted(names, key=lambda value: digest(NAMESPACE + ":family-cap:" + command_identifier(value)))[:FAMILY_CAP]}
     rows = []
     for item in records:
         family = families[item.name]
@@ -148,11 +161,14 @@ def partition_commands(commands: Sequence[Command], reserved_aliases: set[str]) 
         raise ValueError("technical corpus partition leakage")
     summary: dict[str, object] = {
         "mode": "joint-package-and-physical-family-component-hash",
-        "split_probabilities": {"train": 0.7, "development": 0.1, "calibration": 0.1, "test": 0.1},
+        "split_probabilities": {
+            "train": TRAIN_SPLIT_PROBABILITY, "development": DEVELOPMENT_SPLIT_PROBABILITY,
+            "calibration": CALIBRATION_SPLIT_PROBABILITY, "test": TEST_SPLIT_PROBABILITY,
+        },
         "commands": len(records), "families": len(members),
         "package_components": len(set(documents.values())),
         "largest_component_commands": max(Counter(documents.values()).values(), default=0),
-        "reserved_families": len(blocked), "family_cap": 2,
+        "reserved_families": len(blocked), "family_cap": FAMILY_CAP,
         "rows_by_split": {split: sum(row.split == split for row in rows) for split in ALL_SPLITS},
         "documents_by_split": {split: len({row.document for row in rows if row.split == split}) for split in ALL_SPLITS},
         "families_by_split": {split: len({row.family for row in rows if row.split == split}) for split in ALL_SPLITS},
@@ -190,13 +206,13 @@ def all_internal_edits(forms: Iterable[str]) -> set[str]:
     tokens = {word for form in result for word in WORDS.findall(form)}
     result.update(tokens)
     for word in tokens:
-        if not 4 <= len(word) <= 64:
+        if not WORD_EDIT_MIN_LENGTH <= len(word) <= WORD_EDIT_MAX_LENGTH:
             continue
         for index in range(1, len(word) - 1):
             result.add(word[:index] + word[index + 1:])
             result.add(word[:index] + word[index] + word[index:])
-        for index in range(1, len(word) - 2):
-            result.add(word[:index] + word[index + 1] + word[index] + word[index + 2:])
+        for index in range(1, len(word) - TRANSPOSITION_TAIL_MARGIN):
+            result.add(word[:index] + word[index + 1] + word[index] + word[index + TRANSPOSITION_TAIL_MARGIN:])
     return result
 
 
@@ -229,7 +245,7 @@ def verified_source(directory: Path) -> tuple[Path, dict[str, str], dict[str, ob
     data = receipt.get("contents")
     release_data = receipt.get("release")
     if (not isinstance(data, dict) or not isinstance(release_data, dict)
-            or data.get("status") != 200 or release_data.get("status") != 200
+            or data.get("status") != HTTP_OK_STATUS or release_data.get("status") != HTTP_OK_STATUS
             or receipt.get("tls_certificate_verification") is not True
             or data.get("url") != "https://deb.debian.org/debian/dists/trixie/main/Contents-amd64.gz"
             or release_data.get("url") != "https://deb.debian.org/debian/dists/trixie/InRelease"):

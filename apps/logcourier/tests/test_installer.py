@@ -51,7 +51,7 @@ def test_build_installer_command_and_checksum(builder, payload, monkeypatch):
     assert args[0] == str(Path("C:/Inno Setup 6/ISCC.exe"))
     assert f"/DSourceDir={payload / 'dist/LogCourier'}" in args
     assert args[-1] == str(payload / "packaging/windows/LogCourier.iss")
-    assert kwargs == {"cwd": payload, "check": True, "timeout": 600}
+    assert kwargs == {"cwd": payload, "check": True, "timeout": builder["COMPILER_TIMEOUT_SECONDS"]}
 
 
 @pytest.mark.parametrize("missing", ["LogCourier-cli.exe", "_internal/fixture.md"])

@@ -47,6 +47,8 @@ LANDING_FILE_NAME = "index.html"
 PLACEHOLDER_PATTERN = re.compile(r"@[A-Z_]+@")
 DIGEST_FIELDS = (("MD5Sum", "md5"), ("SHA256", "sha256"))
 COMPUTED_INDEX_FIELDS = ("Filename", "Size", "MD5sum", "SHA1", "SHA256")
+GZIP_COMPRESSION_LEVEL = 9
+INDEX_FILE_VARIANTS = 2  # the plain index and its .gz
 
 
 @dataclass(frozen=True)
@@ -272,7 +274,7 @@ def build(
         entries.append(_index_entry(package_path, pool_path))
 
     index = ("\n\n".join(entries) + "\n").encode("utf-8")
-    compressed = gzip.compress(index, compresslevel=9, mtime=0)
+    compressed = gzip.compress(index, compresslevel=GZIP_COMPRESSION_LEVEL, mtime=0)
     (index_directory / INDEX_FILE_NAME).write_bytes(index)
     (index_directory / f"{INDEX_FILE_NAME}.gz").write_bytes(compressed)
 
@@ -343,7 +345,7 @@ def _verify_release_digests(repository: Path, sources: RepositorySources) -> Non
         if _digests(payload)[algorithm] != digest or len(payload) != int(size):
             raise SystemExit(f"The release file misstates {name}")
         checked += 1
-    if checked != len(DIGEST_FIELDS) * 2:
+    if checked != len(DIGEST_FIELDS) * INDEX_FILE_VARIANTS:
         raise SystemExit("The release file does not cover both indices")
 
 

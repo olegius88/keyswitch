@@ -37,12 +37,15 @@ ANCHORS = {
     },
 }
 TRAINERS = {"prefix_v1": "tools/train_prefix_model.py", "boundary_v2": "tools/train_boundary_v2.py"}
+CHECKSUM_CHUNK_BYTES = 1024 * 1024
+MAX_COMPATIBILITY_METADATA_BYTES = 1024 * 1024
+REPORT_JSON_INDENT = 2
 
 
 def checksum(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+        for chunk in iter(lambda: source.read(CHECKSUM_CHUNK_BYTES), b""):
             digest.update(chunk)
     return digest.hexdigest()
 
@@ -58,8 +61,8 @@ def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 def read_object(path: Path) -> dict[str, object]:
     with path.open("rb") as source:
-        raw = source.read(1024 * 1024 + 1)
-    if len(raw) > 1024 * 1024:
+        raw = source.read(MAX_COMPATIBILITY_METADATA_BYTES + 1)
+    if len(raw) > MAX_COMPATIBILITY_METADATA_BYTES:
         raise ValueError("oversized compatibility metadata")
     value: object = json.loads(raw, object_pairs_hook=_object)
     if not isinstance(value, dict):
@@ -158,7 +161,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("corpus", choices=tuple(ANCHORS))
     args = parser.parse_args(argv)
-    print(json.dumps(verify(args.corpus), ensure_ascii=True, indent=2))
+    print(json.dumps(verify(args.corpus), ensure_ascii=True, indent=REPORT_JSON_INDENT))
     return 0
 
 

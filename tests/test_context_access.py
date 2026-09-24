@@ -13,9 +13,10 @@ from keyswitch.atspi_context import AtspiFieldReader, _native_api
 from keyswitch.context_access import PlatformFieldReader
 from keyswitch.context_model import ContextModel
 from keyswitch.context_policy import ContextPolicy
-from keyswitch.input_context import FieldContext
+from keyswitch.input_context import CONTEXT_LIMIT, FieldContext
 from keyswitch.windows_context import (
     CONNECTION_TIMEOUT_MS,
+    SUFFIX_LIMIT_CHARACTERS,
     TEXT_PATTERN_ID,
     UI_AUTOMATION_LIBRARY,
     WindowsFieldReader,
@@ -26,6 +27,11 @@ from test_context_policy import ContextEngineTests
 # Read out of the caller's globals by comtypes' `_check_version`; see the
 # Windows-only test below. Any existing file proves the timestamp comparison.
 typelib_path = sys.executable
+
+# An arbitrary HRESULT used wherever a fixture provider failure needs a code.
+FIXTURE_HRESULT = -2147220991
+# An arbitrary window id fed to read() wherever the id itself carries no meaning.
+WINDOW_ID = 5
 
 
 class _VersionChecker(Protocol):
@@ -38,13 +44,20 @@ class _CodeGenerator(Protocol):
 
 
 class WindowsContextTests(unittest.TestCase):
+    MATCHING_PROCESS_ID = 42
+    MISMATCHED_PROCESS_ID = 43
+    ELEMENT_RUNTIME_ID = [1, 2, 3]
+    OTHER_ELEMENT_RUNTIME_ID = [99]
+    MULTIPLE_SELECTION_LENGTH = 2
+    PREEXISTING_COINIT_FLAGS = 2
+
     def setUp(self) -> None:
         self.automation = MagicMock()
         self.element = self.automation.GetFocusedElement.return_value
-        self.element.CurrentProcessId = 42
+        self.element.CurrentProcessId = self.MATCHING_PROCESS_ID
         self.element.CurrentIsPassword = False
         self.element.CurrentAutomationId = "message"
-        self.element.GetRuntimeId.return_value = [1, 2, 3]
+        self.element.GetRuntimeId.return_value = self.ELEMENT_RUNTIME_ID
         pattern = self.element.GetCurrentPattern.return_value.QueryInterface.return_value
         pattern.GetSelection.return_value.Length = 1
         self.caret = pattern.GetSelection.return_value.GetElement.return_value
@@ -54,7 +67,7 @@ class WindowsContextTests(unittest.TestCase):
         self.after.GetText.return_value = " после курсора"
         self.caret.Clone.side_effect = [self.before, self.after]
         self.reader = WindowsFieldReader(self.automation, object())
-        self.pid = patch.object(WindowsFieldReader, "_process_for_window", return_value=42)
+        self.pid = patch.object(WindowsFieldReader, "_process_for_window", return_value=self.MATCHING_PROCESS_ID)
         self.pid.start()
         self.addCleanup(self.pid.stop)
 
@@ -65,8 +78,8 @@ class WindowsContextTests(unittest.TestCase):
         self.assertEqual(field.after, " после курсора")
         self.assertEqual(field.source, "uia")
         self.reader.close()  # Injected test automation owns no COM apartment.
-        self.before.MoveEndpointByUnit.assert_called_once_with(0, 0, -512)
-        self.after.MoveEndpointByUnit.assert_called_once_with(1, 0, 128)
+        self.before.MoveEndpointByUnit.assert_called_once_with(0, 0, -CONTEXT_LIMIT)
+        self.after.MoveEndpointByUnit.assert_called_once_with(1, 0, SUFFIX_LIMIT_CHARACTERS)
         self.element.CurrentIsPassword = True
         self.element.GetCurrentPattern.reset_mock()
         field = self.reader.read("chat", 1)
@@ -76,14 +89,14 @@ class WindowsContextTests(unittest.TestCase):
         self.element.GetCurrentPattern.assert_not_called()
 
     def test_selection_process_focus_change_and_missing_ranges(self) -> None:
-        self.element.CurrentProcessId = 43
+        self.element.CurrentProcessId = self.MISMATCHED_PROCESS_ID
         self.assertIsNone(self.reader.read("chat", 1))
-        self.element.CurrentProcessId = 42
+        self.element.CurrentProcessId = self.MATCHING_PROCESS_ID
         pattern = self.element.GetCurrentPattern.return_value.QueryInterface.return_value
         ranges = pattern.GetSelection.return_value
         ranges.Length = 0
         self.assertIsNone(self.reader.read("chat", 1))
-        ranges.Length = 2
+        ranges.Length = self.MULTIPLE_SELECTION_LENGTH
         multiple = self.reader.read("chat", 1)
         assert multiple is not None
         self.assertTrue(multiple.selection)
@@ -95,7 +108,7 @@ class WindowsContextTests(unittest.TestCase):
         self.caret.Clone.assert_not_called()
         self.caret.CompareEndpoints.return_value = 0
         other = MagicMock()
-        other.GetRuntimeId.return_value = [99]
+        other.GetRuntimeId.return_value = self.OTHER_ELEMENT_RUNTIME_ID
         other.CurrentIsPassword = False
         self.automation.GetFocusedElement.side_effect = [self.element, other]
         changed = self.reader.read("chat", 1)
@@ -124,14 +137,14 @@ class WindowsContextTests(unittest.TestCase):
 
             # The provider's own failure is named by class and HRESULT only.
             class ProviderError(Exception):
-                hresult = -2147220991
+                hresult = FIXTURE_HRESULT
 
             factory.return_value.automation.GetFocusedElement.side_effect = ProviderError("private")
             probe = probe_uia()
             self.assertEqual(
                 {key: probe[key] for key in ("available", "focused_text_pattern", "focused_error", "hresult")},
                 {"available": True, "focused_text_pattern": None,
-                 "focused_error": "ProviderError", "hresult": -2147220991},
+                 "focused_error": "ProviderError", "hresult": FIXTURE_HRESULT},
             )
 
             factory.side_effect = OSError("provider details are private")
@@ -186,7 +199,7 @@ class WindowsContextTests(unittest.TestCase):
     def test_reused_com_initializes_worker_and_cleans_failed_factory(self) -> None:
         com, client = MagicMock(), MagicMock()
         client.CreateObject.side_effect = OSError("provider unavailable")
-        with patch.dict("sys.modules", {"comtypes": com}), patch.dict("sys.__dict__", {"coinit_flags": 2}), patch("keyswitch.windows_context.importlib.import_module", side_effect=[com, client]):
+        with patch.dict("sys.modules", {"comtypes": com}), patch.dict("sys.__dict__", {"coinit_flags": self.PREEXISTING_COINIT_FLAGS}), patch("keyswitch.windows_context.importlib.import_module", side_effect=[com, client]):
             with self.assertRaises(OSError):
                 WindowsFieldReader()
         com.CoInitializeEx.assert_called_once_with(0)
@@ -257,6 +270,14 @@ class WindowsContextTests(unittest.TestCase):
 
 
 class AtspiContextTests(unittest.TestCase):
+    CARET_OFFSET = 8
+    TEXT_LENGTH = 10
+    STALE_CARET_OFFSET = 9
+    FAILED_INIT_STATUS = 2
+    CACHE_PROBE_ATTEMPTS = 2
+    MATCHING_WINDOW_PROCESS_ID = 42
+    MISMATCHED_WINDOW_PROCESS_ID = 43
+
     def setUp(self) -> None:
         _native_api.cache_clear()
         self.addCleanup(_native_api.cache_clear)
@@ -274,61 +295,61 @@ class AtspiContextTests(unittest.TestCase):
         self.node.get_role.return_value = "text"
         self.text = self.node.get_text_iface.return_value
         self.text.get_n_selections.return_value = 0
-        self.text.get_caret_offset.return_value = 8
-        self.text.get_character_count.return_value = 10
+        self.text.get_caret_offset.return_value = self.CARET_OFFSET
+        self.text.get_character_count.return_value = self.TEXT_LENGTH
         self.api.Text.get_text.side_effect = ["before x", " y"]
         self.reader = AtspiFieldReader(self.api)
 
     def test_bounded_text_password_selection_and_missing_support(self) -> None:
-        field = self.reader.read("chat", 5)
+        field = self.reader.read("chat", WINDOW_ID)
         assert field is not None
         self.assertEqual(field.before, "before x")
         self.assertEqual(field.field_id, "5:0:0")
         self.api.Text.get_text.reset_mock()
         self.node.get_role.return_value = self.api.Role.PASSWORD_TEXT
-        field = self.reader.read("chat", 5)
+        field = self.reader.read("chat", WINDOW_ID)
         assert field is not None
         self.assertTrue(field.sensitive)
         self.api.Text.get_text.assert_not_called()
         self.node.get_role.return_value = "text"
         self.text.get_n_selections.return_value = 1
-        field = self.reader.read("chat", 5)
+        field = self.reader.read("chat", WINDOW_ID)
         assert field is not None
         self.assertTrue(field.selection)
         self.api.Text.get_text.assert_not_called()
         self.node.get_text_iface.return_value = None
-        self.assertIsNone(self.reader.read("chat", 5))
+        self.assertIsNone(self.reader.read("chat", WINDOW_ID))
 
     def test_negative_caret_and_stale_caret(self) -> None:
         self.text.get_caret_offset.return_value = -1
-        self.assertIsNone(self.reader.read("chat", 5))
-        self.text.get_caret_offset.side_effect = [8, 9]
-        changed = self.reader.read("chat", 5)
+        self.assertIsNone(self.reader.read("chat", WINDOW_ID))
+        self.text.get_caret_offset.side_effect = [self.CARET_OFFSET, self.STALE_CARET_OFFSET]
+        changed = self.reader.read("chat", WINDOW_ID)
         assert changed is not None
         self.assertEqual(changed.before, "")
 
     def test_masked_entry_and_selection_changed_during_read(self) -> None:
         self.api.Text.get_text.side_effect = ["••••", "••"]
-        masked = self.reader.read("chat", 5)
+        masked = self.reader.read("chat", WINDOW_ID)
         assert masked is not None
         self.assertTrue(masked.sensitive)
         self.assertEqual(masked.before, "")
         self.api.Text.get_text.side_effect = ["before x", " y"]
         self.text.get_n_selections.side_effect = [0, 1]
-        selected = self.reader.read("chat", 5)
+        selected = self.reader.read("chat", WINDOW_ID)
         assert selected is not None
         self.assertTrue(selected.selection)
 
     def test_process_match_missing_application_and_time_budget(self) -> None:
-        self.assertIsNone(self.reader.read("elsewhere", 5))
+        self.assertIsNone(self.reader.read("elsewhere", WINDOW_ID))
         with patch("keyswitch.atspi_context.Path.read_text", return_value="process\n"):
             self.assertTrue(self.reader._matches("process", self.app))
         with patch("keyswitch.atspi_context.time.monotonic", side_effect=[0, 1]):
-            self.assertIsNone(self.reader.read("chat", 5))
+            self.assertIsNone(self.reader.read("chat", WINDOW_ID))
         with patch("keyswitch.atspi_context.time.monotonic", side_effect=[0, 0, 0, 1]):
-            self.assertIsNone(self.reader.read("chat", 5))
+            self.assertIsNone(self.reader.read("chat", WINDOW_ID))
         self.desktop.get_child_at_index.return_value = None
-        self.assertIsNone(self.reader.read("chat", 5))
+        self.assertIsNone(self.reader.read("chat", WINDOW_ID))
 
     def test_factory_and_empty_child(self) -> None:
         gi = MagicMock()
@@ -337,17 +358,17 @@ class AtspiContextTests(unittest.TestCase):
         gi.require_version.assert_called_once_with("Atspi", "2.0")
         self.api.init.assert_called_once_with()
         self.app.get_child_at_index.return_value = None
-        self.assertIsNone(reader.read("chat", 5))
+        self.assertIsNone(reader.read("chat", WINDOW_ID))
         reader.close()
 
     def test_already_initialized_api_and_failed_initialization_are_cached(self) -> None:
-        for status in (1, 2):
+        for status in (1, self.FAILED_INIT_STATUS):
             with self.subTest(status=status):
                 _native_api.cache_clear()
                 self.api.reset_mock()
                 self.api.init.return_value = status
                 with patch("keyswitch.atspi_context.importlib.import_module", side_effect=[MagicMock(), self.api]):
-                    for _ in range(2):
+                    for _ in range(self.CACHE_PROBE_ATTEMPTS):
                         if status == 1:
                             self.assertIs(AtspiFieldReader().api, self.api)
                         else:
@@ -355,18 +376,20 @@ class AtspiContextTests(unittest.TestCase):
                                 AtspiFieldReader()
                 self.api.init.assert_called_once_with()
                 self.api.get_desktop.assert_not_called()
-                if status == 2:
+                if status == self.FAILED_INIT_STATUS:
                     self.api.set_timeout.assert_not_called()
 
     def test_window_process_overrides_ambiguous_application_name(self) -> None:
-        self.app.get_process_id.return_value = 42
-        reader = AtspiFieldReader(self.api, process_for_window=lambda window: 42)
-        self.assertIsNotNone(reader.read("OtherWMClass", 5))
-        self.app.get_process_id.return_value = 43
-        self.assertIsNone(reader.read("chat", 5))
+        self.app.get_process_id.return_value = self.MATCHING_WINDOW_PROCESS_ID
+        reader = AtspiFieldReader(self.api, process_for_window=lambda window: self.MATCHING_WINDOW_PROCESS_ID)
+        self.assertIsNotNone(reader.read("OtherWMClass", WINDOW_ID))
+        self.app.get_process_id.return_value = self.MISMATCHED_WINDOW_PROCESS_ID
+        self.assertIsNone(reader.read("chat", WINDOW_ID))
 
 
 class PlatformReaderTests(unittest.TestCase):
+    FACTORY_CALLS_AFTER_REOPEN = 2
+
     def test_each_platform_is_read_by_its_own_provider(self) -> None:
         """A wrong choice here shows up as a silent absence of context."""
 
@@ -379,7 +402,7 @@ class PlatformReaderTests(unittest.TestCase):
                 reader = PlatformFieldReader()
                 with patch("keyswitch.context_access.sys.platform", platform), \
                         patch(target) as factory:
-                    reader.read("chat", 5)
+                    reader.read("chat", WINDOW_ID)
                 factory.assert_called_once()
 
     def test_diagnostics_start_empty_and_are_independent_snapshots(self) -> None:
@@ -457,7 +480,7 @@ class PlatformReaderTests(unittest.TestCase):
                         })
                         failing_call.side_effect = None
                         self.assertEqual(reader.read("chat", 1), result)
-                        self.assertEqual(factory.call_count, 2)
+                        self.assertEqual(factory.call_count, self.FACTORY_CALLS_AFTER_REOPEN)
                         after = reader.diagnostics()
                         self.assertEqual(
                             {key: after[key] for key in ("status", "failure_stage", "failure_type")},
@@ -477,7 +500,7 @@ class PlatformReaderTests(unittest.TestCase):
         """COM failures carry an HRESULT; the number says which call refused."""
 
         class ProviderError(Exception):
-            hresult = -2147220991
+            hresult = FIXTURE_HRESULT
 
         reader = PlatformFieldReader()
         with patch("keyswitch.context_access.sys.platform", "linux"), \
@@ -486,7 +509,7 @@ class PlatformReaderTests(unittest.TestCase):
             self.assertIsNone(reader.read("chat", 1))
             diagnostics = reader.diagnostics()
             self.assertEqual(diagnostics["failure_name"], "ProviderError")
-            self.assertEqual(diagnostics["failure_code"], -2147220991)
+            self.assertEqual(diagnostics["failure_code"], FIXTURE_HRESULT)
             reader.close()
             self.assertNotIn("failure_code", reader.diagnostics())
 

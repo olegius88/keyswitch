@@ -49,6 +49,28 @@ XA_CARDINAL = 6
 MOD1_MASK = ALT_MASK
 MOD4_MASK = SUPER_MASK
 
+DEFAULT_GROUP_COUNT = 2
+MAX_XKB_GROUPS = 4
+# XRecord delivers each event as a fixed-size, 4-byte-unit record.
+XRECORD_DATA_UNIT_BYTES = 4
+XRECORD_EVENT_SIZE_BYTES = 32
+# Bit 7 of the XRecord event type is the "send event" flag, not part of it.
+XRECORD_EVENT_TYPE_MASK = 0x7F
+# The XKB group occupies bits 13-14 of the X11 key event state field.
+XKB_GROUP_STATE_SHIFT = 13
+XKB_GROUP_STATE_MASK = 0x3
+MAX_UNICODE_CODEPOINT = 0x10FFFF
+MAX_TRACKED_OWN_WINDOWS = 256
+# A toolkit gives the focus to a child window with no properties of its own;
+# the ancestor walk that looks for _NET_WM_PID or the class hint is bounded.
+MAX_WINDOW_ANCESTOR_DEPTH = 16
+CARDINAL_PROPERTY_FORMAT_BITS = 32
+BACKSPACE_KEYSYM = 0xFF08
+SHIFT_L_KEYSYM = 0xFFE1
+MIN_INJECTION_DEADLINE_SECONDS = 1.0
+INJECTION_SECONDS_PER_EVENT = 0.02
+THREAD_JOIN_TIMEOUT_SECONDS = 2.0
+
 
 class XRecordRange8(ctypes.Structure):
     _fields_ = [("first", ctypes.c_ubyte), ("last", ctypes.c_ubyte)]  # type: ignore[mutable-override]
@@ -311,8 +333,8 @@ class _Libraries:
 class X11Backend:
     """Observe all core keyboard events and inject deterministic corrections."""
 
-    def __init__(self, group_count: int = 2) -> None:
-        self.group_count = max(2, min(group_count, 4))
+    def __init__(self, group_count: int = DEFAULT_GROUP_COUNT) -> None:
+        self.group_count = max(DEFAULT_GROUP_COUNT, min(group_count, MAX_XKB_GROUPS))
         self._libraries = _Libraries()
         self._control: int | None = None
         # Own-window verdicts by X window id; ids of another client can never
@@ -506,9 +528,9 @@ class X11Backend:
                 or not data.data_len
             ):
                 return
-            payload = ctypes.string_at(data.data, data.data_len * 4)
-            for offset in range(0, len(payload) - 31, 32):
-                event = self._decode_event(payload[offset : offset + 32])
+            payload = ctypes.string_at(data.data, data.data_len * XRECORD_DATA_UNIT_BYTES)
+            for offset in range(0, len(payload) - (XRECORD_EVENT_SIZE_BYTES - 1), XRECORD_EVENT_SIZE_BYTES):
+                event = self._decode_event(payload[offset : offset + XRECORD_EVENT_SIZE_BYTES])
                 if event is not None and self._listener is not None:
                     self._listener(event)
         except Exception:
@@ -533,13 +555,13 @@ class X11Backend:
             _same_screen,
             _pad,
         ) = struct.unpack("=BBHIIIIhhhhHBB", payload)
-        event_type &= 0x7F
+        event_type &= XRECORD_EVENT_TYPE_MASK
         if event_type == BUTTON_PRESS:
             return KeyEvent(True, 0, "Pointer", "", ("", ""), -1, 0, timestamp)
         if event_type not in (KEY_PRESS, KEY_RELEASE):
             return None
         pressed = event_type == KEY_PRESS
-        group = (state >> 13) & 0x3
+        group = (state >> XKB_GROUP_STATE_SHIFT) & XKB_GROUP_STATE_MASK
         characters = tuple(
             self._character_for_keycode(keycode, candidate_group, state)
             for candidate_group in range(self.group_count)
@@ -576,7 +598,10 @@ class X11Backend:
             # Direct indexing returns NoSymbol for RU; the actual key lookup
             # applies the key's group fallback, just as the editor does.
             consumed, resolved = ctypes.c_uint(), ctypes.c_ulong()
-            lookup_state = (state & ~(3 << 13)) | ((group & 3) << 13)
+            lookup_state = (
+                (state & ~(XKB_GROUP_STATE_MASK << XKB_GROUP_STATE_SHIFT))
+                | ((group & XKB_GROUP_STATE_MASK) << XKB_GROUP_STATE_SHIFT)
+            )
             if not self._libraries.x11.XkbLookupKeySym(
                 self._control, keycode, lookup_state,
                 ctypes.byref(consumed), ctypes.byref(resolved),
@@ -584,7 +609,7 @@ class X11Backend:
                 return ""
             keysym = resolved.value
         codepoint = self._libraries.xkb.xkb_keysym_to_utf32(keysym)
-        if not codepoint or codepoint > 0x10FFFF:
+        if not codepoint or codepoint > MAX_UNICODE_CODEPOINT:
             return ""
         character = chr(codepoint)
         if caps and character.isalpha():
@@ -666,7 +691,7 @@ class X11Backend:
         if cached is not None:
             return cached
         own = self._window_process_id(window) == os.getpid()
-        if len(self._own_windows) >= 256:
+        if len(self._own_windows) >= MAX_TRACKED_OWN_WINDOWS:
             self._own_windows.clear()
         self._own_windows[window] = own
         return own
@@ -690,7 +715,7 @@ class X11Backend:
         if not atom:
             return 0
         current = window
-        for _ in range(16):
+        for _ in range(MAX_WINDOW_ANCESTOR_DEPTH):
             process_id = self._cardinal_property(current, atom)
             if process_id:
                 return process_id
@@ -721,7 +746,7 @@ class X11Backend:
         if status != 0 or not data.value:
             return 0
         try:
-            if actual_format.value != 32 or count.value < 1:
+            if actual_format.value != CARDINAL_PROPERTY_FORMAT_BITS or count.value < 1:
                 return 0
             return int(ctypes.cast(data, ctypes.POINTER(ctypes.c_ulong))[0])
         finally:
@@ -804,8 +829,8 @@ class X11Backend:
             return stroke.shift ^ (
                 stroke.character_for(group).isalpha() and stroke.caps_lock != caps_lock
             )
-        backspace_keycode = int(self._libraries.x11.XKeysymToKeycode(self._control, 0xFF08))
-        shift_keycode = int(self._libraries.x11.XKeysymToKeycode(self._control, 0xFFE1))
+        backspace_keycode = int(self._libraries.x11.XKeysymToKeycode(self._control, BACKSPACE_KEYSYM))
+        shift_keycode = int(self._libraries.x11.XKeysymToKeycode(self._control, SHIFT_L_KEYSYM))
         if not backspace_keycode or not shift_keycode:
             raise X11Error("X-сервер не вернул keycode для BackSpace/Shift")
         sequence: list[tuple[bool, int]] = []
@@ -867,7 +892,7 @@ class X11Backend:
                 self._expected.extend(target_boundary_sequence)
                 self._expected.extend(source_boundary_sequence)
                 self._expected_deadline = time.monotonic() + max(
-                    1.0, expected_count * 0.02
+                    MIN_INJECTION_DEADLINE_SECONDS, expected_count * INJECTION_SECONDS_PER_EVENT
                 )
             self._libraries.xtst.XTestGrabControl(self._control, 1)
             try:
@@ -928,7 +953,7 @@ class X11Backend:
         ):
             return ""
         current = window.value
-        for _ in range(16):
+        for _ in range(MAX_WINDOW_ANCESTOR_DEPTH):
             if not current:
                 break
             hint = XClassHint()
@@ -967,7 +992,7 @@ class X11Backend:
             self._libraries.xtst.XRecordDisableContext(self._control, self._context)
             self._libraries.x11.XSync(self._control, 0)
         if self._thread and self._thread is not threading.current_thread():
-            self._thread.join(timeout=2.0)
+            self._thread.join(timeout=THREAD_JOIN_TIMEOUT_SECONDS)
         self._thread = None
 
     def close(self) -> None:

@@ -13,11 +13,28 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from freeze_context_action_corpus import (
-    PINS, Sentence, SurfaceToken, Union, aligned_text, assigned_split,
+    AFTER_WINDOW_CHARACTERS, BEFORE_WINDOW_CHARACTERS, PINS, Sentence, SurfaceToken, Union, aligned_text, assigned_split,
     canonical, exposed_families, family_aliases, freeze, intended_window,
     load_split, partition, physical, read_conllu, sentence_rows,
     source_inventory, token_language, typo_variants,
 )
+from model_protocol import ACTIVE_SPLITS
+
+MAXIMUM_DOCUMENT_SEARCH_ATTEMPTS = 1000  # documents() gives up finding all active splits after this many tries
+WAIT_TOKEN_ROW_INDEX = 2  # "wait" is the third row of "I can't  wait!" (I, can't, wait, !)
+MISC_SPACING_ROW_COUNT = 2  # one row per surface token when misc-reconstructed
+ALIGNED_TEXT_STATUS_INDEX = 2  # aligned_text returns (text, spans, status)
+NAMED_DOCUMENT_SENTENCE_INDEX = 2  # s3, the sentence carrying "# newdoc_id = named"
+ANONYMOUS_DOCUMENT_SENTENCE_INDEX = 3  # s4, the sentence after a bare "# newdoc"
+LARGEST_COMPONENT_DOCUMENT_COUNT = 4  # one document per split, joined by the shared physical family
+GIANT_COMPONENT_ROW_COUNT = 8  # four documents, two tokens ("shared" + the split's word) each
+GIANT_COMPONENT_QUARANTINED_ROW_COUNT = 4  # the "shared" row from each of the four documents
+FREEZE_MAX_DOCUMENTS = 8
+FREEZE_MAX_SENTENCES_PER_DOCUMENT = 8
+LONG_PREFIX_CHARACTERS = 120  # longer than BEFORE_WINDOW_CHARACTERS so the window clips instead of padding
+LONG_SUFFIX_CHARACTERS = 100  # longer than AFTER_WINDOW_CHARACTERS so the window clips instead of padding
+SAMPLE_TOKEN_START = 121  # LONG_PREFIX_CHARACTERS "a"s plus one separating space
+SAMPLE_TOKEN_END = 127  # SAMPLE_TOKEN_START plus len("sample")
 
 
 def token(form: str, lemma: str | None = None, identifier: str = "1") -> SurfaceToken:
@@ -31,10 +48,10 @@ def sentence(form: str, document: str, lemma: str | None = None) -> Sentence:
 
 def documents(namespace: str) -> dict[str, str]:
     result: dict[str, str] = {}
-    for index in range(1000):
+    for index in range(MAXIMUM_DOCUMENT_SEARCH_ATTEMPTS):
         document = "fixture:d" + str(index)
         result.setdefault(assigned_split(namespace, "document:" + document), document)
-        if len(result) == 4:
+        if len(result) == len(ACTIVE_SPLITS):
             return result
     raise AssertionError("test fixture could not populate four splits")
 
@@ -77,7 +94,7 @@ class ContextActionCorpusTests(unittest.TestCase):
         self.assertEqual((contraction.lemma, contraction.before, contraction.after), ("can not", "I ", "  wait!"))
         self.assertEqual((contraction.spacing, contraction.literal_tail), ("  ", "  "))
         self.assertEqual(intended_window(contraction), "I can't  wait!")
-        self.assertEqual(rows[2].literal_tail, "!")
+        self.assertEqual(rows[WAIT_TOKEN_ROW_INDEX].literal_tail, "!")
         self.assertEqual(item.document, "fixture:discussion")
 
     def test_misc_spacing_reconstruction_is_retained_but_quarantined_without_exact_text(self) -> None:
@@ -88,11 +105,11 @@ class ContextActionCorpusTests(unittest.TestCase):
         self.assertEqual(text, "\tслово  !\n")
         self.assertEqual(status, "misc-reconstructed-no-text")
         rows, _ = partition([item], "fixture", set())
-        self.assertEqual(len(rows), 2)
+        self.assertEqual(len(rows), MISC_SPACING_ROW_COUNT)
         self.assertTrue(all(row.split == "quarantine" for row in rows))
         self.assertTrue(all("misc-reconstructed-no-text" in row.quarantine_reasons for row in rows))
         conflicting = replace(item, text="another surface")
-        self.assertEqual(aligned_text(conflicting)[2], "text-alignment-conflict")
+        self.assertEqual(aligned_text(conflicting)[ALIGNED_TEXT_STATUS_INDEX], "text-alignment-conflict")
 
     def test_document_aliases_and_unmarked_sections_are_conservative(self) -> None:
         path = self.write("documents.conllu", """# sent_id = s1
@@ -115,8 +132,8 @@ class ContextActionCorpusTests(unittest.TestCase):
 """)
         items = list(read_conllu(path, "fixture"))
         self.assertEqual(items[0].document, items[1].document)
-        self.assertEqual(items[2].document, "fixture:named")
-        self.assertNotEqual(items[2].document, items[3].document)
+        self.assertEqual(items[NAMED_DOCUMENT_SENTENCE_INDEX].document, "fixture:named")
+        self.assertNotEqual(items[NAMED_DOCUMENT_SENTENCE_INDEX].document, items[ANONYMOUS_DOCUMENT_SENTENCE_INDEX].document)
 
     def test_giant_component_quarantine_never_discards_conflicting_rows(self) -> None:
         namespace = "fixture:partition"
@@ -125,9 +142,9 @@ class ContextActionCorpusTests(unittest.TestCase):
         items = [sentence(form, docs[split]) for split, form in forms.items()]
         rows, report = partition(items, namespace, set())
         self.assertEqual(report["mode"], "document-hash-with-family-conflict-quarantine")
-        self.assertEqual(report["largest_component_documents"], 4)
-        self.assertEqual(len(rows), 8)
-        self.assertEqual(sum(row.split == "quarantine" for row in rows), 4)
+        self.assertEqual(report["largest_component_documents"], LARGEST_COMPONENT_DOCUMENT_COUNT)
+        self.assertEqual(len(rows), GIANT_COMPONENT_ROW_COUNT)
+        self.assertEqual(sum(row.split == "quarantine" for row in rows), GIANT_COMPONENT_QUARANTINED_ROW_COUNT)
         for split, form in forms.items():
             self.assertEqual(next(row.split for row in rows if row.original == form), split)
         for field in ("family", "document"):
@@ -175,8 +192,8 @@ class ContextActionCorpusTests(unittest.TestCase):
 """)
         first = self.root / "first"
         second = self.root / "second"
-        a = freeze([("fixture", path)], first, "repeatable", set(), {}, [], 8, 8)
-        b = freeze([("fixture", path)], second, "repeatable", set(), {}, [], 8, 8)
+        a = freeze([("fixture", path)], first, "repeatable", set(), {}, [], FREEZE_MAX_DOCUMENTS, FREEZE_MAX_SENTENCES_PER_DOCUMENT)
+        b = freeze([("fixture", path)], second, "repeatable", set(), {}, [], FREEZE_MAX_DOCUMENTS, FREEZE_MAX_SENTENCES_PER_DOCUMENT)
         self.assertEqual(a, b)
         (first / "test.jsonl.gz").write_bytes(b"intentionally inaccessible as a gzip split")
         train = load_split(first, "train")
@@ -199,17 +216,18 @@ class ContextActionCorpusTests(unittest.TestCase):
                    "files": [{"path": path.name, "sha256": hashlib.sha256(data).hexdigest(),
                               "sha": hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()}]}
             (directory / "pin.json").write_bytes(canonical(pin))
-        self.assertEqual(len(source_inventory(self.root)[0]), 2)
+        self.assertEqual(len(source_inventory(self.root)[0]), len(PINS))
         damaged = self.root / next(iter(PINS)) / "fixture.conllu"
         damaged.write_bytes(b"changed")
         with self.assertRaisesRegex(ValueError, "checksum differs"):
             source_inventory(self.root)
 
     def test_bounded_context_is_a_literal_source_slice(self) -> None:
-        text = "a" * 120 + " sample " + "b" * 100
+        text = "a" * LONG_PREFIX_CHARACTERS + " sample " + "b" * LONG_SUFFIX_CHARACTERS
         item = Sentence("s", "d", "fixture", "f", text,
-                        (token("a" * 120), token("sample", identifier="2"), token("b" * 100, identifier="3")))
+                        (token("a" * LONG_PREFIX_CHARACTERS), token("sample", identifier="2"),
+                         token("b" * LONG_SUFFIX_CHARACTERS, identifier="3")))
         row = sentence_rows(item, Union())[1]
-        self.assertEqual((len(row.before), len(row.after)), (96, 64))
-        self.assertEqual(row.before, text[:121][-96:])
-        self.assertEqual(row.after, text[127:191])
+        self.assertEqual((len(row.before), len(row.after)), (BEFORE_WINDOW_CHARACTERS, AFTER_WINDOW_CHARACTERS))
+        self.assertEqual(row.before, text[:SAMPLE_TOKEN_START][-BEFORE_WINDOW_CHARACTERS:])
+        self.assertEqual(row.after, text[SAMPLE_TOKEN_END:SAMPLE_TOKEN_END + AFTER_WINDOW_CHARACTERS])

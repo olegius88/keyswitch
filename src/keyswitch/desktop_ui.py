@@ -22,7 +22,8 @@ from tkinter import filedialog, messagebox, ttk
 
 from . import __version__
 from .backend import ScreenAnchor
-from .config import SettingsStore
+from .settings_diagnostics import DIAGNOSTICS_JSON_INDENT
+from .config import DEFAULT_HISTORY_LIMIT, DEFAULT_LEARNING_CONFIRMATIONS, SettingsStore
 from .engine import (
     CorrectionPlan,
     EngineSnapshot,
@@ -76,8 +77,17 @@ PAGE_NAMES = (
 WINDOWS_LEARNING_PROMPT_DELAY_MS = 200
 WINDOWS_UPDATE_INITIAL_DELAY_MS = 30_000
 WINDOWS_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000
+EVENT_DRAIN_INTERVAL_MS = 50
+EVENT_DRAIN_INITIAL_DELAY_MS = 25
+ACTIVE_APPLICATION_CAPTURE_DELAY_MS = 3000
 # One wheel notch moves three of these steps, matching the Windows default.
 PAGE_SCROLL_STEP_PIXELS = 20
+WHEEL_STEPS_PER_NOTCH = 3
+# X11 reports the wheel as button presses; Windows reports a signed delta.
+MOUSE_WHEEL_BUTTON_UP = 4
+MOUSE_WHEEL_BUTTON_DOWN = 5
+WINDOWS_WHEEL_UNITS_PER_NOTCH = 120
+WRAP_WIDTH_DEAD_BAND_PIXELS = 6
 # Reserved gutters keep the layout still while the markers appear and vanish.
 MODIFIED_MARKER_WIDTH = 3
 MODIFIED_MARKER_COLUMN = 12
@@ -86,13 +96,155 @@ RESET_BUTTON_COLUMN = 54
 # revert arrows live in Segoe UI Symbol and would depend on font fallback.
 RESET_BUTTON_LABEL = "Сброс"
 RESET_BUTTON_HINT = "Вернуть значение по умолчанию"
+RESET_BUTTON_INTERNAL_PADDING_PIXELS = 2
+RESET_BUTTON_FONT_SIZE = 8
 DESCRIPTION_INDENT = 24
 DESCRIPTION_MARGIN = 12
 DESCRIPTION_MINIMUM_WRAP = 120
 DESCRIPTION_INITIAL_WRAP = 260
 PAGE_PADDING = 30
+PAGE_PADDING_SIDES = 2
+PAGE_CONTENT_PADDING_Y_PIXELS = 24
+PAGE_CAPTION_PADDING_TOP_PIXELS = 3
+PAGE_CAPTION_PADDING_BOTTOM_PIXELS = 18
+PAGE_SUBTITLE_WRAP_WIDTH_PIXELS = 760
+# The wraplength most body copy on a page settles into once laid out.
+CONTENT_TEXT_WRAP_WIDTH_PIXELS = 720
+PAGE_TITLE_FONT_SIZE = 22
+CARD_TITLE_FONT_SIZE = 10
+BRAND_LABEL_FONT_SIZE = 20
+LABELFRAME_TITLE_FONT_SIZE = 11
+# Row/column layout of one setting inside its LabelFrame.
+SETTING_ROW_PADDING_PIXELS = 5
+SETTING_CONTROL_COLUMN_INDEX = 2
+SETTING_ROW_COLUMN_SPAN = 2
+SETTING_CONTROL_PADDING_LEFT_PIXELS = 16
+CHOICE_CONTROL_WIDTH_CHARACTERS = 22
+NUMBER_CONTROL_WIDTH_CHARACTERS = 12
+TEXT_CONTROL_WIDTH_CHARACTERS = 25
+NUMBER_DISPLAY_DECIMAL_PLACES = 2
 # Widgets that already answer the wheel and the paging keys themselves.
 SELF_SCROLLING_WIDGETS = (tk.Text, tk.Listbox, ttk.Treeview)
+
+MAIN_WINDOW_MIN_WIDTH_PIXELS = 900
+MAIN_WINDOW_MIN_HEIGHT_PIXELS = 640
+
+SIDEBAR_WIDTH_PIXELS = 225
+SIDEBAR_PADDING_X_PIXELS = 16
+SIDEBAR_PADDING_Y_PIXELS = 18
+SIDEBAR_ITEM_PADDING_X_PIXELS = 8
+SIDEBAR_BRAND_PADDING_BOTTOM_PIXELS = 2
+SIDEBAR_SUBTITLE_PADDING_BOTTOM_PIXELS = 18
+SIDEBAR_SEPARATOR_PADDING_Y_PIXELS = 16
+SIDEBAR_STATUS_PADDING_TOP_PIXELS = 4
+NAVIGATION_BUTTON_PADDING_X_PIXELS = 12
+NAVIGATION_BUTTON_PADDING_Y_PIXELS = 8
+NAVIGATION_BUTTON_SPACING_PIXELS = 2
+
+TOOLTIP_VERTICAL_GAP_PIXELS = 4
+TOOLTIP_PADDING_X_PIXELS = 8
+TOOLTIP_PADDING_Y_PIXELS = 4
+
+LEARNING_PROMPT_CARD_PADDING_X_PIXELS = 16
+LEARNING_PROMPT_CARD_PADDING_Y_PIXELS = 12
+LEARNING_PROMPT_TITLE_FONT_SIZE = 10
+LEARNING_PROMPT_WORD_FONT_SIZE = 11
+LEARNING_PROMPT_WORD_PADDING_TOP_PIXELS = 5
+LEARNING_PROMPT_WORD_PADDING_BOTTOM_PIXELS = 2
+LEARNING_PROMPT_HINT_FONT_SIZE = 9
+LEARNING_PROMPT_MINIMUM_WIDTH_PIXELS = 390
+LEARNING_PROMPT_WIDTH_CENTERING_DIVISOR = 2
+LEARNING_PROMPT_ANCHOR_GAP_PIXELS = 12
+LEARNING_PROMPT_SCREEN_MARGIN_PIXELS = 8
+
+# The (18, 14) padding a ttk.LabelFrame section uses inside, and the margin
+# below it before the next section starts.
+SECTION_PADDING_X_PIXELS = 18
+SECTION_PADDING_Y_PIXELS = 14
+SECTION_BOTTOM_MARGIN_PIXELS = 14
+# The two spacing units the settings window lays rows and controls out on.
+STANDARD_GAP_PIXELS = 8
+GROUP_GAP_PIXELS = 10
+CARD_TITLE_GAP_PIXELS = 6
+STATUS_LINE_GAP_PIXELS = 4
+
+BYTES_PER_KIBIBYTE = 1024
+
+# Grid rows and columns for each page's static layout, in the order the
+# widgets they place appear in the matching _build_* method.
+OVERVIEW_STATUS_SECTION_ROW = 2
+OVERVIEW_COUNT_ROW = 2
+OVERVIEW_LAST_ACTION_ROW = 3
+OVERVIEW_ERROR_ROW = 4
+OVERVIEW_AUTOCORRECTION_PREVIEW_ROW = 5
+OVERVIEW_TEST_SECTION_ROW = 3
+OVERVIEW_TEST_HINT_ROW = 2
+TEST_ENTRY_FONT_SIZE = 14
+TEST_ENTRY_PADDING_TOP_PIXELS = 12
+TEST_ENTRY_PADDING_BOTTOM_PIXELS = 2
+
+AUTOCORRECTION_COLUMNS_ROW = 2
+AUTOCORRECTION_PRIMARY_COLUMN_WEIGHT = 3
+AUTOCORRECTION_SECONDARY_COLUMN_WEIGHT = 2
+AUTOCORRECTION_COLUMN_GAP_PIXELS = 7
+QUIRKS_COLUMN_SPAN = 2
+QUIRKS_TOP_MARGIN_PIXELS = 14
+
+LAYOUTS_SYSTEM_PAIR_SECTION_ROW = 2
+LAYOUT_LANGUAGE_LABEL_PADDING_TOP_PIXELS = 2
+LAYOUT_LANGUAGE_LABEL_PADDING_BOTTOM_PIXELS = 10
+LAYOUTS_RU_HEADING_ROW = 2
+LAYOUTS_RU_VALUE_ROW = 3
+LAYOUTS_REFRESH_BUTTON_ROW = 4
+LAYOUTS_MANUAL_SWITCH_SECTION_ROW = 3
+MANUAL_SWITCH_NOTE_COLUMN_SPAN = 2
+MANUAL_SWITCH_NOTE_PADDING_TOP_PIXELS = 8
+
+HOTKEYS_SECTION_ROW = 2
+
+EXCLUSIONS_APPLICATIONS_SECTION_ROW = 2
+APPLICATION_LIST_HEIGHT_ROWS = 6
+APPLICATION_LIST_COLUMN_SPAN = 4
+EXCLUSIONS_REMOVE_BUTTON_COLUMN = 3
+EXCLUSIONS_CATALOG_ROW = 2
+EXCLUSIONS_CATALOG_COLUMN_SPAN = 2
+EXCLUSIONS_REFRESH_BUTTON_COLUMN = 2
+EXCLUSIONS_MANUAL_ENTRY_ROW = 3
+EXCLUSIONS_MANUAL_ENTRY_COLUMN_SPAN = 3
+EXCLUSIONS_WORDS_SECTION_ROW = 3
+WORD_LIST_HEIGHT_ROWS = 5
+WORD_LIST_COLUMN_SPAN = 2
+
+APPEARANCE_SECTION_ROW = 2
+
+HISTORY_TOOLBAR_ROW = 2
+HISTORY_TIME_COLUMN_WIDTH_PIXELS = 165
+HISTORY_WORD_COLUMN_WIDTH_PIXELS = 130
+HISTORY_APPLICATION_COLUMN_WIDTH_PIXELS = 150
+HISTORY_CONFIDENCE_COLUMN_WIDTH_PIXELS = 100
+HISTORY_TREE_ROW = 3
+
+UPDATES_STATE_SECTION_ROW = 2
+UPDATES_PROGRESS_ROW = 2
+UPDATES_POLICY_SECTION_ROW = 3
+UPDATES_ACTIONS_SECTION_ROW = 4
+
+MAINTENANCE_LEARNING_SECTION_ROW = 2
+LEARNING_TREE_HEIGHT_ROWS = 6
+LEARNING_WORD_COLUMN_WIDTH_PIXELS = 150
+LEARNING_DIRECTION_COLUMN_WIDTH_PIXELS = 105
+LEARNING_CONFIRMATIONS_COLUMN_WIDTH_PIXELS = 115
+LEARNING_STATE_COLUMN_WIDTH_PIXELS = 175
+MAINTENANCE_DESCRIPTION_ROW = 2
+MAINTENANCE_LEARNING_ACTIONS_ROW = 3
+MAINTENANCE_CLEAR_REJECTIONS_BUTTON_COLUMN = 2
+MAINTENANCE_SETTINGS_SECTION_ROW = 3
+MAINTENANCE_DIAGNOSTICS_SECTION_ROW = 4
+MAINTENANCE_LOCATIONS_SECTION_ROW = 5
+
+ABOUT_SECTION_ROW = 2
+DIAGNOSTICS_TEXT_HEIGHT_ROWS = 15
+ABOUT_LICENSE_LABEL_ROW = 3
 
 
 @dataclass(frozen=True)
@@ -125,7 +277,7 @@ class _Tooltip:
             window.wm_overrideredirect(True)
             window.wm_geometry(
                 f"+{self._widget.winfo_rootx()}"
-                f"+{self._widget.winfo_rooty() + self._widget.winfo_height() + 4}"
+                f"+{self._widget.winfo_rooty() + self._widget.winfo_height() + TOOLTIP_VERTICAL_GAP_PIXELS}"
             )
             tk.Label(
                 window,
@@ -133,8 +285,8 @@ class _Tooltip:
                 background="#2b3040",
                 foreground="white",
                 borderwidth=0,
-                padx=8,
-                pady=4,
+                padx=TOOLTIP_PADDING_X_PIXELS,
+                pady=TOOLTIP_PADDING_Y_PIXELS,
             ).pack()
         except tk.TclError:
             LOGGER.debug("Не удалось показать подсказку", exc_info=True)
@@ -176,8 +328,8 @@ class WindowsLearningPrompt:
         card = tk.Frame(
             self.window,
             background="#171a21",
-            padx=16,
-            pady=12,
+            padx=LEARNING_PROMPT_CARD_PADDING_X_PIXELS,
+            pady=LEARNING_PROMPT_CARD_PADDING_Y_PIXELS,
         )
         card.pack(fill="both", expand=True)
         tk.Label(
@@ -185,23 +337,23 @@ class WindowsLearningPrompt:
             text="Добавить слово в правила переключения?",
             background="#171a21",
             foreground="#ffffff",
-            font=("Segoe UI Semibold", 10),
+            font=("Segoe UI Semibold", LEARNING_PROMPT_TITLE_FONT_SIZE),
             anchor="w",
         ).pack(fill="x")
         self.word = tk.Label(
             card,
             background="#171a21",
             foreground="#9a84ff",
-            font=("Segoe UI Semibold", 11),
+            font=("Segoe UI Semibold", LEARNING_PROMPT_WORD_FONT_SIZE),
             anchor="w",
         )
-        self.word.pack(fill="x", pady=(5, 2))
+        self.word.pack(fill="x", pady=(LEARNING_PROMPT_WORD_PADDING_TOP_PIXELS, LEARNING_PROMPT_WORD_PADDING_BOTTOM_PIXELS))
         tk.Label(
             card,
             text="Enter - ДА    Esc - НЕТ",
             background="#171a21",
             foreground="#b7bdc9",
-            font=("Segoe UI", 9),
+            font=("Segoe UI", LEARNING_PROMPT_HINT_FONT_SIZE),
             anchor="w",
         ).pack(fill="x")
         self.window.bind("<Return>", self._confirm_event)
@@ -214,20 +366,20 @@ class WindowsLearningPrompt:
         self.anchor = anchor
         self.word.configure(text=f"{prompt.original}  →  {prompt.replacement}")
         self.window.update_idletasks()
-        width = max(390, self.window.winfo_reqwidth())
+        width = max(LEARNING_PROMPT_MINIMUM_WIDTH_PIXELS, self.window.winfo_reqwidth())
         height = self.window.winfo_reqheight()
         if anchor is None:
             pointer_x, pointer_y = self.root.winfo_pointerxy()
             anchor = ScreenAnchor(pointer_x, pointer_y)
             self.anchor = anchor
-        x = anchor.x - width // 2
-        y = anchor.y - height - 12
+        x = anchor.x - width // LEARNING_PROMPT_WIDTH_CENTERING_DIVISOR
+        y = anchor.y - height - LEARNING_PROMPT_ANCHOR_GAP_PIXELS
         virtual_x = self.root.winfo_vrootx()
         virtual_y = self.root.winfo_vrooty()
         virtual_width = self.root.winfo_vrootwidth()
         virtual_height = self.root.winfo_vrootheight()
-        x = max(virtual_x + 8, min(x, virtual_x + virtual_width - width - 8))
-        y = max(virtual_y + 8, min(y, virtual_y + virtual_height - height - 8))
+        x = max(virtual_x + LEARNING_PROMPT_SCREEN_MARGIN_PIXELS, min(x, virtual_x + virtual_width - width - LEARNING_PROMPT_SCREEN_MARGIN_PIXELS))
+        y = max(virtual_y + LEARNING_PROMPT_SCREEN_MARGIN_PIXELS, min(y, virtual_y + virtual_height - height - LEARNING_PROMPT_SCREEN_MARGIN_PIXELS))
         self.window.geometry(f"{width}x{height}+{x}+{y}")
         # The prompt must never take the foreground: on Windows every window
         # has its own keyboard layout, so an activated prompt would both read
@@ -292,7 +444,7 @@ class DesktopApplication:
         self.enable_updates = enable_updates
         self.settings = SettingsStore()
         follow_settings(self.settings)
-        self.history = HistoryStore(limit=int(self.settings.get("history.limit", 200)))
+        self.history = HistoryStore(limit=int(self.settings.get("history.limit", DEFAULT_HISTORY_LIMIT)))
         self.backend = services.backend()
         self.engine = KeySwitchEngine(
             self.settings,
@@ -331,7 +483,7 @@ class DesktopApplication:
         self.root = tk.Tk(className="KeySwitch")
         self.root.title("KeySwitch")
         self.root.geometry("1080x760")
-        self.root.minsize(900, 640)
+        self.root.minsize(MAIN_WINDOW_MIN_WIDTH_PIXELS, MAIN_WINDOW_MIN_HEIGHT_PIXELS)
         self.root.protocol("WM_DELETE_WINDOW", self._window_close)
         # A Tk font description is a Tcl list; brace the Windows family name
         # so its embedded space is not parsed as a bogus size/style token.
@@ -387,17 +539,17 @@ class DesktopApplication:
         shell = ttk.Frame(self.root, style="App.TFrame")
         shell.pack(fill="both", expand=True)
 
-        sidebar = ttk.Frame(shell, width=225, padding=(16, 18), style="Sidebar.TFrame")
+        sidebar = ttk.Frame(shell, width=SIDEBAR_WIDTH_PIXELS, padding=(SIDEBAR_PADDING_X_PIXELS, SIDEBAR_PADDING_Y_PIXELS), style="Sidebar.TFrame")
         sidebar.pack(side="left", fill="y")
         sidebar.pack_propagate(False)
         ttk.Label(sidebar, text="KeySwitch", style="Brand.TLabel").pack(
-            anchor="w", padx=8, pady=(0, 2)
+            anchor="w", padx=SIDEBAR_ITEM_PADDING_X_PIXELS, pady=(0, SIDEBAR_BRAND_PADDING_BOTTOM_PIXELS)
         )
         ttk.Label(
             sidebar,
             text="умная раскладка EN / RU",
             style="MutedSidebar.TLabel",
-        ).pack(anchor="w", padx=8, pady=(0, 18))
+        ).pack(anchor="w", padx=SIDEBAR_ITEM_PADDING_X_PIXELS, pady=(0, SIDEBAR_SUBTITLE_PADDING_BOTTOM_PIXELS))
         for page_name, title in PAGE_NAMES:
             # Native ttk themes are allowed to ignore custom button colours.
             # A classic Tk button keeps the dark sidebar readable on every
@@ -415,17 +567,17 @@ class DesktopApplication:
                 highlightthickness=0,
                 relief="flat",
                 cursor="hand2",
-                padx=12,
-                pady=8,
+                padx=NAVIGATION_BUTTON_PADDING_X_PIXELS,
+                pady=NAVIGATION_BUTTON_PADDING_Y_PIXELS,
             )
-            button.pack(fill="x", pady=2)
+            button.pack(fill="x", pady=NAVIGATION_BUTTON_SPACING_PIXELS)
             self._navigation[page_name] = button
-        ttk.Separator(sidebar).pack(fill="x", pady=16)
+        ttk.Separator(sidebar).pack(fill="x", pady=SIDEBAR_SEPARATOR_PADDING_Y_PIXELS)
         ttk.Label(sidebar, textvariable=self.layout_text, style="Sidebar.TLabel").pack(
-            anchor="w", padx=8
+            anchor="w", padx=SIDEBAR_ITEM_PADDING_X_PIXELS
         )
         ttk.Label(sidebar, textvariable=self.status_text, style="MutedSidebar.TLabel").pack(
-            anchor="w", padx=8, pady=(4, 0)
+            anchor="w", padx=SIDEBAR_ITEM_PADDING_X_PIXELS, pady=(SIDEBAR_STATUS_PADDING_TOP_PIXELS, 0)
         )
 
         content_shell = ttk.Frame(shell, style="Content.TFrame")
@@ -472,7 +624,7 @@ class DesktopApplication:
         viewport.configure(yscrollcommand=scrollbar.set)
         page = ttk.Frame(
             viewport,
-            padding=(PAGE_PADDING, 24),
+            padding=(PAGE_PADDING, PAGE_CONTENT_PADDING_Y_PIXELS),
             style="Content.TFrame",
         )
         window = viewport.create_window(0, 0, window=page, anchor="nw")
@@ -487,11 +639,11 @@ class DesktopApplication:
             page,
             text=subtitle,
             style="PageSubtitle.TLabel",
-            wraplength=760,
+            wraplength=PAGE_SUBTITLE_WRAP_WIDTH_PIXELS,
             justify="left",
         )
-        caption.grid(row=1, column=0, sticky="ew", pady=(3, 18))
-        self._follow_width(caption, page, 2 * PAGE_PADDING + DESCRIPTION_MARGIN)
+        caption.grid(row=1, column=0, sticky="ew", pady=(PAGE_CAPTION_PADDING_TOP_PIXELS, PAGE_CAPTION_PADDING_BOTTOM_PIXELS))
+        self._follow_width(caption, page, PAGE_PADDING_SIDES * PAGE_PADDING + DESCRIPTION_MARGIN)
         self._pages[name] = page
         self._page_holders[name] = holder
         self._page_viewports[name] = viewport
@@ -532,7 +684,7 @@ class DesktopApplication:
         def resize(event: tk.Event[tk.Misc]) -> None:
             target = max(minimum, event.width - reserve)
             # A dead band keeps the wrap width from oscillating by a pixel.
-            if abs(int(str(label.cget("wraplength"))) - target) >= 6:
+            if abs(int(str(label.cget("wraplength"))) - target) >= WRAP_WIDTH_DEAD_BAND_PIXELS:
                 label.configure(wraplength=target)
 
         container.bind("<Configure>", resize, add=True)
@@ -564,15 +716,15 @@ class DesktopApplication:
 
     @staticmethod
     def _wheel_steps(event: tk.Event[tk.Misc]) -> int:
-        if event.num in {4, 5}:
-            return -3 if event.num == 4 else 3
+        if event.num in {MOUSE_WHEEL_BUTTON_UP, MOUSE_WHEEL_BUTTON_DOWN}:
+            return -WHEEL_STEPS_PER_NOTCH if event.num == MOUSE_WHEEL_BUTTON_UP else WHEEL_STEPS_PER_NOTCH
         delta = int(event.delta)
         if delta == 0:
             return 0
         # Windows counts 120 units per notch; builds that report a bare
         # ±1 are treated as one notch as well.
-        notches = delta // 120 if abs(delta) >= 120 else (1 if delta > 0 else -1)
-        return -3 * notches
+        notches = delta // WINDOWS_WHEEL_UNITS_PER_NOTCH if abs(delta) >= WINDOWS_WHEEL_UNITS_PER_NOTCH else (1 if delta > 0 else -1)
+        return -WHEEL_STEPS_PER_NOTCH * notches
 
     def _wheel_scroll(self, event: tk.Event[tk.Misc]) -> None:
         # Route by pointer position rather than by the widget Tk happened to
@@ -607,8 +759,8 @@ class DesktopApplication:
 
     @staticmethod
     def _section(parent: ttk.Frame, title: str, row: int) -> ttk.LabelFrame:
-        section = ttk.LabelFrame(parent, text=title, padding=(18, 14))
-        section.grid(row=row, column=0, sticky="ew", pady=(0, 14))
+        section = ttk.LabelFrame(parent, text=title, padding=(SECTION_PADDING_X_PIXELS, SECTION_PADDING_Y_PIXELS))
+        section.grid(row=row, column=0, sticky="ew", pady=(0, SECTION_BOTTOM_MARGIN_PIXELS))
         section.columnconfigure(0, weight=1)
         return section
 
@@ -619,33 +771,33 @@ class DesktopApplication:
             "KeySwitch работает рядом с вами",
             "Автоматическая замена раскладки выполняется локально после завершения слова.",
         )
-        status = self._section(page, "Состояние", 2)
+        status = self._section(page, "Состояние", OVERVIEW_STATUS_SECTION_ROW)
         ttk.Label(status, textvariable=self.status_text, style="CardTitle.TLabel").grid(
             row=0, column=0, sticky="w"
         )
-        ttk.Label(status, textvariable=self.layout_text).grid(row=1, column=0, sticky="w", pady=(6, 0))
-        ttk.Label(status, textvariable=self.count_text).grid(row=2, column=0, sticky="w", pady=(4, 0))
-        ttk.Label(status, textvariable=self.last_action_text, wraplength=720).grid(
-            row=3, column=0, sticky="w", pady=(4, 0)
+        ttk.Label(status, textvariable=self.layout_text).grid(row=1, column=0, sticky="w", pady=(CARD_TITLE_GAP_PIXELS, 0))
+        ttk.Label(status, textvariable=self.count_text).grid(row=OVERVIEW_COUNT_ROW, column=0, sticky="w", pady=(STATUS_LINE_GAP_PIXELS, 0))
+        ttk.Label(status, textvariable=self.last_action_text, wraplength=CONTENT_TEXT_WRAP_WIDTH_PIXELS).grid(
+            row=OVERVIEW_LAST_ACTION_ROW, column=0, sticky="w", pady=(STATUS_LINE_GAP_PIXELS, 0)
         )
-        ttk.Label(status, textvariable=self.error_text, style="Error.TLabel", wraplength=720).grid(
-            row=4, column=0, sticky="w", pady=(4, 0)
+        ttk.Label(status, textvariable=self.error_text, style="Error.TLabel", wraplength=CONTENT_TEXT_WRAP_WIDTH_PIXELS).grid(
+            row=OVERVIEW_ERROR_ROW, column=0, sticky="w", pady=(STATUS_LINE_GAP_PIXELS, 0)
         )
-        self._add_setting(status, AUTOCORRECTION_SETTINGS[0], 5)
+        self._add_setting(status, AUTOCORRECTION_SETTINGS[0], OVERVIEW_AUTOCORRECTION_PREVIEW_ROW)
 
-        test = self._section(page, "Проверка в реальном поле", 3)
+        test = self._section(page, "Проверка в реальном поле", OVERVIEW_TEST_SECTION_ROW)
         ttk.Label(
             test,
             text="Выберите EN и напечатайте ghbdtn: после паузы появится «привет». Можно также нажать пробел. Потом проверьте обратное направление.",
-            wraplength=720,
+            wraplength=CONTENT_TEXT_WRAP_WIDTH_PIXELS,
         ).grid(row=0, column=0, sticky="w")
-        self.test_entry = ttk.Entry(test, font=("Segoe UI", 14))
-        self.test_entry.grid(row=1, column=0, sticky="ew", pady=(12, 2))
+        self.test_entry = ttk.Entry(test, font=("Segoe UI", TEST_ENTRY_FONT_SIZE))
+        self.test_entry.grid(row=1, column=0, sticky="ew", pady=(TEST_ENTRY_PADDING_TOP_PIXELS, TEST_ENTRY_PADDING_BOTTOM_PIXELS))
         ttk.Label(
             test,
             text="Поле обрабатывается тем же глобальным Win32 backend, что и другие приложения.",
             style="Muted.TLabel",
-        ).grid(row=2, column=0, sticky="w")
+        ).grid(row=OVERVIEW_TEST_HINT_ROW, column=0, sticky="w")
 
     def _build_autocorrection(self, parent: ttk.Frame) -> None:
         page = self._new_page(
@@ -655,21 +807,21 @@ class DesktopApplication:
             "Настройте точность распознавания, обучение и события завершения слова.",
         )
         columns = ttk.Frame(page, style="Content.TFrame")
-        columns.grid(row=2, column=0, sticky="nsew")
-        columns.columnconfigure(0, weight=3)
-        columns.columnconfigure(1, weight=2)
-        behavior = ttk.LabelFrame(columns, text="Распознавание", padding=(18, 14))
-        behavior.grid(row=0, column=0, sticky="nsew", padx=(0, 7))
+        columns.grid(row=AUTOCORRECTION_COLUMNS_ROW, column=0, sticky="nsew")
+        columns.columnconfigure(0, weight=AUTOCORRECTION_PRIMARY_COLUMN_WEIGHT)
+        columns.columnconfigure(1, weight=AUTOCORRECTION_SECONDARY_COLUMN_WEIGHT)
+        behavior = ttk.LabelFrame(columns, text="Распознавание", padding=(SECTION_PADDING_X_PIXELS, SECTION_PADDING_Y_PIXELS))
+        behavior.grid(row=0, column=0, sticky="nsew", padx=(0, AUTOCORRECTION_COLUMN_GAP_PIXELS))
         behavior.columnconfigure(0, weight=1)
         for row, spec in enumerate(AUTOCORRECTION_SETTINGS):
             self._add_setting(behavior, spec, row)
-        triggers = ttk.LabelFrame(columns, text="Когда проверять слово", padding=(18, 14))
-        triggers.grid(row=0, column=1, sticky="nsew", padx=(7, 0))
+        triggers = ttk.LabelFrame(columns, text="Когда проверять слово", padding=(SECTION_PADDING_X_PIXELS, SECTION_PADDING_Y_PIXELS))
+        triggers.grid(row=0, column=1, sticky="nsew", padx=(AUTOCORRECTION_COLUMN_GAP_PIXELS, 0))
         triggers.columnconfigure(0, weight=1)
         for row, spec in enumerate(TRIGGER_SETTINGS):
             self._add_setting(triggers, spec, row)
-        quirks = ttk.LabelFrame(columns, text="Особенности программ", padding=(18, 14))
-        quirks.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(14, 0))
+        quirks = ttk.LabelFrame(columns, text="Особенности программ", padding=(SECTION_PADDING_X_PIXELS, SECTION_PADDING_Y_PIXELS))
+        quirks.grid(row=1, column=0, columnspan=QUIRKS_COLUMN_SPAN, sticky="nsew", pady=(QUIRKS_TOP_MARGIN_PIXELS, 0))
         quirks.columnconfigure(0, weight=1)
         for row, spec in enumerate(APPLICATION_SETTINGS):
             self._add_setting(quirks, spec, row)
@@ -681,19 +833,19 @@ class DesktopApplication:
             "Раскладки EN / RU",
             "KeySwitch находит установленные английскую и русскую HKL и сохраняет выбранный пользователем язык.",
         )
-        section = self._section(page, "Системная пара", 2)
+        section = self._section(page, "Системная пара", LAYOUTS_SYSTEM_PAIR_SECTION_ROW)
         ttk.Label(
             section,
             text="Английская раскладка",
             style="CardTitle.TLabel",
         ).grid(row=0, column=0, sticky="w")
-        ttk.Label(section, text="EN — primary language 0x09").grid(row=1, column=0, sticky="w", pady=(2, 10))
-        ttk.Label(section, text="Русская раскладка", style="CardTitle.TLabel").grid(row=2, column=0, sticky="w")
-        ttk.Label(section, text="RU — primary language 0x19").grid(row=3, column=0, sticky="w", pady=(2, 10))
+        ttk.Label(section, text="EN — primary language 0x09").grid(row=1, column=0, sticky="w", pady=(LAYOUT_LANGUAGE_LABEL_PADDING_TOP_PIXELS, LAYOUT_LANGUAGE_LABEL_PADDING_BOTTOM_PIXELS))
+        ttk.Label(section, text="Русская раскладка", style="CardTitle.TLabel").grid(row=LAYOUTS_RU_HEADING_ROW, column=0, sticky="w")
+        ttk.Label(section, text="RU — primary language 0x19").grid(row=LAYOUTS_RU_VALUE_ROW, column=0, sticky="w", pady=(LAYOUT_LANGUAGE_LABEL_PADDING_TOP_PIXELS, LAYOUT_LANGUAGE_LABEL_PADDING_BOTTOM_PIXELS))
         ttk.Button(section, text="Обновить диагностику", command=self._refresh_diagnostics).grid(
-            row=4, column=0, sticky="w"
+            row=LAYOUTS_REFRESH_BUTTON_ROW, column=0, sticky="w"
         )
-        behavior = self._section(page, "Ручное переключение", 3)
+        behavior = self._section(page, "Ручное переключение", LAYOUTS_MANUAL_SWITCH_SECTION_ROW)
         manual_spec = next(
             spec
             for spec in AUTOCORRECTION_SETTINGS
@@ -703,8 +855,8 @@ class DesktopApplication:
         ttk.Label(
             behavior,
             text="Когда вы сами меняете язык перед вводом, первое завершённое слово остаётся в выбранной раскладке. Следующие слова снова анализируются автоматически.",
-            wraplength=720,
-        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
+            wraplength=CONTENT_TEXT_WRAP_WIDTH_PIXELS,
+        ).grid(row=1, column=0, columnspan=MANUAL_SWITCH_NOTE_COLUMN_SPAN, sticky="w", pady=(MANUAL_SWITCH_NOTE_PADDING_TOP_PIXELS, 0))
 
     def _build_hotkeys(self, parent: ttk.Frame) -> None:
         page = self._new_page(
@@ -713,7 +865,7 @@ class DesktopApplication:
             "Горячие клавиши",
             "Комбинации работают глобально. Используйте названия Ctrl, Alt, Shift, Super, Pause и букв.",
         )
-        section = self._section(page, "Глобальные команды", 2)
+        section = self._section(page, "Глобальные команды", HOTKEYS_SECTION_ROW)
         for row, spec in enumerate(HOTKEY_SETTINGS):
             self._add_setting(section, spec, row)
 
@@ -724,46 +876,46 @@ class DesktopApplication:
             "Исключения",
             "В исключённых программах KeySwitch наблюдает раскладку, но не заменяет введённые слова.",
         )
-        applications = self._section(page, "Программы", 2)
+        applications = self._section(page, "Программы", EXCLUSIONS_APPLICATIONS_SECTION_ROW)
         applications.columnconfigure(0, weight=1)
-        self.application_list = tk.Listbox(applications, height=6, exportselection=False)
-        self.application_list.grid(row=0, column=0, columnspan=4, sticky="ew")
+        self.application_list = tk.Listbox(applications, height=APPLICATION_LIST_HEIGHT_ROWS, exportselection=False)
+        self.application_list.grid(row=0, column=0, columnspan=APPLICATION_LIST_COLUMN_SPAN, sticky="ew")
         ttk.Button(applications, text="Активное окно", command=self._add_active_application).grid(
-            row=1, column=0, sticky="w", pady=(10, 8)
+            row=1, column=0, sticky="w", pady=(GROUP_GAP_PIXELS, STANDARD_GAP_PIXELS)
         )
         ttk.Button(applications, text="Выбрать .exe…", command=self._pick_executable).grid(
-            row=1, column=1, sticky="w", padx=(8, 0), pady=(10, 8)
+            row=1, column=1, sticky="w", padx=(STANDARD_GAP_PIXELS, 0), pady=(GROUP_GAP_PIXELS, STANDARD_GAP_PIXELS)
         )
         ttk.Button(applications, text="Удалить", command=self._remove_application).grid(
-            row=1, column=3, sticky="e", pady=(10, 8)
+            row=1, column=EXCLUSIONS_REMOVE_BUTTON_COLUMN, sticky="e", pady=(GROUP_GAP_PIXELS, STANDARD_GAP_PIXELS)
         )
         self.catalog_combo = ttk.Combobox(
             applications,
             textvariable=self.catalog_selection,
             state="readonly",
         )
-        self.catalog_combo.grid(row=2, column=0, columnspan=2, sticky="ew")
+        self.catalog_combo.grid(row=EXCLUSIONS_CATALOG_ROW, column=0, columnspan=EXCLUSIONS_CATALOG_COLUMN_SPAN, sticky="ew")
         ttk.Button(applications, text="Обновить список", command=self._load_catalog).grid(
-            row=2, column=2, padx=(8, 0)
+            row=EXCLUSIONS_CATALOG_ROW, column=EXCLUSIONS_REFRESH_BUTTON_COLUMN, padx=(STANDARD_GAP_PIXELS, 0)
         )
         ttk.Button(applications, text="Добавить из списка", command=self._add_catalog_application).grid(
-            row=2, column=3, padx=(8, 0)
+            row=EXCLUSIONS_CATALOG_ROW, column=EXCLUSIONS_REMOVE_BUTTON_COLUMN, padx=(STANDARD_GAP_PIXELS, 0)
         )
         manual_entry = ttk.Entry(applications, textvariable=self.manual_application)
-        manual_entry.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+        manual_entry.grid(row=EXCLUSIONS_MANUAL_ENTRY_ROW, column=0, columnspan=EXCLUSIONS_MANUAL_ENTRY_COLUMN_SPAN, sticky="ew", pady=(STANDARD_GAP_PIXELS, 0))
         ttk.Button(applications, text="Добавить вручную", command=self._add_manual_application).grid(
-            row=3, column=3, padx=(8, 0), pady=(8, 0)
+            row=EXCLUSIONS_MANUAL_ENTRY_ROW, column=EXCLUSIONS_REMOVE_BUTTON_COLUMN, padx=(STANDARD_GAP_PIXELS, 0), pady=(STANDARD_GAP_PIXELS, 0)
         )
 
-        words = self._section(page, "Слова", 3)
+        words = self._section(page, "Слова", EXCLUSIONS_WORDS_SECTION_ROW)
         words.columnconfigure(0, weight=1)
-        self.word_list = tk.Listbox(words, height=5, exportselection=False)
-        self.word_list.grid(row=0, column=0, columnspan=2, sticky="ew")
-        ttk.Entry(words, textvariable=self.manual_word).grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        self.word_list = tk.Listbox(words, height=WORD_LIST_HEIGHT_ROWS, exportselection=False)
+        self.word_list.grid(row=0, column=0, columnspan=WORD_LIST_COLUMN_SPAN, sticky="ew")
+        ttk.Entry(words, textvariable=self.manual_word).grid(row=1, column=0, sticky="ew", pady=(STANDARD_GAP_PIXELS, 0))
         buttons = ttk.Frame(words)
-        buttons.grid(row=1, column=1, padx=(8, 0), pady=(8, 0))
+        buttons.grid(row=1, column=1, padx=(STANDARD_GAP_PIXELS, 0), pady=(STANDARD_GAP_PIXELS, 0))
         ttk.Button(buttons, text="Добавить", command=self._add_word).pack(side="left")
-        ttk.Button(buttons, text="Удалить", command=self._remove_word).pack(side="left", padx=(8, 0))
+        ttk.Button(buttons, text="Удалить", command=self._remove_word).pack(side="left", padx=(STANDARD_GAP_PIXELS, 0))
         self._refresh_exclusion_lists()
 
     def _build_appearance(self, parent: ttk.Frame) -> None:
@@ -773,7 +925,7 @@ class DesktopApplication:
             "Внешний вид и система",
             "Настройте автозагрузку после входа в Windows, трей, уведомления и локальную историю.",
         )
-        section = self._section(page, "Интеграция с Windows", 2)
+        section = self._section(page, "Интеграция с Windows", APPEARANCE_SECTION_ROW)
         for row, spec in enumerate(SYSTEM_SETTINGS):
             self._add_setting(section, spec, row)
 
@@ -785,7 +937,7 @@ class DesktopApplication:
             "Сохраняются только пары слов, время, приложение и уверенность — не полный поток клавиатуры.",
         )
         toolbar = ttk.Frame(page, style="Content.TFrame")
-        toolbar.grid(row=2, column=0, sticky="ew", pady=(0, 10))
+        toolbar.grid(row=HISTORY_TOOLBAR_ROW, column=0, sticky="ew", pady=(0, GROUP_GAP_PIXELS))
         ttk.Button(toolbar, text="Обновить", command=self._refresh_history).pack(side="left")
         ttk.Button(toolbar, text="Очистить историю", command=self._clear_history).pack(side="right")
         columns = ("time", "original", "replacement", "application", "confidence")
@@ -797,12 +949,12 @@ class DesktopApplication:
             "application": "Приложение",
             "confidence": "Уверенность",
         }
-        widths = {"time": 165, "original": 130, "replacement": 130, "application": 150, "confidence": 100}
+        widths = {"time": HISTORY_TIME_COLUMN_WIDTH_PIXELS, "original": HISTORY_WORD_COLUMN_WIDTH_PIXELS, "replacement": HISTORY_WORD_COLUMN_WIDTH_PIXELS, "application": HISTORY_APPLICATION_COLUMN_WIDTH_PIXELS, "confidence": HISTORY_CONFIDENCE_COLUMN_WIDTH_PIXELS}
         for column in columns:
             self.history_tree.heading(column, text=headings[column])
             self.history_tree.column(column, width=widths[column], anchor="w")
-        self.history_tree.grid(row=3, column=0, sticky="nsew")
-        page.rowconfigure(3, weight=1)
+        self.history_tree.grid(row=HISTORY_TREE_ROW, column=0, sticky="nsew")
+        page.rowconfigure(HISTORY_TREE_ROW, weight=1)
         self._refresh_history()
 
     def _build_updates(self, parent: ttk.Frame) -> None:
@@ -812,7 +964,7 @@ class DesktopApplication:
             "Обновления",
             "KeySwitch проверяет стабильные выпуски, сверяет SHA-256 и может тихо обновиться с автоматическим перезапуском.",
         )
-        state = self._section(page, "Состояние", 2)
+        state = self._section(page, "Состояние", UPDATES_STATE_SECTION_ROW)
         ttk.Label(
             state,
             textvariable=self.update_version_text,
@@ -821,19 +973,19 @@ class DesktopApplication:
         ttk.Label(
             state,
             textvariable=self.update_status_text,
-            wraplength=720,
-        ).grid(row=1, column=0, sticky="w", pady=(6, 0))
+            wraplength=CONTENT_TEXT_WRAP_WIDTH_PIXELS,
+        ).grid(row=1, column=0, sticky="w", pady=(CARD_TITLE_GAP_PIXELS, 0))
         ttk.Label(
             state,
             textvariable=self.update_progress_text,
             style="Muted.TLabel",
-        ).grid(row=2, column=0, sticky="w", pady=(4, 0))
+        ).grid(row=UPDATES_PROGRESS_ROW, column=0, sticky="w", pady=(STATUS_LINE_GAP_PIXELS, 0))
 
-        policy = self._section(page, "Политика", 3)
+        policy = self._section(page, "Политика", UPDATES_POLICY_SECTION_ROW)
         for row, spec in enumerate(UPDATE_SETTINGS):
             self._add_setting(policy, spec, row)
 
-        actions = self._section(page, "Действия", 4)
+        actions = self._section(page, "Действия", UPDATES_ACTIONS_SECTION_ROW)
         controls = ttk.Frame(actions)
         controls.grid(row=0, column=0, sticky="w")
         self.update_check_button = ttk.Button(
@@ -848,23 +1000,23 @@ class DesktopApplication:
             command=self._install_available_update,
             state="disabled",
         )
-        self.update_install_button.pack(side="left", padx=(8, 0))
+        self.update_install_button.pack(side="left", padx=(STANDARD_GAP_PIXELS, 0))
         self.update_release_button = ttk.Button(
             controls,
             text="Открыть выпуск",
             command=self._open_update_release,
             state="disabled",
         )
-        self.update_release_button.pack(side="left", padx=(8, 0))
+        self.update_release_button.pack(side="left", padx=(STANDARD_GAP_PIXELS, 0))
         ttk.Label(
             actions,
             text=(
                 "Автоустановка работает для Setup EXE текущего пользователя и не требует "
                 "прав администратора. При обновлении окно закроется и KeySwitch запустится снова."
             ),
-            wraplength=720,
+            wraplength=CONTENT_TEXT_WRAP_WIDTH_PIXELS,
             style="Muted.TLabel",
-        ).grid(row=1, column=0, sticky="w", pady=(10, 0))
+        ).grid(row=1, column=0, sticky="w", pady=(GROUP_GAP_PIXELS, 0))
 
     def _update_from_thread(self, snapshot: UpdateSnapshot) -> None:
         self._post(partial(self._apply_update_snapshot, snapshot))
@@ -936,7 +1088,7 @@ class DesktopApplication:
             "Обслуживание",
             "Управляйте локальными правилами, настройками и расположением данных KeySwitch.",
         )
-        learning = self._section(page, "Локальное обучение", 2)
+        learning = self._section(page, "Локальное обучение", MAINTENANCE_LEARNING_SECTION_ROW)
         learning.columnconfigure(0, weight=1)
         ttk.Label(learning, textvariable=self.learning_text).grid(
             row=0,
@@ -948,7 +1100,7 @@ class DesktopApplication:
             learning,
             columns=columns,
             show="headings",
-            height=6,
+            height=LEARNING_TREE_HEIGHT_ROWS,
         )
         headings = {
             "word": "Набрано",
@@ -958,11 +1110,11 @@ class DesktopApplication:
             "state": "Состояние",
         }
         widths = {
-            "word": 150,
-            "replacement": 150,
-            "direction": 105,
-            "confirmations": 115,
-            "state": 175,
+            "word": LEARNING_WORD_COLUMN_WIDTH_PIXELS,
+            "replacement": LEARNING_WORD_COLUMN_WIDTH_PIXELS,
+            "direction": LEARNING_DIRECTION_COLUMN_WIDTH_PIXELS,
+            "confirmations": LEARNING_CONFIRMATIONS_COLUMN_WIDTH_PIXELS,
+            "state": LEARNING_STATE_COLUMN_WIDTH_PIXELS,
         }
         for column in columns:
             self.learning_tree.heading(column, text=headings[column])
@@ -973,7 +1125,7 @@ class DesktopApplication:
                 stretch=column == "state",
                 anchor="w",
             )
-        self.learning_tree.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        self.learning_tree.grid(row=1, column=0, sticky="ew", pady=(GROUP_GAP_PIXELS, 0))
         ttk.Label(
             learning,
             text=(
@@ -983,11 +1135,11 @@ class DesktopApplication:
                 "Правила и запреты удаляются по отдельности."
             ),
             style="Muted.TLabel",
-            wraplength=720,
+            wraplength=CONTENT_TEXT_WRAP_WIDTH_PIXELS,
             justify="left",
-        ).grid(row=2, column=0, sticky="w", pady=(8, 0))
+        ).grid(row=MAINTENANCE_DESCRIPTION_ROW, column=0, sticky="w", pady=(STANDARD_GAP_PIXELS, 0))
         actions = ttk.Frame(learning)
-        actions.grid(row=3, column=0, sticky="w", pady=(10, 0))
+        actions.grid(row=MAINTENANCE_LEARNING_ACTIONS_ROW, column=0, sticky="w", pady=(GROUP_GAP_PIXELS, 0))
         ttk.Button(
             actions,
             text="Удалить выбранное",
@@ -997,39 +1149,39 @@ class DesktopApplication:
             actions,
             text="Очистить правила",
             command=self._clear_learning,
-        ).grid(row=0, column=1, sticky="w", padx=(8, 0))
+        ).grid(row=0, column=1, sticky="w", padx=(STANDARD_GAP_PIXELS, 0))
         ttk.Button(
             actions,
             text="Очистить запреты",
             command=self._clear_rejections,
-        ).grid(row=0, column=2, sticky="w", padx=(8, 0))
+        ).grid(row=0, column=MAINTENANCE_CLEAR_REJECTIONS_BUTTON_COLUMN, sticky="w", padx=(STANDARD_GAP_PIXELS, 0))
 
-        settings = self._section(page, "Настройки", 3)
+        settings = self._section(page, "Настройки", MAINTENANCE_SETTINGS_SECTION_ROW)
         ttk.Label(
             settings,
             text="Вернуть все параметры по умолчанию. История и выученные правила сохранятся.",
-            wraplength=720,
+            wraplength=CONTENT_TEXT_WRAP_WIDTH_PIXELS,
         ).grid(row=0, column=0, sticky="w")
         ttk.Button(
             settings,
             text="Сбросить настройки",
             command=self._reset_settings,
-        ).grid(row=1, column=0, sticky="w", pady=(10, 0))
+        ).grid(row=1, column=0, sticky="w", pady=(GROUP_GAP_PIXELS, 0))
 
-        diagnostics = self._section(page, "Технический журнал", 4)
+        diagnostics = self._section(page, "Технический журнал", MAINTENANCE_DIAGNOSTICS_SECTION_ROW)
         diagnostics.columnconfigure(0, weight=1)
         for row, spec in enumerate(DIAGNOSTIC_SETTINGS):
             self._add_setting(diagnostics, spec, row)
         ttk.Label(
             diagnostics,
             textvariable=self.log_state_text,
-            wraplength=720,
+            wraplength=CONTENT_TEXT_WRAP_WIDTH_PIXELS,
             justify="left",
         ).grid(
             row=len(DIAGNOSTIC_SETTINGS),
             column=0,
             sticky="w",
-            pady=(8, 0),
+            pady=(STANDARD_GAP_PIXELS, 0),
         )
         ttk.Button(
             diagnostics,
@@ -1039,10 +1191,10 @@ class DesktopApplication:
             row=len(DIAGNOSTIC_SETTINGS) + 1,
             column=0,
             sticky="w",
-            pady=(8, 0),
+            pady=(STANDARD_GAP_PIXELS, 0),
         )
 
-        locations = self._section(page, "Локальные файлы", 5)
+        locations = self._section(page, "Локальные файлы", MAINTENANCE_LOCATIONS_SECTION_ROW)
         ttk.Label(
             locations,
             text=(
@@ -1051,7 +1203,7 @@ class DesktopApplication:
                 f"Самообучение: {self.engine.learning.path}\n"
                 f"Журнал: {log_path()}"
             ),
-            wraplength=720,
+            wraplength=CONTENT_TEXT_WRAP_WIDTH_PIXELS,
         ).grid(row=0, column=0, sticky="w")
         self._refresh_learning()
         self._refresh_log_state()
@@ -1063,18 +1215,18 @@ class DesktopApplication:
             f"KeySwitch {__version__}",
             "Локальное приложение автоматического исправления раскладки для Windows и Linux.",
         )
-        details = self._section(page, "Диагностика Win32 backend", 2)
-        self.diagnostics_text = tk.Text(details, height=15, wrap="word", borderwidth=0)
+        details = self._section(page, "Диагностика Win32 backend", ABOUT_SECTION_ROW)
+        self.diagnostics_text = tk.Text(details, height=DIAGNOSTICS_TEXT_HEIGHT_ROWS, wrap="word", borderwidth=0)
         self.diagnostics_text.grid(row=0, column=0, sticky="nsew")
         buttons = ttk.Frame(details)
-        buttons.grid(row=1, column=0, sticky="w", pady=(10, 0))
+        buttons.grid(row=1, column=0, sticky="w", pady=(GROUP_GAP_PIXELS, 0))
         ttk.Button(buttons, text="Обновить", command=self._refresh_diagnostics).pack(side="left")
-        ttk.Button(buttons, text="Копировать", command=self._copy_diagnostics).pack(side="left", padx=(8, 0))
+        ttk.Button(buttons, text="Копировать", command=self._copy_diagnostics).pack(side="left", padx=(STANDARD_GAP_PIXELS, 0))
         ttk.Label(
             page,
             text="Лицензия: GNU GPL-3.0-or-later · https://github.com/olegius88/keyswitch",
             style="Muted.TLabel",
-        ).grid(row=3, column=0, sticky="w")
+        ).grid(row=ABOUT_LICENSE_LABEL_ROW, column=0, sticky="w")
         self._refresh_diagnostics()
 
     def _add_setting(
@@ -1084,10 +1236,10 @@ class DesktopApplication:
         row: int,
     ) -> None:
         cell = ttk.Frame(parent, style="Content.TFrame")
-        cell.grid(row=row, column=0, sticky="ew", pady=5)
+        cell.grid(row=row, column=0, sticky="ew", pady=SETTING_ROW_PADDING_PIXELS)
         cell.columnconfigure(0, minsize=MODIFIED_MARKER_COLUMN)
         cell.columnconfigure(1, weight=1)
-        cell.columnconfigure(2, minsize=RESET_BUTTON_COLUMN)
+        cell.columnconfigure(SETTING_CONTROL_COLUMN_INDEX, minsize=RESET_BUTTON_COLUMN)
         marker = tk.Frame(
             cell,
             width=MODIFIED_MARKER_WIDTH,
@@ -1108,7 +1260,7 @@ class DesktopApplication:
             style="Reset.TButton",
             command=partial(self._restore_default, spec.path),
         )
-        reset.grid(row=0, column=2, sticky="ne")
+        reset.grid(row=0, column=SETTING_CONTROL_COLUMN_INDEX, sticky="ne")
         reset.grid_remove()
         _Tooltip(reset, RESET_BUTTON_HINT)
         label: ttk.Label | ttk.Checkbutton
@@ -1126,7 +1278,7 @@ class DesktopApplication:
                 variable=variable,
                 command=partial(self._save_boolean, spec.path, variable),
             )
-            label.grid(row=0, column=0, columnspan=2, sticky="w")
+            label.grid(row=0, column=0, columnspan=SETTING_ROW_COLUMN_SPAN, sticky="w")
             normal_style = "TCheckbutton"
             modified_style = "Modified.TCheckbutton"
             indent = DESCRIPTION_INDENT
@@ -1134,7 +1286,7 @@ class DesktopApplication:
             label = ttk.Label(body, text=spec.title, style="CardTitle.TLabel")
             label.grid(row=0, column=0, sticky="w")
             control = self._setting_control(body, spec)
-            control.grid(row=0, column=1, sticky="e", padx=(16, 0))
+            control.grid(row=0, column=1, sticky="e", padx=(SETTING_CONTROL_PADDING_LEFT_PIXELS, 0))
             normal_style = "CardTitle.TLabel"
             modified_style = "Modified.CardTitle.TLabel"
             indent = 0
@@ -1145,7 +1297,7 @@ class DesktopApplication:
             wraplength=DESCRIPTION_INITIAL_WRAP,
             justify="left",
         )
-        description.grid(row=1, column=0, columnspan=2, sticky="w", padx=(indent, 0))
+        description.grid(row=1, column=0, columnspan=SETTING_ROW_COLUMN_SPAN, sticky="w", padx=(indent, 0))
         self._follow_width(description, body, indent + DESCRIPTION_MARGIN)
         self._setting_indicators.setdefault(spec.path, []).append(
             _SettingIndicator(marker, reset, label, normal_style, modified_style)
@@ -1201,7 +1353,7 @@ class DesktopApplication:
             )
             choice_control = ttk.Combobox(
                 parent,
-                width=22,
+                width=CHOICE_CONTROL_WIDTH_CHARACTERS,
                 state="readonly",
                 values=tuple(labels.values()),
                 textvariable=variable,
@@ -1219,7 +1371,7 @@ class DesktopApplication:
         if spec.kind in {"int", "float"}:
             number_control = ttk.Spinbox(
                 parent,
-                width=12,
+                width=NUMBER_CONTROL_WIDTH_CHARACTERS,
                 from_=spec.minimum,
                 to=spec.maximum,
                 increment=spec.step,
@@ -1232,7 +1384,7 @@ class DesktopApplication:
             )
             self._bind_wheel_guard(number_control)
             return number_control
-        text_control = ttk.Entry(parent, width=25, textvariable=variable)
+        text_control = ttk.Entry(parent, width=TEXT_CONTROL_WIDTH_CHARACTERS, textvariable=variable)
         text_control.bind(
             "<FocusOut>",
             partial(self._save_text_event, spec.path, variable),
@@ -1283,7 +1435,7 @@ class DesktopApplication:
             variable.set(str(self.settings.get(spec.path, spec.minimum)))
             return
         numeric = max(spec.minimum, min(spec.maximum, numeric))
-        value: int | float = int(round(numeric)) if spec.kind == "int" else round(numeric, 2)
+        value: int | float = int(round(numeric)) if spec.kind == "int" else round(numeric, NUMBER_DISPLAY_DECIMAL_PLACES)
         variable.set(str(value))
         self.settings.set(spec.path, value)
         self._update_modified_indicator(spec.path)
@@ -1356,7 +1508,7 @@ class DesktopApplication:
                 action()
             except Exception:
                 LOGGER.exception("Ошибка действия Windows UI")
-        self.root.after(50, self._drain_events)
+        self.root.after(EVENT_DRAIN_INTERVAL_MS, self._drain_events)
 
     def _setting_from_thread(self, path: str, value: object) -> None:
         self._post(partial(self._apply_setting, path, value))
@@ -1397,7 +1549,7 @@ class DesktopApplication:
             labels = self._choice_labels.get(path, {})
             string_variable.set(labels.get(str(value), str(value)))
         self._refresh_modified_indicators()
-        self.history.limit = max(1, int(self.settings.get("history.limit", 200)))
+        self.history.limit = max(1, int(self.settings.get("history.limit", DEFAULT_HISTORY_LIMIT)))
         self._apply_theme(str(self.settings.get("appearance.theme", "system")))
         self._refresh_exclusion_lists()
         self._sync_autostart()
@@ -1633,7 +1785,7 @@ class DesktopApplication:
         )
         self.status_text.set("Выберите приложение-исключение…")
         self.root.withdraw()
-        self.root.after(3000, self._capture_active_application)
+        self.root.after(ACTIVE_APPLICATION_CAPTURE_DELAY_MS, self._capture_active_application)
 
     def _capture_active_application(self) -> None:
         identifier = self.backend.active_application()
@@ -1757,7 +1909,7 @@ class DesktopApplication:
         elif size == 0:
             state = "файл пуст: записей ещё нет"
         else:
-            state = f"записывается, {size / 1024:.1f} КБ"
+            state = f"записывается, {size / BYTES_PER_KIBIBYTE:.1f} КБ"
         self.log_state_text.set(
             f"Файл журнала: {log_path()}\n"
             f"Состояние: {state}\n"
@@ -1776,7 +1928,7 @@ class DesktopApplication:
         """List what local learning remembers, rules first, then rejections."""
 
         self.learning_tree.delete(*self.learning_tree.get_children())
-        required = int(self.settings.get("detection.learning_confirmations", 2))
+        required = int(self.settings.get("detection.learning_confirmations", DEFAULT_LEARNING_CONFIRMATIONS))
         for rule in self.engine.learning.rules(required):
             self.learning_tree.insert(
                 "",
@@ -1911,7 +2063,7 @@ class DesktopApplication:
             "data": str(data_dir()),
             "error": probe.error,
         }
-        return json.dumps(payload, ensure_ascii=False, indent=2)
+        return json.dumps(payload, ensure_ascii=False, indent=DIAGNOSTICS_JSON_INDENT)
 
     def _refresh_diagnostics(self) -> None:
         diagnostics = self._diagnostics()
@@ -1958,24 +2110,24 @@ class DesktopApplication:
         style.configure("Sidebar.TFrame", background=sidebar)
         style.configure("TCheckbutton", background=content, foreground=foreground)
         style.configure("Modified.TCheckbutton", background=content, foreground=accent)
-        style.configure("Reset.TButton", padding=(2, 0), font=("Segoe UI", 8))
+        style.configure("Reset.TButton", padding=(RESET_BUTTON_INTERNAL_PADDING_PIXELS, 0), font=("Segoe UI", RESET_BUTTON_FONT_SIZE))
         style.configure("TLabel", background=content, foreground=foreground)
-        style.configure("PageTitle.TLabel", background=content, foreground=foreground, font=("Segoe UI Semibold", 22))
+        style.configure("PageTitle.TLabel", background=content, foreground=foreground, font=("Segoe UI Semibold", PAGE_TITLE_FONT_SIZE))
         style.configure("PageSubtitle.TLabel", background=content, foreground=muted)
-        style.configure("CardTitle.TLabel", foreground=foreground, font=("Segoe UI Semibold", 10))
+        style.configure("CardTitle.TLabel", foreground=foreground, font=("Segoe UI Semibold", CARD_TITLE_FONT_SIZE))
         style.configure(
             "Modified.CardTitle.TLabel",
             foreground=accent,
-            font=("Segoe UI Semibold", 10),
+            font=("Segoe UI Semibold", CARD_TITLE_FONT_SIZE),
         )
         style.configure("Muted.TLabel", foreground=muted)
         style.configure("Error.TLabel", foreground="#e5484d")
-        style.configure("Brand.TLabel", background=sidebar, foreground="white", font=("Segoe UI Semibold", 20))
+        style.configure("Brand.TLabel", background=sidebar, foreground="white", font=("Segoe UI Semibold", BRAND_LABEL_FONT_SIZE))
         style.configure("Sidebar.TLabel", background=sidebar, foreground="white")
         style.configure("MutedSidebar.TLabel", background=sidebar, foreground="#aebbd1")
         self._refresh_navigation_style()
         style.configure("TLabelframe", background=content, foreground=foreground)
-        style.configure("TLabelframe.Label", background=content, foreground=foreground, font=("Segoe UI Semibold", 11))
+        style.configure("TLabelframe.Label", background=content, foreground=foreground, font=("Segoe UI Semibold", LABELFRAME_TITLE_FONT_SIZE))
         for viewport in self._page_viewports.values():
             viewport.configure(background=content)
         for indicators in self._setting_indicators.values():
@@ -1994,7 +2146,7 @@ class DesktopApplication:
                 engine_error = str(error)
                 LOGGER.exception("Не удалось запустить Windows backend")
                 self.error_text.set(engine_error)
-        self.root.after(25, self._drain_events)
+        self.root.after(EVENT_DRAIN_INITIAL_DELAY_MS, self._drain_events)
         if self.hidden and self.tray is not None and not engine_error:
             self.root.withdraw()
         else:
