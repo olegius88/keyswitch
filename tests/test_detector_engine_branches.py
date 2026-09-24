@@ -907,7 +907,7 @@ class EngineBranchTests(unittest.TestCase):
             initialized.records[0].getMessage().removeprefix("TECHNICAL ")
         )
         self.assertEqual(initial_payload["event"], "engine_initialized")
-        self.assertEqual(initial_payload["keyswitch_version"], "0.31.2")
+        self.assertEqual(initial_payload["keyswitch_version"], "0.32.0")
         self.assertEqual(initial_payload["settings"]["overrides"], {"diagnostics.technical_logging": True})
 
     def test_start_stop_idempotence_and_backend_failure(self) -> None:

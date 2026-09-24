@@ -43,6 +43,7 @@ from .early_switch import (
 from .history import HistoryEntry, HistoryStore
 from .indicator import alternate_layout_group, layout_label
 from .language_model import LanguageModel, WordScore
+from .layouts import RU_KEYS, US_KEYS, LayoutPair
 from .lexicon_supplement import supplement_words
 from .learning import LearningStore
 from .intent_model import CorrectionTrigger, LinearNgramModel
@@ -163,6 +164,18 @@ class LanguageContext:
     group: int
     words: dict[int, str]
     updated_at: float
+
+
+@dataclass(frozen=True)
+class InsertionPoint:
+    """The letters that already stood right before and after the caret when a word began there."""
+
+    head: str
+    tail: str
+
+    @property
+    def inside_word(self) -> bool:
+        return bool(self.head or self.tail)
 
 
 @dataclass(frozen=True)
@@ -288,6 +301,11 @@ class KeySwitchEngine:
         # move or an erased character, where nothing is known to stand there.
         self._last_key_character = ""
         self._character_before_key = ""
+        # After a click, a caret move or another window the engine has not seen
+        # what stands around the caret; the next word reads it from the field
+        # as it begins (_read_insertion).
+        self._position_unknown = True
+        self._insertion: InsertionPoint | None = None
         # True once anything was typed after the last committed word, so Pause
         # must not rewrite that word any more.
         self._last_committed_stale = False
@@ -834,6 +852,7 @@ class KeySwitchEngine:
             if not self._strokes and any(stroke.character in {"@", "_", "/", "\\"} for stroke in self._symbol_strokes):
                 self._strokes = self._symbol_strokes
                 self._symbol_strokes = []
+            self._begin_word(event)
             self._source_group = event.group
             self._strokes.append(event)
             self._mark_word_activity()
@@ -899,6 +918,7 @@ class KeySwitchEngine:
                 return
             # A leading digit or path marker belongs to the token too:
             # `2ghbdtn` must not be seen as the unrelated word `ghbdtn`.
+            self._begin_word(event)
             self._source_group = event.group
             self._strokes.append(event)
             self._mark_word_activity()
@@ -1056,6 +1076,9 @@ class KeySwitchEngine:
             return "protected_token"
         if self._context_waiting is not None:
             return "context_word_waiting"
+        if self._insertion is not None and self._insertion.inside_word:
+            # Letters typed into another word are not the start of one.
+            return "inside_word"
         return ""
 
     def _early_prefix_field(self, original: str, application: str) -> tuple[FieldContext, str]:
@@ -1299,6 +1322,10 @@ class KeySwitchEngine:
         mention = self._mention_head(self.backend.active_application())
         head = self._literal_head(typed, self._source_group)
         strokes, trailing, segmentation_certain = self._completed_word(typed[head:], self._source_group)
+        if self._insertion is not None and self._insertion.inside_word:
+            # Typed into a word, every key is part of it: `,` between `те` and `е`
+            # is the `б` of `тебе`, not punctuation in front of a word.
+            head, strokes, trailing, segmentation_certain = 0, typed, (), True
         self._reset_pause_correction()
         source_group = self._source_group
         original = self._text_for_group(strokes, source_group)
@@ -1350,7 +1377,9 @@ class KeySwitchEngine:
         decision: DetectionDecision | None = None
         waiting, self._context_waiting = self._context_waiting, None
         if should_analyze and not excluded:
-            decision = self._decide_word(
+            inside = None if trailing or head else self._decide_inside_word(
+                strokes, source_group, alternatives, application, self._trigger_for_boundary(boundary), boundary)
+            decision = inside if inside is not None else self._decide_word(
                 original,
                 alternatives,
                 source_group,
@@ -1441,6 +1470,7 @@ class KeySwitchEngine:
             self._pending_learning_action = None
             self._pending_trigger_keycode = boundary.keycode
         self._strokes = []
+        self._insertion = None
         self._source_group = -1
         self._early_switch_undone = False
         self._update(
@@ -1661,6 +1691,144 @@ class KeySwitchEngine:
             use_intent_model=bool(self.settings.get("detection.intent_model_enabled", True)),
         )
 
+    def _begin_word(self, event: KeyEvent) -> None:
+        if self._strokes:
+            return
+        if self._position_unknown:
+            self._insertion = self._read_insertion(event)
+        self._position_unknown = False
+
+    def _read_insertion(self, event: KeyEvent) -> InsertionPoint | None:
+        """What stands around the caret where a word begins after a click or a caret move.
+
+        Clicking into written text and typing is how a word is fixed in place:
+        `сд|лать` gets its missing `е`. The engine saw none of that text, so
+        the letters were judged as a word of their own at the start of an empty
+        field. The field is read once, as the word begins, and the letters
+        right before and after the caret say whether this is a new word or the
+        middle of an existing one (_decide_inside_word).
+        """
+
+        reader = self.context_policy.reader
+        if reader is None or not bool(self.settings.get("detection.context_read_field", False)):
+            return None
+        application = self.backend.active_application()
+        if self._application_excluded(application):
+            return None
+        snapshot = reader.read(application, self._focus_window or 0)
+        if snapshot is None or snapshot.sensitive or snapshot.selection or snapshot.application != application:
+            return None
+        before = snapshot.before
+        # The key may already have reached the editor, or not yet.
+        if event.character and before.endswith(event.character):
+            before = before[:-len(event.character)]
+        point = InsertionPoint(self._letters_before(before), self._letters_after(snapshot.after))
+        if point.inside_word:
+            self._technical_event(
+                "word_started_inside_text", application=application,
+                head_letters=len(point.head), tail_letters=len(point.tail),
+            )
+        return point
+
+    @staticmethod
+    def _letters_before(text: str) -> str:
+        start = len(text)
+        while start and text[start - 1].isalpha():
+            start -= 1
+        return text[start:]
+
+    @staticmethod
+    def _letters_after(text: str) -> str:
+        end = 0
+        while end < len(text) and text[end].isalpha():
+            end += 1
+        return text[:end]
+
+    def _layout_name(self, group: int) -> str:
+        names: list[str] = self.settings.get("detection.layouts", ["us", "ru"])
+        return names[group] if 0 <= group < len(names) else ""
+
+    def _layout_letters(self, group: int) -> frozenset[str]:
+        keys = {"us": US_KEYS, "ru": RU_KEYS}.get(self._layout_name(group), "")
+        return frozenset(character for key in keys if key.isalpha() for character in (key, key.upper()))
+
+    def _decide_inside_word(
+        self, strokes: tuple[KeyEvent, ...], source_group: int, alternatives: dict[int, str],
+        application: str, trigger: CorrectionTrigger, boundary: KeyEvent | None,
+    ) -> DetectionDecision | None:
+        """Letters typed into the middle of a word are judged as that whole word.
+
+        `t` typed between `сд` and `лать` is not a word: the question is what the
+        whole word is. When the letters around it are in the other layout, the
+        word is put to the usual decision as if all of it had been typed in the
+        fragment's layout - `cltkfnm` against `сделать` - and only the typed
+        fragment is replaced. When they are in the fragment's own layout, the
+        fragment agrees with its word and is left alone. At a boundary the word
+        ends there, so only the letters before the caret belong to it.
+        Returns None when the word was not begun inside text.
+        """
+
+        point = self._insertion
+        target = next(iter(alternatives), None)
+        reader = self.context_policy.reader
+        if point is None or not point.inside_word or target is None or reader is None:
+            return None
+        fragment = self._text_for_group(strokes, source_group)
+        closing = "" if boundary is None or boundary.deferred else boundary.character
+        snapshot = reader.read(application, self._focus_window or 0)
+        before: str | None = None
+        if (snapshot is not None and not snapshot.sensitive and not snapshot.selection
+                and snapshot.application == application):
+            for suffix in ((fragment + closing, fragment) if closing else (fragment,)):
+                if snapshot.before.endswith(suffix):
+                    before = snapshot.before[:-len(suffix)]
+                    break
+        if snapshot is None or before is None:
+            return self._kept_inside_word(fragment, source_group, "field_changed", point)
+        head = self._letters_before(before)
+        tail = "" if boundary is not None else self._letters_after(snapshot.after)
+        if not head and not tail:
+            return None
+        surroundings = head + tail
+        source_letters, target_letters = self._layout_letters(source_group), self._layout_letters(target)
+        if not target_letters or not all(character in target_letters for character in surroundings) or any(
+                character in source_letters for character in surroundings):
+            same = bool(source_letters) and all(character in source_letters for character in surroundings)
+            return self._kept_inside_word(fragment, source_group, "same_layout" if same else "mixed_layout", point)
+        pair, source_name, target_name = LayoutPair(), self._layout_name(source_group), self._layout_name(target)
+        whole = pair.translate(head, target_name, source_name) + fragment + pair.translate(tail, target_name, source_name)
+        decision = self._decide_word(
+            whole, {target: head + alternatives[target] + tail}, source_group, application, trigger,
+            boundary_text=closing,
+            field_override=replace(snapshot, before=before[:len(before) - len(head)], after=snapshot.after[len(tail):]),
+            # The whole word and its surroundings come from the field itself, so the
+            # model's verdict stands wherever it is, as for a planned neighbour.
+            planned_context=True,
+        )
+        converted = decision.should_convert and decision.target_group == target
+        self._technical_event(
+            "inside_word_decision", application=application, surroundings="other_layout",
+            head_letters=len(head), tail_letters=len(tail), converted=converted,
+        )
+        if not converted:
+            # A wait or a suggestion is about a next word; this one is inside text.
+            self._context_result = None
+            return replace(decision, should_convert=False, original=fragment, replacement=fragment)
+        return replace(decision, original=fragment, replacement=alternatives[target])
+
+    def _kept_inside_word(
+        self, fragment: str, source_group: int, reason: str, point: InsertionPoint,
+    ) -> DetectionDecision:
+        self._technical_event(
+            "inside_word_decision", surroundings=reason,
+            head_letters=len(point.head), tail_letters=len(point.tail), converted=False,
+        )
+        score = self.models[source_group].score(fragment)
+        return DetectionDecision(
+            False, fragment, fragment, source_group, source_group, 0.0,
+            "слово набрано внутри другого слова", score, score,
+        )
+
     def _decide_word(
         self,
         original: str,
@@ -1669,6 +1837,7 @@ class KeySwitchEngine:
         application: str,
         trigger: CorrectionTrigger = "space",
         *, literal_tail: str = "", boundary_text: str = "",
+        field_override: FieldContext | None = None, planned_context: bool = False,
     ) -> DetectionDecision:
         self._context_result = None
         context_words, context_group = self._context_for(application)
@@ -1723,8 +1892,9 @@ class KeySwitchEngine:
         result = self.context_policy.decide(
             decision, alternative, group, self.detector, trigger,
             str(self.settings.get("detection.context_policy", "assist")),
-            read_field=bool(self.settings.get("detection.context_read_field", False)),
-            literal_tail=literal_tail, boundary_text=boundary_text,
+            read_field=field_override is None and bool(self.settings.get("detection.context_read_field", False)),
+            literal_tail=literal_tail, boundary_text=boundary_text, field_override=field_override,
+            planned_context=planned_context,
         )
         self._context_result = result
         if result.field is not None and result.field.sensitive:
@@ -2321,6 +2491,10 @@ class KeySwitchEngine:
         typed = tuple(self._strokes)
         head = self._literal_head(typed, self._source_group)
         strokes, trailing, segmentation_certain = self._completed_word(typed[head:], self._source_group)
+        if self._insertion is not None and self._insertion.inside_word:
+            # Typed into a word, every key is part of it: `,` between `те` and `е`
+            # is the `б` of `тебе`, not punctuation in front of a word.
+            head, strokes, trailing, segmentation_certain = 0, typed, (), True
         source_group = self._source_group
         manual_layout_selected = self._word_protected(source_group)
         original = self._text_for_group(strokes, source_group)
@@ -2369,7 +2543,9 @@ class KeySwitchEngine:
             return
         if not segmentation_certain:
             return
-        decision = self._decide_word(
+        inside = None if trailing or head else self._decide_inside_word(
+            strokes, source_group, alternatives, application, "pause", None)
+        decision = inside if inside is not None else self._decide_word(
             original, alternatives, source_group, application, "pause",
             literal_tail="".join(stroke.character for stroke in trailing),
         )
@@ -2419,6 +2595,7 @@ class KeySwitchEngine:
                 head=() if mention and self._quotation_closed(mention[0], trailing, None) else mention,
             )
         self._strokes = []
+        self._insertion = None
         self._source_group = -1
         self._early_switch_undone = False
         self._reset_pause_correction()
@@ -2690,6 +2867,7 @@ class KeySwitchEngine:
         # but never let that stale wait block the following word's prefix.
         self._cancel_context_wait("manual_conversion")
         self._strokes = []
+        self._insertion = None
         self._symbol_strokes = []
         self._source_group = -1
         self._early_switch_undone = False
@@ -3461,6 +3639,8 @@ class KeySwitchEngine:
         # After a click, a caret move or another window nothing is known to
         # stand before the next key.
         self._last_key_character = ""
+        self._position_unknown = True
+        self._insertion = None
         self._cancel_context_wait(reason or "word_cleared")
         if self._deferred_action is not None:
             self._complete_deferred_action(False, reason)

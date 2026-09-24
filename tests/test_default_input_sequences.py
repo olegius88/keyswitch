@@ -32,6 +32,7 @@ from keyswitch.constants.settings_defaults import (
 )
 from keyswitch.engine import KeySwitchEngine
 from keyswitch.history import HistoryStore
+from keyswitch.input_context import FieldContext
 from keyswitch.intent_model import IntentModelStatus, LinearNgramModel
 from keyswitch.language_model import LanguageModel
 from test_input_integrity import EditorBackend
@@ -104,6 +105,19 @@ class _Session:
     def submit(self) -> None:
         self.tap(KeyEvent(True, DEFAULT_SEQUENCE_RETURN_KEYCODE, "Return", "", ("", ""), self.backend.group, 0, 0))
         self.idle()
+
+
+class _CaretReader:
+    """The field as UI Automation reads it: the text before and after the caret."""
+
+    status = "available"
+
+    def __init__(self, backend: EditorBackend) -> None:
+        self.backend = backend
+
+    def read(self, application: str, window: int) -> FieldContext:
+        text, caret = self.backend.text, self.backend.caret
+        return FieldContext(application, "1", text[:caret], text[caret:], role="text", source="uia")
 
 
 class DefaultInputSequenceTests(unittest.TestCase):
@@ -202,6 +216,27 @@ class DefaultInputSequenceTests(unittest.TestCase):
                         self.session(group=0, application=application) as session:
                     session.type("еще привет ", 1, idle_after_words=pause)
                     self.assertEqual(session.backend.text, "еще привет ")
+
+    def test_a_letter_typed_into_a_written_word_is_judged_with_the_word(self) -> None:
+        """A click into written text, a missing letter, a pause: the whole word decides.
+
+        0.31.2 judged the letter alone, so a correct `е` put back into `мня` became
+        `мtня`, and a mistyped `t` stayed whenever the letter alone looked like one.
+        """
+        for text, caret, letter, typed_group in (
+            ("дай мне мня", len("дай мне м"), "е", 1),
+            ("дай мне мня", len("дай мне м"), "е", 0),
+            ("я говорю тее это", len("я говорю те"), "б", 0),
+            ("we want to mke it", len("we want to m"), "a", 1),
+        ):
+            with self.subTest(text=text, typed_group=typed_group), \
+                    self.session(group=typed_group, application="firefox") as session:
+                session.backend.text, session.backend.caret = text, caret
+                session.engine.context_policy.reader = _CaretReader(session.backend)
+                session.engine._handle(KeyEvent(True, 0, "Pointer", "", ("", ""), typed_group, 0, 0))
+                session.type(letter, 0 if letter.isascii() else 1, idle_after_words=False)
+                session.idle()
+                self.assertEqual(session.backend.text, text[:caret] + letter + text[caret:])
 
     def test_punctuation_and_repeated_spaces_never_submit_without_return(self) -> None:
         with self.session() as session:

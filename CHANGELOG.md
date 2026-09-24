@@ -4,6 +4,26 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.32.0 — 2026-09-24
+
+- Read the field as a word begins after a click, a caret move or another window, and
+  judge letters typed into the middle of a written word as that whole word. Clicking
+  into text and typing is how a word is fixed in place - `сд|лать` gets its missing
+  `е` - but the engine had seen none of that text, so the typed letters were judged as
+  a word of their own at the start of an empty field: a correct `е` put back into
+  `мня` became `t` at the pause, and a mistyped `t` stayed whenever the letter alone
+  looked like something. Now the letters right before and after the caret are read
+  when typing starts. When they are in the other layout, the fragment is decided as
+  if the whole word had been typed in its layout (`cltkfnm` against `сделать`), with
+  the text around the word as context, and only the fragment is replaced; a key that
+  is punctuation in one layout and a letter in the other counts as a letter there (`,`
+  between `те` and `е` is `б`). When they are in the fragment's own layout, it agrees
+  with its word and is left alone, and the early layout switch does not fire inside a
+  word. Letters put back into 1,500 sentences typed into different applications:
+  corrupted fixes went from 2,619 to none, restored wrong-layout fixes from 4,390 to
+  7,464 of 7,500 (in Firefox from 1,930 corrupted and 3,397 restored to none and
+  7,464); ordinary typing is unchanged.
+
 ## 0.31.2 — 2026-09-24
 
 - Decide a word in doubt together with its converted neighbour in every application.
