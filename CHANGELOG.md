@@ -4,6 +4,17 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.33.2 — 2026-09-28
+
+- Read only the text of the focused field on Windows. In Chromium-based windows - VS Code and
+  other Electron applications, Chrome, Edge - the reader took up to 512 characters of the page or
+  window around an input, so a word typed into an empty chat box was judged by the conversation
+  above it and the controls below: a Russian "ты" typed there became "ns". Every field read in
+  VS Code on a real machine since 0.30 held 450 or more characters before the caret, and Firefox
+  reads showed the same pattern. The reader now stops at the edges of the field: an empty input
+  in Edge reads as empty instead of 512 characters of the paragraph above it, and a filled one
+  reads as its own text.
+
 ## 0.33.1 — 2026-09-27
 
 - Publish everything since 0.32.0. The 0.33.0 section below was tagged, but its release job

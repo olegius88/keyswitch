@@ -17,7 +17,7 @@ from keyswitch.input_context import CONTEXT_LIMIT, FieldContext
 from keyswitch.windows_context import UI_AUTOMATION_LIBRARY, WindowsFieldReader, probe_uia
 from keyswitch.constants.text import FIELD_AFTER_CARET_MAX_CHARACTERS
 from keyswitch.constants.timing import UIA_CONNECTION_TIMEOUT_MS
-from keyswitch.constants.windows import UIA_TEXT_PATTERN_ID
+from keyswitch.constants.windows import UIA_EMBEDDED_OBJECT_CHARACTER, UIA_TEXT_PATTERN_ID
 from test_context_policy import ContextEngineTests
 from fixture_values.counts import (
     ATSPI_CACHE_PROBE_ATTEMPTS,
@@ -70,6 +70,9 @@ class WindowsContextTests(unittest.TestCase):
         self.before, self.after = MagicMock(), MagicMock()
         self.before.GetText.return_value = "ранее вставленный текст ghbdtn "
         self.after.GetText.return_value = " после курсора"
+        # Both reads stay inside the field's own document range unless a test says otherwise.
+        self.before.CompareEndpoints.return_value = 0
+        self.after.CompareEndpoints.return_value = 0
         self.caret.Clone.side_effect = [self.before, self.after]
         self.reader = WindowsFieldReader(self.automation, object())
         self.pid = patch.object(WindowsFieldReader, "_process_for_window", return_value=FIELD_READER_MATCHING_PROCESS_ID)
@@ -85,6 +88,8 @@ class WindowsContextTests(unittest.TestCase):
         self.reader.close()  # Injected test automation owns no COM apartment.
         self.before.MoveEndpointByUnit.assert_called_once_with(0, 0, -CONTEXT_LIMIT)
         self.after.MoveEndpointByUnit.assert_called_once_with(1, 0, FIELD_AFTER_CARET_MAX_CHARACTERS)
+        self.before.MoveEndpointByRange.assert_not_called()
+        self.after.MoveEndpointByRange.assert_not_called()
         self.element.CurrentIsPassword = True
         self.element.GetCurrentPattern.reset_mock()
         field = self.reader.read("chat", 1)
@@ -92,6 +97,27 @@ class WindowsContextTests(unittest.TestCase):
         self.assertTrue(field.sensitive)
         self.assertEqual(field.before, "")
         self.element.GetCurrentPattern.assert_not_called()
+
+    def test_a_browser_range_stops_at_the_edges_of_the_field(self) -> None:
+        """Chromium moves a caret's endpoints past the focused input into the page around it.
+
+        An empty input in Edge read 512 characters of the paragraph above it, and an empty
+        chat box in VS Code read the conversation above it. The field's own document range
+        bounds both reads, and the placeholder an empty field reports is not text.
+        """
+
+        document = self.element.GetCurrentPattern.return_value.QueryInterface.return_value.DocumentRange
+        self.before.CompareEndpoints.return_value = -1
+        self.after.CompareEndpoints.return_value = 1
+        self.before.GetText.return_value = UIA_EMBEDDED_OBJECT_CHARACTER
+        self.after.GetText.return_value = UIA_EMBEDDED_OBJECT_CHARACTER
+        field = self.reader.read("chat", 1)
+        assert field is not None
+        self.assertEqual((field.before, field.after), ("", ""))
+        self.before.CompareEndpoints.assert_called_once_with(0, document, 0)
+        self.after.CompareEndpoints.assert_called_once_with(1, document, 1)
+        self.before.MoveEndpointByRange.assert_called_once_with(0, document, 0)
+        self.after.MoveEndpointByRange.assert_called_once_with(1, document, 1)
 
     def test_selection_process_focus_change_and_missing_ranges(self) -> None:
         self.element.CurrentProcessId = FIELD_READER_MISMATCHED_PROCESS_ID

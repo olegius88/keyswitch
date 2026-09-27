@@ -65,6 +65,9 @@ VK_Z: Final = 0x5A
 # UI Automation TextPattern id. GetCurrentPattern answers S_OK with a null pointer when the element
 # does not support it: a field without text is an ordinary answer.
 UIA_TEXT_PATTERN_ID: Final = 10014
+# What a browser's text range reports in place of an embedded object, and as the whole text of an
+# empty input (Edge, 27.09.2026): a placeholder, never typed text.
+UIA_EMBEDDED_OBJECT_CHARACTER: Final = "￼"
 ERROR_ALREADY_EXISTS: Final = 183
 SW_RESTORE: Final = 9
 WH_KEYBOARD_LL: Final = 13

@@ -20,7 +20,7 @@ from .input_context import CONTEXT_LIMIT, FieldContext, FieldRole
 from .constants.text import FIELD_AFTER_CARET_MAX_CHARACTERS
 from .constants.timing import UIA_CONNECTION_TIMEOUT_MS, UIA_TRANSACTION_TIMEOUT_MS
 from .constants.units import MILLISECONDS_PER_SECOND
-from .constants.windows import UIA_TEXT_PATTERN_ID
+from .constants.windows import UIA_EMBEDDED_OBJECT_CHARACTER, UIA_TEXT_PATTERN_ID
 
 
 # The type library the build pre-generates and the runtime opens must name the
@@ -33,6 +33,7 @@ class _Range(Protocol):
     def Clone(self) -> _Range: ...
     def CompareEndpoints(self, endpoint: int, other: _Range, other_endpoint: int) -> int: ...
     def MoveEndpointByUnit(self, endpoint: int, unit: int, count: int) -> int: ...
+    def MoveEndpointByRange(self, endpoint: int, other: _Range, other_endpoint: int) -> None: ...
     def GetText(self, maximum: int) -> str: ...
 
 
@@ -43,6 +44,8 @@ class _Ranges(Protocol):
 
 
 class _TextPattern(Protocol):
+    @property
+    def DocumentRange(self) -> _Range: ...
     def GetSelection(self) -> _Ranges: ...
 
 
@@ -166,7 +169,8 @@ class WindowsFieldReader:
             # expose its text. That is a field KeySwitch cannot read, not a
             # provider that has to be rebuilt.
             return None
-        ranges = supported.QueryInterface(self.text_interface).GetSelection()
+        pattern = supported.QueryInterface(self.text_interface)
+        ranges = pattern.GetSelection()
         if ranges.Length > 1:
             return FieldContext(application, field_id, selection=True, source="uia")
         if ranges.Length != 1:
@@ -177,7 +181,20 @@ class WindowsFieldReader:
         before, after = caret.Clone(), caret.Clone()
         before.MoveEndpointByUnit(0, 0, -CONTEXT_LIMIT)
         after.MoveEndpointByUnit(1, 0, FIELD_AFTER_CARET_MAX_CHARACTERS)
-        prefix, suffix = before.GetText(CONTEXT_LIMIT), after.GetText(FIELD_AFTER_CARET_MAX_CHARACTERS)
+        # A browser's text ranges run through the whole page: Chromium moves an endpoint past
+        # the edge of the focused input into the text around it. An empty input in Edge read
+        # 512 characters of the paragraph above it and the fields below (27.09.2026), and an
+        # empty chat box in VS Code read the conversation above it: every read in VS Code on the
+        # owner's laptop since 0.30 held 450 or more characters before the caret and some after
+        # it, and a Russian `ты` typed there became `ns`. Firefox reads there looked the same.
+        # The field's own document range is its text alone, so both reads stop at its edges.
+        field = pattern.DocumentRange
+        if before.CompareEndpoints(0, field, 0) < 0:
+            before.MoveEndpointByRange(0, field, 0)
+        if after.CompareEndpoints(1, field, 1) > 0:
+            after.MoveEndpointByRange(1, field, 1)
+        prefix = before.GetText(CONTEXT_LIMIT).replace(UIA_EMBEDDED_OBJECT_CHARACTER, "")
+        suffix = after.GetText(FIELD_AFTER_CARET_MAX_CHARACTERS).replace(UIA_EMBEDDED_OBJECT_CHARACTER, "")
         current = self.automation.GetFocusedElement()
         if current.CurrentIsPassword:
             return FieldContext(application, field_id, role="password", sensitive=True, source="uia")

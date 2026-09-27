@@ -38,7 +38,7 @@
 | Компонент | Роль и статус | Документы и доказательства |
 | --- | --- | --- |
 | Layout Intent / KSLM v20 | Базовый классификатор пары токенов; рабочий `intent-v1-8bccdf50b028` | [Карточка RU](../model/intent_v1/MODEL_CARD.md), [EN](../model/intent_v1/MODEL_CARD.en.md), [runbook](intent-model-runbook.md), [cookbook](intent-model-cookbook.md) |
-| Context v1 | Рабочая четырёхклассовая политика `context-v1-6c73aeb72db0` (0.33.0, схема признаков 5, без имени приложения), введена в 0.15.0 и переобучалась | [Устройство](context-assistant.md), [отчёт](../model/context_v1/report.json) |
+| Context v1 | Рабочая четырёхклассовая политика `context-v1-6c73aeb72db0` (0.33.1, схема признаков 5, без имени приложения), введена в 0.15.0 и переобучалась | [Устройство](context-assistant.md), [отчёт](../model/context_v1/report.json) |
 | Ortho v1 | Счётная модель орфотактики в пространстве клавиш; разрешает замену там, где детектор воздержался | [Методика и границы](../model/ortho_v1/README.md), [отчёт рабочей модели](../model/ortho_v1/report.json) |
 | Ortho v2 | Измерительный конвейер для неё; кандидат не выпущен | [Что найдено и почему](../model/ortho_v2/README.md) |
 | Prefix v1 | Отдельная модель раннего переключения на полуслове в `assist` | [Методика и ограничения](../model/prefix_v1/README.md), [отчёт](../model/prefix_v1/report.json) |
