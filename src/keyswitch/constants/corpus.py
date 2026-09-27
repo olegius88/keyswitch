@@ -95,3 +95,66 @@ TRAIN_SPLIT_PROBABILITY: Final = TRAIN_SPLIT_CEILING / SPLIT_BUCKET_COUNT
 DEVELOPMENT_SPLIT_PROBABILITY: Final = (DEVELOPMENT_SPLIT_CEILING - TRAIN_SPLIT_CEILING) / SPLIT_BUCKET_COUNT
 CALIBRATION_SPLIT_PROBABILITY: Final = (CALIBRATION_SPLIT_CEILING - DEVELOPMENT_SPLIT_CEILING) / SPLIT_BUCKET_COUNT
 TEST_SPLIT_PROBABILITY: Final = (SPLIT_BUCKET_COUNT - CALIBRATION_SPLIT_CEILING) / SPLIT_BUCKET_COUNT
+# The context-v2 phrase split (tools/context_corpus.py), frozen with the rejected context-v2
+# generation and reused by corpora built from its reserve. A row of the CC0 phrase snapshot is
+# identifier, language, text and modification time.
+CC0_PHRASE_TSV_FIELDS: Final = 4
+# Phrases kept per near-duplicate group by default, so a large template family cannot dominate.
+CONTEXT_PHRASES_PER_GROUP: Final = 4
+# A phrase enters the split with this many characters and at least this many words.
+CONTEXT_PHRASE_MIN_CHARACTERS: Final = 4
+CONTEXT_PHRASE_MAX_CHARACTERS: Final = 512
+CONTEXT_PHRASE_MIN_WORDS: Final = 2
+# A phrase of this many words also groups by each of its one-word deletions.
+CONTEXT_NEAR_DUPLICATE_MIN_WORDS: Final = 4
+CONTEXT_NEAR_DUPLICATE_MAX_WORDS: Final = 40
+# A phrase group's hash picks one of the buckets; cumulative ceilings of train, development,
+# calibration and test, and the rest is the reserve.
+CONTEXT_PHRASE_SPLIT_BUCKET_COUNT: Final = 100
+CONTEXT_PHRASE_TRAIN_SPLIT_CEILING: Final = 60
+CONTEXT_PHRASE_DEVELOPMENT_SPLIT_CEILING: Final = 70
+CONTEXT_PHRASE_CALIBRATION_SPLIT_CEILING: Final = 80
+CONTEXT_PHRASE_TEST_SPLIT_CEILING: Final = 90
+# Context-v2 phrase frames (tools/context_frames.py). A focus word has at most this many letters;
+# the first word of a phrase is always a focus when it is short, and at most this many positions
+# of a phrase become frames.
+CONTEXT_FRAME_WORD_MAX_CHARACTERS: Final = 32
+CONTEXT_FRAME_SHORT_WORD_MAX_CHARACTERS: Final = 2
+CONTEXT_FRAME_FOCUS_POSITIONS_PER_PHRASE: Final = 2
+# Left and right context a frame keeps around its focus word.
+CONTEXT_FRAME_BEFORE_MAX_CHARACTERS: Final = 512
+CONTEXT_FRAME_AFTER_MAX_CHARACTERS: Final = 128
+# One frame in this many has its left context typed in the other layout; one in this many keeps
+# its right context and the role of a text field.
+CONTEXT_FRAME_WRONG_LAYOUT_BEFORE_MODULUS: Final = 5
+CONTEXT_FRAME_TEXT_FIELD_MODULUS: Final = 7
+# One frame in this many whose focus word has at least this many letters also gets a spelling
+# variant: one inner letter deleted, never one of the edge letters (the first and the last).
+CONTEXT_FRAME_SPELLING_VARIANT_MODULUS: Final = 5
+CONTEXT_FRAME_SPELLING_VARIANT_MIN_CHARACTERS: Final = 4
+CONTEXT_FRAME_SPELLING_EDGE_CHARACTERS: Final = 2
+# One focus family in this many is held out of every fitting split for the lexical test track.
+CONTEXT_FRAME_LEXICAL_HOLDOUT_MODULUS: Final = 10
+# Authored technical tokens: a family's hash picks one of the buckets; the first ones train, then
+# one development and one calibration bucket, the rest test.
+CONTEXT_FRAME_SAFETY_SPLIT_BUCKET_COUNT: Final = 10
+CONTEXT_FRAME_SAFETY_TRAIN_BUCKETS: Final = 6
+CONTEXT_FRAME_SAFETY_DEVELOPMENT_BUCKET: Final = 6
+CONTEXT_FRAME_SAFETY_CALIBRATION_BUCKET: Final = 7
+# Corpus revision the context-v2 seal records.
+CONTEXT_V2_CORPUS_REVISION: Final = 2
+# The key-space corpus of the rejected ortho-v2 generation (tools/ortho_v2_corpus.py): the percent
+# of key-sequence families reserved for the one-shot gate, the longest token taken, the cap on the
+# weight of a lexicon row, and how many letters make an all-capitals token an abbreviation.
+ORTHO_V2_GATE_SHARE_PERCENT: Final = 16
+ORTHO_V2_MAXIMUM_TOKEN_CHARACTERS: Final = 32
+ORTHO_V2_MAXIMUM_LEXICON_WEIGHT: Final = 32
+ORTHO_V2_ABBREVIATION_MIN_LETTERS: Final = 2
+# Shortest lexicon word the ortho-v2 corpus counts.
+ORTHO_V2_LEXICON_MIN_CHARACTERS: Final = 2
+# tools/ortho_v2_verified.py: a sentence vouches for its tokens' labels when it has at least this
+# many word-shaped tokens and at least this share of them are known to its language.
+ORTHO_V2_VERIFIED_MIN_TOKENS: Final = 5
+ORTHO_V2_VERIFIED_MIN_KNOWN_SHARE: Final = 0.75
+# Dictionary verdicts that tool caches while it reads the snapshot.
+ORTHO_V2_DICTIONARY_CACHE_SIZE: Final = 1 << 20

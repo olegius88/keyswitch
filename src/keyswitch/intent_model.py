@@ -31,6 +31,43 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Callable, Final, Literal, ParamSpec, Protocol, TypeVar, cast
 
+from .constants.file_formats import (
+    INT64_MIN,
+    KSLM_FINGERPRINT_ENTRY_BYTES,
+    KSLM_MAX_CONTAINER_BYTES,
+    KSLM_MAX_DIMENSION,
+    KSLM_MAX_DIMENSION_LOG2,
+    KSLM_MAX_FINGERPRINTS,
+    KSLM_MAX_MANIFEST_BYTES,
+    KSLM_MAX_PAYLOAD_BYTES,
+    KSLM_MIN_MANIFEST_BYTES,
+    KSLM_QUANTIZED_WEIGHT_LIMIT,
+    KSLM_QUANTIZED_WEIGHT_LIMIT_FLOAT,
+    KSLM_SCHEMA_VERSION,
+    KSLM_WEIGHT_ENTRY_BYTES,
+    PUBLISHED_MODEL_FILE_MODE,
+    SHA256_HEX_CHARACTERS,
+    UINT32_MASK,
+    UINT64_MASK,
+    VERSION_HASH_CHARACTERS,
+)
+from .constants.models import (
+    FEATURE_HASH_SIGN_BIT,
+    FNV1A64_OFFSET_BASIS,
+    FNV1A64_PRIME,
+    INTENT_FEATURE_VERSION,
+    INTENT_LENGTH_EXACT_MAX_CHARACTERS,
+    INTENT_LENGTH_LONG_MAX_CHARACTERS,
+    INTENT_LENGTH_MEDIUM_MAX_CHARACTERS,
+    INTENT_LENGTH_SHORT_MAX_CHARACTERS,
+    INTENT_MAX_FEATURE_GROUP,
+    INTENT_MAX_MODEL_FLOAT_MAGNITUDE,
+    INTENT_MEMBERSHIP_FNV_SEED,
+    INTENT_METADATA_MAX_DEPTH,
+    INTENT_MODEL_VERSION_MAX_CHARACTERS,
+    INTENT_NGRAM_ORDERS,
+    INTENT_RAW_TOKEN_MAX_CHARACTERS,
+)
 from .language_model import WordScore
 
 
@@ -58,24 +95,9 @@ TRIGGERS: Final[tuple[CorrectionTrigger, ...]] = (
 )
 LAYOUT_DIRECTIONS: Final[tuple[LayoutDirection, ...]] = ("0>1", "1>0")
 MAGIC: Final[bytes] = b"KSLM"
-SCHEMA_VERSION: Final[int] = 4
-FEATURE_VERSION: Final[int] = 5
 HASH_ALGORITHM: Final[str] = "fnv1a64-signed-v1"
 MEMBERSHIP_ALGORITHM: Final[str] = "fnv1a64-unsigned-v1"
-DEFAULT_FNV_SEED: Final[int] = 0xCBF29CE484222325
-DEFAULT_MEMBERSHIP_FNV_SEED: Final[int] = 0x9E3779B97F4A7C15
-NGRAM_ORDERS: Final[tuple[int, ...]] = (1, 2, 3, 4, 5)
-RAW_TOKEN_LIMIT: Final[int] = 64
-MINIMUM_RUNTIME_TOKEN_LENGTH: Final[int] = 5
-MAX_DIMENSION: Final[int] = 1 << 21
-MAX_MANIFEST_BYTES: Final[int] = 1 * 1024 * 1024
-MAX_SUPPORTED_FINGERPRINTS: Final[int] = 1 << 20
-MAX_PAYLOAD_BYTES: Final[int] = 12 * 1024 * 1024
 HEADER: Final[struct.Struct] = struct.Struct("<4sHHIII32s")
-MAX_CONTAINER_BYTES: Final[int] = 14 * 1024 * 1024
-_FNV_PRIME: Final[int] = 0x100000001B3
-_UINT64_MASK: Final[int] = (1 << 64) - 1
-_MAX_MODEL_FLOAT: Final[float] = 1_000_000.0
 _MODEL_CACHE: dict[tuple[str, int, int, int, int], "LinearNgramModel"] = {}
 _MODEL_CACHE_LOCK: Final[threading.RLock] = threading.RLock()
 _MODEL_DECODE_LOCK: Final[threading.RLock] = threading.RLock()
@@ -130,7 +152,7 @@ class IntentModelStatus:
         if self.available:
             version = self.version or "unknown"
             if self.checksum:
-                return f"{version} · sha256:{self.checksum[:12]}"
+                return f"{version} · sha256:{self.checksum[:VERSION_HASH_CHARACTERS]}"
             return version
         return f"недоступна: {self.error or 'файл модели не найден'}"
 
@@ -164,32 +186,32 @@ class PlattParameters:
 def normalize_token(token: str) -> str:
     """Bound CPU/memory use, then apply the model's Unicode normalization."""
 
-    bounded = token[:RAW_TOKEN_LIMIT]
+    bounded = token[:INTENT_RAW_TOKEN_MAX_CHARACTERS]
     return unicodedata.normalize("NFC", unicodedata.normalize("NFC", bounded).casefold())
 
 
-def fnv1a64(value: str, seed: int = DEFAULT_FNV_SEED) -> int:
+def fnv1a64(value: str, seed: int = FNV1A64_OFFSET_BASIS) -> int:
     """Return a platform-independent FNV-1a hash of UTF-8 feature text."""
 
-    if isinstance(seed, bool) or not 0 <= seed <= _UINT64_MASK:
+    if isinstance(seed, bool) or not 0 <= seed <= UINT64_MASK:
         raise ValueError("FNV seed must be an unsigned 64-bit integer")
     result = seed
     for byte in value.encode("utf-8"):
         result ^= byte
-        result = (result * _FNV_PRIME) & _UINT64_MASK
+        result = (result * FNV1A64_PRIME) & UINT64_MASK
     return result
 
 
 def signed_feature_hash(
     feature: str,
     dimension: int,
-    seed: int = DEFAULT_FNV_SEED,
+    seed: int = FNV1A64_OFFSET_BASIS,
 ) -> tuple[int, int]:
     """Map one feature to a bucket and a deterministic collision sign."""
 
     _validate_dimension(dimension)
     hashed = fnv1a64(feature, seed)
-    sign = -1 if hashed & (1 << 63) else 1
+    sign = -1 if hashed & FEATURE_HASH_SIGN_BIT else 1
     return hashed & (dimension - 1), sign
 
 
@@ -208,9 +230,9 @@ def extract_features(
     evidence: IntentModelInput,
     *,
     dimension: int,
-    hash_seed: int = DEFAULT_FNV_SEED,
-    membership_seed: int = DEFAULT_MEMBERSHIP_FNV_SEED,
-    ngram_orders: Sequence[int] = NGRAM_ORDERS,
+    hash_seed: int = FNV1A64_OFFSET_BASIS,
+    membership_seed: int = INTENT_MEMBERSHIP_FNV_SEED,
+    ngram_orders: Sequence[int] = INTENT_NGRAM_ORDERS,
 ) -> FeatureVector:
     """Build pairwise character and bounded dense hashed features."""
 
@@ -258,7 +280,10 @@ def extract_features(
     direction = f"{_group(evidence.source_group)}>{_group(evidence.target_group)}"
     length_bucket = _length_bucket(max(len(original), len(alternative)))
 
-    add("dense:length_delta", (len(alternative) - len(original)) / float(RAW_TOKEN_LIMIT))
+    add(
+        "dense:length_delta",
+        (len(alternative) - len(original)) / float(INTENT_RAW_TOKEN_MAX_CHARACTERS),
+    )
     add(
         f"interaction:direction:{direction}:length:{length_bucket}",
         1.0,
@@ -302,15 +327,18 @@ class LinearNgramModel:
         _fingerprint_payload_token: object | None = None,
     ) -> None:
         _validate_dimension(dimension)
-        if weights.typecode != "h" or weights.itemsize != 2:
+        if weights.typecode != "h" or weights.itemsize != KSLM_WEIGHT_ENTRY_BYTES:
             raise ValueError("weights must be a native signed-int16 array")
         if len(weights) != dimension:
             raise ValueError("weight count must equal model dimension")
-        if supported_fingerprints.typecode != "Q" or supported_fingerprints.itemsize != 8:
+        if (
+            supported_fingerprints.typecode != "Q"
+            or supported_fingerprints.itemsize != KSLM_FINGERPRINT_ENTRY_BYTES
+        ):
             raise ValueError(
                 "supported fingerprints must be a native unsigned-int64 array"
             )
-        if len(supported_fingerprints) > MAX_SUPPORTED_FINGERPRINTS:
+        if len(supported_fingerprints) > KSLM_MAX_FINGERPRINTS:
             raise ValueError(
                 "supported fingerprint count exceeds KSLM size limit"
             )
@@ -333,7 +361,7 @@ class LinearNgramModel:
         parsed_orders = _validate_orders(ngram_orders)
         parsed_version = _validate_version(model_version)
         if (
-            len(payload_sha256) != 64
+            len(payload_sha256) != SHA256_HEX_CHARACTERS
             or any(
                 character not in "0123456789abcdef"
                 for character in payload_sha256
@@ -341,7 +369,7 @@ class LinearNgramModel:
         ):
             raise ValueError("payload_sha256 must be exact lowercase SHA-256")
         if (
-            len(checksum) != 64
+            len(checksum) != SHA256_HEX_CHARACTERS
             or any(character not in "0123456789abcdef" for character in checksum)
         ):
             raise ValueError("checksum must be exact lowercase SHA-256")
@@ -497,9 +525,9 @@ def encode_model(
     veto_threshold: float,
     bias: float = 0.0,
     platt_calibration: Mapping[LayoutDirection, PlattParameters] | None = None,
-    fnv_seed: int = DEFAULT_FNV_SEED,
-    membership_seed: int = DEFAULT_MEMBERSHIP_FNV_SEED,
-    ngram_orders: Sequence[int] = NGRAM_ORDERS,
+    fnv_seed: int = FNV1A64_OFFSET_BASIS,
+    membership_seed: int = INTENT_MEMBERSHIP_FNV_SEED,
+    ngram_orders: Sequence[int] = INTENT_NGRAM_ORDERS,
     metadata: Mapping[str, object] | None = None,
 ) -> bytes:
     """Encode and self-validate deterministic KSLM v4 bytes."""
@@ -510,13 +538,13 @@ def encode_model(
     orders = _validate_orders(ngram_orders)
     version = _validate_version(model_version)
     float_weights = _normalize_weights(weights, dimension)
-    scale = max((abs(value) for value in float_weights), default=0.0) / 32767.0
+    scale = max((abs(value) for value in float_weights), default=0.0) / KSLM_QUANTIZED_WEIGHT_LIMIT_FLOAT
     if scale == 0.0:
         scale = 1.0
     quantized = array(
         "h",
         (
-            max(-32767, min(32767, round(value / scale)))
+            max(-KSLM_QUANTIZED_WEIGHT_LIMIT, min(KSLM_QUANTIZED_WEIGHT_LIMIT, round(value / scale)))
             for value in float_weights
         ),
     )
@@ -541,7 +569,7 @@ def encode_model(
     manifest: dict[str, object] = {
         "bias": parsed_bias,
         "dimension": dimension,
-        "feature_version": FEATURE_VERSION,
+        "feature_version": INTENT_FEATURE_VERSION,
         "fnv_seed": fnv_seed,
         "format": MAGIC.decode("ascii"),
         "hash_algorithm": HASH_ALGORITHM,
@@ -557,7 +585,7 @@ def encode_model(
             }
             for direction in LAYOUT_DIRECTIONS
         },
-        "schema": SCHEMA_VERSION,
+        "schema": KSLM_SCHEMA_VERSION,
         "supported_fingerprint_count": len(fingerprints),
         "threshold_logits": parsed_threshold_logits,
         "veto_threshold": parsed_veto,
@@ -566,15 +594,15 @@ def encode_model(
     if metadata is not None:
         manifest["metadata"] = _validated_json_object(metadata, "metadata")
     manifest_bytes = _canonical_json(manifest)
-    if len(manifest_bytes) > MAX_MANIFEST_BYTES:
+    if len(manifest_bytes) > KSLM_MAX_MANIFEST_BYTES:
         raise ValueError("manifest exceeds KSLM size limit")
     header = HEADER.pack(
         MAGIC,
-        SCHEMA_VERSION,
+        KSLM_SCHEMA_VERSION,
         0,
         len(manifest_bytes),
         len(payload),
-        zlib.crc32(payload) & 0xFFFFFFFF,
+        zlib.crc32(payload) & UINT32_MASK,
         hashlib.sha256(manifest_bytes).digest(),
     )
     encoded = header + manifest_bytes + payload
@@ -593,9 +621,9 @@ def write_model(
     veto_threshold: float,
     bias: float = 0.0,
     platt_calibration: Mapping[LayoutDirection, PlattParameters] | None = None,
-    fnv_seed: int = DEFAULT_FNV_SEED,
-    membership_seed: int = DEFAULT_MEMBERSHIP_FNV_SEED,
-    ngram_orders: Sequence[int] = NGRAM_ORDERS,
+    fnv_seed: int = FNV1A64_OFFSET_BASIS,
+    membership_seed: int = INTENT_MEMBERSHIP_FNV_SEED,
+    ngram_orders: Sequence[int] = INTENT_NGRAM_ORDERS,
     metadata: Mapping[str, object] | None = None,
 ) -> LinearNgramModel:
     """Atomically write, validate, and reload a KSLM model artifact."""
@@ -629,7 +657,7 @@ def write_model(
             handle.write(encoded)
             handle.flush()
             os.fsync(handle.fileno())
-        os.chmod(temporary_path, 0o644)
+        os.chmod(temporary_path, PUBLISHED_MODEL_FILE_MODE)
         validated = LinearNgramModel.load(temporary_path)
         if validated.checksum != hashlib.sha256(encoded).hexdigest():
             raise IntentModelFormatError("written model checksum mismatch")
@@ -651,13 +679,13 @@ def _decode_container(data: bytes, source_path: Path | None) -> LinearNgramModel
     magic, schema, flags, manifest_length, payload_length, payload_crc, manifest_digest = HEADER.unpack_from(data)
     if magic != MAGIC:
         raise IntentModelFormatError("invalid KSLM magic")
-    if schema != SCHEMA_VERSION:
+    if schema != KSLM_SCHEMA_VERSION:
         raise IntentModelFormatError(f"unsupported KSLM schema: {schema}")
     if flags != 0:
         raise IntentModelFormatError("unsupported KSLM header flags")
-    if not 2 <= manifest_length <= MAX_MANIFEST_BYTES:
+    if not KSLM_MIN_MANIFEST_BYTES <= manifest_length <= KSLM_MAX_MANIFEST_BYTES:
         raise IntentModelFormatError("invalid KSLM manifest length")
-    if not 0 < payload_length <= MAX_PAYLOAD_BYTES:
+    if not 0 < payload_length <= KSLM_MAX_PAYLOAD_BYTES:
         raise IntentModelFormatError("invalid KSLM payload length")
     expected_length = HEADER.size + manifest_length + payload_length
     if len(data) != expected_length:
@@ -667,7 +695,7 @@ def _decode_container(data: bytes, source_path: Path | None) -> LinearNgramModel
     payload = data[HEADER.size + manifest_length :]
     if hashlib.sha256(manifest_bytes).digest() != manifest_digest:
         raise IntentModelFormatError("KSLM manifest checksum mismatch")
-    if (zlib.crc32(payload) & 0xFFFFFFFF) != payload_crc:
+    if (zlib.crc32(payload) & UINT32_MASK) != payload_crc:
         raise IntentModelFormatError("KSLM payload CRC32 mismatch")
     try:
         decoded_json = cast(object, json.loads(manifest_bytes.decode("utf-8")))
@@ -701,12 +729,12 @@ def _decode_container(data: bytes, source_path: Path | None) -> LinearNgramModel
     if set(manifest) != required and set(manifest) != allowed:
         raise IntentModelFormatError("KSLM manifest fields do not match schema")
     manifest_schema = _manifest_int(manifest["schema"], "schema")
-    if manifest["format"] != "KSLM" or manifest_schema != SCHEMA_VERSION:
+    if manifest["format"] != "KSLM" or manifest_schema != KSLM_SCHEMA_VERSION:
         raise IntentModelFormatError("KSLM manifest format/schema mismatch")
     feature_version = _manifest_int(
         manifest["feature_version"], "feature_version"
     )
-    if feature_version != FEATURE_VERSION:
+    if feature_version != INTENT_FEATURE_VERSION:
         raise IntentModelFormatError("unsupported KSLM feature version")
     if manifest["hash_algorithm"] != HASH_ALGORITHM:
         raise IntentModelFormatError("unsupported KSLM hash algorithm")
@@ -723,7 +751,7 @@ def _decode_container(data: bytes, source_path: Path | None) -> LinearNgramModel
         manifest["supported_fingerprint_count"],
         "supported_fingerprint_count",
     )
-    if not 0 <= fingerprint_count <= MAX_SUPPORTED_FINGERPRINTS:
+    if not 0 <= fingerprint_count <= KSLM_MAX_FINGERPRINTS:
         raise IntentModelFormatError(
             "supported_fingerprint_count exceeds KSLM size limit"
         )
@@ -760,20 +788,22 @@ def _decode_container(data: bytes, source_path: Path | None) -> LinearNgramModel
     payload_sha = manifest["payload_sha256"]
     if (
         not isinstance(payload_sha, str)
-        or len(payload_sha) != 64
+        or len(payload_sha) != SHA256_HEX_CHARACTERS
         or any(character not in "0123456789abcdef" for character in payload_sha)
     ):
         raise IntentModelFormatError("payload_sha256 must be lowercase hexadecimal")
     if hashlib.sha256(payload).hexdigest() != payload_sha:
         raise IntentModelFormatError("KSLM payload SHA256 mismatch")
 
-    expected_payload = (dimension * 2) + (fingerprint_count * 8)
+    expected_payload = (dimension * KSLM_WEIGHT_ENTRY_BYTES) + (
+        fingerprint_count * KSLM_FINGERPRINT_ENTRY_BYTES
+    )
     if payload_length != expected_payload:
         raise IntentModelFormatError("KSLM payload shape does not match dimension")
-    weights = _decode_int16_little_endian(payload[: dimension * 2])
+    weights = _decode_int16_little_endian(payload[: dimension * KSLM_WEIGHT_ENTRY_BYTES])
     if len(weights) != dimension:
         raise IntentModelFormatError("KSLM weight count does not match dimension")
-    supported_fingerprints = _decode_uint64_little_endian(payload[dimension * 2 :])
+    supported_fingerprints = _decode_uint64_little_endian(payload[dimension * KSLM_WEIGHT_ENTRY_BYTES :])
     if len(supported_fingerprints) != fingerprint_count:
         raise IntentModelFormatError(
             "KSLM supported fingerprint count does not match manifest"
@@ -812,7 +842,7 @@ def _decode_container(data: bytes, source_path: Path | None) -> LinearNgramModel
 
 
 def _read_bounded(path: Path) -> bytes:
-    maximum = MAX_CONTAINER_BYTES
+    maximum = KSLM_MAX_CONTAINER_BYTES
     with path.open("rb") as handle:
         data = handle.read(maximum + 1)
     if len(data) > maximum:
@@ -846,19 +876,19 @@ class _FeatureAdder(Protocol):
 
 
 def _length_bucket(length: int) -> str:
-    if length <= 4:
+    if length <= INTENT_LENGTH_EXACT_MAX_CHARACTERS:
         return str(length)
-    if length <= 7:
-        return "5-7"
-    if length <= 11:
-        return "8-11"
-    if length <= 19:
-        return "12-19"
-    return "20+"
+    if length <= INTENT_LENGTH_SHORT_MAX_CHARACTERS:
+        return f"{INTENT_LENGTH_EXACT_MAX_CHARACTERS + 1}-{INTENT_LENGTH_SHORT_MAX_CHARACTERS}"
+    if length <= INTENT_LENGTH_MEDIUM_MAX_CHARACTERS:
+        return f"{INTENT_LENGTH_SHORT_MAX_CHARACTERS + 1}-{INTENT_LENGTH_MEDIUM_MAX_CHARACTERS}"
+    if length <= INTENT_LENGTH_LONG_MAX_CHARACTERS:
+        return f"{INTENT_LENGTH_MEDIUM_MAX_CHARACTERS + 1}-{INTENT_LENGTH_LONG_MAX_CHARACTERS}"
+    return f"{INTENT_LENGTH_LONG_MAX_CHARACTERS + 1}+"
 
 
 def _group(group: int) -> int:
-    return max(-1, min(63, group))
+    return max(-1, min(INTENT_MAX_FEATURE_GROUP, group))
 
 
 def layout_direction(source_group: int, target_group: int) -> LayoutDirection:
@@ -873,14 +903,14 @@ def _validate_dimension(dimension: int) -> None:
     if (
         isinstance(dimension, bool)
         or dimension < 1
-        or dimension > MAX_DIMENSION
+        or dimension > KSLM_MAX_DIMENSION
         or dimension & (dimension - 1)
     ):
-        raise ValueError("model dimension must be a power of two up to 2^21")
+        raise ValueError(f"model dimension must be a power of two up to 2^{KSLM_MAX_DIMENSION_LOG2}")
 
 
 def _validate_seed(seed: int) -> None:
-    if isinstance(seed, bool) or not 0 <= seed <= _UINT64_MASK:
+    if isinstance(seed, bool) or not 0 <= seed <= UINT64_MASK:
         raise ValueError("FNV seed must be an unsigned 64-bit integer")
 
 
@@ -897,13 +927,18 @@ def _validate_orders(orders: Sequence[object]) -> tuple[int, ...]:
             raise ValueError("n-gram orders must be integers")
         parsed.append(order)
     result = tuple(parsed)
-    if result != NGRAM_ORDERS:
+    if result != INTENT_NGRAM_ORDERS:
         raise ValueError("KSLM v4 requires n-gram orders 1, 2, 3, 4, 5")
     return result
 
 
 def _validate_version(value: object) -> str:
-    if not isinstance(value, str) or not value or len(value) > 128 or not value.isprintable():
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > INTENT_MODEL_VERSION_MAX_CHARACTERS
+        or not value.isprintable()
+    ):
         raise ValueError("model_version must be a short printable string")
     return value
 
@@ -912,7 +947,7 @@ def _model_float(value: object, field: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{field} must be numeric")
     parsed = float(value)
-    if not math.isfinite(parsed) or abs(parsed) > _MAX_MODEL_FLOAT:
+    if not math.isfinite(parsed) or abs(parsed) > INTENT_MAX_MODEL_FLOAT_MAGNITUDE:
         raise ValueError(f"{field} must be finite and bounded")
     return parsed
 
@@ -1001,18 +1036,18 @@ def _validate_platt_calibration(
 
 
 def _normalize_supported_fingerprints(values: Collection[object]) -> array[int]:
-    if len(values) > MAX_SUPPORTED_FINGERPRINTS:
+    if len(values) > KSLM_MAX_FINGERPRINTS:
         raise ValueError("supported fingerprint count exceeds KSLM size limit")
     parsed: list[int] = []
     for value in values:
         if (
             isinstance(value, bool)
             or not isinstance(value, int)
-            or not 0 <= value <= _UINT64_MASK
+            or not 0 <= value <= UINT64_MASK
         ):
             raise ValueError("supported fingerprint must be an unsigned 64-bit integer")
         parsed.append(value)
-        if len(parsed) > MAX_SUPPORTED_FINGERPRINTS:
+        if len(parsed) > KSLM_MAX_FINGERPRINTS:
             raise ValueError("supported fingerprint count exceeds KSLM size limit")
     parsed.sort()
     if any(left == right for left, right in zip(parsed, parsed[1:])):
@@ -1036,7 +1071,7 @@ def _normalize_weights(values: Sequence[object], dimension: int) -> list[float]:
 
 
 def _int16_little_endian_bytes(values: array[int]) -> bytes:
-    if values.itemsize != 2:
+    if values.itemsize != KSLM_WEIGHT_ENTRY_BYTES:
         raise RuntimeError("platform int16 array type is unavailable")
     copy = array("h", values)
     if sys.byteorder != "little":
@@ -1046,7 +1081,7 @@ def _int16_little_endian_bytes(values: array[int]) -> bytes:
 
 def _decode_int16_little_endian(data: bytes) -> array[int]:
     values: array[int] = array("h")
-    if values.itemsize != 2:
+    if values.itemsize != KSLM_WEIGHT_ENTRY_BYTES:
         raise IntentModelFormatError("platform int16 array type is unavailable")
     values.frombytes(data)
     if sys.byteorder != "little":
@@ -1055,7 +1090,7 @@ def _decode_int16_little_endian(data: bytes) -> array[int]:
 
 
 def _uint64_little_endian_bytes(values: array[int]) -> bytes:
-    if values.itemsize != 8:
+    if values.itemsize != KSLM_FINGERPRINT_ENTRY_BYTES:
         raise RuntimeError("platform uint64 array type is unavailable")
     copy = array("Q", values)
     if sys.byteorder != "little":
@@ -1065,9 +1100,9 @@ def _uint64_little_endian_bytes(values: array[int]) -> bytes:
 
 def _decode_uint64_little_endian(data: bytes) -> array[int]:
     values: array[int] = array("Q")
-    if values.itemsize != 8:
+    if values.itemsize != KSLM_FINGERPRINT_ENTRY_BYTES:
         raise IntentModelFormatError("platform uint64 array type is unavailable")
-    if len(data) % 8:
+    if len(data) % KSLM_FINGERPRINT_ENTRY_BYTES:
         raise IntentModelFormatError("KSLM fingerprint payload is not uint64-aligned")
     values.frombytes(data)
     if sys.byteorder != "little":
@@ -1110,12 +1145,12 @@ def _validated_json_object(value: Mapping[str, object], field: str) -> dict[str,
 
 
 def _validated_json_value(value: object, field: str, depth: int) -> object:
-    if depth > 16:
+    if depth > INTENT_METADATA_MAX_DEPTH:
         raise IntentModelFormatError(f"{field} exceeds JSON nesting limit")
     if value is None or isinstance(value, (str, bool)):
         return value
     if isinstance(value, int):
-        if value < -(1 << 63) or value > _UINT64_MASK:
+        if value < INT64_MIN or value > UINT64_MASK:
             raise IntentModelFormatError(f"{field} integer is out of range")
         return value
     if isinstance(value, float):

@@ -17,9 +17,9 @@ Runbook соответствует текущему контуру v20:
 - training config schema 13;
 - feature schema v5;
 - KSLM container schema 4;
-- sealed split namespace `keyswitch:intent-v23:physical-signature`;
+- sealed split namespace `keyswitch:intent-v28:physical-signature`;
 - reference host Ubuntu 26.04 и Python 3.14;
-- сертифицированный artifact `intent-v1-b2a2ec8caa8d`.
+- сертифицированный artifact `intent-v1-8bccdf50b028`.
 
 Номера этих схем независимы. Нельзя автоматически повышать их вместе только
 ради нового релиза.
@@ -243,6 +243,18 @@ PYTHONPATH=src python3 tools/freeze_intent_development_corpus.py \
 Повторный запуск в отдельный путь обязан дать побайтно тот же файл. Нельзя
 изменять frozen source вручную.
 
+Model-blind domain, из которого строится этот source, заранее исключает все
+физические сигнатуры уже зафиксированного sealed split текущего кандидата.
+Поэтому он смещается вместе со split namespace: у каждого нового поколения
+`external_evaluation.unknown_typo_development_corpus_sha256` и
+`hard_negative_development.source.bytes`/`.sha256` в config почти всегда
+отличаются от прежнего кандидата, даже если ни policy, ни dataset-параметры не
+менялись. Берите оба значения только из вывода freezer для текущего запуска и
+обновите вместе с ними литеральные ожидания в
+`tests/test_intent_training.py::test_config_schema_and_statistical_upper_bound`
+(`external_evaluation.unknown_typo_development_corpus_sha256` и
+`hard_negative_development.source.sha256`).
+
 ## 5. Создать и зафиксировать holdout до модели
 
 После фиксации development source, но до train, запустить:
@@ -275,6 +287,16 @@ jq -e '
 Если хотя бы одно условие ложно, выпуск останавливается до обучения. Нельзя
 «исправлять» receipt вручную.
 
+Receipt также фиксирует `sealed_dataset_exclusions` и
+`combined_holdout_exclusions` — число физических сигнатур и SHA-256 sealed
+split (и sealed+development вместе), исключённых из holdout. Эти счётчики
+зависят от фактического sealed dataset нового кандидата и почти всегда
+отличаются от прежнего поколения. Обновите вместе
+`EXPECTED_SEALED_EXCLUSION_SIGNATURE_COUNT` и
+`EXPECTED_COMBINED_EXCLUSION_SIGNATURE_COUNT` в
+`tests/fixture_values/counts.py` и их SHA-256 в `tests/test_intent_training.py`
+— из фактического receipt, а не по аналогии с прошлым кандидатом.
+
 ## 6. Заморозить candidate inputs
 
 До официального train:
@@ -305,9 +327,16 @@ diff -u model/intent_v1/holdout-vN-preseal.json "$release_work/preseal-check.jso
 
 ```bash
 set -o pipefail
-PYTHONPATH=src python3 tools/train_intent_model_release.py --workers 0 | \
+PYTHONPATH=src python3 tools/train_intent_model_release.py --workers 0 \
+  --build-environment model/intent_v1/build-environment.json | \
   tee "$release_work/train-manifest.json"
 ```
+
+`--build-environment` обязателен и не имеет default-значения: sidecar
+записывает машину, которая действительно обучила кандидата. Официальный
+запуск пишет его в `model/intent_v1/build-environment.json`; любой replay из
+раздела 10 обязан указывать отдельный путь и не перезаписывать официальный
+sidecar.
 
 `--workers 0` — значение по умолчанию: trainer использует все logical CPU,
 доступные через affinity процесса. Последовательный FTRL-проход выполняет
@@ -402,7 +431,8 @@ for run in a b; do
   PYTHONPATH=src python3 tools/train_intent_model_release.py \
     --artifact "$retrain_root/$run/layout_intent_v1.ksm" \
     --manifest "$retrain_root/$run/manifest.json" \
-    --test-report "$retrain_root/$run/test-report.json"
+    --test-report "$retrain_root/$run/test-report.json" \
+    --build-environment "$retrain_root/$run/build-environment.json"
 done
 
 for file in layout_intent_v1.ksm manifest.json test-report.json; do

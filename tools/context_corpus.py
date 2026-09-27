@@ -15,6 +15,30 @@ from pathlib import Path
 from collections.abc import Iterable, Sequence
 from typing import Literal
 
+from historical_sources import CONTEXT_V2
+from keyswitch.constants.corpus import (
+    CC0_PHRASE_TSV_FIELDS,
+    CONTEXT_NEAR_DUPLICATE_MAX_WORDS,
+    CONTEXT_NEAR_DUPLICATE_MIN_WORDS,
+    CONTEXT_PHRASE_CALIBRATION_SPLIT_CEILING,
+    CONTEXT_PHRASE_DEVELOPMENT_SPLIT_CEILING,
+    CONTEXT_PHRASE_MAX_CHARACTERS,
+    CONTEXT_PHRASE_MIN_CHARACTERS,
+    CONTEXT_PHRASE_MIN_WORDS,
+    CONTEXT_PHRASE_SPLIT_BUCKET_COUNT,
+    CONTEXT_PHRASE_TEST_SPLIT_CEILING,
+    CONTEXT_PHRASE_TRAIN_SPLIT_CEILING,
+    CONTEXT_PHRASES_PER_GROUP,
+)
+from keyswitch.constants.file_formats import (
+    CC0_ARCHIVE_MEMBER_MAX_BYTES,
+    CC0_PHRASE_SOURCE_MAX_BYTES,
+    FROZEN_CORPUS_RECEIPT_JSON_INDENT,
+    HEXADECIMAL_BASE,
+    REPORT_JSON_INDENT,
+)
+from keyswitch.constants.training import DETERMINISTIC_CHOICE_HEX_DIGITS
+
 
 Locale = Literal["eng", "rus"]
 Split = Literal["train", "development", "calibration", "test", "reserve"]
@@ -25,6 +49,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CORPUS_ROOT = ROOT / "model/context_v2"
 SOURCE = CORPUS_ROOT / "sources/tatoeba-cc0-en-ru.tsv.gz"
 RECEIPT = CORPUS_ROOT / "corpus-receipt.json"
+# The receipt records the digest of the tool that froze the split: this file.
+BUILDER = "tools/context_corpus.py"
 WORDS = re.compile(r"[^\W_]+(?:['’\-][^\W_]+)*", re.UNICODE)
 
 
@@ -57,7 +83,7 @@ def load_archive(path: Path) -> list[Phrase]:
         raise ValueError("source archive checksum differs from the reviewed snapshot")
     with tarfile.open(path, "r:bz2") as archive:
         members = archive.getmembers()
-        if len(members) != 1 or members[0].name != "sentences_CC0.csv" or not members[0].isfile() or members[0].size > 64 * 1024 * 1024:
+        if len(members) != 1 or members[0].name != "sentences_CC0.csv" or not members[0].isfile() or members[0].size > CC0_ARCHIVE_MEMBER_MAX_BYTES:
             raise ValueError("unexpected CC0 archive member")
         stream = archive.extractfile(members[0])
         if stream is None:
@@ -71,7 +97,7 @@ def read_phrases(source: Iterable[str]) -> list[Phrase]:
     seen: set[int] = set()
     for line in source:
         fields = line.rstrip("\n").split("\t")
-        if len(fields) != 4:
+        if len(fields) != CC0_PHRASE_TSV_FIELDS:
             raise ValueError("invalid CC0 TSV row")
         identifier, language, text, modified = fields
         if language not in {"eng", "rus"}:
@@ -90,16 +116,18 @@ def load_source(path: Path = SOURCE) -> list[Phrase]:
     if hashlib.sha256(content).hexdigest() != SOURCE_SHA:
         raise ValueError("frozen CC0 source checksum mismatch")
     with gzip.GzipFile(fileobj=io.BytesIO(content)) as compressed:
-        raw = compressed.read(32 * 1024 * 1024 + 1)
-    if len(raw) > 32 * 1024 * 1024:
+        raw = compressed.read(CC0_PHRASE_SOURCE_MAX_BYTES + 1)
+    if len(raw) > CC0_PHRASE_SOURCE_MAX_BYTES:
         raise ValueError("oversized CC0 source")
     return read_phrases(raw.decode("utf-8").splitlines(keepends=True))
 
 
-def assign(phrases: list[Phrase], *, per_group: int = 4) -> tuple[list[AssignedPhrase], dict[str, object]]:
+def assign(phrases: list[Phrase], *, per_group: int = CONTEXT_PHRASES_PER_GROUP) -> tuple[list[AssignedPhrase], dict[str, object]]:
     if per_group < 1:
         raise ValueError("per_group must be positive")
-    eligible = sorted((item for item in phrases if 4 <= len(item.text) <= 512 and len(canonical_tokens(item.text)) >= 2 and "\x00" not in item.text), key=lambda item: item.identifier)
+    eligible = sorted((item for item in phrases if CONTEXT_PHRASE_MIN_CHARACTERS <= len(item.text) <= CONTEXT_PHRASE_MAX_CHARACTERS
+                       and len(canonical_tokens(item.text)) >= CONTEXT_PHRASE_MIN_WORDS and "\x00" not in item.text),
+                      key=lambda item: item.identifier)
     parents = list(range(len(eligible)))
 
     def root(index: int) -> int:
@@ -119,7 +147,7 @@ def assign(phrases: list[Phrase], *, per_group: int = 4) -> tuple[list[AssignedP
         variants = [words]
         # Group one-token substitutions/insertions/deletions before splitting.
         # This is a defined near-duplicate check, not semantic paraphrase detection.
-        if 4 <= len(words) <= 40:
+        if CONTEXT_NEAR_DUPLICATE_MIN_WORDS <= len(words) <= CONTEXT_NEAR_DUPLICATE_MAX_WORDS:
             variants.extend(words[:offset] + words[offset + 1:] for offset in range(len(words)))
         for variant in variants:
             # Identical/mixed-language text must stay together even when the
@@ -136,8 +164,11 @@ def assign(phrases: list[Phrase], *, per_group: int = 4) -> tuple[list[AssignedP
     split_groups: collections.Counter[str] = collections.Counter()
     for group_index, group_phrases in sorted(grouped.items()):
         identifier = f"tatoeba:{eligible[group_index].identifier}"
-        bucket = int(digest(NAMESPACE + ":" + identifier)[:8], 16) % 100
-        split: Split = "train" if bucket < 60 else "development" if bucket < 70 else "calibration" if bucket < 80 else "test" if bucket < 90 else "reserve"
+        bucket = int(digest(NAMESPACE + ":" + identifier)[:DETERMINISTIC_CHOICE_HEX_DIGITS], HEXADECIMAL_BASE) % CONTEXT_PHRASE_SPLIT_BUCKET_COUNT
+        split: Split = ("train" if bucket < CONTEXT_PHRASE_TRAIN_SPLIT_CEILING
+                        else "development" if bucket < CONTEXT_PHRASE_DEVELOPMENT_SPLIT_CEILING
+                        else "calibration" if bucket < CONTEXT_PHRASE_CALIBRATION_SPLIT_CEILING
+                        else "test" if bucket < CONTEXT_PHRASE_TEST_SPLIT_CEILING else "reserve")
         split_groups[split] += 1
         # Keep original text, but do not let huge connected template families
         # dominate the objective merely because they have many source IDs.
@@ -179,18 +210,24 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise ValueError("imported snapshot is not byte-reproducible")
     source = load_source()
     _rows, report = assign(source)
+    builder = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    if RECEIPT.exists():
+        # A frozen receipt keeps the digest of the builder that wrote it, checked against the
+        # archived copy of that builder; this builder has to reproduce everything else.
+        recorded: object = json.loads(RECEIPT.read_bytes())
+        builder = CONTEXT_V2.recorded_digest(BUILDER, recorded.get("builder_sha256") if isinstance(recorded, dict) else None)
     report.update({
         "schema_version": 1, "source_sha256": SOURCE_SHA, "archive_sha256": ARCHIVE_SHA,
         "source_url": "https://downloads.tatoeba.org/exports/sentences_CC0.tar.bz2",
         "license": "CC0-1.0", "license_evidence": "https://tatoeba.org/en/downloads",
-        "builder_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "builder_sha256": builder,
     })
-    content = (json.dumps(report, sort_keys=True, ensure_ascii=False, indent=2) + "\n").encode()
+    content = (json.dumps(report, sort_keys=True, ensure_ascii=False, indent=FROZEN_CORPUS_RECEIPT_JSON_INDENT) + "\n").encode()
     if args.freeze and not RECEIPT.exists():
         RECEIPT.write_bytes(content)
     elif not RECEIPT.exists() or RECEIPT.read_bytes() != content:
         raise ValueError("corpus receipt is missing or changed; do not overwrite a frozen split")
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+    print(json.dumps(report, ensure_ascii=False, indent=REPORT_JSON_INDENT))
     return 0
 
 

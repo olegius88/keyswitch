@@ -17,12 +17,22 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import cast
 
+from keyswitch.constants.corpus import CONTEXT_V2_CORPUS_REVISION
+from keyswitch.constants.file_formats import HEXADECIMAL_BASE, VERSION_HASH_CHARACTERS
+from keyswitch.constants.model_protocol import PROFILES, SEALED_BEFORE_TEST
+from keyswitch.constants.training import (
+    CONTEXT_V2_MAX_REPORTED_FALSE_CONVERSIONS,
+    DETERMINISTIC_CHOICE_HEX_DIGITS,
+    DETERMINISTIC_ROUNDING_DECIMALS,
+    LOG_LOSS_PROBABILITY_FLOOR,
+)
 from keyswitch.context_model import ACTIONS, ARTIFACT_PATH, FEATURE_VERSION, ContextModel, extract_context_features
 
 from context_corpus import CORPUS_ROOT, ROOT, digest
-from context_evidence import CACHE, CACHE_RECEIPT, PROFILES, EvidenceValues, all_frames, canonical, checksum, evidence, load_cache
+from context_evidence import CACHE, CACHE_RECEIPT, EvidenceValues, all_frames, canonical, checksum, evidence, load_cache
 from context_frames import Frame
 from context_optimizer import Kernel, Packed
+from historical_sources import CONTEXT_V2
 
 CONFIG = CORPUS_ROOT / "config.json"
 BASELINE = CORPUS_ROOT / "baseline-context-v1.json"
@@ -38,14 +48,17 @@ def config() -> dict[str, object]:
     return cast(dict[str, object], value)
 
 
-def provenance() -> dict[str, str]:
-    paths = (CONFIG, BASELINE, CACHE, CACHE_RECEIPT, CORPUS_ROOT / "corpus-receipt.json",
+def provenance_paths() -> tuple[Path, ...]:
+    return (CONFIG, BASELINE, CACHE, CACHE_RECEIPT, CORPUS_ROOT / "corpus-receipt.json",
         CORPUS_ROOT / "sources/tatoeba-cc0-en-ru.tsv.gz", CORPUS_ROOT / "safety.json",
         ROOT / "tools/context_corpus.py", ROOT / "tools/context_frames.py",
         ROOT / "tools/context_evidence.py", Path(__file__), ROOT / "tools/context_optimizer.py",
         ROOT / "tools/context_optimizer.c", ROOT / "src/keyswitch/context_model.py",
         ROOT / "src/keyswitch/resources/models/layout_intent_v1.ksm")
-    return {str(path.relative_to(ROOT)): checksum(path) for path in paths}
+
+
+def provenance() -> dict[str, str]:
+    return {str(path.relative_to(ROOT)): checksum(path) for path in provenance_paths()}
 
 
 def audit(frames: list[Frame]) -> dict[str, object]:
@@ -71,7 +84,8 @@ def samples(frames: list[Frame], split: str) -> list[tuple[Frame, str]]:
     for row in frames:
         if row.split != split:
             continue
-        profiles = (PROFILES[int(digest(row.identifier)[:8], 16) % 2],) if split == "train" else PROFILES
+        draw = int(digest(row.identifier)[:DETERMINISTIC_CHOICE_HEX_DIGITS], HEXADECIMAL_BASE)
+        profiles = (PROFILES[draw % len(PROFILES)],) if split == "train" else PROFILES
         items.extend((row, profile) for profile in profiles)
     return sorted(items, key=lambda item: digest("optimizer-order:" + item[0].identifier + ":" + item[1]))
 
@@ -84,28 +98,33 @@ def feature_rows(items: list[tuple[Frame, str]], cache: dict[str, EvidenceValues
 
 
 def select_threshold(predictions: array[float], labels: array[int], candidates: list[float], maximum_false: int) -> tuple[float, dict[str, int]]:
+    width, convert = len(ACTIONS), ACTIONS.index("convert")
     for threshold in sorted(candidates):
         false, true = 0, 0
         for row, label in enumerate(labels):
-            probabilities = predictions[row * 4:row * 4 + 4]
-            converted = max(range(4), key=probabilities.__getitem__) == 1 and probabilities[1] >= threshold
-            false += int(converted and label != 1)
-            true += int(converted and label == 1)
+            probabilities = predictions[row * width:row * width + width]
+            converted = max(range(width), key=probabilities.__getitem__) == convert and probabilities[convert] >= threshold
+            false += int(converted and label != convert)
+            true += int(converted and label == convert)
         if false <= maximum_false:
             return threshold, {"rows": len(labels), "false_conversions": false, "converted_correctly": true}
     # Even exact softmax saturation at 1.0 must not silently pass the gate.
     raise ValueError("no calibration threshold meets the declared safety budget")
 
 
-def fit(directory: Path, frames: list[Frame], cache: dict[str, EvidenceValues]) -> dict[str, object]:
+def fit(directory: Path, frames: list[Frame], cache: dict[str, EvidenceValues],
+        pins: dict[str, str] | None = None) -> dict[str, object]:
+    """Fit and seal a candidate; `pins` replaces the live source hashes when a replay reproduces a seal."""
+
     if (directory / SEAL).exists() or (directory / ARTIFACT).exists():
         raise ValueError("candidate already sealed; do not overwrite it after evaluation")
     options = config()
+    width = len(ACTIONS)
     rows = samples(frames, "train")
     counts = Counter(ACTIONS.index(row.action) for row, _ in rows)
-    if set(counts) != set(range(4)):
+    if set(counts) != set(range(width)):
         raise ValueError("training needs all four actions")
-    importance = {label: len(rows) / (4 * count) * (float(cast(float, options["keep_importance"])) if label == 0 else 1.0) for label, count in counts.items()}
+    importance = {label: len(rows) / (width * count) * (float(cast(float, options["keep_importance"])) if label == 0 else 1.0) for label, count in counts.items()}
     technical = float(cast(float, options["technical_importance"]))
     frequencies: Counter[str] = Counter()
     for features, _label, _weight in feature_rows(rows, cache, importance, technical):
@@ -118,38 +137,51 @@ def fit(directory: Path, frames: list[Frame], cache: dict[str, EvidenceValues]) 
         raise ValueError("empty development or calibration split")
     print(f"packed: train={len(train.labels)}, development={len(development.labels)}, calibration={len(calibration.labels)}, features={len(names)}", flush=True)
     kernel = Kernel.load()
-    weights, accumulators = array("d", [0.0]) * (len(names) * 4), array("d", [1.0]) * (len(names) * 4)
+    weights, accumulators = array("d", [0.0]) * (len(names) * width), array("d", [1.0]) * (len(names) * width)
     best, best_epoch, best_loss = array("d"), 0, math.inf
     for epoch in range(int(cast(int, options["epochs"]))):
         kernel.epoch(train, weights, accumulators, float(cast(float, options["learning_rate"])))
         probabilities = kernel.predict(development, weights)
-        loss = sum(-development.importance[row] * math.log(max(1e-15, probabilities[row * 4 + label])) for row, label in enumerate(development.labels)) / len(development.labels)
+        loss = sum(-development.importance[row] * math.log(max(LOG_LOSS_PROBABILITY_FLOOR, probabilities[row * width + label])) for row, label in enumerate(development.labels)) / len(development.labels)
         if loss < best_loss:
-            best, best_epoch, best_loss = array("d", (round(value, 9) for value in weights)), epoch + 1, loss
+            best, best_epoch, best_loss = array("d", (round(value, DETERMINISTIC_ROUNDING_DECIMALS) for value in weights)), epoch + 1, loss
         print(f"epoch {epoch + 1}: development_loss={loss:.9f}, best={best_epoch}", flush=True)
     threshold, calibration_metrics = select_threshold(kernel.predict(calibration, best), calibration.labels, cast(list[float], options["threshold_candidates"]), int(cast(int, options["calibration_max_false_conversions"])))
-    mapping = {name: list(best[index * 4:index * 4 + 4]) for index, name in enumerate(names)}
+    mapping = {name: list(best[index * width:index * width + width]) for index, name in enumerate(names)}
     weight_hash = hashlib.sha256(json.dumps(mapping, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
     # v1 names the artifact format; corpus revision is recorded in the seal.
     payload = {"actions": list(ACTIONS), "feature_version": FEATURE_VERSION, "weights": mapping,
-        "weights_sha256": weight_hash, "version": "context-v1-" + weight_hash[:12], "conversion_threshold": threshold}
+        "weights_sha256": weight_hash, "version": "context-v1-" + weight_hash[:VERSION_HASH_CHARACTERS], "conversion_threshold": threshold}
     directory.mkdir(parents=True, exist_ok=True)
     (directory / ARTIFACT).write_bytes(canonical(payload))
     ContextModel.load(directory / ARTIFACT)
-    seal: dict[str, object] = {"schema_version": 1, "stage": "sealed-before-test", "corpus_revision": 2,
-        "selected_epoch": best_epoch, "development_loss": round(best_loss, 9),
+    seal: dict[str, object] = {"schema_version": 1, "stage": SEALED_BEFORE_TEST, "corpus_revision": CONTEXT_V2_CORPUS_REVISION,
+        "selected_epoch": best_epoch, "development_loss": round(best_loss, DETERMINISTIC_ROUNDING_DECIMALS),
         "calibration": calibration_metrics, "conversion_threshold": threshold,
-        "feature_count": len(names), "audit": audit(frames), "provenance": provenance(),
+        "feature_count": len(names), "audit": audit(frames), "provenance": provenance() if pins is None else pins,
         "artifact_sha256": checksum(directory / ARTIFACT), "model_version": payload["version"]}
     (directory / SEAL).write_bytes(canonical(seal))
     print(f"sealed {payload['version']}, threshold={threshold}; test not scored", flush=True)
     return seal
 
 
+def recorded_provenance(seal: dict[str, object]) -> dict[str, str]:
+    """The seal's source pins, each checked against its archived copy (tools/historical_sources.py).
+
+    The candidate was sealed long ago and its sources have moved on since, so the pins name
+    the bytes the candidate was fitted with, never the live files; whether the live tools
+    still reproduce the candidate is what `verify` and the numeric replay of
+    tools/verify_context_v2.py show.
+    """
+
+    return CONTEXT_V2.recorded(seal.get("provenance"), (path.relative_to(ROOT).as_posix() for path in provenance_paths()))
+
+
 def validate_seal(directory: Path) -> dict[str, object]:
     seal: object = json.loads((directory / SEAL).read_bytes())
-    if not isinstance(seal, dict) or seal.get("stage") != "sealed-before-test" or seal.get("provenance") != provenance() or seal.get("artifact_sha256") != checksum(directory / ARTIFACT):
+    if not isinstance(seal, dict) or seal.get("stage") != SEALED_BEFORE_TEST or seal.get("artifact_sha256") != checksum(directory / ARTIFACT):
         raise ValueError("candidate seal or provenance changed")
+    recorded_provenance(cast(dict[str, object], seal))
     model = ContextModel.load(directory / ARTIFACT)
     if seal.get("model_version") != model.version or seal.get("conversion_threshold") != model.conversion_threshold:
         raise ValueError("candidate identity changed")
@@ -175,7 +207,7 @@ def metrics(model: ContextModel, frames: list[Frame], profile: str, cache: dict[
             "baseline_false_conversions": int(item.baseline_convert and not desired)}
         counts.update(updates)
         categories.setdefault(row.category, Counter()).update(updates)
-        if effective and not desired and len(examples) < 12:
+        if effective and not desired and len(examples) < CONTEXT_V2_MAX_REPORTED_FALSE_CONVERSIONS:
             examples.append({"source_id": row.identifier, "original": row.original, "alternative": row.alternative, "expected": row.action, "actual": prediction.action})
     return {"counts": dict(counts), "categories": {name: dict(value) for name, value in sorted(categories.items())}, "false_conversion_examples": examples}
 
@@ -250,10 +282,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.action == "evaluate":
         evaluate(args.directory, frames, cache)
     else:
-        validate_seal(args.directory)
+        pins = recorded_provenance(validate_seal(args.directory))
         with tempfile.TemporaryDirectory(prefix="keyswitch-context-replay-") as temporary:
             replay = Path(temporary)
-            fit(replay, frames, cache)
+            fit(replay, frames, cache, pins)
             for filename in (ARTIFACT, SEAL):
                 if (replay / filename).read_bytes() != (args.directory / filename).read_bytes():
                     raise ValueError(f"training replay differs: {filename}")

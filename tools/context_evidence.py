@@ -14,6 +14,14 @@ from pathlib import Path
 from typing import cast
 from collections.abc import Sequence
 
+from keyswitch.constants.file_formats import (
+    CONTEXT_LEXICAL_EVIDENCE_MAX_BYTES,
+    CONTEXT_LEXICAL_EVIDENCE_ROW_FIELDS,
+    REPORT_JSON_INDENT,
+)
+from keyswitch.constants.model_protocol import PROFILES, REFERENCE_HUNSPELL
+from keyswitch.constants.models import SYNTHETIC_FREQUENCY_DIVISOR, SYNTHETIC_FREQUENCY_FLOOR
+from keyswitch.constants.training import DETERMINISTIC_ROUNDING_DECIMALS
 from keyswitch.context_model import ContextEvidence
 from keyswitch.detector import LanguageDetector
 from keyswitch.input_context import FieldContext, FieldRole
@@ -23,7 +31,6 @@ from keyswitch.language_model import LanguageModel, LOCALE_FALLBACKS
 from context_corpus import CORPUS_ROOT, ROOT, assign, load_source
 from context_frames import Frame, build, technical_frames
 
-PROFILES = ("portable", "reference_hunspell")
 CACHE = CORPUS_ROOT / "sources/lexical-evidence.json.gz"
 CACHE_RECEIPT = CORPUS_ROOT / "lexical-receipt.json"
 EvidenceValues = tuple[bool, bool, bool, float]
@@ -63,7 +70,8 @@ def reference_models(spelling: bool) -> dict[int, LanguageModel]:
         if checksum(path) != spec["sha256"]:
             raise ValueError("reference lexicon checksum mismatch")
         frequencies, bigrams = LanguageModel._read_arpa(path)
-        frequency = max(max(frequencies.values(), default=1000) // 20, 1000)
+        frequency = max(max(frequencies.values(), default=SYNTHETIC_FREQUENCY_FLOOR) // SYNTHETIC_FREQUENCY_DIVISOR,
+                        SYNTHETIC_FREQUENCY_FLOOR)
         for word in LOCALE_FALLBACKS[locale]:
             frequencies[word] = max(frequencies.get(word, 0), frequency)
         model = LanguageModel(locale, frequencies, str(path), bigrams, enable_spellcheck=spelling)
@@ -81,7 +89,7 @@ def generate(frames: list[Frame]) -> dict[str, EvidenceValues]:
         raise ValueError("certified baseline unavailable")
     cache: dict[str, EvidenceValues] = {}
     for profile in PROFILES:
-        models = reference_models(profile == "reference_hunspell")
+        models = reference_models(profile == REFERENCE_HUNSPELL)
         detector = LanguageDetector(models, intent)
         for row in frames:
             identity = key(row, profile)
@@ -89,7 +97,8 @@ def generate(frames: list[Frame]) -> dict[str, EvidenceValues]:
                 continue
             decision = detector.decide(row.original, {1 - row.group: row.alternative}, row.group, trigger=cast(CorrectionTrigger, row.trigger))
             source, target = models[row.group].score(row.original), models[1 - row.group].score(row.alternative)
-            cache[identity] = decision.should_convert, source.known, target.known, round(target.value - source.value, 9)
+            cache[identity] = (decision.should_convert, source.known, target.known,
+                               round(target.value - source.value, DETERMINISTIC_ROUNDING_DECIMALS))
         print(f"lexical profile {profile}: {len(cache)} cached inputs", flush=True)
     return cache
 
@@ -99,17 +108,20 @@ def load_cache() -> dict[str, EvidenceValues]:
     if not isinstance(receipt, dict) or receipt.get("sha256") != checksum(CACHE):
         raise ValueError("lexical cache checksum mismatch")
     with gzip.open(CACHE, "rb") as source:
-        raw = source.read(64 * 1024 * 1024 + 1)
-    if len(raw) > 64 * 1024 * 1024:
+        raw = source.read(CONTEXT_LEXICAL_EVIDENCE_MAX_BYTES + 1)
+    if len(raw) > CONTEXT_LEXICAL_EVIDENCE_MAX_BYTES:
         raise ValueError("oversized lexical cache")
     payload: object = json.loads(raw)
     if not isinstance(payload, dict):
         raise ValueError("invalid lexical cache")
     cache: dict[str, EvidenceValues] = {}
     for name, values in payload.items():
-        if not isinstance(name, str) or not isinstance(values, list) or len(values) != 4 or any(type(value) is not bool for value in values[:3]) or type(values[3]) is not float:
+        if not isinstance(name, str) or not isinstance(values, list) or len(values) != CONTEXT_LEXICAL_EVIDENCE_ROW_FIELDS:
             raise ValueError("invalid lexical evidence row")
-        cache[name] = values[0], values[1], values[2], values[3]
+        baseline, source_known, target_known, delta = values
+        if any(type(flag) is not bool for flag in (baseline, source_known, target_known)) or type(delta) is not float:
+            raise ValueError("invalid lexical evidence row")
+        cache[name] = baseline, source_known, target_known, delta
     return cache
 
 
@@ -142,7 +154,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             ROOT / "src/keyswitch/spellcheck.py", ROOT / "src/keyswitch/resources/models/layout_intent_v1.ksm")},
         "scope": "fixed reference lexicon and Hunspell dictionary hashes from intent_v1 config; no personal words or rules"}
     CACHE_RECEIPT.write_bytes(canonical(receipt))
-    print(json.dumps(receipt, indent=2))
+    print(json.dumps(receipt, indent=REPORT_JSON_INDENT))
     return 0
 
 

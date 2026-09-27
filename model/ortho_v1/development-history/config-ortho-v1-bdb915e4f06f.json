@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "order": 5,
+  "discount": 0.75,
+  "scale": 512,
+  "minimum_length": 3,
+  "calibration_false_budget": 0,
+  "margin_nats": 3.0,
+  "promotion": {
+    "minimum_test_negatives": 5000,
+    "maximum_test_false_conversions": 0,
+    "minimum_recall": 0.75
+  }
+}

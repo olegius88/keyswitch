@@ -32,7 +32,9 @@ from typing import Final, cast
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import ortho_v2_corpus as corpus  # noqa: E402
+from historical_sources import ORTHO_V2  # noqa: E402
 
+from keyswitch.constants.file_formats import FROZEN_CORPUS_RECEIPT_JSON_INDENT  # noqa: E402
 from keyswitch.language_model import LanguageModel  # noqa: E402
 
 ROOT: Final[Path] = Path(__file__).resolve().parents[1]
@@ -41,6 +43,7 @@ EVIDENCE: Final[Path] = DIRECTORY / "known-evidence.json.gz"
 RECEIPT: Final[Path] = DIRECTORY / "known-receipt.json"
 INTENT_CONFIG: Final[Path] = ROOT / "model/intent_v1/config.json"
 LOCALES: Final[dict[str, str]] = {"en": "en_US", "ru": "ru_RU"}
+GENERATOR: Final[str] = "tools/ortho_v2_known.py"
 
 
 def checksum(path: Path) -> str:
@@ -97,6 +100,20 @@ def write(payload: dict[str, dict[str, bool]], path: Path) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def generator_digest(path: Path = RECEIPT) -> str:
+    """This tool's digest as a receipt records it.
+
+    A frozen receipt keeps the digest of the generator that wrote it, checked against the
+    archived copy of that generator (tools/historical_sources.py); the live generator has to
+    reproduce the evidence and every other field.
+    """
+
+    if not path.exists():
+        return checksum(Path(__file__))
+    recorded: object = json.loads(path.read_bytes())
+    return ORTHO_V2.recorded_digest(GENERATOR, recorded.get("generator_sha256") if isinstance(recorded, dict) else None)
+
+
 def receipt(payload: dict[str, dict[str, bool]], evidence_sha: str) -> dict[str, object]:
     return {
         "schema_version": 1,
@@ -106,7 +123,7 @@ def receipt(payload: dict[str, dict[str, bool]], evidence_sha: str) -> dict[str,
         ),
         "evidence_sha256": evidence_sha,
         "tokens_sha256": checksum(corpus.TOKENS),
-        "generator_sha256": checksum(Path(__file__)),
+        "generator_sha256": generator_digest(),
         "hunspell": recorded_dictionaries(),
         "known_by_script": {script: sum(words.values()) for script, words in sorted(payload.items())},
         "forms_by_script": {script: len(words) for script, words in sorted(payload.items())},
@@ -134,7 +151,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise ValueError("dictionary evidence is not reproducible from these dictionaries")
         (DIRECTORY / ".known-check.gz").unlink()
     content = (json.dumps(receipt(payload, evidence_sha), sort_keys=True,
-                          ensure_ascii=False, indent=2) + "\n").encode()
+                          ensure_ascii=False, indent=FROZEN_CORPUS_RECEIPT_JSON_INDENT) + "\n").encode()
     if arguments.freeze and not RECEIPT.exists():
         RECEIPT.write_bytes(content)
     elif not RECEIPT.exists() or RECEIPT.read_bytes() != content:

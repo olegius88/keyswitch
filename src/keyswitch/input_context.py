@@ -12,11 +12,19 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 
 from .backend import KeyEvent
+# Exported under these names: the engine and the platform field readers import them from here.
+from .constants.text import FIELD_CONTEXT_MAX_CHARACTERS as CONTEXT_LIMIT
+from .constants.text import (
+    FIELD_CONTEXT_APPLICATION_MAX_CHARACTERS,
+    FIELD_CONTEXT_FIELD_ID_MAX_CHARACTERS,
+    FIELD_CONTEXT_SOURCE_MAX_CHARACTERS,
+)
+from .constants.timing import FIELD_CONTEXT_TTL_SECONDS as CONTEXT_TTL
 
+
+__all__ = ["CONTEXT_LIMIT", "CONTEXT_TTL", "FieldContext", "FieldReader", "FieldRole", "InputContext"]
 
 FieldRole = Literal["unknown", "text", "code", "search", "terminal", "password"]
-CONTEXT_LIMIT = 512
-CONTEXT_TTL = 45.0
 
 
 @dataclass(frozen=True)
@@ -33,10 +41,11 @@ class FieldContext:
     def bounded(self) -> FieldContext:
         private = self.sensitive or self.role == "password"
         return FieldContext(
-            self.application[:128], self.field_id[:128],
+            self.application[:FIELD_CONTEXT_APPLICATION_MAX_CHARACTERS],
+            self.field_id[:FIELD_CONTEXT_FIELD_ID_MAX_CHARACTERS],
             "" if private else self.before[-CONTEXT_LIMIT:],
             "" if private else self.after[:CONTEXT_LIMIT], self.role,
-            self.selection, private, self.source[:32],
+            self.selection, private, self.source[:FIELD_CONTEXT_SOURCE_MAX_CHARACTERS],
         )
 
 

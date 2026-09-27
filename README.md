@@ -17,7 +17,7 @@ KeySwitch — настольное приложение для Windows 10/11 x64
 [Проверка, сборка и выпуск](docs/verification.md)
 
 Последний опубликованный стабильный выпуск —
-[0.32.0](https://github.com/olegius88/keyswitch/releases/tag/v0.32.0).
+[0.33.0](https://github.com/olegius88/keyswitch/releases/tag/v0.33.0).
 Изменения перечислены в [CHANGELOG.md](CHANGELOG.md), известные дефекты
 выпуска — в [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
@@ -118,11 +118,11 @@ Telegram. Токен бота и ID группы задаются в её инт
 
 ## Установка в Windows
 
-Скачайте `KeySwitch-Setup-0.32.0-x64.exe` со страницы
-[опубликованного выпуска 0.32.0](https://github.com/olegius88/keyswitch/releases/tag/v0.32.0) и
+Скачайте `KeySwitch-Setup-0.33.0-x64.exe` со страницы
+[опубликованного выпуска 0.33.0](https://github.com/olegius88/keyswitch/releases/tag/v0.33.0) и
 запустите его. Установка выполняется для текущего пользователя в
 `%LOCALAPPDATA%\Programs\KeySwitch` и не требует прав администратора. В выпуск
-также входит переносимый архив `KeySwitch-0.32.0-windows-x64.zip`.
+также входит переносимый архив `KeySwitch-0.33.0-windows-x64.zip`.
 
 После запуска KeySwitch появится в области уведомлений. Левый или правый щелчок
 по `EN/RU` либо флагу открывает меню. В нём пункт «Переключить на…» всегда
@@ -190,11 +190,11 @@ cd keyswitch
 
 ## Установка DEB-пакета
 
-Скачайте `keyswitch_0.32.0_amd64.deb` со страницы
-[опубликованного выпуска 0.32.0](https://github.com/olegius88/keyswitch/releases/tag/v0.32.0), затем:
+Скачайте `keyswitch_0.33.0_amd64.deb` со страницы
+[опубликованного выпуска 0.33.0](https://github.com/olegius88/keyswitch/releases/tag/v0.33.0), затем:
 
 ```bash
-sudo apt install ./keyswitch_0.32.0_amd64.deb
+sudo apt install ./keyswitch_0.33.0_amd64.deb
 ```
 
 Пакет установит системные зависимости и добавит KeySwitch в меню приложений.
@@ -395,7 +395,8 @@ SHA-256, ограничивает весь файл 14 MiB и безопасно
 payload — 12 MiB, а число точных membership-отпечатков — `2^20`.
 Номера схем независимы: training config использует `schema_version: 13`, сам
 контейнер — KSLM schema 4, а внешний публикационный `manifest.json` —
-`schema_version: 1`.
+`schema_version: 2` (с v26 дополнительно фиксирует SHA-256 значений именованных
+констант toolchain, `toolchain.constants_sha256`).
 
 Offline-модель использует 2 097 152 hash-buckets и конфигурацию максимум на 64
 эпохи с детерминированной ранней остановкой. Frozen EN/RU-лексиконы используются
@@ -417,7 +418,7 @@ language model полностью игнорируются классифика�
 порядками n-грамм, поэтому train/serve feature parity точная. Train-only EN/RU
 scorer остаётся отдельной проверяемой provenance-записью, но не является входом
 классификатора. Разбиение физических сигнатур
-закреплено namespace `keyswitch:intent-v23:physical-signature`. До генерации
+закреплено namespace `keyswitch:intent-v28:physical-signature`. До генерации
 строк candidate-фаза независимо помещает identity- и typo-сигнатуры с
 владельцами из разных pre-sealed split/языков либо пересечением с
 protected/safety токеном в quarantine. Sealed-test строки и их quarantine
@@ -426,7 +427,7 @@ protected/safety токеном в quarantine. Sealed-test строки и их 
 кандидата, а строки кандидата не меняются.
 
 Schema 13 дополнительно подключает побайтно зафиксированный
-`unknown-typo-development-v23.json`. Он был построен model-blind до обучения
+`unknown-typo-development-v28.json`. Он был построен model-blind до обучения
 из 5 000 EN и 5 000 RU неизвестных Hunspell-опечаток, а затем компактно
 сохранён по одной записи на физическую сигнатуру. Независимый namespace ролей
 детерминированно распределяет каждую языковую половину как 3 500/500/500/500
@@ -496,45 +497,62 @@ typo recall 0,90 и pause recall 0,90/0,85. Разница в precision и од�
 наборах действует более сильный инвариант exact-zero: эти строки не должны
 доходить до модели, а все unknown-typo строки должны до неё доходить.
 
-KSLM schema 4 хранит отдельную монотонную Platt-калибровку для направлений
-EN→RU и RU→EN и точный `threshold_logit` для каждой пары trigger/направление.
-Оба калибратора
-обучаются только на calibration split и устраняют систематический сдвиг между
-направлениями, не меняя порядок примеров внутри каждого из них. Runtime
-выбирает порог по trigger и физическому направлению, затем сравнивает с ним
-direction-calibrated logit напрямую; sigmoid-derived confidence порога
+KSLM schema 4 хранит отдельную монотонную Platt-калибровку для направлений EN→RU
+и RU→EN и точный `threshold_logit` для каждой пары trigger/направление. Оба
+калибратора обучаются только на calibration split и устраняют систематический
+сдвиг между направлениями, не меняя порядок примеров внутри каждого из них.
+Runtime выбирает порог по trigger и физическому направлению, затем сравнивает с
+ним direction-calibrated logit напрямую; sigmoid-derived confidence порога
 доступна только в диагностике и не используется для принятия решения. Frozen
 external evaluation policy фиксирует размеры и SHA-256 Hunspell `.dic`/`.aff`
 обоих языков, ожидаемые SHA-256 lexical-disjoint, unknown-typo-development и
 независимого unknown-typo-holdout корпусов, минимум 5000 слов на язык и
 канонический набор всех шести trigger. Holdout использует другой rank/choice
-namespace и исключает sealed и development сигнатуры.
-V11 прошёл внутренние gates, но был отклонён до независимого external holdout:
-strict-evaluator не умел fail-closed индексировать новое семейство frozen
-`hunspell-unknown-*` строк. Причина и точные хэши сохранены в
-`rejection-v11.json`. V12 исправил индекс, но был отклонён: evaluator ошибочно
-построил базовый exclusion-index уже после добавления development-корпуса и не
-смог воспроизвести его frozen provenance. V13 исправил разделение доменов и
-дошёл до независимого holdout, но получил 4 false positive из 10 000 на
-обычный trigger: Wilson upper 0,001028128 превысил лимит 0,001. Точные причины
-и хэши сохранены в `rejection-v12.json` и `rejection-v13.json`. V14 заранее
-зафиксировал нулевой selection FP-бюджет, ротировал все namespaces и прошёл
-независимую strict-проверку с 0 FP из 60 000 unknown-typo негативов. V15
-повторил ротацию всех namespaces после перехода trainer на многопроцессный
-backend и прошёл strict-проверку на новом holdout с 12 FP из 60 000 негативов
-(по 2 на trigger-срез, Wilson upper 0,000728996 при лимите 0,001) и recall
-0,96935. После переноса FTRL в нативное ядро v16 и v17 не прошли pre-sealed
-gate: при нулевом FP-бюджете recall на threshold-split составил 0,9479 и
-0,9458 при минимуме 0,956, registry не создавался. V18 прошёл внутренние gates
-и независимый holdout (5 FP из 60 000, recall 0,9425), но был отклонён
-strict-gate `fallback_regression`: один false positive, внесённый моделью
-относительно детерминированного fallback на 5 000-строчной sealed-выборке;
-решение сохранено в `rejection-v18.json`. V19 снова не прошёл pre-sealed gate
-(recall 0,9463), а v20 прошёл все внутренние gates, holdout (6 FP из 60 000,
-recall 0,9445) и 30 strict gates и стал текущим сертифицированным артефактом.
-Файл `holdout-v23-preseal.json` фиксирует SHA-256, namespaces, размеры и
-нулевые пересечения до загрузки или оценки v20-модели; поля
-`model_loaded=false` и `metrics_evaluated=false` делают эту фазу явной.
+namespace и исключает sealed и development сигнатуры. V11 прошёл внутренние
+gates, но был отклонён до независимого external holdout: strict-evaluator не
+умел fail-closed индексировать новое семейство frozen `hunspell-unknown-*`
+строк. Причина и точные хэши сохранены в `rejection-v11.json`. V12 исправил
+индекс, но был отклонён: evaluator ошибочно построил базовый exclusion-index уже
+после добавления development-корпуса и не смог воспроизвести его frozen
+provenance. V13 исправил разделение доменов и дошёл до независимого holdout, но
+получил 4 false positive из 10 000 на обычный trigger: Wilson upper 0,001028128
+превысил лимит 0,001. Точные причины и хэши сохранены в `rejection-v12.json` и
+`rejection-v13.json`. V14 заранее зафиксировал нулевой selection FP-бюджет,
+ротировал все namespaces и прошёл независимую strict-проверку с 0 FP из 60 000
+unknown-typo негативов. V15 повторил ротацию всех namespaces после перехода
+trainer на многопроцессный backend и прошёл strict-проверку на новом holdout с
+12 FP из 60 000 негативов (по 2 на trigger-срез, Wilson upper 0,000728996 при
+лимите 0,001) и recall 0,96935. После переноса FTRL в нативное ядро v16 и v17 не
+прошли pre-sealed gate: при нулевом FP-бюджете recall на threshold-split
+составил 0,9479 и 0,9458 при минимуме 0,956, registry не создавался. V18 прошёл
+внутренние gates и независимый holdout (5 FP из 60 000, recall 0,9425), но был
+отклонён strict-gate `fallback_regression`: один false positive, внесённый
+моделью относительно детерминированного fallback на 5 000-строчной
+sealed-выборке; решение сохранено в `rejection-v18.json`. V19 снова не прошёл
+pre-sealed gate (recall 0,9463), а v20 прошёл все внутренние gates, holdout (6
+FP из 60 000, recall 0,9445) и 30 strict gates и стал текущим сертифицированным
+артефактом. Ротация toolchain-bound namespace на v23 приняла кандидата
+`intent-v1-b2a2ec8caa8d`, который стал следующим сертифицированным артефактом.
+После перевода detector, intent-моделей и обучающих инструментов на именованные
+константы из `src/keyswitch/constants` точный replay v23 на новом toolchain
+воспроизвёл прежний артефакт, manifest и test-report побайтно, и namespace
+ротировался дальше. V24 прошёл обучение, внутренние ворота и независимый
+external holdout, но отклонён строгим gate `production_context_ensemble`;
+решение сохранено в `rejection-v24.json`. V25 не прошёл выбор порога до захвата
+seal: recall на selection составил 0,951688289 (у pause — 0,942078365) при
+минимуме 0,956; решение сохранено в `rejection-v25.json`, registry не создавался
+и sealed test не оценивался. V26 (`intent-v1-1a0edbe60e84`) и V27
+(`intent-v1-cff4eaedc88a`) прошли все внутренние условия, независимый holdout и
+полный набор из 30 строгих gates, но вместе с переобученной контекстной моделью
+не сохранили критерий end-to-end на раскрытых наборах предложений: с V26 при
+правке внутри слова восстановлено на одно предложение меньше, чем с 0.33.0 (17
+390 против 17 391), с V27 при обычном наборе — 16 353 предложения против 16 367,
+поэтому ни один не был выбран в пакет. V28 прошёл все внутренние условия,
+независимый holdout и полный набор из 30 строгих gates, сохранил этот критерий
+вместе с контекстной моделью и стал текущим сертифицированным артефактом. Файл
+`holdout-v28-preseal.json` фиксирует SHA-256, namespaces, размеры и нулевые
+пересечения до загрузки или оценки v20-модели; поля `model_loaded=false` и
+`metrics_evaluated=false` делают эту фазу явной.
 
 Manifest связывает SHA-256 config, frozen sources, trainer, external evaluator,
 preseal generator/receipt, freezer development-корпуса, intent runtime, layouts,
@@ -758,7 +776,7 @@ python3 tools/release.py --version X.Y.Z            # коммит, тег, push
 - В Windows механизм UIPI не позволяет обычному процессу вводить текст в окно,
   запущенное с более высоким уровнем целостности. Для такого окна KeySwitch
   также должен быть запущен с сопоставимыми правами.
-- Windows Setup EXE опубликованной версии 0.32.0 не подписан сертификатом издателя.
+- Windows Setup EXE опубликованной версии 0.33.0 не подписан сертификатом издателя.
 
 ## Лицензия
 

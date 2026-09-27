@@ -58,7 +58,11 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import environment_probe  # noqa: E402
-from verify_intent_strict_report import strict_gate_problems  # noqa: E402
+from verify_intent_strict_report import (  # noqa: E402
+    ReportRejected,
+    pinned_toolchain_values,
+    strict_gate_problems,
+)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from keyswitch.constants.file_formats import (
     HASH_CHUNK_BYTES,
@@ -188,7 +192,9 @@ MODEL_ARTIFACT: Final[Path] = (
 KSLM_HEADER: Final[struct.Struct] = struct.Struct("<4sHHIII32s")
 
 # Same mapping that packaging/build-windows.ps1 enforces; the preseal receipt
-# path is derived from the registry version at run time.
+# path is derived from the registry version at run time. The values these files
+# import from keyswitch.constants are pinned apart, as toolchain.constants_sha256
+# (verify_intent_strict_report.pinned_toolchain_values).
 MODEL_TOOLCHAIN_PATHS: Final[Mapping[str, str]] = {
     "trainer_sha256": "tools/train_intent_model.py",
     "runtime_sha256": "src/keyswitch/intent_model.py",
@@ -200,6 +206,7 @@ MODEL_TOOLCHAIN_PATHS: Final[Mapping[str, str]] = {
     "environment_probe_sha256": "tools/environment_probe.py",
     "preseal_generator_sha256": "tools/preseal_intent_holdout.py",
     "development_freezer_sha256": "tools/freeze_intent_development_corpus.py",
+    "spellcheck_sha256": "src/keyswitch/spellcheck.py",
 }
 
 # Packages installed by the ``verify`` job of .github/workflows/tests.yml.
@@ -1055,6 +1062,31 @@ def model_identity() -> ModelIdentity:
     )
 
 
+def toolchain_constants_problems(
+    toolchain: Mapping[str, object],
+    facts: dict[str, object],
+    project_root: Path = PROJECT_ROOT,
+) -> list[str]:
+    """Compare manifest.toolchain.constants_sha256 with what the tree holds now.
+
+    No toolchain file digest moves when a value the files import from
+    keyswitch.constants changes; this digest does.
+    """
+
+    try:
+        constants_sha256 = pinned_toolchain_values(project_root).sha256
+    except ReportRejected as error:
+        return [str(error)]
+    facts["toolchain_constants_sha256"] = constants_sha256
+    if toolchain.get("constants_sha256") == constants_sha256:
+        return []
+    return [
+        "constants used by the model toolchain differ from "
+        "manifest.toolchain.constants_sha256"
+        + ("" if "constants_sha256" in toolchain else " (the manifest predates value pinning)")
+    ]
+
+
 def phase_model_inputs(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
     problems: list[str] = []
     ctx.run_command(
@@ -1154,6 +1186,7 @@ def phase_model_inputs(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
     facts["toolchain_drift"] = drifted
     if drifted:
         problems.append("toolchain files differ from manifest: " + ", ".join(drifted))
+    problems.extend(toolchain_constants_problems(toolchain, facts))
     # Whether this host still computes what the build machine computed. The
     # manifest no longer names an interpreter - a rebuilt Python that returns
     # the same answers is the same environment for this purpose - so the

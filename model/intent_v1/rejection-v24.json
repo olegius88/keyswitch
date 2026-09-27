@@ -1,0 +1,303 @@
+{
+  "schema_version": 1,
+  "phase": "strict_production_context_ensemble",
+  "decision": "rejected",
+  "reason": "production_context_ensemble",
+  "artifact_published": true,
+  "internal_quality_gates_passed": true,
+  "independent_external_holdout_evaluated": true,
+  "model_version": "intent-v1-f000bfb842e9",
+  "artifact_sha256": "de2bf750f62b9484ef720a5b0b44aab1de4bae8512c8e43074546265f0a571f6",
+  "config_sha256": "9767ab04d29d6e1060e39c46f1224e70beb2ae712c1de3d921056816b5c69b02",
+  "candidate_sha256": "7397c32173af74b133667e5c0abea50a11176bfd870ff0d2afdf1e9d08b8b986",
+  "candidate_dataset_sha256": "01e21ffaaffa7663002538320d5e7018cb286979cf4c29a51ed817fd7eb3c57b",
+  "seal_registry_sha256": "6c1cbb3b13a9ab3df227eee22a9636810bc588786fc0d527a5ea1cd8e6648ed2",
+  "manifest_sha256": "7becd4c59e59faf7e3c9c85b8ca4f427e1e4e88ea6c6a69af0825541474585fc",
+  "internal_report_sha256": "ea76fadfb3e93057d56244bd5ef145c0d472e83d857849e547313656f7391e8f",
+  "evaluator_sha256": "370c1c4b1d586a98dbcbb96d4e00dbe91aa319e378d68cd8cad951dd48ac7b5d",
+  "strict_report_sha256": "8b756940779d23d66d96ffa2522d6c4293a1633a03eb6f88fbf4e3bd74704802",
+  "failure": {
+    "failed_strict_gates": [
+      "production_context_ensemble"
+    ],
+    "production_context_ensemble": {
+      "bounds": {
+        "context_score_maximum": 1.0,
+        "context_score_minimum": 0.0,
+        "delta_multiplier": 1.75,
+        "source_group_penalty": 0.3,
+        "target_group_bonus": 0.55
+      },
+      "gate_breakdown": {
+        "all_profiles_present": true,
+        "expected_profiles": [
+          "neutral",
+          "none_max",
+          "none_min",
+          "source_max",
+          "source_min",
+          "target_max",
+          "target_min"
+        ],
+        "passed": false,
+        "profiles": {
+          "neutral": {
+            "omitted_keys": [
+              "all_corpora_present",
+              "corpora",
+              "expected_delta",
+              "expected_delta_hex",
+              "group_selector",
+              "observed_deltas_by_direction",
+              "passed",
+              "profile_matches_contract",
+              "reachable_extrema_exact"
+            ]
+          },
+          "none_max": {
+            "omitted_keys": [
+              "all_corpora_present",
+              "corpora",
+              "expected_delta",
+              "expected_delta_hex",
+              "group_selector",
+              "observed_deltas_by_direction",
+              "passed",
+              "profile_matches_contract",
+              "reachable_extrema_exact"
+            ]
+          },
+          "none_min": {
+            "omitted_keys": [
+              "all_corpora_present",
+              "corpora",
+              "expected_delta",
+              "expected_delta_hex",
+              "group_selector",
+              "observed_deltas_by_direction",
+              "passed",
+              "profile_matches_contract",
+              "reachable_extrema_exact"
+            ]
+          },
+          "source_max": {
+            "omitted_keys": [
+              "all_corpora_present",
+              "corpora",
+              "expected_delta",
+              "expected_delta_hex",
+              "group_selector",
+              "observed_deltas_by_direction",
+              "passed",
+              "profile_matches_contract",
+              "reachable_extrema_exact"
+            ]
+          },
+          "source_min": {
+            "omitted_keys": [
+              "all_corpora_present",
+              "corpora",
+              "expected_delta",
+              "expected_delta_hex",
+              "group_selector",
+              "observed_deltas_by_direction",
+              "passed",
+              "profile_matches_contract",
+              "reachable_extrema_exact"
+            ]
+          },
+          "target_max": {
+            "omitted_keys": [
+              "all_corpora_present",
+              "corpora",
+              "expected_delta",
+              "expected_delta_hex",
+              "group_selector",
+              "observed_deltas_by_direction",
+              "passed",
+              "profile_matches_contract",
+              "reachable_extrema_exact"
+            ]
+          },
+          "target_min": {
+            "omitted_keys": [
+              "all_corpora_present",
+              "corpora",
+              "expected_delta",
+              "expected_delta_hex",
+              "group_selector",
+              "observed_deltas_by_direction",
+              "passed",
+              "profile_matches_contract",
+              "reachable_extrema_exact"
+            ]
+          }
+        },
+        "schema_version": 1
+      },
+      "prediction_cache": {
+        "cache_hits": 2086440,
+        "context_invariance_proved_before_use": true,
+        "unique_model_predictions": 347502
+      },
+      "profiles": {
+        "neutral": {
+          "corpora": {
+            "omitted_keys": [
+              "safety",
+              "sealed_test",
+              "sealed_test_typos",
+              "source_known",
+              "unknown_typo"
+            ]
+          },
+          "expected_delta": 0.0,
+          "expected_delta_hex": "0x0.0p+0",
+          "group_selector": "none",
+          "observed_deltas_by_direction": {
+            "omitted_keys": [
+              "0_to_1",
+              "1_to_0"
+            ]
+          },
+          "source_context": 0.0,
+          "target_context": 0.0
+        },
+        "none_max": {
+          "corpora": {
+            "omitted_keys": [
+              "safety",
+              "sealed_test",
+              "sealed_test_typos",
+              "source_known",
+              "unknown_typo"
+            ]
+          },
+          "expected_delta": 1.75,
+          "expected_delta_hex": "0x1.c000000000000p+0",
+          "group_selector": "none",
+          "observed_deltas_by_direction": {
+            "omitted_keys": [
+              "0_to_1",
+              "1_to_0"
+            ]
+          },
+          "source_context": 0.0,
+          "target_context": 1.0
+        },
+        "none_min": {
+          "corpora": {
+            "omitted_keys": [
+              "safety",
+              "sealed_test",
+              "sealed_test_typos",
+              "source_known",
+              "unknown_typo"
+            ]
+          },
+          "expected_delta": -1.75,
+          "expected_delta_hex": "-0x1.c000000000000p+0",
+          "group_selector": "none",
+          "observed_deltas_by_direction": {
+            "omitted_keys": [
+              "0_to_1",
+              "1_to_0"
+            ]
+          },
+          "source_context": 1.0,
+          "target_context": 0.0
+        },
+        "source_max": {
+          "corpora": {
+            "omitted_keys": [
+              "safety",
+              "sealed_test",
+              "sealed_test_typos",
+              "source_known",
+              "unknown_typo"
+            ]
+          },
+          "expected_delta": 1.45,
+          "expected_delta_hex": "0x1.7333333333333p+0",
+          "group_selector": "source",
+          "observed_deltas_by_direction": {
+            "omitted_keys": [
+              "0_to_1",
+              "1_to_0"
+            ]
+          },
+          "source_context": 0.0,
+          "target_context": 1.0
+        },
+        "source_min": {
+          "corpora": {
+            "omitted_keys": [
+              "safety",
+              "sealed_test",
+              "sealed_test_typos",
+              "source_known",
+              "unknown_typo"
+            ]
+          },
+          "expected_delta": -2.05,
+          "expected_delta_hex": "-0x1.0666666666666p+1",
+          "group_selector": "source",
+          "observed_deltas_by_direction": {
+            "omitted_keys": [
+              "0_to_1",
+              "1_to_0"
+            ]
+          },
+          "source_context": 1.0,
+          "target_context": 0.0
+        },
+        "target_max": {
+          "corpora": {
+            "omitted_keys": [
+              "safety",
+              "sealed_test",
+              "sealed_test_typos",
+              "source_known",
+              "unknown_typo"
+            ]
+          },
+          "expected_delta": 2.3,
+          "expected_delta_hex": "0x1.2666666666666p+1",
+          "group_selector": "target",
+          "observed_deltas_by_direction": {
+            "omitted_keys": [
+              "0_to_1",
+              "1_to_0"
+            ]
+          },
+          "source_context": 0.0,
+          "target_context": 1.0
+        },
+        "target_min": {
+          "corpora": {
+            "omitted_keys": [
+              "safety",
+              "sealed_test",
+              "sealed_test_typos",
+              "source_known",
+              "unknown_typo"
+            ]
+          },
+          "expected_delta": -1.2,
+          "expected_delta_hex": "-0x1.3333333333333p+0",
+          "group_selector": "target",
+          "observed_deltas_by_direction": {
+            "omitted_keys": [
+              "0_to_1",
+              "1_to_0"
+            ]
+          },
+          "source_context": 1.0,
+          "target_context": 0.0
+        }
+      },
+      "schema_version": 1
+    }
+  },
+  "remediation": "Treat the disclosed sealed and external results as development evidence only. Rotate the sealed split, registry, hard-negative source and independent holdout namespaces before the next candidate and evaluate that candidate exactly once."
+}

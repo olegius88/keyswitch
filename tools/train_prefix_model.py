@@ -14,9 +14,20 @@ from typing import cast
 
 from keyswitch.context_model import ACTIONS, ContextModel
 from keyswitch.prefix_model import ARTIFACT, PREFIX_FEATURE_VERSION, PrefixModel
+from keyswitch.value_provenance import pin_values
+from context_corpus import ROOT
 from context_evidence import canonical, checksum
 from context_optimizer import Kernel, Packed, SOURCE as OPTIMIZER
-from prefix_corpus import DIRECTORY, RECEIPT, PROFILES, config, rows, provenance as corpus_provenance
+from prefix_corpus import CONVERT, DIRECTORY, KEEP, RECEIPT, WAIT, config, rows, provenance as corpus_provenance
+from keyswitch.constants.file_formats import VERSION_HASH_CHARACTERS
+from keyswitch.constants.model_protocol import PROFILES
+from keyswitch.constants.models import PREFIX_MIN_CHARACTERS
+from keyswitch.constants.prefix import (
+    PREFIX_MIN_FEATURE_OCCURRENCES,
+    PREFIX_REPORT_MAX_EXAMPLES,
+    PREFIX_TRAINING_PROGRESS_EPOCHS,
+)
+from keyswitch.constants.training import DETERMINISTIC_ROUNDING_DECIMALS, LOG_LOSS_PROBABILITY_FLOOR
 
 
 CANDIDATE = DIRECTORY / "candidate.json"
@@ -40,10 +51,10 @@ def sequence_results(model: PrefixModel, split: str) -> list[SequenceResult]:
         key = cast(int, row["sequence"]), str(row["profile"])
         result = results.setdefault(key, SequenceResult(str(row["text"]), str(row["category"]), bool(row["desired"]), str(row["profile"])))
         length = cast(int, row["length"])
-        if length < 4:
+        if length < PREFIX_MIN_CHARACTERS:
             continue  # Runtime default; shorter prefixes are only wait/keep supervision.
         prediction = model.predict_features(cast(dict[str, float], row["features"]))
-        best = max(range(4), key=prediction.probabilities.__getitem__)
+        best = max(range(len(ACTIONS)), key=prediction.probabilities.__getitem__)
         if ACTIONS[best] == "convert":
             result.candidates.append((length, prediction.probabilities[best]))
         if row["legacy_convert"] and result.legacy_at is None:
@@ -68,7 +79,7 @@ def metrics(data: list[SequenceResult], threshold: float) -> dict[str, object]:
         local["legacy_false"] = int(result.legacy_at is not None and not result.desired)
         if first is not None and result.desired:
             local["characters_before_conversion"] = first
-        if len(examples) < 15 and (local["false"] or result.desired and first is None):
+        if len(examples) < PREFIX_REPORT_MAX_EXAMPLES and (local["false"] or result.desired and first is None):
             examples.append({"text": result.text, "category": result.category, "profile": result.profile,
                              "desired": result.desired, "first_conversion": first})
         counts.update(local)
@@ -79,7 +90,8 @@ def metrics(data: list[SequenceResult], threshold: float) -> dict[str, object]:
 
 
 def provenance() -> dict[str, str]:
-    return {"trainer": checksum(Path(__file__)), "optimizer": checksum(OPTIMIZER), "corpus": checksum(RECEIPT)}
+    return {"trainer": checksum(Path(__file__)), "optimizer": checksum(OPTIMIZER), "corpus": checksum(RECEIPT),
+            "constants_sha256": pin_values([Path(__file__)], source_root=ROOT / "src").sha256}
 
 
 def train() -> tuple[bytes, bytes]:
@@ -91,28 +103,30 @@ def train() -> tuple[bytes, bytes]:
     for row in rows("train"):
         counts.update(cast(dict[str, float], row["features"]).keys())
         labels[cast(int, row["label"])] += 1
-    names = sorted(name for name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:cast(int, cfg["maximum_features"])] if count >= 2)
-    factors = {0: cast(float, cfg["keep_importance"]), 1: 1.0, 2: cast(float, cfg["wait_importance"])}
+    names = sorted(name for name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:cast(int, cfg["maximum_features"])]
+                   if count >= PREFIX_MIN_FEATURE_OCCURRENCES)
+    factors = {KEEP: cast(float, cfg["keep_importance"]), CONVERT: 1.0, WAIT: cast(float, cfg["wait_importance"])}
     importance = {label: sum(labels.values()) / (len(labels) * count) * factors[label] for label, count in labels.items()}
     packed = {
         split: Packed.build(((cast(dict[str, float], row["features"]), cast(int, row["label"]), importance[cast(int, row["label"])])
                              for row in rows(split)), names) for split in ("train", "development")
     }
     kernel = Kernel.load()
-    weights, accumulators = array("d", [0.0]) * (len(names) * 4), array("d", [1.0]) * (len(names) * 4)
+    weights, accumulators = array("d", [0.0]) * (len(names) * len(ACTIONS)), array("d", [1.0]) * (len(names) * len(ACTIONS))
     best, best_loss, selected_epoch = array("d", weights), math.inf, 0
     for epoch in range(cast(int, cfg["epochs"])):
         kernel.epoch(packed["train"], weights, accumulators, cast(float, cfg["learning_rate"]))
         probabilities = kernel.predict(packed["development"], weights)
-        loss = sum(-packed["development"].importance[row] * math.log(max(1e-15, probabilities[row * 4 + label]))
+        loss = sum(-packed["development"].importance[row] * math.log(max(LOG_LOSS_PROBABILITY_FLOOR, probabilities[row * len(ACTIONS) + label]))
                    for row, label in enumerate(packed["development"].labels)) / len(packed["development"].labels)
         if loss < best_loss:
             best, best_loss, selected_epoch = array("d", weights), loss, epoch + 1
-        if epoch % 5 == 0:
+        if epoch % PREFIX_TRAINING_PROGRESS_EPOCHS == 0:
             print(f"prefix epoch {epoch + 1}: development loss {loss:.6f}", flush=True)
-    learned = {name: [round(best[index * 4 + action], 9) for action in range(4)] for index, name in enumerate(names)}
+    learned = {name: [round(best[index * len(ACTIONS) + action], DETERMINISTIC_ROUNDING_DECIMALS) for action in range(len(ACTIONS))]
+               for index, name in enumerate(names)}
     digest = hashlib.sha256(json.dumps(learned, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
-    version = "prefix-v1-" + digest[:12]
+    version = "prefix-v1-" + digest[:VERSION_HASH_CHARACTERS]
     model = PrefixModel(ContextModel({name: tuple(values) for name, values in learned.items()}, version))
     calibration = sequence_results(model, "calibration")
     threshold = 1.0
@@ -123,11 +137,11 @@ def train() -> tuple[bytes, bytes]:
             break
     payload = {"feature_version": PREFIX_FEATURE_VERSION, "actions": list(ACTIONS), "version": version,
                "conversion_threshold": threshold, "weights_sha256": digest, "weights": learned,
-               "kind": "keyswitch.prefix-policy", "prefix_feature_version": 1}
+               "kind": "keyswitch.prefix-policy", "prefix_feature_version": PREFIX_FEATURE_VERSION}
     raw = canonical(payload)
     seal = {"schema_version": 1, "candidate_sha256": hashlib.sha256(raw).hexdigest(),
             "provenance": provenance(), "config": cfg, "features": len(names), "epoch": selected_epoch,
-            "development_loss": round(best_loss, 9), "training_rows": len(packed["train"].labels),
+            "development_loss": round(best_loss, DETERMINISTIC_ROUNDING_DECIMALS), "training_rows": len(packed["train"].labels),
             "development": metrics(sequence_results(model, "development"), threshold),
             "calibration": metrics(calibration, threshold), "threshold": threshold}
     return raw, canonical(seal)

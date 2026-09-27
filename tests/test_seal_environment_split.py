@@ -14,6 +14,7 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from collections.abc import Mapping
 from dataclasses import asdict, fields
 from pathlib import Path
@@ -35,6 +36,8 @@ import train_intent_model as trainer  # noqa: E402
 from test_intent_training import config  # noqa: E402
 from fixture_values.scores import SEALED_TEST_TRIGGER_SCORE, SEAL_ENVIRONMENT_VETO_THRESHOLD
 from keyswitch.constants.file_formats import SHA256_HEX_CHARACTERS
+from keyswitch.constants.model_protocol import INTENT_TOOLCHAIN_VALUE_SOURCES
+from keyswitch.value_provenance import ValueProvenanceError
 
 
 # Names that describe a machine rather than an input. None of them may appear
@@ -73,7 +76,7 @@ class IdentityExcludesTheMachine(unittest.TestCase):
         self.assertEqual(names & ENVIRONMENT_FIELD_NAMES, set())
         self.assertEqual(
             names,
-            {"config_sha256"}
+            {"config_sha256", evaluator._TOOLCHAIN_VALUES_FIELD}
             | {field for field, _ in evaluator._TOOLCHAIN_CODE_PATHS},
         )
 
@@ -110,6 +113,7 @@ class IdentityExcludesTheMachine(unittest.TestCase):
 
         honest = {
             "config_sha256": "0" * SHA256_HEX_CHARACTERS,
+            evaluator._TOOLCHAIN_VALUES_FIELD: "0" * SHA256_HEX_CHARACTERS,
             **{field: "0" * SHA256_HEX_CHARACTERS for field, _ in evaluator._TOOLCHAIN_CODE_PATHS},
         }
         self.assertTrue(evaluator._toolchain_code_hashes(honest))
@@ -121,11 +125,57 @@ class IdentityExcludesTheMachine(unittest.TestCase):
     def test_dropping_a_code_digest_is_rejected_too(self) -> None:
         honest = {
             "config_sha256": "0" * SHA256_HEX_CHARACTERS,
+            evaluator._TOOLCHAIN_VALUES_FIELD: "0" * SHA256_HEX_CHARACTERS,
             **{field: "0" * SHA256_HEX_CHARACTERS for field, _ in evaluator._TOOLCHAIN_CODE_PATHS},
         }
         del honest["environment_probe_sha256"]
         with self.assertRaises(ValueError):
             evaluator._toolchain_code_hashes(honest)
+
+    def test_dropping_the_constants_digest_is_rejected(self) -> None:
+        """A schema 1 toolchain, without the values its files import, is not enough."""
+
+        honest = {
+            "config_sha256": "0" * SHA256_HEX_CHARACTERS,
+            **{field: "0" * SHA256_HEX_CHARACTERS for field, _ in evaluator._TOOLCHAIN_CODE_PATHS},
+        }
+        with self.assertRaisesRegex(ValueError, "constants_sha256"):
+            evaluator._toolchain_code_hashes(honest)
+
+
+class IdentityPinsTheValuesTheToolchainImports(unittest.TestCase):
+    """Every number of the toolchain files lives in keyswitch.constants now.
+
+    The file digests no longer move with a threshold, so the snapshot carries
+    the digest of the values the files import - those and no others.
+    """
+
+    def test_snapshot_carries_the_digest_the_verifiers_recompute(self) -> None:
+        snapshot = trainer.capture_toolchain_snapshot("0" * SHA256_HEX_CHARACTERS)
+        pinned = evaluator.toolchain_values()
+        self.assertEqual(snapshot.constants_sha256, pinned.sha256)
+        self.assertEqual(
+            {path.relative_to(PROJECT_ROOT).as_posix() for path in trainer.TOOLCHAIN_VALUE_SOURCE_PATHS},
+            set(INTENT_TOOLCHAIN_VALUE_SOURCES),
+        )
+
+    def test_used_values_are_pinned_and_unused_ones_are_not(self) -> None:
+        values = evaluator.toolchain_values().values
+        self.assertIn("keyswitch.constants.training.WILSON_95_Z_SCORE", values)
+        self.assertIn("keyswitch.constants.settings_defaults.DEFAULT_CONFIDENCE_THRESHOLD", values)
+        self.assertIn("keyswitch.constants.model_protocol.INTENT_TOOLCHAIN_VALUE_SOURCES", values)
+        self.assertNotIn("keyswitch.constants.settings_defaults.CONFIDENCE_SETTING_MAX", values)
+
+    def test_strict_report_carries_the_values_behind_the_digest(self) -> None:
+        pinned = evaluator.toolchain_values()
+        self.assertEqual(
+            evaluator.toolchain_values_payload(),
+            {"sha256": pinned.sha256, "values": dict(pinned.values)},
+        )
+        with mock.patch.object(
+            evaluator, "pin_values", side_effect=ValueProvenanceError("unpinnable")
+        ):
+            self.assertEqual(evaluator.toolchain_values_payload(), {"error": "unpinnable"})
 
 
 class ProvenanceDescribesTheMachine(unittest.TestCase):

@@ -21,15 +21,32 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from keyswitch.constants.file_formats import HEXADECIMAL_BASE, REPORT_JSON_INDENT, VERSION_HASH_CHARACTERS
+from keyswitch.constants.models import CONTEXT_TYPO_FEATURE_VERSION, CONTEXT_V1_CONVERSION_THRESHOLD
+from keyswitch.constants.training import (
+    # Keeps its name here: tests shorten the training by patching this module's EPOCHS.
+    CONTEXT_V1_EPOCHS as EPOCHS,
+    CONTEXT_V1_KEEP_IMPORTANCE,
+    CONTEXT_V1_LEARNING_RATE,
+    CONTEXT_V1_MAX_REPORTED_FAILURES,
+    CONTEXT_V1_SLASH_WORDS_PER_FAMILY,
+    CONTEXT_V1_SPLIT_BUCKET_COUNT,
+    CONTEXT_V1_TRAIN_SPLIT_BUCKETS,
+    DETERMINISTIC_CHOICE_HEX_DIGITS,
+    DETERMINISTIC_ROUNDING_DECIMALS,
+    LOG_LOSS_PROBABILITY_FLOOR,
+    SHORT_WORD_MAX_CHARACTERS,
+)
 from keyswitch.context_model import (
-    ACTIONS, ARTIFACT_PATH, FEATURE_VERSION, ContextAction, ContextEvidence,
-    ContextModel, extract_context_features, softmax,
+    ACTIONS, ARTIFACT_PATH, TECHNICAL_MARKS, ContextAction, ContextEvidence,
+    ContextModel, extract_context_features, one_typo_from_word, softmax,
 )
 from keyswitch.detector import LanguageDetector
 from keyswitch.input_context import FieldContext
 from keyswitch.intent_model import LinearNgramModel
 from keyswitch.language_model import LanguageModel
 from keyswitch.layouts import LayoutPair
+from keyswitch.lexicon_supplement import supplement_words
 from keyswitch.short_words import (
     TRUSTED_SHORT_WORDS, natural_short_source_veto, trusted_short_word_decision,
 )
@@ -40,22 +57,22 @@ SCENARIOS = ROOT / "model/context_v1/scenarios.json"
 HOLDOUT = ROOT / "model/context_v1/holdout-3.json"
 REPORT = ROOT / "model/context_v1/report.json"
 NAMESPACE = "keyswitch:context-v1:candidate3"
-EPOCHS = 70
-KEEP_IMPORTANCE = 1.0
-LEARNING_RATE = 0.2
-CONVERSION_THRESHOLD = 0.985
+# Rows carry no application name: the model must answer the same way in every
+# application, and a name it learned covered only the few applications listed
+# here. Rows used to be expanded over (application, role) pairs; each role keeps
+# the share it had then, so the balance of the corpus stays as it was measured.
 # Without field reading the engine reports role `unknown` for every real
-# application, so each application appears both with a declared role and with
-# `unknown`. Pairing `unknown` only with a stand-in editor left the serving
-# combination unseen.
-FIELDS = (("Telegram", "text"), ("Code", "text"), ("TestEditor", "unknown"),
-          ("Telegram", "unknown"), ("chrome", "unknown"), ("Code", "unknown"))
-TERMINAL_FIELDS = (("Code", "code"), ("WindowsTerminal", "terminal"),
-                   ("Telegram", "unknown"), ("Code", "unknown"))
-# A field read through accessibility reports its role, and a chat input or an
-# editor pane holding code, logs or English prose is where a correctly typed
-# Russian word most often follows English text.
-LATIN_FIELD_APPS = (("Code", "text"), ("Telegram", "text"))
+# application, and a field read through accessibility reports its own role.
+FIELD_ROLES = ("text", "text", "unknown", "unknown", "unknown", "unknown")
+TERMINAL_ROLES = ("code", "terminal", "unknown", "unknown")
+# A chat input or an editor pane holding code, logs or English prose is where a
+# correctly typed Russian word most often follows English text.
+LATIN_FIELD_ROLES = ("text", "text")
+SLASH_ROLES = ("text", "code", "unknown", "unknown")
+# English words that may follow a collision word: whole phrases, as a field read around the caret
+# gives them, and single words, as the engine gives the converted neighbour of a waiting word.
+COLLISION_ENGLISH_FOLLOWING = ("is not ready yet", "can wait until tomorrow", "was right about it",
+                               "is", "can", "was", "the", "and")
 
 
 @dataclass(frozen=True)
@@ -72,8 +89,9 @@ def canonical(value: object) -> bytes:
 
 
 def family_split(signature: str) -> str:
-    bucket = int(hashlib.sha256((NAMESPACE + ":" + signature).encode()).hexdigest()[:8], 16) % 10
-    return "train" if bucket < 8 else "development"
+    digest = hashlib.sha256((NAMESPACE + ":" + signature).encode()).hexdigest()
+    bucket = int(digest[:DETERMINISTIC_CHOICE_HEX_DIGITS], HEXADECIMAL_BASE) % CONTEXT_V1_SPLIT_BUCKET_COUNT
+    return "train" if bucket < CONTEXT_V1_TRAIN_SPLIT_BUCKETS else "development"
 
 
 def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> list[Row]:
@@ -84,10 +102,15 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
     intent, _status = LinearNgramModel.try_load_default()
     if intent is None:
         raise ValueError("baseline model unavailable")
-    models = {0: LanguageModel.load("en_US"), 1: LanguageModel.load("ru_RU")}
+    # The engine's detector reads both lexicons with their packaged supplements
+    # (engine.py: LanguageModel.load(locale, supplement_words(locale))); the
+    # baseline decision and the known flags here must be the ones it computes.
+    models = {group: LanguageModel.load(locale, supplement_words(locale))
+              for group, locale in ((0, "en_US"), (1, "ru_RU"))}
     detector = LanguageDetector(models, intent)
     rows: list[Row] = []
     cache: dict[tuple[str, int, str, int | None], tuple[bool, bool, bool, float]] = {}
+    typos: dict[tuple[str, int], tuple[bool, bool]] = {}
 
     def context_group_of(text: str) -> int | None:
         """The engine remembers the layout of the previous word, not its text.
@@ -138,7 +161,7 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
             )
         return cache[key][0]
 
-    def add(word: str, group: int, before: str, after: str, app: str, role: str,
+    def add(word: str, group: int, before: str, after: str, role: str,
             trigger: str, action: ContextAction, category: str) -> None:
         from keyswitch.input_context import FieldRole
 
@@ -146,14 +169,28 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
         signature = min(word.casefold(), alternate.casefold())
         baseline_for(word, group, before, trigger)
         baseline, source_known, target_known, delta = cache[(word, group, trigger, context_group_of(before))]
+        # Feature schema 5 tells a reading one typo away from a word from any other
+        # unknown token. Without it a lone `aghbdtn` (a stray key before `ghbdtn`)
+        # and a technical name the detector converts by mistake (`nextjs`) differed
+        # only in their letters, and every row keeping the name cost the other its
+        # conversion. The engine computes the same flags with its own lexicons.
+        if (word, group) not in typos:
+            typos[(word, group)] = (one_typo_from_word(word, models[group]), one_typo_from_word(alternate, models[1 - group]))
+        source_typo, target_typo = typos[(word, group)]
         item = ContextEvidence(
-            word, alternate, group, FieldContext(app, "training-field", before, after, cast(FieldRole, role)),
+            word, alternate, group, FieldContext("", "training-field", before, after, cast(FieldRole, role)),
             trigger, baseline, source_known, target_known, delta,
+            source_typo=source_typo, target_typo=target_typo,
         )
         rows.append(Row(item, action, signature, "test" if held_out else family_split(signature), category))
 
-    for name, group in (("russian", 1), ("english", 0), ("short_russian", 1), ("russian_chat", 1), ("short_english", 0)):
-        words: object = payload.get(name)
+    # `russian_hard` holds frequent Russian words whose keys in the English layout
+    # the detector does not convert on its own: only the context restores them
+    # (`kexit` for `лучше`), so they are taught like the other Russian words.
+    # An independent test set may leave the list out.
+    for name, group in (("russian", 1), ("english", 0), ("short_russian", 1), ("russian_chat", 1), ("short_english", 0),
+                        ("russian_hard", 1)):
+        words: object = payload.get(name, [] if name == "russian_hard" else None)
         if not isinstance(words, list) or any(not isinstance(word, str) for word in words):
             raise ValueError("invalid scenario words")
         for word in cast(list[str], words):
@@ -166,11 +203,11 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
             # A word that stands alone may be meant either way when both readings
             # are words; short words nearly always are, so they count as such.
             collision = name in {"short_russian", "short_english"} or models[1 - group].score(wrong).known
-            # A short English word on its own teaches nothing the other families
-            # do not: alone it is judged like any short token. It is taught in
-            # English context and with the words that follow it.
-            for before in (contexts[1:] if name == "short_english" else contexts):
-                for app, role in FIELDS:
+            # A short English word on its own is as ambiguous as any short token:
+            # typed in the other layout it waits for the next word (`ш` for `I`
+            # at the start of a message), and typed as intended it stays.
+            for before in contexts:
+                for role in FIELD_ROLES:
                     for trigger in ("space", "pause", "enter", "punctuation"):
                         action: ContextAction = "convert"
                         # A short word without context stays ambiguous only when
@@ -180,22 +217,26 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
                         if name in {"short_russian", "russian_chat", "short_english"} and collision \
                                 and not before and not baseline_for(wrong, 1 - group, "", trigger):
                             action = "suggest" if trigger in {"enter", "punctuation"} else "wait"
-                        add(wrong, 1 - group, before, "", app, role, trigger, action, name + "_wrong")
+                        add(wrong, 1 - group, before, "", role, trigger, action, name + "_wrong")
                         # Standalone Latin letters may be variables. Correct
                         # short Russian words, like all valid prose, stay put.
-                        add(word, group, before, "", app, role, trigger, "keep", name + "_correct")
+                        add(word, group, before, "", role, trigger, "keep", name + "_correct")
             if name == "short_russian":
                 for following in ("этого достаточно", "следующего сообщения", "сегодня всё получилось",
                                   "завтра продолжим", "меня всё устраивает", "нас это не касается",
                                   "тебя ждут в офисе", "него другое мнение", "вас получилось лучше",
                                   "них уже есть решение"):
-                    for app, role in FIELDS:
-                        add(wrong, 0, "", following, app, role, "space", "convert", "short_lookahead")
+                    for role in FIELD_ROLES:
+                        add(wrong, 0, "", following, role, "space", "convert", "short_lookahead")
+                        # The engine asks again with only the converted next word after it.
+                        add(wrong, 0, "", following.split()[0], role, "space", "convert", "short_lookahead")
             elif name == "short_english":
                 for following in ("is not ready yet", "can wait until tomorrow", "will be fine", "was right about it",
                                   "should know that", "have seen this before"):
-                    for app, role in FIELDS:
-                        add(wrong, 1, "", following, app, role, "space", "convert", "short_lookahead")
+                    for role in FIELD_ROLES:
+                        add(wrong, 1, "", following, role, "space", "convert", "short_lookahead")
+                        # The engine asks again with only the converted next word after it.
+                        add(wrong, 1, "", following.split()[0], role, "space", "convert", "short_lookahead")
             elif name == "russian_chat" and collision:
                 # A conversational word whose other reading is English waits at the
                 # start of a message (`tot` for `еще`). The engine then asks about it
@@ -203,15 +244,15 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
                 # Each has its twin with nothing after it, which waits: the rows differ
                 # only in the next word, so only the next word is what they teach.
                 for following in ("в", "не", "раз", "тест", "работает", "можно", "будет", "немного", "надо", "есть"):
-                    for app, role in FIELDS:
-                        add(wrong, 0, "", following, app, role, "space", "convert", "chat_lookahead")
-                        add(wrong, 0, "", "", app, role, "space", "wait", "chat_lookahead_alone")
-            # App identity must not override the actual language of comments.
-            add(wrong, 1 - group, "// " + contexts[1], "", "Code", "code", "space", "convert", "code_comment")
+                    for role in FIELD_ROLES:
+                        add(wrong, 0, "", following, role, "space", "convert", "chat_lookahead")
+                        add(wrong, 0, "", "", role, "space", "wait", "chat_lookahead_alone")
+            # A code field must not override the actual language of its comments.
+            add(wrong, 1 - group, "// " + contexts[1], "", "code", "space", "convert", "code_comment")
             # A legitimate English insertion inside Russian prose is not a
             # layout error, even when the surrounding sentence is Russian.
             if group == 0:
-                add(word, 0, "в сообщении написано ", "", "Telegram", "text", "space", "keep", "mixed_prose")
+                add(word, 0, "в сообщении написано ", "", "text", "space", "keep", "mixed_prose")
 
     # A field whose text is mostly code, logs or English prose still holds
     # Russian sentences: a chat input under an editor, a comment, a reply. The
@@ -220,9 +261,10 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
     # became `почему ns` and `все еще` became `все tot` in real use. Every such
     # field teaches four classes in equal measure, so the script of the field
     # stays neutral and the token decides: a correctly typed Russian or English
-    # word stays, and either typed in the other layout is converted. A wrong
-    # form that is itself a word of the other language (`tot`, `ns`) is not
+    # word stays, and either typed in the other layout is converted. A longer
+    # wrong form that is itself a word of the other language (`tot`) is not
     # taught here: whether it was meant needs more than the field can tell.
+    # Short words have their own rows below.
     latin_fields: object = payload.get("latin_fields", [])
     latin_tails: object = payload.get("latin_tails", [])
     for scenarios in (latin_fields, latin_tails):
@@ -236,13 +278,42 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
     for field in cast(list[str], latin_fields):
         for tail in cast(list[str], latin_tails):
             before = field + tail
-            for app, role in LATIN_FIELD_APPS:
+            for role in LATIN_FIELD_ROLES:
                 for word, group in [*((word, 1) for word in russian_words[:count]),
                                     *((word, 0) for word in english_words[:count])]:
-                    add(word, group, before, "", app, role, "space", "keep", "latin_field_correct")
+                    add(word, group, before, "", role, "space", "keep", "latin_field_correct")
                     wrong = pair.translate(word, "ru" if group == 1 else "us", "us" if group == 1 else "ru")
-                    if len(word) > 2 and not models[1 - group].score(wrong).known:
-                        add(wrong, 1 - group, before, "", app, role, "space", "convert", "latin_field_wrong")
+                    if len(word) > SHORT_WORD_MAX_CHARACTERS and not models[1 - group].score(wrong).known:
+                        add(wrong, 1 - group, before, "", role, "space", "convert", "latin_field_wrong")
+
+    # A Russian word whose keys in the other layout also spell an English word
+    # (`лун` is `key`, `ищи` is `bob`): with the packaged supplement the engine
+    # knows both readings of many such tokens. Typed as it is, the Russian word
+    # stays after Russian text and after an English field, as every correctly
+    # typed Russian word does. English words after it make it the English word:
+    # the engine hands them over when a word is edited in place and when a
+    # waiting word is decided with its neighbour (`here` with one key in the
+    # other layout reads `руку`, and `is` follows). Russian words after it are
+    # not taught: they would outweigh the rows where a Latin collision before a
+    # converted Russian word is converted (`tot привет`).
+    # The Latin reading after Russian text is not taught: an English word there
+    # is often meant (`вчера key`).
+    collisions: object = payload.get("russian_collisions", [])
+    if not isinstance(collisions, list) or any(not isinstance(word, str) for word in collisions):
+        raise ValueError("invalid russian_collisions scenarios")
+    for word in cast(list[str], collisions):
+        for before in ("я думаю что ", "подскажи пожалуйста ", "мы обсуждали это вчера "):
+            for role in FIELD_ROLES:
+                for trigger in ("space", "pause", "enter", "punctuation"):
+                    add(word, 1, before, "", role, trigger, "keep", "collision_correct")
+        for field in cast(list[str], latin_fields):
+            for tail in cast(list[str], latin_tails):
+                for role in LATIN_FIELD_ROLES:
+                    add(word, 1, field + tail, "", role, "space", "keep", "collision_latin_field")
+        for before in ("", "I think that ", "we discussed this yesterday "):
+            for following in COLLISION_ENGLISH_FOLLOWING:
+                for role in ("text", "unknown"):
+                    add(word, 1, before, following, role, "space", "convert", "collision_english_after")
 
     # The runtime's curated trusted short-word list decides a handful of
     # two-letter tokens on its own, in both directions. Mirroring it here keeps
@@ -255,24 +326,51 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
                 wrong = pair.translate(word, "us" if target_group == 0 else "ru", "ru" if target_group == 0 else "us")
                 phrases = ("", "я думаю что ", "мы обсуждали это вчера ") if target_group == 1 else ("", "I think that ", "we discussed this yesterday ")
                 for before in phrases:
-                    for app, role in FIELDS:
+                    for role in FIELD_ROLES:
                         for trigger in ("space", "pause", "enter", "punctuation"):
                             converts = baseline_for(wrong, 1 - target_group, before, trigger)
                             action = "convert" if converts or before else (
                                 "suggest" if trigger in {"enter", "punctuation"} else "wait")
-                            add(wrong, 1 - target_group, before, "", app, role, trigger, cast(ContextAction, action), "trusted_short_wrong")
-                            add(word, target_group, before, "", app, role, trigger, "keep", "trusted_short_correct")
+                            add(wrong, 1 - target_group, before, "", role, trigger, cast(ContextAction, action), "trusted_short_wrong")
+                            add(word, target_group, before, "", role, trigger, "keep", "trusted_short_correct")
 
     technical: object = payload.get("technical")
     if not isinstance(technical, list) or any(not isinstance(word, str) for word in technical):
         raise ValueError("invalid technical scenarios")
+    technical_contexts = ("запусти ", "введи команду ", "const value = ", "return ", "$ ", "the command is ")
     for token in cast(list[str], technical):
-        for before in ("запусти ", "введи команду ", "const value = ", "return ", "$ ", "the command is "):
-            for app, role in TERMINAL_FIELDS:
+        wrong = pair.translate(token, "us", "ru")
+        letters = "".join(char for char in wrong if char.isalpha())
+        # Some technical tokens are authored to stay although their letters spell
+        # a Russian word in the other layout (`2ghbdtn`, `/ntcn1`): a word with a
+        # digit or a path mark is an identifier, not a layout error.
+        stays = len(token) > SHORT_WORD_MAX_CHARACTERS and models[1].score(letters).known
+        # Such a token and any path, address or identifier stays at the start of
+        # a field too (`/c,jhrb2` there once became `.сборки2`). A plain command
+        # name alone is left to both of its readings: `зь2` typed alone is `pm2`.
+        alone = ("",) if stays or any(char in token for char in TECHNICAL_MARKS) else ()
+        for before in (*alone, *technical_contexts):
+            for role in TERMINAL_ROLES:
                 for trigger in ("space", "pause", "enter", "punctuation"):
-                    add(token, 0, before, "", app, role, trigger, "keep", "technical")
+                    add(token, 0, before, "", role, trigger, "keep", "technical")
+        # The same keys typed in the Russian layout are still the command:
+        # `пше` is `git`. Not taught for a one- or two-letter token (the
+        # short-word families decide those), for a token that stays, when the
+        # other reading keeps a path mark (`гыук_шв`): the mark is what tells a
+        # path from a word, or for a token with a digit. A digit reads the same
+        # in both layouts, and rows converting such tokens taught the model that
+        # a digit points to a layout error: `/c,jhrb2` at the start of a field
+        # became `/сборки2`. `зь2` still becomes `pm2` from its letters, as it
+        # did before these rows existed.
+        if (len(token) > SHORT_WORD_MAX_CHARACTERS and not stays
+                and not any(char in wrong for char in TECHNICAL_MARKS)
+                and not any(char.isdigit() for char in token)):
+            for before in ("", *technical_contexts):
+                for role in TERMINAL_ROLES:
+                    for trigger in ("space", "pause", "enter", "punctuation"):
+                        add(wrong, 1, before, "", role, trigger, "convert", "technical_wrong")
 
-    def unknown_family(name: str, group: int, contexts: tuple[str, ...], apps: tuple[tuple[str, str], ...]) -> None:
+    def unknown_family(name: str, group: int, contexts: tuple[str, ...], roles: tuple[str, ...]) -> None:
         """Tokens outside both lexicons: the physical form decides, not a dictionary.
 
         A technical term, dotfile, jargon word or misspelling typed in the wrong
@@ -288,19 +386,57 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
         for token in cast(list[str], tokens):
             wrong = pair.translate(token, "us" if group == 0 else "ru", "ru" if group == 0 else "us")
             for before in contexts:
-                for app, role in apps:
+                for role in roles:
                     for trigger in ("space", "pause", "enter", "punctuation"):
                         action: ContextAction = "convert"
-                        if len(token) <= 2 and not before and not baseline_for(wrong, 1 - group, "", trigger):
+                        if len(token) <= SHORT_WORD_MAX_CHARACTERS and not before and not baseline_for(wrong, 1 - group, "", trigger):
                             action = "suggest" if trigger in {"enter", "punctuation"} else "wait"
-                        add(wrong, 1 - group, before, "", app, role, trigger, action, name + "_wrong")
-                        add(token, group, before, "", app, role, trigger, "keep", name + "_correct")
+                        add(wrong, 1 - group, before, "", role, trigger, action, name + "_wrong")
+                        add(token, group, before, "", role, trigger, "keep", name + "_correct")
 
-    terminal_apps = TERMINAL_FIELDS
-    unknown_family("technical_terms", 0, ("", "запусти ", "далее запускается процесс ", "$ "), terminal_apps)
-    unknown_family("dotted", 0, ("", "открой файл ", "нужно поправить ", "$ cat "), terminal_apps)
-    unknown_family("english_unknown", 0, ("", "I think that ", "could you please ", "в сообщении написано "), FIELDS)
-    unknown_family("russian_unknown", 1, ("", "я думаю что ", "нужно срочно ", "мы обсуждали это вчера ", "подскажи пожалуйста "), FIELDS)
+    unknown_family("technical_terms", 0, ("", "запусти ", "далее запускается процесс ", "$ "), TERMINAL_ROLES)
+    unknown_family("dotted", 0, ("", "открой файл ", "нужно поправить ", "$ cat "), TERMINAL_ROLES)
+    unknown_family("english_unknown", 0, ("", "I think that ", "could you please ", "в сообщении написано "), FIELD_ROLES)
+    unknown_family("russian_unknown", 1, ("", "я думаю что ", "нужно срочно ", "мы обсуждали это вчера ", "подскажи пожалуйста "), FIELD_ROLES)
+
+    # Short Russian words outside the Russian lexicon whose other reading the
+    # English lexicon happens to know (`ок` is `jr`, `ии` is `bb`). Everywhere
+    # else such a Cyrillic token is an English word typed in the wrong layout,
+    # so without these rows `ок` after code or a log became `jr`. They are
+    # taught in context only: alone, `ок` and `ш` for `I` look the same.
+    short_unknown: object = payload.get("short_russian_unknown", [])
+    if not isinstance(short_unknown, list) or any(not isinstance(word, str) for word in short_unknown):
+        raise ValueError("invalid short_russian_unknown scenarios")
+    for word in cast(list[str], short_unknown):
+        for before in ("я думаю что ", "нужно срочно ", "мы обсуждали это вчера ", "подскажи пожалуйста "):
+            for role in FIELD_ROLES:
+                for trigger in ("space", "pause", "enter", "punctuation"):
+                    add(word, 1, before, "", role, trigger, "keep", "short_russian_unknown_correct")
+    # Short words after an English field, in the same four classes as the
+    # longer ones above. The rows above already keep a short Russian word, and
+    # a short English word stays too. Typed in the other layout right after the
+    # English text, either is converted - except a one-letter Russian word in
+    # the English layout: a lone Latin letter after English text is as often an
+    # initial or part of an abbreviation (`six f b i agents`), so it waits for
+    # the next word, as a short English word does at the start of a message.
+    # After a Russian tail the short-word families above already teach the
+    # Russian side, and a Latin token there may be a command or a path
+    # (`код/dpkg`), so the tail is not taught here.
+    for field in cast(list[str], latin_fields):
+        for tail in cast(list[str], latin_tails):
+            for role in LATIN_FIELD_ROLES:
+                for word in cast(list[str], short_unknown):
+                    add(word, 1, field + tail, "", role, "space", "keep", "latin_field_short_unknown")
+                if not tail:
+                    for word in cast(list[str], payload["short_russian"]):
+                        wrong = pair.translate(word, "ru", "us")
+                        action = "wait" if len(word) == 1 else "convert"
+                        add(wrong, 0, field, "", role, "space", action, "latin_field_short_wrong")
+                for word in cast(list[str], payload["short_english"]):
+                    add(word, 0, field + tail, "", role, "space", "keep", "latin_field_short_correct")
+                    if not tail:
+                        wrong = pair.translate(word, "us", "ru")
+                        add(wrong, 1, field, "", role, "space", "convert", "latin_field_short_wrong")
 
     # A slash is punctuation in both layouts, so the engine hands the word after
     # it to the model separately. The language of the fragment before the slash
@@ -316,13 +452,17 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
         if not isinstance(value, list) or any(not isinstance(prefix, str) for prefix in value):
             raise ValueError("invalid slash scenarios")
         prefixes += cast(list[str], value)
+    # Every technical term is taught after a slash: a command or package name
+    # after a path segment is what this family is about, and the model cannot see
+    # the slash itself - `код/dpkg` reads to it as `dpkg` after a Russian word.
     for name, group in (("russian", 1), ("english", 0), ("technical_terms", 0)):
-        for word in cast(list[str], payload[name])[:10]:
+        words = cast(list[str], payload[name])
+        for word in (words if name == "technical_terms" else words[:CONTEXT_V1_SLASH_WORDS_PER_FAMILY]):
             wrong = pair.translate(word, "ru" if group == 1 else "us", "us" if group == 1 else "ru")
             for before in prefixes:
-                for app, role in (("Telegram", "text"), ("Code", "code"), ("Telegram", "unknown"), ("Code", "unknown")):
-                    add(wrong, 1 - group, before, "", app, role, "space", "convert", "slash_wrong")
-                    add(word, group, before, "", app, role, "space", "keep", "slash_correct")
+                for role in SLASH_ROLES:
+                    add(wrong, 1 - group, before, "", role, "space", "convert", "slash_wrong")
+                    add(word, group, before, "", role, "space", "keep", "slash_correct")
     return rows
 
 
@@ -336,13 +476,15 @@ def development_metrics(weights: dict[str, list[float]], rows: list[tuple[dict[s
     """
 
     correct = false_conversions = 0
+    action_count = len(ACTIONS)
+    unseen = (0.0,) * action_count
     for features, label in rows:
-        scores = [0.0] * 4
+        scores = [0.0] * action_count
         for name, value in features.items():
-            for index, weight in enumerate(weights.get(name, (0.0, 0.0, 0.0, 0.0))):
+            for index, weight in enumerate(weights.get(name, unseen)):
                 scores[index] += weight * value
         probabilities = softmax(scores)
-        selected = max(range(4), key=lambda index: probabilities[index])
+        selected = max(range(action_count), key=lambda index: probabilities[index])
         action = ACTIONS[selected]
         if action == "convert" and probabilities[selected] < threshold:
             action = "suggest"
@@ -352,31 +494,42 @@ def development_metrics(weights: dict[str, list[float]], rows: list[tuple[dict[s
 
 
 def train(rows: list[Row]) -> tuple[dict[str, list[float]], int, float]:
-    train_rows = [(extract_context_features(row.evidence), ACTIONS.index(row.action)) for row in rows if row.split == "train"]
-    development = [(extract_context_features(row.evidence), ACTIONS.index(row.action)) for row in rows if row.split == "development"]
+    train_rows = [(extract_context_features(row.evidence, CONTEXT_TYPO_FEATURE_VERSION), ACTIONS.index(row.action))
+                  for row in rows if row.split == "train"]
+    development = [(extract_context_features(row.evidence, CONTEXT_TYPO_FEATURE_VERSION), ACTIONS.index(row.action))
+                   for row in rows if row.split == "development"]
     if not train_rows or not development:
         raise ValueError("empty training or development split")
     names = sorted({name for features, _label in train_rows for name in features})
-    weights = {name: [0.0] * 4 for name in names}
-    accumulators = {name: [1.0] * 4 for name in names}
+    action_count = len(ACTIONS)
+    unseen = (0.0,) * action_count
+    weights = {name: [0.0] * action_count for name in names}
+    accumulators = {name: [1.0] * action_count for name in names}
     label_counts = Counter(label for _features, label in train_rows)
     # Inverse frequency already balances the classes. The former extra 2.0 bias
     # towards `keep` was chosen for a small, highly repetitive corpus; on the
     # larger one it held the `convert` probability under the fixed 0.985
     # serving threshold, so a correct decision still changed no text.
     # Both this weight and the step below were selected on development only.
-    importance_by_label = {label: len(train_rows) / (4 * count) * (KEEP_IMPORTANCE if label == 0 else 1.0) for label, count in label_counts.items()}
+    importance_by_label = {label: len(train_rows) / (action_count * count) * (CONTEXT_V1_KEEP_IMPORTANCE if label == 0 else 1.0)
+                           for label, count in label_counts.items()}
     best: dict[str, list[float]] = {}
     best_loss, best_epoch = math.inf, 0
-    # Selection follows the runtime rule under a zero-false-conversion budget.
-    # Weighted log-loss is dominated by the `keep` mass and stopped before the
-    # model reached the fixed serving threshold, so a correct decision still
-    # changed no text. Both quantities are measured on development only.
     best_correct = -1
+    # Selection follows the runtime rule under a zero-false-conversion budget,
+    # measured on development only: the epoch with the most correct actions
+    # and no false conversion, the lower log-loss breaking a tie. Weighted
+    # log-loss alone is dominated by the `keep` mass and would stop before the
+    # model reaches the fixed serving threshold.
+    # How long to train is chosen on disclosed data (see CONTEXT_V1_EPOCHS):
+    # development keeps gaining correct actions, but in the engine a word typed
+    # after a stray key (`aghbdtn`) needs a few epochs before the typo evidence
+    # carries it, while every further epoch converts more package names typed
+    # as intended after a path and spoils more correct sentences.
     # Fixed order and optimizer parameters; test never selects an epoch.
     for epoch in range(EPOCHS):
         for features, label in train_rows:
-            scores = [0.0] * 4
+            scores = [0.0] * action_count
             for name, value in features.items():
                 for index, weight in enumerate(weights[name]):
                     scores[index] += weight * value
@@ -384,22 +537,22 @@ def train(rows: list[Row]) -> tuple[dict[str, list[float]], int, float]:
             importance = importance_by_label[label]
             for name, value in features.items():
                 vector, squared = weights[name], accumulators[name]
-                for index in range(4):
+                for index in range(action_count):
                     gradient = importance * (probabilities[index] - float(index == label)) * value
                     squared[index] += gradient * gradient
-                    vector[index] -= LEARNING_RATE * gradient / math.sqrt(squared[index])
+                    vector[index] -= CONTEXT_V1_LEARNING_RATE * gradient / math.sqrt(squared[index])
         loss = 0.0
         for features, label in development:
-            scores = [0.0] * 4
+            scores = [0.0] * action_count
             for name, value in features.items():
-                for index, weight in enumerate(weights.get(name, (0.0, 0.0, 0.0, 0.0))):
+                for index, weight in enumerate(weights.get(name, unseen)):
                     scores[index] += weight * value
-            loss -= importance_by_label[label] * math.log(max(1e-15, softmax(scores)[label]))
+            loss -= importance_by_label[label] * math.log(max(LOG_LOSS_PROBABILITY_FLOOR, softmax(scores)[label]))
         loss /= len(development)
-        correct, false_conversions = development_metrics(weights, development, CONVERSION_THRESHOLD)
+        correct, false_conversions = development_metrics(weights, development, CONTEXT_V1_CONVERSION_THRESHOLD)
         if false_conversions == 0 and (correct > best_correct or (correct == best_correct and loss < best_loss)):
             best_correct, best_loss, best_epoch = correct, loss, epoch + 1
-            best = {name: [round(value, 9) for value in vector] for name, vector in weights.items()}
+            best = {name: [round(value, DETERMINISTIC_ROUNDING_DECIMALS) for value in vector] for name, vector in weights.items()}
     if not best:
         raise ValueError("no epoch reached the development false-conversion budget")
     return best, best_epoch, best_loss
@@ -424,7 +577,7 @@ def evaluate(model: ContextModel, rows: list[Row], split: str) -> dict[str, obje
         category["rows"] += 1
         category["correct_actions"] += int(prediction.action == row.action)
         category["false_conversions"] += int(prediction.action == "convert" and row.action != "convert")
-        if prediction.action != row.action and len(failures) < 30:
+        if prediction.action != row.action and len(failures) < CONTEXT_V1_MAX_REPORTED_FAILURES:
             failures.append({"token": row.evidence.original, "category": row.category, "expected": row.action, "actual": prediction.action})
     return {"counts": dict(counts), "categories": {name: dict(value) for name, value in sorted(by_category.items())}, "examples": failures}
 
@@ -439,8 +592,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     rows = build_corpus()
     weights, epoch, loss = train(rows)
     digest = hashlib.sha256(json.dumps(weights, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
-    payload = {"feature_version": FEATURE_VERSION, "actions": list(ACTIONS), "version": "context-v1-" + digest[:12], "conversion_threshold": CONVERSION_THRESHOLD, "weights_sha256": digest, "weights": weights}
-    model = ContextModel({name: tuple(value) for name, value in weights.items()}, "context-v1-" + digest[:12])
+    payload = {"feature_version": CONTEXT_TYPO_FEATURE_VERSION, "actions": list(ACTIONS), "version": "context-v1-" + digest[:VERSION_HASH_CHARACTERS],
+               "conversion_threshold": CONTEXT_V1_CONVERSION_THRESHOLD, "weights_sha256": digest, "weights": weights}
+    model = ContextModel({name: tuple(value) for name, value in weights.items()}, "context-v1-" + digest[:VERSION_HASH_CHARACTERS],
+                         feature_version=CONTEXT_TYPO_FEATURE_VERSION)
     # The development-only path neither reads nor scores reserved test rows.
     if not args.development_only:
         rows += build_corpus(HOLDOUT, held_out=True)
@@ -454,13 +609,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     report = {
         "schema_version": 1, "model_version": model.version, "evidence_scope": "author-created-synthetic-scenarios-not-real-world-quality",
         "split_namespace": NAMESPACE, "family_counts": {name: len(value) for name, value in groups.items()},
-        "test_overlap": overlap, "selected_epoch": epoch, "development_loss": round(loss, 9),
+        "test_overlap": overlap, "selected_epoch": epoch, "development_loss": round(loss, DETERMINISTIC_ROUNDING_DECIMALS),
         "sources_sha256": hashlib.sha256(SCENARIOS.read_bytes()).hexdigest(),
         "holdout_sha256": None if args.development_only else hashlib.sha256(HOLDOUT.read_bytes()).hexdigest(),
         "runtime_sha256": hashlib.sha256((ROOT / "src/keyswitch/context_model.py").read_bytes()).hexdigest(),
         "policy_sha256": hashlib.sha256((ROOT / "src/keyswitch/short_words.py").read_bytes()).hexdigest(),
         "trainer_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "baseline_sha256": hashlib.sha256((ROOT / "src/keyswitch/resources/models/layout_intent_v1.ksm").read_bytes()).hexdigest(),
+        "supplement_sha256": hashlib.sha256((ROOT / "src/keyswitch/resources/lexicon-supplement-ru_RU.json").read_bytes()).hexdigest(),
         "artifact_sha256": hashlib.sha256(canonical(payload)).hexdigest(),
         "baseline_scope": "isolated-token LanguageDetector, not full application",
         "development": evaluate(model, rows, "development"), "test": test, "quality_gates_passed": passed,
@@ -474,7 +630,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.artifact.write_bytes(artifact_bytes)
         args.report.write_bytes(report_bytes)
-    print(json.dumps({"model": model.version, "quality_gates_passed": passed, "test": test, "selected_epoch": epoch}, ensure_ascii=False, indent=2))
+    print(json.dumps({"model": model.version, "quality_gates_passed": passed, "test": test, "selected_epoch": epoch}, ensure_ascii=False, indent=REPORT_JSON_INDENT))
     return 0 if passed or args.development_only else 1
 
 

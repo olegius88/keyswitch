@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from collections.abc import Iterable, Mapping
 
-from keyswitch.context_model import softmax
+from keyswitch.constants.training import CONTEXT_OPTIMIZER_CACHE_DIGEST_CHARACTERS
+from keyswitch.context_model import ACTIONS, softmax
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = Path(__file__).with_suffix(".c")
@@ -32,7 +33,7 @@ class Packed:
         vocabulary = {name: index for index, name in enumerate(names)}
         result = cls(array("Q", [0]), array("I"), array("d"), array("B"), array("d"))
         for features, label, importance in rows:
-            if not 0 <= label < 4 or not math.isfinite(importance) or importance <= 0:
+            if not 0 <= label < len(ACTIONS) or not math.isfinite(importance) or importance <= 0:
                 raise ValueError("invalid training target or importance")
             for name, value in features.items():
                 if not math.isfinite(value):
@@ -47,15 +48,17 @@ class Packed:
 
 
 def python_epoch(data: Packed, weights: array[float], accumulators: array[float], rate: float) -> None:
+    # One weight per feature and action, stored feature by feature, as the native kernel reads them.
+    width = len(ACTIONS)
     for row, label in enumerate(data.labels):
-        scores = [0.0] * 4
+        scores = [0.0] * width
         for position in range(data.offsets[row], data.offsets[row + 1]):
-            for action in range(4):
-                scores[action] += weights[data.indices[position] * 4 + action] * data.values[position]
+            for action in range(width):
+                scores[action] += weights[data.indices[position] * width + action] * data.values[position]
         probabilities = softmax(scores)
         for position in range(data.offsets[row], data.offsets[row + 1]):
-            for action in range(4):
-                index = data.indices[position] * 4 + action
+            for action in range(width):
+                index = data.indices[position] * width + action
                 gradient = data.importance[row] * (probabilities[action] - float(action == label)) * data.values[position]
                 accumulators[index] += gradient * gradient
                 weights[index] -= rate * gradient / math.sqrt(accumulators[index])
@@ -64,17 +67,21 @@ def python_epoch(data: Packed, weights: array[float], accumulators: array[float]
 class Kernel:
     def __init__(self, path: Path) -> None:
         self.library = ctypes.CDLL(str(path))
+        pointer = ctypes.c_void_p
         self.library.context_epoch.restype = None
-        self.library.context_epoch.argtypes = [ctypes.c_void_p] * 5 + [ctypes.c_uint64, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_double]
+        # offsets, indices, values, labels, importance; rows; weights, accumulators; rate
+        self.library.context_epoch.argtypes = [pointer, pointer, pointer, pointer, pointer, ctypes.c_uint64,
+                                               pointer, pointer, ctypes.c_double]
         self.library.context_predict.restype = None
-        self.library.context_predict.argtypes = [ctypes.c_void_p] * 3 + [ctypes.c_uint64, ctypes.c_void_p, ctypes.c_void_p]
+        # offsets, indices, values; rows; weights, output
+        self.library.context_predict.argtypes = [pointer, pointer, pointer, ctypes.c_uint64, pointer, pointer]
 
     @classmethod
     def load(cls) -> Kernel:
         compiler = shutil.which("gcc") or shutil.which("cc")
         if compiler is None:
             raise RuntimeError("large-corpus training needs a C compiler; runtime and artifact validation do not")
-        digest = hashlib.sha256(SOURCE.read_bytes() + repr(FLAGS).encode()).hexdigest()[:16]
+        digest = hashlib.sha256(SOURCE.read_bytes() + repr(FLAGS).encode()).hexdigest()[:CONTEXT_OPTIMIZER_CACHE_DIGEST_CHARACTERS]
         directory = ROOT / "build/context-optimizer" / digest
         directory.mkdir(parents=True, exist_ok=True)
         library = directory / "context.so"
@@ -89,6 +96,6 @@ class Kernel:
         self.library.context_epoch(data.offsets.buffer_info()[0], data.indices.buffer_info()[0], data.values.buffer_info()[0], data.labels.buffer_info()[0], data.importance.buffer_info()[0], len(data.labels), weights.buffer_info()[0], accumulators.buffer_info()[0], rate)
 
     def predict(self, data: Packed, weights: array[float]) -> array[float]:
-        result = array("d", [0.0]) * (len(data.labels) * 4)
+        result = array("d", [0.0]) * (len(data.labels) * len(ACTIONS))
         self.library.context_predict(data.offsets.buffer_info()[0], data.indices.buffer_info()[0], data.values.buffer_info()[0], len(data.labels), weights.buffer_info()[0], result.buffer_info()[0])
         return result

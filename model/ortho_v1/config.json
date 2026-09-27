@@ -1,11 +1,52 @@
 {
-  "schema_version": 1,
+  "schema_version": 11,
   "order": 5,
   "discount": 0.75,
   "scale": 512,
   "minimum_length": 3,
-  "calibration_false_budget": 0,
-  "margin_nats": 3.0,
+  "thresholds_nats": {
+    "en": 26.0,
+    "ru": 13.3
+  },
+  "collapse_runs": 2,
+  "stretch_runs": 3,
+  "hyphen_stretch": true,
+  "compound_min_letters": {
+    "en": 3
+  },
+  "unscored_shapes": [],
+  "web_source_scripts": [
+    "ru"
+  ],
+  "prose_source_scripts": [
+    "ru"
+  ],
+  "feature_folds": 5,
+  "feature_l2": 0.1,
+  "feature_min_types": 10,
+  "feature_shared": [
+    "extra_key",
+    "name_unknown"
+  ],
+  "feature_tied": [
+    "dot_word",
+    "source_word"
+  ],
+  "feature_omitted": [
+    "target_unknown",
+    "source_plausibility"
+  ],
+  "feature_separated": {
+    "en": [
+      "parts_source",
+      "parts_target"
+    ],
+    "ru": [
+      "ident",
+      "parts_source",
+      "parts_target"
+    ]
+  },
   "promotion": {
     "minimum_test_negatives": 5000,
     "maximum_test_false_conversions": 0,

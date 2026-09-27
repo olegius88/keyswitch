@@ -1,0 +1,33 @@
+{
+  "artifact_published": false,
+  "config_sha256": "3e5dfd16af148adff08e8d267efe62094502e1da053ae8dea831b50dfda30781",
+  "decision": "rejected",
+  "failure": {
+    "failed_triggers": [
+      "boundary_probe",
+      "enter",
+      "punctuation",
+      "space",
+      "tab"
+    ],
+    "observed_recall": {
+      "boundary_probe": 0.951688289,
+      "enter": 0.951688289,
+      "pause": 0.942078365,
+      "punctuation": 0.951688289,
+      "space": 0.951688289,
+      "tab": 0.951688289
+    },
+    "selection_minimum_recall": 0.956
+  },
+  "independent_external_holdout_evaluated": false,
+  "internal_quality_gates_passed": false,
+  "phase": "threshold_selection",
+  "reason": "selection_recall",
+  "remediation": "Rotate the sealed split, registry, hard-negative source and independent holdout namespaces before the next candidate, as the recorded rejections of v6-v13 and v18 prescribe.",
+  "schema_version": 1,
+  "scope": "The candidate was rejected at threshold selection, before the sealed evaluation was claimed and before a single sealed row was materialised: sealed_test_evaluated is false and model/intent_v1/seal-registry-v25.json was never created. Nothing about the held-out test was disclosed, so this receipt records a development outcome rather than a consumed evaluation.",
+  "sealed_registry_created": false,
+  "sealed_test_evaluated": false,
+  "split_namespace": "keyswitch:intent-v25:physical-signature"
+}

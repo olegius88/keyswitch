@@ -35,7 +35,6 @@ EVIDENCE_LOAD_CALLS_AFTER_MTIME_CHANGE: Final = 3
 COMPLETED_WORD_SEGMENTATION_CERTAIN_INDEX: Final = 2
 # Number of keystrokes (word + trailing comma + space) the undo must erase.
 UNDO_WORD_COMMA_SPACE_BACKSPACE_COUNT: Final = 3
-OVERSIZED_BOUNDARY_POLICY_BYTES: Final = 65537
 UIA_MULTIPLE_SELECTION_RANGE_COUNT: Final = 2
 ATSPI_FIXTURE_CARET_OFFSET: Final = 8
 ATSPI_FIXTURE_TEXT_CHARACTERS: Final = 10
@@ -196,9 +195,6 @@ LOOKAHEAD_SAMPLING_SEEDS_PER_FAMILY: Final = 2
 LOOKAHEAD_SEEDS_PER_GENERATED_FAMILY: Final = 4
 LOOKAHEAD_TOTAL_SEED_FIXTURES: Final = 12
 CONTEXT_FILLER_CHARACTERS: Final = 700
-# FieldContext keeps this many characters of the application name (frozen input_context.py, pending
-# reseal).
-FIELD_CONTEXT_APPLICATION_MAX_CHARACTERS: Final = 128
 FIELD_CONTEXT_OVERLONG_NAME_CHARACTERS: Final = 200
 FIELD_CONTEXT_OVERLONG_TEXT_CHARACTERS: Final = 900
 # Confirmations a learned rule requires in the tests: the detection.learning_confirmations they
@@ -334,8 +330,7 @@ INTENT_TINY_FINGERPRINT_CAP: Final = 2
 # Halving a length finds its middle item or character.
 MIDPOINT_DIVISOR: Final = 2
 INTENT_TINY_PAYLOAD_CAP_BYTES: Final = 32
-# _validated_json_value() rejects metadata nested past depth 16 (not yet named there;
-# PENDING_RESEAL); this goes comfortably past that.
+# Nesting comfortably past INTENT_METADATA_MAX_DEPTH, which _validated_json_value() rejects.
 INTENT_METADATA_NESTING_DEPTH_OVER_LIMIT: Final = 18
 JSON_NESTING_OVERFLOW_DEPTH: Final = 1200
 INTENT_LOADER_THREAD_POOL_WORKERS: Final = 2
@@ -343,8 +338,9 @@ INTENT_LOADER_EXPECTED_DECODE_CALLS: Final = 2
 INTENT_DISCOVERY_SECOND_LOAD_CALL_COUNT: Final = 2
 INTENT_DISCOVERY_THIRD_LOAD_CALL_COUNT: Final = 3
 INTENT_DISCOVERY_EXPECTED_RELOAD_CALLS: Final = 2
-# Twelve hashed files plus tools/environment_probe.py, certified since v21.
-INTENT_STRICT_REPORT_VERIFIED_FILE_COUNT: Final = 13
+# Twelve hashed files plus tools/environment_probe.py, certified since v21, and
+# src/keyswitch/spellcheck.py, certified since manifest schema 2.
+INTENT_STRICT_REPORT_VERIFIED_FILE_COUNT: Final = 14
 STRICT_REPORT_SCRIPT_SEARCH_WINDOW_CHARACTERS: Final = 200
 INTENT_DEFAULT_SAMPLES_PER_DIRECTION: Final = 10
 INTENT_DEFAULT_POSITIVES_PER_DIRECTION: Final = 5
@@ -482,8 +478,8 @@ EXPECTED_PRESEAL_EXAMPLES_BY_ROLE: Final = {
         "calibration": 12_000,
         "threshold": 12_000,
     }
-EXPECTED_SEALED_EXCLUSION_SIGNATURE_COUNT: Final = 288_843
-EXPECTED_COMBINED_EXCLUSION_SIGNATURE_COUNT: Final = 298_843
+EXPECTED_SEALED_EXCLUSION_SIGNATURE_COUNT: Final = 288_861
+EXPECTED_COMBINED_EXCLUSION_SIGNATURE_COUNT: Final = 298_861
 WILSON_BOUND_TEST_SAMPLE_SIZE: Final = 1_000
 WILSON_BOUND_COMPARISON_PLACES: Final = 8
 WILSON_BOUND_TEST_FALSE_POSITIVES: Final = 2
@@ -561,8 +557,6 @@ PREFIX_OVER_LENGTH_CAP_CHARACTERS: Final = 30
 PREFIX_LONG_APPLICATION_NAME_REPEATS: Final = 100
 # Trailing filler past PREFIX_MAX_CHARACTERS: must never surface in features.
 PREFIX_TRAILING_FILLER_CHARACTERS: Final = 100
-# Mirrors the frozen src/keyswitch/prefix_model.py before[-512:] context window.
-PREFIX_MODEL_BEFORE_WINDOW_CHARACTERS: Final = 512
 PREFIX_SPLIT_PROBE_SAMPLE_COUNT: Final = 1000
 PREFIX_OUT_OF_RANGE_CONVERTED_COUNT: Final = 10**9
 PREFIX_EXPECTED_CHARACTERS_BEFORE_CONVERSION: Final = 4
@@ -590,11 +584,8 @@ LEARNING_SCALAR_RULE_VALUE: Final = 5
 LEARNING_FULL_CONFIRMATIONS: Final = 5
 LEARNING_MALFORMED_RULE_VALUE: Final = 9
 LATIN_ALPHABET_SIZE: Final = 26
-LANGUAGE_MODEL_CALIBRATION_WORD_LIMIT: Final = 12_000
-LANGUAGE_MODEL_SCORE_CACHE_MAXSIZE: Final = 65_536
 LANGUAGE_MODEL_BEST_DELETION_WORD_LENGTH: Final = 30
 LANGUAGE_MODEL_BEST_DELETION_LIMIT: Final = 3
-HUNSPELL_MAX_CHECK_CHARACTERS: Final = 128
 TRAY_APP_EXPECTED_MENU_OPEN_CALLS: Final = 2
 TRAY_APP_EXPECTED_CLOSE_CALLS: Final = 2
 # Version, TextDirection, Status, IconThemePath.
@@ -663,3 +654,8 @@ RUSSIAN_QUANTITY_SAMPLE_COUNTS: Final = (1, 2, 5, 11, 12, 21, 22, 25, 111)
 # A whole float is written without a fraction part; a fraction is written with a decimal comma.
 RUSSIAN_QUANTITY_SAMPLE_WHOLE_FLOAT: Final = 3.0
 RUSSIAN_QUANTITY_SAMPLE_FRACTION: Final = 2.5
+# test_input_integrity: letters typed past MAX_WORD_STROKES in one run, the minimum word length set
+# above the length of a learned two-letter rule, and the auto-repeats of an Enter the prompt swallowed.
+LONG_INPUT_EXTRA_STROKES: Final = 20
+EXPLICIT_RULE_MINIMUM_LENGTH: Final = 8
+SWALLOWED_ENTER_REPEATS: Final = 4

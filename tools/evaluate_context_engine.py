@@ -27,6 +27,13 @@ if TESTS_PATH not in sys.path:
 
 from keyswitch.backend import KeyEvent, SHIFT_MASK
 from keyswitch.boundary_model import BoundaryModel
+from keyswitch.constants.training import (
+    CONTEXT_V2_ENGINE_FIRST_KEY_SERIAL,
+    CONTEXT_V2_ENGINE_MAX_REPORTED_FAILURES,
+    CONTEXT_V2_ENGINE_PHRASE_MAX_CHARACTERS,
+    CONTEXT_V2_ENGINE_PHRASE_MIN_CHARACTERS,
+    CONTEXT_V2_ENGINE_ROWS_PER_LOCALE,
+)
 from keyswitch.config import SettingsStore
 from keyswitch.context_model import ContextModel
 from keyswitch.engine import KeySwitchEngine
@@ -40,19 +47,20 @@ from context_evidence import canonical, checksum, reference_models
 from train_context_v2 import ARTIFACT, BASELINE, validate_seal
 
 REPORT = CORPUS_ROOT / "engine-report.json"
-ROWS_PER_LOCALE = 64
+LOCALES = ("eng", "rus")
 
 
 def select_phrases(rows: list[AssignedPhrase]) -> list[AssignedPhrase]:
-    eligible = [row for row in rows if row.split == "test" and 8 <= len(row.phrase.text) <= 96
+    eligible = [row for row in rows if row.split == "test"
+        and CONTEXT_V2_ENGINE_PHRASE_MIN_CHARACTERS <= len(row.phrase.text) <= CONTEXT_V2_ENGINE_PHRASE_MAX_CHARACTERS
         and re.fullmatch(r"[A-Za-z\s.,!?'’\-:;()]+" if row.phrase.locale == "eng" else r"[А-Яа-яЁё\s.,!?'’\-:;()]+", row.phrase.text)]
     selected: list[AssignedPhrase] = []
-    for locale in ("eng", "rus"):
+    for locale in LOCALES:
         unique: dict[str, AssignedPhrase] = {}
         for row in sorted(eligible, key=lambda item: digest("engine-replay:" + str(item.phrase.identifier))):
             if row.phrase.locale == locale:
                 unique.setdefault(row.group, row)
-        selected.extend(list(unique.values())[:ROWS_PER_LOCALE])
+        selected.extend(list(unique.values())[:CONTEXT_V2_ENGINE_ROWS_PER_LOCALE])
     return selected
 
 
@@ -73,7 +81,7 @@ def replay(text: str, target: int, initial: int, model: ContextModel | None, mod
         with patch("keyswitch.engine.LanguageModel.load", side_effect=load):
             engine = KeySwitchEngine(settings, HistoryStore(root / "history.jsonl"), backend)
         engine.context_policy.model = model
-        for serial, desired in enumerate(text, 100):
+        for serial, desired in enumerate(text, CONTEXT_V2_ENGINE_FIRST_KEY_SERIAL):
             other = pair.translate(desired, "us" if target == 0 else "ru", "ru" if target == 0 else "us")
             characters = (desired, other) if target == 0 else (other, desired)
             # Physical keys remain fixed; glyphs follow the backend's NEW
@@ -104,7 +112,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.refresh_runtime and previous is None:
         raise ValueError("runtime refresh needs the previous report")
     selected = select_phrases(assign(load_source())[0])
-    if len(selected) != ROWS_PER_LOCALE * 2:
+    if len(selected) != CONTEXT_V2_ENGINE_ROWS_PER_LOCALE * len(LOCALES):
         raise ValueError("insufficient independent phrase groups")
     models = reference_models(False)
     variants = {"detector": None, "v1": ContextModel.load(BASELINE), "candidate": ContextModel.load(CORPUS_ROOT / ARTIFACT)}
@@ -125,13 +133,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 counts["changed_correct"] += int(correct and actual != text)
                 counts["length_mismatches"] += int(len(actual) != len(text))
                 counts["injections"] += injections
-                if actual != text and len(failures) < 12:
+                if actual != text and len(failures) < CONTEXT_V2_ENGINE_MAX_REPORTED_FAILURES:
                     failures.append({"source_id": row.phrase.identifier, "initially_correct": correct, "expected": text, "actual": actual})
         results[name], examples[name] = dict(counts), failures
         print(f"{name}: {json.dumps(counts)}", flush=True)
     candidate, prior = results["candidate"], results["v1"]
     report: dict[str, object] = {"schema_version": 1, "scope": "in-process visible editor, portable dictionary, boundary-only; not native OS E2E or human-intent labels",
-        "selection": "source test partition, hash-ranked distinct groups, 64 per locale, before model scoring",
+        "selection": f"source test partition, hash-ranked distinct groups, {CONTEXT_V2_ENGINE_ROWS_PER_LOCALE} per locale, before model scoring",
         "source_ids": [row.phrase.identifier for row in selected], "results": results, "examples": examples,
         "provenance": {str(path.relative_to(ROOT)): checksum(path) for path in (Path(__file__), CORPUS_ROOT / ARTIFACT, BASELINE, ROOT / "src/keyswitch/engine.py", ROOT / "src/keyswitch/context_policy.py", ROOT / "src/keyswitch/input_context.py", ROOT / "src/keyswitch/boundary_model.py", ROOT / "src/keyswitch/boundary_policy.py", ROOT / "src/keyswitch/resources/models/boundary-v2.json", ROOT / "src/keyswitch/resources/models/ortho_v1.json", ROOT / "tests/test_input_integrity.py")},
         "promotion_passed": candidate["length_mismatches"] == 0 and candidate["changed_correct"] <= prior["changed_correct"] and candidate["exactly_restored"] >= prior["exactly_restored"]}

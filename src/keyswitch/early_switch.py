@@ -23,6 +23,15 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Protocol
 
+from .constants.prefix import (
+    EARLY_SWITCH_DOMINANT_TARGET_FREQUENCY,
+    EARLY_SWITCH_MIN_TARGET_COMPLETIONS,
+    EARLY_SWITCH_MIN_TARGET_FREQUENCY,
+    PREFIX_INDEX_CACHE_SIZE,
+    PREFIX_INDEX_COMPLETION_SCAN_LIMIT,
+    PREFIX_INDEX_DICTIONARY_MAX_BYTES,
+)
+from .constants.settings_defaults import DEFAULT_EARLY_SWITCH_MIN_LENGTH
 from .language_model import LanguageModel, WordScore
 
 
@@ -52,10 +61,10 @@ class PrefixEvidence:
 class EarlySwitchPolicy:
     """Thresholds; the defaults are the calibrated conservative values."""
 
-    minimum_length: int = 4
-    minimum_completions: int = 10
-    minimum_frequency: int = 2000
-    dominant_frequency: int = 100_000
+    minimum_length: int = DEFAULT_EARLY_SWITCH_MIN_LENGTH
+    minimum_completions: int = EARLY_SWITCH_MIN_TARGET_COMPLETIONS
+    minimum_frequency: int = EARLY_SWITCH_MIN_TARGET_FREQUENCY
+    dominant_frequency: int = EARLY_SWITCH_DOMINANT_TARGET_FREQUENCY
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -103,7 +112,7 @@ class PrefixIndex:
     def __len__(self) -> int:
         return len(self._words)
 
-    def completions(self, prefix: str, *, limit: int = 4096) -> PrefixEvidence:
+    def completions(self, prefix: str, *, limit: int = PREFIX_INDEX_COMPLETION_SCAN_LIMIT) -> PrefixEvidence:
         """Count words starting with ``prefix`` and their best frequency."""
 
         normalized = prefix.casefold()
@@ -127,7 +136,7 @@ class PrefixIndex:
         return _cached_index(model.locale, model.source, id(model.frequencies))
 
 
-@lru_cache(maxsize=8)
+@lru_cache(maxsize=PREFIX_INDEX_CACHE_SIZE)
 def _cached_index(locale: str, source: str, _identity: int) -> PrefixIndex:
     model = LanguageModel.load(locale)
     words = set(model.frequencies)
@@ -147,7 +156,7 @@ def _hunspell_dictionary_path(source: str) -> Path | None:
     return None
 
 
-def _dictionary_stems(path: Path, *, limit: int = 16 * 1024 * 1024) -> set[str]:
+def _dictionary_stems(path: Path, *, limit: int = PREFIX_INDEX_DICTIONARY_MAX_BYTES) -> set[str]:
     """Read the alphabetic stems of a Hunspell ``.dic`` file (bounded)."""
 
     stems: set[str] = set()

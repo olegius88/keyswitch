@@ -135,9 +135,9 @@
   раскрытые строками, quarantine или safety-данными кандидата, исключаются,
   candidate-строки не меняются. Post-build audit
   проверяет сгенерированные строки. Физические сигнатуры распределяются
-  namespace `keyswitch:intent-v23:physical-signature`.
+  namespace `keyswitch:intent-v28:physical-signature`.
 - Schema 13 загружает отдельный frozen
-  `unknown-typo-development-v23.json`, построенный model-blind до обучения.
+  `unknown-typo-development-v28.json`, построенный model-blind до обучения.
   Независимый namespace ролей делит по 5 000 сигнатур каждого языка как
   3 500/500/500/500 между train/development/calibration/threshold без test.
   Loader проверяет hashes/sizes, Hunspell provenance, физическую эквивалентность,
@@ -315,7 +315,7 @@ Trainer публикует выходы только после всех gates. 
   Стабильное имя `layout_intent_v1.ksm` обозначает поколение классификатора;
   контейнер использует schema 4. Это не номера соседних документов: training
   config имеет `schema_version: 13`, а внешний публикационный `manifest.json` —
-  `schema_version: 1`. Диагностика показывает версию/SHA-256 модели либо причину
+  `schema_version: 2`. Диагностика показывает версию/SHA-256 модели либо причину
   безопасного fallback, а пользователь может отключить линейный слой
   переключателем «Локальная линейная модель».
 - Обе сборки также включают точный `resources/models/context_policy_v1.json`

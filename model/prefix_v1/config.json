@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "namespace": "keyswitch:prefix-v1:20260907:candidate1",
+  "namespace": "keyswitch:prefix-v1:20260925:candidate3",
   "maximum_words_per_language": 2500,
   "maximum_words_per_family": 4,
   "minimum_word_length": 5,
@@ -19,5 +19,5 @@
     "maximum_false_sequences_over_legacy": 0,
     "minimum_test_sequences": 1000
   },
-  "evidence_scope": "New prefix task on an existing public CC0 snapshot; not globally unseen source text or independently observed human intent. Split by first three physical keys before expanding prefixes, directions, contexts and dictionary profiles. These groups have not trained this prefix candidate; earlier complete-word experiments may have seen their words. Prefixes of length one and two are shared ambiguous wait examples and are never actionable. Epoch selected on development, threshold on calibration; test only after a seal."
+  "evidence_scope": "New prefix task on an existing public CC0 snapshot; not globally unseen source text or independently observed human intent. Split by first three physical keys before expanding prefixes, directions, contexts and dictionary profiles. These groups have not trained this prefix candidate. The earlier prefix-v1 splits (keyswitch:prefix-v1:20260907:candidate1, keyswitch:prefix-v1:20260925:candidate2) partitioned the same words differently and their tests were exposed, so these groups overlap those generations' train, development, calibration and test; earlier complete-word experiments may have seen their words. Features read the lexicon the engine serves: the onboard lexicons plus the packaged supplement for word scores, the onboard lexicons and Hunspell stems for the prefix index. Prefixes of length one and two are shared ambiguous wait examples and are never actionable. Epoch selected on development, threshold on calibration; test only after a seal."
 }

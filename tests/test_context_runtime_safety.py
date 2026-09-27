@@ -109,7 +109,7 @@ class ContextRuntimeSafetyTests(InputIntegrityTests):
         self.assertEqual(self.engine._manual_release_deadline, 0.0)
         self.assertEqual(len(self.backend.injections), 1)
 
-    def test_context_logging_distinguishes_unsupported_prediction_from_model_policy(self) -> None:
+    def test_context_logging_keeps_the_support_flag_as_a_diagnostic(self) -> None:
         self.settings.set("detection.context_policy", "assist")
         for supported in (False, True):
             self.reset_editor()
@@ -121,9 +121,9 @@ class ContextRuntimeSafetyTests(InputIntegrityTests):
                 self.type("ghbdtn ")
             event = next(e for e in self.events(logs.output) if e["event"] == "context_decision")
             self.assertEqual(event["model_supported"], supported)
-            self.assertEqual(event["policy_applied"], supported)
-            self.assertEqual(event["decision_source"], "context_model" if supported else "baseline")
-            self.assertEqual(event["fallback_reason"], "" if supported else "unsupported_context")
+            self.assertEqual(event["policy_applied"], True)
+            self.assertEqual(event["decision_source"], "context_model")
+            self.assertEqual(event["fallback_reason"], "")
             self.assertEqual(event["final_action"], "convert")
             self.assertEqual(event["applied"], True)  # Compatibility: this is NOT attribution.
 

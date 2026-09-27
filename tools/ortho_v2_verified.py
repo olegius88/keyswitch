@@ -48,7 +48,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import context_corpus  # noqa: E402
 import ortho_v2_corpus as corpus  # noqa: E402
 import ortho_v2_known as known  # noqa: E402
+from historical_sources import ORTHO_V2  # noqa: E402
 
+from keyswitch.constants.corpus import (  # noqa: E402
+    ORTHO_V2_DICTIONARY_CACHE_SIZE,
+    ORTHO_V2_VERIFIED_MIN_KNOWN_SHARE,
+    ORTHO_V2_VERIFIED_MIN_TOKENS,
+)
+from keyswitch.constants.file_formats import FROZEN_CORPUS_RECEIPT_JSON_INDENT  # noqa: E402
 from keyswitch.language_model import LanguageModel  # noqa: E402
 
 ROOT: Final[Path] = Path(__file__).resolve().parents[1]
@@ -57,10 +64,11 @@ LABELS: Final[Path] = DIRECTORY / "verified-labels.json.gz"
 RECEIPT: Final[Path] = DIRECTORY / "verified-receipt.json"
 LOCALES: Final[dict[str, str]] = {"en": "en_US", "ru": "ru_RU"}
 SENTENCE_LOCALE: Final[dict[str, str]] = {"eng": "en", "rus": "ru"}
+GENERATOR: Final[str] = "tools/ortho_v2_verified.py"
+CORPUS_TOOL: Final[str] = "tools/ortho_v2_corpus.py"
 # A sentence must be long enough for its own vocabulary to say anything, and
-# mostly made of words the language is known to contain.
-MINIMUM_TOKENS: Final[int] = 5
-MINIMUM_KNOWN_SHARE: Final[float] = 0.75
+# mostly made of words the language is known to contain: at least
+# ORTHO_V2_VERIFIED_MIN_TOKENS tokens, at least ORTHO_V2_VERIFIED_MIN_KNOWN_SHARE known.
 
 
 def checksum(path: Path) -> str:
@@ -80,7 +88,7 @@ def verified_sentences() -> tuple[dict[str, set[str]], dict[str, int]]:
 
     models = spellers()
 
-    @lru_cache(maxsize=1 << 20)
+    @lru_cache(maxsize=ORTHO_V2_DICTIONARY_CACHE_SIZE)
     def dictionary_knows(script: str, word: str) -> bool:
         return bool(models[script].score(word).known)
 
@@ -92,14 +100,14 @@ def verified_sentences() -> tuple[dict[str, set[str]], dict[str, int]]:
         words = unicodedata.normalize("NFC", assigned.phrase.text).split()
         counts[f"{script}:sentences"] += 1
         shaped = [word for word in words if any(character.isalpha() for character in word)]
-        if len(shaped) < MINIMUM_TOKENS:
+        if len(shaped) < ORTHO_V2_VERIFIED_MIN_TOKENS:
             counts[f"{script}:too_short"] += 1
             continue
         if any(corpus.script_of(word) not in (script, None) for word in shaped):
             counts[f"{script}:mixed_script"] += 1
             continue
         recognised = sum(1 for word in shaped if dictionary_knows(script, word))
-        if recognised < MINIMUM_KNOWN_SHARE * len(shaped):
+        if recognised < ORTHO_V2_VERIFIED_MIN_KNOWN_SHARE * len(shaped):
             counts[f"{script}:too_unfamiliar"] += 1
             continue
         # Text typed in the wrong layout reads as a word of the other language.
@@ -126,7 +134,24 @@ def write(trusted: dict[str, set[str]], path: Path) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def tool_digests(path: Path = RECEIPT) -> tuple[str, str]:
+    """The digests of this generator and of the corpus tool, as a receipt records them.
+
+    A frozen receipt keeps both, each checked against its archived copy
+    (tools/historical_sources.py); the live tools have to reproduce the labels and every
+    other field.
+    """
+
+    if not path.exists():
+        return checksum(Path(__file__)), checksum(ROOT / CORPUS_TOOL)
+    recorded: object = json.loads(path.read_bytes())
+    fields = recorded if isinstance(recorded, dict) else {}
+    return (ORTHO_V2.recorded_digest(GENERATOR, fields.get("generator_sha256")),
+            ORTHO_V2.recorded_digest(CORPUS_TOOL, fields.get("corpus_tool_sha256")))
+
+
 def receipt(trusted: dict[str, set[str]], counts: dict[str, int], labels_sha: str) -> dict[str, object]:
+    generator, corpus_tool = tool_digests()
     return {
         "schema_version": 1,
         "description": (
@@ -134,8 +159,8 @@ def receipt(trusted: dict[str, set[str]], counts: dict[str, int], labels_sha: st
             "verifiably monolingual, rather than inherited from one that is not."
         ),
         "rule": {
-            "minimum_tokens": MINIMUM_TOKENS,
-            "minimum_known_share": MINIMUM_KNOWN_SHARE,
+            "minimum_tokens": ORTHO_V2_VERIFIED_MIN_TOKENS,
+            "minimum_known_share": ORTHO_V2_VERIFIED_MIN_KNOWN_SHARE,
             "requires": [
                 "every token written in the sentence's own alphabet",
                 "at least the given share of tokens known to that language",
@@ -144,8 +169,8 @@ def receipt(trusted: dict[str, set[str]], counts: dict[str, int], labels_sha: st
         },
         "labels_sha256": labels_sha,
         "source_sha256": checksum(context_corpus.SOURCE),
-        "generator_sha256": checksum(Path(__file__)),
-        "corpus_tool_sha256": checksum(ROOT / "tools/ortho_v2_corpus.py"),
+        "generator_sha256": generator,
+        "corpus_tool_sha256": corpus_tool,
         "hunspell": known.recorded_dictionaries(),
         "sentences": counts,
         "verified_sequences": {script: len(words) for script, words in sorted(trusted.items())},
@@ -179,7 +204,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise ValueError("verified labels are not reproducible from these dictionaries")
         (DIRECTORY / ".verified-check.gz").unlink()
     content = (json.dumps(receipt(trusted, counts, labels_sha), sort_keys=True,
-                          ensure_ascii=False, indent=2) + "\n").encode()
+                          ensure_ascii=False, indent=FROZEN_CORPUS_RECEIPT_JSON_INDENT) + "\n").encode()
     if arguments.freeze and not RECEIPT.exists():
         RECEIPT.write_bytes(content)
     elif not RECEIPT.exists() or RECEIPT.read_bytes() != content:

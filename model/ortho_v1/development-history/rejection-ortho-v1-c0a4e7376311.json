@@ -1,0 +1,34 @@
+{
+  "candidate_sha256": "c98385c1fec5238ec88f76e34f895901519f82319740e0c2b4eb49ef36658947",
+  "corpus_namespace": "keyswitch:ortho-v1:served-split-g6",
+  "failed_gate": "maximum_test_false_conversions",
+  "false_conversions": [
+    {
+      "converted_to": "сказал",
+      "direction": "en",
+      "keys": "crfpfk",
+      "score": 54.5996,
+      "shape": "lower",
+      "typed_as": "crfpfk"
+    }
+  ],
+  "gates": {
+    "maximum_test_false_conversions": 0,
+    "minimum_recall": 0.75,
+    "minimum_test_negatives": 5000
+  },
+  "installed_model_unchanged": "ortho-v1-bdb915e4f06f",
+  "measured": {
+    "false_types": 1,
+    "negative_types": 5445,
+    "recall": 0.971749
+  },
+  "model_version": "ortho-v1-c0a4e7376311",
+  "namespace": "keyswitch:ortho-v1:candidate6",
+  "reason": "The single sealed test found one false conversion against a gate of none, with 5445 negative types and recall 0.971749. It is `crfpfk` (`сказал` typed in the Latin layout), which the test corpus labels by its own alphabet, as it did in the test of generation 4; converting it is what a user would want. `фнафер` and `ЙЦУКЕН`, failures of generation 4, did not recur. The split is now opened and cannot test another candidate independently.",
+  "report_sha256": "c2971795def9c2c5aa086c219c10b1b6a6bb6f208e12e4c6b49ea5b8cc396392",
+  "schema_version": 1,
+  "seal_sha256": "5d93fc6fc0f9c437eb2ae3a1375f564f6433a6579a8e03787ea11f8308cacc5e",
+  "stage": "rejected-after-test",
+  "test_split_opened": true
+}

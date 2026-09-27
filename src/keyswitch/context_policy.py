@@ -5,10 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import ClassVar, Final
 
-from .context_model import FEATURE_VERSION, AfterOrigin, ContextEvidence, ContextModel, ContextPrediction
+from .context_model import AfterOrigin, ContextEvidence, ContextModel, ContextPrediction, one_typo_from_word
 from .identifier_lexicon import IdentifierLexicon
-from .detector import DetectionDecision, LanguageDetector
+from .detector import DetectionDecision, LanguageDetector, LanguageScorer
 from .input_context import FieldContext, FieldReader, InputContext
+from .language_model import LanguageModel
 from .ortho_model import OrthoEvidence, OrthoModel, shape_of
 from .short_words import ISOLATED_SHORT_WORD_REASON, is_short_word_override
 from .word_decision import NOT_A_WORD_REASON
@@ -66,6 +67,12 @@ def shared_identifiers() -> IdentifierLexicon | None:
     return _SHARED_IDENTIFIERS[0]
 
 
+def _one_typo_from_word(text: str, scorer: LanguageScorer) -> bool:
+    """The typo check reads a frequency lexicon; a scorer without one never reports a typo."""
+
+    return isinstance(scorer, LanguageModel) and one_typo_from_word(text, scorer)
+
+
 def evidence_for_decision(
     baseline: DetectionDecision, alternative: str, target_group: int,
     detector: LanguageDetector, field: FieldContext, trigger: str,
@@ -94,6 +101,8 @@ def evidence_for_decision(
         source, target, baseline.model_probability, baseline.model_threshold,
         literal_tail, ortho_score, ortho_threshold, boundary_text, after_origin,
         source_identifier=source_identifier, target_identifier=target_identifier,
+        source_typo=_one_typo_from_word(baseline.original, detector.models[baseline.source_group]),
+        target_typo=_one_typo_from_word(alternative, detector.models[target_group]),
     )
 
 
@@ -117,7 +126,7 @@ class ContextPolicy:
         *, after: str = "", read_field: bool = False,
         field_override: FieldContext | None = None,
         literal_tail: str = "", boundary_text: str = "",
-        after_origin: AfterOrigin = "none", planned_context: bool = False,
+        after_origin: AfterOrigin = "none",
     ) -> ContextResult:
         if mode not in {"assist", "shadow"} or self.model is None:
             return ContextResult(baseline, fallback_reason="mode_disabled" if mode not in {"assist", "shadow"} else "model_unavailable")
@@ -154,17 +163,13 @@ class ContextPolicy:
         prediction = self.model.predict(evidence)
         if mode == "shadow":
             return ContextResult(baseline, prediction, field, fallback_reason="shadow_mode")
-        # Missing context is honest uncertainty, not an instruction to guess.
-        # A wait/suggestion can still describe a short ambiguous first word.
-        # A planned context is not missing: the engine asks about a waiting word
-        # with the neighbour it has just decided. The model's support gate only
-        # asks whether it has a weight for this application or for these exact
-        # neighbour words, and five applications and fifty following words are
-        # all it knows, so in Firefox it started a wait for `tot` and then threw
-        # away its own 0.9993 verdict on `tot` before `привет`: the pair stayed
-        # `tot привет` (0.31.0 and 0.31.1 logs, 24.09.2026). Its verdict stands.
-        if not prediction.supported and prediction.action not in {"wait", "suggest"} and not planned_context:
-            return ContextResult(baseline, prediction, field, fallback_reason="unsupported_context")
+        # The model's verdict stands whatever its support flag says. The flag only
+        # tells whether some weight names this application or these exact
+        # neighbour words; the model knows a handful of each, so in Firefox, Edge
+        # or a terminal a confident verdict used to be thrown away for the
+        # baseline - `tot привет` stayed (0.31.x logs, 24.09.2026) - while the
+        # trainer evaluates and certifies the model on its own verdict, with no
+        # such fallback. The flag stays in the log as a diagnostic.
         if prediction.action == "convert":
             decision = replace(
                 baseline, should_convert=True, replacement=alternative,
@@ -173,7 +178,7 @@ class ContextPolicy:
             )
         elif (is_short_word_override(baseline)
               and (baseline.reason == ISOLATED_SHORT_WORD_REASON or trigger == "pause"
-                   or (prediction.action != "wait" and self.model.feature_version == FEATURE_VERSION))):
+                   or (prediction.action != "wait" and self.model.feature_version != CONTEXT_ACTION_FEATURE_VERSION))):
             # A curated, reviewed exception is an explicit rule, not a guess, so
             # neither a probabilistic `keep` nor an under-confident `convert`
             # cancels it. `wait` still delays it at a boundary, because that is
@@ -208,7 +213,7 @@ class ContextPolicy:
         result = ContextResult(decision, prediction, field, policy_applied=True,
                                decision_source="context_model")
         if self.model.feature_version != CONTEXT_ACTION_FEATURE_VERSION:
-            result = self._licensed(result, baseline, alternative, target_group, field)
+            result = self._licensed(result, baseline, alternative, target_group, field, detector)
         return self._spelling_a_word(result)
 
     @staticmethod
@@ -240,7 +245,8 @@ class ContextPolicy:
                              decision_source="safety", fallback_reason="replacement_not_a_word")
 
     def _licensed(self, result: ContextResult, baseline: DetectionDecision, alternative: str,
-                  target_group: int, field: FieldContext) -> ContextResult:
+                  target_group: int, field: FieldContext,
+                  detector: LanguageDetector | None = None) -> ContextResult:
         """Let the orthotactic model turn a refusal into a conversion, never the reverse.
 
         The word models answer "is this a word"; this one answers "could this
@@ -260,15 +266,20 @@ class ContextPolicy:
         if (result.decision.should_convert or baseline.should_convert or self.ortho is None
                 or prediction is None or prediction.action == "wait"):
             return result
-        licensed = self._orthotactic(baseline, alternative, target_group, field)
+        licensed = self._orthotactic(baseline, alternative, target_group, field, detector)
         if licensed is None:
             return result
         return ContextResult(licensed, prediction, field, decision_source="ortho_model",
                              fallback_reason="orthotactic_licence")
 
     def _orthotactic(self, baseline: DetectionDecision, alternative: str,
-                     target_group: int, field: FieldContext) -> DetectionDecision | None:
-        """Score the physical keys under both languages and license a conversion."""
+                     target_group: int, field: FieldContext,
+                     detector: LanguageDetector | None = None) -> DetectionDecision | None:
+        """Score the physical keys under both languages and license a conversion.
+
+        The features of a schema 2 artifact ask dictionaries about parts of the token; the
+        detector's own models answer, so the model never loads a second copy of them.
+        """
 
         model = self.ortho
         if baseline.source_score.known:
@@ -290,7 +301,9 @@ class ContextPolicy:
             # it: `и"ю` is a quotation mark between two letters, not Russian.
             return None
         shape = shape_of(baseline.original, not field.before.strip())
-        score = model.score(OrthoEvidence(keys, shape, source_script))
+        known = None if detector is None else (
+            lambda script, word: detector.models[0 if script == "en" else 1].score(word).known)
+        score = model.score(OrthoEvidence(keys, shape, source_script), known=known)
         if not score.supported or score.total <= model.thresholds[source_script]:
             return None
         return replace(

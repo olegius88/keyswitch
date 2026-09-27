@@ -14,7 +14,10 @@ tools/train_context_model.py text eol=lf
 tools/verify_context_model.py text eol=lf
 model/context_v2/*.json text eol=lf
 model/context_v2/engine-history/*.json text eol=lf
-model/context_v2/compatibility/generation-sources/*.py text eol=lf
+# Archived bytes pinned by the evidence of rejected generations (tools/historical_sources.py).
+model/*/compatibility/generation-sources/** text eol=lf
+model/*/compatibility/generation-sources/**/*.ksm binary
+model/*/compatibility/generation-sources/**/*.gz binary
 model/context_v2/sources/*.gz binary
 model/boundary_v1/*.json text eol=lf
 model/boundary_v1/development-history/*.json text eol=lf
@@ -25,6 +28,7 @@ tools/evaluate_boundary_engine.py text eol=lf
 tools/verify_boundary_model.py text eol=lf
 model/boundary_v2/*.json text eol=lf
 model/boundary_v2/development-history/*.json text eol=lf
+model/boundary_v2/generation-history/*/*.json text eol=lf
 model/boundary_v2/*.gz binary
 src/keyswitch/boundary_policy.py text eol=lf
 src/keyswitch/resources/models/boundary-v2.json text eol=lf
@@ -34,6 +38,7 @@ tools/verify_boundary_v2.py text eol=lf
 model/prefix_v1/*.json text eol=lf
 model/prefix_v1/development-history/*.json text eol=lf
 model/prefix_v1/engine-history/*.json text eol=lf
+model/prefix_v1/generation-history/*/*.json text eol=lf
 model/prefix_v1/*.gz binary
 src/keyswitch/resources/models/prefix_policy_v1.json text eol=lf
 src/keyswitch/prefix_model.py text eol=lf
@@ -56,6 +61,7 @@ src/keyswitch/short_words.py text eol=lf
 # or report, so no checkout can invalidate the model on one platform alone.
 model/ortho_v1/*.json text eol=lf
 model/ortho_v1/*.gz binary
+model/ortho_v1/development-history/*.json text eol=lf
 model/ortho_v2/*.json text eol=lf
 model/ortho_v2/development-history/*.json text eol=lf
 model/ortho_v2/sources/*.json text eol=lf
@@ -65,6 +71,13 @@ tools/ortho_v2_known.py text eol=lf
 src/keyswitch/ortho_model.py text eol=lf
 src/keyswitch/resources/models/ortho_v1.json text eol=lf
 tools/ortho_corpus.py text eol=lf
+tools/ortho_known.py text eol=lf
+tools/ortho_web_lexicon.py text eol=lf
+tools/ortho_independent.py text eol=lf
+model/ortho_v1/independent/*.json text eol=lf
+model/ortho_v1/independent/*.gz binary
+model/ortho_v1/development-history/independent-*/*.json text eol=lf
+model/ortho_v1/development-history/independent-*/*.gz binary
 tools/train_ortho_model.py text eol=lf
 tools/verify_ortho_model.py text eol=lf
 tools/ortho_v2_known.py text eol=lf
@@ -100,8 +113,16 @@ model/intent_v1/seal-registry-v18.json text eol=lf
 model/intent_v1/seal-registry-v20.json text eol=lf
 model/intent_v1/seal-registry-v21.json text eol=lf
 model/intent_v1/seal-registry-v23.json text eol=lf
+model/intent_v1/seal-registry-v24.json text eol=lf
+model/intent_v1/seal-registry-v26.json text eol=lf
+model/intent_v1/seal-registry-v27.json text eol=lf
+model/intent_v1/seal-registry-v28.json text eol=lf
 model/intent_v1/seal-outcome-v21.json text eol=lf
 model/intent_v1/seal-outcome-v23.json text eol=lf
+model/intent_v1/seal-outcome-v24.json text eol=lf
+model/intent_v1/seal-outcome-v26.json text eol=lf
+model/intent_v1/seal-outcome-v27.json text eol=lf
+model/intent_v1/seal-outcome-v28.json text eol=lf
 model/intent_v1/holdout-v6-preseal.json text eol=lf
 model/intent_v1/holdout-v7-preseal.json text eol=lf
 model/intent_v1/holdout-v8-preseal.json text eol=lf
@@ -116,6 +137,11 @@ model/intent_v1/holdout-v18-preseal.json text eol=lf
 model/intent_v1/holdout-v20-preseal.json text eol=lf
 model/intent_v1/holdout-v21-preseal.json text eol=lf
 model/intent_v1/holdout-v23-preseal.json text eol=lf
+model/intent_v1/holdout-v24-preseal.json text eol=lf
+model/intent_v1/holdout-v25-preseal.json text eol=lf
+model/intent_v1/holdout-v26-preseal.json text eol=lf
+model/intent_v1/holdout-v27-preseal.json text eol=lf
+model/intent_v1/holdout-v28-preseal.json text eol=lf
 model/intent_v1/unknown-typo-development-v11.json text eol=lf
 model/intent_v1/unknown-typo-development-v12.json text eol=lf
 model/intent_v1/unknown-typo-development-v13.json text eol=lf
@@ -125,9 +151,16 @@ model/intent_v1/unknown-typo-development-v18.json text eol=lf
 model/intent_v1/unknown-typo-development-v20.json text eol=lf
 model/intent_v1/unknown-typo-development-v21.json text eol=lf
 model/intent_v1/unknown-typo-development-v23.json text eol=lf
+model/intent_v1/unknown-typo-development-v24.json text eol=lf
+model/intent_v1/unknown-typo-development-v25.json text eol=lf
+model/intent_v1/unknown-typo-development-v26.json text eol=lf
+model/intent_v1/unknown-typo-development-v27.json text eol=lf
+model/intent_v1/unknown-typo-development-v28.json text eol=lf
 model/intent_v1/rejection-v10.json text eol=lf
 model/intent_v1/rejection-v11.json text eol=lf
 model/intent_v1/rejection-v12.json text eol=lf
+model/intent_v1/rejection-v25.json text eol=lf
+model/intent_v1/rejection-v24.json text eol=lf
 model/intent_v1/rejection-v13.json text eol=lf
 model/intent_v1/rejection-v18.json text eol=lf
 model/intent_v1/rejection-v8.json text eol=lf
@@ -146,6 +179,7 @@ src/keyswitch/layouts.py text eol=lf
 src/keyswitch/language_model.py text eol=lf
 src/keyswitch/resources/protected_tokens.txt text eol=lf
 src/keyswitch/resources/lexicon-supplement-ru_RU.json text eol=lf
+src/keyswitch/resources/lexicon-supplement-ru_RU.receipt.json text eol=lf
 src/keyswitch/resources/identifiers.json text eol=lf
 
 # Action-model replay records the runtime and editor harness byte for byte.

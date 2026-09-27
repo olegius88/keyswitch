@@ -1,0 +1,107 @@
+{
+  "candidate_sha256": "b5ba78293d3dcfa055834e584489849fcb53c8d2861f449574742af803c439b3",
+  "corpus_namespace": "keyswitch:ortho-v1:served-split-g13",
+  "failed_gate": "maximum_test_false_conversions",
+  "false_conversions": [
+    {
+      "direction": "en",
+      "keys": "hjort",
+      "reads_as": "рощке",
+      "score": 28.4746,
+      "shape": "inner"
+    },
+    {
+      "direction": "ru",
+      "keys": "nb-bit",
+      "score": 19.9004,
+      "shape": "initial",
+      "typed_as": "ти-ише"
+    },
+    {
+      "direction": "ru",
+      "keys": "refath",
+      "score": 15.248,
+      "shape": "lower",
+      "typed_as": "куафер"
+    },
+    {
+      "direction": "ru",
+      "keys": "xtune",
+      "score": 15.1309,
+      "shape": "lower",
+      "typed_as": "чегту"
+    }
+  ],
+  "gates": {
+    "maximum_test_false_conversions": 0,
+    "minimum_recall": 0.75,
+    "minimum_test_negatives": 5000
+  },
+  "independent_test": {
+    "evidence_sha256": "ecb6cebcc4c929be3b13bab3475763aa21fb3d3abf02454e9b2008dc1f08e3b6",
+    "receipt_sha256": "5c1796624bc7d49c41bc99f09002b1e54769437266b5f2e00e989439ac8bea79",
+    "set": "wikipedia-en-chekhov-ru",
+    "source": {
+      "excluded_pages": [
+        "Анна на шее (Чехов)"
+      ],
+      "files": [
+        {
+          "license": "CC0 1.0: the README of common-voice/common-voice states that the sentence text in /server/data comes from Sentence Collector submissions or is scraped from Wikipedia with its extractor and is released under CC0 (files europarl-* are the exception and are not used); server/data/en/LICENSE is the CC0 1.0 text",
+          "locale": "eng",
+          "name": "wiki.en.rerun-2021-11.txt",
+          "reader": "lines",
+          "retrieved": "2026-09-26T18:11+05:00",
+          "sample_percent": 5,
+          "sha256": "16647e64ba4124ccfeb7061e88ffb53261a16a15b7c4abcd2122b168b9f29639",
+          "url": "https://github.com/common-voice/common-voice/raw/1ce6d077cad36f99404b5414afacc314df58ad8c/server/data/en/wiki.en.rerun-2021-11.txt"
+        },
+        {
+          "license": "CC0 1.0: the README of common-voice/common-voice states that the sentence text in /server/data comes from Sentence Collector submissions or is scraped from Wikipedia with its extractor and is released under CC0 (files europarl-* are the exception and are not used); server/data/en/LICENSE is the CC0 1.0 text",
+          "locale": "rus",
+          "name": "bakwc1.txt",
+          "reader": "lines",
+          "retrieved": "2026-09-26T18:11+05:00",
+          "sample_percent": 100,
+          "sha256": "ca6ce2652c711824cfd7e1d65d395df7ee1028d539ac63d2aa2c10781de95597",
+          "url": "https://github.com/common-voice/common-voice/raw/1ce6d077cad36f99404b5414afacc314df58ad8c/server/data/ru/bakwc1.txt"
+        },
+        {
+          "license": "CC0 1.0: the README of common-voice/common-voice states that the sentence text in /server/data comes from Sentence Collector submissions or is scraped from Wikipedia with its extractor and is released under CC0 (files europarl-* are the exception and are not used); server/data/en/LICENSE is the CC0 1.0 text",
+          "locale": "rus",
+          "name": "highsource-de-ru-translations.txt",
+          "reader": "lines",
+          "retrieved": "2026-09-26T18:11+05:00",
+          "sample_percent": 100,
+          "sha256": "cfb20b4a5ed267ccdbfb72a3f7252e3a669bcdeb5e5a5a837800a547e7f76067",
+          "url": "https://github.com/common-voice/common-voice/raw/1ce6d077cad36f99404b5414afacc314df58ad8c/server/data/ru/highsource-de-ru-translations.txt"
+        },
+        {
+          "license": "Public domain: Anton Chekhov died in 1904; his author page on Russian Wikisource ({{АП|ГОД=1904}}) marks his works as public domain where copyright lasts the author's life plus 100 years or less; translations and later editions may carry rights of their own (Civil Code of the Russian Federation, article 1260) - these are his Russian originals",
+          "locale": "rus",
+          "name": "chekhov-wikisource.json",
+          "reader": "wikisource",
+          "retrieved": "2026-09-26T18:36+05:00",
+          "sample_percent": 40,
+          "sha256": "77603b3f2656dccc756f25e75cb40c06bc25343f9c37a36a7409b456bb8cdb21",
+          "url": "https://ru.wikisource.org/wiki/Категория:Рассказы_Антона_Павловича_Чехова (API, revisions in the file)"
+        }
+      ]
+    },
+    "tokens_sha256": "136c8b59c6f47f6b9b882e7b839ad7db7690d91238838735a5181f27517457cc"
+  },
+  "installed_model_unchanged": "ortho-v1-bdb915e4f06f",
+  "measured": {
+    "false_types": 4,
+    "negative_types": 6755,
+    "recall": 0.922595
+  },
+  "model_version": "ortho-v1-8723bff1344e",
+  "namespace": "keyswitch:ortho-v1:candidate13",
+  "reason": "The single independent test on wikipedia-en-chekhov-ru, frozen before any scoring, found four false conversions against a gate of none, with 6755 negative types and recall 0.922595: the surname `Hjort` in English text and three Russian tokens of Chekhov's prose (`ти-ише`, the old word `куафер`, `чегту`). The set is now opened and cannot test another candidate.",
+  "report_sha256": "41887aac1cd97f686c0e20fe44daacecd63a024f09e7f39a6d1fb43a629c2a19",
+  "schema_version": 1,
+  "seal_sha256": "35e49f17b4f61cbc31e22bc2a05f1a1deebce305aa43fc9f1ee386a2987e7d21",
+  "stage": "rejected-after-test",
+  "test_split_opened": true
+}

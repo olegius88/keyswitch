@@ -11,6 +11,34 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
+from .constants.file_formats import ARPA_BIGRAM_SECTION
+from .constants.models import (
+    LANGUAGE_MODEL_CACHE_SIZE,
+    LANGUAGE_MODEL_CALIBRATION_MIN_CHARACTERS,
+    LANGUAGE_MODEL_CALIBRATION_WORD_LIMIT,
+    LANGUAGE_MODEL_DEFAULT_NGRAM_MEAN,
+    LANGUAGE_MODEL_DELETION_MIN_CHARACTERS,
+    LANGUAGE_MODEL_DELETION_POSITIONS,
+    LANGUAGE_MODEL_EMPTY_TOKEN_SCORE,
+    LANGUAGE_MODEL_EXACT_WORD_BASE_SCORE,
+    LANGUAGE_MODEL_GRAM_SMOOTHING,
+    LANGUAGE_MODEL_INVALID_RATIO_WEIGHT,
+    LANGUAGE_MODEL_KNOWN_WORD_NATURALNESS_FLOOR,
+    LANGUAGE_MODEL_MAX_GRAM_WEIGHT,
+    LANGUAGE_MODEL_MIN_NGRAM_DEVIATION,
+    LANGUAGE_MODEL_MIN_WORD_CHARACTERS,
+    LANGUAGE_MODEL_NATURALNESS_MAX,
+    LANGUAGE_MODEL_NATURALNESS_MIN,
+    LANGUAGE_MODEL_NATURALNESS_WEIGHT,
+    LANGUAGE_MODEL_NGRAM_ORDERS,
+    LANGUAGE_MODEL_POPULARITY_WEIGHT,
+    LANGUAGE_MODEL_SCORE_CACHE_MAXSIZE,
+    LANGUAGE_MODEL_SPELL_KNOWN_SCORE,
+    LANGUAGE_MODEL_TRIGRAM_ORDER,
+    LANGUAGE_MODEL_UNSEEN_GRAM_VOCABULARY,
+    SYNTHETIC_FREQUENCY_DIVISOR,
+    SYNTHETIC_FREQUENCY_FLOOR,
+)
 from .spellcheck import HunspellDictionary
 
 
@@ -60,7 +88,7 @@ class WordScore:
     spell_known: bool = False
     ngram_score: float = 0.0
     invalid_ratio: float = 1.0
-    raw_ngram_score: float = -15.0
+    raw_ngram_score: float = LANGUAGE_MODEL_NATURALNESS_MIN
 
 
 class _DisabledSpellChecker:
@@ -76,8 +104,6 @@ class _DisabledSpellChecker:
 
 class LanguageModel:
     """Frequency lexicon + Hunspell morphology + smoothed character n-grams."""
-
-    NGRAM_ORDERS = (2, 3, 4)
 
     def __init__(
         self,
@@ -106,18 +132,20 @@ class LanguageModel:
         self._gram_totals = {
             order: sum(counter.values()) for order, counter in self._gram_counts.items()
         }
-        self._grams = set(self._gram_counts[3])
+        self._grams = set(self._gram_counts[LANGUAGE_MODEL_TRIGRAM_ORDER])
         calibration_words = [
             word
             for word, _frequency in sorted(
                 frequencies.items(), key=lambda item: (-item[1], item[0])
-            )[:12_000]
-            if len(word) >= 3 and word.isalpha()
+            )[:LANGUAGE_MODEL_CALIBRATION_WORD_LIMIT]
+            if len(word) >= LANGUAGE_MODEL_CALIBRATION_MIN_CHARACTERS and word.isalpha()
         ]
         calibration = [self._raw_ngram_score(word) for word in calibration_words]
-        self._ngram_mean = statistics.fmean(calibration) if calibration else -10.0
+        self._ngram_mean = (
+            statistics.fmean(calibration) if calibration else LANGUAGE_MODEL_DEFAULT_NGRAM_MEAN
+        )
         self._ngram_deviation = statistics.pstdev(calibration) if len(calibration) > 1 else 1.0
-        if self._ngram_deviation < 0.05:
+        if self._ngram_deviation < LANGUAGE_MODEL_MIN_NGRAM_DEVIATION:
             self._ngram_deviation = 1.0
 
     @classmethod
@@ -128,7 +156,7 @@ class LanguageModel:
         return cls._load_cached(locale, normalized_extra)
 
     @staticmethod
-    @lru_cache(maxsize=16)
+    @lru_cache(maxsize=LANGUAGE_MODEL_CACHE_SIZE)
     def _load_cached(locale: str, extra_words: tuple[str, ...]) -> "LanguageModel":
         path = next(
             (
@@ -144,7 +172,10 @@ class LanguageModel:
         if path is not None:
             frequencies, bigrams = LanguageModel._read_arpa(path)
             source = str(path)
-        synthetic_frequency = max(max(frequencies.values(), default=1000) // 20, 1000)
+        synthetic_frequency = max(
+            max(frequencies.values(), default=SYNTHETIC_FREQUENCY_FLOOR) // SYNTHETIC_FREQUENCY_DIVISOR,
+            SYNTHETIC_FREQUENCY_FLOOR,
+        )
         for word in (*LOCALE_FALLBACKS.get(locale, ()), *extra_words):
             normalized = LanguageModel.normalize(word)
             if normalized:
@@ -174,7 +205,7 @@ class LanguageModel:
                         section = 1
                         continue
                     if line == r"\2-grams:":
-                        section = 2
+                        section = ARPA_BIGRAM_SECTION
                         continue
                     if line.startswith("\\"):
                         section = 0
@@ -190,7 +221,7 @@ class LanguageModel:
                         continue
                     if section == 1:
                         token = LanguageModel.normalize(payload)
-                        if len(token) >= 2:
+                        if len(token) >= LANGUAGE_MODEL_MIN_WORD_CHARACTERS:
                             unigrams[token] = unigrams.get(token, 0) + count
                     else:
                         # Section zero was skipped above and section one was
@@ -220,14 +251,14 @@ class LanguageModel:
         cls, frequencies: dict[str, int]
     ) -> dict[int, Counter[str]]:
         counters: dict[int, Counter[str]] = {
-            order: Counter() for order in cls.NGRAM_ORDERS
+            order: Counter() for order in LANGUAGE_MODEL_NGRAM_ORDERS
         }
         for word, frequency in frequencies.items():
-            if len(word) < 2 or not word.isalpha():
+            if len(word) < LANGUAGE_MODEL_MIN_WORD_CHARACTERS or not word.isalpha():
                 continue
             # The source counts are highly skewed. Logarithmic weighting keeps
             # frequent words important without erasing legitimate rare forms.
-            weight = max(1, min(32, int(math.log2(max(1, frequency))) + 1))
+            weight = max(1, min(LANGUAGE_MODEL_MAX_GRAM_WEIGHT, int(math.log2(max(1, frequency))) + 1))
             padded = f"^{word}$"
             for order, counter in counters.items():
                 for index in range(len(padded) - order + 1):
@@ -238,15 +269,15 @@ class LanguageModel:
     def _build_grams(frequencies: dict[str, int]) -> set[str]:
         """Legacy helper used by older external tests."""
 
-        return set(LanguageModel._build_gram_counts(frequencies)[3])
+        return set(LanguageModel._build_gram_counts(frequencies)[LANGUAGE_MODEL_TRIGRAM_ORDER])
 
     def _raw_ngram_score(self, word: str) -> float:
         normalized = self.normalize(word)
         if not normalized:
-            return -30.0
+            return LANGUAGE_MODEL_EMPTY_TOKEN_SCORE
         padded = f"^{normalized}$"
         order_scores: list[float] = []
-        for order in self.NGRAM_ORDERS:
+        for order in LANGUAGE_MODEL_NGRAM_ORDERS:
             grams = [
                 padded[index : index + order]
                 for index in range(len(padded) - order + 1)
@@ -255,8 +286,8 @@ class LanguageModel:
                 continue
             counter = self._gram_counts[order]
             total = self._gram_totals[order]
-            vocabulary = len(counter) + 2048
-            alpha = 0.2
+            vocabulary = len(counter) + LANGUAGE_MODEL_UNSEEN_GRAM_VOCABULARY
+            alpha = LANGUAGE_MODEL_GRAM_SMOOTHING
             order_scores.append(
                 sum(
                     math.log((counter.get(gram, 0) + alpha) / (total + alpha * vocabulary))
@@ -264,7 +295,7 @@ class LanguageModel:
                 )
                 / len(grams)
             )
-        return statistics.fmean(order_scores) if order_scores else -30.0
+        return statistics.fmean(order_scores) if order_scores else LANGUAGE_MODEL_EMPTY_TOKEN_SCORE
 
     def ngram_score(self, word: str) -> float:
         return (self._raw_ngram_score(word) - self._ngram_mean) / self._ngram_deviation
@@ -276,10 +307,12 @@ class LanguageModel:
             return 0.0
         return math.log1p(frequency) / math.log1p(self.maximum_bigram)
 
-    def best_single_deletion(self, word: str, limit: int = 12) -> WordScore:
+    def best_single_deletion(
+        self, word: str, limit: int = LANGUAGE_MODEL_DELETION_POSITIONS
+    ) -> WordScore:
         """Return the strongest score after dropping one likely typo character."""
 
-        if len(word) < 4:
+        if len(word) < LANGUAGE_MODEL_DELETION_MIN_CHARACTERS:
             return self.score("")
         indices = list(range(len(word)))
         if len(indices) > limit:
@@ -294,13 +327,19 @@ class LanguageModel:
             key=lambda item: item.value,
         )
 
-    @lru_cache(maxsize=65_536)
+    @lru_cache(maxsize=LANGUAGE_MODEL_SCORE_CACHE_MAXSIZE)
     def score(self, word: str) -> WordScore:
         """Score a token with a bounded cache shared by runtime and training."""
 
         normalized = self.normalize(word)
         if not normalized:
-            return WordScore(-30.0, False, 0, 0.0, ngram_score=-15.0)
+            return WordScore(
+                LANGUAGE_MODEL_EMPTY_TOKEN_SCORE,
+                False,
+                0,
+                0.0,
+                ngram_score=LANGUAGE_MODEL_NATURALNESS_MIN,
+            )
         lexical_eligible = all(
             character.isalpha() or character in "'-" for character in word
         )
@@ -314,23 +353,33 @@ class LanguageModel:
         known = exact or spell_known
         padded = f"^{normalized}$"
         trigrams = [
-            padded[index : index + 3]
-            for index in range(max(0, len(padded) - 2))
+            padded[index : index + LANGUAGE_MODEL_TRIGRAM_ORDER]
+            for index in range(max(0, len(padded) - (LANGUAGE_MODEL_TRIGRAM_ORDER - 1)))
         ]
-        hits = sum(gram in self._gram_counts[3] for gram in trigrams)
+        hits = sum(gram in self._gram_counts[LANGUAGE_MODEL_TRIGRAM_ORDER] for gram in trigrams)
         ratio = hits / len(trigrams) if trigrams else 0.0
         invalid_ratio = 1.0 - ratio
-        raw_naturalness = max(-15.0, min(4.0, self.ngram_score(normalized)))
+        raw_naturalness = max(
+            LANGUAGE_MODEL_NATURALNESS_MIN,
+            min(LANGUAGE_MODEL_NATURALNESS_MAX, self.ngram_score(normalized)),
+        )
         naturalness = raw_naturalness
         lexical = 0.0
         if exact:
             popularity = math.log1p(frequency) / math.log1p(self.maximum)
-            lexical = 7.0 + 3.0 * popularity
+            lexical = (
+                LANGUAGE_MODEL_EXACT_WORD_BASE_SCORE
+                + LANGUAGE_MODEL_POPULARITY_WEIGHT * popularity
+            )
         elif spell_known:
-            lexical = 6.5
+            lexical = LANGUAGE_MODEL_SPELL_KNOWN_SCORE
         if known:
-            naturalness = max(naturalness, -4.0)
-        value = lexical + 1.15 * naturalness - 0.75 * invalid_ratio
+            naturalness = max(naturalness, LANGUAGE_MODEL_KNOWN_WORD_NATURALNESS_FLOOR)
+        value = (
+            lexical
+            + LANGUAGE_MODEL_NATURALNESS_WEIGHT * naturalness
+            - LANGUAGE_MODEL_INVALID_RATIO_WEIGHT * invalid_ratio
+        )
         return WordScore(
             value,
             known,

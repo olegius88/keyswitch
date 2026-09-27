@@ -234,3 +234,8 @@ X11_PARENT_WINDOW: Final = 20
 X11_DEEP_TOWER_END_WINDOW: Final = 900
 X11_WINDOW_CACHE_TEST_START: Final = 1000
 X11_XKB_REPORTED_GROUP: Final = 3
+# Windows virtual keys of the letters behind SCAN_CODE_A and HELD_KEY_SCAN_CODE ('A' and 'D'), and a
+# target group the Windows backend does not know.
+WINDOWS_A_VIRTUAL_KEY: Final = 0x41
+WINDOWS_HELD_VIRTUAL_KEY: Final = 0x44
+WINDOWS_UNKNOWN_TARGET_GROUP: Final = 8

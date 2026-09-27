@@ -1,0 +1,58 @@
+{
+  "candidate_sha256": "58c75ed6e9a656dbfae6a8d9093698c501fdc3ac2a37300bce635ecfd1cb5952",
+  "corpus_namespace": "keyswitch:ortho-v1:served-split-20260925",
+  "failed_gate": "maximum_test_false_conversions",
+  "false_conversions": [
+    {
+      "converted_to": "сказал",
+      "direction": "en",
+      "keys": "crfpfk",
+      "score": 54.5645,
+      "shape": "lower",
+      "typed_as": "crfpfk"
+    },
+    {
+      "converted_to": "qwerty",
+      "direction": "ru",
+      "keys": "qwerty",
+      "score": 36.7578,
+      "shape": "upper",
+      "typed_as": "йцукен"
+    },
+    {
+      "converted_to": "ayfath",
+      "direction": "ru",
+      "keys": "ayfath",
+      "score": 19.3926,
+      "shape": "lower",
+      "typed_as": "фнафер"
+    },
+    {
+      "converted_to": "rftaaa",
+      "direction": "ru",
+      "keys": "rftaaa",
+      "score": 16.4941,
+      "shape": "lower",
+      "typed_as": "каеффф"
+    }
+  ],
+  "gates": {
+    "maximum_test_false_conversions": 0,
+    "minimum_recall": 0.75,
+    "minimum_test_negatives": 5000
+  },
+  "installed_model_unchanged": "ortho-v1-bdb915e4f06f",
+  "measured": {
+    "false_types": 4,
+    "negative_types": 5540,
+    "recall": 0.973732
+  },
+  "model_version": "ortho-v1-1c1110e5feac",
+  "namespace": "keyswitch:ortho-v1:candidate4",
+  "reason": "The single sealed test found four false conversions against a gate of none, with 5 540 negative types and recall 0.973738. Three are Russian tokens the dictionaries do not know, written in the Russian layout: the layout name `ЙЦУКЕН` in capitals (its keys spell `QWERTY`), the slang `фнафер` and the stretched `каеффф`. One, `crfpfk` (`сказал` typed in the Latin layout), carries a corpus label by its own alphabet; converting it is what a user would want. The development draws that never saw the test groups had estimated a 0.79 chance of passing; the split is now opened and cannot test another candidate independently.",
+  "report_sha256": "d18a4b53f0f3e46b32c07491486686c0ad162de34480eb9cd804fb63eb350e21",
+  "schema_version": 1,
+  "seal_sha256": "ebb7c30ec2041d0cd65348cd86d2b2a5af3f7fd0854e76479cc0e653bb3c3e30",
+  "stage": "rejected-after-test",
+  "test_split_opened": true
+}

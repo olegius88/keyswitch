@@ -12,6 +12,7 @@ from collections.abc import Iterable, Sequence
 from unittest.mock import patch
 
 from auxiliary_runtime_evidence import packaged_intent, runtime_provenance
+from boundary_v2_corpus import verify_receipt
 from keyswitch.backend import KeyEvent
 from keyswitch.boundary_model import BoundaryModel
 from keyswitch.boundary_policy import ARTIFACT, BoundaryPolicy
@@ -25,7 +26,6 @@ from context_evidence import canonical, checksum
 # The engine serves the onboard lexicon plus the packaged supplement, so the replay does too.
 from reference_lexicon import reference_models
 from train_boundary_model import CANDIDATE, DIRECTORY
-from verify_lexical_compatibility import verify as verify_compatibility
 
 if str(ROOT / "tests") not in sys.path:
     sys.path.insert(0, str(ROOT / "tests"))
@@ -47,10 +47,8 @@ SCENARIOS = (
 def provenance() -> dict[str, str]:
     return runtime_provenance(ROOT, [Path(__file__), CANDIDATE, ARTIFACT,
         ROOT / "model/boundary_v2/corpus.json", ROOT / "model/boundary_v2/seal.json",
-        ROOT / "model/boundary_v2/lexical-compatibility.json", ROOT / "tools/train_boundary_model.py",
-        ROOT / "tools/verify_lexical_compatibility.py",
-        ROOT / "src/keyswitch/resources/lexicon-supplement-ru_RU.json",
-        ROOT / "model/intent_v1/compatibility/generation-config-v21.json"])
+        ROOT / "tools/train_boundary_model.py", ROOT / "tools/boundary_v2_corpus.py",
+        ROOT / "src/keyswitch/resources/lexicon-supplement-ru_RU.json"])
 
 
 def replay(original: str, model: BoundaryModel | None, models: dict[int, LanguageModel]) -> tuple[str, int]:
@@ -83,7 +81,7 @@ def replay(original: str, model: BoundaryModel | None, models: dict[int, Languag
 
 
 def evaluate() -> bytes:
-    verify_compatibility("boundary_v2")
+    verify_receipt()
     runtime = provenance()
     models = reference_models(False)
     results: dict[str, object] = {}

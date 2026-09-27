@@ -26,7 +26,7 @@ RESOURCE = SUPPLEMENT_ROOT / "lexicon-supplement-ru_RU.json"
 class LexiconSupplementTests(unittest.TestCase):
     def test_packaged_supplement_is_the_pinned_derivation(self) -> None:
         payload = json.loads(RESOURCE.read_bytes())
-        self.assertEqual((payload["schema_version"], payload["locale"], payload["name"]), (1, "ru_RU", "opensubtitles-2018-ru-full-min10-outside-onboard-v3"))
+        self.assertEqual((payload["schema_version"], payload["locale"], payload["name"]), (1, "ru_RU", "opensubtitles-2018-ru-full-min10-outside-onboard-v4"))
         self.assertEqual(
             payload["source"]["sha256"],
             "32dfd94138aea266" + payload["source"]["sha256"][PINNED_SOURCE_SHA256_PREFIX_CHARACTERS:],
@@ -35,6 +35,10 @@ class LexiconSupplementTests(unittest.TestCase):
         self.assertEqual(payload["base_lexicon"]["sha256"], hashlib.sha256((Path(__file__).resolve().parents[1] / "model/intent_v1/sources/ru_RU.lm").read_bytes()).hexdigest())
         words = supplement_words("ru_RU")
         self.assertEqual(len(words), payload["selection"]["selected"])
+        # v4 is v3 without the truncated forms (tools/filter_lexicon_supplement.py, receipt beside it).
+        receipt = json.loads((SUPPLEMENT_ROOT / "lexicon-supplement-ru_RU.receipt.json").read_bytes())
+        self.assertEqual(payload["selection"]["dropped_truncations"], receipt["dropped"]["count"])
+        self.assertEqual(len(words) + receipt["dropped"]["count"], receipt["input"]["words"])
         self.assertEqual(list(words), sorted(set(words)))
         for word in ("зум", "окей", "вау"):
             with self.subTest(word=word):

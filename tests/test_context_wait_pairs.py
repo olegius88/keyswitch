@@ -141,21 +141,20 @@ class ContextWaitPairTests(ContextEngineTests):
         self.type("tot ghbdtn ")
         self.assertEqual(self.backend.text, "еще привет ")
 
-    def test_outside_its_vocabulary_the_model_decides_only_with_a_planned_neighbour(self) -> None:
-        """Asked about `tot` before the `привет` the engine converted, the model's verdict
-        stands; asked about the same word with no such neighbour, the baseline decides."""
+    def test_the_models_verdict_stands_whatever_its_support_flag_says(self) -> None:
+        """The flag only says whether a weight names this application or these exact
+        neighbours; the trainer certifies the model on its verdict alone, so the engine
+        takes that verdict everywhere and keeps the flag as a diagnostic."""
         self.script(lambda _item: "convert", supported=False)
         baseline = self.engine._planned_baseline("tot", {1: "еще"}, 0, "", 1)
         self.assertFalse(baseline.should_convert)
-        field = FieldContext("firefox", "1", "", "")
-
-        def decide(planned: bool) -> bool:
-            return self.engine.context_policy.decide(
-                baseline, "еще", 1, self.engine.detector, "space", "assist",
-                after="привет", field_override=field, planned_context=planned,
-            ).decision.should_convert
-
-        self.assertEqual((decide(True), decide(False)), (True, False))
+        result = self.engine.context_policy.decide(
+            baseline, "еще", 1, self.engine.detector, "space", "assist",
+            field_override=FieldContext("firefox", "1", "", ""),
+        )
+        self.assertTrue(result.decision.should_convert)
+        assert result.prediction is not None
+        self.assertFalse(result.prediction.supported)
 
     def test_a_next_word_converted_at_a_pause_takes_the_waiting_word_with_it(self) -> None:
         """`tot`, then `ghbdtn` and a pause before the space: `привет` used to convert alone,

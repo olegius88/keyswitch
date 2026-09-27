@@ -15,19 +15,27 @@ from functools import lru_cache
 from pathlib import Path
 
 from .language_model import LanguageModel
+from .constants.boundary import (
+    BOUNDARY_FEATURE_FREQUENCY_LOG_DIVISOR,
+    BOUNDARY_FEATURE_LENGTH_SCALE_CHARACTERS,
+    BOUNDARY_FEATURE_NGRAM_SCORE_BOUND,
+    BOUNDARY_MAX_LITERAL_SUFFIX_CHARACTERS as MAX_SUFFIX,
+    BOUNDARY_THRESHOLD_EXCLUSIVE_MIN,
+    BOUNDARY_V1_FEATURE_VERSION as FEATURE_VERSION,
+)
 
+__all__ = ["ARTIFACT", "FEATURE_VERSION", "MAX_SUFFIX", "BoundaryModel", "BoundaryPrediction", "features"]
 
 ARTIFACT = Path(__file__).parent / "resources/models/boundary-v1.json"
-FEATURE_VERSION = 1
-MAX_SUFFIX = 8
 
 
 def features(original: str, alternative: str, suffix_length: int,
              source: LanguageModel, target: LanguageModel) -> dict[str, float]:
     """Numeric evidence only: no word IDs, apps or private context memorized."""
     end = len(original) - suffix_length
+    scale = BOUNDARY_FEATURE_LENGTH_SCALE_CHARACTERS
     result = {"bias": 1.0, "suffix": min(suffix_length, MAX_SUFFIX) / MAX_SUFFIX,
-              "length": min(end, 24) / 24, "whole": float(suffix_length == 0)}
+              "length": min(end, scale) / scale, "whole": float(suffix_length == 0)}
     for name, text, model in (
         ("source_word", original[:end], source),
         ("target_word", alternative[:end], target),
@@ -35,8 +43,9 @@ def features(original: str, alternative: str, suffix_length: int,
         score = model.score(text)
         result[name + ":letters"] = float(text.isalpha())
         result[name + ":known"] = float(text.isalpha() and score.exact)
-        result[name + ":frequency"] = math.log1p(score.frequency) / 20
-        result[name + ":ngram"] = max(-3.0, min(3.0, score.ngram_score)) / 3
+        result[name + ":frequency"] = math.log1p(score.frequency) / BOUNDARY_FEATURE_FREQUENCY_LOG_DIVISOR
+        bound = BOUNDARY_FEATURE_NGRAM_SCORE_BOUND
+        result[name + ":ngram"] = max(-bound, min(bound, score.ngram_score)) / bound
         result[name + ":invalid"] = score.invalid_ratio
     return result
 
@@ -75,7 +84,8 @@ class BoundaryModel:
         weights, threshold, version = value.get("weights"), value.get("threshold"), value.get("version")
         if (not isinstance(weights, dict) or not weights
                 or any(not isinstance(key, str) or type(weight) not in (int, float) or not math.isfinite(weight) for key, weight in weights.items())
-                or not isinstance(threshold, (int, float)) or isinstance(threshold, bool) or not 0.5 < threshold <= 1.0
+                or not isinstance(threshold, (int, float)) or isinstance(threshold, bool)
+                or not BOUNDARY_THRESHOLD_EXCLUSIVE_MIN < threshold <= 1.0
                 or not isinstance(version, str) or not version):
             raise ValueError("invalid boundary model")
         return cls(weights, threshold, version)

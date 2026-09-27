@@ -202,9 +202,9 @@ Hunspell snapshot намеренно меняется, сначала обнов
 ```bash
 sha256sum \
   model/intent_v1/config.json \
-  model/intent_v1/unknown-typo-development-v23.json \
-  model/intent_v1/holdout-v23-preseal.json \
-  model/intent_v1/seal-registry-v23.json \
+  model/intent_v1/unknown-typo-development-v28.json \
+  model/intent_v1/holdout-v28-preseal.json \
+  model/intent_v1/seal-registry-v28.json \
   model/intent_v1/manifest.json \
   model/intent_v1/test-report.json \
   src/keyswitch/resources/models/layout_intent_v1.ksm
@@ -214,13 +214,13 @@ sha256sum \
 
 | Файл | SHA-256 |
 | --- | --- |
-| `config.json` | `76fde35bec793c2c1d6a168753e28cb1cb0c62ac63fa1da40a6d36c85c7fd532` |
-| `unknown-typo-development-v23.json` | `61e02546fb05c2502b2535c512b0e11fad13042d25b1f4f70cff621a4e35686f` |
-| `holdout-v23-preseal.json` | `875d828cbdc8096d7b3258769c58cd886eb195f38b8ea0790714c1e9763c0b4d` |
-| `seal-registry-v23.json` | `dbe05a3b868232c7f46f57af174ceafa51693fcff0dd60331ff1b2349c588112` |
-| `manifest.json` | `9c39b615ba90b94107be6bef0140ce9387e493bb6aae195f4a8d116021283da9` |
-| `test-report.json` | `f3c44b42c96ce654042d17c822d92bd3202a9d1b12d6b28e34e394531a10fa94` |
-| `layout_intent_v1.ksm` | `47f86818c4c1243daeabfafd50d03dd9884aa3973bb546191afe02c4092a3f4d` |
+| `config.json` | `2026433380f1a418079c8cb60eafc64cc420fc256b3c074dbb7d6389f6b275fd` |
+| `unknown-typo-development-v28.json` | `49db792445388bfdba7065fa36d025ae31c341b722ed7be2da4870da92f6f479` |
+| `holdout-v28-preseal.json` | `f96580347c890c4820dbaab9b8c7ccca31c2a0f75ad9961345910bef25f700b7` |
+| `seal-registry-v28.json` | `f2b6ed6842ef7fe291a37f9ead8f887f8c221bb67f844cfd7bc070ca608c749d` |
+| `manifest.json` | `c21631d7b484317d6c892d3e77ac6f19983d78fe820f80b1db1e32f3fce410d8` |
+| `test-report.json` | `59a92bda24ffa2d3cb46ec88001f2f04e18fad87ce31edc8fd7efcb2ba58de0d` |
+| `layout_intent_v1.ksm` | `d0b90ad59a48eb7c2aa8c89680a2bc0dd2290c1e9c717068af49087c165878bb` |
 
 ### Internal provenance без внешнего performance-прогона
 
@@ -250,10 +250,10 @@ PYTHONPATH=src python3 tools/preseal_intent_holdout.py \
   --config model/intent_v1/config.json \
   --en-model model/intent_v1/sources/en_US.lm \
   --ru-model model/intent_v1/sources/ru_RU.lm \
-  > "$work_root/holdout-v23-preseal.json"
+  > "$work_root/holdout-v28-preseal.json"
 
-diff -u model/intent_v1/holdout-v23-preseal.json \
-  "$work_root/holdout-v23-preseal.json"
+diff -u model/intent_v1/holdout-v28-preseal.json \
+  "$work_root/holdout-v28-preseal.json"
 
 jq -e '
   .model_loaded == false and
@@ -262,7 +262,7 @@ jq -e '
   .holdout.signature_count == 10000 and
   .overlap_counts.development_holdout == 0 and
   .overlap_counts.sealed_holdout == 0
-' "$work_root/holdout-v23-preseal.json"
+' "$work_root/holdout-v28-preseal.json"
 ```
 
 Это безопасная проверка: `preseal_intent_holdout.py` не принимает путь к KSLM,
@@ -288,6 +288,7 @@ PYTHONPATH=src python3 tools/train_intent_model_release.py \
   --artifact "$work_root/replay/layout_intent_v1.ksm" \
   --manifest "$work_root/replay/manifest.json" \
   --test-report "$work_root/replay/test-report.json" \
+  --build-environment "$work_root/replay/build-environment.json" \
   > "$work_root/replay/stdout-manifest.json"
 
 cmp src/keyswitch/resources/models/layout_intent_v1.ksm \
@@ -384,7 +385,8 @@ development domain, ротируйте обе `UNKNOWN_TYPO_DEVELOPMENT_*_NAMESP
   train/development/calibration/threshold и sample weight.
 
 Изменение `ngram_orders` требует согласованного изменения runtime feature
-schema; текущий loader требует точное совпадение `NGRAM_ORDERS`. Изменение
+schema; текущий loader требует точное совпадение `INTENT_NGRAM_ORDERS`
+(`src/keyswitch/constants/models.py`). Изменение
 формата KSLM требует нового container schema и совместного обновления writer,
 loader, packaging bounds и тестов.
 
@@ -466,6 +468,18 @@ jq -r '{
 | `bytes` | `hard_negative_development.source.bytes` |
 | `expanded_corpus_sha256` | `external_evaluation.unknown_typo_development_corpus_sha256` |
 
+`build_model_blind_external_corpora()` строит этот model-blind development
+corpus, заранее исключая все физические сигнатуры уже зафиксированного sealed
+split (`sealed_physical_signatures=sealed_index.signatures`). Домен смещается
+вместе с namespace: у нового поколения `expanded_corpus_sha256` (→
+`unknown_typo_development_corpus_sha256`) и `bytes`/`sha256` самого source
+почти всегда отличаются от прежнего кандидата. Не переносите старые значения
+по аналогии — берите их только из вывода freezer для текущего запуска, и не
+забудьте обновить оба литеральных ожидания в
+`tests/test_intent_training.py::test_config_schema_and_statistical_upper_bound`
+(`external_evaluation.unknown_typo_development_corpus_sha256` и
+`hard_negative_development.source.sha256`).
+
 После обновления config доказать byte reproducibility:
 
 ```bash
@@ -518,6 +532,17 @@ diff -u model/intent_v1/holdout-vN-preseal.json \
 
 Если diff не пуст, inputs ещё не заморожены. Не переходите к train.
 
+Receipt также содержит `sealed_dataset_exclusions` и
+`combined_holdout_exclusions` — число физических сигнатур и SHA-256 sealed
+split (и sealed+development вместе), которые holdout обязан исключить. Эти
+числа зависят от фактического sealed dataset нового кандидата и почти всегда
+отличаются от прежнего поколения даже при неизменной policy. Обновите оба
+литеральных ожидания вместе: `EXPECTED_SEALED_EXCLUSION_SIGNATURE_COUNT` и
+`EXPECTED_COMBINED_EXCLUSION_SIGNATURE_COUNT` в
+`tests/fixture_values/counts.py`, а также их SHA-256 в
+`tests/test_intent_training.py` — из фактического receipt, а не по аналогии
+с прошлым кандидатом.
+
 ### 6.6. Preflight перед необратимым seal claim
 
 ```bash
@@ -549,9 +574,15 @@ inputs:
 set -o pipefail
 PYTHONPATH=src python3 tools/train_intent_model_release.py \
   --workers 0 \
+  --build-environment model/intent_v1/build-environment.json \
   --diagnostic-output "$work_root/presealed-failure.json" \
   | tee "$work_root/train-stdout.json"
 ```
+
+`--build-environment` обязателен: у него нет default-значения намеренно —
+sidecar фиксирует именно ту машину, что обучила кандидата. Официальный запуск
+пишет его в `model/intent_v1/build-environment.json`; любой replay обязан
+писать в другой путь и не перезаписывать официальный sidecar.
 
 Не добавляйте `--dry-run` в надежде избежать seal: проходящий кандидат всё
 равно создаст registry. `--diagnostic-output` сохранит отдельный файл только
@@ -658,6 +689,7 @@ for run in replay-a replay-b; do
     --artifact "$work_root/$run/layout_intent_v1.ksm" \
     --manifest "$work_root/$run/manifest.json" \
     --test-report "$work_root/$run/test-report.json" \
+    --build-environment "$work_root/$run/build-environment.json" \
     > "$work_root/$run/stdout.json"
 done
 

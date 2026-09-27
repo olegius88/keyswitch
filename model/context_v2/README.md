@@ -104,18 +104,36 @@ required. No universal absence of lost or extra symbols is claimed.
 PYTHONPATH=src python3 tools/context_corpus.py
 PYTHONPATH=src python3 tools/context_evidence.py
 PYTHONPATH=src python3 tools/train_context_v2.py verify
-PYTHONPATH=src python3 tools/evaluate_context_engine.py --verify
-PYTHONPATH=src python3 tools/verify_context_v2.py
+PYTHONPATH=src python3 tools/verify_context_v2.py --verify-frozen
 ```
 
-Training replay requires a C compiler on Linux, not a GPU. The checked-in
-source snapshot and lexical cache make it independent of network access and
-installed Hunspell dictionaries. Fast metadata/provenance validation runs on
-both packaging platforms. The historical verifier prohibits installing this
-rejected candidate and preserves its comparison evidence. Acceptance of the
-active model belongs to the separate feature-version-aware
-[shipping gate](../../tools/verify_context_model.py); it does not require every
-later accepted model to equal this experiment's frozen v1 baseline.
+`context_corpus.py` rebuilds the phrase split and compares its receipt;
+`context_evidence.py` checks the frozen lexical cache; `train_context_v2.py
+verify` refits the candidate in a temporary directory and compares the
+candidate, the seal and the test report byte for byte; `verify_context_v2.py
+--verify-frozen` checks the historical anchors and recomputes the four test
+tracks. Training replay requires a C compiler on Linux, not a GPU. The
+checked-in source snapshot and lexical cache make it independent of network
+access and installed Hunspell dictionaries.
+
+The seal, the receipts and the engine report pin the source files that
+produced them. Those files have changed since (the runtime moved its numbers
+into named constants, the intent model was retrained), so each pin outside
+this directory is checked against an exact archived copy in
+[`compatibility/generation-sources/`](compatibility/README.md), never against
+the live file. The replays above run the live tools; the seal and the receipt
+they reproduce keep the recorded pins, so a replay shows that the current
+tools still produce the same bytes, and the pins show which bytes produced the
+evidence. The lexical cache was computed once with the intent model of that
+time: its archived copy is kept as evidence and is not claimed to equal the
+installed one.
+
+Fast metadata/provenance validation runs on both packaging platforms. The
+historical verifier prohibits installing this rejected candidate and preserves
+its comparison evidence. Acceptance of the active model belongs to the separate
+feature-version-aware [shipping gate](../../tools/verify_context_model.py); it
+does not require every later accepted model to equal this experiment's frozen
+v1 baseline.
 
 The next research step is richer, carefully annotated intent/context evidence
 and error analysis on development data, followed by a fresh held-out test.
@@ -124,11 +142,13 @@ variable, English insertion or typo was intentional.
 
 ## Runtime regression history
 
-Engine-only changes can be checked with
-`PYTHONPATH=src python3 tools/evaluate_context_engine.py --refresh-runtime`.
-This retains the prior report under its SHA256 in `engine-history/`, keeps the
-same compared weights and phrase IDs, and records a linked runtime-regression
-report. Replaying an already observed test does not create new independent
-model evidence or reverse the candidate's rejection. The ordinary `--verify`
-command reproduces the current report, and package verification checks both
-current source provenance and the archived report link.
+The [engine report](engine-report.json) describes the runtime of its time: its
+provenance names the engine, context policy and editor harness bytes that ran,
+and those bytes are archived with the other sources; the reports it replaced
+stay in `engine-history/`. The report is anchored by the historical
+verifier, so it is frozen evidence rather than a regression check of the
+current engine: `tools/evaluate_context_engine.py` replays the current engine,
+which is a different program, and neither its `--verify` nor its
+`--refresh-runtime` mode is part of the verification of this candidate.
+Replaying an already observed test would not create new independent model
+evidence or reverse the candidate's rejection.

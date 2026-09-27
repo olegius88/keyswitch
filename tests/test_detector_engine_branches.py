@@ -19,7 +19,7 @@ from unittest.mock import Mock, patch
 from keyswitch import detector as detector_module
 from keyswitch import layouts
 from keyswitch.config import SettingsStore
-from keyswitch.detector import CONTEXT_SOURCE_GROUP_PENALTY, DetectionDecision, LanguageDetector
+from keyswitch.detector import DetectionDecision, LanguageDetector
 from keyswitch.engine import (
     CorrectionPlan,
     EngineSnapshot,
@@ -28,7 +28,11 @@ from keyswitch.engine import (
     LanguageContext,
     LearningPrompt,
 )
-from keyswitch.constants.detection import MAX_REMEMBERED_APPLICATION_CONTEXTS
+from keyswitch.constants.detection import (
+    CONFIRMED_RULE_MIN_CONFIDENCE,
+    CONTEXT_SOURCE_GROUP_PENALTY,
+    MAX_REMEMBERED_APPLICATION_CONTEXTS,
+)
 from keyswitch.history import HistoryStore
 from keyswitch.input_context import CONTEXT_TTL
 from keyswitch.intent_model import CorrectionTrigger, IntentModelInput, LinearPrediction
@@ -106,7 +110,6 @@ from fixture_values.scores import (
     DETECTOR_FIXTURE_DEFAULT_NGRAM_SCORE,
     DETECTOR_FIXTURE_GRAM_RATIO,
     DETECTOR_FIXTURE_INVALID_RATIO,
-    DETECTOR_FORCED_CONFIDENCE_FLOOR,
     DETECTOR_HIGHER_DOMINANT_KNOWN_SCORE,
     DETECTOR_HIGH_CONFIDENCE_SCORE,
     DETECTOR_HIGH_MODEL_THRESHOLD,
@@ -270,7 +273,7 @@ class DetectorBranchTests(unittest.TestCase):
         self.assertEqual(self.decide(detector, rejected_targets={1}).reason, "отклонённое пользователем исправление")
         forced = self.decide(detector, forced_target_group=1)
         self.assertTrue(forced.should_convert)
-        self.assertGreaterEqual(forced.confidence, DETECTOR_FORCED_CONFIDENCE_FLOOR)
+        self.assertGreaterEqual(forced.confidence, CONFIRMED_RULE_MIN_CONFIDENCE)
         not_found = self.decide(detector, forced_target_group=NONEXISTENT_LAYOUT_GROUP)
         self.assertTrue(not_found.should_convert)
         protected = self.decide(detector, original="https://host", alternatives={1: "target"})
@@ -466,7 +469,7 @@ class DetectorBranchTests(unittest.TestCase):
             {1: "фисв"},
             0,
             minimum_length=DEFAULT_MINIMUM_WORD_LENGTH,
-            confidence_threshold=DETECTOR_FORCED_CONFIDENCE_FLOOR,
+            confidence_threshold=CONFIRMED_RULE_MIN_CONFIDENCE,
         )
         self.assertFalse(short.should_convert)
         self.assertIsNone(short.model_probability)
@@ -907,7 +910,7 @@ class EngineBranchTests(unittest.TestCase):
             initialized.records[0].getMessage().removeprefix("TECHNICAL ")
         )
         self.assertEqual(initial_payload["event"], "engine_initialized")
-        self.assertEqual(initial_payload["keyswitch_version"], "0.32.0")
+        self.assertEqual(initial_payload["keyswitch_version"], "0.33.0")
         self.assertEqual(initial_payload["settings"]["overrides"], {"diagnostics.technical_logging": True})
 
     def test_start_stop_idempotence_and_backend_failure(self) -> None:

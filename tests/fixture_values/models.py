@@ -36,7 +36,7 @@ INTENT_TEST_DIMENSION: Final = 256
 INTENT_SMALL_TEST_DIMENSION: Final = 64
 # A larger dimension for tests that want more distinct buckets to work with.
 INTENT_LARGE_TEST_DIMENSION: Final = 1024
-# intent_model.NGRAM_ORDERS is (1, 2, 3, 4, 5); this fixture is missing 1 and 5 and recurs wherever
+# INTENT_NGRAM_ORDERS is (1, 2, 3, 4, 5); this fixture is missing 1 and 5 and recurs wherever
 # a test needs "some ngram_orders, but not the real ones".
 INCOMPLETE_INTENT_NGRAM_ORDERS: Final = (2, 3, 4)
 # encode_test_case()'s default dimension, small enough to keep malformed-input fixtures cheap.
@@ -47,9 +47,10 @@ KSLM_HEADER_MANIFEST_LENGTH_INDEX: Final = 3
 KSLM_HEADER_PAYLOAD_LENGTH_INDEX: Final = 4
 KSLM_HEADER_CRC_INDEX: Final = 5
 KSLM_HEADER_DIGEST_INDEX: Final = 6
-# Pins of the frozen intent_model.py limits (pending reseal): a change there must fail these tests.
+# Pins of the intent model limits (constants/models.py, constants/file_formats.py): a change there
+# must fail these tests.
 EXPECTED_INTENT_MINIMUM_RUNTIME_TOKEN_LENGTH: Final = 5
-# intent_model.MAX_SUPPORTED_FINGERPRINTS == 1 << this
+# KSLM_MAX_FINGERPRINTS == 1 << this
 EXPECTED_KSLM_MAX_FINGERPRINTS_LOG2: Final = 20
 EXPECTED_KSLM_MAX_PAYLOAD_MEBIBYTES: Final = 12
 EXPECTED_KSLM_MAX_CONTAINER_MEBIBYTES: Final = 14
@@ -61,8 +62,6 @@ INTENT_SAMPLE_FINGERPRINTS: Final = (1, 2, 3)
 INTENT_MUTATION_PROBE_VALUE: Final = 9
 INTENT_IMMUTABLE_WRITE_PROBE: Final = 2
 INTENT_SECOND_SAMPLE_FINGERPRINT: Final = 2
-# src/keyswitch/intent_model.py's own bound, not yet named there (PENDING_RESEAL)
-INTENT_MODEL_VERSION_MAX_CHARACTERS: Final = 128
 INTENT_OVERSIZED_METADATA_INT: Final = 1 << 65
 INTENT_LOADER_FIXTURE_FINGERPRINT: Final = 7
 INTENT_WRONG_SCHEMA_FLOAT: Final = 3.0
@@ -91,7 +90,7 @@ INTENT_EXCESSIVE_DIMENSION_EXPONENT: Final = 22
 INTENT_TRAIN_ONLY_SCORER_ALGORITHM_VERSION: Final = 2
 INTENT_TRAIN_ONLY_SCORER_NGRAM_ORDERS: Final = (2, 3, 4)
 INTENT_EXTERNAL_POLICY_SCHEMA_VERSION: Final = 2
-INTENT_UNSUPPORTED_MANIFEST_SCHEMA_VERSION: Final = 2
+INTENT_UNSUPPORTED_MANIFEST_SCHEMA_VERSION: Final = 3
 INTENT_SEALED_CANDIDATE_QUANTIZE_WEIGHTS: Final = {2: 1.5, 9: -0.5}
 INTENT_SEALED_CANDIDATE_FINGERPRINTS: Final = frozenset({1, 2, 3})
 INTENT_TAMPERED_FINGERPRINTS: Final = frozenset({1, 2, 4})
@@ -137,7 +136,6 @@ ORTHO_NON_INTEGER_LOGPROB: Final = 0.5
 ORTHO_NON_TEXT_GRAM_NAME: Final = 2
 UNSUPPORTED_EXPOSURE_INVENTORY_SCHEMA_VERSION: Final = 2
 UNSUPPORTED_PREFIX_FEATURE_VERSION: Final = 3
-LANGUAGE_MODEL_TRIGRAM_ORDER: Final = 3
 UNSUPPORTED_KSLM_SCHEMA_VERSION: Final = KSLM_SCHEMA_VERSION - 1
 # One past the largest representable uint64, and the largest one itself; both recur as
 # fingerprint/seed boundary fixtures.
@@ -245,3 +243,6 @@ EXPECTED_INTENT_TYPO_POLICY_TYPO_CONFUSION_COUNTS: Final = (
 INTENT_TAIL_DIAGNOSTIC_OVERALL_CONFUSION_COUNTS: Final = (1, 1, 2, 0)
 # The operating point choose_directional_threshold is patched to return in the margin tests.
 INTENT_INITIAL_SYMMETRIC_CONFUSION_COUNTS: Final = (2, 0, 2, 0)
+# The archived feature-2 context model's feature limit, restated so a refactoring probe can
+# import an equal named constant in place of the literal (tests/test_context_v2_history.py).
+CONTEXT_V2_HISTORY_MAX_FEATURES: Final = 50000

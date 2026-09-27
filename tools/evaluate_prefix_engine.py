@@ -21,15 +21,14 @@ from unittest.mock import patch
 from auxiliary_runtime_evidence import packaged_intent, runtime_provenance
 from context_corpus import ROOT
 from context_evidence import canonical, checksum
-# The engine serves the onboard lexicon plus the packaged supplement, so the replay does too.
-from reference_lexicon import reference_models
 from keyswitch.constants.model_protocol import PROFILES
-from prefix_corpus import DIRECTORY, rows
+# The replay scores and indexes prefixes with what the engine builds (prefix_corpus.lexicon): the
+# onboard lexicon plus the packaged supplement for scoring, the onboard lexicon for the index.
+from prefix_corpus import DIRECTORY, lexicon, rows, verify_receipt
 from train_prefix_model import CANDIDATE, SEAL
-from verify_lexical_compatibility import verify as verify_compatibility
 from keyswitch.backend import KeyEvent
 from keyswitch.config import SettingsStore
-from keyswitch.early_switch import PrefixIndex, _dictionary_stems
+from keyswitch.early_switch import PrefixIndex
 from keyswitch.engine import KeySwitchEngine
 from keyswitch.history import HistoryStore
 from keyswitch.input_context import FieldContext, FieldRole
@@ -53,10 +52,8 @@ REPORT = DIRECTORY / "engine-report.json"
 
 def provenance() -> dict[str, str]:
     return runtime_provenance(ROOT, [Path(__file__), CANDIDATE, SEAL, DIRECTORY / "corpus.json",
-        DIRECTORY / "lexical-compatibility.json", ROOT / "tools/prefix_corpus.py",
-        ROOT / "tools/train_prefix_model.py", ROOT / "tools/verify_lexical_compatibility.py",
-        ROOT / "src/keyswitch/resources/lexicon-supplement-ru_RU.json",
-        ROOT / "model/intent_v1/compatibility/generation-config-v21.json"])
+        ROOT / "tools/prefix_corpus.py", ROOT / "tools/train_prefix_model.py", ROOT / "tools/reference_lexicon.py",
+        ROOT / "src/keyswitch/resources/lexicon-supplement-ru_RU.json"])
 
 
 def select(split: str) -> list[dict[str, object]]:
@@ -120,16 +117,14 @@ def replay(row: dict[str, object], model: PrefixModel | None, models: dict[int, 
 
 
 def evaluate(split: str) -> dict[str, object]:
-    verify_compatibility("prefix_v1")
+    verify_receipt()
     runtime = provenance()
     selected = select(split)
     variants = {"shipping_no_prefix": None, "candidate": PrefixModel.load(CANDIDATE)}
     results: dict[str, dict[str, dict[str, int]]] = {}
     failures: list[dict[str, object]] = []
     for profile in PROFILES:
-        models = reference_models(profile == "reference_hunspell")
-        indexes = {group: PrefixIndex(set(model.frequencies) | (_dictionary_stems(Path(model.speller.source)) if profile == "reference_hunspell" else set()), model.frequencies)
-                   for group, model in models.items()}
+        models, indexes = lexicon(profile)
         for native in (False, True):
             context = profile + ("/field" if native else "/observed")
             for name, model in variants.items():

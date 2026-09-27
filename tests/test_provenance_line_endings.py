@@ -24,7 +24,7 @@ if TOOLS_PATH not in sys.path:
 
 import release_pipeline  # noqa: E402
 import verify_context_model  # noqa: E402
-import verify_context_v2_history  # noqa: E402
+import historical_sources  # noqa: E402
 from fixture_values.counts import PROVENANCE_MINIMUM_HASHED_FILE_COUNT
 from fixture_values.platform import GIT_CHECK_ATTR_FIELD_COUNT, GIT_CHECK_ATTR_MAX_SPLITS
 
@@ -56,7 +56,7 @@ def hashed_files() -> list[Path]:
     paths = set(recorded_paths())
     paths |= set(verify_context_model.provenance_paths().values())
     paths |= {ROOT / relative for relative in release_pipeline.MODEL_TOOLCHAIN_PATHS.values()}
-    paths |= {ROOT / verify_context_v2_history.ARCHIVE / Path(name).name for name in verify_context_v2_history.SOURCES}
+    paths |= {archive.path(name, ROOT) for archive in historical_sources.ARCHIVES for name in archive.sources}
     return sorted(path for path in paths if path.is_file())
 
 

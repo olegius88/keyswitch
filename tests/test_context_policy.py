@@ -10,21 +10,25 @@ import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 from unittest.mock import patch
 
 from keyswitch.backend import KeyEvent
 from keyswitch.constants.keyboard import ALT_MASK, CONTROL_MASK
 from keyswitch.context_model import (
     ACTIONS, FEATURE_VERSION, ContextAction, ContextEvidence, ContextModel,
-    extract_context_features, softmax,
+    extract_context_features, one_typo_from_word, softmax,
 )
-from keyswitch.context_policy import ContextPolicy, ContextResult
+from keyswitch.context_policy import ContextPolicy, ContextResult, evidence_for_decision
+from keyswitch.detector import LanguageDetector, LanguageScorer
+from keyswitch.language_model import LanguageModel
 from keyswitch.engine import KeySwitchEngine
 from keyswitch.input_context import CONTEXT_LIMIT, CONTEXT_TTL, FieldContext, InputContext
 from test_input_integrity import InputIntegrityTests
+from keyswitch.constants.text import FIELD_CONTEXT_APPLICATION_MAX_CHARACTERS
 from fixture_values.counts import (
     CONTEXT_FILLER_CHARACTERS,
-    FIELD_CONTEXT_APPLICATION_MAX_CHARACTERS,
     FIELD_CONTEXT_OVERLONG_NAME_CHARACTERS,
     FIELD_CONTEXT_OVERLONG_TEXT_CHARACTERS,
     LEARNING_CONFIRMATIONS_REQUIRED,
@@ -40,7 +44,9 @@ from fixture_values.scores import (
 )
 from keyswitch.constants.models import (
     CONTEXT_ACTION_FEATURE_VERSION,
+    CONTEXT_TYPO_FEATURE_VERSION,
     CONTEXT_V1_CONVERSION_THRESHOLD,
+    CONTEXT_V1_FEATURE_VERSIONS,
 )
 
 
@@ -179,6 +185,54 @@ class ContextModelTests(unittest.TestCase):
         rich = replace(self.item, original="a_2", alternative="ф_2", field=FieldContext("test", "1", "// привет =", "hello"))
         self.assertEqual(extract_context_features(rich)["token:digits"], 1.0)
 
+    def test_typo_evidence_and_digit_direction_belong_to_schema_five(self) -> None:
+        stray = replace(self.item, original="aghbdtn", alternative="фпривет", target_typo=True)
+        legacy = extract_context_features(stray)
+        self.assertFalse([name for name in legacy if name.startswith(("typo:", "token:digits:direction"))])
+        features = extract_context_features(stray, CONTEXT_TYPO_FEATURE_VERSION)
+        self.assertEqual(features["typo:0:1:known:0:0"], 1.0)
+        self.assertEqual(features["typo:0:1:known:0:0:baseline:1"], 1.0)
+        self.assertNotIn("token:digits:direction:0", features)
+        command = replace(self.item, original="зь2", alternative="pm2", source_group=1)
+        self.assertEqual(extract_context_features(command, CONTEXT_TYPO_FEATURE_VERSION)["token:digits:direction:1"], 1.0)
+        weights = {"typo:0:1:known:0:0": (0.0, DOMINANT_BIAS_WEIGHT, 0.0, 0.0)}
+        typo_model = ContextModel(weights, "context-v1-typo", feature_version=CONTEXT_TYPO_FEATURE_VERSION)
+        self.assertEqual(typo_model.predict(stray).action, "convert")
+        self.assertNotEqual(ContextModel(weights, "context-v1-legacy").predict(stray).action, "convert")
+        self.save({**self.payload(), "feature_version": CONTEXT_TYPO_FEATURE_VERSION})
+        self.assertEqual(ContextModel.load(self.path).feature_version, CONTEXT_TYPO_FEATURE_VERSION)
+        self.save({**self.payload(), "feature_version": CONTEXT_TYPO_FEATURE_VERSION, "version": "context-v3-test"})
+        with self.assertRaises(ValueError):
+            ContextModel.load(self.path)
+
+    def test_one_typo_from_word_reads_the_frequency_lexicon(self) -> None:
+        russian = LanguageModel("ru_RU", {"привет": 1}, "fixture", enable_spellcheck=False)
+        for typed in ("фпривет", "пирвет", "прибет", "приет", "ПРИВЕТТ"):
+            with self.subTest(typed=typed):
+                self.assertTrue(one_typo_from_word(typed, russian))
+        for typed in ("привет", "прив", "при-вет", "тучеоы"):
+            with self.subTest(typed=typed):
+                self.assertFalse(one_typo_from_word(typed, russian))
+        # Without a known alphabet only extra and swapped letters can be found.
+        other = LanguageModel("xx_XX", {"hello": 1}, "fixture", enable_spellcheck=False)
+        self.assertTrue(one_typo_from_word("helloo", other))
+        self.assertFalse(one_typo_from_word("hallo", other))
+
+    def test_the_evidence_builder_marks_readings_one_typo_from_a_word(self) -> None:
+        detector = LanguageDetector({0: LanguageModel("en_US", {"hello": 1}, "fixture", enable_spellcheck=False),
+                                     1: LanguageModel("ru_RU", {"привет": 1}, "fixture", enable_spellcheck=False)})
+        field = FieldContext("editor", "1", "", "", "unknown")
+        stray = evidence_for_decision(detector.decide("aghbdtn", {1: "фпривет"}, 0), "фпривет", 1, detector, field, "enter")
+        self.assertEqual((stray.source_typo, stray.target_typo), (False, True))
+        typed = evidence_for_decision(detector.decide("helloo", {1: "руддщщ"}, 0), "руддщщ", 1, detector, field, "space")
+        self.assertEqual((typed.source_typo, typed.target_typo), (True, False))
+        # A scorer without a frequency lexicon (a test double, say) reports no typo.
+        scorer = detector.models[1]
+        bare = LanguageDetector({0: detector.models[0], 1: cast(LanguageScorer, SimpleNamespace(
+            score=scorer.score, context_score=scorer.context_score, best_single_deletion=scorer.best_single_deletion))})
+        without = evidence_for_decision(bare.decide("aghbdtn", {1: "фпривет"}, 0), "фпривет", 1, bare, field, "enter")
+        self.assertFalse(without.target_typo)
+
 
 class ContextEngineTests(InputIntegrityTests):
     """Inherited physical-editor harness; only context tests are collected."""
@@ -212,8 +266,8 @@ class ContextEngineTests(InputIntegrityTests):
     def test_bundled_trained_model_resolves_user_phrase_and_retains_code(self) -> None:
         model = self.engine.context_policy.model
         assert model is not None
-        self.assertIn(model.feature_version, (FEATURE_VERSION, CONTEXT_ACTION_FEATURE_VERSION))
-        prefix = "context-v1-" if model.feature_version == FEATURE_VERSION else "context-v3-"
+        self.assertIn(model.feature_version, (*CONTEXT_V1_FEATURE_VERSIONS, CONTEXT_ACTION_FEATURE_VERSION))
+        prefix = "context-v1-" if model.feature_version in CONTEXT_V1_FEATURE_VERSIONS else "context-v3-"
         self.assertTrue(model.version.startswith(prefix))
         # A lone curated letter converts at the start of a message on its own and
         # the layout follows, so the same physical keys now type the Russian word.

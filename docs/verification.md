@@ -88,18 +88,19 @@ Hunspell-словарей во время replay:
 PYTHONPATH=src python3 tools/context_corpus.py
 PYTHONPATH=src python3 tools/context_evidence.py
 PYTHONPATH=src python3 tools/train_context_v2.py verify
-PYTHONPATH=src python3 tools/evaluate_context_engine.py --verify
-PYTHONPATH=src python3 tools/verify_context_v2.py
+PYTHONPATH=src python3 tools/verify_context_v2.py --verify-frozen
 ```
 
-При изменении только движка старый engine-report больше не описывает текущий
-код. Для явной регрессионной перепроверки существует
-`PYTHONPATH=src python3 tools/evaluate_context_engine.py --refresh-runtime`.
-Команда сохраняет предыдущий отчёт в `model/context_v2/engine-history/`,
-проверяет неизменность сравниваемых весов и списка фраз и выполняет replay
-заново. Новый отчёт помечен как повторная проверка уже наблюдавшегося теста;
-это не новый независимый тест и не разрешение продвигать исследовательские
-веса. После обновления обычный `--verify` должен воспроизводить его точно.
+Печать, квитанции и engine-report эксперимента закрепляют по SHA-256 файлы, из
+которых они получены. Файлы вне `model/context_v2/` с тех пор менялись, поэтому
+каждый закреплённый файл сверяется с его точной копией в
+`model/context_v2/compatibility/generation-sources/` (дайджесты — в
+`tools/historical_sources.py`), а не с живым файлом. Повторы выше выполняют
+нынешние инструменты и сравнивают результат с замороженными байтами; в печать и
+квитанцию, которые они воспроизводят, подставляются записанные дайджесты.
+Engine-report закреплён как историческое свидетельство о движке того времени:
+`tools/evaluate_context_engine.py` проигрывает нынешний движок, и ни его
+`--verify`, ни `--refresh-runtime` в проверку эксперимента не входят.
 
 Для training replay эксперимента нужен Linux C-компилятор; GPU не используется.
 Команды выше проверяют сохранённые результаты и не устанавливают candidate
@@ -111,10 +112,16 @@ PYTHONPATH=src python3 tools/verify_context_v2.py
 Эксперимент границ слова проверяется отдельно от контекстных весов:
 
 ```bash
-PYTHONPATH=src python3 tools/train_boundary_model.py --verify
-PYTHONPATH=src python3 tools/verify_boundary_model.py
+PYTHONPATH=src python3 tools/verify_boundary_model.py --verify-frozen
 PYTHONPATH=src python3 tools/evaluate_boundary_engine.py --verify
 ```
+
+`--verify-frozen` заново обучает кандидата нынешними инструментами, заново
+считает запечатанный test и сравнивает кандидата, печать и отчёт побайтно.
+Источники, закреплённые печатью, сверяются с копиями в
+`model/boundary_v1/compatibility/generation-sources/`, а не с живыми файлами;
+`tools/train_boundary_model.py --verify` сверяет их с живыми файлами и после
+любой их правки падает, поэтому исторической проверкой не является.
 
 Кандидат boundary-v1 отклонён и не включён в программу. Его обучение использует слова из
 прежнего резерва публичных фраз; этот резерв больше нельзя считать новым
@@ -122,19 +129,27 @@ PYTHONPATH=src python3 tools/evaluate_boundary_engine.py --verify
 [в отчёте эксперимента](../model/boundary_v1/README.md). Запускайте тяжёлые
 обучения и replay последовательно. API-моки не заменяют нативный Windows E2E.
 
-Принятая boundary-v2 проверяется отдельно, без изменения старого v1-test:
+Принятая boundary-v2 (`boundary-v2-db59e2332c9c`, признаки версии 3, порог 0.9)
+проверяется отдельно, без изменения старого v1-test:
 
 ```bash
+PYTHONPATH=src python3 tools/filter_lexicon_supplement.py --verify
 PYTHONPATH=src python3 tools/boundary_v2_corpus.py
 PYTHONPATH=src python3 tools/train_boundary_v2.py --verify
 PYTHONPATH=src python3 tools/verify_boundary_v2.py
 ```
 
-Первый sealed test boundary-v2 и его ограничения описаны
+Первая команда сверяет словарное дополнение, по которому движок и корпус считают
+признаки, с его квитанцией и правилом фильтра. Квитанция корпуса закрепляет
+лексический контракт intent-v1 (словари и их контрольные суммы), дополнение, код и
+значения констант, а не весь конфиг intent. Запечатанный test этого поколения —
+2 093 строки: 1 907 верных решений, 186 воздержаний на неоднозначных вводах,
+0 ошибок; данные, выбор порога и ограничения описаны
 [в карточке модели](../model/boundary_v2/README.md). Повторный `--verify`
 сравнивает веса/отчёты побайтно, а не создаёт новую независимую проверку.
-Общий `evaluate_boundary_engine.py` теперь явно сравнивает старый алгоритм,
-отклонённый v1 и активный v2; прежние отчёты архивируются.
+Общий `evaluate_boundary_engine.py` явно сравнивает старый алгоритм,
+отклонённый v1 и активный v2 (18 авторских последовательностей: 13, 12 и 18
+точных); прежние отчёты архивируются.
 
 Раннюю модель префиксов проверяют отдельные команды (последовательно):
 
@@ -147,7 +162,14 @@ PYTHONPATH=src python3 tools/verify_prefix_model.py
 
 Обучение использует замороженные числовые признаки; сквозной replay требует
 эталонных словарей. `verify` не меняет веса, не подбирает порог и не продвигает
-модель. Для изменений только движка доступен `evaluate_prefix_engine.py
+модель. Признаки корпуса считаются по словарям, которые использует движок:
+оценки слов — онбордовые словари с пакетным дополнением, индекс префиксов —
+онбордовые словари и основы Hunspell. Квитанция корпуса закрепляет лексический
+контракт intent-v1 (пути и контрольные суммы словарей), дополнение, код, из
+которого посчитаны строки, и значения констант, которые этот код импортирует;
+их изменение останавливает проверку до нового обучения prefix-v1, а новое
+поколение intent-v1 с теми же словарями — нет. Для изменений
+только движка доступен `evaluate_prefix_engine.py
 --refresh-runtime` с архивированием старого отчёта; это регрессия, не свежий
 независимый тест. [Методика и ограничения](../model/prefix_v1/README.md).
 

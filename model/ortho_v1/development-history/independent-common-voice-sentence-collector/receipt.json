@@ -1,0 +1,97 @@
+{
+  "evidence_sha256": "3d42d68abffe53e0c4b5650cf0d9293c38108b3a29da7742edf2b296a5311df7",
+  "excluded_as_seen": {
+    "en:negative_types": 794,
+    "en:positive_types": 11165,
+    "ru:negative_types": 213,
+    "ru:positive_types": 20512
+  },
+  "left_out_words": [
+    ".dist",
+    "bild",
+    "const",
+    "ctrl",
+    "gtk",
+    "healthcheck",
+    "hfcs",
+    "hotfix",
+    "htop",
+    "kubectl",
+    "nginx",
+    "npm",
+    "oled",
+    "webjs",
+    "websocket",
+    "а-б",
+    "гифку",
+    "гыф",
+    "йцукен",
+    "каеффф",
+    "клаиватура",
+    "лдпр",
+    "лут",
+    "мацуи",
+    "мда-а",
+    "москва",
+    "пересборку",
+    "повторнно",
+    "превет",
+    "привет",
+    "репост",
+    "рсфср",
+    "севодня",
+    "созвон",
+    "тыща",
+    "у-у",
+    "уведмление",
+    "флуд",
+    "фнаф",
+    "фнафер",
+    "фпривет",
+    "фыва",
+    "чатик",
+    "я-то"
+  ],
+  "population": "the corpus' own rules (ortho_corpus.label, to_keys, shape_of; train_ortho_model.population) with this verdict; types whose served keys the snapshot or a case written by hand shows are left out",
+  "provenance": {
+    "keyswitch.constants": "0b26013c07036b2b56771fe46c00f9e6c3f14be4007968f7d69db8fd2b9a657e",
+    "src/keyswitch/ortho_model.py": "b7ffe7f5347e7cdec07a104489b8eea75b5c1d0b8fac5c442d763ff0647989b9",
+    "tools/ortho_corpus.py": "83481f7bac29d5e2e425d5ae8eec67fc19e8dc152ad387851a8139a86e7427fd",
+    "tools/ortho_independent.py": "fb726854643d112d45d0439638555cb1da5552d5d15df050bdf730b1a78538f6",
+    "tools/ortho_known.py": "b23c15028dbda54bd844ea7608c68b79a180c0632d5b2bf5794ea5606ac72717",
+    "tools/train_ortho_model.py": "7b30dc030ca7c0b5bdddde7985d0b2325e6b7aedc95395e421310d0e5ec1dfd1"
+  },
+  "rows_by_script": {
+    "en": 51297,
+    "ru": 64708
+  },
+  "schema_version": 1,
+  "snapshot_tokens_sha256": "6240082161b5de559735c04965eef130bf8ab8d21aae05058c007bbbf3ca38bb",
+  "source": {
+    "commit": "1ce6d077cad36f99404b5414afacc314df58ad8c",
+    "files": [
+      {
+        "locale": "eng",
+        "path": "server/data/en/sentence-collector.txt",
+        "sha256": "31ac8e200449ebd7aee4a8c6bd16d4dafd076cf11f7c3efe1035f0283712d136",
+        "url": "https://github.com/common-voice/common-voice/raw/1ce6d077cad36f99404b5414afacc314df58ad8c/server/data/en/sentence-collector.txt"
+      },
+      {
+        "locale": "rus",
+        "path": "server/data/ru/sentence-collector.txt",
+        "sha256": "e0869a008310c452f63fd02e4d52f8abc58df2de73e558c486719161e3ad1b87",
+        "url": "https://github.com/common-voice/common-voice/raw/1ce6d077cad36f99404b5414afacc314df58ad8c/server/data/ru/sentence-collector.txt"
+      }
+    ],
+    "license": "CC0 1.0: the repository README states that the sentence text in /server/data comes from user submissions in the Sentence Collector or Wikipedia and is released under CC0 (files europarl-* are the exception and are not used); server/data/en/LICENSE is the CC0 1.0 text",
+    "repository": "https://github.com/common-voice/common-voice",
+    "retrieved": "2026-09-26T15:49+05:00"
+  },
+  "tokens_sha256": "bc34f677c90d8134bf54fd0ca7e3e8e9ba4171587822c4cb489457646ca5450b",
+  "types": {
+    "en:negative_types": 3418,
+    "en:positive_types": 22115,
+    "ru:negative_types": 2219,
+    "ru:positive_types": 8974
+  }
+}

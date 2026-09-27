@@ -1,0 +1,137 @@
+{
+  "authored_cases": [
+    {
+      "generation1_score": 12.3828,
+      "generation1_threshold": 10.390625,
+      "keys": "htop",
+      "score": 10.8086,
+      "shape": "lower",
+      "source_script": "ru",
+      "threshold": 11.816406
+    },
+    {
+      "generation1_score": 21.3672,
+      "generation1_threshold": 10.390625,
+      "keys": "nginx",
+      "score": 19.666,
+      "shape": "lower",
+      "source_script": "ru",
+      "threshold": 11.816406
+    },
+    {
+      "generation1_score": 28.791,
+      "generation1_threshold": 10.390625,
+      "keys": "bild",
+      "score": 28.7832,
+      "shape": "lower",
+      "source_script": "ru",
+      "threshold": 11.816406
+    },
+    {
+      "generation1_score": 39.332,
+      "generation1_threshold": 25.96875,
+      "keys": "z-nj",
+      "score": 38.3281,
+      "shape": "inner",
+      "source_script": "en",
+      "threshold": 26.71875
+    }
+  ],
+  "authored_regressions_failed": [
+    {
+      "meant": "htop",
+      "test": "tests/test_ortho_model.py::OrthoLicenceTests::test_a_command_typed_in_the_wrong_layout_is_licensed",
+      "typed": "рещз"
+    },
+    {
+      "meant": "htop",
+      "test": "tests/test_ortho_model.py::OrthoLicenceTests::test_the_licence_never_overturns_a_refusal_that_belongs_to_another_layer",
+      "typed": "рещз"
+    },
+    {
+      "meant": "htop",
+      "test": "tests/test_language_intent_regressions.py::LanguageIntentRegressions::test_wrong_layout_commands_and_dotfiles_are_restored_with_spaces",
+      "typed": "рещз"
+    }
+  ],
+  "calibration_rows": 45640,
+  "candidate_sha256": "036607e35b86bd4b09a2e8b42911da6111855b5673456005538900850f7db2fd",
+  "config": {
+    "calibration_false_budget": 0,
+    "discount": 0.75,
+    "margin_nats": 3.0,
+    "minimum_length": 3,
+    "order": 5,
+    "promotion": {
+      "maximum_test_false_conversions": 0,
+      "minimum_recall": 0.75,
+      "minimum_test_negatives": 5000
+    },
+    "scale": 512,
+    "schema_version": 1
+  },
+  "corpus_namespace": "keyswitch:ortho-v1:key-space-20260925",
+  "corpus_receipt_sha256": "70a7b49f56eeb51a427979ca8deb3227d7e807f0e691fbf52559e192eade5f05",
+  "installed_model_unchanged": "ortho-v1-bdb915e4f06f",
+  "model_version": "ortho-v1-6ae27bc9622b",
+  "namespace": "keyswitch:ortho-v1:candidate2",
+  "reason": "The same procedure as generation 1, counted on a new draw of the phrase-group split, no longer licenses `htop` typed in the Russian layout: its score fell below the new Russian threshold, which the procedure sets at the worst calibration negative plus the margin. Three authored regression tests of this case fail with the candidate installed (the rest of the suite fails identically with and without it), so the candidate cannot ship whatever its test result, and the test split was not opened.",
+  "schema_version": 1,
+  "seal_sha256": "61210f0a103239a75f689e97cf9707582eebef8c607f23f92a25790bc37ba6cb",
+  "sealed_provenance": {
+    "keyswitch.constants": "3e635032a40b9099756a3c12ccf62283e270b83aec2cf30336397b352d459dab",
+    "model/ortho_v1/config.json": "f76429242df7dbc8a98fafdd99cca6ea43e64744e9ead5ae6db30a01e0723a71",
+    "model/ortho_v1/corpus-receipt.json": "70a7b49f56eeb51a427979ca8deb3227d7e807f0e691fbf52559e192eade5f05",
+    "model/ortho_v1/tokens.jsonl.gz": "180c7b36bbc9b3bab3a3312a093720f79d0e86e854c71573b256ab45db6b898a",
+    "src/keyswitch/ortho_model.py": "acf22514e6ed554ba11a53342484bbf34ad094f923defc5ebee9debfe18da000",
+    "tools/ortho_corpus.py": "957d7ba35d6139aabc2041f970632466fa3d94212a44a8f47b03ae6ec60bdb8a",
+    "tools/train_ortho_model.py": "c21a4849ea5947edb48f9f2df3f6efffa452d7cb1deffb0db6f6d4d7a12047fb"
+  },
+  "split_draw_diagnosis": {
+    "draws": 20,
+    "draws_passing_every_authored_case": 2,
+    "en_threshold_range": [
+      12.229,
+      51.42
+    ],
+    "generation1_thresholds": {
+      "en": 25.96875,
+      "ru": 10.390625
+    },
+    "reading": "The threshold follows one sample, the worst calibration negative, and moves by tens of nats between draws; generation 1's split happened to give a low Russian threshold. A new test of this procedure mostly measures the draw, not the model.",
+    "ru_threshold_range": [
+      7.111,
+      24.447
+    ],
+    "salts": "diagnostic-only:draw-00 .. diagnostic-only:draw-19",
+    "scope": "The same procedure on twenty further draws of the split, each salted with a throwaway label that may never become a namespace: TRAIN counted, thresholds set on CALIBRATION, authored cases scored. The TEST split of no draw was read or scored.",
+    "unwanted_licensed_in_draws": {
+      "ghbdtn": 0,
+      "gthtc,jhre": 0,
+      "hello": 0
+    },
+    "wanted_licensed_in_draws": {
+      ".dist": 14,
+      "bild": 20,
+      "htop": 3,
+      "nginx": 17,
+      "webjs": 16,
+      "z-nj": 17
+    }
+  },
+  "split_rule": "context-v2 phrase groups (tools/context_corpus.py); bucket = int(sha256(namespace + ':' + group)[:8], 16) mod 100; train below 60, development below 70, calibration below 80, test below 90, reserve otherwise",
+  "stage": "rejected-before-test",
+  "test_split_opened": false,
+  "thresholds": {
+    "en": 26.71875,
+    "ru": 11.816406
+  },
+  "tokens_sha256": "180c7b36bbc9b3bab3a3312a093720f79d0e86e854c71573b256ab45db6b898a",
+  "types_by_split": {
+    "calibration": 21916,
+    "development": 22092,
+    "reserve": 22571,
+    "test": 22384,
+    "train": 76925
+  }
+}

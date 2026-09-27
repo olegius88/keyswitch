@@ -9,6 +9,25 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from keyswitch.constants.corpus import (
+    CONTEXT_FRAME_AFTER_MAX_CHARACTERS,
+    CONTEXT_FRAME_BEFORE_MAX_CHARACTERS,
+    CONTEXT_FRAME_FOCUS_POSITIONS_PER_PHRASE,
+    CONTEXT_FRAME_LEXICAL_HOLDOUT_MODULUS,
+    CONTEXT_FRAME_SAFETY_CALIBRATION_BUCKET,
+    CONTEXT_FRAME_SAFETY_DEVELOPMENT_BUCKET,
+    CONTEXT_FRAME_SAFETY_SPLIT_BUCKET_COUNT,
+    CONTEXT_FRAME_SAFETY_TRAIN_BUCKETS,
+    CONTEXT_FRAME_SHORT_WORD_MAX_CHARACTERS,
+    CONTEXT_FRAME_SPELLING_EDGE_CHARACTERS,
+    CONTEXT_FRAME_SPELLING_VARIANT_MIN_CHARACTERS,
+    CONTEXT_FRAME_SPELLING_VARIANT_MODULUS,
+    CONTEXT_FRAME_TEXT_FIELD_MODULUS,
+    CONTEXT_FRAME_WORD_MAX_CHARACTERS,
+    CONTEXT_FRAME_WRONG_LAYOUT_BEFORE_MODULUS,
+)
+from keyswitch.constants.file_formats import HEXADECIMAL_BASE, REPORT_JSON_INDENT
+from keyswitch.constants.training import DETERMINISTIC_CHOICE_HEX_DIGITS
 from keyswitch.layouts import LayoutPair
 
 from context_corpus import AssignedPhrase, assign, digest, load_source
@@ -16,6 +35,21 @@ from context_corpus import AssignedPhrase, assign, digest, load_source
 
 Action = Literal["keep", "convert", "wait", "suggest"]
 TOKEN = re.compile(r"[A-Za-zА-Яа-яЁё]+(?:['’\-][A-Za-zА-Яа-яЁё]+)*")
+# The trigger and the application of a frame are drawn from these, in this order.
+TRIGGERS = ("space", "space", "space", "pause", "punctuation", "enter")
+APPLICATIONS = ("", "Telegram", "chrome", "Code")
+
+
+def draw(key: str) -> int:
+    """The deterministic number a frame's choices are taken from."""
+
+    return int(digest(key)[:DETERMINISTIC_CHOICE_HEX_DIGITS], HEXADECIMAL_BASE)
+
+
+def lexical_holdout(family: str) -> bool:
+    """The focus family belongs to the separate lexical test track."""
+
+    return draw("focus-holdout:" + family) % CONTEXT_FRAME_LEXICAL_HOLDOUT_MODULUS == 0
 
 
 def attached(character: str) -> bool:
@@ -27,7 +61,7 @@ def word_spans(text: str, group: int) -> list[re.Match[str]]:
     for match in TOKEN.finditer(text):
         before = text[match.start() - 1] if match.start() else ""
         after = text[match.end()] if match.end() < len(text) else ""
-        if attached(before) or attached(after) or not 1 <= len(match.group()) <= 32:
+        if attached(before) or attached(after) or not 1 <= len(match.group()) <= CONTEXT_FRAME_WORD_MAX_CHARACTERS:
             continue
         if not all(("a" <= c.casefold() <= "z") if group == 0 else ("а" <= c.casefold() <= "я" or c.casefold() == "ё") for c in match.group() if c.isalpha()):
             continue
@@ -75,49 +109,51 @@ def build(phrases: list[AssignedPhrase]) -> list[Frame]:
             continue
         ordered = sorted(matches, key=lambda match: digest(f"focus:{phrase.identifier}:{match.start()}"))
         first = matches[0]
-        selected = ([first] if len(first.group()) <= 2 else []) + ordered
+        selected = ([first] if len(first.group()) <= CONTEXT_FRAME_SHORT_WORD_MAX_CHARACTERS else []) + ordered
         positions: set[int] = set()
         for match in selected:
             if match.start() in positions:
                 continue
             positions.add(match.start())
-            if len(positions) > 2:
+            if len(positions) > CONTEXT_FRAME_FOCUS_POSITIONS_PER_PHRASE:
                 break
             token = match.group()
             wrong = pair.translate(token, "us" if target == 0 else "ru", "ru" if target == 0 else "us")
             if wrong == token or pair.translate(wrong, "ru" if target == 0 else "us", "us" if target == 0 else "ru") != token:
                 continue
             key = f"tatoeba:{phrase.identifier}:{match.start()}"
-            sample = int(digest(key)[:8], 16)
-            before = phrase.text[:match.start()][-512:]
-            if sample % 5 == 0:
+            sample = draw(key)
+            before = phrase.text[:match.start()][-CONTEXT_FRAME_BEFORE_MAX_CHARACTERS:]
+            if sample % CONTEXT_FRAME_WRONG_LAYOUT_BEFORE_MODULUS == 0:
                 before = pair.translate(before, "us" if target == 0 else "ru", "ru" if target == 0 else "us")
-            after = phrase.text[match.end():][:128] if sample % 7 == 0 else ""
-            trigger = ("space", "space", "space", "pause", "punctuation", "enter")[sample % 6]
-            app = ("", "Telegram", "chrome", "Code")[sample % 4]
-            role = "text" if sample % 7 == 0 else "unknown"
+            text_field = sample % CONTEXT_FRAME_TEXT_FIELD_MODULUS == 0
+            after = phrase.text[match.end():][:CONTEXT_FRAME_AFTER_MAX_CHARACTERS] if text_field else ""
+            trigger = TRIGGERS[sample % len(TRIGGERS)]
+            app = APPLICATIONS[sample % len(APPLICATIONS)]
+            role = "text" if text_field else "unknown"
             family = min(token.casefold(), wrong.casefold())
             # A separate focus-lexical track excludes these supervision
             # families from ALL fitting/tuning sets. The primary test checks
             # unseen phrase groups and may share common focus words.
-            lexical = int(digest("focus-holdout:" + family)[:8], 16) % 10 == 0
+            lexical = lexical_holdout(family)
             if lexical and item.split != "test":
                 continue
             split = "lexical_test" if lexical else item.split
             for original, alternative, group, action in ((token, wrong, target, "keep"), (wrong, token, 1 - target, "convert")):
                 desired: Action = "keep" if action == "keep" else "convert"
-                if desired == "convert" and len(token) <= 2 and not before.strip() and not after.strip():
+                if desired == "convert" and len(token) <= CONTEXT_FRAME_SHORT_WORD_MAX_CHARACTERS and not before.strip() and not after.strip():
                     desired = "suggest" if trigger in {"enter", "punctuation"} else "wait"
                 frames.append(Frame(key + ":" + action, item.group, split, phrase.locale, original, alternative, group, before, after, app, role, trigger, desired, family, "real_phrase_layout_intervention"))
             # A spelling error is not automatically a layout error. The
             # intended language here is known from our intervention, not
             # inferred from dictionary membership or a teacher prediction.
-            if split != "lexical_test" and sample % 5 == 0 and len(token) >= 4 and token.isalpha():
-                position = 1 + sample % (len(token) - 2)
+            if (split != "lexical_test" and sample % CONTEXT_FRAME_SPELLING_VARIANT_MODULUS == 0
+                    and len(token) >= CONTEXT_FRAME_SPELLING_VARIANT_MIN_CHARACTERS and token.isalpha()):
+                position = 1 + sample % (len(token) - CONTEXT_FRAME_SPELLING_EDGE_CHARACTERS)
                 typo = token[:position] + token[position + 1:]
                 alternate = pair.translate(typo, "us" if target == 0 else "ru", "ru" if target == 0 else "us")
                 typo_family = min(typo.casefold(), alternate.casefold())
-                if int(digest("focus-holdout:" + typo_family)[:8], 16) % 10 != 0:
+                if not lexical_holdout(typo_family):
                     frames.append(Frame(key + ":spelling", item.group, split, phrase.locale, typo, alternate, target, before, after, app, role, trigger, "keep", typo_family, "synthetic_spelling_keep"))
     return frames
 
@@ -136,9 +172,11 @@ def technical_frames(path: Path) -> list[Frame]:
         assert isinstance(value, str)
         alternate = pair.translate(value, "us", "ru")
         family = min(value.casefold(), alternate.casefold())
-        bucket = int(digest("keyswitch:context-v2:safety:" + family)[:8], 16) % 10
-        split = "train" if bucket < 6 else "development" if bucket == 6 else "calibration" if bucket == 7 else "test"
-        lexical = int(digest("focus-holdout:" + family)[:8], 16) % 10 == 0
+        bucket = draw("keyswitch:context-v2:safety:" + family) % CONTEXT_FRAME_SAFETY_SPLIT_BUCKET_COUNT
+        split = ("train" if bucket < CONTEXT_FRAME_SAFETY_TRAIN_BUCKETS
+                 else "development" if bucket == CONTEXT_FRAME_SAFETY_DEVELOPMENT_BUCKET
+                 else "calibration" if bucket == CONTEXT_FRAME_SAFETY_CALIBRATION_BUCKET else "test")
+        lexical = lexical_holdout(family)
         if lexical and split != "test":
             continue
         split = "lexical_test" if lexical else split
@@ -163,4 +201,4 @@ if __name__ == "__main__":
         "model_loaded": False,
         "metrics_evaluated": False,
     }
-    print(json.dumps(report, indent=2))
+    print(json.dumps(report, indent=REPORT_JSON_INDENT))

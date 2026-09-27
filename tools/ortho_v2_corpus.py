@@ -63,7 +63,19 @@ from typing import Final, Literal
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import context_corpus  # noqa: E402
+from historical_sources import ORTHO_V2  # noqa: E402
 
+from keyswitch.constants.corpus import (  # noqa: E402
+    ORTHO_V2_ABBREVIATION_MIN_LETTERS,
+    ORTHO_V2_GATE_SHARE_PERCENT,
+    ORTHO_V2_LEXICON_MIN_CHARACTERS,
+    ORTHO_V2_MAXIMUM_LEXICON_WEIGHT,
+    ORTHO_V2_MAXIMUM_TOKEN_CHARACTERS,
+)
+from keyswitch.constants.file_formats import FROZEN_CORPUS_RECEIPT_JSON_INDENT, HEXADECIMAL_BASE  # noqa: E402
+from keyswitch.constants.text import ASCII_CONTROL_CHARACTER_LIMIT, ASCII_DELETE_CODEPOINT  # noqa: E402
+from keyswitch.constants.training import DETERMINISTIC_CHOICE_HEX_DIGITS  # noqa: E402
+from keyswitch.constants.units import PERCENT_SCALE  # noqa: E402
 from keyswitch.layouts import LayoutPair  # noqa: E402
 
 Script = Literal["en", "ru"]
@@ -74,17 +86,16 @@ TOKENS: Final[Path] = DIRECTORY / "tokens.jsonl.gz"
 RECEIPT: Final[Path] = DIRECTORY / "corpus-receipt.json"
 NAMESPACE: Final[str] = "keyswitch:ortho-v2:key-space-20260910b"
 GATE_NAMESPACE: Final[str] = "keyswitch:ortho-v2:gate-20260910b"
-GATE_SHARE: Final[int] = 16
 CYRILLIC: Final[frozenset[str]] = frozenset("абвгдеёжзийклмнопрстуфхцчшщъыьэюя")
 LATIN: Final[frozenset[str]] = frozenset("abcdefghijklmnopqrstuvwxyz")
-MAXIMUM_TOKEN: Final[int] = 32
 PAIR: Final[LayoutPair] = LayoutPair()
 # Which keys write a letter in each layout. The Russian layout writes several of
 # the US punctuation keys as letters, which is why a trailing comma survives into
 # the token when the text was typed there and disappears when it was not.
 LETTER_KEYS: Final[dict[str, frozenset[str]]] = {
-    "en": frozenset(key for key in map(chr, range(32, 127)) if key.isalpha()),
-    "ru": frozenset(key for key in map(chr, range(32, 127))
+    "en": frozenset(key for key in map(chr, range(ASCII_CONTROL_CHARACTER_LIMIT, ASCII_DELETE_CODEPOINT))
+                    if key.isalpha()),
+    "ru": frozenset(key for key in map(chr, range(ASCII_CONTROL_CHARACTER_LIMIT, ASCII_DELETE_CODEPOINT))
                     if PAIR.translate(key, "us", "ru").isalpha()),
 }
 LEXICONS: Final[dict[str, tuple[str, str]]] = {
@@ -93,7 +104,6 @@ LEXICONS: Final[dict[str, tuple[str, str]]] = {
     "ru": ("model/intent_v1/sources/ru_RU.lm",
            "e57c14eec2b78e52a2125dce2b38044d8dfe480f3964b9d118614527195ceda9"),
 }
-MAXIMUM_LEXICON_WEIGHT: Final[int] = 32
 
 
 def checksum(path: Path) -> str:
@@ -256,14 +266,15 @@ def gate_family(keys: str) -> bool:
     """True when this key sequence is reserved for the one-shot promotion test."""
 
     return int(hashlib.sha256(
-        (GATE_NAMESPACE + ":" + keys).encode("utf-8")).hexdigest()[:8], 16) % 100 < GATE_SHARE
+        (GATE_NAMESPACE + ":" + keys).encode("utf-8")).hexdigest()[:DETERMINISTIC_CHOICE_HEX_DIGITS],
+        HEXADECIMAL_BASE) % PERCENT_SCALE < ORTHO_V2_GATE_SHARE_PERCENT
 
 
 def shape_of(token: str, position: int) -> str:
     """Case shape, which is what makes the abbreviation reading available."""
 
     letters = [character for character in token if character.isalpha()]
-    if len(letters) >= 2 and all(character.isupper() for character in letters):
+    if len(letters) >= ORTHO_V2_ABBREVIATION_MIN_LETTERS and all(character.isupper() for character in letters):
         return "upper"
     if token[:1].isupper():
         return "initial" if position == 0 else "inner"
@@ -296,7 +307,7 @@ def read_lexicon(path: Path, expected: str) -> dict[str, int]:
         except ValueError:
             continue
         token = payload.casefold()
-        if len(token) >= 2:
+        if len(token) >= ORTHO_V2_LEXICON_MIN_CHARACTERS:
             words[token] = words.get(token, 0) + count
     return words
 
@@ -315,9 +326,9 @@ def lexicon_rows() -> dict[tuple[str, str], int]:
             if script_of(word) != script:
                 continue
             keys = to_keys(word)
-            if not keys or len(keys) > MAXIMUM_TOKEN:
+            if not keys or len(keys) > ORTHO_V2_MAXIMUM_TOKEN_CHARACTERS:
                 continue
-            weight = max(1, min(MAXIMUM_LEXICON_WEIGHT, int(frequency).bit_length()))
+            weight = max(1, min(ORTHO_V2_MAXIMUM_LEXICON_WEIGHT, int(frequency).bit_length()))
             key = (script, keys)
             counts[key] = max(counts.get(key, 0), weight)
     return counts
@@ -360,7 +371,7 @@ def rows() -> list[dict[str, object]]:
     for assigned in context_corpus.assign(context_corpus.load_source())[0]:
         words = unicodedata.normalize("NFC", assigned.phrase.text).split()
         for position, raw in enumerate(words):
-            if len(raw) > MAXIMUM_TOKEN:
+            if len(raw) > ORTHO_V2_MAXIMUM_TOKEN_CHARACTERS:
                 continue
             script = script_of(raw)
             if script is None:
@@ -399,8 +410,8 @@ def load_tokens(path: Path = TOKENS) -> list[dict[str, object]]:
         return [json.loads(line) for line in handle]
 
 
-def provenance() -> dict[str, str]:
-    paths = (
+def provenance_paths() -> tuple[Path, ...]:
+    return (
         ROOT / "tools/ortho_v2_corpus.py",
         ROOT / "tools/context_corpus.py",
         ROOT / "src/keyswitch/layouts.py",
@@ -408,10 +419,28 @@ def provenance() -> dict[str, str]:
         context_corpus.RECEIPT,
         *(ROOT / path for path, _expected in sorted(LEXICONS.values())),
     )
-    return {path.relative_to(ROOT).as_posix(): checksum(path) for path in paths}
 
 
-def report(payload: list[dict[str, object]], tokens_sha: str) -> dict[str, object]:
+def provenance() -> dict[str, str]:
+    """Live source hashes, recorded when a corpus is frozen."""
+
+    return {path.relative_to(ROOT).as_posix(): checksum(path) for path in provenance_paths()}
+
+
+def recorded_provenance(receipt: object) -> dict[str, str]:
+    """The frozen receipt's source pins, each checked against its archived copy.
+
+    The corpus was frozen with sources that have moved on since, so a replay keeps the
+    recorded pins (tools/historical_sources.py) and shows with the live tools that the
+    corpus itself is still reproduced byte for byte.
+    """
+
+    pins = receipt.get("provenance") if isinstance(receipt, dict) else None
+    return ORTHO_V2.recorded(pins, (path.relative_to(ROOT).as_posix() for path in provenance_paths()))
+
+
+def report(payload: list[dict[str, object]], tokens_sha: str,
+           sources: dict[str, str] | None = None) -> dict[str, object]:
     by_split: Counter[str] = Counter()
     by_script: Counter[str] = Counter()
     occurrences: Counter[str] = Counter()
@@ -436,18 +465,18 @@ def report(payload: list[dict[str, object]], tokens_sha: str) -> dict[str, objec
             "counts only; they are lowercased and must never be used as negatives."
         ),
         "gate": {
-            "namespace": GATE_NAMESPACE, "share_percent": GATE_SHARE,
-            "rule": "sha256(namespace + ':' + keys)[:8] mod 100 < share",
+            "namespace": GATE_NAMESPACE, "share_percent": ORTHO_V2_GATE_SHARE_PERCENT,
+            "rule": f"sha256(namespace + ':' + keys)[:{DETERMINISTIC_CHOICE_HEX_DIGITS}] mod {PERCENT_SCALE} < share",
             "meaning": "excluded from every count; scored once by the promotion test",
             "types_by_split_script": dict(sorted(gated.items())),
         },
-        "lexicon_weight": "max(1, min(32, frequency.bit_length()))",
+        "lexicon_weight": f"max(1, min({ORTHO_V2_MAXIMUM_LEXICON_WEIGHT}, frequency.bit_length()))",
         "types_by_split": dict(sorted(by_split.items())),
         "types_by_split_script": dict(sorted(by_script.items())),
         "occurrences_by_split_script": dict(sorted(occurrences.items())),
-        "maximum_token_characters": MAXIMUM_TOKEN,
+        "maximum_token_characters": ORTHO_V2_MAXIMUM_TOKEN_CHARACTERS,
         "tokens_sha256": tokens_sha,
-        "provenance": provenance(),
+        "provenance": provenance() if sources is None else sources,
     }
 
 
@@ -466,8 +495,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             (DIRECTORY / ".tokens-check.gz").unlink()
             raise ValueError("token corpus is not reproducible from the frozen source")
         (DIRECTORY / ".tokens-check.gz").unlink()
-    content = (json.dumps(report(payload, tokens_sha), sort_keys=True,
-                          ensure_ascii=False, indent=2) + "\n").encode()
+    sources = recorded_provenance(json.loads(RECEIPT.read_bytes())) if RECEIPT.exists() else None
+    content = (json.dumps(report(payload, tokens_sha, sources), sort_keys=True,
+                          ensure_ascii=False, indent=FROZEN_CORPUS_RECEIPT_JSON_INDENT) + "\n").encode()
     if arguments.freeze and not RECEIPT.exists():
         RECEIPT.write_bytes(content)
     elif not RECEIPT.exists() or RECEIPT.read_bytes() != content:

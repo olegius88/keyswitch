@@ -33,6 +33,10 @@ CANDIDATE = ROOT / "model/boundary_v1/candidate.json"
 if str(ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(ROOT / "tools"))
 
+import train_boundary_model
+import verify_boundary_model
+from historical_sources import BOUNDARY_V1, checksum as historical_checksum
+from keyswitch.constants.file_formats import SHA256_HEX_CHARACTERS
 from verify_boundary_model import verify
 from verify_context_v2 import read_object
 from fixture_values.clock import PAUSE_TRIGGER_OFFSET_SECONDS
@@ -67,6 +71,66 @@ class BoundaryArtifactTests(unittest.TestCase):
                 return {**report, **change} if path.name == "report.json" else read_object(path)
             with patch("verify_boundary_model.read_object", side_effect=altered), self.assertRaises(ValueError):
                 verify()
+
+    def test_historical_evidence_is_anchored_and_pinned_to_archived_sources(self) -> None:
+        result = verify()
+        self.assertIs(result["historical_evidence_verified"], True)
+        self.assertIs(result["current_runtime_verified"], False)
+        seal = read_object(CANDIDATE.parent / "seal.json")
+        pins = seal["provenance"]
+        assert isinstance(pins, dict)
+        # Every source the seal pins is archived, the shared runtime and training files included.
+        self.assertEqual(set(pins), set(BOUNDARY_V1.sources))
+        checksum = historical_checksum
+        for name in verify_boundary_model.ANCHORS:
+            target = CANDIDATE.parent / name
+
+            def altered(path: Path, target: Path = target) -> str:
+                return "0" * SHA256_HEX_CHARACTERS if path == target else checksum(path)
+
+            with self.subTest(anchor=name), patch("verify_boundary_model.checksum", side_effect=altered):
+                with self.assertRaisesRegex(ValueError, "anchor changed"):
+                    verify()
+        for change in ({**pins, "src/keyswitch/language_model.py": "0" * SHA256_HEX_CHARACTERS},
+                       {name: digest for name, digest in pins.items() if name != "tools/context_evidence.py"}):
+            def changed(path: Path, change: dict[str, object] = change) -> dict[str, object]:
+                return {**seal, "provenance": change} if path.name == "seal.json" else read_object(path)
+
+            with self.subTest(pins=sorted(change)), patch("verify_boundary_model.read_object", side_effect=changed):
+                with self.assertRaises(ValueError):
+                    verify()
+
+    def test_frozen_replay_puts_the_sealed_pins_back_and_compares_every_byte(self) -> None:
+        sealed = (train_boundary_model.CANDIDATE.read_bytes(), train_boundary_model.SEAL.read_bytes())
+        report = train_boundary_model.REPORT.read_bytes()
+        pins = read_object(train_boundary_model.SEAL)["provenance"]
+        seen: list[dict[str, str]] = []
+
+        def replay() -> tuple[bytes, bytes]:
+            seen.append(train_boundary_model.provenance())
+            return sealed
+
+        with patch.object(train_boundary_model, "train", side_effect=replay), \
+                patch.object(train_boundary_model, "evaluate", return_value=report):
+            self.assertIs(verify_boundary_model.verify_frozen()["frozen_training_replay"], True)
+        self.assertEqual(seen, [pins])
+        for candidate, seal, test in ((b"changed", sealed[1], report), (sealed[0], b"changed", report),
+                                      (sealed[0], sealed[1], b"changed")):
+            with self.subTest(changed=(candidate, seal, test) != (sealed[0], sealed[1], report)), \
+                    patch.object(train_boundary_model, "train", return_value=(candidate, seal)), \
+                    patch.object(train_boundary_model, "evaluate", return_value=test):
+                with self.assertRaisesRegex(ValueError, "replay changed"):
+                    verify_boundary_model.verify_frozen()
+
+    def test_cli_replays_only_when_asked(self) -> None:
+        with patch.object(verify_boundary_model, "verify", return_value={"accepted": False}) as fast, \
+                patch.object(verify_boundary_model, "verify_frozen", return_value={"frozen_training_replay": True}) as frozen, \
+                patch("sys.stdout"):
+            self.assertEqual(verify_boundary_model.main([]), 0)
+            fast.assert_called_once_with()
+            frozen.assert_not_called()
+            self.assertEqual(verify_boundary_model.main(["--verify-frozen"]), 0)
+            frozen.assert_called_once_with()
 
     def test_load_predict_and_fail_closed(self) -> None:
         model = BoundaryModel.load(CANDIDATE)

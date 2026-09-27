@@ -61,10 +61,8 @@ BOUNDARY_MODEL_THRESHOLD_BELOW_RANGE: Final = .4
 # A probability paired with an abstaining (suffix_length=None) prediction.
 BOUNDARY_ABSTAIN_PROBABILITY: Final = .51
 BOUNDARY_EXCLUDED_TOKEN_PROBABILITY: Final = .5
-# Frozen tools/train_boundary_v2.py and src/keyswitch/boundary_policy.py pin these directly
-# (PENDING_RESEAL), so they are mirrored here rather than imported.
+# A threshold inside the boundary-v2 policy's accepted range.
 BOUNDARY_POLICY_VALID_THRESHOLD: Final = 0.99
-BOUNDARY_POLICY_THRESHOLD_LOWER_BOUND: Final = 0.5
 # A per_mille sampling rate chosen for this test, distinct from the application's own
 # TATOEBA_SAMPLE_PER_MILLE default.
 TATOEBA_TEST_SAMPLE_PER_MILLE: Final = 100
@@ -211,8 +209,6 @@ DETECTOR_DEFAULT_VETO_THRESHOLD: Final = -3.0
 DETECTOR_WEAK_SOURCE_SCORE: Final = -5
 DETECTOR_DOMINANT_KNOWN_SCORE: Final = 8
 DETECTOR_HIGHER_DOMINANT_KNOWN_SCORE: Final = 9
-# Mirrors detector.decide's own forced-group floor: max(20.0, forced_delta).
-DETECTOR_FORCED_CONFIDENCE_FLOOR: Final = 20.0
 # --- test_trusted_short_words_require_curated_exact_dominant_target ---
 DETECTOR_CURATED_SOURCE_SCORE: Final = 5.0
 DETECTOR_NOT_EXACT_SHORT_WORD_SCORE: Final = -4.0
@@ -530,7 +526,8 @@ INTENT_OPTIMIZER_SEALED_VALUE_BY_FIELD: Final = (
         ),
     )
 INTENT_OPTIMIZER_RECALL_UNDER_SEALED_MARGIN: Final = 0.01
-# Pins of the frozen train_intent_model.py context constants: a change there must fail this test.
+# Pins of the context policy constants the intent trainer and evaluator replay
+# (constants/detection.py): a change there must fail this test.
 EXPECTED_INTENT_CONTEXT_DELTA_MULTIPLIER: Final = 1.75
 EXPECTED_INTENT_CONTEXT_TARGET_GROUP_BONUS: Final = 0.55
 EXPECTED_INTENT_CONTEXT_SOURCE_GROUP_PENALTY: Final = 0.3

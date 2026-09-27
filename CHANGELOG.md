@@ -4,6 +4,57 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.33.0 — 2026-09-27
+
+- Decide completed words the same way in every application. The context model knew five
+  applications by name, and in any other one - Firefox, Edge, a terminal - its answer was
+  thrown away for the detector's. It is now trained without application names; the field's role
+  (text, code, terminal) still counts, since the field itself reports it. On 3,500 subtitle
+  sentences typed through the engine into five kinds of field, correctly and in the other layout,
+  spoiled correct sentences went from 82 to 41 (from 45 in Firefox) and restored ones from 16,367
+  to 16,579 (from 15,442 in Firefox); letters put back inside a word restored 17,422 sentences
+  instead of 17,391. On 500 new sentences nobody had seen before: spoiled 13 -> 5 (8 -> 5 in
+  Firefox), restored 2,318 -> 2,360 (2,193 -> 2,360 in Firefox) of 2,500.
+- Convert a word typed in the other layout even when it carries a typo or a stray key: the context
+  model now sees whether a reading is one typo away from a dictionary word (a letter extra, missing
+  or wrong, or two neighbours swapped). "aghbdtn" - a stuck "a" before "ghbdtn" - becomes "фпривет"
+  again, while technical names the detector converts by mistake, such as "nextjs" and ".zshrc", stay.
+  On frequent words with one typo typed alone in the other layout: Russian words with a stray key in
+  front 96.7% -> 97.5%, English words with two letters swapped 85.4% -> 92.3%, with a stray key
+  89.2% -> 95.8%; Russian words with a letter dropped 85.1% -> 83.6%.
+- Tell a digit by the layout of the letters around it: "pm2" and a path like "/c,jhrb2" stay,
+  "зь2" typed in the Russian layout becomes "pm2". A digit reads the same in both layouts, so the
+  model could not see which one it was typed in.
+- A lone Latin letter right after English text waits for the next word instead of turning into a
+  Russian one ("six f b i agents").
+- A new orthotactic model licenses conversions the detector leaves undecided. Russian word forms from
+  web text (a list derived from the fastText Common Crawl vectors, CC BY-SA 3.0) and from
+  public-domain prose on Wikisource now tell Russian slang and rare words from English typed in the
+  wrong layout, so "фнафер", "куафер" or the layout name "ЙЦУКЕН" typed as intended stay; stretched
+  words ("каеффф", "муууу") and a stray extra key are recognised. On text its development never
+  saw - English Wikipedia sentences and Russian prose by Averchenko and Leskov - it replaced none of
+  6,695 correctly typed words and restored 91.9% of the wrong-layout ones; the previous model,
+  measured afterwards on an earlier set of the same kind, replaced 21 of 6,755. The model file grows
+  from 4.8 to 15 MB and takes about 1.2 s instead of 0.4 s to load.
+- Correct words ending in -х and -ю typed in the other layout again: "каких других", "свою
+  историю", "новую". The Russian dictionary supplement held 2,872 word stumps ("каки", "сво",
+  "истори"), so the word without its last letter looked like a word too and the model split it
+  off as punctuation. Five short names or words stop being converted from the other layout: бан,
+  эми, бен, лео, тим.
+- Keep a mistyped word whole when its last letter sits on a punctuation key. The word boundary
+  model now sees when a reading is a dictionary word with one letter missing, so "аэроклуб" with a
+  typo ending in "б" is no longer cut into a word and a comma.
+- Train the early layout switch, the word boundary model and the context model on the
+  dictionaries exactly as the engine loads them; they used to see a different set of known words
+  than the program they served.
+- Russian abbreviations outside the dictionary ("ок", "сп", "тв", "ии") stay after code or a log
+  instead of turning into Latin letters; a short word typed in the other layout after code is
+  converted.
+- Every model is now trained anew from code that names all its values; the layout intent model is
+  generation v28 (`intent-v1-8bccdf50b028`, artifact SHA-256
+  `d0b90ad59a48eb7c2aa8c89680a2bc0dd2290c1e9c717068af49087c165878bb`), whose inputs also record
+  the values of the named constants.
+
 ## 0.32.0 — 2026-09-24
 
 - Read the field as a word begins after a click, a caret move or another window, and

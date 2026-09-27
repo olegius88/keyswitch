@@ -10,7 +10,9 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from keyswitch.boundary_policy import FEATURE_VERSION, BoundaryPolicy, features
+from keyswitch.boundary_policy import FEATURE_VERSION, SUPPORTED_FEATURE_VERSIONS, BoundaryPolicy, features, misspelled
+from keyswitch.constants.boundary import BOUNDARY_V2_FEATURE_VERSION
+from keyswitch.language_model import LanguageModel
 from test_input_integrity import InputIntegrityTests
 
 
@@ -19,16 +21,14 @@ CANDIDATE = ROOT / "model/boundary_v2/candidate.json"
 if str(ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(ROOT / "tools"))
 
+import boundary_v2_corpus as corpus_tool
 import verify_boundary_v2 as verifier
 from boundary_v2_corpus import RECEIPT
 from evaluate_boundary_engine import REPORT as ENGINE_REPORT, SCENARIOS
 from verify_context_v2 import read_object
+from keyswitch.constants.boundary import BOUNDARY_POLICY_MAX_BYTES, BOUNDARY_THRESHOLD_EXCLUSIVE_MIN
 from fixture_values.clock import PAUSE_TRIGGER_OFFSET_SECONDS
-from fixture_values.counts import OVERSIZED_BOUNDARY_POLICY_BYTES
-from fixture_values.scores import (
-    BOUNDARY_POLICY_THRESHOLD_LOWER_BOUND,
-    BOUNDARY_POLICY_VALID_THRESHOLD,
-)
+from fixture_values.scores import BOUNDARY_POLICY_VALID_THRESHOLD
 
 
 class BoundaryPolicyArtifactTests(unittest.TestCase):
@@ -36,13 +36,16 @@ class BoundaryPolicyArtifactTests(unittest.TestCase):
         self.assertTrue(verifier.verify()["accepted"])
         corpus, engine = read_object(RECEIPT), read_object(ENGINE_REPORT)
         altered_corpora = ({**corpus, "family_overlap": 1}, {**corpus, "prior_phrase_test_family_overlap": 1},
-                           {**corpus, "sha256": {}})
-        for changed in altered_corpora:
-            with patch.object(verifier, "read_object", return_value=changed), self.assertRaises(ValueError):
-                verifier.verify()
+                           {**corpus, "sha256": {}}, {**corpus, "provenance": {}})
+        with tempfile.TemporaryDirectory() as temporary:
+            altered = Path(temporary) / "corpus.json"
+            for changed in altered_corpora:
+                altered.write_text(json.dumps(changed))
+                with patch.object(corpus_tool, "RECEIPT", altered), self.assertRaisesRegex(ValueError, "boundary"):
+                    verifier.verify()
         invalid_engines: tuple[dict[str, object], ...] = ({"provenance": {}}, {"results": {}}, {"results": []})
         for change in invalid_engines:
-            with patch.object(verifier, "read_object", side_effect=[corpus, {**engine, **change}]), self.assertRaises(ValueError):
+            with patch.object(verifier, "read_object", return_value={**engine, **change}), self.assertRaises(ValueError):
                 verifier.verify()
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "artifact.json"
@@ -60,7 +63,7 @@ class BoundaryPolicyArtifactTests(unittest.TestCase):
         invalid_results: tuple[dict[str, object], ...] = ({"exact": 0}, {"changed_correct": 1}, {"rows": []}, {"rows": [{}] * len(SCENARIOS)})
         for changes in invalid_results:
             changed_engine = {**engine, "results": {**results, "active_v2": {**active, **changes}}}
-            with patch.object(verifier, "read_object", side_effect=[corpus, changed_engine]), self.assertRaises(ValueError):
+            with patch.object(verifier, "read_object", return_value=changed_engine), self.assertRaises(ValueError):
                 verifier.verify()
 
     def test_version_size_and_numeric_validation(self) -> None:
@@ -68,14 +71,14 @@ class BoundaryPolicyArtifactTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "model.json"
             invalid_cases: tuple[object, ...] = ([], {}, {**good, "feature_version": 1}, {**good, "version": "boundary-v1-test"},
-                            {**good, "version": None}, {**good, "threshold": True}, {**good, "threshold": BOUNDARY_POLICY_THRESHOLD_LOWER_BOUND},
+                            {**good, "version": None}, {**good, "threshold": True}, {**good, "threshold": BOUNDARY_THRESHOLD_EXCLUSIVE_MIN},
                             {**good, "threshold": None}, {**good, "weights": {}},
                             {**good, "weights": {"a": float("inf")}}, {**good, "weights": {"a": True}})
             for invalid in invalid_cases:
                 path.write_text(json.dumps(invalid))
                 with self.assertRaises(ValueError):
                     BoundaryPolicy.load(path)
-            path.write_bytes(b" " * OVERSIZED_BOUNDARY_POLICY_BYTES)
+            path.write_bytes(b" " * (BOUNDARY_POLICY_MAX_BYTES + 1))
             with self.assertRaisesRegex(ValueError, "oversized"):
                 BoundaryPolicy.load(path)
             path.write_text(json.dumps(good))
@@ -87,6 +90,43 @@ class BoundaryPolicyArtifactTests(unittest.TestCase):
         with patch.object(BoundaryPolicy, "load", return_value=BoundaryPolicy({}, BOUNDARY_POLICY_VALID_THRESHOLD, "test")) as load:
             self.assertIs(BoundaryPolicy.default(), load.return_value)
         BoundaryPolicy.default.cache_clear()
+
+
+class BoundaryFeatureVersionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.russian = LanguageModel("ru_RU", {"наличию": 1, "налили": 1}, "test", enable_spellcheck=False)
+        self.english = LanguageModel("en_US", {"hello": 1}, "test", enable_spellcheck=False)
+
+    def test_a_misspelling_is_a_known_word_with_one_letter_missing_but_not_the_last(self) -> None:
+        self.assertTrue(misspelled("налиию", self.russian))  # наличию without ч
+        self.assertTrue(misspelled("налии", self.russian))  # налили without л
+        self.assertFalse(misspelled("наличи", self.russian))  # only the last letter is missing
+        self.assertFalse(misspelled("наличию", self.russian))  # a word is no misspelling
+        self.assertFalse(misspelled("нали.", self.russian))
+        self.assertTrue(misspelled("helo", self.english))
+        self.assertFalse(misspelled("hell", self.english))
+
+    def test_each_artifact_is_read_with_the_features_it_was_trained_on(self) -> None:
+        self.assertEqual(SUPPORTED_FEATURE_VERSIONS, (BOUNDARY_V2_FEATURE_VERSION, FEATURE_VERSION))
+        version2 = features("yfkbb.", "налиию", 0, self.english, self.russian, BOUNDARY_V2_FEATURE_VERSION)
+        version3 = features("yfkbb.", "налиию", 0, self.english, self.russian)
+        self.assertFalse(any("misspell" in name for name in version2))
+        self.assertEqual(set(version3) - {name for name in version3 if "misspell" in name}, set(version2))
+        self.assertEqual(version3["target_word:misspelling"], 1.0)
+        self.assertEqual(version3["word:misspelling_either:misspelled_rivals"], 1.0)  # налии is one too
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "model.json"
+            for version in SUPPORTED_FEATURE_VERSIONS:
+                path.write_text(json.dumps({"feature_version": version, "version": "boundary-v2-test",
+                                            "threshold": BOUNDARY_POLICY_VALID_THRESHOLD, "weights": {"bias": 0.0}}))
+                policy = BoundaryPolicy.load(path)
+                self.assertEqual(policy.feature_version, version)
+                self.assertEqual(policy.extract("yfkbb.", "налиию", 0, self.english, self.russian),
+                                 features("yfkbb.", "налиию", 0, self.english, self.russian, version))
+            path.write_text(json.dumps({"feature_version": FEATURE_VERSION + 1, "version": "boundary-v2-test",
+                                        "threshold": BOUNDARY_POLICY_VALID_THRESHOLD, "weights": {"bias": 0.0}}))
+            with self.assertRaisesRegex(ValueError, "unsupported"):
+                BoundaryPolicy.load(path)
 
 
 class BoundaryPolicyEngineTests(InputIntegrityTests):
@@ -205,5 +245,6 @@ class BoundaryPolicyEngineTests(InputIntegrityTests):
 
 def load_tests(loader: unittest.TestLoader, tests: unittest.TestSuite, pattern: str | None) -> unittest.TestSuite:
     suite = loader.loadTestsFromTestCase(BoundaryPolicyArtifactTests)
+    suite.addTests(loader.loadTestsFromTestCase(BoundaryFeatureVersionTests))
     suite.addTests(BoundaryPolicyEngineTests(name) for name in BoundaryPolicyEngineTests.__dict__ if name.startswith("test_"))
     return suite

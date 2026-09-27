@@ -769,12 +769,17 @@ def main() -> None:
     sys.path.insert(0, str(project / "tools"))
     sys.path.insert(0, str(project / "src"))
 
+    from keyswitch.constants.file_formats import (
+        INTENT_MANIFEST_SCHEMA_VERSION,
+        KSLM_MAX_CONTAINER_BYTES,
+        KSLM_MAX_FINGERPRINTS,
+        KSLM_MAX_MANIFEST_BYTES,
+        KSLM_MAX_PAYLOAD_BYTES,
+        KSLM_SCHEMA_VERSION,
+    )
+    from keyswitch.constants.model_protocol import INTENT_TOOLCHAIN_VALUE_SOURCES
+    from keyswitch.value_provenance import ValueProvenanceError, pin_values
     from keyswitch.intent_model import (
-        MAX_CONTAINER_BYTES,
-        MAX_MANIFEST_BYTES,
-        MAX_PAYLOAD_BYTES,
-        MAX_SUPPORTED_FINGERPRINTS,
-        SCHEMA_VERSION,
         LinearNgramModel,
         TRIGGERS,
         stable_sigmoid,
@@ -787,11 +792,11 @@ def main() -> None:
 
     config, config_digest = load_training_config_snapshot(config_path)
     runtime_limits = (
-        SCHEMA_VERSION,
-        MAX_CONTAINER_BYTES,
-        MAX_MANIFEST_BYTES,
-        MAX_PAYLOAD_BYTES,
-        MAX_SUPPORTED_FINGERPRINTS,
+        KSLM_SCHEMA_VERSION,
+        KSLM_MAX_CONTAINER_BYTES,
+        KSLM_MAX_MANIFEST_BYTES,
+        KSLM_MAX_PAYLOAD_BYTES,
+        KSLM_MAX_FINGERPRINTS,
     )
     packaging_limits = (
         KSLM_SCHEMA,
@@ -806,8 +811,12 @@ def main() -> None:
     if type(config.schema_version) is not int or config.schema_version != 13:
         fail("Windows packaging requires training config schema 13")
     manifest = strict_json(manifest_path, 1024 * 1024, "intent manifest")
-    if type(manifest.get("schema_version")) is not int or manifest["schema_version"] != 1:
-        fail("intent manifest schema must be exact integer 1")
+    if type(manifest.get("schema_version")) is not int or manifest["schema_version"] != INTENT_MANIFEST_SCHEMA_VERSION:
+        fail(
+            "intent manifest schema must be exact integer "
+            f"{INTENT_MANIFEST_SCHEMA_VERSION}; schema 1 predates "
+            "toolchain.constants_sha256"
+        )
 
     if manifest.get("config_sha256") != config_digest:
         fail("intent manifest config_sha256 does not match config.json")
@@ -884,7 +893,8 @@ def main() -> None:
         "environment_probe_sha256": "tools/environment_probe.py",
         "preseal_generator_sha256": "tools/preseal_intent_holdout.py",
         "development_freezer_sha256": "tools/freeze_intent_development_corpus.py",
-        "preseal_receipt_sha256": "model/intent_v1/holdout-v23-preseal.json",
+        "spellcheck_sha256": "src/keyswitch/spellcheck.py",
+        "preseal_receipt_sha256": "model/intent_v1/holdout-v28-preseal.json",
     }
     for field, relative_path in toolchain_paths.items():
         expected_digest = exact_sha256(
@@ -899,6 +909,22 @@ def main() -> None:
         ).hexdigest()
         if actual_digest != expected_digest:
             fail(f"model toolchain file differs from manifest: {relative_path}")
+    # No file digest above moves when a value those files import from
+    # keyswitch.constants changes; the digest of the imported values does.
+    expected_constants = exact_sha256(
+        toolchain.get("constants_sha256"), "manifest.toolchain.constants_sha256"
+    )
+    try:
+        pinned_constants = pin_values(
+            [project_root / relative for relative in INTENT_TOOLCHAIN_VALUE_SOURCES],
+            source_root=project_root / "src",
+        )
+    except ValueProvenanceError as error:
+        raise ValueError(f"model toolchain constants cannot be pinned: {error}") from error
+    if pinned_constants.sha256 != expected_constants:
+        fail(
+            "model toolchain constants differ from manifest.toolchain.constants_sha256"
+        )
 
     triggers = tuple(TRIGGERS)
     if len(triggers) * 2 != SELECTION_FALSE_POSITIVE_COMPARISONS:
@@ -1147,11 +1173,11 @@ if ($RussianSourcePolicy.path -cne "model/intent_v1/sources/ru_RU.lm") {
 if ($LicenseSourcePolicy.path -cne "model/intent_v1/sources/COPYRIGHT.onboard-data") {
     throw "Frozen license-evidence path differs from the packaging contract"
 }
-if ($HardNegativeSourcePolicy.path -cne "model/intent_v1/unknown-typo-development-v23.json") {
+if ($HardNegativeSourcePolicy.path -cne "model/intent_v1/unknown-typo-development-v28.json") {
     throw "Frozen hard-negative source path differs from the packaging contract"
 }
 
-$HardNegativeSource = Join-Path $ProjectDirectory "model\intent_v1\unknown-typo-development-v23.json"
+$HardNegativeSource = Join-Path $ProjectDirectory "model\intent_v1\unknown-typo-development-v28.json"
 $null = Get-VerifiedFrozenFileHash `
     -Path $HardNegativeSource `
     -ExpectedBytes ([long]$HardNegativeSourcePolicy.bytes) `

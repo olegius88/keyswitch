@@ -89,7 +89,11 @@ jobs:
       - name: Replay key-space orthotactic training and promotion guard
         run: |
           PYTHONPATH=src python3 tools/ortho_corpus.py
+          KEYSWITCH_MODEL_PATH=model/intent_v1/sources KEYSWITCH_HUNSPELL_PATH=model/intent_v1/sources/hunspell PYTHONPATH=src python3 tools/ortho_known.py
+          PYTHONPATH=src python3 tools/ortho_web_lexicon.py
+          PYTHONPATH=src python3 tools/ortho_prose_lexicon.py
           PYTHONPATH=src python3 tools/train_ortho_model.py verify
+          PYTHONPATH=src:tools python3 tools/ortho_independent.py
           PYTHONPATH=src:tools python3 tools/verify_ortho_model.py
           PYTHONPATH=src python3 tools/ortho_v2_corpus.py
           KEYSWITCH_MODEL_PATH=model/intent_v1/sources PYTHONPATH=src python3 tools/ortho_v2_known.py
@@ -99,13 +103,11 @@ jobs:
 
       - name: Replay boundary segmentation training and prevent rejected rollout
         run: |
-          PYTHONPATH=src python3 tools/train_boundary_model.py --verify
-          PYTHONPATH=src python3 tools/verify_boundary_model.py
+          PYTHONPATH=src python3 tools/verify_boundary_model.py --verify-frozen
           PYTHONPATH=src python3 tools/evaluate_boundary_engine.py --verify
 
       - name: Verify frozen boundary-v2 numeric evidence and current engine gate
         run: |
-          PYTHONPATH=src python3 tools/verify_lexical_compatibility.py boundary_v2
           PYTHONPATH=src python3 tools/verify_boundary_v2.py --verify-frozen
           PYTHONPATH=src python3 tools/verify_boundary_v2.py
 
@@ -114,7 +116,6 @@ jobs:
 
       - name: Verify frozen prefix numeric evidence and current engine replay
         run: |
-          PYTHONPATH=src python3 tools/verify_lexical_compatibility.py prefix_v1
           PYTHONPATH=src python3 tools/verify_prefix_model.py --verify-frozen
           PYTHONPATH=src python3 tools/evaluate_prefix_engine.py --verify
           PYTHONPATH=src python3 tools/verify_prefix_model.py

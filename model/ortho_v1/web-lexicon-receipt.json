@@ -1,0 +1,17 @@
+{
+  "forms": 707117,
+  "forms_sha256": "124039af7ff9d2aedfcd87aa9246f13ddc7a6c5cac83dcb7673f66afd1ee578e",
+  "schema_version": 1,
+  "selection": "words of the vocabulary written in lowercase Cyrillic [а-яё]+ in the web text, at least 4 letters, and lowercase compounds [а-яё]+(-[а-яё]+)+; the rank is the word's line in the source",
+  "source": {
+    "integrity": "downloaded over TLS; the source publishes no checksum or signature for the file, so its SHA-256 was recorded at download and every derivation refuses any other file",
+    "license": "CC BY-SA 3.0, as the source page states for the word vectors",
+    "license_note": "the counts derived from these forms ship inside the orthotactic artifact; that an adaptation of CC BY-SA 3.0 material may be shared under a later version with the same license elements, and that CC BY-SA 4.0 is one-way compatible with the GNU GPL version 3 (creativecommons.org, compatible licenses), is a reading of the license texts that no lawyer has reviewed",
+    "page": "https://fasttext.cc/docs/en/crawl-vectors.html",
+    "sha256": "02bd7a202103a6b90c8f97617144ed230e3b4d51a08c28d2e029e1f0027917fa",
+    "trained_on": "Common Crawl and Wikipedia (Grave et al., Learning Word Vectors for 157 Languages)",
+    "url": "https://dl.fbaipublicfiles.com/fasttext/vectors-crawl/cc.ru.300.vec.gz"
+  },
+  "use": "counted only into the channel of Russian that scores a token typed in Russian",
+  "weight": "max(1, min(32, round(50000000 / (rank + 1)).bit_length()))"
+}

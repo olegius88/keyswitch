@@ -45,6 +45,9 @@ ENGINE_WORKER_JOIN_TIMEOUT_SECONDS: Final = 2.0
 # less than this even when a deadline is closer.
 ENGINE_LOOP_MAX_WAKE_SECONDS: Final = 0.5
 ENGINE_LOOP_MIN_WAKE_SECONDS: Final = 0.01
+# Typed field context older than this is dropped, and the engine waits as long for the neighbour of a
+# waiting word (input_context exports it as CONTEXT_TTL).
+FIELD_CONTEXT_TTL_SECONDS: Final = 45.0
 # Undo stays available for this long after a correction.
 UNDO_AVAILABLE_WINDOW_SECONDS: Final = 10.0
 # The macOS app re-checks the accessibility permission this often while it waits for it.

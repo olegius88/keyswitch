@@ -1,7 +1,7 @@
 {
-  "artifact_model_version": "intent-v1-b2a2ec8caa8d",
-  "artifact_sha256": "47f86818c4c1243daeabfafd50d03dd9884aa3973bb546191afe02c4092a3f4d",
-  "build_provenance_sha256": "b2a2ec8caa8de95a796892d825cc80ac96e65fdf9ebf5269d922395eac55ce93",
+  "artifact_model_version": "intent-v1-8bccdf50b028",
+  "artifact_sha256": "d0b90ad59a48eb7c2aa8c89680a2bc0dd2290c1e9c717068af49087c165878bb",
+  "build_provenance_sha256": "8bccdf50b0281fe8078b8262247cec8dadb423dc8ca9ce43da6bdc482a41ace9",
   "byteorder": "little",
   "compiler": "/usr/bin/gcc: gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
   "environment_probe": {

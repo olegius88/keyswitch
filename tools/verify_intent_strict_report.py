@@ -5,12 +5,16 @@ The strict evaluator takes about half an hour, so packaging and the release
 pipeline may reuse a report that was produced earlier in the same release
 contour.  Reuse must stay fail-closed: the report is accepted only when every
 gate passed and every hash it recorded (artifact, config, frozen sources and
-the complete model toolchain) still equals the file that is present now.  A
-report that predates any change to those files is rejected, and the caller has
-to run the evaluator again.
+the complete model toolchain) still equals the file that is present now, and
+the digest of the constants the toolchain files import
+(``keyswitch.value_provenance``) still equals the one computed from the tree.
+A report that predates any change to those files or values is rejected, and
+the caller has to run the evaluator again.
 
-The check depends only on the standard library so it can run from
-``packaging/build-deb.sh``, from ``tools/release_pipeline.py`` and from CI.
+The check depends only on the standard library and on ``keyswitch.constants``
+and ``keyswitch.value_provenance`` (standard library only themselves) so it can
+run from ``packaging/build-deb.sh``, from ``tools/release_pipeline.py`` and
+from CI.
 """
 
 from __future__ import annotations
@@ -29,6 +33,14 @@ from keyswitch.constants.file_formats import (
     KSLM_MAX_CONTAINER_BYTES,
     METADATA_JSON_LIMIT_BYTES,
     REPORT_JSON_INDENT,
+)
+from keyswitch.constants.model_protocol import INTENT_TOOLCHAIN_VALUE_SOURCES
+from keyswitch.value_provenance import (
+    PinnedValues,
+    ValueProvenanceError,
+    changed_values,
+    pin_values,
+    values_sha256,
 )
 
 
@@ -83,7 +95,10 @@ TOOLCHAIN_PATHS: Final[Mapping[str, str]] = {
     "toolchain_environment_probe_sha256": "tools/environment_probe.py",
     "toolchain_preseal_generator_sha256": "tools/preseal_intent_holdout.py",
     "toolchain_development_freezer_sha256": "tools/freeze_intent_development_corpus.py",
+    "toolchain_spellcheck_sha256": "src/keyswitch/spellcheck.py",
 }
+# The digest of the values the toolchain files import from keyswitch.constants.
+CONSTANTS_CHECK: Final[str] = "toolchain_constants_sha256"
 SOURCE_PATHS: Final[Mapping[str, str]] = {
     "english_source_sha256": "model/intent_v1/sources/en_US.lm",
     "russian_source_sha256": "model/intent_v1/sources/ru_RU.lm",
@@ -99,6 +114,7 @@ REQUIRED_PROVENANCE: Final[frozenset[str]] = frozenset(
         "build_provenance_sha256",
         "model_version",
         "toolchain_preseal_receipt_sha256",
+        CONSTANTS_CHECK,
         *TOOLCHAIN_PATHS,
         *SOURCE_PATHS,
     }
@@ -187,6 +203,35 @@ def receipt_path(manifest: Mapping[str, object], project_root: Path) -> Path:
     return project_root / "model" / "intent_v1" / f"holdout-v{match.group(1)}-preseal.json"
 
 
+def pinned_toolchain_values(project_root: Path) -> PinnedValues:
+    """Resolve the constants the intent toolchain files import, in this tree."""
+
+    try:
+        return pin_values(
+            (project_root / relative for relative in INTENT_TOOLCHAIN_VALUE_SOURCES),
+            source_root=project_root / "src",
+        )
+    except ValueProvenanceError as error:
+        raise ReportRejected(f"the toolchain constants cannot be pinned: {error}") from error
+
+
+def changed_constants(
+    report: Mapping[str, object], expected_sha256: str, current: PinnedValues
+) -> str:
+    """Name the constants that moved, when the report kept the values behind a digest.
+
+    The evaluator writes the resolved values next to their digest. They are used
+    only when they hash to the digest being compared, so a stale or edited list
+    cannot name the wrong constants.
+    """
+
+    recorded = report.get("toolchain_constants")
+    values = recorded.get("values") if isinstance(recorded, dict) else None
+    if not isinstance(values, dict) or values_sha256(values) != expected_sha256:
+        return "the report does not list the values behind that digest"
+    return "changed: " + ", ".join(changed_values(values, current.values))
+
+
 def verify_report(
     *,
     report_path: Path,
@@ -273,6 +318,26 @@ def verify_report(
     if recorded_receipt != actual_receipt or toolchain.get("preseal_receipt_sha256") != actual_receipt:
         raise ReportRejected("preseal receipt changed since the report was produced")
     verified[str(receipt.relative_to(project_root))] = actual_receipt
+    recorded_constants = current_digest(entries[CONSTANTS_CHECK].get("detail"), CONSTANTS_CHECK)
+    pinned = pinned_toolchain_values(project_root)
+    if recorded_constants != pinned.sha256:
+        raise ReportRejected(
+            "constants used by the model toolchain changed since the report was produced ("
+            + changed_constants(report, recorded_constants, pinned)
+            + ")"
+        )
+    manifest_constants = toolchain.get("constants_sha256")
+    if manifest_constants != pinned.sha256:
+        detail = (
+            changed_constants(report, manifest_constants, pinned)
+            if isinstance(manifest_constants, str)
+            else "the manifest predates value pinning"
+        )
+        raise ReportRejected(
+            "manifest.toolchain.constants_sha256 differs from the constants the toolchain uses ("
+            + detail
+            + ")"
+        )
     for name, relative in SOURCE_PATHS.items():
         recorded_source = as_sha256(entries[name].get("detail"), name)
         actual_source = sha256_bytes(
@@ -289,6 +354,8 @@ def verify_report(
         "artifact_sha256": artifact_sha256,
         "gate_count": len(gates),
         "verified_files": len(verified),
+        "constants_sha256": pinned.sha256,
+        "verified_constants": len(pinned.values),
     }
 
 

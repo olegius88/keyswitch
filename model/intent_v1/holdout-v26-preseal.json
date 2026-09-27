@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "policy": "keyswitch-intent-v26-preseal-holdout",
+  "model_loaded": false,
+  "metrics_evaluated": false,
+  "development": {
+    "role": "hard-negative-presealed-roles",
+    "rank_namespace": "keyswitch:intent-v1:unknown-typo-rank",
+    "choice_namespace": "keyswitch:intent-v1:unknown-typo-choice",
+    "corpus_sha256": "532bd1d81d1ed01a62b40d5adc67953adf6248b69b912c4305ee3589b6f5be86",
+    "signature_count": 10000,
+    "words_by_group": {
+      "0": 5000,
+      "1": 5000
+    },
+    "frozen_source": {
+      "path": "model/intent_v1/unknown-typo-development-v26.json",
+      "sha256": "9a1bdaedf9d81bda09b3342f884ead0af85d8320043d98956c7fffe64509a8c7",
+      "bytes": 2129732
+    },
+    "role_namespace": "keyswitch:intent-v26:unknown-typo-development-role",
+    "role_words_by_group": {
+      "train": {
+        "0": 3500,
+        "1": 3500
+      },
+      "development": {
+        "0": 500,
+        "1": 500
+      },
+      "calibration": {
+        "0": 500,
+        "1": 500
+      },
+      "threshold": {
+        "0": 500,
+        "1": 500
+      }
+    },
+    "examples_by_role": {
+      "train": 84000,
+      "development": 12000,
+      "calibration": 12000,
+      "threshold": 12000
+    },
+    "training_example_weight": 3.0
+  },
+  "holdout": {
+    "role": "independent-release-holdout",
+    "rank_namespace": "keyswitch:intent-v26:unknown-typo-holdout-rank",
+    "choice_namespace": "keyswitch:intent-v26:unknown-typo-holdout-choice",
+    "corpus_sha256": "38fd57ee890b86babb4661e8785e9d5372887a6434bcd784922819a859e1b5f0",
+    "signature_count": 10000,
+    "words_by_group": {
+      "0": 5000,
+      "1": 5000
+    }
+  },
+  "sealed_dataset_exclusions": {
+    "signature_count": 288872,
+    "sha256": "81795639b8cd61e3d63e3f37385293bc4de95dbc9668580c23c430af10cccb9b"
+  },
+  "combined_holdout_exclusions": {
+    "signature_count": 298872,
+    "sha256": "cf0640c3c232043518c50fa1f1cbb52f8599f9d1dfe061051171e7ce261294d7"
+  },
+  "overlap_counts": {
+    "development_holdout": 0,
+    "sealed_holdout": 0
+  }
+}

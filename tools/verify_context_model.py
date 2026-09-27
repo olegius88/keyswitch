@@ -19,6 +19,7 @@ from keyswitch.constants.file_formats import METADATA_JSON_LIMIT_BYTES, REPORT_J
 from keyswitch.constants.models import (
     CONTEXT_ACTION_FEATURE_VERSION,
     CONTEXT_V1_CONVERSION_THRESHOLD,
+    CONTEXT_V1_FEATURE_VERSIONS,
 )
 from keyswitch.constants.training import CONTEXT_V1_MINIMUM_TEST_ROWS
 
@@ -47,12 +48,14 @@ def provenance_paths(root: Path = ROOT, artifact: Path = ARTIFACT_PATH) -> dict[
         "policy_sha256": root / "src/keyswitch/short_words.py",
         "trainer_sha256": root / "tools/train_context_model.py",
         "baseline_sha256": root / "src/keyswitch/resources/models/layout_intent_v1.ksm",
+        # The corpus reads both lexicons as the engine loads them, supplement included.
+        "supplement_sha256": root / "src/keyswitch/resources/lexicon-supplement-ru_RU.json",
         "artifact_sha256": artifact,
     }
 
 
 def verify_legacy(root: Path = ROOT, report_path: Path = REPORT, artifact: Path = ARTIFACT_PATH) -> dict[str, object]:
-    """Preserve the historical feature-2 contract independently of active weights."""
+    """Preserve the context-v1 contract (features 2 and 5) independently of active weights."""
     with report_path.open("rb") as handle:
         raw = handle.read(METADATA_JSON_LIMIT_BYTES + 1)
     if len(raw) > METADATA_JSON_LIMIT_BYTES:
@@ -65,7 +68,7 @@ def verify_legacy(root: Path = ROOT, report_path: Path = REPORT, artifact: Path 
         if report.get(name) != hashlib.sha256(path.read_bytes()).hexdigest():
             raise ValueError(f"context provenance mismatch: {name}")
     model = ContextModel.load(artifact)
-    if model.feature_version != LEGACY_FEATURE_VERSION or model.version != report.get("model_version") or model.conversion_threshold != CONTEXT_V1_CONVERSION_THRESHOLD:
+    if model.feature_version not in CONTEXT_V1_FEATURE_VERSIONS or model.version != report.get("model_version") or model.conversion_threshold != CONTEXT_V1_CONVERSION_THRESHOLD:
         raise ValueError("context model identity or threshold differs from evaluation")
     test = report.get("test")
     counts = test.get("counts") if isinstance(test, dict) else None
@@ -89,7 +92,7 @@ def verify(
     if fingerprint == REJECTED_ARTIFACT:
         raise ValueError("rejected context-v2 research artifact cannot be activated")
     model = ContextModel.load(artifact)
-    if model.feature_version == LEGACY_FEATURE_VERSION:
+    if model.feature_version in CONTEXT_V1_FEATURE_VERSIONS:
         result = verify_legacy(root, report_path, artifact)
         # Local import avoids the historical verifier's REPORT import cycle.
         from verify_context_v2 import verify as verify_research
@@ -107,7 +110,7 @@ def verify(
 
 
 def replay_commands(feature_version: int) -> tuple[tuple[str, ...], ...]:
-    if feature_version == LEGACY_FEATURE_VERSION:
+    if feature_version in CONTEXT_V1_FEATURE_VERSIONS:
         # Rejected context-v2 has its separate historical numeric CI gate.
         return (("tools/train_context_model.py", "--verify"),)
     if feature_version == CONTEXT_ACTION_FEATURE_VERSION:

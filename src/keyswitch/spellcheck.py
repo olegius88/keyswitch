@@ -14,6 +14,7 @@ import os
 import threading
 from pathlib import Path
 
+from .constants.text import HUNSPELL_MAX_CHECK_CHARACTERS
 from .history import data_dir
 
 
@@ -65,7 +66,7 @@ class HunspellDictionary:
 
     def check(self, word: str) -> bool:
         normalized = word.strip()
-        if not self._handle or not normalized or len(normalized) > 128:
+        if not self._handle or not normalized or len(normalized) > HUNSPELL_MAX_CHECK_CHARACTERS:
             return False
         try:
             encoded = normalized.encode(self._encoding)

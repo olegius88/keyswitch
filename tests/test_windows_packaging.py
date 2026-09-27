@@ -12,14 +12,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from keyswitch.intent_model import SCHEMA_VERSION
 from fixture_values.models import UNSUPPORTED_KSLM_SCHEMA_VERSION
 from fixture_values.platform import PYTHON_SERIES_VERSION_COMPONENTS
 from keyswitch.constants.file_formats import (
+    INTENT_MANIFEST_SCHEMA_VERSION,
     KSLM_MAX_CONTAINER_BYTES,
     KSLM_MAX_FINGERPRINTS,
     KSLM_MAX_MANIFEST_BYTES,
     KSLM_MAX_PAYLOAD_BYTES,
+    KSLM_SCHEMA_VERSION,
+    SHA256_HEX_CHARACTERS,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -105,7 +107,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
 
     def test_native_help_describes_the_v21_model_first_contract(self) -> None:
         for contract in (
-            "keyswitch:intent-v23:physical-signature",
+            "keyswitch:intent-v28:physical-signature",
             "Training config schema 13",
             "sole statistical",
             "coverage and language scores are diagnostic only",
@@ -148,7 +150,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(accepted.returncode, 0, accepted.stderr)
-        self.assertEqual(accepted.stdout.strip(), "intent-v1-b2a2ec8caa8d")
+        self.assertEqual(accepted.stdout.strip(), "intent-v1-8bccdf50b028")
 
         required_contracts = (
             "KSLM_MAXIMUM_CONTAINER_BYTES = 14 * 1024 * 1024",
@@ -161,6 +163,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
             "runtime_limits != packaging_limits",
             "artifact_bytes = verify_kslm_packaging_bounds(artifact_path)",
             'strict_json(manifest_path, 1024 * 1024, "intent manifest")',
+            'manifest["schema_version"] != INTENT_MANIFEST_SCHEMA_VERSION',
             "config.schema_version != 13",
             'manifest.get("config_sha256") != config_digest',
             'manifest.get("gate_policy") != gate_policy_payload(config)',
@@ -185,7 +188,12 @@ class WindowsPackagingContractTests(unittest.TestCase):
             'registry != expected_registry',
             '"trainer_sha256": "tools/train_intent_model.py"',
             '"evaluator_sha256": "tools/evaluate_intent_model.py"',
+            '"spellcheck_sha256": "src/keyswitch/spellcheck.py"',
             'model toolchain file differs from manifest',
+            "from keyswitch.value_provenance import ValueProvenanceError, pin_values",
+            "for relative in INTENT_TOOLCHAIN_VALUE_SOURCES",
+            'toolchain.get("constants_sha256")',
+            "model toolchain constants differ from manifest.toolchain.constants_sha256",
         )
         for contract in required_contracts:
             self.assertIn(contract, validator)
@@ -257,6 +265,74 @@ class WindowsPackagingContractTests(unittest.TestCase):
                     self.assertIn("manifest.quality_gate_breakdown", result.stderr)
                     self.assertIn(missing, result.stderr)
 
+    def test_embedded_validator_pins_the_constants_the_toolchain_imports(self) -> None:
+        """A manifest bound to every toolchain file still fails on a stale value digest.
+
+        The shipped manifest is re-bound to the working tree first, so the check is
+        exercised whatever candidate is installed; the digest the validator computes
+        must be the one the Linux verifiers compute.
+        """
+
+        match = re.search(
+            r"\$ModelContractValidator = @'\n(.*?)\n'@", self.script, re.DOTALL
+        )
+        assert match is not None
+        validator = match.group(1)
+        sys.path.insert(0, str(PROJECT_ROOT / "tools"))
+        try:
+            from verify_intent_strict_report import (
+                TOOLCHAIN_PATHS,
+                pinned_toolchain_values,
+                receipt_path,
+            )
+        finally:
+            sys.path.remove(str(PROJECT_ROOT / "tools"))
+        original = json.loads(
+            (PROJECT_ROOT / "model/intent_v1/manifest.json").read_text("utf-8")
+        )
+        toolchain = dict(original["toolchain"])
+        for name, relative in TOOLCHAIN_PATHS.items():
+            toolchain[name.removeprefix("toolchain_")] = hashlib.sha256(
+                (PROJECT_ROOT / relative).read_bytes()
+            ).hexdigest()
+        toolchain["preseal_receipt_sha256"] = hashlib.sha256(
+            receipt_path(original, PROJECT_ROOT).read_bytes()
+        ).hexdigest()
+        current = pinned_toolchain_values(PROJECT_ROOT).sha256
+        with tempfile.TemporaryDirectory() as temporary:
+            manifest_path = Path(temporary) / "manifest.json"
+
+            def run(**changes: object) -> subprocess.CompletedProcess[str]:
+                manifest = {**original, "schema_version": INTENT_MANIFEST_SCHEMA_VERSION, **changes}
+                manifest_path.write_text(json.dumps(manifest), "utf-8")
+                return subprocess.run(
+                    [
+                        sys.executable, "-c", validator, str(PROJECT_ROOT),
+                        str(PROJECT_ROOT / "model/intent_v1/config.json"),
+                        str(manifest_path),
+                        str(PROJECT_ROOT / "src/keyswitch/resources/models/layout_intent_v1.ksm"),
+                    ],
+                    capture_output=True, text=True, check=False,
+                )
+
+            stale = run(toolchain={**toolchain, "constants_sha256": "0" * SHA256_HEX_CHARACTERS})
+            self.assertNotEqual(stale.returncode, 0)
+            self.assertIn(
+                "model toolchain constants differ from manifest.toolchain.constants_sha256",
+                stale.stderr,
+            )
+            missing = run(toolchain={name: value for name, value in toolchain.items() if name != "constants_sha256"})
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn("manifest.toolchain.constants_sha256 must be a lowercase SHA-256", missing.stderr)
+            legacy = run(schema_version=1, toolchain={**toolchain, "constants_sha256": current})
+            self.assertNotEqual(legacy.returncode, 0)
+            self.assertIn("schema 1 predates toolchain.constants_sha256", legacy.stderr)
+            # With the digest the Linux verifiers compute, the value check passes;
+            # whatever fails later is about the installed candidate, not the values.
+            bound = run(toolchain={**toolchain, "constants_sha256": current})
+            self.assertNotIn("constants", bound.stderr)
+            self.assertNotIn("model toolchain file differs", bound.stderr)
+
     def test_windows_preflight_verifies_the_certified_sealed_artifact(self) -> None:
         preflight = self.script[
             self.script.index("$ProjectDirectory =") : self.script.index(
@@ -326,6 +402,10 @@ class WindowsPackagingContractTests(unittest.TestCase):
             "model/intent_v1/seal-registry-v15.json",
             "model/intent_v1/seal-registry-v18.json",
             "model/intent_v1/seal-registry-v23.json",
+            "model/intent_v1/seal-registry-v24.json",
+            "model/intent_v1/seal-registry-v26.json",
+            "model/intent_v1/seal-registry-v27.json",
+            "model/intent_v1/seal-registry-v28.json",
             "model/intent_v1/holdout-v6-preseal.json",
             "model/intent_v1/holdout-v7-preseal.json",
             "model/intent_v1/holdout-v8-preseal.json",
@@ -337,15 +417,27 @@ class WindowsPackagingContractTests(unittest.TestCase):
             "model/intent_v1/holdout-v15-preseal.json",
             "model/intent_v1/holdout-v18-preseal.json",
             "model/intent_v1/holdout-v23-preseal.json",
+            "model/intent_v1/holdout-v24-preseal.json",
+            "model/intent_v1/holdout-v25-preseal.json",
+            "model/intent_v1/holdout-v26-preseal.json",
+            "model/intent_v1/holdout-v27-preseal.json",
+            "model/intent_v1/holdout-v28-preseal.json",
             "model/intent_v1/unknown-typo-development-v11.json",
             "model/intent_v1/unknown-typo-development-v12.json",
             "model/intent_v1/unknown-typo-development-v13.json",
             "model/intent_v1/unknown-typo-development-v15.json",
             "model/intent_v1/unknown-typo-development-v18.json",
             "model/intent_v1/unknown-typo-development-v23.json",
+            "model/intent_v1/unknown-typo-development-v24.json",
+            "model/intent_v1/unknown-typo-development-v25.json",
+            "model/intent_v1/unknown-typo-development-v26.json",
+            "model/intent_v1/unknown-typo-development-v27.json",
+            "model/intent_v1/unknown-typo-development-v28.json",
             "model/intent_v1/rejection-v12.json",
             "model/intent_v1/rejection-v13.json",
             "model/intent_v1/rejection-v18.json",
+            "model/intent_v1/rejection-v25.json",
+            "model/intent_v1/rejection-v24.json",
             "model/intent_v1/rejection-v11.json",
             "model/intent_v1/rejection-v10.json",
             "model/intent_v1/rejection-v9.json",
@@ -494,7 +586,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
                 valid_path.write_bytes(
                     header.pack(
                         b"KSLM",
-                        SCHEMA_VERSION,
+                        KSLM_SCHEMA_VERSION,
                         0,
                         len(valid_manifest),
                         len(payload),
@@ -514,7 +606,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
 
                 for label, schema, flags, expected_error in (
                     ("schema", UNSUPPORTED_KSLM_SCHEMA_VERSION, 0, "schema is unsupported"),
-                    ("flags", SCHEMA_VERSION, 1, "header flags are unsupported"),
+                    ("flags", KSLM_SCHEMA_VERSION, 1, "header flags are unsupported"),
                 ):
                     header_invalid_path = root / f"{label}-{index}.ksm"
                     header_invalid_path.write_bytes(
@@ -557,7 +649,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
                 invalid_path.write_bytes(
                     header.pack(
                         b"KSLM",
-                        SCHEMA_VERSION,
+                        KSLM_SCHEMA_VERSION,
                         0,
                         len(oversized_fingerprint_manifest),
                         len(payload),
@@ -659,7 +751,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
             model.write_bytes(
                 header.pack(
                     b"KSLM",
-                    SCHEMA_VERSION,
+                    KSLM_SCHEMA_VERSION,
                     0,
                     len(manifest),
                     len(payload),

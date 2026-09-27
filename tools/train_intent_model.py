@@ -34,15 +34,113 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Final, Literal, Protocol, TypeAlias, cast
 
+from keyswitch.constants.corpus import TRANSPOSE_PAIR_CHARACTERS
+from keyswitch.constants.file_formats import (
+    HARD_NEGATIVE_DEVELOPMENT_SCHEMA_VERSION,
+    HASH_CHUNK_BYTES,
+    INTENT_EXTERNAL_EVALUATION_SCHEMA_VERSION,
+    INTENT_FROZEN_SOURCE_MAX_BYTES,
+    INTENT_MANIFEST_SCHEMA_VERSION,
+    INTENT_MODEL_JSON_INDENT,
+    INTENT_PUBLICATION_BACKUP_MAX_BYTES,
+    INTENT_SEAL_REGISTRY_MAX_BYTES,
+    INTENT_TRAINING_CONFIG_MAX_BYTES,
+    INTENT_TRAINING_CONFIG_SCHEMA_VERSION,
+    KSLM_FINGERPRINT_ENTRY_BYTES,
+    KSLM_MAX_DIMENSION,
+    KSLM_MAX_FINGERPRINTS,
+    KSLM_MAX_PAYLOAD_BYTES,
+    KSLM_QUANTIZED_WEIGHT_LIMIT,
+    KSLM_QUANTIZED_WEIGHT_LIMIT_FLOAT,
+    KSLM_WEIGHT_ENTRY_BYTES,
+    PRESEALED_CANDIDATE_RECORD_SCHEMA_VERSION,
+    PUBLISHED_MODEL_FILE_MODE,
+    SHA256_HEX_CHARACTERS,
+    UINT64_MASK,
+    VERSION_HASH_CHARACTERS,
+)
+from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
+from keyswitch.constants.model_protocol import INTENT_TOOLCHAIN_VALUE_SOURCES
+from keyswitch.constants.models import (
+    FNV1A64_OFFSET_BASIS,
+    INTENT_CONTEXT_INVARIANT_FEATURE_VERSION,
+    INTENT_FEATURE_VERSION,
+    INTENT_LENGTH_EXACT_MAX_CHARACTERS,
+    INTENT_LENGTH_LONG_MAX_CHARACTERS,
+    INTENT_LENGTH_MEDIUM_MAX_CHARACTERS,
+    INTENT_LENGTH_SHORT_MAX_CHARACTERS,
+    INTENT_MEMBERSHIP_FNV_SEED,
+    INTENT_MIN_RUNTIME_TOKEN_CHARACTERS,
+    INTENT_NGRAM_ORDERS,
+    LANGUAGE_MODEL_EMPTY_TOKEN_SCORE,
+    LANGUAGE_MODEL_INVALID_RATIO_WEIGHT,
+    LANGUAGE_MODEL_NATURALNESS_MAX,
+    LANGUAGE_MODEL_NATURALNESS_MIN,
+    LANGUAGE_MODEL_NATURALNESS_WEIGHT,
+    LANGUAGE_MODEL_NGRAM_ORDERS,
+    LANGUAGE_MODEL_SCORE_CACHE_MAXSIZE,
+)
+from keyswitch.constants.text import ASCII_CONTROL_CHARACTER_LIMIT
+from keyswitch.constants.training import (
+    BISECTION_DIVISOR,
+    CALIBRATION_L2_PENALTY_FACTOR,
+    CALIBRATION_LINE_SEARCH_SHRINK,
+    CALIBRATION_LINE_SEARCH_STEPS,
+    CALIBRATION_MIN_CURVATURE,
+    CALIBRATION_MIN_DETERMINANT,
+    CALIBRATION_STEP_TOLERANCE,
+    COMPILER_VERSION_TIMEOUT_SECONDS,
+    CONTEXT_STRESS_EXTREME_DELTA,
+    CONTEXT_STRESS_INNER_DELTA,
+    CONTEXT_STRESS_NEAR_ZERO_DELTA,
+    CONTEXT_STRESS_OUTER_DELTA,
+    DIAGNOSTIC_FREQUENCY_FIRST_BOUND,
+    DIAGNOSTIC_FREQUENCY_SECOND_BOUND,
+    DIAGNOSTIC_FREQUENCY_THIRD_BOUND,
+    EXAMPLE_FREQUENCY_LOG_DIVISOR,
+    EXAMPLE_FREQUENCY_WEIGHT_CAP,
+    FALSE_POSITIVE_GATES_PER_TRIGGER,
+    FTRL_NATIVE_CACHE_DIGEST_CHARACTERS,
+    FTRL_NATIVE_DOUBLE_BYTES,
+    FTRL_NATIVE_INDEX_BYTES,
+    FTRL_NATIVE_INDEX_LIMIT,
+    FTRL_NATIVE_INDEX_LIMIT_LOG2,
+    FTRL_NATIVE_OFFSET_BYTES,
+    FTRL_NATIVE_SELF_CHECK_ROWS,
+    HARD_NEGATIVE_CORPUS_STRING_MAX_CHARACTERS,
+    HARD_NEGATIVE_MAX_EXAMPLE_WEIGHT,
+    HARD_NEGATIVE_MIN_EXAMPLE_WEIGHT,
+    INTENT_CALIBRATION_SPLIT_BUCKETS,
+    INTENT_DEVELOPMENT_SPLIT_BUCKETS,
+    INTENT_DRAW_DIGEST_BYTES,
+    INTENT_EXTERNAL_MIN_WORDS_PER_GROUP,
+    INTENT_FROZEN_SOURCE_FILE_COUNT,
+    INTENT_MAX_TYPO_AUGMENTATIONS,
+    INTENT_MAX_VETO_POSITIVE_QUANTILE,
+    INTENT_METRIC_DECIMALS,
+    INTENT_MIN_TRAINING_DIMENSION,
+    INTENT_MIN_WORD_LENGTH_FLOOR,
+    INTENT_SPLIT_BUCKET_COUNT,
+    INTENT_TEST_SPLIT_BUCKETS,
+    INTENT_THRESHOLD_SPLIT_BUCKETS,
+    INTENT_TRAIN_SPLIT_BUCKETS,
+    INTENT_TYPO_EDGE_CHARACTERS,
+    INTENT_TYPO_MIN_SIGNATURE_CHARACTERS,
+    LEAKAGE_ERROR_EXAMPLE_COUNT,
+    LEXICAL_COLLISION_EXAMPLE_WEIGHT,
+    PROTECTED_TOKEN_EXAMPLE_WEIGHT,
+    RATE_BOUND_TOLERANCE,
+    SAFETY_COLLISION_MIN_WORD_CHARACTERS,
+    SELECTION_WILSON_Z_SCORE,
+    THRESHOLD_CANDIDATE_TYPO_METRICS_INDEX,
+    TRAIN_ONLY_SCORER_ALGORITHM_VERSION,
+    WILSON_95_Z_SCORE,
+    WILSON_CENTRE_DENOMINATOR_FACTOR,
+    WILSON_INTERVAL_CONFIDENCE,
+    WILSON_RADIUS_DENOMINATOR_FACTOR,
+)
+from keyswitch.constants.units import BITS_PER_BYTE
 from keyswitch.intent_model import (
-    DEFAULT_FNV_SEED,
-    DEFAULT_MEMBERSHIP_FNV_SEED,
-    FEATURE_VERSION,
-    MAX_DIMENSION,
-    MAX_PAYLOAD_BYTES,
-    MAX_SUPPORTED_FINGERPRINTS,
-    MINIMUM_RUNTIME_TOKEN_LENGTH,
-    NGRAM_ORDERS,
     LAYOUT_DIRECTIONS,
     TRIGGERS as MODEL_TRIGGERS,
     CorrectionTrigger,
@@ -60,6 +158,7 @@ from keyswitch.detector import (
 )
 from keyswitch.language_model import LanguageModel, WordScore
 from keyswitch.layouts import LayoutPair
+from keyswitch.value_provenance import pin_values
 
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -77,11 +176,11 @@ ContextGroupSelector: TypeAlias = Literal["source", "target"]
 SparseFeatures: TypeAlias = tuple[tuple[int, float], ...]
 
 SPLIT_BUCKETS: Final[tuple[tuple[SplitName, int], ...]] = (
-    ("train", 26),
-    ("development", 4),
-    ("calibration", 4),
-    ("threshold", 3),
-    ("test", 3),
+    ("train", INTENT_TRAIN_SPLIT_BUCKETS),
+    ("development", INTENT_DEVELOPMENT_SPLIT_BUCKETS),
+    ("calibration", INTENT_CALIBRATION_SPLIT_BUCKETS),
+    ("threshold", INTENT_THRESHOLD_SPLIT_BUCKETS),
+    ("test", INTENT_TEST_SPLIT_BUCKETS),
 )
 SPLIT_NAMES: Final[tuple[SplitName, ...]] = tuple(
     name for name, _width in SPLIT_BUCKETS
@@ -93,13 +192,13 @@ PRESEALED_SPLITS: Final[tuple[SplitName, ...]] = (
     "threshold",
 )
 SEALED_TEST_SPLITS: Final[tuple[SplitName, ...]] = ("test",)
-SPLIT_NAMESPACE: Final[str] = "keyswitch:intent-v23:physical-signature"
+SPLIT_NAMESPACE: Final[str] = "keyswitch:intent-v28:physical-signature"
 SPLIT_HASH_NAMESPACE: Final[bytes] = SPLIT_NAMESPACE.encode("ascii") + b"\0"
 SEALED_REGISTRY_RELATIVE_PATH: Final[str] = (
-    "model/intent_v1/seal-registry-v23.json"
+    "model/intent_v1/seal-registry-v28.json"
 )
 SEALED_OUTCOME_RELATIVE_PATH: Final[str] = (
-    "model/intent_v1/seal-outcome-v23.json"
+    "model/intent_v1/seal-outcome-v28.json"
 )
 SEALED_OUTCOME_SECTIONS: Final[tuple[str, ...]] = (
     "sealed_test",
@@ -115,18 +214,17 @@ UNKNOWN_TYPO_DEVELOPMENT_CHOICE_NAMESPACE: Final[str] = (
     "keyswitch:intent-v1:unknown-typo-choice"
 )
 UNKNOWN_TYPO_HOLDOUT_RANK_NAMESPACE: Final[str] = (
-    "keyswitch:intent-v23:unknown-typo-holdout-rank"
+    "keyswitch:intent-v28:unknown-typo-holdout-rank"
 )
 UNKNOWN_TYPO_HOLDOUT_CHOICE_NAMESPACE: Final[str] = (
-    "keyswitch:intent-v23:unknown-typo-holdout-choice"
+    "keyswitch:intent-v28:unknown-typo-holdout-choice"
 )
 HARD_NEGATIVE_ROLE_NAMESPACE: Final[str] = (
-    "keyswitch:intent-v23:unknown-typo-development-role"
+    "keyswitch:intent-v28:unknown-typo-development-role"
 )
 HARD_NEGATIVE_SOURCE_RELATIVE_PATH: Final[str] = (
-    "model/intent_v1/unknown-typo-development-v23.json"
+    "model/intent_v1/unknown-typo-development-v28.json"
 )
-SAFETY_COLLISION_MINIMUM_WORD_LENGTH: Final[int] = 3
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 INTENT_RUNTIME_PATH: Final[Path] = (
     PROJECT_ROOT / "src/keyswitch/intent_model.py"
@@ -136,6 +234,9 @@ LANGUAGE_MODEL_RUNTIME_PATH: Final[Path] = (
     PROJECT_ROOT / "src/keyswitch/language_model.py"
 )
 DETECTOR_RUNTIME_PATH: Final[Path] = PROJECT_ROOT / "src/keyswitch/detector.py"
+SPELLCHECK_RUNTIME_PATH: Final[Path] = (
+    PROJECT_ROOT / "src/keyswitch/spellcheck.py"
+)
 PROTECTED_TOKENS_RUNTIME_PATH: Final[Path] = (
     PROJECT_ROOT / "src/keyswitch/resources/protected_tokens.txt"
 )
@@ -150,26 +251,23 @@ DEVELOPMENT_FREEZER_PATH: Final[Path] = (
     PROJECT_ROOT / "tools/freeze_intent_development_corpus.py"
 )
 PRESEAL_RECEIPT_PATH: Final[Path] = (
-    PROJECT_ROOT / "model/intent_v1/holdout-v23-preseal.json"
+    PROJECT_ROOT / "model/intent_v1/holdout-v28-preseal.json"
 )
-MAX_TRAINING_CONFIG_BYTES: Final[int] = 1 << 16
-MAX_FROZEN_SOURCE_BYTES: Final[int] = 1 << 26
-MAX_PUBLICATION_BACKUP_BYTES: Final[int] = 1 << 26
-MAX_SEAL_REGISTRY_BYTES: Final[int] = 1 << 14
-WILSON_INTERVAL_CONFIDENCE: Final[float] = 0.95
-WILSON_95_Z_SCORE: Final[float] = 1.959963984540054
+SOURCE_ROOT: Final[Path] = PROJECT_ROOT / "src"
+TOOLCHAIN_VALUE_SOURCE_PATHS: Final[tuple[Path, ...]] = tuple(
+    PROJECT_ROOT / relative for relative in INTENT_TOOLCHAIN_VALUE_SOURCES
+)
 # The primary threshold family contains one overall and one typo-tail false-
 # positive gate for each trigger.  Fixed context-stress profiles repeat this
 # already-defined family on deterministic perturbations of the same rows.
-SELECTION_FALSE_POSITIVE_COMPARISONS: Final[int] = len(MODEL_TRIGGERS) * 2
+SELECTION_FALSE_POSITIVE_COMPARISONS: Final[int] = (
+    len(MODEL_TRIGGERS) * FALSE_POSITIVE_GATES_PER_TRIGGER
+)
 SELECTION_PER_COMPARISON_CONFIDENCE: Final[float] = (
     1.0
     - (1.0 - WILSON_INTERVAL_CONFIDENCE)
     / SELECTION_FALSE_POSITIVE_COMPARISONS
 )
-# NormalDist().inv_cdf(1 - (1 - 0.95) / (2 * 12)), pinned rather than
-# recomputed so signed reports remain byte-reproducible across Python builds.
-SELECTION_WILSON_Z_SCORE: Final[float] = 2.8652602385321333
 
 
 @dataclass(frozen=True)
@@ -189,17 +287,17 @@ class FrozenSourceFile:
         ):
             raise ValueError(f"{label}.path must be a repository-relative path")
         if (
-            len(self.sha256) != 64
+            len(self.sha256) != SHA256_HEX_CHARACTERS
             or any(character not in "0123456789abcdef" for character in self.sha256)
         ):
             raise ValueError(f"{label}.sha256 must be lowercase hexadecimal")
         if (
             isinstance(self.bytes, bool)
-            or not 1 <= self.bytes <= MAX_FROZEN_SOURCE_BYTES
+            or not 1 <= self.bytes <= INTENT_FROZEN_SOURCE_MAX_BYTES
         ):
             raise ValueError(
                 f"{label}.bytes must be between 1 and "
-                f"{MAX_FROZEN_SOURCE_BYTES}"
+                f"{INTENT_FROZEN_SOURCE_MAX_BYTES}"
             )
 
 
@@ -237,7 +335,7 @@ class TrainingSources:
             self.english.path,
             self.russian.path,
         }
-        if len(paths) != 3:
+        if len(paths) != INTENT_FROZEN_SOURCE_FILE_COUNT:
             raise ValueError("frozen source paths must be distinct")
 
 
@@ -255,7 +353,7 @@ class FrozenExternalLocalePolicy:
             ("dictionary_sha256", self.dictionary_sha256),
             ("affix_sha256", self.affix_sha256),
         ):
-            if len(digest) != 64 or any(
+            if len(digest) != SHA256_HEX_CHARACTERS or any(
                 character not in "0123456789abcdef" for character in digest
             ):
                 raise ValueError(
@@ -267,11 +365,11 @@ class FrozenExternalLocalePolicy:
         ):
             if (
                 isinstance(size, bool)
-                or not 1 <= size <= MAX_FROZEN_SOURCE_BYTES
+                or not 1 <= size <= INTENT_FROZEN_SOURCE_MAX_BYTES
             ):
                 raise ValueError(
                     f"{label}.{field_name} must be between 1 and "
-                    f"{MAX_FROZEN_SOURCE_BYTES}"
+                    f"{INTENT_FROZEN_SOURCE_MAX_BYTES}"
                 )
 
 
@@ -289,11 +387,12 @@ class FrozenExternalEvaluationPolicy:
     unknown_typo_holdout_corpus_sha256: str
 
     def validate(self) -> None:
-        if self.schema_version != 2:
+        if self.schema_version != INTENT_EXTERNAL_EVALUATION_SCHEMA_VERSION:
             raise ValueError("unsupported external evaluation policy schema")
-        if self.minimum_words_per_group < 5_000:
+        if self.minimum_words_per_group < INTENT_EXTERNAL_MIN_WORDS_PER_GROUP:
             raise ValueError(
-                "external evaluation requires at least 5000 words per group"
+                "external evaluation requires at least "
+                f"{INTENT_EXTERNAL_MIN_WORDS_PER_GROUP} words per group"
             )
         if self.trigger_expansion != tuple(MODEL_TRIGGERS):
             raise ValueError(
@@ -316,7 +415,7 @@ class FrozenExternalEvaluationPolicy:
                 self.unknown_typo_holdout_corpus_sha256,
             ),
         ):
-            if len(digest) != 64 or any(
+            if len(digest) != SHA256_HEX_CHARACTERS or any(
                 character not in "0123456789abcdef" for character in digest
             ):
                 raise ValueError(
@@ -348,7 +447,7 @@ class HardNegativeDevelopmentPolicy:
         }
 
     def validate(self, *, expected_words_per_group: int) -> None:
-        if self.schema_version != 2:
+        if self.schema_version != HARD_NEGATIVE_DEVELOPMENT_SCHEMA_VERSION:
             raise ValueError("unsupported hard-negative development schema")
         self.source.validate("hard_negative_development.source")
         if self.source.path != HARD_NEGATIVE_SOURCE_RELATIVE_PATH:
@@ -357,7 +456,7 @@ class HardNegativeDevelopmentPolicy:
             )
         if self.role_namespace != HARD_NEGATIVE_ROLE_NAMESPACE:
             raise ValueError(
-                "hard-negative development role namespace must match v23"
+                "hard-negative development role namespace must match v28"
             )
         counts = self.role_counts()
         if any(
@@ -376,11 +475,13 @@ class HardNegativeDevelopmentPolicy:
         if (
             isinstance(self.training_example_weight, bool)
             or not math.isfinite(self.training_example_weight)
-            or not 0.25 <= self.training_example_weight <= 8.0
+            or not HARD_NEGATIVE_MIN_EXAMPLE_WEIGHT
+            <= self.training_example_weight
+            <= HARD_NEGATIVE_MAX_EXAMPLE_WEIGHT
         ):
             raise ValueError(
                 "hard-negative training example weight must be finite and "
-                "between 0.25 and 8.0"
+                f"between {HARD_NEGATIVE_MIN_EXAMPLE_WEIGHT} and {HARD_NEGATIVE_MAX_EXAMPLE_WEIGHT}"
             )
 
 
@@ -411,6 +512,16 @@ class TrainingToolchainSnapshot:
     weakened; its readings live in the provenance sidecar, because a reading
     inside this snapshot would put the Unicode database and libm back into the
     identity through the same door that was just closed.
+
+    `constants_sha256` pins the values the code files import from
+    `keyswitch.constants` (`keyswitch.value_provenance`, over the files in
+    `INTENT_TOOLCHAIN_VALUE_SOURCES`). Since every number of these files moved
+    there, a changed threshold no longer moves any file digest above; the
+    digest covers exactly the names the files import, resolved, so a constant
+    the toolchain does not read cannot refuse the seal. Manifest schema 2
+    introduced it, together with `spellcheck_sha256`: language_model.py loads
+    the Hunspell dictionaries through src/keyswitch/spellcheck.py, which no
+    earlier digest covered.
     """
 
     config_sha256: str
@@ -425,6 +536,8 @@ class TrainingToolchainSnapshot:
     preseal_generator_sha256: str
     development_freezer_sha256: str
     preseal_receipt_sha256: str
+    spellcheck_sha256: str
+    constants_sha256: str
 
 
 @dataclass(frozen=True)
@@ -559,19 +672,20 @@ class TrainingConfig:
     safety_maximum_guard_failures: int
 
     def validate(self) -> None:
-        if self.schema_version != 13:
+        if self.schema_version != INTENT_TRAINING_CONFIG_SCHEMA_VERSION:
             raise ValueError("unsupported training config schema")
         if (
-            self.dimension < 256
-            or self.dimension > MAX_DIMENSION
+            self.dimension < INTENT_MIN_TRAINING_DIMENSION
+            or self.dimension > KSLM_MAX_DIMENSION
             or self.dimension & (self.dimension - 1)
         ):
             raise ValueError(
-                "dimension must be a power of two between 256 and MAX_DIMENSION"
+                "dimension must be a power of two between "
+                f"{INTENT_MIN_TRAINING_DIMENSION} and MAX_DIMENSION"
             )
-        if not 0 <= self.feature_hash_seed <= (1 << 64) - 1:
+        if not 0 <= self.feature_hash_seed <= UINT64_MASK:
             raise ValueError("feature_hash_seed must be an unsigned 64-bit integer")
-        if not 0 <= self.membership_hash_seed <= (1 << 64) - 1:
+        if not 0 <= self.membership_hash_seed <= UINT64_MASK:
             raise ValueError("membership_hash_seed must be an unsigned 64-bit integer")
         if self.membership_hash_seed == self.feature_hash_seed:
             raise ValueError("membership_hash_seed must differ from feature_hash_seed")
@@ -589,14 +703,14 @@ class TrainingConfig:
         }:
             raise ValueError("hard-negative source path must be distinct")
         self.sealed_evaluation.validate()
-        if not 2 <= self.minimum_word_length <= self.maximum_word_length:
+        if not INTENT_MIN_WORD_LENGTH_FLOOR <= self.minimum_word_length <= self.maximum_word_length:
             raise ValueError("invalid word-length bounds")
         if self.maximum_words_per_language != 0:
             raise ValueError(
                 "maximum_words_per_language must be zero so held-out rows "
                 "cannot affect candidate truncation"
             )
-        if not 1 <= self.typo_augmentations <= 3:
+        if not 1 <= self.typo_augmentations <= INTENT_MAX_TYPO_AUGMENTATIONS:
             raise ValueError("typo_augmentations must be between one and three")
         if not 1 <= self.minimum_epochs <= self.maximum_epochs:
             raise ValueError("invalid epoch bounds")
@@ -686,8 +800,10 @@ class TrainingConfig:
         ):
             if not math.isfinite(value) or value < 0.0:
                 raise ValueError(f"{name} must be finite and non-negative")
-        if not 0.0 <= self.veto_positive_quantile <= 0.1:
-            raise ValueError("veto_positive_quantile must be in [0, 0.1]")
+        if not 0.0 <= self.veto_positive_quantile <= INTENT_MAX_VETO_POSITIVE_QUANTILE:
+            raise ValueError(
+                f"veto_positive_quantile must be in [0, {INTENT_MAX_VETO_POSITIVE_QUANTILE}]"
+            )
         if self.veto_logit_margin < 0.0:
             raise ValueError("veto_logit_margin cannot be negative")
         if not 0.0 <= self.veto_max_false_negative_rate <= 1.0:
@@ -1130,7 +1246,7 @@ def _decode_training_config(text: str) -> TrainingConfig:
             "split_buckets must exactly match the versioned "
             "65/10/10/7.5/7.5 split"
         )
-    if root.get("ngram_orders") != list(NGRAM_ORDERS):
+    if root.get("ngram_orders") != list(INTENT_NGRAM_ORDERS):
         raise ValueError("ngram_orders must match the KSLM v5 feature schema")
     return config
 
@@ -1147,13 +1263,13 @@ def load_training_config_snapshot(path: Path) -> tuple[TrainingConfig, str]:
 
     try:
         with path.open("rb") as stream:
-            raw = stream.read(MAX_TRAINING_CONFIG_BYTES + 1)
+            raw = stream.read(INTENT_TRAINING_CONFIG_MAX_BYTES + 1)
     except OSError as error:
         raise ValueError(f"training config is unavailable: {path}") from error
-    if len(raw) > MAX_TRAINING_CONFIG_BYTES:
+    if len(raw) > INTENT_TRAINING_CONFIG_MAX_BYTES:
         raise ValueError(
             "training config exceeds the maximum size of "
-            f"{MAX_TRAINING_CONFIG_BYTES} bytes"
+            f"{INTENT_TRAINING_CONFIG_MAX_BYTES} bytes"
         )
     try:
         text = raw.decode("utf-8")
@@ -1195,7 +1311,7 @@ class PreparedLexicon:
 
 
 def sha256_file(
-    path: Path, *, maximum_bytes: int = MAX_FROZEN_SOURCE_BYTES
+    path: Path, *, maximum_bytes: int = INTENT_FROZEN_SOURCE_MAX_BYTES
 ) -> str:
     """Hash at most a declared number of bytes from a local input."""
 
@@ -1204,7 +1320,7 @@ def sha256_file(
     digest = hashlib.sha256()
     total = 0
     with path.open("rb") as handle:
-        while chunk := handle.read(min(1024 * 1024, maximum_bytes - total + 1)):
+        while chunk := handle.read(min(HASH_CHUNK_BYTES, maximum_bytes - total + 1)):
             total += len(chunk)
             if total > maximum_bytes:
                 raise RuntimeError(f"file exceeds hashing size limit: {path}")
@@ -1231,7 +1347,7 @@ def _stage_bytes(destination: Path, data: bytes) -> Path:
                 raise OSError("short write while staging bytes")
             handle.flush()
             os.fsync(handle.fileno())
-        os.chmod(staged, 0o644)
+        os.chmod(staged, PUBLISHED_MODEL_FILE_MODE)
         return staged
     except BaseException:
         if staged is not None:
@@ -1286,8 +1402,8 @@ def publish_bytes_bundle(outputs: Sequence[tuple[Path, bytes]]) -> None:
         for destination, data in outputs:
             try:
                 with destination.open("rb") as stream:
-                    existing = stream.read(MAX_PUBLICATION_BACKUP_BYTES + 1)
-                if len(existing) > MAX_PUBLICATION_BACKUP_BYTES:
+                    existing = stream.read(INTENT_PUBLICATION_BACKUP_MAX_BYTES + 1)
+                if len(existing) > INTENT_PUBLICATION_BACKUP_MAX_BYTES:
                     raise ValueError(
                         "existing publication target exceeds the rollback limit: "
                         f"{destination}"
@@ -1361,7 +1477,7 @@ def json_native_mapping(
 
 
 def _exact_sha256(value: str, label: str) -> str:
-    if len(value) != 64 or any(
+    if len(value) != SHA256_HEX_CHARACTERS or any(
         character not in "0123456789abcdef" for character in value
     ):
         raise ValueError(f"{label} must be exact lowercase SHA-256")
@@ -1387,7 +1503,7 @@ def supported_fingerprints_sha256(values: Collection[int]) -> str:
 
     normalized = sorted(set(values))
     if len(normalized) != len(values) or any(
-        isinstance(value, bool) or not 0 <= value <= (1 << 64) - 1
+        isinstance(value, bool) or not 0 <= value <= UINT64_MASK
         for value in normalized
     ):
         raise ValueError("supported fingerprints must be unique uint64 values")
@@ -1406,25 +1522,27 @@ def quantized_model_payload_sha256(
 
     if len(weights.values) != weights.dimension:
         raise ValueError("quantized weight count must equal dimension")
-    weight_bytes = bytearray(weights.dimension * 2)
+    weight_bytes = bytearray(weights.dimension * KSLM_WEIGHT_ENTRY_BYTES)
     for index, value in enumerate(weights.values):
-        if not -32767 <= value <= 32767:
+        if not -KSLM_QUANTIZED_WEIGHT_LIMIT <= value <= KSLM_QUANTIZED_WEIGHT_LIMIT:
             raise ValueError("quantized weight is outside signed int16 range")
-        struct.pack_into("<h", weight_bytes, index * 2, value)
+        struct.pack_into("<h", weight_bytes, index * KSLM_WEIGHT_ENTRY_BYTES, value)
     fingerprints = sorted(set(supported_fingerprints))
     if len(fingerprints) != len(supported_fingerprints) or any(
-        isinstance(value, bool) or not 0 <= value <= (1 << 64) - 1
+        isinstance(value, bool) or not 0 <= value <= UINT64_MASK
         for value in fingerprints
     ):
         raise ValueError("supported fingerprints must be unique uint64 values")
-    if len(fingerprints) > MAX_SUPPORTED_FINGERPRINTS:
+    if len(fingerprints) > KSLM_MAX_FINGERPRINTS:
         raise ValueError("supported fingerprints exceed the KSLM size limit")
-    payload_bytes = (weights.dimension * 2) + (len(fingerprints) * 8)
-    if payload_bytes > MAX_PAYLOAD_BYTES:
+    payload_bytes = (weights.dimension * KSLM_WEIGHT_ENTRY_BYTES) + (
+        len(fingerprints) * KSLM_FINGERPRINT_ENTRY_BYTES
+    )
+    if payload_bytes > KSLM_MAX_PAYLOAD_BYTES:
         raise ValueError("quantized model payload exceeds the KSLM size limit")
-    fingerprint_bytes = bytearray(len(fingerprints) * 8)
+    fingerprint_bytes = bytearray(len(fingerprints) * KSLM_FINGERPRINT_ENTRY_BYTES)
     for index, value in enumerate(fingerprints):
-        struct.pack_into("<Q", fingerprint_bytes, index * 8, value)
+        struct.pack_into("<Q", fingerprint_bytes, index * KSLM_FINGERPRINT_ENTRY_BYTES, value)
     return hashlib.sha256(weight_bytes + fingerprint_bytes).hexdigest()
 
 
@@ -1484,7 +1602,7 @@ def training_candidate_model_parameters(
         "veto_threshold_hex": veto.raw_logit.hex(),
         "feature_hash_seed": config.feature_hash_seed,
         "membership_hash_seed": config.membership_hash_seed,
-        "ngram_orders": list(NGRAM_ORDERS),
+        "ngram_orders": list(INTENT_NGRAM_ORDERS),
     }
 
 
@@ -1550,7 +1668,7 @@ def validate_presealed_candidate_serialization(
             platt_calibration=calibration.runtime_parameters(),
             fnv_seed=config.feature_hash_seed,
             membership_seed=config.membership_hash_seed,
-            ngram_orders=NGRAM_ORDERS,
+            ngram_orders=INTENT_NGRAM_ORDERS,
             metadata={"validation_phase": "presealed_candidate"},
         )
     if runtime_candidate_model_parameters(model) != dict(expected_parameters):
@@ -1717,7 +1835,7 @@ def sealed_candidate_sha256(
             "presealed candidate metadata conflicts with candidate identity"
         )
     payload: dict[str, object] = {
-        "schema_version": 2,
+        "schema_version": PRESEALED_CANDIDATE_RECORD_SCHEMA_VERSION,
         "split_namespace": split_namespace,
         "config_sha256": config_sha256,
         "candidate_dataset_sha256": candidate_dataset_sha256,
@@ -1758,12 +1876,12 @@ def _read_seal_registry_snapshot(path: Path) -> bytes:
         raise RuntimeError(f"sealed evaluation registry cannot be a symlink: {path}")
     try:
         with path.open("rb") as stream:
-            raw = stream.read(MAX_SEAL_REGISTRY_BYTES + 1)
+            raw = stream.read(INTENT_SEAL_REGISTRY_MAX_BYTES + 1)
     except OSError as error:
         raise RuntimeError(
             f"sealed evaluation registry is unavailable: {path}"
         ) from error
-    if len(raw) > MAX_SEAL_REGISTRY_BYTES:
+    if len(raw) > INTENT_SEAL_REGISTRY_MAX_BYTES:
         raise RuntimeError("sealed evaluation registry exceeds its size limit")
     return raw
 
@@ -1836,7 +1954,7 @@ def claim_sealed_outcome(
         "sealed_outcome_sha256": outcome_sha256,
     }
     expected = _canonical_json_bytes(record)
-    if len(expected) > MAX_SEAL_REGISTRY_BYTES:
+    if len(expected) > INTENT_SEAL_REGISTRY_MAX_BYTES:
         raise AssertionError("sealed outcome record is oversized")
     staged: Path | None = None
     try:
@@ -1957,7 +2075,7 @@ def claim_sealed_evaluation(
         "candidate_dataset_sha256": candidate_dataset_sha256,
     }
     expected = _canonical_json_bytes(record)
-    if len(expected) > MAX_SEAL_REGISTRY_BYTES:
+    if len(expected) > INTENT_SEAL_REGISTRY_MAX_BYTES:
         raise AssertionError("sealed evaluation registry record is oversized")
     staged: Path | None = None
     try:
@@ -2098,9 +2216,13 @@ def capture_toolchain_snapshot(
         ),
         preseal_receipt_sha256=sha256_file(
             PRESEAL_RECEIPT_PATH,
-            maximum_bytes=MAX_TRAINING_CONFIG_BYTES,
+            maximum_bytes=INTENT_TRAINING_CONFIG_MAX_BYTES,
         ),
         environment_probe_sha256=sha256_file(ENVIRONMENT_PROBE_PATH),
+        spellcheck_sha256=sha256_file(SPELLCHECK_RUNTIME_PATH),
+        constants_sha256=pin_values(
+            TOOLCHAIN_VALUE_SOURCE_PATHS, source_root=SOURCE_ROOT
+        ).sha256,
     )
 
 
@@ -2122,7 +2244,7 @@ def _compiler_identity() -> str:
             [compiler, "--version"],
             capture_output=True,
             check=True,
-            timeout=30,
+            timeout=COMPILER_VERSION_TIMEOUT_SECONDS,
         )
     except (OSError, subprocess.SubprocessError):
         return f"{compiler} (version unavailable)"
@@ -2188,7 +2310,7 @@ def verify_toolchain_snapshot(
     """Refuse publication when executable inputs changed during training."""
 
     current = capture_toolchain_snapshot(
-        sha256_file(config_path, maximum_bytes=MAX_TRAINING_CONFIG_BYTES)
+        sha256_file(config_path, maximum_bytes=INTENT_TRAINING_CONFIG_MAX_BYTES)
     )
     if current != snapshot:
         changed = tuple(
@@ -2277,7 +2399,7 @@ def read_verified_frozen_file(
 ) -> bytes:
     """Return exactly the bytes whose configured size and SHA-256 were checked."""
 
-    if not 1 <= expected.bytes <= MAX_FROZEN_SOURCE_BYTES:
+    if not 1 <= expected.bytes <= INTENT_FROZEN_SOURCE_MAX_BYTES:
         raise RuntimeError(
             f"{label} configured size is outside the supported bounds"
         )
@@ -2364,7 +2486,7 @@ def stable_split(signature: str) -> SplitName:
     """Assign a physical signature to the immutable 40-bucket split."""
 
     digest = hashlib.sha256(SPLIT_HASH_NAMESPACE + signature.encode("utf-8")).digest()
-    bucket = int.from_bytes(digest[:8], "big") % 40
+    bucket = int.from_bytes(digest[:INTENT_DRAW_DIGEST_BYTES], "big") % INTENT_SPLIT_BUCKET_COUNT
     cursor = 0
     for name, width in SPLIT_BUCKETS:
         cursor += width
@@ -2377,7 +2499,9 @@ def deterministic_training_trigger(signature: str) -> CorrectionTrigger:
     digest = hashlib.sha256(
         b"keyswitch:intent-v1:training-trigger\0" + signature.encode("utf-8")
     ).digest()
-    return MODEL_TRIGGERS[int.from_bytes(digest[:8], "big") % len(MODEL_TRIGGERS)]
+    return MODEL_TRIGGERS[
+        int.from_bytes(digest[:INTENT_DRAW_DIGEST_BYTES], "big") % len(MODEL_TRIGGERS)
+    ]
 
 
 def load_onboard_unigrams(
@@ -2399,7 +2523,7 @@ def load_onboard_unigrams(
         if minimum_word_length is None
         else minimum_word_length
     )
-    if not 2 <= effective_minimum_word_length <= config.maximum_word_length:
+    if not INTENT_MIN_WORD_LENGTH_FLOOR <= effective_minimum_word_length <= config.maximum_word_length:
         raise ValueError(
             "minimum_word_length override must be between two and the "
             "configured maximum_word_length"
@@ -2408,13 +2532,13 @@ def load_onboard_unigrams(
     if source_bytes is None:
         try:
             with path.open("rb") as stream:
-                raw = stream.read(MAX_FROZEN_SOURCE_BYTES + 1)
+                raw = stream.read(INTENT_FROZEN_SOURCE_MAX_BYTES + 1)
         except OSError as error:
             raise RuntimeError(f"language source is unavailable: {path}") from error
-        if len(raw) > MAX_FROZEN_SOURCE_BYTES:
+        if len(raw) > INTENT_FROZEN_SOURCE_MAX_BYTES:
             raise RuntimeError(
                 "language source exceeds the maximum supported size of "
-                f"{MAX_FROZEN_SOURCE_BYTES} bytes"
+                f"{INTENT_FROZEN_SOURCE_MAX_BYTES} bytes"
             )
     else:
         raw = source_bytes
@@ -2536,10 +2660,10 @@ def typo_variants(
     """Create symmetric physical-key typos without consulting either language."""
 
     variants = [TypoVariant(signature, "identity")]
-    if maximum_augmentations <= 0 or len(signature) < 3:
+    if maximum_augmentations <= 0 or len(signature) < INTENT_TYPO_MIN_SIGNATURE_CHARACTERS:
         return tuple(variants)
     digest = hashlib.sha256(b"keyswitch:intent-v1:typo\0" + signature.encode()).digest()
-    interior = 1 + digest[0] % max(1, len(signature) - 2)
+    interior = 1 + digest[0] % max(1, len(signature) - INTENT_TYPO_EDGE_CHARACTERS)
     candidates = (
         TypoVariant(signature[:interior] + signature[interior + 1 :], "deletion"),
         TypoVariant(
@@ -2552,7 +2676,7 @@ def typo_variants(
             signature[:interior]
             + signature[interior + 1]
             + signature[interior]
-            + signature[interior + 2 :],
+            + signature[interior + TRANSPOSE_PAIR_CHARACTERS :],
             "transposition",
         ),
     )
@@ -2601,7 +2725,7 @@ class HardNegativeDevelopmentCorpus:
 
     def provenance_payload(self) -> dict[str, object]:
         return {
-            "schema_version": 2,
+            "schema_version": HARD_NEGATIVE_DEVELOPMENT_SCHEMA_VERSION,
             "source": {
                 "path": HARD_NEGATIVE_SOURCE_RELATIVE_PATH,
                 "sha256": self.source_sha256,
@@ -2700,8 +2824,8 @@ def _bounded_corpus_string(value: object, label: str) -> str:
     if (
         not isinstance(value, str)
         or not value
-        or len(value) > 256
-        or any(ord(character) < 32 for character in value)
+        or len(value) > HARD_NEGATIVE_CORPUS_STRING_MAX_CHARACTERS
+        or any(ord(character) < ASCII_CONTROL_CHARACTER_LIMIT for character in value)
     ):
         raise ValueError(f"{label} must be non-empty bounded text")
     return value
@@ -2775,11 +2899,11 @@ def _decode_hard_negative_development_corpus(
     if _integer(root, "schema_version") != 1:
         raise ValueError("unsupported frozen hard-negative corpus schema")
     if _string(root, "policy") != (
-        "keyswitch-intent-v23-frozen-unknown-typo-development"
+        "keyswitch-intent-v28-frozen-unknown-typo-development"
     ):
-        raise ValueError("hard-negative corpus policy must match v23")
+        raise ValueError("hard-negative corpus policy must match v28")
     if _string(root, "role_namespace") != HARD_NEGATIVE_ROLE_NAMESPACE:
-        raise ValueError("hard-negative corpus role namespace must match v23")
+        raise ValueError("hard-negative corpus role namespace must match v28")
     if _string(root, "rank_namespace") != (
         UNKNOWN_TYPO_DEVELOPMENT_RANK_NAMESPACE
     ) or _string(root, "choice_namespace") != (
@@ -2799,7 +2923,7 @@ def _decode_hard_negative_development_corpus(
         _exact_sha256(digest, label)
     signature_count = _integer(root, "signature_count")
     expected_signatures = (
-        config.external_evaluation.minimum_words_per_group * 2
+        config.external_evaluation.minimum_words_per_group * LAYOUT_GROUP_COUNT
     )
     if signature_count != expected_signatures:
         raise ValueError("hard-negative corpus signature count is incomplete")
@@ -3044,24 +3168,24 @@ class ContextStressProfile:
 
 
 CONTEXT_STRESS_PROFILES: Final[tuple[ContextStressProfile, ...]] = (
-    ContextStressProfile("source_minimum", -6.0, "source"),
-    ContextStressProfile("source_outer_negative", -1.25, "source"),
-    ContextStressProfile("source_inner_negative", -0.75, "source"),
-    ContextStressProfile("source_near_zero_negative", -0.125, "source"),
+    ContextStressProfile("source_minimum", -CONTEXT_STRESS_EXTREME_DELTA, "source"),
+    ContextStressProfile("source_outer_negative", -CONTEXT_STRESS_OUTER_DELTA, "source"),
+    ContextStressProfile("source_inner_negative", -CONTEXT_STRESS_INNER_DELTA, "source"),
+    ContextStressProfile("source_near_zero_negative", -CONTEXT_STRESS_NEAR_ZERO_DELTA, "source"),
     ContextStressProfile("source_zero", 0.0, "source"),
-    ContextStressProfile("source_near_zero_positive", 0.125, "source"),
-    ContextStressProfile("source_inner_positive", 0.75, "source"),
-    ContextStressProfile("source_outer_positive", 1.25, "source"),
-    ContextStressProfile("source_maximum", 6.0, "source"),
-    ContextStressProfile("target_minimum", -6.0, "target"),
-    ContextStressProfile("target_outer_negative", -1.25, "target"),
-    ContextStressProfile("target_inner_negative", -0.75, "target"),
-    ContextStressProfile("target_near_zero_negative", -0.125, "target"),
+    ContextStressProfile("source_near_zero_positive", CONTEXT_STRESS_NEAR_ZERO_DELTA, "source"),
+    ContextStressProfile("source_inner_positive", CONTEXT_STRESS_INNER_DELTA, "source"),
+    ContextStressProfile("source_outer_positive", CONTEXT_STRESS_OUTER_DELTA, "source"),
+    ContextStressProfile("source_maximum", CONTEXT_STRESS_EXTREME_DELTA, "source"),
+    ContextStressProfile("target_minimum", -CONTEXT_STRESS_EXTREME_DELTA, "target"),
+    ContextStressProfile("target_outer_negative", -CONTEXT_STRESS_OUTER_DELTA, "target"),
+    ContextStressProfile("target_inner_negative", -CONTEXT_STRESS_INNER_DELTA, "target"),
+    ContextStressProfile("target_near_zero_negative", -CONTEXT_STRESS_NEAR_ZERO_DELTA, "target"),
     ContextStressProfile("target_zero", 0.0, "target"),
-    ContextStressProfile("target_near_zero_positive", 0.125, "target"),
-    ContextStressProfile("target_inner_positive", 0.75, "target"),
-    ContextStressProfile("target_outer_positive", 1.25, "target"),
-    ContextStressProfile("target_maximum", 6.0, "target"),
+    ContextStressProfile("target_near_zero_positive", CONTEXT_STRESS_NEAR_ZERO_DELTA, "target"),
+    ContextStressProfile("target_inner_positive", CONTEXT_STRESS_INNER_DELTA, "target"),
+    ContextStressProfile("target_outer_positive", CONTEXT_STRESS_OUTER_DELTA, "target"),
+    ContextStressProfile("target_maximum", CONTEXT_STRESS_EXTREME_DELTA, "target"),
 )
 
 
@@ -3140,27 +3264,30 @@ class NgramOnlyWordScorer:
     def __init__(self, model: LanguageModel) -> None:
         self._model = model
 
-    @lru_cache(maxsize=65_536)
+    @lru_cache(maxsize=LANGUAGE_MODEL_SCORE_CACHE_MAXSIZE)
     def score(self, word: str) -> WordScore:
         normalized = self._model.normalize(word)
         if not normalized:
             return WordScore(
-                -30.0,
+                LANGUAGE_MODEL_EMPTY_TOKEN_SCORE,
                 False,
                 0,
                 0.0,
                 exact=False,
                 spell_known=False,
-                ngram_score=-15.0,
+                ngram_score=LANGUAGE_MODEL_NATURALNESS_MIN,
                 invalid_ratio=1.0,
-                raw_ngram_score=-15.0,
+                raw_ngram_score=LANGUAGE_MODEL_NATURALNESS_MIN,
             )
         structural = self._model.score(word)
         naturalness = max(
-            -15.0,
-            min(4.0, self._model.ngram_score(normalized)),
+            LANGUAGE_MODEL_NATURALNESS_MIN,
+            min(LANGUAGE_MODEL_NATURALNESS_MAX, self._model.ngram_score(normalized)),
         )
-        value = 1.15 * naturalness - 0.75 * structural.invalid_ratio
+        value = (
+            LANGUAGE_MODEL_NATURALNESS_WEIGHT * naturalness
+            - LANGUAGE_MODEL_INVALID_RATIO_WEIGHT * structural.invalid_ratio
+        )
         return WordScore(
             value,
             False,
@@ -3200,8 +3327,8 @@ class TrainOnlyLanguageScorers:
         digest.update(
             json.dumps(
                 {
-                    "algorithm_version": 2,
-                    "ngram_orders": list(LanguageModel.NGRAM_ORDERS),
+                    "algorithm_version": TRAIN_ONLY_SCORER_ALGORITHM_VERSION,
+                    "ngram_orders": list(LANGUAGE_MODEL_NGRAM_ORDERS),
                     "score_mode": "character-ngram-only",
                     "spellcheck_enabled": False,
                 },
@@ -3274,8 +3401,8 @@ class TrainOnlyLanguageScorers:
     def provenance_payload(self) -> dict[str, object]:
         return {
             "kind": "train-only-character-ngram",
-            "algorithm_version": 2,
-            "ngram_orders": list(LanguageModel.NGRAM_ORDERS),
+            "algorithm_version": TRAIN_ONLY_SCORER_ALGORITHM_VERSION,
+            "ngram_orders": list(LANGUAGE_MODEL_NGRAM_ORDERS),
             "score_mode": "character-ngram-only",
             "spellcheck_enabled": False,
             "word_counts_by_group": {
@@ -3440,7 +3567,10 @@ def _canonical_physical_text(
 
 
 def _example_weight(frequency: int) -> float:
-    return 1.0 + min(2.0, math.log1p(max(1, frequency)) / 8.0)
+    return 1.0 + min(
+        EXAMPLE_FREQUENCY_WEIGHT_CAP,
+        math.log1p(max(1, frequency)) / EXAMPLE_FREQUENCY_LOG_DIVISOR,
+    )
 
 
 def context_stress_examples(
@@ -3480,7 +3610,7 @@ def _hard_negative_examples(
             target_group=1,
             trigger=trigger,
             label=False,
-            weight=2.0,
+            weight=PROTECTED_TOKEN_EXAMPLE_WEIGHT,
             base_signature=signature,
             variant_kind="protected",
             source_known=False,
@@ -3789,7 +3919,7 @@ def build_dataset(
                         target_group=target_group,
                         trigger=trigger,
                         label=False,
-                        weight=3.0,
+                        weight=LEXICAL_COLLISION_EXAMPLE_WEIGHT,
                         base_signature=collision.physical_signature,
                         variant_kind="lexical_collision",
                         source_known=True,
@@ -4117,7 +4247,7 @@ def _assert_variant_quarantine_integrity(
     if invalid_quarantine:
         raise ValueError(
             f"{label} variant quarantine ownership/reason evidence is invalid: "
-            f"{tuple(invalid_quarantine[:3])!r}"
+            f"{tuple(invalid_quarantine[:LEAKAGE_ERROR_EXAMPLE_COUNT])!r}"
         )
 
 
@@ -4181,32 +4311,32 @@ def assert_no_split_leakage(
     if audit.malformed_rows:
         raise ValueError(
             "generated lexical rows have inconsistent physical signatures: "
-            f"{audit.malformed_rows[:3]!r}"
+            f"{audit.malformed_rows[:LEAKAGE_ERROR_EXAMPLE_COUNT]!r}"
         )
     if audit.cross_split_signatures:
         raise ValueError(
             "actual augmented physical signature leaked between splits: "
-            f"{audit.cross_split_signatures[:3]!r}"
+            f"{audit.cross_split_signatures[:LEAKAGE_ERROR_EXAMPLE_COUNT]!r}"
         )
     if audit.cross_language_signatures:
         raise ValueError(
             "actual augmented physical signature has contradictory intended "
-            f"languages: {audit.cross_language_signatures[:3]!r}"
+            f"languages: {audit.cross_language_signatures[:LEAKAGE_ERROR_EXAMPLE_COUNT]!r}"
         )
     if audit.safety_overlap_signatures:
         raise ValueError(
             "actual augmented physical signature overlaps the safety corpus: "
-            f"{audit.safety_overlap_signatures[:3]!r}"
+            f"{audit.safety_overlap_signatures[:LEAKAGE_ERROR_EXAMPLE_COUNT]!r}"
         )
     if audit.safety_base_signature_overlaps:
         raise ValueError(
             "base signature overlaps the safety corpus: "
-            f"{audit.safety_base_signature_overlaps[:3]!r}"
+            f"{audit.safety_base_signature_overlaps[:LEAKAGE_ERROR_EXAMPLE_COUNT]!r}"
         )
     if audit.quarantined_signatures_present:
         raise ValueError(
             "quarantined physical signatures were emitted as rows: "
-            f"{audit.quarantined_signatures_present[:3]!r}"
+            f"{audit.quarantined_signatures_present[:LEAKAGE_ERROR_EXAMPLE_COUNT]!r}"
         )
 
 
@@ -4337,7 +4467,7 @@ class RuntimeFeatureExtractor:
             dimension=dimension,
             hash_seed=self.hash_seed,
             membership_seed=self.membership_seed,
-            ngram_orders=NGRAM_ORDERS,
+            ngram_orders=INTENT_NGRAM_ORDERS,
         )
         return ExtractedExampleFeatures(
             vector.values, vector.character_fingerprints
@@ -4833,7 +4963,6 @@ FTRL_NATIVE_COMPILER_FLAGS: Final[tuple[str, ...]] = (
     "-fno-fast-math",
     "-fexcess-precision=standard",
 )
-FTRL_NATIVE_SELF_CHECK_ROWS: Final[int] = 4096
 FTRLKernelChoice: TypeAlias = Literal["auto", "native", "python"]
 
 
@@ -4866,7 +4995,7 @@ def pack_training_rows(
     values = array("d")
     labels = array("B")
     weights = array("d")
-    if indptr.itemsize != 8 or indices.itemsize != 4:
+    if indptr.itemsize != FTRL_NATIVE_OFFSET_BYTES or indices.itemsize != FTRL_NATIVE_INDEX_BYTES:
         raise RuntimeError("native FTRL kernel needs 64-bit offsets and 32-bit indices")
     maximum_row_length = 0
     for item in training:
@@ -4890,8 +5019,10 @@ def pack_training_rows(
         indptr.append(len(indices))
         labels.append(1 if item.example.label else 0)
         weights.append(sample_weight)
-    if len(training) >= 2**31 or dimension >= 2**31:
-        raise ValueError("native FTRL kernel supports at most 2^31 rows and features")
+    if len(training) >= FTRL_NATIVE_INDEX_LIMIT or dimension >= FTRL_NATIVE_INDEX_LIMIT:
+        raise ValueError(
+            f"native FTRL kernel supports at most 2^{FTRL_NATIVE_INDEX_LIMIT_LOG2} rows and features"
+        )
     return PackedTrainingRows(
         row_count=len(training),
         maximum_row_length=maximum_row_length,
@@ -4945,7 +5076,7 @@ class NativeFTRLKernel:
         if compiler is None:
             return None
         directory = (cache_root or PROJECT_ROOT / "build" / "ftrl-native") / (
-            cls.source_digest()[:16]
+            cls.source_digest()[:FTRL_NATIVE_CACHE_DIGEST_CHARACTERS]
         )
         library = directory / "libftrl.so"
         if not library.is_file():
@@ -5002,21 +5133,21 @@ class NativeFTRLKernel:
         """Apply one epoch in ``order`` and write the state back into ``model``."""
 
         dimension = model.parameters.dimension
-        z = array("d", bytes(8 * dimension))
-        n = array("d", bytes(8 * dimension))
+        z = array("d", bytes(FTRL_NATIVE_DOUBLE_BYTES * dimension))
+        n = array("d", bytes(FTRL_NATIVE_DOUBLE_BYTES * dimension))
         for index, value in model.z.items():
             z[index] = value
         for index, value in model.n.items():
             n[index] = value
         touched_mask = array("B", bytes(dimension))
-        touched_list = array("i", bytes(4 * dimension))
+        touched_list = array("i", bytes(FTRL_NATIVE_INDEX_BYTES * dimension))
         order_array = array("i", order)
         if len(order_array) > packed.row_count or any(
             not 0 <= row < packed.row_count for row in order_array
         ):
             raise ValueError("epoch order refers to rows outside the packed set")
         bias_state = array("d", [model.bias_z, model.bias_n])
-        scratch = array("d", bytes(8 * max(1, packed.maximum_row_length)))
+        scratch = array("d", bytes(FTRL_NATIVE_DOUBLE_BYTES * max(1, packed.maximum_row_length)))
         touched_count = int(
             self._function(
                 packed.indptr.buffer_info()[0],
@@ -5239,15 +5370,18 @@ def quantize_weights(
     if any(not math.isfinite(value) for value in weights.values()):
         raise ValueError("weights must be finite")
     maximum = max((abs(value) for value in weights.values()), default=0.0)
-    scale = maximum / 32767.0 if maximum else 1.0
+    scale = maximum / KSLM_QUANTIZED_WEIGHT_LIMIT_FLOAT if maximum else 1.0
     values = [0] * dimension
-    support = bytearray((dimension + 7) // 8)
+    support = bytearray((dimension + (BITS_PER_BYTE - 1)) // BITS_PER_BYTE)
     maximum_error = 0.0
     for index, weight in weights.items():
-        quantized = max(-32767, min(32767, int(round(weight / scale))))
+        quantized = max(
+            -KSLM_QUANTIZED_WEIGHT_LIMIT,
+            min(KSLM_QUANTIZED_WEIGHT_LIMIT, int(round(weight / scale))),
+        )
         values[index] = quantized
         if quantized:
-            support[index // 8] |= 1 << (index % 8)
+            support[index // BITS_PER_BYTE] |= 1 << (index % BITS_PER_BYTE)
         maximum_error = max(maximum_error, abs(weight - quantized * scale))
     return QuantizedWeights(
         dimension,
@@ -5352,7 +5486,7 @@ def _calibration_loss(
 ) -> float:
     return (
         sum(logistic_loss(slope * score + intercept, label) for score, label in scores)
-        + 0.5 * l2 * (slope * slope + intercept * intercept)
+        + CALIBRATION_L2_PENALTY_FACTOR * l2 * (slope * slope + intercept * intercept)
     )
 
 
@@ -5382,14 +5516,14 @@ def fit_platt_calibration(
             logit = slope * score + intercept
             probability = stable_sigmoid(logit)
             residual = probability - float(label)
-            curvature = max(1e-12, probability * (1.0 - probability))
+            curvature = max(CALIBRATION_MIN_CURVATURE, probability * (1.0 - probability))
             gradient_slope += residual * score
             gradient_intercept += residual
             hessian_ss += curvature * score * score
             hessian_si += curvature * score
             hessian_ii += curvature
         determinant = hessian_ss * hessian_ii - hessian_si * hessian_si
-        if determinant <= 1e-18:
+        if determinant <= CALIBRATION_MIN_DETERMINANT:
             break
         step_slope = (
             hessian_ii * gradient_slope - hessian_si * gradient_intercept
@@ -5397,12 +5531,12 @@ def fit_platt_calibration(
         step_intercept = (
             hessian_ss * gradient_intercept - hessian_si * gradient_slope
         ) / determinant
-        if max(abs(step_slope), abs(step_intercept)) < 1e-10:
+        if max(abs(step_slope), abs(step_intercept)) < CALIBRATION_STEP_TOLERANCE:
             break
         old_loss = _calibration_loss(scores, slope, intercept, l2)
         step_scale = 1.0
         accepted = False
-        for _line_search in range(30):
+        for _line_search in range(CALIBRATION_LINE_SEARCH_STEPS):
             candidate_slope = slope - step_scale * step_slope
             candidate_intercept = intercept - step_scale * step_intercept
             new_loss = _calibration_loss(
@@ -5413,7 +5547,7 @@ def fit_platt_calibration(
                 intercept = candidate_intercept
                 accepted = True
                 break
-            step_scale *= 0.5
+            step_scale *= CALIBRATION_LINE_SEARCH_SHRINK
         if not accepted:
             break
     return PlattCalibration(slope, intercept, len(scores), positives)
@@ -5790,14 +5924,14 @@ def choose_threshold(
                 and candidate_metrics.false_positive
                 > maximum_false_positives
             )
-            or candidate_metrics.precision + 1e-15 < precision_floor
+            or candidate_metrics.precision + RATE_BOUND_TOLERANCE < precision_floor
             or wilson_upper_bound(
                 candidate_metrics.false_positive,
                 candidate_metrics.true_negative
                 + candidate_metrics.false_positive,
                 false_positive_z_score,
             )
-            > maximum_false_positive_rate + 1e-15
+            > maximum_false_positive_rate + RATE_BOUND_TOLERANCE
         ):
             return
         candidate = (threshold, candidate_metrics, candidate_typo_metrics)
@@ -5819,7 +5953,7 @@ def choose_threshold(
                 typo_negative_count,
                 effective_typo_z_score,
             )
-            <= typo_maximum_false_positive_rate + 1e-15
+            <= typo_maximum_false_positive_rate + RATE_BOUND_TOLERANCE
         )
         if full_policy_passes and (
             best is None or ranking(candidate) > ranking(best)
@@ -5868,7 +6002,7 @@ def choose_threshold(
         trigger,
         selected_best[0],
         selected_best[1],
-        selected_best[2],
+        selected_best[THRESHOLD_CANDIDATE_TYPO_METRICS_INDEX],
     )
 
 
@@ -5928,9 +6062,9 @@ def _maximum_primary_false_positives(
             else 1.0
         )
         if (
-            precision + 1e-15 < precision_floor
+            precision + RATE_BOUND_TOLERANCE < precision_floor
             or wilson_upper_bound(false_positives, negatives, z_score)
-            > maximum_false_positive_rate + 1e-15
+            > maximum_false_positive_rate + RATE_BOUND_TOLERANCE
         ):
             break
         maximum = false_positives
@@ -5989,7 +6123,7 @@ def _direction_operating_curve(
         )
         current_ranking = (
             current[1].true_positive,
-            current[2].true_positive,
+            current[THRESHOLD_CANDIDATE_TYPO_METRICS_INDEX].true_positive,
             current[0],
         ) if current is not None else None
         if current_ranking is None or candidate_ranking > current_ranking:
@@ -6156,7 +6290,10 @@ def choose_directional_threshold(
                 "1>0": reverse[0],
             }
             metrics = _sum_confusion(forward[1], reverse[1])
-            typo_metrics = _sum_confusion(forward[2], reverse[2])
+            typo_metrics = _sum_confusion(
+                forward[THRESHOLD_CANDIDATE_TYPO_METRICS_INDEX],
+                reverse[THRESHOLD_CANDIDATE_TYPO_METRICS_INDEX],
+            )
             if (
                 (
                     maximum_false_positives is not None
@@ -6166,13 +6303,13 @@ def choose_directional_threshold(
                         > maximum_false_positives
                     )
                 )
-                or metrics.precision + 1e-15 < precision_floor
+                or metrics.precision + RATE_BOUND_TOLERANCE < precision_floor
                 or wilson_upper_bound(
                     metrics.false_positive,
                     metrics.true_negative + metrics.false_positive,
                     false_positive_z_score,
                 )
-                > maximum_false_positive_rate + 1e-15
+                > maximum_false_positive_rate + RATE_BOUND_TOLERANCE
             ):
                 continue
             candidate = (logits, metrics, typo_metrics)
@@ -6189,7 +6326,7 @@ def choose_directional_threshold(
                     typo_metrics.true_negative + typo_metrics.false_positive,
                     effective_typo_z_score,
                 )
-                <= typo_maximum_false_positive_rate + 1e-15
+                <= typo_maximum_false_positive_rate + RATE_BOUND_TOLERANCE
             )
             if full_policy_passes and (
                 best is None or ranking(candidate) > ranking(best)
@@ -6204,7 +6341,7 @@ def choose_directional_threshold(
         trigger,
         max(selected_best[0].values()),
         selected_best[1],
-        selected_best[2],
+        selected_best[THRESHOLD_CANDIDATE_TYPO_METRICS_INDEX],
         selected_best[0],
     )
 
@@ -6601,7 +6738,7 @@ def _maximum_feasible_threshold_margin(
     upper = len(ordered) - 1
     best = 0
     while lower <= upper:
-        middle = (lower + upper) // 2
+        middle = (lower + upper) // BISECTION_DIVISOR
         margin = ordered[middle]
         selections = _apply_trigger_threshold_margin(
             base, examples, config, margin
@@ -6662,7 +6799,6 @@ def choose_trigger_thresholds(
     )
 
 
-CONTEXT_INVARIANT_FEATURE_VERSION: Final[int] = 5
 _CONTEXT_INVARIANCE_SENTINELS: Final[
     tuple[tuple[str, str, int, int], ...]
 ] = (
@@ -6680,9 +6816,10 @@ def verify_context_feature_invariance(
 ) -> int:
     """Fail closed unless runtime schema v5 ignores the full context grid."""
 
-    if FEATURE_VERSION != CONTEXT_INVARIANT_FEATURE_VERSION:
+    if INTENT_FEATURE_VERSION != INTENT_CONTEXT_INVARIANT_FEATURE_VERSION:
         raise RuntimeError(
-            "fast context stress requires context-invariant feature schema v5"
+            "fast context stress requires context-invariant feature schema "
+            f"v{INTENT_CONTEXT_INVARIANT_FEATURE_VERSION}"
         )
     comparisons = 0
     for original, alternative, source_group, target_group in (
@@ -6774,12 +6911,12 @@ def metrics_payload(metrics: ConfusionMatrix) -> dict[str, object]:
     negative_count = metrics.true_negative + metrics.false_positive
     payload: dict[str, object] = asdict(metrics)
     payload.update(
-        precision=round(metrics.precision, 9),
-        recall=round(metrics.recall, 9),
-        specificity=round(metrics.specificity, 9),
-        false_positive_rate=round(metrics.false_positive_rate, 9),
+        precision=round(metrics.precision, INTENT_METRIC_DECIMALS),
+        recall=round(metrics.recall, INTENT_METRIC_DECIMALS),
+        specificity=round(metrics.specificity, INTENT_METRIC_DECIMALS),
+        false_positive_rate=round(metrics.false_positive_rate, INTENT_METRIC_DECIMALS),
         false_positive_rate_upper_95=round(
-            wilson_upper_bound(metrics.false_positive, negative_count), 9
+            wilson_upper_bound(metrics.false_positive, negative_count), INTENT_METRIC_DECIMALS
         ),
         negative_samples=negative_count,
     )
@@ -6802,10 +6939,10 @@ def wilson_upper_bound(
     proportion = successes / samples
     z_squared = z_score * z_score
     denominator = 1.0 + z_squared / samples
-    centre = proportion + z_squared / (2.0 * samples)
+    centre = proportion + z_squared / (WILSON_CENTRE_DENOMINATOR_FACTOR * samples)
     radius = z_score * math.sqrt(
         proportion * (1.0 - proportion) / samples
-        + z_squared / (4.0 * samples * samples)
+        + z_squared / (WILSON_RADIUS_DENOMINATOR_FACTOR * samples * samples)
     )
     return min(1.0, (centre + radius) / denominator)
 
@@ -6851,7 +6988,7 @@ def gate_policy_payload(config: TrainingConfig) -> dict[str, object]:
 
     return {
         "model_applicability": {
-            "minimum_normalized_token_length": MINIMUM_RUNTIME_TOKEN_LENGTH,
+            "minimum_normalized_token_length": INTENT_MIN_RUNTIME_TOKEN_CHARACTERS,
             "length_comparison": "maximum_of_original_and_replacement",
             "model_first_after_hard_guards": True,
             "post_guard_decision_rule": (
@@ -7284,27 +7421,27 @@ def threshold_selection_gate_breakdown(
 
 def _diagnostic_length_bucket(example: LexicalExample) -> str:
     length = max(len(example.original), len(example.alternative))
-    if length <= 4:
-        return "1-4"
-    if length <= 7:
-        return "5-7"
-    if length <= 11:
-        return "8-11"
-    if length <= 19:
-        return "12-19"
-    return "20+"
+    if length <= INTENT_LENGTH_EXACT_MAX_CHARACTERS:
+        return f"1-{INTENT_LENGTH_EXACT_MAX_CHARACTERS}"
+    if length <= INTENT_LENGTH_SHORT_MAX_CHARACTERS:
+        return f"{INTENT_LENGTH_EXACT_MAX_CHARACTERS + 1}-{INTENT_LENGTH_SHORT_MAX_CHARACTERS}"
+    if length <= INTENT_LENGTH_MEDIUM_MAX_CHARACTERS:
+        return f"{INTENT_LENGTH_SHORT_MAX_CHARACTERS + 1}-{INTENT_LENGTH_MEDIUM_MAX_CHARACTERS}"
+    if length <= INTENT_LENGTH_LONG_MAX_CHARACTERS:
+        return f"{INTENT_LENGTH_MEDIUM_MAX_CHARACTERS + 1}-{INTENT_LENGTH_LONG_MAX_CHARACTERS}"
+    return f"{INTENT_LENGTH_LONG_MAX_CHARACTERS + 1}+"
 
 
 def _diagnostic_frequency_bucket(frequency: int) -> str:
     if frequency <= 0:
         return "0"
-    if frequency < 10:
-        return "1-9"
-    if frequency < 100:
-        return "10-99"
-    if frequency < 1_000:
-        return "100-999"
-    return "1000+"
+    if frequency < DIAGNOSTIC_FREQUENCY_FIRST_BOUND:
+        return f"1-{DIAGNOSTIC_FREQUENCY_FIRST_BOUND - 1}"
+    if frequency < DIAGNOSTIC_FREQUENCY_SECOND_BOUND:
+        return f"{DIAGNOSTIC_FREQUENCY_FIRST_BOUND}-{DIAGNOSTIC_FREQUENCY_SECOND_BOUND - 1}"
+    if frequency < DIAGNOSTIC_FREQUENCY_THIRD_BOUND:
+        return f"{DIAGNOSTIC_FREQUENCY_SECOND_BOUND}-{DIAGNOSTIC_FREQUENCY_THIRD_BOUND - 1}"
+    return f"{DIAGNOSTIC_FREQUENCY_THIRD_BOUND}+"
 
 
 def _selection_metric_slices(
@@ -7692,7 +7829,7 @@ def training_word_score(
 
 def runtime_feature_extractor(
     hash_seed: int,
-    membership_seed: int = DEFAULT_MEMBERSHIP_FNV_SEED,
+    membership_seed: int = INTENT_MEMBERSHIP_FNV_SEED,
     *,
     scorers: Mapping[int, WordScorer],
 ) -> ExampleFeatureExtractor:
@@ -7875,7 +8012,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         license_evidence=config.sources.license_evidence.path,
         logical_path=config.sources.english.path,
         source_bytes=english_bytes,
-        minimum_word_length=SAFETY_COLLISION_MINIMUM_WORD_LENGTH,
+        minimum_word_length=SAFETY_COLLISION_MIN_WORD_CHARACTERS,
     )
     russian, russian_source = load_onboard_unigrams(
         arguments.ru_model,
@@ -7886,7 +8023,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         license_evidence=config.sources.license_evidence.path,
         logical_path=config.sources.russian.path,
         source_bytes=russian_bytes,
-        minimum_word_length=SAFETY_COLLISION_MINIMUM_WORD_LENGTH,
+        minimum_word_length=SAFETY_COLLISION_MIN_WORD_CHARACTERS,
     )
     del english_bytes
     del russian_bytes
@@ -8129,7 +8266,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         }
         diagnostic_bytes = (
             json.dumps(
-                diagnostic, ensure_ascii=False, indent=2, sort_keys=True
+                diagnostic, ensure_ascii=False, indent=INTENT_MODEL_JSON_INDENT, sort_keys=True
             )
             + "\n"
         ).encode("utf-8")
@@ -8316,7 +8453,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         split: len(dataset.by_split[split]) for split in SPLIT_NAMES
     }
     manifest: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": INTENT_MANIFEST_SCHEMA_VERSION,
         "model_id": "keyswitch-layout-intent-v1",
         "calibration_scope": calibration.provenance,
         "config_sha256": toolchain_snapshot.config_sha256,
@@ -8475,7 +8612,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             model = write_model(
                 staged_artifact,
                 model_version=(
-                    "intent-v1-" + build_provenance_sha256[:12]
+                    "intent-v1-" + build_provenance_sha256[:VERSION_HASH_CHARACTERS]
                 ),
                 dimension=config.dimension,
                 weights=quantized.dequantized(),
@@ -8489,7 +8626,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 platt_calibration=calibration.runtime_parameters(),
                 fnv_seed=config.feature_hash_seed,
                 membership_seed=config.membership_hash_seed,
-                ngram_orders=NGRAM_ORDERS,
+                ngram_orders=INTENT_NGRAM_ORDERS,
                 metadata=json_native_mapping(manifest),
             )
             if runtime_candidate_model_parameters(model) != (
@@ -8509,7 +8646,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 json.dumps(
                     manifest,
                     ensure_ascii=False,
-                    indent=2,
+                    indent=INTENT_MODEL_JSON_INDENT,
                     sort_keys=True,
                 )
                 + "\n"
@@ -8518,7 +8655,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 json.dumps(
                     report,
                     ensure_ascii=False,
-                    indent=2,
+                    indent=INTENT_MODEL_JSON_INDENT,
                     sort_keys=True,
                 )
                 + "\n"
@@ -8544,7 +8681,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "artifact_sha256": manifest["artifact_sha256"],
                     },
                     ensure_ascii=False,
-                    indent=2,
+                    indent=INTENT_MODEL_JSON_INDENT,
                     sort_keys=True,
                 )
                 + "\n"
@@ -8557,7 +8694,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     (arguments.build_environment, environment_bytes),
                 )
             )
-    print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
+    print(json.dumps(manifest, ensure_ascii=False, indent=INTENT_MODEL_JSON_INDENT, sort_keys=True))
     return 0 if gates_pass else 1
 
 

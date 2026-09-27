@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "namespace": "keyswitch:boundary-v2:20260907:candidate1",
+  "namespace": "keyswitch:boundary-v2:20260925:candidate5",
   "maximum_words_per_stratum": 3000,
   "maximum_words_per_family": 4,
   "epochs": 50,
@@ -13,5 +13,5 @@
     "minimum_test_rows": 1000,
     "minimum_test_word_endings": 50
   },
-  "evidence_scope": "New synthetic segmentation supervision from frozen public reference lexicons. Partition by four physical leading keys before punctuation variants. New test families exclude the entire previously consumed public phrase-source vocabulary (including the boundary-v1 reserve and prefix corpus); the same lexical resources may know held-out words. This is not independent real-user intent or a new test of the unchanged context/prefix models. Fresh test opened only after sealing weights and a calibration-selected threshold. Old private/audit and published examples are regression cases, not held-out evidence."
+  "evidence_scope": "New synthetic segmentation supervision from frozen public reference lexicons; lexical features and alternative valid readings are computed with the lexicon the engine serves (onboard lexicons plus the packaged supplement). A misspelling drops one key other than the last, is categorised like a correctly spelled word, is followed by one literal suffix drawn from the same set, and is kept only when no reading of the typed keys is a known word; where no reading is a known word, every reading that is a known word with one key missed is a valid intended output too, and the candidates see which readings are such misspellings (feature version 3). Partition by four physical leading keys before punctuation variants. New test families exclude the entire previously consumed public phrase-source vocabulary (including the boundary-v1 reserve and prefix corpus); the same lexical resources may know held-out words. These families have not trained this candidate. Earlier boundary-v2 splits (keyswitch:boundary-v2:20260907:candidate1, whose test was exposed; keyswitch:boundary-v2:20260925:candidate2 and keyswitch:boundary-v2:20260925:candidate4, rejected on calibration before their tests were read; keyswitch:boundary-v2:20260925:candidate3, superseded before its test was read) partitioned the same lexicon words differently, so these families overlap their train, development, calibration and test. This is not independent real-user intent or a new test of the context or prefix models. Fresh test opened only after sealing weights and a calibration-selected threshold. Old private/audit and published examples are regression cases, not held-out evidence."
 }

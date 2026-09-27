@@ -31,6 +31,7 @@ from verify_context_model import LEGACY_FEATURE_VERSION
 from keyswitch.constants.models import (
     CONTEXT_ACTION_FEATURE_VERSION,
     CONTEXT_V1_CONVERSION_THRESHOLD,
+    CONTEXT_V1_FEATURE_VERSIONS,
 )
 from fixture_values.corpora import HISTORICAL_CONTEXT_V1_TEST_COUNTS
 from fixture_values.counts import (
@@ -57,7 +58,7 @@ def write_fixture_artifact(path: Path, feature_version: int = LEGACY_FEATURE_VER
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"feature_version": feature_version, "actions": list(ACTIONS),
         "weights": weights, "weights_sha256": fingerprint, "conversion_threshold": CONTEXT_V1_CONVERSION_THRESHOLD,
-        "version": ("context-v1-" if feature_version == LEGACY_FEATURE_VERSION else "context-v3-")
+        "version": ("context-v1-" if feature_version in CONTEXT_V1_FEATURE_VERSIONS else "context-v3-")
         + fingerprint[:VERSION_HASH_CHARACTERS]}))
     return ContextModel.load(path)
 
@@ -154,21 +155,25 @@ class ActiveContextGateTests(unittest.TestCase):
 
     def test_active_shipping_schema_uses_its_declared_model_generation(self) -> None:
         model = ContextModel.load()
-        self.assertIn(model.feature_version, (LEGACY_FEATURE_VERSION, CONTEXT_ACTION_FEATURE_VERSION))
-        prefix = "context-v1-" if model.feature_version == LEGACY_FEATURE_VERSION else "context-v3-"
+        self.assertIn(model.feature_version, (*CONTEXT_V1_FEATURE_VERSIONS, CONTEXT_ACTION_FEATURE_VERSION))
+        prefix = "context-v1-" if model.feature_version in CONTEXT_V1_FEATURE_VERSIONS else "context-v3-"
         self.assertTrue(model.version.startswith(prefix))
         # Acceptance is an explicit CLI gate, never inferred from this loader test.
 
     def test_feature_two_keeps_both_historical_evidence_checks(self) -> None:
-        with patch.object(verifier, "verify_legacy", return_value=self.identity) as legacy, \
-                patch("verify_context_v2.verify") as research, \
-                patch.object(action_verifier, "verify", side_effect=AssertionError("v3 receipt must not be used")):
-            result = self.verify()
-        legacy.assert_called_once_with(self.root, self.report, self.artifact)
-        research.assert_called_once_with(self.root / "model/context_v2", self.artifact)
-        self.assertEqual(
-            result, {**self.identity, "feature_version": LEGACY_FEATURE_VERSION, "quality_gates_passed": True}
-        )
+        # Feature 5 is context-v1 with typo evidence: the same report, provenance and history checks.
+        for version in CONTEXT_V1_FEATURE_VERSIONS:
+            with self.subTest(version=version):
+                write_fixture_artifact(self.artifact, version)
+                with patch.object(verifier, "verify_legacy", return_value=self.identity) as legacy, \
+                        patch("verify_context_v2.verify") as research, \
+                        patch.object(action_verifier, "verify", side_effect=AssertionError("v3 receipt must not be used")):
+                    result = self.verify()
+                legacy.assert_called_once_with(self.root, self.report, self.artifact)
+                research.assert_called_once_with(self.root / "model/context_v2", self.artifact)
+                self.assertEqual(
+                    result, {**self.identity, "feature_version": version, "quality_gates_passed": True}
+                )
         with patch.object(verifier, "verify_legacy", return_value=self.identity), \
                 patch("verify_context_v2.verify", side_effect=ValueError("research seal mutated")):
             with self.assertRaisesRegex(ValueError, "research seal"):
@@ -218,8 +223,9 @@ class ActiveContextGateTests(unittest.TestCase):
                 verifier.verify(artifact=rejected)
 
     def test_replay_dispatch_keeps_exact_protocols_and_propagates_failure(self) -> None:
-        self.assertEqual(verifier.replay_commands(LEGACY_FEATURE_VERSION), (
-            ("tools/train_context_model.py", "--verify"),))
+        for version in CONTEXT_V1_FEATURE_VERSIONS:
+            self.assertEqual(verifier.replay_commands(version), (
+                ("tools/train_context_model.py", "--verify"),))
         with self.assertRaises(ValueError):
             verifier.replay_commands(UNSUPPORTED_CONTEXT_FEATURE_VERSION)
         with patch("verify_context_model.subprocess.run") as run:

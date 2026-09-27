@@ -6,13 +6,45 @@ import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Final, Protocol
+from typing import Protocol
 
+from .constants.detection import (
+    ACRONYM_MIN_LETTERS,
+    CONFIRMED_RULE_MIN_CONFIDENCE,
+    CONTEXT_DELTA_MULTIPLIER,
+    CONTEXT_SOURCE_GROUP_PENALTY,
+    CONTEXT_TARGET_GROUP_BONUS,
+    HEURISTIC_KNOWN_TARGET_MIN_MARGIN,
+    HEURISTIC_KNOWN_TARGET_RELIEF_PER_CHARACTER,
+    HEURISTIC_KNOWN_TARGET_RELIEF_START_CHARACTERS,
+    HEURISTIC_NGRAM_AGGRESSIVE_MARGIN_REDUCTION,
+    HEURISTIC_NGRAM_EXTRA_MARGIN,
+    HEURISTIC_NGRAM_MIN_CHARACTERS,
+    HEURISTIC_NGRAM_MIN_CHARACTERS_AGGRESSIVE,
+    HEURISTIC_NGRAM_MIN_EXTRA_MARGIN,
+    HEURISTIC_NGRAM_RELIEF_CAP,
+    HEURISTIC_NGRAM_RELIEF_PER_CHARACTER,
+    HEURISTIC_NGRAM_RELIEF_START_CHARACTERS,
+    HEURISTIC_PLAUSIBLE_TARGET_NGRAM_MIN,
+    HEURISTIC_PLAUSIBLE_TARGET_NGRAM_MIN_AGGRESSIVE,
+    HEURISTIC_SPELL_ONLY_TARGET_EXTRA_MARGIN,
+    HEURISTIC_TYPO_DELETION_EXTRA_MARGIN,
+    HEURISTIC_TYPO_DELETION_MIN_CHARACTERS,
+    HEURISTIC_UNLIKELY_SOURCE_NGRAM_MAX,
+    HEURISTIC_UNLIKELY_SOURCE_NGRAM_MAX_AGGRESSIVE,
+    MAX_CONVERTIBLE_TOKEN_CHARACTERS,
+    REPEATED_CHARACTER_RUN,
+)
+from .constants.keyboard import LAYOUT_GROUP_COUNT
+from .constants.models import (
+    INTENT_MIN_RUNTIME_TOKEN_CHARACTERS,
+    LANGUAGE_MODEL_KNOWN_WORD_NATURALNESS_FLOOR,
+)
+from .constants.settings_defaults import DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_MINIMUM_WORD_LENGTH
 from .intent_model import (
     CorrectionTrigger,
     IntentModelInput,
     LinearPrediction,
-    MINIMUM_RUNTIME_TOKEN_LENGTH,
     normalize_token,
 )
 from .language_model import LanguageModel, WordScore
@@ -32,14 +64,10 @@ def _load_protected_tokens() -> frozenset[str]:
 
 PROTECTED_TOKENS = _load_protected_tokens()
 
-# Public policy constants keep offline production-context evaluation tied to
-# the exact arithmetic used by the serving detector.  LanguageModel's
-# context_score contract is bounded to [0, 1].
-CONTEXT_SCORE_MINIMUM: Final[float] = 0.0
-CONTEXT_SCORE_MAXIMUM: Final[float] = 1.0
-CONTEXT_DELTA_MULTIPLIER: Final[float] = 1.75
-CONTEXT_TARGET_GROUP_BONUS: Final[float] = 0.55
-CONTEXT_SOURCE_GROUP_PENALTY: Final[float] = 0.3
+# The context policy constants (constants/detection.py) keep offline
+# production-context evaluation tied to the exact arithmetic used by the
+# serving detector.  LanguageModel's context_score contract is bounded to
+# [CONTEXT_SCORE_MINIMUM, CONTEXT_SCORE_MAXIMUM].
 
 @dataclass(frozen=True)
 class DetectionDecision:
@@ -90,7 +118,7 @@ class LanguageDetector:
         models: Mapping[int, LanguageScorer],
         intent_model: IntentClassifier | None = None,
     ) -> None:
-        if len(models) < 2:
+        if len(models) < LAYOUT_GROUP_COUNT:
             raise ValueError("At least two language models are required")
         self.models = dict(models)
         self.intent_model = intent_model
@@ -101,8 +129,8 @@ class LanguageDetector:
         alternatives: dict[int, str],
         source_group: int,
         *,
-        minimum_length: int = 3,
-        confidence_threshold: float = 2.0,
+        minimum_length: int = DEFAULT_MINIMUM_WORD_LENGTH,
+        confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
         ignored_words: set[str] | None = None,
         aggressive: bool = False,
         protect_code: bool = True,
@@ -178,7 +206,7 @@ class LanguageDetector:
                     forced_text,
                     source_group,
                     forced_group,
-                    max(20.0, forced_delta),
+                    max(CONFIRMED_RULE_MIN_CONFIDENCE, forced_delta),
                     "подтверждённое правило пользователя",
                     source_score,
                     forced_score,
@@ -240,17 +268,22 @@ class LanguageDetector:
             )
 
         if target_score.known:
-            length_relief = min(1.0, max(0, effective_length - 3) * 0.18)
-            required = max(0.65, confidence_threshold - length_relief)
+            length_relief = min(
+                1.0,
+                max(0, effective_length - HEURISTIC_KNOWN_TARGET_RELIEF_START_CHARACTERS)
+                * HEURISTIC_KNOWN_TARGET_RELIEF_PER_CHARACTER,
+            )
+            required = max(HEURISTIC_KNOWN_TARGET_MIN_MARGIN, confidence_threshold - length_relief)
             if target_score.spell_known and not target_score.exact:
-                required += 0.15
+                required += HEURISTIC_SPELL_ONLY_TARGET_EXTRA_MARGIN
             context_supports_target = context_group == group
             # A Hunspell hit is already strong morphological evidence. The
-            # n-gram score is clamped at -4 for valid but very rare forms, so
-            # accept that floor while still requiring an invalid source and a
-            # clear total-score margin.
+            # n-gram score is clamped at LANGUAGE_MODEL_KNOWN_WORD_NATURALNESS_FLOOR
+            # for valid but very rare forms, so accept that floor while still
+            # requiring an invalid source and a clear total-score margin.
             morphology_is_plausible = (
-                target_score.ngram_score >= -4.0 or context_supports_target
+                target_score.ngram_score >= LANGUAGE_MODEL_KNOWN_WORD_NATURALNESS_FLOOR
+                or context_supports_target
             )
             heuristic_should_convert = delta >= required and morphology_is_plausible
             should_convert = heuristic_should_convert
@@ -278,7 +311,7 @@ class LanguageDetector:
         # One accidental extra character should not erase otherwise decisive
         # dictionary evidence. This does not correct the typo itself; it only
         # chooses the layout of the original physical sequence.
-        if effective_length >= 5:
+        if effective_length >= HEURISTIC_TYPO_DELETION_MIN_CHARACTERS:
             target_without_one = self.models[group].best_single_deletion(replacement)
             source_without_one = source_model.best_single_deletion(original)
             typo_delta = target_without_one.value - max(
@@ -287,7 +320,7 @@ class LanguageDetector:
             typo_supported = (
                 target_without_one.known
                 and not source_without_one.known
-                and typo_delta >= confidence_threshold + 0.5
+                and typo_delta >= confidence_threshold + HEURISTIC_TYPO_DELETION_EXTRA_MARGIN
             )
             if typo_supported:
                 return DetectionDecision(
@@ -307,15 +340,32 @@ class LanguageDetector:
         # but only when the source looks distinctly unnatural. The required
         # margin decreases with length because longer sequences carry more
         # independent evidence.
-        length_relief = min(2.0, max(0, effective_length - 4) * 0.32)
-        required = confidence_threshold + 2.4 - length_relief
+        length_relief = min(
+            HEURISTIC_NGRAM_RELIEF_CAP,
+            max(0, effective_length - HEURISTIC_NGRAM_RELIEF_START_CHARACTERS)
+            * HEURISTIC_NGRAM_RELIEF_PER_CHARACTER,
+        )
+        required = confidence_threshold + HEURISTIC_NGRAM_EXTRA_MARGIN - length_relief
         if aggressive:
-            required -= 0.75
-        required = max(confidence_threshold + 0.25, required)
-        source_is_unlikely = source_score.ngram_score <= (-0.65 if aggressive else -1.1)
-        target_is_plausible = target_score.ngram_score >= (-2.0 if aggressive else -1.25)
+            required -= HEURISTIC_NGRAM_AGGRESSIVE_MARGIN_REDUCTION
+        required = max(confidence_threshold + HEURISTIC_NGRAM_MIN_EXTRA_MARGIN, required)
+        source_is_unlikely = source_score.ngram_score <= (
+            HEURISTIC_UNLIKELY_SOURCE_NGRAM_MAX_AGGRESSIVE
+            if aggressive
+            else HEURISTIC_UNLIKELY_SOURCE_NGRAM_MAX
+        )
+        target_is_plausible = target_score.ngram_score >= (
+            HEURISTIC_PLAUSIBLE_TARGET_NGRAM_MIN_AGGRESSIVE
+            if aggressive
+            else HEURISTIC_PLAUSIBLE_TARGET_NGRAM_MIN
+        )
         heuristic_should_convert = (
-            effective_length >= (4 if aggressive else 5)
+            effective_length
+            >= (
+                HEURISTIC_NGRAM_MIN_CHARACTERS_AGGRESSIVE
+                if aggressive
+                else HEURISTIC_NGRAM_MIN_CHARACTERS
+            )
             and source_is_unlikely
             and target_is_plausible
             and delta >= required
@@ -362,7 +412,7 @@ class LanguageDetector:
                 len(normalize_token(original)),
                 len(normalize_token(replacement)),
             )
-            < MINIMUM_RUNTIME_TOKEN_LENGTH
+            < INTENT_MIN_RUNTIME_TOKEN_CHARACTERS
         ):
             return None
         return self.intent_model.predict(
@@ -425,7 +475,7 @@ class LanguageDetector:
 
     @staticmethod
     def _looks_like_protected_token(token: str) -> bool:
-        if len(token) > 64:
+        if len(token) > MAX_CONVERTIBLE_TOKEN_CHARACTERS:
             return True
         lowered = token.casefold()
         if lowered in PROTECTED_TOKENS:
@@ -439,11 +489,14 @@ class LanguageDetector:
         if any(character in "_/\\=:" for character in token):
             return True
         letters = [character for character in token if character.isalpha()]
-        if len(letters) >= 2 and all(character.isupper() for character in letters):
+        if len(letters) >= ACRONYM_MIN_LETTERS and all(character.isupper() for character in letters):
             return True
         if any(character.isupper() for character in letters[1:]):
             return True
-        if any(lowered[index : index + 4] == lowered[index] * 4 for index in range(max(0, len(lowered) - 3))):
+        if any(
+            lowered[index : index + REPEATED_CHARACTER_RUN] == lowered[index] * REPEATED_CHARACTER_RUN
+            for index in range(max(0, len(lowered) - (REPEATED_CHARACTER_RUN - 1)))
+        ):
             return True
         scripts = {
             "CYRILLIC" if "CYRILLIC" in unicodedata.name(character, "") else "LATIN"

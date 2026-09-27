@@ -15,7 +15,7 @@ from . import __version__
 from .backend import InputBackend, KeyEvent, KeyDisposition
 from .app_quirks import mention_head
 from .boundary_model import BoundaryModel, MAX_SUFFIX, features as boundary_features
-from .boundary_policy import BoundaryPolicy, features as boundary_policy_features
+from .boundary_policy import BoundaryPolicy
 from .config import SettingsStore
 from .constants.settings_defaults import (
     CONFIDENCE_SETTING_MAX,
@@ -1581,7 +1581,7 @@ class KeySwitchEngine:
             return strokes, (), False
         target = targets[0]
         alternative = self._text_for_group(strokes, target)
-        extract = boundary_policy_features if isinstance(model, BoundaryPolicy) else boundary_features
+        extract = model.extract if isinstance(model, BoundaryPolicy) else boundary_features
         prediction = model.predict(tuple(
             extract(original, alternative, length, self.models[source_group], self.models[target])
             for length in range(tail + 1)
@@ -1801,9 +1801,6 @@ class KeySwitchEngine:
             whole, {target: head + alternatives[target] + tail}, source_group, application, trigger,
             boundary_text=closing,
             field_override=replace(snapshot, before=before[:len(before) - len(head)], after=snapshot.after[len(tail):]),
-            # The whole word and its surroundings come from the field itself, so the
-            # model's verdict stands wherever it is, as for a planned neighbour.
-            planned_context=True,
         )
         converted = decision.should_convert and decision.target_group == target
         self._technical_event(
@@ -1837,7 +1834,7 @@ class KeySwitchEngine:
         application: str,
         trigger: CorrectionTrigger = "space",
         *, literal_tail: str = "", boundary_text: str = "",
-        field_override: FieldContext | None = None, planned_context: bool = False,
+        field_override: FieldContext | None = None,
     ) -> DetectionDecision:
         self._context_result = None
         context_words, context_group = self._context_for(application)
@@ -1894,7 +1891,6 @@ class KeySwitchEngine:
             str(self.settings.get("detection.context_policy", "assist")),
             read_field=field_override is None and bool(self.settings.get("detection.context_read_field", False)),
             literal_tail=literal_tail, boundary_text=boundary_text, field_override=field_override,
-            planned_context=planned_context,
         )
         self._context_result = result
         if result.field is not None and result.field.sensitive:
@@ -1991,7 +1987,7 @@ class KeySwitchEngine:
             planned_baseline, alternative, group, self.detector, "space", "assist",
             after=decision.replacement, field_override=waiting.field,
             boundary_text=previous.boundary.character,
-            after_origin="planned_next_conversion", planned_context=True,
+            after_origin="planned_next_conversion",
         )
         if not result.decision.should_convert:
             self._log_context_wait("context_wait_cancelled", waiting, "lookahead_not_converted")

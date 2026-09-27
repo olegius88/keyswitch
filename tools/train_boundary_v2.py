@@ -12,9 +12,19 @@ from pathlib import Path
 from typing import cast
 
 from keyswitch.boundary_policy import ARTIFACT, FEATURE_VERSION, BoundaryPolicy
+from keyswitch.context_model import ACTIONS
+from keyswitch.value_provenance import pin_values
 from boundary_v2_corpus import CONFIG, DIRECTORY, RECEIPT, provenance as corpus_provenance, rows
+from context_corpus import ROOT
 from context_evidence import canonical, checksum
 from context_optimizer import Kernel, Packed, SOURCE as OPTIMIZER
+from keyswitch.constants.boundary import (
+    BOUNDARY_V2_TRAINING_PROGRESS_EPOCHS,
+    BOUNDARY_V2_VERSION_PREFIX,
+    BOUNDARY_WEIGHT_DECIMALS,
+)
+from keyswitch.constants.file_formats import VERSION_HASH_CHARACTERS
+from keyswitch.constants.training import DETERMINISTIC_ROUNDING_DECIMALS, LOG_LOSS_PROBABILITY_FLOOR
 
 
 CANDIDATE = DIRECTORY / "candidate.json"
@@ -23,7 +33,8 @@ REPORT = DIRECTORY / "report.json"
 
 
 def provenance() -> dict[str, str]:
-    return {"trainer": checksum(Path(__file__)), "optimizer": checksum(OPTIMIZER), "corpus": checksum(RECEIPT)}
+    return {"trainer": checksum(Path(__file__)), "optimizer": checksum(OPTIMIZER), "corpus": checksum(RECEIPT),
+            "constants_sha256": pin_values([Path(__file__)], source_root=ROOT / "src").sha256}
 
 
 def metrics(model: BoundaryPolicy, data: list[dict[str, object]]) -> dict[str, object]:
@@ -85,19 +96,23 @@ def train() -> tuple[bytes, bytes]:
     names = sorted({name for row in data["train"] for values in cast(list[dict[str, float]], row["features"]) for name in values})
     packed = {split: Packed.build(comparisons(data[split]), names) for split in ("train", "development")}
     kernel = Kernel.load()
-    weights, accumulators = array("d", [0.0]) * (len(names) * 4), array("d", [1.0]) * (len(names) * 4)
+    # The optimizer keeps one weight per feature and context action, feature by feature; a boundary
+    # comparison uses the first two (label 1: this candidate wins, label 0: the other one does).
+    width = len(ACTIONS)
+    weights, accumulators = array("d", [0.0]) * (len(names) * width), array("d", [1.0]) * (len(names) * width)
     best, best_loss, selected = array("d", weights), math.inf, 0
     for epoch in range(cast(int, cfg["epochs"])):
         kernel.epoch(packed["train"], weights, accumulators, cast(float, cfg["learning_rate"]))
         probabilities = kernel.predict(packed["development"], weights)
-        loss = sum(-packed["development"].importance[index] * math.log(max(1e-15, probabilities[index * 4 + label]))
+        loss = sum(-packed["development"].importance[index] * math.log(max(LOG_LOSS_PROBABILITY_FLOOR, probabilities[index * width + label]))
                    for index, label in enumerate(packed["development"].labels)) / len(packed["development"].labels)
         if loss < best_loss:
             best, best_loss, selected = array("d", weights), loss, epoch + 1
-        if epoch % 10 == 0:
+        if epoch % BOUNDARY_V2_TRAINING_PROGRESS_EPOCHS == 0:
             print(f"boundary-v2 epoch {epoch + 1}: development loss {loss:.6f}", flush=True)
-    learned = {name: round(best[index * 4 + 1] - best[index * 4], 12) for index, name in enumerate(names)}
-    version = "boundary-v2-" + hashlib.sha256(canonical(learned)).hexdigest()[:12]
+    learned = {name: round(best[index * width + 1] - best[index * width], BOUNDARY_WEIGHT_DECIMALS)
+               for index, name in enumerate(names)}
+    version = BOUNDARY_V2_VERSION_PREFIX + hashlib.sha256(canonical(learned)).hexdigest()[:VERSION_HASH_CHARACTERS]
     calibration = []
     threshold = 1.0
     for candidate in cast(list[float], cfg["thresholds"]):
@@ -110,7 +125,7 @@ def train() -> tuple[bytes, bytes]:
     raw = canonical({"feature_version": FEATURE_VERSION, "version": version, "weights": learned, "threshold": threshold})
     seal = {"schema_version": 1, "candidate_sha256": hashlib.sha256(raw).hexdigest(),
             "provenance": provenance(), "epoch": selected, "training_rows": len(data["train"]),
-            "development_loss": round(best_loss, 9), "development": metrics(model, data["development"]),
+            "development_loss": round(best_loss, DETERMINISTIC_ROUNDING_DECIMALS), "development": metrics(model, data["development"]),
             "calibration": metrics(model, data["calibration"]), "threshold_search": calibration,
             "config": cfg, "scope": cfg["evidence_scope"]}
     return raw, canonical(seal)
@@ -127,7 +142,8 @@ def evaluate() -> bytes:
     result = metrics(BoundaryPolicy.load(CANDIDATE), list(rows("test")))
     return canonical({"schema_version": 1, "seal_sha256": checksum(SEAL), "candidate_sha256": checksum(CANDIDATE),
                       "test": result, "accepted": acceptable(result, test=True),
-                      "scope": "First sealed synthetic segmentation evaluation on previously unused supervision families; subsequent replays are regression only."})
+                      "scope": "First sealed synthetic segmentation evaluation of this candidate, on supervision families it was not "
+                               "fitted, selected or calibrated on; subsequent replays are regression only."})
 
 
 def main() -> int:

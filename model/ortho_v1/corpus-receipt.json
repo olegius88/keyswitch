@@ -1,45 +1,41 @@
 {
-  "description": "Key-space token types derived from the frozen CC0 phrase snapshot. Tokens are labelled by their own alphabet, never by the sentence language, and keep their punctuation.",
+  "description": "Key-space token types from the frozen CC0 phrase snapshot, stored whole with their punctuation, Russian commas and full stops on their own key; the frozen Onboard word lists follow as rows that only add characters to the counts. What the engine serves the model is derived per layout by `served`.",
+  "label_rule": "the alphabet of the token itself, except that a token in the other alphabet inside a sentence of a language, whose reading in that language is a word of its frozen word list while the token is no word of its own alphabet's list, is that language typed in the wrong layout; the reading is taken of the whole token and of its letter core in the layout it was typed in, and the token's own word is that core",
+  "lexicon_weight": "max(1, min(32, frequency.bit_length()))",
   "maximum_token_characters": 32,
-  "namespace": "keyswitch:ortho-v1:key-space-20260908",
+  "namespace": "keyswitch:ortho-v1:served-split-g15",
   "occurrences_by_split_script": {
-    "calibration:en": 53342,
-    "calibration:ru": 18016,
-    "development:en": 57651,
-    "development:ru": 18956,
-    "reserve:en": 54493,
-    "reserve:ru": 19215,
-    "test:en": 55322,
-    "test:ru": 19001,
-    "train:en": 334335,
-    "train:ru": 113140
+    "lexicon:en": 481882,
+    "lexicon:ru": 434630,
+    "test:en": 308051,
+    "test:ru": 103224,
+    "train:en": 247084,
+    "train:ru": 85112
   },
   "provenance": {
+    "keyswitch.constants": "6f83b2ceaa0e4a273759cac4c2a3628e597b177033a5d395903dc4ee83745d9f",
     "model/context_v2/corpus-receipt.json": "cf88d7fe395d09ff6fafa8b3950cd18e1e7a07d781af9199e23e15fcff57cd5b",
     "model/context_v2/sources/tatoeba-cc0-en-ru.tsv.gz": "1f7df948b946f1d1aed5efd2a83a9a5a09d2b8abcb9224045b40c9ec6720e793",
+    "model/intent_v1/sources/en_US.lm": "017a513a23bb37947a3a0e73e307066fa8ec0642075172cdcad6ea204cae68da",
+    "model/intent_v1/sources/ru_RU.lm": "e57c14eec2b78e52a2125dce2b38044d8dfe480f3964b9d118614527195ceda9",
     "src/keyswitch/layouts.py": "374e8913fe51c72370ae8f775875847e47c2a1db7c8deaa2fc919944dd45597c",
-    "tools/context_corpus.py": "4c71b1ec1d213b2301899856b10066d5551e44a56c1e5a352d1742969e83806a",
-    "tools/ortho_corpus.py": "de474571c8453a2f41c348cf534cd7ea461a888ea00d34b0622c706ca5fbc7fe"
+    "tools/context_corpus.py": "fc0d5b566a9e191839b188f62a74a659760aa537ac951ea26e89d1d94ad90e61",
+    "tools/ortho_corpus.py": "9f86b10c06a0fc8892e83d4bb8d21ab541cd08dabd6520c7e5146f67eb21dea6"
   },
-  "schema_version": 1,
-  "tokens_sha256": "fab2fc577471b912278d4364cc192f06918f4f835a1f5366eea40e539e87be9e",
+  "schema_version": 2,
+  "split_rule": "context-v2 phrase groups (tools/context_corpus.py); bucket = int(sha256(namespace + ':' + group)[:8], 16) mod 100; test below 55, train otherwise",
+  "tokens_sha256": "7e50cad95bd10ea73ad9de23962ccaf0f65ef854a0619a054659dccc2b099f17",
   "types_by_split": {
-    "calibration": 21547,
-    "development": 22694,
-    "reserve": 21981,
-    "test": 22197,
-    "train": 77352
+    "lexicon": 81493,
+    "test": 71899,
+    "train": 62638
   },
   "types_by_split_script": {
-    "calibration:en": 14033,
-    "calibration:ru": 7514,
-    "development:en": 14885,
-    "development:ru": 7809,
-    "reserve:en": 14201,
-    "reserve:ru": 7780,
-    "test:en": 14437,
-    "test:ru": 7760,
-    "train:en": 47385,
-    "train:ru": 29967
+    "lexicon:en": 39272,
+    "lexicon:ru": 42221,
+    "test:en": 44875,
+    "test:ru": 27024,
+    "train:en": 39367,
+    "train:ru": 23271
   }
 }

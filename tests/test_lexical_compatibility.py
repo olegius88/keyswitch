@@ -31,6 +31,10 @@ from fixture_values.scores import (
 )
 from keyswitch.constants.file_formats import SHA256_HEX_CHARACTERS
 
+# The installed anchors, read before any test patches them.
+ANCHORED_CORPORA = dict(compatibility.ANCHORS)
+KIND = "fixture_corpus"
+
 
 class LexicalCompatibilityTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -59,8 +63,12 @@ class LexicalCompatibilityTests(unittest.TestCase):
         self.stack.enter_context(patch.object(compatibility, "LEXICAL_SHA256", compatibility.contract_sha256(self.generation)))
         self.write("tools/context_optimizer.c", b"frozen optimizer")
         self.write("tools/generator.py", b"frozen generator")
+        # No installed corpus relies on an audited transition now, so the mechanism is exercised on a
+        # fixture corpus anchored the way an audited one would be.
+        trainers = {KIND: "tools/train_fixture_model.py"}
+        self.stack.enter_context(patch.object(compatibility, "TRAINERS", trainers))
         anchors: dict[str, dict[str, str]] = {}
-        for kind in compatibility.ANCHORS:
+        for kind in trainers:
             self.write(compatibility.TRAINERS[kind], ("frozen trainer " + kind).encode())
             partitions: dict[str, str] = {}
             for split in ACTIVE_SPLITS:
@@ -108,7 +116,7 @@ class LexicalCompatibilityTests(unittest.TestCase):
             with self.subTest(path=relative):
                 path = self.root / relative
                 original = path.read_bytes()
-                kind = "boundary_v2" if "boundary_v2" in relative else "prefix_v1"
+                kind = KIND
                 try:
                     path.write_bytes(original + b"changed")
                     with self.assertRaises(ValueError):
@@ -120,7 +128,7 @@ class LexicalCompatibilityTests(unittest.TestCase):
                     path.write_bytes(original)
 
     def test_receipt_cannot_reanchor_a_replaced_corpus_and_its_partition_hashes(self) -> None:
-        kind = "prefix_v1"
+        kind = KIND
         corpus_path = self.root / f"model/{kind}/corpus.json"
         corpus = compatibility.read_object(corpus_path)
         split_path = self.root / f"model/{kind}/test.jsonl.gz"
@@ -134,19 +142,28 @@ class LexicalCompatibilityTests(unittest.TestCase):
             compatibility.verify(kind, root=self.root)
 
     def test_receipt_schema_is_closed_and_duplicate_fields_are_rejected(self) -> None:
-        good = compatibility.expected_receipt("prefix_v1", self.generation)
-        relative = "model/prefix_v1/lexical-compatibility.json"
+        good = compatibility.expected_receipt(KIND, self.generation)
+        relative = f"model/{KIND}/lexical-compatibility.json"
         for changed in ({**good, "accepted": True}, {**good, "schema_version": True},
                         {**good, "scope": "fresh evaluation passed"}, {**good, "consumed_contract_sha256": "0" * SHA256_HEX_CHARACTERS}, {}):
             with self.subTest(changed=changed.get("scope")):
                 self.write_json(relative, changed)
                 with self.assertRaises(ValueError):
-                    compatibility.verify("prefix_v1", root=self.root)
+                    compatibility.verify(KIND, root=self.root)
         self.write(relative, b'{"schema_version":1,"schema_version":1}')
         with self.assertRaisesRegex(ValueError, "duplicate"):
-            compatibility.verify("prefix_v1", root=self.root)
+            compatibility.verify(KIND, root=self.root)
         with self.assertRaisesRegex(ValueError, "unsupported"):
             compatibility.verify("arbitrary", root=self.root)
+
+    def test_refit_corpora_are_not_vouched_for_by_the_retired_transition(self) -> None:
+        # prefix-v1 and boundary-v2 were refit on the configuration their corpus receipts pin, so no
+        # audited transition vouches for them any more and the installed list is empty.
+        with patch.object(compatibility, "ANCHORS", {}):
+            for kind in ("prefix_v1", "boundary_v2"):
+                with self.subTest(kind=kind), self.assertRaisesRegex(ValueError, "unsupported"):
+                    compatibility.verify(kind, root=self.root)
+        self.assertEqual(ANCHORED_CORPORA, {})
 
     def test_changed_consumed_contract_is_rejected_even_with_reviewed_outer_digest(self) -> None:
         changed = copy.deepcopy(self.current)
@@ -154,12 +171,12 @@ class LexicalCompatibilityTests(unittest.TestCase):
         self.write_json(compatibility.CONFIG, changed)
         with patch.object(compatibility, "AUDITED_CONFIG_SHA256", compatibility.checksum(self.root / compatibility.CONFIG)):
             with self.assertRaisesRegex(ValueError, "consumed lexical contract"):
-                compatibility.verify("prefix_v1", root=self.root)
+                compatibility.verify(KIND, root=self.root)
 
     def test_future_unused_config_change_still_requires_a_reviewed_transition(self) -> None:
         self.write_json(compatibility.CONFIG, {**self.current, "unused_training_version": LEXICAL_FUTURE_UNUSED_TRAINING_VERSION})
         with self.assertRaisesRegex(ValueError, "input changed"):
-            compatibility.verify("prefix_v1", root=self.root)
+            compatibility.verify(KIND, root=self.root)
 
     def test_external_symlink_is_not_a_valid_frozen_input(self) -> None:
         outside = self.root.parent / (self.root.name + "-external")
@@ -172,12 +189,12 @@ class LexicalCompatibilityTests(unittest.TestCase):
         except OSError as error:
             self.skipTest(str(error))
         with self.assertRaisesRegex(ValueError, "escapes"):
-            compatibility.verify("prefix_v1", root=self.root)
+            compatibility.verify(KIND, root=self.root)
 
 
 class FrozenGateDispatchTests(unittest.TestCase):
 
-    def test_boundary_wrapper_reproduces_original_numeric_evaluation_on_small_fixture(self) -> None:
+    def test_boundary_gate_repeats_the_trainer_evaluation_on_small_fixture(self) -> None:
         import train_boundary_v2 as trainer
         import verify_boundary_v2 as gate
         from keyswitch.boundary_policy import FEATURE_VERSION, BoundaryPolicy
@@ -197,15 +214,15 @@ class FrozenGateDispatchTests(unittest.TestCase):
             seal.write_text(json.dumps({"candidate_sha256": compatibility.checksum(candidate), "provenance": {},
                                         "config": config, "calibration": calibration}))
             receipt.write_text('{"provenance":{}}')
-            for module in (trainer, gate):
-                for name, value in (("CONFIG", cfg), ("CANDIDATE", candidate), ("SEAL", seal), ("RECEIPT", receipt)):
-                    stack.enter_context(patch.object(module, name, value))
-                stack.enter_context(patch.object(module, "provenance", return_value={}))
-                stack.enter_context(patch.object(module, "rows", side_effect=lambda split: iter(data)))
+            for name, value in (("CONFIG", cfg), ("CANDIDATE", candidate), ("SEAL", seal), ("RECEIPT", receipt)):
+                stack.enter_context(patch.object(trainer, name, value))
+            stack.enter_context(patch.object(trainer, "provenance", return_value={}))
+            stack.enter_context(patch.object(trainer, "rows", side_effect=lambda split: iter(data)))
             stack.enter_context(patch.object(trainer, "corpus_provenance", return_value={}))
-            stack.enter_context(patch.object(gate, "verify_compatibility", return_value={"compatible": True}))
+            receipt_check = stack.enter_context(patch.object(gate, "verify_receipt", return_value={}))
             original = trainer.evaluate()
             self.assertEqual(gate.evaluate(), original)
+            receipt_check.assert_called_once_with()
             self.assertTrue(json.loads(original)["accepted"])
             self.assertEqual(json.loads(original)["test"]["counts"], {"correct": 1, "rows": 1})
             # An incorrect frozen label changes the score and fails the original quality gate.
@@ -214,28 +231,31 @@ class FrozenGateDispatchTests(unittest.TestCase):
             self.assertNotEqual(changed, original)
             self.assertFalse(json.loads(changed)["accepted"])
 
-    def test_prefix_frozen_numeric_replay_requires_compatibility_and_exact_report(self) -> None:
+    def test_prefix_frozen_numeric_replay_requires_the_corpus_receipt_and_exact_report(self) -> None:
         import verify_prefix_model as gate
         with tempfile.TemporaryDirectory() as temporary:
             report = Path(temporary) / "report.json"
             report.write_bytes(b'{"accepted":true}\n')
-            with patch.object(gate, "REPORT", report), patch.object(gate, "verify_compatibility", return_value={"compatible": True}) as validate, \
+            with patch.object(gate, "REPORT", report), patch.object(gate, "verify_receipt", return_value={"scope": "fixture"}) as validate, \
                     patch.object(gate, "evaluate", return_value=report.read_bytes()) as evaluate:
                 self.assertTrue(gate.verify_frozen()["frozen_numeric_regression"])
-                validate.assert_called_once_with("prefix_v1")
+                validate.assert_called_once_with()
                 evaluate.assert_called_once_with()
                 report.write_bytes(b'{"accepted":false}\n')
                 with self.assertRaisesRegex(ValueError, "numeric regression"):
                     gate.verify_frozen()
-            with patch.object(gate, "verify_compatibility", side_effect=ValueError("unapproved")), patch.object(gate, "evaluate") as evaluate:
-                with self.assertRaisesRegex(ValueError, "unapproved"):
+            with patch.object(gate, "verify_receipt", side_effect=ValueError("prefix corpus provenance changed")), \
+                    patch.object(gate, "evaluate") as evaluate:
+                with self.assertRaisesRegex(ValueError, "provenance changed"):
                     gate.verify_frozen()
                 evaluate.assert_not_called()
 
-    def test_boundary_compatibility_failure_never_opens_frozen_feature_rows(self) -> None:
+    def test_boundary_receipt_failure_never_opens_frozen_feature_rows(self) -> None:
+        import train_boundary_v2 as trainer
         import verify_boundary_v2 as gate
-        with patch.object(gate, "verify_compatibility", side_effect=ValueError("unapproved")), patch.object(gate, "rows") as rows:
-            with self.assertRaisesRegex(ValueError, "unapproved"):
+        with patch.object(gate, "verify_receipt", side_effect=ValueError("boundary corpus provenance changed")), \
+                patch.object(trainer, "rows") as rows:
+            with self.assertRaisesRegex(ValueError, "provenance changed"):
                 gate.evaluate()
             rows.assert_not_called()
 
@@ -243,13 +263,18 @@ class FrozenGateDispatchTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         for workflow in ("tests.yml", "release.yml"):
             text = (root / ".github/workflows" / workflow).read_text()
-            for command in ("verify_lexical_compatibility.py prefix_v1", "verify_lexical_compatibility.py boundary_v2",
-                            "verify_prefix_model.py --verify-frozen", "verify_boundary_v2.py --verify-frozen",
+            for command in ("verify_prefix_model.py --verify-frozen", "verify_boundary_v2.py --verify-frozen",
                             "evaluate_prefix_engine.py --verify", "evaluate_boundary_engine.py --verify",
-                            "train_boundary_model.py --verify", "verify_boundary_model.py"):
+                            "verify_boundary_model.py --verify-frozen"):
                 self.assertIn(command, text)
             self.assertNotIn("train_boundary_v2.py --verify", text)
+            # The rejected boundary-v1 seal pins sources that have changed since; its replay runs
+            # through the historical verifier, which checks the pins against archived copies.
+            self.assertNotIn("train_boundary_model.py --verify", text)
             self.assertNotIn("train_prefix_model.py verify", text)
+            # prefix-v1 and boundary-v2 pin the intent configuration in their own corpus receipts now,
+            # so no audited transition is left to verify.
+            self.assertNotIn("verify_lexical_compatibility.py", text)
 
     def test_engine_evaluators_refuse_inputs_that_change_during_replay(self) -> None:
         import evaluate_boundary_engine as boundary
@@ -258,7 +283,7 @@ class FrozenGateDispatchTests(unittest.TestCase):
         from keyswitch.boundary_policy import BoundaryPolicy
         from keyswitch.prefix_model import PrefixModel
         before, after = {"runtime.py": "old"}, {"runtime.py": "new"}
-        with patch.object(boundary, "verify_compatibility"), patch.object(boundary, "reference_models", return_value={}), \
+        with patch.object(boundary, "verify_receipt"), patch.object(boundary, "reference_models", return_value={}), \
                 patch.object(boundary, "provenance", side_effect=[before, after]), \
                 patch.object(boundary, "SCENARIOS", (("input", "output"),)), \
                 patch.object(boundary, "replay", return_value=("output ", 0)), \
@@ -266,7 +291,7 @@ class FrozenGateDispatchTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "runtime inputs changed"):
                 boundary.evaluate()
         row = {"sequence": 1, "text": "input", "category": "wrong", "desired": True}
-        with patch.object(prefix, "verify_compatibility"), patch.object(prefix, "reference_models", return_value={}), \
+        with patch.object(prefix, "verify_receipt"), patch.object(prefix, "lexicon", return_value=({}, {})), \
                 patch.object(prefix, "provenance", side_effect=[before, after]), \
                 patch.object(prefix, "select", return_value=[row]), \
                 patch.object(prefix, "replay", return_value={"expected": "output ", "actual": "output ", "early_at": 1, "injections": 1}), \

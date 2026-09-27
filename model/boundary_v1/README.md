@@ -74,16 +74,32 @@ real-user error rate or permission to activate this rejected candidate.
 Run sequentially in the Linux reference environment, without downloads:
 
 ```bash
-PYTHONPATH=src python3 tools/train_boundary_model.py --verify
-PYTHONPATH=src python3 tools/verify_boundary_model.py
+PYTHONPATH=src python3 tools/verify_boundary_model.py --verify-frozen
 PYTHONPATH=src python3 tools/evaluate_boundary_engine.py --verify
 ```
 
-`--verify` retrains and compares the candidate, seal and report byte-for-byte.
-The fast verifier rejects altered provenance/counts and installation of
-unapproved weights; CI and package builds invoke it. Training and test entry
-points refuse to overwrite an observed test. The explicit promotion command
-also refuses this rejected candidate.
+The fast verifier (`tools/verify_boundary_model.py` without arguments) checks
+the seal, candidate and report against reviewed digests, rejects altered
+provenance/counts and refuses installation of unapproved weights; package
+builds invoke it. `--verify-frozen` also retrains with the live tools and
+re-scores the sealed test, and compares the candidate, the seal and the report
+byte for byte; CI invokes it.
+
+The seal pins the six source files that produced the candidate
+(`src/keyswitch/boundary_model.py`, `language_model.py`, `layouts.py`,
+`tools/train_boundary_model.py`, `context_corpus.py`, `context_evidence.py`).
+They are shared with the installed models and change with them, so exact
+copies from Git commit `2c090c0` are kept in
+[`compatibility/generation-sources/`](compatibility/generation-sources) and each
+pin is checked against its copy, never against the live file (digests in
+`tools/historical_sources.py`). The replay puts these recorded pins back into
+the seal it reproduces: it shows that the current tools still produce the same
+candidate and test result, while the pins show which bytes produced them.
+`tools/train_boundary_model.py --verify` compares the seal with live source
+hashes instead and therefore fails as soon as any of these files changes; it
+is not the historical check. Training and test entry points refuse to
+overwrite an observed test. The explicit promotion command also refuses this
+rejected candidate.
 
 Known gaps: unannotated real intention, uncommon/misspelled words, contextual
 punctuation meaning, morphological family separation, IME/dead-key composition,

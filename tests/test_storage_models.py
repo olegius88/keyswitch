@@ -22,6 +22,13 @@ from keyswitch.constants.file_formats import HISTORY_CONFIDENCE_DECIMALS
 from keyswitch.language_model import LanguageModel
 from keyswitch.learning import LearningStore
 from keyswitch.constants.detection import MAX_LEARNING_CONFIRMATIONS
+from keyswitch.constants.models import (
+    LANGUAGE_MODEL_CALIBRATION_WORD_LIMIT,
+    LANGUAGE_MODEL_NGRAM_ORDERS,
+    LANGUAGE_MODEL_SCORE_CACHE_MAXSIZE,
+    LANGUAGE_MODEL_TRIGRAM_ORDER,
+)
+from keyswitch.constants.text import HUNSPELL_MAX_CHECK_CHARACTERS
 from keyswitch.spellcheck import HunspellDictionary
 from keyswitch.system import AutostartManager
 from fixture_values.corpora import (
@@ -44,11 +51,8 @@ from fixture_values.corpora import (
 from fixture_values.counts import (
     HISTORY_BRANCH_ENTRY_COUNT,
     HISTORY_LIMIT_FIXTURE,
-    HUNSPELL_MAX_CHECK_CHARACTERS,
     LANGUAGE_MODEL_BEST_DELETION_LIMIT,
     LANGUAGE_MODEL_BEST_DELETION_WORD_LENGTH,
-    LANGUAGE_MODEL_CALIBRATION_WORD_LIMIT,
-    LANGUAGE_MODEL_SCORE_CACHE_MAXSIZE,
     LATIN_ALPHABET_SIZE,
     LEARNING_BROKEN_RULE_CONFIRMATIONS,
     LEARNING_CONFIRMATIONS_REQUIRED,
@@ -57,7 +61,6 @@ from fixture_values.counts import (
     LEARNING_SCALAR_RULE_VALUE,
 )
 from fixture_values.keys import ALTERNATE_TARGET_GROUP
-from fixture_values.models import LANGUAGE_MODEL_TRIGRAM_ORDER
 from fixture_values.platform import FAKE_HUNSPELL_HANDLE
 from fixture_values.scores import (
     HISTORY_BRANCH_CONFIDENCE_OFFSET,
@@ -329,7 +332,7 @@ class LanguageModelBranchTests(unittest.TestCase):
             return float(len(word))
 
         empty_counts = {
-            order: Counter[str]() for order in LanguageModel.NGRAM_ORDERS
+            order: Counter[str]() for order in LANGUAGE_MODEL_NGRAM_ORDERS
         }
         with (
             patch.object(

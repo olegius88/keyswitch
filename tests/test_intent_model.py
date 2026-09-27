@@ -110,7 +110,6 @@ from fixture_values.models import (
     INTENT_LOADER_FIXTURE_FINGERPRINT,
     INTENT_MATRIX_DIMENSION,
     INTENT_MINI_TEST_DIMENSION,
-    INTENT_MODEL_VERSION_MAX_CHARACTERS,
     INTENT_MUTATION_PROBE_VALUE,
     INTENT_OVERSIZED_METADATA_INT,
     INTENT_SAMPLE_FINGERPRINT,
@@ -181,8 +180,23 @@ from fixture_values.scores import (
 from keyswitch.constants.file_formats import (
     KSLM_FINGERPRINT_ENTRY_BYTES,
     KSLM_MAX_CONTAINER_BYTES,
+    KSLM_MAX_DIMENSION,
+    KSLM_MAX_FINGERPRINTS,
+    KSLM_MAX_MANIFEST_BYTES,
+    KSLM_MAX_PAYLOAD_BYTES,
+    KSLM_SCHEMA_VERSION,
     KSLM_WEIGHT_ENTRY_BYTES,
     SHA256_HEX_CHARACTERS,
+)
+from keyswitch.constants.models import (
+    FNV1A64_OFFSET_BASIS,
+    INTENT_FEATURE_VERSION,
+    INTENT_MAX_MODEL_FLOAT_MAGNITUDE,
+    INTENT_MEMBERSHIP_FNV_SEED,
+    INTENT_MIN_RUNTIME_TOKEN_CHARACTERS,
+    INTENT_MODEL_VERSION_MAX_CHARACTERS,
+    INTENT_NGRAM_ORDERS,
+    INTENT_RAW_TOKEN_MAX_CHARACTERS,
 )
 from keyswitch.constants.units import BYTES_PER_MEBIBYTE
 
@@ -319,9 +333,9 @@ def encode_test_case(
     bias: object = 0.0,
     platt_scale: object = 1.0,
     platt_bias: object = 0.0,
-    fnv_seed: object = im.DEFAULT_FNV_SEED,
-    membership_seed: object = im.DEFAULT_MEMBERSHIP_FNV_SEED,
-    ngram_orders: object = im.NGRAM_ORDERS,
+    fnv_seed: object = FNV1A64_OFFSET_BASIS,
+    membership_seed: object = INTENT_MEMBERSHIP_FNV_SEED,
+    ngram_orders: object = INTENT_NGRAM_ORDERS,
     metadata: object = None,
 ) -> bytes:
     """Pass deliberately malformed runtime values without weakening mypy."""
@@ -410,7 +424,7 @@ def repack_artifact(
         final_manifest = manifest_bytes
     header = im.HEADER.pack(
         im.MAGIC,
-        im.SCHEMA_VERSION,
+        KSLM_SCHEMA_VERSION,
         0,
         len(final_manifest),
         len(final_payload),
@@ -423,21 +437,21 @@ def repack_artifact(
 class StatusAndPrimitiveTests(unittest.TestCase):
 
     def test_hard_size_caps_are_exact_and_internally_consistent(self) -> None:
-        self.assertEqual(im.MINIMUM_RUNTIME_TOKEN_LENGTH, EXPECTED_INTENT_MINIMUM_RUNTIME_TOKEN_LENGTH)
-        self.assertEqual(im.MAX_SUPPORTED_FINGERPRINTS, 1 << EXPECTED_KSLM_MAX_FINGERPRINTS_LOG2)
-        self.assertEqual(im.MAX_PAYLOAD_BYTES, EXPECTED_KSLM_MAX_PAYLOAD_MEBIBYTES * BYTES_PER_MEBIBYTE)
-        self.assertEqual(im.MAX_MANIFEST_BYTES, 1 * BYTES_PER_MEBIBYTE)
-        self.assertEqual(im.MAX_CONTAINER_BYTES, EXPECTED_KSLM_MAX_CONTAINER_MEBIBYTES * BYTES_PER_MEBIBYTE)
+        self.assertEqual(INTENT_MIN_RUNTIME_TOKEN_CHARACTERS, EXPECTED_INTENT_MINIMUM_RUNTIME_TOKEN_LENGTH)
+        self.assertEqual(KSLM_MAX_FINGERPRINTS, 1 << EXPECTED_KSLM_MAX_FINGERPRINTS_LOG2)
+        self.assertEqual(KSLM_MAX_PAYLOAD_BYTES, EXPECTED_KSLM_MAX_PAYLOAD_MEBIBYTES * BYTES_PER_MEBIBYTE)
+        self.assertEqual(KSLM_MAX_MANIFEST_BYTES, 1 * BYTES_PER_MEBIBYTE)
+        self.assertEqual(KSLM_MAX_CONTAINER_BYTES, EXPECTED_KSLM_MAX_CONTAINER_MEBIBYTES * BYTES_PER_MEBIBYTE)
         self.assertEqual(
-            (im.MAX_DIMENSION * KSLM_WEIGHT_ENTRY_BYTES)
-            + (im.MAX_SUPPORTED_FINGERPRINTS * KSLM_FINGERPRINT_ENTRY_BYTES),
-            im.MAX_PAYLOAD_BYTES,
+            (KSLM_MAX_DIMENSION * KSLM_WEIGHT_ENTRY_BYTES)
+            + (KSLM_MAX_FINGERPRINTS * KSLM_FINGERPRINT_ENTRY_BYTES),
+            KSLM_MAX_PAYLOAD_BYTES,
         )
         self.assertGreaterEqual(
-            im.MAX_CONTAINER_BYTES,
+            KSLM_MAX_CONTAINER_BYTES,
             im.HEADER.size
-            + im.MAX_MANIFEST_BYTES
-            + im.MAX_PAYLOAD_BYTES,
+            + KSLM_MAX_MANIFEST_BYTES
+            + KSLM_MAX_PAYLOAD_BYTES,
         )
 
     def test_status_summary_and_dictionary_are_diagnostics_safe(self) -> None:
@@ -468,31 +482,31 @@ class StatusAndPrimitiveTests(unittest.TestCase):
     def test_unicode_normalization_and_raw_limit(self) -> None:
         self.assertEqual(normalize_token("A\u030A"), "å")
         self.assertEqual(normalize_token("Straße"), "strasse")
-        self.assertEqual(normalize_token("A" * im.RAW_TOKEN_LIMIT + "B"), "a" * im.RAW_TOKEN_LIMIT)
+        self.assertEqual(normalize_token("A" * INTENT_RAW_TOKEN_MAX_CHARACTERS + "B"), "a" * INTENT_RAW_TOKEN_MAX_CHARACTERS)
 
     def test_fnv_golden_vectors_and_signed_buckets(self) -> None:
-        self.assertEqual(fnv1a64(""), im.DEFAULT_FNV_SEED)
+        self.assertEqual(fnv1a64(""), FNV1A64_OFFSET_BASIS)
         self.assertEqual(fnv1a64("a"), FNV1A64_OF_A)
         self.assertEqual(fnv1a64("foobar"), FNV1A64_OF_FOOBAR)
         self.assertEqual(fnv1a64("привет"), FNV1A64_OF_PRIVET)
         self.assertEqual(signed_feature_hash("a", INTENT_TEST_DIMENSION), (SIGNED_HASH_BUCKET_OF_A, -1))
         self.assertEqual(signed_feature_hash("KSLM", INTENT_TEST_DIMENSION), (SIGNED_HASH_BUCKET_OF_KSLM, 1))
         self.assertEqual(
-            fnv1a64("char:g0:n2:^a", im.DEFAULT_MEMBERSHIP_FNV_SEED),
+            fnv1a64("char:g0:n2:^a", INTENT_MEMBERSHIP_FNV_SEED),
             MEMBERSHIP_HASH_CHAR_GROUP0_ORDER2,
         )
         self.assertEqual(
-            fnv1a64("char:g1:n5:вет$", im.DEFAULT_MEMBERSHIP_FNV_SEED),
+            fnv1a64("char:g1:n5:вет$", INTENT_MEMBERSHIP_FNV_SEED),
             MEMBERSHIP_HASH_CHAR_GROUP1_ORDER5,
         )
         self.assertNotEqual(
-            fnv1a64("char:g0:n2:^a", im.DEFAULT_MEMBERSHIP_FNV_SEED),
-            fnv1a64("char:g0:n2:^a", im.DEFAULT_FNV_SEED),
+            fnv1a64("char:g0:n2:^a", INTENT_MEMBERSHIP_FNV_SEED),
+            fnv1a64("char:g0:n2:^a", FNV1A64_OFFSET_BASIS),
         )
         for invalid in (-1, UINT64_OVERFLOW, True):
             with self.assertRaises(ValueError):
                 fnv1a64("x", invalid)
-        for invalid_dimension in (0, INVALID_INTENT_DIMENSION, im.MAX_DIMENSION + 1, True):
+        for invalid_dimension in (0, INVALID_INTENT_DIMENSION, KSLM_MAX_DIMENSION + 1, True):
             with self.assertRaises(ValueError):
                 signed_feature_hash("x", invalid_dimension)
 
@@ -522,10 +536,10 @@ class FeatureExtractionTests(unittest.TestCase):
             self.assertTrue(character)
             right[name] = right.get(name, 0.0) + value
 
-        im._add_character_features("aaaa", 0, -1.0, im.NGRAM_ORDERS, add_left)
-        im._add_character_features("bbbb", 1, 1.0, im.NGRAM_ORDERS, add_left)
-        im._add_character_features("bbbb", 1, -1.0, im.NGRAM_ORDERS, add_right)
-        im._add_character_features("aaaa", 0, 1.0, im.NGRAM_ORDERS, add_right)
+        im._add_character_features("aaaa", 0, -1.0, INTENT_NGRAM_ORDERS, add_left)
+        im._add_character_features("bbbb", 1, 1.0, INTENT_NGRAM_ORDERS, add_left)
+        im._add_character_features("bbbb", 1, -1.0, INTENT_NGRAM_ORDERS, add_right)
+        im._add_character_features("aaaa", 0, 1.0, INTENT_NGRAM_ORDERS, add_right)
         self.assertEqual(set(left), set(right))
         for name, value in left.items():
             self.assertAlmostEqual(value, -right[name])
@@ -533,8 +547,8 @@ class FeatureExtractionTests(unittest.TestCase):
 
     def test_feature_vector_is_deterministic_bounded_and_sparse(self) -> None:
         item = evidence(
-            original="G" * im.RAW_TOKEN_LIMIT + "ignored",
-            alternative="П" * im.RAW_TOKEN_LIMIT + "лишнее",
+            original="G" * INTENT_RAW_TOKEN_MAX_CHARACTERS + "ignored",
+            alternative="П" * INTENT_RAW_TOKEN_MAX_CHARACTERS + "лишнее",
             source_group=-INTENT_EXTREME_GROUP,
             target_group=INTENT_EXTREME_GROUP,
             source_score=word_score(
@@ -680,7 +694,7 @@ class FeatureExtractionTests(unittest.TestCase):
         changed_feature_hash = extract_features(
             item,
             dimension=INTENT_LARGE_TEST_DIMENSION,
-            hash_seed=im.DEFAULT_FNV_SEED ^ 1,
+            hash_seed=FNV1A64_OFFSET_BASIS ^ 1,
         )
         self.assertNotEqual(vector.values, changed_feature_hash.values)
         self.assertEqual(
@@ -691,7 +705,7 @@ class FeatureExtractionTests(unittest.TestCase):
         changed_membership_hash = extract_features(
             item,
             dimension=INTENT_LARGE_TEST_DIMENSION,
-            membership_seed=im.DEFAULT_MEMBERSHIP_FNV_SEED ^ 1,
+            membership_seed=INTENT_MEMBERSHIP_FNV_SEED ^ 1,
         )
         self.assertEqual(vector.values, changed_membership_hash.values)
         self.assertNotEqual(
@@ -759,7 +773,7 @@ class FeatureExtractionTests(unittest.TestCase):
             extract_features(
                 evidence(),
                 dimension=INTENT_SMALL_TEST_DIMENSION,
-                membership_seed=im.DEFAULT_FNV_SEED,
+                membership_seed=FNV1A64_OFFSET_BASIS,
             )
         with self.assertRaises(ValueError):
             extract_features(evidence(), dimension=INTENT_SMALL_TEST_DIMENSION, ngram_orders=INCOMPLETE_INTENT_NGRAM_ORDERS)
@@ -874,15 +888,15 @@ class EncodingAndPredictionTests(unittest.TestCase):
         )
         self.assertEqual(first, second)
         manifest, payload = unpack_artifact(first)
-        self.assertEqual(manifest["schema"], im.SCHEMA_VERSION)
-        self.assertEqual(manifest["feature_version"], im.FEATURE_VERSION)
+        self.assertEqual(manifest["schema"], KSLM_SCHEMA_VERSION)
+        self.assertEqual(manifest["feature_version"], INTENT_FEATURE_VERSION)
         self.assertEqual(
             manifest["membership_algorithm"],
             im.MEMBERSHIP_ALGORITHM,
         )
         self.assertEqual(
             manifest["membership_seed"],
-            im.DEFAULT_MEMBERSHIP_FNV_SEED,
+            INTENT_MEMBERSHIP_FNV_SEED,
         )
         self.assertEqual(manifest["supported_fingerprint_count"], INTENT_EXPECTED_FINGERPRINT_COUNT)
         self.assertEqual(
@@ -905,7 +919,7 @@ class EncodingAndPredictionTests(unittest.TestCase):
             self.assertEqual(model.veto_threshold, INTENT_TEST_VETO_THRESHOLD)
             self.assertEqual(
                 model.membership_seed,
-                im.DEFAULT_MEMBERSHIP_FNV_SEED,
+                INTENT_MEMBERSHIP_FNV_SEED,
             )
             self.assertEqual(model.checksum, hashlib.sha256(first).hexdigest())
             snapshot = model.metadata
@@ -1080,9 +1094,9 @@ class EncodingAndPredictionTests(unittest.TestCase):
                 threshold_logits=directional_threshold_logits(),
                 veto_threshold=-1.0,
                 model_version="immutable",
-                fnv_seed=im.DEFAULT_FNV_SEED,
-                membership_seed=im.DEFAULT_MEMBERSHIP_FNV_SEED,
-                ngram_orders=im.NGRAM_ORDERS,
+                fnv_seed=FNV1A64_OFFSET_BASIS,
+                membership_seed=INTENT_MEMBERSHIP_FNV_SEED,
+                ngram_orders=INTENT_NGRAM_ORDERS,
                 payload_sha256=payload_sha256,
                 checksum=checksum,
                 source_path=None,
@@ -1132,7 +1146,7 @@ class EncodingAndPredictionTests(unittest.TestCase):
         for arguments in invalid_cases:
             with self.assertRaises(ValueError):
                 construct(**arguments)
-        with patch.object(im, "MAX_SUPPORTED_FINGERPRINTS", INTENT_TINY_FINGERPRINT_CAP):
+        with patch.object(im, "KSLM_MAX_FINGERPRINTS", INTENT_TINY_FINGERPRINT_CAP):
             with self.assertRaisesRegex(ValueError, "fingerprint count"):
                 construct(fingerprints_value=array("Q", INTENT_SAMPLE_FINGERPRINTS))
 
@@ -1215,7 +1229,7 @@ class EncodingAndPredictionTests(unittest.TestCase):
             self.assertEqual(LinearNgramModel.load(path).metadata, {"source": "test"})
 
     def test_writer_validation_rejects_invalid_arguments(self) -> None:
-        invalid_dimensions = (0, INVALID_INTENT_DIMENSION, im.MAX_DIMENSION + 1, True)
+        invalid_dimensions = (0, INVALID_INTENT_DIMENSION, KSLM_MAX_DIMENSION + 1, True)
         for dimension in invalid_dimensions:
             with self.assertRaises(ValueError):
                 encode_test_case(dimension=dimension)
@@ -1246,7 +1260,7 @@ class EncodingAndPredictionTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             encode_test_case(weights=WeightBomb())
-        for invalid_weight in (math.nan, math.inf, im._MAX_MODEL_FLOAT + 1, True, "bad"):
+        for invalid_weight in (math.nan, math.inf, INTENT_MAX_MODEL_FLOAT_MAGNITUDE + 1, True, "bad"):
             weights: list[object] = [0.0] * INTENT_MINI_TEST_DIMENSION
             weights[0] = invalid_weight
             with self.assertRaises(ValueError):
@@ -1269,8 +1283,8 @@ class EncodingAndPredictionTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 encode_test_case(membership_seed=invalid_seed)
         with self.assertRaises(ValueError):
-            encode_test_case(membership_seed=im.DEFAULT_FNV_SEED)
-        with patch.object(im, "MAX_SUPPORTED_FINGERPRINTS", 1):
+            encode_test_case(membership_seed=FNV1A64_OFFSET_BASIS)
+        with patch.object(im, "KSLM_MAX_FINGERPRINTS", 1):
             with self.assertRaises(ValueError):
                 encode_test_case(supported_fingerprints={1, INTENT_SECOND_SAMPLE_FINGERPRINT})
 
@@ -1307,7 +1321,7 @@ class EncodingAndPredictionTests(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 encode_test_case(supported_fingerprints=FingerprintBomb())
-        with patch.object(im, "MAX_SUPPORTED_FINGERPRINTS", INTENT_TINY_FINGERPRINT_CAP):
+        with patch.object(im, "KSLM_MAX_FINGERPRINTS", INTENT_TINY_FINGERPRINT_CAP):
             exact_fingerprint_cap = encode_test_case(
                 supported_fingerprints={1, INTENT_SECOND_SAMPLE_FINGERPRINT}
             )
@@ -1320,7 +1334,7 @@ class EncodingAndPredictionTests(unittest.TestCase):
             )
             with self.assertRaises(ValueError):
                 encode_test_case(supported_fingerprints={1, INTENT_SECOND_SAMPLE_FINGERPRINT, INTENT_SAMPLE_FINGERPRINT})
-        with patch.object(im, "MAX_PAYLOAD_BYTES", INTENT_TINY_PAYLOAD_CAP_BYTES):
+        with patch.object(im, "KSLM_MAX_PAYLOAD_BYTES", INTENT_TINY_PAYLOAD_CAP_BYTES):
             exact_payload_cap = encode_test_case(
                 dimension=INTENT_MINI_TEST_DIMENSION,
                 supported_fingerprints={1, INTENT_SECOND_SAMPLE_FINGERPRINT},
@@ -1350,7 +1364,7 @@ class EncodingAndPredictionTests(unittest.TestCase):
             {**threshold_logit_objects, "extra": INTENT_ARBITRARY_THRESHOLD_LOGIT},
             {**threshold_logit_objects, "space": math.nan},
             {**threshold_logit_objects, "space": True},
-            {**threshold_logit_objects, "space": im._MAX_MODEL_FLOAT + 1},
+            {**threshold_logit_objects, "space": INTENT_MAX_MODEL_FLOAT_MAGNITUDE + 1},
         ]
         for threshold_logits in bad_threshold_logits:
             with self.assertRaises(ValueError):
@@ -1386,7 +1400,7 @@ class EncodingAndPredictionTests(unittest.TestCase):
             with self.assertRaises(IntentModelFormatError):
                 encode_test_case(metadata=metadata)
         with self.assertRaises(ValueError):
-            encode_test_case(metadata={"huge": "x" * im.MAX_MANIFEST_BYTES})
+            encode_test_case(metadata={"huge": "x" * KSLM_MAX_MANIFEST_BYTES})
 
 
 class LoaderCorruptionTests(unittest.TestCase):
@@ -1410,7 +1424,7 @@ class LoaderCorruptionTests(unittest.TestCase):
         self,
         *,
         magic: bytes = im.MAGIC,
-        schema: int = im.SCHEMA_VERSION,
+        schema: int = KSLM_SCHEMA_VERSION,
         flags: int = 0,
         manifest_length: int | None = None,
         payload_length: int | None = None,
@@ -1439,20 +1453,20 @@ class LoaderCorruptionTests(unittest.TestCase):
         self.assert_format_error(self.replace_header(flags=1), "flags")
         self.assert_format_error(self.replace_header(manifest_length=1), "manifest length")
         self.assert_format_error(
-            self.replace_header(manifest_length=im.MAX_MANIFEST_BYTES + 1),
+            self.replace_header(manifest_length=KSLM_MAX_MANIFEST_BYTES + 1),
             "manifest length",
         )
         self.assert_format_error(
-            self.replace_header(manifest_length=im.MAX_MANIFEST_BYTES),
+            self.replace_header(manifest_length=KSLM_MAX_MANIFEST_BYTES),
             "file length",
         )
         self.assert_format_error(self.replace_header(payload_length=0), "payload length")
         self.assert_format_error(
-            self.replace_header(payload_length=im.MAX_PAYLOAD_BYTES + 1),
+            self.replace_header(payload_length=KSLM_MAX_PAYLOAD_BYTES + 1),
             "payload length",
         )
         self.assert_format_error(
-            self.replace_header(payload_length=im.MAX_PAYLOAD_BYTES),
+            self.replace_header(payload_length=KSLM_MAX_PAYLOAD_BYTES),
             "file length",
         )
         self.assert_format_error(self.valid + b"trailing", "file length")
@@ -1499,7 +1513,7 @@ class LoaderCorruptionTests(unittest.TestCase):
         old_manifest_bytes = im._canonical_json(old_manifest)
         header = im.HEADER.pack(
             im.MAGIC,
-            im.SCHEMA_VERSION,
+            KSLM_SCHEMA_VERSION,
             0,
             len(old_manifest_bytes),
             len(changed_payload),
@@ -1538,12 +1552,12 @@ class LoaderCorruptionTests(unittest.TestCase):
             ("fnv_seed", -1, "FNV seed"),
             ("membership_seed", True, "membership_seed"),
             ("membership_seed", -1, "FNV seed"),
-            ("membership_seed", im.DEFAULT_FNV_SEED, "must differ"),
+            ("membership_seed", FNV1A64_OFFSET_BASIS, "must differ"),
             ("supported_fingerprint_count", True, "integer"),
             ("supported_fingerprint_count", -1, "size limit"),
             (
                 "supported_fingerprint_count",
-                im.MAX_SUPPORTED_FINGERPRINTS + 1,
+                KSLM_MAX_FINGERPRINTS + 1,
                 "size limit",
             ),
             ("ngram_orders", "bad", "array"),
@@ -1562,7 +1576,7 @@ class LoaderCorruptionTests(unittest.TestCase):
 
         for direction, field, value, message in (
             ("0>1", "scale", 0.0, "positive"),
-            ("1>0", "bias", im._MAX_MODEL_FLOAT + 1, "bounded"),
+            ("1>0", "bias", INTENT_MAX_MODEL_FLOAT_MAGNITUDE + 1, "bounded"),
         ):
             def mutate_calibration(
                 manifest: dict[str, object],
@@ -1586,7 +1600,7 @@ class LoaderCorruptionTests(unittest.TestCase):
         raw = im._canonical_json(manifest).replace(b'"bias":0.5', b'"bias":NaN')
         nan_artifact = im.HEADER.pack(
             im.MAGIC,
-            im.SCHEMA_VERSION,
+            KSLM_SCHEMA_VERSION,
             0,
             len(raw),
             len(payload),
@@ -1692,14 +1706,14 @@ class LoaderCorruptionTests(unittest.TestCase):
             self.assert_format_error(self.valid, "fingerprint count")
 
     def test_file_size_bound_and_missing_file(self) -> None:
-        self.assertEqual(im.MAX_CONTAINER_BYTES, KSLM_MAX_CONTAINER_BYTES)
+        self.assertEqual(KSLM_MAX_CONTAINER_BYTES, KSLM_MAX_CONTAINER_BYTES)
         opener = mock_open(read_data=b"short")
         with patch.object(Path, "open", opener):
             self.assertEqual(im._read_bounded(Path("bounded.ksm")), b"short")
-        opener().read.assert_called_once_with(im.MAX_CONTAINER_BYTES + 1)
+        opener().read.assert_called_once_with(KSLM_MAX_CONTAINER_BYTES + 1)
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "huge.ksm"
-            maximum = im.MAX_CONTAINER_BYTES
+            maximum = KSLM_MAX_CONTAINER_BYTES
             with path.open("wb") as handle:
                 handle.seek(maximum)
                 handle.write(b"x")

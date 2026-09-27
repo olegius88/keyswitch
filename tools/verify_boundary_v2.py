@@ -5,53 +5,37 @@ import argparse
 import json
 from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
 
 from keyswitch.boundary_policy import ARTIFACT, BoundaryPolicy
-from boundary_v2_corpus import CONFIG, DIRECTORY, RECEIPT, rows
-from keyswitch.constants.model_protocol import ACTIVE_SPLITS
-from context_evidence import canonical, checksum
+from boundary_v2_corpus import verify_receipt
+from context_evidence import checksum
 from evaluate_boundary_engine import REPORT as ENGINE_REPORT, SCENARIOS, provenance as engine_provenance
-from train_boundary_v2 import CANDIDATE, REPORT, SEAL, acceptable, metrics, provenance
+from train_boundary_v2 import CANDIDATE, REPORT, evaluate as evaluate_test
 from verify_context_v2 import read_object
-from verify_lexical_compatibility import read_object as read_compatibility_object
-from verify_lexical_compatibility import verify as verify_compatibility
 from keyswitch.constants.file_formats import REPORT_JSON_INDENT
 
 
 def evaluate() -> bytes:
-    """Repeat the historical numeric evaluation after audited lexical checks.
+    """Repeat the sealed numeric evaluation once the corpus receipt matches the current inputs.
 
-    Frozen feature rows and original metric code are used unchanged. This is
+    The receipt check comes first, so changed inputs never open the frozen test rows. The
+    evaluation itself is the trainer's: frozen feature rows, sealed weights and threshold. This is
     regression evidence, not re-extraction, retraining, or a new holdout.
     """
-    verify_compatibility("boundary_v2")
-    seal = read_compatibility_object(SEAL)
-    if (seal.get("candidate_sha256") != checksum(CANDIDATE) or seal.get("provenance") != provenance()
-            or seal.get("config") != json.loads(CONFIG.read_bytes())):
-        raise ValueError("boundary candidate/provenance changed after seal")
-    if not acceptable(cast(dict[str, object], seal["calibration"]), test=False):
-        raise ValueError("calibration gates failed; do not open the held-out test")
-    result = metrics(BoundaryPolicy.load(CANDIDATE), list(rows("test")))
-    return canonical({"schema_version": 1, "seal_sha256": checksum(SEAL), "candidate_sha256": checksum(CANDIDATE),
-                      "test": result, "accepted": acceptable(result, test=True),
-                      "scope": "First sealed synthetic segmentation evaluation on previously unused supervision families; subsequent replays are regression only."})
+    verify_receipt()
+    return evaluate_test()
 
 
 def verify_frozen() -> dict[str, object]:
     raw = evaluate()
     if raw != REPORT.read_bytes() or json.loads(raw).get("accepted") is not True:
         raise ValueError("boundary-v2 frozen numeric regression changed or rejected")
-    return {"corpus": "boundary_v2", "compatible": True, "frozen_numeric_regression": True,
+    return {"corpus": "boundary_v2", "frozen_numeric_regression": True,
             "scope": "Frozen numeric regression with unchanged weights; no new fit or current-runtime acceptance."}
 
 
 def verify(*, artifact: Path = ARTIFACT, report_path: Path = REPORT,
            engine_path: Path = ENGINE_REPORT) -> dict[str, object]:
-    corpus = read_object(RECEIPT)
-    if (corpus.get("family_overlap") != 0 or corpus.get("prior_phrase_test_family_overlap") != 0
-            or corpus.get("sha256") != {split: checksum(DIRECTORY / (split + ".jsonl.gz")) for split in ACTIVE_SPLITS}):
-        raise ValueError("boundary-v2 frozen partitions changed")
     raw = evaluate()
     report = json.loads(raw)
     if raw != report_path.read_bytes() or report["accepted"] is not True:

@@ -27,11 +27,11 @@ from keyswitch.constants.models import (
     MAX_PREFIX_WEIGHTS,
     PREFIX_MAX_CHARACTERS,
 )
+from keyswitch.constants.prefix import PREFIX_V1_BEFORE_CONTEXT_CHARACTERS
 from fixture_values.corpora import PREFIX_LEXICON_HIGH_FREQUENCY, PREFIX_LEXICON_LOW_FREQUENCY
 from fixture_values.counts import (
     PREFIX_CHARACTER_FEATURE_VALUE_CEILING,
     PREFIX_LONG_APPLICATION_NAME_REPEATS,
-    PREFIX_MODEL_BEFORE_WINDOW_CHARACTERS,
     PREFIX_OVER_LENGTH_CAP_CHARACTERS,
     PREFIX_TRAILING_FILLER_CHARACTERS,
     SUBTEST_PAYLOAD_PREVIEW_CHARACTERS,
@@ -162,7 +162,7 @@ class PrefixModelTests(unittest.TestCase):
         self.assertEqual((rich["token:capitals"], rich["token:digits"]), (1., 1.))
         reverse = features(PrefixInput("привет", "ghbdtn", 1, FieldContext("Terminal", "1", "English ё")), self.indexes, self.models)
         self.assertEqual(reverse["source:known"], 1.)
-        long = features(replace(self.item, original="x" * PREFIX_OVER_LENGTH_CAP_CHARACTERS, field=FieldContext("A " * PREFIX_LONG_APPLICATION_NAME_REPEATS, "1", "secret " + "x" * PREFIX_MODEL_BEFORE_WINDOW_CHARACTERS)), self.indexes, self.models)
+        long = features(replace(self.item, original="x" * PREFIX_OVER_LENGTH_CAP_CHARACTERS, field=FieldContext("A " * PREFIX_LONG_APPLICATION_NAME_REPEATS, "1", "secret " + "x" * PREFIX_V1_BEFORE_CONTEXT_CHARACTERS)), self.indexes, self.models)
         self.assertEqual(long["length"], 1.)
         self.assertNotIn("before:word:secret", long)
 

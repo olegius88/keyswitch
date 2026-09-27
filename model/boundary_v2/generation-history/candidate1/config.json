@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "namespace": "keyswitch:boundary-v2:20260907:candidate1",
+  "maximum_words_per_stratum": 3000,
+  "maximum_words_per_family": 4,
+  "epochs": 50,
+  "learning_rate": 0.12,
+  "thresholds": [0.90, 0.95, 0.98, 0.99, 0.995, 0.999, 0.9995, 0.9999, 1.0],
+  "promotion": {
+    "maximum_errors": 0,
+    "minimum_decided_fraction_per_stratum": 0.80,
+    "required_recall_strata": ["word_ending", "literal_en", "literal_ru"],
+    "minimum_test_rows": 1000,
+    "minimum_test_word_endings": 50
+  },
+  "evidence_scope": "New synthetic segmentation supervision from frozen public reference lexicons. Partition by four physical leading keys before punctuation variants. New test families exclude the entire previously consumed public phrase-source vocabulary (including the boundary-v1 reserve and prefix corpus); the same lexical resources may know held-out words. This is not independent real-user intent or a new test of the unchanged context/prefix models. Fresh test opened only after sealing weights and a calibration-selected threshold. Old private/audit and published examples are regression cases, not held-out evidence."
+}

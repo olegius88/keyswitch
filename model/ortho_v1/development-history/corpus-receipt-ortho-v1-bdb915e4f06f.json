@@ -1,0 +1,45 @@
+{
+  "description": "Key-space token types derived from the frozen CC0 phrase snapshot. Tokens are labelled by their own alphabet, never by the sentence language, and keep their punctuation.",
+  "maximum_token_characters": 32,
+  "namespace": "keyswitch:ortho-v1:key-space-20260908",
+  "occurrences_by_split_script": {
+    "calibration:en": 53342,
+    "calibration:ru": 18016,
+    "development:en": 57651,
+    "development:ru": 18956,
+    "reserve:en": 54493,
+    "reserve:ru": 19215,
+    "test:en": 55322,
+    "test:ru": 19001,
+    "train:en": 334335,
+    "train:ru": 113140
+  },
+  "provenance": {
+    "model/context_v2/corpus-receipt.json": "cf88d7fe395d09ff6fafa8b3950cd18e1e7a07d781af9199e23e15fcff57cd5b",
+    "model/context_v2/sources/tatoeba-cc0-en-ru.tsv.gz": "1f7df948b946f1d1aed5efd2a83a9a5a09d2b8abcb9224045b40c9ec6720e793",
+    "src/keyswitch/layouts.py": "374e8913fe51c72370ae8f775875847e47c2a1db7c8deaa2fc919944dd45597c",
+    "tools/context_corpus.py": "4c71b1ec1d213b2301899856b10066d5551e44a56c1e5a352d1742969e83806a",
+    "tools/ortho_corpus.py": "de474571c8453a2f41c348cf534cd7ea461a888ea00d34b0622c706ca5fbc7fe"
+  },
+  "schema_version": 1,
+  "tokens_sha256": "fab2fc577471b912278d4364cc192f06918f4f835a1f5366eea40e539e87be9e",
+  "types_by_split": {
+    "calibration": 21547,
+    "development": 22694,
+    "reserve": 21981,
+    "test": 22197,
+    "train": 77352
+  },
+  "types_by_split_script": {
+    "calibration:en": 14033,
+    "calibration:ru": 7514,
+    "development:en": 14885,
+    "development:ru": 7809,
+    "reserve:en": 14201,
+    "reserve:ru": 7780,
+    "test:en": 14437,
+    "test:ru": 7760,
+    "train:en": 47385,
+    "train:ru": 29967
+  }
+}

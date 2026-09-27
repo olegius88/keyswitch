@@ -32,7 +32,8 @@ from fixture_values.counts import (
 )
 from fixture_values.hashes import TRUNCATED_DIGEST_PROBE_CHARACTERS
 from fixture_values.scores import ULP_PROBE_DOUBLE_VALUE
-from keyswitch.constants.file_formats import SHA256_HEX_CHARACTERS
+from keyswitch.constants.environment_probe import PROBE_DOUBLES
+from keyswitch.constants.file_formats import ENVIRONMENT_PROBE_SCHEMA_VERSION, SHA256_HEX_CHARACTERS
 
 CELL_NAMES = tuple(name for name, _ in probe.CELLS)
 
@@ -66,7 +67,7 @@ class ProbeShape(unittest.TestCase):
 
     def test_probe_operands_are_doubles(self) -> None:
         # An int here would silently probe integer arithmetic instead.
-        for value in probe._PROBE_DOUBLES:
+        for value in PROBE_DOUBLES:
             self.assertIs(type(value), float)
 
     def test_source_carries_no_expected_digest(self) -> None:
@@ -235,7 +236,7 @@ class ProbeCommandLine(unittest.TestCase):
         completed = self.run_probe("--cells", "ordering", "integers")
         self.assertEqual(completed.returncode, 0)
         payload = json.loads(completed.stdout)
-        self.assertEqual(payload["schema_version"], probe.SCHEMA_VERSION)
+        self.assertEqual(payload["schema_version"], ENVIRONMENT_PROBE_SCHEMA_VERSION)
         self.assertEqual(set(payload["cells"]), {"ordering", "integers"})
 
     def test_fork_check_is_reported(self) -> None:

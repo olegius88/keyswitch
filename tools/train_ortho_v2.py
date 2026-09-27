@@ -57,7 +57,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import ortho_v2_corpus as corpus  # noqa: E402
 import ortho_v2_verified as verified  # noqa: E402
+from historical_sources import ORTHO_V2  # noqa: E402
 
+from keyswitch.constants.file_formats import REPORT_JSON_INDENT, VERSION_HASH_CHARACTERS  # noqa: E402
+from keyswitch.constants.model_protocol import SEALED_BEFORE_TEST  # noqa: E402
+from keyswitch.constants.training import (  # noqa: E402
+    ORTHO_V2_FALSE_RATE_DECIMALS,
+    ORTHO_V2_FALSE_RATE_SCALE,
+    ORTHO_V2_IDEAL_SEPARATION_PERCENT,
+    ORTHO_V2_PRINTED_REPORT_MAX_CHARACTERS,
+    ORTHO_V2_RECALL_DECIMALS,
+    ORTHO_V2_REPORTED_SCORE_DECIMALS,
+    ORTHO_V2_REPORTED_WORST_FALSE,
+    ORTHO_V2_SEALED_THRESHOLD_DECIMALS,
+    ORTHO_V2_SHAPE_PSEUDO_COUNT,
+    ORTHO_V2_UNIGRAM_PSEUDO_COUNT,
+)
 from keyswitch.context_policy import word_shaped  # noqa: E402
 from keyswitch.ortho_model import (  # noqa: E402
     BOS, EOS, SCRIPTS, SHAPES,
@@ -168,7 +183,7 @@ def fit_channel(gram_counts: Counter[str], order: int, discount: float,
         for gram in sorted(gram for gram in gram_counts if len(gram) == size):
             count = gram_counts[gram]
             if size == 1:
-                probability = (count + 0.5) / (unigram_total + 0.5 * alphabet)
+                probability = (count + ORTHO_V2_UNIGRAM_PSEUDO_COUNT) / (unigram_total + ORTHO_V2_UNIGRAM_PSEUDO_COUNT * alphabet)
                 logprob[gram] = math.log(probability)
                 continue
             context = gram[:-1]
@@ -191,9 +206,9 @@ def shape_channel(observed: dict[str, Counter[str]], scale: int) -> dict[str, ob
     result: dict[str, object] = {}
     for script in SCRIPTS:
         counter = observed[script]
-        total = sum(counter.values()) + 0.5 * len(SHAPES)
+        total = sum(counter.values()) + ORTHO_V2_SHAPE_PSEUDO_COUNT * len(SHAPES)
         result[script] = {
-            shape: quantise(math.log((counter.get(shape, 0) + 0.5) / total), scale)
+            shape: quantise(math.log((counter.get(shape, 0) + ORTHO_V2_SHAPE_PSEUDO_COUNT) / total), scale)
             for shape in SHAPES
         }
     return result
@@ -222,7 +237,7 @@ def build(rows: list[dict[str, object]], settings: dict[str, object]) -> dict[st
         "acronym_shape": shape_channel(acronym, scale),
     }
     digest = hashlib.sha256(canonical(payload)).hexdigest()
-    payload["version"] = f"ortho-v2-{digest[:12]}"
+    payload["version"] = f"ortho-v2-{digest[:VERSION_HASH_CHARACTERS]}"
     payload["weights_sha256"] = digest
     return payload
 
@@ -457,8 +472,8 @@ def outcome(scored: list[tuple[str, float, int, str, str, int]],
                 counted[f"{direction}:recalled_types_len{bucket}"] += 1
     report: dict[str, object] = {"counts": dict(sorted(counted.items()))}
     report["worst_false"] = {
-        script: [{"score": round(value, 4), "keys": keys, "shape": shape}
-                 for value, keys, shape in sorted(items, reverse=True)[:10]]
+        script: [{"score": round(value, ORTHO_V2_REPORTED_SCORE_DECIMALS), "keys": keys, "shape": shape}
+                 for value, keys, shape in sorted(items, reverse=True)[:ORTHO_V2_REPORTED_WORST_FALSE]]
         for script, items in worst.items()
     }
     return report
@@ -479,7 +494,7 @@ class Totals:
 
     @property
     def false_per_10000(self) -> float:
-        return 10_000 * self.false_occurrences / max(1, self.negative_occurrences)
+        return ORTHO_V2_FALSE_RATE_SCALE * self.false_occurrences / max(1, self.negative_occurrences)
 
 
 def totals(result: dict[str, object]) -> Totals:
@@ -623,13 +638,30 @@ def baseline_outcome(model: CountedModel, samples: list[tuple[str, str, str, int
     return totals({"counts": dict(counted)})
 
 
+def provenance_paths() -> tuple[Path, ...]:
+    return (ROOT / "tools/train_ortho_v2.py", ROOT / "tools/ortho_v2_corpus.py",
+            ROOT / "src/keyswitch/ortho_model.py", corpus.TOKENS, corpus.RECEIPT,
+            CONFIG, BASELINE, BASELINE_CORPUS, corpus.KNOWN_EVIDENCE,
+            ROOT / "model/ortho_v2/sources/known-receipt.json",
+            verified.LABELS, verified.RECEIPT)
+
+
 def provenance() -> dict[str, str]:
-    paths = (ROOT / "tools/train_ortho_v2.py", ROOT / "tools/ortho_v2_corpus.py",
-             ROOT / "src/keyswitch/ortho_model.py", corpus.TOKENS, corpus.RECEIPT,
-             CONFIG, BASELINE, BASELINE_CORPUS, corpus.KNOWN_EVIDENCE,
-             ROOT / "model/ortho_v2/sources/known-receipt.json",
-             verified.LABELS, verified.RECEIPT)
-    return {path.relative_to(ROOT).as_posix(): checksum(path) for path in paths}
+    """Live source hashes, recorded when a candidate is sealed."""
+
+    return {path.relative_to(ROOT).as_posix(): checksum(path) for path in provenance_paths()}
+
+
+def recorded_provenance(seal: dict[str, object]) -> dict[str, str]:
+    """The seal's source pins, each checked against its archived copy (tools/historical_sources.py).
+
+    The candidate was sealed with sources that have moved on since - the shared runtime
+    module and the installed model's files among them - so its pins name those bytes, never
+    the live files. `verify` shows separately that the live tools still count the same
+    candidate.
+    """
+
+    return ORTHO_V2.recorded(seal.get("provenance"), (path.relative_to(ROOT).as_posix() for path in provenance_paths()))
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -666,18 +698,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         }
         CANDIDATE.write_bytes(canonical(payload))
         seal = {
-            "schema_version": 1, "stage": "sealed-before-test", "namespace": NAMESPACE,
+            "schema_version": 1, "stage": SEALED_BEFORE_TEST, "namespace": NAMESPACE,
             "model_version": payload["version"], "candidate_sha256": checksum(CANDIDATE),
-            "thresholds": {script: round(value, 6) for script, value in thresholds.items()},
+            "thresholds": {script: round(value, ORTHO_V2_SEALED_THRESHOLD_DECIMALS) for script, value in thresholds.items()},
             "config": settings, "provenance": provenance(),
             "calibration_rows": len(calibration),
         }
         SEAL.write_bytes(canonical(seal))
-        print(json.dumps(seal, ensure_ascii=False, indent=2))
+        print(json.dumps(seal, ensure_ascii=False, indent=REPORT_JSON_INDENT))
         return 0
     seal = cast(dict[str, object], json.loads(SEAL.read_bytes()))
-    if seal.get("provenance") != provenance() or seal.get("candidate_sha256") != checksum(CANDIDATE):
+    if seal.get("candidate_sha256") != checksum(CANDIDATE):
         raise ValueError("candidate or provenance changed after the seal")
+    recorded_provenance(seal)
     model = CountedModel(CANDIDATE)
     thresholds = {script: float(value)
                   for script, value in cast(dict[str, float], seal["thresholds"]).items()}
@@ -709,48 +742,48 @@ def main(argv: Sequence[str] | None = None) -> int:
             "schema_version": 1, "model_version": seal["model_version"],
             "seal_sha256": checksum(SEAL), "candidate_sha256": checksum(CANDIDATE),
             "thresholds": seal["thresholds"],
-            "gate_families": gate, "gate_recall": round(gate_totals.recall, 6),
-            "gate_false_per_10000": round(gate_totals.false_per_10000, 4),
+            "gate_families": gate, "gate_recall": round(gate_totals.recall, ORTHO_V2_RECALL_DECIMALS),
+            "gate_false_per_10000": round(gate_totals.false_per_10000, ORTHO_V2_FALSE_RATE_DECIMALS),
             "mutually_unseen": unseen,
-            "mutually_unseen_recall": round(unseen_totals.recall, 6),
-            "mutually_unseen_false_per_10000": round(unseen_totals.false_per_10000, 4),
+            "mutually_unseen_recall": round(unseen_totals.recall, ORTHO_V2_RECALL_DECIMALS),
+            "mutually_unseen_false_per_10000": round(unseen_totals.false_per_10000, ORTHO_V2_FALSE_RATE_DECIMALS),
             "mutually_unseen_scope": (
                 "gate families the installed model did not count either; the only "
                 "population where neither model can be answering from memory"
             ),
-            "corpus_test": held, "recall": round(held_totals.recall, 6),
-            "test_false_per_10000": round(held_totals.false_per_10000, 4),
+            "corpus_test": held, "recall": round(held_totals.recall, ORTHO_V2_RECALL_DECIMALS),
+            "test_false_per_10000": round(held_totals.false_per_10000, ORTHO_V2_FALSE_RATE_DECIMALS),
             "lexical_stress_track": lexical,
             "baseline": {
                 "model_version": legacy.version,
                 "scope": "the installed model as users run it today, on the same rows",
-                "gate": {"false_per_10000": round(gate_baseline.false_per_10000, 4),
+                "gate": {"false_per_10000": round(gate_baseline.false_per_10000, ORTHO_V2_FALSE_RATE_DECIMALS),
                          "false_repeated_types": gate_baseline.false_repeated_types,
                          "false_attested_types": gate_baseline.false_attested_types,
-                         "recall": round(gate_baseline.recall, 6)},
-                "test": {"false_per_10000": round(test_baseline.false_per_10000, 4),
+                         "recall": round(gate_baseline.recall, ORTHO_V2_RECALL_DECIMALS)},
+                "test": {"false_per_10000": round(test_baseline.false_per_10000, ORTHO_V2_FALSE_RATE_DECIMALS),
                          "false_repeated_types": test_baseline.false_repeated_types,
                          "false_attested_types": test_baseline.false_attested_types,
-                         "recall": round(test_baseline.recall, 6)},
+                         "recall": round(test_baseline.recall, ORTHO_V2_RECALL_DECIMALS)},
                 "mutually_unseen": {
-                    "false_per_10000": round(unseen_baseline.false_per_10000, 4),
+                    "false_per_10000": round(unseen_baseline.false_per_10000, ORTHO_V2_FALSE_RATE_DECIMALS),
                     "false_repeated_types": unseen_baseline.false_repeated_types,
                     "false_attested_types": unseen_baseline.false_attested_types,
-                    "recall": round(unseen_baseline.recall, 6)},
+                    "recall": round(unseen_baseline.recall, ORTHO_V2_RECALL_DECIMALS)},
             },
             "baseline_behind_new_guards": {
                 "scope": ("the same weights with this release's two refusals applied, "
                           "reported so the weights and the guards can be told apart"),
-                "gate": {"false_per_10000": round(gate_guarded.false_per_10000, 4),
-                         "recall": round(gate_guarded.recall, 6)},
-                "test": {"false_per_10000": round(test_guarded.false_per_10000, 4),
-                         "recall": round(test_guarded.recall, 6)},
+                "gate": {"false_per_10000": round(gate_guarded.false_per_10000, ORTHO_V2_FALSE_RATE_DECIMALS),
+                         "recall": round(gate_guarded.recall, ORTHO_V2_RECALL_DECIMALS)},
+                "test": {"false_per_10000": round(test_guarded.false_per_10000, ORTHO_V2_FALSE_RATE_DECIMALS),
+                         "recall": round(test_guarded.recall, ORTHO_V2_RECALL_DECIMALS)},
             },
             "promotion_passed": passed,
             "not_promoted_because": (
                 None if passed else
                 "no candidate built on this corpus has beaten the installed model "
-                "while satisfying the rule; the weights separate 99.7% of wanted "
+                f"while satisfying the rule; the weights separate {ORTHO_V2_IDEAL_SEPARATION_PERCENT}% of wanted "
                 "conversions at an ideal threshold, but the corpus cannot fix one: "
                 "its negative tail is mislabelled wrong-layout text and unverifiable "
                 "foreign strings, so the margin swallows the gain"
@@ -763,7 +796,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
         }
         REPORT.write_bytes(canonical(payload))
-        print(json.dumps(payload, ensure_ascii=False, indent=2)[:4000])
+        print(json.dumps(payload, ensure_ascii=False, indent=REPORT_JSON_INDENT)[:ORTHO_V2_PRINTED_REPORT_MAX_CHARACTERS])
         return 0 if passed else 1
     if arguments.command == "verify":
         replay = build(rows, settings)

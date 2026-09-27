@@ -37,3 +37,18 @@ ALL_SPLITS: Final = (*ACTIVE_SPLITS, QUARANTINE)
 PORTABLE: Final = "portable"
 REFERENCE_HUNSPELL: Final = "reference_hunspell"
 PROFILES: Final = (PORTABLE, REFERENCE_HUNSPELL)
+
+# The intent seal pins, beside the bytes of its toolchain files, the values these files
+# import from the constants package (`keyswitch.value_provenance`); repository-relative.
+INTENT_TOOLCHAIN_VALUE_SOURCES: Final = (
+    "tools/train_intent_model.py",
+    "src/keyswitch/intent_model.py",
+    "src/keyswitch/detector.py",
+    "src/keyswitch/language_model.py",
+    "src/keyswitch/layouts.py",
+    "src/keyswitch/spellcheck.py",
+    "tools/evaluate_intent_model.py",
+    "tools/environment_probe.py",
+    "tools/preseal_intent_holdout.py",
+    "tools/freeze_intent_development_corpus.py",
+)

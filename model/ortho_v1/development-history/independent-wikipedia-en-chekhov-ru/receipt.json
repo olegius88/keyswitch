@@ -1,0 +1,128 @@
+{
+  "evidence_sha256": "ecb6cebcc4c929be3b13bab3475763aa21fb3d3abf02454e9b2008dc1f08e3b6",
+  "excluded_as_seen": {
+    "en:negative_types": 397,
+    "en:positive_types": 16030,
+    "ru:negative_types": 374,
+    "ru:positive_types": 12325
+  },
+  "history_tokens_sha256": {
+    "independent-common-voice-sentence-collector": "bc34f677c90d8134bf54fd0ca7e3e8e9ba4171587822c4cb489457646ca5450b"
+  },
+  "left_out_words": [
+    ".dist",
+    "bild",
+    "const",
+    "ctrl",
+    "gtk",
+    "healthcheck",
+    "hfcs",
+    "hotfix",
+    "htop",
+    "kubectl",
+    "nginx",
+    "npm",
+    "oled",
+    "webjs",
+    "websocket",
+    "а-б",
+    "гифку",
+    "гыф",
+    "йцукен",
+    "каеффф",
+    "клаиватура",
+    "лдпр",
+    "лут",
+    "мацуи",
+    "мда-а",
+    "москва",
+    "пересборку",
+    "повторнно",
+    "превет",
+    "привет",
+    "репост",
+    "рсфср",
+    "севодня",
+    "созвон",
+    "тыща",
+    "у-у",
+    "уведмление",
+    "флуд",
+    "фнаф",
+    "фнафер",
+    "фпривет",
+    "фыва",
+    "чатик",
+    "я-то"
+  ],
+  "population": "the corpus' own rules (ortho_corpus.label, to_keys, shape_of; train_ortho_model.population) with this verdict; a type whose served keys, every run read once, match a row of the snapshot, of an opened set or of a case written by hand is left out",
+  "provenance": {
+    "keyswitch.constants": "b8eaa8aa901b1655fe46cd33021f9653ee38e18d4b2d38835c715571915ce307",
+    "src/keyswitch/ortho_model.py": "0f25c3517011cf6905bd2d0a538254855267e19bcb99ef03a26e37b5821760de",
+    "tools/ortho_corpus.py": "358a74a6f26baedd151de53d6c59bd8205306dc23a345d29c4d8b077c517b3f3",
+    "tools/ortho_independent.py": "ba60e8b429214a04d98ae8bc9cf42bb19cd988d41d5fd259a96d82bcc58234da",
+    "tools/ortho_known.py": "2c0bf006c332824e037d77a90707cc7e5273970981abeed6a7af21d079a2508c",
+    "tools/train_ortho_model.py": "8e5776172a78398ffd77da08a76ded0c083cca02acaed7579c6f34d7edbcc6a3"
+  },
+  "rows_by_script": {
+    "en": 20367,
+    "ru": 70865
+  },
+  "schema_version": 2,
+  "set": "wikipedia-en-chekhov-ru",
+  "snapshot_tokens_sha256": "df1cf43914ead4e7d48fe193634277f730ed07d66020a7e2e793bf92ea9b940b",
+  "source": {
+    "excluded_pages": [
+      "Анна на шее (Чехов)"
+    ],
+    "files": [
+      {
+        "license": "CC0 1.0: the README of common-voice/common-voice states that the sentence text in /server/data comes from Sentence Collector submissions or is scraped from Wikipedia with its extractor and is released under CC0 (files europarl-* are the exception and are not used); server/data/en/LICENSE is the CC0 1.0 text",
+        "locale": "eng",
+        "name": "wiki.en.rerun-2021-11.txt",
+        "reader": "lines",
+        "retrieved": "2026-09-26T18:11+05:00",
+        "sample_percent": 5,
+        "sha256": "16647e64ba4124ccfeb7061e88ffb53261a16a15b7c4abcd2122b168b9f29639",
+        "url": "https://github.com/common-voice/common-voice/raw/1ce6d077cad36f99404b5414afacc314df58ad8c/server/data/en/wiki.en.rerun-2021-11.txt"
+      },
+      {
+        "license": "CC0 1.0: the README of common-voice/common-voice states that the sentence text in /server/data comes from Sentence Collector submissions or is scraped from Wikipedia with its extractor and is released under CC0 (files europarl-* are the exception and are not used); server/data/en/LICENSE is the CC0 1.0 text",
+        "locale": "rus",
+        "name": "bakwc1.txt",
+        "reader": "lines",
+        "retrieved": "2026-09-26T18:11+05:00",
+        "sample_percent": 100,
+        "sha256": "ca6ce2652c711824cfd7e1d65d395df7ee1028d539ac63d2aa2c10781de95597",
+        "url": "https://github.com/common-voice/common-voice/raw/1ce6d077cad36f99404b5414afacc314df58ad8c/server/data/ru/bakwc1.txt"
+      },
+      {
+        "license": "CC0 1.0: the README of common-voice/common-voice states that the sentence text in /server/data comes from Sentence Collector submissions or is scraped from Wikipedia with its extractor and is released under CC0 (files europarl-* are the exception and are not used); server/data/en/LICENSE is the CC0 1.0 text",
+        "locale": "rus",
+        "name": "highsource-de-ru-translations.txt",
+        "reader": "lines",
+        "retrieved": "2026-09-26T18:11+05:00",
+        "sample_percent": 100,
+        "sha256": "cfb20b4a5ed267ccdbfb72a3f7252e3a669bcdeb5e5a5a837800a547e7f76067",
+        "url": "https://github.com/common-voice/common-voice/raw/1ce6d077cad36f99404b5414afacc314df58ad8c/server/data/ru/highsource-de-ru-translations.txt"
+      },
+      {
+        "license": "Public domain: Anton Chekhov died in 1904; his author page on Russian Wikisource ({{АП|ГОД=1904}}) marks his works as public domain where copyright lasts the author's life plus 100 years or less; translations and later editions may carry rights of their own (Civil Code of the Russian Federation, article 1260) - these are his Russian originals",
+        "locale": "rus",
+        "name": "chekhov-wikisource.json",
+        "reader": "wikisource",
+        "retrieved": "2026-09-26T18:36+05:00",
+        "sample_percent": 40,
+        "sha256": "77603b3f2656dccc756f25e75cb40c06bc25343f9c37a36a7409b456bb8cdb21",
+        "url": "https://ru.wikisource.org/wiki/Категория:Рассказы_Антона_Павловича_Чехова (API, revisions in the file)"
+      }
+    ]
+  },
+  "tokens_sha256": "136c8b59c6f47f6b9b882e7b839ad7db7690d91238838735a5181f27517457cc",
+  "types": {
+    "en:negative_types": 3275,
+    "en:positive_types": 16172,
+    "ru:negative_types": 3480,
+    "ru:positive_types": 4253
+  }
+}

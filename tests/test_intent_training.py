@@ -32,14 +32,10 @@ import evaluate_intent_model as eim  # noqa: E402
 import train_intent_model as tim  # noqa: E402
 
 from keyswitch.intent_model import (  # noqa: E402
-    DEFAULT_FNV_SEED,
-    DEFAULT_MEMBERSHIP_FNV_SEED,
     CorrectionTrigger,
     IntentModelInput,
     LayoutDirection,
     LinearPrediction,
-    MAX_CONTAINER_BYTES,
-    NGRAM_ORDERS,
     TRIGGERS,
     LinearNgramModel,
     PlattParameters,
@@ -48,12 +44,22 @@ from keyswitch.intent_model import (  # noqa: E402
     write_model,
 )
 from keyswitch.detector import LanguageDetector  # noqa: E402
-from keyswitch.detector import (  # noqa: E402
+from keyswitch.constants.detection import (  # noqa: E402
     CONTEXT_DELTA_MULTIPLIER,
     CONTEXT_SCORE_MAXIMUM,
     CONTEXT_SCORE_MINIMUM,
     CONTEXT_SOURCE_GROUP_PENALTY,
     CONTEXT_TARGET_GROUP_BONUS,
+)
+from keyswitch.constants.models import (  # noqa: E402
+    FNV1A64_OFFSET_BASIS,
+    INTENT_MEMBERSHIP_FNV_SEED,
+    INTENT_NGRAM_ORDERS,
+)
+from keyswitch.constants.training import (  # noqa: E402
+    SELECTION_WILSON_Z_SCORE,
+    WILSON_95_Z_SCORE,
+    WILSON_INTERVAL_CONFIDENCE,
 )
 from keyswitch.language_model import LanguageModel, WordScore  # noqa: E402
 from keyswitch.layouts import LayoutPair  # noqa: E402
@@ -132,7 +138,6 @@ from train_intent_model import (  # noqa: E402
     PRESEALED_SPLITS,
     SELECTION_FALSE_POSITIVE_COMPARISONS,
     SELECTION_PER_COMPARISON_CONFIDENCE,
-    SELECTION_WILSON_Z_SCORE,
     SEALED_TEST_SPLITS,
     ScoredExample,
     SealedEvaluationPolicy,
@@ -150,8 +155,6 @@ from train_intent_model import (  # noqa: E402
     TrainOnlyLanguageScorers,
     VariantQuarantine,
     VetoSelection,
-    WILSON_95_Z_SCORE,
-    WILSON_INTERVAL_CONFIDENCE,
     WordScorer,
     audit_guarded_safety_corpus,
     audit_dataset_physical_signatures,
@@ -224,7 +227,6 @@ from train_intent_model import (  # noqa: E402
 )
 from fixture_values.clock import INTENT_BARRIER_WAIT_TIMEOUT_SECONDS
 from fixture_values.corpora import (
-    HARD_NEGATIVE_CORPUS_JSON_INDENT,
     INTENT_DATASET_EXPECTED_HELLO_FREQUENCY,
     INTENT_DATASET_EXPECTED_KEY_FREQUENCY,
     INTENT_DATASET_HIGH_FREQUENCY,
@@ -567,7 +569,13 @@ from fixture_values.scores import (
     INTENT_WEAK_TYPO_POLICY_KWARGS,
     INTENT_WILSON_BOUND_GATE_KWARGS,
 )
-from keyswitch.constants.file_formats import SHA256_HEX_CHARACTERS, VERSION_HASH_CHARACTERS
+from keyswitch.constants.file_formats import (
+    HARD_NEGATIVE_CORPUS_JSON_INDENT,
+    INTENT_MANIFEST_SCHEMA_VERSION,
+    KSLM_MAX_CONTAINER_BYTES,
+    SHA256_HEX_CHARACTERS,
+    VERSION_HASH_CHARACTERS,
+)
 
 
 def directional_calibration(
@@ -636,6 +644,8 @@ EXPECTED_PRESEALED_PROVENANCE_CHECK_NAMES: frozenset[str] = frozenset(
         "toolchain_preseal_generator_sha256",
         "toolchain_development_freezer_sha256",
         "toolchain_preseal_receipt_sha256",
+        "toolchain_spellcheck_sha256",
+        "toolchain_constants_sha256",
         "hard_negative_development",
     }
 )
@@ -648,8 +658,8 @@ DEFAULT_TRAINING_CONFIG_VALUES: dict[str, object] = {
     "schema_version": EXPECTED_INTENT_CONFIG_SCHEMA_VERSION,
     "seed": INTENT_TEST_TRAINING_SEED,
     "dimension": INTENT_TEST_DIMENSION,
-    "feature_hash_seed": DEFAULT_FNV_SEED,
-    "membership_hash_seed": DEFAULT_MEMBERSHIP_FNV_SEED,
+    "feature_hash_seed": FNV1A64_OFFSET_BASIS,
+    "membership_hash_seed": INTENT_MEMBERSHIP_FNV_SEED,
     "sources": TrainingSources(
         package="onboard-data",
         package_version="test-version",
@@ -709,7 +719,7 @@ DEFAULT_TRAINING_CONFIG_VALUES: dict[str, object] = {
     "sealed_evaluation": SealedEvaluationPolicy(
         schema_version=1,
         split_namespace=SPLIT_NAMESPACE,
-        registry_path="model/intent_v1/seal-registry-v23.json",
+        registry_path="model/intent_v1/seal-registry-v28.json",
     ),
     **INTENT_TEST_TRAINING_CONFIG_FIELDS,
 }
@@ -820,7 +830,7 @@ def manifest_schema_fixture() -> dict[str, object]:
     """Small top-level sidecar with every versioned field and correct type."""
 
     return {
-        "schema_version": 1,
+        "schema_version": INTENT_MANIFEST_SCHEMA_VERSION,
         "model_id": "keyswitch-layout-intent-v1",
         "calibration_scope": "lexical-synthetic-not-real-world-probability",
         "config_sha256": "0" * SHA256_HEX_CHARACTERS,
@@ -959,8 +969,8 @@ class SpyIntentModel:
 
     veto_threshold = INTENT_SPY_VETO_THRESHOLD
     dimension = INTENT_TEST_DIMENSION
-    fnv_seed = DEFAULT_FNV_SEED
-    membership_seed = DEFAULT_MEMBERSHIP_FNV_SEED
+    fnv_seed = FNV1A64_OFFSET_BASIS
+    membership_seed = INTENT_MEMBERSHIP_FNV_SEED
 
     def __init__(self) -> None:
         self.inputs: list[IntentModelInput] = []
@@ -1958,7 +1968,7 @@ class DatasetConstructionTests(unittest.TestCase):
             ),
             (
                 replace(baseline, role_namespace="other"),
-                "role namespace must match v23",
+                "role namespace must match v28",
             ),
             (
                 replace(baseline, train_words_per_group=0),
@@ -1987,8 +1997,8 @@ class LeakageAndFeatureTests(unittest.TestCase):
 
     def test_training_adapter_exactly_matches_runtime_feature_contract(self) -> None:
         scorers = test_word_scorers()
-        hash_seed = DEFAULT_FNV_SEED ^ INTENT_HASH_SEED_XOR_PERTURBATION
-        membership_seed = DEFAULT_MEMBERSHIP_FNV_SEED ^ INTENT_MEMBERSHIP_SEED_XOR_PERTURBATION
+        hash_seed = FNV1A64_OFFSET_BASIS ^ INTENT_HASH_SEED_XOR_PERTURBATION
+        membership_seed = INTENT_MEMBERSHIP_FNV_SEED ^ INTENT_MEMBERSHIP_SEED_XOR_PERTURBATION
         adapter = runtime_feature_extractor(
             hash_seed,
             membership_seed,
@@ -2030,7 +2040,7 @@ class LeakageAndFeatureTests(unittest.TestCase):
                         dimension=INTENT_LEAKAGE_ALTERNATE_TEST_DIMENSION,
                         hash_seed=hash_seed,
                         membership_seed=membership_seed,
-                        ngram_orders=NGRAM_ORDERS,
+                        ngram_orders=INTENT_NGRAM_ORDERS,
                     )
                     self.assertEqual(
                         adapter(row, INTENT_LEAKAGE_ALTERNATE_TEST_DIMENSION),
@@ -2071,7 +2081,7 @@ class LeakageAndFeatureTests(unittest.TestCase):
             intent_input_for_example(poisoned_metadata, scorers=scorers),
         )
         extractor = runtime_feature_extractor(
-            DEFAULT_FNV_SEED,
+            FNV1A64_OFFSET_BASIS,
             scorers=scorers,
         )
         features_positive = extractor(positive, INTENT_TEST_DIMENSION)
@@ -2084,7 +2094,7 @@ class LeakageAndFeatureTests(unittest.TestCase):
                 raise AssertionError("classifier extraction must not call scorers")
 
         scorer_free = runtime_feature_extractor(
-            DEFAULT_FNV_SEED,
+            FNV1A64_OFFSET_BASIS,
             scorers={0: RaisingScorer(), 1: RaisingScorer()},
         )
         self.assertEqual(
@@ -2263,8 +2273,8 @@ class LeakageAndFeatureTests(unittest.TestCase):
     def test_training_support_union_is_collected_without_per_row_sets(self) -> None:
         examples = (lexical_example(True), lexical_example(False, signature="world"))
         extractor = runtime_feature_extractor(
-            DEFAULT_FNV_SEED,
-            DEFAULT_MEMBERSHIP_FNV_SEED,
+            FNV1A64_OFFSET_BASIS,
+            INTENT_MEMBERSHIP_FNV_SEED,
             scorers=test_word_scorers(),
         )
         expected: set[int] = set()
@@ -2293,8 +2303,8 @@ class LeakageAndFeatureTests(unittest.TestCase):
             for index in range(INTENT_LEAKAGE_PARALLEL_FEATURIZATION_EXAMPLE_COUNT)
         )
         extractor = runtime_feature_extractor(
-            DEFAULT_FNV_SEED,
-            DEFAULT_MEMBERSHIP_FNV_SEED,
+            FNV1A64_OFFSET_BASIS,
+            INTENT_MEMBERSHIP_FNV_SEED,
             scorers=test_word_scorers(),
         )
         sequential_support: set[int] = set()
@@ -4405,7 +4415,7 @@ class ExternalEvaluationTests(unittest.TestCase):
                 "veto_threshold_hex": veto.raw_logit.hex(),
                 "feature_hash_seed": config_value.feature_hash_seed,
                 "membership_hash_seed": config_value.membership_hash_seed,
-                "ngram_orders": list(NGRAM_ORDERS),
+                "ngram_orders": list(INTENT_NGRAM_ORDERS),
             }
             fixture_candidate_metadata = (
                 presealed_candidate_metadata_projection(
@@ -4536,7 +4546,7 @@ class ExternalEvaluationTests(unittest.TestCase):
                     for trigger, logit in threshold_logits.items()
                 },
                 "veto_threshold": veto.raw_logit,
-                "ngram_orders": NGRAM_ORDERS,
+                "ngram_orders": INTENT_NGRAM_ORDERS,
             }
             matching = cast(
                 LinearNgramModel,
@@ -4571,6 +4581,8 @@ class ExternalEvaluationTests(unittest.TestCase):
                 "preseal_generator_sha256",
                 "development_freezer_sha256",
                 "preseal_receipt_sha256",
+                "spellcheck_sha256",
+                "constants_sha256",
             ):
                 self.assertTrue(by_name[f"toolchain_{field_name}"].passed)
             self.assertNotIn("toolchain_python_version", by_name)
@@ -4901,6 +4913,46 @@ class ExternalEvaluationTests(unittest.TestCase):
             self.assertTrue(
                 stale_by_name["toolchain_language_model_sha256"].passed
             )
+            self.assertTrue(stale_by_name["toolchain_constants_sha256"].passed)
+
+            # A threshold moved into keyswitch.constants changes no file digest;
+            # the digest of the imported values is what refuses it.
+            stale_values_embedded = {
+                **embedded,
+                "toolchain": {
+                    **cast(dict[str, object], embedded["toolchain"]),
+                    "constants_sha256": "0" * SHA256_HEX_CHARACTERS,
+                },
+            }
+            stale_values_checks = verify_provenance(
+                model=cast(
+                    LinearNgramModel,
+                    SimpleNamespace(
+                        **{**common, "metadata": stale_values_embedded},
+                        membership_seed=config_value.membership_hash_seed,
+                    ),
+                ),
+                artifact=artifact,
+                manifest={
+                    **stale_values_embedded,
+                    "artifact_sha256": artifact_digest,
+                    "artifact_model_version": model_version,
+                },
+                config_path=config_path,
+                config=config_value,
+                english_path=english_path,
+                russian_path=russian_path,
+                dataset=dataset,
+                training_language_scorer=training_language_scorer,
+                sealed_registry_root=Path(temporary),
+            )
+            stale_values_by_name = {
+                check.name: check for check in stale_values_checks
+            }
+            self.assertFalse(
+                stale_values_by_name["toolchain_constants_sha256"].passed
+            )
+            self.assertTrue(stale_values_by_name["toolchain_trainer_sha256"].passed)
 
             tampered_embedded = {
                 **embedded,
@@ -6335,10 +6387,10 @@ class ExternalEvaluationTests(unittest.TestCase):
 
         arguments["unknown_typo_raw_model"] = metrics
         latency = cast(dict[str, object], arguments["latency"])
-        latency["artifact_bytes"] = MAX_CONTAINER_BYTES
+        latency["artifact_bytes"] = KSLM_MAX_CONTAINER_BYTES
         at_limit = _strict_gates(**arguments)  # type: ignore[arg-type]
         self.assertTrue(at_limit["artifact_size"])
-        latency["artifact_bytes"] = MAX_CONTAINER_BYTES + 1
+        latency["artifact_bytes"] = KSLM_MAX_CONTAINER_BYTES + 1
         above_limit = _strict_gates(**arguments)  # type: ignore[arg-type]
         self.assertFalse(above_limit["artifact_size"])
 
@@ -6815,6 +6867,11 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                 "future-schema",
                 {**baseline, "schema_version": INTENT_UNSUPPORTED_MANIFEST_SCHEMA_VERSION},
                 "unsupported model manifest schema",
+            ),
+            (
+                "schema-without-pinned-values",
+                {**baseline, "schema_version": 1},
+                "schema 1 predates toolchain.constants_sha256",
             ),
             (
                 "wrong-model",
@@ -7970,11 +8027,11 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                         quantized, invalid_fingerprints
                     )
         with patch.object(
-            tim, "MAX_SUPPORTED_FINGERPRINTS", INTENT_PATCHED_MAX_SUPPORTED_FINGERPRINTS
+            tim, "KSLM_MAX_FINGERPRINTS", INTENT_PATCHED_MAX_SUPPORTED_FINGERPRINTS
         ):
             with self.assertRaisesRegex(ValueError, "fingerprints exceed"):
                 quantized_model_payload_sha256(quantized, fingerprints)
-        with patch.object(tim, "MAX_PAYLOAD_BYTES", INTENT_PATCHED_MAX_PAYLOAD_BYTES):
+        with patch.object(tim, "KSLM_MAX_PAYLOAD_BYTES", INTENT_PATCHED_MAX_PAYLOAD_BYTES):
             with self.assertRaisesRegex(ValueError, "payload exceeds"):
                 quantized_model_payload_sha256(quantized, {1})
 
@@ -8295,20 +8352,20 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             root = Path(temporary)
             oversized_config = root / "oversized.json"
             oversized_config.write_bytes(b"12345")
-            with patch.object(tim, "MAX_TRAINING_CONFIG_BYTES", INTENT_PATCHED_BYTE_LIMIT):
+            with patch.object(tim, "INTENT_TRAINING_CONFIG_MAX_BYTES", INTENT_PATCHED_BYTE_LIMIT):
                 with self.assertRaisesRegex(ValueError, "exceeds"):
                     load_training_config_snapshot(oversized_config)
 
             destination = root / "existing.ksm"
             destination.write_bytes(b"12345")
-            with patch.object(tim, "MAX_PUBLICATION_BACKUP_BYTES", INTENT_PATCHED_BYTE_LIMIT):
+            with patch.object(tim, "INTENT_PUBLICATION_BACKUP_MAX_BYTES", INTENT_PATCHED_BYTE_LIMIT):
                 with self.assertRaisesRegex(ValueError, "rollback limit"):
                     publish_bytes_bundle(((destination, b"new"),))
             self.assertEqual(destination.read_bytes(), b"12345")
 
             oversized_manifest = root / "manifest.json"
             oversized_manifest.write_bytes(b"12345")
-            with patch.object(eim, "MAX_EXTERNAL_MANIFEST_BYTES", INTENT_PATCHED_BYTE_LIMIT):
+            with patch.object(eim, "INTENT_EXTERNAL_MANIFEST_MAX_BYTES", INTENT_PATCHED_BYTE_LIMIT):
                 with self.assertRaisesRegex(ValueError, "model manifest exceeds"):
                     eim._json_object(oversized_manifest)
 
@@ -8325,7 +8382,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                     )
                 ),
             )
-            with patch.object(eim, "MAX_HUNSPELL_DICTIONARY_BYTES", INTENT_PATCHED_BYTE_LIMIT):
+            with patch.object(eim, "HUNSPELL_DICTIONARY_MAX_BYTES", INTENT_PATCHED_BYTE_LIMIT):
                 with self.assertRaisesRegex(ValueError, "dictionary exceeds"):
                     eim._hunspell_dictionary_words(model)
 
@@ -8631,8 +8688,8 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
                     )
                     for direction in ("0>1", "1>0")
                 },
-                "fnv_seed": DEFAULT_FNV_SEED,
-                "ngram_orders": NGRAM_ORDERS,
+                "fnv_seed": FNV1A64_OFFSET_BASIS,
+                "ngram_orders": INTENT_NGRAM_ORDERS,
                 "metadata": {"calibration_scope": "lexical-synthetic-not-real-world-probability"},
             }
             first = write_model(first_path, **keyword_arguments)  # type: ignore[arg-type]
@@ -8677,9 +8734,9 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             feature_vector = extract_features(
                 model_input,
                 dimension=quantized.dimension,
-                hash_seed=DEFAULT_FNV_SEED,
-                membership_seed=DEFAULT_MEMBERSHIP_FNV_SEED,
-                ngram_orders=NGRAM_ORDERS,
+                hash_seed=FNV1A64_OFFSET_BASIS,
+                membership_seed=INTENT_MEMBERSHIP_FNV_SEED,
+                ngram_orders=INTENT_NGRAM_ORDERS,
             )
             training_logit = scorer.score(feature_vector.values)
             self.assertEqual(prediction.logit.hex(), training_logit.hex())
@@ -8730,22 +8787,22 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         )
         self.assertEqual(
             loaded.external_evaluation.unknown_typo_holdout_corpus_sha256,
-            "806bb9a5d1711bca0d5957cd8c119b3c5fa504068b95c5cc65655b6e02b0d75c",
+            "6b285fbe2c5ecd253056d1e0a7252fa8cf431741a5fa59711b2bb1e409fabb02",
         )
         self.assertEqual(
             loaded.sealed_evaluation.split_namespace, SPLIT_NAMESPACE
         )
         self.assertEqual(
             loaded.sealed_evaluation.registry_path,
-            "model/intent_v1/seal-registry-v23.json",
+            "model/intent_v1/seal-registry-v28.json",
         )
         self.assertEqual(
             loaded.hard_negative_development.source.path,
-            "model/intent_v1/unknown-typo-development-v23.json",
+            "model/intent_v1/unknown-typo-development-v28.json",
         )
         self.assertEqual(
             loaded.hard_negative_development.source.sha256,
-            "95ec8affaf49392862ab982e38e3b16cad67256423768a7dcb9e20940527dce8",
+            "49db792445388bfdba7065fa36d025ae31c341b722ed7be2da4870da92f6f479",
         )
         self.assertEqual(
             loaded.hard_negative_development.role_counts(),
@@ -8771,7 +8828,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         self.assertEqual(
             loaded.threshold_logit_margin_cap, EXPECTED_INTENT_PRODUCTION_LOGIT_MARGIN_CAP
         )
-        preseal_path = repository / "model/intent_v1/holdout-v23-preseal.json"
+        preseal_path = repository / "model/intent_v1/holdout-v28-preseal.json"
         preseal_bytes = preseal_path.read_bytes()
         self.assertLessEqual(len(preseal_bytes), INTENT_MAX_PRESEAL_BYTES)
         preseal = cast(
@@ -8795,7 +8852,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
         self.assertEqual(preseal["schema_version"], 1)
         self.assertEqual(
             preseal["policy"],
-            "keyswitch-intent-v23-preseal-holdout",
+            "keyswitch-intent-v28-preseal-holdout",
         )
         self.assertIs(preseal["model_loaded"], False)
         self.assertIs(preseal["metrics_evaluated"], False)
@@ -8852,7 +8909,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             {
                 "signature_count": EXPECTED_SEALED_EXCLUSION_SIGNATURE_COUNT,
                 "sha256": (
-                    "5d8d55c6277901a33cc72c5a3a526e33deff2b154e15e816eb8889161b1079fa"
+                    "6ee388cad304b147edd2c1a40e154066bc052f8d32e2e0a58026ecf56e556a8b"
                 ),
             },
         )
@@ -8861,7 +8918,7 @@ class ArtifactAndStatisticsTests(unittest.TestCase):
             {
                 "signature_count": EXPECTED_COMBINED_EXCLUSION_SIGNATURE_COUNT,
                 "sha256": (
-                    "99553887249602e5fee72bac59491b89be58882f383820e9cc0a80cd5b0e8204"
+                    "2a85cfce24739b0965e257242ea7287a2c02962182a146762ce6b34e0b544864"
                 ),
             },
         )
@@ -9207,8 +9264,8 @@ class DeterministicIntentModel:
 
     veto_threshold = -INTENT_DETERMINISTIC_VETO_THRESHOLD
     dimension = INTENT_TEST_DIMENSION
-    fnv_seed = DEFAULT_FNV_SEED
-    membership_seed = DEFAULT_MEMBERSHIP_FNV_SEED
+    fnv_seed = FNV1A64_OFFSET_BASIS
+    membership_seed = INTENT_MEMBERSHIP_FNV_SEED
 
     def predict(self, item: IntentModelInput) -> LinearPrediction:
         logit = float(len(item.original) - len(item.alternative)) + INTENT_DETERMINISTIC_LOGIT_OFFSET
@@ -9352,12 +9409,12 @@ class ParallelRowScoringTests(unittest.TestCase):
             )
 
     def test_main_restores_the_default_worker_count(self) -> None:
-        before = eim._DEFAULT_ROW_WORKERS
+        before = eim._default_row_workers
         with tempfile.TemporaryDirectory() as directory:
             missing = Path(directory) / "missing-config.json"
             with self.assertRaises(Exception):
                 eim.main(["--config", str(missing), "--workers", "3"])
-        self.assertEqual(eim._DEFAULT_ROW_WORKERS, before)
+        self.assertEqual(eim._default_row_workers, before)
 
 
 if __name__ == "__main__":

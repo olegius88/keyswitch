@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import cast
 
 import evaluate_intent_model as evaluator
+from keyswitch.constants.file_formats import HARD_NEGATIVE_CORPUS_JSON_INDENT
+from keyswitch.constants.training import PAIRED_ROWS_PER_TRIGGER
 from keyswitch.intent_model import CorrectionTrigger, TRIGGERS
 from preseal_intent_holdout import build_model_blind_external_corpora
 from train_intent_model import (
@@ -23,7 +25,7 @@ from train_intent_model import (
 )
 
 
-_POLICY = "keyswitch-intent-v23-frozen-unknown-typo-development"
+_POLICY = "keyswitch-intent-v28-frozen-unknown-typo-development"
 _PREFIX = "hunspell-unknown:"
 
 
@@ -98,7 +100,7 @@ def _compact_rows(
     grouped: dict[str, list[LexicalExample]] = defaultdict(list)
     for example in examples:
         grouped[example.base_signature].append(example)
-    expected_rows_per_signature = len(TRIGGERS) * 2
+    expected_rows_per_signature = len(TRIGGERS) * PAIRED_ROWS_PER_TRIGGER
     records: list[dict[str, object]] = []
     for base_signature, rows in grouped.items():
         if (
@@ -214,7 +216,7 @@ def _canonical_bytes(value: Mapping[str, object]) -> bytes:
         json.dumps(
             value,
             ensure_ascii=False,
-            indent=2,
+            indent=HARD_NEGATIVE_CORPUS_JSON_INDENT,
             sort_keys=False,
             allow_nan=False,
         )

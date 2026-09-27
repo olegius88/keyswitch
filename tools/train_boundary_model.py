@@ -18,10 +18,30 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from keyswitch.boundary_model import ARTIFACT, FEATURE_VERSION, BoundaryModel, features
+from keyswitch.boundary_model import ARTIFACT, FEATURE_VERSION, MAX_SUFFIX, BoundaryModel, features
 from keyswitch.layouts import LayoutPair
 from context_corpus import ROOT, SOURCE_SHA, assign, canonical_tokens, load_source
 from context_evidence import canonical, checksum, reference_models
+from keyswitch.constants.boundary import (
+    BOUNDARY_AMBIGUOUS_PUNCTUATION,
+    BOUNDARY_V1_EPOCHS,
+    BOUNDARY_V1_FAMILY_KEY_CHARACTERS,
+    BOUNDARY_V1_LABEL_CLASSES,
+    BOUNDARY_V1_LEARNING_RATE,
+    BOUNDARY_V1_LOSS_MODEL_THRESHOLD,
+    BOUNDARY_V1_SPLIT_BUCKET_COUNT,
+    BOUNDARY_V1_THRESHOLDS,
+    BOUNDARY_V1_TRAIN_SPLIT_BUCKETS,
+    BOUNDARY_V1_WORD_MAX_CHARACTERS,
+    BOUNDARY_V1_WORD_MIN_CHARACTERS,
+    BOUNDARY_WEIGHT_DECIMALS,
+)
+from keyswitch.constants.file_formats import HEXADECIMAL_BASE, VERSION_HASH_CHARACTERS
+from keyswitch.constants.training import (
+    BOUNDARY_PROMOTION_MIN_DECIDED_FRACTION,
+    DETERMINISTIC_CHOICE_HEX_DIGITS,
+    LOG_LOSS_PROBABILITY_FLOOR,
+)
 
 
 DIRECTORY = ROOT / "model/boundary_v1"
@@ -29,7 +49,6 @@ CANDIDATE = DIRECTORY / "candidate.json"
 SEAL = DIRECTORY / "seal.json"
 REPORT = DIRECTORY / "report.json"
 NAMESPACE = "keyswitch:boundary-v1:20260906"
-THRESHOLDS = (0.9, 0.95, 0.98, 0.99, 0.995, 0.999, 0.9995)
 
 
 @dataclass(frozen=True)
@@ -46,7 +65,8 @@ def rows(*, test: bool) -> list[Row]:
     assigned, _ = assign(load_source())
     pair = LayoutPair()
     words = sorted({word for item in assigned if item.split == "reserve"
-                    for word in canonical_tokens(item.phrase.text) if word.isalpha() and 3 <= len(word) <= 24})
+                    for word in canonical_tokens(item.phrase.text)
+                    if word.isalpha() and BOUNDARY_V1_WORD_MIN_CHARACTERS <= len(word) <= BOUNDARY_V1_WORD_MAX_CHARACTERS})
     result: set[Row] = set()
     for word in words:
         russian = all("а" <= char <= "я" or char == "ё" for char in word)
@@ -56,18 +76,21 @@ def rows(*, test: bool) -> list[Row]:
         physical = pair.translate(word, "ru", "us") if russian else word
         # Shared physical stems keep case/yo variants and related prefixes
         # together. This is a declared string-family split, not lemmatization.
-        family = physical.replace("`", "t")[:4]
-        bucket = int(hashlib.sha256((NAMESPACE + family).encode()).hexdigest()[:8], 16) % 10
-        split = "train" if bucket < 7 else "development" if bucket == 7 else "calibration" if bucket == 8 else "test"
+        family = physical.replace("`", "t")[:BOUNDARY_V1_FAMILY_KEY_CHARACTERS]
+        digest = hashlib.sha256((NAMESPACE + family).encode()).hexdigest()
+        bucket = int(digest[:DETERMINISTIC_CHOICE_HEX_DIGITS], HEXADECIMAL_BASE) % BOUNDARY_V1_SPLIT_BUCKET_COUNT
+        split = ("train" if bucket < BOUNDARY_V1_TRAIN_SPLIT_BUCKETS
+                 else "development" if bucket == BOUNDARY_V1_TRAIN_SPLIT_BUCKETS
+                 else "calibration" if bucket == BOUNDARY_V1_TRAIN_SPLIT_BUCKETS + 1 else "test")
         if (split == "test") != test:
             continue
-        tail = len(physical) - len(physical.rstrip(",.;[]'`"))
-        if russian and 0 < tail <= 8 and tail < len(physical):
+        tail = len(physical) - len(physical.rstrip(BOUNDARY_AMBIGUOUS_PUNCTUATION))
+        if russian and 0 < tail <= MAX_SUFFIX and tail < len(physical):
             result.add(Row(physical, word, tail, 0, family, split))
         for suffix in (",", ".", ";", "]", "...", ",;", "'"):
             observed = physical + suffix
-            tail = len(observed) - len(observed.rstrip(",.;[]'`"))
-            if 0 < tail <= 8 and tail < len(observed):
+            tail = len(observed) - len(observed.rstrip(BOUNDARY_AMBIGUOUS_PUNCTUATION))
+            if 0 < tail <= MAX_SUFFIX and tail < len(observed):
                 result.add(Row(observed, pair.translate(observed, "us", "ru"), tail, len(suffix), family, split))
     return sorted(result, key=lambda item: (item.split, item.family, item.original, item.label))
 
@@ -109,28 +132,29 @@ def train() -> tuple[bytes, bytes]:
     weights, squared = dict.fromkeys(names, 0.0), dict.fromkeys(names, 1.0)
     label_counts = Counter(bool(row.label) for row, _ in training)
     best, best_loss, epoch_used = dict(weights), math.inf, 0
-    for epoch in range(35):
+    for epoch in range(BOUNDARY_V1_EPOCHS):
         for row, values in training:
-            probabilities = BoundaryModel(weights, 0.9, "training").probabilities(values)
-            importance = len(training) / (2 * label_counts[bool(row.label)])
+            probabilities = BoundaryModel(weights, BOUNDARY_V1_LOSS_MODEL_THRESHOLD, "training").probabilities(values)
+            importance = len(training) / (BOUNDARY_V1_LABEL_CLASSES * label_counts[bool(row.label)])
             for name in names:
                 gradient = sum((probability - float(index == row.label)) * candidate[name]
                                for index, (candidate, probability) in enumerate(zip(values, probabilities))) * importance
                 squared[name] += gradient * gradient
-                weights[name] -= 0.10 * gradient / math.sqrt(squared[name])
-        model = BoundaryModel(weights, 0.9, "candidate")
-        loss = sum(-math.log(max(1e-15, model.probabilities(values)[row.label]))
+                weights[name] -= BOUNDARY_V1_LEARNING_RATE * gradient / math.sqrt(squared[name])
+        model = BoundaryModel(weights, BOUNDARY_V1_LOSS_MODEL_THRESHOLD, "candidate")
+        loss = sum(-math.log(max(LOG_LOSS_PROBABILITY_FLOOR, model.probabilities(values)[row.label]))
                    / label_counts[bool(row.label)] for row, values in development)
         if loss < best_loss:
             best, best_loss, epoch_used = dict(weights), loss, epoch + 1
-    best = {name: round(value, 12) for name, value in best.items()}
-    threshold = THRESHOLDS[-1]
-    for candidate in THRESHOLDS:
+    best = {name: round(value, BOUNDARY_WEIGHT_DECIMALS) for name, value in best.items()}
+    threshold = BOUNDARY_V1_THRESHOLDS[-1]
+    for candidate in BOUNDARY_V1_THRESHOLDS:
         result = metrics(BoundaryModel(best, candidate, "candidate"), calibration)
         if int(cast(int, result.get("errors", 0))) == 0:
             threshold = candidate
             break
-    payload = {"feature_version": FEATURE_VERSION, "version": "boundary-v1-" + hashlib.sha256(canonical(best)).hexdigest()[:12],
+    payload = {"feature_version": FEATURE_VERSION,
+               "version": "boundary-v1-" + hashlib.sha256(canonical(best)).hexdigest()[:VERSION_HASH_CHARACTERS],
                "weights": best, "threshold": threshold}
     raw = canonical(payload)
     model = BoundaryModel(best, threshold, str(payload["version"]))
@@ -139,7 +163,7 @@ def train() -> tuple[bytes, bytes]:
                "namespace": NAMESPACE, "epoch": epoch_used, "training_rows": len(training),
                "development": metrics(model, development), "calibration": metrics(model, calibration),
                "family_counts": dict(Counter(split for split, _ in {(row.split, row.family) for row, _ in data})),
-               "promotion_gates": {"test_errors_max": 0, "test_decided_fraction_min": 0.80},
+               "promotion_gates": {"test_errors_max": 0, "test_decided_fraction_min": BOUNDARY_PROMOTION_MIN_DECIDED_FRACTION},
                "limitations": "Synthetic segmentation labels; lexical resources may know held-out words. No independent real-user intent or native input evidence."}
     return raw, canonical(receipt)
 
@@ -151,7 +175,7 @@ def evaluate() -> bytes:
     data = encoded(rows(test=True))
     result = metrics(BoundaryModel.load(CANDIDATE), data)
     count = cast(int, result["rows"])
-    accepted = result.get("errors", 0) == 0 and cast(int, result.get("correct", 0)) / count >= 0.80
+    accepted = result.get("errors", 0) == 0 and cast(int, result.get("correct", 0)) / count >= BOUNDARY_PROMOTION_MIN_DECIDED_FRACTION
     return canonical({"schema_version": 1, "seal_sha256": checksum(SEAL), "candidate_sha256": checksum(CANDIDATE),
                       "test": result, "test_families": len({row.family for row, _ in data}),
                       "accepted": accepted, "scope": "first sealed synthetic boundary test; replays are regression checks"})

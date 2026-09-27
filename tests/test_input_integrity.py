@@ -20,6 +20,28 @@ from test_engine_behaviour import FakeBackend, plain_key
 from test_windows_backend import FakeWindowsAPI, key_event
 from test_x11_backend import backend_with, payload
 from keyswitch.x11_backend import XkbStateRec, X11Error
+from keyswitch.constants.x11 import X11_BUTTON_PRESS
+from fixture_values.clock import PAUSE_TRIGGER_OFFSET_SECONDS
+from fixture_values.counts import (
+    EXPLICIT_RULE_MINIMUM_LENGTH,
+    LEARNING_CONFIRMATIONS_REQUIRED,
+    LONG_INPUT_EXTRA_STROKES,
+    SWALLOWED_ENTER_REPEATS,
+)
+from fixture_values.keys import (
+    BACKSPACE_KEYCODE,
+    EDITOR_REPLAY_FIRST_KEY_SERIAL,
+    HELD_KEY_SCAN_CODE,
+    LATE_KEY_SCAN_CODE,
+    SCAN_CODE_A,
+    SCAN_CODE_ENTER,
+    SHIFT_L_KEYCODE,
+    UNDO_TRIGGER_SENTINEL_KEYCODE,
+    WINDOWS_A_VIRTUAL_KEY,
+    WINDOWS_HELD_VIRTUAL_KEY,
+    WINDOWS_UNKNOWN_TARGET_GROUP,
+)
+from fixture_values.platform import X11_CONTROL_DISPLAY, XTEST_FAKE_KEY_EVENT_IS_PRESS_ARG_INDEX
 
 
 class EditorBackend(FakeBackend):
@@ -85,7 +107,7 @@ class InputIntegrityTests(unittest.TestCase):
         self.backend = EditorBackend()
         self.engine = KeySwitchEngine(self.settings, HistoryStore(root / "history.jsonl"), self.backend)
         self.pair = LayoutPair()
-        self.serial = 100
+        self.serial = EDITOR_REPLAY_FIRST_KEY_SERIAL
 
     def key(self, name: str, character: str = "", *, group: int | None = None) -> KeyEvent:
         self.serial += 1
@@ -126,7 +148,7 @@ class InputIntegrityTests(unittest.TestCase):
         self.type("Ghbdtn")
         last_input = self.engine._last_word_input_at
         assert last_input is not None
-        self.engine._maybe_correct_after_pause(now=last_input + 2)
+        self.engine._maybe_correct_after_pause(now=last_input + PAUSE_TRIGGER_OFFSET_SECONDS)
         self.assertEqual(self.backend.text, "Привет")
         self.type("ик")
         self.assertEqual(self.engine.snapshot.current_word, "Приветик")
@@ -233,7 +255,7 @@ class InputIntegrityTests(unittest.TestCase):
                     self.assertEqual(self.backend.text, "ghbdtn" + suffix)
                     last = self.engine._last_word_input_at
                     assert last is not None
-                    self.engine._maybe_correct_after_pause(now=last + 2)
+                    self.engine._maybe_correct_after_pause(now=last + PAUSE_TRIGGER_OFFSET_SECONDS)
                 self.assertEqual(self.backend.text, "привет" + suffix)
 
     def test_space_needs_no_letter_mapping_in_the_other_layout(self) -> None:
@@ -301,8 +323,8 @@ class InputIntegrityTests(unittest.TestCase):
                 self.tap(self.key(edit, " " if edit == "space" else "x" if edit == "x" else ""))
                 visible = self.backend.text
                 before = len(self.backend.injections)
-                self.engine._schedule_undo(999)
-                self.send(plain_key("z", 999, self.backend.group, False))
+                self.engine._schedule_undo(UNDO_TRIGGER_SENTINEL_KEYCODE)
+                self.send(plain_key("z", UNDO_TRIGGER_SENTINEL_KEYCODE, self.backend.group, False))
                 self.assertEqual(len(self.backend.injections), before)
                 self.assertEqual(self.backend.text, visible)
 
@@ -311,7 +333,8 @@ class InputIntegrityTests(unittest.TestCase):
         boundary = self.key("space", " ")
         self.send(boundary)
         self.backend.window += 1
-        self.backend.text, self.backend.caret = "elsewhere", 9
+        self.backend.text = "elsewhere"
+        self.backend.caret = len(self.backend.text)
         self.send(replace(boundary, pressed=False))
         self.assertEqual(self.backend.text, "elsewhere")
         self.assertEqual(self.backend.injections, [])
@@ -329,7 +352,7 @@ class InputIntegrityTests(unittest.TestCase):
                 self.assertTrue(self.backend.text.endswith("привет "))
 
     def test_long_input_is_bounded_and_does_not_correct_an_untracked_suffix(self) -> None:
-        text = "a" * (MAX_WORD_STROKES + 20) + "ghbdtn "
+        text = "a" * (MAX_WORD_STROKES + LONG_INPUT_EXTRA_STROKES) + "ghbdtn "
         self.type(text)
         self.assertEqual(self.backend.text, text)
         self.assertLessEqual(len(self.engine._strokes), MAX_WORD_STROKES)
@@ -337,8 +360,8 @@ class InputIntegrityTests(unittest.TestCase):
         self.assertTrue(self.backend.text.endswith("привет "))
 
     def test_explicit_short_rule_is_not_ignored_by_minimum_length(self) -> None:
-        self.settings.set("detection.minimum_length", 8)
-        self.engine.learning.confirm_manual(0, "kb", 1, 2)
+        self.settings.set("detection.minimum_length", EXPLICIT_RULE_MINIMUM_LENGTH)
+        self.engine.learning.confirm_manual(0, "kb", 1, LEARNING_CONFIRMATIONS_REQUIRED)
         self.type("kb ")
         self.assertEqual(self.backend.text, "ли ")
         self.reset_editor()
@@ -359,10 +382,10 @@ class InputIntegrityTests(unittest.TestCase):
 class NativeInputIntegrityTests(unittest.TestCase):
     def test_x11_pointer_and_unknown_keyboard_state(self) -> None:
         backend, libraries = backend_with()
-        backend._control = 101
+        backend._control = X11_CONTROL_DISPLAY
         self.assertEqual(backend.release_input(), 0)
         self.assertEqual(backend.complete_action(True), 0)
-        pointer = backend._decode_event(payload(4))
+        pointer = backend._decode_event(payload(X11_BUTTON_PRESS))
         assert pointer is not None
         self.assertEqual(pointer.key_name, "Pointer")
         libraries.x11.XkbGetState.return_value = 1
@@ -372,23 +395,27 @@ class NativeInputIntegrityTests(unittest.TestCase):
 
     def test_x11_replay_compensates_caps_lock(self) -> None:
         backend, libraries = backend_with()
-        backend._control = 101
+        backend._control = X11_CONTROL_DISPLAY
         def caps_on(_display: object, _device: object, pointer: ctypes._CData | ctypes._CArgObject | int) -> int:
             ctypes.cast(pointer, ctypes.POINTER(XkbStateRec)).contents.locked_mods = LOCK_MASK
             return 0
         libraries.x11.XkbGetState.side_effect = caps_on
         backend.inject_correction((key_event(),), 1, None)
-        sequence = [(call.args[1], call.args[2]) for call in libraries.xtst.XTestFakeKeyEvent.call_args_list]
-        self.assertEqual(sequence, [(22, 1), (22, 0), (50, 1), (30, 1), (30, 0), (50, 0)])
+        sequence = [(call.args[1], call.args[XTEST_FAKE_KEY_EVENT_IS_PRESS_ARG_INDEX])
+                    for call in libraries.xtst.XTestFakeKeyEvent.call_args_list]
+        # Backspace, then Shift held around the replayed key: Caps Lock would otherwise change its case.
+        replayed = key_event().keycode
+        self.assertEqual(sequence, [(BACKSPACE_KEYCODE, 1), (BACKSPACE_KEYCODE, 0), (SHIFT_L_KEYCODE, 1),
+                                    (replayed, 1), (replayed, 0), (SHIFT_L_KEYCODE, 0)])
 
     def test_swallowed_enter_repeats_never_reach_the_chat(self) -> None:
         api = FakeWindowsAPI()
         backend = WindowsBackend(api)
         backend.set_key_filter(lambda event: event.key_name == "Return")
-        event = NativeKeyEvent(True, VK_RETURN, 28, False, False, 1)
+        event = NativeKeyEvent(True, VK_RETURN, SCAN_CODE_ENTER, False, False, 1)
         self.assertTrue(backend._handle_native(event))
         backend.set_key_filter(None)  # prompt already confirmed on first press
-        for _ in range(4):
+        for _ in range(SWALLOWED_ENTER_REPEATS):
             self.assertTrue(backend._handle_native(event))
         self.assertFalse(backend._handle_native(replace(event, injected=True)))
         self.assertTrue(backend._handle_native(replace(event, pressed=False)))
@@ -403,22 +430,24 @@ class NativeInputIntegrityTests(unittest.TestCase):
         def send(inputs: tuple[NativeInput, ...]) -> int:
             # Simulate the native synchronous hook call absent in the old mock.
             for item in inputs:
-                backend._handle_native(NativeKeyEvent(item.pressed, item.virtual_key or 65, item.scan_code or 30, item.extended, item.synthetic, 1, replayed=not item.synthetic))
+                backend._handle_native(NativeKeyEvent(item.pressed, item.virtual_key or WINDOWS_A_VIRTUAL_KEY, item.scan_code or SCAN_CODE_A,
+                                                      item.extended, item.synthetic, 1, replayed=not item.synthetic))
             return original_send(inputs)
         with patch.object(api, "send_inputs", side_effect=send):
             backend.hold_input()
-            self.assertTrue(backend._handle_native(NativeKeyEvent(True, 68, 32, False, False, 1)))
-            backend.inject_correction((key_event(),), 1, None, late=(key_event(keycode=31),))
+            self.assertTrue(backend._handle_native(NativeKeyEvent(True, WINDOWS_HELD_VIRTUAL_KEY, HELD_KEY_SCAN_CODE, False, False, 1)))
+            backend.inject_correction((key_event(),), 1, None, late=(key_event(keycode=LATE_KEY_SCAN_CODE),))
         self.assertFalse(backend._holding)
         self.assertEqual(backend._held, [])
-        self.assertEqual([event.keycode for event in delivered if not event.synthetic], [31, 31, 32])
+        self.assertEqual([event.keycode for event in delivered if not event.synthetic],
+                         [LATE_KEY_SCAN_CODE, LATE_KEY_SCAN_CODE, HELD_KEY_SCAN_CODE])
 
     def test_validation_error_and_pointer_during_layout_switch_release_input(self) -> None:
         api = FakeWindowsAPI()
         backend = WindowsBackend(api)
         backend.hold_input()
         with self.assertRaisesRegex(RuntimeError, "Неизвестная группа"):
-            backend.inject_correction((), 8, None)
+            backend.inject_correction((), WINDOWS_UNKNOWN_TARGET_GROUP, None)
         self.assertFalse(backend._holding)
         request = api.request_layout
         def click_during_switch(layout: int) -> bool:

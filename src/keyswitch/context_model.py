@@ -2,8 +2,9 @@
 
 The model is a four-class sparse softmax classifier. It receives the recent
 sentence, application/field evidence and the existing detector's lexical
-evidence. The legacy trainer produces feature2 weights; the context action
-trainer produces feature3 weights. Probabilities are corpus scores, not a promise of
+evidence. The context-v1 trainer produces feature5 weights (feature2 plus typo
+evidence); feature2 artifacts still load, and the context action trainer
+produces feature3 weights. Probabilities are corpus scores, not a promise of
 real-world correctness. Hard safety/explicit user intent live in the engine.
 """
 
@@ -20,25 +21,50 @@ from pathlib import Path
 from typing import Final, Literal, cast
 
 from .input_context import FieldContext
-from .language_model import WordScore
+from .language_model import LanguageModel, WordScore
 from .context_action_features import extract_action_features
+from .constants.boundary import BOUNDARY_MISSING_LETTERS as ALPHABET_LETTERS
+from .constants.file_formats import MAX_CONTEXT_MODEL_BYTES as MAX_ARTIFACT_BYTES
+from .constants.models import (
+    ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS,
+    ACTION_FEATURE_APPLICATION_NAME_CHARACTERS,
+    ACTION_FEATURE_APPLICATION_TOKEN_COUNT,
+    ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS,
+    ACTION_FEATURE_CHARACTER_TEXT_FIELD_INDEX,
+    ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS,
+    ACTION_FEATURE_WORD_MAX_CHARACTERS,
+    ACTION_FEATURE_WORD_SCORE_BOUND,
+    CONTEXT_ACTION_FEATURE_VERSION,
+    CONTEXT_FEATURE_AFTER_WORD_COUNT,
+    CONTEXT_FEATURE_BEFORE_WORD_COUNT,
+    CONTEXT_FEATURE_NGRAM_ORDERS,
+    CONTEXT_MODEL_FEATURE_VERSION as FEATURE_VERSION,
+    CONTEXT_SUPPORTED_FEATURE_VERSIONS as SUPPORTED_FEATURE_VERSIONS,
+    CONTEXT_TYPO_FEATURE_VERSION,
+    CONTEXT_TYPO_MIN_CHARACTERS,
+    CONTEXT_V1_CONVERSION_THRESHOLD,
+    MAX_CONTEXT_FEATURE_NAME_CHARACTERS,
+    MAX_CONTEXT_MODEL_FEATURES as MAX_FEATURES,
+    MAX_CONTEXT_MODEL_VERSION_CHARACTERS,
+    MAX_CONTEXT_WEIGHT_MAGNITUDE,
+    MIN_CONTEXT_CONVERSION_THRESHOLD,
+)
 
+# FEATURE_VERSION, MAX_ARTIFACT_BYTES and MAX_FEATURES keep the names this module has always
+# exported (the historical context-v2 comparison reads them); their values live in the constants.
+__all__ = [
+    "ACTIONS", "ARTIFACT_PATH", "FEATURE_VERSION", "MAX_ARTIFACT_BYTES", "MAX_FEATURES",
+    "AfterOrigin", "ContextAction", "ContextEvidence", "ContextModel", "ContextPrediction",
+    "TECHNICAL_MARKS", "extract_context_features", "one_typo_from_word", "softmax",
+]
 
 ContextAction = Literal["keep", "convert", "wait", "suggest"]
 AfterOrigin = Literal["none", "field", "planned_next_conversion"]
 ACTIONS: Final[tuple[ContextAction, ...]] = ("keep", "convert", "wait", "suggest")
-FEATURE_VERSION = 2
-MAX_ARTIFACT_BYTES = 8 * 1024 * 1024
-MAX_FEATURES = 50000
-# A correctly typed short token unknown to the lexicon cannot be told apart from
-# the same keys typed in the wrong layout when the other reading happens to be a
-# word or a command name and nothing else disambiguates it: an all-uppercase
-# acronym or brand in any context, or any such token standing alone. The model
-# may only suggest there. Two letters are already deferred by the corpus policy.
-SHORT_UNKNOWN_SOURCE_MAX_LENGTH: Final = 3
-SHORT_UPPERCASE_UNKNOWN_SOURCE_MAX_LENGTH: Final = SHORT_UNKNOWN_SOURCE_MAX_LENGTH
 ARTIFACT_PATH = Path(__file__).parent / "resources" / "models" / "context_policy_v1.json"
 _WORDS = re.compile(r"[^\W\d_]+(?:['’\-][^\W\d_]+)*", re.UNICODE)
+# Characters that mark a path, an address or an identifier inside a token.
+TECHNICAL_MARKS: Final = "_/@\\=<>"
 
 
 @dataclass(frozen=True)
@@ -63,6 +89,9 @@ class ContextEvidence:
     after_origin: AfterOrigin = "none"
     source_identifier: bool = False
     target_identifier: bool = False
+    # Whether the reading is no word itself but one typo away from one (`one_typo_from_word`).
+    source_typo: bool = False
+    target_typo: bool = False
 
     def __post_init__(self) -> None:
         # Replacing literal field contents must not retain a stale empty flag.
@@ -84,12 +113,42 @@ def _normalized(text: str) -> str:
     return unicodedata.normalize("NFC", text.casefold())
 
 
-def extract_context_features(item: ContextEvidence) -> dict[str, float]:
-    """Bounded features shared verbatim by training and serving."""
+def one_typo_from_word(text: str, model: LanguageModel) -> bool:
+    """A reading that is no word of the lexicon but one typo away from one.
 
-    original, alternative = _normalized(item.original[:64]), _normalized(item.alternative[:64])
-    before, after = _normalized(item.field.before[-512:]), _normalized(item.field.after[:128])
-    length = min(6, max(len(original), len(alternative)))
+    One letter extra, missing or wrong, or two neighbours swapped: `фпривет` is
+    `привет` with a stray key in front. Only the frequency lexicon is read, as
+    for the boundary model's misspellings, so the check costs dictionary
+    lookups and no spell checker calls. Short readings are not checked: almost
+    every short string has a neighbour in a lexicon this large.
+    """
+
+    word = LanguageModel.normalize(text)
+    if (len(word) < CONTEXT_TYPO_MIN_CHARACTERS or word != text.casefold() or not word.isalpha()
+            or model.frequencies.get(word, 0)):
+        return False
+    known = model.frequencies
+    letters = ALPHABET_LETTERS.get(model.locale, "")
+    for index, current in enumerate(word):
+        head, tail = word[:index], word[index + 1:]
+        if known.get(head + tail, 0):
+            return True
+        if tail and known.get(head + tail[:1] + current + tail[1:], 0):
+            return True
+        if any(letter != current and known.get(head + letter + tail, 0) for letter in letters):
+            return True
+    return any(known.get(word[:index] + letter + word[index:], 0)
+               for index in range(len(word) + 1) for letter in letters)
+
+
+def extract_context_features(item: ContextEvidence, feature_version: int = FEATURE_VERSION) -> dict[str, float]:
+    """Bounded features shared verbatim by training and serving; schema 5 adds the typo evidence."""
+
+    original = _normalized(item.original[:ACTION_FEATURE_WORD_MAX_CHARACTERS])
+    alternative = _normalized(item.alternative[:ACTION_FEATURE_WORD_MAX_CHARACTERS])
+    before = _normalized(item.field.before[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:])
+    after = _normalized(item.field.after[:ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS])
+    length = min(ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS, max(len(original), len(alternative)))
     direction = str(item.source_group)
     baseline = str(int(item.baseline_convert))
     features: dict[str, float] = {
@@ -100,15 +159,17 @@ def extract_context_features(item: ContextEvidence) -> dict[str, float]:
         f"role:{item.field.role}": 1.0,
         f"trigger:{item.trigger}": 1.0,
         f"known:{int(item.source_known)}:{int(item.target_known)}": 1.0,
-        "score_delta": max(-10.0, min(10.0, item.score_delta)) / 10.0,
+        "score_delta": max(-ACTION_FEATURE_WORD_SCORE_BOUND, min(ACTION_FEATURE_WORD_SCORE_BOUND, item.score_delta))
+        / ACTION_FEATURE_WORD_SCORE_BOUND,
     }
-    for part in re.findall(r"[a-z0-9]+", item.field.application.casefold()[:128])[:4]:
+    application = item.field.application.casefold()[:ACTION_FEATURE_APPLICATION_NAME_CHARACTERS]
+    for part in re.findall(r"[a-z0-9]+", application)[:ACTION_FEATURE_APPLICATION_TOKEN_COUNT]:
         features[f"app:{part}"] = 1.0
         features[f"app:{part}:length:{length}"] = 1.0
     scripts: list[str] = []
     for label, text in (("before", before), ("after", after)):
         words = _WORDS.findall(text)
-        words = words[-6:] if label == "before" else words[:3]
+        words = words[-CONTEXT_FEATURE_BEFORE_WORD_COUNT:] if label == "before" else words[:CONTEXT_FEATURE_AFTER_WORD_COUNT]
         ru = sum("а" <= char <= "я" or char == "ё" for char in text)
         en = sum("a" <= char <= "z" for char in text)
         dominant = "ru" if ru > en else "en" if en > ru else "none"
@@ -128,15 +189,27 @@ def extract_context_features(item: ContextEvidence) -> dict[str, float]:
             features["before:comment"] = float(any(mark in text for mark in ("//", "#", "/*")))
     for token, sign in ((original, -1.0), (alternative, 1.0)):
         padded = "^" + token + "$"
-        for order in (1, 2, 3):
+        for order in CONTEXT_FEATURE_NGRAM_ORDERS:
             scale = sign / math.sqrt(max(1, len(padded) - order + 1))
             for index in range(len(padded) - order + 1):
                 feature = "char:" + padded[index:index + order]
                 features[feature] = features.get(feature, 0.0) + scale
     features["token:digits"] = float(any(char.isdigit() for char in original))
-    features["token:technical"] = float(any(char in original for char in "_/@\\=<>"))
+    features["token:technical"] = float(any(char in original for char in TECHNICAL_MARKS))
     features[f"context:{scripts[0]}:{scripts[1]}:{item.field.role}:{direction}:{length}"] = 1.0
     features[f"context:{scripts[0]}:{scripts[1]}:baseline:{baseline}:length:{length}"] = 1.0
+    if feature_version == CONTEXT_TYPO_FEATURE_VERSION:
+        # Only a reading outside the lexicon can be a typo, and a typo of a word
+        # means something else when the typed reading is itself a word: `лучше`
+        # stays although `kexit` is one letter from `exit`.
+        typo = (f"typo:{int(item.source_typo)}:{int(item.target_typo)}"
+                f":known:{int(item.source_known)}:{int(item.target_known)}")
+        features[typo] = 1.0
+        features[f"{typo}:baseline:{baseline}"] = 1.0
+        # A digit reads the same in both layouts, so its n-grams cancel out of
+        # the two readings. What it says depends on the layout of the letters
+        # around it: `pm2` and `/c,jhrb2` stay, `зь2` is `pm2`.
+        features[f"token:digits:direction:{direction}"] = features["token:digits"]
     return {name: value for name, value in features.items() if value}
 
 
@@ -150,10 +223,10 @@ def softmax(scores: list[float]) -> tuple[float, ...]:
 class ContextModel:
     def __init__(
         self, weights: Mapping[str, tuple[float, ...]], version: str,
-        conversion_threshold: float = 0.985,
+        conversion_threshold: float = CONTEXT_V1_CONVERSION_THRESHOLD,
         *, feature_version: int = FEATURE_VERSION,
     ) -> None:
-        if type(feature_version) is not int or feature_version not in (FEATURE_VERSION, 3):
+        if type(feature_version) is not int or feature_version not in SUPPORTED_FEATURE_VERSIONS:
             raise ValueError("incompatible context feature version")
         self.weights = dict(weights)
         self.version = version
@@ -170,16 +243,19 @@ class ContextModel:
         if not isinstance(payload, dict):
             raise ValueError("context model must be an object")
         feature_version = payload.get("feature_version")
-        if type(feature_version) is not int or feature_version not in (FEATURE_VERSION, 3) or payload.get("actions") != list(ACTIONS):
+        if (type(feature_version) is not int or feature_version not in SUPPORTED_FEATURE_VERSIONS
+                or payload.get("actions") != list(ACTIONS)):
             raise ValueError("incompatible context model")
         raw_weights: object = payload.get("weights")
         if not isinstance(raw_weights, dict) or not 0 < len(raw_weights) <= MAX_FEATURES:
             raise ValueError("invalid context weights")
         weights: dict[str, tuple[float, ...]] = {}
         for name, values in raw_weights.items():
-            if not isinstance(name, str) or len(name) > 512 or not isinstance(values, list) or len(values) != 4:
+            if (not isinstance(name, str) or len(name) > MAX_CONTEXT_FEATURE_NAME_CHARACTERS or not isinstance(values, list)
+                    or len(values) != len(ACTIONS)):
                 raise ValueError("invalid context feature")
-            if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or abs(value) > 1000 for value in values):
+            if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+                   or abs(value) > MAX_CONTEXT_WEIGHT_MAGNITUDE for value in values):
                 raise ValueError("invalid context weight")
             weights[name] = tuple(float(value) for value in values)
         checksum = hashlib.sha256(json.dumps(raw_weights, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
@@ -187,10 +263,11 @@ class ContextModel:
             raise ValueError("context model checksum mismatch")
         version: object = payload.get("version")
         threshold: object = payload.get("conversion_threshold")
-        prefix = "context-v1-" if feature_version == FEATURE_VERSION else "context-v3-"
-        if not isinstance(version, str) or not version.startswith(prefix) or len(version) > 80:
+        prefix = "context-v3-" if feature_version == CONTEXT_ACTION_FEATURE_VERSION else "context-v1-"
+        if not isinstance(version, str) or not version.startswith(prefix) or len(version) > MAX_CONTEXT_MODEL_VERSION_CHARACTERS:
             raise ValueError("invalid context version")
-        if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not 0.95 <= threshold <= 1.0:
+        if (isinstance(threshold, bool) or not isinstance(threshold, (int, float))
+                or not MIN_CONTEXT_CONVERSION_THRESHOLD <= threshold <= 1.0):
             raise ValueError("unsafe context threshold")
         return cls(weights, version, float(threshold), feature_version=feature_version)
 
@@ -205,10 +282,11 @@ class ContextModel:
     def supports_features(self, features: Mapping[str, float]) -> bool:
         """Use the same language-support gate during calibration and inference."""
 
-        if self.feature_version == 3:
+        if self.feature_version == CONTEXT_ACTION_FEATURE_VERSION:
+            text = ACTION_FEATURE_CHARACTER_TEXT_FIELD_INDEX
             return all(any(
                 name in self.weights for name in features
-                if name.startswith(label + ":char:") and any(char.isalpha() for char in name.split(":", 4)[4])
+                if name.startswith(label + ":char:") and any(char.isalpha() for char in name.split(":", text)[text])
             ) for label in ("source", "target"))
         return any(
             name in self.weights
@@ -240,29 +318,29 @@ class ContextModel:
         return True
 
     def predict(self, item: ContextEvidence) -> ContextPrediction:
-        if self.feature_version == 3:
+        if self.feature_version == CONTEXT_ACTION_FEATURE_VERSION:
             try:
                 features = extract_action_features(item)
             except ValueError:
                 return ContextPrediction("suggest", 0.0, (0.0, 0.0, 0.0, 1.0), self.version, False)
         else:
-            features = extract_context_features(item)
+            features = extract_context_features(item, self.feature_version)
         scores = [0.0] * len(ACTIONS)
         for name, value in features.items():
             weights = self.weights.get(name)
             if weights is not None:
                 for index, weight in enumerate(weights):
                     scores[index] += weight * value
-        if self.feature_version == 3 and not all(math.isfinite(score) for score in scores):
+        if self.feature_version == CONTEXT_ACTION_FEATURE_VERSION and not all(math.isfinite(score) for score in scores):
             return ContextPrediction("suggest", 0.0, (0.0, 0.0, 0.0, 1.0), self.version, False)
         probabilities = softmax(scores)
         selected = max(range(len(ACTIONS)), key=probabilities.__getitem__)
         action = ACTIONS[selected]
         if action == "convert" and probabilities[selected] < self.conversion_threshold:
             action = "suggest"
-        if self.feature_version == 3 and action == "convert" and not self.allows_automatic_conversion(features):
+        if self.feature_version == CONTEXT_ACTION_FEATURE_VERSION and action == "convert" and not self.allows_automatic_conversion(features):
             action = "suggest"
         supported = self.supports_features(features)
-        if self.feature_version == 3 and not supported and action in {"keep", "convert"}:
+        if self.feature_version == CONTEXT_ACTION_FEATURE_VERSION and not supported and action in {"keep", "convert"}:
             action = "suggest"
         return ContextPrediction(action, probabilities[selected], probabilities, self.version, supported)

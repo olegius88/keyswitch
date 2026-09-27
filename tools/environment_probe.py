@@ -22,13 +22,14 @@ pass here and still change the weights. Only a full replay settles that, which
 is why the probe never gets a vote on identity - it is recorded as provenance
 and used to explain a divergence, never to certify its absence. The one cell
 that IS exhaustive is `unicode`, which walks every code point, because the
-runtime normalizes every token it sees (src/keyswitch/intent_model.py:164-168)
-and a Unicode database bump is a real and silent behavioural change.
+runtime normalizes every token it sees (normalize_token in
+src/keyswitch/intent_model.py) and a Unicode database bump is a real and silent
+behavioural change.
 
 Cells, and why each one is here:
 
 * `float_arithmetic` - the FTRL update written out as the trainer writes it
-  (tools/train_intent_model.py:4275-4285, 4334-4349), including the cancelling
+  (FTRLProximal.update in tools/train_intent_model.py), including the cancelling
   difference `sqrt(new_n) - sqrt(old_n)` that carries the learning rate.
 * `libm` - exactly the functions the trainer calls, at the frequency it calls
   them: sqrt (7 sites), nextafter (3), log1p (2), exp, log, floor, ceil.
@@ -38,12 +39,12 @@ Cells, and why each one is here:
   manifest and comes back.
 * `unicode` - casefold and NFC/NFD over every code point.
 * `hashing` - UTF-8 encoding and the FNV-1a mixing loop
-  (src/keyswitch/intent_model.py:171-181), plus struct packing, which is how a
-  feature becomes a bucket.
+  (fnv1a64 in src/keyswitch/intent_model.py), plus struct packing, which is how
+  a feature becomes a bucket.
 * `ordering` - sort stability, which fixes the order rows reach the model.
 * `integers` - the exact integer operations quantisation relies on.
 * `random_stream` - `random.Random(seed + epoch).shuffle`
-  (tools/train_intent_model.py:4859), which fixes the epoch's row order.
+  (fit_ftrl in tools/train_intent_model.py), which fixes the epoch's row order.
 
 No expected value appears anywhere in this file. The probe reports what this
 machine does; comparing that against a recorded run is the caller's business.
@@ -63,7 +64,54 @@ from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Callable, Final, TypedDict
 
-SCHEMA_VERSION: Final[int] = 1
+# Run as a script with no PYTHONPATH, the probe still finds the shared constants.
+if str(Path(__file__).resolve().parent.parent / "src") not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+from keyswitch.constants.environment_probe import (  # noqa: E402
+    DOUBLE_MAGNITUDE_MASK,
+    PROBE_DOUBLES,
+    PROBE_FTRL_ALPHA,
+    PROBE_FTRL_BETA,
+    PROBE_FTRL_L1,
+    PROBE_FTRL_L2,
+    PROBE_FTRL_WEIGHT_PER_GRADIENT,
+    PROBE_INTEGER_IMAGE_BYTES,
+    PROBE_INTEGERS,
+    PROBE_POW_BASE,
+    PROBE_POW_EXPONENT,
+    PROBE_POW_MODULUS,
+    PROBE_RANDOM_BITS,
+    PROBE_RANDOM_DRAWS,
+    PROBE_RANDOM_EPOCHS,
+    PROBE_RANDOM_SEEDS,
+    PROBE_ROUND_DIGITS,
+    PROBE_ROUNDING_DOUBLES,
+    PROBE_SAMPLE_POPULATION,
+    PROBE_SAMPLE_SIZE,
+    PROBE_SHIFT_BITS,
+    PROBE_SHUFFLE_LENGTH,
+    PROBE_SMALLEST_SUBNORMAL,
+    PROBE_SORT_KEY_MODULUS,
+    PROBE_SORT_PAIR_COUNT,
+    PROBE_SUM_ALTERNATING_COUNT,
+    PROBE_SUM_ALTERNATING_PERIOD,
+    PROBE_SUM_ALTERNATING_STEP,
+    PROBE_SUM_CANCELLING_MAGNITUDE,
+    PROBE_SUM_SMALL_TERM,
+    PROBE_SUM_SMALL_TERM_COUNT,
+    PROBE_SUM_SUBNORMAL_COUNT,
+    PROBE_ULP_OPERANDS,
+    UNICODE_PLANE_BITS,
+)
+from keyswitch.constants.file_formats import (  # noqa: E402
+    ENVIRONMENT_PROBE_SCHEMA_VERSION,
+    HEXADECIMAL_BASE,
+    REPORT_JSON_INDENT,
+    UINT64_MASK,
+)
+from keyswitch.constants.models import FNV1A64_OFFSET_BASIS, FNV1A64_PRIME  # noqa: E402
+from keyswitch.constants.text import MAX_UNICODE_CODEPOINT  # noqa: E402
 
 
 class CellMeasurement(TypedDict):
@@ -86,34 +134,9 @@ class Measurement(TypedDict, total=False):
     cells: dict[str, CellMeasurement]
     fork_check: str
 
-# Operands chosen to sit on the places doubles misbehave: subnormals, the
-# exponent boundary, values whose difference cancels, and ordinary magnitudes
-# from real training. Not a random sample - a list of known-awkward inputs.
-_PROBE_DOUBLES: Final[tuple[float, ...]] = (
-    0.0,
-    -0.0,
-    5e-324,
-    2.2250738585072014e-308,
-    1e-300,
-    1e-15,
-    0.1,
-    0.5,
-    1.0 - 2**-53,
-    1.0,
-    1.0 + 2**-52,
-    1.5,
-    2.0,
-    3.0,
-    10.0,
-    1e15,
-    1e15 + 1.0,
-    2**53 - 1.0,
-    float(2**53),
-    1e300,
-    1.7976931348623157e308,
-)
-
-assert all(type(value) is float for value in _PROBE_DOUBLES), (
+# The operands (PROBE_DOUBLES) sit where doubles misbehave: subnormals, the exponent boundary,
+# cancelling differences and ordinary training magnitudes.
+assert all(type(value) is float for value in PROBE_DOUBLES), (
     "probe operands must be doubles; an int here would silently probe integer "
     "arithmetic instead"
 )
@@ -141,14 +164,14 @@ _PROBE_STRINGS: Final[tuple[str, ...]] = (
 def _double(value: float) -> bytes:
     """The exact IEEE-754 image, which also separates -0.0 from 0.0.
 
-    Mirrors `_same_double` in the trainer (tools/train_intent_model.py:4547).
+    Mirrors `_same_double` in the trainer (tools/train_intent_model.py).
     """
 
     return struct.pack("<d", value)
 
 
 def _integer(value: int) -> bytes:
-    return value.to_bytes(17, "little", signed=True)
+    return value.to_bytes(PROBE_INTEGER_IMAGE_BYTES, "little", signed=True)
 
 
 def _text(value: str) -> bytes:
@@ -163,11 +186,11 @@ def _text(value: str) -> bytes:
 def _cell_float_arithmetic() -> Iterator[tuple[str, bytes]]:
     """The FTRL update, written as the trainer writes it."""
 
-    alpha, beta, l1, l2 = 0.1, 1.0, 0.5, 0.01
-    for old_n in _PROBE_DOUBLES:
+    alpha, beta, l1, l2 = PROBE_FTRL_ALPHA, PROBE_FTRL_BETA, PROBE_FTRL_L1, PROBE_FTRL_L2
+    for old_n in PROBE_DOUBLES:
         if not math.isfinite(old_n) or old_n < 0.0:
             continue
-        for gradient in _PROBE_DOUBLES:
+        for gradient in PROBE_DOUBLES:
             if not math.isfinite(gradient):
                 continue
             new_n = old_n + gradient * gradient
@@ -176,7 +199,7 @@ def _cell_float_arithmetic() -> Iterator[tuple[str, bytes]]:
             # The cancelling difference that carries the learning rate.
             sigma = (math.sqrt(new_n) - math.sqrt(old_n)) / alpha
             yield f"sigma:{old_n!r}:{gradient!r}", _double(sigma)
-            weight = gradient * 0.5
+            weight = gradient * PROBE_FTRL_WEIGHT_PER_GRADIENT
             z_value = gradient - sigma * weight
             yield f"z:{old_n!r}:{gradient!r}", _double(z_value)
             if abs(z_value) <= l1:
@@ -201,15 +224,15 @@ def _cell_libm() -> Iterator[tuple[str, bytes]]:
         ("ceil", lambda value: float(math.ceil(value))),
     )
     for name, function in unary:
-        for value in _PROBE_DOUBLES:
+        for value in PROBE_DOUBLES:
             try:
                 result = function(value)
             except (ValueError, OverflowError) as error:
                 yield f"{name}:{value!r}", _text(type(error).__name__)
                 continue
             yield f"{name}:{value!r}", _double(result)
-    for left in _PROBE_DOUBLES:
-        for right in _PROBE_DOUBLES:
+    for left in PROBE_DOUBLES:
+        for right in PROBE_DOUBLES:
             yield f"nextafter:{left!r}:{right!r}", _double(math.nextafter(left, right))
 
 
@@ -217,16 +240,17 @@ def _cell_builtin_sum() -> Iterator[tuple[str, bytes]]:
     """Summation order, which decides the last bits of every dot product."""
 
     sequences: tuple[tuple[str, tuple[float, ...]], ...] = (
-        ("cancel", (1e16, 1.0, -1e16)),
-        ("cancel_reversed", (-1e16, 1.0, 1e16)),
-        ("many_small", (1.0,) + (1e-16,) * 64),
-        ("many_small_reversed", (1e-16,) * 64 + (1.0,)),
+        ("cancel", (PROBE_SUM_CANCELLING_MAGNITUDE, 1.0, -PROBE_SUM_CANCELLING_MAGNITUDE)),
+        ("cancel_reversed", (-PROBE_SUM_CANCELLING_MAGNITUDE, 1.0, PROBE_SUM_CANCELLING_MAGNITUDE)),
+        ("many_small", (1.0,) + (PROBE_SUM_SMALL_TERM,) * PROBE_SUM_SMALL_TERM_COUNT),
+        ("many_small_reversed", (PROBE_SUM_SMALL_TERM,) * PROBE_SUM_SMALL_TERM_COUNT + (1.0,)),
         ("alternating", tuple(
-            (1.0 if index % 2 else -1.0) * (1.0 + index * 1e-13)
-            for index in range(128)
+            (1.0 if index % PROBE_SUM_ALTERNATING_PERIOD else -1.0)
+            * (1.0 + index * PROBE_SUM_ALTERNATING_STEP)
+            for index in range(PROBE_SUM_ALTERNATING_COUNT)
         )),
-        ("subnormal", (5e-324,) * 32),
-        ("mixed", _PROBE_DOUBLES),
+        ("subnormal", (PROBE_SMALLEST_SUBNORMAL,) * PROBE_SUM_SUBNORMAL_COUNT),
+        ("mixed", PROBE_DOUBLES),
     )
     def guarded(
         compute: Callable[[tuple[float, ...]], float], values: tuple[float, ...]
@@ -264,20 +288,20 @@ def _cell_builtin_sum() -> Iterator[tuple[str, bytes]]:
 def _cell_float_text() -> Iterator[tuple[str, bytes]]:
     """The boundary where a float becomes the manifest and comes back."""
 
-    for value in _PROBE_DOUBLES:
+    for value in PROBE_DOUBLES:
         yield f"repr:{value!r}", _text(repr(value))
         yield f"hex:{value!r}", _text(value.hex())
         yield f"json:{value!r}", _text(json.dumps(value))
         yield f"roundtrip:{value!r}", _double(float(repr(value)))
         yield f"from_hex:{value!r}", _double(float.fromhex(value.hex()))
-        for digits in (0, 1, 6, 15):
+        for digits in PROBE_ROUND_DIGITS:
             yield f"round:{value!r}:{digits}", _double(round(value, digits))
 
 
 def _cell_unicode() -> Iterator[tuple[str, bytes]]:
     """Every code point. The runtime normalises every token it sees."""
 
-    for point in range(0x110000):
+    for point in range(MAX_UNICODE_CODEPOINT + 1):
         character = chr(point)
         folded = character.casefold()
         composed = unicodedata.normalize("NFC", character)
@@ -298,7 +322,7 @@ def _cell_unicode() -> Iterator[tuple[str, bytes]]:
         yield f"str:fold:{value!r}", _text(value.casefold())
         for form in ("NFC", "NFD", "NFKC", "NFKD"):
             yield f"str:{form}:{value!r}", _text(unicodedata.normalize(form, value))
-        # Exactly what normalize_token does (intent_model.py:164-168).
+        # Exactly what normalize_token does (intent_model.py).
         yield (
             f"str:token:{value!r}",
             _text(unicodedata.normalize(
@@ -310,17 +334,17 @@ def _cell_unicode() -> Iterator[tuple[str, bytes]]:
 def _cell_hashing() -> Iterator[tuple[str, bytes]]:
     """How a feature becomes a bucket."""
 
-    prime = 0x100000001B3
-    mask = (1 << 64) - 1
+    prime = FNV1A64_PRIME
+    mask = UINT64_MASK
     for value in _PROBE_STRINGS:
         encoded = _text(value)
         yield f"utf8:{value!r}", encoded
-        result = 0xCBF29CE484222325
+        result = FNV1A64_OFFSET_BASIS
         for byte in encoded:
             result ^= byte
             result = (result * prime) & mask
         yield f"fnv1a64:{value!r}", _integer(result)
-    for number in _PROBE_DOUBLES:
+    for number in PROBE_DOUBLES:
         yield f"pack_le:{number!r}", struct.pack("<d", number)
         yield f"pack_be:{number!r}", struct.pack(">d", number)
         # A double beyond the single-precision range is not representable;
@@ -338,12 +362,12 @@ def _cell_hashing() -> Iterator[tuple[str, bytes]]:
 def _cell_ordering() -> Iterator[tuple[str, bytes]]:
     """Sort stability, which fixes the order rows reach the model."""
 
-    pairs = tuple((index % 5, index) for index in range(64))
+    pairs = tuple((index % PROBE_SORT_KEY_MODULUS, index) for index in range(PROBE_SORT_PAIR_COUNT))
     yield "stable", _text(repr(sorted(pairs, key=lambda item: item[0])))
     yield "reverse", _text(repr(sorted(pairs, key=lambda item: item[0], reverse=True)))
     yield "strings", _text(repr(sorted(_PROBE_STRINGS)))
     yield "strings_fold", _text(repr(sorted(_PROBE_STRINGS, key=str.casefold)))
-    finite = tuple(value for value in _PROBE_DOUBLES if math.isfinite(value))
+    finite = tuple(value for value in PROBE_DOUBLES if math.isfinite(value))
     yield "doubles", _text(repr(sorted(finite)))
     yield "min_max", _double(min(finite)) + _double(max(finite))
     yield "dict_order", _text(repr(list({value: None for value in _PROBE_STRINGS})))
@@ -352,7 +376,7 @@ def _cell_ordering() -> Iterator[tuple[str, bytes]]:
 def _cell_integers() -> Iterator[tuple[str, bytes]]:
     """The integer operations quantisation relies on."""
 
-    values = (-(2**70), -(2**63), -7, -1, 0, 1, 7, 2**31, 2**63 - 1, 2**70)
+    values = PROBE_INTEGERS
     for left in values:
         yield f"str:{left}", _text(str(left))
         yield f"bits:{left}", _integer(left.bit_length())
@@ -363,9 +387,9 @@ def _cell_integers() -> Iterator[tuple[str, bytes]]:
             yield f"mod:{left}:{right}", _integer(left % right)
             quotient, remainder = divmod(left, right)
             yield f"divmod:{left}:{right}", _integer(quotient) + _integer(remainder)
-        yield f"shift:{left}", _integer(left >> 3) + _integer(left << 3)
-    yield "pow_mod", _integer(pow(3, 2**20, 2**61 - 1))
-    for value in (0.0, 0.5, 1.5, 2.5, -0.5, -1.5, 1e15 + 0.5):
+        yield f"shift:{left}", _integer(left >> PROBE_SHIFT_BITS) + _integer(left << PROBE_SHIFT_BITS)
+    yield "pow_mod", _integer(pow(PROBE_POW_BASE, PROBE_POW_EXPONENT, PROBE_POW_MODULUS))
+    for value in PROBE_ROUNDING_DOUBLES:
         yield f"round_int:{value!r}", _integer(round(value))
         yield f"trunc:{value!r}", _integer(math.trunc(value))
 
@@ -373,21 +397,21 @@ def _cell_integers() -> Iterator[tuple[str, bytes]]:
 def _cell_random_stream() -> Iterator[tuple[str, bytes]]:
     """The Mersenne Twister stream that fixes each epoch's row order."""
 
-    for seed in (0, 1, 20260909, 2**31 - 1):
-        for epoch in (0, 1, 7):
+    for seed in PROBE_RANDOM_SEEDS:
+        for epoch in PROBE_RANDOM_EPOCHS:
             generator = random.Random(seed + epoch)
-            indices = list(range(64))
+            indices = list(range(PROBE_SHUFFLE_LENGTH))
             generator.shuffle(indices)
             yield f"shuffle:{seed}:{epoch}", _text(repr(indices))
             generator = random.Random(seed + epoch)
             yield f"random:{seed}:{epoch}", b"".join(
-                _double(generator.random()) for _ in range(8)
+                _double(generator.random()) for _ in range(PROBE_RANDOM_DRAWS)
             )
             generator = random.Random(seed + epoch)
-            yield f"getrandbits:{seed}:{epoch}", _integer(generator.getrandbits(64))
+            yield f"getrandbits:{seed}:{epoch}", _integer(generator.getrandbits(PROBE_RANDOM_BITS))
             generator = random.Random(seed + epoch)
             yield f"sample:{seed}:{epoch}", _text(
-                repr(generator.sample(range(1000), 16))
+                repr(generator.sample(range(PROBE_SAMPLE_POPULATION), PROBE_SAMPLE_SIZE))
             )
 
 
@@ -413,8 +437,8 @@ def _bucket_of(cell: str, label: str) -> str:
     """
 
     if cell == "unicode" and label.startswith("U+"):
-        point = int(label[2:].split(":", 1)[0], 16)
-        return f"plane-{point >> 16:02X}"
+        point = int(label[len("U+"):].split(":", 1)[0], HEXADECIMAL_BASE)
+        return f"plane-{point >> UNICODE_PLANE_BITS:02X}"
     return label.split(":", 1)[0]
 
 
@@ -451,7 +475,7 @@ def measure(cells: Sequence[str] | None = None) -> Measurement:
         combined.update(name.encode("utf-8") + b"\x00")
         combined.update(measured[name]["sha256"].encode("ascii") + b"\n")
     return {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": ENVIRONMENT_PROBE_SCHEMA_VERSION,
         "probe_sha256": combined.hexdigest(),
         "cells": measured,
     }
@@ -515,7 +539,7 @@ def _ulp_distance(left: float, right: float) -> int | None:
         # Map the sign-magnitude bit pattern onto a monotone integer line, so
         # that subtracting two of them counts the doubles between them.
         bits = int(struct.unpack("<q", struct.pack("<d", value))[0])
-        return bits if bits >= 0 else -(bits & 0x7FFFFFFFFFFFFFFF) - 1
+        return bits if bits >= 0 else -(bits & DOUBLE_MAGNITUDE_MASK) - 1
 
     return abs(ordered(left) - ordered(right))
 
@@ -579,7 +603,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="a recorded measurement to compare --explain against",
     )
     parser.add_argument(
-        "--ulp", nargs=2, metavar=("A", "B"),
+        "--ulp", nargs=PROBE_ULP_OPERANDS, metavar=("A", "B"),
         help="report how many doubles separate two little-endian hex images",
     )
     parser.add_argument(
@@ -624,7 +648,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         else:
             payload["fork_check"] = "agrees"
-    print(json.dumps(payload, indent=2, sort_keys=True))
+    print(json.dumps(payload, indent=REPORT_JSON_INDENT, sort_keys=True))
     return 0
 
 

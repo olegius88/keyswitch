@@ -22,7 +22,8 @@ from evaluate_context_engine import select_phrases
 from verify_context_v2 import read_object, validate_metrics, verify
 from keyswitch.constants.file_formats import METADATA_JSON_LIMIT_BYTES
 from keyswitch.context_model import ARTIFACT_PATH
-from verify_context_v2_history import normalized_provenance, verify_sources
+from historical_sources import normalized_provenance
+from verify_context_v2_history import verify_sources
 from fixture_values.corpora import CONTEXT_V2_TEST_SPLIT_INDEX
 from fixture_values.counts import (
     CONTEXT_V2_DUPLICATE_ROW_REPEATS,

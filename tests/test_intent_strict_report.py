@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -21,6 +22,8 @@ from fixture_values.counts import (
     STRICT_REPORT_SCRIPT_SEARCH_WINDOW_CHARACTERS,
 )
 from keyswitch.constants.file_formats import SHA256_HEX_CHARACTERS
+from keyswitch.constants.model_protocol import INTENT_TOOLCHAIN_VALUE_SOURCES
+from keyswitch.value_provenance import PinnedValues
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ARTIFACT = PROJECT_ROOT / "src/keyswitch/resources/models/layout_intent_v1.ksm"
@@ -44,11 +47,16 @@ def _toolchain(manifest: dict[str, object]) -> dict[str, object]:
     return {str(key): value for key, value in toolchain.items()}
 
 
+def _pinned(root: Path = PROJECT_ROOT) -> PinnedValues:
+    return verifier.pinned_toolchain_values(root)
+
+
 def _synthetic_report() -> dict[str, object]:
     """Build a passing report whose hashes match the repository files."""
 
     manifest = _manifest()
     toolchain = _toolchain(manifest)
+    pinned = _pinned()
     provenance: list[dict[str, object]] = [
         {"name": "artifact_sha256", "passed": True, "detail": _sha256(ARTIFACT)},
         {"name": "config_sha256", "passed": True, "detail": _sha256(CONFIG)},
@@ -73,6 +81,13 @@ def _synthetic_report() -> dict[str, object]:
             "detail": f"current={receipt_digest}, manifest={receipt_digest}",
         }
     )
+    provenance.append(
+        {
+            "name": verifier.CONSTANTS_CHECK,
+            "passed": True,
+            "detail": f"current={pinned.sha256}, manifest={pinned.sha256}",
+        }
+    )
     for name, relative in verifier.SOURCE_PATHS.items():
         provenance.append(
             {"name": name, "passed": True, "detail": _sha256(PROJECT_ROOT / relative)}
@@ -86,8 +101,59 @@ def _synthetic_report() -> dict[str, object]:
         },
         "performance": {"deterministic_predictions": True},
         "provenance": provenance,
+        "toolchain_constants": {"sha256": pinned.sha256, "values": dict(pinned.values)},
         "toolchain_digest_sample": toolchain.get("trainer_sha256"),
     }
+
+
+def _current_tree_manifest(directory: Path) -> Path:
+    """The shipped manifest re-bound to the working tree, every toolchain digest recomputed.
+
+    The tests that read the shipped manifest as it is accept only a tree that
+    matches the installed candidate. These exercise the value check whatever the
+    tree holds now.
+    """
+
+    manifest = _manifest()
+    toolchain = _toolchain(manifest)
+    for name, relative in verifier.TOOLCHAIN_PATHS.items():
+        toolchain[name.removeprefix("toolchain_")] = _sha256(PROJECT_ROOT / relative)
+    toolchain["constants_sha256"] = _pinned().sha256
+    manifest["toolchain"] = toolchain
+    path = directory / "current-manifest.json"
+    path.write_text(json.dumps(manifest), "utf-8")
+    return path
+
+
+def _mirror(directory: Path) -> Path:
+    """Copy exactly what the verifier reads from a tree, constants included."""
+
+    mirror = directory / "tree"
+    receipt = verifier.receipt_path(_manifest(), PROJECT_ROOT).relative_to(PROJECT_ROOT)
+    for relative in {
+        *verifier.TOOLCHAIN_PATHS.values(),
+        *INTENT_TOOLCHAIN_VALUE_SOURCES,
+        *verifier.SOURCE_PATHS.values(),
+        receipt.as_posix(),
+        "src/keyswitch/constants",
+    }:
+        source = PROJECT_ROOT / relative
+        target = mirror / relative
+        if source.is_dir():
+            shutil.copytree(source, target, ignore=shutil.ignore_patterns("__pycache__"))
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+    return mirror
+
+
+def _redefine(path: Path, name: str, suffix: str) -> None:
+    """Append an expression to one constant's definition, so its value changes."""
+
+    text = path.read_text("utf-8")
+    changed, count = re.subn(rf"^({name}\b[^\n]*)$", rf"\1{suffix}", text, flags=re.MULTILINE)
+    assert count == 1, name
+    path.write_text(changed, "utf-8")
 
 
 def _declared_strict_gates() -> frozenset[str]:
@@ -134,7 +200,8 @@ class StrictReportVerifierTests(unittest.TestCase):
         self.assertEqual(summary["artifact_sha256"], _sha256(ARTIFACT))
         self.assertEqual(summary["gate_count"], len(_declared_strict_gates()))
         # Twelve hashed files plus tools/environment_probe.py, certified
-        # since v21 so the environment probe cannot be quietly weakened.
+        # since v21 so the environment probe cannot be quietly weakened, and
+        # src/keyswitch/spellcheck.py, certified since manifest schema 2.
         self.assertEqual(summary["verified_files"], INTENT_STRICT_REPORT_VERIFIED_FILE_COUNT)
         self.assertEqual(summary["model_version"], _manifest()["artifact_model_version"])
 
@@ -234,6 +301,71 @@ class StrictReportVerifierTests(unittest.TestCase):
         detector.write_text(detector.read_text("utf-8") + "\n# drift\n", "utf-8")
         with self.assertRaisesRegex(verifier.ReportRejected, "detector.py changed"):
             self._verify(_synthetic_report(), project_root=mirror)
+
+    def _verify_current(
+        self, report: dict[str, object], project_root: Path = PROJECT_ROOT, manifest: Path | None = None
+    ) -> dict[str, object]:
+        return verifier.verify_report(
+            report_path=self._write(report),
+            artifact_path=ARTIFACT,
+            manifest_path=manifest or _current_tree_manifest(self.root),
+            config_path=CONFIG,
+            project_root=project_root,
+        )
+
+    def test_report_bound_to_the_current_values_is_accepted(self) -> None:
+        pinned = _pinned()
+        summary = self._verify_current(_synthetic_report())
+        self.assertEqual(summary["constants_sha256"], pinned.sha256)
+        self.assertEqual(summary["verified_constants"], len(pinned.values))
+        self.assertEqual(summary["verified_files"], INTENT_STRICT_REPORT_VERIFIED_FILE_COUNT)
+
+    def test_changed_constant_is_rejected_by_name(self) -> None:
+        """No toolchain file changes when a threshold does; the value digest does."""
+
+        mirror = _mirror(self.root)
+        _redefine(mirror / "src/keyswitch/constants/training.py", "WILSON_95_Z_SCORE", " + 1")
+        with self.assertRaisesRegex(
+            verifier.ReportRejected,
+            r"changed since the report was produced \(changed: "
+            r"keyswitch\.constants\.training\.WILSON_95_Z_SCORE\)",
+        ):
+            self._verify_current(_synthetic_report(), project_root=mirror)
+
+    def test_changed_constant_the_toolchain_does_not_read_is_ignored(self) -> None:
+        mirror = _mirror(self.root)
+        _redefine(mirror / "src/keyswitch/constants/settings_defaults.py", "CONFIDENCE_SETTING_MAX", " + 1")
+        summary = self._verify_current(_synthetic_report(), project_root=mirror)
+        self.assertEqual(summary["constants_sha256"], _pinned().sha256)
+
+    def test_report_without_its_values_cannot_name_the_change(self) -> None:
+        mirror = _mirror(self.root)
+        _redefine(mirror / "src/keyswitch/constants/training.py", "WILSON_95_Z_SCORE", " + 1")
+        report = _synthetic_report()
+        del report["toolchain_constants"]
+        with self.assertRaisesRegex(verifier.ReportRejected, "does not list the values behind that digest"):
+            self._verify_current(report, project_root=mirror)
+
+    def test_manifest_must_carry_the_current_constants_digest(self) -> None:
+        manifest = json.loads(_current_tree_manifest(self.root).read_text("utf-8"))
+        del manifest["toolchain"]["constants_sha256"]
+        legacy = self.root / "legacy-manifest.json"
+        legacy.write_text(json.dumps(manifest), "utf-8")
+        with self.assertRaisesRegex(verifier.ReportRejected, "the manifest predates value pinning"):
+            self._verify_current(_synthetic_report(), manifest=legacy)
+        manifest["toolchain"]["constants_sha256"] = "0" * SHA256_HEX_CHARACTERS
+        legacy.write_text(json.dumps(manifest), "utf-8")
+        with self.assertRaisesRegex(
+            verifier.ReportRejected,
+            r"manifest\.toolchain\.constants_sha256 differs .*does not list the values behind",
+        ):
+            self._verify_current(_synthetic_report(), manifest=legacy)
+
+    def test_unpinnable_constants_are_rejected(self) -> None:
+        mirror = _mirror(self.root)
+        (mirror / "src/keyswitch/constants/training.py").unlink()
+        with self.assertRaisesRegex(verifier.ReportRejected, "the toolchain constants cannot be pinned"):
+            self._verify_current(_synthetic_report(), project_root=mirror)
 
     def test_command_line_reports_the_reason_and_exit_status(self) -> None:
         report = _synthetic_report()

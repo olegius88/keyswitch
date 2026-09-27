@@ -17,6 +17,7 @@ if TOOLS_PATH not in sys.path:
     sys.path.insert(0, TOOLS_PATH)
 
 import release_pipeline as pipeline  # noqa: E402
+import verify_intent_strict_report as strict_report  # noqa: E402
 from test_intent_strict_report import _declared_strict_gates  # noqa: E402
 from fixture_values.clock import SECONDS_JUST_OVER_A_MINUTE, SECONDS_JUST_UNDER_A_MINUTE
 from fixture_values.release import (
@@ -377,6 +378,24 @@ class ModelArtifactTests(unittest.TestCase):
             identity.registry_path.stem.split("-")[-1],
         )
         self.assertTrue(identity.artifact_version.startswith("intent-v1-"))
+
+    def test_manifest_must_pin_the_constants_the_toolchain_imports(self) -> None:
+        current = strict_report.pinned_toolchain_values(pipeline.PROJECT_ROOT).sha256
+        facts: dict[str, object] = {}
+        self.assertEqual(pipeline.toolchain_constants_problems({"constants_sha256": current}, facts), [])
+        self.assertEqual(facts["toolchain_constants_sha256"], current)
+        (stale,) = pipeline.toolchain_constants_problems(
+            {"constants_sha256": "0" * SHA256_HEX_CHARACTERS}, {}
+        )
+        self.assertIn("differ from manifest.toolchain.constants_sha256", stale)
+        self.assertNotIn("predates", stale)
+        (legacy,) = pipeline.toolchain_constants_problems({}, {})
+        self.assertIn("the manifest predates value pinning", legacy)
+        with tempfile.TemporaryDirectory() as directory:
+            (unpinnable,) = pipeline.toolchain_constants_problems(
+                {"constants_sha256": current}, {}, Path(directory)
+            )
+        self.assertIn("the toolchain constants cannot be pinned", unpinnable)
 
 
 @unittest.skipUnless(Path("/proc/self/stat").exists(), "requires Linux /proc")

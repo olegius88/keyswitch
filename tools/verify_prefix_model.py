@@ -14,10 +14,9 @@ from evaluate_prefix_engine import provenance as engine_provenance
 from keyswitch.prefix_model import ARTIFACT, PrefixModel
 from keyswitch.prefix_schema import VersionedPrefixModel
 from keyswitch.constants.model_protocol import ACTIVE_SPLITS, PROFILES
-from prefix_corpus import DIRECTORY, RECEIPT, config
+from prefix_corpus import DIRECTORY, config, verify_receipt
 from train_prefix_model import CANDIDATE, SEAL, REPORT, accepted, evaluate, provenance
 from verify_context_v2 import read_object
-from verify_lexical_compatibility import verify as verify_compatibility
 from keyswitch.constants.file_formats import REPORT_JSON_INDENT
 from keyswitch.constants.training import (
     PREFIX_EARLY_RESTORED_MIN_FRACTION,
@@ -26,12 +25,18 @@ from keyswitch.constants.training import (
 
 
 def verify_frozen() -> dict[str, object]:
-    """Replay stored numeric features with unchanged weights; never re-fit."""
-    compatibility = verify_compatibility("prefix_v1")
+    """Replay stored numeric features with unchanged weights; never re-fit.
+
+    The corpus receipt pins the bytes and imported values of every input the rows were
+    computed from, the intent lexical configuration included, so a changed input fails here
+    before any frozen row is read.
+    """
+    receipt = verify_receipt()
     raw = evaluate()
     if raw != REPORT.read_bytes() or json.loads(raw).get("accepted") is not True:
         raise ValueError("prefix frozen numeric regression changed or rejected")
-    return {**compatibility, "frozen_numeric_regression": True}
+    return {"corpus": "prefix_v1", "corpus_provenance_verified": True, "scope": receipt["scope"],
+            "verified_partitions": list(ACTIVE_SPLITS), "frozen_numeric_regression": True}
 
 
 def verify(*, require_active: bool = True, report_path: Path = REPORT,
@@ -55,12 +60,8 @@ def verify(*, require_active: bool = True, report_path: Path = REPORT,
                     "active": True, "artifact_sha256": fingerprint, "engine_passed": True,
                     "evidence": "context-action release receipt",
                     "receipt_model_version": receipt["model_version"], "evidence_scope": receipt["scope"]}
-    verify_compatibility("prefix_v1")
-    corpus, seal, report, engine = (read_object(path) for path in (RECEIPT, SEAL, report_path, engine_path))
-    if corpus.get("family_overlap") != 0 or corpus.get("profiles") != list(PROFILES):
-        raise ValueError("prefix corpus provenance changed")
-    if corpus.get("sha256") != {split: checksum(DIRECTORY / (split + ".jsonl.gz")) for split in ACTIVE_SPLITS}:
-        raise ValueError("prefix frozen examples changed")
+    verify_receipt()
+    seal, report, engine = (read_object(path) for path in (SEAL, report_path, engine_path))
     if (seal.get("provenance") != provenance() or seal.get("config") != config()
             or seal.get("candidate_sha256") != checksum(CANDIDATE)):
         raise ValueError("prefix seal changed")

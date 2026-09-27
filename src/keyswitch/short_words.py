@@ -12,6 +12,15 @@ from dataclasses import replace
 from collections.abc import Collection, Mapping, Set
 from typing import Final
 
+from .constants.detection import (
+    HEURISTIC_UNLIKELY_SOURCE_NGRAM_MAX,
+    NATURAL_SOURCE_MAX_LENGTH as NATURAL_SOURCE_MAX_LENGTH,
+    SINGLE_LETTER_CONFIDENCE as SINGLE_LETTER_CONFIDENCE,
+    TRUSTED_SHORT_WORD_CONTEXT_RATIO as TRUSTED_SHORT_WORD_CONTEXT_RATIO,
+    TRUSTED_SHORT_WORD_MAX_LENGTH as TRUSTED_SHORT_WORD_MAX_LENGTH,
+    TRUSTED_SHORT_WORD_MINIMUM_FREQUENCY as TRUSTED_SHORT_WORD_MINIMUM_FREQUENCY,
+    TRUSTED_SHORT_WORD_MINIMUM_RATIO as TRUSTED_SHORT_WORD_MINIMUM_RATIO,
+)
 from .detector import DetectionDecision, LanguageDetector
 from .language_model import LanguageModel
 
@@ -37,16 +46,14 @@ TRUSTED_SHORT_WORDS: Final[Mapping[int, frozenset[str]]] = {
     )
     | TRUSTED_SINGLE_LETTER_WORDS,
 }
-TRUSTED_SHORT_WORD_MAX_LENGTH: Final[int] = 2
 # A short token found only in the other language's frequency list is thin
 # evidence: "дев" reads as ordinary Russian (n-gram z-score -0.7) yet "ltd" is
 # a frequent English token, and the intent model never sees tokens this short.
-# Up to this length the source must also read unnaturally — the bar the
-# detector's unknown-word branch already applies — unless the recent context
-# favours the target language. This lives here, not in the detector, because
-# the detector is part of the certified model toolchain.
-NATURAL_SOURCE_MAX_LENGTH: Final[int] = 4
-NATURAL_SOURCE_NGRAM_SCORE: Final[float] = -1.1
+# Up to NATURAL_SOURCE_MAX_LENGTH the source must also read unnaturally — the
+# bar the detector's unknown-word branch already applies,
+# HEURISTIC_UNLIKELY_SOURCE_NGRAM_MAX — unless the recent context favours the
+# target language. This lives here, not in the detector, because the detector
+# is part of the certified model toolchain.
 DICTIONARY_ONLY_REASONS: Final[frozenset[str]] = frozenset(
     {
         "слово найдено только в целевом частотном словаре",
@@ -73,20 +80,17 @@ def natural_short_source_veto(
     )
     if (
         length > NATURAL_SOURCE_MAX_LENGTH
-        or decision.source_score.ngram_score <= NATURAL_SOURCE_NGRAM_SCORE
+        or decision.source_score.ngram_score <= HEURISTIC_UNLIKELY_SOURCE_NGRAM_MAX
         or context_group == decision.target_group
     ):
         return decision
     return replace(decision, should_convert=False, reason=NATURAL_SOURCE_REASON)
-TRUSTED_SHORT_WORD_MINIMUM_FREQUENCY: Final[int] = 10_000
-TRUSTED_SHORT_WORD_MINIMUM_RATIO: Final[float] = 100.0
 # With the previous word already in the target language, a two-letter entry
-# only has to be at least as frequent as the token it replaces: ``kb`` and
-# ``nj`` are real English tokens, but after a Russian word they are ``ли`` and
-# ``то``. The frequency lists hold no single letters at all, so a one-letter
-# entry relies on the curated list and that context alone.
-TRUSTED_SHORT_WORD_CONTEXT_RATIO: Final[float] = 1.0
-SINGLE_LETTER_CONFIDENCE: Final[float] = 1.0
+# only has to be at least as frequent as the token it replaces
+# (TRUSTED_SHORT_WORD_CONTEXT_RATIO): ``kb`` and ``nj`` are real English
+# tokens, but after a Russian word they are ``ли`` and ``то``. The frequency
+# lists hold no single letters at all, so a one-letter entry relies on the
+# curated list and that context alone.
 CONTEXT_SHORT_WORD_REASON: Final[str] = (
     "короткое слово из безопасного списка после слова на целевом языке"
 )

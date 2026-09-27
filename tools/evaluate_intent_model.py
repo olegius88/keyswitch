@@ -24,28 +24,69 @@ if tools_path not in sys.path:
 
 import environment_probe  # noqa: E402
 
-from keyswitch.detector import (
+from keyswitch.constants.detection import (
     CONTEXT_DELTA_MULTIPLIER,
     CONTEXT_SCORE_MAXIMUM,
     CONTEXT_SCORE_MINIMUM,
     CONTEXT_SOURCE_GROUP_PENALTY,
     CONTEXT_TARGET_GROUP_BONUS,
+)
+from keyswitch.constants.file_formats import (
+    HUNSPELL_AFFIX_MAX_BYTES,
+    HUNSPELL_DICTIONARY_MAX_BYTES,
+    INTENT_EXTERNAL_EVALUATION_SCHEMA_VERSION,
+    INTENT_EXTERNAL_MANIFEST_MAX_BYTES,
+    INTENT_MANIFEST_SCHEMA_VERSION,
+    KSLM_MAX_CONTAINER_BYTES,
+    REPORT_JSON_INDENT,
+    SHA256_HEX_CHARACTERS,
+    VERSION_HASH_CHARACTERS,
+)
+from keyswitch.constants.models import INTENT_MIN_RUNTIME_TOKEN_CHARACTERS
+from keyswitch.constants.training import (
+    CONTEXTUAL_RECALL_TOLERANCE,
+    CORPUS_NAMESPACE_MAX_CHARACTERS,
+    EXTERNAL_WORD_MAX_CHARACTERS,
+    FIFTH_PERCENTILE,
+    FIRST_QUARTILE,
+    HUNSPELL_SNAPSHOT_READS_PER_FILE,
+    INTENT_EXTERNAL_MIN_WORDS_PER_GROUP,
+    INTENT_HUNSPELL_AFFIX_HEADER_SCAN_LINES,
+    INTENT_MAX_TYPO_AUGMENTATIONS,
+    LATENCY_LOAD_REPETITIONS,
+    LATENCY_MS_DECIMALS,
+    LATENCY_WARMUP_PREDICTIONS,
+    NINETY_FIFTH_PERCENTILE,
+    PAIRED_ROWS_PER_TRIGGER,
+    PROVENANCE_DATASET_CHECK_POSITION,
+    RATE_BOUND_TOLERANCE,
+    SAFETY_COLLISION_MIN_WORD_CHARACTERS,
+    SELECTION_WILSON_Z_SCORE,
+    STRICT_COMPARISON_SAMPLE,
+    STRICT_INFERENCE_P95_MAX_MS,
+    STRICT_LATENCY_SAMPLE,
+    STRICT_LOAD_P95_MAX_MS,
+    THIRD_QUARTILE,
+    WILSON_95_Z_SCORE,
+    WILSON_INTERVAL_CONFIDENCE,
+)
+from keyswitch.constants.units import NANOSECONDS_PER_MILLISECOND
+from keyswitch.detector import (
     LanguageDetector,
     LanguageScorer,
 )
 from keyswitch.intent_model import (
     LAYOUT_DIRECTIONS,
-    MAX_CONTAINER_BYTES,
     IntentModelInput,
     LinearPrediction,
     LinearNgramModel,
-    MINIMUM_RUNTIME_TOKEN_LENGTH,
     TRIGGERS,
     CorrectionTrigger,
 )
 from keyswitch.language_model import LanguageModel, WordScore
 from keyswitch.layouts import LayoutPair
 from keyswitch.spellcheck import HunspellDictionary
+from keyswitch.value_provenance import PinnedValues, ValueProvenanceError, pin_values
 
 from train_intent_model import (
     CONTEXT_STRESS_PROFILES,
@@ -61,11 +102,12 @@ from train_intent_model import (
     PRESEALED_SPLITS,
     SELECTION_FALSE_POSITIVE_COMPARISONS,
     SELECTION_PER_COMPARISON_CONFIDENCE,
-    SELECTION_WILSON_Z_SCORE,
     SEALED_TEST_SPLITS,
-    SAFETY_COLLISION_MINIMUM_WORD_LENGTH,
+    SOURCE_ROOT,
+    SPELLCHECK_RUNTIME_PATH,
     SPLIT_NAMES,
     SPLIT_NAMESPACE,
+    TOOLCHAIN_VALUE_SOURCE_PATHS,
     UNKNOWN_TYPO_DEVELOPMENT_CHOICE_NAMESPACE,
     UNKNOWN_TYPO_DEVELOPMENT_RANK_NAMESPACE,
     UNKNOWN_TYPO_HOLDOUT_CHOICE_NAMESPACE,
@@ -80,8 +122,6 @@ from train_intent_model import (
     TrainingConfig,
     ThresholdSelection,
     VetoSelection,
-    WILSON_95_Z_SCORE,
-    WILSON_INTERVAL_CONFIDENCE,
     WordScorer,
     audit_guarded_safety_corpus,
     assert_no_split_leakage,
@@ -221,7 +261,12 @@ _TOOLCHAIN_CODE_PATHS: tuple[tuple[str, Path], ...] = (
     ("preseal_generator_sha256", PRESEAL_GENERATOR_PATH),
     ("development_freezer_sha256", DEVELOPMENT_FREEZER_PATH),
     ("preseal_receipt_sha256", PRESEAL_RECEIPT_PATH),
+    ("spellcheck_sha256", SPELLCHECK_RUNTIME_PATH),
 )
+# The one toolchain digest that is not a file's: the values the code files import
+# from keyswitch.constants, which no file digest above moves with (manifest
+# schema 2; keyswitch.value_provenance).
+_TOOLCHAIN_VALUES_FIELD: Final = "constants_sha256"
 _BUILD_PROVENANCE_FIELDS = (
     "config_sha256",
     "dataset_sha256",
@@ -327,13 +372,9 @@ _PRESEALED_PROVENANCE_CHECK_NAMES: Final[frozenset[str]] = frozenset(
             f"toolchain_{field_name}"
             for field_name, _path in _TOOLCHAIN_CODE_PATHS
         ),
+        f"toolchain_{_TOOLCHAIN_VALUES_FIELD}",
     }
 )
-MAX_EXTERNAL_MANIFEST_BYTES = 1 << 20
-MAX_HUNSPELL_AFFIX_BYTES = 1 << 20
-MAX_HUNSPELL_DICTIONARY_BYTES = 1 << 26
-STRICT_COMPARISON_SAMPLE: Final[int] = 5_000
-STRICT_LATENCY_SAMPLE: Final[int] = 5_000
 INTERNAL_SEALED_EVIDENCE_CHECK_NAMES: Final[frozenset[str]] = frozenset(
     {
         "runtime_threshold_selection",
@@ -773,7 +814,7 @@ def _json_object(
 ) -> dict[str, object]:
     raw_json = _read_bounded_external_file(
         path,
-        MAX_EXTERNAL_MANIFEST_BYTES,
+        INTENT_EXTERNAL_MANIFEST_MAX_BYTES,
         label=label,
     )
 
@@ -809,7 +850,7 @@ def _string(value: object, label: str) -> str:
 
 def _sha256(value: object, label: str) -> str:
     digest = _string(value, label)
-    if len(digest) != 64 or any(
+    if len(digest) != SHA256_HEX_CHARACTERS or any(
         character not in "0123456789abcdef" for character in digest
     ):
         raise ValueError(f"{label} must be an exact lowercase SHA-256 digest")
@@ -917,18 +958,36 @@ def _toolchain_code_hashes(toolchain_value: object) -> dict[str, str]:
     """
 
     toolchain = _mapping(toolchain_value, "manifest.toolchain")
+    fields = (
+        *(field for field, _path in _TOOLCHAIN_CODE_PATHS),
+        _TOOLCHAIN_VALUES_FIELD,
+    )
     _require_exact_keys(
-        toolchain,
-        {"config_sha256", *(field for field, _path in _TOOLCHAIN_CODE_PATHS)},
-        "manifest.toolchain",
+        toolchain, {"config_sha256", *fields}, "manifest.toolchain"
     )
     return {
         field_name: _sha256(
             toolchain.get(field_name),
             f"manifest.toolchain.{field_name}",
         )
-        for field_name, _path in _TOOLCHAIN_CODE_PATHS
+        for field_name in fields
     }
+
+
+def toolchain_values() -> PinnedValues:
+    """The constants the intent toolchain files import, resolved in this tree."""
+
+    return pin_values(TOOLCHAIN_VALUE_SOURCE_PATHS, source_root=SOURCE_ROOT)
+
+
+def toolchain_values_payload() -> dict[str, object]:
+    """The resolved values for the strict report, so a verifier can name a change."""
+
+    try:
+        pinned = toolchain_values()
+    except ValueProvenanceError as error:
+        return {"error": str(error)}
+    return {"sha256": pinned.sha256, "values": dict(pinned.values)}
 
 
 def _build_provenance_sha256(manifest: Mapping[str, object]) -> str:
@@ -995,7 +1054,13 @@ def _validate_manifest_schema(
     manifest = _exact_mapping(value, _MANIFEST_KEYS, "manifest")
     if type(manifest.get("schema_version")) is not int:
         raise ValueError("manifest.schema_version must be an integer")
-    if manifest["schema_version"] != 1:
+    if manifest["schema_version"] == 1:
+        raise ValueError(
+            "model manifest schema 1 predates toolchain.constants_sha256: it "
+            "does not pin the constants its toolchain uses, so the model has "
+            "to be trained again"
+        )
+    if manifest["schema_version"] != INTENT_MANIFEST_SCHEMA_VERSION:
         raise ValueError("unsupported model manifest schema")
     if manifest.get("model_id") != "keyswitch-layout-intent-v1":
         raise ValueError("manifest.model_id is unsupported")
@@ -1167,7 +1232,7 @@ def _binary_gate_evidence_passed(
             float(cast(float, bound.get("upper"))),
             expected_upper,
             rel_tol=0.0,
-            abs_tol=1e-15,
+            abs_tol=RATE_BOUND_TOLERANCE,
         )
         and expected_upper
         <= float(
@@ -1689,7 +1754,7 @@ def verify_provenance(
         manifest.get("artifact_model_version"),
         "manifest.artifact_model_version",
     )
-    expected_model_version = "intent-v1-" + calculated_build_provenance[:12]
+    expected_model_version = "intent-v1-" + calculated_build_provenance[:VERSION_HASH_CHARACTERS]
     manifest_training_language_scorer = _mapping(
         manifest.get("training_language_scorer"),
         "manifest.training_language_scorer",
@@ -1806,6 +1871,18 @@ def verify_provenance(
                 f"current={current_digest}, manifest={manifest_digest}",
             )
         )
+    try:
+        current_values = toolchain_values().sha256
+    except ValueProvenanceError as error:
+        current_values = f"unresolved ({error})"
+    manifest_values = manifest_toolchain_hashes[_TOOLCHAIN_VALUES_FIELD]
+    toolchain_checks.append(
+        _check(
+            f"toolchain_{_TOOLCHAIN_VALUES_FIELD}",
+            manifest_values == current_values,
+            f"current={current_values}, manifest={manifest_values}",
+        )
+    )
     checks: list[VerificationCheck] = [
         _check(
             "artifact_sha256",
@@ -1934,7 +2011,7 @@ def verify_provenance(
     ]
     if dataset_digest is not None:
         checks.insert(
-            2,
+            PROVENANCE_DATASET_CHECK_POSITION,
             _check(
                 "dataset_sha256",
                 dataset_digest == manifest.get("dataset_sha256"),
@@ -2539,16 +2616,16 @@ def _hunspell_snapshot_from_paths(
     try:
         affix_bytes = _read_bounded_external_file(
             affix_path,
-            MAX_HUNSPELL_AFFIX_BYTES,
+            HUNSPELL_AFFIX_MAX_BYTES,
             label="Hunspell affix file",
         )
-        for raw_line in affix_bytes.splitlines()[:80]:
+        for raw_line in affix_bytes.splitlines()[:INTENT_HUNSPELL_AFFIX_HEADER_SCAN_LINES]:
             if raw_line.startswith(b"SET "):
-                encoding = raw_line[4:].decode("ascii", "replace")
+                encoding = raw_line[len(b"SET "):].decode("ascii", "replace")
                 break
         dictionary_bytes = _read_bounded_external_file(
             dictionary_path,
-            MAX_HUNSPELL_DICTIONARY_BYTES,
+            HUNSPELL_DICTIONARY_MAX_BYTES,
             label="Hunspell dictionary",
         )
         candidates = {
@@ -2564,7 +2641,7 @@ def _hunspell_snapshot_from_paths(
         sorted(
             word
             for word in candidates
-            if MINIMUM_RUNTIME_TOKEN_LENGTH <= len(word) <= 24
+            if INTENT_MIN_RUNTIME_TOKEN_CHARACTERS <= len(word) <= EXTERNAL_WORD_MAX_CHARACTERS
             and word.isalpha()
         )
     )
@@ -2651,7 +2728,7 @@ def external_corpus_sha256(examples: Sequence[LexicalExample]) -> str:
 def build_lexical_disjoint_corpus(
     onboard_words: Mapping[int, set[str]],
     *,
-    minimum_words_per_group: int = 5000,
+    minimum_words_per_group: int = INTENT_EXTERNAL_MIN_WORDS_PER_GROUP,
     hunspell_snapshots: Mapping[int, HunspellDictionarySnapshot] | None = None,
 ) -> LexicalDisjointCorpus:
     if minimum_words_per_group < 1:
@@ -2770,7 +2847,7 @@ def build_unknown_typo_disjoint_corpus(
     onboard_words: Mapping[int, set[str]],
     *,
     sealed_physical_signatures: Collection[str],
-    minimum_words_per_group: int = 5000,
+    minimum_words_per_group: int = INTENT_EXTERNAL_MIN_WORDS_PER_GROUP,
     hunspell_snapshots: Mapping[int, HunspellDictionarySnapshot] | None = None,
     language_models: Mapping[int, LanguageModel] | None = None,
     rank_namespace: str = UNKNOWN_TYPO_DEVELOPMENT_RANK_NAMESPACE,
@@ -2793,7 +2870,7 @@ def build_unknown_typo_disjoint_corpus(
     ):
         if (
             not namespace
-            or len(namespace) > 128
+            or len(namespace) > CORPUS_NAMESPACE_MAX_CHARACTERS
             or "\0" in namespace
             or not namespace.isascii()
         ):
@@ -2857,7 +2934,7 @@ def build_unknown_typo_disjoint_corpus(
             digest = hashlib.sha256(
                 choice_namespace_bytes + signature.encode("utf-8")
             ).digest()
-            variants = list(typo_variants(signature, 3)[1:])
+            variants = list(typo_variants(signature, INTENT_MAX_TYPO_AUGMENTATIONS)[1:])
             if not variants:
                 continue
             rotation = digest[0] % len(variants)
@@ -2879,7 +2956,7 @@ def build_unknown_typo_disjoint_corpus(
                         len(LanguageModel.normalize(correct_typo)),
                         len(LanguageModel.normalize(wrong_typo)),
                     )
-                    < MINIMUM_RUNTIME_TOKEN_LENGTH
+                    < INTENT_MIN_RUNTIME_TOKEN_CHARACTERS
                     or LanguageDetector.is_protected_token(correct_typo)
                     or LanguageDetector.is_protected_token(wrong_typo)
                     or models[group].score(correct_typo).known
@@ -2974,7 +3051,7 @@ def unknown_typo_physical_signatures(
             raise ValueError("unknown-typo corpus contains an empty signature")
         signatures.add(physical)
         rows_by_signature.setdefault(physical, []).append(example)
-    expected_rows = len(TRIGGERS) * 2
+    expected_rows = len(TRIGGERS) * PAIRED_ROWS_PER_TRIGGER
     if not signatures or any(
         len(rows) != expected_rows for rows in rows_by_signature.values()
     ):
@@ -3173,21 +3250,21 @@ class _ContextInvariantIntentModel:
 # in the parent from the model calls each worker recorded, so its reported
 # counters stay exactly what a sequential run produces.
 
-_DEFAULT_ROW_WORKERS = 1
+_default_row_workers = 1
 _R = TypeVar("_R")
 
 
 def set_default_row_workers(workers: int) -> None:
     """Set the worker count used when a scoring call does not name one."""
 
-    global _DEFAULT_ROW_WORKERS
+    global _default_row_workers
     if workers < 1:
         raise ValueError("row scoring needs at least one worker")
-    _DEFAULT_ROW_WORKERS = workers
+    _default_row_workers = workers
 
 
 def _effective_row_workers(requested: int | None, rows: int) -> int:
-    workers = _DEFAULT_ROW_WORKERS if requested is None else requested
+    workers = _default_row_workers if requested is None else requested
     if workers < 1:
         raise ValueError("row scoring needs at least one worker")
     return max(1, min(workers, rows))
@@ -3777,11 +3854,11 @@ def _coverage_statistics(rows: Sequence[ModelPredictionRow]) -> CoverageStatisti
     return CoverageStatistics(
         samples=len(values),
         minimum=min(values),
-        p05=_percentile(values, 0.05),
-        p25=_percentile(values, 0.25),
+        p05=_percentile(values, FIFTH_PERCENTILE),
+        p25=_percentile(values, FIRST_QUARTILE),
         median=statistics.median(values),
-        p75=_percentile(values, 0.75),
-        p95=_percentile(values, 0.95),
+        p75=_percentile(values, THIRD_QUARTILE),
+        p95=_percentile(values, NINETY_FIFTH_PERCENTILE),
         maximum=max(values),
         mean=statistics.fmean(values),
         zero_coverage_samples=sum(value == 0.0 for value in values),
@@ -3831,10 +3908,10 @@ def latency_report(
     scorers: Mapping[int, WordScorer],
 ) -> dict[str, object]:
     load_samples: list[float] = []
-    for _index in range(11):
+    for _index in range(LATENCY_LOAD_REPETITIONS):
         started = time.perf_counter_ns()
         loaded = LinearNgramModel.load(artifact)
-        load_samples.append((time.perf_counter_ns() - started) / 1_000_000.0)
+        load_samples.append((time.perf_counter_ns() - started) / NANOSECONDS_PER_MILLISECOND)
         if loaded.checksum != model.checksum:
             raise RuntimeError("model checksum changed between repeated loads")
     sample = _deterministic_sample(examples, min(requested, len(examples)))
@@ -3842,14 +3919,14 @@ def latency_report(
         intent_input_for_example(example, scorers=scorers)
         for example in sample
     )
-    for item in evidence[: min(100, len(evidence))]:
+    for item in evidence[: min(LATENCY_WARMUP_PREDICTIONS, len(evidence))]:
         model.predict(item)
     inference_samples: list[float] = []
     prediction_digest = hashlib.sha256()
     for item in evidence:
         started = time.perf_counter_ns()
         prediction = model.predict(item)
-        inference_samples.append((time.perf_counter_ns() - started) / 1_000_000.0)
+        inference_samples.append((time.perf_counter_ns() - started) / NANOSECONDS_PER_MILLISECOND)
         prediction_digest.update(repr(prediction).encode("utf-8"))
     repeated_digest = hashlib.sha256()
     for item in evidence:
@@ -3858,13 +3935,13 @@ def latency_report(
     return {
         "artifact_bytes": artifact.stat().st_size,
         "load_ms": {
-            "median": round(statistics.median(load_samples), 6),
-            "p95": round(_percentile(load_samples, 0.95), 6),
+            "median": round(statistics.median(load_samples), LATENCY_MS_DECIMALS),
+            "p95": round(_percentile(load_samples, NINETY_FIFTH_PERCENTILE), LATENCY_MS_DECIMALS),
             "samples": len(load_samples),
         },
         "inference_ms": {
-            "median": round(statistics.median(inference_samples), 6),
-            "p95": round(_percentile(inference_samples, 0.95), 6),
+            "median": round(statistics.median(inference_samples), LATENCY_MS_DECIMALS),
+            "p95": round(_percentile(inference_samples, NINETY_FIFTH_PERCENTILE), LATENCY_MS_DECIMALS),
             "samples": len(inference_samples),
         },
         "deterministic_predictions": deterministic,
@@ -4115,10 +4192,10 @@ def _context_profile_corpus_gate(
         if requires_both_labels:
             if profile.expected_delta < 0.0:
                 recall_passed = (
-                    ensemble.recall + 0.005
+                    ensemble.recall + CONTEXTUAL_RECALL_TOLERANCE
                     >= comparison.fallback.recall
                 )
-                recall_policy = "contextual-fallback-minus-0.005"
+                recall_policy = f"contextual-fallback-minus-{CONTEXTUAL_RECALL_TOLERANCE}"
             else:
                 recall_passed = ensemble.recall >= minimum_recall
                 recall_policy = "absolute-floor"
@@ -4177,7 +4254,7 @@ def _context_profile_corpus_gate(
                 overall.model_evaluated_samples == overall.samples
             ),
             "all_negative_rows_reach_model": (
-                overall.negative_model_evaluated * 2 == overall.samples
+                overall.negative_model_evaluated * PAIRED_ROWS_PER_TRIGGER == overall.samples
             ),
         }
     elif corpus_name in {"safety", "source_known"}:
@@ -4391,7 +4468,8 @@ def external_corpus_provenance_gate_breakdown(
         )
     )
     gates = {
-        "external_policy_schema": external_policy.schema_version == 2,
+        "external_policy_schema": external_policy.schema_version
+        == INTENT_EXTERNAL_EVALUATION_SCHEMA_VERSION,
         "external_minimum_corpus_policy": (
             lexical_disjoint.minimum_words_per_group
             == external_policy.minimum_words_per_group
@@ -4525,7 +4603,7 @@ def _strict_gates(
         - safety.expected_pre_model_guarded_samples
     )
     unknown_typo_expected_samples = (
-        2
+        PAIRED_ROWS_PER_TRIGGER
         * sum(unknown_typo_disjoint.words_by_group.values())
         * len(TRIGGERS)
     )
@@ -4651,14 +4729,14 @@ def _strict_gates(
             and source_known_comparison.introduced_false_positives == 0
         ),
         "lexical_disjoint_recall": (
-            lexical_comparison.ensemble.recall + 0.005
+            lexical_comparison.ensemble.recall + CONTEXTUAL_RECALL_TOLERANCE
             >= lexical_comparison.fallback.recall
         ),
         "unknown_typo_model_evaluated": (
             unknown_typo_comparison.samples == unknown_typo_expected_samples
             and unknown_typo_comparison.model_evaluated_samples
             == unknown_typo_comparison.samples
-            and unknown_typo_comparison.negative_model_evaluated * 2
+            and unknown_typo_comparison.negative_model_evaluated * PAIRED_ROWS_PER_TRIGGER
             == unknown_typo_comparison.samples
         ),
         "unknown_typo_false_positives": (
@@ -4668,7 +4746,7 @@ def _strict_gates(
             >= unknown_typo_comparison.fallback.specificity
         ),
         "unknown_typo_recall": (
-            unknown_typo_comparison.ensemble.recall + 0.005
+            unknown_typo_comparison.ensemble.recall + CONTEXTUAL_RECALL_TOLERANCE
             >= unknown_typo_comparison.fallback.recall
         ),
         "unknown_typo_raw_model_integrity": set(unknown_typo_raw_model)
@@ -4686,13 +4764,13 @@ def _strict_gates(
             production_context_gate.get("passed") is True
         ),
         "artifact_size": isinstance(artifact_bytes, int)
-        and artifact_bytes <= MAX_CONTAINER_BYTES,
+        and artifact_bytes <= KSLM_MAX_CONTAINER_BYTES,
         "load_latency": isinstance(load_p95, (int, float))
         and not isinstance(load_p95, bool)
-        and float(load_p95) <= 500.0,
+        and float(load_p95) <= STRICT_LOAD_P95_MAX_MS,
         "inference_latency": isinstance(inference_p95, (int, float))
         and not isinstance(inference_p95, bool)
-        and float(inference_p95) <= 10.0,
+        and float(inference_p95) <= STRICT_INFERENCE_P95_MAX_MS,
         "deterministic_inference": latency.get("deterministic_predictions") is True,
     }
 
@@ -4707,7 +4785,7 @@ def strict_gates_pass(gates: Mapping[str, object]) -> bool:
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parse_arguments(argv)
-    previous_workers = _DEFAULT_ROW_WORKERS
+    previous_workers = _default_row_workers
     set_default_row_workers(arguments.workers)
     sys.stderr.write(
         "KeySwitch evaluator: row scoring uses "
@@ -4736,7 +4814,7 @@ def _evaluate(arguments: EvaluationArguments) -> int:
         license_declaration=config.sources.license_declaration,
         license_evidence=config.sources.license_evidence.path,
         logical_path=config.sources.english.path,
-        minimum_word_length=SAFETY_COLLISION_MINIMUM_WORD_LENGTH,
+        minimum_word_length=SAFETY_COLLISION_MIN_WORD_CHARACTERS,
     )
     russian, _russian_source = load_onboard_unigrams(
         arguments.russian_model,
@@ -4746,7 +4824,7 @@ def _evaluate(arguments: EvaluationArguments) -> int:
         license_declaration=config.sources.license_declaration,
         license_evidence=config.sources.license_evidence.path,
         logical_path=config.sources.russian.path,
-        minimum_word_length=SAFETY_COLLISION_MINIMUM_WORD_LENGTH,
+        minimum_word_length=SAFETY_COLLISION_MIN_WORD_CHARACTERS,
     )
     prepared = prepare_lexicon(
         (*english, *russian),
@@ -4813,7 +4891,7 @@ def _evaluate(arguments: EvaluationArguments) -> int:
                     ],
                 },
                 ensure_ascii=False,
-                indent=2,
+                indent=REPORT_JSON_INDENT,
                 sort_keys=True,
             )
         )
@@ -4863,7 +4941,7 @@ def _evaluate(arguments: EvaluationArguments) -> int:
                     "provenance": [asdict(check) for check in provenance],
                 },
                 ensure_ascii=False,
-                indent=2,
+                indent=REPORT_JSON_INDENT,
                 sort_keys=True,
             )
         )
@@ -4890,7 +4968,7 @@ def _evaluate(arguments: EvaluationArguments) -> int:
                     ],
                 },
                 ensure_ascii=False,
-                indent=2,
+                indent=REPORT_JSON_INDENT,
                 sort_keys=True,
             )
         )
@@ -4924,7 +5002,7 @@ def _evaluate(arguments: EvaluationArguments) -> int:
                     ],
                 },
                 ensure_ascii=False,
-                indent=2,
+                indent=REPORT_JSON_INDENT,
                 sort_keys=True,
             )
         )
@@ -5088,7 +5166,7 @@ def _evaluate(arguments: EvaluationArguments) -> int:
                     ),
                 },
                 ensure_ascii=False,
-                indent=2,
+                indent=REPORT_JSON_INDENT,
                 sort_keys=True,
             )
         )
@@ -5175,6 +5253,7 @@ def _evaluate(arguments: EvaluationArguments) -> int:
             ),
         },
         "provenance": [asdict(check) for check in provenance],
+        "toolchain_constants": toolchain_values_payload(),
         "environment": environment_section(),
         "runtime_threshold_selection": {
             "matches_signed_training_evidence": (
@@ -5227,7 +5306,7 @@ def _evaluate(arguments: EvaluationArguments) -> int:
                 for snapshot in hunspell_snapshots_before_handle.values()
             },
             "handle_snapshot_stable": hunspell_handle_snapshot_stable,
-            "bounded_snapshot_reads_per_file": 2,
+            "bounded_snapshot_reads_per_file": HUNSPELL_SNAPSHOT_READS_PER_FILE,
             "words_loaded_by_group": {
                 snapshot.provenance.locale: len(snapshot.words)
                 for snapshot in hunspell_snapshots.values()
@@ -5444,7 +5523,7 @@ def _evaluate(arguments: EvaluationArguments) -> int:
             "the sealed synthetic lexical set, not real-world user traffic."
         ),
     }
-    print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    print(json.dumps(payload, ensure_ascii=False, indent=REPORT_JSON_INDENT, sort_keys=True))
     if arguments.strict and not strict_passed:
         return 1
     return 0

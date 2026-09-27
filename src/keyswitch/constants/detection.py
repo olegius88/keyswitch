@@ -27,3 +27,64 @@ UNSCORED_CORRECTION_CONFIDENCE: Final = 99.0
 MINIMUM_LEARNABLE_LETTERS: Final = 2
 # Cap on a learned rule's confirmation counter and on the confirmations a rule may require.
 MAX_LEARNING_CONFIRMATIONS: Final = 999
+# Context policy shared by the serving detector and the intent trainer and evaluator, which replay
+# its arithmetic offline: a LanguageModel context_score lies in [minimum, maximum]; the difference of
+# the target and source context scores is multiplied, then the recent context language adds the
+# bonus when it is the target's and takes the penalty when it is the source's.
+CONTEXT_SCORE_MINIMUM: Final[float] = 0.0
+CONTEXT_SCORE_MAXIMUM: Final[float] = 1.0
+CONTEXT_DELTA_MULTIPLIER: Final[float] = 1.75
+CONTEXT_TARGET_GROUP_BONUS: Final[float] = 0.55
+CONTEXT_SOURCE_GROUP_PENALTY: Final[float] = 0.3
+# Confidence of a conversion a confirmed user rule forces, unless the score margin is larger.
+CONFIRMED_RULE_MIN_CONFIDENCE: Final = 20.0
+# Heuristic fallback, used when the intent model does not decide. A target word a lexicon knows
+# needs the confidence threshold as its margin, relieved by the relief per character for each
+# character past the relief start (by at most one), but never below the minimum margin; a target only
+# Hunspell knows needs the extra margin on top.
+HEURISTIC_KNOWN_TARGET_RELIEF_START_CHARACTERS: Final = 3
+HEURISTIC_KNOWN_TARGET_RELIEF_PER_CHARACTER: Final = 0.18
+HEURISTIC_KNOWN_TARGET_MIN_MARGIN: Final = 0.65
+HEURISTIC_SPELL_ONLY_TARGET_EXTRA_MARGIN: Final = 0.15
+# One accidental extra character: a word at least this long whose target reading is known after
+# dropping one character converts when that margin beats the confidence threshold by this much.
+HEURISTIC_TYPO_DELETION_MIN_CHARACTERS: Final = 5
+HEURISTIC_TYPO_DELETION_EXTRA_MARGIN: Final = 0.5
+# An unknown word judged by character n-grams needs the confidence threshold plus the extra margin,
+# relieved by the relief per character past the relief start (by at most the cap) and reduced once
+# more in aggressive mode, but at least the threshold plus the minimum extra margin. The source must
+# score at most, and the target at least, the given n-gram bounds, and the word must be at least as
+# long as the given length; aggressive mode has its own bounds. The short-word policy
+# (keyswitch.short_words) holds a short, dictionary-only source to the same default source bound.
+HEURISTIC_NGRAM_EXTRA_MARGIN: Final = 2.4
+HEURISTIC_NGRAM_RELIEF_START_CHARACTERS: Final = 4
+HEURISTIC_NGRAM_RELIEF_PER_CHARACTER: Final = 0.32
+HEURISTIC_NGRAM_RELIEF_CAP: Final = 2.0
+HEURISTIC_NGRAM_AGGRESSIVE_MARGIN_REDUCTION: Final = 0.75
+HEURISTIC_NGRAM_MIN_EXTRA_MARGIN: Final = 0.25
+HEURISTIC_UNLIKELY_SOURCE_NGRAM_MAX: Final = -1.1
+HEURISTIC_UNLIKELY_SOURCE_NGRAM_MAX_AGGRESSIVE: Final = -0.65
+HEURISTIC_PLAUSIBLE_TARGET_NGRAM_MIN: Final = -1.25
+HEURISTIC_PLAUSIBLE_TARGET_NGRAM_MIN_AGGRESSIVE: Final = -2.0
+HEURISTIC_NGRAM_MIN_CHARACTERS: Final = 5
+HEURISTIC_NGRAM_MIN_CHARACTERS_AGGRESSIVE: Final = 4
+# The structural guard protects a token longer than the convertible length, an all-capital token of
+# at least the acronym length, and a token with a run of this many repeated characters.
+MAX_CONVERTIBLE_TOKEN_CHARACTERS: Final = 64
+ACRONYM_MIN_LETTERS: Final = 2
+REPEATED_CHARACTER_RUN: Final = 4
+# The runtime short-word policy (keyswitch.short_words, which exports these names). The curated
+# trusted list decides normalised words of at most this many letters.
+TRUSTED_SHORT_WORD_MAX_LENGTH: Final[int] = 2
+# A dictionary-only conversion of a word up to this long (the longer normalised reading) is withheld
+# while its source reads naturally, unless the recent context favours the target language.
+NATURAL_SOURCE_MAX_LENGTH: Final[int] = 4
+# A two-letter trusted entry converts on its own when its exact target reading is at least this
+# frequent and, counting one more of each, at least the minimum ratio more frequent than the source;
+# after a word in the target language the context ratio is enough.
+TRUSTED_SHORT_WORD_MINIMUM_FREQUENCY: Final[int] = 10_000
+TRUSTED_SHORT_WORD_MINIMUM_RATIO: Final[float] = 100.0
+TRUSTED_SHORT_WORD_CONTEXT_RATIO: Final[float] = 1.0
+# Confidence of a one-letter trusted word converted on its context alone: the frequency lists hold no
+# single letters, so there is no ratio to report.
+SINGLE_LETTER_CONFIDENCE: Final[float] = 1.0

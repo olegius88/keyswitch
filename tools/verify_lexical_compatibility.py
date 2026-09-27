@@ -29,21 +29,15 @@ GENERATION_SHA256 = "2a8105d749422e9a8ef2bf6894d848ee8fdaff11df948d42a952fea27ed
 AUDITED_CONFIG_SHA256 = "76fde35bec793c2c1d6a168753e28cb1cb0c62ac63fa1da40a6d36c85c7fd532"
 LEXICAL_SHA256 = "42f4b35de9f96a30f570b116326d20079da665fad4ca53728f1b1185e52cf7fc"
 SCOPE = "Unchanged consumed lexical configuration and source bytes; frozen numeric regression only. No new training, independent evaluation, or current-runtime acceptance."
-ANCHORS = {
-    "prefix_v1": {
-        "corpus.json": "d11fcefe8ea51ef8223623cc1621b9d63a6d8ae5066d1cdb29e2cccd28785948",
-        "candidate.json": "d0e40f60c6af3728afe60e3c53055ff0a091441879159f2cbb78ce42b9103488",
-        "seal.json": "662a02ad8043a2ca12032d1a7ac6fb9a03ada1dac762f93995e08a5e40bdea5d",
-        "report.json": "b154612cb0b646f7c8f799fa80ddf5d7b0f7592daed75cc189cd556f8c26b3af",
-    },
-    "boundary_v2": {
-        "corpus.json": "0c2b2be4f24b6410e749b4fe9de6a3aa5cd1de14c091baf9de466c2d80657c1a",
-        "candidate.json": "6685e02734f0451a91278fa577b37c7a25a2aa692c7a91c9a979fdbb045b7cf5",
-        "seal.json": "38a7f5d136747acc36a4d471a80ccf9e9145a008bd76ec7babaa8d0251784489",
-        "report.json": "dba34050cbd39e306d28d8d60d183b5769645ac099eca92a0cd83a9d75cd51f8",
-    },
-}
-TRAINERS = {"prefix_v1": "tools/train_prefix_model.py", "boundary_v2": "tools/train_boundary_v2.py"}
+# The anchors of corpora frozen before an audited transition of the intent configuration. The
+# GENERATION_* and AUDITED_CONFIG_SHA256 values above describe the last such transition (the
+# generation-21 configuration audited against generation 23). Both corpora it covered were refit on
+# the configuration they now pin in their own receipts (model/prefix_v1/corpus.json and
+# model/boundary_v2/corpus.json); their retired receipts are kept in
+# model/*/generation-history/candidate1/lexical-compatibility.json. No corpus relies on a transition
+# now, so the list is empty; a corpus is added here only with a newly audited transition.
+ANCHORS: dict[str, dict[str, str]] = {}
+TRAINERS: dict[str, str] = {}
 
 
 def checksum(path: Path) -> str:

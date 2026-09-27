@@ -1,0 +1,27 @@
+{
+  "evidence_sha256": "2fd23cbcdcd3231dba32ddd165b2bd695ac814a84538440bcef67845d096e868",
+  "excluded_as_seen": {
+    "en:negative_types": 8,
+    "en:positive_types": 33780,
+    "ru:negative_types": 1125,
+    "ru:positive_types": 45
+  },
+  "population": "tools/ortho_independent.py rules (wikitext_sentences, ortho_corpus.label, to_keys, shape_of, population) with this verdict of the reference dictionaries; types seen by the development before it are left out",
+  "set": "class-development-gorky-bulgakov-kuzmin",
+  "source": {
+    "note": "the page texts are not checked in; the rows below are the key sequences of the tokens with their case shapes",
+    "pages": 361,
+    "retrieved": "2026-09-27T12:52+05:00",
+    "sentences": 104143,
+    "sha256": "488dc9e80b458eb21b759c4be2993bdfd8f8a0744d11e8f2429ef7ffb46c0309",
+    "url": "https://ru.wikisource.org/wiki/Категория:Рассказы_Максима_Горького, Категория:Рассказы_Михаила_Афанасьевича_Булгакова, Категория:Рассказы_Михаила_Алексеевича_Кузмина (API, the main pages of the three categories, revisions in the file)"
+  },
+  "tokens_sha256": "fe247436cf31bb8bc33c1522e4d2840c23061ef183ab4c7e97a63ff27e989b7a",
+  "types": {
+    "en:negative_types": 50,
+    "en:positive_types": 31391,
+    "ru:negative_types": 8360,
+    "ru:positive_types": 57
+  },
+  "use": "the development of generation 12 (iteration 4) scored its variants on these rows to measure the class of rare words of literary Russian; it was never an independent test, and its rows are left out of later independent sets"
+}

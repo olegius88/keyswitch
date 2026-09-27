@@ -12,11 +12,12 @@ from pathlib import Path
 from typing import cast
 
 import evaluate_intent_model as evaluator
+from keyswitch.constants.file_formats import PRESEAL_RECEIPT_JSON_INDENT
+from keyswitch.constants.training import SAFETY_COLLISION_MIN_WORD_CHARACTERS
 from keyswitch.language_model import LanguageModel
 from train_intent_model import (
     PRESEALED_SPLITS,
     PROJECT_ROOT,
-    SAFETY_COLLISION_MINIMUM_WORD_LENGTH,
     SEALED_TEST_SPLITS,
     SPLIT_NAMESPACE,
     TrainingConfig,
@@ -97,7 +98,7 @@ def build_model_blind_external_corpora(
         license_declaration=config.sources.license_declaration,
         license_evidence=config.sources.license_evidence.path,
         logical_path=config.sources.english.path,
-        minimum_word_length=SAFETY_COLLISION_MINIMUM_WORD_LENGTH,
+        minimum_word_length=SAFETY_COLLISION_MIN_WORD_CHARACTERS,
     )
     russian, _russian_source = load_onboard_unigrams(
         russian_path,
@@ -107,7 +108,7 @@ def build_model_blind_external_corpora(
         license_declaration=config.sources.license_declaration,
         license_evidence=config.sources.license_evidence.path,
         logical_path=config.sources.russian.path,
-        minimum_word_length=SAFETY_COLLISION_MINIMUM_WORD_LENGTH,
+        minimum_word_length=SAFETY_COLLISION_MIN_WORD_CHARACTERS,
     )
     prepared = prepare_lexicon(
         (*english, *russian),
@@ -323,7 +324,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         json.dumps(
             report,
             ensure_ascii=False,
-            indent=2,
+            indent=PRESEAL_RECEIPT_JSON_INDENT,
             sort_keys=False,
         )
     )
