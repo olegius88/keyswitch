@@ -23,6 +23,11 @@ from keyswitch.constants.file_formats import (
     KSLM_SCHEMA_VERSION,
     SHA256_HEX_CHARACTERS,
 )
+from keyswitch.constants.models import (
+    CONTEXT_SUPPORTED_FEATURE_VERSIONS,
+    CURRENT_PREFIX_FEATURE_VERSION,
+)
+from keyswitch.constants.prefix import PREFIX_V1_FEATURE_VERSION
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -85,6 +90,25 @@ class WindowsPackagingContractTests(unittest.TestCase):
             self.assertNotIn("tools/train_context_v2.py verify", text)
             for module in ("test_language_intent_regressions.py", "test_input_sequence_matrix.py", "test_word_decision.py"):
                 self.assertIn(module, text)
+
+    def test_identity_checks_accept_the_schemas_the_runtime_loads(self) -> None:
+        """The build accepts exactly the feature schemas the installed app loads.
+
+        Only the Windows runner executes this script, so a list that lags the
+        runtime rejects a verified model there after every local check passed.
+        """
+
+        for subject, supported in (
+            ("ActiveContext", CONTEXT_SUPPORTED_FEATURE_VERSIONS),
+            ("ActivePrefix", (PREFIX_V1_FEATURE_VERSION, CURRENT_PREFIX_FEATURE_VERSION)),
+        ):
+            listed = re.search(
+                rf"\${subject}\.feature_version -notin @\(([^)]*)\)", self.script
+            )
+            assert listed is not None
+            self.assertEqual(
+                {int(value) for value in listed.group(1).split(",")}, set(supported)
+            )
 
     def test_type_library_is_generated_for_the_name_the_runtime_opens(self) -> None:
         """The build pre-generates exactly the wrapper the installed app imports.

@@ -1354,7 +1354,7 @@ $ActiveContextLines = @(Invoke-NativeCommand `
     -FailureMessage "Active context model provenance or quality gate failed")
 $ActiveContext = ($ActiveContextLines -join "`n") | ConvertFrom-Json
 if ($ActiveContext.quality_gates_passed -isnot [bool] -or $ActiveContext.quality_gates_passed -ne $true `
-    -or $ActiveContext.feature_version -notin @(2, 3) `
+    -or $ActiveContext.feature_version -notin @(2, 3, 5) `
     -or $ActiveContext.artifact_sha256 -cnotmatch '^[a-f0-9]{64}$' `
     -or $ActiveContext.model_version -isnot [string] -or $ActiveContext.model_version.Length -gt 80) {
     throw "Active context verifier returned an invalid identity"

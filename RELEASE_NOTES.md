@@ -1,4 +1,4 @@
-# KeySwitch 0.33.0
+# KeySwitch 0.33.1
 
 ## Русский
 
@@ -6,15 +6,18 @@
 раскладке, исправляется и тогда, когда в нём опечатка или лишняя клавиша. Полный перечень — в
 [CHANGELOG.md](CHANGELOG.md).
 
+0.33.0 не был опубликован: сборка для Windows не приняла новую контекстную
+модель. 0.33.1 содержит все изменения 0.33.0 и исправленную сборку.
+
 ### Файлы выпуска
 
-- `KeySwitch-Setup-0.33.0-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
+- `KeySwitch-Setup-0.33.1-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
   сертификатом издателя: SmartScreen покажет предупреждение.
-- `KeySwitch-0.33.0-windows-x64.zip` — переносимый архив для Windows.
-- `keyswitch_0.33.0_amd64.deb` — Ubuntu/Xubuntu, сеанс X11. Если стоит 0.28.0 или
+- `KeySwitch-0.33.1-windows-x64.zip` — переносимый архив для Windows.
+- `keyswitch_0.33.1_amd64.deb` — Ubuntu/Xubuntu, сеанс X11. Если стоит 0.28.0 или
   новее, эта версия придёт через обычное обновление системы.
-- `KeySwitch-0.33.0-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее), macOS 13 и новее.
-- `KeySwitch-0.33.0-macos-x86_64.zip` — Mac на процессоре Intel, macOS 13 и новее.
+- `KeySwitch-0.33.1-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее), macOS 13 и новее.
+- `KeySwitch-0.33.1-macos-x86_64.zip` — Mac на процессоре Intel, macOS 13 и новее.
 - `SHA256SUMS` — контрольные суммы всех файлов; сверьте их перед установкой.
 
 Архив для Mac нужен ровно один: сборка для Apple Silicon не запускается на Intel и
@@ -56,15 +59,18 @@ Completed words are now decided the same way in every application, and a word ty
 layout is converted even with a typo or a stray key in it. The full list is in
 [CHANGELOG.md](CHANGELOG.md).
 
+0.33.0 was never published: the Windows build rejected the new context model.
+0.33.1 carries every change of 0.33.0 and the fixed build.
+
 ### Release files
 
-- `KeySwitch-Setup-0.33.0-x64.exe` — installer for Windows 10/11 x64. It is not signed with
+- `KeySwitch-Setup-0.33.1-x64.exe` — installer for Windows 10/11 x64. It is not signed with
   a publisher certificate, so SmartScreen shows a warning.
-- `KeySwitch-0.33.0-windows-x64.zip` — portable archive for Windows.
-- `keyswitch_0.33.0_amd64.deb` — Ubuntu/Xubuntu on an X11 session. With 0.28.0 or newer
+- `KeySwitch-0.33.1-windows-x64.zip` — portable archive for Windows.
+- `keyswitch_0.33.1_amd64.deb` — Ubuntu/Xubuntu on an X11 session. With 0.28.0 or newer
   installed, this version arrives through the ordinary system update.
-- `KeySwitch-0.33.0-macos-arm64.zip` — Mac with Apple silicon (M1 and later), macOS 13 or newer.
-- `KeySwitch-0.33.0-macos-x86_64.zip` — Mac with an Intel processor, macOS 13 or newer.
+- `KeySwitch-0.33.1-macos-arm64.zip` — Mac with Apple silicon (M1 and later), macOS 13 or newer.
+- `KeySwitch-0.33.1-macos-x86_64.zip` — Mac with an Intel processor, macOS 13 or newer.
 - `SHA256SUMS` — checksums of every file; verify them before installing.
 
 Exactly one Mac archive is the right one: a build for Apple silicon does not run on Intel,

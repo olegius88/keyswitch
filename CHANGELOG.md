@@ -4,7 +4,17 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
-## 0.33.0 — 2026-09-27
+## 0.33.1 — 2026-09-27
+
+- Publish everything since 0.32.0. The 0.33.0 section below was tagged, but its release job
+  produced no assets: the Windows build accepted only the context model's feature schemas 2 and 3
+  and rejected the new model, which uses schema 5. The Windows build now accepts every feature
+  schema the program loads, for the context model and the early layout switch alike, and a test
+  compares its lists with the program's.
+
+## 0.33.0 — unpublished, 2026-09-27
+
+These changes were tagged but did not produce a published release. 0.33.1 publishes them.
 
 - Decide completed words the same way in every application. The context model knew five
   applications by name, and in any other one - Firefox, Edge, a terminal - its answer was
