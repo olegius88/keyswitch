@@ -62,12 +62,12 @@ class LiteralHeadTests(InputIntegrityTests):
 
         Splitting off a literal head would decide the word before anyone looked at
         it, so the engine hands over the token whole. What happens to it then is
-        the model's answer, and both answers are visible here: two tokens are read
-        as Russian typed in the English layout and converted at the boundary, and
-        the one the model is unsure about is left for the pause.
+        the model's answer: all three tokens are read as Russian typed in the
+        English layout and converted at the boundary, and Pause right after the
+        correction takes the whole token back.
         """
 
-        for typed, expected in (("c,jhrb/ntcns ", "c,jhrb/ntcns "), ("b/bkb ", "и/или "),
+        for typed, expected in (("c,jhrb/ntcns ", "сборки/тесты "), ("b/bkb ", "и/или "),
                                 ("rhtp/c,jhrb ", "крез/сборки ")):
             with self.subTest(typed=typed):
                 self.reset_editor()
@@ -79,7 +79,7 @@ class LiteralHeadTests(InputIntegrityTests):
         self.reset_editor()
         self.type("c,jhrb/ntcns ", group=0)
         self.tap(self.key("Pause"))
-        self.assertEqual(self.backend.text, "сборки/тесты ")
+        self.assertEqual(self.backend.text, "c,jhrb/ntcns ")
 
     def test_paths_commands_and_correct_words_around_slashes_stay(self) -> None:
         for typed, group in (("/usr/local/bin ", 0), ("src/keyswitch/engine ", 0), ("/start ", 0), ("user@ghbdtn ", 0), ("abc/ ", 0), ("/foo=ghbdtn ", 0), ("/c,jhrb2 ", 0), ("да/нет ", 1), ("и/или ", 1)):

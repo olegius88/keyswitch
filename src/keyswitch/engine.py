@@ -10,6 +10,7 @@ import time
 import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from typing import Final
 
 from . import __version__
 from .backend import InputBackend, KeyEvent, KeyDisposition
@@ -69,6 +70,7 @@ from .constants.detection import (
     MINIMUM_LEARNABLE_LETTERS,
     NATURAL_SOURCE_BOUNDARY_MIN_CHARACTERS,
     NATURAL_SOURCE_BOUNDARY_NGRAM_FLOOR,
+    TRUSTED_SHORT_WORD_MAX_LENGTH,
     UNSCORED_CORRECTION_CONFIDENCE,
 )
 from .constants.keyboard import LAYOUT_GROUP_COUNT
@@ -143,6 +145,10 @@ class CorrectionPlan:
     # start of a mention. It is judged with the word, not on its own, so it is
     # kept out of `strokes` until the correction runs (_execute_correction).
     head: tuple[KeyEvent, ...] = ()
+    # A word converted at a space: its baseline decision and field, so the model can be
+    # asked about it again once the next word shows which way that one went
+    # (_revert_with_next_word).
+    revisit: tuple[DetectionDecision, FieldContext | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -189,6 +195,19 @@ class WaitingContextWord:
     # A word the model only suggested converting is asked again when its neighbour
     # arrives, never at a pause: a pause brings no new context to decide with.
     settles_on_pause: bool = True
+
+
+# The baseline reason of the question a converted word is asked again (_revert_with_next_word).
+REVISIT_REASON: Final = "слово после соседа, переведённого обратно"
+
+
+@dataclass(frozen=True)
+class ProvisionalWord:
+    """An applied conversion of a word that the next word may still take back."""
+
+    plan: CorrectionPlan
+    window: int
+    deadline: float
 
 
 @dataclass(frozen=True)
@@ -264,6 +283,9 @@ class KeySwitchEngine:
         self.prefix_model: PrefixModel | None = VersionedPrefixModel.default()
         self._early_switch_confidence = EARLY_SWITCH_CONFIDENCE
         self._context_waiting: WaitingContextWord | None = None
+        self._provisional: ProvisionalWord | None = None
+        # The baseline of the last word `_decide_word` decided, before the model spoke.
+        self._last_baseline: DetectionDecision | None = None
         self._context_wait_sequence = 0
         self._sensitive_context_window: int | None = None
         self._typed_events = 0
@@ -1376,6 +1398,7 @@ class KeySwitchEngine:
         excluded = self._application_excluded(application)
         decision: DetectionDecision | None = None
         waiting, self._context_waiting = self._context_waiting, None
+        provisional, self._provisional = self._provisional, None
         if should_analyze and not excluded:
             inside = None if trailing or head else self._decide_inside_word(
                 strokes, source_group, alternatives, application, self._trigger_for_boundary(boundary), boundary)
@@ -1391,6 +1414,8 @@ class KeySwitchEngine:
             excluded = self._application_excluded(application)
             joint = None if trailing or head else self._resolve_context_wait(
                 waiting, strokes, boundary, decision, application, alternatives)
+            if joint is None and not (trailing or head):
+                joint = self._revert_with_next_word(provisional, strokes, boundary, decision, application)
             if trailing or head:
                 self._log_context_wait("context_wait_cancelled", waiting, "literal_tail" if trailing else "literal_head")
             if joint is not None:
@@ -1414,11 +1439,19 @@ class KeySwitchEngine:
                 self._pending = plan
                 self._pending_learning_action = None
                 self._pending_trigger_keycode = boundary.keycode
+                # A word converted at a space stays open for the next word: if that
+                # one goes back the other way, the model is asked about this one again.
+                if (inside is None and not trailing and not head and boundary.character == " "
+                        and not boundary.deferred and self._last_baseline is not None):
+                    field = self._context_result.field if self._context_result is not None else None
+                    self._pending = replace(self._pending, revisit=(self._last_baseline, field))
                 # A lone letter converts at once, but a user who keeps typing makes
                 # that correction abort as unsafe; the next word then decides it,
-                # exactly as it did while the letter waited for context.
-                if decision.reason == ISOLATED_SHORT_WORD_REASON:
-                    self._start_context_wait(plan, decision, boundary, trailing, head)
+                # exactly as it did while the letter waited for context. A short
+                # word the model converts at the start of a message is the same
+                # case: `z ctujlyz` typed in one go must still end as `я сегодня`.
+                if decision.reason == ISOLATED_SHORT_WORD_REASON or self._opening_conversion(inside, original):
+                    self._start_context_wait(plan, decision, boundary, trailing, head, fallback=True)
             else:
                 self._remember_context(application, source_group, typed[:head] + strokes)
                 self._start_context_wait(plan, decision, boundary, trailing, head)
@@ -1797,10 +1830,13 @@ class KeySwitchEngine:
             return self._kept_inside_word(fragment, source_group, "same_layout" if same else "mixed_layout", point)
         pair, source_name, target_name = LayoutPair(), self._layout_name(source_group), self._layout_name(target)
         whole = pair.translate(head, target_name, source_name) + fragment + pair.translate(tail, target_name, source_name)
+        # The model is told that the word is being edited in place: every other letter of
+        # it is already in the other layout.
         decision = self._decide_word(
             whole, {target: head + alternatives[target] + tail}, source_group, application, trigger,
             boundary_text=closing,
             field_override=replace(snapshot, before=before[:len(before) - len(head)], after=snapshot.after[len(tail):]),
+            inside=True,
         )
         converted = decision.should_convert and decision.target_group == target
         self._technical_event(
@@ -1834,9 +1870,10 @@ class KeySwitchEngine:
         application: str,
         trigger: CorrectionTrigger = "space",
         *, literal_tail: str = "", boundary_text: str = "",
-        field_override: FieldContext | None = None,
+        field_override: FieldContext | None = None, inside: bool = False,
     ) -> DetectionDecision:
         self._context_result = None
+        self._last_baseline = None
         context_words, context_group = self._context_for(application)
         context_aware = bool(self.settings.get("detection.context_aware", True))
         ignored_words: list[str] = self.settings.get("exclusions.words", [])
@@ -1869,6 +1906,7 @@ class KeySwitchEngine:
                 self.settings.get("detection.intent_model_enabled", True)
             ),
         )
+        self._last_baseline = decision
         if (
             not context_aware or forced_target is not None or trigger == "boundary_probe"
             or self.detector.token_key(original) in {self.detector.token_key(word) for word in ignored_words}
@@ -1890,7 +1928,7 @@ class KeySwitchEngine:
             decision, alternative, group, self.detector, trigger,
             str(self.settings.get("detection.context_policy", "assist")),
             read_field=field_override is None and bool(self.settings.get("detection.context_read_field", False)),
-            literal_tail=literal_tail, boundary_text=boundary_text, field_override=field_override,
+            literal_tail=literal_tail, boundary_text=boundary_text, field_override=field_override, inside=inside,
         )
         self._context_result = result
         if result.field is not None and result.field.sensitive:
@@ -2023,9 +2061,72 @@ class KeySwitchEngine:
         )
         return result.decision if result.decision.should_convert else None
 
+    def _revert_with_next_word(
+        self, provisional: ProvisionalWord | None, strokes: tuple[KeyEvent, ...],
+        boundary: KeyEvent | None, decision: DetectionDecision, application: str,
+    ) -> tuple[CorrectionPlan, DetectionDecision] | None:
+        """Ask the model about a converted word again when the next word goes the other way.
+
+        `ns` alone becomes `ты` and the layout follows, so the next word is typed in
+        Russian. When the engine then converts that word into the language `ns` was
+        typed in - `vs` and `code` come out as `мы сщву` - the first word is decided
+        once more with the converted next word after it, exactly as a waiting word
+        is (_resolve_context_wait). If the model no longer converts it, one
+        correction returns both: `vs code`. The engine only asks; the model decides.
+        """
+
+        if provisional is None or not decision.should_convert:
+            return None
+        applied = provisional.plan
+        if (
+            applied.revisit is None or applied.boundary is None
+            or decision.target_group != applied.source_group
+            or time.monotonic() > provisional.deadline or provisional.window != (self._focus_window or 0)
+            or applied.application != application
+            or any(stroke.group != applied.target_group for stroke in strokes)
+        ):
+            return None
+        original = applied.replacement + applied.boundary.character + decision.original
+        closing = None if boundary is None or boundary.deferred else boundary
+        if not self.context_policy.stream.text.endswith(original + ("" if closing is None else closing.character)):
+            return None
+        baseline, field = applied.revisit
+        # The question is how to read the word now that its neighbour went the other
+        # way, not what the detector thinks of it alone: it is asked with no baseline
+        # conversion, as the model was taught it (train_context_model: short_revisit),
+        # and no curated rule answers in the model's place.
+        baseline = replace(baseline, should_convert=False, reason=REVISIT_REASON)
+        again = self.context_policy.decide(
+            baseline, applied.replacement, applied.target_group, self.detector, "space", "assist",
+            after=decision.replacement, field_override=field,
+            boundary_text=applied.boundary.character, after_origin="planned_next_conversion",
+        )
+        if again.decision.should_convert:
+            return None
+        self._technical_event(
+            "converted_word_reverted", previous_characters=len(applied.original),
+            next_characters=len(decision.original),
+        )
+        return CorrectionPlan(
+            applied.strokes + (applied.boundary,) + strokes,
+            closing, applied.target_group, applied.source_group,
+            original, applied.original + applied.boundary.character + decision.replacement,
+            decision.confidence, application, True, "context_phrase", self._context_field_id(),
+        ), decision
+
+    def _opening_conversion(self, inside: DetectionDecision | None, original: str) -> bool:
+        """The model converted a short word that opens the message, with nothing before it."""
+
+        result = self._context_result
+        return (
+            inside is None and result is not None and result.decision_source == "context_model"
+            and result.decision.should_convert and result.field is not None and not result.field.before.strip()
+            and len(LanguageModel.normalize(original)) <= TRUSTED_SHORT_WORD_MAX_LENGTH
+        )
+
     def _start_context_wait(
         self, plan: CorrectionPlan, decision: DetectionDecision,
-        boundary: KeyEvent, trailing: tuple[KeyEvent, ...], head: int,
+        boundary: KeyEvent, trailing: tuple[KeyEvent, ...], head: int, *, fallback: bool = False,
     ) -> None:
         """Let a word at a space wait for its next word.
 
@@ -2044,7 +2145,7 @@ class KeySwitchEngine:
 
         result = self._context_result
         settles = result is not None and result.prediction is not None and (
-            result.prediction.action == "wait" or decision.reason == ISOLATED_SHORT_WORD_REASON)
+            result.prediction.action == "wait" or fallback)
         if (
             result is not None and result.prediction is not None and result.field is not None
             and (settles or result.prediction.action == "suggest")
@@ -2081,6 +2182,9 @@ class KeySwitchEngine:
     def _cancel_context_wait(self, reason: str) -> None:
         self._log_context_wait("context_wait_cancelled", self._context_waiting, reason)
         self._context_waiting = None
+        # Whatever ends a wait - another field, a caret move, Backspace, a manual
+        # conversion - also ends a converted word's claim on the next word.
+        self._provisional = None
 
     def _log_input_edit(self, event: KeyEvent, application: str) -> None:
         # Observe editing controls, not printable keystrokes or field contents.
@@ -2576,11 +2680,14 @@ class KeySwitchEngine:
         # space converted `привет` alone, switched the layout, and the space in the
         # other layout ended the wait with `tot` left standing.
         waiting, self._context_waiting = self._context_waiting, None
+        provisional, self._provisional = self._provisional, None
         joint = None
         if trailing or head:
             self._log_context_wait("context_wait_cancelled", waiting, "literal_tail" if trailing else "literal_head")
         else:
             joint = self._resolve_context_wait(waiting, strokes, None, decision, application, alternatives)
+            if joint is None:
+                joint = self._revert_with_next_word(provisional, strokes, None, decision, application)
         if joint is not None:
             plan = joint[0]
         else:
@@ -3383,6 +3490,10 @@ class KeySwitchEngine:
             trailing=plan.trailing,
         )
         self._last_committed_stale = bool(context_reset_reason)
+        self._provisional = (
+            ProvisionalWord(plan, self._focus_window or 0, time.monotonic() + CONTEXT_TTL)
+            if plan.revisit is not None and plan.boundary is not None and not context_reset_reason else None
+        )
         if plan.boundary is None and not plan.trailing and not context_reset_reason and any(char.isalpha() for char in plan.replacement):
             # Idle/manual correction did not end the word. Keep its physical
             # prefix so continued typing and Backspace still refer to the

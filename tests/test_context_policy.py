@@ -21,6 +21,7 @@ from keyswitch.context_model import (
     extract_context_features, one_typo_from_word, softmax,
 )
 from keyswitch.context_policy import ContextPolicy, ContextResult, evidence_for_decision
+from keyswitch.short_words import opens_sentences
 from keyswitch.detector import LanguageDetector, LanguageScorer
 from keyswitch.language_model import LanguageModel
 from keyswitch.engine import KeySwitchEngine
@@ -44,6 +45,7 @@ from fixture_values.scores import (
 )
 from keyswitch.constants.models import (
     CONTEXT_ACTION_FEATURE_VERSION,
+    CONTEXT_OPENING_FEATURE_VERSION,
     CONTEXT_TYPO_FEATURE_VERSION,
     CONTEXT_V1_CONVERSION_THRESHOLD,
     CONTEXT_V1_FEATURE_VERSIONS,
@@ -232,6 +234,55 @@ class ContextModelTests(unittest.TestCase):
             score=scorer.score, context_score=scorer.context_score, best_single_deletion=scorer.best_single_deletion))})
         without = evidence_for_decision(bare.decide("aghbdtn", {1: "фпривет"}, 0), "фпривет", 1, bare, field, "enter")
         self.assertFalse(without.target_typo)
+
+    def test_opening_evidence_and_whether_the_word_stands_alone_belong_to_schema_six(self) -> None:
+        lone = replace(self.item, original="ns", alternative="ты", field=FieldContext("editor", "1", "", "", "text"),
+                       target_opening=True)
+        typo_features = extract_context_features(lone, CONTEXT_TYPO_FEATURE_VERSION)
+        self.assertFalse([name for name in typo_features if name.startswith("opening:")])
+        features = extract_context_features(lone, CONTEXT_OPENING_FEATURE_VERSION)
+        self.assertEqual(features["opening:0:1"], 1.0)
+        self.assertEqual(features["opening:0:1:alone:1:direction:0"], 1.0)
+        # Schema 6 keeps the typo evidence of schema 5.
+        self.assertIn("typo:0:0:known:0:0", features)
+        after = replace(lone, field=FieldContext("editor", "1", "привет ", "", "text"))
+        self.assertEqual(extract_context_features(after, CONTEXT_OPENING_FEATURE_VERSION)["opening:0:1:alone:0:direction:0"], 1.0)
+        self.save({**self.payload(), "feature_version": CONTEXT_OPENING_FEATURE_VERSION})
+        self.assertEqual(ContextModel.load(self.path).feature_version, CONTEXT_OPENING_FEATURE_VERSION)
+
+    def test_the_planned_next_word_a_path_and_an_edit_in_place_belong_to_schema_six(self) -> None:
+        planned = replace(self.item, field=FieldContext("editor", "1", "", "code", "text"),
+                          after_origin="planned_next_conversion")
+        features = extract_context_features(planned, CONTEXT_OPENING_FEATURE_VERSION)
+        self.assertEqual(features["next:word:code"], 1.0)
+        self.assertEqual(features["next:script:en:direction:0"], 1.0)
+        self.assertFalse([name for name in features if name.startswith("after:")])
+        # The same word already in the field is text after the caret.
+        field = replace(planned, after_origin="field")
+        self.assertEqual(extract_context_features(field, CONTEXT_OPENING_FEATURE_VERSION)["after:word:code"], 1.0)
+        # Schema 5 reads a planned word as text after the caret, as it was trained.
+        self.assertEqual(extract_context_features(planned, CONTEXT_TYPO_FEATURE_VERSION)["after:word:code"], 1.0)
+        path = replace(self.item, field=FieldContext("editor", "1", "код/", "", "text"))
+        self.assertEqual(extract_context_features(path, CONTEXT_OPENING_FEATURE_VERSION)["before:slash"], 1.0)
+        self.assertEqual(extract_context_features(path, CONTEXT_OPENING_FEATURE_VERSION)["before:slash:known:0:0:direction:0"], 1.0)
+        self.assertNotIn("before:slash", extract_context_features(path, CONTEXT_TYPO_FEATURE_VERSION))
+        inside = replace(self.item, inside=True)
+        self.assertEqual(extract_context_features(inside, CONTEXT_OPENING_FEATURE_VERSION)["inside"], 1.0)
+        self.assertNotIn("inside", extract_context_features(inside, CONTEXT_TYPO_FEATURE_VERSION))
+        self.assertNotIn("inside", extract_context_features(self.item, CONTEXT_OPENING_FEATURE_VERSION))
+
+    def test_the_evidence_builder_marks_readings_that_open_sentences(self) -> None:
+        self.assertTrue(opens_sentences("ты", 1))
+        self.assertTrue(opens_sentences("Мы", 1))
+        self.assertFalse(opens_sentences("же", 1))
+        self.assertFalse(opens_sentences("ns", 0))
+        detector = LanguageDetector({0: LanguageModel("en_US", {"ns": 1}, "fixture", enable_spellcheck=False),
+                                     1: LanguageModel("ru_RU", {"ты": 1}, "fixture", enable_spellcheck=False)})
+        field = FieldContext("editor", "1", "", "", "text")
+        evidence = evidence_for_decision(detector.decide("ns", {1: "ты"}, 0), "ты", 1, detector, field, "space")
+        self.assertEqual((evidence.source_opening, evidence.target_opening), (False, True))
+        typed = evidence_for_decision(detector.decide("ты", {0: "ns"}, 1), "ns", 0, detector, field, "space")
+        self.assertEqual((typed.source_opening, typed.target_opening), (True, False))
 
 
 class ContextEngineTests(InputIntegrityTests):

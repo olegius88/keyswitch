@@ -4,6 +4,31 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.33.3 — 2026-09-28
+
+- Convert a short word typed in the other layout on its own. "ns" typed into an empty field now
+  becomes "ты" at the space, as does "ns" after Russian text, while "ты" typed as intended stays
+  even with text after the caret. If the next word turns out to be English after all - "vs code"
+  typed in one go comes out as "мы сщву" once the layout follows - both words go back to
+  "vs code" in one correction. The context model decides: once the next word is known, the
+  engine asks it about the first word again; a word that reads clearly stays converted -
+  "спасибо team", "hello привет".
+- The context model (`context-v1-df0afc3ffa7f`, feature schema 6, 9 epochs) is told three more things: that
+  a word is being edited in place, with the rest of it already in the other layout; that the text
+  after a word is the next word the engine plans to convert rather than text already in the field;
+  and that a slash stands right before the word. On 4,000 subtitle sentences typed through the
+  engine into five kinds of field, correctly and in the other layout, spoiled correct sentences
+  went from 46 to 42 and restored ones from 18,939 to 19,427 of 20,000; letters put back inside a
+  word restored 19,948 sentences instead of 19,907, still spoiling none. Package names typed as
+  intended after a Russian word and a slash are replaced by mistake less often: 66 instead of 128
+  of 23,664 in a probe. On 500 new sentences no model had seen: spoiled 5 -> 3, restored
+  2,342 -> 2,413 of 2,500, letters inside a word 2,480 -> 2,482, the same in Firefox.
+- Known costs, measured on the same probes: six two-letter Latin abbreviations typed before
+  "привет" in the English layout ("cd", "km", "lt", "rd", "td", "re") are no longer turned into
+  Russian ("св привет", "ку привет"), and package names typed alone into an empty field are
+  replaced by mistake 16 times instead of 12 of 1,972 ("nedb", "rfdc", "ltgt", "rehype"): they
+  share letters with the lone "ns" and "ne" that now convert.
+
 ## 0.33.2 — 2026-09-28
 
 - Read only the text of the focused field on Windows. In Chromium-based windows - VS Code and

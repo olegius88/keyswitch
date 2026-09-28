@@ -40,6 +40,7 @@ from .constants.models import (
     CONTEXT_FEATURE_NGRAM_ORDERS,
     CONTEXT_MODEL_FEATURE_VERSION as FEATURE_VERSION,
     CONTEXT_SUPPORTED_FEATURE_VERSIONS as SUPPORTED_FEATURE_VERSIONS,
+    CONTEXT_OPENING_FEATURE_VERSION,
     CONTEXT_TYPO_FEATURE_VERSION,
     CONTEXT_TYPO_MIN_CHARACTERS,
     CONTEXT_V1_CONVERSION_THRESHOLD,
@@ -92,6 +93,12 @@ class ContextEvidence:
     # Whether the reading is no word itself but one typo away from one (`one_typo_from_word`).
     source_typo: bool = False
     target_typo: bool = False
+    # Whether the reading is a word that opens sentences of its language (short_words.opens_sentences).
+    source_opening: bool = False
+    target_opening: bool = False
+    # Whether letters were typed into the middle of a word whose other letters are all in the
+    # other layout (engine._decide_inside_word): the question is then what the whole word is.
+    inside: bool = False
 
     def __post_init__(self) -> None:
         # Replacing literal field contents must not retain a stale empty flag.
@@ -142,7 +149,12 @@ def one_typo_from_word(text: str, model: LanguageModel) -> bool:
 
 
 def extract_context_features(item: ContextEvidence, feature_version: int = FEATURE_VERSION) -> dict[str, float]:
-    """Bounded features shared verbatim by training and serving; schema 5 adds the typo evidence."""
+    """Bounded features shared verbatim by training and serving.
+
+    Schema 5 adds the typo evidence; schema 6 adds whether a reading opens sentences, the
+    next word the engine plans to convert as text of its own kind, a path separator right
+    before the token, and whether the word is being edited in place.
+    """
 
     original = _normalized(item.original[:ACTION_FEATURE_WORD_MAX_CHARACTERS])
     alternative = _normalized(item.alternative[:ACTION_FEATURE_WORD_MAX_CHARACTERS])
@@ -167,13 +179,20 @@ def extract_context_features(item: ContextEvidence, feature_version: int = FEATU
         features[f"app:{part}"] = 1.0
         features[f"app:{part}:length:{length}"] = 1.0
     scripts: list[str] = []
-    for label, text in (("before", before), ("after", after)):
+    # Schema 6 tells the text after the caret from the next word the engine plans to
+    # convert (a waiting word asked with its neighbour, a converted word asked again):
+    # the two are different evidence, and as one feature family the rows where `ns`
+    # before an English next word stays taught every Latin token with nothing after it
+    # to lean towards converting - a correct `if` after English text reached 0.98
+    # (28.09.2026).
+    planned = feature_version == CONTEXT_OPENING_FEATURE_VERSION and item.after_origin == "planned_next_conversion"
+    for label, text in (("before", before), ("next" if planned else "after", after)):
         words = _WORDS.findall(text)
         words = words[-CONTEXT_FEATURE_BEFORE_WORD_COUNT:] if label == "before" else words[:CONTEXT_FEATURE_AFTER_WORD_COUNT]
         ru = sum("а" <= char <= "я" or char == "ё" for char in text)
         en = sum("a" <= char <= "z" for char in text)
         dominant = "ru" if ru > en else "en" if en > ru else "none"
-        scripts.append(dominant)
+        scripts.append(("next-" if label == "next" else "") + dominant)
         features[f"{label}:script:{dominant}:length:{length}"] = 1.0
         features[f"{label}:script:{dominant}:direction:{direction}"] = 1.0
         features[f"{label}:script:{dominant}:baseline:{baseline}"] = 1.0
@@ -198,7 +217,7 @@ def extract_context_features(item: ContextEvidence, feature_version: int = FEATU
     features["token:technical"] = float(any(char in original for char in TECHNICAL_MARKS))
     features[f"context:{scripts[0]}:{scripts[1]}:{item.field.role}:{direction}:{length}"] = 1.0
     features[f"context:{scripts[0]}:{scripts[1]}:baseline:{baseline}:length:{length}"] = 1.0
-    if feature_version == CONTEXT_TYPO_FEATURE_VERSION:
+    if feature_version in (CONTEXT_TYPO_FEATURE_VERSION, CONTEXT_OPENING_FEATURE_VERSION):
         # Only a reading outside the lexicon can be a typo, and a typo of a word
         # means something else when the typed reading is itself a word: `лучше`
         # stays although `kexit` is one letter from `exit`.
@@ -210,6 +229,32 @@ def extract_context_features(item: ContextEvidence, feature_version: int = FEATU
         # the two readings. What it says depends on the layout of the letters
         # around it: `pm2` and `/c,jhrb2` stay, `зь2` is `pm2`.
         features[f"token:digits:direction:{direction}"] = features["token:digits"]
+    if feature_version == CONTEXT_OPENING_FEATURE_VERSION and (item.source_opening or item.target_opening):
+        # Whether a reading opens sentences, and whether the word stands alone: `ns` alone
+        # opens a message as `ты` does in Russian, and nothing in English opens with `ns`.
+        # Nothing is said about the words neither of whose readings opens a sentence -
+        # nearly all of them: as a feature of its own, `opening:0:0` in a sentence became
+        # a general lean to keep for every word typed in the other layout, and letters
+        # typed into the middle of `сука` in the English layout stayed (28.09.2026).
+        opening = f"opening:{int(item.source_opening)}:{int(item.target_opening)}"
+        alone = int(not before.strip() and not after.strip())
+        features[opening] = 1.0
+        features[f"{opening}:alone:{alone}:direction:{direction}"] = 1.0
+    if feature_version == CONTEXT_OPENING_FEATURE_VERSION and before.endswith("/"):
+        # A path separator right before the token: `код/dpkg` read as `dpkg` after a
+        # Russian word, so a package name typed as intended after a Russian path segment
+        # was converted like a Russian word typed in the wrong layout.
+        known = f"known:{int(item.source_known)}:{int(item.target_known)}:direction:{direction}"
+        features["before:slash"] = 1.0
+        features[f"before:slash:{known}"] = 1.0
+    if feature_version == CONTEXT_OPENING_FEATURE_VERSION and item.inside:
+        # Letters typed into the middle of a word whose other letters are in the other
+        # layout: the model is asked about the whole word, and without this it saw a word
+        # like any other - letters typed into `шмидт` under a line of code stayed Latin at
+        # 0.97, and a longer training that carried them over converted more package names
+        # after a path (28.09.2026).
+        features["inside"] = 1.0
+        features[f"inside:known:{int(item.source_known)}:{int(item.target_known)}:direction:{direction}"] = 1.0
     return {name: value for name, value in features.items() if value}
 
 

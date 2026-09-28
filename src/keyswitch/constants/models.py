@@ -89,9 +89,16 @@ CONTEXT_TYPO_FEATURE_VERSION: Final = 5
 # Schema 5: the shortest reading checked for being one typo away from a word; nearly every shorter
 # string has a neighbour in a lexicon of this size.
 CONTEXT_TYPO_MIN_CHARACTERS: Final = 5
-# Schemas of the context-v1 trainer: feature 2 artifacts and feature 5 ones share its report,
-# provenance and replay.
-CONTEXT_V1_FEATURE_VERSIONS: Final = (CONTEXT_MODEL_FEATURE_VERSION, CONTEXT_TYPO_FEATURE_VERSION)
+# ContextModel feature_version of the context-v1 scheme with opening evidence, feature schema 6:
+# schema 5 plus whether each reading is a word that opens sentences of its language
+# (short_words.OPENING_WORDS). The frequency lexicons are encyclopedic and rank the conversational
+# `ты` next to the English token `ns`, so without it a model could tell them apart only by letters.
+CONTEXT_OPENING_FEATURE_VERSION: Final = 6
+# Schemas of the context-v1 trainer: feature 2, 5 and 6 artifacts share its report, provenance and
+# replay.
+CONTEXT_V1_FEATURE_VERSIONS: Final = (
+    CONTEXT_MODEL_FEATURE_VERSION, CONTEXT_TYPO_FEATURE_VERSION, CONTEXT_OPENING_FEATURE_VERSION,
+)
 # Feature schemas a context artifact may carry: context-v1's and the context action scheme's.
 CONTEXT_SUPPORTED_FEATURE_VERSIONS: Final = (*CONTEXT_V1_FEATURE_VERSIONS, CONTEXT_ACTION_FEATURE_VERSION)
 # Feature schema 2 only: words of the left and of the right context that become word features, and

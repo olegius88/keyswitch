@@ -46,6 +46,33 @@ TRUSTED_SHORT_WORDS: Final[Mapping[int, frozenset[str]]] = {
     )
     | TRUSTED_SINGLE_LETTER_WORDS,
 }
+# Short Russian words that open sentences, a fact the frequency lexicons do not carry: they are
+# encyclopedic, and `ты` stands there at 5 599 next to the English token `ns` at 2 430. In the train
+# parts of UD Taiga (119 490 sentences) 14% of sentences open with a curated letter and 10.1% with a
+# curated two-letter word (но 3 149, он 1 708, на 1 296, не 1 028, мы 818, по 590, да 421, ты 372,
+# ну 363), while the Latin readings of these words open at most one English sentence each in UD
+# EWT (12 544 sentences; ns and vs none); `же` and `бы` open none, so they are not listed, and
+# `ли` opens one, as its reading `kb` does in English, so it is taught with the rest. Measured
+# 16.09 and 28.09.2026 on .t/reliable-release-2026-09-12/corpus-sources. The context model reads
+# it as evidence (feature schema 6); it decides nothing on its own.
+OPENING_WORDS: Final[Mapping[int, frozenset[str]]] = {
+    0: frozenset(),
+    1: frozenset(
+        {
+            "не", "ли", "на", "по", "то", "мы", "вы", "ты", "он", "но", "за", "до", "из", "от",
+            "об", "ну", "их", "им", "да", "ни", "во", "ко", "со", "уж", "ей", "её",
+        }
+    )
+    | TRUSTED_SINGLE_LETTER_WORDS,
+}
+
+
+def opens_sentences(text: str, group: int) -> bool:
+    """Whether this reading is a word that opens sentences of its language."""
+
+    return LanguageModel.normalize(text) in OPENING_WORDS.get(group, frozenset())
+
+
 # A short token found only in the other language's frequency list is thin
 # evidence: "дев" reads as ordinary Russian (n-gram z-score -0.7) yet "ltd" is
 # a frequent English token, and the intent model never sees tokens this short.

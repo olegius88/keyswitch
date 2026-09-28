@@ -22,10 +22,11 @@ from pathlib import Path
 from typing import cast
 
 from keyswitch.constants.file_formats import HEXADECIMAL_BASE, REPORT_JSON_INDENT, VERSION_HASH_CHARACTERS
-from keyswitch.constants.models import CONTEXT_TYPO_FEATURE_VERSION, CONTEXT_V1_CONVERSION_THRESHOLD
+from keyswitch.constants.models import CONTEXT_OPENING_FEATURE_VERSION, CONTEXT_V1_CONVERSION_THRESHOLD
 from keyswitch.constants.training import (
     # Keeps its name here: tests shorten the training by patching this module's EPOCHS.
     CONTEXT_V1_EPOCHS as EPOCHS,
+    CONTEXT_V1_INSIDE_WORD_MIN_CHARACTERS,
     CONTEXT_V1_KEEP_IMPORTANCE,
     CONTEXT_V1_LEARNING_RATE,
     CONTEXT_V1_MAX_REPORTED_FAILURES,
@@ -48,7 +49,7 @@ from keyswitch.language_model import LanguageModel
 from keyswitch.layouts import LayoutPair
 from keyswitch.lexicon_supplement import supplement_words
 from keyswitch.short_words import (
-    TRUSTED_SHORT_WORDS, natural_short_source_veto, trusted_short_word_decision,
+    TRUSTED_SHORT_WORDS, natural_short_source_veto, opens_sentences, trusted_short_word_decision,
 )
 
 
@@ -111,6 +112,24 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
     rows: list[Row] = []
     cache: dict[tuple[str, int, str, int | None], tuple[bool, bool, bool, float]] = {}
     typos: dict[tuple[str, int], tuple[bool, bool]] = {}
+    # The short Russian words are all taught, none held for development: `ты` was one
+    # of the three held there, so the model had never seen it and read `ns` by its
+    # letters alone - `ns` stayed in an empty field and after `привет` (28.09.2026).
+    # The short English words keep their split: taught, `in` carried the correct
+    # `штуке` over to `inert` through the letters they share.
+    taught: set[str] = set()
+    listed: object = payload.get("short_russian", [])
+    for word in listed if isinstance(listed, list) else []:
+        if isinstance(word, str):
+            wrong = pair.translate(word, "ru", "us")
+            taught.add(min(word.casefold(), wrong.casefold()))
+    # Words that never open a Russian sentence (UD Taiga: `же` and `бы` none, `ли` once)
+    # still wait for their neighbour at the start of a field; every other short word
+    # typed in the other layout converts there on its own.
+    not_opening: object = payload.get("short_russian_not_opening", [])
+    if not isinstance(not_opening, list) or any(not isinstance(word, str) for word in not_opening):
+        raise ValueError("invalid short_russian_not_opening scenarios")
+    waits_alone = {word.casefold() for word in cast(list[str], not_opening)}
 
     def context_group_of(text: str) -> int | None:
         """The engine remembers the layout of the previous word, not its text.
@@ -162,13 +181,16 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
         return cache[key][0]
 
     def add(word: str, group: int, before: str, after: str, role: str,
-            trigger: str, action: ContextAction, category: str) -> None:
+            trigger: str, action: ContextAction, category: str, baseline_override: bool | None = None,
+            inside: bool = False, planned: bool = False) -> None:
         from keyswitch.input_context import FieldRole
 
         alternate = pair.translate(word, "us" if group == 0 else "ru", "ru" if group == 0 else "us")
         signature = min(word.casefold(), alternate.casefold())
         baseline_for(word, group, before, trigger)
         baseline, source_known, target_known, delta = cache[(word, group, trigger, context_group_of(before))]
+        if baseline_override is not None:
+            baseline = baseline_override
         # Feature schema 5 tells a reading one typo away from a word from any other
         # unknown token. Without it a lone `aghbdtn` (a stray key before `ghbdtn`)
         # and a technical name the detector converts by mistake (`nextjs`) differed
@@ -181,8 +203,69 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
             word, alternate, group, FieldContext("", "training-field", before, after, cast(FieldRole, role)),
             trigger, baseline, source_known, target_known, delta,
             source_typo=source_typo, target_typo=target_typo,
+            source_opening=opens_sentences(word, group), target_opening=opens_sentences(alternate, 1 - group),
+            inside=inside,
+            # The engine asks with the next word it plans to convert after the word
+            # (a waiting word, a converted word asked again); feature schema 6 tells
+            # that text from text already in the field.
+            after_origin="planned_next_conversion" if planned else "none",
         )
-        rows.append(Row(item, action, signature, "test" if held_out else family_split(signature), category))
+        split = "test" if held_out else "train" if signature in taught else family_split(signature)
+        rows.append(Row(item, action, signature, split, category))
+
+    # A word typed in the other layout converts with a stray key in it too, as 0.33.0
+    # promised for `aghbdtn` (a stuck `a` before `ghbdtn`): the reading is one letter
+    # away from the word, which the typo evidence of schema 5 tells. The stray keys
+    # are ones whose Russian letter is no word on its own (`й`, `ц`, `з`), at either
+    # end of the word; `a` itself is left to the authored test. And a Russian word
+    # typed as intended stays with text after the caret, whatever that text is.
+    russian_words_list: object = payload.get("russian", [])
+    if not isinstance(russian_words_list, list) or any(not isinstance(word, str) for word in russian_words_list):
+        raise ValueError("invalid russian scenarios")
+    for word in cast(list[str], russian_words_list):
+        wrong = pair.translate(word, "ru", "us")
+        for stray in ("q", "w", "p"):
+            for typed in (stray + wrong, wrong + stray):
+                for before in ("", "я думаю что "):
+                    for role in FIELD_ROLES:
+                        for trigger in ("space", "enter"):
+                            add(typed, 0, before, "", role, trigger, "convert", "stray_key_wrong")
+        # Both forms of the word get the same text after the caret, so that text
+        # stays neutral and the word decides, as in the English fields above: taught
+        # only as keep, it made a Russian word in the English layout stay when a
+        # sentence followed, and letters typed into the middle of a word were no
+        # longer corrected (`суrа` for `сука`, 76 package sentences, 28.09.2026).
+        for after in ("этого достаточно", "сегодня всё получилось", "is not ready yet", "was right about it"):
+            for before in ("", "я думаю что "):
+                for role in FIELD_ROLES:
+                    add(word, 1, before, after, role, "space", "keep", "russian_correct_after")
+                    add(wrong, 0, before, after, role, "space", "convert", "russian_wrong_after")
+
+    # A word converted at a space is asked about again when the next word goes back
+    # the other way (engine._revert_with_next_word, the `short_revisit` rows below).
+    # That says nothing about a word that reads clearly: `cgfcb,j` stays `спасибо`
+    # before `team` typed in the Russian layout, and `руддщ` stays `hello` before a
+    # Russian word typed in the English layout. Taught only with the short words both
+    # readings share, the question took back any word: `спасибо team` became
+    # `cgfcb,j team` (28.09.2026). A form that is itself a word of the other language
+    # is left out: whether it was meant is what the next word may tell.
+    english_next, russian_next = ("is", "can", "was", "the", "and"), ("привет", "сегодня", "давай", "спасибо", "хорошо")
+    for group, family, other_next, own_next in ((1, russian_words_list, english_next, russian_next),
+                                                (0, payload.get("english", []), russian_next, english_next)):
+        for word in cast(list[str], family):
+            wrong = pair.translate(word, "ru" if group == 1 else "us", "us" if group == 1 else "ru")
+            if models[1 - group].score(wrong).known:
+                continue
+            for following, own in zip(other_next, own_next):
+                for role in FIELD_ROLES:
+                    add(wrong, 1 - group, "", following, role, "space", "convert", "revisit_stays",
+                        baseline_override=False, planned=True)
+                    # The other half, so the planned next word stays neutral and the word
+                    # decides: typed as intended before a next word of its own language,
+                    # it stays. Taught only as the converting half, it tipped a correct `if`
+                    # after English text over the threshold (development, 28.09.2026).
+                    add(word, group, "", own, role, "space", "keep", "revisit_stays_correct",
+                        baseline_override=False, planned=True)
 
     # `russian_hard` holds frequent Russian words whose keys in the English layout
     # the detector does not convert on its own: only the context restores them
@@ -200,6 +283,11 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
                 # One- and two-letter words carry the ambiguity the whole policy
                 # rests on, so they keep their share of the corpus as it grows.
                 contexts += ("но ", "мне кажется ", "давай ", "сегодня ")
+                # Eight phrases taught the model those phrases: `ns` converted after
+                # `я думаю что` but not after `привет` (28.09.2026). Sixteen more make
+                # it read the Russian text before the word rather than its words.
+                contexts += ("слушай ", "кстати ", "вот ", "короче ", "хорошо ", "спасибо ", "понятно ",
+                             "ладно ", "смотри ", "знаешь ", "а ", "ну ", "да ", "вообще ", "наверное ", "конечно ")
             # A word that stands alone may be meant either way when both readings
             # are words; short words nearly always are, so they count as such.
             collision = name in {"short_russian", "short_english"} or models[1 - group].score(wrong).known
@@ -214,29 +302,76 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
                         # the curated trusted list did not already decide it. A
                         # conversational word whose other reading is an English
                         # word (`еще` and `tot`) is just as ambiguous on its own.
+                        # A short word opening the field converts at a space or a
+                        # pause: 10.1% of Russian sentences open with a curated
+                        # two-letter word and their Latin readings open almost no
+                        # English one (UD Taiga, UD EWT), so `ns` alone is `ты`. If
+                        # the next word goes back the other way, the engine asks
+                        # about this one again (the `short_revisit` rows below).
+                        # Only Russian words: an English one typed in the Russian layout keeps
+                        # waiting, since teaching `шт` alone as `in` carried the correct
+                        # `штуке` over to `inert` (development, 28.09.2026).
+                        opens = name == "short_russian" and word.casefold() not in waits_alone
                         if name in {"short_russian", "russian_chat", "short_english"} and collision \
                                 and not before and not baseline_for(wrong, 1 - group, "", trigger):
-                            action = "suggest" if trigger in {"enter", "punctuation"} else "wait"
+                            action = ("convert" if opens
+                                      else "suggest" if trigger in {"enter", "punctuation"} else "wait")
                         add(wrong, 1 - group, before, "", role, trigger, action, name + "_wrong")
                         # Standalone Latin letters may be variables. Correct
                         # short Russian words, like all valid prose, stay put.
                         add(word, group, before, "", role, trigger, "keep", name + "_correct")
+            if name in {"short_russian", "short_english"}:
+                # A word typed as intended stays whatever follows the caret. Only
+                # the rows where a converted neighbour follows a word typed in the
+                # other layout had text after the caret, so the model learned that
+                # text after it means convert: `ты` typed in the middle of a
+                # sentence became `ns` (28.09.2026).
+                # An English word is taught at the start of the field only: after an
+                # English phrase these rows taught that a word typed in the English
+                # layout after English text stays, and letters typed into a Russian
+                # word under a line of code stayed Latin.
+                for after in ("этого достаточно", "сегодня всё получилось", "is not ready yet", "was right about it"):
+                    for before in ("", contexts[1]) if group == 1 else ("",):
+                        for role in FIELD_ROLES:
+                            add(word, group, before, after, role, "space", "keep", "short_correct_after")
             if name == "short_russian":
+                # `ns` converted on its own, then an English word converted back: the
+                # engine asks about `ns` again with that word after it, and the word
+                # the user typed stays (`ns code`). The engine asks that question with
+                # no baseline conversion (engine._revert_with_next_word): taught with
+                # the detector's own verdict, the rows of the curated words it converts
+                # taught `baseline:1` to keep, and `aghbdtn` stayed.
+                for following in (word for word in COLLISION_ENGLISH_FOLLOWING if " " not in word):
+                    for role in FIELD_ROLES:
+                        add(wrong, 0, "", following, role, "space", "keep", "short_revisit", baseline_override=False, planned=True)
                 for following in ("этого достаточно", "следующего сообщения", "сегодня всё получилось",
                                   "завтра продолжим", "меня всё устраивает", "нас это не касается",
                                   "тебя ждут в офисе", "него другое мнение", "вас получилось лучше",
                                   "них уже есть решение"):
                     for role in FIELD_ROLES:
                         add(wrong, 0, "", following, role, "space", "convert", "short_lookahead")
-                        # The engine asks again with only the converted next word after it.
+                        # The engine asks again with only the converted next word after it;
+                        # the same word may also stand in the field after the caret.
+                        add(wrong, 0, "", following.split()[0], role, "space", "convert", "short_lookahead", planned=True)
                         add(wrong, 0, "", following.split()[0], role, "space", "convert", "short_lookahead")
             elif name == "short_english":
                 for following in ("is not ready yet", "can wait until tomorrow", "will be fine", "was right about it",
                                   "should know that", "have seen this before"):
                     for role in FIELD_ROLES:
                         add(wrong, 1, "", following, role, "space", "convert", "short_lookahead")
-                        # The engine asks again with only the converted next word after it.
+                        # The engine asks again with only the converted next word after it;
+                        # the same word may also stand in the field after the caret.
+                        add(wrong, 1, "", following.split()[0], role, "space", "convert", "short_lookahead", planned=True)
                         add(wrong, 1, "", following.split()[0], role, "space", "convert", "short_lookahead")
+                # The mirror of the `short_revisit` rows: the same English words after
+                # the word and the same question without a baseline conversion, so only
+                # the layout the word was typed in tells them apart. Without it `ns is`
+                # staying taught `иге` (`but` in the Russian layout) before an English
+                # word to stay too (package, 28.09.2026).
+                for following in (word for word in COLLISION_ENGLISH_FOLLOWING if " " not in word):
+                    for role in FIELD_ROLES:
+                        add(wrong, 1, "", following, role, "space", "convert", "short_english_revisit", baseline_override=False,
+                            planned=True)
             elif name == "russian_chat" and collision:
                 # A conversational word whose other reading is English waits at the
                 # start of a message (`tot` for `еще`). The engine then asks about it
@@ -245,6 +380,7 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
                 # only in the next word, so only the next word is what they teach.
                 for following in ("в", "не", "раз", "тест", "работает", "можно", "будет", "немного", "надо", "есть"):
                     for role in FIELD_ROLES:
+                        add(wrong, 0, "", following, role, "space", "convert", "chat_lookahead", planned=True)
                         add(wrong, 0, "", following, role, "space", "convert", "chat_lookahead")
                         add(wrong, 0, "", "", role, "space", "wait", "chat_lookahead_alone")
             # A code field must not override the actual language of its comments.
@@ -285,6 +421,19 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
                     wrong = pair.translate(word, "ru" if group == 1 else "us", "us" if group == 1 else "ru")
                     if len(word) > SHORT_WORD_MAX_CHARACTERS and not models[1 - group].score(wrong).known:
                         add(wrong, 1 - group, before, "", role, "space", "convert", "latin_field_wrong")
+                        # A word edited in place is decided at the pause after the
+                        # click: letters typed into `шмидт` under a line of code in
+                        # the English layout were left at 0.96-0.98 (package,
+                        # 28.09.2026). Both forms, so the pause stays neutral.
+                        if group == 1:
+                            add(word, 1, before, "", role, "pause", "keep", "latin_field_correct")
+                            add(wrong, 0, before, "", role, "pause", "convert", "latin_field_wrong")
+                    # The same Russian word with the rest of its sentence after the
+                    # caret, as a word edited in place under a line of code has it:
+                    # both forms, so the text after it stays neutral.
+                    if group == 1 and tail and len(word) > SHORT_WORD_MAX_CHARACTERS and not models[0].score(wrong).known:
+                        add(word, 1, before, "сегодня всё получилось", role, "pause", "keep", "latin_field_correct_after")
+                        add(wrong, 0, before, "сегодня всё получилось", role, "pause", "convert", "latin_field_wrong_after")
 
     # A Russian word whose keys in the other layout also spell an English word
     # (`лун` is `key`, `ищи` is `bob`): with the packaged supplement the engine
@@ -313,7 +462,9 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
         for before in ("", "I think that ", "we discussed this yesterday "):
             for following in COLLISION_ENGLISH_FOLLOWING:
                 for role in ("text", "unknown"):
-                    add(word, 1, before, following, role, "space", "convert", "collision_english_after")
+                    add(word, 1, before, following, role, "space", "convert", "collision_english_after", planned=" " not in following)
+                    if " " not in following:
+                        add(word, 1, before, following, role, "space", "convert", "collision_english_after")
 
     # The runtime's curated trusted short-word list decides a handful of
     # two-letter tokens on its own, in both directions. Mirroring it here keeps
@@ -329,7 +480,8 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
                     for role in FIELD_ROLES:
                         for trigger in ("space", "pause", "enter", "punctuation"):
                             converts = baseline_for(wrong, 1 - target_group, before, trigger)
-                            action = "convert" if converts or before else (
+                            opening = target_group == 1 and word.casefold() not in waits_alone
+                            action = "convert" if converts or before or opening else (
                                 "suggest" if trigger in {"enter", "punctuation"} else "wait")
                             add(wrong, 1 - target_group, before, "", role, trigger, cast(ContextAction, action), "trusted_short_wrong")
                             add(word, target_group, before, "", role, trigger, "keep", "trusted_short_correct")
@@ -355,16 +507,16 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
                     add(token, 0, before, "", role, trigger, "keep", "technical")
         # The same keys typed in the Russian layout are still the command:
         # `пше` is `git`. Not taught for a one- or two-letter token (the
-        # short-word families decide those), for a token that stays, when the
+        # short-word families decide those), for a token that stays, or when the
         # other reading keeps a path mark (`гыук_шв`): the mark is what tells a
-        # path from a word, or for a token with a digit. A digit reads the same
-        # in both layouts, and rows converting such tokens taught the model that
-        # a digit points to a layout error: `/c,jhrb2` at the start of a field
-        # became `/сборки2`. `зь2` still becomes `pm2` from its letters, as it
-        # did before these rows existed.
+        # path from a word. A token with a digit is taught too since feature
+        # schema 5 reads a digit together with the layout it was typed in: before
+        # that, such rows taught the model that a digit points to a layout error
+        # and `/c,jhrb2` at the start of a field became `/сборки2`, and `зь2`
+        # rested on its letters alone until the short-word rows of 28.09.2026 left
+        # it at 0.966.
         if (len(token) > SHORT_WORD_MAX_CHARACTERS and not stays
-                and not any(char in wrong for char in TECHNICAL_MARKS)
-                and not any(char.isdigit() for char in token)):
+                and not any(char in wrong for char in TECHNICAL_MARKS)):
             for before in ("", *technical_contexts):
                 for role in TERMINAL_ROLES:
                     for trigger in ("space", "pause", "enter", "punctuation"):
@@ -389,7 +541,10 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
                 for role in roles:
                     for trigger in ("space", "pause", "enter", "punctuation"):
                         action: ContextAction = "convert"
-                        if len(token) <= SHORT_WORD_MAX_CHARACTERS and not before and not baseline_for(wrong, 1 - group, "", trigger):
+                        # A short Russian word outside the lexicon (`хз` as `[p`) converts on
+                        # its own like the listed ones do; its Latin reading is no word.
+                        if len(token) <= SHORT_WORD_MAX_CHARACTERS and not before and name != "russian_unknown" \
+                                and not baseline_for(wrong, 1 - group, "", trigger):
                             action = "suggest" if trigger in {"enter", "punctuation"} else "wait"
                         add(wrong, 1 - group, before, "", role, trigger, action, name + "_wrong")
                         add(token, group, before, "", role, trigger, "keep", name + "_correct")
@@ -437,6 +592,29 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
                     if not tail:
                         wrong = pair.translate(word, "us", "ru")
                         add(wrong, 1, field, "", role, "space", "convert", "latin_field_short_wrong")
+
+    # Letters typed into the middle of a word in the other layout: the engine asks
+    # about the whole word only when every other letter of it is in the other
+    # layout (engine._decide_inside_word), and feature schema 6 tells the model so.
+    # Without these rows it judged such a word like any other: letters typed into
+    # `шмидт` under a line of code stayed Latin at 0.97, and the longer training that
+    # carried them over converted more package names after a path (28.09.2026).
+    # An independent test set may leave the contexts out.
+    inside_contexts: object = payload.get("inside_contexts", [])
+    inside_after: object = payload.get("inside_after", {})
+    if not isinstance(inside_contexts, list) or any(not isinstance(text, str) for text in inside_contexts) \
+            or not isinstance(inside_after, dict) or any(not isinstance(text, str) for text in inside_after.values()):
+        raise ValueError("invalid inside-word scenarios")
+    for name, group in (("russian", 1), ("russian_hard", 1), ("russian_unknown", 1), ("english", 0), ("technical_terms", 0)):
+        tail_after = cast(dict[str, str], inside_after).get("russian" if group == 1 else "english", "")
+        for word in cast(list[str], payload.get(name, [])):
+            if len(word) < CONTEXT_V1_INSIDE_WORD_MIN_CHARACTERS:
+                continue
+            wrong = pair.translate(word, "ru" if group == 1 else "us", "us" if group == 1 else "ru")
+            for before in cast(list[str], inside_contexts):
+                for after in ("", tail_after):
+                    for trigger in ("pause", "space"):
+                        add(wrong, 1 - group, before, after, "text", trigger, "convert", "inside_wrong", inside=True)
 
     # A slash is punctuation in both layouts, so the engine hands the word after
     # it to the model separately. The language of the fragment before the slash
@@ -494,9 +672,9 @@ def development_metrics(weights: dict[str, list[float]], rows: list[tuple[dict[s
 
 
 def train(rows: list[Row]) -> tuple[dict[str, list[float]], int, float]:
-    train_rows = [(extract_context_features(row.evidence, CONTEXT_TYPO_FEATURE_VERSION), ACTIONS.index(row.action))
+    train_rows = [(extract_context_features(row.evidence, CONTEXT_OPENING_FEATURE_VERSION), ACTIONS.index(row.action))
                   for row in rows if row.split == "train"]
-    development = [(extract_context_features(row.evidence, CONTEXT_TYPO_FEATURE_VERSION), ACTIONS.index(row.action))
+    development = [(extract_context_features(row.evidence, CONTEXT_OPENING_FEATURE_VERSION), ACTIONS.index(row.action))
                    for row in rows if row.split == "development"]
     if not train_rows or not development:
         raise ValueError("empty training or development split")
@@ -592,10 +770,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     rows = build_corpus()
     weights, epoch, loss = train(rows)
     digest = hashlib.sha256(json.dumps(weights, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
-    payload = {"feature_version": CONTEXT_TYPO_FEATURE_VERSION, "actions": list(ACTIONS), "version": "context-v1-" + digest[:VERSION_HASH_CHARACTERS],
+    payload = {"feature_version": CONTEXT_OPENING_FEATURE_VERSION, "actions": list(ACTIONS), "version": "context-v1-" + digest[:VERSION_HASH_CHARACTERS],
                "conversion_threshold": CONTEXT_V1_CONVERSION_THRESHOLD, "weights_sha256": digest, "weights": weights}
     model = ContextModel({name: tuple(value) for name, value in weights.items()}, "context-v1-" + digest[:VERSION_HASH_CHARACTERS],
-                         feature_version=CONTEXT_TYPO_FEATURE_VERSION)
+                         feature_version=CONTEXT_OPENING_FEATURE_VERSION)
     # The development-only path neither reads nor scores reserved test rows.
     if not args.development_only:
         rows += build_corpus(HOLDOUT, held_out=True)

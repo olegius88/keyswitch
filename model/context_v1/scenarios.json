@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Author-created EN/RU input scenarios, not collected user messages. All variants of a physical token stay in one split. Candidate 3 folds the former holdout-2 families into development and adds technical terms, dotfiles, out-of-lexicon Russian and English tokens and slash contexts; holdout-3.json is the independent test. Candidate 6 adds conversational Russian words (with the everyday spelling еще and eight of the eighteen dictionary collisions) and English-dominant fields - code, logs, English prose - with and without Russian words next to the caret. Candidate 8 adds short English words, which the scenarios lacked entirely. Candidate 9 lets a conversational word that waits at the start of a message follow the next word once that word is converted. The retraining without application names adds short Russian words outside the Russian lexicon whose other reading is an English token, and short words after English-dominant fields. Technical tokens with a path or identifier mark, and those whose letters spell a Russian word in the other layout, are also taught at the start of a field, and a command without a digit typed in the Russian layout is taught as that command. Collision words are Russian forms of at least three letters that the Russian lexicon knows as the engine loads it (with the packaged supplement) and the reference Hunspell accepts, whose keys in the English layout spell a word the English lexicon knows; tokens of the other lists and of holdout-3 are left out. Hard Russian words are frequent words of the built-in Russian lexicon, four to nine letters, whose keys typed in the English layout the detector does not convert on its own after a Russian word; a deterministic sample outside the other lists and holdout-3.",
+  "description": "Author-created EN/RU input scenarios, not collected user messages. All variants of a physical token stay in one split. Candidate 3 folds the former holdout-2 families into development and adds technical terms, dotfiles, out-of-lexicon Russian and English tokens and slash contexts; holdout-3.json is the independent test. Candidate 6 adds conversational Russian words (with the everyday spelling еще and eight of the eighteen dictionary collisions) and English-dominant fields - code, logs, English prose - with and without Russian words next to the caret. Candidate 8 adds short English words, which the scenarios lacked entirely. Candidate 9 lets a conversational word that waits at the start of a message follow the next word once that word is converted. The retraining without application names adds short Russian words outside the Russian lexicon whose other reading is an English token, and short words after English-dominant fields. Technical tokens with a path or identifier mark, and those whose letters spell a Russian word in the other layout, are also taught at the start of a field, and a command without a digit typed in the Russian layout is taught as that command. Collision words are Russian forms of at least three letters that the Russian lexicon knows as the engine loads it (with the packaged supplement) and the reference Hunspell accepts, whose keys in the English layout spell a word the English lexicon knows; tokens of the other lists and of holdout-3 are left out. Hard Russian words are frequent words of the built-in Russian lexicon, four to nine letters, whose keys typed in the English layout the detector does not convert on its own after a Russian word; a deterministic sample outside the other lists and holdout-3. The short-word cycle of 28.09.2026 teaches a short word typed in the other layout to convert on its own at the start of a field, since 10.1% of Russian sentences open with a curated two-letter word and their Latin readings open almost no English one (UD Taiga and UD EWT); the words that never open a sentence (же, бы) are listed apart, and ли, which opens one Russian sentence as kb opens one English, converts with the rest. A short word so converted stays when the next word, converted back, is English; a short word typed as intended stays with text after the caret; and the short words are all taught, none held for development. It adds the frequent те, та and ту. Feature schema 6 adds words edited in place: letters typed into the middle of a word in the other layout, before and after the texts of inside_contexts and inside_after.",
   "russian": [
     "привет",
     "спасибо",
@@ -234,7 +234,10 @@
     "ни",
     "во",
     "со",
-    "уж"
+    "уж",
+    "те",
+    "та",
+    "ту"
   ],
   "technical": [
     "pm2",
@@ -295,7 +298,7 @@
     "--force",
     "foo_bar",
     "3pm",
-    "д",
+    "d",
     "g",
     "h",
     "l",
@@ -910,5 +913,21 @@
     "штате",
     "штату",
     "штраф"
-  ]
+  ],
+  "short_russian_not_opening": [
+    "же",
+    "бы"
+  ],
+  "inside_contexts": [
+    "",
+    "я думаю что ",
+    "мы обсуждали это вчера ",
+    "def evaluate(self, word: str) -> bool:\n    return self.model.predict(word)\n# ",
+    "const result = await fetch(url, { method: 'POST' });\n// ",
+    "def evaluate(self, word: str) -> bool:\n    return self.model.predict(word)\n# я думаю что "
+  ],
+  "inside_after": {
+    "russian": " сегодня",
+    "english": " today"
+  }
 }

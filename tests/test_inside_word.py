@@ -79,6 +79,23 @@ class InsideWordTests(ContextEngineTests):
         # The model saw the whole word and the text around it, not the letter.
         self.assertIn(("cltkfnm", "мы хотим ", " это"), model.questions)
 
+    def test_the_model_is_told_that_the_word_is_edited_in_place(self) -> None:
+        told: list[bool] = []
+
+        def answer(item: ContextEvidence) -> ContextAction:
+            told.append(item.inside)
+            return "convert" if item.inside else "keep"
+
+        self.engine.context_policy.model = ScriptedModel(answer)
+        self.click_into("мы хотим сдлать это", len("мы хотим сд"), 0)
+        self.type("t")
+        self.pause()
+        self.assertEqual(self.backend.text, "мы хотим сделать это")
+        # A word typed on its own is not an edit in place.
+        self.reset_editor(0)
+        self.type("ghbdtn ")
+        self.assertEqual(told, [True, False])
+
     def test_a_letter_in_its_own_layout_is_left_alone(self) -> None:
         model = self.script({"е": "convert"})
         self.click_into("мы хотим сдлать это", len("мы хотим сд"), 1)

@@ -11,7 +11,7 @@ from .detector import DetectionDecision, LanguageDetector, LanguageScorer
 from .input_context import FieldContext, FieldReader, InputContext
 from .language_model import LanguageModel
 from .ortho_model import OrthoEvidence, OrthoModel, shape_of
-from .short_words import ISOLATED_SHORT_WORD_REASON, is_short_word_override
+from .short_words import ISOLATED_SHORT_WORD_REASON, is_short_word_override, opens_sentences
 from .word_decision import NOT_A_WORD_REASON
 from .constants.detection import MINIMUM_SHAPED_TOKEN_CHARACTERS
 from .constants.models import CONTEXT_ACTION_FEATURE_VERSION
@@ -78,6 +78,7 @@ def evidence_for_decision(
     detector: LanguageDetector, field: FieldContext, trigger: str,
     *, literal_tail: str = "", boundary_text: str = "", ortho: OrthoModel | None = None,
     after_origin: AfterOrigin = "none", identifiers: IdentifierLexicon | None = None,
+    inside: bool = False,
 ) -> ContextEvidence:
     """Build the same lexical and optional orthotactic evidence for any caller."""
 
@@ -103,6 +104,9 @@ def evidence_for_decision(
         source_identifier=source_identifier, target_identifier=target_identifier,
         source_typo=_one_typo_from_word(baseline.original, detector.models[baseline.source_group]),
         target_typo=_one_typo_from_word(alternative, detector.models[target_group]),
+        source_opening=opens_sentences(baseline.original, baseline.source_group),
+        target_opening=opens_sentences(alternative, target_group),
+        inside=inside,
     )
 
 
@@ -126,7 +130,7 @@ class ContextPolicy:
         *, after: str = "", read_field: bool = False,
         field_override: FieldContext | None = None,
         literal_tail: str = "", boundary_text: str = "",
-        after_origin: AfterOrigin = "none",
+        after_origin: AfterOrigin = "none", inside: bool = False,
     ) -> ContextResult:
         if mode not in {"assist", "shadow"} or self.model is None:
             return ContextResult(baseline, fallback_reason="mode_disabled" if mode not in {"assist", "shadow"} else "model_unavailable")
@@ -156,7 +160,7 @@ class ContextPolicy:
             baseline, alternative, target_group, detector, field, trigger,
             literal_tail=literal_tail, boundary_text=boundary_text,
             ortho=self.ortho if self.model.feature_version == CONTEXT_ACTION_FEATURE_VERSION else None,
-            after_origin=after_origin,
+            after_origin=after_origin, inside=inside,
         )
         source, target = evidence.source_score, evidence.target_score
         assert source is not None and target is not None

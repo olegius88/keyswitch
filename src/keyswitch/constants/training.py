@@ -136,13 +136,14 @@ TRIMMED_LEFT_FIELD: Final = 3
 TRIMMED_RIGHT_FIELD: Final = 4
 CONTEXT_V1_MINIMUM_TEST_ROWS: Final = 10_000
 # The context-v1 trainer (tools/train_context_model.py): AdaGrad epochs and step, and the importance
-# of `keep` rows on top of the inverse class frequency. The epochs are the earliest after which every
-# authored engine test passes, chosen on disclosed data for feature schema 5 (26.09.2026): each
-# further epoch converts more correctly typed package names after a path (npm names: 128 of 23,664
-# at the 8th against 166 at the 14th in the corpus before the one-letter wait) and spoils more
-# correct sentences typed through the engine. The holdout rejected a 14-epoch model for three such
-# words after a slash, which is what led to measuring the class on the npm names.
-CONTEXT_V1_EPOCHS: Final = 8
+# of `keep` rows on top of the inverse class frequency. The epochs are the earliest at which the
+# development budget (no false conversion) is met and every authored engine test passes, chosen on
+# disclosed data: for feature schema 6 (28.09.2026) development converts a correct `if` after
+# English text through the 8th epoch and nothing correct from the 9th. Before schema 6 saw a slash, each
+# further epoch converted more correctly typed package names after a path (npm names: 128 of 23,664
+# at the 8th against 166 at the 14th for schema 5), and the holdout rejected a 14-epoch schema-5
+# model and a 10-epoch schema-6 corpus without the slash for three such words after a slash.
+CONTEXT_V1_EPOCHS: Final = 9
 CONTEXT_V1_LEARNING_RATE: Final = 0.2
 CONTEXT_V1_KEEP_IMPORTANCE: Final = 1.0
 # Its family split: a signature's hash picks one of the buckets; the first ones are train, the rest
@@ -153,6 +154,10 @@ CONTEXT_V1_TRAIN_SPLIT_BUCKETS: Final = 8
 # terms are all typed there). With ten, a command name after a Russian path
 # segment (`код/dpkg`) read as a Russian word typed in the wrong layout.
 CONTEXT_V1_SLASH_WORDS_PER_FAMILY: Final = 30
+# Words its corpus types with letters put into their middle in the other layout (feature schema 6
+# tells the model so): a word at least this long has a letter or two between a head and a tail, as
+# the mid-word edits of the package replay have.
+CONTEXT_V1_INSIDE_WORD_MIN_CHARACTERS: Final = 4
 # Mismatched rows its report quotes for a split.
 CONTEXT_V1_MAX_REPORTED_FAILURES: Final = 30
 # Decimal places of the recall the ortho-v2 verifier recomputes and compares with the sealed report.
