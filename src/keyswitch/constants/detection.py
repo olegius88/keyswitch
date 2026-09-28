@@ -11,6 +11,10 @@ MINIMUM_SHAPED_TOKEN_CHARACTERS: Final[int] = 2
 EARLY_SWITCH_CONFIDENCE: Final = 15.0
 # Most strokes the engine keeps for one word.
 MAX_WORD_STROKES: Final = 256
+# Words left as typed at a space that a later converted word may still take along: the first
+# words of a message have nothing before them to tell their layout by (`hey here` typed in the
+# Russian layout is `рун руку`, two Russian words, until `ерун` shows it was `they`).
+KEPT_WORDS_TAKEN_ALONG: Final = 2
 # Input events the engine queues before the producer blocks.
 ENGINE_EVENT_QUEUE_MAX_SIZE: Final = 4096
 # Per-application remembered context words; oldest is dropped past this cap.

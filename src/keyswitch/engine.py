@@ -65,6 +65,7 @@ from .word_decision import automatic_word_decision
 from .constants.detection import (
     EARLY_SWITCH_CONFIDENCE,
     ENGINE_EVENT_QUEUE_MAX_SIZE,
+    KEPT_WORDS_TAKEN_ALONG,
     MAX_REMEMBERED_APPLICATION_CONTEXTS,
     MAX_WORD_STROKES as MAX_WORD_STROKES,
     MINIMUM_LEARNABLE_LETTERS,
@@ -211,6 +212,21 @@ class ProvisionalWord:
 
 
 @dataclass(frozen=True)
+class KeptWord:
+    """A word left as typed at a space that the next word may still take along.
+
+    `baseline` is the detector's decision, or None for a token the boundary model
+    could not split (`dc\\``: `всё` or `вс` and a backtick), which was not decided at all.
+    """
+
+    plan: CorrectionPlan
+    baseline: DetectionDecision | None
+    field: FieldContext | None
+    window: int
+    deadline: float
+
+
+@dataclass(frozen=True)
 class LearningPrompt:
     source_group: int
     target_group: int
@@ -284,6 +300,7 @@ class KeySwitchEngine:
         self._early_switch_confidence = EARLY_SWITCH_CONFIDENCE
         self._context_waiting: WaitingContextWord | None = None
         self._provisional: ProvisionalWord | None = None
+        self._kept: tuple[KeptWord, ...] = ()
         # The baseline of the last word `_decide_word` decided, before the model spoke.
         self._last_baseline: DetectionDecision | None = None
         self._context_wait_sequence = 0
@@ -1399,6 +1416,7 @@ class KeySwitchEngine:
         decision: DetectionDecision | None = None
         waiting, self._context_waiting = self._context_waiting, None
         provisional, self._provisional = self._provisional, None
+        kept, self._kept = self._kept, ()
         if should_analyze and not excluded:
             inside = None if trailing or head else self._decide_inside_word(
                 strokes, source_group, alternatives, application, self._trigger_for_boundary(boundary), boundary)
@@ -1414,8 +1432,22 @@ class KeySwitchEngine:
             excluded = self._application_excluded(application)
             joint = None if trailing or head else self._resolve_context_wait(
                 waiting, strokes, boundary, decision, application, alternatives)
+            if joint is not None and waiting is not None:
+                joint = (self._take_along(kept, joint[0], len(waiting.plan.original), application), joint[1])
+            elif waiting is not None and not head and (trailing or not decision.should_convert):
+                # A waiting word whose neighbour did not convert either may still be settled by a
+                # later word (`тщ ш`, then `огые`); one the model declined with a converted
+                # neighbour has had its answer. A neighbour with a sign split off its end ends
+                # the wait, and the waiting word is asked with it as a kept word (`tot ghbdtn,`).
+                kept = (*kept, KeptWord(waiting.plan, waiting.decision, waiting.field, waiting.window, waiting.deadline))
             if joint is None and not (trailing or head):
                 joint = self._revert_with_next_word(provisional, strokes, boundary, decision, application)
+            if joint is None and not head and decision.should_convert:
+                taken = self._take_along(
+                    kept, replace(self._plan_from_decision(strokes, boundary, application, decision), trailing=trailing),
+                    len(original), application)
+                if taken.mode == "context_phrase":
+                    joint = (taken, decision)
             if trailing or head:
                 self._log_context_wait("context_wait_cancelled", waiting, "literal_tail" if trailing else "literal_head")
             if joint is not None:
@@ -1454,10 +1486,31 @@ class KeySwitchEngine:
                     self._start_context_wait(plan, decision, boundary, trailing, head, fallback=True)
             else:
                 self._remember_context(application, source_group, typed[:head] + strokes)
-                self._start_context_wait(plan, decision, boundary, trailing, head)
+                waits = self._start_context_wait(plan, decision, boundary, trailing, head)
+                if inside is None and not trailing and not head:
+                    field = self._context_result.field if self._context_result is not None else None
+                    # A word waiting for its neighbour joins the kept words only if the wait fails.
+                    self._keep_for_next_word(kept, None if waits else KeptWord(
+                        plan, self._last_baseline, field, self._focus_window or 0, time.monotonic() + CONTEXT_TTL), boundary)
+                elif inside is None and trailing and not head and self._sign_reads_as_letter(plan):
+                    # The boundary model split a sign off the end of the word and the word
+                    # stayed, but only the whole token reads as a word: `t\`` is `её`, and
+                    # only the next word can tell (`мать`). The model is asked about the
+                    # whole token then.
+                    whole = strokes + trailing
+                    self._keep_for_next_word(kept, KeptWord(replace(
+                        plan, strokes=typed[:head] + whole, original=self._text_for_group(whole, source_group),
+                        replacement=self._text_for_group(whole, plan.target_group), trailing=(),
+                    ), None, None, self._focus_window or 0, time.monotonic() + CONTEXT_TTL), boundary)
         else:
             self._log_context_wait("context_wait_cancelled", waiting, "analysis_skipped")
             self._remember_context(application, source_group, typed[:head] + strokes)
+            # A token the boundary model could not split was not decided at all;
+            # the next word may still show what it was (`dc\`` before `тот`).
+            if (enabled and trigger_enabled and not manual_layout_protected and not caret_unknown
+                    and not segmentation_certain and not excluded and not head):
+                self._keep_for_next_word(kept, KeptWord(
+                    plan, None, None, self._focus_window or 0, time.monotonic() + CONTEXT_TTL), boundary)
         self._log_word_evaluation(
             trigger=self._trigger_for_boundary(boundary),
             original=original,
@@ -1874,17 +1927,50 @@ class KeySwitchEngine:
     ) -> DetectionDecision:
         self._context_result = None
         self._last_baseline = None
-        context_words, context_group = self._context_for(application)
+        decision = self._baseline_decision(original, alternatives, source_group, application, trigger)
+        self._last_baseline = decision
         context_aware = bool(self.settings.get("detection.context_aware", True))
         ignored_words: list[str] = self.settings.get("exclusions.words", [])
-        rejected_targets = (
+        rejected_targets = self._rejected_targets(source_group, original)
+        forced_target = self._forced_target_group(source_group, original)
+        if (
+            not context_aware or forced_target is not None or trigger == "boundary_probe"
+            or self.detector.token_key(original) in {self.detector.token_key(word) for word in ignored_words}
+            or self._application_excluded(application)
+        ):
+            # A token the user excluded, a layout they chose by hand and an excluded
+            # application are their own decisions; the model is not asked about those.
+            # "Protect code" is not in that list any more: it used to skip the model for
+            # every token carrying a digit, so `зь2` stayed while the model said convert
+            # with 0.9993 - and the model keeps `pm2`, `npm`, `git` and `h264` on its own
+            # (measured 17.09.2026). The detector still refuses such tokens in the
+            # baseline; telling code from a mistyped word is exactly what the model is for.
+            return decision
+        return self._consult_context_model(
+            decision, original, alternatives, rejected_targets, application, trigger,
+            literal_tail=literal_tail, boundary_text=boundary_text, field_override=field_override, inside=inside,
+        )
+
+    def _rejected_targets(self, source_group: int, original: str) -> set[int]:
+        return (
             self.learning.rejected_targets(source_group, original)
             if bool(self.settings.get("detection.learning", True))
             else set()
         )
+
+    def _baseline_decision(
+        self, original: str, alternatives: dict[int, str], source_group: int,
+        application: str, trigger: CorrectionTrigger,
+    ) -> DetectionDecision:
+        """What the detector decides about a word before the context model is asked."""
+
+        context_words, context_group = self._context_for(application)
+        context_aware = bool(self.settings.get("detection.context_aware", True))
+        ignored_words: list[str] = self.settings.get("exclusions.words", [])
         protect_code = bool(self.settings.get("detection.protect_code", True))
         forced_target = self._forced_target_group(source_group, original)
-        decision = automatic_word_decision(
+        rejected_targets = self._rejected_targets(source_group, original)
+        return automatic_word_decision(
             self.detector,
             original,
             alternatives,
@@ -1906,20 +1992,12 @@ class KeySwitchEngine:
                 self.settings.get("detection.intent_model_enabled", True)
             ),
         )
-        self._last_baseline = decision
-        if (
-            not context_aware or forced_target is not None or trigger == "boundary_probe"
-            or self.detector.token_key(original) in {self.detector.token_key(word) for word in ignored_words}
-            or self._application_excluded(application)
-        ):
-            # A token the user excluded, a layout they chose by hand and an excluded
-            # application are their own decisions; the model is not asked about those.
-            # "Protect code" is not in that list any more: it used to skip the model for
-            # every token carrying a digit, so `зь2` stayed while the model said convert
-            # with 0.9993 - and the model keeps `pm2`, `npm`, `git` and `h264` on its own
-            # (measured 17.09.2026). The detector still refuses such tokens in the
-            # baseline; telling code from a mistyped word is exactly what the model is for.
-            return decision
+
+    def _consult_context_model(
+        self, decision: DetectionDecision, original: str, alternatives: dict[int, str],
+        rejected_targets: set[int], application: str, trigger: CorrectionTrigger,
+        *, literal_tail: str, boundary_text: str, field_override: FieldContext | None, inside: bool,
+    ) -> DetectionDecision:
         candidates = [(group, text) for group, text in alternatives.items() if group not in rejected_targets]
         if not candidates:
             return decision
@@ -2075,7 +2153,8 @@ class KeySwitchEngine:
         correction returns both: `vs code`. The engine only asks; the model decides.
         """
 
-        if provisional is None or not decision.should_convert:
+        if (provisional is None or not decision.should_convert
+                or self.settings.get("detection.context_policy", "assist") != "assist"):
             return None
         applied = provisional.plan
         if (
@@ -2114,6 +2193,108 @@ class KeySwitchEngine:
             decision.confidence, application, True, "context_phrase", self._context_field_id(),
         ), decision
 
+    def _keep_for_next_word(
+        self, kept: tuple[KeptWord, ...], word: KeptWord | None, boundary: KeyEvent,
+    ) -> None:
+        """Remember the words left as typed at a space until a later word shows their layout."""
+
+        if boundary.character != " " or boundary.deferred:
+            return
+        if word is not None and not any(char.isalpha() for char in word.plan.original):
+            # A token of signs alone (`.`, `1.2`, `...`) is never converted on its own, and a
+            # converted next word does not make it a word either: `.` before `ghbdtn` is no `ю`.
+            return
+        chain = kept if word is None or word.plan.target_group == word.plan.source_group else (*kept, word)
+        self._kept = chain[-KEPT_WORDS_TAKEN_ALONG:]
+
+    def _sign_reads_as_letter(self, plan: CorrectionPlan) -> bool:
+        """Only the whole token, the sign split off its end included, reads as a word in the other layout.
+
+        `t\\`` is `её`, while `t` alone, `е`, is no word. When the word without the
+        sign is a word itself, the boundary model's split stands.
+        """
+
+        model = self.models[plan.target_group]
+        whole = self._text_for_group(plan.strokes + plan.trailing, plan.target_group)
+        return model.score(whole).known and not model.score(plan.replacement).known
+
+    def _take_along(
+        self, kept: tuple[KeptWord, ...], plan: CorrectionPlan, first_characters: int, application: str,
+    ) -> CorrectionPlan:
+        """Ask the model about the words before a converted word again, nearest first.
+
+        The first words of a line have nothing before them to tell their layout
+        by: `руку` is a Russian word and `here` an English one, and `dc\\`` is `всё` or
+        `вс` with a backtick. When a word typed in the same layout converts - `ерун` is
+        `they` - the model is asked about the word before it once more with the
+        converted word after it, as a waiting word is (_resolve_context_wait); while
+        it converts them, one correction takes the words along: `hey here they`. The
+        mirror of _revert_with_next_word; the engine only asks, the model decides.
+
+        Only the first words of a line are taken along: a word with words before it
+        on its line was decided with them, and asked again it reads to the model like
+        a first word. A Russian word typed as intended before a term typed in the other
+        layout was converted then: `склонируй репо пшерги` would become
+        `склонируй htgj github`.
+        """
+
+        if self.settings.get("detection.context_policy", "assist") != "assist":
+            return plan
+        next_replacement = plan.replacement[:first_characters]
+        # Enter/Tab has not reached the editor: it is neither in the text nor replaced. A sign
+        # split off the converted word's end stays literal after the whole correction.
+        closing = None if plan.boundary is None or plan.boundary.deferred else plan.boundary
+        suffix = "".join(stroke.character for stroke in plan.trailing) + ("" if closing is None else closing.character)
+        start, taken = plan, list[KeptWord]()
+        for word in reversed(kept):
+            previous = word.plan
+            if (
+                previous.boundary is None
+                or plan.source_group != previous.source_group or plan.target_group != previous.target_group
+                or time.monotonic() > word.deadline or word.window != (self._focus_window or 0)
+                or previous.application != application
+                or any(stroke.group != previous.source_group for stroke in (*previous.strokes, *plan.strokes))
+                or not self.context_policy.stream.text.endswith(
+                    previous.original + previous.boundary.character + plan.original + suffix)
+                # Only a word whose other reading is a word is asked: a term typed as intended
+                # before a Russian word typed in the English layout (`htop gjrfpsdftn`) is no
+                # `рещз`, yet asked with `показывает` after it the model converts it.
+                or not self.models[previous.target_group].score(previous.replacement).known
+            ):
+                break
+            baseline = word.baseline if word.baseline is not None else self._baseline_decision(
+                previous.original, {previous.target_group: previous.replacement}, previous.source_group,
+                application, "space")
+            again = self.context_policy.decide(
+                baseline, previous.replacement, previous.target_group, self.detector, "space", "assist",
+                after=next_replacement, field_override=word.field,
+                boundary_text=previous.boundary.character, after_origin="planned_next_conversion",
+            )
+            if not again.decision.should_convert:
+                break
+            taken.append(word)
+            plan = replace(
+                plan, strokes=previous.strokes + (previous.boundary,) + plan.strokes, boundary=closing,
+                original=previous.original + previous.boundary.character + plan.original,
+                replacement=previous.replacement + previous.boundary.character + plan.replacement,
+                automatic=True, mode="context_phrase", context_field=self._context_field_id(),
+            )
+            next_replacement = previous.replacement
+        if not taken:
+            return start
+        farthest = taken[-1]
+        before = (farthest.field.before if farthest.field is not None
+                  else self.context_policy.stream.text[:-len(plan.original + suffix)])
+        if any(char.isalpha() for char in before.rsplit("\n", 1)[-1]):
+            self._technical_event("kept_words_left", words=len(taken), reason="words_before_on_line")
+            return start
+        for word in taken:
+            self._technical_event(
+                "kept_word_converted", previous_characters=len(word.plan.original),
+                boundary_undecided=word.baseline is None,
+            )
+        return plan
+
     def _opening_conversion(self, inside: DetectionDecision | None, original: str) -> bool:
         """The model converted a short word that opens the message, with nothing before it."""
 
@@ -2127,8 +2308,8 @@ class KeySwitchEngine:
     def _start_context_wait(
         self, plan: CorrectionPlan, decision: DetectionDecision,
         boundary: KeyEvent, trailing: tuple[KeyEvent, ...], head: int, *, fallback: bool = False,
-    ) -> None:
-        """Let a word at a space wait for its next word.
+    ) -> bool:
+        """Let a word at a space wait for its next word; say whether it waits.
 
         The model asks for it with a ``wait`` verdict, whatever the word's length:
         `tot` at the start of a message may be `еще`, and only its neighbour can
@@ -2165,6 +2346,8 @@ class KeySwitchEngine:
                 self._context_wait_sequence, settles,
             )
             self._log_context_wait("context_wait_started", self._context_waiting, "model_wait" if settles else "model_suggest")
+            return True
+        return False
 
     def _log_context_wait(
         self, event: str, waiting: WaitingContextWord | None, reason: str, **fields: object,
@@ -2183,8 +2366,9 @@ class KeySwitchEngine:
         self._log_context_wait("context_wait_cancelled", self._context_waiting, reason)
         self._context_waiting = None
         # Whatever ends a wait - another field, a caret move, Backspace, a manual
-        # conversion - also ends a converted word's claim on the next word.
+        # conversion - also ends a converted or kept word's claim on the next word.
         self._provisional = None
+        self._kept = ()
 
     def _log_input_edit(self, event: KeyEvent, application: str) -> None:
         # Observe editing controls, not printable keystrokes or field contents.
@@ -2681,13 +2865,21 @@ class KeySwitchEngine:
         # other layout ended the wait with `tot` left standing.
         waiting, self._context_waiting = self._context_waiting, None
         provisional, self._provisional = self._provisional, None
+        kept, self._kept = self._kept, ()
         joint = None
         if trailing or head:
             self._log_context_wait("context_wait_cancelled", waiting, "literal_tail" if trailing else "literal_head")
         else:
             joint = self._resolve_context_wait(waiting, strokes, None, decision, application, alternatives)
+            if joint is not None and waiting is not None:
+                joint = (self._take_along(kept, joint[0], len(waiting.plan.original), application), joint[1])
             if joint is None:
                 joint = self._revert_with_next_word(provisional, strokes, None, decision, application)
+            if joint is None:
+                taken = self._take_along(kept, self._plan_from_decision(strokes, None, application, decision, "pause"),
+                                         len(original), application)
+                if taken.mode == "context_phrase":
+                    joint = (taken, decision)
         if joint is not None:
             plan = joint[0]
         else:

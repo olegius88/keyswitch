@@ -4,6 +4,30 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.34.0 — 2026-09-29
+
+- Correct the first words of a line together with the next word. `руку ерун` typed in the Russian
+  layout used to end as "руку they": "руку" is a Russian word, and nothing before it said otherwise.
+  A word left as typed at a space is now remembered; when the next word, typed in the same layout,
+  is corrected, the context model is asked about the word before it once more, with the corrected
+  word after it, and one correction takes both along - "here they" - and one more word back the
+  same way: `рун руку ерун` -> "hey here they". A token that ends in a letter on
+  a punctuation key is asked about whole: ``dc` njn`` -> "всё тот", ``t` vfnm`` -> "её мать". A sign
+  split off the corrected word stays a sign: `tot ghbdtn,` -> "еще привет,".
+- Only the first words of a line are taken along - no letter stands before them on their line. A
+  word in the middle of a phrase was already decided with the words before it, and a Russian word
+  typed as intended before a term typed in the other layout reads to the model just like "руку":
+  "склонируй репо пшерги" would have become "склонируй htgj github". Only a word whose other
+  reading is a word is asked again: a term typed as intended before a Russian word typed in the
+  English layout (`htop gjrfpsdftn`) stays "htop", though with "показывает" after it the model
+  would convert it too. Tokens without a letter ("." or "1.2") are never taken along. The context
+  model is the one from 0.33.3.
+- On 5,000 subtitle sentences of ten disclosed sets typed through the engine into five kinds of
+  field, correctly and in the other layout, restored sentences went from 24,258 to 24,805 of 25,000,
+  with the same 55 spoiled correct ones; letters put back inside a word are unchanged (24,920
+  restored, none spoiled). On 500 new sentences no model had seen: restored 2,419 -> 2,473 of
+  2,500, spoiled 4 -> 4; letters inside a word 2,490 -> 2,490, none spoiled; the same in Firefox.
+
 ## 0.33.3 — 2026-09-28
 
 - Convert a short word typed in the other layout on its own. "ns" typed into an empty field now
