@@ -21,8 +21,11 @@ from keyswitch.constants.file_formats import (
     KSLM_MAX_MANIFEST_BYTES,
     KSLM_MAX_PAYLOAD_BYTES,
     KSLM_SCHEMA_VERSION,
+    MAX_CONTEXT_TERM_FREQUENCY_BYTES,
     SHA256_HEX_CHARACTERS,
 )
+from keyswitch.constants.units import BYTES_PER_MEBIBYTE
+from keyswitch.context_model import TERM_FREQUENCY_PATH
 from keyswitch.constants.models import (
     CONTEXT_SUPPORTED_FEATURE_VERSIONS,
     CURRENT_PREFIX_FEATURE_VERSION,
@@ -490,6 +493,14 @@ class WindowsPackagingContractTests(unittest.TestCase):
             "src/keyswitch/resources/models/*.ksm binary",
             self.git_attributes,
         )
+
+    def test_the_windows_build_reads_the_term_table_up_to_the_program_s_limit(self) -> None:
+        # 0.35.0 was tagged without a release: the build kept its own 4 MiB limit while the
+        # program read up to 8 MiB, and the new table is 4.5 MB.
+        match = re.search(r"-MaximumBytes (\d+)MB -MinimumBytes 2 -Label \"bundled term frequency table\"", self.script)
+        assert match is not None
+        self.assertEqual(int(match.group(1)) * BYTES_PER_MEBIBYTE, MAX_CONTEXT_TERM_FREQUENCY_BYTES)
+        self.assertLessEqual(TERM_FREQUENCY_PATH.stat().st_size, MAX_CONTEXT_TERM_FREQUENCY_BYTES)
 
     def test_every_native_package_enforces_the_same_bounded_kslm_envelope(
         self,

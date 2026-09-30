@@ -4,7 +4,16 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
-## 0.35.0 — 2026-09-30
+## 0.35.1 — 2026-09-30
+
+- Publish everything since 0.34.0. The 0.35.0 section below was tagged, but its release job
+  produced no assets: the Windows build limited the context model's term frequency table to
+  4 MiB, while the program reads up to 8 MiB and the new table is 4.5 MB. The Windows build now
+  uses the program's limit, and a test compares the two.
+
+## 0.35.0 — unpublished, 2026-09-30
+
+These changes were tagged but did not produce a published release. 0.35.1 publishes them.
 
 - Replay a sign typed right after a corrected word in the layout the word was meant in. Typing
   Russian in the English layout, the Russian comma is Shift+/, so `ghbdtn?` is "привет," and

@@ -1529,7 +1529,7 @@ if ($ActiveContext.feature_version -eq 7) {
     # Feature schema 7 reads this table next to the artifact; the model does not load without it.
     [byte[]]$BundledTermFrequencyBytes = Read-BoundedFileBytes `
         -Path (Join-Path $NativeDistribution "keyswitch\resources\models\context-term-frequency.json") `
-        -MaximumBytes 4MB -MinimumBytes 2 -Label "bundled term frequency table"
+        -MaximumBytes 8MB -MinimumBytes 2 -Label "bundled term frequency table"
     if ((Get-BytesSha256 -Bytes $BundledTermFrequencyBytes) -cne $ActiveContext.term_frequency_sha256) {
         throw "Native distribution contains a different term frequency table"
     }
