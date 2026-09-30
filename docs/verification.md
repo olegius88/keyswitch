@@ -80,6 +80,12 @@ PYTHONPATH=src python3 tools/train_context_model.py --verify
 PYTHONPATH=src python3 tools/verify_context_model.py
 ```
 
+С 0.35.0 (схема признаков 7) `train_context_model.py --verify` читает и вопросы движка из
+`model/context_v1/captured/` (их SHA-256 закреплены манифестом, манифест — отчётом) и считает эпохи
+C-ядром `tools/context_optimizer.c`: нужен компилятор C, обучение занимает 5–10 минут и до 6 ГБ памяти.
+Сами вопросы пересоздаются из исходных выгрузок командой `tools/mixed_typing.py capture --verify`
+([рецепты и источники](../model/context_v1/captured/README.md)).
+
 Расширенный эксперимент использует уже зафиксированные публичные предложения
 и числовой словарный кэш, без загрузок из сети и без зависимости от установленных
 Hunspell-словарей во время replay:

@@ -15,6 +15,9 @@ MAX_WORD_STROKES: Final = 256
 # words of a message have nothing before them to tell their layout by (`hey here` typed in the
 # Russian layout is `рун руку`, two Russian words, until `ерун` shows it was `they`).
 KEPT_WORDS_TAKEN_ALONG: Final = 2
+# Fewest letters left of a word once the letters at its end that are signs in the other layout are
+# set aside (`руддщб` is `hello,`): `чё` without `ё` is a lone `ч`, and one letter is no word to judge.
+REPLAYED_SIGNS_MIN_STEM_LETTERS: Final = 2
 # Input events the engine queues before the producer blocks.
 ENGINE_EVENT_QUEUE_MAX_SIZE: Final = 4096
 # Per-application remembered context words; oldest is dropped past this cap.

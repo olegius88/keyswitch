@@ -2,14 +2,15 @@
 
 The model is a four-class sparse softmax classifier. It receives the recent
 sentence, application/field evidence and the existing detector's lexical
-evidence. The context-v1 trainer produces feature5 weights (feature2 plus typo
-evidence); feature2 artifacts still load, and the context action trainer
-produces feature3 weights. Probabilities are corpus scores, not a promise of
+evidence. The context-v1 trainer produces feature7 weights; feature2, feature5
+and feature6 artifacts still load, and the context action trainer produces
+feature3 weights. Probabilities are corpus scores, not a promise of
 real-world correctness. Hard safety/explicit user intent live in the engine.
 """
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import math
@@ -24,7 +25,7 @@ from .input_context import FieldContext
 from .language_model import LanguageModel, WordScore
 from .context_action_features import extract_action_features
 from .constants.boundary import BOUNDARY_MISSING_LETTERS as ALPHABET_LETTERS
-from .constants.file_formats import MAX_CONTEXT_MODEL_BYTES as MAX_ARTIFACT_BYTES
+from .constants.file_formats import MAX_CONTEXT_MODEL_BYTES as MAX_ARTIFACT_BYTES, MAX_CONTEXT_TERM_FREQUENCY_BYTES
 from .constants.models import (
     ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS,
     ACTION_FEATURE_APPLICATION_NAME_CHARACTERS,
@@ -41,6 +42,9 @@ from .constants.models import (
     CONTEXT_MODEL_FEATURE_VERSION as FEATURE_VERSION,
     CONTEXT_SUPPORTED_FEATURE_VERSIONS as SUPPORTED_FEATURE_VERSIONS,
     CONTEXT_OPENING_FEATURE_VERSION,
+    CONTEXT_LINE_FEATURE_VERSION,
+    CONTEXT_OPENING_SCHEMAS,
+    CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS,
     CONTEXT_TYPO_FEATURE_VERSION,
     CONTEXT_TYPO_MIN_CHARACTERS,
     CONTEXT_V1_CONVERSION_THRESHOLD,
@@ -66,6 +70,14 @@ ARTIFACT_PATH = Path(__file__).parent / "resources" / "models" / "context_policy
 _WORDS = re.compile(r"[^\W\d_]+(?:['’\-][^\W\d_]+)*", re.UNICODE)
 # Characters that mark a path, an address or an identifier inside a token.
 TECHNICAL_MARKS: Final = "_/@\\=<>"
+_LATIN_DOT: Final = re.compile(r"[A-Za-z]\.[A-Za-z]")
+# Signs stripped off both ends of a token before its frequency is looked up, as when it was counted.
+_TERM_EDGE_SIGNS: Final = ".,!?:;\"'()[]{}<>«»-"
+# How often plain words occur (schema 7), read on first use: `latin` and `cyrillic` count words inside
+# Russian text, `english` and `russian` words in text of their own language.
+TERM_FREQUENCY_PATH: Final = Path(__file__).with_name("resources") / "models" / "context-term-frequency.json"
+TERM_ALPHABETS: Final = ("cyrillic", "english", "latin", "russian")
+_TERM_FREQUENCY: dict[str, dict[str, int]] | None = None
 
 
 @dataclass(frozen=True)
@@ -153,7 +165,9 @@ def extract_context_features(item: ContextEvidence, feature_version: int = FEATU
 
     Schema 5 adds the typo evidence; schema 6 adds whether a reading opens sentences, the
     next word the engine plans to convert as text of its own kind, a path separator right
-    before the token, and whether the word is being edited in place.
+    before the token, and whether the word is being edited in place; schema 7 adds where
+    the word stands on its line, its case, a dot or underscore inside the Latin reading,
+    how often each reading occurs, and whether the token has letters at all.
     """
 
     original = _normalized(item.original[:ACTION_FEATURE_WORD_MAX_CHARACTERS])
@@ -185,7 +199,7 @@ def extract_context_features(item: ContextEvidence, feature_version: int = FEATU
     # before an English next word stays taught every Latin token with nothing after it
     # to lean towards converting - a correct `if` after English text reached 0.98
     # (28.09.2026).
-    planned = feature_version == CONTEXT_OPENING_FEATURE_VERSION and item.after_origin == "planned_next_conversion"
+    planned = feature_version in CONTEXT_OPENING_SCHEMAS and item.after_origin == "planned_next_conversion"
     for label, text in (("before", before), ("next" if planned else "after", after)):
         words = _WORDS.findall(text)
         words = words[-CONTEXT_FEATURE_BEFORE_WORD_COUNT:] if label == "before" else words[:CONTEXT_FEATURE_AFTER_WORD_COUNT]
@@ -217,7 +231,7 @@ def extract_context_features(item: ContextEvidence, feature_version: int = FEATU
     features["token:technical"] = float(any(char in original for char in TECHNICAL_MARKS))
     features[f"context:{scripts[0]}:{scripts[1]}:{item.field.role}:{direction}:{length}"] = 1.0
     features[f"context:{scripts[0]}:{scripts[1]}:baseline:{baseline}:length:{length}"] = 1.0
-    if feature_version in (CONTEXT_TYPO_FEATURE_VERSION, CONTEXT_OPENING_FEATURE_VERSION):
+    if feature_version in (CONTEXT_TYPO_FEATURE_VERSION, *CONTEXT_OPENING_SCHEMAS):
         # Only a reading outside the lexicon can be a typo, and a typo of a word
         # means something else when the typed reading is itself a word: `лучше`
         # stays although `kexit` is one letter from `exit`.
@@ -229,7 +243,7 @@ def extract_context_features(item: ContextEvidence, feature_version: int = FEATU
         # the two readings. What it says depends on the layout of the letters
         # around it: `pm2` and `/c,jhrb2` stay, `зь2` is `pm2`.
         features[f"token:digits:direction:{direction}"] = features["token:digits"]
-    if feature_version == CONTEXT_OPENING_FEATURE_VERSION and (item.source_opening or item.target_opening):
+    if feature_version in CONTEXT_OPENING_SCHEMAS and (item.source_opening or item.target_opening):
         # Whether a reading opens sentences, and whether the word stands alone: `ns` alone
         # opens a message as `ты` does in Russian, and nothing in English opens with `ns`.
         # Nothing is said about the words neither of whose readings opens a sentence -
@@ -240,14 +254,14 @@ def extract_context_features(item: ContextEvidence, feature_version: int = FEATU
         alone = int(not before.strip() and not after.strip())
         features[opening] = 1.0
         features[f"{opening}:alone:{alone}:direction:{direction}"] = 1.0
-    if feature_version == CONTEXT_OPENING_FEATURE_VERSION and before.endswith("/"):
+    if feature_version in CONTEXT_OPENING_SCHEMAS and before.endswith("/"):
         # A path separator right before the token: `код/dpkg` read as `dpkg` after a
         # Russian word, so a package name typed as intended after a Russian path segment
         # was converted like a Russian word typed in the wrong layout.
         known = f"known:{int(item.source_known)}:{int(item.target_known)}:direction:{direction}"
         features["before:slash"] = 1.0
         features[f"before:slash:{known}"] = 1.0
-    if feature_version == CONTEXT_OPENING_FEATURE_VERSION and item.inside:
+    if feature_version in CONTEXT_OPENING_SCHEMAS and item.inside:
         # Letters typed into the middle of a word whose other letters are in the other
         # layout: the model is asked about the whole word, and without this it saw a word
         # like any other - letters typed into `шмидт` under a line of code stayed Latin at
@@ -255,7 +269,119 @@ def extract_context_features(item: ContextEvidence, feature_version: int = FEATU
         # after a path (28.09.2026).
         features["inside"] = 1.0
         features[f"inside:known:{int(item.source_known)}:{int(item.target_known)}:direction:{direction}"] = 1.0
+    if feature_version == CONTEXT_LINE_FEATURE_VERSION:
+        known = f"known:{int(item.source_known)}:{int(item.target_known)}"
+        # Where on its line the word stands. In Russian technical text `vs` is a word between
+        # two terms (`React vs Vue`); at the start of a new line under English text it is `мы`
+        # typed in the other layout - schema 6 saw the same last words either way.
+        lines = item.field.before.rsplit("\n", 1)
+        state = "same" if any(char.isalpha() for char in lines[-1]) else "newline" if len(lines) > 1 else "empty"
+        features[f"line:{state}"] = 1.0
+        features[f"line:{state}:direction:{direction}"] = 1.0
+        features[f"line:{state}:{known}"] = 1.0
+        if state == "newline":
+            previous = lines[0].rsplit("\n", 1)[-1].casefold()
+            ru = sum("а" <= char <= "я" or char == "ё" for char in previous)
+            en = sum("a" <= char <= "z" for char in previous)
+            features[f"line:newline:previous:{'ru' if ru > en else 'en' if en > ru else 'none'}:direction:{direction}"] = 1.0
+        # Both readings have the same case: an inner capital (`WinForms`, `ЦштАщкьы`) or all
+        # capitals (`WPF`, `ЦЗА`) say which one was meant, and the n-grams read casefolded text.
+        letters = [char for char in item.original if char.isalpha()]
+        if len(letters) > 1:
+            shape = ("upper" if all(char.isupper() for char in letters) else "inner" if any(char.isupper() for char in letters[1:])
+                     else "title" if letters[0].isupper() else "lower")
+            features[f"case:{shape}:direction:{direction}"] = 1.0
+            features[f"case:{shape}:{known}"] = 1.0
+        latin = item.original if item.source_group == 0 else item.alternative
+        cyrillic = item.alternative if item.source_group == 0 else item.original
+        features[f"latin:dot:direction:{direction}"] = float(bool(_LATIN_DOT.search(latin)))
+        features[f"latin:underscore:direction:{direction}"] = float("_" in latin.strip("_"))
+        # How often each reading occurs inside Russian text: a Latin term (`id`, `wpf`), or
+        # Cyrillic outside the lexicon (slang and abbreviations: `пдф`, `тп`). `gla`, `lut` and
+        # a typo like `дге` do not occur, and the lexicon knows none of them. A Cyrillic reading
+        # the lexicon knows is a bucket of its own: `швы` is a word, not a token never seen.
+        cyrillic_known = item.source_known if item.source_group == 1 else item.target_known
+        latin_bucket = term_bucket(latin, "latin")
+        cyrillic_bucket = "lexicon" if cyrillic_known else term_bucket(cyrillic, "cyrillic")
+        if not item.inside and (before.strip() or after.strip()):
+            # How often each reading occurs in text of its own language splits the two buckets
+            # that said the least: `uh` never occurs inside Russian technical text, yet it is an
+            # English word and `gla` is not; `гр` is in the lexicon as `на` is, but only `на` is
+            # common Russian. Without them an English line typed in the Russian layout kept its
+            # first word when the next one converted, `гр why`: a Latin reading never seen inside
+            # Russian text and a Cyrillic one the lexicon knows had both learned to mean a Russian
+            # word (30.09.2026). Letters typed into a word are left out: the rest of the word
+            # shows its language, and how rare the word is does not - with the tables a name
+            # stayed half typed, `lyтn` and `даuе`, and English misses inside a word went from
+            # 135 to 294 on the subtitle development sample. So is a word alone in its field: a
+            # short one waits there for its neighbour, and the tables made `шы` so plainly `is`
+            # that it converted alone (two false conversions on the holdout); asked again with
+            # the neighbour, it has the tables.
+            english_bucket = term_bucket(latin, "english")
+            russian_bucket = term_bucket(cyrillic, "russian")
+            if latin_bucket == "0":
+                latin_bucket = f"0:{english_bucket}"
+            if cyrillic_known:
+                cyrillic_bucket = f"lexicon:{russian_bucket}"
+            languages = f"freq:english:{english_bucket}:russian:{russian_bucket}"
+            features[f"freq:english:{english_bucket}:direction:{direction}"] = 1.0
+            features[f"freq:russian:{russian_bucket}:direction:{direction}"] = 1.0
+            features[f"{languages}:direction:{direction}"] = 1.0
+            features[f"{languages}:{scripts[1]}:direction:{direction}"] = 1.0
+            features[f"{languages}:line:{state}:direction:{direction}"] = 1.0
+        # Letters typed into a word learn their own weights for the buckets: with a word alone in
+        # its field sharing them, the Russian first words that stay drew them to `keep` and English
+        # misses inside a word went from 151 to 233.
+        frequency = "inside:freq" if item.inside else "freq"
+        features[f"{frequency}:latin:{latin_bucket}:direction:{direction}"] = 1.0
+        features[f"{frequency}:cyrillic:{cyrillic_bucket}:direction:{direction}"] = 1.0
+        features[f"{frequency}:{latin_bucket}:{cyrillic_bucket}:direction:{direction}"] = 1.0
+        # A token without letters. `=/`, `000?` and `"4` typed in the Russian layout are signs in
+        # both readings and stay, while `1/` typed in the English layout is the Russian `1.`.
+        # Their frequency buckets are `na`, as those of `don't` typed in the Russian layout are,
+        # and that one converts: a Russian `=/` went over to `=|` (0.990). `:/` typed in the
+        # English layout reads `Ж.`, and `ж` is a common word: an emoticon became a letter
+        # (1.000), though `2.7`, `<=` and `:=` of the same shape all stay (30.09.2026).
+        if not any(char.isalpha() for char in item.original):
+            digits = int(any(char.isdigit() for char in item.original))
+            kind = "letters" if any(char.isalpha() for char in item.alternative) else "only"
+            features[f"signs:{kind}:direction:{direction}"] = 1.0
+            features[f"signs:{kind}:digits:{digits}:direction:{direction}"] = 1.0
     return {name: value for name, value in features.items() if value}
+
+
+def load_term_frequency(path: Path) -> dict[str, dict[str, int]]:
+    """The table schema 7 reads, checked like the artifact: without it the model does not load."""
+
+    with path.open("rb") as handle:
+        raw = handle.read(MAX_CONTEXT_TERM_FREQUENCY_BYTES + 1)
+    if len(raw) > MAX_CONTEXT_TERM_FREQUENCY_BYTES:
+        raise ValueError("term frequency table is too large")
+    payload: object = json.loads(raw)
+    if not isinstance(payload, dict) or sorted(payload) != list(TERM_ALPHABETS):
+        raise ValueError("invalid term frequency table")
+    table: dict[str, dict[str, int]] = {}
+    for alphabet, counts in payload.items():
+        if not isinstance(counts, dict) or not all(type(count) is int and count > 0 for count in counts.values()):
+            raise ValueError("invalid term frequency table")
+        table[alphabet] = counts
+    return table
+
+
+def _term_frequency() -> dict[str, dict[str, int]]:
+    global _TERM_FREQUENCY
+    if _TERM_FREQUENCY is None:
+        _TERM_FREQUENCY = load_term_frequency(TERM_FREQUENCY_PATH)
+    return _TERM_FREQUENCY
+
+
+def term_bucket(text: str, alphabet: str) -> str:
+    """The bucket of how often a plain word occurs in the text one table counts; `na` for anything else."""
+
+    core = text.strip(_TERM_EDGE_SIGNS).casefold()
+    if not core or not core.isalpha():
+        return "na"
+    return str(bisect.bisect_right(CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, _term_frequency()[alphabet].get(core, 0)))
 
 
 def softmax(scores: list[float]) -> tuple[float, ...]:
@@ -291,6 +417,9 @@ class ContextModel:
         if (type(feature_version) is not int or feature_version not in SUPPORTED_FEATURE_VERSIONS
                 or payload.get("actions") != list(ACTIONS)):
             raise ValueError("incompatible context model")
+        if feature_version == CONTEXT_LINE_FEATURE_VERSION:
+            # Schema 7 reads how often each reading occurs in Russian text: the model is not whole without it.
+            _term_frequency()
         raw_weights: object = payload.get("weights")
         if not isinstance(raw_weights, dict) or not 0 < len(raw_weights) <= MAX_FEATURES:
             raise ValueError("invalid context weights")

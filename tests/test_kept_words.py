@@ -211,9 +211,13 @@ class KeptWordModelTests(ContextEngineTests):
         self.assertEqual(self.typed(0, "levf.", "jy"), "думаю он ")
 
     def test_a_sign_split_off_the_first_word_is_decided_with_the_next_word(self) -> None:
-        # `её` is `t\`` and a backtick to the boundary model; `jr.` reads as no word whole and stays `ок.`.
+        # `её` is `t\`` and a backtick to the boundary model; `е` alone is no word.
         self.assertEqual(self.typed(0, "t`", "vfnm"), "её мать ")
-        self.assertEqual(self.typed(0, "jr.", "ghbdtn"), "jr. привет ")
+
+    def test_a_first_word_with_a_period_split_off_converts_at_its_own_space(self) -> None:
+        # `jr.` is `ок` and a period: it converts before the next word, which is then typed
+        # in the Russian layout already.
+        self.assertEqual(self.typed(0, "jr.", "привет"), "ок. привет ")
 
     def test_a_clear_first_word_stays_before_a_word_of_the_other_language(self) -> None:
         self.assertEqual(self.typed(0, "ok", "ghbdtn"), "ok привет ")

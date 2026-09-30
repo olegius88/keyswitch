@@ -146,6 +146,11 @@ CONTEXT_V1_MINIMUM_TEST_ROWS: Final = 10_000
 CONTEXT_V1_EPOCHS: Final = 9
 CONTEXT_V1_LEARNING_RATE: Final = 0.2
 CONTEXT_V1_KEEP_IMPORTANCE: Final = 1.0
+# The features a context-v1 model trained with the engine's captured questions keeps: the most
+# frequent ones across its training rows, below the loader's limit (MAX_CONTEXT_MODEL_FEATURES). The
+# captured questions bring in hundreds of thousands of rare letter n-grams; keeping the 48 000 most
+# frequent cost nothing measurable against keeping all of them (research-2026-09-29, M3 against M1).
+CONTEXT_V1_MAX_TRAINED_FEATURES: Final = 48000
 # Its family split: a signature's hash picks one of the buckets; the first ones are train, the rest
 # development.
 CONTEXT_V1_SPLIT_BUCKET_COUNT: Final = 10

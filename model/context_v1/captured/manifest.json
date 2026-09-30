@@ -1,0 +1,343 @@
+{
+ "schema_version": 1,
+ "columns": [
+  "count",
+  "original",
+  "alternative",
+  "source_group",
+  "trigger",
+  "baseline_convert",
+  "source_known",
+  "target_known",
+  "score_delta",
+  "literal_tail",
+  "boundary_text",
+  "after_origin",
+  "source_typo",
+  "target_typo",
+  "source_opening",
+  "target_opening",
+  "inside",
+  "before",
+  "after",
+  "role",
+  "label"
+ ],
+ "sources": [
+  {
+   "file": "so-typing.jsonl.xz",
+   "sha256": "7955bf45b1c6cc7c48132944ae3fe75c1ce5994198fbab676f7700d148031aef",
+   "rows": 351627,
+   "unique": 131088,
+   "weight": 0.5,
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "typing": "8 000 mixed + 2 000 Russian messages, four typing modes",
+   "recipe": {
+    "messages": "so-train.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 8000,
+    "russian_share": 0.25,
+    "seed": "capture-v1"
+   }
+  },
+  {
+   "file": "so-typing-previous-line.jsonl.xz",
+   "sha256": "4bacc37cdc05edd3ecb2a129cad5f0ee9d2a592ebdac887d9bf157b7781f90c0",
+   "rows": 349663,
+   "unique": 138014,
+   "weight": 0.5,
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "typing": "another 10 000 messages, 40 % under a code line or another message",
+   "recipe": {
+    "messages": "so-train.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 8000,
+    "russian_share": 0.25,
+    "seed": "capture-v2",
+    "prefix_rate": 0.4,
+    "code": "code-train.txt.gz"
+   }
+  },
+  {
+   "file": "so-inside.jsonl.xz",
+   "sha256": "786a48cd80fdb50c0f435403874057239d08f420fd3f2d43e3e8cdcde202d1b7",
+   "rows": 19777,
+   "unique": 19777,
+   "weight": 0.5,
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "typing": "letters typed back into a word after a click, other layout",
+   "recipe": {
+    "messages": "so-train.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 16000,
+    "russian_share": 0.25,
+    "seed": "ins-so",
+    "edit": true
+   }
+  },
+  {
+   "file": "so-typing-typos.jsonl.xz",
+   "sha256": "ec994d61f473c49d29a9b231077fd809e00f1c50cd1242aefdc37cc81125b99e",
+   "rows": 345326,
+   "unique": 138320,
+   "weight": 0.5,
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "typing": "another 10 000 messages, one typo in 12 % of words",
+   "recipe": {
+    "messages": "so-train.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 8000,
+    "russian_share": 0.25,
+    "seed": "capture-v3-typo",
+    "prefix_rate": 0.4,
+    "code": "code-train.txt.gz",
+    "typo_rate": 0.12
+   }
+  },
+  {
+   "file": "tatoeba-typing.jsonl.xz",
+   "sha256": "08741efdf0af6c5e159fd0a189a9448eb90dbe609d069880f86a6b659c0d6dbd",
+   "rows": 391737,
+   "unique": 219503,
+   "weight": 0.7,
+   "origin": "Tatoeba sentence exports rus/eng of 2026-09-26",
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR; code lines above them: ru.stackoverflow.com, CC BY-SA)",
+   "typing": "16 000 Russian + 16 000 English sentences, typed right or wholly in the other layout, 80 % under a previous line",
+   "recipe": {
+    "messages": "tatoeba-train.jsonl.gz",
+    "kinds": [
+     "tatoeba"
+    ],
+    "count": 16000,
+    "russian_share": 1.0,
+    "seed": "capture-tatoeba",
+    "prefix_rate": 0.8,
+    "code": "code-train.txt.gz"
+   }
+  },
+  {
+   "file": "tatoeba-inside.jsonl.xz",
+   "sha256": "7263f81bcb31607724675651544e4040e115ca0e18e001a1853b0e216e425b77",
+   "rows": 29700,
+   "unique": 29700,
+   "weight": 0.7,
+   "origin": "Tatoeba sentence exports rus/eng of 2026-09-26",
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR; code lines above them: ru.stackoverflow.com, CC BY-SA)",
+   "typing": "letters typed back into a word after a click, other layout",
+   "recipe": {
+    "messages": "tatoeba-train.jsonl.gz",
+    "kinds": [
+     "tatoeba"
+    ],
+    "count": 16000,
+    "russian_share": 1.0,
+    "seed": "ins-tatoeba",
+    "prefix_rate": 0.6,
+    "code": "code-train.txt.gz",
+    "edit": true
+   }
+  },
+  {
+   "file": "tatoeba-chat-typing.jsonl.xz",
+   "sha256": "55f9050e98de065827f23570af18b2752080b74a80bed24d4d30d93cb3db5209",
+   "rows": 393122,
+   "unique": 219174,
+   "weight": 0.7,
+   "origin": "Tatoeba sentence exports rus/eng of 2026-09-26",
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR; code lines above them: ru.stackoverflow.com, CC BY-SA)",
+   "typing": "chat style: lowercase, no final sign",
+   "recipe": {
+    "messages": "tatoeba-chat-train.jsonl.gz",
+    "kinds": [
+     "tatoeba_chat"
+    ],
+    "count": 16000,
+    "russian_share": 1.0,
+    "seed": "capture-tatoeba-lower",
+    "prefix_rate": 0.8,
+    "code": "code-train.txt.gz"
+   }
+  },
+  {
+   "file": "tatoeba-chat-inside.jsonl.xz",
+   "sha256": "070273babdbbb64077898485c8a8ed8c125ada71ed1ee2278cdbca79ef9e0fdf",
+   "rows": 31712,
+   "unique": 31540,
+   "weight": 0.7,
+   "origin": "Tatoeba sentence exports rus/eng of 2026-09-26",
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR; code lines above them: ru.stackoverflow.com, CC BY-SA)",
+   "typing": "chat style, letters typed back into a word",
+   "recipe": {
+    "messages": "tatoeba-chat-train.jsonl.gz",
+    "kinds": [
+     "tatoeba_chat"
+    ],
+    "count": 16000,
+    "russian_share": 1.0,
+    "seed": "ins-tatoeba-lower",
+    "prefix_rate": 0.6,
+    "code": "code-train.txt.gz",
+    "edit": true
+   }
+  },
+  {
+   "file": "tatoeba-chat-typos.jsonl.xz",
+   "sha256": "8464c17de1e566dc6e991e2c8106b0a187bf3ff9f142ca12e90da19cfbf88eed",
+   "rows": 395007,
+   "unique": 224147,
+   "weight": 0.7,
+   "origin": "Tatoeba sentence exports rus/eng of 2026-09-26",
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR; code lines above them: ru.stackoverflow.com, CC BY-SA)",
+   "typing": "chat style, one typo in 12 % of words",
+   "recipe": {
+    "messages": "tatoeba-chat-train.jsonl.gz",
+    "kinds": [
+     "tatoeba_chat"
+    ],
+    "count": 16000,
+    "russian_share": 1.0,
+    "seed": "capture-tatoeba-typo",
+    "prefix_rate": 0.8,
+    "code": "code-train.txt.gz",
+    "typo_rate": 0.12
+   }
+  },
+  {
+   "file": "taiga-typing-keep.jsonl.xz",
+   "sha256": "e9addabad24b5e8d083798a143a5522fb16ead79ab2209c7a02028db0d324298",
+   "rows": 474885,
+   "unique": 230313,
+   "weight": 1.5,
+   "origin": "UD Russian-Taiga r2.18 (d1e48cd2)",
+   "license": "CC BY-SA 4.0 (UD Russian-Taiga: CC BY-SA 4.0; code lines above them: ru.stackoverflow.com, CC BY-SA)",
+   "typing": "2 000 mixed + 20 000 Russian sentences, typed right or wholly in the other layout, 60 % under a previous line; only `keep` answers",
+   "recipe": {
+    "messages": "taiga-train.jsonl.gz",
+    "kinds": [
+     "taiga"
+    ],
+    "count": 2000,
+    "russian_share": 10.0,
+    "seed": "capture-taiga",
+    "prefix_rate": 0.6,
+    "code": "code-train.txt.gz",
+    "labels": [
+     "keep"
+    ]
+   },
+   "balance": false
+  },
+  {
+   "file": "taiga-chat-typing-keep.jsonl.xz",
+   "sha256": "b24201f6cd65bbc9f54ef05c4490f5022bde39246b29ee1fcb07e582fa51492d",
+   "rows": 473988,
+   "unique": 229944,
+   "weight": 1.5,
+   "origin": "UD Russian-Taiga r2.18 (d1e48cd2)",
+   "license": "CC BY-SA 4.0 (UD Russian-Taiga: CC BY-SA 4.0; code lines above them: ru.stackoverflow.com, CC BY-SA)",
+   "typing": "chat style: lowercase, no final sign; only `keep` answers",
+   "recipe": {
+    "messages": "taiga-chat-train.jsonl.gz",
+    "kinds": [
+     "taiga_chat"
+    ],
+    "count": 2000,
+    "russian_share": 10.0,
+    "seed": "capture-taiga-chat",
+    "prefix_rate": 0.6,
+    "code": "code-train.txt.gz",
+    "labels": [
+     "keep"
+    ]
+   },
+   "balance": false
+  },
+  {
+   "file": "tatoeba-chat-en-wrong.jsonl.xz",
+   "sha256": "feff4d6f6f32a8c2598d32d6a2931e78c90a5b8051373c49d3f6980ad2d445f5",
+   "rows": 209525,
+   "unique": 183808,
+   "weight": 3.0,
+   "origin": "Tatoeba (https://tatoeba.org), eng_sentences of 2026-09-26",
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR; code lines above them: ru.stackoverflow.com, CC BY-SA)",
+   "typing": "30 000 English chat-style sentences typed wholly in the Russian layout, 60 % under a previous line",
+   "recipe": {
+    "messages": "tatoeba-chat-train.jsonl.gz",
+    "kinds": [
+     "tatoeba_chat"
+    ],
+    "count": 30000,
+    "russian_share": 0.0,
+    "seed": "capture-en-wrong",
+    "prefix_rate": 0.6,
+    "code": "code-train.txt.gz",
+    "modes": [
+     "start_wrong"
+    ]
+   }
+  },
+  {
+   "file": "tatoeba-chat-en-wrong-ru-line.jsonl.xz",
+   "sha256": "e2bbb733d6ac9d3fbf522e833e52a7e85a91a95eef2143978a111a266e358601",
+   "rows": 143453,
+   "unique": 142675,
+   "weight": 3.0,
+   "origin": "Tatoeba (https://tatoeba.org), eng_sentences and rus_sentences of 2026-09-26",
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR)",
+   "typing": "20 000 English chat-style sentences typed wholly in the Russian layout under a Russian sentence",
+   "recipe": {
+    "messages": "tatoeba-chat-train.jsonl.gz",
+    "kinds": [
+     "tatoeba_chat"
+    ],
+    "count": 20000,
+    "russian_share": 0.0,
+    "seed": "capture-en-wrong-ru-line",
+    "prefix_rate": 1.0,
+    "modes": [
+     "start_wrong"
+    ],
+    "lines_above": {
+     "messages": "tatoeba-train.jsonl.gz",
+     "kinds": [
+      "tatoeba"
+     ],
+     "mix": "russian",
+     "count": 20000,
+     "seed": "lines-above-ru"
+    }
+   }
+  }
+ ],
+ "capture": {
+  "tool": "tools/mixed_typing.py capture (messages from `tools/mixed_typing.py messages`)",
+  "context_model": "context-v1-df0afc3ffa7f (KeySwitch 0.33.3, sha256 99b2bd7ba294c2673f9240585dc7deb7891c10266109efde95e118c9517c0280)",
+  "engine": "KeySwitch 0.35.0 engine (`capture --verify` re-creates every file); typed through tests/test_input_sequence_matrix.py",
+  "labels": "convert if the token asked about was typed in the other layout than meant, keep if typed as meant",
+  "sources": {
+   "ru.stackoverflow": "Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e598eaab49b8b5ec7397d5c12b0f22416a, ru_stackoverflow.jsonl.zst sha256 e3f6eda2b3df7de1d3cc4a45ce2e69bb1e439b7736cd8d81e911129bd512dab9; Stack Exchange texts under CC BY-SA 2.5, 3.0 or 4.0 by publication date (the dataset card states CC BY-SA 2.5)",
+   "tatoeba": "https://downloads.tatoeba.org/exports/per_language/{rus,eng} of 2026-09-26: rus_sentences.tsv.bz2 sha256 8c80c8e8337da106a8f3a1e1c96a6a100a6ab5429f01e8735c978c0697d6f75f, eng_sentences.tsv.bz2 sha256 f0568ae34496f8a03758ce6821b68da04b1fe67a9300de8d26d50494ae5aceab, CC BY 2.0 FR (Tatoeba, https://tatoeba.org)",
+   "ud-taiga": "https://github.com/UniversalDependencies/UD_Russian-Taiga r2.18, commit d1e48cd29c1f19b6aad1aec361d9f724db764f66, ru_taiga-ud-*.conllu (SHA-256 in .t pin), CC BY-SA 4.0"
+  }
+ }
+}

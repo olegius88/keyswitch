@@ -659,3 +659,7 @@ RUSSIAN_QUANTITY_SAMPLE_FRACTION: Final = 2.5
 LONG_INPUT_EXTRA_STROKES: Final = 20
 EXPLICIT_RULE_MINIMUM_LENGTH: Final = 8
 SWALLOWED_ENTER_REPEATS: Final = 4
+# Identifiers drawn into the three splits of the mixed-typing tool in its test.
+MIXED_SPLIT_SAMPLE_IDS: Final = 1000
+# Mixed messages a recipe in the mixed-typing tool test takes (and half as many Russian ones).
+MIXED_TYPING_TEST_MESSAGES: Final = 2

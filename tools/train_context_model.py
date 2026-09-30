@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Train and verify the independent contextual action policy using stdlib.
+"""Train and verify the independent contextual action policy.
 
 The current Layout Intent artifact and its sealed corpus are never modified
 or used as training rows. Scenario groups split by physical key sequence
-before variants, applications or contexts are expanded. Test labels are used
-only after epoch selection on development. Re-running --verify must reproduce
-the exact artifact. Reports deliberately identify this as synthetic evidence.
+before variants, applications or contexts are expanded. The engine's own
+questions on typed public text (model/context_v1/captured) join the training
+rows, except those about the families development and the holdout measure.
+Test labels are used only after epoch selection on development. Epochs run on
+the kernel of context_optimizer.c, or on a Python loop with the same arithmetic
+where no C compiler exists. Re-running --verify must reproduce the exact
+artifact. Reports name their evidence: scenarios written for the project and
+questions on typed public text, not real users.
 """
 
 from __future__ import annotations
@@ -13,16 +18,19 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import lzma
 import math
+import sys
 import time
+from array import array
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import NamedTuple, cast
 
 from keyswitch.constants.file_formats import HEXADECIMAL_BASE, REPORT_JSON_INDENT, VERSION_HASH_CHARACTERS
-from keyswitch.constants.models import CONTEXT_OPENING_FEATURE_VERSION, CONTEXT_V1_CONVERSION_THRESHOLD
+from keyswitch.constants.models import CONTEXT_LINE_FEATURE_VERSION, CONTEXT_V1_CONVERSION_THRESHOLD
 from keyswitch.constants.training import (
     # Keeps its name here: tests shorten the training by patching this module's EPOCHS.
     CONTEXT_V1_EPOCHS as EPOCHS,
@@ -30,6 +38,7 @@ from keyswitch.constants.training import (
     CONTEXT_V1_KEEP_IMPORTANCE,
     CONTEXT_V1_LEARNING_RATE,
     CONTEXT_V1_MAX_REPORTED_FAILURES,
+    CONTEXT_V1_MAX_TRAINED_FEATURES,
     CONTEXT_V1_SLASH_WORDS_PER_FAMILY,
     CONTEXT_V1_SPLIT_BUCKET_COUNT,
     CONTEXT_V1_TRAIN_SPLIT_BUCKETS,
@@ -39,8 +48,8 @@ from keyswitch.constants.training import (
     SHORT_WORD_MAX_CHARACTERS,
 )
 from keyswitch.context_model import (
-    ACTIONS, ARTIFACT_PATH, TECHNICAL_MARKS, ContextAction, ContextEvidence,
-    ContextModel, extract_context_features, one_typo_from_word, softmax,
+    ACTIONS, ARTIFACT_PATH, TECHNICAL_MARKS, TERM_FREQUENCY_PATH, ContextAction, ContextEvidence,
+    ContextModel, extract_context_features, one_typo_from_word,
 )
 from keyswitch.detector import LanguageDetector
 from keyswitch.input_context import FieldContext
@@ -51,11 +60,22 @@ from keyswitch.lexicon_supplement import supplement_words
 from keyswitch.short_words import (
     TRUSTED_SHORT_WORDS, natural_short_source_veto, opens_sentences, trusted_short_word_decision,
 )
+from context_optimizer import Kernel, Packed, kernel_softmax, python_epoch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIOS = ROOT / "model/context_v1/scenarios.json"
+# Signs a captured token may carry at its ends that the scenario families never do.
+CAPTURED_EDGE_SIGNS = ".,!?:;\"'()[]{}<>«»-"
 HOLDOUT = ROOT / "model/context_v1/holdout-3.json"
+# Questions the engine asked while public text was typed the way a person switches layouts
+# (tools/mixed_typing.py capture): one file per source and typing, weights in the manifest.
+CAPTURED = ROOT / "model/context_v1/captured/manifest.json"
+CAPTURED_COLUMNS = (
+    "count", "original", "alternative", "source_group", "trigger", "baseline_convert", "source_known", "target_known",
+    "score_delta", "literal_tail", "boundary_text", "after_origin", "source_typo", "target_typo",
+    "source_opening", "target_opening", "inside", "before", "after", "role", "label",
+)
 REPORT = ROOT / "model/context_v1/report.json"
 NAMESPACE = "keyswitch:context-v1:candidate3"
 # Rows carry no application name: the model must answer the same way in every
@@ -644,8 +664,7 @@ def build_corpus(source_path: Path = SCENARIOS, *, held_out: bool = False) -> li
     return rows
 
 
-def development_metrics(weights: dict[str, list[float]], rows: list[tuple[dict[str, float], int]],
-                        threshold: float) -> tuple[int, int]:
+def development_metrics(probabilities: Sequence[float], labels: Sequence[int], threshold: float) -> tuple[int, int]:
     """Score development the way the runtime does: argmax, then the threshold.
 
     A `convert` below the serving threshold changes no text, so an epoch that
@@ -655,42 +674,144 @@ def development_metrics(weights: dict[str, list[float]], rows: list[tuple[dict[s
 
     correct = false_conversions = 0
     action_count = len(ACTIONS)
-    unseen = (0.0,) * action_count
-    for features, label in rows:
-        scores = [0.0] * action_count
-        for name, value in features.items():
-            for index, weight in enumerate(weights.get(name, unseen)):
-                scores[index] += weight * value
-        probabilities = softmax(scores)
-        selected = max(range(action_count), key=lambda index: probabilities[index])
+    for row, label in enumerate(labels):
+        scores = probabilities[row * action_count:(row + 1) * action_count]
+        selected = max(range(action_count), key=lambda index: scores[index])
         action = ACTIONS[selected]
-        if action == "convert" and probabilities[selected] < threshold:
+        if action == "convert" and scores[selected] < threshold:
             action = "suggest"
         correct += int(action == ACTIONS[label])
         false_conversions += int(action == "convert" and ACTIONS[label] != "convert")
     return correct, false_conversions
 
 
-def train(rows: list[Row]) -> tuple[dict[str, list[float]], int, float]:
-    train_rows = [(extract_context_features(row.evidence, CONTEXT_OPENING_FEATURE_VERSION), ACTIONS.index(row.action))
-                  for row in rows if row.split == "train"]
-    development = [(extract_context_features(row.evidence, CONTEXT_OPENING_FEATURE_VERSION), ACTIONS.index(row.action))
+class CapturedSource(NamedTuple):
+    path: Path
+    weight: float
+    # Whether the source's answers count towards the balance of actions. Correctly typed Russian
+    # text (UD Taiga) adds only `keep`: counted, it would lower the importance of every `keep`
+    # and push the whole model towards converting (English words and technical tokens included).
+    balanced: bool = True
+
+
+def captured_sources(manifest: Path = CAPTURED) -> list[CapturedSource]:
+    """The captured question files with their weights, each checked against its pinned SHA-256."""
+
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1 or tuple(payload.get("columns", ())) != CAPTURED_COLUMNS:
+        raise ValueError("invalid captured question manifest")
+    sources: list[CapturedSource] = []
+    for source in payload.get("sources", []):
+        path = manifest.parent / str(source["file"])
+        if hashlib.sha256(path.read_bytes()).hexdigest() != source["sha256"]:
+            raise ValueError(f"captured questions changed: {path.name}")
+        weight = float(source["weight"])
+        balanced = source.get("balance", True)
+        if not math.isfinite(weight) or weight <= 0 or not isinstance(balanced, bool):
+            raise ValueError(f"invalid weight or balance for {path.name}")
+        sources.append(CapturedSource(path, weight, balanced))
+    return sources
+
+
+def signatures(original: str, alternative: str) -> set[str]:
+    """The scenario families a question belongs to: its two readings, as typed and without edge signs."""
+
+    plain = min(original.casefold(), alternative.casefold())
+    core = min(original.strip(CAPTURED_EDGE_SIGNS).casefold(), alternative.strip(CAPTURED_EDGE_SIGNS).casefold())
+    return {plain, core}
+
+
+def captured_rows(path: Path) -> Iterator[tuple[ContextEvidence, int, int]]:
+    """Each distinct captured question once: its evidence, label index and how often it was asked."""
+
+    with lzma.open(path, "rt", encoding="utf-8") as handle:
+        for line in handle:
+            values = json.loads(line)
+            row = dict(zip(CAPTURED_COLUMNS, values, strict=True))
+            # No application name, as in every scenario row: the model does not read it.
+            field = FieldContext("", "captured", str(row.pop("before")), str(row.pop("after")), row.pop("role"))
+            count, label = int(row.pop("count")), ACTIONS.index(row.pop("label"))
+            yield ContextEvidence(field=field, **row), label, count
+
+
+def _python_predict(data: Packed, weights: array[float]) -> array[float]:
+    """The native kernel's prediction, for a machine without a C compiler (tests on Windows)."""
+
+    width = len(ACTIONS)
+    result = array("d")
+    for row in range(len(data.labels)):
+        scores = [0.0] * width
+        for position in range(data.offsets[row], data.offsets[row + 1]):
+            for action in range(width):
+                scores[action] += weights[data.indices[position] * width + action] * data.values[position]
+        result.extend(kernel_softmax(scores))
+    return result
+
+
+def train(rows: list[Row], captured: Sequence[CapturedSource] = (),
+          reserved: frozenset[str] = frozenset()) -> tuple[dict[str, list[float]], int, float]:
+    base = [(extract_context_features(row.evidence, CONTEXT_LINE_FEATURE_VERSION), ACTIONS.index(row.action)) for row in rows if row.split == "train"]
+    development = [(extract_context_features(row.evidence, CONTEXT_LINE_FEATURE_VERSION), ACTIONS.index(row.action))
                    for row in rows if row.split == "development"]
-    if not train_rows or not development:
+    if not base or not development:
         raise ValueError("empty training or development split")
-    names = sorted({name for features, _label in train_rows for name in features})
     action_count = len(ACTIONS)
-    unseen = (0.0,) * action_count
-    weights = {name: [0.0] * action_count for name in names}
-    accumulators = {name: [1.0] * action_count for name in names}
-    label_counts = Counter(label for _features, label in train_rows)
+
+    def examples() -> Iterator[tuple[dict[str, float], int, float, int, bool]]:
+        """Distinct training rows with weight, count and balance; read twice rather than held in memory."""
+
+        for features, label in base:
+            yield features, label, 1.0, 1, True
+        for source in captured:
+            for evidence, label, count in captured_rows(source.path):
+                # A question about a development or held-out family would teach what those
+                # families measure (`швы` for `ids` is a development family).
+                if not signatures(evidence.original, evidence.alternative) & reserved:
+                    yield extract_context_features(evidence, CONTEXT_LINE_FEATURE_VERSION), label, source.weight, count, source.balanced
+
+    frequency: Counter[str] = Counter()
+    label_counts: Counter[int] = Counter()
+    counts = array("I")
+    for features, label, _weight, count, balanced in examples():
+        for name in features:
+            frequency[name] += count
+        if balanced:
+            label_counts[label] += count
+        counts.append(count)
+    total = sum(label_counts.values())
+    names = sorted(sorted(frequency, key=lambda name: (-frequency[name], name))[:CONTEXT_V1_MAX_TRAINED_FEATURES])
     # Inverse frequency already balances the classes. The former extra 2.0 bias
     # towards `keep` was chosen for a small, highly repetitive corpus; on the
     # larger one it held the `convert` probability under the fixed 0.985
     # serving threshold, so a correct decision still changed no text.
     # Both this weight and the step below were selected on development only.
-    importance_by_label = {label: len(train_rows) / (action_count * count) * (CONTEXT_V1_KEEP_IMPORTANCE if label == 0 else 1.0)
+    importance_by_label = {label: total / (action_count * count) * (CONTEXT_V1_KEEP_IMPORTANCE if label == 0 else 1.0)
                            for label, count in label_counts.items()}
+    distinct = Packed.build(((features, label, importance_by_label[label] * weight) for features, label, weight, _count, _balanced in examples()), names)
+    # Every question as often as it was asked, in one fixed shuffled order: an epoch does not end
+    # on a single source, and the same rows always give the same weights.
+    expanded = array("I", (row for row, count in enumerate(counts) for _ in range(count)))
+    order = sorted(range(len(expanded)), key=lambda index: hashlib.sha256(f"{NAMESPACE}:order:{index}".encode()).hexdigest())
+    data = Packed(array("Q", [0]), array("I"), array("d"), array("B"), array("d"))
+    for index in order:
+        row = expanded[index]
+        start, end = distinct.offsets[row], distinct.offsets[row + 1]
+        data.indices.extend(distinct.indices[start:end])
+        data.values.extend(distinct.values[start:end])
+        data.offsets.append(len(data.indices))
+        data.labels.append(distinct.labels[row])
+        data.importance.append(distinct.importance[row])
+    del distinct, expanded, order
+    held = Packed.build(((features, label, importance_by_label.get(label, 1.0)) for features, label in development), names)
+    try:
+        # The native kernel is a Linux training tool; elsewhere (tests on Windows) the same epoch runs in Python.
+        kernel: Kernel | None = Kernel.load() if sys.platform != "win32" else None
+    except RuntimeError:
+        kernel = None
+    step: Callable[[Packed, array[float], array[float], float], None] = kernel.epoch if kernel is not None else python_epoch
+    predict: Callable[[Packed, array[float]], array[float]] = kernel.predict if kernel is not None else _python_predict
+    weights = array("d", [0.0]) * (len(names) * action_count)
+    accumulators = array("d", [1.0]) * (len(names) * action_count)
     best: dict[str, list[float]] = {}
     best_loss, best_epoch = math.inf, 0
     best_correct = -1
@@ -706,31 +827,19 @@ def train(rows: list[Row]) -> tuple[dict[str, list[float]], int, float]:
     # as intended after a path and spoils more correct sentences.
     # Fixed order and optimizer parameters; test never selects an epoch.
     for epoch in range(EPOCHS):
-        for features, label in train_rows:
-            scores = [0.0] * action_count
-            for name, value in features.items():
-                for index, weight in enumerate(weights[name]):
-                    scores[index] += weight * value
-            probabilities = softmax(scores)
-            importance = importance_by_label[label]
-            for name, value in features.items():
-                vector, squared = weights[name], accumulators[name]
-                for index in range(action_count):
-                    gradient = importance * (probabilities[index] - float(index == label)) * value
-                    squared[index] += gradient * gradient
-                    vector[index] -= CONTEXT_V1_LEARNING_RATE * gradient / math.sqrt(squared[index])
+        step(data, weights, accumulators, CONTEXT_V1_LEARNING_RATE)
+        probabilities = predict(held, weights)
         loss = 0.0
-        for features, label in development:
-            scores = [0.0] * action_count
-            for name, value in features.items():
-                for index, weight in enumerate(weights.get(name, unseen)):
-                    scores[index] += weight * value
-            loss -= importance_by_label[label] * math.log(max(LOG_LOSS_PROBABILITY_FLOOR, softmax(scores)[label]))
-        loss /= len(development)
-        correct, false_conversions = development_metrics(weights, development, CONTEXT_V1_CONVERSION_THRESHOLD)
+        for row, label in enumerate(held.labels):
+            loss -= importance_by_label.get(label, 1.0) * math.log(max(LOG_LOSS_PROBABILITY_FLOOR, probabilities[row * action_count + label]))
+        loss /= len(held.labels)
+        correct, false_conversions = development_metrics(probabilities, held.labels, CONTEXT_V1_CONVERSION_THRESHOLD)
+        print(f"epoch {epoch + 1}: development correct {correct}, false conversions {false_conversions}, "
+              f"loss {loss:.{DETERMINISTIC_ROUNDING_DECIMALS}f}", file=sys.stderr, flush=True)
         if false_conversions == 0 and (correct > best_correct or (correct == best_correct and loss < best_loss)):
             best_correct, best_loss, best_epoch = correct, loss, epoch + 1
-            best = {name: [round(value, DETERMINISTIC_ROUNDING_DECIMALS) for value in vector] for name, vector in weights.items()}
+            best = {name: [round(weights[index * action_count + action], DETERMINISTIC_ROUNDING_DECIMALS)
+                           for action in range(action_count)] for index, name in enumerate(names)}
     if not best:
         raise ValueError("no epoch reached the development false-conversion budget")
     return best, best_epoch, best_loss
@@ -768,12 +877,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--development-only", action="store_true")
     args = parser.parse_args(argv)
     rows = build_corpus()
-    weights, epoch, loss = train(rows)
+    # The families development and the holdout measure, by token only (no label is read): no
+    # captured question about them is trained on.
+    reserved = {row.family for row in rows if row.split == "development"}
+    if not args.development_only:
+        reserved |= {row.family for row in build_corpus(HOLDOUT, held_out=True)}
+    weights, epoch, loss = train(rows, captured_sources(), frozenset(reserved))
     digest = hashlib.sha256(json.dumps(weights, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
-    payload = {"feature_version": CONTEXT_OPENING_FEATURE_VERSION, "actions": list(ACTIONS), "version": "context-v1-" + digest[:VERSION_HASH_CHARACTERS],
+    payload = {"feature_version": CONTEXT_LINE_FEATURE_VERSION, "actions": list(ACTIONS), "version": "context-v1-" + digest[:VERSION_HASH_CHARACTERS],
                "conversion_threshold": CONTEXT_V1_CONVERSION_THRESHOLD, "weights_sha256": digest, "weights": weights}
     model = ContextModel({name: tuple(value) for name, value in weights.items()}, "context-v1-" + digest[:VERSION_HASH_CHARACTERS],
-                         feature_version=CONTEXT_OPENING_FEATURE_VERSION)
+                         feature_version=CONTEXT_LINE_FEATURE_VERSION)
     # The development-only path neither reads nor scores reserved test rows.
     if not args.development_only:
         rows += build_corpus(HOLDOUT, held_out=True)
@@ -785,10 +899,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError("physical token leakage into context holdout")
     passed = not args.development_only and counts.get("false_conversions", 0) == 0 and counts.get("converted_correctly", 0) >= counts.get("baseline_converted_correctly", 0)
     report = {
-        "schema_version": 1, "model_version": model.version, "evidence_scope": "author-created-synthetic-scenarios-not-real-world-quality",
+        "schema_version": 1, "model_version": model.version,
+        "evidence_scope": "author-created-synthetic-scenarios-and-engine-questions-on-typed-public-text-not-real-users",
         "split_namespace": NAMESPACE, "family_counts": {name: len(value) for name, value in groups.items()},
         "test_overlap": overlap, "selected_epoch": epoch, "development_loss": round(loss, DETERMINISTIC_ROUNDING_DECIMALS),
         "sources_sha256": hashlib.sha256(SCENARIOS.read_bytes()).hexdigest(),
+        "captured_sha256": hashlib.sha256(CAPTURED.read_bytes()).hexdigest(),
+        "term_frequency_sha256": hashlib.sha256(TERM_FREQUENCY_PATH.read_bytes()).hexdigest(),
         "holdout_sha256": None if args.development_only else hashlib.sha256(HOLDOUT.read_bytes()).hexdigest(),
         "runtime_sha256": hashlib.sha256((ROOT / "src/keyswitch/context_model.py").read_bytes()).hexdigest(),
         "policy_sha256": hashlib.sha256((ROOT / "src/keyswitch/short_words.py").read_bytes()).hexdigest(),

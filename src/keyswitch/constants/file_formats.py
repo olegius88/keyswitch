@@ -26,6 +26,8 @@ LEXICON_SUPPLEMENT_MAX_BYTES: Final = 8 * BYTES_PER_MEBIBYTE
 MAX_PREFIX_MODEL_BYTES: Final = 2 * BYTES_PER_MEBIBYTE
 # Largest context model artifact loaded (context_model.py exports it as MAX_ARTIFACT_BYTES).
 MAX_CONTEXT_MODEL_BYTES: Final = 8 * BYTES_PER_MEBIBYTE
+# Largest term frequency table the context model reads with feature schema 7.
+MAX_CONTEXT_TERM_FREQUENCY_BYTES: Final = 8 * BYTES_PER_MEBIBYTE
 # Indentation of every diagnostics report printed or copied for a person to read.
 DIAGNOSTICS_JSON_INDENT: Final = 2
 # Read size when a file is streamed through SHA-256 (and copied while hashed).

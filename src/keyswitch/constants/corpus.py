@@ -158,3 +158,55 @@ ORTHO_V2_VERIFIED_MIN_TOKENS: Final = 5
 ORTHO_V2_VERIFIED_MIN_KNOWN_SHARE: Final = 0.75
 # Dictionary verdicts that tool caches while it reads the snapshot.
 ORTHO_V2_DICTIONARY_CACHE_SIZE: Final = 1 << 20
+# tools/mixed_typing.py - public text typed the way a person switches layouts, through the engine.
+# Messages from ru.stackoverflow: whitespace tokens per message, and the split of question threads by
+# the first hex digits of a SHA-256 over a hundred buckets (the first ten test, the next ten
+# development, the rest train).
+MIXED_MESSAGE_MIN_TOKENS: Final = 3
+MIXED_MESSAGE_MAX_TOKENS: Final = 24
+MIXED_SPLIT_HEX_DIGITS: Final = 8
+MIXED_TEST_SPLIT_BUCKETS: Final = 10
+MIXED_DEVELOPMENT_SPLIT_BUCKETS: Final = 20
+# Tatoeba sentences taken: whitespace tokens per sentence.
+TATOEBA_SENTENCE_MIN_TOKENS: Final = 2
+TATOEBA_SENTENCE_MAX_TOKENS: Final = 12
+# Single lines of code from the posts, the text of a previous line in the field: their length, and
+# how many of the first ones a run draws from.
+MIXED_CODE_LINE_MIN_CHARACTERS: Final = 10
+MIXED_CODE_LINE_MAX_CHARACTERS: Final = 100
+MIXED_PREFIX_CODE_LINES: Final = 200000
+# Deterministic draws: leading hex digits of a SHA-256, and the resolution of a share compared with
+# a draw.
+MIXED_DRAW_HEX_DIGITS: Final = 8
+MIXED_DRAW_RESOLUTION: Final = 10000
+# A typo: leading hex digits of its draw, its four kinds (a letter missed, two swapped, one pressed
+# twice, the key next to it), the bits that pick the kind and the place, and the fewest letters a
+# token needs for one (a letter is only missed from a longer token).
+MIXED_TYPO_HEX_DIGITS: Final = 12
+MIXED_TYPO_PLACE_SHIFT: Final = 4
+MIXED_TYPO_NEIGHBOUR_SHIFT: Final = 16
+MIXED_TYPO_MIN_LETTERS: Final = 3
+# A mid-word edit, as the insert package makes it: a word of at least four letters loses one letter,
+# or two if it has five or more, at a place drawn from the given bits; the letters are typed back one
+# key at a time, then the pause that corrects them.
+MIXED_EDIT_WORD_MIN_LETTERS: Final = 4
+MIXED_EDIT_TWO_LETTERS_FROM: Final = 5
+MIXED_EDIT_MAX_REMOVED_LETTERS: Final = 2
+MIXED_EDIT_LENGTH_SHIFT: Final = 8
+MIXED_EDIT_PLACE_SHIFT: Final = 12
+MIXED_EDIT_CLOCK_START_SECONDS: Final = 1000.0
+MIXED_EDIT_KEY_INTERVAL_SECONDS: Final = 0.08
+MIXED_EDIT_PAUSE_SECONDS: Final = 2.0
+# Worker processes and the jobs each takes at a time.
+MIXED_TYPING_DEFAULT_WORKERS: Final = 10
+MIXED_TYPING_CHUNK_JOBS: Final = 8
+# Russian-only messages typed per mixed one when `mixed_typing.py evaluate` samples a set, and the xz
+# preset of the captured question files.
+MIXED_EVALUATE_RUSSIAN_SHARE: Final = 0.25
+MIXED_CAPTURE_XZ_PRESET: Final = 9
+# The text column of a Tatoeba sentence export (id, language, text), and the two kinds of previous
+# line a typed message is put under: a line of code or another message.
+TATOEBA_TEXT_COLUMN: Final = 2
+# Column of the author's user name in a Tatoeba `*_sentences_detailed.tsv` export.
+TATOEBA_AUTHOR_COLUMN: Final = 3
+MIXED_PREFIX_KINDS: Final = 2

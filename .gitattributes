@@ -9,6 +9,10 @@ model/intent_v1/sources/hunspell/* binary
 src/keyswitch/resources/models/*.ksm binary
 src/keyswitch/resources/models/context_policy_v1.json text eol=lf
 model/context_v1/*.json text eol=lf
+model/context_v1/captured/*.json text eol=lf
+model/context_v1/captured/*.xz binary
+model/context_v1/captured/*.txt text eol=lf
+src/keyswitch/resources/models/context-term-frequency.json text eol=lf
 src/keyswitch/context_model.py text eol=lf
 tools/train_context_model.py text eol=lf
 tools/verify_context_model.py text eol=lf

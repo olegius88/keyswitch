@@ -55,6 +55,9 @@ def recorded_paths() -> Iterator[Path]:
 def hashed_files() -> list[Path]:
     paths = set(recorded_paths())
     paths |= set(verify_context_model.provenance_paths().values())
+    # The captured question files are pinned by the manifest the context report hashes.
+    manifest = ROOT / "model/context_v1/captured/manifest.json"
+    paths |= {manifest.parent / str(source["file"]) for source in json.loads(manifest.read_text(encoding="utf-8"))["sources"]}
     paths |= {ROOT / relative for relative in release_pipeline.MODEL_TOOLCHAIN_PATHS.values()}
     paths |= {archive.path(name, ROOT) for archive in historical_sources.ARCHIVES for name in archive.sources}
     return sorted(path for path in paths if path.is_file())

@@ -13,7 +13,7 @@ from pathlib import Path
 from collections.abc import Iterable, Mapping
 
 from keyswitch.constants.training import CONTEXT_OPTIMIZER_CACHE_DIGEST_CHARACTERS
-from keyswitch.context_model import ACTIONS, softmax
+from keyswitch.context_model import ACTIONS
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = Path(__file__).with_suffix(".c")
@@ -47,6 +47,22 @@ class Packed:
         return result
 
 
+def kernel_softmax(scores: list[float]) -> list[float]:
+    """The native kernel's softmax, operation for operation.
+
+    `sum()` adds floats with compensation since Python 3.12 and the kernel adds them one after
+    another, so the runtime's softmax differs from the kernel in the last bit now and then: the
+    fallback's development loss was 1.0674340763929338 against 1.0674340763929335 (30.09.2026).
+    """
+
+    maximum = max(scores)
+    values = [math.exp(score - maximum) for score in scores]
+    total = 0.0
+    for value in values:
+        total += value
+    return [value / total for value in values]
+
+
 def python_epoch(data: Packed, weights: array[float], accumulators: array[float], rate: float) -> None:
     # One weight per feature and action, stored feature by feature, as the native kernel reads them.
     width = len(ACTIONS)
@@ -55,7 +71,7 @@ def python_epoch(data: Packed, weights: array[float], accumulators: array[float]
         for position in range(data.offsets[row], data.offsets[row + 1]):
             for action in range(width):
                 scores[action] += weights[data.indices[position] * width + action] * data.values[position]
-        probabilities = softmax(scores)
+        probabilities = kernel_softmax(scores)
         for position in range(data.offsets[row], data.offsets[row + 1]):
             for action in range(width):
                 index = data.indices[position] * width + action

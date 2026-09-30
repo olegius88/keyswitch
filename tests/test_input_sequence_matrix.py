@@ -121,8 +121,6 @@ class InputSequenceMatrixTests(unittest.TestCase):
             (0, "rjnjhe. ", "которую "),
             (0, "ghbdtn... ", "привет... "),
             (0, "/c,jhrb ", "/сборки "),
-            (1, "hello/", "hello."),
-            (1, "hello?", "hello,"),
         )
         for group, keys, expected in cases:
             with self.subTest(group=group, keys=keys), session(group) as current:

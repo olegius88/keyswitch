@@ -4,6 +4,55 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.35.0 — 2026-09-30
+
+- Replay a sign typed right after a corrected word in the layout the word was meant in. Typing
+  Russian in the English layout, the Russian comma is Shift+/, so `ghbdtn?` is "привет," and
+  `ltkf&` is "дела?"; the sign used to stay as typed ("привет?"). An address such as
+  `support@mail.ru` typed in the Russian layout gets its "@" back, while a quotation mark that opened
+  the word closes it and stays: `"john"` keeps both quotes. In the other direction, `hello,` typed
+  in the Russian layout is `руддщб` - the comma is the key of "б": letters at the end of a token that
+  are signs in the other layout are set aside while the word is judged and replayed with it if it
+  converts ("hello,"), as long as at least two letters are left: "хлеб" and "чё" stay words.
+- A new context model, `context-v1-789437013251` (feature schema 7). Besides the project's scenarios
+  it learns from the questions the engine itself asks while public text is typed through it the way
+  people switch layouts - Russian Stack Overflow messages with English terms and Tatoeba sentences,
+  typed correctly, with one switch forgotten, started in the wrong layout, with typos, under a
+  previous line, with letters typed back into a word, and English sentences typed wholly in the
+  Russian layout - each labelled from what was meant, and from correctly typed Russian text of UD
+  Russian-Taiga, so that names and slang stay. Schema 7 adds where the word stands on its line, its
+  case, a dot or underscore inside the Latin reading, whether the token has letters at all, and how
+  often each reading occurs - inside Russian text and in text of its own language
+  (`context-term-frequency.json`): `uh` never occurs inside Russian technical text yet is an English
+  word, and `гр` is in the lexicon as `на` is, but only `на` is common Russian, so an English line
+  typed in the Russian layout no longer keeps its first word ("гр why"). Letters typed into a word
+  and a word alone in its field are not told by the tables of their own language. The questions, how
+  to re-create them and whose texts they come from are in `model/context_v1/captured/` (fragments of
+  ru.stackoverflow.com posts under CC BY-SA, Tatoeba sentences under CC BY 2.0 FR and UD
+  Russian-Taiga sentences under CC BY-SA 4.0, distributed under CC BY-SA 4.0); training runs on a
+  small C kernel with the arithmetic of the Python loop.
+- On Russian Stack Overflow comments typed through the engine (development part: 1,973 mixed and
+  495 Russian ones), correctly typed mixed messages changed by mistake 49 -> 12; a forgotten switch
+  back to Russian is corrected in 95.3% of messages instead of 84.0%, a forgotten switch to English
+  in 81.2% instead of 52.3%, a message started in the wrong layout in 91.4% instead of 80.8%
+  (Russian messages: 94.9% instead of 84.8%, still none of the correct ones changed). With a typo in
+  12% of the words: 64 -> 27 changed, 83.4% -> 93.9%, 50.4% -> 79.5%, 79.7% -> 90.3%. Correctly typed
+  Russian text is spoiled 1, 1 and 0 times instead of 4, 2 and 0 in 4,990 Taiga sentences, 1,976
+  Stack Overflow messages and 2,000 Tatoeba sentences. On 5,000 subtitle sentences of ten disclosed
+  sets typed into five kinds of field: restored 24,805 -> 24,842 of 25,000, spoiled correct ones
+  55 -> 35; letters typed back into a word 24,920 -> 24,951, none spoiled; the same in Firefox. An
+  independent check on fresh data passed on all 20 rows: on 5,000 new subtitle sentences restored
+  24,853 -> 24,858 of 25,000 with spoiled correct ones 31 -> 19 (letters inside a word 24,956 ->
+  24,965); on 9,884 Stack Overflow messages mixed text changed by mistake 175 -> 42 times, a forgotten
+  switch to English corrected in 6,121 instead of 3,844 of 7,418 messages, correctly typed Russian
+  messages unchanged (0 -> 0; with typos 16 -> 7); on 9,999 Tatoeba sentences English ones typed in the
+  Russian layout restored 7,829 -> 7,947 of 8,000, correct ones never changed.
+- Known costs: two-letter Russian words whose Latin reading is an English word, typed in the English
+  layout after Russian text, are missed 38 times instead of 32 of 52 in a probe (fewer alone in an
+  empty field, 40 instead of 45, and before Russian text, 19 instead of 32), and rare ones typed as
+  intended at the start of a field before Russian text ("шт", "уч", "фе") are changed 7 times instead
+  of once; `jr.` at the start of a message now becomes "ок." at once.
+
 ## 0.34.0 — 2026-09-29
 
 - Correct the first words of a line together with the next word. `руку ерун` typed in the Russian

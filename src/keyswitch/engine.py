@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import logging
 import queue
@@ -71,6 +72,7 @@ from .constants.detection import (
     MINIMUM_LEARNABLE_LETTERS,
     NATURAL_SOURCE_BOUNDARY_MIN_CHARACTERS,
     NATURAL_SOURCE_BOUNDARY_NGRAM_FLOOR,
+    REPLAYED_SIGNS_MIN_STEM_LETTERS,
     TRUSTED_SHORT_WORD_MAX_LENGTH,
     UNSCORED_CORRECTION_CONFIDENCE,
 )
@@ -150,6 +152,9 @@ class CorrectionPlan:
     # asked about it again once the next word shows which way that one went
     # (_revert_with_next_word).
     revisit: tuple[DetectionDecision, FieldContext | None] | None = None
+    # The boundary sign was folded into `strokes` and is replayed in the new layout
+    # (_replay_sign_with_word): the word ended there, though no boundary follows it.
+    sign_replayed: bool = False
 
 
 @dataclass(frozen=True)
@@ -1357,6 +1362,8 @@ class KeySwitchEngine:
             self._pending = None
             self._pending_learning_action = None
         typed = tuple(self._strokes)
+        # Signs typed in front of the word's first letter: a quotation mark there is closed by one at its end.
+        opened = (*self._symbol_strokes, *itertools.takewhile(lambda stroke: not stroke.character.isalpha(), typed))
         shown, self._mention_shown = self._mention_shown, None
         mention = self._mention_head(self.backend.active_application())
         head = self._literal_head(typed, self._source_group)
@@ -1365,6 +1372,11 @@ class KeySwitchEngine:
             # Typed into a word, every key is part of it: `,` between `те` and `е`
             # is the `б` of `тебе`, not punctuation in front of a word.
             head, strokes, trailing, segmentation_certain = 0, typed, (), True
+        signs: tuple[KeyEvent, ...] = ()
+        if not trailing and segmentation_certain and not (self._insertion is not None and self._insertion.inside_word):
+            count = self._replayed_signs(strokes, self._source_group)
+            if count:
+                strokes, signs = strokes[:-count], strokes[-count:]
         self._reset_pause_correction()
         source_group = self._source_group
         original = self._text_for_group(strokes, source_group)
@@ -1378,12 +1390,12 @@ class KeySwitchEngine:
         # Pause on the last committed token still converts it whole: the
         # literal head only narrows what an automatic decision may replace.
         plan = CorrectionPlan(
-            typed[:head] + strokes,
+            typed[:head] + strokes + signs,
             boundary,
             source_group,
             next(iter(alternatives), source_group),
-            original,
-            next(iter(alternatives.values()), original),
+            original + self._text_for_group(signs, source_group),
+            next(iter(alternatives.values()), original) + self._text_for_group(signs, next(iter(alternatives), source_group)),
             0.0,
             application,
             False,
@@ -1418,7 +1430,7 @@ class KeySwitchEngine:
         provisional, self._provisional = self._provisional, None
         kept, self._kept = self._kept, ()
         if should_analyze and not excluded:
-            inside = None if trailing or head else self._decide_inside_word(
+            inside = None if trailing or head or signs else self._decide_inside_word(
                 strokes, source_group, alternatives, application, self._trigger_for_boundary(boundary), boundary)
             decision = inside if inside is not None else self._decide_word(
                 original,
@@ -1426,11 +1438,11 @@ class KeySwitchEngine:
                 source_group,
                 application,
                 self._trigger_for_boundary(boundary),
-                literal_tail="".join(stroke.character for stroke in trailing),
+                literal_tail="".join(stroke.character for stroke in (*trailing, *signs)),
                 boundary_text=boundary.character,
             )
             excluded = self._application_excluded(application)
-            joint = None if trailing or head else self._resolve_context_wait(
+            joint = None if trailing or head or signs else self._resolve_context_wait(
                 waiting, strokes, boundary, decision, application, alternatives)
             if joint is not None and waiting is not None:
                 joint = (self._take_along(kept, joint[0], len(waiting.plan.original), application), joint[1])
@@ -1440,27 +1452,28 @@ class KeySwitchEngine:
                 # neighbour has had its answer. A neighbour with a sign split off its end ends
                 # the wait, and the waiting word is asked with it as a kept word (`tot ghbdtn,`).
                 kept = (*kept, KeptWord(waiting.plan, waiting.decision, waiting.field, waiting.window, waiting.deadline))
-            if joint is None and not (trailing or head):
+            if joint is None and not (trailing or head or signs):
                 joint = self._revert_with_next_word(provisional, strokes, boundary, decision, application)
             if joint is None and not head and decision.should_convert:
                 taken = self._take_along(
-                    kept, replace(self._plan_from_decision(strokes, boundary, application, decision), trailing=trailing),
+                    kept, self._with_signs(replace(self._plan_from_decision(strokes, boundary, application, decision),
+                                                   trailing=trailing), signs),
                     len(original), application)
                 if taken.mode == "context_phrase":
                     joint = (taken, decision)
             if trailing or head:
                 self._log_context_wait("context_wait_cancelled", waiting, "literal_tail" if trailing else "literal_head")
             if joint is not None:
-                self._pending, decision = joint
+                self._pending, decision = self._replay_sign_with_word(joint[0], opened), joint[1]
                 self._pending_learning_action = None
                 self._pending_trigger_keycode = boundary.keycode
                 decision = replace(decision, should_convert=True)
             elif decision.should_convert:
-                plan = replace(
+                plan = self._replay_sign_with_word(self._with_signs(replace(
                     self._plan_from_decision(strokes, boundary, application, decision),
                     trailing=trailing,
                     head=() if mention and self._quotation_closed(mention[0], trailing, boundary) else mention,
-                )
+                ), signs), opened)
                 if boundary.deferred:
                     # Enter/Tab has not reached the editor. Do not delete it
                     # as a character or include it in the text replacement.
@@ -1473,7 +1486,7 @@ class KeySwitchEngine:
                 self._pending_trigger_keycode = boundary.keycode
                 # A word converted at a space stays open for the next word: if that
                 # one goes back the other way, the model is asked about this one again.
-                if (inside is None and not trailing and not head and boundary.character == " "
+                if (inside is None and not trailing and not head and not signs and boundary.character == " "
                         and not boundary.deferred and self._last_baseline is not None):
                     field = self._context_result.field if self._context_result is not None else None
                     self._pending = replace(self._pending, revisit=(self._last_baseline, field))
@@ -1485,14 +1498,14 @@ class KeySwitchEngine:
                 if decision.reason == ISOLATED_SHORT_WORD_REASON or self._opening_conversion(inside, original):
                     self._start_context_wait(plan, decision, boundary, trailing, head, fallback=True)
             else:
-                self._remember_context(application, source_group, typed[:head] + strokes)
-                waits = self._start_context_wait(plan, decision, boundary, trailing, head)
-                if inside is None and not trailing and not head:
+                self._remember_context(application, source_group, typed[:head] + strokes + signs)
+                waits = False if signs else self._start_context_wait(plan, decision, boundary, trailing, head)
+                if inside is None and not trailing and not head and not signs:
                     field = self._context_result.field if self._context_result is not None else None
                     # A word waiting for its neighbour joins the kept words only if the wait fails.
                     self._keep_for_next_word(kept, None if waits else KeptWord(
                         plan, self._last_baseline, field, self._focus_window or 0, time.monotonic() + CONTEXT_TTL), boundary)
-                elif inside is None and trailing and not head and self._sign_reads_as_letter(plan):
+                elif inside is None and trailing and not head and not signs and self._sign_reads_as_letter(plan):
                     # The boundary model split a sign off the end of the word and the word
                     # stayed, but only the whole token reads as a word: `t\`` is `её`, and
                     # only the next word can tell (`мать`). The model is asked about the
@@ -2425,6 +2438,65 @@ class KeySwitchEngine:
         self._contexts[key] = LanguageContext(group, words, time.monotonic())
         while len(self._contexts) > MAX_REMEMBERED_APPLICATION_CONTEXTS:
             self._contexts.pop(next(iter(self._contexts)))
+
+    def _replayed_signs(self, strokes: tuple[KeyEvent, ...], source_group: int) -> int:
+        """Letters at the end of a token that are signs in the other layout, when the token is no word.
+
+        `hello,` typed in the Russian layout is `руддщб`: the comma is the key of `б`. The
+        word is judged without them and, if it converts, they are replayed with it; a
+        token that is a word as typed (`хлеб`) keeps its letters.
+        """
+
+        targets = [group for group in self.models if group != source_group]
+        if not targets:
+            return 0
+        count = 0
+        for stroke in reversed(strokes):
+            meant = stroke.character_for(targets[0])
+            if not stroke.character.isalpha() or not meant or meant.isalpha() or meant.isspace():
+                break
+            count += 1
+        if (not count or len(strokes) - count < REPLAYED_SIGNS_MIN_STEM_LETTERS
+                or any(not stroke.character.isalpha() for stroke in strokes[:-count])
+                or self.models[source_group].score(self._text_for_group(strokes, source_group)).known):
+            # A token with digits or signs inside (`з+1ю` for `p+1.`) is judged whole, as before, and
+            # so is one whose rest is a single letter: `чё` is not `ч` with a backtick.
+            return 0
+        return count
+
+    def _with_signs(self, plan: CorrectionPlan, signs: tuple[KeyEvent, ...]) -> CorrectionPlan:
+        if not signs:
+            return plan
+        return replace(
+            plan, strokes=plan.strokes + signs,
+            original=plan.original + self._text_for_group(signs, plan.source_group),
+            replacement=plan.replacement + self._text_for_group(signs, plan.target_group),
+        )
+
+    @staticmethod
+    def _replay_sign_with_word(plan: CorrectionPlan, opened: tuple[KeyEvent, ...]) -> CorrectionPlan:
+        """Replay a sign typed right after a converted word in the new layout too.
+
+        A person typing Russian in the English layout presses the keys of the Russian
+        layout for signs as well: the comma is Shift+/, so `ghbdtn?` is `привет,`, and
+        `ltkf&` is `дела?`; `support@mail.ru` typed in the Russian layout has `"` where
+        `@` was meant. A key that is a sign in both layouts but a different one was
+        pressed for the layout the word was meant in - unless it is a quotation mark and
+        one opened the word (`opened`): then it closes the quotation, and `"john"` keeps
+        both quotes.
+        """
+
+        boundary = plan.boundary
+        if (boundary is None or boundary.deferred or plan.trailing or plan.head or boundary.character.isspace()
+                or (boundary.character == '"' and any(stroke.character == '"' for stroke in opened))):
+            return plan
+        meant = boundary.character_for(plan.target_group)
+        if not meant or meant == boundary.character or meant.isalpha() or meant.isspace():
+            return plan
+        return replace(
+            plan, strokes=plan.strokes + (boundary,), boundary=None, sign_replayed=True,
+            original=plan.original + boundary.character, replacement=plan.replacement + meant,
+        )
 
     def _plan_from_decision(
         self,
@@ -3686,7 +3758,8 @@ class KeySwitchEngine:
             ProvisionalWord(plan, self._focus_window or 0, time.monotonic() + CONTEXT_TTL)
             if plan.revisit is not None and plan.boundary is not None and not context_reset_reason else None
         )
-        if plan.boundary is None and not plan.trailing and not context_reset_reason and any(char.isalpha() for char in plan.replacement):
+        if (plan.boundary is None and not plan.trailing and not plan.sign_replayed and not context_reset_reason
+                and any(char.isalpha() for char in plan.replacement)):
             # Idle/manual correction did not end the word. Keep its physical
             # prefix so continued typing and Backspace still refer to the
             # whole token instead of a detached suffix.

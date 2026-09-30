@@ -94,11 +94,26 @@ CONTEXT_TYPO_MIN_CHARACTERS: Final = 5
 # (short_words.OPENING_WORDS). The frequency lexicons are encyclopedic and rank the conversational
 # `ты` next to the English token `ns`, so without it a model could tell them apart only by letters.
 CONTEXT_OPENING_FEATURE_VERSION: Final = 6
-# Schemas of the context-v1 trainer: feature 2, 5 and 6 artifacts share its report, provenance and
+# ContextModel feature_version of the context-v1 scheme with line, case and term evidence, feature
+# schema 7: schema 6 plus where on its line the word stands (the first word of a message or of a new
+# line against a word with words before it), the case pattern of the token (an inner capital, all
+# capitals), a dot or underscore inside its Latin reading, how often each reading occurs inside
+# Russian text (a Latin term like `id`, Cyrillic slang like `пдф`) and in text of its own language
+# (`uh` is an English word, `гр` a rare Russian one), and whether the token has letters at all - the
+# questions the engine asks while real mixed Russian and English text is typed made these the
+# evidence that decides.
+CONTEXT_LINE_FEATURE_VERSION: Final = 7
+# Schemas of the context-v1 trainer: feature 2, 5, 6 and 7 artifacts share its report, provenance and
 # replay.
 CONTEXT_V1_FEATURE_VERSIONS: Final = (
     CONTEXT_MODEL_FEATURE_VERSION, CONTEXT_TYPO_FEATURE_VERSION, CONTEXT_OPENING_FEATURE_VERSION,
+    CONTEXT_LINE_FEATURE_VERSION,
 )
+# Schemas that carry every schema 6 feature (schema 7 adds its own on top).
+CONTEXT_OPENING_SCHEMAS: Final = (CONTEXT_OPENING_FEATURE_VERSION, CONTEXT_LINE_FEATURE_VERSION)
+# Schema 7: the occurrence counts that open the term frequency buckets above the first, in every
+# table; a reading seen fewer times than the first bound is in bucket 0, as one never seen.
+CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS: Final = (5, 50, 500, 5000)
 # Feature schemas a context artifact may carry: context-v1's and the context action scheme's.
 CONTEXT_SUPPORTED_FEATURE_VERSIONS: Final = (*CONTEXT_V1_FEATURE_VERSIONS, CONTEXT_ACTION_FEATURE_VERSION)
 # Feature schema 2 only: words of the left and of the right context that become word features, and

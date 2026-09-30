@@ -41,6 +41,10 @@ def provenance_paths(root: Path = ROOT, artifact: Path = ARTIFACT_PATH) -> dict[
 
     return {
         "sources_sha256": root / "model/context_v1/scenarios.json",
+        # The engine's questions on typed public text; the manifest pins every file's SHA-256.
+        "captured_sha256": root / "model/context_v1/captured/manifest.json",
+        # Schema 7 reads how often a reading occurs in Russian text from this resource.
+        "term_frequency_sha256": root / "src/keyswitch/resources/models/context-term-frequency.json",
         "holdout_sha256": root / "model/context_v1/holdout-3.json",
         "runtime_sha256": root / "src/keyswitch/context_model.py",
         # The corpus reproduces the runtime short-word policy, so its source
@@ -79,7 +83,9 @@ def verify_legacy(root: Path = ROOT, report_path: Path = REPORT, artifact: Path 
         raise ValueError("invalid context evaluation counts")
     if counts["rows"] < CONTEXT_V1_MINIMUM_TEST_ROWS or counts["false_conversions"] != 0 or counts["converted_correctly"] < counts["baseline_converted_correctly"]:
         raise ValueError("context evaluation fails release policy")
-    return {"model_version": model.version, "artifact_sha256": report["artifact_sha256"], "counts": cast(dict[str, object], counts), "evidence_scope": report.get("evidence_scope")}
+    # The table schema 7 reads ships next to the artifact; both native builds compare their copy with it.
+    return {"model_version": model.version, "artifact_sha256": report["artifact_sha256"], "term_frequency_sha256": report["term_frequency_sha256"],
+            "counts": cast(dict[str, object], counts), "evidence_scope": report.get("evidence_scope")}
 
 
 def verify(

@@ -1354,8 +1354,9 @@ $ActiveContextLines = @(Invoke-NativeCommand `
     -FailureMessage "Active context model provenance or quality gate failed")
 $ActiveContext = ($ActiveContextLines -join "`n") | ConvertFrom-Json
 if ($ActiveContext.quality_gates_passed -isnot [bool] -or $ActiveContext.quality_gates_passed -ne $true `
-    -or $ActiveContext.feature_version -notin @(2, 3, 5, 6) `
+    -or $ActiveContext.feature_version -notin @(2, 3, 5, 6, 7) `
     -or $ActiveContext.artifact_sha256 -cnotmatch '^[a-f0-9]{64}$' `
+    -or ($ActiveContext.feature_version -eq 7 -and $ActiveContext.term_frequency_sha256 -cnotmatch '^[a-f0-9]{64}$') `
     -or $ActiveContext.model_version -isnot [string] -or $ActiveContext.model_version.Length -gt 80) {
     throw "Active context verifier returned an invalid identity"
 }
@@ -1523,6 +1524,15 @@ if ((Get-BytesSha256 -Bytes $BundledPrefixBytes) -cne $ActivePrefix.artifact_sha
     -Label "bundled contextual model"
 if ((Get-BytesSha256 -Bytes $BundledContextBytes) -cne $ActiveContext.artifact_sha256) {
     throw "Native distribution contains a different contextual model"
+}
+if ($ActiveContext.feature_version -eq 7) {
+    # Feature schema 7 reads this table next to the artifact; the model does not load without it.
+    [byte[]]$BundledTermFrequencyBytes = Read-BoundedFileBytes `
+        -Path (Join-Path $NativeDistribution "keyswitch\resources\models\context-term-frequency.json") `
+        -MaximumBytes 4MB -MinimumBytes 2 -Label "bundled term frequency table"
+    if ((Get-BytesSha256 -Bytes $BundledTermFrequencyBytes) -cne $ActiveContext.term_frequency_sha256) {
+        throw "Native distribution contains a different term frequency table"
+    }
 }
 [byte[]]$BundledIntentModelBytes = Read-BoundedFileBytes `
     -Path $BundledIntentModel `
