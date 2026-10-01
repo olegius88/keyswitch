@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import importlib
 import unittest
 import sys
@@ -43,6 +44,17 @@ from fixture_values.platform import (
 # Read out of the caller's globals by comtypes' `_check_version`; see the
 # Windows-only test below. Any existing file proves the timestamp comparison.
 typelib_path = sys.executable
+
+
+class _NullComPointer(ctypes.c_void_p):
+    """What comtypes returns for an S_OK null IUnknown** out parameter.
+
+    POINTER(IUnknown) is a c_void_p subclass, and ctypes hands a subclass
+    instance back from an out parameter as it is: falsy, but not None.
+    """
+
+    def QueryInterface(self, interface: object) -> object:
+        raise ValueError("NULL COM pointer access")
 
 
 class _VersionChecker(Protocol):
@@ -163,8 +175,9 @@ class WindowsContextTests(unittest.TestCase):
             factory.return_value.close.assert_called_once()
 
             # A window that offers no text says so; it is not a broken provider.
-            factory.return_value.automation.GetFocusedElement.return_value.GetCurrentPattern.return_value = None
-            self.assertIs(probe_uia()["focused_text_pattern"], False)
+            for null in (None, _NullComPointer()):
+                factory.return_value.automation.GetFocusedElement.return_value.GetCurrentPattern.return_value = null
+                self.assertIs(probe_uia()["focused_text_pattern"], False)
 
             # The provider's own failure is named by class and HRESULT only.
             class ProviderError(Exception):
@@ -184,15 +197,19 @@ class WindowsContextTests(unittest.TestCase):
     def test_a_window_without_text_is_an_unreadable_field_not_a_broken_provider(self) -> None:
         """Chromium and Qt expose a focused element long before its text.
 
-        GetCurrentPattern answers S_OK with a null pointer there, which comtypes
-        hands over as None. Treating that as an exception used to mark the whole
-        bridge unavailable and, after three retries, stop accessibility reads for
-        the rest of the session.
+        GetCurrentPattern answers S_OK with a null pointer there. comtypes hands
+        it over as a NULL POINTER(IUnknown) - a c_void_p subclass, falsy but not
+        None - whose QueryInterface raises. Treating that as an exception used to
+        mark the whole bridge unavailable and, after three retries, stop
+        accessibility reads for the rest of the session.
         """
 
-        self.element.GetCurrentPattern.return_value = None
-        self.assertIsNone(self.reader.read("chat", 1))
-        self.element.GetCurrentPattern.assert_called_once_with(UIA_TEXT_PATTERN_ID)
+        for null in (None, _NullComPointer()):
+            with self.subTest(null=null):
+                self.element.GetCurrentPattern.reset_mock()
+                self.element.GetCurrentPattern.return_value = null
+                self.assertIsNone(self.reader.read("chat", 1))
+                self.element.GetCurrentPattern.assert_called_once_with(UIA_TEXT_PATTERN_ID)
 
         reader = PlatformFieldReader()
         with patch("keyswitch.context_access.sys.platform", "win32"), patch(

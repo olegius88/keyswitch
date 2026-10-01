@@ -257,6 +257,22 @@ class InputIntegrityTests(unittest.TestCase):
                     self.send(plain_key("z", UNDO_TRIGGER_SENTINEL_KEYCODE, self.backend.group, False))
                 self.assertEqual(self.backend.text, "руддщ, ")
 
+    def test_a_lone_letter_after_a_word_stays_without_context(self) -> None:
+        # Context off, or an application without a name to keep it for: the previous
+        # word is unknown, not absent, so `b` in `plan b` is not the `и` of a message start.
+        for disabled in ("setting", "application"):
+            with self.subTest(disabled=disabled):
+                self.reset_editor()
+                self.settings.set("detection.context_aware", disabled != "setting")
+                with patch.object(self.backend, "active_application", return_value="" if disabled == "application" else "TestEditor"):
+                    self.type("plan b ")
+                self.assertEqual(self.backend.text, "plan b ")
+        self.settings.set("detection.context_aware", True)
+        self.reset_editor()
+        self.engine._contexts.clear()
+        self.type("b ")
+        self.assertEqual(self.backend.text, "и ")
+
     def test_a_history_write_failure_keeps_the_correction_and_its_undo(self) -> None:
         with patch.object(self.engine.history, "append", side_effect=OSError("disk full")):
             self.type("ghbdtn ")

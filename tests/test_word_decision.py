@@ -89,6 +89,12 @@ class OpeningLetterTests(unittest.TestCase):
                 self.assertTrue(decision.should_convert)
                 self.assertEqual((decision.replacement, decision.reason), (replacement, ISOLATED_SHORT_WORD_REASON))
 
+    def test_an_unknown_previous_word_is_not_the_start_of_a_message(self) -> None:
+        # With context switched off the caller passes no group whatever came before.
+        decision = self.decide("b", "и", None, context_tracked=False)
+        self.assertFalse(decision.should_convert)
+        self.assertNotEqual(decision.reason, ISOLATED_SHORT_WORD_REASON)
+
     def test_an_english_neighbour_a_foreign_letter_and_exclusions_keep_the_letter(self) -> None:
         self.assertFalse(self.decide("z", "я", 0).should_convert)
         self.assertFalse(self.decide("g", "п", None).should_convert)

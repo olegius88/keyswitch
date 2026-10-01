@@ -2104,6 +2104,8 @@ class KeySwitchEngine:
             use_intent_model=bool(
                 self.settings.get("detection.intent_model_enabled", True)
             ),
+            # Context is kept per named application (_remember_context).
+            context_tracked=context_aware and bool(application.strip()),
         )
 
     def _consult_context_model(

@@ -20,6 +20,15 @@ All notable changes to KeySwitch are documented in this file.
   defaults are used.
 - Write the trimmed history aside and swap it in, as the settings already were: once the history
   is full every correction rewrites it, and a crash or a full disk during that write emptied it.
+- Do not convert a lone letter after a word when context is off. The message-start exception
+  (`b` alone at the start of a message is the Russian `и`) took "no context" for "no previous
+  word", so with "consider context" switched off, or in an application without a name, every
+  `plan b` became `plan и` and `vitamin c` became `vitamin с`. The exception now applies only
+  where the engine keeps context and knows that no word came before.
+- Keep reading field context on Windows after focusing a control without text. UI Automation
+  answers such a control with a null pattern, which comtypes returns as a null pointer rather than
+  `None`; the reader called it, failed and switched field reading off for up to a minute in every
+  application. The diagnostics probe reported such a control as offering text.
 
 ## 0.36.1 — 2026-10-01
 

@@ -164,10 +164,11 @@ class WindowsFieldReader:
         if element.CurrentIsPassword:
             return FieldContext(application, field_id, role="password", sensitive=True, source="uia")
         supported = element.GetCurrentPattern(UIA_TEXT_PATTERN_ID)
-        if supported is None:
+        if not supported:
             # Chromium and Qt windows expose a focused element long before they
             # expose its text. That is a field KeySwitch cannot read, not a
-            # provider that has to be rebuilt.
+            # provider that has to be rebuilt. comtypes returns the S_OK null
+            # pattern as a NULL POINTER(IUnknown), which is falsy but not None.
             return None
         pattern = supported.QueryInterface(self.text_interface)
         ranges = pattern.GetSelection()
@@ -252,7 +253,7 @@ def probe_uia() -> dict[str, object]:
         elapsed = round((time.monotonic() - started) * MILLISECONDS_PER_SECOND)
         return {
             "available": True,
-            "focused_text_pattern": pattern is not None,
+            "focused_text_pattern": bool(pattern),
             "focused_probe_ms": elapsed,
         }
     except Exception as error:
