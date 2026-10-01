@@ -1,4 +1,4 @@
-# KeySwitch 0.36.0
+# KeySwitch 0.36.1
 
 ## Русский
 
@@ -6,15 +6,20 @@
 а ввод через удалённый доступ (TeamViewer, AnyDesk) больше не задерживает и не теряет Enter. Полный
 перечень — в [CHANGELOG.md](CHANGELOG.md).
 
+0.36.0 не был опубликован: на медленной сборочной машине оба нажатия двойного `Pause` успевали встать в
+очередь до первой замены, второе считалось неизвестным вводом после слова, и замена не выполнялась. Теперь
+нажатие клавиши преобразования в очереди замену не останавливает, а полсекунды на второе нажатие
+отсчитываются от момента, когда слово уже исправлено. 0.36.1 содержит все изменения 0.36.0 и это исправление.
+
 ### Файлы выпуска
 
-- `KeySwitch-Setup-0.36.0-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
+- `KeySwitch-Setup-0.36.1-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
   сертификатом издателя: SmartScreen покажет предупреждение.
-- `KeySwitch-0.36.0-windows-x64.zip` — переносимый архив для Windows.
-- `keyswitch_0.36.0_amd64.deb` — Ubuntu/Xubuntu, сеанс X11. Если стоит 0.28.0 или
+- `KeySwitch-0.36.1-windows-x64.zip` — переносимый архив для Windows.
+- `keyswitch_0.36.1_amd64.deb` — Ubuntu/Xubuntu, сеанс X11. Если стоит 0.28.0 или
   новее, эта версия придёт через обычное обновление системы.
-- `KeySwitch-0.36.0-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее), macOS 13 и новее.
-- `KeySwitch-0.36.0-macos-x86_64.zip` — Mac на процессоре Intel, macOS 13 и новее.
+- `KeySwitch-0.36.1-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее), macOS 13 и новее.
+- `KeySwitch-0.36.1-macos-x86_64.zip` — Mac на процессоре Intel, macOS 13 и новее.
 - `SHA256SUMS` — контрольные суммы всех файлов; сверьте их перед установкой.
 
 Архив для Mac нужен ровно один: сборка для Apple Silicon не запускается на Intel и
@@ -71,15 +76,20 @@ Self-learning is replaced by switching rules that exist only once they are confi
 through remote control (TeamViewer, AnyDesk) no longer delays or drops Enter. The full list is in
 [CHANGELOG.md](CHANGELOG.md).
 
+0.36.0 was not published: on the slow build machine both presses of a double `Pause` were queued before
+the first conversion ran, the second counted as unknown input after the word, and the conversion did not
+happen. A queued press of the conversion key no longer stops the conversion, and the half second for the
+second press starts once the word is corrected. 0.36.1 contains every change of 0.36.0 and this fix.
+
 ### Release files
 
-- `KeySwitch-Setup-0.36.0-x64.exe` — installer for Windows 10/11 x64. It is not signed with
+- `KeySwitch-Setup-0.36.1-x64.exe` — installer for Windows 10/11 x64. It is not signed with
   a publisher certificate, so SmartScreen shows a warning.
-- `KeySwitch-0.36.0-windows-x64.zip` — portable archive for Windows.
-- `keyswitch_0.36.0_amd64.deb` — Ubuntu/Xubuntu on an X11 session. With 0.28.0 or newer
+- `KeySwitch-0.36.1-windows-x64.zip` — portable archive for Windows.
+- `keyswitch_0.36.1_amd64.deb` — Ubuntu/Xubuntu on an X11 session. With 0.28.0 or newer
   installed, this version arrives through the ordinary system update.
-- `KeySwitch-0.36.0-macos-arm64.zip` — Mac with Apple silicon (M1 and later), macOS 13 or newer.
-- `KeySwitch-0.36.0-macos-x86_64.zip` — Mac with an Intel processor, macOS 13 or newer.
+- `KeySwitch-0.36.1-macos-arm64.zip` — Mac with Apple silicon (M1 and later), macOS 13 or newer.
+- `KeySwitch-0.36.1-macos-x86_64.zip` — Mac with an Intel processor, macOS 13 or newer.
 - `SHA256SUMS` — checksums of every file; verify them before installing.
 
 Exactly one Mac archive is the right one: a build for Apple silicon does not run on Intel,

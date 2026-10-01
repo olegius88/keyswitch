@@ -4,7 +4,20 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
-## 0.36.0 — 2026-10-01
+## 0.36.1 — 2026-10-01
+
+- Publish everything since 0.35.1. The 0.36.0 section below was tagged, but its Windows test of the
+  rule offer failed on the build machine and nothing was published. On a slow machine both presses
+  of a double Pause were already waiting when the first one's conversion ran; the second press
+  counted as unknown input typed after the word, so the conversion left the text alone and the
+  second press found nothing to offer. A queued press of the conversion hotkey types nothing and no
+  longer stops the conversion. The half second a second press may take also starts only once the
+  first conversion is on screen, so a slow program does not turn a double press into two single
+  ones.
+
+## 0.36.0 — unpublished, 2026-10-01
+
+These changes were tagged but did not produce a published release. 0.36.1 publishes them.
 
 - Replace self-learning with switching rules that exist only once they are confirmed. A double
   press of the manual conversion key (Pause) leaves the last word the opposite of what the

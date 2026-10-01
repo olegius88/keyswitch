@@ -3339,7 +3339,9 @@ class KeySwitchEngine:
             elif item.key_name in MODIFIER_KEYS:
                 usable = False
                 kept.append(item)
-            elif not item.pressed:
+            elif not item.pressed or self._matches_hotkey("convert_last", item):
+                # A key-up types nothing, and neither does a second press of the
+                # conversion hotkey: it is answered once this correction lands.
                 kept.append(item)
             elif self._late_text_key(item) and self._safe_text_stroke(item):
                 late.append(item)
@@ -3924,6 +3926,12 @@ class KeySwitchEngine:
             return True
         self._remember_correction(plan)
         self._last_requested_plan = requested
+        if requested is self._convert_outcome and self._convert_press_at:
+            # A second press of the hotkey made while this conversion was being
+            # typed waited behind it in the hook; slow typing into a slow program
+            # must not turn a double press into two single ones, so the window
+            # for the second press starts once the word is on screen.
+            self._convert_press_at = time.monotonic()
         if plan.mode == "symbols":
             self._update(
                 current_group=plan.target_group,

@@ -417,3 +417,80 @@ jobs:
           codesign -d --entitlements :- "$bundle" | tee entitlements.txt
           grep -q "com.apple.security.cs.allow-unsigned-executable-memory" entitlements.txt
           codesign -dv --verbose=4 "$bundle" 2>&1 | grep -q "Timestamp="
+
+  windows-arm64-probe:
+    # Not released yet: this job finds out whether the Win32 tests, the E2E and
+    # the Nuitka/Inno Setup build work on native Windows ARM64. It never fails
+    # the run; read its step results. The build script still names its output
+    # x64 here and the files are not published.
+    name: Probe the Win32 tests and build on Windows ARM64
+    runs-on: windows-11-arm
+    continue-on-error: true
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up native ARM64 Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          architecture: arm64
+
+      - name: Report the interpreter and toolchain
+        run: |
+          python -c "import platform, sys, sysconfig; print(platform.machine(), sys.version, sysconfig.get_platform())"
+          Get-Command ISCC.exe -ErrorAction SilentlyContinue | Format-List Source
+          Test-Path (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe")
+
+      - name: Install pinned runtime and build dependencies
+        continue-on-error: true
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          python -m pip install coverage==7.15.4 Nuitka==4.2 ordered-set==4.1.0 pystray==0.19.5 Pillow==12.3.0 comtypes==1.4.16
+
+      - name: Configure the EN and RU keyboard layouts for the E2E
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $languages = New-WinUserLanguageList -Language "en-US"
+          $languages.Add("ru-RU")
+          Set-WinUserLanguageList -LanguageList $languages -Force
+
+      - name: Run the Win32 backend and input tests on ARM64
+        continue-on-error: true
+        env:
+          PYTHONPATH: src
+          KEYSWITCH_MODEL_PATH: model/intent_v1/sources
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          python -m unittest discover -s tests -p test_windows_backend.py
+          python -m unittest discover -s tests -p test_input_integrity.py
+          python tests/test_intent_model.py
+
+      - name: Run the hook, SendInput and Tk E2E on ARM64
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          KEYSWITCH_MODEL_PATH: model/intent_v1/sources
+          PYTHONPATH: src
+        run: python tests/e2e_windows.py
+
+      - name: Build the native distribution and installer on ARM64
+        continue-on-error: true
+        shell: pwsh
+        run: ./packaging/build-windows.ps1
+
+      - name: Show which architecture the built executable is
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $executable = Get-ChildItem -Recurse -Filter KeySwitch.exe build, dist -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $executable) { throw "No KeySwitch.exe was built" }
+          $bytes = [System.IO.File]::ReadAllBytes($executable.FullName)
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+          $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          Write-Host ("{0}: PE machine 0x{1:X4} (0xAA64 is ARM64, 0x8664 is x64)" -f $executable.FullName, $machine)
+          $diagnostics = & $executable.FullName --diagnose
+          Write-Host $diagnostics
