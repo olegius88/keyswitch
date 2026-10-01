@@ -2460,6 +2460,11 @@ class KeySwitchEngine:
                 plan, decision, result.field, self._focus_window or 0, time.monotonic() + CONTEXT_TTL,
                 self._context_wait_sequence, settles,
             )
+            # The pause that settles this wait (_settle_context_wait_after_pause) is
+            # counted from its boundary. The commit has just cleared the word timer,
+            # and nothing else would set it until the next key, so without this the
+            # pause never settled anything. The pause correction stays off.
+            self._last_word_input_at = time.monotonic()
             self._log_context_wait("context_wait_started", self._context_waiting, "model_wait" if settles else "model_suggest")
             return True
         return False
