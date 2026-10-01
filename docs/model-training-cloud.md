@@ -59,6 +59,27 @@ reference-модели всех текущих тренеров, ищет ком
 Системные лексиконы `onboard-data` Ubuntu 24.04 и словари Hunspell совпадают
 по SHA-256 с закреплёнными, поэтому replay context-v1 даёт те же байты, что в CI.
 
+## Версия Python и расхождения с CI
+
+CI работает на ubuntu-26.04 с более новым Python, чем облачный образ. Проверено
+01.10.2026 на Python 3.12 (интерпретатор, выбранный хуком):
+
+- воспроизведение корпусов ortho (`ortho_corpus.py`, `ortho_known.py`,
+  `ortho_v2_corpus.py`, `ortho_v2_known.py`, `ortho_v2_verified.py`) зависит от
+  версии базы Unicode: на 3.11 и 3.12 (Unicode 14.0 и 15.0) оно расходится уже на
+  исходном коде, на `/usr/bin/python3.13` (Unicode 15.1) проходит. Эти шаги
+  запускайте через `python3.13`;
+- четыре теста Fedora/openSUSE в `tests/test_context_action_holdout.py`
+  импортируют `compression.zstd` из Python 3.14 и в образе не запускаются;
+- `test_the_default_target_check_reads_the_file_system_and_survives_a_bad_path`
+  падает на 3.12: там `Path.is_file()` бросает `OSError` на слишком длинное имя;
+- coverage 7.4.4 из Ubuntu 24.04 на Python 3.12 считает отдельными ветвями
+  переходы `->exit` генераторных выражений и импорты под `if TYPE_CHECKING:`,
+  поэтому показывает 99% там, где CI видит 100%.
+
+Остальные тесты (1695 из 1701) и все прочие проверки моделей из `tests.yml`
+проходят в образе.
+
 Результаты обучения пишите в `.t/` (каталог игнорируется git), например
 `--output .t/prefix-v2/<имя-запуска>`. Протокол принятия каждой модели описан
 в её README; облако его не меняет. Development-отчёт не разрешает продвижение,
