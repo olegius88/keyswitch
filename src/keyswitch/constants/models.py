@@ -24,8 +24,10 @@ ACTION_FEATURE_RAW_NGRAM_SCORE_BOUND: Final = 32.0
 # Frequencies are log-scaled against this cap so one very common word cannot dominate the feature.
 ACTION_FEATURE_FREQUENCY_CAP: Final = 10**12
 # `after_origin == "planned_next_conversion"` is only reachable for a short waiting word with a
-# short, single-line planned right context.
-PLANNED_CONTEXT_WORD_MAX_CHARACTERS: Final = 2
+# short, single-line planned right context. Three letters since the context-v3 candidates of
+# 01.10.2026: the action model defers an isolated word of up to three letters
+# (ACTION_SHORT_WORD_MAX_CHARACTERS), and the engine re-decides it with its planned next word.
+PLANNED_CONTEXT_WORD_MAX_CHARACTERS: Final = 3
 # Longest single-line planned right context a planned_next_conversion origin allows.
 PLANNED_CONTEXT_AFTER_MAX_CHARACTERS: Final = 64
 # The "length" feature buckets every word length from here up together (schemas 2 and 3).
