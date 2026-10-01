@@ -781,6 +781,50 @@ See [release and recovery procedures](docs/verification.md).
   for that target window.
 - The published Windows 0.35.1 Setup EXE is not signed with a publisher certificate.
 
+## Privacy
+
+KeySwitch processes keystrokes, words and model features on the computer where
+it runs. Typed text, learned rules, history and logs are not sent anywhere.
+
+The only network requests KeySwitch makes are update checks against the GitHub
+Releases of this repository: `api.github.com`, plus `github.com` and
+`release-assets.githubusercontent.com` when an installer is downloaded. The
+requests identify only the installed KeySwitch version
+(`User-Agent: KeySwitch/<version>`). GitHub receives the IP address, as with any
+web request, and the
+[GitHub privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement)
+applies. Automatic checking and automatic installation are described in
+[Install on Windows](#install-on-windows) and can be turned off on the Updates
+page; a check then runs only on the Check now («Проверить сейчас») button. The
+Debian package adds an APT source for <https://olegius88.github.io/keyswitch/>,
+which the system package manager contacts on its own schedule
+([Updates through APT](#updates-through-apt)).
+
+LogCourier, a separate application in this repository that is not included in
+KeySwitch packages, sends only the log files the user selects, only to the
+Telegram group the user configures, and only after sending is enabled in its
+settings. The [Telegram privacy policy](https://telegram.org/privacy) applies to
+that transfer.
+
+## Code signing policy
+
+Windows releases are not signed yet (see [Limitations](#limitations)). Signing,
+once enabled, follows these rules:
+
+- Only files produced from a tagged commit of this repository by the
+  [Native packages](.github/workflows/release.yml) workflow on GitHub-hosted
+  runners are signed: the KeySwitch executables and the Setup EXE. Nothing built
+  on a developer machine is signed. Third-party binaries included in the package,
+  such as the Python runtime and Tcl/Tk, keep their upstream signatures or stay
+  unsigned.
+- Every signing request is approved manually.
+- Team roles:
+  - committers and reviewers: [Oleg Shevchuk (@olegius88)](https://github.com/olegius88);
+  - approvers: [Oleg Shevchuk (@olegius88)](https://github.com/olegius88).
+- Team members use multi-factor authentication for GitHub and for the signing
+  service.
+- Privacy policy: [Privacy](#privacy).
+
 ## License
 
 KeySwitch is distributed under the
