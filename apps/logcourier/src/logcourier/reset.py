@@ -117,8 +117,9 @@ def clear(store: Store, config: Config, client, cancelled, progress) -> str:
         raise DeliveryCancelled(
             "Очистка группы прервана; она продолжится с того же места."
         ) from None
-    store.forget(key)
-    return summary(state)
+    # A clearing begun by 0.1.4 dropped its uncatalogued archives up front and counted them.
+    dropped = store.finish_clearing(config.destination, state["kept"]) + state.get("dropped", 0)
+    return summary(state, dropped)
 
 
 def deleted_from(client, chat_id: str, first: int, last: int, cancelled) -> int:
@@ -152,7 +153,7 @@ def delete(client, chat_id: str, first: int, last: int) -> bool:
     return True
 
 
-def summary(state: dict) -> str:
+def summary(state: dict, dropped: int) -> str:
     kept = state["kept"]
     if kept is not None:
         text = (
@@ -166,9 +167,9 @@ def summary(state: dict) -> str:
             f"Группа очищена: удалены все сообщения до №{state['top']}, кроме служебного "
             "о создании группы."
         )
-    if state.get("dropped"):
+    if dropped:
         text += (
             " Вместе с ними удалены архивы, ещё не внесённые в каталог: "
-            f"{quantity(state['dropped'], ARCHIVES)}."
+            f"{quantity(dropped, ARCHIVES)}."
         )
     return text + " Новый каталог начнётся со следующей отправки."

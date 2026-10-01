@@ -141,6 +141,8 @@ class Collector:
                     "SELECT offset,anchor FROM cursors WHERE source=? AND identity=?",
                     (source.id, identity),
                 ).fetchone()
+                if cursor is None:
+                    cursor = self._adopt_copy(source.id, identity, stream, info.st_size)
                 offset = cursor["offset"] if cursor else 0
                 reset = bool(
                     cursor
@@ -211,3 +213,37 @@ class Collector:
         if not found:
             raise FileNotFoundError(source.path)
         return count
+
+    def _adopt_copy(self, source_id: str, identity: str, stream, size: int):
+        """Continue a file never seen before where a copy of it was already read.
+
+        Rotation by copying (logrotate copytruncate) leaves the rotated slot as a new
+        file whose bytes up to a cursor of this source are what that cursor read, the
+        lines left out by the initial baseline included. Reading it from the start
+        sent them again; the cursor of the furthest matching copy is taken over, and
+        stored at once, so the match does not depend on that cursor staying put.
+        """
+
+        known = self.store.db.execute(
+            "SELECT identity,offset,anchor FROM cursors WHERE source=? AND offset>0 AND offset<=?"
+            " ORDER BY offset DESC",
+            (source_id, size),
+        ).fetchall()
+        for row in known:
+            if fingerprint(stream, row["offset"]) != row["anchor"]:
+                continue
+            context = self.store.db.execute(
+                "SELECT version FROM cursor_context WHERE source=? AND identity=?",
+                (source_id, row["identity"]),
+            ).fetchone()
+            with self.store.db:
+                self.store.db.execute(
+                    "INSERT INTO cursors VALUES (?,?,?,?)",
+                    (source_id, identity, row["offset"], row["anchor"]),
+                )
+                self.store.db.execute(
+                    "INSERT OR REPLACE INTO cursor_context VALUES (?,?,?)",
+                    (source_id, identity, context["version"] if context else None),
+                )
+            return row
+        return None
