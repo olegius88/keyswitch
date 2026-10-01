@@ -30,7 +30,7 @@ from keyswitch.constants.training import (
     LOOKAHEAD_MAXIMUM_FAMILIES_LIMIT,
     LOOKAHEAD_MAXIMUM_SEEDS_PER_FAMILY,
     PLANNED_VARIANT_MASS_DIVISOR,
-    SHORT_WORD_MAX_CHARACTERS,
+    ACTION_SHORT_WORD_MAX_CHARACTERS,
 )
 
 
@@ -103,7 +103,7 @@ def _fingerprint(item: ContextEvidence) -> str:
 
 def _eligible(seed: LookaheadSeed) -> bool:
     item = seed.evidence
-    if (not 0 < len(item.original) <= SHORT_WORD_MAX_CHARACTERS or not item.original.isalpha() or not item.alternative.isalpha()
+    if (not 0 < len(item.original) <= ACTION_SHORT_WORD_MAX_CHARACTERS or not item.original.isalpha() or not item.alternative.isalpha()
             or item.trigger != "space" or item.boundary_text != " "
             or item.literal_tail or item.after_origin == "planned_next_conversion"):
         return False

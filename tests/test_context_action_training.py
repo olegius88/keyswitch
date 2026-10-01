@@ -37,6 +37,7 @@ from train_context_action_model import (
     natural_lookahead_rows,
     evidence,
     historical_curriculum,
+    MIXED_INSERTION_CONTEXTS,
     legacy_lookahead_rows,
     metrics,
     previous_context,
@@ -54,6 +55,7 @@ from keyswitch.input_context import FieldContext
 from train_context_model import Row as HistoricalRow
 from fixture_values.corpora import FIXTURE_WORD_FREQUENCY, PLANNED_EVIDENCE_DOMINANT_WORD_FREQUENCY
 from fixture_values.counts import (
+    MIXED_CONTEXT_SAMPLE_ROWS,
     CHOOSE_THRESHOLD_CONVERT_ROW_COUNT,
     CHOOSE_THRESHOLD_PLATEAU_NET_BENEFIT,
     CHOOSE_THRESHOLD_PLATEAU_PORTABLE_HIGH_TRUE_ROWS,
@@ -349,6 +351,24 @@ class ActionTrainingTests(unittest.TestCase):
         self.assertTrue(all(row.action == "keep" for row in rows
                             if row.category == "mixed_language_insertion"))
 
+    def test_mixed_insertions_follow_a_sentence_or_a_quoted_name_in_a_parenthesis(self) -> None:
+        """Half of the inserted words stand inside a parenthesis after a quoted name.
+
+        The candidate of corpus v10 (01.10.2026) converted `(en)` and ``Bad inside Russian
+        sentences on its sealed test: the only mixed context it had seen was one plain sentence.
+        """
+
+        contexts: dict[int, set[str]] = {group: set() for group in MIXED_INSERTION_CONTEXTS}
+        for index in range(MIXED_CONTEXT_SAMPLE_ROWS):
+            for original, group in (("en", 0), ("да", 1)):
+                rows = action_rows([fixture(f"mixed-{index}", original, group)])
+                for row in rows:
+                    if row.category in ("mixed_language_insertion", "mixed_language_layout_intervention"):
+                        contexts[group].add(row.field.before)
+                        self.assertIn(row.field.before, MIXED_INSERTION_CONTEXTS[group])
+        for group, seen in contexts.items():
+            self.assertEqual(seen, set(MIXED_INSERTION_CONTEXTS[group]))
+
     def test_contextless_short_pairs_share_the_same_deferred_action(self) -> None:
         expected = {"space": {"wait"}, "pause": {"wait"},
                     "enter": {"suggest"}, "tab": {"suggest"}, "punctuation": {"suggest"}}
@@ -408,14 +428,17 @@ class ActionTrainingTests(unittest.TestCase):
                 HistoricalRow(replace(item, field=replace(item.field, before="я думаю ")), "keep", "хз", "train", "russian_unknown_correct"),
                 HistoricalRow(replace(item, field=replace(item.field, before="8-10 ")), "keep", "хз", "train", "russian_unknown_correct"),
                 HistoricalRow(replace(item, original="yf", alternative="на", source_group=0), "convert", "yf", "train", "trusted_short_wrong"),
-                HistoricalRow(replace(item, original="три"), "keep", "три", "train", "russian_unknown_correct")]
+                HistoricalRow(replace(item, original="три"), "keep", "три", "train", "russian_unknown_correct"),
+                HistoricalRow(replace(item, original="окей"), "keep", "окей", "train", "russian_unknown_correct")]
         actual = {(row.trigger, row.field.before, row.category, row.original): row.action for row in self.historical_fixture(rows)}
         self.assertEqual(actual[("pause", "", "legacy_russian_unknown_correct", "хз")], "wait")
         self.assertEqual(actual[("enter", "", "legacy_russian_unknown_correct", "хз")], "suggest")
         self.assertEqual(actual[("pause", "я думаю ", "legacy_russian_unknown_correct", "хз")], "keep")
         self.assertEqual(actual[("pause", "8-10 ", "legacy_russian_unknown_correct", "хз")], "wait")
         self.assertEqual(actual[("pause", "", "legacy_trusted_short_wrong", "yf")], "convert")
-        self.assertEqual(actual[("pause", "", "legacy_russian_unknown_correct", "три")], "keep")
+        # Three letters alone are deferred since corpus v12 (01.10.2026); four decide.
+        self.assertEqual(actual[("pause", "", "legacy_russian_unknown_correct", "три")], "wait")
+        self.assertEqual(actual[("pause", "", "legacy_russian_unknown_correct", "окей")], "keep")
         relabeled = self.historical_fixture(rows[:1] + rows[HISTORICAL_CURRICULUM_RELABEL_SECOND_SOURCE_INDEX:HISTORICAL_CURRICULUM_RELABEL_SECOND_SOURCE_INDEX + 1])
         self.assertAlmostEqual(sum(row.sample_weight for row in relabeled), 1.0)
         self.assertEqual({row.action for row in relabeled}, {"wait", "keep"})
