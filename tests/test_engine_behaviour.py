@@ -1827,6 +1827,32 @@ class EngineBehaviourTests(unittest.TestCase):
         self.double_pause()
         self.assertIsNone(self.engine.learning_prompt)
 
+    def test_a_second_press_held_behind_a_slow_conversion_is_still_a_double_press(self) -> None:
+        self.type_word("qwerty")
+        self.hit_pause(release=False)
+        # The conversion runs on the release; typing it took longer than the window.
+        self.engine._convert_press_at -= DOUBLE_CONVERT_PRESS_WINDOW_SECONDS + 1
+        self.engine._handle(plain_key("Pause", PAUSE_KEYCODE, self.engine.snapshot.current_group, pressed=False))
+        self.hit_pause()
+        self.assertEqual(len(self.backend.injections), 1)
+        self.assertEqual(self.offered().action, "convert")
+
+    def test_a_second_press_already_queued_does_not_stop_the_first_conversion(self) -> None:
+        # On a slow machine both presses wait in the queue before the first one runs.
+        group = self.engine.snapshot.current_group
+        self.type_word("qwerty")
+        self.engine._handle(plain_key("Pause", PAUSE_KEYCODE, group))
+        self.engine._events.put_nowait(plain_key("Pause", PAUSE_KEYCODE, group))
+        self.engine._events.put_nowait(plain_key("Pause", PAUSE_KEYCODE, group, pressed=False))
+        self.engine._handle(plain_key("Pause", PAUSE_KEYCODE, group, pressed=False))
+        self.assertEqual(len(self.backend.injections), 1)
+        while not self.engine._events.empty():
+            queued = self.engine._events.get_nowait()
+            assert isinstance(queued, KeyEvent)
+            self.engine._handle(queued)
+        self.assertEqual(len(self.backend.injections), 1)
+        self.assertEqual(self.offered().action, "convert")
+
     def test_auto_repeat_of_a_held_pause_is_still_the_first_press(self) -> None:
         self.type_word("qwerty")
         self.hit_pause(release=False)
