@@ -25,6 +25,7 @@ from keyswitch.short_words import opens_sentences
 from keyswitch.detector import LanguageDetector, LanguageScorer
 from keyswitch.language_model import LanguageModel
 from keyswitch.engine import KeySwitchEngine
+from keyswitch.learning import LearnedRule
 from keyswitch.input_context import CONTEXT_LIMIT, CONTEXT_TTL, FieldContext, InputContext
 from test_input_integrity import InputIntegrityTests
 from keyswitch.constants.text import FIELD_CONTEXT_APPLICATION_MAX_CHARACTERS
@@ -32,7 +33,6 @@ from fixture_values.counts import (
     CONTEXT_FILLER_CHARACTERS,
     FIELD_CONTEXT_OVERLONG_NAME_CHARACTERS,
     FIELD_CONTEXT_OVERLONG_TEXT_CHARACTERS,
-    LEARNING_CONFIRMATIONS_REQUIRED,
 )
 from fixture_values.keys import CONTEXT_POLICY_FIXTURE_KEYCODE, SECOND_WINDOW_ID
 from fixture_values.models import NON_STRING_FIELD_VALUE
@@ -369,12 +369,12 @@ class ContextEngineTests(InputIntegrityTests):
         self.assertEqual(self.backend.text, "ghbdtn ")
         self.reset_editor()
         self.settings.set("exclusions.words", [])
-        self.engine.learning.reject(0, "ghbdtn", 1)
+        self.engine.learning.add_rule(LearnedRule("ghbdtn", 0, 1, "keep"))
         self.type("ghbdtn ")
         self.assertEqual(self.backend.text, "ghbdtn ")
         self.reset_editor()
         self.choose("keep")
-        self.engine.learning.confirm_manual(0, "ghbdtn", 1, LEARNING_CONFIRMATIONS_REQUIRED)
+        self.engine.learning.add_rule(LearnedRule("ghbdtn", 0, 1))
         self.type("ghbdtn ")
         self.assertEqual(self.backend.text, "привет ")
 

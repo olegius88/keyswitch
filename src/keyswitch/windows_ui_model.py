@@ -15,7 +15,6 @@ from .constants.settings_defaults import (
     HISTORY_LIMIT_SETTING_MAX,
     HISTORY_LIMIT_SETTING_MIN,
     HISTORY_LIMIT_SETTING_STEP,
-    LEARNING_CONFIRMATIONS_SETTING_MAX,
     MINIMUM_WORD_LENGTH_SETTING_MAX,
     MINIMUM_WORD_LENGTH_SETTING_MIN,
     PAUSE_DELAY_SETTING_MAX_SECONDS,
@@ -138,17 +137,20 @@ AUTOCORRECTION_SETTINGS = (
     ),
     SettingSpec(
         "detection.learning",
-        "Локальное обучение",
-        "Предлагать правило после Pause/Break и запоминать подтверждение Enter.",
+        "Правила переключения",
+        "Правила из списка на странице «Обслуживание» действуют, а двойное нажатие клавиши "
+        "ручного преобразования (Pause) предлагает правило для последнего слова. Правило "
+        "появляется только по кнопке OK в окне правила.",
         "bool",
     ),
     SettingSpec(
-        "detection.learning_confirmations",
-        "Подтверждений для правила",
-        "Порог, при котором правило начинает действовать; Enter в подсказке достигает его сразу.",
-        "int",
-        minimum=1,
-        maximum=LEARNING_CONFIRMATIONS_SETTING_MAX,
+        "detection.injected_input",
+        "Ввод от других программ",
+        "Считать набором нажатия, которые присылают другие программы: удалённый доступ "
+        "(TeamViewer, AnyDesk), макросы, экранная клавиатура. Выключено по умолчанию: такой "
+        "ввод уже проверен на компьютере, где его набирают, а ожидание его отпусканий "
+        "задерживало Enter.",
+        "bool",
     ),
 )
 
@@ -206,7 +208,8 @@ HOTKEY_SETTINGS = (
     SettingSpec(
         "hotkeys.convert_last",
         "Преобразовать последнее слово",
-        "Ручная смена раскладки уже введённого слова.",
+        "Ручная смена раскладки уже введённого слова. Двойное нажатие предлагает правило "
+        "переключения для этого слова.",
         "text",
     ),
     SettingSpec(

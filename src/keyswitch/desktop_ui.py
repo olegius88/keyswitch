@@ -24,7 +24,7 @@ from . import __version__
 from .backend import ScreenAnchor
 from .constants.file_formats import DIAGNOSTICS_JSON_INDENT
 from .config import SettingsStore
-from .constants.settings_defaults import DEFAULT_HISTORY_LIMIT, DEFAULT_LEARNING_CONFIRMATIONS
+from .constants.settings_defaults import DEFAULT_HISTORY_LIMIT
 from .engine import (
     CorrectionPlan,
     EngineSnapshot,
@@ -33,7 +33,7 @@ from .engine import (
 )
 from .history import HistoryEntry, HistoryStore, data_dir
 from .indicator import layout_label
-from .layouts import LayoutPair
+from .learning import RULE_ACTIONS, RULE_MATCHES, InvalidRule, LearnedRule
 from .logsetup import (
     follow_settings,
     log_directory,
@@ -42,6 +42,28 @@ from .logsetup import (
     rotation_summary,
 )
 from .desktop_services import DesktopServices, PromptBackend
+from .rule_editor import (
+    ACTION_LABELS,
+    ACTION_TITLE,
+    CASE_LABEL,
+    CONDITION_LEAD,
+    CONDITION_TITLE,
+    EXTRA_LEAD,
+    MATCH_LABELS,
+    PATTERN_LABEL,
+    PROMPT_HINT,
+    PROMPT_TITLE,
+    WINDOW_TITLE,
+    RuleDraft,
+    action_text,
+    build_rule,
+    condition_text,
+    draft_from_prompt,
+    draft_from_rule,
+    layout_hint,
+    other_layout_text,
+    prompt_word_line,
+)
 from .russian_text import SECONDS, quantity
 from .system_model import Application as CatalogApplication
 from .tray_model import TrayActions, TrayController
@@ -118,12 +140,10 @@ from .constants.ui_desktop import (
     LAYOUTS_RU_VALUE_ROW,
     LAYOUT_LANGUAGE_LABEL_PADDING_BOTTOM_PIXELS,
     LAYOUT_LANGUAGE_LABEL_PADDING_TOP_PIXELS,
-    LEARNING_CONFIRMATIONS_COLUMN_WIDTH_PIXELS,
-    LEARNING_DIRECTION_COLUMN_WIDTH_PIXELS,
-    LEARNING_STATE_COLUMN_WIDTH_PIXELS,
+    LEARNING_ACTION_COLUMN_WIDTH_PIXELS,
+    LEARNING_CONDITION_COLUMN_WIDTH_PIXELS,
     LEARNING_TREE_HEIGHT_ROWS,
     LEARNING_WORD_COLUMN_WIDTH_PIXELS,
-    MAINTENANCE_CLEAR_REJECTIONS_BUTTON_COLUMN,
     MAINTENANCE_DESCRIPTION_ROW,
     MAINTENANCE_DIAGNOSTICS_SECTION_ROW,
     MAINTENANCE_LEARNING_ACTIONS_ROW,
@@ -160,6 +180,8 @@ from .constants.ui_desktop import (
     RESET_BUTTON_COLUMN_MIN_PIXELS,
     RESET_BUTTON_FONT_SIZE_POINTS,
     RESET_BUTTON_INTERNAL_PADDING_PIXELS,
+    RULE_EDITOR_PATTERN_WIDTH_CHARACTERS,
+    RULE_EDITOR_TEXT_WRAP_PIXELS,
     SECTION_BOTTOM_MARGIN_PIXELS,
     SECTION_PADDING_X_PIXELS,
     SECTION_PADDING_Y_PIXELS,
@@ -305,7 +327,7 @@ class WindowsLearningPrompt:
         card.pack(fill="both", expand=True)
         tk.Label(
             card,
-            text="Добавить слово в правила переключения?",
+            text=PROMPT_TITLE,
             background="#171a21",
             foreground="#ffffff",
             font=("Segoe UI Semibold", LEARNING_PROMPT_TITLE_FONT_SIZE_POINTS),
@@ -321,7 +343,7 @@ class WindowsLearningPrompt:
         self.word.pack(fill="x", pady=(LEARNING_PROMPT_WORD_PADDING_TOP_PIXELS, LEARNING_PROMPT_WORD_PADDING_BOTTOM_PIXELS))
         tk.Label(
             card,
-            text="Enter - ДА    Esc - НЕТ",
+            text=PROMPT_HINT,
             background="#171a21",
             foreground="#b7bdc9",
             font=("Segoe UI", LEARNING_PROMPT_HINT_FONT_SIZE_POINTS),
@@ -335,7 +357,7 @@ class WindowsLearningPrompt:
     ) -> None:
         self.prompt = prompt
         self.anchor = anchor
-        self.word.configure(text=f"{prompt.original}  →  {prompt.replacement}")
+        self.word.configure(text=prompt_word_line(prompt))
         self.window.update_idletasks()
         width = max(LEARNING_PROMPT_MINIMUM_WIDTH_PIXELS, self.window.winfo_reqwidth())
         height = self.window.winfo_reqheight()
@@ -398,6 +420,168 @@ class WindowsLearningPrompt:
         return "break"
 
 
+class RuleEditorDialog:
+    """The rule window: the letters, the condition, the case and the action.
+
+    It is a normal window that takes the keyboard, so the letters can be edited;
+    ``focused`` tells the engine when the window gains and loses the keyboard, so
+    what is typed here is left alone and typing elsewhere is not. Enter is OK and
+    Escape is Cancel. ``accept`` turns the form into a rule and answers with an
+    empty string, or with what to fix, which the window shows instead of closing.
+    """
+
+    def __init__(
+        self,
+        root: tk.Tk,
+        draft: RuleDraft,
+        accept: Callable[[RuleDraft], str],
+        closed: Callable[[], None],
+        focused: Callable[[bool], None],
+    ) -> None:
+        self.draft = draft
+        self.accept = accept
+        self.closed = closed
+        self.focused = focused
+        self.window = tk.Toplevel(root, class_="KeySwitchRuleEditor")
+        self.window.withdraw()
+        self.window.title(WINDOW_TITLE)
+        self.window.resizable(False, False)
+        self.window.attributes("-topmost", True)
+        self.window.protocol("WM_DELETE_WINDOW", self.cancel)
+        self.pattern = tk.StringVar(master=self.window, value=draft.pattern)
+        self.match = tk.StringVar(master=self.window, value=draft.match)
+        self.case_sensitive = tk.BooleanVar(master=self.window, value=draft.case_sensitive)
+        self.action = tk.StringVar(master=self.window, value=draft.action)
+        self.hint = tk.StringVar(master=self.window, value="")
+        self.problem = tk.StringVar(master=self.window, value="")
+
+        body = ttk.Frame(self.window, padding=(SECTION_PADDING_X_PIXELS, SECTION_PADDING_Y_PIXELS))
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text=PATTERN_LABEL).pack(anchor="w")
+        self.entry = ttk.Entry(body, textvariable=self.pattern, width=RULE_EDITOR_PATTERN_WIDTH_CHARACTERS)
+        self.entry.pack(fill="x", pady=(STANDARD_GAP_PIXELS, 0))
+        ttk.Label(body, textvariable=self.hint, style="Muted.TLabel").pack(anchor="w")
+
+        condition = ttk.LabelFrame(body, text=CONDITION_TITLE, padding=STANDARD_GAP_PIXELS)
+        condition.pack(fill="x", pady=(GROUP_GAP_PIXELS, 0))
+        ttk.Label(condition, text=CONDITION_LEAD).pack(anchor="w")
+        for match in RULE_MATCHES:
+            ttk.Radiobutton(
+                condition, text=MATCH_LABELS[match], value=match, variable=self.match,
+            ).pack(anchor="w", padx=(GROUP_GAP_PIXELS, 0))
+        ttk.Label(condition, text=EXTRA_LEAD).pack(anchor="w", pady=(STANDARD_GAP_PIXELS, 0))
+        ttk.Checkbutton(
+            condition, text=CASE_LABEL, variable=self.case_sensitive,
+        ).pack(anchor="w", padx=(GROUP_GAP_PIXELS, 0))
+
+        action = ttk.LabelFrame(body, text=ACTION_TITLE, padding=STANDARD_GAP_PIXELS)
+        action.pack(fill="x", pady=(GROUP_GAP_PIXELS, 0))
+        for value in RULE_ACTIONS:
+            ttk.Radiobutton(
+                action, text=ACTION_LABELS[value], value=value, variable=self.action,
+            ).pack(anchor="w")
+
+        ttk.Label(
+            body, textvariable=self.problem, style="Error.TLabel",
+            wraplength=RULE_EDITOR_TEXT_WRAP_PIXELS, justify="left",
+        ).pack(anchor="w", pady=(STANDARD_GAP_PIXELS, 0))
+        buttons = ttk.Frame(body)
+        buttons.pack(anchor="e", pady=(GROUP_GAP_PIXELS, 0))
+        ttk.Button(buttons, text="OK", command=self.confirm, default="active").pack(side="left")
+        ttk.Button(buttons, text="Отмена", command=self.cancel).pack(
+            side="left", padx=(STANDARD_GAP_PIXELS, 0)
+        )
+        for sequence in ("<Return>", "<KP_Enter>"):
+            self.window.bind(sequence, self._confirm_event)
+        self.window.bind("<Escape>", self._cancel_event)
+        self.window.bind("<FocusIn>", self._focus_in, add="+")
+        self.window.bind("<FocusOut>", self._focus_out, add="+")
+        self.pattern.trace_add("write", self._pattern_changed)
+        self._pattern_changed()
+
+    def show(self, activate: Callable[[int], object]) -> None:
+        """Centre the window on the screen and give it the keyboard."""
+
+        self.window.update_idletasks()
+        width = self.window.winfo_reqwidth()
+        height = self.window.winfo_reqheight()
+        x = (self.window.winfo_screenwidth() - width) // CENTERING_DIVISOR
+        y = (self.window.winfo_screenheight() - height) // CENTERING_DIVISOR
+        self.window.geometry(f"+{max(0, x)}+{max(0, y)}")
+        self.window.deiconify()
+        self.window.lift()
+        self.window.update_idletasks()
+        try:
+            activate(int(self.window.winfo_id()))
+        except (tk.TclError, ValueError):
+            pass
+        self.window.focus_force()
+        self.entry.focus_set()
+        self.entry.icursor("end")
+        self.entry.select_range(0, "end")
+
+    def current_draft(self) -> RuleDraft:
+        match = self.match.get()
+        action = self.action.get()
+        return RuleDraft(
+            self.pattern.get(),
+            match if match in RULE_MATCHES else "exact",
+            bool(self.case_sensitive.get()),
+            action if action in RULE_ACTIONS else "convert",
+            self.draft.application,
+            self.draft.editing,
+        )
+
+    def confirm(self) -> None:
+        problem = self.accept(self.current_draft())
+        if problem:
+            self.problem.set(problem)
+            self.entry.focus_set()
+            return
+        self._close()
+
+    def cancel(self) -> None:
+        self._close()
+
+    def lift(self) -> None:
+        self.window.deiconify()
+        self.window.lift()
+        self.window.focus_force()
+
+    def _close(self) -> None:
+        self.window.destroy()
+        self.focused(False)
+        self.closed()
+
+    def _focus_in(self, _event: tk.Event[tk.Misc]) -> None:
+        self.focused(True)
+
+    def _focus_out(self, _event: tk.Event[tk.Misc]) -> None:
+        # Moving between the window's own fields also leaves one of them; only
+        # the keyboard leaving the window counts, which is known once Tk settles.
+        self.window.after_idle(self._check_focus)
+
+    def _check_focus(self) -> None:
+        try:
+            current = self.window.focus_get()
+        except (tk.TclError, KeyError):
+            current = None
+        if current is None or not str(current).startswith(str(self.window)):
+            self.focused(False)
+
+    def _pattern_changed(self, *_arguments: object) -> None:
+        self.hint.set(layout_hint(self.current_draft()))
+        self.problem.set("")
+
+    def _confirm_event(self, _event: tk.Event[tk.Misc]) -> str:
+        self.confirm()
+        return "break"
+
+    def _cancel_event(self, _event: tk.Event[tk.Misc]) -> str:
+        self.cancel()
+        return "break"
+
+
 class DesktopApplication:
     """Own Tk, the global engine, tray and per-user desktop integration."""
 
@@ -450,6 +634,10 @@ class DesktopApplication:
         self._catalog_items: dict[str, CatalogApplication] = {}
         self._update_after_id: str | None = None
         self._last_update_notification = ""
+        self.rule_editor: RuleEditorDialog | None = None
+        # The window the user typed in when a rule offer opened the rule window;
+        # it gets the keyboard back when the window closes.
+        self._rule_return_window: int | None = None
 
         self.root = tk.Tk(className="KeySwitch")
         self.root.title("KeySwitch")
@@ -504,6 +692,7 @@ class DesktopApplication:
         self.engine.subscribe(self._snapshot_from_thread)
         self.engine.subscribe_corrections(self._correction_from_thread)
         self.engine.subscribe_learning_prompts(self._learning_prompt_from_thread)
+        self.engine.subscribe_rule_requests(self._rule_request_from_thread)
         self.updates.subscribe(self._update_from_thread)
 
     def _build_window(self) -> None:
@@ -1059,14 +1248,14 @@ class DesktopApplication:
             "Обслуживание",
             "Управляйте локальными правилами, настройками и расположением данных KeySwitch.",
         )
-        learning = self._section(page, "Локальное обучение", PAGE_FIRST_SECTION_ROW)
+        learning = self._section(page, "Правила переключения", PAGE_FIRST_SECTION_ROW)
         learning.columnconfigure(0, weight=1)
         ttk.Label(learning, textvariable=self.learning_text).grid(
             row=0,
             column=0,
             sticky="w",
         )
-        columns = ("word", "replacement", "direction", "confirmations", "state")
+        columns = ("word", "replacement", "condition", "action")
         self.learning_tree = ttk.Treeview(
             learning,
             columns=columns,
@@ -1074,18 +1263,16 @@ class DesktopApplication:
             height=LEARNING_TREE_HEIGHT_ROWS,
         )
         headings = {
-            "word": "Набрано",
-            "replacement": "Заменяется на",
-            "direction": "Направление",
-            "confirmations": "Подтверждений",
-            "state": "Состояние",
+            "word": "Сочетание",
+            "replacement": "В другой раскладке",
+            "condition": "Условие",
+            "action": "Действие",
         }
         widths = {
             "word": LEARNING_WORD_COLUMN_WIDTH_PIXELS,
             "replacement": LEARNING_WORD_COLUMN_WIDTH_PIXELS,
-            "direction": LEARNING_DIRECTION_COLUMN_WIDTH_PIXELS,
-            "confirmations": LEARNING_CONFIRMATIONS_COLUMN_WIDTH_PIXELS,
-            "state": LEARNING_STATE_COLUMN_WIDTH_PIXELS,
+            "condition": LEARNING_CONDITION_COLUMN_WIDTH_PIXELS,
+            "action": LEARNING_ACTION_COLUMN_WIDTH_PIXELS,
         }
         for column in columns:
             self.learning_tree.heading(column, text=headings[column])
@@ -1093,17 +1280,19 @@ class DesktopApplication:
                 column,
                 width=widths[column],
                 minwidth=widths[column],
-                stretch=column == "state",
+                stretch=column == "action",
                 anchor="w",
             )
         self.learning_tree.grid(row=1, column=0, sticky="ew", pady=(GROUP_GAP_PIXELS, 0))
+        self.learning_tree.bind("<Double-1>", lambda _event: self._edit_selected_rule())
         ttk.Label(
             learning,
             text=(
-                "Правило появляется после ручного преобразования (Pause) и "
-                "начинает действовать, набрав нужное число подтверждений. "
-                "Запрет запоминается, когда вы отменяете автоисправление. "
-                "Правила и запреты удаляются по отдельности."
+                "Правило говорит, что делать со словом, которое совпадает с сочетанием букв, "
+                "начинается с него или содержит его: переводить в другую раскладку или нет. "
+                "Правило важнее решения модели. Чтобы добавить правило для последнего слова, "
+                "дважды нажмите клавишу ручного преобразования (Pause), затем Enter: окно "
+                "правила откроется уже заполненным. Правило появляется только по кнопке OK."
             ),
             style="Muted.TLabel",
             wraplength=CONTENT_TEXT_WRAP_WIDTH_PIXELS,
@@ -1111,26 +1300,20 @@ class DesktopApplication:
         ).grid(row=MAINTENANCE_DESCRIPTION_ROW, column=0, sticky="w", pady=(STANDARD_GAP_PIXELS, 0))
         actions = ttk.Frame(learning)
         actions.grid(row=MAINTENANCE_LEARNING_ACTIONS_ROW, column=0, sticky="w", pady=(GROUP_GAP_PIXELS, 0))
-        ttk.Button(
-            actions,
-            text="Удалить выбранное",
-            command=self._delete_selected_learning,
-        ).grid(row=0, column=0, sticky="w")
-        ttk.Button(
-            actions,
-            text="Очистить правила",
-            command=self._clear_learning,
-        ).grid(row=0, column=1, sticky="w", padx=(STANDARD_GAP_PIXELS, 0))
-        ttk.Button(
-            actions,
-            text="Очистить запреты",
-            command=self._clear_rejections,
-        ).grid(row=0, column=MAINTENANCE_CLEAR_REJECTIONS_BUTTON_COLUMN, sticky="w", padx=(STANDARD_GAP_PIXELS, 0))
+        for index, (text, command) in enumerate((
+            ("Добавить…", self._add_rule),
+            ("Изменить…", self._edit_selected_rule),
+            ("Удалить выбранное", self._delete_selected_learning),
+            ("Удалить все", self._clear_learning),
+        )):
+            ttk.Button(actions, text=text, command=command).pack(
+                side="left", padx=(STANDARD_GAP_PIXELS if index else 0, 0)
+            )
 
         settings = self._section(page, "Настройки", MAINTENANCE_SETTINGS_SECTION_ROW)
         ttk.Label(
             settings,
-            text="Вернуть все параметры по умолчанию. История и выученные правила сохранятся.",
+            text="Вернуть все параметры по умолчанию. История и правила переключения сохранятся.",
             wraplength=CONTENT_TEXT_WRAP_WIDTH_PIXELS,
         ).grid(row=0, column=0, sticky="w")
         ttk.Button(
@@ -1171,7 +1354,7 @@ class DesktopApplication:
             text=(
                 f"Настройки: {self.settings.path}\n"
                 f"История: {self.history.path}\n"
-                f"Самообучение: {self.engine.learning.path}\n"
+                f"Правила переключения: {self.engine.learning.path}\n"
                 f"Журнал: {log_path()}"
             ),
             wraplength=CONTENT_TEXT_WRAP_WIDTH_PIXELS,
@@ -1890,104 +2073,94 @@ class DesktopApplication:
         )
 
     def _refresh_learning(self) -> None:
-        rules, rejections = self.engine.learning.counts()
-        self.learning_text.set(
-            f"Выученных правил: {rules} · запретов после отмены: {rejections}"
-        )
+        count = self.engine.learning.count()
+        self.learning_text.set(f"Правил: {count}" if count else "Правил пока нет")
         self._refresh_learning_rules()
 
     def _refresh_learning_rules(self) -> None:
-        """List what local learning remembers, rules first, then rejections."""
+        """List the user's switching rules, as the store keeps them."""
 
         self.learning_tree.delete(*self.learning_tree.get_children())
-        required = int(self.settings.get("detection.learning_confirmations", DEFAULT_LEARNING_CONFIRMATIONS))
-        for rule in self.engine.learning.rules(required):
+        for rule in self.engine.learning.rules():
             self.learning_tree.insert(
                 "",
                 "end",
-                iid=self._learning_row_id("rule", rule.source_group, rule.word),
+                iid=self._learning_row_id(rule),
                 values=(
-                    rule.word,
-                    self._other_layout_text(rule.word, rule.source_group),
-                    self._direction_label(rule.source_group, rule.target_group),
-                    f"{rule.confirmations} из {required}",
-                    "действует" if rule.active else "ждёт подтверждений",
-                ),
-            )
-        for rejection in self.engine.learning.rejections():
-            self.learning_tree.insert(
-                "",
-                "end",
-                iid=self._learning_row_id(
-                    "rejection",
-                    rejection.source_group,
-                    rejection.word,
-                    rejection.target_group,
-                ),
-                values=(
-                    rejection.word,
-                    self._other_layout_text(rejection.word, rejection.source_group),
-                    self._direction_label(
-                        rejection.source_group, rejection.target_group
-                    ),
-                    "—",
-                    "запрещено после отмены",
+                    rule.pattern,
+                    other_layout_text(rule.pattern, rule.source_group),
+                    condition_text(rule),
+                    action_text(rule),
                 ),
             )
 
     @staticmethod
-    def _direction_label(source_group: int, target_group: int) -> str:
-        return f"{layout_label(source_group)} → {layout_label(target_group)}"
+    def _learning_row_id(rule: LearnedRule) -> str:
+        """A tree row id that names the rule exactly, whatever its letters hold."""
 
-    @staticmethod
-    def _other_layout_text(word: str, source_group: int) -> str:
-        """The word as the other layout renders the same physical keys."""
-
-        pair = LayoutPair()
-        return (
-            pair.translate(word, "us", "ru")
-            if source_group == 0
-            else pair.translate(word, "ru", "us")
+        return json.dumps(
+            [rule.pattern, rule.source_group, rule.target_group, rule.action, rule.match, rule.case_sensitive],
+            ensure_ascii=False,
         )
 
-    @staticmethod
-    def _learning_row_id(
-        kind: str, source_group: int, word: str, target_group: int | None = None
-    ) -> str:
-        """A tree row id that names the entry exactly, whatever the word holds."""
-
-        return json.dumps([kind, source_group, word, target_group], ensure_ascii=False)
+    def _selected_rules(self) -> list[LearnedRule]:
+        stored = {self._learning_row_id(rule): rule for rule in self.engine.learning.rules()}
+        return [stored[row_id] for row_id in self.learning_tree.selection() if row_id in stored]
 
     def _delete_selected_learning(self) -> None:
-        for row_id in self.learning_tree.selection():
-            kind, source_group, word, target_group = json.loads(row_id)
-            if kind == "rule":
-                self.engine.learning.remove_rule(int(source_group), str(word))
-            else:
-                self.engine.learning.remove_rejection(
-                    int(source_group), str(word), int(target_group)
-                )
+        for rule in self._selected_rules():
+            self.engine.learning.remove_rule(rule)
         self._refresh_learning()
 
     def _clear_learning(self) -> None:
         if messagebox.askyesno(
-            "Очистить правила",
-            "Удалить все выученные правила? Запреты, записанные при отмене "
-            "исправлений, сохранятся.",
+            "Удалить все правила",
+            "Удалить все правила переключения? Отменить это нельзя.",
             parent=self.root,
         ):
-            self.engine.learning.clear_rules()
+            self.engine.learning.clear()
             self._refresh_learning()
 
-    def _clear_rejections(self) -> None:
-        if messagebox.askyesno(
-            "Очистить запреты",
-            "Удалить все запреты, записанные при отмене исправлений? "
-            "Выученные правила сохранятся.",
-            parent=self.root,
-        ):
-            self.engine.learning.clear_rejections()
-            self._refresh_learning()
+    def _add_rule(self) -> None:
+        self._open_rule_editor(RuleDraft(), None)
+
+    def _edit_selected_rule(self) -> None:
+        selected = self._selected_rules()
+        if selected:
+            self._open_rule_editor(draft_from_rule(selected[0]), None)
+
+    def _rule_request_from_thread(self, prompt: LearningPrompt) -> None:
+        # The prompt never took the keyboard, so the window in front is the one
+        # the user typed in: it gets the keyboard back when the rule window closes.
+        anchor = self.backend.input_anchor()
+        self._post(partial(self._open_rule_editor, draft_from_prompt(prompt), anchor.window if anchor else None))
+
+    def _open_rule_editor(self, draft: RuleDraft, return_window: int | None) -> None:
+        if self.rule_editor is not None:
+            self.rule_editor.lift()
+            return
+        self._rule_return_window = return_window
+        self.rule_editor = RuleEditorDialog(
+            self.root, draft, self._accept_rule, self._rule_editor_closed, self.engine.set_rule_editor_open
+        )
+        self.rule_editor.show(self.backend.restore_window)
+
+    def _accept_rule(self, draft: RuleDraft) -> str:
+        try:
+            rule = build_rule(draft)
+            self.engine.add_learning_rule(rule, replacing=draft.editing, application=draft.application)
+        except InvalidRule as error:
+            return str(error)
+        except OSError as error:
+            return f"Правило не сохранено: {error}"
+        self._refresh_learning()
+        return ""
+
+    def _rule_editor_closed(self) -> None:
+        self.rule_editor = None
+        window, self._rule_return_window = self._rule_return_window, None
+        if window is not None:
+            self.root.after_idle(lambda: self.backend.restore_window(window))
 
     def _reset_settings(self) -> None:
         if messagebox.askyesno(
@@ -2081,6 +2254,7 @@ class DesktopApplication:
         style.configure("Content.TFrame", background=content)
         style.configure("Sidebar.TFrame", background=sidebar)
         style.configure("TCheckbutton", background=content, foreground=foreground)
+        style.configure("TRadiobutton", background=content, foreground=foreground)
         style.configure("Modified.TCheckbutton", background=content, foreground=accent)
         style.configure("Reset.TButton", padding=(RESET_BUTTON_INTERNAL_PADDING_PIXELS, 0), font=("Segoe UI", RESET_BUTTON_FONT_SIZE_POINTS))
         style.configure("TLabel", background=content, foreground=foreground)

@@ -91,9 +91,6 @@ P_KEYCODE: Final = 33
 RETURN_KEYCODE: Final = 36
 UNLABELLED_LAYOUT_GROUP: Final = 7
 OUT_OF_RANGE_LAYOUT_GROUP: Final = 3
-# A learning target group other than the two layouts a rule usually names; the store keeps it apart
-# from them.
-ALTERNATE_TARGET_GROUP: Final = 2
 DEFAULT_SEQUENCE_RETURN_KEYCODE: Final = 104
 # A layout group no fixture model or backend defines.
 NONEXISTENT_LAYOUT_GROUP: Final = 9
@@ -239,3 +236,11 @@ X11_XKB_REPORTED_GROUP: Final = 3
 WINDOWS_A_VIRTUAL_KEY: Final = 0x41
 WINDOWS_HELD_VIRTUAL_KEY: Final = 0x44
 WINDOWS_UNKNOWN_TARGET_GROUP: Final = 8
+# The character a remote control program sends with KEYEVENTF_UNICODE in a VK_PACKET key event: the
+# Cyrillic "а" (U+0430), as the scan code field carries it.
+PACKET_CHARACTER_CODE: Final = 0x0430
+# Fake window and thread identifiers of the native activation tests: the window in front, its
+# thread and the thread of KeySwitch's own window.
+WINDOWS_FOREGROUND_HWND: Final = 0x5150
+WINDOWS_FOREGROUND_THREAD_ID: Final = 4242
+WINDOWS_CURRENT_THREAD_ID: Final = 1717

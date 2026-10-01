@@ -24,12 +24,10 @@ from .constants.settings_defaults import (
     CONFIDENCE_SETTING_MIN,
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_EARLY_SWITCH_MIN_LENGTH,
-    DEFAULT_LEARNING_CONFIRMATIONS,
     DEFAULT_MINIMUM_WORD_LENGTH,
     DEFAULT_PAUSE_DELAY_SECONDS,
     EARLY_SWITCH_MIN_LENGTH_SETTING_MAX,
     EARLY_SWITCH_MIN_LENGTH_SETTING_MIN,
-    LEARNING_CONFIRMATIONS_SETTING_MAX,
     MINIMUM_WORD_LENGTH_SETTING_MAX,
     MINIMUM_WORD_LENGTH_SETTING_MIN,
     PAUSE_DELAY_SETTING_MAX_SECONDS,
@@ -47,7 +45,7 @@ from .indicator import alternate_layout_group, layout_label
 from .language_model import LanguageModel, WordScore
 from .layouts import RU_KEYS, US_KEYS, LayoutPair
 from .lexicon_supplement import supplement_words
-from .learning import LearningStore
+from .learning import LearnedRule, LearningStore, RuleAction
 from .intent_model import CorrectionTrigger, LinearNgramModel
 from .context_policy import ContextPolicy, ContextResult
 from .constants.models import (
@@ -69,18 +67,19 @@ from .constants.detection import (
     KEPT_WORDS_TAKEN_ALONG,
     MAX_REMEMBERED_APPLICATION_CONTEXTS,
     MAX_WORD_STROKES as MAX_WORD_STROKES,
-    MINIMUM_LEARNABLE_LETTERS,
     NATURAL_SOURCE_BOUNDARY_MIN_CHARACTERS,
     NATURAL_SOURCE_BOUNDARY_NGRAM_FLOOR,
     REPLAYED_SIGNS_MIN_STEM_LETTERS,
     TRUSTED_SHORT_WORD_MAX_LENGTH,
     UNSCORED_CORRECTION_CONFIDENCE,
 )
-from .constants.keyboard import LAYOUT_GROUP_COUNT
+from .constants.keyboard import LAYOUT_GROUP_COUNT, UNICODE_PACKET_KEY_NAME
+from .constants.file_formats import LEGACY_RULE_CONFIRMATIONS_REQUIRED
 from .constants.log_files import LOGGED_SCORE_DECIMALS
 from .constants.text import BASIC_MULTILINGUAL_PLANE_MAX_CODEPOINT
 from .constants.timing import (
     ACTION_TIMEOUT_SECONDS,
+    DOUBLE_CONVERT_PRESS_WINDOW_SECONDS,
     ENGINE_LOOP_MAX_WAKE_SECONDS,
     ENGINE_LOOP_MIN_WAKE_SECONDS,
     ENGINE_SWITCH_GRACE_SECONDS,
@@ -233,11 +232,19 @@ class KeptWord:
 
 @dataclass(frozen=True)
 class LearningPrompt:
+    """The rule a double press of the conversion hotkey offers to set up.
+
+    ``original`` is the word as typed in ``source_group`` and ``replacement`` the same
+    keys in ``target_group``; ``action`` is what the rule would do with it. An empty
+    ``original`` offers an empty rule window: there was no word to start from.
+    """
+
     source_group: int
     target_group: int
     original: str
     replacement: str
     application: str
+    action: RuleAction = "convert"
 
 
 @dataclass(frozen=True)
@@ -296,7 +303,12 @@ class KeySwitchEngine:
         self.detector = LanguageDetector(self.models, intent_model)
         self.backend: InputBackend = backend or _default_backend(len(self.models))
         self.backend_label = backend_label
-        self.learning = learning or LearningStore(history.path.with_name("learning.json"))
+        self.learning = learning or LearningStore(
+            history.path.with_name("learning.json"),
+            # Only reads a learning file of an older schema; the setting itself is gone.
+            legacy_confirmations=int(settings.get(
+                "detection.learning_confirmations", LEGACY_RULE_CONFIRMATIONS_REQUIRED)),
+        )
         self.context_policy = ContextPolicy(context_reader or PlatformFieldReader(self.backend))
         self._context_result: ContextResult | None = None
         self.boundary_model: BoundaryModel | None = BoundaryPolicy.default()
@@ -377,7 +389,26 @@ class KeySwitchEngine:
         self._manual_release_deadline = 0.0
         self._last_committed: CorrectionPlan | None = None
         self._last_correction: CorrectionPlan | None = None
-        self._pending_learning_action: tuple[str, int, str, int] | None = None
+        # The rule offer to show once the pending plan has run: a double press
+        # that had to put the word back first.
+        self._learning_prompt_after: LearningPrompt | None = None
+        # The first plan of the chain of corrections over the same keys: what
+        # the engine itself did (automatic) or the first manual conversion.
+        self._correction_origin: CorrectionPlan | None = None
+        # The plan the last successful _execute_correction was asked to run.
+        self._last_requested_plan: CorrectionPlan | None = None
+        # The previous press of the conversion hotkey, for telling a double press.
+        self._convert_press_at = 0.0
+        self._convert_keycode = -1
+        self._convert_released = False
+        # What that press did: the plan it scheduled or "switch" for a layout toggle.
+        self._convert_outcome: CorrectionPlan | str | None = None
+        # Set while the rule window is open: its fields are not text to correct.
+        self._input_suspended = False
+        # Input other programs inject (remote control, macros) counts as typing
+        # only with detection.injected_input; read by the hook, so cached here.
+        self._injected_input = bool(settings.get("detection.injected_input", False))
+        self._foreign_input_active = False
         self._learning_prompt: LearningPrompt | None = None
         self._learning_prompt_deadline: float | None = None
         self._contexts: dict[str, LanguageContext] = {}
@@ -390,9 +421,12 @@ class KeySwitchEngine:
         self._learning_prompt_callbacks: list[
             Callable[[LearningPrompt | None], None]
         ] = []
+        self._rule_request_callbacks: list[Callable[[LearningPrompt], None]] = []
         self._lock = threading.RLock()
         self.settings.subscribe(self._settings_changed)
         self._technical_session_event("engine_initialized")
+        if self.learning.migrated:
+            self._technical_event("learning_rules_migrated", rules=self.learning.migrated)
 
     @property
     def snapshot(self) -> EngineSnapshot:
@@ -421,9 +455,21 @@ class KeySwitchEngine:
             prompt = self._learning_prompt
         callback(prompt)
 
+    def subscribe_rule_requests(self, callback: Callable[[LearningPrompt], None]) -> None:
+        """Be told when Enter on the prompt asks for the rule window."""
+
+        with self._lock:
+            self._rule_request_callbacks.append(callback)
+
     def confirm_learning_prompt(
         self, prompt: LearningPrompt | None = None
     ) -> bool:
+        """Enter on the prompt: open the rule window, filled in from the prompt.
+
+        Nothing is remembered yet. A rule exists only once the user presses OK in
+        that window, which calls :meth:`add_learning_rule`.
+        """
+
         with self._lock:
             current = self._learning_prompt
             if current is None or (prompt is not None and prompt != current):
@@ -432,42 +478,58 @@ class KeySwitchEngine:
             self._learning_prompt_deadline = None
             self._prompt_key_deadline = 0.0
             callbacks = tuple(self._learning_prompt_callbacks)
-        required = self._learning_confirmations()
-        # Enter is the only thing that teaches, and it teaches at once: the
-        # manual conversion itself no longer counts towards the threshold, so
-        # counting Enters instead would silently raise the price of a rule.
-        confirmations = self.learning.confirm_manual(
-            current.source_group,
-            current.original,
-            current.target_group,
-            required,
-        )
-        excluded = self._application_excluded(current.application)
+            requests = tuple(self._rule_request_callbacks)
         self._technical_event(
             "learning_prompt_confirmed",
             source_group=current.source_group,
             target_group=current.target_group,
             application=current.application,
-            required_confirmations=required,
-            confirmations=confirmations,
-        )
-        self._technical_event(
-            "learning_rule_recorded",
-            word="<redacted>" if excluded else current.original,
-            source_group=current.source_group,
-            target_group=current.target_group,
-            confirmations=confirmations,
-            required_confirmations=required,
-            active=True,
-            application=current.application,
-            application_excluded=excluded,
-        )
-        self._update(
-            last_action=f"{current.original} → {current.replacement} · правило выучено"
+            action=current.action,
+            has_word=bool(current.original),
         )
         for callback in callbacks:
             callback(None)
+        for request in requests:
+            request(current)
         return True
+
+    def add_learning_rule(
+        self, rule: LearnedRule, *, replacing: LearnedRule | None = None, application: str = ""
+    ) -> LearnedRule:
+        """OK in the rule window: keep the rule, in place of ``replacing`` if given."""
+
+        stored = (
+            self.learning.add_rule(rule) if replacing is None
+            else self.learning.replace_rule(replacing, rule)
+        )
+        excluded = bool(application) and self._application_excluded(application)
+        self._technical_event(
+            "learning_rule_added",
+            pattern="<redacted>" if excluded else stored.pattern,
+            match=stored.match,
+            case_sensitive=stored.case_sensitive,
+            action=stored.action,
+            source_group=stored.source_group,
+            target_group=stored.target_group,
+            replaced=replacing is not None,
+            application=application,
+            application_excluded=excluded,
+        )
+        verb = "переводить" if stored.action == "convert" else "не переводить"
+        self._update(last_action=f"Правило добавлено: «{stored.pattern}» — {verb}")
+        return stored
+
+    def set_rule_editor_open(self, opened: bool) -> None:
+        """While the rule window has the keyboard its fields are typed into, not text to correct.
+
+        The window reports when it gains and loses the keyboard, so typing elsewhere
+        while it stays open is corrected as usual.
+        """
+
+        if opened == self._input_suspended:
+            return
+        self._input_suspended = opened
+        self._technical_event("rule_editor_" + ("focused" if opened else "left"))
 
     def dismiss_learning_prompt(
         self, prompt: LearningPrompt | None = None, *, reason: str = "dismissed"
@@ -637,10 +699,6 @@ class KeySwitchEngine:
             MINIMUM_WORD_LENGTH_SETTING_MIN, MINIMUM_WORD_LENGTH_SETTING_MAX,
         ))
 
-    def _learning_confirmations(self) -> int:
-        return int(self._bounded_setting(
-            "detection.learning_confirmations", DEFAULT_LEARNING_CONFIRMATIONS, 1, LEARNING_CONFIRMATIONS_SETTING_MAX))
-
     def _apply_layout_selection(self, group: int) -> None:
         try:
             self.backend.switch_group(group)
@@ -690,6 +748,7 @@ class KeySwitchEngine:
             if event.pressed:
                 self._log_input_edit(event, self.backend.active_application())
             self._sensitive_context_window = None
+            self._convert_press_at = 0.0
             self._clear_word(reason="pointer_activity")
             self._untracked_token = False
             # A click often lands in an empty field, which is exactly where the first
@@ -698,6 +757,17 @@ class KeySwitchEngine:
             self._contexts.clear()
             self.context_policy.stream.clear()
             return
+        if self._input_suspended:
+            # The rule window is open: what is typed there is a rule, not text.
+            if event.pressed and (self._strokes or self._symbol_strokes):
+                self._clear_word(reason="rule_editor_open")
+            self._convert_press_at = 0.0
+            return
+        if event.foreign and not self._accepts_injected(event):
+            self._observe_foreign_input(event)
+            return
+        if event.pressed and event.key_name not in MODIFIER_KEYS:
+            self._foreign_input_active = False
         self._expire_learning_prompt()
         prompt = self.learning_prompt
         if prompt is not None and event.pressed and event.key_name not in MODIFIER_KEYS:
@@ -770,8 +840,14 @@ class KeySwitchEngine:
             self._character_before_key = self._last_key_character
             self._last_key_character = typed if typed.isprintable() or typed.isspace() else ""
         if not event.pressed:
+            if event.keycode == self._convert_keycode:
+                self._convert_released = True
             self._maybe_execute_pending(event)
             return
+        is_convert = self._matches_hotkey("convert_last", event)
+        if not is_convert:
+            # Only two presses of the hotkey with nothing in between are a double press.
+            self._convert_press_at = 0.0
         if self._matches_hotkey("toggle", event):
             enabled = not bool(self.settings.get("enabled", True))
             self.settings.set("enabled", enabled)
@@ -780,8 +856,11 @@ class KeySwitchEngine:
                 reason="engine_toggled",
             )
             return
-        if self._matches_hotkey("convert_last", event):
-            self._schedule_manual_conversion(event.keycode)
+        if is_convert:
+            if self._double_convert_press(event):
+                self._request_rule_after_double_press(event.keycode)
+            else:
+                self._schedule_manual_conversion(event.keycode)
             return
         if self._matches_hotkey("undo", event):
             self._schedule_undo(event.keycode)
@@ -794,7 +873,7 @@ class KeySwitchEngine:
             self._last_committed_stale = True
             self._log_pending_dropped("backspace")
             self._pending = None
-            self._pending_learning_action = None
+            self._learning_prompt_after = None
             # Erasing is not appending. A caret moved into finished text makes the next
             # word untouchable because nobody knows what stands in front of it; a user
             # who then rubs that text out has answered the question - nothing does.
@@ -920,7 +999,7 @@ class KeySwitchEngine:
                 return
             self._log_pending_dropped("additional_boundary")
             self._pending = None
-            self._pending_learning_action = None
+            self._learning_prompt_after = None
             # Nothing typed since the last boundary: remember layout-dependent
             # symbols so Pause converts just them (RU quote -> "@"), and never
             # rewrite the previous word after further input.
@@ -1098,7 +1177,7 @@ class KeySwitchEngine:
         # lost. Like boundary corrections, execute on that key's release and
         # absorb letters pressed before it (rollover typing).
         self._pending = plan
-        self._pending_learning_action = None
+        self._learning_prompt_after = None
         self._pending_trigger_keycode = strokes[-1].keycode
         self._technical_event(
             "early_switch_scheduled",
@@ -1111,11 +1190,8 @@ class KeySwitchEngine:
         ignored: list[str] = self.settings.get("exclusions.words", [])
         if any(self.detector.token_key(word).startswith(key) for word in ignored):
             return "excluded_word_prefix"
-        if bool(self.settings.get("detection.learning", True)) and any(
-            item.source_group == source and item.target_group == target and item.word.startswith(key)
-            for item in self.learning.rejections()
-        ):
-            return "learned_rejected_prefix"
+        if bool(self.settings.get("detection.learning", True)) and self.learning.keeps_continuation(source, original):
+            return "learned_keep_rule"
         if bool(self.settings.get("detection.protect_code", True)) and self.detector.is_protected_token(original):
             return "protected_token"
         if self._context_waiting is not None:
@@ -1251,7 +1327,7 @@ class KeySwitchEngine:
             EARLY_SWITCH_CONFIDENCE, self.backend.active_application(), True, "late_stroke",
         )
         self._pending_trigger_keycode = event.keycode
-        self._pending_learning_action = None
+        self._learning_prompt_after = None
         self._technical_event(
             "late_stroke_scheduled",
             source_group=event.group,
@@ -1323,8 +1399,7 @@ class KeySwitchEngine:
             True,
             "early",
         )
-        self._last_correction = plan
-        self._last_correction_time = time.monotonic()
+        self._remember_correction(plan)
         self._last_committed = CorrectionPlan(
             strokes, boundary, final_group, origin, replacement, original,
             self._early_switch_confidence, application, False,
@@ -1360,7 +1435,7 @@ class KeySwitchEngine:
         if self._pending is not None and self._pending.mode != "early":
             self._log_pending_dropped("next_word_committed")
             self._pending = None
-            self._pending_learning_action = None
+            self._learning_prompt_after = None
         typed = tuple(self._strokes)
         # Signs typed in front of the word's first letter: a quotation mark there is closed by one at its end.
         opened = (*self._symbol_strokes, *itertools.takewhile(lambda stroke: not stroke.character.isalpha(), typed))
@@ -1465,7 +1540,7 @@ class KeySwitchEngine:
                 self._log_context_wait("context_wait_cancelled", waiting, "literal_tail" if trailing else "literal_head")
             if joint is not None:
                 self._pending, decision = self._replay_sign_with_word(joint[0], opened), joint[1]
-                self._pending_learning_action = None
+                self._learning_prompt_after = None
                 self._pending_trigger_keycode = boundary.keycode
                 decision = replace(decision, should_convert=True)
             elif decision.should_convert:
@@ -1482,7 +1557,7 @@ class KeySwitchEngine:
                 # takes over the same word: say so instead of losing the plan.
                 self._log_pending_dropped("superseded_by_boundary")
                 self._pending = plan
-                self._pending_learning_action = None
+                self._learning_prompt_after = None
                 self._pending_trigger_keycode = boundary.keycode
                 # A word converted at a space stays open for the next word: if that
                 # one goes back the other way, the model is asked about this one again.
@@ -1566,7 +1641,7 @@ class KeySwitchEngine:
                 shown, typed[:len(typed) - len(trailing)], trailing,
                 None if boundary.deferred else boundary, application,
             )
-            self._pending_learning_action = None
+            self._learning_prompt_after = None
             self._pending_trigger_keycode = boundary.keycode
         self._strokes = []
         self._insertion = None
@@ -1676,7 +1751,7 @@ class KeySwitchEngine:
         ignored: list[str] = self.settings.get("exclusions.words", [])
         if ((bool(self.settings.get("detection.protect_code", True)) and self.detector.is_protected_token(original))
                 or original.casefold() in {word.casefold() for word in ignored}
-                or (bool(self.settings.get("detection.learning", True)) and set(targets) <= self.learning.rejected_targets(source_group, original))):
+                or set(targets) <= self._rejected_targets(source_group, original)):
             return strokes, (), False
         target = targets[0]
         alternative = self._text_for_group(strokes, target)
@@ -1772,11 +1847,7 @@ class KeySwitchEngine:
         for planned frames, or the other reading of the waiting word before it.
         """
         ignored_words: list[str] = self.settings.get("exclusions.words", [])
-        rejected_targets = (
-            self.learning.rejected_targets(source_group, original)
-            if bool(self.settings.get("detection.learning", True))
-            else set()
-        )
+        rejected_targets = self._rejected_targets(source_group, original)
         forced_target = self._forced_target_group(source_group, original)
         return automatic_word_decision(
             self.detector, original, alternatives, source_group,
@@ -1965,11 +2036,11 @@ class KeySwitchEngine:
         )
 
     def _rejected_targets(self, source_group: int, original: str) -> set[int]:
-        return (
-            self.learning.rejected_targets(source_group, original)
-            if bool(self.settings.get("detection.learning", True))
-            else set()
-        )
+        """Every other layout when a "keep" rule of the user fits the word."""
+
+        if not bool(self.settings.get("detection.learning", True)) or not self.learning.keeps(source_group, original):
+            return set()
+        return {group for group in self.models if group != source_group}
 
     def _baseline_decision(
         self, original: str, alternatives: dict[int, str], source_group: int,
@@ -2409,8 +2480,7 @@ class KeySwitchEngine:
     def _forced_target_group(self, source_group: int, word: str) -> int | None:
         if not bool(self.settings.get("detection.learning", True)):
             return None
-        confirmations = self._learning_confirmations()
-        return self.learning.forced_target(source_group, word, confirmations)
+        return self.learning.forced_target(source_group, word)
 
     def _context_for(self, application: str) -> tuple[dict[int, str], int | None]:
         if not application.strip():
@@ -2706,25 +2776,27 @@ class KeySwitchEngine:
     def _learning_diagnostics(
         self, source_group: int | None, word: str
     ) -> dict[str, object]:
-        """What local learning knows about this word before the decision.
+        """Which of the user's rules decides about this word, if any.
 
-        A rule that has not reached the confirmation threshold changes nothing
-        yet, so without these numbers a log line cannot be told apart from one
-        where no rule exists at all.
+        Without it a log line cannot tell a correction the user's rule forced, or
+        a word their rule kept, from one the model decided on its own.
         """
 
+        enabled = bool(self.settings.get("detection.learning", True))
         if source_group is None:
-            return {"enabled": bool(self.settings.get("detection.learning", True))}
-        target, confirmations = self.learning.rule_state(source_group, word)
+            return {"enabled": enabled}
+        rule = self.learning.match(source_group, word) if enabled else None
         return {
-            "enabled": bool(self.settings.get("detection.learning", True)),
-            "required_confirmations": self._learning_confirmations(),
-            "rule_target": target,
-            "confirmations": confirmations,
+            "enabled": enabled,
+            "rule": None if rule is None else {
+                "pattern": rule.pattern,
+                "match": rule.match,
+                "case_sensitive": rule.case_sensitive,
+                "action": rule.action,
+                "target_group": rule.target_group,
+            },
             "forced_target": self._forced_target_group(source_group, word),
-            "rejected_targets": sorted(
-                self.learning.rejected_targets(source_group, word)
-            ),
+            "rejected_targets": sorted(self._rejected_targets(source_group, word)),
         }
 
     def _log_word_discarded(self, reason: str) -> None:
@@ -2800,7 +2872,7 @@ class KeySwitchEngine:
             return
         self._log_context_wait("context_wait_settled", waiting, "pause")
         self._pending = replace(waiting.plan, confidence=result.decision.confidence)
-        self._pending_learning_action = None
+        self._learning_prompt_after = None
         self._pending_trigger_keycode = -1
 
     def _maybe_correct_after_pause(self, *, now: float | None = None) -> None:
@@ -3048,7 +3120,7 @@ class KeySwitchEngine:
             UNSCORED_CORRECTION_CONFIDENCE, application, True, "mention_shown",
             trailing=(shown,),
         )
-        self._pending_learning_action = None
+        self._learning_prompt_after = None
         self._pending_trigger_keycode = stroke.keycode
 
     def _after_mention_head(self, event: KeyEvent, boundary: KeyEvent | None) -> None:
@@ -3078,7 +3150,7 @@ class KeySwitchEngine:
         self._pending = self._mention_write_back(
             head, tuple(self._strokes), (), boundary, self.backend.active_application()
         )
-        self._pending_learning_action = None
+        self._learning_prompt_after = None
         self._pending_trigger_keycode = trigger_keycode
 
     def _mention_write_back(
@@ -3129,7 +3201,6 @@ class KeySwitchEngine:
             self._update(last_action="Замена ожидает отпускания клавиш")
             return
         mode = "manual"
-        learn = True
         trailing: tuple[KeyEvent, ...] = ()
         if self._strokes:
             strokes = tuple(self._symbol_strokes) + tuple(self._strokes)
@@ -3153,7 +3224,6 @@ class KeySwitchEngine:
             application = self.backend.active_application()
             source = "symbols"
             mode = "symbols"
-            learn = False
         elif self._last_committed is not None and not self._last_committed_stale:
             strokes = self._last_committed.strokes
             source_group = self._last_committed.source_group
@@ -3170,7 +3240,6 @@ class KeySwitchEngine:
         target = targets[0]
         original = self._text_for_group(strokes, source_group)
         replacement = self._text_for_group(strokes, target)
-        learn = learn and self._learnable(replacement)
         plan = CorrectionPlan(
             strokes,
             boundary,
@@ -3184,30 +3253,16 @@ class KeySwitchEngine:
             mode,
             trailing=trailing,
         )
+        # Pause right after a correction converts the same keys back. That
+        # teaches nothing: a rule comes only from the rule window, which a
+        # double press of the hotkey offers.
         reversal = self._reversal_of_last_correction(plan)
-        action: tuple[str, int, str, int] | None = None
-        if reversal is not None and reversal.automatic:
-            # Pause right after an automatic correction undoes it, exactly as
-            # the undo hotkey does: the direction is rejected so the mistake
-            # is not repeated, and the way back is not learned as a rule.
-            action = (
-                "reject",
-                reversal.source_group,
-                reversal.original,
-                reversal.target_group,
-            )
-            learn = False
-        elif reversal is not None:
-            # Toggling a manual conversion back and forth is indecision, not
-            # a confirmation: neither direction counts.
-            learn = False
-        elif learn:
-            action = ("manual", source_group, original, target)
         # A second Pause before the first one ran replaces the plan; without
         # this line the first conversion would vanish without a trace.
         self._log_pending_dropped("replaced_by_manual_conversion")
         self._pending = plan
-        self._pending_learning_action = action
+        self._learning_prompt_after = None
+        self._convert_outcome = plan
         self._pending_trigger_keycode = trigger_keycode
         self._manual_release_deadline = time.monotonic() + MANUAL_RELEASE_TIMEOUT_SECONDS
         excluded = self._application_excluded(application)
@@ -3222,7 +3277,6 @@ class KeySwitchEngine:
             application=application,
             application_excluded=excluded,
             symbol_count=len(self._symbol_strokes),
-            learnable=learn,
             reversal=(
                 None
                 if reversal is None
@@ -3240,20 +3294,6 @@ class KeySwitchEngine:
         self._early_switch_undone = False
         self._last_committed_stale = True
         self._reset_pause_correction()
-
-    @staticmethod
-    def _learnable(replacement: str) -> bool:
-        """Only something that reads as a word may become a rule.
-
-        A lone letter converted to punctuation ("б" -> ",") or a run of
-        symbols must never be offered for learning, let alone be counted as a
-        confirmation towards an automatic rule.
-        """
-
-        letters = sum(1 for character in replacement if character.isalpha())
-        return letters >= MINIMUM_LEARNABLE_LETTERS and all(
-            character.isalpha() or character in "'-" for character in replacement
-        )
 
     @staticmethod
     def _late_text_key(event: KeyEvent) -> bool:
@@ -3341,6 +3381,164 @@ class KeySwitchEngine:
             return None
         return plan
 
+    def _remember_correction(self, plan: CorrectionPlan) -> None:
+        """Note a correction that landed and the chain of corrections it belongs to.
+
+        Converting the same keys back continues the chain; anything else starts a
+        new one. The chain's first plan is what a double press of the hotkey
+        reasons about: the engine's own decision, or the user's first conversion.
+        """
+
+        if self._correction_origin is None or self._reversal_of_last_correction(plan) is None:
+            self._correction_origin = plan
+        self._last_correction = plan
+        self._last_correction_time = time.monotonic()
+
+    def _chain_origin(self, plan: CorrectionPlan) -> CorrectionPlan:
+        """The chain ``plan`` would continue once it runs."""
+
+        if self._correction_origin is not None and self._reversal_of_last_correction(plan) is not None:
+            return self._correction_origin
+        return plan
+
+    @staticmethod
+    def _wanted_group(origin: CorrectionPlan) -> int:
+        """The layout the user wants the word in when they object to ``origin``.
+
+        An automatic correction was the engine's idea, so the user wants the keys
+        as typed; a manual conversion was theirs, so they want its result.
+        """
+
+        return origin.source_group if origin.automatic else origin.target_group
+
+    def _double_convert_press(self, event: KeyEvent) -> bool:
+        """Whether this press of the conversion hotkey completes a double press."""
+
+        if (
+            event.keycode == self._convert_keycode and not self._convert_released
+            and self._convert_press_at
+        ):
+            # Auto-repeat of the held key: still the first press.
+            return False
+        now = time.monotonic()
+        double = (
+            bool(self.settings.get("detection.learning", True))
+            and self._convert_released
+            and event.keycode == self._convert_keycode
+            and self._convert_outcome is not None
+            and now - self._convert_press_at <= DOUBLE_CONVERT_PRESS_WINDOW_SECONDS
+        )
+        self._convert_press_at = 0.0 if double else now
+        self._convert_keycode = event.keycode
+        self._convert_released = False
+        if not double:
+            self._convert_outcome = None
+        return double
+
+    def _request_rule_after_double_press(self, trigger_keycode: int) -> None:
+        """Second press of the hotkey: leave the word as the user wants it and offer a rule.
+
+        The first press already did what a single press does. If that put the
+        word where the user wants it - a wrong automatic correction undone, a
+        missed one converted - the second press only opens the offer. If the
+        first press undid a fix the user had made earlier, the second press puts
+        the fix back, exactly as a single press would, and the offer follows.
+        """
+
+        outcome = self._take_convert_outcome()
+        application = self.backend.active_application()
+        if isinstance(outcome, CorrectionPlan) and outcome.mode != "symbols":
+            if self._pending is outcome:
+                origin = self._chain_origin(outcome)
+                offer = self._rule_offer(origin, application)
+                if self._wanted_group(origin) == outcome.source_group:
+                    # The first press, still waiting for its keys, would undo
+                    # the user's own fix: it never runs.
+                    self._log_pending_dropped("rule_requested")
+                    self._pending = None
+                    self._manual_release_deadline = 0.0
+                    self._show_learning_prompt(offer)
+                else:
+                    self._learning_prompt_after = offer
+                return
+            if self._last_requested_plan is outcome:
+                origin = self._correction_origin or outcome
+                offer = self._rule_offer(origin, application)
+                if self._wanted_group(origin) == outcome.target_group:
+                    self._show_learning_prompt(offer)
+                    return
+                self._schedule_manual_conversion(trigger_keycode)
+                scheduled = self._take_convert_outcome()
+                if isinstance(scheduled, CorrectionPlan) and self._pending is scheduled:
+                    self._learning_prompt_after = offer
+                else:
+                    self._show_learning_prompt(offer)
+                return
+        if outcome == "switch":
+            # The first press toggled the layout; the second puts it back.
+            self._switch_layout_only(trigger_keycode)
+            self._take_convert_outcome()
+        self._show_learning_prompt(self._empty_rule_offer(application))
+
+    def _take_convert_outcome(self) -> CorrectionPlan | str | None:
+        """What the last press of the hotkey did, forgotten once read."""
+
+        outcome, self._convert_outcome = self._convert_outcome, None
+        return outcome
+
+    def _rule_offer(self, origin: CorrectionPlan, application: str) -> LearningPrompt:
+        if not any(character.isalpha() for character in origin.original):
+            return self._empty_rule_offer(application)
+        return LearningPrompt(
+            origin.source_group, origin.target_group, origin.original, origin.replacement,
+            application, "keep" if origin.automatic else "convert",
+        )
+
+    def _empty_rule_offer(self, application: str) -> LearningPrompt:
+        current = self.snapshot.current_group
+        group = current if current in self.models else next(iter(self.models), 0)
+        target = next((item for item in self.models if item != group), group)
+        return LearningPrompt(group, target, "", "", application)
+
+    def _accepts_injected(self, event: KeyEvent) -> bool:
+        """Whether input another program injected is treated as the user's typing.
+
+        A key that carries a character instead of a key position (VK_PACKET on
+        Windows) never is: it cannot be typed again in another layout.
+        """
+
+        return self._injected_input and event.key_name != UNICODE_PACKET_KEY_NAME
+
+    def _observe_foreign_input(self, event: KeyEvent) -> None:
+        """Input another program injected: the text changed in a way not typed here.
+
+        Remote control (TeamViewer, AnyDesk), macros and on-screen keyboards send
+        keys of their own. They are not this keyboard's typing - the machine where
+        they are typed has its own switcher - so they are neither words nor
+        hotkeys nor keys to wait for; only the text they change is no longer known.
+        """
+
+        if not event.pressed or event.key_name in MODIFIER_KEYS:
+            return
+        self._convert_press_at = 0.0
+        if not self._foreign_input_active:
+            self._foreign_input_active = True
+            self._technical_event(
+                "foreign_input_observed",
+                key_name=event.key_name,
+                application=self.backend.active_application(),
+                word_length=len(self._strokes),
+                action_waiting=self._deferred_action is not None,
+            )
+        if self._deferred_action is not None:
+            # The user's own Enter is waiting for its keys to come up; the
+            # injected key is held behind it and follows it. Nothing to undo.
+            return
+        self._clear_word(reason="foreign_input")
+        self._untracked_token = False
+        self._last_committed_stale = True
+        self._contexts.clear()
+
     def _reversal_of_last_correction(
         self, plan: CorrectionPlan
     ) -> CorrectionPlan | None:
@@ -3384,6 +3582,7 @@ class KeySwitchEngine:
             self._update(last_error=str(error), last_action="Раскладка не переключена")
             return
         self._note_engine_switch(target)
+        self._convert_outcome = "switch"
         protects = bool(self.settings.get("detection.respect_manual_layout", True))
         self._manual_layout_group = target if protects else None
         self._manual_layout_observed_at = time.monotonic()
@@ -3426,7 +3625,7 @@ class KeySwitchEngine:
             False,
             "early_undo",
         )
-        self._pending_learning_action = None
+        self._learning_prompt_after = None
         self._pending_trigger_keycode = trigger_keycode
         self._manual_release_deadline = time.monotonic() + MANUAL_RELEASE_TIMEOUT_SECONDS
         self._technical_event(
@@ -3440,7 +3639,7 @@ class KeySwitchEngine:
         if self._pending is not None and self._pending.mode == "early":
             self._log_pending_dropped("replaced_by_undo")
             self._pending = None
-            self._pending_learning_action = None
+            self._learning_prompt_after = None
             self._early_switch_undone = True
             self._update(last_action="Раннее переключение отменено до замены")
             return
@@ -3473,23 +3672,16 @@ class KeySwitchEngine:
             "undo",
             trailing=previous.trailing,
         )
-        self._pending_learning_action = (
-            (
-                "reject",
-                previous.source_group,
-                previous.original,
-                previous.target_group,
-            )
-            if previous.automatic
-            else None
-        )
+        # Undo puts the text back and teaches nothing; a rule that keeps the
+        # word comes only from the rule window.
+        self._learning_prompt_after = None
         self._pending_trigger_keycode = trigger_keycode
         self._manual_release_deadline = time.monotonic() + MANUAL_RELEASE_TIMEOUT_SECONDS
 
     def _maybe_execute_pending(self, event: KeyEvent) -> None:
         if self._deferred_action is not None and not self._pressed and not self._modifier_keycodes:
             plan, self._pending = self._pending, None
-            self._pending_learning_action = None
+            self._learning_prompt_after = None
             succeeded = plan is None or self._execute_correction(plan, None)
             if self._deferred_action is not None:
                 self._complete_deferred_action(succeeded, "corrected" if plan else "no_correction")
@@ -3505,7 +3697,7 @@ class KeySwitchEngine:
             return
         plan, self._pending = self._pending, None
         self._manual_release_deadline = 0.0
-        learning_action, self._pending_learning_action = self._pending_learning_action, None
+        learning_prompt, self._learning_prompt_after = self._learning_prompt_after, None
         if plan.mode in ("early", "early_undo", "late_stroke"):
             refreshed = self._refresh_early_plan(plan)
             if refreshed is None:
@@ -3521,13 +3713,14 @@ class KeySwitchEngine:
             typed = tuple(self._strokes)
             if len(typed) >= len(plan.strokes) and typed[:len(plan.strokes) - 1] == plan.strokes[1:]:
                 plan = self._mention_write_back(plan.strokes[0], typed, (), None, plan.application)
-        self._execute_correction(plan, learning_action)
+        self._execute_correction(plan, learning_prompt)
 
     def _execute_correction(
         self,
         plan: CorrectionPlan,
-        learning_action: tuple[str, int, str, int] | None,
+        learning_prompt: LearningPrompt | None,
     ) -> bool:
+        requested = plan
         if plan.head:
             # The word decided; the mention head is rewritten with it, and the
             # rule the user may confirm still names the word alone.
@@ -3729,8 +3922,8 @@ class KeySwitchEngine:
                 last_error="",
             )
             return True
-        self._last_correction = plan
-        self._last_correction_time = time.monotonic()
+        self._remember_correction(plan)
+        self._last_requested_plan = requested
         if plan.mode == "symbols":
             self._update(
                 current_group=plan.target_group,
@@ -3769,41 +3962,8 @@ class KeySwitchEngine:
             if not plan.automatic:
                 self._manual_layout_group = plan.target_group
         self._remember_context(plan.application, plan.target_group, plan.strokes)
-        rejected_rule = False
-        learning_prompt: LearningPrompt | None = None
-        if learning_action is not None and bool(self.settings.get("detection.learning", True)):
-            action, source_group, word, target_group = learning_action
-            excluded = self._application_excluded(plan.application)
-            if action == "manual":
-                # A manual conversion asks, it does not teach. Only Enter on the
-                # prompt records the confirmation; typing on, clicking, changing
-                # focus or letting the prompt time out leaves the rules exactly
-                # as they were, which is what Escape does too.
-                required = self._learning_confirmations()
-                rule_target, confirmations = self.learning.rule_state(source_group, word)
-                if not (rule_target == target_group and confirmations >= required):
-                    learning_prompt = LearningPrompt(
-                        source_group,
-                        target_group,
-                        plan.original,
-                        plan.replacement,
-                        plan.application,
-                    )
-            elif action == "reject":
-                self.learning.reject(source_group, word, target_group)
-                rejected_rule = True
-                self._technical_event(
-                    "learning_rejection_recorded",
-                    word="<redacted>" if excluded else word,
-                    source_group=source_group,
-                    target_group=target_group,
-                    application=plan.application,
-                    application_excluded=excluded,
-                )
         count = self.snapshot.correction_count + (1 if plan.automatic else 0)
         action = f"{plan.original} → {plan.replacement}"
-        if rejected_rule:
-            action += " · ложное срабатывание запомнено"
         self._update(
             current_group=plan.target_group,
             correction_count=count,
@@ -3918,6 +4078,7 @@ class KeySwitchEngine:
             source_group=prompt.source_group,
             target_group=prompt.target_group,
             application=prompt.application,
+            action=prompt.action,
             timeout_seconds=LEARNING_PROMPT_TIMEOUT_SECONDS,
         )
         for callback in callbacks:
@@ -3943,6 +4104,8 @@ class KeySwitchEngine:
         """
 
         if not event.pressed or event.synthetic:
+            return False
+        if self._input_suspended or (event.foreign and not self._accepts_injected(event)):
             return False
         if self._sensitive_context_window is not None:
             return False
@@ -4040,7 +4203,7 @@ class KeySwitchEngine:
         self._early_switch_at = None
         self._reset_pause_correction()
         self._pending = None
-        self._pending_learning_action = None
+        self._learning_prompt_after = None
         self._manual_release_deadline = 0.0
         self._last_committed_stale = True
         if action is None:
@@ -4054,6 +4217,7 @@ class KeySwitchEngine:
             self._cancel_context_wait("settings_changed")
             self._sensitive_context_window = None
         self._action_keys = self._configured_action_keys()
+        self._injected_input = bool(self.settings.get("detection.injected_input", False))
         if path == "*":
             self.dismiss_learning_prompt(reason="settings_reloaded")
             self._update(enabled=bool(self.settings.get("enabled", True)))
@@ -4090,6 +4254,7 @@ class KeySwitchEngine:
 
         self._own_layout_ignored = False
         self._sensitive_context_window = None
+        self._convert_press_at = 0.0
         dropped = len(self._strokes)
         self._clear_word(reason="focus_changed")
         self._untracked_token = False

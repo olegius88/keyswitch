@@ -71,7 +71,6 @@ def main() -> int:
         raise RuntimeError("Windows E2E must run on Windows")
 
     from keyswitch.config import SettingsStore
-    from keyswitch.constants.settings_defaults import DEFAULT_LEARNING_CONFIRMATIONS
     from keyswitch.windows_backend import NativeInput, NativeKeyEvent
     from keyswitch.windows_native import CtypesWindowsAPI
     from keyswitch.windows_tray import WindowsTrayState
@@ -150,6 +149,9 @@ def main() -> int:
         # by unit tests and would race with the burst here.
         settings.set("detection.early_switch", False)
         settings.set("updates.check_automatically", False)
+        # The scenario types with SendInput, which Windows marks as injected by
+        # another program; the setting lets KeySwitch treat it as typing.
+        settings.set("detection.injected_input", True)
 
         print("WINDOWS_UI_INIT_START", flush=True)
         visual_application = WindowsApplication(WindowsServices(), hidden=False, no_engine=True)
@@ -519,40 +521,58 @@ def main() -> int:
 
         def wait_for_learning_confirmation() -> None:
             try:
-                required = int(
-                    application.settings.get(
-                        "detection.learning_confirmations", DEFAULT_LEARNING_CONFIRMATIONS
-                    )
-                )
                 confirmed = (
                     application.engine.learning_prompt is None
                     and application.learning_prompt.window.state() == "withdrawn"
-                    and application.engine.learning.forced_target(
-                        0, "hello", required
-                    )
-                    == 1
+                    and application.rule_editor is None
+                    and application.engine.learning.forced_target(0, "hello") == 1
                 )
                 if not confirmed:
                     if time.monotonic() >= learning_deadline[0]:
                         raise RuntimeError(
-                            "Learning confirmation timed out; "
+                            "Rule window confirmation timed out; "
                             f"prompt={application.engine.learning_prompt!r}, "
-                            "window_state="
-                            f"{application.learning_prompt.window.state()!r}"
+                            f"rule_window={application.rule_editor!r}, "
+                            f"rules={application.engine.learning.rules()!r}"
                         )
                     application.root.after(WINDOWS_E2E_POLL_MS, wait_for_learning_confirmation)
                     return
                 if application.root.state() != "zoomed":
                     raise RuntimeError(
-                        "Learning prompt changed the maximized target window "
+                        "The rule offer changed the maximized target window "
                         f"to {application.root.state()!r}"
                     )
                 if entered_messages:
                     raise RuntimeError(f"Prompt Enter leaked to the editor: {entered_messages!r}")
                 if application.test_entry.get() != "руддщ":
-                    raise RuntimeError("Prompt confirmation changed the editor text")
+                    raise RuntimeError("The rule offer changed the editor text")
                 print("WINDOWS_PROMPT_ENTER_NO_LEAK_E2E_OK", flush=True)
                 prepare_learned_input()
+            except Exception as error:
+                fail(error)
+
+        def wait_for_rule_window() -> None:
+            try:
+                editor = application.rule_editor
+                ready = (
+                    editor is not None
+                    and editor.window.state() == "normal"
+                    and application.root.focus_get() is editor.entry
+                    and editor.pattern.get() == "hello"
+                )
+                if not ready:
+                    if time.monotonic() >= learning_deadline[0]:
+                        raise RuntimeError(
+                            "Rule window did not open with the keyboard; "
+                            f"editor={editor!r}, focus={application.root.focus_get()!r}"
+                        )
+                    application.root.after(WINDOWS_E2E_POLL_MS, wait_for_rule_window)
+                    return
+                print("WINDOWS_RULE_WINDOW_E2E_OK", flush=True)
+                # Enter in the rule window is OK.
+                send_virtual_key(VK_RETURN)
+                learning_deadline[0] = time.monotonic() + WINDOWS_E2E_STANDARD_DEADLINE_SECONDS
+                application.root.after(WINDOWS_E2E_POLL_MS, wait_for_learning_confirmation)
             except Exception as error:
                 fail(error)
 
@@ -570,24 +590,29 @@ def main() -> int:
                 if not ready:
                     if time.monotonic() >= learning_deadline[0]:
                         raise RuntimeError(
-                            "Learning prompt timed out; "
+                            "Rule offer timed out; "
                             f"text={application.test_entry.get()!r}, "
                             f"group={application.backend.current_group()}, "
                             f"prompt={prompt!r}, window={popup.window.state()!r}"
                         )
                     application.root.after(WINDOWS_E2E_POLL_MS, wait_for_learning_prompt)
                     return
+                if prompt is None or (prompt.original, prompt.action) != ("hello", "convert"):
+                    raise RuntimeError(f"Unexpected rule offer {prompt!r}")
                 anchor = popup.anchor
                 if anchor is None or anchor.window is None:
-                    raise RuntimeError("Learning prompt has no Win32 caret anchor")
+                    raise RuntimeError("Rule offer has no Win32 caret anchor")
                 popup.window.update_idletasks()
                 if popup.window.winfo_y() + popup.window.winfo_height() > anchor.y:
                     raise RuntimeError(
-                        "Learning prompt was not positioned above the caret"
+                        "Rule offer was not positioned above the caret"
                     )
+                # Enter on the offer opens the rule window; nothing is stored yet.
                 send_virtual_key(VK_RETURN)
+                if application.engine.learning.count():
+                    raise RuntimeError("A rule was stored before OK in the rule window")
                 learning_deadline[0] = time.monotonic() + WINDOWS_E2E_STANDARD_DEADLINE_SECONDS
-                application.root.after(WINDOWS_E2E_POLL_MS, wait_for_learning_confirmation)
+                application.root.after(WINDOWS_E2E_POLL_MS, wait_for_rule_window)
             except Exception as error:
                 fail(error)
 
@@ -617,6 +642,8 @@ def main() -> int:
                         )
                     application.root.after(WINDOWS_E2E_POLL_MS, wait_for_typed_learning_word)
                     return
+                # A double press: the first converts the word, the second offers a rule.
+                send_virtual_key(VK_PAUSE)
                 send_virtual_key(VK_PAUSE)
                 learning_deadline[0] = time.monotonic() + WINDOWS_E2E_LONG_DEADLINE_SECONDS
                 application.root.after(WINDOWS_E2E_POLL_MS, wait_for_learning_prompt)

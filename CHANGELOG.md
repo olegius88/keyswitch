@@ -4,6 +4,41 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.36.0 — 2026-10-01
+
+- Replace self-learning with switching rules that exist only once they are confirmed. A double
+  press of the manual conversion key (Pause) leaves the last word the opposite of what the
+  program did - a wrong correction is undone, a missed one is made - and offers a rule above the
+  caret; Enter opens the rule window, already filled in: the letters as typed, the condition
+  (the word contains them, starts with them or matches them), case sensitivity and the action
+  (convert the word or keep it). The rule is stored only by OK in that window. Before, a single
+  Pause showed an offer that Enter accepted at once - easily by an Enter meant for the message -
+  and undoing a correction silently stored a ban, so rules appeared that nobody had asked for.
+  A single Pause and the undo hotkey now only fix the text. When several rules fit a word the
+  most specific one decides: a whole word, then a beginning, then a part; longer letters first;
+  on a tie "keep". The rules are listed, added, edited and removed on the Maintenance page (in
+  Linux, in the automatic correction settings). A learning file of the old schema is converted on
+  first start: a counter that had reached the threshold becomes a "convert" rule, a ban becomes a
+  "keep" rule, counters that never acted are dropped, and the old file is kept as
+  `learning.json.v2-backup`. The "confirmations for a rule" setting is gone.
+- Do not treat keys another program injects on Windows as typing. A computer controlled through
+  TeamViewer receives the remote typing as injected keys, much of it as characters
+  (`VK_PACKET`) whose releases never reached KeySwitch: every Enter there waited about two
+  seconds for those releases, a click during the wait dropped it, a Pause pressed on the
+  controlling computer also switched the layout of the controlled one, and words made of such
+  keys were judged a second time. Injected keys now reset the word, are never waited for, and
+  neither hotkeys nor Enter/Tab are taken from them; the switcher of the computer where they
+  are typed corrects them. The new "input from other programs" setting restores the previous
+  behaviour, except for `VK_PACKET`, which is never a key that can be held or typed again in
+  another layout.
+- Replay a `VK_PACKET` character held behind a correction as a character (`KEYEVENTF_UNICODE`)
+  instead of as a bogus scan code, and mark the replay of another program's key so it stays
+  known as injected.
+- Bring the rule window to the front from the hotkey: Windows lets only the program in front
+  move the foreground, so the window borrows the input of the thread in front for the switch
+  instead of only flashing in the taskbar. While the rule window is open, what is typed in it is
+  not treated as text to correct.
+
 - Let LogCourier clear its log group and start over. The new "clear the group and start
   again" button on the sending tab takes every pin down, deletes the group's messages a bot
   may delete and starts a new chain of catalogs, while collection and sending go on. Telegram

@@ -10,7 +10,6 @@ from unittest.mock import patch
 from keyswitch.config import SettingsStore
 from keyswitch.constants.settings_defaults import (
     DEFAULT_CONFIDENCE_THRESHOLD,
-    DEFAULT_LEARNING_CONFIRMATIONS,
 )
 from keyswitch.detector import DetectionDecision, LanguageDetector
 from keyswitch.engine import Hotkey, KeySwitchEngine, LearningPrompt
@@ -24,7 +23,8 @@ from keyswitch.indicator import (
     normalize_indicator_style,
 )
 from keyswitch.language_model import LanguageModel
-from keyswitch.learning import LearningStore
+from keyswitch.learning import LearnedRule
+from keyswitch.rule_editor import build_rule, draft_from_prompt
 from keyswitch.layouts import LayoutPair
 from keyswitch.language_model import WordScore
 from keyswitch.short_words import (
@@ -59,17 +59,15 @@ from fixture_values.clock import (
 )
 from fixture_values.corpora import SHORT_SOURCE_VETO_TARGET_WORD_FREQUENCY
 from fixture_values.counts import (
-    CORE_EXPECTED_VALID_RULE_COUNT,
     CORE_INJECTIONS_AFTER_LEARNED_RULE_APPLIES,
+    CORE_DOUBLE_PRESS_COUNT,
     CORE_INJECTIONS_AFTER_SECOND_CORRECTION,
-    CORE_MALFORMED_RULE_CONFIRMATIONS,
     CORE_REPEATED_MANUAL_CONVERSIONS,
     HISTORY_LIMIT_FIXTURE,
     INJECTION_BOUNDARY_INDEX,
     NON_DEFAULT_MINIMUM_WORD_LENGTH,
 )
 from fixture_values.keys import (
-    ALTERNATE_TARGET_GROUP,
     ALT_L_KEYCODE,
     COMMA_KEYCODE,
     CONTROL_L_KEYCODE,
@@ -242,7 +240,7 @@ class SettingsTests(unittest.TestCase):
             self.assertTrue(store.get("detection.respect_manual_layout"))
             self.assertTrue(store.get("detection.correct_on_pause"))
             self.assertTrue(store.get("detection.learning"))
-            self.assertEqual(store.get("detection.learning_confirmations"), DEFAULT_LEARNING_CONFIRMATIONS)
+            self.assertFalse(store.get("detection.injected_input"))
             store.set("enabled", False)
             self.assertFalse(SettingsStore(path).get("enabled"))
 
@@ -278,122 +276,6 @@ class SettingsTests(unittest.TestCase):
             assert isinstance(layouts, list)
             layouts.append("de")
             self.assertEqual(store.default("detection.layouts"), ["us", "ru"])
-
-
-class LearningTests(unittest.TestCase):
-    def test_manual_confirmations_and_rejection_are_persistent(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "learning.json"
-            learning = LearningStore(path)
-            self.assertEqual(learning.record_manual(0, "qwerty", 1), 1)
-            self.assertIsNone(learning.forced_target(0, "QWERTY", DEFAULT_LEARNING_CONFIRMATIONS))
-            self.assertEqual(learning.record_manual(0, "qwerty", 1), DEFAULT_LEARNING_CONFIRMATIONS)
-            self.assertEqual(
-                LearningStore(path).forced_target(0, "Qwerty", DEFAULT_LEARNING_CONFIRMATIONS), 1
-            )
-            learning.reject(0, "qwerty", 1)
-            self.assertIsNone(learning.forced_target(0, "qwerty", 1))
-            self.assertEqual(learning.rejected_targets(0, "qwerty"), {1})
-
-    def test_rules_and_rejections_are_forgotten_separately(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "learning.json"
-            learning = LearningStore(path)
-            learning.record_manual(0, "qwerty", 1)
-            learning.record_manual(1, "йцукен", 0)
-            learning.reject(1, "ты", 0)
-            learning.reject(1, "ты", ALTERNATE_TARGET_GROUP)
-            self.assertTrue(learning.remove_rule(0, "QWERTY"))
-            self.assertFalse(learning.remove_rule(0, "qwerty"))
-            self.assertTrue(learning.remove_rejection(1, "ты", ALTERNATE_TARGET_GROUP))
-            self.assertFalse(learning.remove_rejection(1, "ты", ALTERNATE_TARGET_GROUP))
-            self.assertFalse(learning.remove_rejection(1, "нет", 0))
-            self.assertEqual(learning.rejected_targets(1, "ты"), {0})
-            self.assertEqual(LearningStore(path).counts(), (1, 1))
-            # Clearing what went wrong keeps the user's own "not this word".
-            learning.clear_rules()
-            self.assertEqual(LearningStore(path).counts(), (0, 1))
-            # Removing the last forbidden direction removes the word's entry.
-            self.assertTrue(learning.remove_rejection(1, "ты", 0))
-            self.assertEqual(learning.rejected_targets(1, "ты"), set())
-            learning.record_manual(0, "qwerty", 1)
-            learning.reject(0, "asdf", 1)
-            learning.clear_rejections()
-            self.assertEqual(LearningStore(path).counts(), (1, 0))
-
-    def test_layout_punctuation_is_part_of_the_learned_identity(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            learning = LearningStore(Path(directory) / "learning.json")
-            learning.record_manual(0, ",fpf", 1)
-            learning.record_manual(0, ",fpf", 1)
-            self.assertEqual(learning.forced_target(0, ",FPF", DEFAULT_LEARNING_CONFIRMATIONS), 1)
-            self.assertIsNone(learning.forced_target(0, "fpf", DEFAULT_LEARNING_CONFIRMATIONS))
-
-
-class LearningRuleStateTests(unittest.TestCase):
-    def test_a_pending_rule_is_readable_before_it_becomes_active(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            store = LearningStore(Path(directory) / "learning.json")
-            self.assertEqual(store.rule_state(0, "qwerty"), (None, 0))
-
-            store.record_manual(0, "qwerty", 1)
-            self.assertEqual(store.rule_state(0, "qwerty"), (1, 1))
-            # One confirmation is not yet a rule that forces a conversion.
-            self.assertIsNone(store.forced_target(0, "qwerty", DEFAULT_LEARNING_CONFIRMATIONS))
-
-            store.record_manual(0, "qwerty", 1)
-            self.assertEqual(store.rule_state(0, "qwerty"), (1, DEFAULT_LEARNING_CONFIRMATIONS))
-            self.assertEqual(store.forced_target(0, "qwerty", DEFAULT_LEARNING_CONFIRMATIONS), 1)
-
-            # A malformed rule reads as no rule at all.
-            store._data["rules"][store._key(0, "qwerty")] = {"confirmations": CORE_MALFORMED_RULE_CONFIRMATIONS}
-            self.assertEqual(store.rule_state(0, "qwerty"), (None, 0))
-            store._data["rules"][store._key(0, "qwerty")] = "broken"
-            self.assertEqual(store.rule_state(0, "qwerty"), (None, 0))
-
-    def test_the_settings_window_can_list_what_was_learned(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            store = LearningStore(Path(directory) / "learning.json")
-            self.assertEqual(store.rules(), ())
-            self.assertEqual(store.rejections(), ())
-
-            store.record_manual(0, "ghbdtn", 1)
-            store.record_manual(0, "ghbdtn", 1)
-            store.record_manual(1, "руддщ", 0)
-            store.reject(0, "hjrjdsq", 1)
-
-            self.assertEqual(
-                [
-                    (rule.word, rule.source_group, rule.target_group,
-                     rule.confirmations, rule.active)
-                    for rule in store.rules(DEFAULT_LEARNING_CONFIRMATIONS)
-                ],
-                [("ghbdtn", 0, 1, DEFAULT_LEARNING_CONFIRMATIONS, True), ("руддщ", 1, 0, 1, False)],
-            )
-            # A stricter threshold leaves the same rule waiting.
-            self.assertFalse(store.rules(DEFAULT_LEARNING_CONFIRMATIONS + 1)[0].active)
-            self.assertEqual(
-                [
-                    (item.word, item.source_group, item.target_group)
-                    for item in store.rejections()
-                ],
-                [("hjrjdsq", 0, 1)],
-            )
-
-            # Damaged entries are skipped instead of breaking the listing.
-            rules = store._data["rules"]
-            rules["broken"] = {"target_group": 1, "confirmations": 1}
-            rules["x:word"] = {"target_group": 1, "confirmations": 1}
-            rules[store._key(0, "text")] = "not a rule"
-            rules[store._key(0, "other")] = {"confirmations": 1}
-            rejections = store._data["rejections"]
-            rejections["broken"] = [1]
-            rejections[store._key(0, "word")] = "not a list"
-            rejections[store._key(0, "mixed")] = [1, "nonsense"]
-            self.assertEqual(len(store.rules(DEFAULT_LEARNING_CONFIRMATIONS)), CORE_EXPECTED_VALID_RULE_COUNT)
-            self.assertEqual(
-                [item.word for item in store.rejections()], ["hjrjdsq", "mixed"]
-            )
 
 
 class SpellcheckTests(unittest.TestCase):
@@ -844,28 +726,33 @@ class EngineTests(unittest.TestCase):
         self.assertEqual("".join(item.character_for(target) for item in strokes), "руддщ")
         self.assertIsNotNone(boundary)
 
-    def test_enter_confirms_manual_conversion_as_an_immediate_rule(self) -> None:
+    def test_a_double_pause_offers_the_rule_window_and_its_rule_applies_itself(self) -> None:
         prompts: list[LearningPrompt | None] = []
+        requests: list[LearningPrompt] = []
         self.engine.subscribe_learning_prompts(prompts.append)
+        self.engine.subscribe_rule_requests(requests.append)
         for index, character in enumerate("hello", start=SYNTHETIC_KEYCODE_BASE):
             self.engine._handle(letter_event(character, index, 0, self.pair))
             self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         pause = KeyEvent(True, PAUSE_KEYCODE, "Pause", "", ("", ""), 0, 0, CORE_PAUSE_PRESS_TIMESTAMP)
-        self.engine._handle(pause)
-        self.engine._handle(release_event(pause))
+        for _press in range(CORE_DOUBLE_PRESS_COUNT):
+            self.engine._handle(pause)
+            self.engine._handle(release_event(pause))
 
         prompt = self.engine.learning_prompt
-        self.assertIsNotNone(prompt)
         assert prompt is not None
-        self.assertEqual((prompt.original, prompt.replacement), ("hello", "руддщ"))
-        self.assertIsNone(self.engine.learning.forced_target(0, "hello", DEFAULT_LEARNING_CONFIRMATIONS))
+        self.assertEqual((prompt.original, prompt.replacement, prompt.action), ("hello", "руддщ", "convert"))
+        self.assertIsNone(self.engine.learning.forced_target(0, "hello"))
 
         enter = KeyEvent(True, RETURN_KEYCODE, "Return", "\n", ("\n", "\n"), 1, 0, CORE_ENTER_TIMESTAMP)
         self.engine._handle(enter)
         self.assertIsNone(self.engine.learning_prompt)
-        self.assertEqual(self.engine.learning.forced_target(0, "hello", DEFAULT_LEARNING_CONFIRMATIONS), 1)
         self.assertEqual(prompts[-1], None)
-        self.assertIn("правило выучено", self.engine.snapshot.last_action)
+        self.assertEqual(requests, [prompt])
+        # Nothing is remembered until OK in the rule window.
+        self.assertIsNone(self.engine.learning.forced_target(0, "hello"))
+        self.engine.add_learning_rule(build_rule(draft_from_prompt(prompt)), application=prompt.application)
+        self.assertEqual(self.engine.learning.forced_target(0, "hello"), 1)
 
         self.engine._manual_layout_group = 0
         for index, character in enumerate("hello", start=CORE_SECOND_WORD_KEYCODE_BASE):
@@ -928,8 +815,8 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(self.backend.injections[0][1], 0)
         self.assertIsNone(self.backend.injections[0][INJECTION_BOUNDARY_INDEX])
 
-    def test_repeated_manual_conversions_teach_nothing_until_enter(self) -> None:
-        """Only the answer to the prompt teaches; repeating the fix does not."""
+    def test_repeated_manual_conversions_teach_nothing_until_a_rule_is_added(self) -> None:
+        """Only OK in the rule window teaches; repeating the fix does not."""
 
         self.settings.set("detection.respect_manual_layout", False)
 
@@ -944,8 +831,8 @@ class EngineTests(unittest.TestCase):
 
         for _attempt in range(CORE_REPEATED_MANUAL_CONVERSIONS):
             convert()
-        self.assertEqual(self.engine.learning.counts(), (0, 0))
-        self.assertIsNone(self.engine.learning.forced_target(0, "qwerty", DEFAULT_LEARNING_CONFIRMATIONS))
+        self.assertEqual(self.engine.learning.count(), 0)
+        self.assertIsNone(self.engine.learning.forced_target(0, "qwerty"))
 
         # The word is still corrected by hand every time, never on its own.
         self.backend.group = 0
@@ -956,10 +843,10 @@ class EngineTests(unittest.TestCase):
         self.engine._handle(boundary_event(False))
         self.assertEqual(len(self.backend.injections), CORE_INJECTIONS_AFTER_SECOND_CORRECTION)
 
-        # Enter on the prompt is what makes the rule, and then it applies itself.
+        # A rule from the rule window applies itself.
         convert()
-        self.assertTrue(self.engine.confirm_learning_prompt())
-        self.assertEqual(self.engine.learning.forced_target(0, "qwerty", DEFAULT_LEARNING_CONFIRMATIONS), 1)
+        self.engine.add_learning_rule(LearnedRule("qwerty", 0, 1))
+        self.assertEqual(self.engine.learning.forced_target(0, "qwerty"), 1)
         self.backend.group = 0
         for index, character in enumerate("qwerty", start=SYNTHETIC_KEYCODE_BASE):
             self.engine._handle(letter_event(character, index, 0, self.pair))
@@ -988,14 +875,16 @@ class EngineTests(unittest.TestCase):
         for event in events:
             self.engine._handle(event)
         self.assertEqual([item[1] for item in self.backend.injections], [1, 0])
-        self.assertEqual(self.engine.learning.rejected_targets(0, "ghbdtn"), {1})
+        self.assertEqual(self.engine.learning.count(), 0)
         self.backend.group = 0
         for index, character in enumerate("ghbdtn", start=SYNTHETIC_KEYCODE_BASE):
             self.engine._handle(letter_event(character, index, 0, self.pair))
             self.engine._handle(release_event(letter_event(character, index, 0, self.pair)))
         self.engine._handle(boundary_event(True))
         self.engine._handle(boundary_event(False))
-        self.assertEqual([item[1] for item in self.backend.injections], [1, 0])
+        # The undo taught nothing: the word is corrected again. Keeping it takes
+        # a rule from the rule window.
+        self.assertEqual([item[1] for item in self.backend.injections], [1, 0, 1])
 
 
 class HotkeyTests(unittest.TestCase):

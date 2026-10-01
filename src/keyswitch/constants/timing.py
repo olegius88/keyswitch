@@ -26,6 +26,10 @@ EVENT_DRAIN_INITIAL_DELAY_MS: Final = 25
 APPLICATION_CAPTURE_DELAY_MS: Final = 3000
 # The learning prompt waits this long for an answer.
 LEARNING_PROMPT_TIMEOUT_SECONDS: Final = 8.0
+# A second press of the manual conversion hotkey this soon after the first one, with its release in
+# between and no other key, asks for a switching rule instead of converting the word back. The
+# Windows default double-click time is the same half second.
+DOUBLE_CONVERT_PRESS_WINDOW_SECONDS: Final = 0.5
 # A layout change observed this soon after the engine switched the layout itself (correction, menu
 # action) is the engine's own switch, not the user's.
 ENGINE_SWITCH_GRACE_SECONDS: Final = 1.5

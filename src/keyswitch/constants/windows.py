@@ -56,6 +56,9 @@ VK_OEM_4: Final = 0xDB
 VK_OEM_5: Final = 0xDC
 VK_OEM_6: Final = 0xDD
 VK_OEM_7: Final = 0xDE
+# A key event that carries a Unicode character in its scan code field (SendInput with
+# KEYEVENTF_UNICODE): remote control and on-screen keyboards type with it.
+VK_PACKET: Final = 0xE7
 # Alphanumeric keys: winuser.h defines no VK_0.. VK_9 / VK_A.. VK_Z constants because their values
 # equal the ASCII digits and upper-case letters.
 VK_0: Final = 0x30
@@ -93,12 +96,15 @@ LLKHF_EXTENDED: Final = 0x01
 LLKHF_INJECTED: Final = 0x10
 KEYEVENTF_EXTENDEDKEY: Final = 0x0001
 KEYEVENTF_KEYUP: Final = 0x0002
+KEYEVENTF_UNICODE: Final = 0x0004
 KEYEVENTF_SCANCODE: Final = 0x0008
 INPUT_KEYBOARD: Final = 1
 PROCESS_QUERY_LIMITED_INFORMATION: Final = 0x1000
-# dwExtraInfo marks on the keys KeySwitch sends itself (synthetic) and replays.
+# dwExtraInfo marks on the keys KeySwitch sends itself (synthetic) and replays; a replay of a key
+# another program injected carries its own mark, so it is still known as injected.
 KEYSWITCH_EXTRA_INFO: Final = 0x4B535743
 KEYSWITCH_REPLAY_INFO: Final = 0x4B535752
+KEYSWITCH_FOREIGN_REPLAY_INFO: Final = 0x4B535746
 GA_ROOT: Final = 2
 GWL_EXSTYLE: Final = -20
 WS_EX_TOOLWINDOW: Final = 0x00000080

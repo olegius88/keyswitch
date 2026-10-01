@@ -1,4 +1,4 @@
-.TH KEYSWITCH 1 "September 2026" "KeySwitch 0.35.1" "User Commands"
+.TH KEYSWITCH 1 "October 2026" "KeySwitch 0.36.0" "User Commands"
 .SH NAME
 keyswitch \- automatic keyboard layout correction for Ubuntu X11
 .SH SYNOPSIS
@@ -142,11 +142,14 @@ Settings, exclusions, hotkeys, history and diagnostics are available from the
 application window. Left-clicking the desktop indicator opens its native menu
 with correction toggles, settings, history, exclusions, about and quit actions.
 .PP
-After a manual word conversion with Pause/Break, KeySwitch displays a focused
-prompt above the input position. Enter immediately adds the conversion to the
-local switching rules; Escape dismisses the offer. Local learning and its
-fallback repeated-conversion threshold are configurable in the application.
-Enter confirming this prompt does not also submit a message. Ordinary X11
+Pressing Pause/Break twice right after a word leaves it the opposite of what
+KeySwitch did (a wrong correction undone, a missed one made) and offers a
+switching rule above the input position. Enter opens the rule window, filled
+in from the situation: the letters as typed, the condition (the word contains
+them, starts with them or matches them), case sensitivity and the action
+(convert the word or keep it). A rule is stored only by OK in that window;
+Escape dismisses the offer. A single Pause and the undo hotkey teach nothing.
+Enter answering the offer does not also submit a message. Ordinary X11
 Enter/Tab events cannot be delayed by XRecord, so correct the word using
 Space, idle correction or Pause before submitting or changing fields.
 .PP
@@ -181,7 +184,8 @@ User settings.
 Correction history, when enabled.
 .TP
 .I ~/.local/share/keyswitch/learning.json
-Explicitly learned conversions and rejected automatic corrections.
+Switching rules added in the rule window. A file of an older schema is
+converted on first start and kept as learning.json.v2-backup.
 .TP
 .I ~/.local/share/keyswitch/dictionaries/
 Optional per-user Hunspell dictionaries.

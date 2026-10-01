@@ -23,3 +23,6 @@ LAYOUT_LABELS: Final = {0: "EN", 1: "RU"}
 LAYOUT_NAMES: Final = {0: "английский (EN)", 1: "русский (RU)"}
 # Layout group a synthetic pointer event carries: it belongs to no layout.
 POINTER_EVENT_GROUP: Final = -1
+# Key name of a key event that carries a character instead of a key position (VK_PACKET on
+# Windows, sent with KEYEVENTF_UNICODE by remote control and on-screen keyboards).
+UNICODE_PACKET_KEY_NAME: Final = "Packet"

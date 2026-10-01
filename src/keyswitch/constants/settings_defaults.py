@@ -12,8 +12,6 @@ DEFAULT_CONFIDENCE_THRESHOLD: Final = 2.0
 DEFAULT_PAUSE_DELAY_SECONDS: Final = 1.5
 # Default of detection.early_switch_min_length; every fallback to the setting uses it.
 DEFAULT_EARLY_SWITCH_MIN_LENGTH: Final = 4
-# Default of detection.learning_confirmations; every fallback to the setting uses it.
-DEFAULT_LEARNING_CONFIRMATIONS: Final = 2
 # Default of history.limit; every fallback to the setting uses it.
 DEFAULT_HISTORY_LIMIT: Final = 200
 # The shipped settings; the persisted file is seeded from it and merged over it.
@@ -49,10 +47,13 @@ DEFAULT_SETTINGS: Final[dict[str, object]] = {
         "hold_after_caret_move": True,
         "protect_code": True,
         "intent_model_enabled": True,
+        # Switching rules from the rule window act, and a double press of the
+        # conversion hotkey offers one.
         "learning": True,
-        # The threshold a rule must reach to act. Enter on the prompt reaches it
-        # at once; rules left half-confirmed by older versions stay inactive.
-        "learning_confirmations": DEFAULT_LEARNING_CONFIRMATIONS,
+        # Keys other programs inject (remote control, macros, on-screen keyboards)
+        # count as typing on this keyboard. Off: the machine where they are typed
+        # has its own switcher, and waiting for their key-ups held Enter back.
+        "injected_input": False,
     },
     "hotkeys": {
         "toggle": "Ctrl+Alt+P",
@@ -99,9 +100,6 @@ CONFIDENCE_SETTING_STEP: Final = 0.1
 PAUSE_DELAY_SETTING_MIN_SECONDS: Final = 0.3
 PAUSE_DELAY_SETTING_MAX_SECONDS: Final = 5.0
 PAUSE_DELAY_SETTING_STEP_SECONDS: Final = 0.1
-# Most confirmations detection.learning_confirmations may ask for: both settings windows offer
-# 1 to this and the engine clamps a stored value into it.
-LEARNING_CONFIRMATIONS_SETTING_MAX: Final = 10
 # Allowed range and step of history.limit in the settings controls (only the Tk window offers it).
 HISTORY_LIMIT_SETTING_MIN: Final = 10
 HISTORY_LIMIT_SETTING_MAX: Final = 5000

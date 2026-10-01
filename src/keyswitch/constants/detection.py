@@ -30,10 +30,6 @@ NATURAL_SOURCE_BOUNDARY_NGRAM_FLOOR: Final = -0.25
 # application convention asks for (Telegram's quote shown as "@") - is certain; this stands in
 # for the confidence a model would have reported.
 UNSCORED_CORRECTION_CONFIDENCE: Final = 99.0
-# A replacement needs at least this many letters to be offered as a rule.
-MINIMUM_LEARNABLE_LETTERS: Final = 2
-# Cap on a learned rule's confirmation counter and on the confirmations a rule may require.
-MAX_LEARNING_CONFIRMATIONS: Final = 999
 # Context policy shared by the serving detector and the intent trainer and evaluator, which replay
 # its arithmetic offline: a LanguageModel context_score lies in [minimum, maximum]; the difference of
 # the target and source context scores is multiplied, then the recent context language adds the

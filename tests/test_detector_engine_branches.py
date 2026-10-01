@@ -20,6 +20,7 @@ from keyswitch import detector as detector_module
 from keyswitch import layouts
 from keyswitch.config import SettingsStore
 from keyswitch.detector import DetectionDecision, LanguageDetector
+from keyswitch.learning import LearnedRule
 from keyswitch.engine import (
     CorrectionPlan,
     EngineSnapshot,
@@ -67,7 +68,6 @@ from fixture_values.counts import (
     CLOSE_CALLS_AFTER_REPEATED_STOP,
     DETECTOR_OVERSIZED_MINIMUM_LENGTH,
     DETECTOR_RESCUE_INPUT_CALLS,
-    LEARNING_CONFIRMATIONS_REQUIRED,
     PROTECTED_TOKEN_OVERLENGTH_CHARACTERS,
 )
 from fixture_values.keys import (
@@ -910,7 +910,7 @@ class EngineBranchTests(unittest.TestCase):
             initialized.records[0].getMessage().removeprefix("TECHNICAL ")
         )
         self.assertEqual(initial_payload["event"], "engine_initialized")
-        self.assertEqual(initial_payload["keyswitch_version"], "0.35.1")
+        self.assertEqual(initial_payload["keyswitch_version"], "0.36.0")
         self.assertEqual(initial_payload["settings"]["overrides"], {"diagnostics.technical_logging": True})
 
     def test_start_stop_idempotence_and_backend_failure(self) -> None:
@@ -1105,14 +1105,14 @@ class EngineBranchTests(unittest.TestCase):
         self.assertIsNone(self.engine._pending)
         self.engine.models = original_models
 
-    def test_stale_undo_and_manual_undo_do_not_record_rejection(self) -> None:
+    def test_stale_undo_and_manual_undo_record_nothing(self) -> None:
         self.engine._schedule_undo(Z_KEYCODE)
         self.assertIn("нельзя отменить", self.engine.snapshot.last_action)
         plan = CorrectionPlan((letter("a"),), None, 0, 1, "a", "ф", CORRECTION_PLAN_CONFIDENCE, "Editor", False)
         self.engine._last_correction = plan
         self.engine._last_correction_time = time.monotonic()
         self.engine._schedule_undo(Z_KEYCODE)
-        self.assertIsNone(self.engine._pending_learning_action)
+        self.assertIsNone(self.engine._learning_prompt_after)
 
     def test_injection_error_and_disabled_history_learning(self) -> None:
         callback = Mock()
@@ -1129,35 +1129,20 @@ class EngineBranchTests(unittest.TestCase):
         self.settings.set("general.keep_history", False)
         self.settings.set("detection.learning", False)
         self.engine._pending = plan
-        self.engine._pending_learning_action = ("manual", 0, "a", 1)
         self.engine._pending_trigger_keycode = -1
         self.engine._maybe_execute_pending(key("x"))
         self.assertEqual(self.history.read(), [])
         callback.assert_called_once_with(plan)
 
-    def test_learning_action_labels_manual_and_reject(self) -> None:
-        self.settings.set("detection.learning_confirmations", 1)
+    def test_a_plan_shows_the_rule_offer_it_carries_once_it_has_run(self) -> None:
         manual = CorrectionPlan((letter("q"),), None, 0, 1, "q", "й", CORRECTION_PLAN_CONFIDENCE, "Editor", False)
+        offer = LearningPrompt(0, 1, "q", "й", "Editor")
         self.engine._pending = manual
-        self.engine._pending_learning_action = ("manual", 0, "q", 1)
+        self.engine._learning_prompt_after = offer
         self.engine._pending_trigger_keycode = -1
         self.engine._maybe_execute_pending(key("x"))
-        # The conversion itself only offers the rule; Enter writes it down.
         self.assertEqual(self.engine.snapshot.last_action, "q → й")
-        self.assertTrue(self.engine.confirm_learning_prompt())
-        self.assertIn("правило выучено", self.engine.snapshot.last_action)
-
-        automatic = CorrectionPlan((letter("a"),), None, 1, 0, "ф", "a", CORRECTION_PLAN_CONFIDENCE, "Editor", False)
-        self.engine._pending = automatic
-        self.engine._pending_learning_action = ("reject", 0, "source", 1)
-        self.engine._pending_trigger_keycode = -1
-        self.engine._maybe_execute_pending(key("x"))
-        self.assertIn("ложное срабатывание", self.engine.snapshot.last_action)
-
-        self.engine._pending = automatic
-        self.engine._pending_learning_action = ("unknown", 0, "source", 1)
-        self.engine._pending_trigger_keycode = -1
-        self.engine._maybe_execute_pending(key("x"))
+        self.assertIs(self.engine.learning_prompt, offer)
 
     def test_learning_prompt_confirmation_dismissal_and_expiry(self) -> None:
         callbacks: list[LearningPrompt | None] = []
@@ -1195,7 +1180,7 @@ class EngineBranchTests(unittest.TestCase):
         self.assertIsNone(self.engine._forced_target_group(0, "hello"))
 
     def test_manual_layout_protection_overrides_learned_rule_on_pause(self) -> None:
-        self.engine.learning.confirm_manual(0, "hello", 1, LEARNING_CONFIRMATIONS_REQUIRED)
+        self.engine.learning.add_rule(LearnedRule("hello", 0, 1))
         self.engine._manual_layout_group = 0
         self.engine._strokes = [
             letter(character, keycode)

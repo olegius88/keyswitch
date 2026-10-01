@@ -197,9 +197,6 @@ LOOKAHEAD_TOTAL_SEED_FIXTURES: Final = 12
 CONTEXT_FILLER_CHARACTERS: Final = 700
 FIELD_CONTEXT_OVERLONG_NAME_CHARACTERS: Final = 200
 FIELD_CONTEXT_OVERLONG_TEXT_CHARACTERS: Final = 900
-# Confirmations a learned rule requires in the tests: the detection.learning_confirmations they
-# configure, or the confirmations_required they pass to LearningStore.confirm_manual().
-LEARNING_CONFIRMATIONS_REQUIRED: Final = 2
 TECHNICAL_CORPUS_SPLIT_PROBE_COMMANDS: Final = 400
 TECHNICAL_CORPUS_TYPO_VARIANT_PROBES: Final = 100
 TECHNICAL_CORPUS_EXPECTED_KEPT_ROWS: Final = 2
@@ -230,8 +227,6 @@ CONTEXT_V2_FEWER_CONVERTED_CORRECTLY: Final = 480
 WAIT_PAIR_CONTEXT_SUFFIX_CHARACTERS: Final = 4
 # A detection.minimum_length a test configures instead of the default.
 NON_DEFAULT_MINIMUM_WORD_LENGTH: Final = 5
-CORE_MALFORMED_RULE_CONFIRMATIONS: Final = 3
-CORE_EXPECTED_VALID_RULE_COUNT: Final = 2
 # A history limit small enough that a test overflows it with a few entries.
 HISTORY_LIMIT_FIXTURE: Final = 2
 CORE_INJECTIONS_AFTER_SECOND_CORRECTION: Final = 2
@@ -269,7 +264,16 @@ REPLAYED_STROKE_COUNT: Final = 6
 REVERSED_CORRECTION_STROKE_COUNT: Final = 6
 DIGIT_WORD_STROKE_COUNT: Final = 3
 DISCARDED_WORD_LENGTH: Final = 2
-INJECTIONS_AFTER_REPEATED_REJECTION: Final = 2
+# Corrections in the engine tests: a correction, its undo by Pause and the same correction again
+# (nothing was learned from the undo).
+INJECTIONS_AFTER_REPEATED_CORRECTION: Final = 3
+# A manual conversion and the plain toggle back of a second press that came too late.
+INJECTIONS_AFTER_TOGGLE_BACK: Final = 2
+# A double Pause after a wrong correction: the correction and its undo by the first press.
+DOUBLE_PAUSE_INJECTIONS_AFTER_UNDO: Final = 2
+# A double Pause after the user had undone the correction: those two, the first press undoing
+# the user's fix and the second putting it back.
+DOUBLE_PAUSE_INJECTIONS_AFTER_RESTORED_FIX: Final = 4
 TOGGLE_REPEAT_COUNT: Final = 3
 INJECTIONS_AFTER_TOGGLES: Final = 4
 HELD_KEYS_DURING_INJECTION: Final = 2
@@ -285,9 +289,6 @@ ROLLOVER_INJECTION_STROKE_COUNT: Final = 5
 DROPPED_WORD_LENGTH: Final = 3
 INJECTIONS_AFTER_UNDO_REVERT: Final = 2
 INJECTIONS_AFTER_SECOND_EARLY_SWITCH: Final = 3
-LEARNING_PROMPT_REQUIRED_CONFIRMATIONS: Final = 5
-# A detection.learning_confirmations a test configures instead of the default.
-NON_DEFAULT_LEARNING_CONFIRMATIONS: Final = 3
 # A string setting value longer than LOGGED_SETTING_VALUE_MAX_CHARACTERS, so its logged form is
 # shortened.
 OVERSIZED_SETTING_STRING_CHARACTERS: Final = 100
@@ -579,10 +580,6 @@ READER_ATTEMPTS_AFTER_ONE_MORE_CAPPED_RETRY: Final = len(FIELD_READER_RETRY_DELA
 STOL_REOPENED_WORD_CHARACTERS: Final = 4
 NON_DEFAULT_HISTORY_LIMIT: Final = 50
 HISTORY_BRANCH_ENTRY_COUNT: Final = 3
-LEARNING_BROKEN_RULE_CONFIRMATIONS: Final = 2
-LEARNING_SCALAR_RULE_VALUE: Final = 5
-LEARNING_FULL_CONFIRMATIONS: Final = 5
-LEARNING_MALFORMED_RULE_VALUE: Final = 9
 LATIN_ALPHABET_SIZE: Final = 26
 LANGUAGE_MODEL_BEST_DELETION_WORD_LENGTH: Final = 30
 LANGUAGE_MODEL_BEST_DELETION_LIMIT: Final = 3
@@ -609,7 +606,7 @@ TRAY_CONTROLLER_EXPECTED_DRAW_COUNT: Final = 4
 GTK_EXPECTED_NAVIGATION_PAGE_COUNT: Final = 9
 GTK_EXPECTED_HEADER_MENU_ITEM_COUNT: Final = 3
 GTK_EXPECTED_APPLICATION_ROW_COUNT: Final = 3
-GTK_SAMPLE_CONFIRMED_RULES: Final = 2
+GTK_SAMPLE_RULE_COUNT: Final = 2
 NON_DEFAULT_EARLY_SWITCH_MIN_LENGTH: Final = 3
 GTK_EXPECTED_SAVE_HOTKEY_CALLS: Final = 2
 GTK_EXPECTED_ADD_MANUAL_CALLS: Final = 2
@@ -663,3 +660,17 @@ SWALLOWED_ENTER_REPEATS: Final = 4
 MIXED_SPLIT_SAMPLE_IDS: Final = 1000
 # Mixed messages a recipe in the mixed-typing tool test takes (and half as many Russian ones).
 MIXED_TYPING_TEST_MESSAGES: Final = 2
+# Confirmation counters in a learning file of schema 2: one that reached the default threshold
+# (a rule) and one short of it (never acted).
+LEGACY_RULE_CONFIRMATIONS_REACHED: Final = 2
+LEGACY_RULE_CONFIRMATIONS_BELOW: Final = 1
+# Presses of the conversion hotkey that make a double press.
+CORE_DOUBLE_PRESS_COUNT: Final = 2
+# The rule window opened once and brought to the front again by a second request.
+TRAY_APP_EXPECTED_RULE_WINDOW_PRESENTS: Final = 2
+# schema_version of the learning file before the switching rules (counters and forbidden directions).
+LEGACY_LEARNING_STORE_SCHEMA_VERSION: Final = 2
+# The caret anchor of a rule offer in the GTK application tests: its position and the window under it.
+TRAY_APP_OFFER_ANCHOR_X: Final = 640
+TRAY_APP_OFFER_ANCHOR_Y: Final = 420
+TRAY_APP_OFFER_WINDOW: Final = 0x4C0001

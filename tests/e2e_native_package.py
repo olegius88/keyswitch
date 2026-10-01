@@ -21,7 +21,6 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk
 
 from keyswitch.config import SettingsStore
-from keyswitch.constants.settings_defaults import DEFAULT_SETTINGS
 from keyswitch.history import HistoryStore
 from keyswitch.learning import LearningStore
 from keyswitch.tray import ITEM_INTERFACE, MENU_INTERFACE, MENU_PATH, OBJECT_PATH
@@ -355,6 +354,8 @@ def main() -> int:
             entry.grab_focus()
             typer.clear_field()
             typer.type("hello")
+            # A double press: the first converts the word, the second offers a rule.
+            typer.tap_keysym(PAUSE_KEYSYM)
             typer.tap_keysym(PAUSE_KEYSYM)
         except (OSError, RuntimeError) as error:
             return fail(f"cannot start packaged learning scenario: {error}")
@@ -370,15 +371,26 @@ def main() -> int:
         try:
             typer.tap_keysym(RETURN_KEYSYM)
         except RuntimeError as error:
-            return fail(f"cannot confirm packaged learning prompt: {error}")
+            return fail(f"cannot open the packaged rule window: {error}")
+        GLib.timeout_add(E2E_VERIFY_SETTLE_DELAY_MS, confirm_rule_window)
+        return GLib.SOURCE_REMOVE
+
+    def confirm_rule_window() -> bool:
+        # Enter on the offer only opened the rule window; nothing is stored before OK.
+        learning.load()
+        if learning.count():
+            return fail("a rule was stored before OK in the packaged rule window")
+        try:
+            typer.tap_keysym(RETURN_KEYSYM)
+        except RuntimeError as error:
+            return fail(f"cannot confirm the packaged rule window: {error}")
         GLib.timeout_add(E2E_LEARNING_CONFIRMATION_VERIFY_DELAY_MS, verify_learning_confirmation)
         return GLib.SOURCE_REMOVE
 
     def verify_learning_confirmation() -> bool:
-        required = int(DEFAULT_SETTINGS["detection"]["learning_confirmations"])  # type: ignore[index]
         learning.load()
-        if learning.forced_target(0, "hello", required) != 1:
-            return fail("Enter did not persist the packaged learning rule")
+        if learning.forced_target(0, "hello") != 1:
+            return fail("OK in the rule window did not persist the packaged rule")
         try:
             typer.switch_group(0)
             window.present()

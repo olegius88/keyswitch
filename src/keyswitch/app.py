@@ -30,7 +30,9 @@ from .engine import (
 )
 from .history import HistoryStore, data_dir
 from .logsetup import configure_logging as configure_logging, follow_settings
-from .learning_prompt import LearningPromptWindow, PromptBackend
+from .learning import InvalidRule
+from .learning_prompt import LearningPromptWindow, PromptBackend, RuleEditorWindow
+from .rule_editor import RuleDraft, build_rule, draft_from_prompt
 from .system import APP_ID, AutostartManager
 from .tray import StatusNotifierItem
 from .ui import MainWindow, RESOURCE_DIR
@@ -52,6 +54,8 @@ class _WindowController(Protocol):
     def get_visible(self) -> bool: ...
 
     def show_page(self, page_name: str) -> bool: ...
+
+    def refresh_rules(self) -> None: ...
 
 
 class _TrayController(Protocol):
@@ -82,6 +86,11 @@ class KeySwitchApplication(Adw.Application):
         self.window: _WindowController | None = None
         self.tray: _TrayController | None = None
         self.learning_prompt_window: LearningPromptWindow | None = None
+        self.rule_editor: RuleEditorWindow | None = None
+        # The window the user typed in when the last rule offer closed, and the
+        # one the open rule window gives the keyboard back to.
+        self._offer_window: int | None = None
+        self._rule_return_window: int | None = None
         self._initialized = False
         self._held = False
         self._update_initial_source: int | None = None
@@ -120,9 +129,11 @@ class KeySwitchApplication(Adw.Application):
             self.engine,
             self.updates,
             self._window_close_requested,
+            open_rule_editor=self.open_rule_editor,
         )
         self.engine.subscribe_corrections(self._correction_from_thread)
         self.engine.subscribe_learning_prompts(self._learning_prompt_from_thread)
+        self.engine.subscribe_rule_requests(self._rule_request_from_thread)
         engine_error = ""
         if not self.no_engine:
             try:
@@ -360,6 +371,8 @@ class KeySwitchApplication(Adw.Application):
     def _apply_learning_prompt(self, prompt: LearningPrompt | None) -> bool:
         if prompt is None:
             if self.learning_prompt_window is not None:
+                anchor = self.learning_prompt_window.anchor
+                self._offer_window = anchor.window if anchor is not None else None
                 self.learning_prompt_window.hide_prompt()
             return GLib.SOURCE_REMOVE
         if self.learning_prompt_window is None:
@@ -371,6 +384,48 @@ class KeySwitchApplication(Adw.Application):
             )
         self.learning_prompt_window.show_prompt(prompt)
         return GLib.SOURCE_REMOVE
+
+    def _rule_request_from_thread(self, prompt: LearningPrompt) -> None:
+        GLib.idle_add(self._open_offered_rule, draft_from_prompt(prompt))
+
+    def _open_offered_rule(self, draft: RuleDraft) -> bool:
+        # The offer has just closed: the window under it is where the user typed.
+        return self.open_rule_editor(draft, self._offer_window)
+
+    def open_rule_editor(self, draft: RuleDraft, return_window: int | None = None) -> bool:
+        """Show the rule window filled in with ``draft``; one at a time.
+
+        ``return_window`` gets the keyboard back when the window closes.
+        """
+
+        if self.rule_editor is not None:
+            self.rule_editor.present()
+            return GLib.SOURCE_REMOVE
+        self._rule_return_window = return_window
+        self.rule_editor = RuleEditorWindow(
+            cast(Gtk.Application, self), draft, self._accept_rule, self._rule_editor_closed,
+            self.engine.set_rule_editor_open,
+        )
+        self.rule_editor.present()
+        return GLib.SOURCE_REMOVE
+
+    def _accept_rule(self, draft: RuleDraft) -> str:
+        try:
+            rule = build_rule(draft)
+            self.engine.add_learning_rule(rule, replacing=draft.editing, application=draft.application)
+        except InvalidRule as error:
+            return str(error)
+        except OSError as error:
+            return f"Правило не сохранено: {error}"
+        if self.window is not None:
+            self.window.refresh_rules()
+        return ""
+
+    def _rule_editor_closed(self) -> None:
+        self.rule_editor = None
+        window, self._rule_return_window = self._rule_return_window, None
+        if window is not None:
+            cast(PromptBackend, self.engine.backend).restore_window(window)
 
     def quit_application(self) -> bool:
         self.quit()
@@ -393,6 +448,9 @@ class KeySwitchApplication(Adw.Application):
         if self.learning_prompt_window is not None:
             self.learning_prompt_window.destroy()
             self.learning_prompt_window = None
+        if self.rule_editor is not None:
+            self.rule_editor.destroy()
+            self.rule_editor = None
         if self._held:
             self.release()
             self._held = False

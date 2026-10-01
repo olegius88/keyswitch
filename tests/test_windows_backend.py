@@ -15,7 +15,7 @@ import unittest
 import warnings
 from collections.abc import Callable
 from pathlib import Path, PureWindowsPath
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 from keyswitch import logsetup
@@ -29,6 +29,7 @@ from keyswitch.constants.keyboard import (
     LOCK_MASK,
     SHIFT_MASK,
     SUPER_MASK,
+    UNICODE_PACKET_KEY_NAME,
 )
 from keyswitch.constants.models import PREFIX_MAX_CHARACTERS, PREFIX_MIN_CHARACTERS
 from keyswitch.constants.timing import (
@@ -69,6 +70,7 @@ from keyswitch.constants.windows import (
     VK_OEM_7,
     VK_OEM_COMMA,
     VK_OEM_PERIOD,
+    VK_PACKET,
     VK_RETURN,
     VK_SHIFT,
 )
@@ -126,13 +128,17 @@ from fixture_values.keys import (
     FAKE_FOREGROUND_PROCESS_ID,
     HELD_KEY_SCAN_CODE,
     INJECTED_KEY_SCAN_CODE,
+    PACKET_CHARACTER_CODE,
     LATE_KEY_SCAN_CODE,
     NONEXISTENT_LAYOUT_GROUP,
     SCAN_CODE_A,
     SCAN_CODE_ENTER,
     SCAN_CODE_SEMICOLON,
     UNSUPPORTED_LAYOUT_GROUP,
+    WINDOWS_CURRENT_THREAD_ID,
     WINDOWS_FAKE_HWND,
+    WINDOWS_FOREGROUND_HWND,
+    WINDOWS_FOREGROUND_THREAD_ID,
     WINDOWS_INACTIVE_HWND,
     WINDOWS_INVALID_SOURCE_GROUP,
     WINDOWS_OTHER_HWND,
@@ -261,12 +267,33 @@ class FakeWindowsAPI:
 
 
 class FakeActivationUser32:
-    def __init__(self, *, root: int | None, activated: bool = True) -> None:
+    def __init__(
+        self, *, root: int | None, activated: bool = True,
+        foreground: int | None = None, foreground_thread: int = 0,
+    ) -> None:
         self.root = root
         self.activated = activated
+        self.foreground = foreground
+        self.foreground_thread = foreground_thread
         self.ancestor_calls: list[tuple[int, int]] = []
         self.foreground_calls: list[int] = []
         self.show_calls: list[tuple[int, int]] = []
+        self.attach_calls: list[tuple[int, int, int]] = []
+        self.raised: list[int] = []
+
+    def GetForegroundWindow(self) -> int | None:
+        return self.foreground
+
+    def GetWindowThreadProcessId(self, _window: object, _process: object) -> int:
+        return self.foreground_thread
+
+    def AttachThreadInput(self, current: int, other: int, attach: int) -> int:
+        self.attach_calls.append((current, other, attach))
+        return 1
+
+    def BringWindowToTop(self, handle: ctypes.c_void_p | int) -> int:
+        self.raised.append(int(handle.value or 0) if isinstance(handle, ctypes.c_void_p) else handle)
+        return 1
 
     def GetAncestor(self, handle: ctypes.c_void_p, flag: int) -> int | None:
         self.ancestor_calls.append((int(handle.value or 0), flag))
@@ -457,7 +484,26 @@ class WindowsNativeActivationTests(unittest.TestCase):
     def api_with(user32: FakeActivationUser32) -> CtypesWindowsAPI:
         api = CtypesWindowsAPI.__new__(CtypesWindowsAPI)
         object.__setattr__(api, "user32", user32)
+        object.__setattr__(api, "kernel32", SimpleNamespace(GetCurrentThreadId=lambda: WINDOWS_CURRENT_THREAD_ID))
         return api
+
+    def test_activation_borrows_the_input_of_the_thread_in_front_for_the_switch(self) -> None:
+        user32 = FakeActivationUser32(
+            root=WINDOWS_ROOT_HWND, foreground=WINDOWS_FOREGROUND_HWND, foreground_thread=WINDOWS_FOREGROUND_THREAD_ID,
+        )
+        self.assertTrue(self.api_with(user32).activate_window(WINDOWS_FAKE_HWND))
+        self.assertEqual(
+            user32.attach_calls,
+            [(WINDOWS_CURRENT_THREAD_ID, WINDOWS_FOREGROUND_THREAD_ID, 1),
+             (WINDOWS_CURRENT_THREAD_ID, WINDOWS_FOREGROUND_THREAD_ID, 0)],
+        )
+        self.assertEqual(user32.raised, [WINDOWS_ROOT_HWND])
+        # Its own thread in front needs nothing borrowed.
+        user32 = FakeActivationUser32(
+            root=WINDOWS_ROOT_HWND, foreground=WINDOWS_FOREGROUND_HWND, foreground_thread=WINDOWS_CURRENT_THREAD_ID,
+        )
+        self.assertTrue(self.api_with(user32).activate_window(WINDOWS_FAKE_HWND))
+        self.assertEqual(user32.attach_calls, [])
 
     def test_activate_window_preserves_top_level_show_state(self) -> None:
         user32 = FakeActivationUser32(root=WINDOWS_ROOT_HWND)
@@ -945,6 +991,50 @@ class WindowsBackendInjectionTests(unittest.TestCase):
                 NativeInput(False, scan_code=LATE_KEY_SCAN_CODE, synthetic=False, replayed=True),
             ),
         )
+        backend.stop()
+
+    def test_keys_other_programs_inject_are_marked_and_replayed_as_theirs(self) -> None:
+        api = FakeWindowsAPI()
+        backend = WindowsBackend(api)
+        delivered: list[KeyEvent] = []
+        backend.start(delivered.append)
+        listener = api.hook_listener
+        assert listener is not None
+
+        # Remote control types a character, not a key: it is marked as foreign
+        # and nothing waits for its release.
+        self.assertFalse(listener(NativeKeyEvent(
+            True, VK_PACKET, PACKET_CHARACTER_CODE, False, False, WINDOWS_HELD_KEY_PRESS_TIMESTAMP, foreign=True,
+        )))
+        self.assertEqual(delivered[-1].key_name, UNICODE_PACKET_KEY_NAME)
+        self.assertTrue(delivered[-1].foreign)
+        self.assertNotIn(VK_PACKET, backend._pressed)
+        self.assertFalse(listener(NativeKeyEvent(
+            False, VK_PACKET, PACKET_CHARACTER_CODE, False, False, WINDOWS_HELD_KEY_RELEASE_TIMESTAMP, foreign=True,
+        )))
+
+        # Held behind a correction, both come back in order, each marked as what it was.
+        backend.hold_input()
+        self.assertTrue(listener(NativeKeyEvent(
+            True, VK_PACKET, PACKET_CHARACTER_CODE, False, False, WINDOWS_HELD_KEY_PRESS_TIMESTAMP, foreign=True,
+        )))
+        self.assertTrue(listener(NativeKeyEvent(
+            True, ord("D"), HELD_KEY_SCAN_CODE, False, False, WINDOWS_HELD_KEY_PRESS_TIMESTAMP, foreign=True,
+        )))
+        backend.release_input()
+        self.assertEqual(
+            api.sent,
+            [
+                (NativeInput(
+                    True, scan_code=PACKET_CHARACTER_CODE, synthetic=False, replayed=True, unicode=True, foreign=True,
+                ),),
+                (NativeInput(
+                    True, virtual_key=ord("D"), scan_code=HELD_KEY_SCAN_CODE, synthetic=False, replayed=True,
+                    foreign=True,
+                ),),
+            ],
+        )
+        self.assertFalse(backend._holding)
         backend.stop()
 
     def test_switch_timeout_and_already_selected_group(self) -> None:

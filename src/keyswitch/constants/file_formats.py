@@ -19,8 +19,15 @@ VERSION_HASH_CHARACTERS: Final[int] = 12
 # The text after the ":" separator from str.partition(":"), which always returns a 3-tuple (before,
 # separator, after).
 PARTITION_AFTER_SEPARATOR_INDEX: Final = 2
-# schema_version of the learning file.
-LEARNING_STORE_SCHEMA_VERSION: Final = 2
+# schema_version of the learning file: 3 keeps a list of rules from the rule window; 2 and older
+# kept counters of manual conversions and forbidden directions, converted on first load.
+LEARNING_STORE_SCHEMA_VERSION: Final = 3
+# Name suffix of the copy an older learning file is kept as before it is converted.
+LEARNING_STORE_BACKUP_SUFFIX: Final = ".v2-backup"
+# The confirmation threshold a learning file of schema 2 was used with unless the settings said
+# otherwise (the removed detection.learning_confirmations defaulted to it): a counter that reached
+# it acted as a rule and is carried over as one.
+LEGACY_RULE_CONFIRMATIONS_REQUIRED: Final = 2
 LEXICON_SUPPLEMENT_MAX_BYTES: Final = 8 * BYTES_PER_MEBIBYTE
 # Largest prefix model artifact loaded.
 MAX_PREFIX_MODEL_BYTES: Final = 2 * BYTES_PER_MEBIBYTE

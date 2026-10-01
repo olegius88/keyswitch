@@ -16,10 +16,11 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gio, GLib, Gtk
 
 from keyswitch.config import SettingsStore
-from keyswitch.constants.settings_defaults import DEFAULT_LEARNING_CONFIRMATIONS
 from keyswitch.engine import KeySwitchEngine, LearningPrompt
 from keyswitch.history import HistoryStore
-from keyswitch.learning_prompt import LearningPromptWindow
+from keyswitch.learning import InvalidRule
+from keyswitch.learning_prompt import LearningPromptWindow, RuleEditorWindow
+from keyswitch.rule_editor import RuleDraft, build_rule, draft_from_prompt
 from keyswitch.x11_backend import KeyEvent, X11Backend, _Libraries
 from keyswitch.constants.x11 import BACKSPACE_KEYSYM
 from fixture_values.clock import (
@@ -192,6 +193,33 @@ def main() -> int:
         GLib.idle_add(apply_learning_prompt, prompt)
 
     engine.subscribe_learning_prompts(queue_learning_prompt)
+    rule_windows: list[RuleEditorWindow] = []
+    offer_windows: list[int] = []
+
+    def accept_rule(draft: RuleDraft) -> str:
+        try:
+            engine.add_learning_rule(build_rule(draft), application=draft.application)
+        except InvalidRule as error:
+            return str(error)
+        return ""
+
+    def rule_window_closed() -> None:
+        # As the application does: the keyboard goes back to the window under the offer.
+        for offer_window in offer_windows:
+            backend.restore_window(offer_window)
+
+    def open_rule_window(prompt: LearningPrompt) -> bool:
+        editor = RuleEditorWindow(
+            application, draft_from_prompt(prompt), accept_rule, rule_window_closed, engine.set_rule_editor_open
+        )
+        rule_windows.append(editor)
+        editor.present()
+        return GLib.SOURCE_REMOVE
+
+    def request_rule_window(prompt: LearningPrompt) -> None:
+        GLib.idle_add(open_rule_window, prompt)
+
+    engine.subscribe_rule_requests(request_rule_window)
     engine.start()
     engine_listener = backend._listener
 
@@ -253,6 +281,8 @@ def main() -> int:
         entry.grab_focus()
         typer.clear_field()
         typer.type("hello")
+        # A double press: the first converts the word, the second offers a rule.
+        typer.tap_keysym(PAUSE_KEYSYM)
         typer.tap_keysym(PAUSE_KEYSYM)
         GLib.timeout_add(E2E_VERIFY_SETTLE_DELAY_MS, verify_learning_prompt)
         return GLib.SOURCE_REMOVE
@@ -273,16 +303,35 @@ def main() -> int:
             print("E2E_FAILED")
             loop.quit()
             return GLib.SOURCE_REMOVE
+        anchor = learning_prompt.anchor
+        if anchor is not None and anchor.window is not None:
+            offer_windows.append(anchor.window)
         typer.tap_keysym(RETURN_KEYSYM)
+        GLib.timeout_add(E2E_LEARNING_CONFIRMATION_VERIFY_DELAY_MS, verify_rule_window)
+        return GLib.SOURCE_REMOVE
+
+    def verify_rule_window() -> bool:
+        # Enter on the offer opened the rule window, filled in; nothing is stored before OK.
+        if (
+            len(rule_windows) != 1
+            or rule_windows[0].current_draft().pattern != "hello"
+            or engine.learning.count()
+            or engine.learning_prompt is not None
+        ):
+            print(f"rule_window_failed windows={len(rule_windows)} rules={engine.learning.rules()!r}")
+            print("E2E_FAILED")
+            loop.quit()
+            return GLib.SOURCE_REMOVE
+        rule_windows[0].confirm()
         GLib.timeout_add(E2E_LEARNING_CONFIRMATION_VERIFY_DELAY_MS, verify_learning_confirmation)
         return GLib.SOURCE_REMOVE
 
     def verify_learning_confirmation() -> bool:
-        required = int(settings.get("detection.learning_confirmations", DEFAULT_LEARNING_CONFIRMATIONS))
         if (
             engine.learning_prompt is not None
-            or engine.learning.forced_target(0, "hello", required) != 1
+            or engine.learning.forced_target(0, "hello") != 1
             or learning_prompt.get_visible()
+            or engine._input_suspended
         ):
             print("learning_confirmation_failed")
             print("E2E_FAILED")

@@ -10,8 +10,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from keyswitch.backend import KeyEvent
+from keyswitch.learning import LearnedRule
 from keyswitch.boundary_model import MAX_SUFFIX, BoundaryModel, BoundaryPrediction
-from keyswitch.constants.settings_defaults import DEFAULT_LEARNING_CONFIRMATIONS
 from keyswitch.constants.detection import MAX_WORD_STROKES
 from keyswitch.input_context import FieldContext
 from keyswitch.windows_backend import WindowsBackend, WindowsBackendError
@@ -277,13 +277,13 @@ class BoundaryExecutionTests(InputIntegrityTests):
             self.assertFalse(self.engine._completed_word(strokes, 0)[COMPLETED_WORD_SEGMENTATION_CERTAIN_INDEX])
 
     def test_explicit_full_token_rule_and_rejection_outrank_segmentation(self) -> None:
-        self.engine.learning.confirm_manual(0, "rjnjhe.", 1, DEFAULT_LEARNING_CONFIRMATIONS)
+        self.engine.learning.add_rule(LearnedRule("rjnjhe.", 0, 1))
         with patch.object(self.model, "predict", side_effect=AssertionError("must not override user rule")):
             self.type("rjnjhe. ")
         self.assertEqual(self.backend.text, "которую ")
         self.reset_editor()
         self.engine.learning.clear()
-        self.engine.learning.reject(0, "ghbdtn,", 1)
+        self.engine.learning.add_rule(LearnedRule("ghbdtn,", 0, 1, "keep"))
         with patch.object(self.model, "predict", side_effect=AssertionError("must not bypass full-token rejection")):
             self.type("ghbdtn, ")
         self.assertEqual(self.backend.text, "ghbdtn, ")

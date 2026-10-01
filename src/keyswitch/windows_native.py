@@ -26,7 +26,9 @@ from .constants.windows import (
     KEYEVENTF_EXTENDEDKEY,
     KEYEVENTF_KEYUP,
     KEYEVENTF_SCANCODE,
+    KEYEVENTF_UNICODE,
     KEYSWITCH_EXTRA_INFO,
+    KEYSWITCH_FOREIGN_REPLAY_INFO,
     KEYSWITCH_REPLAY_INFO,
     LLKHF_EXTENDED,
     LLKHF_INJECTED,
@@ -246,6 +248,10 @@ class CtypesWindowsAPI:
         user32.GetAncestor.restype = ctypes.c_void_p
         user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
         user32.SetForegroundWindow.restype = ctypes.c_int
+        user32.BringWindowToTop.argtypes = [ctypes.c_void_p]
+        user32.BringWindowToTop.restype = ctypes.c_int
+        user32.AttachThreadInput.argtypes = [ctypes.c_ulong, ctypes.c_ulong, ctypes.c_int]
+        user32.AttachThreadInput.restype = ctypes.c_int
         user32.GetKeyState.argtypes = [ctypes.c_int]
         user32.GetKeyState.restype = ctypes.c_short
         user32.GetWindowThreadProcessId.argtypes = [
@@ -401,11 +407,26 @@ class CtypesWindowsAPI:
         return applied
 
     def activate_window(self, window: int) -> bool:
-        """Request foreground activation without changing the window state."""
+        """Bring a window to the foreground without changing its state.
+
+        Windows lets only the process in front move the foreground. The rule
+        window opens from a hotkey while another program is in front, and would
+        only flash in the taskbar; attaching to the input of the thread in front
+        for the moment of the switch lifts that restriction.
+        """
 
         handle = ctypes.c_void_p(window)
         root = self.user32.GetAncestor(handle, GA_ROOT) or handle
-        return bool(self.user32.SetForegroundWindow(root))
+        foreground = self.user32.GetForegroundWindow()
+        current = int(self.kernel32.GetCurrentThreadId())
+        other = int(self.user32.GetWindowThreadProcessId(foreground, None)) if foreground else 0
+        attached = bool(other and other != current and self.user32.AttachThreadInput(current, other, 1))
+        try:
+            self.user32.BringWindowToTop(root)
+            return bool(self.user32.SetForegroundWindow(root))
+        finally:
+            if attached:
+                self.user32.AttachThreadInput(current, other, 0)
 
     def input_anchor(self) -> ScreenAnchor | None:
         window = int(self.user32.GetForegroundWindow() or 0)
@@ -500,17 +521,27 @@ class CtypesWindowsAPI:
             flags = 0
             if not item.pressed:
                 flags |= KEYEVENTF_KEYUP
-            if item.extended:
-                flags |= KEYEVENTF_EXTENDEDKEY
-            if item.scan_code:
-                flags |= KEYEVENTF_SCANCODE
+            if item.unicode:
+                # The character itself travels in wScan; there is no key position.
+                flags |= KEYEVENTF_UNICODE
+            else:
+                if item.extended:
+                    flags |= KEYEVENTF_EXTENDEDKEY
+                if item.scan_code:
+                    flags |= KEYEVENTF_SCANCODE
+            if item.synthetic:
+                extra = KEYSWITCH_EXTRA_INFO
+            elif item.replayed:
+                extra = KEYSWITCH_FOREIGN_REPLAY_INFO if item.foreign else KEYSWITCH_REPLAY_INFO
+            else:
+                extra = 0
             native[index].type = INPUT_KEYBOARD
             native[index].ki = KEYBDINPUT(
-                item.virtual_key,
+                0 if item.unicode else item.virtual_key,
                 item.scan_code,
                 flags,
                 0,
-                KEYSWITCH_EXTRA_INFO if item.synthetic else KEYSWITCH_REPLAY_INFO if item.replayed else 0,
+                extra,
             )
         return int(self.user32.SendInput(len(native), native, ctypes.sizeof(INPUT)))
 
@@ -568,21 +599,20 @@ class CtypesWindowsAPI:
                     data,
                     ctypes.POINTER(KBDLLHOOKSTRUCT),
                 ).contents
+                injected = bool(native.flags & LLKHF_INJECTED)
+                extra = int(native.dwExtraInfo or 0)
                 consumed = listener(
                     NativeKeyEvent(
                         message in {WM_KEYDOWN, WM_SYSKEYDOWN},
                         int(native.vkCode),
                         int(native.scanCode),
                         bool(native.flags & LLKHF_EXTENDED),
-                        bool(
-                            native.flags & LLKHF_INJECTED
-                            and native.dwExtraInfo == KEYSWITCH_EXTRA_INFO
-                        ),
+                        injected and extra == KEYSWITCH_EXTRA_INFO,
                         int(native.time),
-                        bool(
-                            native.flags & LLKHF_INJECTED
-                            and native.dwExtraInfo == KEYSWITCH_REPLAY_INFO
-                        ),
+                        injected and extra in {KEYSWITCH_REPLAY_INFO, KEYSWITCH_FOREIGN_REPLAY_INFO},
+                        # Any other injected key comes from another program: remote
+                        # control, a macro, an on-screen keyboard.
+                        injected and extra not in {KEYSWITCH_EXTRA_INFO, KEYSWITCH_REPLAY_INFO},
                     )
                 )
                 if consumed:

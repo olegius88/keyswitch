@@ -20,7 +20,9 @@ from gi.repository import Atspi, Gdk, GdkX11, GLib, Gtk
 from keyswitch import learning_prompt as prompt_module
 from keyswitch.backend import ScreenAnchor
 from keyswitch.engine import LearningPrompt
-from keyswitch.learning_prompt import LearningPromptWindow, focused_caret_anchor
+from keyswitch.learning import LearnedRule
+from keyswitch.learning_prompt import LearningPromptWindow, RuleEditorWindow, focused_caret_anchor
+from keyswitch.rule_editor import PROMPT_TITLE, RuleDraft
 from keyswitch.constants.geometry import CENTERING_DIVISOR
 from keyswitch.constants.learning_prompt import (
     LEARNING_PROMPT_ANCHOR_GAP_PIXELS,
@@ -269,10 +271,7 @@ class LearningPromptWindowTests(unittest.TestCase):
         self.window.destroy()
 
     def test_build_show_anchor_fallback_and_hide(self) -> None:
-        self.assertEqual(
-            self.window.question.get_label(),
-            "Добавить слово в правила переключения?",
-        )
+        self.assertEqual(self.window.question.get_label(), PROMPT_TITLE)
         self.assertIn("Enter", self.window.hint.get_label())
         with (
             patch.object(
@@ -291,7 +290,7 @@ class LearningPromptWindowTests(unittest.TestCase):
                 CARET_OVERRIDE_WITH_BACKEND_ANCHOR.x, CARET_OVERRIDE_WITH_BACKEND_ANCHOR.y, FIRST_SCREEN_ANCHOR.window
             ),
         )
-        self.assertEqual(self.window.word.get_text(), "hello  →  руддщ")
+        self.assertEqual(self.window.word.get_text(), "«hello» → «руддщ»: переводить")
         present.assert_called_once_with()
         focus.assert_called_once_with()
         idle.assert_called_once_with(self.window._position_above_anchor)
@@ -379,6 +378,91 @@ class LearningPromptWindowTests(unittest.TestCase):
         self.window.prompt = self.prompt
         self.assertTrue(self.window._on_close_request(self.window))
         self.assertEqual(self.dismiss.call_count, LEARNING_PROMPT_DISMISS_CALLS_AFTER_CLOSE_WITH_PROMPT)
+
+
+@unittest.skipUnless(DISPLAY_AVAILABLE, "GTK display is required")
+class RuleEditorWindowTests(unittest.TestCase):
+    application: ClassVar[Gtk.Application]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.application = Gtk.Application(application_id="io.github.olegius88.KeySwitchRuleEditorTests")
+        cls.application.register(None)
+
+    def setUp(self) -> None:
+        self.answers: list[str] = []
+        self.drafts: list[RuleDraft] = []
+        self.closed = Mock()
+        self.focused = Mock()
+        self.editing = LearnedRule("tot", 0, 1, "keep", "prefix", True)
+        self.window = RuleEditorWindow(
+            self.application, RuleDraft("tot", "prefix", True, "keep", "Telegram", self.editing),
+            self.accept, self.closed, self.focused,
+        )
+
+    def accept(self, draft: RuleDraft) -> str:
+        self.drafts.append(draft)
+        return self.answers.pop(0) if self.answers else ""
+
+    def test_the_form_starts_from_the_draft_and_reads_back_the_choices(self) -> None:
+        self.assertEqual(self.window.current_draft(), RuleDraft("tot", "prefix", True, "keep", "Telegram", self.editing))
+        self.assertEqual(self.window.hint.get_text(), "Набрано в раскладке EN; в RU это «еще»")
+        self.window.matches["contains"].set_active(True)
+        self.window.actions["convert"].set_active(True)
+        self.window.case_sensitive.set_active(False)
+        self.window.entry.set_text("еще")
+        self.assertEqual(self.window.hint.get_text(), "Набрано в раскладке RU; в EN это «tot»")
+        self.assertEqual(
+            self.window.current_draft(), RuleDraft("еще", "contains", False, "convert", "Telegram", self.editing)
+        )
+        self.window.destroy()
+
+    def test_ok_shows_what_to_fix_or_closes(self) -> None:
+        self.answers.append("В сочетании нужна хотя бы одна буква")
+        self.window.entry.emit("activate")
+        self.assertEqual(self.window.problem.get_text(), "В сочетании нужна хотя бы одна буква")
+        self.closed.assert_not_called()
+        # Editing the letters clears the old message.
+        self.window.entry.set_text("tota")
+        self.assertEqual(self.window.problem.get_text(), "")
+        self.window.confirm()
+        self.closed.assert_called_once_with()
+        self.focused.assert_called_with(False)
+        self.assertEqual(len(self.drafts), len(("first", "second")))
+
+    def test_escape_cancel_and_closing_the_window_do_not_store_anything(self) -> None:
+        state = Gdk.ModifierType(0)
+        self.assertFalse(self.window._on_key_pressed(Mock(), Gdk.KEY_a, A_KEYCODE, state))
+        self.assertTrue(self.window._on_key_pressed(Mock(), Gdk.KEY_Escape, ESCAPE_KEYCODE, state))
+        self.closed.assert_called_once_with()
+        # Losing or gaining the keyboard is passed on.
+        self.focused.reset_mock()
+        second = RuleEditorWindow(self.application, RuleDraft(), self.accept, self.closed, self.focused)
+        second.notify("is-active")
+        self.focused.assert_called_once_with(second.is_active())
+        self.assertTrue(second._on_close_request(second))
+        third = RuleEditorWindow(self.application, RuleDraft(), self.accept, self.closed, self.focused)
+        next(
+            widget for widget in _descendants(third)
+            if isinstance(widget, Gtk.Button) and widget.get_label() == "Отмена"
+        ).emit("clicked")
+        fourth = RuleEditorWindow(self.application, RuleDraft("tot"), self.accept, self.closed, self.focused)
+        next(
+            widget for widget in _descendants(fourth)
+            if isinstance(widget, Gtk.Button) and widget.get_label() == "OK"
+        ).emit("clicked")
+        self.assertEqual(self.closed.call_count, len(("escape", "close", "cancel", "ok")))
+        self.assertEqual([draft.pattern for draft in self.drafts], ["tot"])
+
+
+def _descendants(widget: Gtk.Widget) -> list[Gtk.Widget]:
+    found: list[Gtk.Widget] = []
+    child = widget.get_first_child()
+    while child is not None:
+        found.append(child)
+        found.extend(_descendants(child))
+        child = child.get_next_sibling()
+    return found
 
 
 if __name__ == "__main__":

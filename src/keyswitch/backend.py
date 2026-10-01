@@ -29,6 +29,9 @@ class KeyEvent:
     timestamp: int
     synthetic: bool = False
     deferred: bool = False
+    # Injected by another program (remote control, a macro, an on-screen keyboard),
+    # not typed on this keyboard; only the Windows backend can tell.
+    foreign: bool = False
 
     @property
     def shift(self) -> bool:

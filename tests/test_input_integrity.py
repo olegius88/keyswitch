@@ -13,6 +13,7 @@ from unittest.mock import patch
 from keyswitch.backend import KeyEvent, SHIFT_MASK, LOCK_MASK
 from keyswitch.config import SettingsStore
 from keyswitch.engine import KeySwitchEngine, LearningPrompt, MAX_WORD_STROKES, _LayoutSelection
+from keyswitch.learning import LearnedRule
 from keyswitch.history import HistoryStore
 from keyswitch.layouts import LayoutPair
 from keyswitch.windows_backend import NativeInput, NativeKeyEvent, VK_RETURN, VK_SHIFT, WindowsBackend
@@ -24,7 +25,6 @@ from keyswitch.constants.x11 import X11_BUTTON_PRESS
 from fixture_values.clock import PAUSE_TRIGGER_OFFSET_SECONDS
 from fixture_values.counts import (
     EXPLICIT_RULE_MINIMUM_LENGTH,
-    LEARNING_CONFIRMATIONS_REQUIRED,
     LONG_INPUT_EXTRA_STROKES,
     SWALLOWED_ENTER_REPEATS,
 )
@@ -180,7 +180,7 @@ class InputIntegrityTests(unittest.TestCase):
         # The keyboard hook can see both keys before the worker processes either.
         self.assertFalse(self.engine.consumes_key(self.key("a", "a")))
         self.assertEqual(self.engine.consumes_key(self.key("Return")), "defer")
-        self.assertIsNone(self.engine.learning.forced_target(0, "hello", 1))
+        self.assertIsNone(self.engine.learning.forced_target(0, "hello"))
 
     def test_another_word_committed_before_boundary_release_cancels_the_old_plan(self) -> None:
         self.type("ghbdtn")
@@ -361,11 +361,11 @@ class InputIntegrityTests(unittest.TestCase):
 
     def test_explicit_short_rule_is_not_ignored_by_minimum_length(self) -> None:
         self.settings.set("detection.minimum_length", EXPLICIT_RULE_MINIMUM_LENGTH)
-        self.engine.learning.confirm_manual(0, "kb", 1, LEARNING_CONFIRMATIONS_REQUIRED)
+        self.engine.learning.add_rule(LearnedRule("kb", 0, 1))
         self.type("kb ")
         self.assertEqual(self.backend.text, "ли ")
         self.reset_editor()
-        self.engine.learning.reject(0, "kb", 1)
+        self.engine.learning.add_rule(LearnedRule("kb", 0, 1, "keep"))
         self.type("kb ")
         self.assertEqual(self.backend.text, "kb ")
 
@@ -468,7 +468,7 @@ class NativeInputIntegrityTests(unittest.TestCase):
             engine._show_learning_prompt(LearningPrompt(0, 1, "hello", "руддщ", "TestEditor"))
             self.assertFalse(engine.consumes_key(event))
             engine._handle(event)
-            self.assertIsNone(engine.learning.forced_target(0, "hello", 1))
+            self.assertIsNone(engine.learning.forced_target(0, "hello"))
 
     def test_caps_state_changes_only_replay_case_not_punctuation(self) -> None:
         backend = WindowsBackend(FakeWindowsAPI())

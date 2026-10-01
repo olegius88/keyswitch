@@ -22,7 +22,7 @@ entirely locally and using the active EN/RU system layout pair.
 [Verification, builds and releases](docs/verification.md) (guides in Russian)
 
 The latest published stable release is
-[0.35.1](https://github.com/olegius88/keyswitch/releases/tag/v0.35.1).
+[0.36.0](https://github.com/olegius88/keyswitch/releases/tag/v0.36.0).
 The changes are listed in [CHANGELOG.md](CHANGELOG.md) and the known defects
 of the release in [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
@@ -48,10 +48,11 @@ of the release in [RELEASE_NOTES.md](RELEASE_NOTES.md).
   first-party linear model;
 - conservative guards for URLs, paths, code, abbreviations, ambiguous words
   and common technical terms;
-- local explicit learning: after manual conversion with `Pause/Break`, a prompt
-  appears above the input field; `Enter` immediately adds the word to the
-  rules, `Esc` rejects the offer, and undoing a false correction records a
-  rejection; rules and rejections are cleared separately;
+- switching rules: a double press of `Pause/Break` offers a rule for the last
+  word, `Enter` opens the rule window already filled in from the situation (the
+  word matches the letters, starts with them or contains them; case-sensitive or
+  not; convert or keep), and the rule exists only once OK is pressed. The rules
+  are listed on the Maintenance page;
 - system layout switching and correction of the already typed word through
   Win32 `SendInput` or XTEST;
 - respect for manual layout selection: the first completed word after the user
@@ -74,7 +75,7 @@ of the release in [RELEASE_NOTES.md](RELEASE_NOTES.md).
   correction, hotkeys, exclusions, history and backend diagnostics;
 - scrollable settings pages; Windows marks changed settings with a color and
   offers individual reset buttons. Both platforms offer a full settings reset
-  that preserves correction history and learned rules;
+  that preserves correction history and switching rules;
 - single-instance protection: launching KeySwitch again activates the existing
   application window;
 - automatic stable GitHub Release checks after startup and every six hours;
@@ -107,7 +108,8 @@ See [settings, training, privacy and limits](docs/context-assistant.md).
 On Windows, Enter/Tab is intercepted before delivery: the word is corrected
 first, then the action is sent exactly once. For example, `ghbdtn` + Enter
 submits `привет` when settings and safety guards permit correction.
-A learning prompt owns Enter exclusively while it is active.
+While a rule offer is shown, Enter only opens the rule window and does not reach
+the application.
 Shift/Ctrl/Alt shortcuts are not intercepted. A correction failure or a focus
 change cancels submission and is reported in diagnostics. On X11 these actions
 have already reached the application, so use Space, idle correction or Pause
@@ -117,11 +119,11 @@ scenarios and platform limitations.
 
 ## Install on Windows
 
-Download `KeySwitch-Setup-0.35.1-x64.exe` from the
-[published 0.35.1 release](https://github.com/olegius88/keyswitch/releases/tag/v0.35.1) and run
+Download `KeySwitch-Setup-0.36.0-x64.exe` from the
+[published 0.36.0 release](https://github.com/olegius88/keyswitch/releases/tag/v0.36.0) and run
 it. The per-user installation goes to `%LOCALAPPDATA%\Programs\KeySwitch` and
 does not require administrator privileges. The release also includes the
-portable `KeySwitch-0.35.1-windows-x64.zip` archive.
+portable `KeySwitch-0.36.0-windows-x64.zip` archive.
 
 After launch, KeySwitch appears in the notification area. Left- or right-click
 the `EN/RU` or flag icon to open its menu. Its Switch to action always offers
@@ -172,12 +174,26 @@ For the reverse direction, select RU, type `тест `, then `руддщ` (the p
 keys for `hello`). `Pause` requests manual conversion of the current word;
 technical logging explains why automatic correction was skipped.
 
-To teach KeySwitch a personal exception, type the word and press `Pause/Break`.
-After the manual replacement, a prompt above the input position asks whether
-to add the word to switching rules. Pressing `Enter` activates the rule
-immediately; `Esc` dismisses it. The Local learning switch disables the whole
-mechanism. If the prompt is not confirmed, a rule can still become active after
-the configured number of repeated manual conversions.
+To tell KeySwitch what to do with a particular word, press `Pause/Break` twice
+right after it. The word becomes the opposite of what the program did: a wrong
+correction is undone, a missed one is made. A prompt above the input position
+asks "Добавить правило переключения?" (add a switching rule?). `Enter` opens the
+rule window filled in from the situation: "keep the word" for an undone
+correction, "convert the word" for a missed one. The letters, the condition (the
+word contains them, starts with them or matches them), case sensitivity and the
+action can be changed there. The rule exists only after OK or `Enter` in that
+window; `Esc`, Cancel, typing on or letting the prompt time out store nothing. A
+single `Pause` and an undo with `Ctrl+Alt+Z` only fix the text and teach
+nothing. Rules outrank the model's decision; they are listed, added, edited and
+removed on the Maintenance page and switched off by the "Правила переключения"
+setting.
+
+Keys other programs send on Windows - remote control (TeamViewer, AnyDesk),
+macros, on-screen keyboards - are not treated as typing by default: KeySwitch
+neither corrects words made of them, nor answers their `Pause`, nor holds their
+Enter back. When the controlling computer runs KeySwitch too, that copy corrects
+the words. The "Ввод от других программ" (input from other programs) setting
+restores the previous behaviour.
 
 Probe the system backend without opening the application window:
 
@@ -187,12 +203,12 @@ Probe the system backend without opening the application window:
 
 ## Install the Debian package
 
-Download `keyswitch_0.35.1_amd64.deb` from the
-[published 0.35.1 release](https://github.com/olegius88/keyswitch/releases/tag/v0.35.1), then
+Download `keyswitch_0.36.0_amd64.deb` from the
+[published 0.36.0 release](https://github.com/olegius88/keyswitch/releases/tag/v0.36.0), then
 install it with:
 
 ```bash
-sudo apt install ./keyswitch_0.35.1_amd64.deb
+sudo apt install ./keyswitch_0.36.0_amd64.deb
 ```
 
 The package installs the required system dependencies and adds KeySwitch to the
@@ -286,7 +302,7 @@ configuration; the standard setup is `us,ru`.
 On Windows:
 
 - settings: `%APPDATA%\KeySwitch\config.json`;
-- history, learning data, custom dictionaries and log:
+- history, switching rules, custom dictionaries and log:
   `%LOCALAPPDATA%\KeySwitch`;
 - autostart: the per-user
   `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` registry key.
@@ -295,8 +311,7 @@ On Linux:
 
 - settings: `~/.config/keyswitch/config.json`;
 - correction history: `~/.local/share/keyswitch/history.jsonl`;
-- explicitly learned rules and rejected corrections:
-  `~/.local/share/keyswitch/learning.json`;
+- switching rules: `~/.local/share/keyswitch/learning.json`;
 - optional per-user Hunspell dictionaries:
   `~/.local/share/keyswitch/dictionaries/<locale>.aff/.dic`;
 - startup and optional technical-diagnostics log:
@@ -320,7 +335,7 @@ interpretations, the skip reason (`skipped_reason`) and the detector's shadow
 verdict for protected or disabled cases, context, the source and age of a
 manual layout change, whether a layout change was made by the engine itself
 or by the user, deferred pause corrections with their cause, early-switch
-events, the learning prompt lifecycle and the values of changed settings.
+events, the rule offer lifecycle, added rules and the values of changed settings.
 Because it may
 contain typed words and application names, technical mode is disabled by
 default. Engine diagnostic events replace excluded-application text with
@@ -335,7 +350,7 @@ surrounding phrase; `correction_applied` confirms event submission, not the
 final text. See [troubleshooting](docs/troubleshooting.md).
 
 The Base word model (KSLM) switch on the automatic-correction page disables only
-the baseline KSLM classifier; dictionaries, hard guards and explicitly learned
+the baseline KSLM classifier; dictionaries, hard guards and the user's switching
 rules continue to work. The contextual assistant has a separate setting and
 is not disabled by this switch. Diagnostics show the bundled KSLM version and abbreviated
 SHA-256, or the reason for a safe fallback to the deterministic ensemble.
@@ -371,7 +386,7 @@ for frequent two-letter function words; it currently contains Russian-layout
 `ша` to English `if`. The exception requires an exact target-language lexicon
 hit and at least a 100x target/source frequency ratio. An explicit manual
 layout change has higher priority and protects the entire next word, including
-pause correction and previously learned rules. Normal detection resumes after
+pause correction and the user's switching rules. Normal detection resumes after
 the word boundary. Re-observing a layout the engine just selected within 1.5
 seconds does not create new protection as an external manual change would.
 An explicit menu language choice itself protects the next word, as does Pause
@@ -615,9 +630,9 @@ evaluation, AT-SPI E2E and their environment requirements are documented in
 the [verification guide](docs/verification.md).
 
 On Windows, a separate E2E starts a real `WH_KEYBOARD_LL` hook, types scan codes
-through `SendInput` into a Tk field and verifies both directions, the learning
-prompt, `Enter` confirmation, automatic reuse of the learned rule, the final
-layout and history:
+through `SendInput` into a Tk field and verifies both directions, the rule offer
+after a double `Pause`, the rule window and its OK, automatic reuse of the rule,
+the final layout and history:
 
 ```powershell
 $env:PYTHONPATH = "src"
@@ -648,8 +663,8 @@ Run the real end-to-end test in an active X11 session with:
 PYTHONPATH=src python3 tests/e2e_x11.py
 ```
 
-A successful run prints `E2E_OK` after real corrections, `Pause/Break` +
-`Enter` learning and verification of the one-word guard following a manual
+A successful run prints `E2E_OK` after real corrections, a rule added through a
+double `Pause/Break`, `Enter` and the rule window, and verification of the one-word guard following a manual
 layout switch inside a GTK Entry. An
 additional integration test exports a real StatusNotifierItem and DBusMenu on
 an isolated session bus:
@@ -779,12 +794,12 @@ See [release and recovery procedures](docs/verification.md).
 - On Windows, UIPI prevents a regular process from injecting input into a
   window running at a higher integrity level. KeySwitch needs a matching level
   for that target window.
-- The published Windows 0.35.1 Setup EXE is not signed with a publisher certificate.
+- The published Windows 0.36.0 Setup EXE is not signed with a publisher certificate.
 
 ## Privacy
 
 KeySwitch processes keystrokes, words and model features on the computer where
-it runs. Typed text, learned rules, history and logs are not sent anywhere.
+it runs. Typed text, switching rules, history and logs are not sent anywhere.
 
 The only network requests KeySwitch makes are update checks against the GitHub
 Releases of this repository: `api.github.com`, plus `github.com` and

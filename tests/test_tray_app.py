@@ -26,8 +26,11 @@ from keyswitch import app as app_module
 from keyswitch import launcher as launcher_module
 from keyswitch import tray as tray_module
 from keyswitch.app import KeySwitchApplication
+from keyswitch.backend import ScreenAnchor
 from keyswitch.engine import CorrectionPlan, EngineSnapshot, LearningPrompt
-from keyswitch.learning_prompt import LearningPromptWindow
+from keyswitch.learning import LearnedRule
+from keyswitch.learning_prompt import LearningPromptWindow, RuleEditorWindow
+from keyswitch.rule_editor import RuleDraft
 from keyswitch.updates import UpdatePhase, UpdateSnapshot
 from keyswitch.x11_backend import BackendProbe, KeyEvent
 from fixture_values.counts import (
@@ -39,6 +42,10 @@ from fixture_values.counts import (
     TRAY_APP_EXPECTED_PROPERTIES_UPDATED_CALLS,
     TRAY_APP_EXPECTED_QUIT_CALLS,
     TRAY_APP_EXPECTED_SCHEDULE_CALLS,
+    TRAY_APP_EXPECTED_RULE_WINDOW_PRESENTS,
+    TRAY_APP_OFFER_ANCHOR_X,
+    TRAY_APP_OFFER_ANCHOR_Y,
+    TRAY_APP_OFFER_WINDOW,
     TRAY_APP_EXPECTED_SHOW_PROMPT_CALLS,
     TRAY_APP_EXPECTED_SYNC_AUTOSTART_CALLS,
     TRAY_APP_FAKE_HISTORY_LIMIT,
@@ -436,6 +443,9 @@ class FakeEngine:
         self.stop_error: Exception | None = None
         self.select_result = True
         self.select_calls = 0
+        self.rule_request_callbacks: list[Callable[[LearningPrompt], None]] = []
+        self.added_rules: list[tuple[LearnedRule, LearnedRule | None, str]] = []
+        self.add_rule_error: Exception | None = None
 
     def subscribe_corrections(
         self, callback: Callable[[CorrectionPlan], None]
@@ -450,6 +460,20 @@ class FakeEngine:
 
     def confirm_learning_prompt(self, _prompt: LearningPrompt | None = None) -> bool:
         return True
+
+    def subscribe_rule_requests(self, callback: Callable[[LearningPrompt], None]) -> None:
+        self.rule_request_callbacks.append(callback)
+
+    def set_rule_editor_open(self, opened: bool) -> None:
+        return None
+
+    def add_learning_rule(
+        self, rule: LearnedRule, *, replacing: LearnedRule | None = None, application: str = ""
+    ) -> LearnedRule:
+        if self.add_rule_error is not None:
+            raise self.add_rule_error
+        self.added_rules.append((rule, replacing, application))
+        return rule
 
     def dismiss_learning_prompt(self, _prompt: LearningPrompt | None = None) -> bool:
         return True
@@ -474,11 +498,12 @@ class FakeEngine:
 
 
 class FakeWindow:
-    def __init__(self, *_args: object) -> None:
+    def __init__(self, *_args: object, **_options: object) -> None:
         self.present_calls = 0
         self.visible = False
         self.toasts: list[str] = []
         self.pages: list[str] = []
+        self.rule_refreshes = 0
 
     def present(self) -> None:
         self.present_calls += 1
@@ -496,6 +521,9 @@ class FakeWindow:
     def show_page(self, page_name: str) -> bool:
         self.pages.append(page_name)
         return True
+
+    def refresh_rules(self) -> None:
+        self.rule_refreshes += 1
 
 
 class FakeTray:
@@ -943,14 +971,59 @@ class ApplicationGlueTests(unittest.TestCase):
             self.assertFalse(self.application._apply_learning_prompt(prompt))
         factory.assert_called_once()
         self.assertEqual(popup.show_prompt.call_count, TRAY_APP_EXPECTED_SHOW_PROMPT_CALLS)
+        popup.anchor = ScreenAnchor(TRAY_APP_OFFER_ANCHOR_X, TRAY_APP_OFFER_ANCHOR_Y, TRAY_APP_OFFER_WINDOW)
         self.assertFalse(self.application._apply_learning_prompt(None))
         popup.hide_prompt.assert_called_once_with()
+        # The window under the offer is where the keyboard goes back to after the rule window.
+        self.assertEqual(self.application._offer_window, TRAY_APP_OFFER_WINDOW)
+        popup.anchor = None
+        self.assertFalse(self.application._apply_learning_prompt(None))
+        self.assertIsNone(self.application._offer_window)
+
+    def test_the_rule_window_opens_once_stores_the_rule_and_closes(self) -> None:
+        prompt = LearningPrompt(0, 1, "tot", "еще", "Telegram", "keep")
+        with patch("keyswitch.app.GLib.idle_add") as idle:
+            self.application._rule_request_from_thread(prompt)
+        idle.assert_called_once_with(self.application._open_offered_rule, RuleDraft("tot", action="keep", application="Telegram"))
+
+        editor = Mock()
+        self.application._offer_window = TRAY_APP_OFFER_WINDOW
+        with patch("keyswitch.app.RuleEditorWindow", return_value=editor) as factory:
+            self.assertFalse(self.application._open_offered_rule(RuleDraft("tot", action="keep")))
+            # A second request only brings the open window forward.
+            self.assertFalse(self.application.open_rule_editor(RuleDraft("other")))
+        factory.assert_called_once()
+        # The window itself tells the engine when it has the keyboard.
+        self.assertEqual(factory.call_args.args[-1], self.engine.set_rule_editor_open)
+        self.assertEqual(editor.present.call_count, TRAY_APP_EXPECTED_RULE_WINDOW_PRESENTS)
+
+        window = FakeWindow()
+        self.application.window = window
+        self.assertEqual(self.application._accept_rule(RuleDraft("tot", action="keep", application="Telegram")), "")
+        self.assertEqual(self.engine.added_rules, [(LearnedRule("tot", 0, 1, "keep"), None, "Telegram")])
+        self.assertEqual(window.rule_refreshes, 1)
+        self.application.window = None
+        self.assertEqual(self.application._accept_rule(RuleDraft("еще")), "")
+        self.assertEqual(self.application._accept_rule(RuleDraft("12")), "В сочетании нужна хотя бы одна буква")
+        self.engine.add_rule_error = OSError("disk full")
+        self.assertEqual(self.application._accept_rule(RuleDraft("tot")), "Правило не сохранено: disk full")
+
+        self.application._rule_editor_closed()
+        self.assertIsNone(self.application.rule_editor)
+        self.engine.backend.restore_window.assert_called_once_with(TRAY_APP_OFFER_WINDOW)
+        # A rule window opened from the settings gives nothing back.
+        with patch("keyswitch.app.RuleEditorWindow", return_value=Mock()):
+            self.application.open_rule_editor(RuleDraft())
+        self.application._rule_editor_closed()
+        self.engine.backend.restore_window.assert_called_once_with(TRAY_APP_OFFER_WINDOW)
 
     def test_shutdown_closes_resources_releases_hold_and_logs_stop_error(self) -> None:
         tray = FakeTray()
         self.application.tray = tray
         popup = Mock()
         self.application.learning_prompt_window = cast(LearningPromptWindow, popup)
+        editor = Mock()
+        self.application.rule_editor = cast(RuleEditorWindow, editor)
         self.application._held = True
         self.engine.stop_error = RuntimeError("stop failed")
         with (
@@ -963,6 +1036,8 @@ class ApplicationGlueTests(unittest.TestCase):
         self.assertEqual(tray.closed, 1)
         popup.destroy.assert_called_once_with()
         self.assertIsNone(self.application.learning_prompt_window)
+        editor.destroy.assert_called_once_with()
+        self.assertIsNone(self.application.rule_editor)
         release.assert_called_once_with()
         base_shutdown.assert_called_once_with(self.application)
 

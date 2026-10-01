@@ -32,7 +32,8 @@ from keyswitch.context_policy import ContextPolicy
 from keyswitch.engine import EngineSnapshot
 from keyswitch.history import HistoryEntry, HistoryStore
 from keyswitch.intent_model import IntentModelStatus
-from keyswitch.learning import LearningStore
+from keyswitch.learning import LearnedRule, LearningStore
+from keyswitch.rule_editor import RuleDraft, draft_from_rule
 from keyswitch.russian_text import SECONDS, quantity
 from keyswitch.ui import ApplicationChoice, MainWindow
 from keyswitch.updates import UpdatePhase, UpdateSnapshot
@@ -49,10 +50,9 @@ from fixture_values.counts import (
     GTK_EXPECTED_NAVIGATION_PAGE_COUNT,
     GTK_EXPECTED_SAVE_HOTKEY_CALLS,
     GTK_MINIMUM_LENGTH_UPDATE,
-    GTK_SAMPLE_CONFIRMED_RULES,
+    GTK_SAMPLE_RULE_COUNT,
     GTK_SAMPLE_CORRECTION_COUNT,
     NON_DEFAULT_EARLY_SWITCH_MIN_LENGTH,
-    NON_DEFAULT_LEARNING_CONFIRMATIONS,
     NON_DEFAULT_MINIMUM_WORD_LENGTH,
     RUSSIAN_PLURAL_SAMPLE_COUNTS,
 )
@@ -325,7 +325,8 @@ class MainWindowInteractionTests(unittest.TestCase):
         self.assertEqual(menu.get_n_items(), GTK_EXPECTED_HEADER_MENU_ITEM_COUNT)
         self.assertEqual(self.window.history_total_label.get_label(), "1 запись")
         self.assertEqual(len(self.window._application_rows), GTK_EXPECTED_APPLICATION_ROW_COUNT)
-        self.assertEqual(self.window._learning_summary(GTK_SAMPLE_CONFIRMED_RULES, 1), "Подтверждённых правил: 2 · запретов после отмены: 1")
+        self.assertEqual(self.window._learning_summary(GTK_SAMPLE_RULE_COUNT), "Правил: 2")
+        self.assertEqual(self.window._learning_summary(0), "Правил пока нет")
 
         minimum = self.window._settings_controls["detection.minimum_length"]
         assert isinstance(minimum, Adw.SpinRow)
@@ -370,12 +371,6 @@ class MainWindowInteractionTests(unittest.TestCase):
         assert isinstance(indicator, Adw.ComboRow)
         indicator.set_selected(1)
         self.assertEqual(self.settings.get("appearance.indicator_style"), "flags")
-        confirmations = self.window._settings_controls[
-            "detection.learning_confirmations"
-        ]
-        assert isinstance(confirmations, Adw.SpinRow)
-        confirmations.set_value(NON_DEFAULT_LEARNING_CONFIRMATIONS)
-        self.assertEqual(self.settings.get("detection.learning_confirmations"), NON_DEFAULT_LEARNING_CONFIRMATIONS)
         theme = next(
             widget
             for widget in descendants(self.window)
@@ -462,7 +457,7 @@ class MainWindowInteractionTests(unittest.TestCase):
                 self.window, "_remove_application_exclusion"
             ) as remove_application,
         ):
-            button(label="Очистить").emit("clicked")
+            button(label="Удалить все").emit("clicked")
             button(label="Из списка…").emit("clicked")
             button(label="Выбрать окно").emit("clicked")
             self.window.manual_app_entry.emit("activate")
@@ -527,7 +522,7 @@ class MainWindowInteractionTests(unittest.TestCase):
         with patch.object(self.window, "refresh_history") as refresh:
             self.window._navigation_selected(self.window.nav_list, history_row)
         refresh.assert_called_once_with()
-        with patch.object(self.window, "_refresh_learning_status") as refresh_learning:
+        with patch.object(self.window, "refresh_rules") as refresh_learning:
             self.window._navigation_selected(self.window.nav_list, automation_row)
         refresh_learning.assert_called_once_with()
         with patch.object(self.window, "refresh_history") as refresh:
@@ -805,17 +800,16 @@ class MainWindowInteractionTests(unittest.TestCase):
         self.window._clear_history_response("cancel")
         self.window._clear_history_response("clear")
         self.assertEqual(self.history.read(), [])
+        self.engine.learning.add_rule(LearnedRule("word", 0, 1))
+        self.engine.learning.add_rule(LearnedRule("слово", 1, 0, "keep"))
         self.window._clear_learning_response("cancel")
-        self.engine.learning.record_manual(0, "word", 1)
-        self.engine.learning.reject(1, "слово", 0)
-        self.window._clear_learning_response("rules")
-        self.assertEqual(self.engine.learning.counts(), (0, 1))
-        self.engine.learning.record_manual(0, "word", 1)
-        self.window._clear_learning_response("rejections")
-        self.assertEqual(self.engine.learning.counts(), (1, 0))
-        self.engine.learning.reject(1, "слово", 0)
+        self.assertEqual(self.engine.learning.count(), GTK_SAMPLE_RULE_COUNT)
+        # Without a rule window to open the rows are only listed.
+        self.window.refresh_rules()
+        self.assertFalse(self.window._rule_rows[0].get_activatable())
         self.window._clear_learning_response("all")
-        self.assertEqual(self.engine.learning.counts(), (0, 0))
+        self.assertEqual(self.engine.learning.count(), 0)
+        self.assertEqual(self.window._rule_rows, [])
         self.window._reset_response("cancel")
         self.settings.set("enabled", False)
         self.window._reset_response("reset")
@@ -878,6 +872,46 @@ class MainWindowInteractionTests(unittest.TestCase):
             )
         self.assertFalse(failed_engine.backend.probe().available)
         second.destroy()
+
+    def test_the_rules_group_lists_opens_and_removes_rules(self) -> None:
+        opened: list[RuleDraft] = []
+        rule = self.engine.learning.add_rule(LearnedRule("tot", 0, 1, "keep", "prefix"))
+        with (
+            patch("keyswitch.ui.AutostartManager", return_value=self.autostart),
+            patch("keyswitch.ui.installed_application_choices", return_value=[]),
+        ):
+            window = MainWindow(
+                self.application,
+                self.settings,
+                self.history,
+                self.engine,
+                self.updates,
+                lambda: True,
+                open_rule_editor=opened.append,
+            )
+        try:
+            self.assertEqual(len(window._rule_rows), 1)
+            row = window._rule_rows[0]
+            self.assertEqual(row.get_title(), "tot")
+            self.assertEqual(row.get_subtitle(), "начинается с · не переводить · в другой раскладке «еще»")
+            row.emit("activated")
+            self.assertEqual(opened, [draft_from_rule(rule)])
+            next(
+                widget for widget in descendants(window)
+                if isinstance(widget, Gtk.Button) and widget.get_label() == "Добавить…"
+            ).emit("clicked")
+            self.assertEqual(opened[-1], RuleDraft())
+            with patch.object(window, "toast") as toast:
+                next(
+                    widget for widget in descendants(row)
+                    if isinstance(widget, Gtk.Button) and widget.get_tooltip_text() == "Удалить правило"
+                ).emit("clicked")
+            toast.assert_called_once_with("Правило удалено")
+            self.assertEqual(self.engine.learning.count(), 0)
+            self.assertEqual(window._rule_rows, [])
+            self.assertEqual(window.learning_status_row.get_subtitle(), "Правил пока нет")
+        finally:
+            window.destroy()
 
 
 if __name__ == "__main__":

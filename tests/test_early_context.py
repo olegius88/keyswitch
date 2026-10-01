@@ -9,6 +9,7 @@ from unittest.mock import patch
 from keyswitch.constants.keyboard import ALT_MASK, CONTROL_MASK
 from keyswitch.constants.settings_defaults import DEFAULT_EARLY_SWITCH_MIN_LENGTH
 from keyswitch.context_model import ContextModel
+from keyswitch.learning import LearnedRule
 from keyswitch.early_switch import EarlySwitchDecision
 from keyswitch.constants.models import PREFIX_MAX_CHARACTERS, PREFIX_MIN_CHARACTERS
 from keyswitch.input_context import FieldContext
@@ -97,7 +98,7 @@ class EarlyContextTests(InputIntegrityTests):
         self.assertEqual(self.backend.text, "ghbdtn ")
         self.reset_editor()
         self.settings.set("exclusions.words", [])
-        self.engine.learning.reject(0, "ghbdtn", 1)
+        self.engine.learning.add_rule(LearnedRule("ghbdtn", 0, 1, "keep"))
         self.type("ghbdtn ", group=0)
         self.assertEqual(self.backend.text, "ghbdtn ")
         self.reset_editor()
@@ -106,8 +107,8 @@ class EarlyContextTests(InputIntegrityTests):
         self.assertEqual(self.backend.text, "прив")
 
     def test_wrong_rejection_direction_and_other_words_do_not_block_prefix(self) -> None:
-        self.engine.learning.reject(1, "ghbdtn", 0)
-        self.engine.learning.reject(0, "other", 1)
+        self.engine.learning.add_rule(LearnedRule("ghbdtn", 1, 0, "keep"))
+        self.engine.learning.add_rule(LearnedRule("other", 0, 1, "keep"))
         self.settings.set("exclusions.words", ["other"])
         self.type("ghbd")
         self.assertEqual(self.backend.text, "прив")

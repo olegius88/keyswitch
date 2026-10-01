@@ -12,26 +12,25 @@ from pathlib import Path
 from unittest.mock import patch
 
 from keyswitch.backend import FocusInfo, KeyDisposition
-from keyswitch.constants.keyboard import ALT_MASK, CONTROL_MASK
+from keyswitch.constants.keyboard import ALT_MASK, CONTROL_MASK, UNICODE_PACKET_KEY_NAME
 from keyswitch.config import SettingsStore
 from keyswitch.constants.settings_defaults import (
     CONFIDENCE_SETTING_MAX,
     CONFIDENCE_SETTING_MIN,
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_EARLY_SWITCH_MIN_LENGTH,
-    DEFAULT_LEARNING_CONFIRMATIONS,
     DEFAULT_MINIMUM_WORD_LENGTH,
     DEFAULT_PAUSE_DELAY_SECONDS,
     EARLY_SWITCH_MIN_LENGTH_SETTING_MAX,
     EARLY_SWITCH_MIN_LENGTH_SETTING_MIN,
-    LEARNING_CONFIRMATIONS_SETTING_MAX,
     MINIMUM_WORD_LENGTH_SETTING_MAX,
     MINIMUM_WORD_LENGTH_SETTING_MIN,
     PAUSE_DELAY_SETTING_MAX_SECONDS,
     PAUSE_DELAY_SETTING_MIN_SECONDS,
 )
-from keyswitch.engine import KeySwitchEngine, CorrectionPlan
-from keyswitch.constants.timing import ENGINE_SWITCH_GRACE_SECONDS
+from keyswitch.engine import KeySwitchEngine, CorrectionPlan, LearningPrompt
+from keyswitch.constants.timing import DOUBLE_CONVERT_PRESS_WINDOW_SECONDS, ENGINE_SWITCH_GRACE_SECONDS
+from keyswitch.learning import LearnedRule, RuleAction, RuleMatch
 from keyswitch.history import HistoryStore
 from keyswitch.indicator import layout_label
 from keyswitch.layouts import LayoutPair
@@ -50,15 +49,15 @@ from fixture_values.counts import (
     INJECTIONS_AFTER_OVERRIDE,
     INJECTIONS_AFTER_QUOTE_PAUSE,
     INJECTIONS_AFTER_REOPENED_PAUSE,
-    INJECTIONS_AFTER_REPEATED_REJECTION,
+    INJECTIONS_AFTER_REPEATED_CORRECTION,
     INJECTIONS_AFTER_SECOND_EARLY_SWITCH,
+    INJECTIONS_AFTER_TOGGLE_BACK,
     INJECTIONS_AFTER_TOGGLES,
     INJECTIONS_AFTER_UNDO_REVERT,
     LATE_KEYS_DURING_INJECTION,
     LATE_STROKE_INJECTION_LENGTH,
-    LEARNING_CONFIRMATIONS_REQUIRED,
-    LEARNING_PROMPT_REQUIRED_CONFIRMATIONS,
-    NON_DEFAULT_LEARNING_CONFIRMATIONS,
+    DOUBLE_PAUSE_INJECTIONS_AFTER_RESTORED_FIX,
+    DOUBLE_PAUSE_INJECTIONS_AFTER_UNDO,
     NON_DEFAULT_MINIMUM_WORD_LENGTH,
     OVERSIZED_EARLY_SWITCH_MIN_LENGTH,
     OVERSIZED_SETTING_STRING_CHARACTERS,
@@ -131,6 +130,7 @@ from fixture_values.keys import (
     SECOND_WORD_SECOND_LETTER_KEYCODE,
     SEVENTH_WORD_KEYCODE_BASE,
     SIXTH_LETTER_KEYCODE,
+    SHIFT_L_KEYCODE,
     SIXTH_WORD_KEYCODE_BASE,
     SPACE_KEYCODE,
     STALE_MODIFIER_KEYCODE,
@@ -278,6 +278,26 @@ class EngineBehaviourTests(unittest.TestCase):
         self.engine._handle(
             plain_key("Pause", keycode, self.engine.snapshot.current_group, pressed=False)
         )
+
+    def hit_pause(self, *, release: bool = True, release_others: bool = True) -> None:
+        """A real press of the Pause hotkey, through the engine's key handling."""
+
+        if release_others:
+            self.release_keys()
+        group = self.engine.snapshot.current_group
+        self.engine._handle(plain_key("Pause", PAUSE_KEYCODE, group))
+        if release:
+            self.engine._handle(plain_key("Pause", PAUSE_KEYCODE, group, pressed=False))
+
+    def double_pause(self) -> None:
+        self.hit_pause()
+        self.hit_pause()
+
+    def add_rule(
+        self, pattern: str, source: int, target: int, action: RuleAction = "convert",
+        match: RuleMatch = "exact", case_sensitive: bool = False,
+    ) -> LearnedRule:
+        return self.engine.learning.add_rule(LearnedRule(pattern, source, target, action, match, case_sensitive))
 
     def release_keys(self) -> None:
         for keycode in tuple(self.engine._pressed):
@@ -585,9 +605,6 @@ class EngineBehaviourTests(unittest.TestCase):
             if event["event"] == "manual_conversion_scheduled"
         )
         self.assertEqual((scheduled["original"], scheduled["replacement"]), ("зь2", "pm2"))
-        # A token carrying a digit is code: nothing is learned from it and the
-        # automatic path leaves it alone.
-        self.assertFalse(scheduled["learnable"])
 
     def test_a_word_with_a_digit_is_never_corrected_automatically(self) -> None:
         self.type_word("ыекштп", group=1)
@@ -652,7 +669,7 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertFalse(self.engine.consumes_key(enter))
 
         self.type_word("qwerty")
-        self.press_pause()
+        self.double_pause()
         self.assertIsNotNone(self.engine.learning_prompt)
 
         # While the prompt is shown Enter and Esc answer it, and only them.
@@ -692,7 +709,7 @@ class EngineBehaviourTests(unittest.TestCase):
             self.engine.stop()
         self.assertIsNone(self.backend.key_filter)
 
-    def test_pause_after_an_automatic_correction_rejects_it(self) -> None:
+    def test_pause_after_an_automatic_correction_undoes_it_and_teaches_nothing(self) -> None:
         self.settings.set("detection.respect_manual_layout", False)
         self.correct_hello()
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
@@ -700,22 +717,16 @@ class EngineBehaviourTests(unittest.TestCase):
         events = self.technical_events(logs.output)
         scheduled = next(e for e in events if e["event"] == "manual_conversion_scheduled")
         self.assertEqual(scheduled["reversal"], "automatic")
-        self.assertFalse(scheduled["learnable"])
-        rejection = next(e for e in events if e["event"] == "learning_rejection_recorded")
-        self.assertEqual(
-            (rejection["word"], rejection["source_group"], rejection["target_group"]),
-            ("ghbdtn", 0, 1),
-        )
-        self.assertNotIn("learning_rule_recorded", [e["event"] for e in events])
-        self.assertEqual(self.engine.learning.rejected_targets(0, "ghbdtn"), {1})
-        self.assertEqual(self.engine.learning.rule_state(1, "привет"), (None, 0))
+        self.assertNotIn("learnable", scheduled)
+        self.assertNotIn("learning_rule_added", [e["event"] for e in events])
+        self.assertEqual(self.engine.learning.count(), 0)
         self.assertIsNone(self.engine.learning_prompt)
 
-        # The same word is left alone from now on.
+        # Nothing was remembered: the same word is corrected again.
         self.backend.group = 0
         self.type_word("ghbdtn")
         self.press_space(0)
-        self.assertEqual(len(self.backend.injections), INJECTIONS_AFTER_REPEATED_REJECTION)
+        self.assertEqual(len(self.backend.injections), INJECTIONS_AFTER_REPEATED_CORRECTION)
 
     def test_toggling_a_manual_conversion_is_not_a_confirmation(self) -> None:
         self.settings.set("detection.respect_manual_layout", False)
@@ -727,17 +738,16 @@ class EngineBehaviourTests(unittest.TestCase):
             if e["event"] == "manual_conversion_scheduled"
         )
         self.assertIsNone(first["reversal"])
-        # The conversion only offers the rule; nothing is written before Enter.
-        self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (None, 0))
+        # A single conversion neither offers nor writes a rule.
+        self.assertIsNone(self.engine.learning_prompt)
         for _ in range(TOGGLE_REPEAT_COUNT):
             with self.assertLogs("keyswitch.engine", level="INFO") as logs:
                 self.press_pause()
             events = self.technical_events(logs.output)
             scheduled = next(e for e in events if e["event"] == "manual_conversion_scheduled")
             self.assertEqual(scheduled["reversal"], "manual")
-            self.assertFalse(scheduled["learnable"])
-            self.assertNotIn("learning_rule_recorded", [e["event"] for e in events])
-        self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (None, 0))
+            self.assertNotIn("learning_rule_added", [e["event"] for e in events])
+        self.assertEqual(self.engine.learning.count(), 0)
         self.assertEqual(len(self.backend.injections), INJECTIONS_AFTER_TOGGLES)
 
     def test_a_boundary_that_takes_over_an_early_plan_says_so(self) -> None:
@@ -864,8 +874,6 @@ class EngineBehaviourTests(unittest.TestCase):
              DEFAULT_CONFIDENCE_THRESHOLD, CONFIDENCE_SETTING_MIN, CONFIDENCE_SETTING_MAX),
             ("detection.minimum_length", self.engine._minimum_word_length,
              DEFAULT_MINIMUM_WORD_LENGTH, MINIMUM_WORD_LENGTH_SETTING_MIN, MINIMUM_WORD_LENGTH_SETTING_MAX),
-            ("detection.learning_confirmations", self.engine._learning_confirmations,
-             DEFAULT_LEARNING_CONFIRMATIONS, 1, LEARNING_CONFIRMATIONS_SETTING_MAX),
         )
         for path, read, default, minimum, maximum in cases:
             with self.subTest(setting=path):
@@ -995,7 +1003,8 @@ class EngineBehaviourTests(unittest.TestCase):
         strokes, target, boundary = self.backend.injections[-1]
         self.assertEqual((len(strokes), target), (EARLY_SWITCH_WORD_LENGTH, 0))
         self.assertIsNotNone(boundary)
-        self.assertEqual(self.engine.snapshot.last_action, "привет → ghbdtn · ложное срабатывание запомнено")
+        self.assertEqual(self.engine.snapshot.last_action, "привет → ghbdtn")
+        self.assertEqual(self.engine.learning.count(), 0)
 
     def test_late_stroke_after_early_switch_waits_for_release(self) -> None:
         self.settings.set("detection.respect_manual_layout", False)
@@ -1102,8 +1111,7 @@ class EngineBehaviourTests(unittest.TestCase):
 
     def test_boundary_detector_can_still_override_an_early_switch(self) -> None:
         self.settings.set("detection.early_switch", True)
-        for _ in range(DEFAULT_LEARNING_CONFIRMATIONS):
-            self.engine.learning.record_manual(1, "привет", 0)
+        self.add_rule("привет", 1, 0)
         self.type_word("ghbd")
         self.type_word("ет", group=1, start=FIFTH_LETTER_KEYCODE)
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
@@ -1250,71 +1258,29 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertIsNone(evaluation["shadow_decision"])
         self.assertEqual(evaluation["original"], "<redacted>")
 
-    def test_the_log_shows_what_local_learning_knows_about_the_word(self) -> None:
+    def test_the_log_shows_which_rule_decides_about_the_word(self) -> None:
         self.settings.set("detection.respect_manual_layout", False)
-        # Two confirmations make the intermediate state visible in the log.
-        self.settings.set("detection.learning_confirmations", LEARNING_CONFIRMATIONS_REQUIRED)
 
-        # No rule yet: the word is evaluated by the model alone.
+        # No rule: the word is evaluated by the model alone.
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.type_word("ghbdtn")
             self.press_space(0)
-        learning = self.learning_field(logs.output, "ghbdtn")
         self.assertEqual(
-            learning,
-            {
-                "enabled": True,
-                "required_confirmations": LEARNING_CONFIRMATIONS_REQUIRED,
-                "rule_target": None,
-                "confirmations": 0,
-                "forced_target": None,
-                "rejected_targets": [],
-            },
+            self.learning_field(logs.output, "ghbdtn"),
+            {"enabled": True, "rule": None, "forced_target": None, "rejected_targets": []},
         )
 
-        # A rule half-confirmed by an older version stays inactive on its own.
-        self.engine.learning.record_manual(0, "qwerty", 1)
-        self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (1, 1))
-
-        # One manual conversion offers the rule again; it teaches nothing by itself.
-        self.backend.group = 0
+        # OK in the rule window stores the rule and says so.
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            self.type_word("qwerty")
-            self.press_pause()
-            self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (1, 1))
-            self.assertIsNotNone(self.engine.learning_prompt)
-            self.engine.dismiss_learning_prompt(reason="escape")
-        self.assertNotIn(
-            "learning_rule_recorded",
-            [event["event"] for event in self.technical_events(logs.output)],
-        )
-        self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (1, 1))
-
-        self.backend.group = 0
-        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            self.type_word("qwerty")
-            self.press_space(0)
-        pending = self.learning_field(logs.output, "qwerty")
-        self.assertEqual(pending["confirmations"], 1)
-        self.assertEqual(pending["rule_target"], 1)
-        self.assertIsNone(pending["forced_target"])
-
-        # Enter on the prompt is what turns it into an active rule.
-        self.backend.group = 0
-        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            self.type_word("qwerty")
-            self.press_pause()
-            self.assertTrue(self.engine.confirm_learning_prompt())
-        recorded = next(
-            event
-            for event in self.technical_events(logs.output)
-            if event["event"] == "learning_rule_recorded"
+            self.engine.add_learning_rule(LearnedRule("qwerty", 0, 1), application="TestEditor")
+        added = next(
+            event for event in self.technical_events(logs.output) if event["event"] == "learning_rule_added"
         )
         self.assertEqual(
-            (recorded["word"], recorded["confirmations"], recorded["active"]),
-            ("qwerty", LEARNING_CONFIRMATIONS_REQUIRED, True),
+            (added["pattern"], added["match"], added["action"], added["replaced"]),
+            ("qwerty", "exact", "convert", False),
         )
-        self.assertEqual(recorded["required_confirmations"], LEARNING_CONFIRMATIONS_REQUIRED)
+        self.assertEqual(self.engine.snapshot.last_action, "Правило добавлено: «qwerty» — переводить")
 
         self.backend.group = 0
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
@@ -1322,7 +1288,10 @@ class EngineBehaviourTests(unittest.TestCase):
             self.press_space(0)
         forced = self.learning_field(logs.output, "qwerty")
         self.assertEqual(forced["forced_target"], 1)
-        self.assertEqual(forced["confirmations"], LEARNING_CONFIRMATIONS_REQUIRED)
+        self.assertEqual(
+            forced["rule"],
+            {"pattern": "qwerty", "match": "exact", "case_sensitive": False, "action": "convert", "target_group": 1},
+        )
         evaluation = next(
             event
             for event in self.technical_events(logs.output)
@@ -1332,20 +1301,22 @@ class EngineBehaviourTests(unittest.TestCase):
         assert isinstance(decision, dict)
         self.assertEqual(decision["reason"], "подтверждённое правило пользователя")
 
-    def test_the_log_shows_a_rejection_and_the_word_it_blocks(self) -> None:
+    def test_undo_teaches_nothing_and_a_keep_rule_blocks_the_word(self) -> None:
         self.settings.set("detection.respect_manual_layout", False)
         self.correct_hello()
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
             self.press_undo()
-        rejection = next(
-            event
-            for event in self.technical_events(logs.output)
-            if event["event"] == "learning_rejection_recorded"
-        )
-        self.assertEqual(
-            (rejection["word"], rejection["source_group"], rejection["target_group"]),
-            ("ghbdtn", 0, 1),
-        )
+        self.assertNotIn("learning_rule_added", [event["event"] for event in self.technical_events(logs.output)])
+        self.assertEqual(self.engine.learning.count(), 0)
+
+        rule = self.add_rule("ghbdtn", 0, 1, "keep")
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine.add_learning_rule(replace(rule, case_sensitive=True), replacing=rule)
+        self.assertTrue(next(
+            event for event in self.technical_events(logs.output) if event["event"] == "learning_rule_added"
+        )["replaced"])
+        self.assertEqual(self.engine.snapshot.last_action, "Правило добавлено: «ghbdtn» — не переводить")
+        self.assertEqual(self.engine.learning.rules(), (replace(rule, case_sensitive=True),))
 
         self.backend.group = 0
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
@@ -1361,6 +1332,20 @@ class EngineBehaviourTests(unittest.TestCase):
         decision = evaluation["decision"]
         assert isinstance(decision, dict)
         self.assertEqual(decision["reason"], "отклонённое пользователем исправление")
+
+        # A rule added from an excluded application keeps its letters out of the log.
+        self.settings.set("exclusions.applications", ["secret"])
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine.add_learning_rule(LearnedRule("hidden", 0, 1), application="Secret Vault")
+        added = next(
+            event for event in self.technical_events(logs.output) if event["event"] == "learning_rule_added"
+        )
+        self.assertEqual((added["pattern"], added["application_excluded"]), ("<redacted>", True))
+
+        # Rules of a switched off rule set decide nothing.
+        self.settings.set("detection.learning", False)
+        self.assertEqual(self.engine._rejected_targets(0, "ghbdtn"), set())
+        self.assertIsNone(self.engine._forced_target_group(0, "hidden"))
 
     def test_the_learning_field_reports_the_switch_when_the_word_is_unknown(self) -> None:
         self.settings.set("detection.learning", False)
@@ -1634,57 +1619,40 @@ class EngineBehaviourTests(unittest.TestCase):
         self.engine._handle(plain_key("z", SCHEDULED_UNDO_KEYCODE, 1, pressed=False))
         self.assertEqual(len(self.backend.injections), before)
 
-    def test_learning_is_not_offered_for_a_lone_letter_or_symbols(self) -> None:
-        self.settings.set("detection.learning_confirmations", 1)
+    def test_a_single_pause_converts_and_offers_nothing(self) -> None:
         self.engine._handle(boundary_event(True, group=1))
         self.engine._handle(boundary_event(False, group=1))
         self.type_word("б", group=1, start=FIFTH_WORD_KEYCODE_BASE)
-        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            self.press_pause()
+        self.hit_pause()
         strokes, target, boundary = self.backend.injections[-1]
         self.assertEqual((len(strokes), target, boundary), (1, 0, None))
         self.assertEqual(self.engine.snapshot.last_action, "б → ,")
         self.assertIsNone(self.engine.learning_prompt)
-        self.assertEqual(self.engine.learning.counts(), (0, 0))
-        scheduled = next(
-            event for event in self.technical_events(logs.output) if event["event"] == "manual_conversion_scheduled"
-        )
-        self.assertFalse(scheduled["learnable"])
-        # Two letters still read as a word and become a rule at once.
         self.type_word("yj", group=0, start=SIXTH_WORD_KEYCODE_BASE)
-        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            self.press_pause()
+        self.hit_pause()
         self.assertEqual(self.engine.snapshot.last_action, "yj → но")
-        self.assertEqual(self.engine.learning.counts(), (0, 0))
-        self.assertIsNotNone(self.engine.learning_prompt)
-        self.assertTrue(self.engine.confirm_learning_prompt())
-        self.assertEqual(self.engine.snapshot.last_action, "yj → но · правило выучено")
-        self.assertEqual(self.engine.learning.counts(), (1, 0))
-        scheduled = next(
-            event for event in self.technical_events(logs.output) if event["event"] == "manual_conversion_scheduled"
-        )
-        self.assertTrue(scheduled["learnable"])
+        self.assertIsNone(self.engine.learning_prompt)
+        self.assertEqual(self.engine.learning.count(), 0)
 
     def test_learning_prompt_lifecycle_is_logged(self) -> None:
-        self.settings.set("detection.learning_confirmations", LEARNING_PROMPT_REQUIRED_CONFIRMATIONS)
-
-        def manual_conversion() -> None:
+        def offer() -> None:
+            self.backend.group = 0
             self.type_word("ghbdtn")
-            self.press_pause()
+            self.double_pause()
             self.assertIsNotNone(self.engine.learning_prompt)
 
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            manual_conversion()
+            offer()
             self.engine._handle(plain_key("Escape", ESCAPE_KEYCODE, 1))
-        names = [event["event"] for event in self.technical_events(logs.output)]
-        self.assertIn("learning_prompt_shown", names)
+        shown = next(event for event in self.technical_events(logs.output) if event["event"] == "learning_prompt_shown")
+        self.assertEqual((shown["original"], shown["action"]), ("ghbdtn", "convert"))
         dismissed = next(
             event for event in self.technical_events(logs.output) if event["event"] == "learning_prompt_dismissed"
         )
         self.assertEqual(dismissed["reason"], "escape")
 
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            manual_conversion()
+            offer()
             self.engine._handle(letter_event("a", A_KEYCODE, 1, self.pair))
         reasons = [
             event["reason"] for event in self.technical_events(logs.output) if event["event"] == "learning_prompt_dismissed"
@@ -1693,7 +1661,7 @@ class EngineBehaviourTests(unittest.TestCase):
         self.engine._clear_word()
 
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            manual_conversion()
+            offer()
             deadline = self.engine._learning_prompt_deadline
             assert deadline is not None
             self.assertTrue(self.engine._expire_learning_prompt(now=deadline + 1.0))
@@ -1703,91 +1671,266 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertEqual(reasons, ["timeout"])
 
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            manual_conversion()
+            offer()
             self.assertTrue(self.engine.confirm_learning_prompt())
         confirmed = next(
             event for event in self.technical_events(logs.output) if event["event"] == "learning_prompt_confirmed"
         )
-        self.assertEqual(confirmed["required_confirmations"], LEARNING_PROMPT_REQUIRED_CONFIRMATIONS)
+        self.assertEqual((confirmed["action"], confirmed["has_word"]), ("convert", True))
 
-    def test_only_enter_records_what_local_learning_keeps(self) -> None:
-        """Every answer except Enter leaves the rules as they were.
+    def test_only_ok_in_the_rule_window_stores_a_rule(self) -> None:
+        """Enter on the offer opens the rule window; nothing is stored before its OK."""
 
-        A manual conversion is a correction, not a lesson: the user may just
-        carry on typing, click elsewhere or leave the prompt alone, and none of
-        that is a decision about the word.
-        """
-
-        self.settings.set("detection.learning_confirmations", 1)
+        requests: list[LearningPrompt] = []
+        self.engine.subscribe_rule_requests(requests.append)
 
         def offer() -> None:
             self.backend.group = 0
             self.type_word("qwerty")
-            self.press_pause()
+            self.double_pause()
             self.assertIsNotNone(self.engine.learning_prompt)
-            self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (None, 0))
 
         offer()
         self.engine._handle(plain_key("Escape", ESCAPE_KEYCODE, 1))
-        self.assertEqual(self.engine.learning.counts(), (0, 0))
-
-        offer()
-        self.engine._handle(letter_event("a", A_KEYCODE, 1, self.pair))
-        self.assertIsNone(self.engine.learning_prompt)
-        self.assertEqual(self.engine.learning.counts(), (0, 0))
-        self.engine._clear_word()
-
         offer()
         self.engine._handle(plain_key("Pointer", 1, 0))
         self.assertIsNone(self.engine.learning_prompt)
-        self.assertEqual(self.engine.learning.counts(), (0, 0))
+        self.assertEqual(requests, [])
 
         offer()
-        deadline = self.engine._learning_prompt_deadline
-        assert deadline is not None
-        self.assertTrue(self.engine._expire_learning_prompt(now=deadline + 1.0))
-        self.assertEqual(self.engine.learning.counts(), (0, 0))
-        self.engine._clear_word()
-
-        offer()
-        self.assertTrue(self.engine.confirm_learning_prompt())
-        self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (1, 1))
-        self.assertEqual(self.engine.learning.forced_target(0, "qwerty", 1), 1)
-        self.assertEqual(self.engine.learning.counts(), (1, 0))
-        self.assertEqual(
-            self.engine.snapshot.last_action, "qwerty → йцукен · правило выучено"
-        )
-
-    def test_a_word_that_already_has_a_rule_is_not_offered_again(self) -> None:
-        """Nothing left to learn: the conversion just happens, without a prompt."""
-
-        self.settings.set("detection.learning_confirmations", 1)
-        self.backend.group = 0
-        self.type_word("qwerty")
-        self.press_pause()
-        self.assertTrue(self.engine.confirm_learning_prompt())
-        self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (1, 1))
-
-        self.settings.set("detection.respect_manual_layout", False)
-        self.backend.group = 0
-        self.type_word("qwerty")
-        self.press_pause()
+        prompt = self.engine.learning_prompt
+        enter = KeyEvent(True, RETURN_KEYCODE, "Return", "\r", ("\r", "\r"), 1, 0, PROMPT_ENTER_TIMESTAMP)
+        self.engine._handle(enter)
+        self.assertEqual(requests, [prompt])
         self.assertIsNone(self.engine.learning_prompt)
-        self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (1, 1))
+        self.assertEqual(self.engine.learning.count(), 0)
+        # A second answer to the same prompt does nothing.
+        self.assertFalse(self.engine.confirm_learning_prompt(prompt))
 
-    def test_enter_reaches_the_threshold_whatever_it_is(self) -> None:
-        """A rule costs one Enter; the threshold is what half-confirmed rules need."""
+    # -- double press: a rule offer ------------------------------------
+    def offered(self) -> LearningPrompt:
+        prompt = self.engine.learning_prompt
+        assert prompt is not None
+        return prompt
 
-        self.settings.set("detection.learning_confirmations", NON_DEFAULT_LEARNING_CONFIRMATIONS)
-        self.backend.group = 0
+    def test_a_double_pause_converts_a_missed_word_and_offers_to_convert_it(self) -> None:
         self.type_word("qwerty")
-        self.press_pause()
-        self.assertTrue(self.engine.confirm_learning_prompt())
+        self.double_pause()
+        self.assertEqual(len(self.backend.injections), 1)
+        prompt = self.offered()
         self.assertEqual(
-            self.engine.snapshot.last_action, "qwerty → йцукен · правило выучено"
+            (prompt.original, prompt.replacement, prompt.action, prompt.source_group, prompt.target_group),
+            ("qwerty", "йцукен", "convert", 0, 1),
         )
-        self.assertEqual(self.engine.learning.rule_state(0, "qwerty"), (1, NON_DEFAULT_LEARNING_CONFIRMATIONS))
-        self.assertEqual(self.engine.learning.forced_target(0, "qwerty", NON_DEFAULT_LEARNING_CONFIRMATIONS), 1)
+
+    def test_a_double_pause_undoes_a_wrong_correction_and_offers_to_keep_the_word(self) -> None:
+        self.correct_hello()
+        self.double_pause()
+        # The first press undid the correction; the second only offers the rule.
+        self.assertEqual(len(self.backend.injections), DOUBLE_PAUSE_INJECTIONS_AFTER_UNDO)
+        self.assertEqual(self.backend.injections[-1][1], 0)
+        prompt = self.offered()
+        self.assertEqual((prompt.original, prompt.replacement, prompt.action), ("ghbdtn", "привет", "keep"))
+
+    def test_a_double_pause_after_the_users_own_fix_puts_the_fix_back(self) -> None:
+        self.correct_hello()
+        self.press_pause()
+        self.assertEqual(len(self.backend.injections), DOUBLE_PAUSE_INJECTIONS_AFTER_UNDO)
+        # The first press undoes the fix; the second puts it back, then offers.
+        self.double_pause()
+        self.assertEqual(len(self.backend.injections), DOUBLE_PAUSE_INJECTIONS_AFTER_RESTORED_FIX)
+        self.assertEqual(self.backend.injections[-1][1], 0)
+        self.assertEqual(self.offered().action, "keep")
+
+    def test_a_double_pause_while_the_first_press_still_waits(self) -> None:
+        shift_down = plain_key("Shift_L", SHIFT_L_KEYCODE, 0)
+        shift_up = plain_key("Shift_L", SHIFT_L_KEYCODE, 0, pressed=False)
+        # A fresh conversion waits for Shift; the offer follows it.
+        self.type_word("qwerty")
+        self.engine._handle(shift_down)
+        self.hit_pause(release_others=False)
+        self.hit_pause(release_others=False)
+        self.assertIsNone(self.engine.learning_prompt)
+        self.assertEqual(self.backend.injections, [])
+        self.engine._handle(shift_up)
+        self.assertEqual(len(self.backend.injections), 1)
+        self.assertEqual(self.offered().action, "convert")
+
+    def test_a_double_pause_drops_a_waiting_press_that_would_undo_the_users_fix(self) -> None:
+        shift_down = plain_key("Shift_L", SHIFT_L_KEYCODE, 1)
+        shift_up = plain_key("Shift_L", SHIFT_L_KEYCODE, 1, pressed=False)
+        self.correct_hello()
+        self.press_pause()
+        self.engine._handle(shift_down)
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.hit_pause(release_others=False)
+            self.hit_pause(release_others=False)
+        dropped = next(
+            event for event in self.technical_events(logs.output) if event["event"] == "pending_correction_dropped"
+        )
+        self.assertEqual(dropped["reason"], "rule_requested")
+        self.engine._handle(shift_up)
+        self.assertEqual(len(self.backend.injections), DOUBLE_PAUSE_INJECTIONS_AFTER_UNDO)
+        self.assertEqual(self.offered().action, "keep")
+
+    def test_a_double_pause_without_a_word_offers_an_empty_rule(self) -> None:
+        self.engine._update(current_group=0)
+        self.double_pause()
+        # The layout went there and back again.
+        self.assertEqual(self.backend.group, 0)
+        prompt = self.offered()
+        self.assertEqual((prompt.original, prompt.source_group, prompt.target_group), ("", 0, 1))
+        # Symbols are not a word either.
+        self.engine.dismiss_learning_prompt()
+        self.press_space(1)
+        self.engine._handle(quote_event())
+        self.double_pause()
+        self.assertEqual(self.offered().original, "")
+        # Nor is a conversion that could not be typed.
+        self.engine.dismiss_learning_prompt()
+        self.type_word("qwerty")
+        with patch.object(self.backend, "inject_correction", side_effect=RuntimeError("busy")):
+            self.hit_pause()
+        self.hit_pause()
+        self.assertEqual(self.offered().original, "")
+
+    def test_an_offer_needs_letters_and_a_layout_to_start_from(self) -> None:
+        plan = CorrectionPlan((), None, 0, 1, "12", "12", 1.0, "TestEditor", False, "manual")
+        self.assertEqual(self.engine._rule_offer(plan, "TestEditor").original, "")
+        self.engine._update(current_group=-1)
+        offer = self.engine._empty_rule_offer("TestEditor")
+        self.assertEqual((offer.source_group, offer.target_group), (0, 1))
+
+    def test_only_a_quick_second_press_of_the_same_key_is_a_double_press(self) -> None:
+        # Too slow: a plain toggle back.
+        self.type_word("qwerty")
+        self.hit_pause()
+        self.engine._convert_press_at -= DOUBLE_CONVERT_PRESS_WINDOW_SECONDS + 1
+        self.hit_pause()
+        self.assertIsNone(self.engine.learning_prompt)
+        self.assertEqual(len(self.backend.injections), INJECTIONS_AFTER_TOGGLE_BACK)
+        # Another key in between.
+        self.type_word("qwerty", start=SIXTH_WORD_KEYCODE_BASE)
+        self.hit_pause()
+        self.press_space()
+        self.hit_pause()
+        self.assertIsNone(self.engine.learning_prompt)
+        # A click in between.
+        self.type_word("qwerty", start=SIXTH_WORD_KEYCODE_BASE)
+        self.hit_pause()
+        self.engine._handle(plain_key("Pointer", 1, 0))
+        self.hit_pause()
+        self.assertIsNone(self.engine.learning_prompt)
+        # Rules switched off: two presses are two conversions.
+        self.settings.set("detection.learning", False)
+        self.type_word("qwerty", start=SIXTH_WORD_KEYCODE_BASE)
+        self.double_pause()
+        self.assertIsNone(self.engine.learning_prompt)
+
+    def test_auto_repeat_of_a_held_pause_is_still_the_first_press(self) -> None:
+        self.type_word("qwerty")
+        self.hit_pause(release=False)
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.hit_pause(release=False, release_others=False)
+        self.assertIn(
+            "manual_conversion_waiting", [event["event"] for event in self.technical_events(logs.output)]
+        )
+        self.engine._handle(plain_key("Pause", PAUSE_KEYCODE, self.engine.snapshot.current_group, pressed=False))
+        self.assertEqual(len(self.backend.injections), 1)
+        self.hit_pause()
+        self.assertEqual(self.offered().action, "convert")
+
+    def test_the_rule_window_keeps_its_typing_away_from_the_engine(self) -> None:
+        enter = KeyEvent(True, RETURN_KEYCODE, "Return", "\r", ("\r", "\r"), 0, 0, PROMPT_ENTER_TIMESTAMP)
+        self.type_word("ghb")
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine.set_rule_editor_open(True)
+            # Focus coming back to the same window says nothing new.
+            self.engine.set_rule_editor_open(True)
+            self.engine._handle(letter_event("d", FOURTH_LETTER_KEYCODE, 0, self.pair))
+            self.engine._handle(letter_event("t", FIFTH_LETTER_KEYCODE, 0, self.pair))
+            self.engine._handle(plain_key("d", FOURTH_LETTER_KEYCODE, 0, pressed=False))
+            self.engine.set_rule_editor_open(False)
+        names = [event["event"] for event in self.technical_events(logs.output)]
+        self.assertEqual(names.count("rule_editor_focused"), 1)
+        self.assertEqual(names.count("rule_editor_left"), 1)
+        discarded = next(event for event in self.technical_events(logs.output) if event["event"] == "word_discarded")
+        self.assertEqual(discarded["reason"], "rule_editor_open")
+        self.assertEqual(self.engine._strokes, [])
+        self.engine.set_rule_editor_open(True)
+        self.assertFalse(self.engine.consumes_key(enter))
+        self.engine.set_rule_editor_open(False)
+        self.assertEqual(self.engine.consumes_key(enter), "defer")
+
+    def test_a_keep_rule_holds_back_an_early_switch_of_the_word(self) -> None:
+        self.add_rule("ghbdtn", 0, 1, "keep")
+        self.assertEqual(self.engine._early_prefix_protection("ghb", 0, 1), "learned_keep_rule")
+        self.settings.set("detection.learning", False)
+        self.assertNotEqual(self.engine._early_prefix_protection("ghb", 0, 1), "learned_keep_rule")
+        self.assertEqual(self.engine._learning_diagnostics(0, "ghbdtn")["rule"], None)
+
+    # -- input other programs inject ---------------------------------------
+    def foreign_letter(self, character: str, keycode: int) -> KeyEvent:
+        return replace(letter_event(character, keycode, 0, self.pair), foreign=True)
+
+    def test_injected_keys_are_not_typing_on_this_keyboard(self) -> None:
+        self.type_word("ghb")
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._handle(self.foreign_letter("d", FOURTH_LETTER_KEYCODE))
+            self.engine._handle(self.foreign_letter("t", FIFTH_LETTER_KEYCODE))
+            self.engine._handle(replace(plain_key("Shift_L", SHIFT_L_KEYCODE, 0), foreign=True))
+            self.engine._handle(replace(plain_key("d", FOURTH_LETTER_KEYCODE, 0, pressed=False), foreign=True))
+        events = self.technical_events(logs.output)
+        observed = [event for event in events if event["event"] == "foreign_input_observed"]
+        self.assertEqual(len(observed), 1)
+        self.assertEqual((observed[0]["word_length"], observed[0]["action_waiting"]), (len("ghb"), False))
+        self.assertEqual(
+            next(event for event in events if event["event"] == "word_discarded")["reason"], "foreign_input"
+        )
+        self.assertEqual(self.engine._strokes, [])
+        # Nothing waits for their key-ups, and Enter from them is not held back.
+        self.assertEqual(self.engine._pressed, set())
+        enter = replace(
+            KeyEvent(True, RETURN_KEYCODE, "Return", "\r", ("\r", "\r"), 0, 0, PROMPT_ENTER_TIMESTAMP), foreign=True
+        )
+        self.assertFalse(self.engine.consumes_key(enter))
+        # Nor is a Pause from them a hotkey.
+        self.engine._handle(replace(plain_key("Pause", PAUSE_KEYCODE, 0), foreign=True))
+        self.assertEqual(self.backend.injections, [])
+        self.assertIsNone(self.engine._pending)
+        # A key of this keyboard ends the burst; the next injected key is reported again.
+        self.type_word("a", start=SIXTH_WORD_KEYCODE_BASE)
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._handle(self.foreign_letter("b", FOURTH_LETTER_KEYCODE))
+        self.assertIn("foreign_input_observed", [event["event"] for event in self.technical_events(logs.output)])
+
+    def test_an_injected_key_waits_behind_the_users_own_enter(self) -> None:
+        self.type_word("ghb")
+        self.engine._deferred_action = KeyEvent(
+            True, RETURN_KEYCODE, "Return", "\r", ("\r", "\r"), 0, 0, PROMPT_ENTER_TIMESTAMP, deferred=True
+        )
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._handle(self.foreign_letter("d", FOURTH_LETTER_KEYCODE))
+        observed = next(
+            event for event in self.technical_events(logs.output) if event["event"] == "foreign_input_observed"
+        )
+        self.assertTrue(observed["action_waiting"])
+        self.assertEqual(self.engine.snapshot.current_word, "ghb")
+
+    def test_injected_input_counts_as_typing_once_the_setting_says_so(self) -> None:
+        self.settings.set("detection.injected_input", True)
+        self.assertTrue(self.engine._injected_input)
+        self.type_word("ghb")
+        self.engine._handle(self.foreign_letter("d", FOURTH_LETTER_KEYCODE))
+        self.assertEqual(self.engine.snapshot.current_word, "ghbd")
+        # A character sent instead of a key never does: it cannot be typed again.
+        packet = replace(
+            KeyEvent(True, FIFTH_LETTER_KEYCODE, UNICODE_PACKET_KEY_NAME, "t", ("t", "е"), 0, 0, FIFTH_LETTER_KEYCODE),
+            foreign=True,
+        )
+        self.assertFalse(self.engine.consumes_key(packet))
+        self.engine._handle(packet)
+        self.assertEqual(self.engine._strokes, [])
 
     def test_setting_changes_are_logged_with_loggable_values(self) -> None:
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:

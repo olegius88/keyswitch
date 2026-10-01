@@ -11,17 +11,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from keyswitch import config, history, language_model, learning, spellcheck, system
+from keyswitch import config, history, language_model, spellcheck, system
 from keyswitch.config import SettingsStore, _deep_merge
-from keyswitch.constants.settings_defaults import (
-    DEFAULT_SETTINGS,
-    LEARNING_CONFIRMATIONS_SETTING_MAX,
-)
+from keyswitch.constants.settings_defaults import DEFAULT_SETTINGS
 from keyswitch.history import HistoryEntry, HistoryStore
 from keyswitch.constants.file_formats import HISTORY_CONFIDENCE_DECIMALS
 from keyswitch.language_model import LanguageModel
-from keyswitch.learning import LearningStore
-from keyswitch.constants.detection import MAX_LEARNING_CONFIRMATIONS
 from keyswitch.constants.models import (
     LANGUAGE_MODEL_CALIBRATION_WORD_LIMIT,
     LANGUAGE_MODEL_NGRAM_ORDERS,
@@ -54,13 +49,7 @@ from fixture_values.counts import (
     LANGUAGE_MODEL_BEST_DELETION_LIMIT,
     LANGUAGE_MODEL_BEST_DELETION_WORD_LENGTH,
     LATIN_ALPHABET_SIZE,
-    LEARNING_BROKEN_RULE_CONFIRMATIONS,
-    LEARNING_CONFIRMATIONS_REQUIRED,
-    LEARNING_FULL_CONFIRMATIONS,
-    LEARNING_MALFORMED_RULE_VALUE,
-    LEARNING_SCALAR_RULE_VALUE,
 )
-from fixture_values.keys import ALTERNATE_TARGET_GROUP
 from fixture_values.platform import FAKE_HUNSPELL_HANDLE
 from fixture_values.scores import (
     HISTORY_BRANCH_CONFIDENCE_OFFSET,
@@ -181,90 +170,6 @@ class HistoryStoreBranchTests(unittest.TestCase):
             path.write_text("{}\n", encoding="utf-8")
             with patch.object(Path, "read_text", side_effect=OSError("denied")):
                 self.assertEqual(store.read(), [])
-
-
-class LearningStoreBranchTests(unittest.TestCase):
-
-    def test_invalid_persisted_shapes_are_ignored(self) -> None:
-        self.assertIsNone(learning._string_keyed_dict({1: "invalid key"}))
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "learning.json"
-            for payload in ("{broken", "[]", '{"rules": [], "rejections": {}}'):
-                path.write_text(payload, encoding="utf-8")
-                store = LearningStore(path)
-                self.assertEqual(store.counts(), (0, 0))
-
-    def test_manual_rules_rejections_invalid_values_and_clear(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "learning.json"
-            store = LearningStore(path)
-            self.assertEqual(store.record_manual(0, "   ", 1), 0)
-            self.assertEqual(store.record_manual(0, "word", 0), 0)
-            first_confirmation = store.record_manual(0, "Word", 1)
-            self.assertEqual(first_confirmation, 1)
-            second_confirmation = store.record_manual(0, "word", 1)
-            self.assertEqual(second_confirmation, first_confirmation + 1)
-            self.assertEqual(store.forced_target(0, "word", second_confirmation + 1), None)
-            self.assertEqual(store.forced_target(0, "word", second_confirmation), 1)
-
-            self.assertEqual(store.record_manual(0, "word", ALTERNATE_TARGET_GROUP), 1)
-            self.assertEqual(store.forced_target(0, "word", 1), ALTERNATE_TARGET_GROUP)
-            store.reject(0, "word", ALTERNATE_TARGET_GROUP)
-            self.assertEqual(store.forced_target(0, "word", 1), None)
-            self.assertEqual(store.rejected_targets(0, "word"), {ALTERNATE_TARGET_GROUP})
-            self.assertEqual(store.counts(), (0, 1))
-
-            store.reject(0, "", 1)
-            store.reject(0, "word", 0)
-            store._data["rejections"]["0:invalid"] = ["1", None, "bad"]
-            store._data["rejections"]["0:not-list"] = "bad"
-            self.assertEqual(store.rejected_targets(0, "invalid"), {1})
-            self.assertEqual(store.rejected_targets(0, "not-list"), set())
-
-            store._data["rules"]["0:broken"] = {"confirmations": LEARNING_BROKEN_RULE_CONFIRMATIONS}
-            self.assertIsNone(store.forced_target(0, "broken"))
-            store._data["rules"]["0:scalar"] = LEARNING_SCALAR_RULE_VALUE
-            self.assertIsNone(store.forced_target(0, "scalar"))
-            store._data["rules"]["0:low"] = {"target_group": 1, "confirmations": 0}
-            self.assertIsNone(store.forced_target(0, "low", 0))
-
-            store._data["rejections"]["0:word"] = "bad"
-            store.reject(0, "word", 1)
-            self.assertEqual(store.rejected_targets(0, "word"), {1})
-            store.reject(0, "word", ALTERNATE_TARGET_GROUP)
-            store.record_manual(0, "word", 1)
-            self.assertEqual(store.rejected_targets(0, "word"), {ALTERNATE_TARGET_GROUP})
-            store.reject(0, "solo", 1)
-            store.record_manual(0, "solo", 1)
-            self.assertEqual(store.rejected_targets(0, "solo"), set())
-            store.clear()
-            self.assertEqual(store.counts(), (0, 0))
-
-    def test_explicit_confirmation_activates_and_reconciles_rule(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            store = LearningStore(Path(temporary) / "learning.json")
-            self.assertEqual(store.confirm_manual(0, "", 1, LEARNING_CONFIRMATIONS_REQUIRED), 0)
-            self.assertEqual(store.confirm_manual(0, "word", 0, LEARNING_CONFIRMATIONS_REQUIRED), 0)
-
-            store.reject(0, "word", 1)
-            store.reject(0, "word", ALTERNATE_TARGET_GROUP)
-            self.assertEqual(store.confirm_manual(0, "word", 1, LEARNING_FULL_CONFIRMATIONS), LEARNING_FULL_CONFIRMATIONS)
-            self.assertEqual(store.forced_target(0, "WORD", LEARNING_FULL_CONFIRMATIONS), 1)
-            self.assertEqual(store.rejected_targets(0, "word"), {ALTERNATE_TARGET_GROUP})
-
-            self.assertEqual(store.confirm_manual(0, "word", 1, LEARNING_CONFIRMATIONS_REQUIRED), LEARNING_FULL_CONFIRMATIONS)
-            store.reject(0, "solo", 1)
-            self.assertEqual(store.confirm_manual(0, "solo", 1, 0), 1)
-            self.assertEqual(store.rejected_targets(0, "solo"), set())
-
-            store._data["rules"]["0:reset"] = LEARNING_MALFORMED_RULE_VALUE
-            store._data["rejections"]["0:reset"] = "invalid"
-            self.assertEqual(
-                store.confirm_manual(0, "reset", 1, LEARNING_CONFIRMATIONS_SETTING_MAX + 1), LEARNING_CONFIRMATIONS_SETTING_MAX)
-            self.assertEqual(store.forced_target(0, "reset", LEARNING_CONFIRMATIONS_SETTING_MAX), 1)
-            # The counter of manual conversions saturates on its own, whatever the setting asks for.
-            store._data["rules"]["0:reset"] = {"target_group": 1, "confirmations": MAX_LEARNING_CONFIRMATIONS}
-            self.assertEqual(store.record_manual(0, "reset", 1), MAX_LEARNING_CONFIRMATIONS)
 
 
 class LanguageModelBranchTests(unittest.TestCase):

@@ -10,6 +10,7 @@ from typing import cast
 from unittest.mock import patch
 
 from keyswitch.backend import KeyEvent
+from keyswitch.learning import LearnedRule
 from keyswitch.context_model import ACTIONS, ContextModel
 from keyswitch.constants.timing import MANUAL_RELEASE_TIMEOUT_SECONDS
 from test_input_integrity import InputIntegrityTests
@@ -86,7 +87,7 @@ class ContextRuntimeSafetyTests(InputIntegrityTests):
         self.assertIn(1, self.engine._pressed)  # Timeout cannot assert a real key-up.
         self.assertIn("не получено отпускание", self.engine.snapshot.last_action)
         self.assertIn("manual_conversion_timeout", [e["event"] for e in self.events(logs.output)])
-        self.assertEqual(self.engine.learning.rejected_targets(0, "ghbdtn"), set())
+        self.assertEqual(self.engine.learning.count(), 0)
 
     def test_expiry_runs_before_new_input_and_does_not_delete_editor_text(self) -> None:
         with patch("keyswitch.engine.time.monotonic", return_value=MANUAL_RELEASE_KEY_PRESS_SECONDS):

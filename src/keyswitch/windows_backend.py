@@ -17,6 +17,7 @@ from .constants.keyboard import (
     LOCK_MASK,
     SHIFT_MASK,
     SUPER_MASK,
+    UNICODE_PACKET_KEY_NAME,
 )
 from .constants.timing import (
     KEYBOARD_LISTENER_START_TIMEOUT_SECONDS,
@@ -60,6 +61,7 @@ from .constants.windows import (
     VK_OEM_5,
     VK_OEM_6,
     VK_OEM_7,
+    VK_PACKET,
     VK_OEM_COMMA,
     VK_OEM_MINUS,
     VK_OEM_PERIOD,
@@ -100,6 +102,8 @@ class NativeKeyEvent:
     injected: bool
     timestamp: int
     replayed: bool = False
+    # Injected by another program; ``injected`` means KeySwitch's own keys only.
+    foreign: bool = False
 
 
 @dataclass(frozen=True)
@@ -110,6 +114,10 @@ class NativeInput:
     extended: bool = False
     synthetic: bool = True
     replayed: bool = False
+    # ``scan_code`` is a Unicode character (KEYEVENTF_UNICODE), not a key position.
+    unicode: bool = False
+    # A replay of a key another program injected.
+    foreign: bool = False
 
 
 class WindowsAPI(Protocol):
@@ -196,6 +204,7 @@ KEY_NAMES = {
     VK_OEM_5: "backslash",
     VK_OEM_6: "bracketright",
     VK_OEM_7: "apostrophe",
+    VK_PACKET: UNICODE_PACKET_KEY_NAME,
 }
 
 
@@ -465,10 +474,11 @@ class WindowsBackend:
                     else:
                         self._holding = False
                         return count
+                packet = item.virtual_key == VK_PACKET
                 self._send_exact((NativeInput(
-                    item.pressed, virtual_key=item.virtual_key,
+                    item.pressed, virtual_key=0 if packet else item.virtual_key,
                     scan_code=item.scan_code, extended=item.extended,
-                    synthetic=False, replayed=True,
+                    synthetic=False, replayed=True, unicode=packet, foreign=item.foreign,
                 ),))
                 count += 1
         finally:
@@ -514,21 +524,9 @@ class WindowsBackend:
                 if self._holding and not prior_release and not action_key:
                     self._held.append(native)
                     return True
-        if native.pressed:
-            if native.virtual_key == VK_CAPITAL and native.virtual_key not in self._pressed:
-                self._caps_lock = not self._caps_lock
-            self._pressed.add(native.virtual_key)
-        else:
-            self._pressed.discard(native.virtual_key)
-            with self._hold_lock:
-                if native.virtual_key in self._action_prior_keys and any(
-                    item.pressed and item.virtual_key == native.virtual_key
-                    for item in self._held
-                ):
-                    # An auto-repeat after Enter belongs to the held next
-                    # input. Its key-up also has to follow that replay.
-                    self._held.append(replace(native, replayed=False))
-            self._action_prior_keys.discard(native.virtual_key)
+        if native.virtual_key != VK_PACKET:
+            # A packet is a character, not a key: nothing is held down by it.
+            self._track_key_state(native)
         state = self._normalized_state()
         characters = tuple(
             self._api.translate_key(
@@ -551,6 +549,7 @@ class WindowsBackend:
             state,
             native.timestamp,
             native.injected,
+            foreign=native.foreign,
         )
         repeated_answer = not event.synthetic and event.pressed and event.keycode in self._consumed_keys
         consumed = self._consumes(event)
@@ -563,6 +562,23 @@ class WindowsBackend:
         if listener is not None and not repeated_answer:
             listener(event)
         return bool(consumed)
+
+    def _track_key_state(self, native: NativeKeyEvent) -> None:
+        if native.pressed:
+            if native.virtual_key == VK_CAPITAL and native.virtual_key not in self._pressed:
+                self._caps_lock = not self._caps_lock
+            self._pressed.add(native.virtual_key)
+            return
+        self._pressed.discard(native.virtual_key)
+        with self._hold_lock:
+            if native.virtual_key in self._action_prior_keys and any(
+                item.pressed and item.virtual_key == native.virtual_key
+                for item in self._held
+            ):
+                # An auto-repeat after Enter belongs to the held next
+                # input. Its key-up also has to follow that replay.
+                self._held.append(replace(native, replayed=False))
+        self._action_prior_keys.discard(native.virtual_key)
 
     def _normalized_state(self) -> int:
         state = LOCK_MASK if self._caps_lock else 0

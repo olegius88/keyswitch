@@ -29,12 +29,10 @@ from .constants.settings_defaults import (
     CONFIDENCE_SETTING_STEP,
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_EARLY_SWITCH_MIN_LENGTH,
-    DEFAULT_LEARNING_CONFIRMATIONS,
     DEFAULT_MINIMUM_WORD_LENGTH,
     DEFAULT_PAUSE_DELAY_SECONDS,
     EARLY_SWITCH_MIN_LENGTH_SETTING_MAX,
     EARLY_SWITCH_MIN_LENGTH_SETTING_MIN,
-    LEARNING_CONFIRMATIONS_SETTING_MAX,
     MINIMUM_WORD_LENGTH_SETTING_MAX,
     MINIMUM_WORD_LENGTH_SETTING_MIN,
     PAUSE_DELAY_SETTING_MAX_SECONDS,
@@ -46,7 +44,8 @@ from .engine import EngineSnapshot
 from .history import HistoryStore
 from .logsetup import log_directory, log_path, log_status, rotation_summary
 from .intent_model import IntentModelStatus
-from .learning import LearningStore
+from .learning import LearnedRule, LearningStore
+from .rule_editor import RuleDraft, action_text, condition_text, draft_from_rule, other_layout_text
 from .system import AutostartManager
 from .backend import BackendProbe
 from .updates import UpdateController, UpdatePhase, UpdateSnapshot
@@ -204,8 +203,12 @@ class MainWindow(Adw.ApplicationWindow):
         engine: _UiEngine,
         updates: UpdateController,
         on_close_request: Callable[[], bool],
+        *,
+        open_rule_editor: Callable[[RuleDraft], object] | None = None,
     ) -> None:
         super().__init__(application=application, title="KeySwitch")
+        self._open_rule_editor = open_rule_editor
+        self._rule_rows: list[Adw.ActionRow] = []
         self.settings = settings
         self.history = history
         self.engine = engine
@@ -519,32 +522,34 @@ class MainWindow(Adw.ApplicationWindow):
         page.append(quirks)
 
         learning = Adw.PreferencesGroup(
-            title="Самообучение",
-            description="KeySwitch сохраняет только слова, которые вы преобразовали вручную или вернули после ложного исправления.",
-        )
-        learning.add(self._switch_row("detection.learning", "Учиться на моих действиях", "После Pause/Break предложить правило: Enter подтверждает, Esc отклоняет"))
-        confirmations = Adw.SpinRow.new_with_range(1, LEARNING_CONFIRMATIONS_SETTING_MAX, 1)
-        confirmations.set_title("Подтверждений для нового правила")
-        confirmations.set_subtitle("Порог, при котором правило начинает действовать; Enter достигает его сразу")
-        confirmations.set_value(float(self.settings.get("detection.learning_confirmations", DEFAULT_LEARNING_CONFIRMATIONS)))
-        confirmations.connect(
-            "notify::value",
-            lambda row, _parameter: self.settings.set(
-                "detection.learning_confirmations", int(row.get_value())
+            title="Правила переключения",
+            description=(
+                "Правило говорит, что делать со словом, которое совпадает с сочетанием букв, "
+                "начинается с него или содержит его: переводить в другую раскладку или нет. "
+                "Дважды нажмите Pause, затем Enter: окно правила откроется заполненным для "
+                "последнего слова. Правило появляется только по кнопке OK."
             ),
         )
-        self._settings_controls["detection.learning_confirmations"] = confirmations
-        learning.add(confirmations)
-        rules, rejections = self.engine.learning.counts()
+        learning.add(self._switch_row(
+            "detection.learning", "Правила действуют",
+            "Двойное нажатие Pause предлагает правило для последнего слова",
+        ))
         self.learning_status_row = Adw.ActionRow(
-            title="Локальная модель пользователя",
-            subtitle=self._learning_summary(rules, rejections),
+            title="Правила пользователя",
+            subtitle=self._learning_summary(self.engine.learning.count()),
         )
-        clear_learning = Gtk.Button(label="Очистить", valign=Gtk.Align.CENTER)
+        if self._open_rule_editor is not None:
+            add_rule = Gtk.Button(label="Добавить…", valign=Gtk.Align.CENTER)
+            open_editor = self._open_rule_editor
+            add_rule.connect("clicked", lambda _button: open_editor(RuleDraft()))
+            self.learning_status_row.add_suffix(add_rule)
+        clear_learning = Gtk.Button(label="Удалить все", valign=Gtk.Align.CENTER)
         clear_learning.add_css_class("destructive-action")
         clear_learning.connect("clicked", lambda _button: self._confirm_clear_learning())
         self.learning_status_row.add_suffix(clear_learning)
         learning.add(self.learning_status_row)
+        self._learning_group = learning
+        self.refresh_rules()
         page.append(learning)
 
         triggers = Adw.PreferencesGroup(title="Исправлять после")
@@ -844,7 +849,7 @@ class MainWindow(Adw.ApplicationWindow):
         page.append(startup)
 
         maintenance = Adw.PreferencesGroup(title="Обслуживание")
-        reset_row = Adw.ActionRow(title="Вернуть настройки по умолчанию", subtitle="История исправлений и выученные правила при этом не удаляются")
+        reset_row = Adw.ActionRow(title="Вернуть настройки по умолчанию", subtitle="История исправлений и правила переключения при этом не удаляются")
         reset_button = Gtk.Button(label="Сбросить", valign=Gtk.Align.CENTER)
         reset_button.add_css_class("destructive-action")
         reset_button.connect("clicked", lambda _b: self._confirm_reset())
@@ -1009,7 +1014,7 @@ class MainWindow(Adw.ApplicationWindow):
         locations = Adw.PreferencesGroup(title="Локальные данные")
         locations.add(Adw.ActionRow(title="Настройки", subtitle=str(self.settings.path)))
         locations.add(Adw.ActionRow(title="История", subtitle=str(self.history.path)))
-        locations.add(Adw.ActionRow(title="Самообучение", subtitle=str(self.engine.learning.path)))
+        locations.add(Adw.ActionRow(title="Правила переключения", subtitle=str(self.engine.learning.path)))
         page.append(locations)
 
         technical_log = Adw.PreferencesGroup(
@@ -1077,7 +1082,7 @@ class MainWindow(Adw.ApplicationWindow):
             if row.page_name == "history":
                 self.refresh_history()
             elif row.page_name == "automation" and hasattr(self, "learning_status_row"):
-                self._refresh_learning_status()
+                self.refresh_rules()
 
     def _engine_update_from_thread(self, snapshot: EngineSnapshot) -> None:
         GLib.idle_add(self._apply_engine_snapshot, snapshot)
@@ -1360,29 +1365,49 @@ class MainWindow(Adw.ApplicationWindow):
             self.toast("История очищена")
 
     @staticmethod
-    def _learning_summary(rules: int, rejections: int) -> str:
-        return f"Подтверждённых правил: {rules} · запретов после отмены: {rejections}"
+    def _learning_summary(count: int) -> str:
+        return f"Правил: {count}" if count else "Правил пока нет"
 
-    def _refresh_learning_status(self) -> None:
-        rules, rejections = self.engine.learning.counts()
-        self.learning_status_row.set_subtitle(
-            self._learning_summary(rules, rejections)
-        )
+    def refresh_rules(self) -> None:
+        """List the switching rules under the group's summary row."""
+
+        for row in self._rule_rows:
+            self._learning_group.remove(row)
+        self._rule_rows = []
+        for rule in self.engine.learning.rules():
+            row = Adw.ActionRow(
+                title=rule.pattern,
+                subtitle=(
+                    f"{condition_text(rule)} · {action_text(rule)} · "
+                    f"в другой раскладке «{other_layout_text(rule.pattern, rule.source_group)}»"
+                ),
+            )
+            # The letters are the user's own text, not Pango markup.
+            row.set_use_markup(False)
+            delete = Gtk.Button(icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER, tooltip_text="Удалить правило")
+            delete.add_css_class("flat")
+            delete.connect("clicked", lambda _button, item=rule: self._remove_rule(item))
+            row.add_suffix(delete)
+            if self._open_rule_editor is not None:
+                open_editor = self._open_rule_editor
+                row.set_activatable(True)
+                row.connect("activated", lambda _row, item=rule: open_editor(draft_from_rule(item)))
+            self._learning_group.add(row)
+            self._rule_rows.append(row)
+        self.learning_status_row.set_subtitle(self._learning_summary(len(self._rule_rows)))
+
+    def _remove_rule(self, rule: LearnedRule) -> None:
+        self.engine.learning.remove_rule(rule)
+        self.refresh_rules()
+        self.toast("Правило удалено")
 
     def _confirm_clear_learning(self) -> None:
         dialog = Adw.AlertDialog(
-            heading="Очистить самообучение?",
-            body=(
-                "«Только правила» удаляет выученные правила и оставляет запреты, "
-                "записанные при отмене ложных исправлений; «Только запреты» — "
-                "наоборот. «Всё» удаляет и то и другое. Обычные настройки и "
-                "история не изменятся."
-            ),
+            heading="Удалить все правила?",
+            body="Все правила переключения будут удалены. Обычные настройки и история не изменятся.",
         )
         dialog.add_response("cancel", "Отмена")
-        dialog.add_response("rules", "Только правила")
-        dialog.add_response("rejections", "Только запреты")
-        dialog.add_response("all", "Всё")
+        dialog.add_response("all", "Удалить все")
         dialog.set_response_appearance("all", Adw.ResponseAppearance.DESTRUCTIVE)
         dialog.set_default_response("cancel")
         dialog.set_close_response("cancel")
@@ -1392,19 +1417,11 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.present(self)
 
     def _clear_learning_response(self, response: str) -> None:
-        if response == "rules":
-            self.engine.learning.clear_rules()
-            message = "Правила удалены, запреты сохранены"
-        elif response == "rejections":
-            self.engine.learning.clear_rejections()
-            message = "Запреты удалены, правила сохранены"
-        elif response == "all":
-            self.engine.learning.clear()
-            message = "Самообучение очищено"
-        else:
+        if response != "all":
             return
-        self._refresh_learning_status()
-        self.toast(message)
+        self.engine.learning.clear()
+        self.refresh_rules()
+        self.toast("Правила удалены")
 
     def _confirm_reset(self) -> None:
         dialog = Adw.AlertDialog(
