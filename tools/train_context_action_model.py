@@ -231,9 +231,9 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
                 # Both members preserve text and take the same deferred action.
                 # Deferring three-letter readings too was measured on 17.09.2026 and
                 # made the fitted model worse on chat-like first words, not better
-                # (.t/reliable-release-2026-09-12/SHORT-ISOLATED-CURRICULUM.md); the corpus
-                # v10 and v11 candidates of 01.10.2026, deciding them at once, turned `зум`
-                # alone into `pev` and left `tot привет`, so the threshold is three again.
+                # (.t/reliable-release-2026-09-12/SHORT-ISOLATED-CURRICULUM.md), and again
+                # on 01.10.2026 (corpus v12: `rjn` by the pause and `pm2` broke, `tot привет`
+                # stayed); deciding them at once turns `зум` alone into `pev` (corpus v10, v11).
                 action = "suggest" if trigger in ("enter", "tab", "punctuation") else "wait"
                 keep_action = action
             result.append(ActionRow(identity + ":keep", row.original, group, field,

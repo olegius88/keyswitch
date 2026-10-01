@@ -436,8 +436,9 @@ class ActionTrainingTests(unittest.TestCase):
         self.assertEqual(actual[("pause", "я думаю ", "legacy_russian_unknown_correct", "хз")], "keep")
         self.assertEqual(actual[("pause", "8-10 ", "legacy_russian_unknown_correct", "хз")], "wait")
         self.assertEqual(actual[("pause", "", "legacy_trusted_short_wrong", "yf")], "convert")
-        # Three letters alone are deferred since corpus v12 (01.10.2026); four decide.
-        self.assertEqual(actual[("pause", "", "legacy_russian_unknown_correct", "три")], "wait")
+        # Three letters alone decide (the corpus v12 experiment of 01.10.2026 deferred them and broke
+        # `rjn` by the pause and `pm2`); two are deferred.
+        self.assertEqual(actual[("pause", "", "legacy_russian_unknown_correct", "три")], "keep")
         self.assertEqual(actual[("pause", "", "legacy_russian_unknown_correct", "окей")], "keep")
         relabeled = self.historical_fixture(rows[:1] + rows[HISTORICAL_CURRICULUM_RELABEL_SECOND_SOURCE_INDEX:HISTORICAL_CURRICULUM_RELABEL_SECOND_SOURCE_INDEX + 1])
         self.assertAlmostEqual(sum(row.sample_weight for row in relabeled), 1.0)

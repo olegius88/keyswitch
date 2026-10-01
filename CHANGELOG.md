@@ -4,6 +4,15 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- The context-action trainer failed before fitting since 0.33.0: its stand-in for the lexicon
+  loader refused the supplement words `build_corpus` passes. `tools/prefix_exposure_inventory.py`
+  lists the words the prefix model was fitted on, which the holdout and fitting freezers require
+  and nothing produced; UD Russian-SynTagRus joins the base corpus sources, half of the
+  mixed-language insertion frames cite the word in a parenthesis, and the action model's
+  isolated-short-word threshold is its own constant. The cloud training guide describes the full
+  rebuild of the corpus from public sources; `model/context_v3/README.md` records the three
+  candidates it produced (corpus v10, v11, v12). The early layout switch stays off by default:
+  the v11 pair passed its sealed test in both settings modes but fails two authored regressions.
 - Training protocol: refuse the words of a sealed test by the words, not by family identifiers.
   `test-membership.json` now carries the physical aliases of every test row's form, lemmas and
   typo variants (`alias_sha256`), the evaluator records them in the access ledger, and the
