@@ -815,6 +815,39 @@ class SealedAccessTests(unittest.TestCase):
                 self.evaluate()
             loader.assert_not_called()
 
+    def test_the_words_of_the_test_travel_into_the_ledger_without_naming_the_same_test(self) -> None:
+        """A membership that names its words records them; a prior record without them still reads.
+
+        The fitting extension refuses the words of every accessed test from the ledger; what
+        makes two tests the same test stays their rows, families and documents - a shared
+        word does not refuse a new test.
+        """
+        def write_membership(aliases: list[str]) -> None:
+            self.membership["alias_sha256"] = aliases
+            (self.corpus / "test-membership.json").write_bytes(canonical(self.membership))
+            self.manifest["test_membership_sha256"] = checksum(self.corpus / "test-membership.json")
+            (self.corpus / "manifest.json").write_bytes(canonical(self.manifest))
+
+        write_membership([digest("alias")])
+        self.assertEqual(evaluator.test_membership(self.corpus)["alias_sha256"], [digest("alias")])
+        write_membership(["not a hash"])
+        with self.assertRaisesRegex(ValueError, "alias_sha256"):
+            evaluator.test_membership(self.corpus)
+        ledger = self.root / "ledger"
+        ledger.mkdir(exist_ok=True)
+        prior = {key: [digest("prior:" + key)] for key in evaluator.MEMBERSHIP_IDENTITY_FIELDS}
+        (ledger / ("b" * SHA256_HEX_CHARACTERS + ".access.json")).write_bytes(canonical({"test_membership": prior}))
+        identity: dict[str, object] = {"test_membership": {**{key: [digest(key)] for key in evaluator.MEMBERSHIP_IDENTITY_FIELDS},
+                                                           "alias_sha256": [digest("alias")]}}
+        key = evaluator.claim_test_access(identity)
+        record = evaluator.read_object(ledger / (key + ".access.json"))
+        self.assertEqual(cast(dict[str, object], record["test_membership"])["alias_sha256"], [digest("alias")])
+        shared: dict[str, object] = {"test_membership": {**{key: [digest("fresh:" + key)] for key in evaluator.MEMBERSHIP_IDENTITY_FIELDS},
+                                                         "alias_sha256": [digest("alias")]}}
+        evaluator.claim_test_access(shared)
+        with self.assertRaisesRegex(ValueError, "overlaps"):
+            evaluator.claim_test_access({"test_membership": {**prior, "alias_sha256": [digest("other")]}})
+
     def test_exception_after_access_preserves_failed_outcome_and_rethrows(self) -> None:
         with patch.object(evaluator, "load_split", side_effect=ValueError("authored broken split")):
             with self.assertRaisesRegex(ValueError, "authored broken"):

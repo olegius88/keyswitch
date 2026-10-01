@@ -654,12 +654,29 @@ def choose_threshold(
     ceiling = max((minimum, net) for minimum, net, _false, _threshold, _report in qualifying)
     floor = (math.floor(ceiling[0] * (1.0 - net_benefit_tolerance)),
              math.floor(ceiling[1] * (1.0 - net_benefit_tolerance)))
-    admissible = [row for row in qualifying if (row[0], row[1]) >= floor]
+    # Both parts of the balance have to hold: a tuple comparison admitted any threshold whose
+    # worst profile matched the best, whatever its pooled net, and the tolerance never applied.
+    admissible = [row for row in qualifying if row[0] >= floor[0] and row[1] >= floor[1]]
     _minimum, _net, _false, threshold, chosen = min(
         admissible, key=lambda row: (row[NET_BENEFIT_FALSE_INDEX], row[NET_BENEFIT_THRESHOLD_INDEX])
     )
     return threshold, {**chosen, "net_benefit_ceiling": ceiling[1], "net_benefit_floor": floor[1],
                        "admissible_thresholds": [row[NET_BENEFIT_THRESHOLD_INDEX] for row in admissible]}, True
+
+
+def development_thresholds(options: Mapping[str, object]) -> list[float]:
+    """The operating points an epoch may be selected for: those the serving band can hold.
+
+    The development threshold of the selected epoch is the floor the calibration grid starts
+    from, and the band's ceiling ends it. An epoch selected for a point above the ceiling
+    had no servable threshold left, and the fit failed after its last epoch.
+    """
+    band = cast(dict[str, object], options["threshold_selection"])
+    ceiling = float(cast(float, band["maximum_threshold"]))
+    candidates = [float(value) for value in cast(list[float], options["threshold_candidates"]) if value <= ceiling]
+    if not candidates:
+        raise ValueError("no threshold candidate lies inside the serving band")
+    return candidates
 
 
 def runtime_masks(features: Iterable[tuple[dict[str, float], int, float]], model: ContextModel) -> tuple[list[bool], list[bool]]:
@@ -793,7 +810,7 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
                    for name, data in development.items() for row, label in enumerate(data.labels)) / development_mass
         selection = assess_epoch({name: (apply_support_mask(predictions[name], *development_masks[name]), data.labels)
                                   for name, data in development.items()},
-                                 thresholds=cast(list[float], options["threshold_candidates"]), loss=loss,
+                                 thresholds=development_thresholds(options), loss=loss,
                                  minimum_net_benefit=int(cast(dict[str, int], options["epoch_selection"])["minimum_net_benefit_per_profile"]))
         if selection is not None and (best_selection is None or selection.rank > best_selection.rank):
             best, best_epoch, best_loss, best_selection = rounded, epoch + 1, loss, selection

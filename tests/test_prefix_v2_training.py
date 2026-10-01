@@ -48,6 +48,7 @@ from keyswitch.constants.training import PREFIX_MIN_EARLY_RECALL_FLOOR
 from fixture_values.corpora import PREFIX_V2_COMMON_WORD_FREQUENCY, PREFIX_V2_RARE_WORD_FREQUENCY
 from fixture_values.counts import (
     PREFIX_V2_DUPLICATE_COPY_COUNTS,
+    PREFIX_V2_LOPSIDED_PORTABLE_SEQUENCES,
     PREFIX_V2_NARROW_FEATURE_CAP,
     PREFIX_V2_PAIR_SIZE,
     UNSUPPORTED_PREFIX_LENGTH,
@@ -228,6 +229,28 @@ class PrefixV2TrainingTests(unittest.TestCase):
         weak_choice = assess_prefix_epoch(weak, thresholds=[MIN_PREFIX_CONVERSION_THRESHOLD], loss=PREFIX_V2_ARBITRARY_LOSS)
         assert weak_choice is not None
         self.assertGreater(early_choice.rank, weak_choice.rank)
+
+    def test_the_weaker_profile_outranks_a_better_pooled_recall(self) -> None:
+        """Three early conversions in one profile do not outweigh none in the other.
+
+        The shared EpochSelection rank weighs the net benefit the context model fills
+        in; the prefix trainer leaves it at zero, so under that rank the pooled recall
+        decided alone and this frontier (3 of 4 pooled, 0 in reference) won.
+        """
+        def scores(portable: int, reference: int) -> dict[str, SequenceScore]:
+            result: dict[str, SequenceScore] = {}
+            for profile, hits, total in (("portable", portable, PREFIX_V2_LOPSIDED_PORTABLE_SEQUENCES), ("reference_hunspell", reference, 1)):
+                result[profile + "correct"] = SequenceScore(profile, False, FULL_LENGTH, "correct", [])
+                for index in range(total):
+                    early = [(PREFIX_MIN_CHARACTERS, PREFIX_V2_MODERATE_PROBABILITY)] if index < hits else []
+                    result[f"{profile}wrong{index}"] = SequenceScore(profile, True, FULL_LENGTH, f"wrong{index}", early)
+            return result
+
+        lopsided = assess_prefix_epoch(scores(PREFIX_V2_LOPSIDED_PORTABLE_SEQUENCES, 0), thresholds=[MIN_PREFIX_CONVERSION_THRESHOLD], loss=PREFIX_V2_ARBITRARY_LOSS)
+        even = assess_prefix_epoch(scores(1, 1), thresholds=[MIN_PREFIX_CONVERSION_THRESHOLD], loss=PREFIX_V2_ARBITRARY_LOSS)
+        assert lopsided is not None and even is not None
+        self.assertGreater(lopsided.pooled_recall, even.pooled_recall)
+        self.assertGreater(even.rank, lopsided.rank)
 
     def test_development_threshold_is_not_exported_instead_of_calibration(self) -> None:
         dev = {profile + name: SequenceScore(profile, desired, FULL_LENGTH, name, candidates)

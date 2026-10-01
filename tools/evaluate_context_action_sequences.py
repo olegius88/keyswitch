@@ -307,6 +307,10 @@ def evaluation_identity(artifact: Path, seal: Path, corpus: Path, prefix: Path, 
             "runtime": runtime_provenance(), "protocol": PROTOCOL}
 
 
+# What makes a test the same test as an accessed one: its rows, families and documents.
+MEMBERSHIP_IDENTITY_FIELDS = ("row_ids_sha256", "family_ids_sha256", "document_ids_sha256")
+
+
 def test_membership(corpus: Path) -> dict[str, list[str]]:
     manifest = read_object(corpus / "manifest.json")
     path = corpus / "test-membership.json"
@@ -314,7 +318,9 @@ def test_membership(corpus: Path) -> dict[str, list[str]]:
         raise ValueError("test membership differs from manifest")
     membership = read_object(path)
     result: dict[str, list[str]] = {}
-    for field in ("row_ids_sha256", "family_ids_sha256", "document_ids_sha256"):
+    # The aliases of the test's words are recorded for the fitting freezer to refuse; a
+    # membership frozen before they existed carries none, and is accessed as it is.
+    for field in (*MEMBERSHIP_IDENTITY_FIELDS, *(("alias_sha256",) if "alias_sha256" in membership else ())):
         values = membership.get(field)
         if (not isinstance(values, list) or not values
                 or any(not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{64}", value) for value in values)):
@@ -348,7 +354,7 @@ def claim_test_access(identity: dict[str, object]) -> str:
                 continue
             prior = object_value(read_object(path).get("test_membership"), "prior test membership")
             if any(set(cast(list[str], membership[field])) & set(cast(list[str], prior[field]))
-                   for field in membership):
+                   for field in MEMBERSHIP_IDENTITY_FIELDS):
                 raise ValueError("test overlaps previously accessed rows, families or documents")
         immutable_record(LEDGER_ROOT / (key + ".access.json"), identity)
     finally:

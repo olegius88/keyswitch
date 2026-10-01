@@ -4,6 +4,22 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- Training protocol: refuse the words of a sealed test by the words, not by family identifiers.
+  `test-membership.json` now carries the physical aliases of every test row's form, lemmas and
+  typo variants (`alias_sha256`), the evaluator records them in the access ledger, and the
+  fitting extension quarantines a new family whose aliases meet the base's test or any accessed
+  test. A family identifier is recomputed by every freeze from the rows it sees, so the same
+  word in another sentence carried a different identifier and passed into training. A word the
+  base already fits now follows its split by the same aliases, and a word fitted in two splits
+  is quarantined, so no word is fitted in one split and measured in another.
+- Prefix-v2 epoch selection ranks the weaker lexical profile first again. The shared selection
+  rank changed on 17.09.2026 to the net benefit the context trainer fills in; the prefix
+  trainer leaves it at zero, so the pooled recall decided alone, against the weaker profile.
+- Context-v3 training selects an epoch only for a development threshold inside the serving
+  band, instead of failing after the last epoch when the selected one lay above the ceiling,
+  and the calibration plateau tolerance now holds for the pooled balance as well as the worst
+  profile: a threshold whose worst profile tied the best was admitted whatever it gave up.
+
 - Let a pause settle a word that waits for its next word, as the context assistant describes. A
   word the model wanted the next word to decide (`yt `, `ша `) was never decided when no next word
   came: the pause that should settle it measured from a moment the engine had already cleared.

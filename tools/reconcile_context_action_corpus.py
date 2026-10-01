@@ -168,12 +168,41 @@ def sequence_document_counts(rows: Sequence[CorpusRow]) -> dict[str, object]:
             "unsupported_selected_by_group": dict(unsupported), "scope": "physical representability only; no model scoring"}
 
 
+def row_aliases(row: CorpusRow) -> set[str]:
+    """Every physical alias of a row's word: its form, its lemmas and its typo variants."""
+    aliases: set[str] = set()
+    for value in (row.original, *row.lemma.split(" "), *typo_variants(row.original, row.identifier)):
+        if value:
+            aliases.update(expanded_aliases(value))
+    return aliases
+
+
+def membership_aliases(rows: Sequence[CorpusRow]) -> list[str]:
+    """The aliases of the words a sealed test holds, for the fitting extension to refuse.
+
+    A family identifier is recomputed by every freeze from the rows it happens to see, so
+    the same word carries different identifiers in different corpora, and a test excluded
+    by identifier alone let its words into a later fitting split through other sentences.
+    The aliases are a function of the word alone and travel with the membership into the
+    access ledger, so every accessed test keeps refusing its words.
+    """
+    aliases: set[str] = set()
+    for row in rows:
+        if row.split == "test":
+            aliases.update(row_aliases(row))
+    return sorted(aliases)
+
+
+ALIAS_SCOPE = "expanded physical aliases of each held-out row's form, lemmas and typo variants"
+
+
 def test_membership(rows: Sequence[CorpusRow], namespace: str) -> dict[str, object]:
     held = [row for row in rows if row.split == "test"]
     return {"namespace": namespace, "scope": "prospective sequence holdout; not globally unseen lexicon",
             "row_ids_sha256": sorted(digest(row.identifier) for row in held),
             "family_ids_sha256": sorted({row.family for row in held}),
-            "document_ids_sha256": sorted({digest(row.document) for row in held})}
+            "document_ids_sha256": sorted({digest(row.document) for row in held}),
+            "alias_sha256": membership_aliases(held), "alias_scope": ALIAS_SCOPE}
 
 
 def validate_original(directory: Path, manifest: Mapping[str, object], rows: Sequence[CorpusRow]) -> None:

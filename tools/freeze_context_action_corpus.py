@@ -529,11 +529,14 @@ def freeze(
         files[split] = {"path": path.name, "sha256": checksum(path),
                         "content_sha256": raw_digest.hexdigest(), "rows": count}
     held_out = [row for row in rows if row.split == "test"]
+    # The reconciler imports this module; the alias helper lives next to the alias hashing.
+    from reconcile_context_action_corpus import ALIAS_SCOPE, membership_aliases
     membership = {
         "namespace": namespace, "scope": "prospective sequence holdout; not globally unseen lexicon",
         "row_ids_sha256": sorted(digest(row.identifier) for row in held_out),
         "family_ids_sha256": sorted({row.family for row in held_out}),
         "document_ids_sha256": sorted({digest(row.document) for row in held_out}),
+        "alias_sha256": membership_aliases(held_out), "alias_scope": ALIAS_SCOPE,
     }
     membership_path = output / "test-membership.json"
     membership_path.write_bytes(canonical(membership))
