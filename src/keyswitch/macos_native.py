@@ -28,6 +28,7 @@ from .constants.macos import (
     CF_NUMBER_SINT32_TYPE,
     CF_STRING_BUFFER_BYTES,
     CF_STRING_ENCODING_UTF8,
+    CF_STRING_MAX_BYTES,
     EVENT_FLAG_ALPHA_SHIFT,
     EVENT_FLAGS_CHANGED,
     EVENT_KEY_DOWN,
@@ -99,6 +100,10 @@ _cf.CFArrayGetCount.restype = ctypes.c_long
 _cf.CFArrayGetValueAtIndex.argtypes = [ctypes.c_void_p, ctypes.c_long]
 _cf.CFArrayGetValueAtIndex.restype = ctypes.c_void_p
 _cf.CFStringGetCString.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long, ctypes.c_uint32]
+_cf.CFStringGetLength.argtypes = [ctypes.c_void_p]
+_cf.CFStringGetLength.restype = ctypes.c_long
+_cf.CFStringGetMaximumSizeForEncoding.argtypes = [ctypes.c_long, ctypes.c_uint32]
+_cf.CFStringGetMaximumSizeForEncoding.restype = ctypes.c_long
 _cf.CFStringGetCString.restype = ctypes.c_bool
 _cf.CFDataGetBytePtr.argtypes = [ctypes.c_void_p]
 _cf.CFDataGetBytePtr.restype = ctypes.c_void_p
@@ -204,7 +209,13 @@ _TAP_CALLBACK = ctypes.CFUNCTYPE(
 def _text(reference: int | None) -> str:
     if not reference:
         return ""
-    buffer = ctypes.create_string_buffer(CF_STRING_BUFFER_BYTES)
+    # A field's text is as long as the field: a fixed buffer refused every value over
+    # about 255 Cyrillic characters, so notes, mail and chats never gave their context.
+    needed = int(_cf.CFStringGetMaximumSizeForEncoding(
+        _cf.CFStringGetLength(reference), CF_STRING_ENCODING_UTF8)) + 1
+    if needed > CF_STRING_MAX_BYTES:
+        return ""
+    buffer = ctypes.create_string_buffer(max(needed, CF_STRING_BUFFER_BYTES))
     if not _cf.CFStringGetCString(reference, buffer, len(buffer), CF_STRING_ENCODING_UTF8):
         return ""
     return buffer.value.decode("utf-8", "replace")

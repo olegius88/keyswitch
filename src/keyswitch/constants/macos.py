@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Final
 
+from .units import BYTES_PER_MEBIBYTE
+
 # Virtual key codes, read from Apple's Events.h. They name physical positions and do not move with
 # the layout, which is what the engine's key codes mean.
 MAC_VK_ANSI_Z: Final = 0x06
@@ -88,6 +90,11 @@ UC_MODIFIER_CONTROL: Final = 16
 UC_KEY_TRANSLATE_BUFFER_CHARACTERS: Final = 8
 # Buffer a CFString is copied into as UTF-8.
 CF_STRING_BUFFER_BYTES: Final = 512
+# Largest text an accessibility attribute is copied out at: a field holding more is not read,
+# rather than copying a whole document into memory for a few hundred characters of context.
+CF_STRING_MAX_BYTES: Final = 4 * BYTES_PER_MEBIBYTE
+# AXSelectedTextRange counts UTF-16 code units, each of two bytes.
+UTF16_CODE_UNIT_BYTES: Final = 2
 # kCFStringEncodingUTF8.
 CF_STRING_ENCODING_UTF8: Final = 0x08000100
 CF_NUMBER_SINT32_TYPE: Final = 3

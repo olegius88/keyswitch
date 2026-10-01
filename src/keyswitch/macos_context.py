@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from .constants.macos import UTF16_CODE_UNIT_BYTES
 from .input_context import CONTEXT_LIMIT, FieldContext, FieldRole
 
 ROLE_ATTRIBUTE = "AXRole"
@@ -54,6 +55,24 @@ def _native_api() -> AccessibilityAPI:
     return CtypesAccessibilityAPI()
 
 
+def _character_index(text: str, units: int) -> int | None:
+    """Where in ``text`` an offset counted in UTF-16 code units falls.
+
+    AXSelectedTextRange counts as NSString does: an emoji or another character
+    outside the basic plane is two units. Slicing the Python string with that
+    number moved the caret one character right for each such character before it.
+    None when the offset lies past the text or inside such a character.
+    """
+
+    encoded = text.encode("utf-16-le")
+    if units * UTF16_CODE_UNIT_BYTES > len(encoded):
+        return None
+    try:
+        return len(encoded[: units * UTF16_CODE_UNIT_BYTES].decode("utf-16-le"))
+    except UnicodeDecodeError:
+        return None
+
+
 class MacFieldReader:
     """What stands on either side of the caret in the focused field."""
 
@@ -90,15 +109,17 @@ class MacFieldReader:
         if caret is None:
             return None
         location, length = caret
-        if location < 0 or length < 0 or location > len(value):
+        start = _character_index(value, location) if location >= 0 and length >= 0 else None
+        end = _character_index(value, location + length) if start is not None else None
+        if start is None or end is None:
             # A range the application computed against text it has since changed.
             return None
         kind: FieldRole = "search" if subrole == SEARCH_FIELD_SUBROLE else ROLES[role]
         return FieldContext(
             application,
             field_id,
-            before=value[:location][-CONTEXT_LIMIT:],
-            after=value[location + length:][:CONTEXT_LIMIT],
+            before=value[:start][-CONTEXT_LIMIT:],
+            after=value[end:][:CONTEXT_LIMIT],
             role=kind,
             selection=length > 0,
             source=SOURCE,

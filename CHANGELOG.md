@@ -10,6 +10,8 @@ All notable changes to KeySwitch are documented in this file.
 - Read Shift, Control, Option and Command on macOS. They arrive as flag changes, which the event
   tap took for releases, so no modifier ever counted as held: `Ghbdtn` was retyped as `привет`,
   `Shift+Return` was held as a plain Enter and hotkeys with a modifier never matched.
+- Read the text of long fields on macOS (a note, a mail, a chat): a field over about 255 Cyrillic
+  characters read as empty, and an emoji before the caret moved the caret one character right.
 - Start even when the settings file holds a history limit that is not a number, instead of
   failing at every start until the file is repaired.
 - Apply a full reset of the settings in the Linux window at once: the theme, the tray icon and its
