@@ -1,140 +1,102 @@
-# KeySwitch 0.36.1
+# KeySwitch 0.36.2
 
 ## Русский
 
-Самообучение заменено правилами переключения, которые появляются только по явному подтверждению,
-а ввод через удалённый доступ (TeamViewer, AnyDesk) больше не задерживает и не теряет Enter. Полный
-перечень — в [CHANGELOG.md](CHANGELOG.md).
-
-0.36.0 не был опубликован: на медленной сборочной машине оба нажатия двойного `Pause` успевали встать в
-очередь до первой замены, второе считалось неизвестным вводом после слова, и замена не выполнялась. Теперь
-нажатие клавиши преобразования в очереди замену не останавливает, а полсекунды на второе нажатие
-отсчитываются от момента, когда слово уже исправлено. 0.36.1 содержит все изменения 0.36.0 и это исправление.
+Выпуск исправлений: KeySwitch больше не портит слово при отмене раннего
+переключения, не останавливается из-за ошибки записи истории, не теряет настройки, сохранённые
+Блокнотом, и не превращает `plan b` в `plan и`. Полный перечень — в [CHANGELOG.md](CHANGELOG.md).
 
 ### Файлы выпуска
 
-- `KeySwitch-Setup-0.36.1-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
+- `KeySwitch-Setup-0.36.2-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
   сертификатом издателя: SmartScreen покажет предупреждение.
-- `KeySwitch-0.36.1-windows-x64.zip` — переносимый архив для Windows.
-- `keyswitch_0.36.1_amd64.deb` — Ubuntu/Xubuntu, сеанс X11. Если стоит 0.28.0 или
+- `KeySwitch-0.36.2-windows-x64.zip` — переносимый архив для Windows.
+- `keyswitch_0.36.2_amd64.deb` — Ubuntu/Xubuntu, сеанс X11. Если стоит 0.28.0 или
   новее, эта версия придёт через обычное обновление системы.
-- `KeySwitch-0.36.1-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее), macOS 13 и новее.
-- `KeySwitch-0.36.1-macos-x86_64.zip` — Mac на процессоре Intel, macOS 13 и новее.
+- `KeySwitch-0.36.2-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее), macOS 13 и новее.
+- `KeySwitch-0.36.2-macos-x86_64.zip` — Mac на процессоре Intel, macOS 13 и новее.
 - `SHA256SUMS` — контрольные суммы всех файлов; сверьте их перед установкой.
 
 Архив для Mac нужен ровно один: сборка для Apple Silicon не запускается на Intel и
 наоборот.
 
-### Правила переключения
+### Текст
 
-Раньше после каждого ручного преобразования по `Pause` появлялась подсказка, и `Enter` сразу добавлял
-правило — в том числе `Enter`, которым собирались отправить сообщение, — а отмена исправления молча
-записывала запрет. Правила появлялись без ведома пользователя, и понять, откуда они взялись, было нельзя.
+- После раннего переключения запятая или точка сразу за словом не запоминалась вместе с ним, и `Pause`
+  или отмена исправления стирали на один символ меньше: `hello, ` превращалось в `hруддщ `. Теперь
+  получается `руддщ, `.
+- При выключенной настройке «Учитывать контекст» и в программах без имени одиночная буква после слова
+  исправлялась как начало сообщения: `plan b` становилось `plan и`, `vitamin c` — `vitamin с`. Теперь
+  правило начала сообщения действует, только когда программа знает, что слова перед буквой не было: без
+  контекста буква остаётся как есть, а в программе без имени её решает контекстная модель.
 
-Теперь правило появляется только по кнопке OK:
+### Надёжность
 
-1. Сразу после слова, с которым программа поступила не так, дважды нажмите `Pause`. Слово станет
-   противоположным тому, что сделала программа: неверное исправление отменится, пропущенное выполнится.
-2. Над местом ввода появится вопрос «Добавить правило переключения?». `Enter` открывает окно правила,
-   `Esc` закрывает вопрос.
-3. Окно уже заполнено: буквы, как они набраны, условие «совпадать с данным сочетанием» и действие —
-   «Не переводить слово в другую раскладку» для отменённого исправления, «Переводить» для пропущенного.
-   Можно выбрать, что слово должно содержать сочетание букв или начинаться с него, учитывать ли
-   регистр, и поправить сами буквы.
-4. OK или `Enter` сохраняет правило, «Отмена» или `Esc` — нет.
-
-Одиночное нажатие `Pause` и отмена по `Ctrl+Alt+Z` по-прежнему исправляют текст, но больше ничему не
-учат. Правила важнее решения модели; их список с кнопками «Добавить…», «Изменить…», «Удалить
-выбранное» и «Удалить все» — на странице «Обслуживание» (в Linux — в разделе «Автокоррекция»). Прежние правила переносятся при первом запуске:
-действовавшее правило становится правилом «переводить», запрет — правилом «не переводить», неподтверждённые
-счётчики отбрасываются, а старый файл сохраняется рядом как `learning.json.v2-backup`. Настройка
-«Подтверждений для правила» убрана.
-
-### Удалённый доступ
-
-Компьютер, которым управляют через TeamViewer, получает набранный текст как нажатия, присланные другой
-программой, и большую часть — символами, без отпускания клавиш. KeySwitch на нём ждал этих отпусканий:
-каждое `Enter` уходило примерно через 2 секунды, а щелчок мышью за это время его отменял. Кроме того,
-`Pause`, нажатый на управляющем компьютере, переключал раскладку и на управляемом.
-
-Теперь в Windows нажатия, присланные другой программой (удалённый доступ, макросы, экранная клавиатура),
-по умолчанию не считаются набором: KeySwitch не исправляет слова из них, не отвечает на их горячие
-клавиши и не задерживает их `Enter`. Если на управляющем компьютере тоже стоит KeySwitch, слова исправляет
-он. Прежнее поведение возвращает настройка «Ввод от других программ».
+- Ошибка в исправлении по паузе или при отложенном `Enter` (например, запись истории на заполненный
+  диск) останавливала обработку ввода; в Windows удержанный `Enter` после этого не отпускался. Теперь
+  ошибка показывается в состоянии программы, а ввод продолжает обрабатываться.
+- Файл настроек или правил, сохранённый Блокнотом (UTF-8 с меткой BOM), не читался, и при первом же
+  изменении настройки его заменяли значения по умолчанию — вместе с исключёнными программами. Теперь
+  такой файл читается, а файл, который прочитать нельзя, сохраняется рядом как
+  `config.json.unreadable-<дата-время>` до того, как программа начнёт работать с настройками по
+  умолчанию.
+- История исправлений перезаписывается через временный файл: сбой во время записи больше не стирает её.
+- В Windows фокус на кнопке или поле без доступного текста отключал чтение контекста поля во всех
+  программах до минуты. Теперь такое поле просто не читается.
 
 ### Что стало хуже
 
-Если на управляющем компьютере KeySwitch не установлен, на управляемом он больше не исправляет текст,
-набранный через удалённый доступ, пока не включена настройка «Ввод от других программ». Символы, которые
-удалённый доступ присылает вместо клавиш, не исправляются и с ней: их нельзя перепечатать в другой
-раскладке. Двойное нажатие `Pause` быстрее половины секунды больше не возвращает слово обратно, а открывает
-предложение правила; чтобы вернуть слово, нажмите `Pause` ещё раз.
+При выключенной настройке «Учитывать контекст» одиночная буква в начале сообщения (`b` вместо `и`)
+больше не исправляется автоматически: без контекста программа не знает, что слова перед ней нет.
+Исправьте её `Pause` или включите настройку.
 
 ## English
 
-Self-learning is replaced by switching rules that exist only once they are confirmed, and typing
-through remote control (TeamViewer, AnyDesk) no longer delays or drops Enter. The full list is in
-[CHANGELOG.md](CHANGELOG.md).
-
-0.36.0 was not published: on the slow build machine both presses of a double `Pause` were queued before
-the first conversion ran, the second counted as unknown input after the word, and the conversion did not
-happen. A queued press of the conversion key no longer stops the conversion, and the half second for the
-second press starts once the word is corrected. 0.36.1 contains every change of 0.36.0 and this fix.
+A fix release: KeySwitch no longer garbles a word when an early switch is
+undone, no longer stops over a failed history write, no longer loses settings saved by Notepad, and
+no longer turns `plan b` into `plan и`. The full list is in [CHANGELOG.md](CHANGELOG.md).
 
 ### Release files
 
-- `KeySwitch-Setup-0.36.1-x64.exe` — installer for Windows 10/11 x64. It is not signed with
+- `KeySwitch-Setup-0.36.2-x64.exe` — installer for Windows 10/11 x64. It is not signed with
   a publisher certificate, so SmartScreen shows a warning.
-- `KeySwitch-0.36.1-windows-x64.zip` — portable archive for Windows.
-- `keyswitch_0.36.1_amd64.deb` — Ubuntu/Xubuntu on an X11 session. With 0.28.0 or newer
+- `KeySwitch-0.36.2-windows-x64.zip` — portable archive for Windows.
+- `keyswitch_0.36.2_amd64.deb` — Ubuntu/Xubuntu on an X11 session. With 0.28.0 or newer
   installed, this version arrives through the ordinary system update.
-- `KeySwitch-0.36.1-macos-arm64.zip` — Mac with Apple silicon (M1 and later), macOS 13 or newer.
-- `KeySwitch-0.36.1-macos-x86_64.zip` — Mac with an Intel processor, macOS 13 or newer.
+- `KeySwitch-0.36.2-macos-arm64.zip` — Mac with Apple silicon (M1 and later), macOS 13 or newer.
+- `KeySwitch-0.36.2-macos-x86_64.zip` — Mac with an Intel processor, macOS 13 or newer.
 - `SHA256SUMS` — checksums of every file; verify them before installing.
 
-Exactly one Mac archive is the right one: a build for Apple silicon does not run on Intel,
-or the other way round.
+Exactly one Mac archive is needed: the Apple silicon build does not run on Intel and vice
+versa.
 
-### Switching rules
+### Text
 
-Before, every manual conversion with `Pause` showed an offer that `Enter` accepted at once - including an
-`Enter` meant to send a message - and undoing a correction silently stored a ban. Rules appeared without the
-user knowing, with no way to tell where they came from.
+- After an early switch, a comma or full stop right after the word was not recorded with it, and
+  `Pause` or undo deleted one character too few: `hello, ` became `hруддщ `. It now becomes
+  `руддщ, `.
+- With "consider context" switched off, and in programs without a name, a lone letter after a word
+  was corrected as if it started a message: `plan b` became `plan и`, `vitamin c` became
+  `vitamin с`. The message-start rule now applies only where the program knows that no word came
+  before the letter: without context the letter stays, and in a program without a name the context
+  model decides it.
 
-Now a rule exists only after OK:
+### Reliability
 
-1. Right after a word the program handled wrongly, press `Pause` twice. The word becomes the opposite of
-   what the program did: a wrong correction is undone, a missed one is made.
-2. A prompt above the caret asks "Добавить правило переключения?" (add a switching rule?). `Enter` opens
-   the rule window, `Esc` closes the prompt.
-3. The window is already filled in: the letters as typed, the condition "matches the letters" and the
-   action - "keep the word" for an undone correction, "convert the word" for a missed one. The word may
-   instead have to contain the letters or start with them, case may count, and the letters can be edited.
-4. OK or `Enter` stores the rule, Cancel or `Esc` does not.
-
-A single `Pause` and the undo with `Ctrl+Alt+Z` still fix the text but teach nothing. Rules outrank the
-model's decision; they are listed with Add, Edit, Remove and Remove all buttons on the Maintenance page (on
-Linux, in the automatic correction section).
-Earlier rules are carried over on first start: a rule that acted becomes a "convert" rule, a ban a "keep"
-rule, unconfirmed counters are dropped, and the old file is kept as `learning.json.v2-backup`. The
-"confirmations for a rule" setting is gone.
-
-### Remote control
-
-A computer controlled through TeamViewer receives the typing as keys another program sends, most of them as
-characters without key releases. KeySwitch there waited for those releases: every `Enter` went out about two
-seconds late, and a click during the wait dropped it. A `Pause` pressed on the controlling computer also
-switched the layout of the controlled one.
-
-Now on Windows keys another program sends (remote control, macros, on-screen keyboards) are not treated as
-typing by default: KeySwitch neither corrects words made of them, nor answers their hotkeys, nor holds their
-`Enter` back. When the controlling computer runs KeySwitch too, that copy corrects the words. The "Ввод от
-других программ" (input from other programs) setting restores the previous behaviour.
+- An error during a pause correction or a deferred `Enter` (for example, writing the history to a
+  full disk) stopped input processing; on Windows a held `Enter` was then never released. The error
+  is now shown in the program's status and input keeps being processed.
+- A settings or rules file saved by Notepad (UTF-8 with a byte order mark) could not be read, and
+  the next settings change replaced it with the defaults, excluded programs included. Such a file is
+  now read, and a file that cannot be read is kept next to it as
+  `config.json.unreadable-<date-time>` before the program works on defaults.
+- The correction history is rewritten through a temporary file, so a failure during the write no
+  longer erases it.
+- On Windows, focusing a button or a field without accessible text switched field context reading
+  off in every program for up to a minute. Such a field is now simply not read.
 
 ### What got worse
 
-Without KeySwitch on the controlling computer, the controlled one no longer corrects text typed through
-remote control unless the "input from other programs" setting is on. Characters remote control sends instead
-of keys are not corrected even then: they cannot be typed again in another layout. Pressing `Pause` twice
-within half a second no longer converts the word back but offers a rule; press `Pause` once more to
-convert it back.
+With "consider context" switched off, a lone letter at the start of a message (`b` for `и`) is no
+longer corrected automatically: without context the program cannot know that no word stands before
+it. Correct it with `Pause`, or switch the setting on.

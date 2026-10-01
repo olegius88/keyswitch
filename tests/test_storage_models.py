@@ -86,6 +86,28 @@ class SettingsStoreBranchTests(unittest.TestCase):
                 store = SettingsStore(path)
                 self.assertEqual(store.get("schema_version"), DEFAULT_SETTINGS["schema_version"])
 
+    def test_a_file_saved_with_a_byte_order_mark_is_read(self) -> None:
+        # Notepad saves UTF-8 with a BOM; reading it as defaults dropped the user's exclusions.
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config.json"
+            path.write_text('{"exclusions": {"applications": ["vault"]}}', encoding="utf-8-sig")
+            self.assertEqual(SettingsStore(path).get("exclusions.applications"), ["vault"])
+
+    def test_an_unreadable_file_is_kept_aside_before_defaults_are_saved(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config.json"
+            original = '{"exclusions": {"applications": ["vault"]'
+            path.write_text(original, encoding="utf-8")
+            store = SettingsStore(path)
+            self.assertIsNotNone(store.unreadable)
+            assert store.unreadable is not None
+            store.set("enabled", False)
+            self.assertEqual(store.unreadable.read_text(encoding="utf-8"), original)
+            self.assertFalse(SettingsStore(path).get("enabled"))
+            path.write_text(original, encoding="utf-8")
+            with patch.object(Path, "replace", side_effect=OSError("locked")):
+                self.assertIsNone(SettingsStore(path).unreadable)
+
     def test_get_set_callbacks_snapshot_and_reset_cover_edge_cases(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "config.json"
@@ -160,6 +182,21 @@ class HistoryStoreBranchTests(unittest.TestCase):
             store.clear()
             expected_callbacks += 1
             self.assertEqual(len(callbacks), expected_callbacks)
+
+    def test_a_failed_trim_keeps_the_history_it_was_trimming(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "history.jsonl"
+            store = HistoryStore(path, limit=1)
+            store.append(HistoryEntry.create("ghbdtn", "привет", "editor", 1))
+
+            def interrupted(target: Path, data: str, encoding: str | None = None) -> int:
+                # The write began - the file is already truncated - and then the disk was full.
+                target.open("w", encoding=encoding).close()
+                raise OSError("disk full")
+
+            with patch.object(Path, "write_text", interrupted), self.assertRaises(OSError):
+                store.append(HistoryEntry.create("rfr", "как", "editor", 1))
+            self.assertEqual([item.original for item in store.read()], ["ghbdtn", "rfr"])
 
     def test_missing_file_read_error_and_minimum_limit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

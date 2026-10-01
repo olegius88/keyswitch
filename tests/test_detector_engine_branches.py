@@ -910,7 +910,7 @@ class EngineBranchTests(unittest.TestCase):
             initialized.records[0].getMessage().removeprefix("TECHNICAL ")
         )
         self.assertEqual(initial_payload["event"], "engine_initialized")
-        self.assertEqual(initial_payload["keyswitch_version"], "0.36.1")
+        self.assertEqual(initial_payload["keyswitch_version"], "0.36.2")
         self.assertEqual(initial_payload["settings"]["overrides"], {"diagnostics.technical_logging": True})
 
     def test_start_stop_idempotence_and_backend_failure(self) -> None:
@@ -997,6 +997,18 @@ class EngineBranchTests(unittest.TestCase):
         self.assertIn("bad event", self.engine.snapshot.last_error)
         self.engine._running.clear()
         self.engine._run()
+
+    def test_worker_survives_an_error_in_its_timers(self) -> None:
+        # A timer that already replaced text and then failed (history on a full
+        # disk, a callback) must not end the worker while the hook keeps queueing.
+        self.engine._running.set()
+        with patch.object(self.engine, "_maybe_correct_after_pause", side_effect=RuntimeError("timer failed")):
+            with patch.object(self.engine._events, "get", side_effect=[queue.Empty, None]):
+                self.engine._run()
+            self.assertIn("timer failed", self.engine.snapshot.last_error)
+            with patch.object(self.engine._events, "get", side_effect=[queue.Empty, letter("a"), None]):
+                self.engine._run()
+        self.assertEqual(self.engine.snapshot.current_word, "a")
 
     def test_stop_survives_full_queue_and_current_worker(self) -> None:
         self.engine._running.set()

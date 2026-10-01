@@ -4,6 +4,34 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.36.2 — 2026-10-02
+
+- Keep the punctuation of an early-switched word when it is converted back. After the early
+  switch had rewritten a word, a comma or full stop typed right after it was left out of the
+  record of that word, so Pause and the undo hotkey deleted one key too few: `hello, ` became
+  `hруддщ ` instead of `руддщ, `. Backspace into the word reopened it without the comma as well.
+- Do not stop the engine when a timer fails. The pause correction, the deferred Enter and the
+  other timers ran outside the error handling of key events: an error there - for example the
+  history on a full disk - ended the worker thread while the hook kept queueing keys, and on
+  Windows an Enter held for a correction was never released. A history that cannot be written no
+  longer interrupts a correction already on screen; the error is shown in the status instead.
+- Read a settings or rules file saved with a byte order mark, as Notepad saves UTF-8, and never
+  save over one that cannot be read. Such a file was silently replaced by the defaults the next
+  time any setting changed, taking the user's exclusions with it. An unreadable `config.json` or
+  `learning.json` is now moved aside as `config.json.unreadable-<date-time>` before the
+  defaults are used.
+- Write the trimmed history aside and swap it in, as the settings already were: once the history
+  is full every correction rewrites it, and a crash or a full disk during that write emptied it.
+- Do not convert a lone letter after a word when context is off. The message-start exception
+  (`b` alone at the start of a message is the Russian `и`) took "no context" for "no previous
+  word", so with "consider context" switched off, or in an application without a name, every
+  `plan b` became `plan и` and `vitamin c` became `vitamin с`. The exception now applies only
+  where the engine keeps context and knows that no word came before.
+- Keep reading field context on Windows after focusing a control without text. UI Automation
+  answers such a control with a null pattern, which comtypes returns as a null pointer rather than
+  `None`; the reader called it, failed and switched field reading off for up to a minute in every
+  application. The diagnostics probe reported such a control as offering text.
+
 ## 0.36.1 — 2026-10-01
 
 - Publish everything since 0.35.1. The 0.36.0 section below was tagged, but its Windows test of the

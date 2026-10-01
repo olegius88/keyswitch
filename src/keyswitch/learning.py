@@ -21,6 +21,7 @@ from .constants.file_formats import (
     LEGACY_RULE_CONFIRMATIONS_REQUIRED,
     USER_DATA_JSON_INDENT,
 )
+from .config import set_aside_unreadable
 from .history import data_dir
 
 RuleMatch = Literal["exact", "prefix", "contains"]
@@ -213,6 +214,8 @@ class LearningStore:
         self._rules: list[LearnedRule] = []
         self._legacy_confirmations = legacy_confirmations
         self.migrated = 0
+        # Where an unreadable learning file was moved by the last load, if anywhere.
+        self.unreadable: Path | None = None
         self.load()
 
     def load(self) -> None:
@@ -220,21 +223,25 @@ class LearningStore:
             self._rules = []
             if not self.path.is_file():
                 return
+            raw = b""
             try:
                 raw = self.path.read_bytes()
-                payload = json.loads(raw.decode("utf-8"))
+                # utf-8-sig: Notepad saves UTF-8 with a byte order mark, which json rejects.
+                payload: object = json.loads(raw.decode("utf-8-sig"))
             except (OSError, ValueError):
-                return
-            if not isinstance(payload, dict):
-                return
-            stored = payload.get("rules")
+                payload = None
+            stored = payload.get("rules") if isinstance(payload, dict) else None
             if isinstance(stored, list):
                 for value in stored:
                     rule = _rule_from_json(value)
                     if rule is not None:
                         self._insert(rule)
                 return
-            if not isinstance(stored, dict) and not isinstance(payload.get("rejections"), dict):
+            if not isinstance(payload, dict) or (
+                not isinstance(stored, dict) and not isinstance(payload.get("rejections"), dict)
+            ):
+                # The next rule would save over the file: keep the user's rules aside.
+                self.unreadable = set_aside_unreadable(self.path)
                 return
             for rule in migrate_legacy(payload, self._legacy_confirmations):
                 self._insert(rule)

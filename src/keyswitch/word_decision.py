@@ -26,8 +26,16 @@ def automatic_word_decision(
     aggressive: bool = False, protect_code: bool = True,
     previous_words: dict[int, str] | None = None, context_group: int | None = None,
     forced_target_group: int | None = None, rejected_targets: set[int] | None = None,
-    trigger: CorrectionTrigger = "space", use_intent_model: bool = True,
+    trigger: CorrectionTrigger = "space", use_intent_model: bool = True, context_tracked: bool = True,
 ) -> DetectionDecision:
+    """The detector's verdict with the curated short-word rules applied.
+
+    ``context_group`` None reads as "no previous word" only while the caller
+    keeps context at all. ``context_tracked`` False - context awareness switched
+    off, or an application without a name the engine could keep context for -
+    means the previous word is unknown, and the message-start exception for a
+    lone letter does not apply: inside ``plan b`` the ``b`` is not ``и``.
+    """
     decision = detector.decide(
         original, alternatives, source_group, minimum_length=minimum_length,
         confidence_threshold=confidence_threshold, ignored_words=ignored_words,
@@ -51,7 +59,7 @@ def automatic_word_decision(
             ignored_words=() if ignored_words is None else ignored_words,
             rejected_targets=frozenset() if rejected_targets is None else rejected_targets,
             protect_code=protect_code,
-        )
+        ) if context_tracked else None
         if opening is not None:
             return opening
     return decision
