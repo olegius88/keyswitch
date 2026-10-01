@@ -33,7 +33,7 @@ DEFAULT_SETTINGS: Final[dict[str, object]] = {
         "confidence": DEFAULT_CONFIDENCE_THRESHOLD,
         "correct_on_pause": True,
         "pause_delay_seconds": DEFAULT_PAUSE_DELAY_SECONDS,
-        "early_switch": False,
+        "early_switch": True,
         "early_switch_min_length": DEFAULT_EARLY_SWITCH_MIN_LENGTH,
         "correct_on_space": True,
         "correct_on_enter": True,

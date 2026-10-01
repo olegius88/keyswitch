@@ -4,6 +4,16 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- The early layout switch is on by default again. It was turned off in 0.23.0 because the installed
+  context-v1 + prefix-v1 pair corrupted correctly typed words before they ended. A new pair,
+  context-v3 + prefix-v2, trained on a corpus frozen from public sources (UD treebanks, Tatoeba,
+  the Debian trixie index) and evaluated once on a sealed test in both settings modes - with the
+  early switch and without it - corrupts no correct word in either mode and restores at least as
+  many wrong ones as the installed pair; the test numbers are in `model/context_v3/README.md`. The
+  setting descriptions and the READMEs say so; turning the switch off is now the override.
+- The context-action trainer failed before fitting since 0.33.0: its stand-in for the lexicon
+  loader refused the supplement words `build_corpus` passes. `tools/prefix_exposure_inventory.py`
+  lists the words the prefix model was fitted on, which the holdout and fitting freezers require.
 - Training protocol: refuse the words of a sealed test by the words, not by family identifiers.
   `test-membership.json` now carries the physical aliases of every test row's form, lemmas and
   typo variants (`alias_sha256`), the evaluator records them in the access ledger, and the

@@ -503,8 +503,8 @@ def replay(plan: SequencePlan, model: ContextModel, models: dict[int, LanguageMo
         directory = Path(temporary)
         settings = SettingsStore(directory / "settings.json")
         if mode == "default":
-            # The shipped default turned the early switch off; this mode exists to measure it,
-            # so it is enabled explicitly and the control mode below remains its counterpart.
+            # The early switch is measured on, whatever the shipped default of the day: this mode
+            # enables it explicitly and the control mode below remains its counterpart.
             settings.set("detection.early_switch", True)
         if mode == "early_off":
             for setting, value in {
