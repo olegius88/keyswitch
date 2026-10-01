@@ -28,7 +28,7 @@ from .engine import (
     KeySwitchEngine,
     LearningPrompt,
 )
-from .history import HistoryStore, data_dir
+from .history import HistoryStore, data_dir, history_limit
 from .logsetup import configure_logging as configure_logging, follow_settings
 from .learning import InvalidRule
 from .learning_prompt import LearningPromptWindow, PromptBackend, RuleEditorWindow
@@ -80,7 +80,7 @@ class KeySwitchApplication(Adw.Application):
         self.settings = SettingsStore()
         follow_settings(self.settings)
         self.autostart = AutostartManager()
-        self.history = HistoryStore(limit=int(self.settings.get("history.limit", DEFAULT_HISTORY_LIMIT)))
+        self.history = HistoryStore(limit=history_limit(self.settings.get("history.limit", DEFAULT_HISTORY_LIMIT)))
         self.engine = KeySwitchEngine(self.settings, self.history)
         self.updates = UpdateManager(__version__, data_dir() / "updates")
         self.window: _WindowController | None = None
@@ -260,7 +260,14 @@ class KeySwitchApplication(Adw.Application):
             else:
                 self._cancel_update_checks()
         elif path == "*":
-            self._schedule_update_checks()
+            # Every setting went back to its default at once: apply each one this
+            # handler applies alone, as the Windows window does on a full reset.
+            for each in (
+                "appearance.show_indicator", "enabled", "general.sound", "general.notifications",
+                "appearance.indicator_style", "appearance.theme", "general.autostart",
+                "updates.check_automatically",
+            ):
+                self._apply_setting(each, self.settings.get(each))
         return GLib.SOURCE_REMOVE
 
     def _schedule_update_checks(self) -> None:

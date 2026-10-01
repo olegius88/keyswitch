@@ -41,7 +41,6 @@ from fixture_values.counts import (
     TRAY_APP_EXPECTED_MENU_OPEN_CALLS,
     TRAY_APP_EXPECTED_PROPERTIES_UPDATED_CALLS,
     TRAY_APP_EXPECTED_QUIT_CALLS,
-    TRAY_APP_EXPECTED_SCHEDULE_CALLS,
     TRAY_APP_EXPECTED_RULE_WINDOW_PRESENTS,
     TRAY_APP_OFFER_ANCHOR_X,
     TRAY_APP_OFFER_ANCHOR_Y,
@@ -709,6 +708,33 @@ class ApplicationGlueTests(unittest.TestCase):
             self.assertTrue(self.application._window_close_requested())
         quit_mock.assert_called_once_with()
 
+    def test_resetting_every_setting_applies_each_of_them(self) -> None:
+        # The GTK window used to reschedule only the update checks: theme, tray icon and
+        # tray toggles kept the values from before the reset until a restart.
+        tray = FakeTray()
+        self.application.tray = tray
+        self.settings.values.update({
+            "appearance.show_indicator": True, "enabled": True, "general.sound": False,
+            "general.notifications": True, "appearance.indicator_style": "letters",
+            "appearance.theme": "system", "general.autostart": True,
+            "updates.check_automatically": True,
+        })
+        with (
+            patch.object(self.application, "_sync_tray") as sync_tray,
+            patch.object(self.application, "_apply_theme") as theme,
+            patch.object(self.application, "_sync_autostart") as sync_autostart,
+            patch.object(self.application, "_schedule_update_checks") as schedule,
+        ):
+            self.assertFalse(self.application._apply_setting("*", {}))
+        sync_tray.assert_called_once_with()
+        theme.assert_called_once_with("system")
+        sync_autostart.assert_called_once_with()
+        schedule.assert_called_once_with()
+        self.assertEqual(
+            (tray.enabled[-1], tray.sound[-1], tray.notifications[-1], tray.styles[-1]),
+            (True, False, True, "letters"),
+        )
+
     def test_sync_tray_create_update_remove_and_failure(self) -> None:
         window = FakeWindow()
         self.application.window = window
@@ -787,8 +813,7 @@ class ApplicationGlueTests(unittest.TestCase):
         ):
             self.application._apply_setting("updates.check_automatically", True)
             self.application._apply_setting("updates.check_automatically", False)
-            self.application._apply_setting("*", {})
-        self.assertEqual(schedule.call_count, TRAY_APP_EXPECTED_SCHEDULE_CALLS)
+        schedule.assert_called_once_with()
         cancel.assert_called_once_with()
         with patch.object(self.application, "_sync_autostart") as sync_autostart:
             self.application._apply_setting("general.autostart", False)

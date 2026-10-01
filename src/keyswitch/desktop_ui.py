@@ -31,7 +31,7 @@ from .engine import (
     KeySwitchEngine,
     LearningPrompt,
 )
-from .history import HistoryEntry, HistoryStore, data_dir
+from .history import HistoryEntry, HistoryStore, data_dir, history_limit
 from .indicator import layout_label
 from .learning import RULE_ACTIONS, RULE_MATCHES, InvalidRule, LearnedRule
 from .logsetup import (
@@ -599,7 +599,7 @@ class DesktopApplication:
         self.enable_updates = enable_updates
         self.settings = SettingsStore()
         follow_settings(self.settings)
-        self.history = HistoryStore(limit=int(self.settings.get("history.limit", DEFAULT_HISTORY_LIMIT)))
+        self.history = HistoryStore(limit=history_limit(self.settings.get("history.limit", DEFAULT_HISTORY_LIMIT)))
         self.backend = services.backend()
         self.engine = KeySwitchEngine(
             self.settings,
@@ -1688,8 +1688,7 @@ class DesktopApplication:
         elif path == "general.notifications" and self.tray is not None:
             self.tray.set_notifications_enabled(bool(value))
         elif path == "history.limit":
-            if isinstance(value, (int, float, str)):
-                self.history.limit = max(1, int(value))
+            self.history.limit = history_limit(value)
         elif path in {"exclusions.applications", "exclusions.words"}:
             self._refresh_exclusion_lists()
         elif path == "updates.check_automatically":
@@ -1703,7 +1702,7 @@ class DesktopApplication:
             labels = self._choice_labels.get(path, {})
             string_variable.set(labels.get(str(value), str(value)))
         self._refresh_modified_indicators()
-        self.history.limit = max(1, int(self.settings.get("history.limit", DEFAULT_HISTORY_LIMIT)))
+        self.history.limit = history_limit(self.settings.get("history.limit", DEFAULT_HISTORY_LIMIT))
         self._apply_theme(str(self.settings.get("appearance.theme", "system")))
         self._refresh_exclusion_lists()
         self._sync_autostart()
