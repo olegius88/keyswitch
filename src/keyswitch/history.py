@@ -89,10 +89,15 @@ class HistoryStore:
             return result[-limit:] if limit is not None else result
 
     def _rewrite(self, entries: list[HistoryEntry]) -> None:
-        self.path.write_text(
+        # Written aside and swapped in, as the settings and rules are: once the
+        # history is full every correction rewrites it, and a crash or a full disk
+        # in the middle of an in-place write would leave it empty.
+        temporary = self.path.with_suffix(".jsonl.tmp")
+        temporary.write_text(
             "".join(json.dumps(asdict(item), ensure_ascii=False) + "\n" for item in entries),
             encoding="utf-8",
         )
+        temporary.replace(self.path)
 
     def clear(self) -> None:
         with self._lock:

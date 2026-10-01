@@ -640,11 +640,13 @@ class KeySwitchEngine:
             try:
                 event = self._events.get(timeout=self._loop_timeout())
             except queue.Empty:
-                self._expire_deferred_action()
-                self._expire_manual_correction()
-                self._poll_current_group()
-                self._maybe_correct_after_pause()
-                self._expire_learning_prompt()
+                # The timers replace text too (pause correction, deferred Enter):
+                # an error there must not end this thread while the hook keeps
+                # queueing keys and a held Enter waits for its release.
+                try:
+                    self._run_timers()
+                except Exception as error:
+                    self._recover_from_error(error)
                 continue
             if event is None:
                 break
@@ -654,11 +656,21 @@ class KeySwitchEngine:
                 else:
                     self._handle(event)
             except Exception as error:
-                self._clear_word(reason="input_error")
-                self._update(last_error=str(error), last_action="Ошибка обработки ввода")
+                self._recover_from_error(error)
         reader = self.context_policy.reader
         if isinstance(reader, PlatformFieldReader):
             reader.close()
+
+    def _run_timers(self) -> None:
+        self._expire_deferred_action()
+        self._expire_manual_correction()
+        self._poll_current_group()
+        self._maybe_correct_after_pause()
+        self._expire_learning_prompt()
+
+    def _recover_from_error(self, error: Exception) -> None:
+        self._clear_word(reason="input_error")
+        self._update(last_error=str(error), last_action="Ошибка обработки ввода")
 
     def _loop_timeout(self) -> float:
         """Wake exactly when the pause delay elapses, at most every 0.5 s."""
@@ -1377,8 +1389,14 @@ class KeySwitchEngine:
         boundary: KeyEvent | None,
         application: str,
         final_group: int,
+        trailing: tuple[KeyEvent, ...] = (),
     ) -> None:
-        """Record the completed word of an early switch as one correction."""
+        """Record the completed word of an early switch as one correction.
+
+        `strokes` and `trailing` are the committed word exactly as `_commit_word`
+        recorded it: Pause, undo and Backspace delete `strokes + trailing + boundary`,
+        so a literal comma left out here leaves one letter of the word on screen.
+        """
 
         origin = self._early_switch_origin
         self._early_switch_origin = None
@@ -1398,11 +1416,12 @@ class KeySwitchEngine:
             application,
             True,
             "early",
+            trailing=trailing,
         )
         self._remember_correction(plan)
         self._last_committed = CorrectionPlan(
             strokes, boundary, final_group, origin, replacement, original,
-            self._early_switch_confidence, application, False,
+            self._early_switch_confidence, application, False, trailing=trailing,
         )
         self._last_committed_stale = False
         excluded = self._application_excluded(application)
@@ -1420,14 +1439,24 @@ class KeySwitchEngine:
             correction_count=self.snapshot.correction_count + 1,
             last_action=f"{original} → {replacement}",
         )
-        if bool(self.settings.get("general.keep_history", True)):
-            self.history.append(
-                HistoryEntry.create(
-                    original, replacement, application, EARLY_SWITCH_CONFIDENCE
-                )
-            )
+        self._record_history(original, replacement, application, EARLY_SWITCH_CONFIDENCE)
         for callback in tuple(self._correction_callbacks):
             callback(plan)
+
+    def _record_history(self, original: str, replacement: str, application: str, confidence: float) -> None:
+        """Store a correction the screen already shows; a failed write stops nothing.
+
+        The text was replaced before this runs, so a full or locked disk is reported
+        and the bookkeeping after it (undo, callbacks, the learning prompt) goes on.
+        """
+
+        if not bool(self.settings.get("general.keep_history", True)):
+            return
+        try:
+            self.history.append(HistoryEntry.create(original, replacement, application, confidence))
+        except OSError as error:
+            self._technical_event("history_write_failed", error=type(error).__name__)
+            self._update(last_error=f"История не записана: {error}")
 
     def _commit_word(self, boundary: KeyEvent) -> None:
         if not self._strokes:
@@ -1617,7 +1646,7 @@ class KeySwitchEngine:
             literal_head=self._text_for_group(typed[:head], source_group),
         )
         if decision is None or not decision.should_convert:
-            self._finish_early_switch(typed[:head] + strokes, boundary, application, source_group)
+            self._finish_early_switch(typed[:head] + strokes + signs, boundary, application, source_group, trailing)
         else:
             self._early_switch_origin = None
             self._early_switch_at = None
@@ -3970,12 +3999,8 @@ class KeySwitchEngine:
             last_action=action,
             last_error="",
         )
-        if plan.automatic and bool(self.settings.get("general.keep_history", True)):
-            self.history.append(
-                HistoryEntry.create(
-                    plan.original, plan.replacement, plan.application, plan.confidence
-                )
-            )
+        if plan.automatic:
+            self._record_history(plan.original, plan.replacement, plan.application, plan.confidence)
         for callback in tuple(self._correction_callbacks):
             callback(plan)
         if learning_prompt is not None:

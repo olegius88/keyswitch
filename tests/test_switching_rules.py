@@ -155,6 +155,17 @@ class LearningStoreTests(unittest.TestCase):
         with patch.object(Path, "read_bytes", side_effect=OSError("denied")):
             self.assertEqual(LearningStore(self.path).count(), 0)
 
+    def test_a_byte_order_mark_is_read_and_an_unreadable_file_survives_the_next_rule(self) -> None:
+        rule = {"pattern": "ok", "source_group": 0, "target_group": 1, "action": "keep", "match": "exact"}
+        self.path.write_text(json.dumps({"rules": [rule]}), encoding="utf-8-sig")
+        self.assertEqual(LearningStore(self.path).rules(), (LearnedRule("ok", 0, 1, "keep"),))
+        self.path.write_text("{broken", encoding="utf-8")
+        store = LearningStore(self.path)
+        self.assertIsNotNone(store.unreadable)
+        assert store.unreadable is not None
+        store.add_rule(LearnedRule("ghbdtn", 0, 1))
+        self.assertEqual(store.unreadable.read_text(encoding="utf-8"), "{broken")
+
     def test_an_old_learning_file_becomes_rules_and_is_kept_aside(self) -> None:
         legacy = {
             "schema_version": LEGACY_LEARNING_STORE_SCHEMA_VERSION,

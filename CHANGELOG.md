@@ -4,6 +4,23 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- Keep the punctuation of an early-switched word when it is converted back. After the early
+  switch had rewritten a word, a comma or full stop typed right after it was left out of the
+  record of that word, so Pause and the undo hotkey deleted one key too few: `hello, ` became
+  `hруддщ ` instead of `руддщ, `. Backspace into the word reopened it without the comma as well.
+- Do not stop the engine when a timer fails. The pause correction, the deferred Enter and the
+  other timers ran outside the error handling of key events: an error there - for example the
+  history on a full disk - ended the worker thread while the hook kept queueing keys, and on
+  Windows an Enter held for a correction was never released. A history that cannot be written no
+  longer interrupts a correction already on screen; the error is shown in the status instead.
+- Read a settings or rules file saved with a byte order mark, as Notepad saves UTF-8, and never
+  save over one that cannot be read. Such a file was silently replaced by the defaults the next
+  time any setting changed, taking the user's exclusions with it. An unreadable `config.json` or
+  `learning.json` is now moved aside as `config.json.unreadable-<date-time>` before the
+  defaults are used.
+- Write the trimmed history aside and swap it in, as the settings already were: once the history
+  is full every correction rewrites it, and a crash or a full disk during that write emptied it.
+
 ## 0.36.0 — 2026-10-01
 
 - Replace self-learning with switching rules that exist only once they are confirmed. A double

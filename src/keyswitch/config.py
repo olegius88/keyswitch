@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Callable, TypeVar, cast, overload
-from .constants.file_formats import USER_DATA_JSON_INDENT
+from .constants.file_formats import UNREADABLE_FILE_SUFFIX, UNREADABLE_FILE_TIME_FORMAT, USER_DATA_JSON_INDENT
 from .constants.settings_defaults import DEFAULT_SETTINGS
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 SettingsData = dict[str, object]
@@ -60,6 +65,23 @@ def _running_on_windows() -> bool:
     return sys.platform == "win32"
 
 
+def set_aside_unreadable(path: Path) -> Path | None:
+    """Move a user file that could not be read out of the way of the next save.
+
+    The application then runs on defaults, and saving them must not destroy what
+    the user had: the bytes stay next to the file under a dated name.
+    """
+
+    target = path.with_name(path.name + UNREADABLE_FILE_SUFFIX + time.strftime(UNREADABLE_FILE_TIME_FORMAT))
+    try:
+        path.replace(target)
+    except OSError:
+        LOGGER.warning("%s could not be read or moved aside", path)
+        return None
+    LOGGER.warning("%s could not be read; kept as %s, defaults in use", path, target.name)
+    return target
+
+
 class SettingsStore:
     """Thread-safe JSON settings with dotted-path access and change callbacks."""
 
@@ -68,6 +90,8 @@ class SettingsStore:
         self._lock = threading.RLock()
         self._callbacks: list[SettingCallback] = []
         self._data: SettingsData = copy.deepcopy(DEFAULT_SETTINGS)
+        # Where an unreadable settings file was moved by the last load, if anywhere.
+        self.unreadable: Path | None = None
         self.load()
 
     def load(self) -> None:
@@ -75,14 +99,18 @@ class SettingsStore:
             if not self.path.exists():
                 return
             try:
-                loaded: object = json.loads(self.path.read_text(encoding="utf-8"))
-                loaded_mapping = _string_keyed_mapping(loaded)
-                if loaded_mapping is not None:
-                    self._data = _deep_merge(DEFAULT_SETTINGS, loaded_mapping)
+                # utf-8-sig: Notepad saves UTF-8 with a byte order mark, which json rejects.
+                loaded: object = json.loads(self.path.read_text(encoding="utf-8-sig"))
             except (OSError, ValueError):
-                # Keep safe defaults. The diagnostics page reports the path so
-                # the user can repair a malformed file without data deletion.
+                loaded = None
+            loaded_mapping = _string_keyed_mapping(loaded)
+            if loaded_mapping is None:
+                # Keep safe defaults, and keep the user's file: the next change
+                # of any setting would otherwise save the defaults over it.
                 self._data = copy.deepcopy(DEFAULT_SETTINGS)
+                self.unreadable = set_aside_unreadable(self.path)
+                return
+            self._data = _deep_merge(DEFAULT_SETTINGS, loaded_mapping)
 
     def save(self) -> None:
         with self._lock:

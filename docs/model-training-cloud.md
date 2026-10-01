@@ -16,8 +16,14 @@
   `onboard-data` (лексиконы), `hunspell-en-us` и `hunspell-ru` (морфология),
   `libhunspell-1.7-0`, `build-essential` (компилятор для
   `tools/context_optimizer.c`), GTK 4 и Xvfb для `tests/run_coverage.sh`;
-- ставит закреплённый mypy в `.typing/` (`tools/install-typing-tools.sh`);
-- экспортирует в сессию `PYTHONPATH=src` и `KEYSWITCH_TYPING_ROOT=.typing`.
+- выбирает системный Python, в котором импортируются `gi`, `dbus` и `coverage`
+  из пакетов apt, и ставит ссылку на него первой в `PATH` как `python3`. В
+  облачном образе `python3` может указывать на другую сборку (на 01.10.2026 это
+  Python 3.11, а apt-пакеты Ubuntu 24.04 собраны для 3.12), и тогда GTK-тесты не
+  импортируются;
+- ставит закреплённый mypy и заглушки PyGObject в `.typing/` тем же
+  интерпретатором (`tools/install-typing-tools.sh`);
+- экспортирует в сессию `PATH`, `PYTHONPATH=src` и `KEYSWITCH_TYPING_ROOT=.typing`.
 
 Хук идемпотентен: уже установленные пакеты не переустанавливаются. Он начнёт
 работать во всех облачных сессиях после слияния в ветку по умолчанию.
@@ -46,7 +52,7 @@ reference-модели всех текущих тренеров, ищет ком
 | `replay-boundary-v2` | воспроизводит seal выпущенной boundary-v2 | репозиторий | совпал |
 | `replay-ortho-v1` | воспроизводит ortho-v1 | репозиторий | совпал |
 | `replay-context-v1` | переобучает context-v1 бит в бит, около 10 минут | системные пакеты хука | совпал после установки пакетов, без них расходится |
-| `train-prefix-v2` | новый кандидат по [`model/prefix_v2/recipe.json`](../model/prefix_v2/recipe.json) | репозиторий, компилятор | запускается; см. ниже |
+| `train-prefix-v2` | новый кандидат по [`model/prefix_v2/recipe.json`](../model/prefix_v2/recipe.json) | репозиторий, компилятор | обучение и calibration прошли за 19 минут; кандидат `prefix-v2-bf3dc28f8567` отличается от `prefix-v2-d1ee002d9ab2` из README context v3 |
 | `train-context-v3` | новый кандидат по [`model/context_v3/recipe.json`](../model/context_v3/recipe.json) | приватный корпус | заблокирован без `.t/` |
 | `evaluate-context-v3` | последовательности для пары context-v3 + prefix-v2 | приватный корпус и журнал test | заблокирован без `.t/` |
 

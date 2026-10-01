@@ -238,6 +238,34 @@ class InputIntegrityTests(unittest.TestCase):
         self.assertEqual(self.backend.text, "ghb")
         self.assertEqual(self.backend.injections, [])
 
+    def test_pause_and_undo_after_an_early_switched_word_take_its_comma_along(self) -> None:
+        # The comma is literal, not part of the word: Pause and undo delete the word,
+        # the comma and the space. Recorded without the comma, they deleted one key
+        # short and left `hруддщ `.
+        self.settings.set("detection.early_switch", True)
+        for revert in ("Pause", "undo"):
+            with self.subTest(revert=revert):
+                self.reset_editor(1)
+                for character in "руддщ":
+                    self.type(self.pair.translate(character, "ru", "us") if self.backend.group == 0 else character)
+                self.type(", ")
+                self.assertEqual(self.backend.text, "hello, ")
+                if revert == "Pause":
+                    self.tap(self.key("Pause"))
+                else:
+                    self.engine._schedule_undo(UNDO_TRIGGER_SENTINEL_KEYCODE)
+                    self.send(plain_key("z", UNDO_TRIGGER_SENTINEL_KEYCODE, self.backend.group, False))
+                self.assertEqual(self.backend.text, "руддщ, ")
+
+    def test_a_history_write_failure_keeps_the_correction_and_its_undo(self) -> None:
+        with patch.object(self.engine.history, "append", side_effect=OSError("disk full")):
+            self.type("ghbdtn ")
+            self.assertEqual(self.backend.text, "привет ")
+            self.assertIn("disk full", self.engine.snapshot.last_error)
+            self.engine._schedule_undo(UNDO_TRIGGER_SENTINEL_KEYCODE)
+            self.send(plain_key("z", UNDO_TRIGGER_SENTINEL_KEYCODE, self.backend.group, False))
+        self.assertEqual(self.backend.text, "ghbdtn ")
+
     def test_remapped_pause_and_caps_do_not_discard_text(self) -> None:
         self.settings.set("hotkeys.convert_last", "F12")
         self.type("hello")

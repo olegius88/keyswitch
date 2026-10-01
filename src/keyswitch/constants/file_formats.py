@@ -24,6 +24,10 @@ PARTITION_AFTER_SEPARATOR_INDEX: Final = 2
 LEARNING_STORE_SCHEMA_VERSION: Final = 3
 # Name suffix of the copy an older learning file is kept as before it is converted.
 LEARNING_STORE_BACKUP_SUFFIX: Final = ".v2-backup"
+# A settings or learning file that could not be read is moved aside under its name, this suffix
+# and the local time in UNREADABLE_FILE_TIME_FORMAT, so the defaults saved next do not replace it.
+UNREADABLE_FILE_SUFFIX: Final = ".unreadable-"
+UNREADABLE_FILE_TIME_FORMAT: Final = "%Y%m%d-%H%M%S"
 # The confirmation threshold a learning file of schema 2 was used with unless the settings said
 # otherwise (the removed detection.learning_confirmations defaulted to it): a counter that reached
 # it acted as a rule and is carried over as one.

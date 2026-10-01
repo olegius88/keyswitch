@@ -62,13 +62,37 @@ if [ "${#missing[@]}" -gt 0 ]; then
     --no-install-recommends "${missing[@]}"
 fi
 
-# Pinned mypy for tools/typecheck.sh; .typing/ is ignored by git.
-if ! PYTHONPATH="$project_root/.typing" python3 -c "import mypy" 2>/dev/null; then
+# The apt bindings (python3-gi, python3-dbus, python3-coverage) are built for
+# the distribution's Python, while a cloud image may point python3 at another
+# build. Put the first system Python that imports them first on PATH as
+# python3, so the GTK tests, the trainers and pip all use the same one.
+python_bin="${HOME:?}/.local/share/keyswitch-cloud/bin"
+interpreter=""
+for candidate in /usr/bin/python3 /usr/bin/python3.14 /usr/bin/python3.13 /usr/bin/python3.12; do
+  if [ -x "$candidate" ] && "$candidate" -c "import gi, dbus, coverage" 2>/dev/null; then
+    interpreter="$candidate"
+    break
+  fi
+done
+if [ -z "$interpreter" ]; then
+  echo "session-start: no system Python imports gi, dbus and coverage" >&2
+  exit 1
+fi
+mkdir -p "$python_bin"
+ln -sfn "$interpreter" "$python_bin/python3"
+export PATH="$python_bin:$PATH"
+
+# Pinned mypy for tools/typecheck.sh, built for that interpreter; .typing/ is
+# ignored by git.
+if ! PYTHONPATH="$project_root/.typing" python3 -m mypy --version >/dev/null 2>&1 \
+    || [ ! -d "$project_root/.typing/gi-stubs" ]; then
+  rm -rf "$project_root/.typing"
   ./tools/install-typing-tools.sh "$project_root/.typing" >/dev/null
 fi
 
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
   {
+    echo "export PATH=\"$python_bin:\$PATH\""
     echo "export PYTHONPATH=\"$project_root/src\${PYTHONPATH:+:\$PYTHONPATH}\""
     echo "export KEYSWITCH_TYPING_ROOT=\"$project_root/.typing\""
   } >> "$CLAUDE_ENV_FILE"
