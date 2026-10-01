@@ -45,6 +45,9 @@ from .constants.macos import (
     EVENT_TAP_DISABLED_TYPES,
     MAC_ALT_KEYS,
     MAC_CONTROL_KEYS,
+    MAC_DEVICE_FLAGS_MASK,
+    MAC_MODIFIER_DEVICE_FLAGS,
+    MAC_MODIFIER_SHARED_FLAGS,
     MAC_SCRIPT_PROBE_KEYCODE,
     MAC_SHIFT_KEYS,
     MAC_SUPER_KEYS,
@@ -198,6 +201,22 @@ class MacAPI(Protocol):
     def enable_event_tap(self) -> None: ...
 
     def stop_event_tap(self) -> None: ...
+
+
+def modifier_pressed(keycode: int, flags: int) -> bool:
+    """Whether a flags-changed event leaves its modifier key down.
+
+    Shift, Control, Option and Command arrive as kCGEventFlagsChanged, not as
+    key-down and key-up, so the state is read from the event's flags: the bit of
+    that very key where the event carries side-specific bits, the modifier's
+    shared bit where it does not.
+    """
+
+    device = MAC_MODIFIER_DEVICE_FLAGS.get(keycode)
+    if device is not None and flags & MAC_DEVICE_FLAGS_MASK:
+        return bool(flags & device)
+    shared = MAC_MODIFIER_SHARED_FLAGS.get(keycode)
+    return shared is not None and bool(flags & shared)
 
 
 def is_cyrillic(text: str) -> bool:

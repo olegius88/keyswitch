@@ -21,7 +21,7 @@ from typing import Final
 from .backend import ScreenAnchor
 from .constants.keyboard import ALT_MASK, CONTROL_MASK, SHIFT_MASK
 from .macos_objc import frontmost_application
-from .macos_backend import NativeInput, NativeKeyEvent
+from .macos_backend import NativeInput, NativeKeyEvent, modifier_pressed
 from .constants.macos import (
     AX_SUCCESS,
     AX_VALUE_TYPE_CF_RANGE,
@@ -29,6 +29,7 @@ from .constants.macos import (
     CF_STRING_BUFFER_BYTES,
     CF_STRING_ENCODING_UTF8,
     EVENT_FLAG_ALPHA_SHIFT,
+    EVENT_FLAGS_CHANGED,
     EVENT_KEY_DOWN,
     EVENT_MARK_INJECTED,
     EVENT_MARK_REPLAYED,
@@ -514,9 +515,16 @@ class CtypesMacAPI:
             listener(NativeKeyEvent(True, 0, timestamp, pointer=True))
             return event
         mark = int(_cg.CGEventGetIntegerValueField(event, EVENT_SOURCE_USER_DATA_FIELD))
+        keycode = int(_cg.CGEventGetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE_FIELD))
+        # A modifier comes as a flags change, which says nothing about up or down by itself.
+        pressed = (
+            modifier_pressed(keycode, int(_cg.CGEventGetFlags(event)))
+            if event_type == EVENT_FLAGS_CHANGED
+            else event_type == EVENT_KEY_DOWN
+        )
         native = NativeKeyEvent(
-            event_type == EVENT_KEY_DOWN,
-            int(_cg.CGEventGetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE_FIELD)),
+            pressed,
+            keycode,
             timestamp,
             injected=mark == EVENT_MARK_INJECTED,
             replayed=mark == EVENT_MARK_REPLAYED,
