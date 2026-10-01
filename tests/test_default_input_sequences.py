@@ -135,7 +135,7 @@ class DefaultInputSequenceTests(unittest.TestCase):
             root = Path(directory)
             settings = SettingsStore(root / "settings.json")
             expected = {
-                "early_switch": True, "early_switch_min_length": DEFAULT_EARLY_SWITCH_MIN_LENGTH,
+                "early_switch": False, "early_switch_min_length": DEFAULT_EARLY_SWITCH_MIN_LENGTH,
                 "correct_on_pause": True, "pause_delay_seconds": DEFAULT_PAUSE_DELAY_SECONDS,
                 "respect_manual_layout": True, "learning": True,
                 "context_policy": "assist", "context_aware": True,

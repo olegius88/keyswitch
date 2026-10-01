@@ -39,11 +39,8 @@ of the release in [RELEASE_NOTES.md](RELEASE_NOTES.md).
   [Boundary model evidence](model/boundary_v2/README.md);
 - early layout switching before the end of a word (`ghbd` → `прив`): a
   separately trained, context-aware prefix model decides in `assist`, within
-  its evaluated 4–12-character range, and waits when uncertain. On by default:
-  the context-v3 + prefix-v2 pair passed its sealed test with and without the
-  early switch while corrupting no correctly typed word
-  ([context v3](model/context_v3/README.md)). Minimum length is configurable
-  (4 by default); early switching can be disabled. `off`,
+  its evaluated 4–12-character range, and waits when uncertain. Minimum length
+  is configurable (4 by default); early switching can be disabled. `off`,
   `shadow`, or disabling context uses the legacy lexical prefix algorithm.
   [Training evidence and limitations](model/prefix_v1/README.md);
 - precision-first hybrid detection using hard guards, frequency lexicons,
