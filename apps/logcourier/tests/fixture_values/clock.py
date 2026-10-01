@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Final
 
-from logcourier.constants.telegram import GROUP_INTERVAL
+from logcourier.constants.telegram import BOT_INTERVAL_SECONDS, GROUP_INTERVAL
 
 FIXTURE_CLOCK_START: Final = 100.0
 # Clock readings of three consecutive Telegram mutations paced GROUP_INTERVAL apart from the
@@ -27,3 +27,11 @@ PACING_UNTIL_TIMESTAMP: Final = 200
 RETRY_AT_OFFSET_SECONDS: Final = 37
 SERVICE_BACKOFF_RETRY_AFTER_SECONDS: Final = 60
 TELEGRAM_FAKE_RETRY_AFTER_SECONDS: Final = 42
+# A notice, two deletions and the unpinning of everything: the notice and the unpinning keep the
+# group's pace, deletions only the bot's.
+EXPECTED_CLEARING_PACING_TIMES: Final = [
+    FIXTURE_CLOCK_START,
+    FIXTURE_CLOCK_START + GROUP_INTERVAL,
+    FIXTURE_CLOCK_START + GROUP_INTERVAL + BOT_INTERVAL_SECONDS,
+    FIXTURE_CLOCK_START + GROUP_INTERVAL + BOT_INTERVAL_SECONDS + BOT_INTERVAL_SECONDS,
+]

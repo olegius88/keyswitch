@@ -17,10 +17,10 @@ from logcourier.config import Config, load_config
 from logcourier.constants.files import BYTES_PER_MEBIBYTE, BYTES_PER_MEGABYTE, CHUNK_BYTES
 from logcourier.constants.gui import WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH
 from logcourier.constants.limits import MAX_QUEUE_BYTES
-from logcourier.constants.telegram import GROUP_INTERVAL, MAX_DOWNLOAD
+from logcourier.constants.telegram import BOT_DELETE_WINDOW_HOURS, GROUP_INTERVAL, MAX_DOWNLOAD
 from logcourier.constants.timing import WAKE_POLL_SECONDS
 from logcourier.gui import Window
-from logcourier.russian_text import SECONDS, quantity, russian_number
+from logcourier.russian_text import HOURS, SECONDS, quantity, russian_number
 
 
 def test_gui_safe_defaults_scroll_and_pause(tmp_path, monkeypatch):
@@ -148,3 +148,46 @@ def test_autostart_toggle_applies_immediately_and_recovers_on_error(tmp_path, mo
     window.tray.hide()
     window.close()
     app.processEvents()
+
+
+def test_clearing_the_group_asks_first_and_runs_in_the_worker(tmp_path, monkeypatch):
+    monkeypatch.delenv("LOGCOURIER_BOT_TOKEN", raising=False)
+    QApplication.instance() or QApplication([])
+    window = Window(tmp_path, Config(), start_service=False)
+    errors, requests, texts = [], [], []
+    window.error = errors.append
+    window.service.reset = requests.append
+    window.reset_group()
+    assert "Сначала укажите токен" in errors[-1]
+    window.token.setText("123456:" + "C" * FAKE_BOT_TOKEN_SECRET_CHARACTERS)
+    window.chat.setText("-100123")
+    window.persist_token.setChecked(False)
+    assert window.save()
+    window.chat.setText("-100124")
+    window.reset_group()
+    assert "не сохранён" in errors[-1]
+    window.chat.setText("-100123")
+    answers = [
+        (QMessageBox.StandardButton.No, True),
+        (QMessageBox.StandardButton.Yes, False),
+        (QMessageBox.StandardButton.Yes, True),
+    ]
+
+    def answer(box):
+        button, delete = answers.pop(0)
+        texts.append(box.text())
+        assert box.checkBox().isChecked()
+        box.checkBox().setChecked(delete)
+        box.button(button).click()
+
+    monkeypatch.setattr(QMessageBox, "exec", answer)
+    window.reset_group()
+    assert requests == [] and window.tabs.currentWidget() is not window.status_page
+    window.reset_group()
+    window.reset_group()
+    assert requests == [False, True]
+    assert window.tabs.currentWidget() is window.status_page
+    assert f"за последние {quantity(BOT_DELETE_WINDOW_HOURS, HOURS)};" in texts[0]
+    window.exiting = True
+    window.tray.hide()
+    window.close()

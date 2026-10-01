@@ -4,6 +4,16 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- Let LogCourier clear its log group and start over. The new "clear the group and start
+  again" button on the sending tab takes every pin down, deletes the group's messages a bot
+  may delete and starts a new chain of catalogs, while collection and sending go on. Telegram
+  lets a bot delete only messages younger than two days and refuses a whole batch for one
+  older message, so the collector deletes from the newest, finds the boundary inside the first
+  refused batch by halving, and names the older messages left for manual deletion. A group
+  holding another collector's catalog, or one this collector never wrote to, is left
+  untouched. Until now a group cleared by hand, catalog included, stopped sending for good
+  with "the pin is lost or changed". Its installer release, LogCourier 0.1.4, is separate.
+
 ## 0.35.1 — 2026-09-30
 
 - Publish everything since 0.34.0. The 0.35.0 section below was tagged, but its release job

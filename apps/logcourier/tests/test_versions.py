@@ -31,6 +31,7 @@ from fixture_values.counts import (
     UPLOADS_WITH_VERSION_MARKER,
 )
 from fixture_values.hashes import SHA256_HEX_LENGTH
+from fixture_values.keys import SUPERGROUP_CREATION_MESSAGE_ID
 
 from logcourier.batching import compact
 from logcourier.catalog import current_catalog, deliver, list_entries
@@ -274,8 +275,9 @@ def test_marker_uses_existing_rate_limit_and_is_not_reuploaded_after_pin_failure
     with pytest.raises(TelegramError):
         deliver(store, config, client)
     assert calls == EXPECTED_PACED_MUTATION_TIMES  # marker, data, catalog
-    assert "МАРКЕР ВЕРСИИ" in telegram.messages[1]["caption"]
-    assert "0.16.2" in telegram.messages[1]["caption"]
+    first_upload = telegram.messages[SUPERGROUP_CREATION_MESSAGE_ID + 1]
+    assert "МАРКЕР ВЕРСИИ" in first_upload["caption"]
+    assert "0.16.2" in first_upload["caption"]
     telegram.fail_pin = False
     deliver(store, config, client)
     assert telegram.uploads == UPLOADS_WITH_VERSION_MARKER

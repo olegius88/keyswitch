@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from fixture_values.clock import (
     BATCHING_RETRY_AFTER_SECONDS,
+    EXPECTED_CLEARING_PACING_TIMES,
     EXPECTED_COOLDOWN,
     EXPECTED_PACED_MUTATION_TIMES,
     FIXTURE_CLOCK_START,
@@ -102,6 +103,20 @@ def test_mutations_including_pin_are_paced_and_persistent(store):
     make().send_document("two")
     make().call("pinChatMessage", {})
     assert calls == EXPECTED_PACED_MUTATION_TIMES
+
+
+def test_deletions_keep_the_bot_pace_and_notices_the_group_pace(store):
+    clock = [FIXTURE_CLOCK_START]
+    calls = []
+    client = SimpleNamespace(bot_id="123456", call=lambda *args: calls.append(clock[0]))
+
+    def sleep(delay):
+        clock[0] += delay
+
+    limited = RateLimitedClient(client, store, "-1", lambda: False, lambda: clock[0], sleep)
+    for method in ("sendMessage", "deleteMessages", "deleteMessages", "unpinAllChatMessages"):
+        limited.call(method, {})
+    assert calls == EXPECTED_CLEARING_PACING_TIMES
 
 
 def test_retry_after_is_persisted_and_stops_requests(store):

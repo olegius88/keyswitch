@@ -22,7 +22,8 @@ from .versions import MARKER_KIND, VERSION, caption, current_versions
 
 CATALOG_CAPTION = "LogCourier catalog SHA256 "
 LOST_PIN = (
-    "Закрепление каталога потеряно или изменено. Восстановите последнее закрепление LogCourier."
+    "Закрепление каталога потеряно или изменено. Верните последнее закрепление LogCourier "
+    "или начните каталог заново: «Отправка» → «Очистить группу и начать заново»."
 )
 HEX = re.compile(r"[a-f0-9]{64}")
 IDENTIFIER = re.compile(r"[a-f0-9]{32}")

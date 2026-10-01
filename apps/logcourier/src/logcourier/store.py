@@ -14,6 +14,9 @@ PENDING_KEY = "catalog_pending:"
 HEAD_DIGEST_KEY = "catalog_digest:"
 # Written instead of HEAD_DIGEST_KEY before 0.1.3: the file_id of the pinned catalog.
 LEGACY_HEAD_KEY = "catalog_head:"
+# Progress of clearing the group, kept until every message up to the notice has been asked for.
+RESET_KEY = "group_reset:"
+CHAIN_KEYS = (PENDING_KEY, HEAD_DIGEST_KEY, LEGACY_HEAD_KEY)
 
 
 class QueueFull(RuntimeError):
@@ -138,6 +141,40 @@ class Store:
                 "UPDATE bundles SET file_id=?,message_id=?,payload=NULL WHERE id=?",
                 (file_id, message_id, bundle_id),
             )
+
+    def delivered(self, destination: str) -> bool:
+        """Whether this collector has ever written to the group: a chain or an uploaded archive."""
+        if any(self.get(key + destination) is not None for key in CHAIN_KEYS):
+            return True
+        row = self.db.execute(
+            "SELECT 1 FROM bundles WHERE destination=? AND file_id IS NOT NULL LIMIT 1",
+            (destination,),
+        ).fetchone()
+        return row is not None
+
+    def restart_chain(self, destination: str, clearing: dict | None) -> int:
+        """Forget the chain of catalogs, so the next delivery starts a new one.
+
+        With `clearing`, the group's messages are about to be deleted: archives uploaded but not
+        yet listed in a catalog go with them, and the clearing progress is stored in the same
+        transaction. Returns how many such archives were dropped.
+        """
+        with self.db:
+            self.db.execute(
+                "DELETE FROM kv WHERE key IN (?,?,?)", [key + destination for key in CHAIN_KEYS]
+            )
+            if clearing is None:
+                return 0
+            dropped = self.db.execute(
+                "UPDATE bundles SET indexed=1 "
+                "WHERE destination=? AND file_id IS NOT NULL AND indexed=0",
+                (destination,),
+            ).rowcount
+            self.db.execute(
+                "INSERT OR REPLACE INTO kv VALUES (?,?)",
+                (RESET_KEY + destination, json.dumps({**clearing, "dropped": dropped})),
+            )
+        return dropped
 
     def acknowledge_index(self, destination: str, ids: list[str], head_digest: str) -> None:
         with self.db:

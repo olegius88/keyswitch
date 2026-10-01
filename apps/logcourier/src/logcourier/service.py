@@ -18,8 +18,9 @@ from .constants.timing import (
     WAKE_POLL_SECONDS,
 )
 from .rate_limit import RateLimitedClient
+from .reset import reset_group
 from .secrets import redact
-from .store import QueueFull, Store
+from .store import RESET_KEY, QueueFull, Store
 from .telegram import Telegram, TelegramError
 
 
@@ -34,6 +35,8 @@ class Service:
         self.wake = threading.Event()
         self.manual = False
         self.manual_pending = False
+        # None, or whether the requested restart of the catalog also deletes the group's messages
+        self.reset_request: bool | None = None
         self.next_send = time.monotonic() + config.interval_minutes * SECONDS_PER_MINUTE
         self.retry_at = 0.0
         self.failures = 0
@@ -50,11 +53,18 @@ class Service:
             self.revision += 1
             self.manual = False
             self.manual_pending = False
+            # A request made for the previous group or token never reaches another one.
+            self.reset_request = None
         self.wake.set()
 
     def send_now(self):
         with self.lock:
             self.manual = True
+        self.wake.set()
+
+    def reset(self, delete_messages: bool):
+        with self.lock:
+            self.reset_request = delete_messages
         self.wake.set()
 
     def stop(self):
@@ -75,11 +85,48 @@ class Service:
                     manual, self.manual = self.manual, False
                     if manual:
                         self.manual_pending = True
+                    reset, self.reset_request = self.reset_request, None
                     revision = self.revision
                 message = "Автоматическая отправка выключена."
                 try:
                     active = config.auto_send or self.manual_pending
-                    if active and not config.consent:
+                    clearing = store.get(RESET_KEY + config.destination) is not None
+                    # A requested reset runs at once; an unfinished one goes on while sending is on.
+                    resetting = reset is not None or (clearing and active)
+                    if resetting and (not token or not config.chat_id or not config.bot_id):
+                        message = "Настройте токен и группу Telegram."
+                    elif resetting and reset is None and time.monotonic() < self.retry_at:
+                        message = (
+                            "Очистка группы продолжится через "
+                            f"{int(self.retry_at - time.monotonic())} с."
+                        )
+                    elif resetting:
+                        client = RateLimitedClient(
+                            Telegram(token),
+                            store,
+                            config.chat_id,
+                            lambda: self.stop_event.is_set() or self.revision != revision,
+                        )
+                        message = reset_group(
+                            store,
+                            config,
+                            client,
+                            bool(reset),
+                            lambda: self.stop_event.is_set() or self.revision != revision,
+                            lambda text: self.notify(text, store.stats(config.destination)),
+                        )
+                        self.failures = 0
+                        self.retry_at = 0
+                        # The new chain starts with the next delivery, not a full interval later.
+                        self.next_send = min(
+                            self.next_send, time.monotonic() + PENDING_RETRY_SECONDS
+                        )
+                    elif clearing:
+                        message = (
+                            "Очистка группы не завершена. Она продолжится, когда отправка "
+                            "снова включена, или по кнопке «Очистить группу и начать заново»."
+                        )
+                    elif active and not config.consent:
                         message = "Требуется разрешение на передачу текста логов."
                     elif active and (not token or not config.chat_id or not config.bot_id):
                         message = "Настройте токен и группу Telegram."

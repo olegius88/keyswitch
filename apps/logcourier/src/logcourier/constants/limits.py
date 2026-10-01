@@ -23,3 +23,11 @@ MAX_INTERVAL_MINUTES: Final = 1440
 MAX_DEVICE_NAME_CHARACTERS: Final = 80
 MAX_SOURCES: Final = 50
 MAX_QUEUE_BYTES: Final = 128 * 1024 * 1024
+# Bot API deleteMessages takes 1-100 message identifiers per request.
+DELETE_BATCH_MESSAGES: Final = 100
+# Message 1 of a supergroup is the service message about its creation, which Telegram never
+# deletes ("message can't be deleted", checked against the live Bot API on 2026-10-01), and a
+# single such message makes deleteMessages refuse its whole batch. Clearing starts after it.
+FIRST_REGULAR_MESSAGE_ID: Final = 2
+# where the messages Telegram keeps end inside a refused batch is searched by halving it
+SEARCH_HALVES: Final = 2

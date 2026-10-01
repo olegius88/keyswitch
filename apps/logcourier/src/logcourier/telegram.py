@@ -72,6 +72,9 @@ class Telegram:
             "getFile",
             "pinChatMessage",
             "unpinChatMessage",
+            "unpinAllChatMessages",
+            "sendMessage",
+            "deleteMessages",
         }
         if method not in allowed:
             raise ValueError("Метод Telegram не разрешён.")

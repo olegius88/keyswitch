@@ -65,9 +65,9 @@ from .constants.limits import (
     MAX_QUEUE_BYTES,
     MAX_ROTATIONS,
 )
-from .constants.telegram import GROUP_INTERVAL, MAX_DOWNLOAD
+from .constants.telegram import BOT_DELETE_WINDOW_HOURS, GROUP_INTERVAL, MAX_DOWNLOAD
 from .constants.timing import WAKE_POLL_SECONDS
-from .russian_text import SECONDS, quantity, russian_number
+from .russian_text import HOURS, SECONDS, quantity, russian_number
 from .secrets import read_token, redact, store_token, token_bot_id
 from .service import Service
 from .store import Store
@@ -223,7 +223,7 @@ class Window(QMainWindow):
         intro = QLabel(
             "1. Создайте отдельного бота через @BotFather.\n"
             "2. Создайте закрытую группу и добавьте бота администратором\n"
-            "   с правом закреплять сообщения.\n"
+            "   с правом закреплять сообщения (чтобы очищать группу — и удалять их).\n"
             "3. Введите токен здесь, найдите группу и проверьте подключение.\n\n"
             "Одна группа — один сборщик. Не закрепляйте в ней другие сообщения.\n"
             "Токен не нужно присылать в чат, записывать в файл или включать в установщик."
@@ -343,6 +343,9 @@ class Window(QMainWindow):
             button.clicked.connect(callback)
             buttons.addWidget(button)
         layout.addLayout(buttons)
+        reset = QPushButton("Очистить группу и начать заново…")
+        reset.clicked.connect(self.reset_group)
+        layout.addWidget(reset)
         layout.addStretch()
 
     def make_status_page(self):
@@ -360,6 +363,7 @@ class Window(QMainWindow):
         )
         info.setWordWrap(True)
         layout.addWidget(info)
+        self.status_page = self.tabs.widget(self.tabs.count() - 1)
 
     def change_autostart(self, enabled):
         try:
@@ -470,6 +474,38 @@ class Window(QMainWindow):
             return
         if self.save():
             self.service.send_now()
+
+    def reset_group(self):
+        if not self.config.chat_id or not self.token.text().strip():
+            self.error("Сначала укажите токен и группу на вкладке «Telegram» и сохраните.")
+            return
+        if self.chat.text().strip() != self.config.chat_id:
+            self.error("ID группы изменён, но не сохранён. Сохраните настройки и повторите.")
+            return
+        box = QMessageBox(
+            QMessageBox.Icon.Warning,
+            "Очистить группу",
+            f"Группа {self.config.chat_id}: сборщик снимет в ней все закрепления и начнёт "
+            "новый каталог. Архивы, отправленные раньше, в новый каталог не попадут.\n\n"
+            "С флажком бот удалит сообщения группы, в том числе чужие. Telegram даёт ботам "
+            "удалять только сообщения, отправленные за последние "
+            f"{quantity(BOT_DELETE_WINDOW_HOURS, HOURS)}; номера более ранних программа "
+            "назовёт, их можно удалить вручную.\n\n"
+            "Неотправленная очередь сохранится и уйдёт в новый каталог. Продолжить?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            self,
+        )
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        delete = QCheckBox("Удалить сообщения группы (нужно право бота «Удаление сообщений»)")
+        delete.setChecked(True)
+        box.setCheckBox(delete)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is None or box.standardButton(clicked) != QMessageBox.StandardButton.Yes:
+            return
+        self.service.reset(delete.isChecked())
+        self.tabs.setCurrentWidget(self.status_page)
+        self.statusBar().showMessage("Очистка группы запущена; ход — на вкладке «Состояние».")
 
     def task(self, action, callback):
         worker = Task(action, self)

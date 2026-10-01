@@ -4,12 +4,16 @@ import time
 
 from .catalog import DeliveryCancelled
 from .constants.telegram import (
+    BOT_INTERVAL_SECONDS,
     DEFAULT_RETRY_AFTER_SECONDS,
     GROUP_INTERVAL,
     TELEGRAM_RATE_LIMIT_STATUS,
     WAIT_POLL_SECONDS,
 )
 from .telegram import TelegramError
+
+# Requests that put something into the group: documents, pins and notices share its pace.
+GROUP_METHODS = ("pinChatMessage", "unpinChatMessage", "unpinAllChatMessages", "sendMessage")
 
 
 class RateLimitedClient:
@@ -19,7 +23,7 @@ class RateLimitedClient:
         self.cancelled, self.clock, self.sleep = cancelled, clock, sleep
         self.cooldown_key = "telegram_cooldown:" + self.bot_id
 
-    def _perform(self, action, mutation=False):
+    def _perform(self, action, mutation=False, interval=GROUP_INTERVAL):
         cooldown = self.store.get(self.cooldown_key, 0)
         if cooldown > self.clock():
             raise TelegramError(
@@ -36,8 +40,8 @@ class RateLimitedClient:
                 self.sleep(min(WAIT_POLL_SECONDS, until - self.clock()))
             if self.cancelled():
                 raise DeliveryCancelled("Отправка остановлена. Очередь сохранена.")
-            self.store.set(key, self.clock() + GROUP_INTERVAL)
-            self.store.set(bot_key, self.clock() + 1.0)
+            self.store.set(key, self.clock() + interval)
+            self.store.set(bot_key, self.clock() + BOT_INTERVAL_SECONDS)
         try:
             return action()
         except TelegramError as error:
@@ -52,10 +56,11 @@ class RateLimitedClient:
             raise
 
     def call(self, method, params=None):
-        return self._perform(
-            lambda: self.client.call(method, params),
-            method in ("pinChatMessage", "unpinChatMessage"),
-        )
+        if method == "deleteMessages":
+            return self._perform(
+                lambda: self.client.call(method, params), True, BOT_INTERVAL_SECONDS
+            )
+        return self._perform(lambda: self.client.call(method, params), method in GROUP_METHODS)
 
     def send_document(self, *args, **kwargs):
         return self._perform(lambda: self.client.send_document(*args, **kwargs), mutation=True)

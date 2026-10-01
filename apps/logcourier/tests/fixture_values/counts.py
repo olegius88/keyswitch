@@ -75,3 +75,12 @@ RUSSIAN_QUANTITY_SAMPLE_COUNTS: Final = (1, 2, 5, 11, 12, 21, 22, 25, 111)
 # A whole float is written without a fraction part; a fraction is written with a decimal comma.
 RUSSIAN_QUANTITY_SAMPLE_WHOLE_FLOAT: Final = 3.0
 RUSSIAN_QUANTITY_SAMPLE_FRACTION: Final = 2.5
+# Messages in the group before it is cleared: the notice after them lands past three
+# deleteMessages batches.
+GROUP_HISTORY_MESSAGES: Final = 250
+# The notice that follows that history: the newest message a clearing deletes.
+CLEARING_NOTICE_MESSAGE_ID: Final = GROUP_HISTORY_MESSAGES + 1
+CLEARING_BATCHES: Final = 3
+# The last message older than two days in that history, which Telegram keeps with everything
+# before it: inside the second batch, at its end, and inside the newest batch.
+LAST_KEPT_MESSAGE_IDS: Final = (119, 151, 200)

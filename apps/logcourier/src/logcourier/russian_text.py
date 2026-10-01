@@ -26,6 +26,8 @@ NounForms = tuple[str, str, str]
 
 # Accusative: "раз в 1 секунду", "раз в 2 секунды", "раз в 5 секунд".
 SECONDS: Final[NounForms] = ("секунду", "секунды", "секунд")
+HOURS: Final[NounForms] = ("час", "часа", "часов")
+ARCHIVES: Final[NounForms] = ("архив", "архива", "архивов")
 
 
 def russian_number(value: float) -> str:
