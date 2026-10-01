@@ -4,6 +4,25 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- Let a pause settle a word that waits for its next word, as the context assistant describes. A
+  word the model wanted the next word to decide (`yt `, `ша `) was never decided when no next word
+  came: the pause that should settle it measured from a moment the engine had already cleared.
+- Read Shift, Control, Option and Command on macOS. They arrive as flag changes, which the event
+  tap took for releases, so no modifier ever counted as held: `Ghbdtn` was retyped as `привет`,
+  `Shift+Return` was held as a plain Enter and hotkeys with a modifier never matched.
+- Start even when the settings file holds a history limit that is not a number, instead of
+  failing at every start until the file is repaired.
+- Apply a full reset of the settings in the Linux window at once: the theme, the tray icon and its
+  toggles kept their previous values until a restart.
+- Delete the installers of earlier updates when a new one is downloaded on Windows; each stayed
+  in the updates folder for good.
+- Check the release tag against the packaged version before the APT repository is published, give
+  write access only to the job that creates the GitHub Release, and refuse to publish an unsigned
+  macOS application from a tag.
+- LogCourier: a log rotated by copying (logrotate `copytruncate`) is no longer sent again from its
+  start, which also sent the lines the user had chosen not to send; clearing the group no longer
+  drops the uncatalogued archives Telegram keeps, and the summary counts only those it deleted.
+
 - Keep the punctuation of an early-switched word when it is converted back. After the early
   switch had rewritten a word, a comma or full stop typed right after it was left out of the
   record of that word, so Pause and the undo hotkey deleted one key too few: `hello, ` became
