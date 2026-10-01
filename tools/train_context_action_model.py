@@ -262,7 +262,9 @@ def historical_curriculum(intent: LinearNgramModel | None = None) -> list[Action
     status = IntentModelStatus(True, ROOT / "src/keyswitch/resources/models/layout_intent_v1.ksm",
                                intent.model_version, intent.checksum, None)
 
-    def load(locale: str) -> LanguageModel:
+    def load(locale: str, extra_words: Iterable[str] = ()) -> LanguageModel:
+        # The reference lexicons already carry the packaged supplements the engine
+        # would pass here (build_corpus: LanguageModel.load(locale, supplement_words(locale))).
         return models[0 if locale == "en_US" else 1]
 
     with patch("train_context_model.LinearNgramModel.try_load_default", return_value=(intent, status)), \

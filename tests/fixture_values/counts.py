@@ -683,3 +683,5 @@ LEGACY_LEARNING_STORE_SCHEMA_VERSION: Final = 2
 TRAY_APP_OFFER_ANCHOR_X: Final = 640
 TRAY_APP_OFFER_ANCHOR_Y: Final = 420
 TRAY_APP_OFFER_WINDOW: Final = 0x4C0001
+# The typed prefix of each fixture word in the prefix exposure inventory test.
+PREFIX_EXPOSURE_FIXTURE_PREFIX_LENGTH = 2

@@ -297,6 +297,10 @@ class ActionTrainingTests(unittest.TestCase):
             self.assertTrue(status.available)
             self.assertIs(LanguageModel.load("en_US"), models[0])
             self.assertIs(LanguageModel.load("ru_RU"), models[1])
+            # build_corpus loads the lexicons as the engine does, with their packaged
+            # supplements; a stand-in that refused the second argument broke every training
+            # run from 0.33.0 until the corpus of 01.10.2026 was fitted.
+            self.assertIs(LanguageModel.load("ru_RU", ("слово",)), models[1])
             return []
 
         with patch.dict("os.environ", {"KEYSWITCH_INTENT_MODEL_PATH": "/unavailable-override.ksm",
