@@ -47,7 +47,7 @@ from .layouts import RU_KEYS, US_KEYS, LayoutPair
 from .lexicon_supplement import supplement_words
 from .learning import LearnedRule, LearningStore, RuleAction
 from .intent_model import CorrectionTrigger, LinearNgramModel
-from .context_policy import ContextPolicy, ContextResult
+from .context_policy import ContextPolicy, ContextResult, ends_with_typed
 from .constants.models import (
     CONTEXT_ACTION_FEATURE_VERSION,
     PREFIX_MAX_CHARACTERS,
@@ -332,6 +332,7 @@ class KeySwitchEngine:
         self._deferred_action: KeyEvent | None = None
         self._action_deadline = 0.0
         self._action_keys = self._configured_action_keys()
+        self._own_hotkeys = self._configured_hotkeys()
         self._events: queue.Queue[KeyEvent | _LayoutSelection | None] = queue.Queue(
             maxsize=ENGINE_EVENT_QUEUE_MAX_SIZE
         )
@@ -3800,7 +3801,7 @@ class KeySwitchEngine:
             if (
                 field is None or field.field_id != plan.context_field
                 or field.application != plan.application or field.sensitive or field.selection
-                or not field.before.endswith(suffix)
+                or not ends_with_typed(field.before, suffix)
             ):
                 typed_after_boundary = bool(self._strokes)
                 self._clear_word(reason="context_field_changed")
@@ -4153,7 +4154,11 @@ class KeySwitchEngine:
             return False
         if event.control or event.alt or event.super_key or event.shift:
             self._prompt_key_deadline = 0.0
-            return False
+            # A backend that can keep a key from the window keeps KeySwitch's own hotkeys: on macOS
+            # TextEdit typed Control+Option+Z as U+001A, which the undo then deleted in place of the
+            # word's last letter. The Win32 hook and XRecord leave them to the window, as before.
+            return bool(getattr(self.backend, "swallows_hotkeys", False)) and any(
+                hotkey.matches(event) for hotkey in self._own_hotkeys)
         if time.monotonic() < self._prompt_key_deadline and event.key_name in PROMPT_KEYS:
             return True
         self._prompt_key_deadline = 0.0
@@ -4161,6 +4166,14 @@ class KeySwitchEngine:
 
     def _matches_hotkey(self, name: str, event: KeyEvent) -> bool:
         return Hotkey(str(self.settings.get(f"hotkeys.{name}", ""))).matches(event)
+
+    def _configured_hotkeys(self) -> tuple[Hotkey, ...]:
+        """Every hotkey of the settings, parsed once for the keyboard hook (see `consumes_key`)."""
+
+        configured = self.settings.get("hotkeys")
+        if not isinstance(configured, dict):
+            return ()
+        return tuple(Hotkey(str(value)) for value in configured.values())
 
     def _is_boundary(self, event: KeyEvent) -> bool:
         return (
@@ -4257,6 +4270,7 @@ class KeySwitchEngine:
             self._cancel_context_wait("settings_changed")
             self._sensitive_context_window = None
         self._action_keys = self._configured_action_keys()
+        self._own_hotkeys = self._configured_hotkeys()
         self._injected_input = bool(self.settings.get("detection.injected_input", False))
         if path == "*":
             self.dismiss_learning_prompt(reason="settings_reloaded")

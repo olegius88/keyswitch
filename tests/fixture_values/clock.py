@@ -193,3 +193,8 @@ X11_EXPECTED_DEADLINE_MARGIN_SECONDS: Final = 5
 SETTLED_NOW_SECONDS: Final = LAST_WORD_INPUT_AT_SECONDS + DEFAULT_PAUSE_DELAY_SECONDS + PAST_PAUSE_THRESHOLD_MARGIN_SECONDS
 # A fixture "now" well short of the pause-correction delay after the last word.
 TOO_SOON_NOW_SECONDS: Final = LAST_WORD_INPUT_AT_SECONDS + BEFORE_PAUSE_THRESHOLD_MARGIN_SECONDS
+# keyswitch.macos_main_thread: a wait the simulated main thread never answers in time, the delay after
+# which a job it began lets go, and a wait long enough for any job it does answer.
+MAIN_THREAD_RUNNER_SHORT_WAIT_SECONDS: Final = 0.05
+MAIN_THREAD_RUNNER_RELEASE_AFTER_SECONDS: Final = 0.2
+MAIN_THREAD_RUNNER_LONG_WAIT_SECONDS: Final = 5.0

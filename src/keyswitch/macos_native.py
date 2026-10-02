@@ -19,7 +19,7 @@ from collections.abc import Callable
 from typing import Final
 
 from .backend import ScreenAnchor
-from .constants.keyboard import ALT_MASK, CONTROL_MASK, SHIFT_MASK
+from .constants.keyboard import ALT_MASK, CONTROL_MASK, LOCK_MASK, SHIFT_MASK
 from .macos_objc import frontmost_application
 from .macos_backend import NativeInput, NativeKeyEvent, modifier_pressed
 from .constants.macos import (
@@ -30,6 +30,8 @@ from .constants.macos import (
     CF_STRING_ENCODING_UTF8,
     CF_STRING_MAX_BYTES,
     EVENT_FLAG_ALPHA_SHIFT,
+    EVENT_FLAG_DEVICE_LEFT_SHIFT,
+    EVENT_FLAG_SHIFT,
     EVENT_FLAGS_CHANGED,
     EVENT_KEY_DOWN,
     EVENT_MARK_INJECTED,
@@ -48,13 +50,20 @@ from .constants.macos import (
     UC_KEY_ACTION_DISPLAY,
     UC_KEY_TRANSLATE_BUFFER_CHARACTERS,
     UC_KEY_TRANSLATE_NO_DEAD_KEYS_MASK,
+    UC_MODIFIER_ALPHA_LOCK,
     UC_MODIFIER_CONTROL,
     UC_MODIFIER_OPTION,
     UC_MODIFIER_SHIFT,
     WINDOW_LIST_EXCLUDE_DESKTOP,
     WINDOW_LIST_ON_SCREEN_ONLY,
 )
-from .constants.timing import EVENT_TAP_RUN_LOOP_SLICE_SECONDS
+from .constants.timing import (
+    EVENT_TAP_RUN_LOOP_SLICE_SECONDS,
+    MACOS_LAYOUT_SWITCH_WAIT_SECONDS,
+    MACOS_MAIN_THREAD_WAIT_SECONDS,
+    MACOS_TAP_MAIN_THREAD_WAIT_SECONDS,
+)
+from .macos_main_thread import MainThreadRunner
 
 
 # The pane of System Settings that holds the switch KeySwitch needs. macOS has
@@ -146,6 +155,8 @@ _cg.CGEventSetIntegerValueField.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ct
 _cg.CGEventSetIntegerValueField.restype = None
 _cg.CGEventGetFlags.argtypes = [ctypes.c_void_p]
 _cg.CGEventGetFlags.restype = ctypes.c_uint64
+_cg.CGEventSetFlags.argtypes = [ctypes.c_void_p, ctypes.c_uint64]
+_cg.CGEventSetFlags.restype = None
 _cg.CGEventGetTimestamp.argtypes = [ctypes.c_void_p]
 _cg.CGEventGetTimestamp.restype = ctypes.c_uint64
 _cg.CGEventCreate.argtypes = [ctypes.c_void_p]
@@ -179,6 +190,25 @@ _tis.UCKeyTranslate.restype = ctypes.c_int32
 
 _SOURCE_ID_PROPERTY = ctypes.c_void_p.in_dll(_tis, "kTISPropertyInputSourceID")
 _LAYOUT_DATA_PROPERTY = ctypes.c_void_p.in_dll(_tis, "kTISPropertyUnicodeKeyLayoutData")
+
+# The Text Input Sources calls above run on the main thread only; libdispatch carries a job there.
+# dispatch_get_main_queue() is a macro for the address of _dispatch_main_q.
+_dispatch = ctypes.cdll.LoadLibrary("/usr/lib/system/libdispatch.dylib")
+_MAIN_QUEUE = ctypes.addressof(ctypes.c_char.in_dll(_dispatch, "_dispatch_main_q"))
+_DISPATCH_FUNCTION = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
+_dispatch.dispatch_async_f.argtypes = [ctypes.c_void_p, ctypes.c_void_p, _DISPATCH_FUNCTION]
+_dispatch.dispatch_async_f.restype = None
+_process = ctypes.CDLL(None)
+_process.pthread_main_np.restype = ctypes.c_int
+
+
+def _post_to_main_queue(number: int) -> None:
+    _dispatch.dispatch_async_f(_MAIN_QUEUE, number, _RUN_ON_MAIN_QUEUE)
+
+
+_MAIN_THREAD = MainThreadRunner(lambda: bool(_process.pthread_main_np()), _post_to_main_queue)
+# Kept for the life of the process: the main queue calls it for every posted job.
+_RUN_ON_MAIN_QUEUE = _DISPATCH_FUNCTION(lambda context: _MAIN_THREAD.run(context or 0))
 
 _services = _framework("ApplicationServices")
 _services.AXIsProcessTrusted.restype = ctypes.c_bool
@@ -249,6 +279,10 @@ def _translate_modifiers(state: int) -> int:
     modifiers = 0
     if state & SHIFT_MASK:
         modifiers |= UC_MODIFIER_SHIFT
+    # Without it a word typed under Caps Lock read as lower case, the field showed capitals, and the
+    # check that the field still holds the typed word refused every such correction (02.10.2026).
+    if state & LOCK_MASK:
+        modifiers |= UC_MODIFIER_ALPHA_LOCK
     if state & ALT_MASK:
         modifiers |= UC_MODIFIER_OPTION
     if state & CONTROL_MASK:
@@ -268,8 +302,14 @@ class CtypesMacAPI:
         self._callback: ctypes.CFUNCTYPE | None = None  # type: ignore[valid-type]
         self._listener: Callable[[NativeKeyEvent], bool] | None = None
         self._stop = threading.Event()
+        self._tap_thread: int | None = None
+        # The layout read last on the main thread: what another thread gets while the main one is busy.
+        self._current_source = ""
 
     # Input sources -----------------------------------------------------
+    #
+    # Every Text Input Sources call goes through _MAIN_THREAD: HIToolbox runs them on the main thread
+    # only and ends the process when the engine's worker or the tap's thread makes one.
 
     def _refresh_sources(self) -> None:
         array = _tis.TISCreateInputSourceList(None, False)
@@ -298,10 +338,22 @@ class CtypesMacAPI:
         self._sources, self._layouts, self._order = found, layouts, tuple(order)
 
     def input_sources(self) -> tuple[str, ...]:
+        return _MAIN_THREAD.call(self._listed_sources, self._order, MACOS_MAIN_THREAD_WAIT_SECONDS)
+
+    def _listed_sources(self) -> tuple[str, ...]:
         self._refresh_sources()
         return self._order
 
     def current_input_source(self) -> str:
+        # The tap's callback must stay short: past its brief wait it takes the layout read last.
+        wait = (MACOS_TAP_MAIN_THREAD_WAIT_SECONDS if threading.get_ident() == self._tap_thread
+                else MACOS_MAIN_THREAD_WAIT_SECONDS)
+        identifier = _MAIN_THREAD.call(self._read_current_input_source, None, wait)
+        if identifier is not None:
+            self._current_source = identifier
+        return self._current_source
+
+    def _read_current_input_source(self) -> str:
         source = _tis.TISCopyCurrentKeyboardInputSource()
         if not source:
             return ""
@@ -311,6 +363,13 @@ class CtypesMacAPI:
             _cf.CFRelease(source)
 
     def select_input_source(self, identifier: str) -> bool:
+        selected = _MAIN_THREAD.call(
+            lambda: self._select_input_source(identifier), False, MACOS_LAYOUT_SWITCH_WAIT_SECONDS)
+        if selected:
+            self._current_source = identifier
+        return selected
+
+    def _select_input_source(self, identifier: str) -> bool:
         source = self._sources.get(identifier)
         if source is None:
             self._refresh_sources()
@@ -322,7 +381,7 @@ class CtypesMacAPI:
     def translate_key(self, keycode: int, state: int, source: str) -> str:
         layout = self._layouts.get(source)
         if layout is None:
-            self._refresh_sources()
+            _MAIN_THREAD.call(self._refresh_sources, None, MACOS_MAIN_THREAD_WAIT_SECONDS)
             layout = self._layouts.get(source)
         if layout is None:
             return ""
@@ -351,6 +410,9 @@ class CtypesMacAPI:
             if not event:
                 break
             try:
+                if item.shift:
+                    _cg.CGEventSetFlags(
+                        event, _cg.CGEventGetFlags(event) | EVENT_FLAG_SHIFT | EVENT_FLAG_DEVICE_LEFT_SHIFT)
                 _cg.CGEventSetIntegerValueField(
                     event, EVENT_SOURCE_USER_DATA_FIELD,
                     EVENT_MARK_REPLAYED if item.replayed else EVENT_MARK_INJECTED)
@@ -473,6 +535,7 @@ class CtypesMacAPI:
     ) -> None:
         self._listener = listener
         self._stop.clear()
+        self._tap_thread = threading.get_ident()
         self._callback = _TAP_CALLBACK(self._on_event)
         mask = 0
         for event_type in (*KEY_EVENTS, *POINTER_EVENTS):

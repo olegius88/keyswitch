@@ -47,7 +47,7 @@ from keyswitch.x11_backend import (
     BackendProbe,
     KeyEvent,
 )
-from keyswitch.constants.keyboard import ALT_MASK, SUPER_MASK
+from keyswitch.constants.keyboard import ALT_MASK, CONTROL_MASK, SUPER_MASK
 from fixture_values.clock import (
     JUST_BEFORE_DEADLINE_MARGIN_SECONDS,
     LEARNING_PROMPT_EARLY_NOW_SECONDS,
@@ -910,7 +910,7 @@ class EngineBranchTests(unittest.TestCase):
             initialized.records[0].getMessage().removeprefix("TECHNICAL ")
         )
         self.assertEqual(initial_payload["event"], "engine_initialized")
-        self.assertEqual(initial_payload["keyswitch_version"], "0.36.2")
+        self.assertEqual(initial_payload["keyswitch_version"], "0.36.3")
         self.assertEqual(initial_payload["settings"]["overrides"], {"diagnostics.technical_logging": True})
 
     def test_start_stop_idempotence_and_backend_failure(self) -> None:
@@ -997,6 +997,21 @@ class EngineBranchTests(unittest.TestCase):
         self.assertIn("bad event", self.engine.snapshot.last_error)
         self.engine._running.clear()
         self.engine._run()
+
+    def test_own_hotkeys_are_kept_from_the_window_only_where_the_backend_can(self) -> None:
+        # On macOS the window typed Control+Option+Z as U+001A before the undo erased the word,
+        # which then took that character for the word's last letter (02.10.2026).
+        undo = letter("z", state=CONTROL_MASK | ALT_MASK)
+        copy = letter("c", state=CONTROL_MASK)
+        # The Win32 hook and XRecord leave a hotkey to the window, as they always did.
+        self.assertFalse(self.engine.consumes_key(undo))
+        setattr(self.backend, "swallows_hotkeys", True)
+        self.assertTrue(self.engine.consumes_key(undo))
+        self.assertFalse(self.engine.consumes_key(copy))
+        self.settings.set("hotkeys.undo", "Ctrl+Shift+U")
+        self.assertFalse(self.engine.consumes_key(undo))
+        self.settings.set("hotkeys", "not a mapping")
+        self.assertFalse(self.engine.consumes_key(undo))
 
     def test_worker_survives_an_error_in_its_timers(self) -> None:
         # A timer that already replaced text and then failed (history on a full

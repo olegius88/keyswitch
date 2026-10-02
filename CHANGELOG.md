@@ -4,13 +4,34 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.36.3 — 2026-10-02
+
+- Keep KeySwitch running on macOS. It read the current keyboard layout from the engine's thread
+  every half second and from the event tap's thread on every key, and macOS answers those calls on
+  the main thread only: on a MacBook Pro with macOS 13.7.8 the program ended within seconds of every
+  start (SIGILL in `dispatch_assert_queue`). Layout calls now run on the main thread, and a thread
+  that cannot wait for it keeps the layout it read last.
+- Correct words typed under Caps Lock on macOS. The key translation left Caps Lock out, so such a
+  word read as lower case while the field showed capitals, and the check that the field still holds
+  the typed word refused the correction.
+- Match hotkeys with Control or Option on letter keys on macOS, and keep them from the window. A
+  letter key was named after the character it typed, and under Control that is a control code, so
+  `Ctrl+Alt+Z` (undo) never matched; once it did, TextEdit also typed the key as an invisible
+  U+001A, which the undo then erased in place of the word's last letter. The macOS event tap now
+  keeps KeySwitch's own hotkeys from the window; on Windows and X11 nothing changes.
+- Correct the first word of a sentence where the editor capitalises it, as TextEdit on macOS does.
+  The check that the field still holds the typed word saw `Ghbdtn` where `ghbdtn` was typed and
+  refused the correction; a first letter whose case alone changed now still marks the typed word.
 - Let a pause settle a word that waits for its next word, as the context assistant describes. A
   word the model wanted the next word to decide (`yt `, `ша `) was never decided when no next word
   came: the pause that should settle it measured from a moment the engine had already cleared.
 - Read Shift, Control, Option and Command on macOS. They arrive as flag changes, which the event
   tap took for releases, so no modifier ever counted as held: `Ghbdtn` was retyped as `привет`,
   `Shift+Return` was held as a plain Enter and hotkeys with a modifier never matched. Caps Lock,
-  which macOS reports once per toggle, counts as a press and a release, never as a held key.
+  which macOS reports once per toggle, is read as a release, never as a held key. A capital is
+  retyped with the Shift flag on the letter itself, since a Shift posted on its own does not reach
+  the letter after it. `Shift+Return` now reaches the window at once as typed; the word before it
+  is left as typed, because the line break already stands after it.
 - Read the text of long fields on macOS (a note, a mail, a chat): a field over about 255 Cyrillic
   characters read as empty, and an emoji before the caret moved the caret one character right.
 - Start even when the settings file holds a history limit that is not a number, instead of

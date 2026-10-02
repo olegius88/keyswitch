@@ -159,6 +159,9 @@ class NativeInput:
     pressed: bool
     keycode: int = 0
     replayed: bool = False
+    # The key goes out with the Shift flag on it. A Shift posted on its own does not reach the
+    # letters after it: `Ghbdtn` was retyped as `привет` (02.10.2026).
+    shift: bool = False
 
 
 class MacAPI(Protocol):
@@ -272,6 +275,11 @@ def key_name(keycode: int, character: str) -> str:
 
 class MacBackend:
     """Observe global Quartz keyboard events and inject physical corrections."""
+
+    # The event tap can keep a key from the window, so KeySwitch's own hotkeys stay its own
+    # (engine.consumes_key): TextEdit typed Control+Option+Z as an invisible U+001A, and the undo
+    # deleted that in place of the word's last letter (02.10.2026).
+    swallows_hotkeys = True
 
     def __init__(self, api: MacAPI | None = None) -> None:
         if api is None:
@@ -591,10 +599,13 @@ class MacBackend:
         )
         group = self.current_group()
         character = characters[group] if 0 <= group < len(characters) else ""
+        # The name comes from the key with no modifier held: under Control the letter types a control
+        # code (Control+Z is \x1a) and under Option another letter, and Ctrl+Alt+Z must still be z.
+        plain = self._api.translate_key(native.keycode, 0, self.sources[0])
         event = KeyEvent(
             native.pressed,
             native.keycode,
-            key_name(native.keycode, characters[0] if characters else ""),
+            key_name(native.keycode, plain),
             character,
             characters,
             group,
@@ -742,8 +753,8 @@ class MacBackend:
         if shifted:
             result.append(NativeInput(True, MAC_VK_SHIFT, replayed=replayed))
         result.extend((
-            NativeInput(True, stroke.keycode, replayed=replayed),
-            NativeInput(False, stroke.keycode, replayed=replayed),
+            NativeInput(True, stroke.keycode, replayed=replayed, shift=shifted),
+            NativeInput(False, stroke.keycode, replayed=replayed, shift=shifted),
         ))
         if shifted:
             result.append(NativeInput(False, MAC_VK_SHIFT, replayed=replayed))

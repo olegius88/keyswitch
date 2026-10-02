@@ -6,6 +6,8 @@ decides is checked here, on any platform, with a substitute in its place.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import sys
 import threading
 import types
@@ -14,7 +16,8 @@ from collections.abc import Callable
 from unittest.mock import patch
 
 from keyswitch.backend import KeyDisposition, KeyEvent, ScreenAnchor
-from keyswitch.constants.keyboard import COMPLETED_ACTION_EVENT_COUNT, LOCK_MASK, SHIFT_MASK
+from keyswitch.constants.keyboard import ALT_MASK, COMPLETED_ACTION_EVENT_COUNT, CONTROL_MASK, LOCK_MASK, SHIFT_MASK
+from keyswitch.engine import Hotkey
 from keyswitch.macos_backend import (
     MacBackend,
     MacBackendError,
@@ -241,6 +244,20 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(event.characters, ("Q", "Й"))
         self.assertEqual(event.state & (SHIFT_MASK | LOCK_MASK), SHIFT_MASK | LOCK_MASK)
 
+    def test_a_letter_under_control_and_option_keeps_its_name_for_hotkeys(self) -> None:
+        # UCKeyTranslate under Control gives a control code (Control+Z is \x1a); named after it, the key
+        # was VK_06 and Ctrl+Alt+Z, the undo hotkey, never matched on a Mac (02.10.2026).
+        translate = self.api.translate_key
+        self.api.translate_key = lambda keycode, state, source: (  # type: ignore[method-assign]
+            "\x1a" if state & CONTROL_MASK else translate(keycode, state, source))
+        self.backend._handle_native(press(MAC_VK_CONTROL))
+        self.backend._handle_native(press(MAC_VK_OPTION))
+        self.backend._handle_native(press(MAC_VK_ANSI_Z))
+        event = self.seen[-1]
+        self.assertEqual(event.key_name, "z")
+        self.assertEqual(event.state & (CONTROL_MASK | ALT_MASK), CONTROL_MASK | ALT_MASK)
+        self.assertTrue(Hotkey("Ctrl+Alt+Z").matches(event))
+
     def test_a_pointer_event_is_named_and_counted(self) -> None:
         self.backend._handle_native(NativeKeyEvent(True, 0, MACOS_FAKE_EVENT_TIMESTAMP, pointer=True))
         self.assertEqual(self.seen[-1].key_name, "Pointer")
@@ -344,6 +361,16 @@ class InjectionTests(unittest.TestCase):
         self.assertEqual(codes[MACOS_ERASE_EVENT_COUNT:], [(True, MAC_VK_ANSI_Q), (False, MAC_VK_ANSI_Q),
                                      (True, MAC_VK_ANSI_Z), (False, MAC_VK_ANSI_Z)])
         self.assertEqual(self.api.current, RUSSIAN)
+
+    def test_a_capital_is_typed_again_with_the_shift_flag_on_the_letter(self) -> None:
+        # A Shift posted on its own does not reach the letter after it on a Mac: `Ghbdtn` came back
+        # as `привет`. The letter carries the flag itself (02.10.2026).
+        capital = replace(self.stroke(MAC_VK_ANSI_Q), state=SHIFT_MASK)
+        self.backend.inject_correction([capital, self.stroke(MAC_VK_ANSI_Z)], 1, None)
+        letters = [item for item in self.api.posted if item.keycode in (MAC_VK_ANSI_Q, MAC_VK_ANSI_Z)]
+        self.assertEqual([(item.keycode, item.shift) for item in letters], [
+            (MAC_VK_ANSI_Q, True), (MAC_VK_ANSI_Q, True), (MAC_VK_ANSI_Z, False), (MAC_VK_ANSI_Z, False)])
+        self.assertTrue(MacBackend.swallows_hotkeys)
 
     def test_an_unknown_target_layout_is_refused_before_anything_is_erased(self) -> None:
         with self.assertRaises(MacBackendError):

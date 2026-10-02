@@ -73,6 +73,22 @@ def _one_typo_from_word(text: str, scorer: LanguageScorer) -> bool:
     return isinstance(scorer, LanguageModel) and one_typo_from_word(text, scorer)
 
 
+def ends_with_typed(text: str, typed: str) -> bool:
+    """Whether ``text`` ends with what was ``typed``, its first letter in either case.
+
+    An editor may capitalise the first word of a sentence as it is finished, as macOS automatic
+    capitalisation does. The letters are still the ones the user typed, so the word is the one
+    the observer saw: TextEdit showed `Ghbdtn` where `ghbdtn` was typed, and the field checks
+    refused every first word of a sentence (02.10.2026).
+    """
+
+    if text.endswith(typed):
+        return True
+    tail = text[len(text) - len(typed):] if len(typed) <= len(text) else ""
+    return bool(typed) and len(tail) == len(typed) and tail[1:] == typed[1:] and (
+        tail[:1].casefold() == typed[:1].casefold())
+
+
 def evidence_for_decision(
     baseline: DetectionDecision, alternative: str, target_group: int,
     detector: LanguageDetector, field: FieldContext, trigger: str,
@@ -146,9 +162,9 @@ class ContextPolicy:
                 if snapshot.sensitive or snapshot.selection:
                     return ContextResult(replace(baseline, should_convert=False, reason="защищённое поле или выделение"), field=snapshot, decision_source="safety", fallback_reason="sensitive_or_selected_field")
                 before = snapshot.before
-                if anchor and before.endswith(anchor):
+                if anchor and ends_with_typed(before, anchor):
                     field = replace(snapshot, before=before[:-len(anchor)])
-                elif anchor and before[:-1].endswith(anchor):
+                elif anchor and ends_with_typed(before[:-1], anchor):
                     field = replace(snapshot, before=before[:-len(anchor) - 1])
                 else:
                     # The editor contradicts the observer: do not fall back

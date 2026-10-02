@@ -63,6 +63,13 @@ KEYBOARD_LISTENER_START_TIMEOUT_SECONDS: Final = 5.0
 KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS: Final = 2.0
 # The event tap's run loop runs in slices this long, so a stop request is noticed.
 EVENT_TAP_RUN_LOOP_SLICE_SECONDS: Final = 0.2
+# macOS answers Text Input Sources calls on the main thread only (keyswitch.macos_main_thread). How
+# long the engine's worker waits for the main thread to read the layout before it keeps the one read
+# last; the event tap's thread waits less, because a slow tap callback is what macOS switches a tap
+# off for; a layout switch the engine asked for may take longer.
+MACOS_MAIN_THREAD_WAIT_SECONDS: Final = 0.25
+MACOS_TAP_MAIN_THREAD_WAIT_SECONDS: Final = 0.02
+MACOS_LAYOUT_SWITCH_WAIT_SECONDS: Final = 1.0
 # The GTK window saves an edited text setting this long after the last keystroke.
 TEXT_SAVE_DEBOUNCE_MS: Final = 450
 # The Windows smoke test closes its window this long after it opens.

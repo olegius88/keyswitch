@@ -621,6 +621,11 @@ class FieldPolicyTests(ContextEngineTests):
             (FieldContext("other", "A", "другое поле", source="uia"), True, "observed"),
             (FieldContext("TestEditor", "A", "раньше ghbdtn", source="uia"), True, "uia"),
             (FieldContext("TestEditor", "A", "раньше ghbdtn ", source="uia"), True, "uia"),
+            # The editor capitalised the first letter of the sentence (macOS, Word): still the typed word.
+            (FieldContext("TestEditor", "A", "Ghbdtn ", source="uia"), True, "uia"),
+            (FieldContext("TestEditor", "A", "раньше GHbdtn", source="uia"), False, "uia"),
+            (FieldContext("TestEditor", "A", "раньше xhbdtn", source="uia"), False, "uia"),
+            (FieldContext("TestEditor", "A", "hbdtn", source="uia"), False, "uia"),
             (FieldContext("TestEditor", "A", "уже другой текст", source="uia"), False, "uia"),
             (FieldContext("TestEditor", "A", selection=True, source="uia"), False, "uia"),
             (FieldContext("TestEditor", "A", sensitive=True, source="uia"), False, "uia"),
@@ -650,6 +655,25 @@ class FieldPolicyTests(ContextEngineTests):
         self.engine.context_policy.reader = reader
         self.settings.set("detection.context_read_field", True)
         reader.read.side_effect = lambda _app, _window: FieldContext("TestEditor", "A", self.backend.text, source="uia")
+        self.type("ghbdtn ")
+        self.assertEqual(self.backend.text, "привет ")
+
+    def test_a_first_letter_the_editor_capitalised_still_anchors_the_word(self) -> None:
+        # macOS capitalises the first word of a sentence as it is finished: TextEdit showed `Ghbdtn`
+        # where `ghbdtn` was typed, and both field checks refused the correction (02.10.2026).
+        self.choose("convert")
+        reader = MagicMock()
+        self.engine.context_policy.reader = reader
+        self.settings.set("detection.context_read_field", True)
+
+        def read(_application: str, _window: int) -> FieldContext:
+            # The capital appears once the word is finished, as macOS puts it there.
+            text = self.backend.text
+            if text.endswith(" "):
+                text = text[:1].upper() + text[1:]
+            return FieldContext("TestEditor", "A", text, source="uia")
+
+        reader.read.side_effect = read
         self.type("ghbdtn ")
         self.assertEqual(self.backend.text, "привет ")
 
