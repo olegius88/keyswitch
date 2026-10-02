@@ -22,7 +22,7 @@ from keyswitch.constants.training import (
 from freeze_context_action_corpus import CorpusRow, physical, typo_variants
 from context_deferral import deferred_isolated, lookahead_focus
 from reconcile_context_action_corpus import expanded_aliases
-from keyswitch.constants.training import ACTION_DEFERRED_WORD_MAX_CHARACTERS
+from keyswitch.constants.training import ACTION_DEFERRED_WORD_MAX_CHARACTERS, CITATION_SIGN_HEADS
 from keyswitch.context_action_features import extract_action_features
 from keyswitch.context_model import ACTIONS, ContextEvidence, ContextModel
 from train_context_action_model import (
@@ -510,7 +510,7 @@ class ActionTrainingTests(unittest.TestCase):
             self.assertAlmostEqual(sum(row.sample_weight for row in rows if row.action == "wait"), HISTORICAL_CURRICULUM_CONVERT_MASS_SHARE)
 
     def test_an_insertion_is_also_framed_after_prose_of_the_other_language(self) -> None:
-        english = replace(fixture("name", "Gagilli", 0), before="the subspecies ")
+        english = replace(fixture("name", "Vorbuli", 0), before="the subspecies ")
         russian = replace(fixture("prose", "подвид", 1), before="Австралийский подвид ")
         abbreviation = replace(fixture("abbr", "МКС", 1), before="экипаж станции ")
         collision = replace(fixture("coll", "XTV", 0), before="watch ")  # its Cyrillic reading `чем` is a word
@@ -519,13 +519,22 @@ class ActionTrainingTests(unittest.TestCase):
         natural = {row.identifier: row for row in rows if ":mixed-natural" in row.identifier}
         # A Latin name cited by Russian prose takes both readings; a Latin abbreviation whose Cyrillic
         # reading is a Russian word is not framed at all, nor are Russian words in English prose.
-        self.assertEqual(set(natural), {"name:mixed-natural", "name:mixed-natural:wrong"})
+        self.assertEqual(set(natural), {"name:mixed-natural", "name:mixed-natural:wrong",
+                                        "name:mixed-natural:head", "name:mixed-natural:head:wrong"})
         keep, wrong = natural["name:mixed-natural"], natural["name:mixed-natural:wrong"]
+        headed, headed_wrong = natural["name:mixed-natural:head"], natural["name:mixed-natural:head:wrong"]
+        # The citation opened by a Latin-layout sign keeps as well; its Cyrillic reading, letters
+        # only because the sign's key is a letter in the Russian layout, converts.
+        self.assertTrue(headed.original.endswith("Vorbuli") and headed.original[:-len("Vorbuli")] in CITATION_SIGN_HEADS)
+        self.assertEqual((headed.field.before, headed.action, headed.group), (keep.field.before, "keep", 0))
+        self.assertEqual((headed_wrong.original, headed_wrong.action, headed_wrong.group),
+                         (translated(headed.original, 0), "convert", 1))
+        self.assertTrue(headed_wrong.original.isalpha())
         self.assertIn(keep.field.before, ("Австралийский подвид ", "экипаж станции "))
         self.assertEqual((keep.action, keep.group), ("keep", 0))
-        self.assertEqual((wrong.field.before, wrong.action, wrong.original, wrong.group), (keep.field.before, "convert", translated("Gagilli", 0), 1))
+        self.assertEqual((wrong.field.before, wrong.action, wrong.original, wrong.group), (keep.field.before, "convert", translated("Vorbuli", 0), 1))
         self.assertFalse([row for row in rows if row.identifier.startswith("coll:mixed-natural")])
-        self.assertTrue(citation_shaped("Gagilli", 0) and citation_shaped("MLS", 0) and citation_shaped("qzxv", 0))
+        self.assertTrue(citation_shaped("Vorbuli", 0) and citation_shaped("QRT", 0) and citation_shaped("qzxv", 0))
         self.assertFalse(citation_shaped("deployment", 0) or citation_shaped("подвид", 1))
         # A left context with words of both scripts never serves as a language's prose.
         self.assertEqual(natural_mixed_contexts([english, russian, mixed_only]), {0: ("the subspecies ",), 1: ("Австралийский подвид ",)})

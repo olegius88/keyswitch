@@ -56,6 +56,7 @@ from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
 from keyswitch.constants.models import CONTEXT_ACTION_FEATURE_VERSION
 from keyswitch.constants.training import (
     BOUNDARY_EVENT_CHOICES,
+    CITATION_SIGN_HEADS,
     COMMAND_FAMILY_IDENTIFIER_PARTS,
     DETERMINISTIC_CHOICE_HEX_DIGITS,
     DETERMINISTIC_ROUNDING_DECIMALS,
@@ -105,7 +106,7 @@ def natural_mixed_contexts(rows: Sequence[CorpusRow]) -> dict[int, tuple[str, ..
     The base treebanks are monolingual: TRAIN of corpus v13 holds 130 Latin rows after
     Russian text among 18 363, while encyclopedic prose (the GSD part of test v13) cites a
     Latin name or abbreviation in every other sentence, and the pair typed in the wrong
-    layout (`ЬДЫ` for `MLS`, `Пфпшддш` for `Gagilli`) is what the v15 candidate left as
+    layout (an abbreviation of three capitals, a capitalised name) is what the v15 candidate left as
     typed. The two fixed phrases of MIXED_INSERTION_CONTEXTS stay; a third insertion pair
     per row takes the left context of a real row of the other language from the same
     split, chosen by hash, so the model sees an insertion after prose it did not write;
@@ -128,7 +129,7 @@ def natural_mixed_contexts(rows: Sequence[CorpusRow]) -> dict[int, tuple[str, ..
 def citation_shaped(original: str, group: int) -> bool:
     """A word prose of the other language cites: a capitalised or upper-case form, or one no lexicon knows.
 
-    Encyclopedic Russian cites `MLS`, `Gagilli` and `Miele`, not `deployment`; a lowercase
+    Encyclopedic Russian cites abbreviations and brand names, not `deployment`; a lowercase
     word the lexicon knows is framed after the fixed insertion phrases only. Framing every
     word after real prose of the other language taught the corpus v16 candidate that any
     Latin token after a Russian clause may be an insertion, and `ns` after `мы решили, что `
@@ -306,16 +307,29 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
             # Only the direction that failed: a Latin citation inside Russian prose. The mirror
             # (a Russian name cited by English prose) made the corpus v16 candidate convert
             # Latin tokens after English text it had kept before. And only a citation whose
-            # Cyrillic reading is no word: `ЬДЫ` after Russian prose is `MLS`, but `чем` after
-            # Russian prose is `чем` whatever `XTV` is (corpus v16 turned `курица, чем` into
-            # `курица, xtv`), and `ns` after Russian prose is `ты`, which the keep frame of
-            # an unknown Latin token after Russian prose taught against (corpus v17: p=0.983).
+            # Cyrillic reading is no word: the Cyrillic keys of a Latin abbreviation after Russian
+            # prose are that abbreviation, but `чем` after Russian prose is `чем` whatever command
+            # its Latin keys spell (the corpus v16 candidate converted such a `чем` on
+            # development), and `ns` after Russian prose is `ты`, which the keep frame of an
+            # unknown Latin token after Russian prose taught against (corpus v17: p=0.983).
             natural_field = FieldContext(application, "public-training",
                                          other[variant_choice(row.identifier, "mixed-natural", len(other))], "", "unknown")
             result.append(ActionRow(row.identifier + ":mixed-natural", row.original, group, natural_field,
                                     trigger, "", "keep", "mixed_language_insertion", boundary_text))
             result.append(ActionRow(row.identifier + ":mixed-natural:wrong", alternate, 1 - group, natural_field,
                                     trigger, "", "convert", "mixed_language_layout_intervention", boundary_text))
+            # Edited prose opens the citation with a sign typed in the Latin layout; the keys of
+            # ``, ' and " are the letters ёё, э and Э in the Russian layout, so the Cyrillic reading
+            # of the whole token is letters only and the token looks like a word of five. The
+            # corpus v19 candidate converted two such citations of test v15 (two backticks before
+            # a capitalised Latin word, Russian prose on the left) that the baseline pair kept.
+            # One sign-headed pair per citation teaches that the head changes nothing.
+            head = CITATION_SIGN_HEADS[variant_choice(row.identifier, "citation-head", len(CITATION_SIGN_HEADS))]
+            headed = head + row.original
+            result.append(ActionRow(row.identifier + ":mixed-natural:head", headed, group, natural_field,
+                                    trigger, "", "keep", "mixed_language_insertion", boundary_text))
+            result.append(ActionRow(row.identifier + ":mixed-natural:head:wrong", translated(headed, group), 1 - group,
+                                    natural_field, trigger, "", "convert", "mixed_language_layout_intervention", boundary_text))
         for index, typo in enumerate(typo_variants(row.original, row.identifier)):
             result.append(ActionRow(row.identifier + f":spelling:{index}", typo, group,
                                     FieldContext(application, "public-training", row.before, "", "unknown"),

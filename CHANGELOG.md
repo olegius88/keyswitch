@@ -52,13 +52,16 @@ All notable changes to KeySwitch are documented in this file.
   readings are both real words or commands, standing alone with the deferred label and with
   planned-neighbour variants labelled convert, outside every sealed test's words. Encyclopedic
   Russian cites Latin names and abbreviations the monolingual base treebanks never show after
-  Russian prose (`ЬДЫ` for `MLS`, `Пфпшддш` for `Gagilli`), so a Latin citation whose Cyrillic
+  Russian prose (an abbreviation of three capitals, a capitalised name), so a Latin citation whose Cyrillic
   reading is no word is also framed after the left context of a real Russian row of the same
-  split. The pair `context-v3-0ba0146fa2ba` + `prefix-v2-bf3dc28f8567` (corpus v14) passed its
-  sealed test in both settings modes with no corruption of correctly typed text (199–200
-  restorations against 196 without the early switch, 33 against 32 with it, 0 corruptions
-  against 3 and 2) and the authored regressions, and is installed; `model/context_v3/README.md`
-  records every candidate of the way there (v13–v18).
+  split, and once more opened by a sign typed in the Latin layout (two backticks, an apostrophe
+  or a double quote), because the Russian-layout keys of those signs are letters and a
+  backtick-opened citation after Russian prose read as a Cyrillic word to the corpus v19
+  candidate. The pair `context-v3-7d8e1c9b2d87` + `prefix-v2-bf3dc28f8567` (corpus v16) passed
+  its sealed test in both settings modes with no corruption of correctly typed text (190
+  restorations against 183 without the early switch, 26 against 21 with it, 0 corruptions
+  against 1–2 and 3) and the authored regressions, and is installed; `model/context_v3/README.md`
+  records every candidate of the way there (v13–v20).
 - The context-action trainer failed before fitting since 0.33.0: its stand-in for the lexicon
   loader refused the supplement words `build_corpus` passes. `tools/prefix_exposure_inventory.py`
   lists the words the prefix model was fitted on, which the holdout and fitting freezers require

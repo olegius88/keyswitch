@@ -40,6 +40,10 @@ ACTION_DEFERRED_WORD_MAX_CHARACTERS: Final = 3
 # identifier index enters TRAIN with this many planned-neighbour variants per member, each carrying
 # an equal share of the member's unit mass.
 LEXICAL_PAIR_ANCHOR_VARIANTS: Final = 3
+# Opening signs of a quoted Latin citation, typed in the Latin layout, whose keys are letters
+# in the Russian layout: `` is ёё, ' is э, " is Э. A citation that carries one is still the
+# citation, and its Cyrillic reading still no word.
+CITATION_SIGN_HEADS: Final = ("``", "'", '"')
 LOOKAHEAD_DEFAULT_MAXIMUM_FAMILIES: Final = 64
 LOOKAHEAD_MAXIMUM_FAMILIES_LIMIT: Final = 4096
 # Also the ceiling `seeds_per_family` may not exceed; the default sits at the cap.
