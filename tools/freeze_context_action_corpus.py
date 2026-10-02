@@ -56,8 +56,9 @@ PINS = {
     "UD_English-EWT": "b7711cce01cdd4f5fcc0a8199b8a50d951b16c0c",
     # Corpus v11 (01.10.2026): Taiga is social-media text and holds almost no Latin token
     # inside a Russian sentence (6 of 1,260 sentences), while edited prose has them in
-    # every twelfth; the context-v3 candidate of corpus v10 converted `(en)` and ``Bad
-    # in Russian text. SynTagRus is edited prose, and no longer a holdout source.
+    # every twelfth; on its sealed test the context-v3 candidate of corpus v10 converted short
+    # Latin words inside Russian sentences. SynTagRus is edited prose, and no longer a holdout
+    # source.
     "UD_Russian-SynTagRus": "6377522610550b696fcc70d39074d2ce03da0e7b",
 }
 PAIR = LayoutPair()

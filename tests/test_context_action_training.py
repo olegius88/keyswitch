@@ -354,7 +354,7 @@ class ActionTrainingTests(unittest.TestCase):
     def test_mixed_insertions_follow_a_sentence_or_a_quoted_name_in_a_parenthesis(self) -> None:
         """Half of the inserted words stand inside a parenthesis after a quoted name.
 
-        The candidate of corpus v10 (01.10.2026) converted `(en)` and ``Bad inside Russian
+        The candidate of corpus v10 (01.10.2026) converted short Latin words inside Russian
         sentences on its sealed test: the only mixed context it had seen was one plain sentence.
         """
 

@@ -242,8 +242,8 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
                                     trigger, tail, action, "layout_intervention", boundary_text))
         # A legitimate insertion may have neighbours in the other language. Half of the
         # rows stand inside a parenthesis after a quoted name, the way edited prose
-        # cites a foreign word: the candidate of corpus v10 (01.10.2026) converted the
-        # `(en)` and the ``Bad of two Russian sentences of UD GSD on its sealed test.
+        # cites a foreign word: on its sealed test the candidate of corpus v10 (01.10.2026)
+        # converted short Latin words inside two Russian sentences of UD GSD.
         mixed_contexts = MIXED_INSERTION_CONTEXTS[group]
         mixed = mixed_contexts[variant_choice(row.identifier, "mixed-context", len(mixed_contexts))]
         mixed_field = FieldContext(application, "public-training", mixed, "", "unknown")
