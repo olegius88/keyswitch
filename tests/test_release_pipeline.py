@@ -55,6 +55,7 @@ def _options(**overrides: object) -> pipeline.Options:
         "timeout_scale": 1.0,
         "fail_fast": False,
         "pipeline_root": Path("/nonexistent"),
+        "fresh_models": False,
     }
     base.update(overrides)
     return pipeline.Options(
@@ -74,6 +75,7 @@ def _options(**overrides: object) -> pipeline.Options:
         timeout_scale=float(str(base["timeout_scale"])),
         fail_fast=bool(base["fail_fast"]),
         pipeline_root=Path(str(base["pipeline_root"])),
+        fresh_models=bool(base["fresh_models"]),
     )
 
 
@@ -264,6 +266,78 @@ class ReportingTests(unittest.TestCase):
             rows["Official and replay outputs are byte-identical"],
             "NOT PROVEN (phase skipped)",
         )
+
+    def test_replays_of_identical_inputs_are_reused_from_an_earlier_run(self) -> None:
+        """A receipt of byte-identical replays for the same inputs stands in for them.
+
+        The fingerprint covers the trainer, its helpers, the frozen sources, the
+        configuration, the official outputs and the machine's probe reading; a
+        different fingerprint, a receipt without byte-identity, fewer replays than
+        asked, an explicit replay directory or --fresh-models all replay again.
+        """
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            earlier = root / "20260901T000000Z-release" / "model" / "replays"
+            earlier.mkdir(parents=True)
+            (earlier / pipeline.REPLAY_RECEIPT_NAME).write_text(json.dumps({
+                "schema_version": 1, "inputs_sha256": "same", "byte_identical": True,
+                "replays": PIPELINE_SAMPLE_REPLAYS, "sha256": {}, "run_dir": str(earlier.parents[1]),
+                "finished_at": "2026-09-01T00:00:00Z",
+            }), encoding="utf-8")
+            current = root / "20260902T000000Z-release"
+            log = cast(pipeline.PhaseLog, SimpleNamespace(write=lambda _message: None))
+
+            def run(fingerprint: str, **overrides: object) -> tuple[pipeline.PhaseState, bool]:
+                options = _options(pipeline_root=root, **overrides)
+                context = cast(pipeline.Context, SimpleNamespace(
+                    options=options, run_dir=current, replay_root=lambda: current / "model" / "replays"))
+                state = pipeline.PhaseState(name="model-replays", title="Byte-identical retraining replays")
+                attempted = False
+
+                def replay(*_arguments: object) -> str:
+                    nonlocal attempted
+                    attempted = True
+                    raise pipeline.PhaseFailure("replay attempted")
+
+                with patch.object(pipeline, "replay_inputs_fingerprint", return_value=fingerprint), \
+                        patch.object(pipeline, "run_one_replay", side_effect=replay):
+                    try:
+                        pipeline.phase_model_replays(context, log, state)
+                    except pipeline.PhaseFailure:
+                        pass
+                return state, attempted
+
+            state, attempted = run("same")
+            self.assertFalse(attempted)
+            self.assertTrue(state.facts["byte_identical"])
+            self.assertEqual(state.facts["reused_from"], str(earlier / pipeline.REPLAY_RECEIPT_NAME))
+            self.assertTrue(any("--fresh-models" in note for note in state.notes))
+            rows = dict(pipeline.checklist_rows({"model-replays": "passed"}))
+            self.assertEqual(rows["Official and replay outputs are byte-identical"], "passed")
+            for fingerprint, overrides in (("other", {}), ("same", {"fresh_models": True}),
+                                           ("same", {"replay_dir": current / "elsewhere"})):
+                _state, attempted = run(fingerprint, **overrides)
+                self.assertTrue(attempted, (fingerprint, overrides))
+
+    def test_an_earlier_strict_report_is_reused_only_when_bound_to_the_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in ("20260901T000000Z-release", "20260902T000000Z-release"):
+                (root / name / "model").mkdir(parents=True)
+                (root / name / "model" / "strict.json").write_text("{}", encoding="utf-8")
+            (root / "latest").symlink_to("20260902T000000Z-release")
+            current = root / "20260903T000000Z-release"
+            context = cast(pipeline.Context, SimpleNamespace(options=_options(pipeline_root=root), run_dir=current))
+            log = cast(pipeline.PhaseLog, SimpleNamespace(write=lambda _message: None))
+            identity = cast(pipeline.ModelIdentity, SimpleNamespace(artifact_sha256="a", artifact_version="v"))
+            newest = root / "20260902T000000Z-release" / "model" / "strict.json"
+            with patch.object(pipeline, "strict_report_facts", return_value=({}, [])):
+                self.assertEqual(pipeline.reusable_strict_report(context, log, identity), newest)
+            with patch.object(pipeline, "strict_report_facts", return_value=({}, ["different machine"])):
+                self.assertIsNone(pipeline.reusable_strict_report(context, log, identity))
+            self.assertEqual([entry.name for entry in pipeline.earlier_run_dirs(root, current)],
+                             ["20260902T000000Z-release", "20260901T000000Z-release"])
 
     def test_summary_markdown_lists_failures_with_log_tail(self) -> None:
         state: dict[str, object] = {

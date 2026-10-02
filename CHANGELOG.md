@@ -4,6 +4,15 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- CI runs its Linux checks in four parallel jobs (typing, coverage and E2E; the model
+  evidence replays; the detector and intent-model gates; the Debian package built from the
+  gates' strict report), keeps Nuitka's compiler cache between runs, and skips a model replay
+  whose every input - sources, tools, tests, model files, interpreter and dictionary versions -
+  it has already verified on an identical tree (repository variable
+  `KEYSWITCH_CI_REPLAY_CACHE=off` restores a replay on every run). The release workflow
+  publishes only after all four jobs pass. The local release pipeline reuses the strict report
+  and the byte-identical retraining replays of an earlier run when they are bound to the same
+  inputs and the same machine; `--fresh-models` recomputes them.
 - The context-action trainer failed before fitting since 0.33.0: its stand-in for the lexicon
   loader refused the supplement words `build_corpus` passes. `tools/prefix_exposure_inventory.py`
   lists the words the prefix model was fitted on, which the holdout and fitting freezers require
