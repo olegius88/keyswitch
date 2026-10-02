@@ -27,6 +27,8 @@ ROOT: Final = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tools"))
 
+from keyswitch.constants.model_protocol import FITTING_SPLITS  # noqa: E402
+
 CONFIG: Final = ROOT / "model/intent_v1/config.json"
 PINNED_HUNSPELL: Final = ROOT / "model/intent_v1/sources/hunspell"
 SYSTEM_LEXICONS: Final = Path("/usr/share/onboard/models")
@@ -35,7 +37,6 @@ LOCALES: Final = ("en_US", "ru_RU")
 PRIVATE_RELEASE: Final = ROOT / ".t/reliable-release-2026-09-12"
 CONTEXT_ACTION_CORPUS: Final = PRIVATE_RELEASE / "context-action-corpus"
 CONTEXT_ACTION_LEDGER: Final = PRIVATE_RELEASE / "context-action-test-ledger"
-PREFIX_V1_SPLITS: Final = ("train", "development", "calibration")
 
 
 @dataclass(frozen=True)
@@ -143,7 +144,7 @@ def check_reference_models() -> Check:
 
 
 def check_prefix_v1_data() -> Check:
-    paths = [ROOT / f"model/prefix_v1/{split}.jsonl.gz" for split in PREFIX_V1_SPLITS]
+    paths = [ROOT / f"model/prefix_v1/{split}.jsonl.gz" for split in FITTING_SPLITS]
     missing = [str(path.relative_to(ROOT)) for path in paths if not path.is_file()]
     return Check("prefix_v1_data", not missing, "missing " + ", ".join(missing) if missing else "prefix-v1 splits present")
 
