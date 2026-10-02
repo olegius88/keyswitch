@@ -356,9 +356,6 @@ jobs:
     name: Build native Debian package
     runs-on: ubuntu-26.04
     needs: [intent]
-    env:
-      NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka-cache
-
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -414,6 +411,10 @@ jobs:
       # Nuitka keeps its compiler cache (ccache / clcache) and downloads under
       # NUITKA_CACHE_DIR; a cached object file is byte-identical to a recompiled
       # one, so the package is the same and only the C compilation is saved.
+      - name: Point Nuitka at a cache that survives the job
+        shell: bash
+        run: echo "NUITKA_CACHE_DIR=$RUNNER_TEMP/nuitka-cache" >> "$GITHUB_ENV"
+
       - name: Restore the Nuitka compiler cache
         uses: actions/cache@v4
         with:
@@ -458,9 +459,6 @@ jobs:
     name: Test and build native Windows installer
     runs-on: windows-2025
 
-    env:
-      NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka-cache
-
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -470,6 +468,10 @@ jobs:
         with:
           python-version: "3.14"
           cache: pip
+
+      - name: Point Nuitka at a cache that survives the job
+        shell: bash
+        run: echo "NUITKA_CACHE_DIR=$RUNNER_TEMP/nuitka-cache" >> "$GITHUB_ENV"
 
       - name: Restore the Nuitka compiler cache
         uses: actions/cache@v4
@@ -620,7 +622,6 @@ jobs:
     # Read here rather than inside the step: a step cannot test its own
     # environment in its condition, and a fork has no secrets at all.
     env:
-      NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka-cache
       SIGNING_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12 }}
       SIGNING_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
 
@@ -633,6 +634,10 @@ jobs:
         with:
           python-version: "3.14"
           cache: pip
+
+      - name: Point Nuitka at a cache that survives the job
+        shell: bash
+        run: echo "NUITKA_CACHE_DIR=$RUNNER_TEMP/nuitka-cache" >> "$GITHUB_ENV"
 
       - name: Restore the Nuitka compiler cache
         uses: actions/cache@v4
