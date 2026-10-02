@@ -14,6 +14,10 @@ INDEX_LIMIT: Final = 2 * 1024 * 1024
 CHUNK_BYTES: Final = 2 * 1024 * 1024
 ARCHIVE_LIMIT: Final = 10 * 1024 * 1024
 FINGERPRINT_WINDOW_BYTES: Final = 128
+# bundles.indexed of an archive uploaded but not yet catalogued when a clearing of the group
+# began: neither catalogued (0) nor listed or dropped (1) until the clearing shows whether
+# Telegram deleted its message.
+BUNDLE_HELD_FOR_CLEARING: Final = 2
 # owner-only: settings, queue and secrets never group/world readable
 PRIVATE_DIRECTORY_MODE: Final = 0o700
 # owner-only: individual settings and downloaded files

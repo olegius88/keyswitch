@@ -13,8 +13,8 @@ from unittest.mock import Mock, patch
 
 from keyswitch import config, history, language_model, spellcheck, system
 from keyswitch.config import SettingsStore, _deep_merge
-from keyswitch.constants.settings_defaults import DEFAULT_SETTINGS
-from keyswitch.history import HistoryEntry, HistoryStore
+from keyswitch.constants.settings_defaults import DEFAULT_HISTORY_LIMIT, DEFAULT_SETTINGS
+from keyswitch.history import HistoryEntry, HistoryStore, history_limit
 from keyswitch.constants.file_formats import HISTORY_CONFIDENCE_DECIMALS
 from keyswitch.language_model import LanguageModel
 from keyswitch.constants.models import (
@@ -197,6 +197,14 @@ class HistoryStoreBranchTests(unittest.TestCase):
             with patch.object(Path, "write_text", interrupted), self.assertRaises(OSError):
                 store.append(HistoryEntry.create("rfr", "как", "editor", 1))
             self.assertEqual([item.original for item in store.read()], ["ghbdtn", "rfr"])
+
+    def test_a_hand_edited_limit_falls_back_to_the_default(self) -> None:
+        # int() of these stopped the application at start (app.py, desktop_ui.py).
+        for value in ("abc", None, True, [DEFAULT_HISTORY_LIMIT]):
+            with self.subTest(value=value):
+                self.assertEqual(history_limit(value), DEFAULT_HISTORY_LIMIT)
+        self.assertEqual(history_limit(str(DEFAULT_HISTORY_LIMIT)), DEFAULT_HISTORY_LIMIT)
+        self.assertEqual(history_limit(0), 1)
 
     def test_missing_file_read_error_and_minimum_limit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

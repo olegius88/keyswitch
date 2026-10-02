@@ -53,6 +53,21 @@ class HistoryEntry:
         )
 
 
+def history_limit(value: object) -> int:
+    """The `history.limit` setting as a count of entries.
+
+    The settings file can be edited by hand; a value that is not a number falls
+    back to the default instead of stopping the application at start.
+    """
+
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return DEFAULT_HISTORY_LIMIT
+    try:
+        return max(1, int(value))
+    except ValueError:
+        return DEFAULT_HISTORY_LIMIT
+
+
 class HistoryStore:
     def __init__(self, path: Path | None = None, limit: int = DEFAULT_HISTORY_LIMIT) -> None:
         self.path = path or data_dir() / "history.jsonl"

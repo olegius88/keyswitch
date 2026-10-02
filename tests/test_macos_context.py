@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from keyswitch.input_context import CONTEXT_LIMIT
+from keyswitch.constants.macos import UTF16_CODE_UNIT_BYTES
 from keyswitch.macos_context import (
     IDENTIFIER_ATTRIBUTE,
     ROLE_ATTRIBUTE,
@@ -75,6 +76,19 @@ class ReadingTests(unittest.TestCase):
         self.assertFalse(context.selection)
         self.assertEqual(context.role, "text")
         self.assertEqual(api.released, [MACOS_FAKE_AX_ELEMENT])
+
+    def test_a_caret_counted_in_utf16_units_falls_after_the_right_character(self) -> None:
+        # AXSelectedTextRange counts the emoji as two units; slicing by that number
+        # put "b" into the text before the caret.
+        text = "\U0001F600 ghbdtn"
+        units = len("\U0001F600 gh".encode("utf-16-le")) // UTF16_CODE_UNIT_BYTES
+        field, _api = reader(**{VALUE_ATTRIBUTE: text, SELECTED_RANGE_ATTRIBUTE: (units, 0)})
+        context = field.read(APPLICATION, MACOS_CONTEXT_WINDOW_ID)
+        assert context is not None
+        self.assertEqual((context.before, context.after), ("\U0001F600 gh", "bdtn"))
+        # An offset between the two units of the emoji is not a caret position.
+        field, _api = reader(**{VALUE_ATTRIBUTE: text, SELECTED_RANGE_ATTRIBUTE: (1, 0)})
+        self.assertIsNone(field.read(APPLICATION, MACOS_CONTEXT_WINDOW_ID))
 
     def test_a_selection_is_reported_and_left_out_of_both_sides(self) -> None:
         field, _api = reader(**{VALUE_ATTRIBUTE: "привет мир", SELECTED_RANGE_ATTRIBUTE: (0, MACOS_CONTEXT_FIRST_WORD_CHARACTERS)})

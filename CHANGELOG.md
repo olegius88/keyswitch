@@ -4,6 +4,43 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- Let a pause settle a word that waits for its next word, as the context assistant describes. A
+  word the model wanted the next word to decide (`yt `, `ша `) was never decided when no next word
+  came: the pause that should settle it measured from a moment the engine had already cleared.
+- Read Shift, Control, Option and Command on macOS. They arrive as flag changes, which the event
+  tap took for releases, so no modifier ever counted as held: `Ghbdtn` was retyped as `привет`,
+  `Shift+Return` was held as a plain Enter and hotkeys with a modifier never matched. Caps Lock,
+  which macOS reports once per toggle, counts as a press and a release, never as a held key.
+- Read the text of long fields on macOS (a note, a mail, a chat): a field over about 255 Cyrillic
+  characters read as empty, and an emoji before the caret moved the caret one character right.
+- Start even when the settings file holds a history limit that is not a number, instead of
+  failing at every start until the file is repaired.
+- Apply a full reset of the settings in the Linux window at once: the theme, the tray icon and its
+  toggles kept their previous values until a restart.
+- Delete the installers of earlier updates when a new one is downloaded on Windows; each stayed
+  in the updates folder for good.
+- Check the release tag against the packaged version before the APT repository is published, give
+  write access only to the job that creates the GitHub Release, and refuse to publish an unsigned
+  macOS application from a tag.
+- LogCourier: a log rotated by copying (logrotate `copytruncate`) is no longer sent again from its
+  start, which also sent the lines the user had chosen not to send; clearing the group no longer
+  drops the uncatalogued archives Telegram keeps, and the summary counts only those it deleted.
+- Training protocol: refuse the words of a sealed test by the words, not by family identifiers.
+  `test-membership.json` now carries the physical aliases of every test row's form, lemmas and
+  typo variants (`alias_sha256`), the evaluator records them in the access ledger, and the
+  fitting extension quarantines a new family whose aliases meet the base's test or any accessed
+  test. A family identifier is recomputed by every freeze from the rows it sees, so the same
+  word in another sentence carried a different identifier and passed into training. A word the
+  base already fits now follows its split by the same aliases, and a word fitted in two splits
+  is quarantined, so no word is fitted in one split and measured in another.
+- Prefix-v2 epoch selection ranks the weaker lexical profile first again. The shared selection
+  rank changed on 17.09.2026 to the net benefit the context trainer fills in; the prefix
+  trainer leaves it at zero, so the pooled recall decided alone, against the weaker profile.
+- Context-v3 training selects an epoch only for a development threshold inside the serving
+  band, instead of failing after the last epoch when the selected one lay above the ceiling,
+  and the calibration plateau tolerance now holds for the pooled balance as well as the worst
+  profile: a threshold whose worst profile tied the best was admitted whatever it gave up.
+
 ## 0.36.2 — 2026-10-02
 
 - Keep the punctuation of an early-switched word when it is converted back. After the early

@@ -41,6 +41,21 @@ class ContextWaitSettlementTests(ContextEngineTests):
         assert plan is not None
         self.assertEqual((plan.original, plan.replacement), ("yt", "не"))
 
+    def test_the_engine_itself_times_the_pause_of_a_waiting_word(self) -> None:
+        # Without any help from the test: the wait records its own boundary moment.
+        self.choose("wait")
+        self.type("yt ")
+        waiting = self.engine._context_waiting
+        assert waiting is not None
+        started = self.engine._last_word_input_at
+        assert started is not None
+        self.assertFalse(self.engine._pause_correction_pending)
+        self.choose("convert")
+        self.engine._maybe_correct_after_pause(now=started + self.engine._pause_delay())
+        plan = self.engine._pending
+        assert plan is not None
+        self.assertEqual((plan.original, plan.replacement), ("yt", "не"))
+
     def test_a_pause_leaves_a_waiting_word_the_model_still_keeps(self) -> None:
         """Settling is a second decision, not a conversion: the model can say no."""
         self.choose("wait")

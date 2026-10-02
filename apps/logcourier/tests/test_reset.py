@@ -148,6 +148,36 @@ def test_clearing_drops_archives_uploaded_but_not_yet_listed(store, configured, 
     assert len(list_entries(telegram, config.chat_id)) == 1
 
 
+def test_an_uncatalogued_archive_telegram_keeps_goes_to_the_new_catalog(
+    store, configured, telegram
+):
+    config, path = configured
+    telegram.fail_pin = True
+    with pytest.raises(TelegramError):
+        delivered(store, config, telegram, path)
+    telegram.fail_pin = False
+    with_history(telegram)
+    # Everything sent so far is older than Telegram lets a bot delete.
+    telegram.kept |= set(range(FIRST_REGULAR_MESSAGE_ID, GROUP_HISTORY_MESSAGES + 1))
+    result = reset_group(store, config, telegram, True)
+    assert result.startswith("Группа очищена частично")
+    assert "ещё не внесённые в каталог" not in result
+    assert store.stats(config.destination)["unindexed"] == 1
+    deliver(store, config, telegram)
+    assert len(list_entries(telegram, config.chat_id)) == 1
+
+
+def test_a_clearing_begun_by_the_previous_version_still_reports_its_dropped_archives(
+    store, configured, telegram
+):
+    config, _ = configured
+    # 0.1.4 dropped the uncatalogued archives when the clearing began and counted them here.
+    store.set(RESET_KEY + config.destination, {"top": 1, "next": 1, "kept": None, "dropped": 1})
+    result = reset_group(store, config, telegram, True)
+    assert f"ещё не внесённые в каталог: {quantity(1, ARCHIVES)}." in result
+    assert store.get(RESET_KEY + config.destination) is None
+
+
 @pytest.mark.parametrize("last_kept", LAST_KEPT_MESSAGE_IDS)
 def test_messages_older_than_telegram_deletes_are_named_and_not_asked_for_again(
     store, configured, telegram, last_kept

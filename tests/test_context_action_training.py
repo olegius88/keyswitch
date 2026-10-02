@@ -31,6 +31,7 @@ from train_context_action_model import (
     apply_support_mask,
     balance_planned_mass,
     choose_threshold,
+    development_thresholds,
     identifier_evidence_dropped,
     identifier_family,
     natural_lookahead_rows,
@@ -54,6 +55,12 @@ from train_context_model import Row as HistoricalRow
 from fixture_values.corpora import FIXTURE_WORD_FREQUENCY, PLANNED_EVIDENCE_DOMINANT_WORD_FREQUENCY
 from fixture_values.counts import (
     CHOOSE_THRESHOLD_CONVERT_ROW_COUNT,
+    CHOOSE_THRESHOLD_PLATEAU_NET_BENEFIT,
+    CHOOSE_THRESHOLD_PLATEAU_PORTABLE_HIGH_TRUE_ROWS,
+    CHOOSE_THRESHOLD_PLATEAU_PORTABLE_LOW_FALSE_ROWS,
+    CHOOSE_THRESHOLD_PLATEAU_PORTABLE_LOW_TRUE_ROWS,
+    CHOOSE_THRESHOLD_PLATEAU_REFERENCE_HIGH_TRUE_ROWS,
+    CHOOSE_THRESHOLD_PLATEAU_REFERENCE_LOW_TRUE_ROWS,
     CHOOSE_THRESHOLD_FALSE_ROW_COUNT,
     CHOOSE_THRESHOLD_GREEDY_NET_BENEFIT,
     CHOOSE_THRESHOLD_LOW_SCORING_FALSE_ROWS,
@@ -532,6 +539,45 @@ class ActionTrainingTests(unittest.TestCase):
             choose_threshold(predictions, [CHOOSE_THRESHOLD_LOW_CANDIDATE], 0, 0.0, net_benefit_tolerance=1.0)
         recipe = json.loads((ROOT / "model/context_v3/recipe.json").read_bytes())
         self.assertEqual(recipe["threshold_selection"]["net_benefit_tolerance"], EXPECTED_RECIPE_NET_BENEFIT_TOLERANCE)
+
+    def test_the_plateau_tolerance_holds_for_the_pooled_balance_too(self) -> None:
+        """A threshold whose worst profile ties the best is not admissible on that alone.
+
+        The admissibility test compared (minimum, net) tuples, so the pooled net never
+        counted once the minimum matched, and the fewest false conversions then chose a
+        threshold that gave up most of the repairs.
+        """
+
+        def rows(high_true: int, low_true: int, low_false: int) -> tuple[array[float], array[int]]:
+            values, labels = array("d"), array("B")
+            for probability, label, count in ((CHOOSE_THRESHOLD_HIGH_CANDIDATE, 1, high_true),
+                                              (CHOOSE_THRESHOLD_LOW_PROBABILITY, 1, low_true),
+                                              (CHOOSE_THRESHOLD_LOW_PROBABILITY, 0, low_false)):
+                for _ in range(count):
+                    values.extend([1 - probability, probability, 0.0, 0.0])
+                    labels.append(label)
+            return values, labels
+
+        predictions = {
+            "portable": rows(CHOOSE_THRESHOLD_PLATEAU_PORTABLE_HIGH_TRUE_ROWS, CHOOSE_THRESHOLD_PLATEAU_PORTABLE_LOW_TRUE_ROWS,
+                             CHOOSE_THRESHOLD_PLATEAU_PORTABLE_LOW_FALSE_ROWS),
+            "reference_hunspell": rows(CHOOSE_THRESHOLD_PLATEAU_REFERENCE_HIGH_TRUE_ROWS, CHOOSE_THRESHOLD_PLATEAU_REFERENCE_LOW_TRUE_ROWS, 0),
+        }
+        threshold, report, passed = choose_threshold(predictions, CHOOSE_THRESHOLD_NARROW_CANDIDATES, 0, 0.0,
+                                                     net_benefit_tolerance=CHOOSE_THRESHOLD_NET_BENEFIT_TOLERANCE)
+        self.assertEqual((threshold, passed), (CHOOSE_THRESHOLD_LOW_CANDIDATE, True))
+        self.assertEqual(report["admissible_thresholds"], [CHOOSE_THRESHOLD_LOW_CANDIDATE])
+        self.assertEqual(report["net_benefit"], CHOOSE_THRESHOLD_PLATEAU_NET_BENEFIT)
+
+    def test_an_epoch_is_selected_only_for_an_operating_point_the_band_can_serve(self) -> None:
+        """The calibration grid starts at the selected epoch's development threshold and ends
+        at the band's ceiling; an epoch chosen above the ceiling left no grid, after every epoch."""
+        recipe = json.loads((ROOT / "model/context_v3/recipe.json").read_bytes())
+        ceiling = recipe["threshold_selection"]["maximum_threshold"]
+        self.assertEqual(development_thresholds(recipe), [value for value in recipe["threshold_candidates"] if value <= ceiling])
+        self.assertLess(len(development_thresholds(recipe)), len(recipe["threshold_candidates"]))
+        with self.assertRaises(ValueError):
+            development_thresholds({**recipe, "threshold_candidates": [CHOOSE_THRESHOLD_CEILING_CANDIDATE]})
 
     def test_the_band_keeps_the_threshold_among_the_cases_the_product_promised(self) -> None:
         """Calibration counts rows; the band names the cases those counts cannot see."""

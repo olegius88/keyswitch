@@ -2,6 +2,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import zipfile
 
 import pytest
@@ -114,6 +115,26 @@ def test_only_new_content_with_rotation_baseline(store, configured):
     path.write_bytes(b"after rotation\n")
     assert collector.scan(config)[0] == 1
     assert fragments(store, config) == b"new\nafter rotation\n"
+
+
+def test_copy_rotation_sends_neither_old_lines_nor_sent_ones_again(store, configured):
+    config, path = configured
+    config.sources[0].include_existing = False
+    collector = Collector(store)
+    collector.scan(config)  # The baseline leaves "old" out.
+    with path.open("ab") as stream:
+        stream.write(b"line1\nline2\n")
+    collector.scan(config)
+    with path.open("ab") as stream:
+        stream.write(b"line3\n")  # Written after the last scan, before the copy.
+    shutil.copyfile(path, path.with_name(path.name + ".1"))
+    path.write_bytes(b"after\n")  # copytruncate empties the live file in place.
+    collector.scan(config)
+    # The live cursor has moved on; the copy keeps its own and is not read again.
+    with path.open("ab") as stream:
+        stream.write(b"later\n")
+    collector.scan(config)
+    assert fragments(store, config) == b"line1\nline2\nline3\nafter\nlater\n"
 
 
 def test_copytruncate_regrows_past_old_offset(store, configured):

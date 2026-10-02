@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Final
 
+from .units import BYTES_PER_MEBIBYTE
+
 # Virtual key codes, read from Apple's Events.h. They name physical positions and do not move with
 # the layout, which is what the engine's key codes mean.
 MAC_VK_ANSI_Z: Final = 0x06
@@ -52,6 +54,17 @@ EVENT_FLAG_SHIFT: Final = 0x00020000
 EVENT_FLAG_CONTROL: Final = 0x00040000
 EVENT_FLAG_ALTERNATE: Final = 0x00080000
 EVENT_FLAG_COMMAND: Final = 0x00100000
+# Side-specific modifier bits of the same flags, from IOLLEvent.h (NX_DEVICE*KEYMASK). A
+# flags-changed event carries no "down" of its own: the bit of its key says it, and with both
+# Shift keys held, releasing one clears only its own bit.
+EVENT_FLAG_DEVICE_LEFT_CONTROL: Final = 0x00000001
+EVENT_FLAG_DEVICE_LEFT_SHIFT: Final = 0x00000002
+EVENT_FLAG_DEVICE_RIGHT_SHIFT: Final = 0x00000004
+EVENT_FLAG_DEVICE_LEFT_COMMAND: Final = 0x00000008
+EVENT_FLAG_DEVICE_RIGHT_COMMAND: Final = 0x00000010
+EVENT_FLAG_DEVICE_LEFT_ALTERNATE: Final = 0x00000020
+EVENT_FLAG_DEVICE_RIGHT_ALTERNATE: Final = 0x00000040
+EVENT_FLAG_DEVICE_RIGHT_CONTROL: Final = 0x00002000
 # Tap placement and options.
 SESSION_EVENT_TAP: Final = 1
 HEAD_INSERT_EVENT_TAP: Final = 0
@@ -77,6 +90,11 @@ UC_MODIFIER_CONTROL: Final = 16
 UC_KEY_TRANSLATE_BUFFER_CHARACTERS: Final = 8
 # Buffer a CFString is copied into as UTF-8.
 CF_STRING_BUFFER_BYTES: Final = 512
+# Largest text an accessibility attribute is copied out at: a field holding more is not read,
+# rather than copying a whole document into memory for a few hundred characters of context.
+CF_STRING_MAX_BYTES: Final = 4 * BYTES_PER_MEBIBYTE
+# AXSelectedTextRange counts UTF-16 code units, each of two bytes.
+UTF16_CODE_UNIT_BYTES: Final = 2
 # kCFStringEncodingUTF8.
 CF_STRING_ENCODING_UTF8: Final = 0x08000100
 CF_NUMBER_SINT32_TYPE: Final = 3
@@ -104,6 +122,26 @@ MAC_CONTROL_KEYS: Final = frozenset({MAC_VK_CONTROL, MAC_VK_RIGHT_CONTROL})
 MAC_ALT_KEYS: Final = frozenset({MAC_VK_OPTION, MAC_VK_RIGHT_OPTION})
 MAC_SUPER_KEYS: Final = frozenset({MAC_VK_COMMAND, MAC_VK_RIGHT_COMMAND})
 MAC_MODIFIER_KEYCODES: Final = MAC_SHIFT_KEYS | MAC_CONTROL_KEYS | MAC_ALT_KEYS | MAC_SUPER_KEYS | {MAC_VK_CAPS_LOCK, MAC_VK_FUNCTION}
+# The flag bit that is set while a modifier key is down, by keycode: side-specific where the
+# event carries it, and the shared bit of the modifier where it does not.
+MAC_MODIFIER_DEVICE_FLAGS: Final = {
+    MAC_VK_CONTROL: EVENT_FLAG_DEVICE_LEFT_CONTROL, MAC_VK_RIGHT_CONTROL: EVENT_FLAG_DEVICE_RIGHT_CONTROL,
+    MAC_VK_SHIFT: EVENT_FLAG_DEVICE_LEFT_SHIFT, MAC_VK_RIGHT_SHIFT: EVENT_FLAG_DEVICE_RIGHT_SHIFT,
+    MAC_VK_OPTION: EVENT_FLAG_DEVICE_LEFT_ALTERNATE, MAC_VK_RIGHT_OPTION: EVENT_FLAG_DEVICE_RIGHT_ALTERNATE,
+    MAC_VK_COMMAND: EVENT_FLAG_DEVICE_LEFT_COMMAND, MAC_VK_RIGHT_COMMAND: EVENT_FLAG_DEVICE_RIGHT_COMMAND,
+}
+MAC_DEVICE_FLAGS_MASK: Final = (
+    EVENT_FLAG_DEVICE_LEFT_CONTROL | EVENT_FLAG_DEVICE_RIGHT_CONTROL | EVENT_FLAG_DEVICE_LEFT_SHIFT
+    | EVENT_FLAG_DEVICE_RIGHT_SHIFT | EVENT_FLAG_DEVICE_LEFT_ALTERNATE | EVENT_FLAG_DEVICE_RIGHT_ALTERNATE
+    | EVENT_FLAG_DEVICE_LEFT_COMMAND | EVENT_FLAG_DEVICE_RIGHT_COMMAND
+)
+MAC_MODIFIER_SHARED_FLAGS: Final = {
+    **{key: EVENT_FLAG_SHIFT for key in MAC_SHIFT_KEYS},
+    **{key: EVENT_FLAG_CONTROL for key in MAC_CONTROL_KEYS},
+    **{key: EVENT_FLAG_ALTERNATE for key in MAC_ALT_KEYS},
+    **{key: EVENT_FLAG_COMMAND for key in MAC_SUPER_KEYS},
+    MAC_VK_CAPS_LOCK: EVENT_FLAG_ALPHA_SHIFT,
+}
 # The key whose translation tells which script a layout types.
 MAC_SCRIPT_PROBE_KEYCODE: Final = MAC_VK_ANSI_Q
 EVENT_TAP_DISABLED_TYPES: Final = frozenset({EVENT_TAP_DISABLED_BY_TIMEOUT, EVENT_TAP_DISABLED_BY_USER_INPUT})

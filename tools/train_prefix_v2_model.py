@@ -191,6 +191,22 @@ def sequence_scores(model: VersionedPrefixModel, frames: Iterable[PrefixFrame]) 
     return results
 
 
+@dataclass(frozen=True)
+class PrefixEpochSelection(EpochSelection):
+    """A prefix epoch is ranked by recall under a zero-false budget, worst profile first.
+
+    The shared ``EpochSelection.rank`` changed on 17.09.2026 to the net benefit the
+    context model is weighed by. The prefix trainer never fills the net fields - it
+    refuses any threshold with a false conversion instead - so under the shared rank
+    every frontier tied at zero and the pooled recall decided alone, against the
+    weaker profile. The recipe's selection rule is the one from before that change.
+    """
+
+    @property
+    def rank(self) -> tuple[float, float, float, float, float]:
+        return (self.minimum_recall, self.pooled_recall, -self.loss, -self.threshold, 0.0)
+
+
 def assess_prefix_epoch(scores: Mapping[str, SequenceScore], *, thresholds: Sequence[float], loss: float) -> EpochSelection | None:
     """Choose a DEV frontier on whole sequences, requiring zero false in both profiles.
 
@@ -214,9 +230,9 @@ def assess_prefix_epoch(scores: Mapping[str, SequenceScore], *, thresholds: Sequ
             profile: {**row, "conversion_recall": row["converted_before_end"] / row["desired"]}
             for profile, row in metrics.items()
         }
-        candidate = EpochSelection(float(threshold), min(row["conversion_recall"] for row in by_profile.values()),
-                                   sum(row["converted_before_end"] for row in metrics.values()) /
-                                   sum(row["desired"] for row in metrics.values()), loss, by_profile)
+        candidate = PrefixEpochSelection(float(threshold), min(row["conversion_recall"] for row in by_profile.values()),
+                                         sum(row["converted_before_end"] for row in metrics.values()) /
+                                         sum(row["desired"] for row in metrics.values()), loss, by_profile)
         if best is None or candidate.rank > best.rank:
             best = candidate
     return best

@@ -268,6 +268,7 @@ class GitHubReleaseClient:
         destination = directory / release.asset.name
         partial_path = directory / f"{release.asset.name}.part"
         _unlink_if_exists(partial_path)
+        _remove_previous_installers(directory, keep=release.asset.name)
         request = Request(
             release.asset.url,
             headers={"User-Agent": f"KeySwitch/{self.current_version}"},
@@ -303,6 +304,21 @@ class GitHubReleaseClient:
         except OSError as error:
             _unlink_if_exists(partial_path)
             raise UpdateError(f"Не удалось загрузить обновление: {error}") from error
+
+
+def _remove_previous_installers(directory: Path, *, keep: str) -> None:
+    """Delete the installers of earlier updates; each one is tens of megabytes.
+
+    Only files named exactly as a KeySwitch installer are touched. One that is
+    still open is left for the next download to try again.
+    """
+
+    for path in directory.iterdir():
+        if path.name != keep and _WINDOWS_INSTALLER_PATTERN.fullmatch(path.name) is not None:
+            try:
+                path.unlink()
+            except OSError:
+                continue
 
 
 def _unlink_if_exists(path: Path) -> None:

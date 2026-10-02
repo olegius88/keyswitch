@@ -346,6 +346,31 @@ class GitHubReleaseClientTests(unittest.TestCase):
             with self.subTest(index=index), self.assertRaises(UpdateError):
                 self.latest(candidate)
 
+    def test_a_download_removes_the_installers_of_earlier_updates(self) -> None:
+        content = b"verified package"
+        release = checked_release(content=content)
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            earlier = directory / "KeySwitch-Setup-0.1.0-x64.exe"
+            locked = directory / "KeySwitch-Setup-0.2.0-x64.exe"
+            unrelated = directory / "notes.txt"
+            for path in (earlier, locked, unrelated):
+                path.write_bytes(b"old")
+            original_unlink = Path.unlink
+
+            def unlink(path: Path, missing_ok: bool = False) -> None:
+                if path == locked:
+                    raise PermissionError("still running")
+                original_unlink(path, missing_ok)
+
+            client = GitHubReleaseClient("0.4.0", opener=FakeOpener(FakeResponse(content, DOWNLOAD_URL)))
+            with patch.object(Path, "unlink", unlink):
+                installed = client.download(release, directory, lambda _done, _total: None)
+            self.assertEqual(installed.read_bytes(), content)
+            self.assertFalse(earlier.exists())
+            self.assertTrue(locked.exists())
+            self.assertTrue(unrelated.exists())
+
     def test_download_success_and_all_integrity_failures(self) -> None:
         content = b"verified package"
         release = checked_release(content=content)

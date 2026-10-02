@@ -195,3 +195,5 @@ tools/*.py text eol=lf
 model/context_v3/*.json text eol=lf
 model/prefix_v2/*.json text eol=lf
 model/intent_v1/compatibility/*.json text eol=lf
+# Bash run by Claude Code on the web; CRLF would break it.
+.claude/hooks/*.sh text eol=lf

@@ -21,14 +21,16 @@ from typing import Final
 from .backend import ScreenAnchor
 from .constants.keyboard import ALT_MASK, CONTROL_MASK, SHIFT_MASK
 from .macos_objc import frontmost_application
-from .macos_backend import NativeInput, NativeKeyEvent
+from .macos_backend import NativeInput, NativeKeyEvent, modifier_pressed
 from .constants.macos import (
     AX_SUCCESS,
     AX_VALUE_TYPE_CF_RANGE,
     CF_NUMBER_SINT32_TYPE,
     CF_STRING_BUFFER_BYTES,
     CF_STRING_ENCODING_UTF8,
+    CF_STRING_MAX_BYTES,
     EVENT_FLAG_ALPHA_SHIFT,
+    EVENT_FLAGS_CHANGED,
     EVENT_KEY_DOWN,
     EVENT_MARK_INJECTED,
     EVENT_MARK_REPLAYED,
@@ -98,6 +100,10 @@ _cf.CFArrayGetCount.restype = ctypes.c_long
 _cf.CFArrayGetValueAtIndex.argtypes = [ctypes.c_void_p, ctypes.c_long]
 _cf.CFArrayGetValueAtIndex.restype = ctypes.c_void_p
 _cf.CFStringGetCString.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long, ctypes.c_uint32]
+_cf.CFStringGetLength.argtypes = [ctypes.c_void_p]
+_cf.CFStringGetLength.restype = ctypes.c_long
+_cf.CFStringGetMaximumSizeForEncoding.argtypes = [ctypes.c_long, ctypes.c_uint32]
+_cf.CFStringGetMaximumSizeForEncoding.restype = ctypes.c_long
 _cf.CFStringGetCString.restype = ctypes.c_bool
 _cf.CFDataGetBytePtr.argtypes = [ctypes.c_void_p]
 _cf.CFDataGetBytePtr.restype = ctypes.c_void_p
@@ -203,7 +209,13 @@ _TAP_CALLBACK = ctypes.CFUNCTYPE(
 def _text(reference: int | None) -> str:
     if not reference:
         return ""
-    buffer = ctypes.create_string_buffer(CF_STRING_BUFFER_BYTES)
+    # A field's text is as long as the field: a fixed buffer refused every value over
+    # about 255 Cyrillic characters, so notes, mail and chats never gave their context.
+    needed = int(_cf.CFStringGetMaximumSizeForEncoding(
+        _cf.CFStringGetLength(reference), CF_STRING_ENCODING_UTF8)) + 1
+    if needed > CF_STRING_MAX_BYTES:
+        return ""
+    buffer = ctypes.create_string_buffer(max(needed, CF_STRING_BUFFER_BYTES))
     if not _cf.CFStringGetCString(reference, buffer, len(buffer), CF_STRING_ENCODING_UTF8):
         return ""
     return buffer.value.decode("utf-8", "replace")
@@ -514,9 +526,16 @@ class CtypesMacAPI:
             listener(NativeKeyEvent(True, 0, timestamp, pointer=True))
             return event
         mark = int(_cg.CGEventGetIntegerValueField(event, EVENT_SOURCE_USER_DATA_FIELD))
+        keycode = int(_cg.CGEventGetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE_FIELD))
+        # A modifier comes as a flags change, which says nothing about up or down by itself.
+        pressed = (
+            modifier_pressed(keycode, int(_cg.CGEventGetFlags(event)))
+            if event_type == EVENT_FLAGS_CHANGED
+            else event_type == EVENT_KEY_DOWN
+        )
         native = NativeKeyEvent(
-            event_type == EVENT_KEY_DOWN,
-            int(_cg.CGEventGetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE_FIELD)),
+            pressed,
+            keycode,
             timestamp,
             injected=mark == EVENT_MARK_INJECTED,
             replayed=mark == EVENT_MARK_REPLAYED,

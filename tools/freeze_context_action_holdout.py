@@ -35,7 +35,7 @@ from freeze_context_action_corpus import (
     family_aliases, physical, read_conllu, row_identifier, sentence_rows, typo_variants,
 )
 from keyswitch.constants.model_protocol import FITTING_SPLITS
-from reconcile_context_action_corpus import expanded_aliases, historical_code_forms
+from reconcile_context_action_corpus import ALIAS_SCOPE, expanded_aliases, historical_code_forms, membership_aliases
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from keyswitch.constants.corpus import (
@@ -305,6 +305,26 @@ def ledger_test_rows(ledger: Path) -> tuple[set[str], set[str]]:
     return rows, documents
 
 
+def ledger_test_aliases(ledger: Path) -> tuple[set[str], int]:
+    """Aliases of the words every accessed test holds, and how many records carry none.
+
+    Records written before the membership carried aliases name their test by identifiers
+    only; the words of those tests are refused only where a corpus still holds them.
+    """
+
+    aliases: set[str] = set()
+    without = 0
+    for path in sorted(ledger.glob("*.access.json")) if ledger.exists() else []:
+        membership = read_object(path).get("test_membership")
+        if not isinstance(membership, dict):
+            continue
+        if "alias_sha256" in membership:
+            aliases.update(hash_set(membership.get("alias_sha256"), "ledger test aliases"))
+        else:
+            without += 1
+    return aliases, without
+
+
 def ledger_test_families(ledger: Path) -> tuple[set[str], dict[str, str]]:
     """Families of every sealed test that was ever accessed, not only the base corpus's own.
 
@@ -353,9 +373,15 @@ def load_exclusions(repository: Path, base: Path, ud_origin: Path, technical_ori
     if checksum(base / "test-membership.json") != read_object(base / "manifest.json").get("test_membership_sha256"):
         raise ValueError("base test membership differs from its manifest")
     prior_families = hash_set(membership.get("family_ids_sha256"), "base test families")
+    # The words of the base's own test and of every accessed test, where their membership
+    # names them; the UD and technical sidecars cover the tests frozen before it did.
+    prior_test_aliases = ud_test_aliases | technical_test_aliases
+    if "alias_sha256" in membership:
+        prior_test_aliases |= hash_set(membership.get("alias_sha256"), "base test aliases")
     if ledger is not None:
         ledger_families, ledger_provenance = ledger_test_families(ledger)
         prior_families |= ledger_families
+        prior_test_aliases |= ledger_test_aliases(ledger)[0]
         provenance.update(ledger_provenance)
     exposed, sources = exposed_families(repository, extra_exposure)
     code = repository / "tools/train_context_model.py"
@@ -370,7 +396,7 @@ def load_exclusions(repository: Path, base: Path, ud_origin: Path, technical_ori
     for path in (closure_path, families_path, prefix_inventory, base / "manifest.json", base / "test-membership.json", lexicon, code,
                  ud_origin / "manifest.json", technical_origin / "manifest.json"):
         provenance[str(path.relative_to(repository)) if path.is_relative_to(repository) else str(path)] = checksum(path)
-    return Exclusions(frozenset(ud_aliases | technical_aliases), frozenset(ud_test_aliases | technical_test_aliases),
+    return Exclusions(frozenset(ud_aliases | technical_aliases), frozenset(prior_test_aliases),
                       frozenset(prefix_aliases), frozenset(prior_families), frozenset(exposed), frozenset(historical_aliases),
                       frozenset(cast(list[str], names)), provenance)
 
@@ -814,7 +840,8 @@ def assemble(base: Path, output: Path, namespace: str, ud_rows: Sequence[CorpusR
     membership = {"namespace": namespace, "scope": "test-only holdout extension; families known to the base corpus, its accessed test, the prefix curriculum or declared exposure are quarantined",
                   "row_ids_sha256": sorted(digest(row.identifier) for row in held),
                   "family_ids_sha256": sorted({row.family for row in held}),
-                  "document_ids_sha256": sorted({digest(row.document) for row in held})}
+                  "document_ids_sha256": sorted({digest(row.document) for row in held}),
+                  "alias_sha256": membership_aliases(held), "alias_scope": ALIAS_SCOPE}
     membership_path = output / "test-membership.json"
     membership_path.write_bytes(canonical(membership))
     manifest: dict[str, object] = {
@@ -937,7 +964,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 repeated += 1
     held = [row for row in (*ud_rows, *sid_rows) if row.split == "test"]
     membership = {"row_ids_sha256": sorted(digest(row.identifier) for row in held), "family_ids_sha256": sorted({row.family for row in held}),
-                  "document_ids_sha256": sorted({digest(row.document) for row in held})}
+                  "document_ids_sha256": sorted({digest(row.document) for row in held}), "alias_sha256": membership_aliases(held)}
     overlap = prior_access_overlap(args.ledger, membership)
     metadata = {"sources": sources, "sampling": sampling, "ud": ud_summary, "technical": sid_summary, "sid_source": sid_metadata,
                 "repeated_rows_quarantined": repeated,

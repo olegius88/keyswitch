@@ -7,8 +7,10 @@ run-name: "KeySwitch — release build (Windows + Linux + macOS) — ${{ github.
       - "v*"
   workflow_dispatch:
 
+# Read-only by default: the build and test jobs install third-party packages and
+# need no write access. Only the release job publishes, and asks for it there.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: keyswitch-release-${{ github.ref }}
@@ -22,6 +24,19 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v7
+
+      # The APT repository is deployed before the release job runs: a tag that
+      # does not name the packaged version must stop the run here, before
+      # installed systems are offered a rebuilt package under the old version.
+      - name: Check that the tag names the packaged version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          package_version="$(sed -nE 's/^version = "([^"]+)"/\1/p' pyproject.toml | head -n 1)"
+          if [ "$GITHUB_REF_NAME" != "v$package_version" ]; then
+            printf 'Tag %s does not name the packaged version %s\n' \
+              "$GITHUB_REF_NAME" "$package_version" >&2
+            exit 1
+          fi
 
       - name: Install runtime, test and package validation tools
         run: |
@@ -357,6 +372,16 @@ jobs:
           python -m coverage report --fail-under=100 \
             --include="*/macos_app.py,*/macos_backend.py,*/macos_context.py,*/macos_services.py,*/macos_system.py,*/tray_model.py,*/system_model.py"
 
+      # Without the identity the bundle is built unsigned, which is fine for a
+      # branch but not for what a tag publishes: an unsigned update loses its
+      # Accessibility permission on every install (packaging/build-macos.sh).
+      - name: Refuse to publish an unsigned application
+        if: ${{ startsWith(github.ref, 'refs/tags/') && env.SIGNING_CERTIFICATE == '' }}
+        run: |
+          printf 'A tagged build is published and must be signed: set %s and %s.\n' \
+            MACOS_CERTIFICATE_P12 MACOS_CERTIFICATE_PASSWORD >&2
+          exit 1
+
       - name: Import the Developer ID signing identity
         if: ${{ env.SIGNING_CERTIFICATE != '' }}
         run: |
@@ -535,6 +560,8 @@ jobs:
     needs: [package, windows, macos, apt-repository]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-26.04
+    permissions:
+      contents: write
 
     steps:
       - name: Check out source

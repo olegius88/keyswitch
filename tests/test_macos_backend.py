@@ -21,19 +21,28 @@ from keyswitch.macos_backend import (
     NativeInput,
     NativeKeyEvent,
     key_name,
+    modifier_pressed,
     select_source_pair,
 )
 from keyswitch.constants.macos import (
+    EVENT_FLAG_ALPHA_SHIFT,
+    EVENT_FLAG_COMMAND,
+    EVENT_FLAG_DEVICE_LEFT_SHIFT,
+    EVENT_FLAG_DEVICE_RIGHT_SHIFT,
+    EVENT_FLAG_SHIFT,
     EVENT_TAP_DISABLED_BY_TIMEOUT,
     MAC_VK_ANSI_Q,
     MAC_VK_ANSI_Z,
     MAC_VK_BACKSPACE,
+    MAC_VK_CAPS_LOCK,
     MAC_VK_COMMAND,
     MAC_VK_CONTROL,
+    MAC_VK_FUNCTION,
     MAC_VK_LEFT_ARROW,
     MAC_VK_OPTION,
     MAC_VK_PERIOD,
     MAC_VK_RETURN,
+    MAC_VK_RIGHT_SHIFT,
     MAC_VK_SHIFT,
 )
 from fixture_values.clock import MACOS_FAKE_EVENT_TIMESTAMP, MACOS_STOP_WAIT_SAFETY_TIMEOUT_SECONDS
@@ -347,6 +356,28 @@ class InjectionTests(unittest.TestCase):
         with self.assertRaises(MacBackendError):
             self.backend.inject_correction([self.stroke(MAC_VK_ANSI_Q)], 1, None)
         self.assertFalse(self.backend._holding)
+
+
+class ModifierFlagsTests(unittest.TestCase):
+    """Modifiers arrive as kCGEventFlagsChanged; their flags say up or down.
+
+    The tap used to read every such event as a release, so Shift never counted
+    as held: `Ghbdtn` was retyped as `привет`, and hotkeys with a modifier
+    never matched.
+    """
+
+    def test_a_flags_change_says_whether_its_own_key_is_down(self) -> None:
+        both = EVENT_FLAG_SHIFT | EVENT_FLAG_DEVICE_LEFT_SHIFT | EVENT_FLAG_DEVICE_RIGHT_SHIFT
+        self.assertTrue(modifier_pressed(MAC_VK_SHIFT, both))
+        # Letting the left Shift go while the right one is held clears only its own bit.
+        right_only = EVENT_FLAG_SHIFT | EVENT_FLAG_DEVICE_RIGHT_SHIFT
+        self.assertFalse(modifier_pressed(MAC_VK_SHIFT, right_only))
+        self.assertTrue(modifier_pressed(MAC_VK_RIGHT_SHIFT, right_only))
+        # Without side-specific bits the modifier's shared bit decides.
+        self.assertTrue(modifier_pressed(MAC_VK_COMMAND, EVENT_FLAG_COMMAND))
+        self.assertFalse(modifier_pressed(MAC_VK_OPTION, 0))
+        self.assertTrue(modifier_pressed(MAC_VK_CAPS_LOCK, EVENT_FLAG_ALPHA_SHIFT))
+        self.assertFalse(modifier_pressed(MAC_VK_FUNCTION, EVENT_FLAG_SHIFT))
 
 
 if __name__ == "__main__":

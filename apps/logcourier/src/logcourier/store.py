@@ -6,7 +6,11 @@ import sqlite3
 import time
 from pathlib import Path
 
-from .constants.files import PRIVATE_DIRECTORY_MODE, PRIVATE_FILE_MODE
+from .constants.files import (
+    BUNDLE_HELD_FOR_CLEARING,
+    PRIVATE_DIRECTORY_MODE,
+    PRIVATE_FILE_MODE,
+)
 from .constants.limits import MAX_QUEUE_BYTES
 from .constants.timing import DB_CONNECT_TIMEOUT_SECONDS, RETENTION_DAYS, SECONDS_PER_DAY
 
@@ -156,8 +160,9 @@ class Store:
         """Forget the chain of catalogs, so the next delivery starts a new one.
 
         With `clearing`, the group's messages are about to be deleted: archives uploaded but not
-        yet listed in a catalog go with them, and the clearing progress is stored in the same
-        transaction. Returns how many such archives were dropped.
+        yet listed in a catalog are held back from the new chain until `finish_clearing` knows
+        whether their messages went, and the clearing progress is stored in the same transaction.
+        Returns how many archives were held.
         """
         with self.db:
             self.db.execute(
@@ -165,15 +170,36 @@ class Store:
             )
             if clearing is None:
                 return 0
-            dropped = self.db.execute(
-                "UPDATE bundles SET indexed=1 "
+            held = self.db.execute(
+                "UPDATE bundles SET indexed=? "
                 "WHERE destination=? AND file_id IS NOT NULL AND indexed=0",
-                (destination,),
+                (BUNDLE_HELD_FOR_CLEARING, destination),
             ).rowcount
             self.db.execute(
                 "INSERT OR REPLACE INTO kv VALUES (?,?)",
-                (RESET_KEY + destination, json.dumps({**clearing, "dropped": dropped})),
+                (RESET_KEY + destination, json.dumps(clearing)),
             )
+        return held
+
+    def finish_clearing(self, destination: str, kept: int | None) -> int:
+        """Settle the archives held by `restart_chain` and forget the finished clearing.
+
+        Telegram keeps the messages up to `kept`: an archive among them is still in the group
+        and goes to the new chain's catalog. The others were deleted with the group and are
+        dropped. Returns how many were dropped.
+        """
+        with self.db:
+            if kept is not None:
+                self.db.execute(
+                    "UPDATE bundles SET indexed=0 "
+                    "WHERE destination=? AND indexed=? AND message_id<=?",
+                    (destination, BUNDLE_HELD_FOR_CLEARING, kept),
+                )
+            dropped = self.db.execute(
+                "UPDATE bundles SET indexed=1 WHERE destination=? AND indexed=?",
+                (destination, BUNDLE_HELD_FOR_CLEARING),
+            ).rowcount
+            self.db.execute("DELETE FROM kv WHERE key=?", (RESET_KEY + destination,))
         return dropped
 
     def acknowledge_index(self, destination: str, ids: list[str], head_digest: str) -> None:

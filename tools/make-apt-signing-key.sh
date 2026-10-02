@@ -38,13 +38,13 @@ passphrase="$(openssl rand -base64 32)"
 printf '%s\n' "$passphrase" > "$target/passphrase.txt"
 chmod 0600 "$target/passphrase.txt"
 
-gpg --batch --yes --pinentry-mode loopback --passphrase "$passphrase" \
+gpg --batch --yes --pinentry-mode loopback --passphrase-file "$target/passphrase.txt" \
     --quick-generate-key "$identity" rsa4096 sign "$expiry"
 fingerprint="$(gpg --batch --with-colons --list-keys \
     | awk -F: '$1 == "fpr" { print $10; exit }')"
 test -n "$fingerprint"
 
-gpg --batch --yes --pinentry-mode loopback --passphrase "$passphrase" \
+gpg --batch --yes --pinentry-mode loopback --passphrase-file "$target/passphrase.txt" \
     --armor --export-secret-keys "$fingerprint" > "$target/private-key.asc"
 chmod 0600 "$target/private-key.asc"
 gpg --batch --yes --armor --export "$fingerprint" > "$target/public-key.asc"
