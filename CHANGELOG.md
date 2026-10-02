@@ -12,7 +12,11 @@ All notable changes to KeySwitch are documented in this file.
   `KEYSWITCH_CI_REPLAY_CACHE=off` restores a replay on every run). The release workflow
   publishes only after all four jobs pass. The local release pipeline reuses the strict report
   and the byte-identical retraining replays of an earlier run when they are bound to the same
-  inputs and the same machine; `--fresh-models` recomputes them.
+  inputs and the same machine; `--fresh-models` recomputes them. The replay marker's key
+  fingerprints the committed tree once, before the first replay: hashing the working tree again
+  at save time saw the `__pycache__` directories and regenerated outputs a replay leaves behind
+  and never produced the key the lookup had asked for. `actions/cache` moves from v4 to v6, so
+  every action the workflows use runs on Node.js 24 and the runner stops warning about Node.js 20.
 - The context-action trainer failed before fitting since 0.33.0: its stand-in for the lexicon
   loader refused the supplement words `build_corpus` passes. `tools/prefix_exposure_inventory.py`
   lists the words the prefix model was fitted on, which the holdout and fitting freezers require

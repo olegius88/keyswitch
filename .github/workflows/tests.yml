@@ -124,8 +124,9 @@ jobs:
 
       # Replays recompute, from pinned inputs, verdicts that are a deterministic
       # function of those inputs. A marker saved after a successful replay, under a
-      # key that names every input (source, tools, tests, model files, the Python
-      # and dictionary versions), lets an identical tree skip the recomputation.
+      # key that names every input (the committed source, tools, tests and model
+      # files, the Python and dictionary versions), lets an identical tree skip
+      # the recomputation.
       # Set the repository variable KEYSWITCH_CI_REPLAY_CACHE to "off" to replay
       # on every run again.
       - name: Fingerprint the replay environment
@@ -134,14 +135,18 @@ jobs:
           python_version="$(python3 -c 'import sys; print(sys.version.replace(" ", "_"))')"
           packages="$(dpkg-query -W -f='${binary:Package}=${Version}\n' onboard-data hunspell-ru hunspell-en-us libhunspell-1.7-0 | tr '\n' ';')"
           echo "environment=$(printf '%s|%s' "$python_version" "$packages" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+          # The tree is fingerprinted once, from the committed blobs: a replay leaves
+          # __pycache__ and regenerated outputs behind, so hashing the working tree
+          # again at save time would never produce the key the lookup asked for.
+          echo "tree=$(git ls-files -s -- src/keyswitch tools tests model pyproject.toml | sha256sum | cut -c1-64)" >> "$GITHUB_OUTPUT"
 
       - name: Look up a verified context replay of this exact tree
         id: restore_context
         if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' }}
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/replay-markers/context.ok
-          key: replay-context-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ hashFiles('src/keyswitch/**', 'tools/**', 'tests/**', 'model/**', 'pyproject.toml') }}
+          key: replay-context-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ steps.inputs.outputs.tree }}
           lookup-only: true
 
       - name: Verify active contextual evidence and versioned replay
@@ -160,18 +165,18 @@ jobs:
 
       - name: Save the verified context replay marker
         if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_context.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/replay-markers/context.ok
-          key: replay-context-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ hashFiles('src/keyswitch/**', 'tools/**', 'tests/**', 'model/**', 'pyproject.toml') }}
+          key: replay-context-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ steps.inputs.outputs.tree }}
 
       - name: Look up a verified ortho replay of this exact tree
         id: restore_ortho
         if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' }}
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/replay-markers/ortho.ok
-          key: replay-ortho-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ hashFiles('src/keyswitch/**', 'tools/**', 'tests/**', 'model/**', 'pyproject.toml') }}
+          key: replay-ortho-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ steps.inputs.outputs.tree }}
           lookup-only: true
 
       - name: Replay key-space orthotactic training and promotion guard
@@ -198,18 +203,18 @@ jobs:
 
       - name: Save the verified ortho replay marker
         if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_ortho.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/replay-markers/ortho.ok
-          key: replay-ortho-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ hashFiles('src/keyswitch/**', 'tools/**', 'tests/**', 'model/**', 'pyproject.toml') }}
+          key: replay-ortho-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ steps.inputs.outputs.tree }}
 
       - name: Look up a verified boundary replay of this exact tree
         id: restore_boundary
         if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' }}
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/replay-markers/boundary.ok
-          key: replay-boundary-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ hashFiles('src/keyswitch/**', 'tools/**', 'tests/**', 'model/**', 'pyproject.toml') }}
+          key: replay-boundary-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ steps.inputs.outputs.tree }}
           lookup-only: true
 
       - name: Replay boundary segmentation training and prevent rejected rollout
@@ -232,18 +237,18 @@ jobs:
 
       - name: Save the verified boundary replay marker
         if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_boundary.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/replay-markers/boundary.ok
-          key: replay-boundary-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ hashFiles('src/keyswitch/**', 'tools/**', 'tests/**', 'model/**', 'pyproject.toml') }}
+          key: replay-boundary-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ steps.inputs.outputs.tree }}
 
       - name: Look up a verified prefix replay of this exact tree
         id: restore_prefix
         if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' }}
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/replay-markers/prefix.ok
-          key: replay-prefix-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ hashFiles('src/keyswitch/**', 'tools/**', 'tests/**', 'model/**', 'pyproject.toml') }}
+          key: replay-prefix-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ steps.inputs.outputs.tree }}
           lookup-only: true
 
       - name: Verify frozen prefix numeric evidence and current engine replay
@@ -261,10 +266,10 @@ jobs:
 
       - name: Save the verified prefix replay marker
         if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_prefix.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/replay-markers/prefix.ok
-          key: replay-prefix-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ hashFiles('src/keyswitch/**', 'tools/**', 'tests/**', 'model/**', 'pyproject.toml') }}
+          key: replay-prefix-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ steps.inputs.outputs.tree }}
 
   intent:
     name: Detector and intent-model quality gates
@@ -389,7 +394,7 @@ jobs:
         run: echo "NUITKA_CACHE_DIR=$RUNNER_TEMP/nuitka-cache" >> "$GITHUB_ENV"
 
       - name: Restore the Nuitka compiler cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/nuitka-cache
           key: nuitka-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/keyswitch/**', 'packaging/**', 'tools/install-build-tools.sh') }}
@@ -439,7 +444,7 @@ jobs:
         run: echo "NUITKA_CACHE_DIR=$RUNNER_TEMP/nuitka-cache" >> "$GITHUB_ENV"
 
       - name: Restore the Nuitka compiler cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/nuitka-cache
           key: nuitka-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/keyswitch/**', 'packaging/**', 'tools/install-build-tools.sh') }}
@@ -615,7 +620,7 @@ jobs:
         run: echo "NUITKA_CACHE_DIR=$RUNNER_TEMP/nuitka-cache" >> "$GITHUB_ENV"
 
       - name: Restore the Nuitka compiler cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/nuitka-cache
           key: nuitka-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/keyswitch/**', 'packaging/**', 'tools/install-build-tools.sh') }}
@@ -728,7 +733,7 @@ jobs:
         run: echo "NUITKA_CACHE_DIR=$RUNNER_TEMP/nuitka-cache" >> "$GITHUB_ENV"
 
       - name: Restore the Nuitka compiler cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/nuitka-cache
           key: nuitka-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/keyswitch/**', 'packaging/**', 'tools/install-build-tools.sh') }}
