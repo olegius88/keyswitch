@@ -277,6 +277,7 @@ MODEL_DOCUMENTS_WITH_NAMESPACE: Final[tuple[str, ...]] = (
     "model/intent_v1/MODEL_CARD.en.md",
 )
 
+REPLAY_RECEIPT_NAME: Final = "receipt.json"
 REPLAY_FILES: Final[tuple[str, ...]] = (
     "layout_intent_v1.ksm",
     "manifest.json",
@@ -609,6 +610,7 @@ class Options:
     timeout_scale: float
     fail_fast: bool
     pipeline_root: Path
+    fresh_models: bool = False
 
     def to_argv(self) -> list[str]:
         argv = ["--profile", self.profile]
@@ -632,6 +634,8 @@ class Options:
         if self.fail_fast:
             argv.append("--fail-fast")
         argv.extend(["--pipeline-root", str(self.pipeline_root)])
+        if self.fresh_models:
+            argv.append("--fresh-models")
         return argv
 
 
@@ -1031,6 +1035,84 @@ class ModelIdentity:
     artifact_sha256: str
 
 
+def earlier_run_dirs(pipeline_root: Path, current: Path) -> list[Path]:
+    """Finished and unfinished runs under the pipeline root, newest first, this run excluded."""
+    if not pipeline_root.is_dir():
+        return []
+    runs = [
+        entry for entry in pipeline_root.iterdir()
+        if entry.is_dir() and not entry.is_symlink() and entry.resolve() != current.resolve()
+    ]
+    return sorted(runs, key=lambda entry: entry.name, reverse=True)
+
+
+def reusable_strict_report(ctx: Context, log: PhaseLog, identity: ModelIdentity) -> Path | None:
+    """The newest earlier strict report that is bound to this tree and this machine.
+
+    `strict_report_facts` refuses a report whose artifact, version or environment
+    probe differ; `verify_intent_strict_report.py` refuses one whose pinned toolchain
+    values differ from the current tree. A report both accept would be recomputed
+    byte for byte, so recomputing it proves nothing the earlier run has not.
+    """
+    for run_dir in earlier_run_dirs(ctx.options.pipeline_root, ctx.run_dir):
+        candidate = run_dir / "model" / "strict.json"
+        if not candidate.is_file():
+            continue
+        try:
+            _facts, problems = strict_report_facts(
+                candidate, identity.artifact_sha256, identity.artifact_version
+            )
+        except (OSError, ValueError, PhaseFailure) as error:
+            log.write(f"earlier strict report {candidate} is unreadable: {error}")
+            continue
+        if problems:
+            log.write(f"earlier strict report {candidate} is not bound to this tree: {problems}")
+            continue
+        return candidate
+    return None
+
+
+def replay_inputs_fingerprint() -> str:
+    """One digest over everything a retraining replay reads, and the machine it runs on.
+
+    The trainer and its helpers, the frozen sources (through their SHA256SUMS), the
+    configuration, the official outputs the replay is compared with, the interpreter
+    and the environment probe. A replay of identical inputs on a machine that
+    computes the same answers is the replay already recorded.
+    """
+    digest = hashlib.sha256()
+    paths = [PROJECT_ROOT / relative for relative in MODEL_TOOLCHAIN_PATHS.values()]
+    paths.extend([
+        PROJECT_ROOT / "tools" / "train_intent_model_release.py",
+        MODEL_CONFIG, MODEL_MANIFEST, MODEL_TEST_REPORT, MODEL_ARTIFACT, MODEL_BUILD_ENVIRONMENT,
+        MODEL_SOURCES / "SHA256SUMS",
+    ])
+    for path in paths:
+        digest.update(path.relative_to(PROJECT_ROOT).as_posix().encode() + b"\0")
+        digest.update((sha256_file(path) if path.is_file() else "missing").encode() + b"\0")
+    digest.update(platform.python_version().encode() + b"\0")
+    digest.update(environment_probe.measure()["probe_sha256"].encode() + b"\0")
+    return digest.hexdigest()
+
+
+def earlier_replay_receipt(ctx: Context, log: PhaseLog, fingerprint: str, count: int) -> dict[str, object] | None:
+    """The newest earlier receipt of byte-identical replays for this fingerprint."""
+    for run_dir in earlier_run_dirs(ctx.options.pipeline_root, ctx.run_dir):
+        candidate = run_dir / "model" / "replays" / REPLAY_RECEIPT_NAME
+        if not candidate.is_file():
+            continue
+        try:
+            receipt = load_json_object(candidate, "replay receipt")
+        except (OSError, ValueError, PhaseFailure) as error:
+            log.write(f"earlier replay receipt {candidate} is unreadable: {error}")
+            continue
+        if (receipt.get("inputs_sha256") != fingerprint or receipt.get("byte_identical") is not True
+                or not isinstance(receipt.get("replays"), int) or int(str(receipt["replays"])) < count):
+            continue
+        return {**receipt, "receipt": str(candidate)}
+    return None
+
+
 def model_identity() -> ModelIdentity:
     config = load_json_object(MODEL_CONFIG, "model config")
     manifest = load_json_object(MODEL_MANIFEST, "model manifest")
@@ -1423,6 +1505,10 @@ def phase_model_strict(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
     identity = model_identity()
     output = ctx.model_dir / "strict.json"
     provided = ctx.options.strict_report
+    if provided is None and not ctx.options.fresh_models:
+        provided = reusable_strict_report(ctx, log, identity)
+        if provided is not None:
+            log.write(f"reusing the strict report of an earlier run: {provided}")
     if provided is not None and provided.is_file():
         facts, problems = strict_report_facts(
             provided, identity.artifact_sha256, identity.artifact_version
@@ -1666,6 +1752,25 @@ def phase_model_replays(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
         return
     root = ctx.replay_root()
     root.mkdir(parents=True, exist_ok=True)
+    fingerprint = replay_inputs_fingerprint()
+    state.facts["inputs_sha256"] = fingerprint
+    if not ctx.options.fresh_models and ctx.options.replay_dir is None:
+        earlier = earlier_replay_receipt(ctx, log, fingerprint, count)
+        if earlier is not None:
+            # The same trainer, sources, configuration and official outputs on a machine
+            # with the same probe reading: the earlier replays are the replays this run
+            # would produce. The receipt names the run that produced them.
+            log.write(f"byte-identical replays already proven for these inputs: {earlier['receipt']}")
+            state.facts["byte_identical"] = True
+            state.facts["replays"] = earlier["replays"]
+            state.facts["sha256"] = earlier.get("sha256")
+            state.facts["reused_from"] = earlier["receipt"]
+            state.notes.append(
+                f"reused the byte-identical replays of {earlier.get('run_dir')} "
+                f"({earlier.get('finished_at')}) for identical inputs {fingerprint[:COMMIT_SHA_PREVIEW_CHARACTERS]}; "
+                "pass --fresh-models to replay again"
+            )
+            return
     labels = ["a", "b"][:count]
     modes: dict[str, str] = {}
     for label in labels:
@@ -1692,6 +1797,11 @@ def phase_model_replays(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
     state.facts["byte_identical"] = not mismatches
     state.facts["replays"] = count
     state.facts["replay_root"] = str(root)
+    if not mismatches:
+        write_json_atomic(root / REPLAY_RECEIPT_NAME, {
+            "schema_version": 1, "inputs_sha256": fingerprint, "byte_identical": True,
+            "replays": count, "sha256": hashes, "run_dir": str(ctx.run_dir), "finished_at": utc_now(),
+        })
     if mismatches:
         # Say which primitives moved before naming the files, because that is
         # the answer to the question a reader is about to ask.
@@ -3009,6 +3119,12 @@ def build_parser() -> argparse.ArgumentParser:
             help="stop admitting phases after the first failure (default: keep going)",
         )
         target.add_argument("--pipeline-root", default=str(DEFAULT_PIPELINE_ROOT))
+        target.add_argument(
+            "--fresh-models",
+            action="store_true",
+            help="recompute the strict report and the retraining replays even when an earlier "
+            "run under the pipeline root proved them for these exact inputs on this machine",
+        )
         target.add_argument("--run-dir", default="", help="explicit run directory")
         target.add_argument(
             "--resume",
@@ -3061,6 +3177,7 @@ def options_from(arguments: argparse.Namespace) -> Options:
         timeout_scale=float(arguments.timeout_scale),
         fail_fast=bool(arguments.fail_fast),
         pipeline_root=Path(str(arguments.pipeline_root)).resolve(),
+        fresh_models=bool(arguments.fresh_models),
     )
 
 

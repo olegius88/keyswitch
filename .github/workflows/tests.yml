@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   verify:
-    name: Coverage, detector, intent model, X11 and native package E2E
+    name: Typing, coverage, X11 and tray E2E
     runs-on: ubuntu-26.04
 
     steps:
@@ -60,9 +60,6 @@ jobs:
       - name: Install static typing tools
         run: ./tools/install-typing-tools.sh "$RUNNER_TEMP/keyswitch-typing"
 
-      - name: Install pinned native build tools
-        run: ./tools/install-build-tools.sh "$RUNNER_TEMP/keyswitch-nuitka"
-
       - name: Run maximum strict Python type checking
         env:
           KEYSWITCH_TYPING_ROOT: ${{ runner.temp }}/keyswitch-typing
@@ -72,6 +69,243 @@ jobs:
         run: >-
           ./tools/run-gui-test.sh --
           ./tests/run_coverage.sh
+
+      - name: Run real X11 RECORD/XTEST end-to-end test
+        run: |
+          ./tools/run-gui-test.sh --noreset -- \
+            bash -c 'setxkbmap -layout us,ru && GTK_A11Y=none PYTHONPATH=src python3 tests/e2e_x11.py'
+
+      - name: Run native AT-SPI caret and password E2E
+        run: ./tools/run-atspi-e2e.sh
+
+      - name: Run real StatusNotifierItem and DBusMenu integration test
+        run: dbus-run-session -- env PYTHONPATH=src python3 tests/e2e_tray_menu.py
+
+  replays:
+    name: Model evidence replays (context, ortho, boundary, prefix)
+    runs-on: ubuntu-26.04
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install runtime and test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            at-spi2-core \
+            build-essential \
+            ccache \
+            dbus-x11 \
+            desktop-file-utils \
+            file \
+            gir1.2-adw-1 \
+            gir1.2-atspi-2.0 \
+            gir1.2-gtk-4.0 \
+            hunspell-en-us \
+            hunspell-ru \
+            libglib2.0-bin \
+            libhunspell-1.7-0 \
+            libx11-6 \
+            libxkbcommon0 \
+            libxtst6 \
+            lintian \
+            onboard-data \
+            patch \
+            patchelf \
+            python3-coverage \
+            python3-dbus \
+            python3-dev \
+            python3-gi \
+            python3-pip \
+            x11-xkb-utils \
+            xauth \
+            xvfb
+
+      # Replays recompute, from pinned inputs, verdicts that are a deterministic
+      # function of those inputs. A marker saved after a successful replay, under a
+      # key that names every input (source, tools, tests, model files, the Python
+      # and dictionary versions), lets an identical tree skip the recomputation.
+      # Set the repository variable KEYSWITCH_CI_REPLAY_CACHE to "off" to replay
+      # on every run again.
+      - name: Fingerprint the replay environment
+        id: inputs
+        run: |
+          python_version="$(python3 -c 'import sys; print(sys.version.replace(" ", "_"))')"
+          packages="$(dpkg-query -W -f='${binary:Package}=${Version}\n' onboard-data hunspell-ru hunspell-en-us libhunspell-1.7-0 | tr '\n' ';')"
+          echo "environment=$(printf '%s|%s' "$python_version" "$packages" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Look up a verified context replay of this exact tree
+        id: restore_context
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/replay-markers/context.ok
+          key: replay-context-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ hashFiles('src/keyswitch/**', 'tools/**', 'tests/**', 'model/**', 'pyproject.toml') }}
+          lookup-only: true
+
+      - name: Verify active contextual evidence and versioned replay
+        if: ${{ steps.restore_context.outputs.cache-hit != 'true' }}
+        run: PYTHONPATH=src python3 tools/verify_context_model.py --replay
+
+      - name: Verify historical rejected context-v2 numeric evidence
+        if: ${{ steps.restore_context.outputs.cache-hit != 'true' }}
+        run: PYTHONPATH=src python3 tools/verify_context_v2.py --verify-frozen
+
+      - name: Record the verified context replay for this tree
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_context.outputs.cache-hit != 'true' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/replay-markers"
+          date -u +%Y-%m-%dT%H:%M:%SZ > "$RUNNER_TEMP/replay-markers/context.ok"
+
+      - name: Save the verified context replay marker
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_context.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/replay-markers/context.ok
+          key: replay-context-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ hashFiles('src/keyswitch/**', 'tools/**', 'tests/**', 'model/**', 'pyproject.toml') }}
+
+      - name: Look up a verified ortho replay of this exact tree
+        id: restore_ortho
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/replay-markers/ortho.ok
+          key: replay-ortho-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ hashFiles('src/keyswitch/**', 'tools/**', 'tests/**', 'model/**', 'pyproject.toml') }}
+          lookup-only: true
+
+      - name: Replay key-space orthotactic training and promotion guard
+        if: ${{ steps.restore_ortho.outputs.cache-hit != 'true' }}
+        run: |
+          PYTHONPATH=src python3 tools/ortho_corpus.py
+          KEYSWITCH_MODEL_PATH=model/intent_v1/sources KEYSWITCH_HUNSPELL_PATH=model/intent_v1/sources/hunspell PYTHONPATH=src python3 tools/ortho_known.py
+          PYTHONPATH=src python3 tools/ortho_web_lexicon.py
+          PYTHONPATH=src python3 tools/ortho_prose_lexicon.py
+          PYTHONPATH=src python3 tools/train_ortho_model.py verify
+          PYTHONPATH=src:tools python3 tools/ortho_independent.py
+          PYTHONPATH=src:tools python3 tools/verify_ortho_model.py
+          PYTHONPATH=src python3 tools/ortho_v2_corpus.py
+          KEYSWITCH_MODEL_PATH=model/intent_v1/sources PYTHONPATH=src python3 tools/ortho_v2_known.py
+          KEYSWITCH_MODEL_PATH=model/intent_v1/sources PYTHONPATH=src python3 tools/ortho_v2_verified.py
+          PYTHONPATH=src python3 tools/train_ortho_v2.py verify
+          PYTHONPATH=src:tools python3 tools/verify_ortho_v2.py
+
+      - name: Record the verified ortho replay for this tree
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_ortho.outputs.cache-hit != 'true' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/replay-markers"
+          date -u +%Y-%m-%dT%H:%M:%SZ > "$RUNNER_TEMP/replay-markers/ortho.ok"
+
+      - name: Save the verified ortho replay marker
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_ortho.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/replay-markers/ortho.ok
+          key: replay-ortho-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ hashFiles('src/keyswitch/**', 'tools/**', 'tests/**', 'model/**', 'pyproject.toml') }}
+
+      - name: Look up a verified boundary replay of this exact tree
+        id: restore_boundary
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/replay-markers/boundary.ok
+          key: replay-boundary-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ hashFiles('src/keyswitch/**', 'tools/**', 'tests/**', 'model/**', 'pyproject.toml') }}
+          lookup-only: true
+
+      - name: Replay boundary segmentation training and prevent rejected rollout
+        if: ${{ steps.restore_boundary.outputs.cache-hit != 'true' }}
+        run: |
+          PYTHONPATH=src python3 tools/verify_boundary_model.py --verify-frozen
+          PYTHONPATH=src python3 tools/evaluate_boundary_engine.py --verify
+
+      - name: Verify frozen boundary-v2 numeric evidence and current engine gate
+        if: ${{ steps.restore_boundary.outputs.cache-hit != 'true' }}
+        run: |
+          PYTHONPATH=src python3 tools/verify_boundary_v2.py --verify-frozen
+          PYTHONPATH=src python3 tools/verify_boundary_v2.py
+
+      - name: Record the verified boundary replay for this tree
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_boundary.outputs.cache-hit != 'true' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/replay-markers"
+          date -u +%Y-%m-%dT%H:%M:%SZ > "$RUNNER_TEMP/replay-markers/boundary.ok"
+
+      - name: Save the verified boundary replay marker
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_boundary.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/replay-markers/boundary.ok
+          key: replay-boundary-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ hashFiles('src/keyswitch/**', 'tools/**', 'tests/**', 'model/**', 'pyproject.toml') }}
+
+      - name: Look up a verified prefix replay of this exact tree
+        id: restore_prefix
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/replay-markers/prefix.ok
+          key: replay-prefix-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ hashFiles('src/keyswitch/**', 'tools/**', 'tests/**', 'model/**', 'pyproject.toml') }}
+          lookup-only: true
+
+      - name: Verify frozen prefix numeric evidence and current engine replay
+        if: ${{ steps.restore_prefix.outputs.cache-hit != 'true' }}
+        run: |
+          PYTHONPATH=src python3 tools/verify_prefix_model.py --verify-frozen
+          PYTHONPATH=src python3 tools/evaluate_prefix_engine.py --verify
+          PYTHONPATH=src python3 tools/verify_prefix_model.py
+
+      - name: Record the verified prefix replay for this tree
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_prefix.outputs.cache-hit != 'true' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/replay-markers"
+          date -u +%Y-%m-%dT%H:%M:%SZ > "$RUNNER_TEMP/replay-markers/prefix.ok"
+
+      - name: Save the verified prefix replay marker
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_prefix.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/replay-markers/prefix.ok
+          key: replay-prefix-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.environment }}-${{ hashFiles('src/keyswitch/**', 'tools/**', 'tests/**', 'model/**', 'pyproject.toml') }}
+
+  intent:
+    name: Detector and intent-model quality gates
+    runs-on: ubuntu-26.04
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install runtime and test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            at-spi2-core \
+            build-essential \
+            ccache \
+            dbus-x11 \
+            desktop-file-utils \
+            file \
+            gir1.2-adw-1 \
+            gir1.2-atspi-2.0 \
+            gir1.2-gtk-4.0 \
+            hunspell-en-us \
+            hunspell-ru \
+            libglib2.0-bin \
+            libhunspell-1.7-0 \
+            libx11-6 \
+            libxkbcommon0 \
+            libxtst6 \
+            lintian \
+            onboard-data \
+            patch \
+            patchelf \
+            python3-coverage \
+            python3-dbus \
+            python3-dev \
+            python3-gi \
+            python3-pip \
+            x11-xkb-utils \
+            xauth \
+            xvfb
 
       - name: Enforce detector quality gates
         run: >-
@@ -87,53 +321,79 @@ jobs:
           python3 tools/verify_intent_strict_report.py \
             --report build/keyswitch-intent-strict.json
 
-      - name: Run real X11 RECORD/XTEST end-to-end test
+      - name: Hand the strict report to the package job
+        uses: actions/upload-artifact@v7
+        with:
+          name: keyswitch-intent-strict
+          path: build/keyswitch-intent-strict.json
+          if-no-files-found: error
+          retention-days: 1
+
+  package:
+    name: Native Debian package
+    runs-on: ubuntu-26.04
+    needs: [intent]
+    env:
+      NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka-cache
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install runtime and test tools
         run: |
-          ./tools/run-gui-test.sh --noreset -- \
-            bash -c 'setxkbmap -layout us,ru && GTK_A11Y=none PYTHONPATH=src python3 tests/e2e_x11.py'
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            at-spi2-core \
+            build-essential \
+            ccache \
+            dbus-x11 \
+            desktop-file-utils \
+            file \
+            gir1.2-adw-1 \
+            gir1.2-atspi-2.0 \
+            gir1.2-gtk-4.0 \
+            hunspell-en-us \
+            hunspell-ru \
+            libglib2.0-bin \
+            libhunspell-1.7-0 \
+            libx11-6 \
+            libxkbcommon0 \
+            libxtst6 \
+            lintian \
+            onboard-data \
+            patch \
+            patchelf \
+            python3-coverage \
+            python3-dbus \
+            python3-dev \
+            python3-gi \
+            python3-pip \
+            x11-xkb-utils \
+            xauth \
+            xvfb
 
-      - name: Verify active contextual evidence and versioned replay
-        run: PYTHONPATH=src python3 tools/verify_context_model.py --replay
+      - name: Install pinned native build tools
+        run: ./tools/install-build-tools.sh "$RUNNER_TEMP/keyswitch-nuitka"
 
-      - name: Verify historical rejected context-v2 numeric evidence
-        run: PYTHONPATH=src python3 tools/verify_context_v2.py --verify-frozen
+      # The report is verified against this tree before it is reused
+      # (packaging/build-deb.sh runs tools/verify_intent_strict_report.py on it).
+      - name: Take the strict report from the intent job
+        uses: actions/download-artifact@v8
+        with:
+          name: keyswitch-intent-strict
+          path: build
 
-      - name: Replay key-space orthotactic training and promotion guard
-        run: |
-          PYTHONPATH=src python3 tools/ortho_corpus.py
-          KEYSWITCH_MODEL_PATH=model/intent_v1/sources KEYSWITCH_HUNSPELL_PATH=model/intent_v1/sources/hunspell PYTHONPATH=src python3 tools/ortho_known.py
-          PYTHONPATH=src python3 tools/ortho_web_lexicon.py
-          PYTHONPATH=src python3 tools/ortho_prose_lexicon.py
-          PYTHONPATH=src python3 tools/train_ortho_model.py verify
-          PYTHONPATH=src:tools python3 tools/ortho_independent.py
-          PYTHONPATH=src:tools python3 tools/verify_ortho_model.py
-          PYTHONPATH=src python3 tools/ortho_v2_corpus.py
-          KEYSWITCH_MODEL_PATH=model/intent_v1/sources PYTHONPATH=src python3 tools/ortho_v2_known.py
-          KEYSWITCH_MODEL_PATH=model/intent_v1/sources PYTHONPATH=src python3 tools/ortho_v2_verified.py
-          PYTHONPATH=src python3 tools/train_ortho_v2.py verify
-          PYTHONPATH=src:tools python3 tools/verify_ortho_v2.py
-
-      - name: Replay boundary segmentation training and prevent rejected rollout
-        run: |
-          PYTHONPATH=src python3 tools/verify_boundary_model.py --verify-frozen
-          PYTHONPATH=src python3 tools/evaluate_boundary_engine.py --verify
-
-      - name: Verify frozen boundary-v2 numeric evidence and current engine gate
-        run: |
-          PYTHONPATH=src python3 tools/verify_boundary_v2.py --verify-frozen
-          PYTHONPATH=src python3 tools/verify_boundary_v2.py
-
-      - name: Run native AT-SPI caret and password E2E
-        run: ./tools/run-atspi-e2e.sh
-
-      - name: Verify frozen prefix numeric evidence and current engine replay
-        run: |
-          PYTHONPATH=src python3 tools/verify_prefix_model.py --verify-frozen
-          PYTHONPATH=src python3 tools/evaluate_prefix_engine.py --verify
-          PYTHONPATH=src python3 tools/verify_prefix_model.py
-
-      - name: Run real StatusNotifierItem and DBusMenu integration test
-        run: dbus-run-session -- env PYTHONPATH=src python3 tests/e2e_tray_menu.py
+      # Nuitka keeps its compiler cache (ccache / clcache) and downloads under
+      # NUITKA_CACHE_DIR; a cached object file is byte-identical to a recompiled
+      # one, so the package is the same and only the C compilation is saved.
+      - name: Restore the Nuitka compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/nuitka-cache
+          key: nuitka-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/keyswitch/**', 'packaging/**', 'tools/install-build-tools.sh') }}
+          restore-keys: |
+            nuitka-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Build native Debian package
         env:
@@ -163,6 +423,9 @@ jobs:
     name: Strict Win32 tests and native installer
     runs-on: windows-2025
 
+    env:
+      NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka-cache
+
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -172,6 +435,14 @@ jobs:
         with:
           python-version: "3.14"
           cache: pip
+
+      - name: Restore the Nuitka compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/nuitka-cache
+          key: nuitka-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/keyswitch/**', 'packaging/**', 'tools/install-build-tools.sh') }}
+          restore-keys: |
+            nuitka-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install pinned typing, runtime and build dependencies
         run: |
@@ -324,6 +595,7 @@ jobs:
     # Read here rather than inside the step: a step cannot test its own
     # environment in its condition, and a fork has no secrets at all.
     env:
+      NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka-cache
       SIGNING_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12 }}
       SIGNING_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
 
@@ -336,6 +608,14 @@ jobs:
         with:
           python-version: "3.14"
           cache: pip
+
+      - name: Restore the Nuitka compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/nuitka-cache
+          key: nuitka-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/keyswitch/**', 'packaging/**', 'tools/install-build-tools.sh') }}
+          restore-keys: |
+            nuitka-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install pinned typing and build dependencies
         run: |
@@ -428,6 +708,9 @@ jobs:
     continue-on-error: true
     timeout-minutes: 120
 
+    env:
+      NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka-cache
+
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -437,6 +720,14 @@ jobs:
         with:
           python-version: "3.14"
           architecture: arm64
+
+      - name: Restore the Nuitka compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/nuitka-cache
+          key: nuitka-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/keyswitch/**', 'packaging/**', 'tools/install-build-tools.sh') }}
+          restore-keys: |
+            nuitka-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Report the interpreter and toolchain
         run: |
