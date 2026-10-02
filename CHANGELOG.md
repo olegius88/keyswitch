@@ -6,17 +6,15 @@ All notable changes to KeySwitch are documented in this file.
 
 - CI runs its Linux checks in four parallel jobs (typing, coverage and E2E; the model
   evidence replays; the detector and intent-model gates; the Debian package built from the
-  gates' strict report), keeps Nuitka's compiler cache between runs, and skips a model replay
-  whose every input - sources, tools, tests, model files, interpreter and dictionary versions -
-  it has already verified on an identical tree (repository variable
-  `KEYSWITCH_CI_REPLAY_CACHE=off` restores a replay on every run). The release workflow
-  publishes only after all four jobs pass. The local release pipeline reuses the strict report
-  and the byte-identical retraining replays of an earlier run when they are bound to the same
-  inputs and the same machine; `--fresh-models` recomputes them. The replay marker's key
-  fingerprints the committed tree once, before the first replay: hashing the working tree again
-  at save time saw the `__pycache__` directories and regenerated outputs a replay leaves behind
-  and never produced the key the lookup had asked for. `actions/cache` moves from v4 to v6, so
-  every action the workflows use runs on Node.js 24 and the runner stops warning about Node.js 20.
+  gates' strict report) and keeps Nuitka's compiler cache between runs. Except on a release tag,
+  it skips a model replay whose every input it has already verified on an identical tree: the
+  committed sources, tools, tests and model files, the workflow file, and the interpreter,
+  compiler, C library and dictionary versions (repository variable
+  `KEYSWITCH_CI_REPLAY_CACHE=off` restores a replay on every run). A release tag replays every
+  model in full, and the release workflow publishes only after all four jobs pass. The local
+  release pipeline reuses the strict report and the byte-identical retraining replays of an
+  earlier run when they are bound to the same inputs and the same machine; `--fresh-models`
+  recomputes them.
 
 ## 0.36.3 — 2026-10-02
 

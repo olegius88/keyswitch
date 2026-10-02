@@ -730,6 +730,11 @@ dbus-run-session -- ./tools/run-native-e2e.sh "$package"
 выполняет тихую установку, точную диагностику bundled-модели и UI-smoke
 установленного приложения, формирует
 единый `SHA256SUMS` и публикует артефакты в GitHub Release.
+Replay моделей на теге выполняются заново. В остальных прогонах CI группа
+replay пропускается, если уже прошла на том же дереве: ключ её метки составляют
+закоммиченные `src/keyswitch`, `tools`, `tests`, `model`, `pyproject.toml` и
+файл workflow, а также версии Python, gcc, glibc и словарей. Переменная
+репозитория `KEYSWITCH_CI_REPLAY_CACHE=off` возвращает replay в каждый прогон.
 
 Linux-конвейер базовой модели и приложения — provenance и strict-оценку KSLM,
 её replay-доказательства, typecheck, coverage, детектор, X11/tray E2E, сборку и

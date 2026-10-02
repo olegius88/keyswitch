@@ -104,10 +104,6 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v7
 
-      # The APT repository is deployed before the release job runs: a tag that
-      # does not name the packaged version must stop the run here, before
-      # installed systems are offered a rebuilt package under the old version.
-
       - name: Install runtime, test and package validation tools
         run: |
           sudo apt-get update
@@ -144,24 +140,30 @@ jobs:
       # Replays recompute, from pinned inputs, verdicts that are a deterministic
       # function of those inputs. A marker saved after a successful replay, under a
       # key that names every input (the committed source, tools, tests and model
-      # files, the Python and dictionary versions), lets an identical tree skip
-      # the recomputation.
+      # files, this workflow file, the Python, compiler, C library and dictionary
+      # versions), lets an identical tree skip the recomputation.
       # Set the repository variable KEYSWITCH_CI_REPLAY_CACHE to "off" to replay
       # on every run again.
+      # A tag replays every model in full and saves no marker: the evidence a
+      # release publishes comes from the release run itself.
       - name: Fingerprint the replay environment
         id: inputs
         run: |
           python_version="$(python3 -c 'import sys; print(sys.version.replace(" ", "_"))')"
           packages="$(dpkg-query -W -f='${binary:Package}=${Version}\n' onboard-data hunspell-ru hunspell-en-us libhunspell-1.7-0 | tr '\n' ';')"
-          echo "environment=$(printf '%s|%s' "$python_version" "$packages" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+          # The context, boundary and prefix trainers compile tools/context_optimizer.c
+          # with gcc against glibc and must reproduce their outputs byte for byte.
+          toolchain="$(gcc --version | sed -n 1p);$(ldd --version | sed -n 1p)"
+          echo "environment=$(printf '%s|%s|%s' "$python_version" "$packages" "$toolchain" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
           # The tree is fingerprinted once, from the committed blobs: a replay leaves
           # __pycache__ and regenerated outputs behind, so hashing the working tree
           # again at save time would never produce the key the lookup asked for.
-          echo "tree=$(git ls-files -s -- src/keyswitch tools tests model pyproject.toml | sha256sum | cut -c1-64)" >> "$GITHUB_OUTPUT"
+          # The workflow file is part of it, so a changed replay step replays again.
+          echo "tree=$(git ls-files -s -- src/keyswitch tools tests model pyproject.toml .github/workflows/release.yml | sha256sum | cut -c1-64)" >> "$GITHUB_OUTPUT"
 
       - name: Look up a verified context replay of this exact tree
         id: restore_context
-        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' }}
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/replay-markers/context.ok
@@ -177,13 +179,13 @@ jobs:
         run: PYTHONPATH=src python3 tools/verify_context_v2.py --verify-frozen
 
       - name: Record the verified context replay for this tree
-        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_context.outputs.cache-hit != 'true' }}
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && !startsWith(github.ref, 'refs/tags/') && steps.restore_context.outputs.cache-hit != 'true' }}
         run: |
           mkdir -p "$RUNNER_TEMP/replay-markers"
           date -u +%Y-%m-%dT%H:%M:%SZ > "$RUNNER_TEMP/replay-markers/context.ok"
 
       - name: Save the verified context replay marker
-        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_context.outputs.cache-hit != 'true' }}
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && !startsWith(github.ref, 'refs/tags/') && steps.restore_context.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/replay-markers/context.ok
@@ -191,7 +193,7 @@ jobs:
 
       - name: Look up a verified ortho replay of this exact tree
         id: restore_ortho
-        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' }}
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/replay-markers/ortho.ok
@@ -215,13 +217,13 @@ jobs:
           PYTHONPATH=src:tools python3 tools/verify_ortho_v2.py
 
       - name: Record the verified ortho replay for this tree
-        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_ortho.outputs.cache-hit != 'true' }}
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && !startsWith(github.ref, 'refs/tags/') && steps.restore_ortho.outputs.cache-hit != 'true' }}
         run: |
           mkdir -p "$RUNNER_TEMP/replay-markers"
           date -u +%Y-%m-%dT%H:%M:%SZ > "$RUNNER_TEMP/replay-markers/ortho.ok"
 
       - name: Save the verified ortho replay marker
-        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_ortho.outputs.cache-hit != 'true' }}
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && !startsWith(github.ref, 'refs/tags/') && steps.restore_ortho.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/replay-markers/ortho.ok
@@ -229,7 +231,7 @@ jobs:
 
       - name: Look up a verified boundary replay of this exact tree
         id: restore_boundary
-        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' }}
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/replay-markers/boundary.ok
@@ -249,13 +251,13 @@ jobs:
           PYTHONPATH=src python3 tools/verify_boundary_v2.py
 
       - name: Record the verified boundary replay for this tree
-        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_boundary.outputs.cache-hit != 'true' }}
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && !startsWith(github.ref, 'refs/tags/') && steps.restore_boundary.outputs.cache-hit != 'true' }}
         run: |
           mkdir -p "$RUNNER_TEMP/replay-markers"
           date -u +%Y-%m-%dT%H:%M:%SZ > "$RUNNER_TEMP/replay-markers/boundary.ok"
 
       - name: Save the verified boundary replay marker
-        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_boundary.outputs.cache-hit != 'true' }}
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && !startsWith(github.ref, 'refs/tags/') && steps.restore_boundary.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/replay-markers/boundary.ok
@@ -263,7 +265,7 @@ jobs:
 
       - name: Look up a verified prefix replay of this exact tree
         id: restore_prefix
-        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' }}
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/replay-markers/prefix.ok
@@ -278,13 +280,13 @@ jobs:
           PYTHONPATH=src python3 tools/verify_prefix_model.py
 
       - name: Record the verified prefix replay for this tree
-        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_prefix.outputs.cache-hit != 'true' }}
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && !startsWith(github.ref, 'refs/tags/') && steps.restore_prefix.outputs.cache-hit != 'true' }}
         run: |
           mkdir -p "$RUNNER_TEMP/replay-markers"
           date -u +%Y-%m-%dT%H:%M:%SZ > "$RUNNER_TEMP/replay-markers/prefix.ok"
 
       - name: Save the verified prefix replay marker
-        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_prefix.outputs.cache-hit != 'true' }}
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && !startsWith(github.ref, 'refs/tags/') && steps.restore_prefix.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/replay-markers/prefix.ok
@@ -297,10 +299,6 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v7
-
-      # The APT repository is deployed before the release job runs: a tag that
-      # does not name the packaged version must stop the run here, before
-      # installed systems are offered a rebuilt package under the old version.
 
       - name: Install runtime, test and package validation tools
         run: |
@@ -364,10 +362,6 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v7
-
-      # The APT repository is deployed before the release job runs: a tag that
-      # does not name the packaged version must stop the run here, before
-      # installed systems are offered a rebuilt package under the old version.
 
       - name: Install runtime, test and package validation tools
         run: |

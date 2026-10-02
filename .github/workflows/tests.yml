@@ -125,8 +125,8 @@ jobs:
       # Replays recompute, from pinned inputs, verdicts that are a deterministic
       # function of those inputs. A marker saved after a successful replay, under a
       # key that names every input (the committed source, tools, tests and model
-      # files, the Python and dictionary versions), lets an identical tree skip
-      # the recomputation.
+      # files, this workflow file, the Python, compiler, C library and dictionary
+      # versions), lets an identical tree skip the recomputation.
       # Set the repository variable KEYSWITCH_CI_REPLAY_CACHE to "off" to replay
       # on every run again.
       - name: Fingerprint the replay environment
@@ -134,11 +134,15 @@ jobs:
         run: |
           python_version="$(python3 -c 'import sys; print(sys.version.replace(" ", "_"))')"
           packages="$(dpkg-query -W -f='${binary:Package}=${Version}\n' onboard-data hunspell-ru hunspell-en-us libhunspell-1.7-0 | tr '\n' ';')"
-          echo "environment=$(printf '%s|%s' "$python_version" "$packages" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+          # The context, boundary and prefix trainers compile tools/context_optimizer.c
+          # with gcc against glibc and must reproduce their outputs byte for byte.
+          toolchain="$(gcc --version | sed -n 1p);$(ldd --version | sed -n 1p)"
+          echo "environment=$(printf '%s|%s|%s' "$python_version" "$packages" "$toolchain" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
           # The tree is fingerprinted once, from the committed blobs: a replay leaves
           # __pycache__ and regenerated outputs behind, so hashing the working tree
           # again at save time would never produce the key the lookup asked for.
-          echo "tree=$(git ls-files -s -- src/keyswitch tools tests model pyproject.toml | sha256sum | cut -c1-64)" >> "$GITHUB_OUTPUT"
+          # The workflow file is part of it, so a changed replay step replays again.
+          echo "tree=$(git ls-files -s -- src/keyswitch tools tests model pyproject.toml .github/workflows/tests.yml | sha256sum | cut -c1-64)" >> "$GITHUB_OUTPUT"
 
       - name: Look up a verified context replay of this exact tree
         id: restore_context
