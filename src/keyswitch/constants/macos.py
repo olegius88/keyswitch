@@ -123,7 +123,8 @@ MAC_ALT_KEYS: Final = frozenset({MAC_VK_OPTION, MAC_VK_RIGHT_OPTION})
 MAC_SUPER_KEYS: Final = frozenset({MAC_VK_COMMAND, MAC_VK_RIGHT_COMMAND})
 MAC_MODIFIER_KEYCODES: Final = MAC_SHIFT_KEYS | MAC_CONTROL_KEYS | MAC_ALT_KEYS | MAC_SUPER_KEYS | {MAC_VK_CAPS_LOCK, MAC_VK_FUNCTION}
 # The flag bit that is set while a modifier key is down, by keycode: side-specific where the
-# event carries it, and the shared bit of the modifier where it does not.
+# event carries it, and the shared bit of the modifier where it does not. Caps Lock has none:
+# its bit holds the lock, not the key (see keyswitch.macos_backend.modifier_pressed).
 MAC_MODIFIER_DEVICE_FLAGS: Final = {
     MAC_VK_CONTROL: EVENT_FLAG_DEVICE_LEFT_CONTROL, MAC_VK_RIGHT_CONTROL: EVENT_FLAG_DEVICE_RIGHT_CONTROL,
     MAC_VK_SHIFT: EVENT_FLAG_DEVICE_LEFT_SHIFT, MAC_VK_RIGHT_SHIFT: EVENT_FLAG_DEVICE_RIGHT_SHIFT,
@@ -140,7 +141,6 @@ MAC_MODIFIER_SHARED_FLAGS: Final = {
     **{key: EVENT_FLAG_CONTROL for key in MAC_CONTROL_KEYS},
     **{key: EVENT_FLAG_ALTERNATE for key in MAC_ALT_KEYS},
     **{key: EVENT_FLAG_COMMAND for key in MAC_SUPER_KEYS},
-    MAC_VK_CAPS_LOCK: EVENT_FLAG_ALPHA_SHIFT,
 }
 # The key whose translation tells which script a layout types.
 MAC_SCRIPT_PROBE_KEYCODE: Final = MAC_VK_ANSI_Q

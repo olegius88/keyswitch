@@ -376,7 +376,9 @@ class ModifierFlagsTests(unittest.TestCase):
         # Without side-specific bits the modifier's shared bit decides.
         self.assertTrue(modifier_pressed(MAC_VK_COMMAND, EVENT_FLAG_COMMAND))
         self.assertFalse(modifier_pressed(MAC_VK_OPTION, 0))
-        self.assertTrue(modifier_pressed(MAC_VK_CAPS_LOCK, EVENT_FLAG_ALPHA_SHIFT))
+        # Caps Lock reports the lock, once per toggle: an engaged lock is not a held key,
+        # or every correction would wait for its release.
+        self.assertFalse(modifier_pressed(MAC_VK_CAPS_LOCK, EVENT_FLAG_ALPHA_SHIFT))
         self.assertFalse(modifier_pressed(MAC_VK_FUNCTION, EVENT_FLAG_SHIFT))
 
 

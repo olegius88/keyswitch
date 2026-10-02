@@ -210,6 +210,11 @@ def modifier_pressed(keycode: int, flags: int) -> bool:
     key-down and key-up, so the state is read from the event's flags: the bit of
     that very key where the event carries side-specific bits, the modifier's
     shared bit where it does not.
+
+    Caps Lock is never down. macOS sends one flags change per toggle and none
+    when the key comes up, and its flag holds the lock rather than the key:
+    read as a held modifier, an engaged lock kept every correction waiting for
+    a release that comes only when the lock is turned off.
     """
 
     device = MAC_MODIFIER_DEVICE_FLAGS.get(keycode)
