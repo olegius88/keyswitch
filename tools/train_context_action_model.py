@@ -66,7 +66,7 @@ from keyswitch.constants.training import (
     MAX_CONTEXTS_PER_FAMILY,
     NET_BENEFIT_FALSE_INDEX,
     NET_BENEFIT_THRESHOLD_INDEX,
-    SHORT_WORD_MAX_CHARACTERS,
+    ACTION_SHORT_WORD_MAX_CHARACTERS,
 )
 
 
@@ -83,6 +83,14 @@ def canonical(value: object) -> bytes:
 
 def checksum(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+# The other-language text a legitimately inserted word follows, by the word's layout group:
+# a plain sentence, and a quoted name with an opening parenthesis as edited prose cites it.
+MIXED_INSERTION_CONTEXTS: dict[int, tuple[str, ...]] = {
+    0: ("в сообщении написано ", "в оригинале «Ночь» ("),
+    1: ("the message says ", "in the original \"Night\" ("),
+}
 
 
 def variant_choice(identifier: str, purpose: str, count: int) -> int:
@@ -217,21 +225,27 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
             curated_letter = (len(row.original) == 1 and len(alternate) == 1
                               and (row.original.casefold() in TRUSTED_SINGLE_LETTER_WORDS
                                    or alternate.casefold() in TRUSTED_SINGLE_LETTER_WORDS))
-            if alone and len(row.original) <= SHORT_WORD_MAX_CHARACTERS and not curated_letter:
+            if alone and len(row.original) <= ACTION_SHORT_WORD_MAX_CHARACTERS and not curated_letter:
                 # An isolated short reading has no observable intent label.
                 # Digits/punctuation do not supply a neighbouring language.
                 # Both members preserve text and take the same deferred action.
                 # Deferring three-letter readings too was measured on 17.09.2026 and
-                # made the fitted model worse on chat-like first words, not better:
-                # see .t/reliable-release-2026-09-12/SHORT-ISOLATED-CURRICULUM.md.
+                # made the fitted model worse on chat-like first words, not better
+                # (.t/reliable-release-2026-09-12/SHORT-ISOLATED-CURRICULUM.md), and again
+                # on 01.10.2026 (corpus v12: `rjn` by the pause and `pm2` broke, `tot привет`
+                # stayed); deciding them at once turns `зум` alone into `pev` (corpus v10, v11).
                 action = "suggest" if trigger in ("enter", "tab", "punctuation") else "wait"
                 keep_action = action
             result.append(ActionRow(identity + ":keep", row.original, group, field,
                                     trigger, tail, keep_action, "natural_surface", boundary_text))
             result.append(ActionRow(identity + ":wrong", alternate, 1 - group, field,
                                     trigger, tail, action, "layout_intervention", boundary_text))
-        # A legitimate insertion may have neighbours in the other language.
-        mixed = "в сообщении написано " if group == 0 else "the message says "
+        # A legitimate insertion may have neighbours in the other language. Half of the
+        # rows stand inside a parenthesis after a quoted name, the way edited prose
+        # cites a foreign word: the candidate of corpus v10 (01.10.2026) converted the
+        # `(en)` and the ``Bad of two Russian sentences of UD GSD on its sealed test.
+        mixed_contexts = MIXED_INSERTION_CONTEXTS[group]
+        mixed = mixed_contexts[variant_choice(row.identifier, "mixed-context", len(mixed_contexts))]
         mixed_field = FieldContext(application, "public-training", mixed, "", "unknown")
         result.append(ActionRow(row.identifier + ":mixed", row.original, group,
                                 mixed_field,
@@ -262,7 +276,9 @@ def historical_curriculum(intent: LinearNgramModel | None = None) -> list[Action
     status = IntentModelStatus(True, ROOT / "src/keyswitch/resources/models/layout_intent_v1.ksm",
                                intent.model_version, intent.checksum, None)
 
-    def load(locale: str) -> LanguageModel:
+    def load(locale: str, extra_words: Iterable[str] = ()) -> LanguageModel:
+        # The reference lexicons already carry the packaged supplements the engine
+        # would pass here (build_corpus: LanguageModel.load(locale, supplement_words(locale))).
         return models[0 if locale == "en_US" else 1]
 
     with patch("train_context_model.LinearNgramModel.try_load_default", return_value=(intent, status)), \
@@ -300,7 +316,7 @@ def historical_curriculum(intent: LinearNgramModel | None = None) -> list[Action
                 parent = row.family, row.category, item.trigger
                 parents[identifier] = parent
                 action: ContextAction = row.action
-                if (action == "keep" and 0 < len(item.original) <= SHORT_WORD_MAX_CHARACTERS
+                if (action == "keep" and 0 < len(item.original) <= ACTION_SHORT_WORD_MAX_CHARACTERS
                         and not WORDS.search(field.before) and not WORDS.search(field.after)):
                     # The shared isolated-short policy: a correct reading with no
                     # neighbouring word has no observable intent label either, so
@@ -328,7 +344,7 @@ def legacy_lookahead_rows(
 ) -> tuple[list[ActionRow], dict[str, object]]:
     """Replace bounded old TRAIN frames with equal-mass planned variants."""
     selected = {row.identifier: row for row in rows
-                if row.category.startswith("legacy_") and 0 < len(row.original) <= SHORT_WORD_MAX_CHARACTERS
+                if row.category.startswith("legacy_") and 0 < len(row.original) <= ACTION_SHORT_WORD_MAX_CHARACTERS
                 and row.trigger == "space" and row.boundary_text == " " and not row.literal_tail
                 and not row.field.sensitive and not row.field.selection and row.field.role != "password"}
     anchors: dict[tuple[str, int], LookaheadAnchor] = {}
@@ -382,7 +398,7 @@ def natural_lookahead_rows(
     by_identifier = {row.identifier: row for row in source_rows}
     selected: dict[str, tuple[ActionRow, str]] = {}
     for row in rows:
-        if (row.category not in ("layout_intervention", "natural_surface") or not 0 < len(row.original) <= SHORT_WORD_MAX_CHARACTERS
+        if (row.category not in ("layout_intervention", "natural_surface") or not 0 < len(row.original) <= ACTION_SHORT_WORD_MAX_CHARACTERS
                 or row.trigger != "space" or row.boundary_text != " " or row.literal_tail
                 or row.field.sensitive or row.field.selection or row.field.role == "password" or row.field.after):
             continue
@@ -443,7 +459,7 @@ def balance_planned_mass(rows: Sequence[ActionRow]) -> tuple[list[ActionRow], di
     isolated: dict[tuple[int, int], float] = defaultdict(float)
     planned: dict[tuple[int, int], float] = defaultdict(float)
     for row in rows:
-        if not 0 < len(row.original) <= SHORT_WORD_MAX_CHARACTERS:
+        if not 0 < len(row.original) <= ACTION_SHORT_WORD_MAX_CHARACTERS:
             continue
         key = (row.group, len(row.original))
         if row.after_origin == "planned_next_conversion":

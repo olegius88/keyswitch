@@ -21,6 +21,12 @@ SPAN_ANCHOR_MAX_CHARACTERS: Final = 24
 # these as seeds. The context-v1 corpus defers such a token standing alone and teaches no conversion
 # of one in a Latin field.
 SHORT_WORD_MAX_CHARACTERS: Final = 2
+# The context-action model (schema 3) has its own threshold so that the context-v1 corpus above keeps
+# its frozen evidence whatever this one measures. Two: with two, the corpus v10 and v11 candidates
+# (01.10.2026) turned `зум` alone into `pev` and left `tot` before `привет`; with three, the corpus
+# v12 candidate kept `зум` but still left `tot привет`, no longer corrected `rjn` by the pause and
+# turned `pm2` into `зь2` - the trade the author measured on 17.09.2026, confirmed.
+ACTION_SHORT_WORD_MAX_CHARACTERS: Final = 2
 LOOKAHEAD_DEFAULT_MAXIMUM_FAMILIES: Final = 64
 LOOKAHEAD_MAXIMUM_FAMILIES_LIMIT: Final = 4096
 # Also the ceiling `seeds_per_family` may not exceed; the default sits at the cap.

@@ -100,11 +100,56 @@ CI работает на ubuntu-26.04 с более новым Python, чем о
    распакуйте его в `.t/` контейнера. Журнал test должен переезжать вместе с
    корпусом: без него evaluator не может подтвердить, что test ещё не
    расходовался. Не коммитьте эти файлы в публичный репозиторий.
-2. **Собрать заново из публичных источников** командой
-   `tools/freeze_context_action_corpus.py --source-root ... --namespace ...`
-   из закреплённых коммитов UD (см. README context v3). Это новый корпус с
-   новым namespace и новым test, а не воспроизведение прежнего; сравнивать
-   его числа с прежними результатами напрямую нельзя.
+2. **Собрать заново из публичных источников.** Это новый корпус с новым
+   namespace и новым test, а не воспроизведение прежнего; сравнивать его числа
+   с прежними результатами напрямую нельзя. Так был собран корпус v10
+   (01.10.2026), на котором обучена пара context-v3 + prefix-v2 с ранней сменой
+   по умолчанию. Порядок (cwd — корень репозитория, `PYTHONPATH=src:tools`,
+   ни один выходной каталог не должен существовать заранее):
+
+   1. Источники. Архивы GitHub из облака недоступны, файлы деревьев UD
+      скачиваются по одному с `raw.githubusercontent.com/UniversalDependencies/
+      <дерево>/<коммит>/<файл>` (`README.md`, `LICENSE.txt`, `*.conllu`), и
+      для каждого дерева пишется `pin.json` с `repository`, `commit` и списком
+      `files` (`path`, `sha256`, `sha` — git blob). Коммиты закреплены в
+      `PINS` в `tools/freeze_context_action_corpus.py` (база: Taiga, EWT) и
+      `tools/freeze_context_action_holdout.py` (holdout). Экспорты Tatoeba
+      (`downloads.tatoeba.org/exports/per_language/<язык>/<язык>_sentences.tsv.bz2`)
+      и индексы Debian (`Contents-amd64.gz` + `InRelease` для trixie и sid)
+      заверяются `source-receipt.json` той формы, которую проверяют
+      `verified_tatoeba_source`, `verified_source` и `verified_sid_source`.
+   2. `tools/freeze_context_action_corpus.py --source-root <ud> --output <ud0>
+      --namespace <ns> --extra-exposure model/context_v1/scenarios.json
+      --extra-exposure model/context_v1/holdout-2.json --extra-exposure
+      model/context_v1/holdout-3.json`.
+   3. `tools/reconcile_context_action_corpus.py --corpus <ud0> --source-root <ud>
+      --report <r> --output <ud1>` — добавляет `physical-family-closure.json`.
+   4. `tools/context_technical_corpus.py --source-directory <trixie> --ud-corpus
+      <ud1> --extra-exposure model/context_v1/holdout-3.json --output <tech>
+      --preview-report <r>`.
+   5. `tools/merge_context_action_corpora.py --base <ud1> --technical <tech>
+      --output <merged>`.
+   6. `tools/prefix_exposure_inventory.py --output <inventory.json>` — алиасы
+      слов, на которых обучена prefix-модель; holdout и fitting отказывают им в
+      test, потому что модели оцениваются вместе.
+   7. `tools/freeze_context_action_holdout.py --source-root <holdout-ud>
+      --treebank ... --tatoeba-directory <tatoeba> --tatoeba-language rus
+      --tatoeba-language eng --sid-directory <sid> --base <merged> --ud-origin
+      <ud1> --technical-origin <tech> --prefix-inventory <inventory.json>
+      --ledger <ledger> --namespace <ns-test> --report <r> --output <hold>` —
+      свежий test; прежний уходит в quarantine.
+   8. `tools/freeze_context_action_fitting.py --base <hold> --output <fit>
+      --namespace <ns-fit> --tatoeba-directory <tatoeba> --tatoeba-language rus
+      --tatoeba-language eng --ud-origin <ud1> --technical-origin <tech>
+      --prefix-inventory <inventory.json> --ledger <ledger> --report <r>` —
+      естественные предложения Tatoeba в обучающих сплитах.
+   9. Обучение и оценка — как в README context v3: `train_context_action_model.py
+      --corpus <fit>`, `train_prefix_v2_model.py`, затем
+      `evaluate_context_action_sequences.py` на development и один раз на test
+      (`--corpus <fit>`; журнал пишется в `LEDGER_ROOT` evaluator'а).
+
+   Журнал доступа начинается пустым: прежние test v1–v9 новому корпусу не
+   известны, и их слова он не исключает.
 
 ## Как не потерять результат
 
