@@ -27,6 +27,19 @@ SHORT_WORD_MAX_CHARACTERS: Final = 2
 # v12 candidate kept `зум` but still left `tot привет`, no longer corrected `rjn` by the pause and
 # turned `pm2` into `зь2` - the trade the author measured on 17.09.2026, confirmed.
 ACTION_SHORT_WORD_MAX_CHARACTERS: Final = 2
+# An isolated reading of three letters is deferred only when its intent is not observable: both
+# readings are plausible, a lexicon word or a shipped identifier each (`tot`/`еще`, `зум`/`pev` - the
+# Debian command `pev` is why the v10 and v11 candidates converted `зум`). One plausible reading
+# decides at once, which is what keeps `rjn` converting by the pause, `три` standing and `зь2`
+# becoming `pm2` (neither reading is plausible, the model's own evidence decides). Measured on
+# corpus v12 (02.10.2026): 64 of the three-letter Debian commands read as a known Russian form.
+ACTION_DEFERRED_WORD_MAX_CHARACTERS: Final = 3
+# The lexical short-pair curriculum (train_context_action_model.lexical_short_pair_rows): natural
+# text rarely holds a three-letter word whose other reading is a word too (corpus v12 TRAIN: 21 rows
+# in 45 544, almost all Debian commands), so every such pair of the pinned lexicons and the shipped
+# identifier index enters TRAIN with this many planned-neighbour variants per member, each carrying
+# an equal share of the member's unit mass.
+LEXICAL_PAIR_ANCHOR_VARIANTS: Final = 3
 LOOKAHEAD_DEFAULT_MAXIMUM_FAMILIES: Final = 64
 LOOKAHEAD_MAXIMUM_FAMILIES_LIMIT: Final = 4096
 # Also the ceiling `seeds_per_family` may not exceed; the default sits at the cap.

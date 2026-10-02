@@ -1433,8 +1433,9 @@ class WindowsUIModelTests(unittest.TestCase):
                       specs["updates.check_automatically"].description)
         detection = DEFAULT_SETTINGS["detection"]
         assert isinstance(detection, dict)
-        # Off by default since 0.23.0: it changed correctly typed words before they ended.
-        self.assertFalse(detection["early_switch"])
+        # Off from 0.23.0, on again once the context-v3 + prefix-v2 pair passed its sealed test
+        # with the switch on and corrupted nothing (02.10.2026).
+        self.assertTrue(detection["early_switch"])
         self.assertTrue(detection["context_aware"])
         self.assertEqual(detection["context_policy"], "assist")
         self.assertEqual(

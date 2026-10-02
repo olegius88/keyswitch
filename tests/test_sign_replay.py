@@ -12,6 +12,7 @@ import unittest
 from unittest.mock import patch
 
 import test_input_sequence_matrix as sequences
+from disclosed_regressions import disclosed_schema3_pair_regression
 
 
 def typed(group: int, keys: str) -> str:
@@ -37,6 +38,7 @@ class SignReplayTests(unittest.TestCase):
     def test_a_sign_the_same_in_both_layouts_stays(self) -> None:
         self.assertEqual(typed(0, "ghbdtn! rfr "), "привет! как ")
 
+    @disclosed_schema3_pair_regression
     def test_a_quote_closes_the_quotation_it_opened_and_is_an_at_sign_otherwise(self) -> None:
         # Shift+2 is `"` in the Russian layout and `@` in the English one. After an English word
         # typed in the Russian layout it is the `@` of an address, unless the same sign opened

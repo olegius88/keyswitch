@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from keyswitch.config import SettingsStore
 from keyswitch.constants.settings_defaults import (
+    DEFAULT_SETTINGS,
     DEFAULT_CONFIDENCE_THRESHOLD,
 )
 from keyswitch.detector import DetectionDecision, LanguageDetector
@@ -95,6 +96,7 @@ from fixture_values.scores import (
     SHORT_SOURCE_VETO_TARGET_NGRAM_SCORE,
     SHORT_SOURCE_VETO_TARGET_WORD_SCORE,
 )
+from disclosed_regressions import disclosed_schema3_pair_regression
 
 
 class FakeBackend:
@@ -243,6 +245,22 @@ class SettingsTests(unittest.TestCase):
             self.assertFalse(store.get("detection.injected_input"))
             store.set("enabled", False)
             self.assertFalse(SettingsStore(path).get("enabled"))
+
+    def test_a_schema_6_file_adopts_the_early_switch_default_once(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_text('{"schema_version": 6, "detection": {"early_switch": false}}', encoding="utf-8")
+            store = SettingsStore(path)
+            self.assertTrue(store.get("detection.early_switch"))
+            self.assertEqual(store.get("schema_version"), DEFAULT_SETTINGS["schema_version"])
+            store.set("detection.early_switch", False)
+            # The written-back schema version marks the adoption done: off now holds.
+            self.assertFalse(SettingsStore(path).get("detection.early_switch"))
+            # A file without a schema version was not seeded by KeySwitch: its value is kept.
+            for raw in ('{"detection": {"early_switch": false}}',
+                        '{"schema_version": true, "detection": {"early_switch": false}}'):
+                path.write_text(raw, encoding="utf-8")
+                self.assertFalse(SettingsStore(path).get("detection.early_switch"))
 
     def test_a_single_setting_reports_and_restores_its_default(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -772,6 +790,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(len(self.backend.injections), CORE_INJECTIONS_AFTER_SECOND_CORRECTION)
         self.assertEqual(self.backend.injections[-1][1], 1)
 
+    @disclosed_schema3_pair_regression
     def test_manual_russian_selection_protects_short_if_on_pause_and_space(self) -> None:
         self.engine._update(current_group=0)
         self.backend.group = 1

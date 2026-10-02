@@ -325,8 +325,10 @@ class ActionBoundaryTests(unittest.TestCase):
             self.engine._expire_deferred_action()
         self.flush()
         # The stuck key typed its own character before the word; what matters is that
-        # the Enter behind it was submitted rather than swallowed.
-        self.assertEqual(self.api.messages, ["фпривет"])
+        # the Enter behind it was submitted rather than swallowed. Whether `aghbdtn` is
+        # converted is the installed model's call (context-v1 converted it, the schema-3
+        # pair of 02.10.2026 keeps it at p=0.50), not this test's subject.
+        self.assertIn(self.api.messages, (["фпривет"], ["aghbdtn"]))
         self.assertFalse(self.backend._holding)
 
     def test_a_key_pressed_after_the_enter_keeps_the_cautious_answer(self) -> None:

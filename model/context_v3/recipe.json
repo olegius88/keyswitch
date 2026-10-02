@@ -1,5 +1,5 @@
 {
- "data_revision": "symmetric-short-actions-balanced-legacy-actions-debian-commands-and-natural-lookahead-v6",
+ "data_revision": "symmetric-short-actions-balanced-legacy-actions-debian-commands-natural-lookahead-three-letter-ambiguity-deferral-lexical-short-pairs-and-unambiguous-latin-citations-after-russian-prose-v12",
  "epochs": 50,
  "feature_revision": "learned-ortho-script-length-right-context-origin-and-identifier-lexicon-v6",
  "training_revision": "identifier-evidence-dropout-one-family-in-three-planned-mass-balance-and-model-verdict-stands-and-threshold-plateau-under-authored-ceiling",
@@ -71,7 +71,7 @@
  "training_order": "SHA256 of frame identifiers mixes natural and legacy rows deterministically",
  "variant_policy": "separate SHA256 streams for trigger, application, optional field-after and boundary event",
  "vocabulary_policy": "Kahan-summed pre-class sample mass; presence only; cutoff tolerance 1e-9; mass rounded to 9 decimal places for ranking ties",
- "short_pair_policy": "Both readings of an isolated token of at most two letters share WAIT/SUGGEST when neither neighbour contains a word; digits and punctuation alone are not a language label. Historical KEEP frames of such isolated tokens take the same deferred action, so natural and legacy frames never label one observable situation differently; historical CONVERT frames keep their declared label.",
+ "short_pair_policy": "Both readings of an isolated token share WAIT/SUGGEST when neither neighbour contains a word and the token's intent is not observable: any token of at most two letters (the curated single letters aside), and a token of three letters whose two readings are both plausible - a known word of the portable lexicon of its layout or a shipped identifier each (tools/context_deferral.py; `tot`/`еще`, `зум`/the Debian command `pev`). A three-letter token with one plausible reading is labelled at once (`rjn`/`кот`, `три`), and one with none is left to the model's own evidence (`зь2`/`pm2`). Digits and punctuation alone are not a language label. Historical KEEP frames of such isolated tokens take the same deferred action, so natural and legacy frames never label one observable situation differently; historical CONVERT frames keep their declared label.",
  "epoch_selection": {
   "calibration": "independent final serving-threshold selection after weights are selected, never below the development operating threshold of the selected epoch: a threshold that already converted falsely on development is not a serving candidate whatever calibration says",
   "minimum_net_benefit_per_profile": 1,
@@ -93,7 +93,7 @@
  },
  "natural_lookahead_curriculum": {
   "maximum_families": 1024,
-  "scope": "Every split separately (train, development, calibration): natural one- and two-letter space-boundary frames of a document are seeds, the first word of the same row's own sentence continuation is the anchor, and the observed/empty variants divide their mass between the original frame and a planned_next_conversion variant, so field-start lookahead is trained, selected and calibrated on the same evidence the engine builds. Anchors never cross a split.",
+  "scope": "Every split separately (train, development, calibration): natural deferrable space-boundary frames of a document are seeds (one- and two-letter words, and three-letter words whose two readings are both plausible, the words the engine may hold for their next word), the first word of the same row's own sentence continuation is the anchor, and the observed/empty variants divide their mass between the original frame and a planned_next_conversion variant, so field-start lookahead is trained, selected and calibrated on the same evidence the engine builds. Anchors never cross a split.",
   "seeds_per_family": 32
  },
  "planned_mass_policy": "TRAIN only, after both lookahead curricula: per (direction, focus length of 1 or 2) the planned_next_conversion frames are rescaled to carry exactly the total mass of the isolated deferred (wait/suggest, no word on either side) frames of the same class. The two are the same physical moment seen before and after the next word is known; legacy parent budgets alone left the planned regime at about one hundredth of that mass and the model could not learn the after-context distinction (planned `у этого` stayed below the serving threshold in exp05-exp08). Development and calibration frames are never rescaled.",
@@ -114,5 +114,11 @@
   "maximum_threshold": 0.99,
   "ceiling_rule": "The served threshold stays inside the band the product's own pinned cases define, which are open data and never a sealed test. Measured 18.09.2026: it must clear the cases that have to stay as typed - `лут` against the command name `ken` at 0.9887 and `Вас` against `Dfc` at 0.9889 - and it must not exceed the tightest case that has to convert, the idle correction of `rjn` to `кот` at 0.994424. Calibration counts rows and can see neither end: outside the band it picks a model that is careless on one side or cautious about the wrong thing on the other.",
   "authored_floor": 0.9895
- }
+ },
+ "lexical_short_pair_curriculum": {
+  "maximum_families": 512,
+  "seeds_per_family": 8,
+  "scope": "TRAIN only: every three-letter word of the pinned onboard lexicons and the shipped identifier index whose other reading is a real word or command too (tools/train_context_action_model.py lexical_short_pairs; supplement-only forms are never a conversion target), standing alone in both readings with the deferred label and, per reading, LEXICAL_PAIR_ANCHOR_VARIANTS planned_next_conversion variants with words of the split's own right contexts labelled convert, one unit of mass per reading. Natural text holds almost no such pair (corpus v12 TRAIN: 21 rows in 45 544), so the corpus v13 candidate trained without it had no convert-labelled planned frame for a Latin three-letter word and kept `tot` after a converted `привет`. Words of this corpus's test and of every accessed test are refused by the same aliases the fitting extension refuses."
+ },
+ "mixed_insertion_policy": "Every natural row frames both readings of its word as an insertion into prose of the other language with the fixed phrases of MIXED_INSERTION_CONTEXTS (one of them cites the word in a parenthesis after a quoted name). Since corpus v18 a citation-shaped Latin word - capitalised, upper-case or unknown to the portable lexicon and the identifier index - whose Cyrillic reading is no Russian word is framed once more after the left context of a real Russian row of the same split, chosen by hash, when that context has words and all of them are Cyrillic: the Latin reading keeps, the Cyrillic reading converts. The base treebanks are monolingual (corpus v13 TRAIN: 130 Latin rows after Russian text among 18 363), while encyclopedic prose cites Latin names and abbreviations constantly; the v15 candidate left `ЬДЫ` (MLS) and `Пфпшддш` (Gagilli) as typed on test v13. Framing every word of both languages that way (corpus v16) taught that any Latin token after a Russian clause may be an insertion and that `чем` after Russian prose is `XTV`; framing every citation-shaped Latin word (corpus v17) still held `ns` after `мы решили, что ` at p=0.983, because `ns` is an unknown Latin token whose Cyrillic reading, `ты`, is the word meant."
 }

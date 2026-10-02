@@ -28,6 +28,7 @@ from keyswitch.context_policy import evidence_for_decision
 from keyswitch.detector import LanguageDetector
 from keyswitch.identifier_lexicon import IdentifierLexicon
 from keyswitch.input_context import FieldContext
+from keyswitch.lexicon_supplement import supplement_words
 from keyswitch.intent_model import CorrectionTrigger, IntentModelStatus, LinearNgramModel
 from keyswitch.language_model import LanguageModel
 from keyswitch.ortho_model import OrthoModel
@@ -42,11 +43,14 @@ from keyswitch.constants.model_protocol import (
 from reference_lexicon import reference_models
 from action_epoch_selection import EpochSelection, assess_epoch
 from context_action_spans import SpanFrame, build_span_curriculum
+from context_deferral import deferred_isolated, lookahead_focus, plausible_reading
 from context_lookahead_curriculum import LookaheadAnchor, LookaheadSeed, build_lookahead_curriculum
 from context_optimizer import Kernel, Packed
 from context_physical_keys import translated as translated
-from evaluate_context_action_sequences import runtime_provenance
+from evaluate_context_action_sequences import LEDGER_ROOT, runtime_provenance
 from freeze_context_action_corpus import CorpusRow, load_split, physical, typo_variants
+from freeze_context_action_holdout import ledger_test_aliases
+from reconcile_context_action_corpus import expanded_aliases
 from keyswitch.constants.file_formats import HEXADECIMAL_BASE, VERSION_HASH_CHARACTERS
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
 from keyswitch.constants.models import CONTEXT_ACTION_FEATURE_VERSION
@@ -59,14 +63,16 @@ from keyswitch.constants.training import (
     FIELD_AFTER_SAMPLE_MODULUS,
     IDENTIFIER_DROPOUT_FAMILIES,
     IDENTIFIER_SUFFIX_SEGMENTS,
+    LEXICAL_PAIR_ANCHOR_VARIANTS,
     LOG_LOSS_PROBABILITY_FLOOR,
     LOOKAHEAD_ANCHOR_MAX_CHARACTERS,
     LOOKAHEAD_ANCHOR_MIN_CHARACTERS,
     MASS_REPORT_DECIMALS,
     MAX_CONTEXTS_PER_FAMILY,
+    ACTION_DEFERRED_WORD_MAX_CHARACTERS,
+    ACTION_SHORT_WORD_MAX_CHARACTERS,
     NET_BENEFIT_FALSE_INDEX,
     NET_BENEFIT_THRESHOLD_INDEX,
-    ACTION_SHORT_WORD_MAX_CHARACTERS,
 )
 
 
@@ -91,6 +97,45 @@ MIXED_INSERTION_CONTEXTS: dict[int, tuple[str, ...]] = {
     0: ("в сообщении написано ", "в оригинале «Ночь» ("),
     1: ("the message says ", "in the original \"Night\" ("),
 }
+
+
+def natural_mixed_contexts(rows: Sequence[CorpusRow]) -> dict[int, tuple[str, ...]]:
+    """Left contexts of a split's own rows, per language, for the insertion frames.
+
+    The base treebanks are monolingual: TRAIN of corpus v13 holds 130 Latin rows after
+    Russian text among 18 363, while encyclopedic prose (the GSD part of test v13) cites a
+    Latin name or abbreviation in every other sentence, and the pair typed in the wrong
+    layout (`ЬДЫ` for `MLS`, `Пфпшддш` for `Gagilli`) is what the v15 candidate left as
+    typed. The two fixed phrases of MIXED_INSERTION_CONTEXTS stay; a third insertion pair
+    per row takes the left context of a real row of the other language from the same
+    split, chosen by hash, so the model sees an insertion after prose it did not write;
+    only a citation-shaped word takes it (citation_shaped). A context qualifies when it
+    has words and all of them are in the language's script.
+    """
+    pools: dict[int, set[str]] = {0: set(), 1: set()}
+    for row in rows:
+        if row.group not in (0, 1) or not row.layout_representable:
+            continue
+        words = WORDS.findall(row.before)
+        if not words:
+            continue
+        cyrillic = [any("а" <= char.casefold() <= "я" or char.casefold() == "ё" for char in word) for word in words]
+        if all(cyrillic) if row.group == 1 else not any(cyrillic):
+            pools[row.group].add(row.before)
+    return {group: tuple(sorted(pool)) for group, pool in pools.items()}
+
+
+def citation_shaped(original: str, group: int) -> bool:
+    """A word prose of the other language cites: a capitalised or upper-case form, or one no lexicon knows.
+
+    Encyclopedic Russian cites `MLS`, `Gagilli` and `Miele`, not `deployment`; a lowercase
+    word the lexicon knows is framed after the fixed insertion phrases only. Framing every
+    word after real prose of the other language taught the corpus v16 candidate that any
+    Latin token after a Russian clause may be an insertion, and `ns` after `мы решили, что `
+    fell to convert p=0.982 under the serving threshold.
+    """
+    letters = "".join(char for char in original if char.isalpha())
+    return bool(letters) and (letters.isupper() or letters.istitle() or not plausible_reading(original, group))
 
 
 def variant_choice(identifier: str, purpose: str, count: int) -> int:
@@ -187,6 +232,7 @@ def select_rows(rows: Sequence[CorpusRow], maximum: int) -> list[CorpusRow]:
 
 def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
     result: list[ActionRow] = []
+    natural_contexts = natural_mixed_contexts(rows)
     triggers: tuple[CorrectionTrigger, ...] = ("space", "space", "enter", "punctuation", "tab", "pause")
     for row in rows:
         if row.group not in (0, 1) or not row.layout_representable:
@@ -225,15 +271,17 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
             curated_letter = (len(row.original) == 1 and len(alternate) == 1
                               and (row.original.casefold() in TRUSTED_SINGLE_LETTER_WORDS
                                    or alternate.casefold() in TRUSTED_SINGLE_LETTER_WORDS))
-            if alone and len(row.original) <= ACTION_SHORT_WORD_MAX_CHARACTERS and not curated_letter:
+            if alone and not curated_letter and deferred_isolated(row.original, alternate, group):
                 # An isolated short reading has no observable intent label.
                 # Digits/punctuation do not supply a neighbouring language.
                 # Both members preserve text and take the same deferred action.
-                # Deferring three-letter readings too was measured on 17.09.2026 and
+                # Deferring every three-letter reading was measured on 17.09.2026 and
                 # made the fitted model worse on chat-like first words, not better
                 # (.t/reliable-release-2026-09-12/SHORT-ISOLATED-CURRICULUM.md), and again
-                # on 01.10.2026 (corpus v12: `rjn` by the pause and `pm2` broke, `tot привет`
-                # stayed); deciding them at once turns `зум` alone into `pev` (corpus v10, v11).
+                # on 01.10.2026 (corpus v12: `rjn` by the pause and `pm2` broke); deciding
+                # them all at once turned `зум` alone into the Debian command `pev` (corpus
+                # v10, v11). A three-letter reading is deferred only when both of its
+                # readings are plausible (context_deferral).
                 action = "suggest" if trigger in ("enter", "tab", "punctuation") else "wait"
                 keep_action = action
             result.append(ActionRow(identity + ":keep", row.original, group, field,
@@ -253,6 +301,21 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
         result.append(ActionRow(row.identifier + ":mixed:wrong", alternate, 1 - group,
                                 mixed_field, trigger, "", "convert",
                                 "mixed_language_layout_intervention", boundary_text))
+        other = natural_contexts[1 - group]
+        if other and group == 0 and citation_shaped(row.original, group) and not plausible_reading(alternate, 1 - group):
+            # Only the direction that failed: a Latin citation inside Russian prose. The mirror
+            # (a Russian name cited by English prose) made the corpus v16 candidate convert
+            # Latin tokens after English text it had kept before. And only a citation whose
+            # Cyrillic reading is no word: `ЬДЫ` after Russian prose is `MLS`, but `чем` after
+            # Russian prose is `чем` whatever `XTV` is (corpus v16 turned `курица, чем` into
+            # `курица, xtv`), and `ns` after Russian prose is `ты`, which the keep frame of
+            # an unknown Latin token after Russian prose taught against (corpus v17: p=0.983).
+            natural_field = FieldContext(application, "public-training",
+                                         other[variant_choice(row.identifier, "mixed-natural", len(other))], "", "unknown")
+            result.append(ActionRow(row.identifier + ":mixed-natural", row.original, group, natural_field,
+                                    trigger, "", "keep", "mixed_language_insertion", boundary_text))
+            result.append(ActionRow(row.identifier + ":mixed-natural:wrong", alternate, 1 - group, natural_field,
+                                    trigger, "", "convert", "mixed_language_layout_intervention", boundary_text))
         for index, typo in enumerate(typo_variants(row.original, row.identifier)):
             result.append(ActionRow(row.identifier + f":spelling:{index}", typo, group,
                                     FieldContext(application, "public-training", row.before, "", "unknown"),
@@ -316,7 +379,7 @@ def historical_curriculum(intent: LinearNgramModel | None = None) -> list[Action
                 parent = row.family, row.category, item.trigger
                 parents[identifier] = parent
                 action: ContextAction = row.action
-                if (action == "keep" and 0 < len(item.original) <= ACTION_SHORT_WORD_MAX_CHARACTERS
+                if (action == "keep" and deferred_isolated(item.original, item.alternative, item.source_group)
                         and not WORDS.search(field.before) and not WORDS.search(field.after)):
                     # The shared isolated-short policy: a correct reading with no
                     # neighbouring word has no observable intent label either, so
@@ -344,7 +407,7 @@ def legacy_lookahead_rows(
 ) -> tuple[list[ActionRow], dict[str, object]]:
     """Replace bounded old TRAIN frames with equal-mass planned variants."""
     selected = {row.identifier: row for row in rows
-                if row.category.startswith("legacy_") and 0 < len(row.original) <= ACTION_SHORT_WORD_MAX_CHARACTERS
+                if row.category.startswith("legacy_") and lookahead_focus(row.original, row.group)
                 and row.trigger == "space" and row.boundary_text == " " and not row.literal_tail
                 and not row.field.sensitive and not row.field.selection and row.field.role != "password"}
     anchors: dict[tuple[str, int], LookaheadAnchor] = {}
@@ -388,7 +451,7 @@ def natural_lookahead_rows(
     """Replace bounded natural short-space frames with equal-mass original/planned variants.
 
     A natural row knows its own continuation (the corpus keeps the sentence), so a
-    one- or two-letter word typed in the wrong layout can be paired with the word
+    deferrable short word typed in the wrong layout can be paired with the word
     that follows it, exactly as the engine's planned lookahead sees it, including
     at the start of a field where the left context is empty. Anchors are the first
     words of the same split's own right contexts; nothing crosses a split.
@@ -398,7 +461,7 @@ def natural_lookahead_rows(
     by_identifier = {row.identifier: row for row in source_rows}
     selected: dict[str, tuple[ActionRow, str]] = {}
     for row in rows:
-        if (row.category not in ("layout_intervention", "natural_surface") or not 0 < len(row.original) <= ACTION_SHORT_WORD_MAX_CHARACTERS
+        if (row.category not in ("layout_intervention", "natural_surface") or not lookahead_focus(row.original, row.group)
                 or row.trigger != "space" or row.boundary_text != " " or row.literal_tail
                 or row.field.sensitive or row.field.selection or row.field.role == "password" or row.field.after):
             continue
@@ -409,6 +472,29 @@ def natural_lookahead_rows(
             selected[row.identifier] = row, source.after
         elif row.field.before.strip():
             selected[row.identifier] = row, ""
+    anchors = natural_anchors(source_rows, split)
+    seeds = [LookaheadSeed(row.identifier, "natural:" + by_identifier[row.identifier.rsplit(":", IDENTIFIER_SUFFIX_SEGMENTS)[0]].document,
+                          evidence(row, detector, ortho),
+                          row.action, "natural_short_lookahead" if row.category == "layout_intervention" else row.category,
+                          row.sample_weight, split, next_words,
+                          "convert" if row.category == "layout_intervention" else "keep")
+             for row, next_words in selected.values()]
+    curriculum = build_lookahead_curriculum(seeds, anchors, detector, profile=profile,
+                                          maximum_families=maximum_families, seeds_per_family=seeds_per_family, split=split)
+    result = [row for row in rows if row.identifier not in selected]
+    for frame in curriculum.frames:
+        row = selected[frame.source_identifier][0]
+        identifier = row.identifier if frame.kind == "original" else row.identifier + ":planned:" + frame.anchor_identifier
+        result.append(replace(row, identifier=identifier, field=frame.evidence.field, action=frame.action,
+                              sample_weight=frame.sample_weight, after_origin=frame.evidence.after_origin))
+    return result, {"counts": curriculum.counts, "mass_by_origin_action": curriculum.mass_by_origin_action,
+                    "input_mass": math.fsum(row.sample_weight for row in rows),
+                    "output_mass": math.fsum(row.sample_weight for row in result),
+                    "scope": "Natural short typing frames of one split paired with the first word of their own sentence's continuation; no cross-split anchors and no candidate context-model labels."}
+
+
+def natural_anchors(source_rows: Sequence[CorpusRow], split: str) -> list[LookaheadAnchor]:
+    """The first words of a split's own right contexts, one anchor per word and language."""
     anchors: dict[tuple[str, int], LookaheadAnchor] = {}
     for source in sorted(source_rows, key=lambda item: item.identifier):
         match = WORDS.match(source.after.lstrip())
@@ -425,30 +511,106 @@ def natural_lookahead_rows(
         anchors.setdefault((text, group), LookaheadAnchor(
             source.identifier + ":first-after", "natural-after:" + hashlib.sha256(physical(text).encode()).hexdigest(),
             text, group, split))
-    seeds = [LookaheadSeed(row.identifier, "natural:" + by_identifier[row.identifier.rsplit(":", IDENTIFIER_SUFFIX_SEGMENTS)[0]].document,
-                          evidence(row, detector, ortho),
-                          row.action, "natural_short_lookahead" if row.category == "layout_intervention" else row.category,
-                          row.sample_weight, split, next_words,
-                          "convert" if row.category == "layout_intervention" else "keep")
-             for row, next_words in selected.values()]
-    curriculum = build_lookahead_curriculum(seeds, list(anchors.values()), detector, profile=profile,
+    return list(anchors.values())
+
+
+def refused_aliases(corpus: Path) -> frozenset[str]:
+    """Aliases of every word a sealed test holds: this corpus's test and every accessed one."""
+    membership = cast(dict[str, object], json.loads((corpus / "test-membership.json").read_bytes()))
+    aliases = set(cast(list[str], membership.get("alias_sha256", [])))
+    ledger, _ = ledger_test_aliases(LEDGER_ROOT)
+    return frozenset(aliases | ledger)
+
+
+def lexical_short_pairs(refused: frozenset[str]) -> list[tuple[str, str, int]]:
+    """Three-letter words of the pinned lexicons whose other reading is a word or a command too.
+
+    Both readings must be real: a form of the onboard lexicon (the OpenSubtitles supplement
+    marks a form as known for the deferral rule, but it also holds one-off noise, and a
+    conversion into such a form is never taught) or an entry of the shipped identifier
+    index. A pair whose word is held by a sealed test stays out, by the same aliases the
+    fitting extension refuses.
+    """
+    models = reference_models(False)
+    supplement = {0: frozenset(supplement_words("en_US")), 1: frozenset(supplement_words("ru_RU"))}
+
+    def real(text: str, group: int) -> bool:
+        return (text not in supplement[group] and models[group].score(text).known) or (
+            plausible_reading(text, group) and not models[group].score(text).known)
+
+    pairs: list[tuple[str, str, int]] = []
+    seen: set[str] = set()
+    for group in (0, 1):
+        for word in sorted(models[group].frequencies):
+            if not ACTION_SHORT_WORD_MAX_CHARACTERS < len(word) <= ACTION_DEFERRED_WORD_MAX_CHARACTERS or not word.isalpha():
+                continue
+            if word in supplement[group]:
+                continue
+            try:
+                alternate = translated(word, group)
+            except ValueError:
+                continue
+            if not real(alternate, 1 - group) or not deferred_isolated(word, alternate, group):
+                continue
+            if refused & (expanded_aliases(word) | expanded_aliases(alternate)):
+                continue
+            # Both lexicons name the same physical pair; it enters once, in the reading met first.
+            if physical(word) in seen:
+                continue
+            seen.add(physical(word))
+            pairs.append((word, alternate, group))
+    return pairs
+
+
+def lexical_short_pair_rows(
+    rows: Sequence[ActionRow], source_rows: Sequence[CorpusRow], detector: LanguageDetector, ortho: OrthoModel | None,
+    *, refused: frozenset[str], profile: str, split: str, maximum_families: int, seeds_per_family: int,
+) -> tuple[list[ActionRow], dict[str, object]]:
+    """Teach a deferred three-letter word to follow its converted neighbour.
+
+    Natural text rarely holds a word of three letters whose other reading is a word too, so
+    the corpus v13 candidate had no planned frame with a convert label for such a word in the
+    Latin direction and kept `tot` after `привет` was converted. Each lexicon pair stands
+    alone in both of its readings with the deferred label, and each reading gets planned
+    variants with words of the split's own right contexts, labelled convert: with a
+    neighbour converted to the other language the pair is that language, which is the
+    decision the engine asks the model for. The frames carry one unit of mass per reading.
+    """
+    pairs = lexical_short_pairs(refused)
+    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+    seeds: list[LookaheadSeed] = []
+    originals: dict[str, ActionRow] = {}
+    for word, alternate, group in pairs:
+        family = "lexical:" + hashlib.sha256(physical(word).encode()).hexdigest()
+        for member, member_group in ((word, group), (alternate, 1 - group)):
+            for variant in range(LEXICAL_PAIR_ANCHOR_VARIANTS):
+                identifier = f"lexical:{member_group}:{member}:{variant}"
+                application = applications[variant_choice(identifier, "application", len(applications))]
+                row = ActionRow(identifier, member, member_group, FieldContext(application, "public-training", "", "", "unknown"),
+                                "space", "", "wait", "lexical_short_pair", " ", 1.0 / LEXICAL_PAIR_ANCHOR_VARIANTS)
+                originals[identifier] = row
+                seeds.append(LookaheadSeed(identifier, family, evidence(row, detector, ortho), "wait", "lexical_short_pair",
+                                           row.sample_weight, split, "", "convert"))
+    curriculum = build_lookahead_curriculum(seeds, natural_anchors(source_rows, split), detector, profile=profile,
                                           maximum_families=maximum_families, seeds_per_family=seeds_per_family, split=split)
-    result = [row for row in rows if row.identifier not in selected]
+    result = list(rows)
     for frame in curriculum.frames:
-        row = selected[frame.source_identifier][0]
+        row = originals[frame.source_identifier]
         identifier = row.identifier if frame.kind == "original" else row.identifier + ":planned:" + frame.anchor_identifier
         result.append(replace(row, identifier=identifier, field=frame.evidence.field, action=frame.action,
                               sample_weight=frame.sample_weight, after_origin=frame.evidence.after_origin))
-    return result, {"counts": curriculum.counts, "mass_by_origin_action": curriculum.mass_by_origin_action,
+    return result, {"pairs": len(pairs), "pairs_by_direction": {str(group): sum(1 for *_, g in pairs if g == group) for group in (0, 1)},
+                    "words": sorted(f"{word}/{alternate}" for word, alternate, _ in pairs),
+                    "counts": curriculum.counts, "mass_by_origin_action": curriculum.mass_by_origin_action,
                     "input_mass": math.fsum(row.sample_weight for row in rows),
                     "output_mass": math.fsum(row.sample_weight for row in result),
-                    "scope": "Natural short typing frames of one split paired with the first word of their own sentence's continuation; no cross-split anchors and no candidate context-model labels."}
+                    "scope": "TRAIN only: three-letter words of the pinned lexicons and the shipped identifier index whose other reading is a real word or command too, standing alone with the deferred label and with planned variants labelled convert; words of this corpus's test and of every accessed test are refused by their aliases."}
 
 
 def balance_planned_mass(rows: Sequence[ActionRow]) -> tuple[list[ActionRow], dict[str, object]]:
     """Give planned lookahead frames the mass of the situation they resolve.
 
-    A one- or two-letter word at a space boundary has two outcomes in the corpus:
+    A deferrable short word at a space boundary has two outcomes in the corpus:
     with no word on either side the corpus defers (wait/suggest), and with the
     planned next word known the declared intervention applies. Both are the same
     physical moment seen at two times, so per direction and focus length the
@@ -459,7 +621,7 @@ def balance_planned_mass(rows: Sequence[ActionRow]) -> tuple[list[ActionRow], di
     isolated: dict[tuple[int, int], float] = defaultdict(float)
     planned: dict[tuple[int, int], float] = defaultdict(float)
     for row in rows:
-        if not 0 < len(row.original) <= ACTION_SHORT_WORD_MAX_CHARACTERS:
+        if not lookahead_focus(row.original, row.group):
             continue
         key = (row.group, len(row.original))
         if row.after_origin == "planned_next_conversion":
@@ -549,6 +711,7 @@ def provenance() -> dict[str, str]:
         "tools/context_optimizer.c", "tools/context_evidence.py", "tools/reference_lexicon.py", "model/context_v3/recipe.json",
         "tools/action_epoch_selection.py", "tests/test_action_epoch_selection.py",
         "tools/context_lookahead_curriculum.py", "tests/test_context_lookahead_curriculum.py",
+        "tools/context_deferral.py",
         "tests/test_context_action_training.py", "tests/test_default_input_sequences.py",
         "tools/context_technical_corpus.py", "tools/merge_context_action_corpora.py",
         "tests/test_context_technical_corpus.py", "tests/test_context_action_merge.py",
@@ -761,6 +924,9 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
     lookahead_options = cast(dict[str, int], options["lookahead_curriculum"])
     natural_options = cast(dict[str, int], options["natural_lookahead_curriculum"])
     natural_reports: dict[str, dict[str, dict[str, object]]] = {}
+    lexical_options = cast(dict[str, int], options["lexical_short_pair_curriculum"])
+    lexical_reports: dict[str, dict[str, object]] = {}
+    refused = refused_aliases(corpus)
     balance_reports: dict[str, dict[str, object]] = {}
     for profile, detector in detectors.items():
         span_reports[profile] = {}
@@ -776,6 +942,9 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
                 maximum_families=natural_options["maximum_families"],
                 seeds_per_family=natural_options["seeds_per_family"])
             if split == "train":
+                rows, lexical_reports[profile] = lexical_short_pair_rows(
+                    rows, source_rows[split], detector, ortho, refused=refused, profile=profile, split=split,
+                    maximum_families=lexical_options["maximum_families"], seeds_per_family=lexical_options["seeds_per_family"])
                 rows, balance_reports[profile] = balance_planned_mass(rows)
             spans = build_span_curriculum(source_rows[split], lexical_models[profile], profile=profile,
                                           maximum_families=span_budgets[split], expected_split=split)
@@ -869,6 +1038,7 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
         "span_curriculum": span_reports,
         "lookahead_curriculum": lookahead_reports,
         "natural_lookahead_curriculum": natural_reports,
+        "lexical_short_pair_curriculum": lexical_reports,
         "planned_mass_balance": balance_reports,
         "test_accessed": False,
         "scope": "natural KEEP plus declared layout/mixed-context interventions; sequence evaluation required"}

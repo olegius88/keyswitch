@@ -46,7 +46,7 @@ from fixture_values.clock import (
     SIMULATED_KEY_RELEASE_GAP_SECONDS,
 )
 from fixture_values.counts import LOOKAHEAD_SLICE_END_OFFSET
-from fixture_values.keys import DEFAULT_SEQUENCE_RETURN_KEYCODE
+from fixture_values.keys import BACKSPACE_KEYCODE, DEFAULT_SEQUENCE_RETURN_KEYCODE
 from keyswitch.constants.units import MILLISECONDS_PER_SECOND
 
 
@@ -135,7 +135,7 @@ class DefaultInputSequenceTests(unittest.TestCase):
             root = Path(directory)
             settings = SettingsStore(root / "settings.json")
             expected = {
-                "early_switch": False, "early_switch_min_length": DEFAULT_EARLY_SWITCH_MIN_LENGTH,
+                "early_switch": True, "early_switch_min_length": DEFAULT_EARLY_SWITCH_MIN_LENGTH,
                 "correct_on_pause": True, "pause_delay_seconds": DEFAULT_PAUSE_DELAY_SECONDS,
                 "respect_manual_layout": True, "learning": True,
                 "context_policy": "assist", "context_aware": True,
@@ -201,6 +201,23 @@ class DefaultInputSequenceTests(unittest.TestCase):
             session.idle(DEFAULT_SEQUENCE_REMAINING_IDLE_SECONDS)
             session.type("  ", 1)
             self.assert_sent_once(session, "кот  ")
+
+    def test_backspace_disarms_the_pause_until_the_next_letter(self) -> None:
+        """A letter erased before the pause is gone for the pause too.
+
+        `rjn`, Backspace, a pause: the pause used to convert the `rj` left behind, a
+        pause delay after the Backspace, as if the user had finished a word there
+        (reported 02.10.2026). Erasing is editing; the next letter arms the pause again.
+        """
+        with self.session(group=0) as session:
+            session.type("кот", 1, idle_after_words=False)
+            self.assertEqual(session.backend.text, "rjn")
+            session.tap(KeyEvent(True, BACKSPACE_KEYCODE, "BackSpace", "", ("", ""), 0, 0, 0))
+            self.assertEqual(session.backend.text, "rj")
+            session.idle(DEFAULT_SEQUENCE_EXTENDED_IDLE_SECONDS)
+            self.assertEqual((session.backend.text, session.backend.submissions), ("rj", []))
+            session.type("т", 1)
+            self.assertEqual(session.backend.text, "кот")
 
     def test_wrong_layout_continues_with_actual_layout_after_early_switch(self) -> None:
         with self.session(group=0) as session:

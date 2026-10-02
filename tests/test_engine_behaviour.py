@@ -1980,8 +1980,8 @@ class EngineBehaviourTests(unittest.TestCase):
         overrides = settings["overrides"]
         assert isinstance(overrides, dict)
         self.assertNotIn("detection.pause_delay_seconds", overrides)
-        # The early switch is off by default, so turning it off is no longer an override.
-        self.assertNotIn("detection.early_switch", overrides)
+        # The early switch is on by default, so this harness turning it off is an override.
+        self.assertFalse(overrides["detection.early_switch"])
         self.settings.set("detection.early_switch", True)
         with self.assertLogs("keyswitch.engine", level="INFO") as switched:
             self.engine._technical_session_event("probe")
@@ -1989,7 +1989,7 @@ class EngineBehaviourTests(unittest.TestCase):
         assert isinstance(enabled, dict)
         overridden = enabled["overrides"]
         assert isinstance(overridden, dict)
-        self.assertTrue(overridden["detection.early_switch"])
+        self.assertNotIn("detection.early_switch", overridden)
         self.assertNotIn("hotkeys.convert_last", overrides)
         self.assertNotIn("detection_settings", session)
         self.assertNotIn("hotkeys", session)
