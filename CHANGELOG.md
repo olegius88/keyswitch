@@ -34,7 +34,11 @@ All notable changes to KeySwitch are documented in this file.
   are disclosed in `tests/disclosed_regressions.py` with the measured verdicts and stay in the
   suite as expected failures while such a pair is installed; each is text-preserving. The X11
   and native end-to-end scripts type the lone `ша` with its neighbour (`if hello`): a two-letter
-  word alone waits for the next word and the two are decided together.
+  word alone waits for the next word and the two are decided together. Both scripts now judge a
+  case no earlier than its settle delay and poll for a late correction until a deadline instead
+  of one reading, the packaged run types a warm-up word until the engine corrects it before the
+  scripted cases, and the Windows E2E step runs a second time when a starved runner misses the
+  engine's layout-switch confirmation once.
 - A letter erased with Backspace is gone for the pause too. The Backspace re-armed the pause
   timer over the letters left, so `rjn`, Backspace, a pause converted the `rj` left behind a
   pause delay after the edit, as if the user had finished a word there. Erasing is editing: the
