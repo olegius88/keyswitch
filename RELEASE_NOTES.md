@@ -1,129 +1,128 @@
-# KeySwitch 0.36.3
+# KeySwitch 0.37.0
 
 ## Русский
 
-Выпуск исправлений. Главное — macOS: KeySwitch больше не закрывается сам через несколько секунд после
-запуска, учитывает Shift, Control, Option, Command и Caps Lock и читает длинные поля. Кроме того,
-слово, которое ждёт следующего, теперь решается после паузы, а Windows больше не хранит установщики
-прежних обновлений. Полный перечень — в [CHANGELOG.md](CHANGELOG.md).
+Ранняя смена раскладки снова включена по умолчанию: раскладка меняется уже по первым буквам слова
+(`ghbd` → `прив`), не дожидаясь пробела. Решают новые модели — контекстная context-v3 и модель
+префиксов prefix-v2. На запечатанной проверке они в обоих режимах, с ранней сменой и без неё, не
+испортили ни одной правильно набранной строки (прежние модели — от одной до трёх) и восстановили
+больше строк, набранных в чужой раскладке. Кроме того, буква, стёртая `Backspace`, больше не
+исправляется паузой. Полный перечень — в [CHANGELOG.md](CHANGELOG.md).
 
 ### Файлы выпуска
 
-- `KeySwitch-Setup-0.36.3-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
+- `KeySwitch-Setup-0.37.0-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
   сертификатом издателя: SmartScreen покажет предупреждение.
-- `KeySwitch-0.36.3-windows-x64.zip` — переносимый архив для Windows.
-- `keyswitch_0.36.3_amd64.deb` — Ubuntu/Xubuntu, сеанс X11. Если стоит 0.28.0 или
+- `KeySwitch-0.37.0-windows-x64.zip` — переносимый архив для Windows.
+- `keyswitch_0.37.0_amd64.deb` — Ubuntu/Xubuntu, сеанс X11. Если стоит 0.28.0 или
   новее, эта версия придёт через обычное обновление системы.
-- `KeySwitch-0.36.3-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее), macOS 13 и новее.
-- `KeySwitch-0.36.3-macos-x86_64.zip` — Mac на процессоре Intel, macOS 13 и новее.
+- `KeySwitch-0.37.0-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее), macOS 13 и новее.
+- `KeySwitch-0.37.0-macos-x86_64.zip` — Mac на процессоре Intel, macOS 13 и новее.
 - `SHA256SUMS` — контрольные суммы всех файлов; сверьте их перед установкой.
 
 Архив для Mac нужен ровно один: сборка для Apple Silicon не запускается на Intel и
 наоборот.
 
-### macOS
+### Ранняя смена раскладки
 
-- KeySwitch закрывался сам через несколько секунд после запуска: раскладку он спрашивал у системы не
-  из главного потока, а macOS отвечает на такие вопросы только в главном потоке и останавливает
-  программу. Теперь вопросы о раскладке задаются в главном потоке.
-- Shift, Control, Option и Command приходят как изменение флагов, а программа принимала каждое
-  такое событие за отпускание. Поэтому `Ghbdtn` перепечатывалось как `привет`, `Shift+Return`
-  удерживался как обычный `Enter`, а горячие клавиши с модификатором не срабатывали. Теперь нажатие
-  читается из флагов, заглавная буква перепечатывается заглавной, а горячие клавиши вроде
-  `Control+Option+Z` срабатывают и до окна не доходят: раньше TextEdit вставлял на них невидимый
-  символ, и отмена стирала его вместо последней буквы слова.
-- Слово, набранное с включённым Caps Lock, не исправлялось: программа читала его строчными буквами,
-  а в поле стояли заглавные, и проверка поля отказывала. Включённый Caps Lock нажатой клавишей тоже
-  не считается.
-- Поле длиннее примерно 255 кириллических символов (заметка, письмо, чат) читалось пустым, а эмодзи
-  перед курсором сдвигал курсор на символ вправо.
+- Включена по умолчанию и выключается одним переключателем «Ранняя смена раскладки» в
+  настройках. Раскладка меняется с четвёртой буквы слова; это число тоже настраивается. Когда
+  модель префиксов сомневается, она ждёт конца слова, и слово решается как раньше — целиком.
+- Файл настроек прежних выпусков хранит выключенную раннюю смену как их значение по умолчанию, и
+  отличить его от выбора человека нельзя. Поэтому при первом запуске 0.37.0 ранняя смена
+  включится и там. Если вы выключали её сами, выключите ещё раз: дальше выбор сохраняется.
+
+### Модели
+
+- Контекстная модель `context-v3-7d8e1c9b2d87` и модель префиксов `prefix-v2-bf3dc28f8567`
+  заменили context-v1 и prefix-v1. Их обучали на корпусе из публичных источников и проверили на
+  отдельной запечатанной выборке, которую при обучении никто не видел.
+- Слово из трёх букв, у которого оба прочтения — настоящие слова (`tot` и `еще`, `зум` и `pev`),
+  модель откладывает до следующего слова и решает вместе с ним: `tot ghbdtn` становится
+  `еще привет`. Слово с одним осмысленным прочтением решается сразу: `rjn` → `кот`.
+- Установленные модели теперь держатся порогов качества, которые сдвигаются только вверх: модель
+  не попадёт в выпуск, если портит правильный текст или восстанавливает меньше, чем установленная.
 
 ### Текст
 
-- Первое слово предложения не исправлялось там, где редактор сам делает его заглавным, например в
-  TextEdit на macOS. Программа видела в поле `Ghbdtn` вместо набранного `ghbdtn` и отказывалась.
-  Теперь слово, у которого изменился только регистр первой буквы, по-прежнему считается набранным.
-- Когда модель не уверена в коротком слове (`yt `, `ша `), она ждёт следующее слово. Если следующего
-  не было, слово так и оставалось набранным: пауза, которая должна была его решить, отсчитывалась от
-  момента, который программа уже сбросила. Теперь после паузы такое слово решается ещё раз — модель
-  исправляет его или оставляет.
-
-### Надёжность
-
-- Нечисловое значение лимита истории в файле настроек больше не мешает запуску.
-- Linux: полный сброс настроек сразу применяет тему, значок в трее и его переключатели, а не после
-  перезапуска.
-- Windows: при загрузке нового обновления удаляются установщики прежних; каждый занимал десятки
-  мегабайт. Установщик, который ещё открыт, остаётся до следующей загрузки.
+- Буква, стёртая `Backspace`, больше не исправляется паузой. После `rjn`, `Backspace` и паузы
+  оставшиеся `rj` превращались в `кт`, будто слово на этом закончено. Теперь стирание считается
+  правкой: пауза не отсчитывается, пока не набрана следующая буква.
 
 ### Что стало хуже
 
-- После паузы слово, которое ждало следующего, теперь может измениться само; раньше оно оставалось как
-  набрано. Если программа ошиблась, верните слово клавишей `Pause`.
-- macOS: слово, после которого сразу нажат `Shift+Return`, больше не исправляется: перенос строки уже
-  стоит за ним. Раньше слово исправлялось, но вместо переноса строки уходил обычный `Enter`, и в чате
-  сообщение отправлялось.
+Новая пара моделей решает четыре случая иначе, чем прежняя. Текст при этом не портится: слово
+остаётся таким, как набрано, и его можно исправить клавишей `Pause`.
+
+- `jr.` перед русским словом в начале строки остаётся `jr.` (раньше становилось `ок.`).
+- `ша` (английское `if` в русской раскладке) после русского слова не становится `if` сразу на
+  пробеле: модель ждёт следующего слова.
+- `b/bkb` остаётся как набрано (раньше становилось `и/или`): слова через косую черту модель
+  оставляет, когда не уверена.
+- `ghbdtn@` остаётся как набрано (раньше становилось `привет"`): со знаком `@` модель читает его
+  как часть адреса.
 
 ## English
 
-A fix release, macOS first: KeySwitch no longer closes by itself a few seconds after it starts, it
-reads Shift, Control, Option, Command and Caps Lock, and it reads long fields. Besides, a word that
-waits for the next one is now decided after a pause, and Windows no longer keeps the installers of
-earlier updates. The full list is in [CHANGELOG.md](CHANGELOG.md).
+The early layout switch is on by default again: the layout changes after the first letters of a
+word (`ghbd` → `прив`) instead of waiting for the space. The decision comes from new models, the
+context-v3 context model and the prefix-v2 prefix model. On a sealed test, in both modes, with
+the early switch and without it, they corrupted no correctly typed row (the previous models
+corrupted one to three) and restored more rows typed in the wrong layout. Besides, a letter
+erased with `Backspace` is no longer corrected by a pause. The full list is in
+[CHANGELOG.md](CHANGELOG.md).
 
 ### Release files
 
-- `KeySwitch-Setup-0.36.3-x64.exe` — installer for Windows 10/11 x64. It is not signed with
+- `KeySwitch-Setup-0.37.0-x64.exe` — installer for Windows 10/11 x64. It is not signed with
   a publisher certificate, so SmartScreen shows a warning.
-- `KeySwitch-0.36.3-windows-x64.zip` — portable archive for Windows.
-- `keyswitch_0.36.3_amd64.deb` — Ubuntu/Xubuntu on an X11 session. With 0.28.0 or newer
+- `KeySwitch-0.37.0-windows-x64.zip` — portable archive for Windows.
+- `keyswitch_0.37.0_amd64.deb` — Ubuntu/Xubuntu on an X11 session. With 0.28.0 or newer
   installed, this version arrives through the ordinary system update.
-- `KeySwitch-0.36.3-macos-arm64.zip` — Mac with Apple silicon (M1 and later), macOS 13 or newer.
-- `KeySwitch-0.36.3-macos-x86_64.zip` — Mac with an Intel processor, macOS 13 or newer.
+- `KeySwitch-0.37.0-macos-arm64.zip` — Mac with Apple silicon (M1 and later), macOS 13 or newer.
+- `KeySwitch-0.37.0-macos-x86_64.zip` — Mac with an Intel processor, macOS 13 or newer.
 - `SHA256SUMS` — checksums of every file; verify them before installing.
 
 Exactly one Mac archive is needed: the Apple silicon build does not run on Intel and vice
 versa.
 
-### macOS
+### Early layout switch
 
-- KeySwitch closed by itself a few seconds after it started: it asked the system for the layout
-  from a thread other than the main one, and macOS answers such questions on the main thread only
-  and stops the program. The layout is now asked for on the main thread.
-- Shift, Control, Option and Command arrive as flag changes, and the program took every such event
-  for a release. So `Ghbdtn` was retyped as `привет`, `Shift+Return` was held as a plain `Enter`,
-  and hotkeys with a modifier never matched. The key state is now read from the flags, a capital is
-  retyped as a capital, and hotkeys such as `Control+Option+Z` match and no longer reach the window:
-  TextEdit used to insert an invisible character for them, which the undo then erased in place of
-  the word's last letter.
-- A word typed with Caps Lock on was not corrected: the program read it in lower case while the
-  field showed capitals, and the field check refused. An engaged Caps Lock does not count as a held
-  key either.
-- A field over about 255 Cyrillic characters (a note, a mail, a chat) read as empty, and an emoji
-  before the caret moved the caret one character to the right.
+- On by default, and one switch, "Early layout switch", turns it off in the settings. The
+  layout changes from the fourth letter of a word, and that number is a setting too. When the
+  prefix model is unsure, it waits for the end of the word, which is then decided whole, as
+  before.
+- A settings file of an earlier release stores the early switch as off, their default, and that
+  cannot be told apart from a person's choice. So the first start of 0.37.0 turns the early
+  switch on there too. If you had turned it off yourself, turn it off once more: the choice holds
+  from then on.
+
+### Models
+
+- The context model `context-v3-7d8e1c9b2d87` and the prefix model `prefix-v2-bf3dc28f8567`
+  replace context-v1 and prefix-v1. They were trained on a corpus built from public sources and
+  checked on a separate sealed sample that no step of the training saw.
+- A three-letter word whose two readings are both real words (`tot` and `еще`, `зум` and `pev`)
+  is held until the next word and decided together with it: `tot ghbdtn` becomes `еще привет`. A
+  word with one meaningful reading is decided at once: `rjn` → `кот`.
+- The installed models are now held to quality floors that only move up: a model does not reach
+  a release if it corrupts correct text or restores less than the installed one.
 
 ### Text
 
-- The first word of a sentence was not corrected where the editor capitalises it, for example in
-  TextEdit on macOS. The program saw `Ghbdtn` in the field where `ghbdtn` was typed and refused. A
-  word whose first letter changed case only still counts as the typed one.
-- When the model is unsure about a short word (`yt `, `ша `), it waits for the next word. With no next
-  word the word stayed as typed: the pause that should decide it was measured from a moment the
-  program had already cleared. Now the word is decided once more after a pause, and the model
-  either corrects it or keeps it.
-
-### Reliability
-
-- A history limit in the settings file that is not a number no longer stops the program at start.
-- Linux: a full reset of the settings applies the theme, the tray icon and its toggles at once,
-  not after a restart.
-- Windows: downloading a new update removes the installers of earlier ones, each tens of
-  megabytes. An installer that is still open stays until the next download.
+- A letter erased with `Backspace` is no longer corrected by a pause. After `rjn`, `Backspace`
+  and a pause, the `rj` left behind became `кт`, as if the word had ended there. Erasing now
+  counts as editing: the pause does not run until the next letter is typed.
 
 ### What got worse
 
-- After a pause, a word that waited for the next one may now change by itself; before, it stayed as
-  typed. If the program got it wrong, press `Pause` to turn the word back.
-- macOS: a word followed at once by `Shift+Return` is no longer corrected, because the line break
-  already stands after it. It used to be corrected, but a plain `Enter` went out instead of the line
-  break, and a chat sent the message.
+The new pair decides four cases differently from the previous one. No text is corrupted: the
+word stays as typed, and `Pause` corrects it.
+
+- `jr.` before a Russian word at the start of a line stays `jr.` (it used to become `ок.`).
+- `ша` (the English `if` typed in the Russian layout) after a Russian word no longer becomes `if`
+  at the space: the model waits for the next word.
+- `b/bkb` stays as typed (it used to become `и/или`): the model leaves slash-joined words alone
+  when it is unsure.
+- `ghbdtn@` stays as typed (it used to become `привет"`): with the `@` sign the model reads it as
+  part of an address.

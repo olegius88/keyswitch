@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.37.0 — 2026-10-03
+
 - CI runs its Linux checks in four parallel jobs (typing, coverage and E2E; the model
   evidence replays; the detector and intent-model gates; the Debian package built from the
   gates' strict report) and keeps Nuitka's compiler cache between runs. Except on a release tag,
