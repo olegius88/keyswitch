@@ -334,8 +334,8 @@ def main() -> int:
             ("руддщ", "hello"),
             ("ghbdtn", "привет"),
             ("ghbdtn", "привет"),
-            ("ша", "if"),
-            ("ша", "if"),
+            ("ша руддщ", "if hello"),
+            ("ша руддщ", "if hello"),
             # Since 0.24.0 the lone "e" converts at the space on its own (a Russian
             # message opens with a single-letter word one time in seven, an English
             # one never does), so the layout is already Russian when the next word
@@ -434,8 +434,8 @@ def main() -> int:
             ("руддщ", "hello"),
             ("ghbdtn", "привет"),
             ("ghbdtn", "привет"),
-            ("ша", "if"),
-            ("ша", "if"),
+            ("ша руддщ", "if hello"),
+            ("ша руддщ", "if hello"),
             # Since 0.24.0 the lone "e" converts at the space on its own (a Russian
             # message opens with a single-letter word one time in seven, an English
             # one never does), so the layout is already Russian when the next word

@@ -17,9 +17,11 @@ NATIVE_PACKAGE_TYPING_CASES: Final = (
     ("punctuation boundary keeps its glyph", 0, "ghbdtn,", "привет,", 1, 2300),
     ("manual layout switch protects next word", 0, "ghbdtn ", "ghbdtn ", 0, 1000),
     ("manual protection is consumed once", 0, "ghbdtn ", "привет ", 1, 1000),
-    ("short Russian word switches to English", 1, "if ", "if ", 0, 1000),
+    # A lone two-letter word waits for its neighbour since the context-v3 pair; the two are
+    # decided together.
+    ("short Russian word switches to English with its neighbour", 1, "if hello ", "if hello ", 0, 1200),
     ("manual Russian selection protects short word", 1, "if ", "ша ", 1, 1000),
-    ("short-word protection is consumed once", 1, "if ", "if ", 0, 1000),
+    ("short-word protection is consumed once", 1, "if hello ", "if hello ", 0, 1200),
     ("context resolves a short word with the next word", 0, "e 'njuj ", "у этого ", 1, 1200),
 )
 # "wait" is the third row of "I can't  wait!" (I, can't, wait, !)

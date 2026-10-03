@@ -261,6 +261,11 @@ class SettingsTests(unittest.TestCase):
                         '{"schema_version": true, "detection": {"early_switch": false}}'):
                 path.write_text(raw, encoding="utf-8")
                 self.assertFalse(SettingsStore(path).get("detection.early_switch"))
+            # A schema-6 file that already has the switch on only takes the new schema version.
+            path.write_text('{"schema_version": 6, "detection": {"early_switch": true}}', encoding="utf-8")
+            store = SettingsStore(path)
+            self.assertTrue(store.get("detection.early_switch"))
+            self.assertEqual(store.get("schema_version"), DEFAULT_SETTINGS["schema_version"])
 
     def test_a_single_setting_reports_and_restores_its_default(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -32,7 +32,9 @@ All notable changes to KeySwitch are documented in this file.
   `я сегодня` again. Four authored expectations of context-v1 that the installed schema-3 pair
   decides differently (`jr.` before `привет`, `ша` after a protected `ша `, `b/bkb`, `ghbdtn@`)
   are disclosed in `tests/disclosed_regressions.py` with the measured verdicts and stay in the
-  suite as expected failures while such a pair is installed; each is text-preserving.
+  suite as expected failures while such a pair is installed; each is text-preserving. The X11
+  and native end-to-end scripts type the lone `ша` with its neighbour (`if hello`): a two-letter
+  word alone waits for the next word and the two are decided together.
 - A letter erased with Backspace is gone for the pause too. The Backspace re-armed the pause
   timer over the letters left, so `rjn`, Backspace, a pause converted the `rj` left behind a
   pause delay after the edit, as if the user had finished a word there. Erasing is editing: the

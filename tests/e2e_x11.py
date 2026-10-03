@@ -131,9 +131,11 @@ def main() -> int:
         ("ambiguous punctuation keeps its glyph after idle", 0, "ghbdtn,", "привет,", 1, X11_E2E_IDLE_PAUSE_VERIFY_DELAY_MS),
         ("manual layout switch protects next word", 0, "ghbdtn ", "ghbdtn ", 0, E2E_VERIFY_SETTLE_DELAY_MS),
         ("manual protection is consumed once", 0, "ghbdtn ", "привет ", 1, E2E_VERIFY_SETTLE_DELAY_MS),
-        ("short Russian word switches to English", 1, "if ", "if ", 0, E2E_VERIFY_SETTLE_DELAY_MS),
+        # A lone two-letter word has no observable intent: since the context-v3 pair it waits
+        # for its neighbour, and the two are decided together (`ша руддщ` → `if hello`).
+        ("short Russian word switches to English with its neighbour", 1, "if hello ", "if hello ", 0, X11_E2E_CONTEXT_RESOLUTION_VERIFY_DELAY_MS),
         ("manual Russian selection protects short word", 1, "if ", "ша ", 1, E2E_VERIFY_SETTLE_DELAY_MS),
-        ("short-word protection is consumed once", 1, "if ", "if ", 0, E2E_VERIFY_SETTLE_DELAY_MS),
+        ("short-word protection is consumed once", 1, "if hello ", "if hello ", 0, X11_E2E_CONTEXT_RESOLUTION_VERIFY_DELAY_MS),
         ("context resolves a short word with the next word", 0, "e 'njuj ", "у этого ", 1, X11_E2E_CONTEXT_RESOLUTION_VERIFY_DELAY_MS),
         ("return to EN before internal punctuation", 1, "hello ", "hello ", 0, E2E_VERIFY_SETTLE_DELAY_MS),
         ("learned boundaries keep the internal comma key", 0, "ghj,ktvf ", "проблема ", 1, E2E_VERIFY_SETTLE_DELAY_MS),
@@ -147,8 +149,8 @@ def main() -> int:
         ("руддщ", "hello"),
         ("ghbdtn", "привет"),
         ("ghbdtn", "привет"),
-        ("ша", "if"),
-        ("ша", "if"),
+        ("ша руддщ", "if hello"),
+        ("ша руддщ", "if hello"),
         # Since 0.24.0 the lone "e" converts at the space on its own (a Russian
         # message opens with a single-letter word one time in seven, an English one
         # never does), so the layout is already Russian when the next word is typed
