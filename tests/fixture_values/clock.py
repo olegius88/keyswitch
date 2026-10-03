@@ -58,8 +58,9 @@ WINDOWS_E2E_PHASE_SETTLE_DELAY_MS: Final = 300
 WINDOWS_E2E_ENTER_PREPARE_DELAY_MS: Final = 200
 WINDOWS_E2E_PROBE_TIMEOUT_SECONDS: Final = 3.0
 WINDOWS_E2E_WATCHDOG_SECONDS: Final = 90
-# Overall watchdog for the whole scripted run.
-X11_E2E_TIMEOUT_SECONDS: Final = 45
+# Overall watchdog for the whole scripted run: the settle delays alone take about 19 s, and on a
+# loaded runner each of the fifteen cases may wait E2E_VERIFY_GRACE_MS more for a late correction.
+X11_E2E_TIMEOUT_SECONDS: Final = 90
 # Pacing between scripted actions and their verification, all in milliseconds.
 X11_E2E_INITIAL_STARTUP_DELAY_MS: Final = 450
 X11_E2E_IDLE_PAUSE_VERIFY_DELAY_MS: Final = 2300

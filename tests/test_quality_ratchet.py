@@ -42,7 +42,8 @@ RECEIPT_PATH = ROOT / "model" / "context_v3" / "release-receipt.json"
 PREFIX_REPORT_PATH = ROOT / "model" / "prefix_v1" / "engine-report.json"
 BOUNDARY_REPORT_PATH = ROOT / "model" / "boundary_v1" / "engine-regression.json"
 TESTS_DIR = ROOT / "tests"
-DISCLOSURE_DECORATOR = re.compile(r"^\s*@disclosed_schema3_pair_regression\s*$", re.MULTILINE)
+# A decorator line, with or without a trailing comment.
+DISCLOSURE_DECORATOR = re.compile(r"^\s*@disclosed_schema3_pair_regression\s*(?:#.*)?$", re.MULTILINE)
 
 
 Section = dict[str, object]
