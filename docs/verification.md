@@ -26,6 +26,12 @@ PYTHONPATH=src python3 tools/verify_boundary_v2.py
 PYTHONPATH=src python3 tools/verify_prefix_model.py
 ```
 
+Набор содержит `tests/test_quality_ratchet.py`: установленная пара моделей и
+замороженные engine-replay не могут опуститься ниже полов из
+`tests/fixture_values/quality_floors.py` (порчи, запас восстановлений, калибровка,
+пороги, число раскрытых ожиданий). Лучший результат поднимает пол в том же PR;
+понижение пола — явное решение, которое PR должен обосновать.
+
 100% line/branch coverage относится к [.coveragerc](../.coveragerc): несколько
 нативных Win32-модулей и Windows UI исключены. Windows CI имеет собственную
 область coverage, настоящий hook/SendInput E2E и проверку установленного EXE.

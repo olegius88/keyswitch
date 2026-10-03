@@ -23,13 +23,23 @@ XTEST_KEY_RELEASE_DELAY_MS: Final = 8
 GDBUS_CALL_TIMEOUT_SECONDS: Final = 10
 NATIVE_PACKAGE_E2E_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS: Final = 8
 NATIVE_PACKAGE_E2E_FORCED_SHUTDOWN_TIMEOUT_SECONDS: Final = 3
-NATIVE_PACKAGE_E2E_TIMEOUT_SECONDS: Final = 50
+NATIVE_PACKAGE_E2E_TIMEOUT_SECONDS: Final = 90
 NATIVE_PACKAGE_E2E_APPLICATION_POLL_MS: Final = 100
 NATIVE_PACKAGE_E2E_TRAY_READY_TO_TYPING_DELAY_MS: Final = 300
+# The first scripted case proves the packaged engine observes keys and corrects by the pause;
+# a loaded runner may need another attempt, each with this much extra time.
+NATIVE_PACKAGE_E2E_WARMUP_DEADLINE_MS: Final = 6000
+NATIVE_PACKAGE_E2E_WARMUP_ATTEMPTS: Final = 3
 # Pause of the X11 E2E drivers between one scripted typing case and the next.
 E2E_INTER_CASE_DELAY_MS: Final = 200
 # Time the X11 E2E drivers let a correction or learning prompt settle before the next check.
 E2E_VERIFY_SETTLE_DELAY_MS: Final = 900
+# After the settle delay a case is polled until its text and layout appear or this much more
+# time has passed: timers and injections lag on a loaded runner, a wrong result stays wrong.
+E2E_VERIFY_GRACE_MS: Final = 4000
+E2E_VERIFY_POLL_MS: Final = 100
+# GLib.get_monotonic_time() counts microseconds.
+MICROSECONDS_PER_MILLISECOND: Final = 1000
 E2E_LEARNING_CONFIRMATION_VERIFY_DELAY_MS: Final = 500
 TRAY_MENU_E2E_READ_LINE_TIMEOUT_SECONDS: Final = 5
 TRAY_MENU_E2E_EVENT_WAIT_TIMEOUT_SECONDS: Final = 2

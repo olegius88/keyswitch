@@ -446,9 +446,9 @@ class ContextModel:
         return cls(weights, version, float(threshold), feature_version=feature_version)
 
     @classmethod
-    def try_load(cls) -> tuple[ContextModel | None, str]:
+    def try_load(cls, path: Path = ARTIFACT_PATH) -> tuple[ContextModel | None, str]:
         try:
-            model = cls.load()
+            model = cls.load(path)
         except (OSError, ValueError) as error:
             return None, str(error)
         return model, model.version

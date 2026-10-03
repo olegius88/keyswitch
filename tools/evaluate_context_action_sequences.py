@@ -503,8 +503,9 @@ def replay(plan: SequencePlan, model: ContextModel, models: dict[int, LanguageMo
         directory = Path(temporary)
         settings = SettingsStore(directory / "settings.json")
         if mode == "default":
-            # The shipped default turned the early switch off; this mode exists to measure it,
-            # so it is enabled explicitly and the control mode below remains its counterpart.
+            # This mode measures the early switch, so it is enabled explicitly whatever the
+            # shipped default says (off from 0.23.0, on again since the corpus v13 candidate), and
+            # the control mode below remains its counterpart.
             settings.set("detection.early_switch", True)
         if mode == "early_off":
             for setting, value in {

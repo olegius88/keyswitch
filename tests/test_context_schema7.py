@@ -11,6 +11,7 @@ from unittest.mock import patch
 from keyswitch import context_model
 from keyswitch.constants.models import CONTEXT_LINE_FEATURE_VERSION, CONTEXT_OPENING_FEATURE_VERSION
 from keyswitch.context_model import (
+    ACTIONS,
     TERM_ALPHABETS, TERM_FREQUENCY_PATH, ContextEvidence, ContextModel, extract_context_features, load_term_frequency, term_bucket,
 )
 from keyswitch.input_context import FieldContext
@@ -161,8 +162,10 @@ class TermFrequencyTableTests(unittest.TestCase):
 
     def test_a_schema_seven_model_without_its_table_does_not_load(self) -> None:
         missing = Path(self.temporary.name) / "missing.json"
+        # The installed model is schema 3 since 02.10.2026; a schema-7 header is enough to ask for the table.
+        schema_seven = self.write({"feature_version": CONTEXT_LINE_FEATURE_VERSION, "actions": list(ACTIONS)})
         with patch.object(context_model, "_TERM_FREQUENCY", None), patch.object(context_model, "TERM_FREQUENCY_PATH", missing):
-            model, reason = ContextModel.try_load()
+            model, reason = ContextModel.try_load(schema_seven)
         self.assertIsNone(model)
         self.assertIn(missing.name, reason)
 

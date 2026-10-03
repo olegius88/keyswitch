@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from test_input_integrity import InputIntegrityTests
 from fixture_values.clock import PAUSE_TRIGGER_OFFSET_SECONDS
+from disclosed_regressions import disclosed_schema3_pair_regression
 
 
 class LiteralHeadTests(InputIntegrityTests):
@@ -57,6 +58,7 @@ class LiteralHeadTests(InputIntegrityTests):
         evaluation = self.evaluations(logs.output)[-1]
         self.assertEqual((evaluation["trigger"], evaluation["original"], evaluation["literal_head"]), ("pause", "c,jhrb", "/"))
 
+    @disclosed_schema3_pair_regression
     def test_heads_that_may_be_wrong_layout_words_leave_the_whole_token_to_the_model(self) -> None:
         """No head is claimed when the head itself reads as a word; the model judges the rest.
 

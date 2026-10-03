@@ -29,13 +29,18 @@ from keyswitch.constants.x11 import BACKSPACE_KEYSYM, XKB_USE_CORE_KBD
 from fixture_values.clock import (
     E2E_INTER_CASE_DELAY_MS,
     E2E_LEARNING_CONFIRMATION_VERIFY_DELAY_MS,
+    E2E_VERIFY_GRACE_MS,
+    E2E_VERIFY_POLL_MS,
     E2E_VERIFY_SETTLE_DELAY_MS,
     GDBUS_CALL_TIMEOUT_SECONDS,
+    MICROSECONDS_PER_MILLISECOND,
     NATIVE_PACKAGE_E2E_APPLICATION_POLL_MS,
     NATIVE_PACKAGE_E2E_FORCED_SHUTDOWN_TIMEOUT_SECONDS,
     NATIVE_PACKAGE_E2E_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS,
     NATIVE_PACKAGE_E2E_TIMEOUT_SECONDS,
     NATIVE_PACKAGE_E2E_TRAY_READY_TO_TYPING_DELAY_MS,
+    NATIVE_PACKAGE_E2E_WARMUP_ATTEMPTS,
+    NATIVE_PACKAGE_E2E_WARMUP_DEADLINE_MS,
     XTEST_KEY_PRESS_DELAY_MS,
     XTEST_KEY_RELEASE_DELAY_MS,
 )
@@ -128,6 +133,7 @@ class PhysicalTyper:
 @dataclass
 class NativeResult:
     exit_code: int = 1
+    warmup_corrections: int = 0
     observed: list[tuple[str, str, int]] = field(default_factory=list)
 
 
@@ -288,7 +294,48 @@ def main() -> int:
         failed = [name for name, passed in checks.items() if not passed]
         if failed:
             return fail(f"packaged tray checks failed: {', '.join(failed)}")
-        GLib.timeout_add(NATIVE_PACKAGE_E2E_TRAY_READY_TO_TYPING_DELAY_MS, type_case, 0)
+        GLib.timeout_add(NATIVE_PACKAGE_E2E_TRAY_READY_TO_TYPING_DELAY_MS, first_case, 1)
+        return GLib.SOURCE_REMOVE
+
+    def first_case(attempt: int) -> bool:
+        # The tray registers before the engine's X11 listener has necessarily seen a key, and
+        # a loaded runner delays the pause timer, so the first case is typed again when it is
+        # not corrected in time. A partial correction switches the layout and the next
+        # attempt's group selection protects the word as a manual choice, which the attempt
+        # after that no longer sees. The later cases never repeat: each selects the layout the
+        # previous one ended in, and a repeat would read as a manual switch.
+        name, group, physical, _expected_text, _expected_group, verify_delay = cases[0]
+        try:
+            typer.switch_group(group)
+            entry.grab_focus()
+            typer.clear_field()
+            typer.type(physical)
+        except (OSError, RuntimeError) as error:
+            return fail(f"cannot type {name!r}: {error}")
+        deadline = GLib.get_monotonic_time() + (verify_delay + NATIVE_PACKAGE_E2E_WARMUP_DEADLINE_MS) * MICROSECONDS_PER_MILLISECOND
+        GLib.timeout_add(verify_delay, verify_first_case, attempt, deadline)
+        return GLib.SOURCE_REMOVE
+
+    def verify_first_case(attempt: int, deadline: int) -> bool:
+        name, _group, _physical, expected_text, expected_group, _delay = cases[0]
+        actual_text = entry.get_text()
+        actual_group = typer.current_group()
+        if (actual_text != expected_text or actual_group != expected_group) and GLib.get_monotonic_time() < deadline:
+            GLib.timeout_add(E2E_VERIFY_POLL_MS, verify_first_case, attempt, deadline)
+            return GLib.SOURCE_REMOVE
+        print(
+            f"case={name!r} attempt={attempt} text={actual_text!r} group={actual_group} "
+            f"expected={expected_text!r}/{expected_group}"
+        )
+        if actual_text != expected_text or actual_group != expected_group:
+            if attempt < NATIVE_PACKAGE_E2E_WARMUP_ATTEMPTS:
+                GLib.timeout_add(E2E_INTER_CASE_DELAY_MS, first_case, attempt + 1)
+                return GLib.SOURCE_REMOVE
+            return fail(f"wrong correction in {name!r}")
+        result.observed.append((name, actual_text, actual_group))
+        # Earlier attempts may have left corrections of their own; the last entry is this case's.
+        result.warmup_corrections = len(history.read()) - 1
+        GLib.timeout_add(E2E_INTER_CASE_DELAY_MS, type_case, 1)
         return GLib.SOURCE_REMOVE
 
     def type_case(index: int) -> bool:
@@ -307,13 +354,19 @@ def main() -> int:
             typer.type(physical)
         except (OSError, RuntimeError) as error:
             return fail(f"cannot type {name!r}: {error}")
-        GLib.timeout_add(verify_delay, verify_case, index)
+        deadline = GLib.get_monotonic_time() + (verify_delay + E2E_VERIFY_GRACE_MS) * MICROSECONDS_PER_MILLISECOND
+        GLib.timeout_add(verify_delay, verify_case, index, deadline)
         return GLib.SOURCE_REMOVE
 
-    def verify_case(index: int) -> bool:
+    def verify_case(index: int, deadline: int) -> bool:
+        # The settle delay is the earliest moment the text may be judged (a kept word must
+        # still be as typed then); a late correction is polled for until the deadline.
         name, _group, _physical, expected_text, expected_group, _delay = cases[index]
         actual_text = entry.get_text()
         actual_group = typer.current_group()
+        if (actual_text != expected_text or actual_group != expected_group) and GLib.get_monotonic_time() < deadline:
+            GLib.timeout_add(E2E_VERIFY_POLL_MS, verify_case, index, deadline)
+            return GLib.SOURCE_REMOVE
         result.observed.append((name, actual_text, actual_group))
         print(
             f"case={name!r} text={actual_text!r} group={actual_group} "
@@ -324,9 +377,10 @@ def main() -> int:
         if index + 1 < len(cases):
             GLib.timeout_add(E2E_INTER_CASE_DELAY_MS, type_case, index + 1)
             return GLib.SOURCE_REMOVE
+        # Corrections of the first case's earlier attempts come first; the cases follow them.
         actual_history = [
             (item.original, item.replacement) for item in history.read()
-        ]
+        ][result.warmup_corrections:]
         expected_history = [
             ("ghbdtn", "привет"),
             ("руддщ", "hello"),
@@ -334,13 +388,12 @@ def main() -> int:
             ("руддщ", "hello"),
             ("ghbdtn", "привет"),
             ("ghbdtn", "привет"),
-            ("ша", "if"),
-            ("ша", "if"),
-            # Since 0.24.0 the lone "e" converts at the space on its own (a Russian
-            # message opens with a single-letter word one time in seven, an English
-            # one never does), so the layout is already Russian when the next word
-            # is typed and the history holds that letter, not the joint phrase.
-            ("e", "у"),
+            ("ша руддщ", "if hello"),
+            ("ша руддщ", "if hello"),
+            # A lone letter typed in one burst with its neighbour waits for it: the schema-3 pair
+            # decides the two together and the history holds the joint phrase. Typed with a pause
+            # after its space, the letter converts on its own (`e` → `у`), as it has since 0.24.0.
+            ("e 'njuj", "у этого"),
         ]
         if actual_history != expected_history:
             return fail(f"wrong correction history: {actual_history!r}")
@@ -424,9 +477,10 @@ def main() -> int:
                 "packaged learned rule did not run: "
                 f"text={entry.get_text()!r} group={typer.current_group()}"
             )
+        # Corrections of the first case's earlier attempts come first; the cases follow them.
         actual_history = [
             (item.original, item.replacement) for item in history.read()
-        ]
+        ][result.warmup_corrections:]
         expected_history = [
             ("ghbdtn", "привет"),
             ("руддщ", "hello"),
@@ -434,13 +488,12 @@ def main() -> int:
             ("руддщ", "hello"),
             ("ghbdtn", "привет"),
             ("ghbdtn", "привет"),
-            ("ша", "if"),
-            ("ша", "if"),
-            # Since 0.24.0 the lone "e" converts at the space on its own (a Russian
-            # message opens with a single-letter word one time in seven, an English
-            # one never does), so the layout is already Russian when the next word
-            # is typed and the history holds that letter, not the joint phrase.
-            ("e", "у"),
+            ("ша руддщ", "if hello"),
+            ("ша руддщ", "if hello"),
+            # A lone letter typed in one burst with its neighbour waits for it: the schema-3 pair
+            # decides the two together and the history holds the joint phrase. Typed with a pause
+            # after its space, the letter converts on its own (`e` → `у`), as it has since 0.24.0.
+            ("e 'njuj", "у этого"),
             ("hello", "руддщ"),
         ]
         if actual_history != expected_history:

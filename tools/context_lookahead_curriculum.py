@@ -17,6 +17,7 @@ import json
 import math
 from pathlib import Path
 
+from context_deferral import deferred_isolated
 from context_physical_keys import translated
 from keyswitch.context_action_features import extract_action_features
 from keyswitch.context_model import ACTIONS, ContextAction, ContextEvidence
@@ -30,7 +31,6 @@ from keyswitch.constants.training import (
     LOOKAHEAD_MAXIMUM_FAMILIES_LIMIT,
     LOOKAHEAD_MAXIMUM_SEEDS_PER_FAMILY,
     PLANNED_VARIANT_MASS_DIVISOR,
-    ACTION_SHORT_WORD_MAX_CHARACTERS,
 )
 
 
@@ -103,7 +103,7 @@ def _fingerprint(item: ContextEvidence) -> str:
 
 def _eligible(seed: LookaheadSeed) -> bool:
     item = seed.evidence
-    if (not 0 < len(item.original) <= ACTION_SHORT_WORD_MAX_CHARACTERS or not item.original.isalpha() or not item.alternative.isalpha()
+    if (not deferred_isolated(item.original, item.alternative, item.source_group) or not item.original.isalpha() or not item.alternative.isalpha()
             or item.trigger != "space" or item.boundary_text != " "
             or item.literal_tail or item.after_origin == "planned_next_conversion"):
         return False
@@ -119,6 +119,11 @@ def _eligible(seed: LookaheadSeed) -> bool:
         # A natural typing frame knows its own continuation; the left context may
         # be empty, exactly as at the start of a field.
         return not item.field.after and bool(seed.next_words.strip())
+    if planned == "convert" and seed.category == "lexical_short_pair":
+        # A lexicon pair has no sentence of its own: it stands alone, and any word of
+        # the split's own right contexts in the neighbour's language may follow it,
+        # the way a keep seed borrows its anchor.
+        return not item.field.after and not item.field.before.strip()
     return (planned == "keep" and (seed.category.startswith("legacy_") or seed.category == "natural_surface")
             and bool(item.field.before.strip()) and not item.field.after)
 
@@ -201,9 +206,9 @@ def build_lookahead_curriculum(
         group = 1 - item.source_group
         choices = available[group]
         planned_label = seed.planned_action or seed.action
-        if planned_label == "convert":
-            first = (item.field.after or seed.next_words).split()[0]
-            choices = [anchor for anchor in choices if anchor.text == first]
+        continuation = (item.field.after or seed.next_words).split()
+        if planned_label == "convert" and continuation:
+            choices = [anchor for anchor in choices if anchor.text == continuation[0]]
         if not choices:
             counts["skipped_missing_anchor"] += 1
             continue

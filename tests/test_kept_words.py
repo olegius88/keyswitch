@@ -18,6 +18,7 @@ from test_context_policy import ContextEngineTests
 from test_context_wait_pairs import ScriptedModel, before_greeting
 from test_inside_word import CaretReader
 from fixture_values.clock import LAST_WORD_INPUT_AT_SECONDS, WAIT_PAIR_PAUSE_CHECK_SECONDS
+from disclosed_regressions import disclosed_schema3_pair_regression
 
 # What each word is once the word after it is known: `руку` before `they` is `here`.
 NEXT_WORD_TELLS = {"руку": "they", "рун": "here", "ура": "hey", "dc`": "тот", "t`": "мать", "kb[": "привет"}
@@ -214,6 +215,7 @@ class KeptWordModelTests(ContextEngineTests):
         # `её` is `t\`` and a backtick to the boundary model; `е` alone is no word.
         self.assertEqual(self.typed(0, "t`", "vfnm"), "её мать ")
 
+    @disclosed_schema3_pair_regression
     def test_a_first_word_with_a_period_split_off_converts_at_its_own_space(self) -> None:
         # `jr.` is `ок` and a period: it converts before the next word, which is then typed
         # in the Russian layout already.

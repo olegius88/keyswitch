@@ -19,7 +19,11 @@ from keyswitch.constants.training import (
     MAX_CONTEXTS_PER_FAMILY,
     PLANNED_VARIANT_MASS_DIVISOR,
 )
-from freeze_context_action_corpus import CorpusRow, typo_variants
+from freeze_context_action_corpus import CorpusRow, physical, typo_variants
+from context_deferral import deferred_isolated, lookahead_focus
+from reconcile_context_action_corpus import expanded_aliases
+from keyswitch.constants.training import ACTION_DEFERRED_WORD_MAX_CHARACTERS, CITATION_SIGN_HEADS
+from keyswitch.context_action_features import extract_action_features
 from keyswitch.context_model import ACTIONS, ContextEvidence, ContextModel
 from train_context_action_model import (
     BLIND_IDENTIFIERS,
@@ -34,11 +38,14 @@ from train_context_action_model import (
     development_thresholds,
     identifier_evidence_dropped,
     identifier_family,
+    citation_shaped,
     natural_lookahead_rows,
+    natural_mixed_contexts,
     evidence,
     historical_curriculum,
     MIXED_INSERTION_CONTEXTS,
     legacy_lookahead_rows,
+    lexical_short_pairs,
     metrics,
     previous_context,
     select_features,
@@ -421,6 +428,47 @@ class ActionTrainingTests(unittest.TestCase):
                           if row.category in {"natural_surface", "layout_intervention"}]
                 self.assertTrue(all(row.action in {"wait", "suggest"} for row in direct))
 
+    def test_three_letters_defer_only_when_both_readings_are_plausible(self) -> None:
+        """`tot`/`еще` and `зум`/`pev` wait for a neighbour; `rjn`/`кот`, `три` and `зь2`/`pm2` decide."""
+        expected = {
+            ("еще", 1): ({"wait"}, {"wait"}), ("tot", 0): ({"wait"}, {"wait"}),
+            ("зум", 1): ({"wait"}, {"wait"}),  # `pev` is a Debian command
+            ("кот", 1): ({"keep"}, {"convert"}), ("три", 1): ({"keep"}, {"convert"}),
+            ("зь2", 1): ({"keep"}, {"convert"}), ("окей", 1): ({"keep"}, {"convert"}),
+        }
+        for (original, group), (natural, wrong) in expected.items():
+            with self.subTest(original=original):
+                sources = [replace(fixture(f"three:{index}:{original}", original, group), before="", after="")
+                           for index in range(HISTORICAL_CURRICULUM_TRIGGER_COVERAGE_SAMPLES)]
+                rows = [row for row in action_rows(sources) if row.trigger == "space"]
+                self.assertEqual(
+                    ({row.action for row in rows if row.category == "natural_surface"},
+                     {row.action for row in rows if row.category == "layout_intervention"}),
+                    (natural, wrong))
+        self.assertTrue(deferred_isolated("еще", "tot", 1) and deferred_isolated("tot", "еще", 0))
+        self.assertFalse(deferred_isolated("кот", "rjn", 1) or deferred_isolated("rjn", "кот", 0))
+        self.assertTrue(lookahead_focus("зум", 1) and lookahead_focus("мы", 1) and not lookahead_focus("дом", 1))
+
+    def test_lexical_short_pairs_enter_once_as_real_pairs_outside_every_sealed_test(self) -> None:
+        pairs = lexical_short_pairs(frozenset())
+        physicals = [physical(word) for word, _, _ in pairs]
+        self.assertEqual(len(physicals), len(set(physicals)))
+        words = {word for word, _, _ in pairs} | {alternate for _, alternate, _ in pairs}
+        self.assertIn("tot", words)
+        self.assertIn("еще", words)
+        self.assertNotIn("зум", words)  # the supplement knows it, the onboard lexicon does not
+        self.assertTrue(all(len(word) == len(alternate) == ACTION_DEFERRED_WORD_MAX_CHARACTERS for word, alternate, _ in pairs))
+        refused = frozenset(expanded_aliases("еще"))
+        self.assertNotIn("tot", {word for word, _, _ in lexical_short_pairs(refused)} | {alternate for _, alternate, _ in lexical_short_pairs(refused)})
+
+    def test_a_deferred_three_letter_word_can_be_asked_again_with_its_planned_neighbour(self) -> None:
+        field = FieldContext("Telegram", "fixture", "", "привет", "unknown")
+        reachable = ContextEvidence("tot", "еще", 0, field, "space", False, True, True, 0.0,
+                                    boundary_text=" ", after_origin="planned_next_conversion")
+        self.assertIn("after_origin:planned_next_conversion", extract_action_features(reachable))
+        with self.assertRaises(ValueError):
+            extract_action_features(replace(reachable, original="tots", alternative="ещеу"))
+
     def test_contextless_short_legacy_keep_shares_the_deferred_action(self) -> None:
         item = ContextEvidence("хз", "[p", 1, FieldContext("chrome", "fixture", "", "", "unknown"), "pause", False, False, False, 0.0)
         rows = [HistoricalRow(item, "keep", "хз", "train", "russian_unknown_correct"),
@@ -429,6 +477,7 @@ class ActionTrainingTests(unittest.TestCase):
                 HistoricalRow(replace(item, field=replace(item.field, before="8-10 ")), "keep", "хз", "train", "russian_unknown_correct"),
                 HistoricalRow(replace(item, original="yf", alternative="на", source_group=0), "convert", "yf", "train", "trusted_short_wrong"),
                 HistoricalRow(replace(item, original="три"), "keep", "три", "train", "russian_unknown_correct"),
+                HistoricalRow(replace(item, original="еще", alternative="tot"), "keep", "еще", "train", "russian_unknown_correct"),
                 HistoricalRow(replace(item, original="окей"), "keep", "окей", "train", "russian_unknown_correct")]
         actual = {(row.trigger, row.field.before, row.category, row.original): row.action for row in self.historical_fixture(rows)}
         self.assertEqual(actual[("pause", "", "legacy_russian_unknown_correct", "хз")], "wait")
@@ -436,9 +485,11 @@ class ActionTrainingTests(unittest.TestCase):
         self.assertEqual(actual[("pause", "я думаю ", "legacy_russian_unknown_correct", "хз")], "keep")
         self.assertEqual(actual[("pause", "8-10 ", "legacy_russian_unknown_correct", "хз")], "wait")
         self.assertEqual(actual[("pause", "", "legacy_trusted_short_wrong", "yf")], "convert")
-        # Three letters alone decide (the corpus v12 experiment of 01.10.2026 deferred them and broke
-        # `rjn` by the pause and `pm2`); two are deferred.
+        # Three letters alone decide when one reading is plausible (the corpus v12 experiment of
+        # 01.10.2026 deferred them all and broke `rjn` by the pause and `pm2`); `еще` is as much
+        # the English `tot`, so it is deferred like two letters are; four letters always decide.
         self.assertEqual(actual[("pause", "", "legacy_russian_unknown_correct", "три")], "keep")
+        self.assertEqual(actual[("pause", "", "legacy_russian_unknown_correct", "еще")], "wait")
         self.assertEqual(actual[("pause", "", "legacy_russian_unknown_correct", "окей")], "keep")
         relabeled = self.historical_fixture(rows[:1] + rows[HISTORICAL_CURRICULUM_RELABEL_SECOND_SOURCE_INDEX:HISTORICAL_CURRICULUM_RELABEL_SECOND_SOURCE_INDEX + 1])
         self.assertAlmostEqual(sum(row.sample_weight for row in relabeled), 1.0)
@@ -457,6 +508,37 @@ class ActionTrainingTests(unittest.TestCase):
             rows = self.historical_fixture([waiting, *variants])
             self.assertAlmostEqual(sum(row.sample_weight for row in rows), 1.0)
             self.assertAlmostEqual(sum(row.sample_weight for row in rows if row.action == "wait"), HISTORICAL_CURRICULUM_CONVERT_MASS_SHARE)
+
+    def test_an_insertion_is_also_framed_after_prose_of_the_other_language(self) -> None:
+        english = replace(fixture("name", "Vorbuli", 0), before="the subspecies ")
+        russian = replace(fixture("prose", "подвид", 1), before="Австралийский подвид ")
+        abbreviation = replace(fixture("abbr", "МКС", 1), before="экипаж станции ")
+        collision = replace(fixture("coll", "XTV", 0), before="watch ")  # its Cyrillic reading `чем` is a word
+        mixed_only = replace(fixture("mixed", "слово", 1), before="see the слово ")
+        rows = action_rows([english, russian, abbreviation, collision, mixed_only])
+        natural = {row.identifier: row for row in rows if ":mixed-natural" in row.identifier}
+        # A Latin name cited by Russian prose takes both readings; a Latin abbreviation whose Cyrillic
+        # reading is a Russian word is not framed at all, nor are Russian words in English prose.
+        self.assertEqual(set(natural), {"name:mixed-natural", "name:mixed-natural:wrong",
+                                        "name:mixed-natural:head", "name:mixed-natural:head:wrong"})
+        keep, wrong = natural["name:mixed-natural"], natural["name:mixed-natural:wrong"]
+        headed, headed_wrong = natural["name:mixed-natural:head"], natural["name:mixed-natural:head:wrong"]
+        # The citation opened by a Latin-layout sign keeps as well; its Cyrillic reading, letters
+        # only because the sign's key is a letter in the Russian layout, converts.
+        self.assertTrue(headed.original.endswith("Vorbuli") and headed.original[:-len("Vorbuli")] in CITATION_SIGN_HEADS)
+        self.assertEqual((headed.field.before, headed.action, headed.group), (keep.field.before, "keep", 0))
+        self.assertEqual((headed_wrong.original, headed_wrong.action, headed_wrong.group),
+                         (translated(headed.original, 0), "convert", 1))
+        self.assertTrue(headed_wrong.original.isalpha())
+        self.assertIn(keep.field.before, ("Австралийский подвид ", "экипаж станции "))
+        self.assertEqual((keep.action, keep.group), ("keep", 0))
+        self.assertEqual((wrong.field.before, wrong.action, wrong.original, wrong.group), (keep.field.before, "convert", translated("Vorbuli", 0), 1))
+        self.assertFalse([row for row in rows if row.identifier.startswith("coll:mixed-natural")])
+        self.assertTrue(citation_shaped("Vorbuli", 0) and citation_shaped("QRT", 0) and citation_shaped("qzxv", 0))
+        self.assertFalse(citation_shaped("deployment", 0) or citation_shaped("подвид", 1))
+        # A left context with words of both scripts never serves as a language's prose.
+        self.assertEqual(natural_mixed_contexts([english, russian, mixed_only]), {0: ("the subspecies ",), 1: ("Австралийский подвид ",)})
+        self.assertFalse([row for row in action_rows([english]) if ":mixed-natural" in row.identifier])
 
     def test_foreign_insertion_context_does_not_determine_layout_label(self) -> None:
         for original, group in (("deployment", 0), ("обсуждение", 1)):

@@ -14,9 +14,12 @@ DEFAULT_PAUSE_DELAY_SECONDS: Final = 1.5
 DEFAULT_EARLY_SWITCH_MIN_LENGTH: Final = 4
 # Default of history.limit; every fallback to the setting uses it.
 DEFAULT_HISTORY_LIMIT: Final = 200
+# Settings files written by schema 6 carry `early_switch: false` as the seeded default of
+# the releases that kept the early switch off; loading them adopts the new default once.
+EARLY_SWITCH_DEFAULT_SCHEMA_VERSION: Final = 7
 # The shipped settings; the persisted file is seeded from it and merged over it.
 DEFAULT_SETTINGS: Final[dict[str, object]] = {
-    "schema_version": 6,
+    "schema_version": EARLY_SWITCH_DEFAULT_SCHEMA_VERSION,
     "enabled": True,
     "general": {
         "start_hidden": True,
@@ -33,7 +36,9 @@ DEFAULT_SETTINGS: Final[dict[str, object]] = {
         "confidence": DEFAULT_CONFIDENCE_THRESHOLD,
         "correct_on_pause": True,
         "pause_delay_seconds": DEFAULT_PAUSE_DELAY_SECONDS,
-        "early_switch": False,
+        # On by default since the context-v3 + prefix-v2 pair passed its sealed test in this mode
+        # with no corruption of correctly typed text (02.10.2026); one switch away in the settings.
+        "early_switch": True,
         "early_switch_min_length": DEFAULT_EARLY_SWITCH_MIN_LENGTH,
         "correct_on_space": True,
         "correct_on_enter": True,

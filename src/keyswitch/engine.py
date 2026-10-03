@@ -50,9 +50,11 @@ from .intent_model import CorrectionTrigger, LinearNgramModel
 from .context_policy import ContextPolicy, ContextResult, ends_with_typed
 from .constants.models import (
     CONTEXT_ACTION_FEATURE_VERSION,
+    PLANNED_CONTEXT_WORD_MAX_CHARACTERS,
     PREFIX_MAX_CHARACTERS,
     PREFIX_MIN_CHARACTERS,
 )
+from .context_model import AfterOrigin
 from .context_access import PlatformFieldReader
 from .constants.units import MILLISECONDS_PER_SECOND
 from .input_context import CONTEXT_TTL, FieldContext, FieldReader
@@ -894,7 +896,13 @@ class KeySwitchEngine:
             if self._strokes:
                 self._strokes.pop()
                 if self._strokes:
-                    self._mark_word_activity()
+                    # Erasing is editing, not typing: the letters left are a word the
+                    # user is still changing, and a pause over them is a pause to think,
+                    # not a boundary. Re-arming the pause timer here corrected the
+                    # half-erased word a pause delay after the Backspace, as if the
+                    # erased letter had never gone (reported 02.10.2026). The next
+                    # letter arms the timer again, as it does for a reopened word.
+                    self._reset_pause_correction()
                 else:
                     self._source_group = -1
                     self._reset_pause_correction()
@@ -2219,9 +2227,19 @@ class KeySwitchEngine:
             planned_baseline, alternative, group, self.detector, "space", "assist",
             after=decision.replacement, field_override=waiting.field,
             boundary_text=previous.boundary.character,
-            after_origin="planned_next_conversion",
+            after_origin=self._neighbour_origin(previous.original),
         )
-        if not result.decision.should_convert:
+        pair_decision = result.decision
+        if (not pair_decision.should_convert and waiting.decision.reason == ISOLATED_SHORT_WORD_REASON
+                and planned_baseline.should_convert):
+            # The lone letter opening a message is the one curated rule the model does not
+            # arbitrate (context_policy.decide): every single-letter row of its corpus sits in
+            # quarantine, so its planned answer is no opinion either. The rule converted the
+            # letter at its space and only its neighbour's layout was still in question; with
+            # the neighbour converted the same way, the detector's verdict on the pair stands,
+            # as it did under the feature-version-2 model (`z ctujlyz` ends as `я сегодня`).
+            pair_decision = planned_baseline
+        if not pair_decision.should_convert:
             self._log_context_wait("context_wait_cancelled", waiting, "lookahead_not_converted")
             return None
         self._technical_event("context_wait_resolved", wait_id=waiting.diagnostic_id, previous_characters=len(previous.original), next_characters=len(decision.original))
@@ -2229,8 +2247,23 @@ class KeySwitchEngine:
             previous.strokes + (previous.boundary,) + strokes,
             closing, previous.source_group, group,
             original, alternative + previous.boundary.character + decision.replacement,
-            result.decision.confidence, application, True, "context_phrase", self._context_field_id(),
+            pair_decision.confidence, application, True, "context_phrase", self._context_field_id(),
         ), decision
+
+    @staticmethod
+    def _neighbour_origin(word: str) -> AfterOrigin:
+        """How a word asked again with its converted neighbour names that right context.
+
+        The model is trained on `planned_next_conversion` frames for the words it defers,
+        up to PLANNED_CONTEXT_WORD_MAX_CHARACTERS letters, and its features refuse a planned
+        frame of a longer word. A longer word that waited (`руку`, then `they`) or that was
+        converted and is revisited (`ghbdtn`, then `hello`) is asked with the converted
+        neighbour as the right context the field will hold, the `field` origin it was
+        trained on for words of every length; asking the refused frame returned `suggest`,
+        which cancelled the wait and took the converted word back (02.10.2026).
+        """
+
+        return "planned_next_conversion" if 0 < len(word) <= PLANNED_CONTEXT_WORD_MAX_CHARACTERS else "field"
 
     def _decide_after_waiting_word(
         self, waiting: WaitingContextWord, decision: DetectionDecision,
@@ -2294,7 +2327,7 @@ class KeySwitchEngine:
         again = self.context_policy.decide(
             baseline, applied.replacement, applied.target_group, self.detector, "space", "assist",
             after=decision.replacement, field_override=field,
-            boundary_text=applied.boundary.character, after_origin="planned_next_conversion",
+            boundary_text=applied.boundary.character, after_origin=self._neighbour_origin(applied.replacement),
         )
         if again.decision.should_convert:
             return None
@@ -2384,7 +2417,7 @@ class KeySwitchEngine:
             again = self.context_policy.decide(
                 baseline, previous.replacement, previous.target_group, self.detector, "space", "assist",
                 after=next_replacement, field_override=word.field,
-                boundary_text=previous.boundary.character, after_origin="planned_next_conversion",
+                boundary_text=previous.boundary.character, after_origin=self._neighbour_origin(previous.replacement),
             )
             if not again.decision.should_convert:
                 break
