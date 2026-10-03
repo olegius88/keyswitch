@@ -336,11 +336,10 @@ def main() -> int:
             ("ghbdtn", "привет"),
             ("ша руддщ", "if hello"),
             ("ша руддщ", "if hello"),
-            # Since 0.24.0 the lone "e" converts at the space on its own (a Russian
-            # message opens with a single-letter word one time in seven, an English
-            # one never does), so the layout is already Russian when the next word
-            # is typed and the history holds that letter, not the joint phrase.
-            ("e", "у"),
+            # A lone letter typed in one burst with its neighbour waits for it: the schema-3 pair
+            # decides the two together and the history holds the joint phrase. Typed with a pause
+            # after its space, the letter converts on its own (`e` → `у`), as it has since 0.24.0.
+            ("e 'njuj", "у этого"),
         ]
         if actual_history != expected_history:
             return fail(f"wrong correction history: {actual_history!r}")
@@ -436,11 +435,10 @@ def main() -> int:
             ("ghbdtn", "привет"),
             ("ша руддщ", "if hello"),
             ("ша руддщ", "if hello"),
-            # Since 0.24.0 the lone "e" converts at the space on its own (a Russian
-            # message opens with a single-letter word one time in seven, an English
-            # one never does), so the layout is already Russian when the next word
-            # is typed and the history holds that letter, not the joint phrase.
-            ("e", "у"),
+            # A lone letter typed in one burst with its neighbour waits for it: the schema-3 pair
+            # decides the two together and the history holds the joint phrase. Typed with a pause
+            # after its space, the letter converts on its own (`e` → `у`), as it has since 0.24.0.
+            ("e 'njuj", "у этого"),
             ("hello", "руддщ"),
         ]
         if actual_history != expected_history:
