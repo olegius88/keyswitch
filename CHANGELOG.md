@@ -36,9 +36,10 @@ All notable changes to KeySwitch are documented in this file.
   and native end-to-end scripts type the lone `ша` with its neighbour (`if hello`): a two-letter
   word alone waits for the next word and the two are decided together. Both scripts now judge a
   case no earlier than its settle delay and poll for a late correction until a deadline instead
-  of one reading, the packaged run types a warm-up word until the engine corrects it before the
-  scripted cases, and the Windows E2E step runs a second time when a starved runner misses the
-  engine's layout-switch confirmation once.
+  of one reading, the packaged run types its first case again when a starved runner misses the
+  pause correction (each later case selects the layout the previous one ended in, so only the
+  first may repeat), and the Windows E2E step runs a second time when a starved runner misses
+  the engine's layout-switch confirmation once.
 - Quality floors. The model protocol gates a candidate against the frozen context-v1 +
   prefix-v1 pair, not against the pair it replaces, so a retrained model could ship worse than
   the installed one and pass. `tests/test_quality_ratchet.py` holds the shipped evidence (the

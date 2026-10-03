@@ -294,41 +294,49 @@ def main() -> int:
         failed = [name for name, passed in checks.items() if not passed]
         if failed:
             return fail(f"packaged tray checks failed: {', '.join(failed)}")
-        GLib.timeout_add(NATIVE_PACKAGE_E2E_TRAY_READY_TO_TYPING_DELAY_MS, warm_up, 1)
+        GLib.timeout_add(NATIVE_PACKAGE_E2E_TRAY_READY_TO_TYPING_DELAY_MS, first_case, 1)
         return GLib.SOURCE_REMOVE
 
-    _warmup_name, warmup_group, warmup_word, warmup_expected, _warmup_group_after, _warmup_delay = cases[0]
-
-    def warm_up(attempt: int) -> bool:
+    def first_case(attempt: int) -> bool:
         # The tray registers before the engine's X11 listener has necessarily seen a key, and
-        # a loaded runner delays the pause timer: the first scripted case must not carry that.
-        # The warm-up types the pause case and waits for its correction; only a packaged
-        # engine that converted it runs the cases. Its history entries are skipped below.
+        # a loaded runner delays the pause timer, so the first case is typed again when it is
+        # not corrected in time. A partial correction switches the layout and the next
+        # attempt's group selection protects the word as a manual choice, which the attempt
+        # after that no longer sees. The later cases never repeat: each selects the layout the
+        # previous one ended in, and a repeat would read as a manual switch.
+        name, group, physical, _expected_text, _expected_group, verify_delay = cases[0]
         try:
-            typer.switch_group(warmup_group)
+            typer.switch_group(group)
             entry.grab_focus()
             typer.clear_field()
-            typer.type(warmup_word)
+            typer.type(physical)
         except (OSError, RuntimeError) as error:
-            return fail(f"cannot type the warm-up word: {error}")
-        deadline = GLib.get_monotonic_time() + NATIVE_PACKAGE_E2E_WARMUP_DEADLINE_MS * MICROSECONDS_PER_MILLISECOND
-        GLib.timeout_add(E2E_VERIFY_POLL_MS, verify_warm_up, attempt, deadline)
+            return fail(f"cannot type {name!r}: {error}")
+        deadline = GLib.get_monotonic_time() + (verify_delay + NATIVE_PACKAGE_E2E_WARMUP_DEADLINE_MS) * MICROSECONDS_PER_MILLISECOND
+        GLib.timeout_add(verify_delay, verify_first_case, attempt, deadline)
         return GLib.SOURCE_REMOVE
 
-    def verify_warm_up(attempt: int, deadline: int) -> bool:
+    def verify_first_case(attempt: int, deadline: int) -> bool:
+        name, _group, _physical, expected_text, expected_group, _delay = cases[0]
         actual_text = entry.get_text()
-        if actual_text == warmup_expected:
-            print(f"warm_up attempt={attempt} text={actual_text!r}")
-            result.warmup_corrections = len(history.read())
-            GLib.timeout_add(E2E_INTER_CASE_DELAY_MS, type_case, 0)
+        actual_group = typer.current_group()
+        if (actual_text != expected_text or actual_group != expected_group) and GLib.get_monotonic_time() < deadline:
+            GLib.timeout_add(E2E_VERIFY_POLL_MS, verify_first_case, attempt, deadline)
             return GLib.SOURCE_REMOVE
-        if GLib.get_monotonic_time() < deadline:
-            return GLib.SOURCE_CONTINUE
-        print(f"warm_up attempt={attempt} text={actual_text!r} expected={warmup_expected!r}")
-        if attempt < NATIVE_PACKAGE_E2E_WARMUP_ATTEMPTS:
-            GLib.timeout_add(E2E_INTER_CASE_DELAY_MS, warm_up, attempt + 1)
-            return GLib.SOURCE_REMOVE
-        return fail("the packaged engine did not correct the warm-up word")
+        print(
+            f"case={name!r} attempt={attempt} text={actual_text!r} group={actual_group} "
+            f"expected={expected_text!r}/{expected_group}"
+        )
+        if actual_text != expected_text or actual_group != expected_group:
+            if attempt < NATIVE_PACKAGE_E2E_WARMUP_ATTEMPTS:
+                GLib.timeout_add(E2E_INTER_CASE_DELAY_MS, first_case, attempt + 1)
+                return GLib.SOURCE_REMOVE
+            return fail(f"wrong correction in {name!r}")
+        result.observed.append((name, actual_text, actual_group))
+        # Earlier attempts may have left corrections of their own; the last entry is this case's.
+        result.warmup_corrections = len(history.read()) - 1
+        GLib.timeout_add(E2E_INTER_CASE_DELAY_MS, type_case, 1)
+        return GLib.SOURCE_REMOVE
 
     def type_case(index: int) -> bool:
         (
@@ -369,7 +377,7 @@ def main() -> int:
         if index + 1 < len(cases):
             GLib.timeout_add(E2E_INTER_CASE_DELAY_MS, type_case, index + 1)
             return GLib.SOURCE_REMOVE
-        # The warm-up corrections come first; the scripted cases follow them.
+        # Corrections of the first case's earlier attempts come first; the cases follow them.
         actual_history = [
             (item.original, item.replacement) for item in history.read()
         ][result.warmup_corrections:]
@@ -469,7 +477,7 @@ def main() -> int:
                 "packaged learned rule did not run: "
                 f"text={entry.get_text()!r} group={typer.current_group()}"
             )
-        # The warm-up corrections come first; the scripted cases follow them.
+        # Corrections of the first case's earlier attempts come first; the cases follow them.
         actual_history = [
             (item.original, item.replacement) for item in history.read()
         ][result.warmup_corrections:]

@@ -26,8 +26,8 @@ NATIVE_PACKAGE_E2E_FORCED_SHUTDOWN_TIMEOUT_SECONDS: Final = 3
 NATIVE_PACKAGE_E2E_TIMEOUT_SECONDS: Final = 90
 NATIVE_PACKAGE_E2E_APPLICATION_POLL_MS: Final = 100
 NATIVE_PACKAGE_E2E_TRAY_READY_TO_TYPING_DELAY_MS: Final = 300
-# A warm-up word typed before the scripted cases proves the packaged engine observes keys and
-# corrects by the pause; a loaded runner may need a second attempt.
+# The first scripted case proves the packaged engine observes keys and corrects by the pause;
+# a loaded runner may need another attempt, each with this much extra time.
 NATIVE_PACKAGE_E2E_WARMUP_DEADLINE_MS: Final = 6000
 NATIVE_PACKAGE_E2E_WARMUP_ATTEMPTS: Final = 3
 # Pause of the X11 E2E drivers between one scripted typing case and the next.
