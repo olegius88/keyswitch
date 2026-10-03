@@ -305,6 +305,10 @@ def main() -> int:
         # after that no longer sees. The later cases never repeat: each selects the layout the
         # previous one ended in, and a repeat would read as a manual switch.
         name, group, physical, _expected_text, _expected_group, verify_delay = cases[0]
+        # The corrections of the earlier attempts are in the history before this one types;
+        # the engine records a correction after it has injected it, so counting once the
+        # field shows the corrected text could still miss this attempt's own entry.
+        result.warmup_corrections = len(history.read())
         try:
             typer.switch_group(group)
             entry.grab_focus()
@@ -333,8 +337,6 @@ def main() -> int:
                 return GLib.SOURCE_REMOVE
             return fail(f"wrong correction in {name!r}")
         result.observed.append((name, actual_text, actual_group))
-        # Earlier attempts may have left corrections of their own; the last entry is this case's.
-        result.warmup_corrections = len(history.read()) - 1
         GLib.timeout_add(E2E_INTER_CASE_DELAY_MS, type_case, 1)
         return GLib.SOURCE_REMOVE
 
