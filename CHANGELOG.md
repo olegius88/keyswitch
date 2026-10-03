@@ -39,6 +39,14 @@ All notable changes to KeySwitch are documented in this file.
   of one reading, the packaged run types a warm-up word until the engine corrects it before the
   scripted cases, and the Windows E2E step runs a second time when a starved runner misses the
   engine's layout-switch confirmation once.
+- Quality floors. The model protocol gates a candidate against the frozen context-v1 +
+  prefix-v1 pair, not against the pair it replaces, so a retrained model could ship worse than
+  the installed one and pass. `tests/test_quality_ratchet.py` holds the shipped evidence (the
+  release receipt, the frozen prefix and boundary engine replays, the number of disclosed
+  expectations) to the floors in `tests/fixture_values/quality_floors.py`: no corruption of
+  correct text, the restoration margin over the baseline, calibration recall and false
+  conversions, the serving thresholds. A floor only moves up with a better pair; lowering one
+  is a stated decision of a pull request.
 - A letter erased with Backspace is gone for the pause too. The Backspace re-armed the pause
   timer over the letters left, so `rjn`, Backspace, a pause converted the `rj` left behind a
   pause delay after the edit, as if the user had finished a word there. Erasing is editing: the
