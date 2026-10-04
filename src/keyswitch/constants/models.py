@@ -116,6 +116,9 @@ CONTEXT_OPENING_SCHEMAS: Final = (CONTEXT_OPENING_FEATURE_VERSION, CONTEXT_LINE_
 # Schema 7: the occurrence counts that open the term frequency buckets above the first, in every
 # table; a reading seen fewer times than the first bound is in bucket 0, as one never seen.
 CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS: Final = (5, 50, 500, 5000)
+# The lowest term frequency bucket of a Russian abbreviation or slang word the context policy keeps
+# as typed (context_policy.russian_slang): fifty occurrences or more inside Russian technical text.
+RUSSIAN_SLANG_MIN_TERM_BUCKET: Final = 2
 # Feature schemas a context artifact may carry: context-v1's and the context action scheme's.
 CONTEXT_SUPPORTED_FEATURE_VERSIONS: Final = (*CONTEXT_V1_FEATURE_VERSIONS, CONTEXT_ACTION_FEATURE_VERSION)
 # Feature schema 2 only: words of the left and of the right context that become word features, and

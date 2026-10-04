@@ -53,7 +53,7 @@ from freeze_context_action_holdout import ledger_test_aliases
 from reconcile_context_action_corpus import expanded_aliases
 from keyswitch.constants.file_formats import HEXADECIMAL_BASE, VERSION_HASH_CHARACTERS
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
-from keyswitch.constants.models import CONTEXT_ACTION_FEATURE_VERSION
+from keyswitch.constants.models import CONTEXT_ACTION_FEATURE_VERSION, PLANNED_CONTEXT_WORD_MAX_CHARACTERS
 from keyswitch.constants.training import (
     BOUNDARY_EVENT_CHOICES,
     CITATION_SIGN_HEADS,
@@ -415,6 +415,113 @@ def historical_curriculum(intent: LinearNgramModel | None = None) -> list[Action
     )) for row in result]
 
 
+def captured_curriculum(options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """Questions the engine asked while public mixed text was typed the way a person types it.
+
+    model/context_v1/captured holds them (tools/mixed_typing.py capture, pinned by SHA-256 in
+    its manifest): ru.stackoverflow messages with their English terms and code lines, Tatoeba
+    chat and the English sentence started in the Russian layout, correctly typed UD Taiga - each
+    token typed in its own layout, the switch at a language boundary sometimes forgotten, the
+    message sometimes begun in the wrong layout. context-v1 learned from them since 0.35.0; the
+    action model only ever saw the scenario families, and on the owner's own typing (field logs
+    of 0.31-0.36, replayed through 0.37.0) it left Russian words typed in the English layout after
+    an inline English term (`git nfr` for `git так`) and English terms typed in the Russian layout
+    amid Russian prose about twice as often as context-v1 did. TRAIN only: the files hold the
+    train parts of their sources.
+
+    The same isolated-short policy applies as to every other frame: a token with no word on
+    either side, short enough to have no observable intent, takes the deferred action whatever
+    the typing meant. Inside-word questions are left out (the action features have no inside
+    flag), and a planned frame of a word longer than the planned context allows is asked with
+    the field origin, as the engine asks it (KeySwitchEngine._neighbour_origin).
+    """
+    from train_context_model import captured_rows, captured_sources
+
+    budget = int(cast(int, options["maximum_rows_per_source"]))
+    # None keeps each file's own share of convert questions.
+    convert_share = None if options["convert_share"] is None else float(cast(float, options["convert_share"]))
+    keep_unknown_share = float(cast(float, options["keep_unknown_share"]))
+    unknown_keep_groups = frozenset(cast(list[int], options["unknown_keep_groups"]))
+    weight_scale = float(cast(float, options["weight_scale"]))
+    minimum_characters = int(cast(int, options["minimum_word_characters"]))
+    excluded = tuple(cast(list[str], options["excluded_file_markers"]))
+    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+    result: list[ActionRow] = []
+    report: dict[str, object] = {}
+    for source in captured_sources(ROOT / str(options["manifest"])):
+        name = source.path.name
+        if any(marker in name for marker in excluded):
+            report[name] = {"excluded": True}
+            continue
+        ranked: dict[ContextAction, list[tuple[bytes, ContextEvidence]]] = {"keep": [], "convert": []}
+        skipped_short = 0
+        for item, label, _count in captured_rows(source.path):
+            action = ACTIONS[label]
+            if action not in ranked:
+                continue
+            if len(item.original) < minimum_characters:
+                # A lone letter is left out, as the corpus leaves it out: in these files a lone
+                # `b`, `c`, `d` or `f` is nearly always a Russian word typed in the English layout,
+                # and a model taught so converted a capital letter in English prose.
+                skipped_short += 1
+                continue
+            try:
+                translated(item.original, item.source_group)
+            except ValueError:
+                continue
+            key = hashlib.sha256(canonical(["captured", name, item.original, item.source_group, item.trigger,
+                                            item.literal_tail, item.boundary_text, item.after_origin,
+                                            item.field.before, item.field.after, item.field.role])).digest()
+            ranked[action].append((key, item))
+        available = len(ranked["convert"]) + len(ranked["keep"])
+        share = convert_share if convert_share is not None else len(ranked["convert"]) / max(1, available)
+        converts = sorted(ranked["convert"], key=lambda entry: entry[0])[:int(budget * share)]
+        # Correctly typed words no lexicon knows - slang, names, brands, abbreviations, English
+        # terms typed in the English layout - are the keep answers a uniform sample nearly never
+        # draws, and exactly the ones both model lines turned into gibberish of the other layout
+        # (an invented `шупшуп` became `iegieg` at p=0.994). Those of the layouts the recipe names
+        # get their own share of the keeps; without the Latin ones, a month name and a capital
+        # abbreviation in English prose were converted.
+        keep_budget = budget - len(converts)
+        ordered_keeps = sorted(ranked["keep"], key=lambda entry: entry[0])
+        unknown = [entry for entry in ordered_keeps if entry[1].source_group in unknown_keep_groups
+                   and not plausible_reading(entry[1].original, entry[1].source_group)]
+        chosen_unknown = unknown[:int(keep_budget * keep_unknown_share)]
+        taken = {entry[0] for entry in chosen_unknown}
+        keeps = chosen_unknown + [entry for entry in ordered_keeps if entry[0] not in taken][:keep_budget - len(chosen_unknown)]
+        counts: Counter[str] = Counter()
+        for action, chosen in (("convert", converts), ("keep", keeps)):
+            for key, item in chosen:
+                identifier = f"captured:{source.path.stem}:{key.hex()}"
+                application = applications[variant_choice(identifier, "application", len(applications))]
+                field = FieldContext(application, "captured", item.field.before, item.field.after, item.field.role)
+                origin = item.after_origin
+                if origin == "planned_next_conversion" and len(item.original) > PLANNED_CONTEXT_WORD_MAX_CHARACTERS:
+                    origin = "field"
+                if origin == "planned_next_conversion" and WORDS.match(item.field.after.lstrip()) is None:
+                    # The engine plans a next word only once one was typed; a planned
+                    # question without a leading word cannot have been asked.
+                    counts["skipped_planned_without_word"] += 1
+                    continue
+                labelled: ContextAction = action
+                curated_letter = (len(item.original) == 1 and len(item.alternative) == 1
+                                  and (item.original.casefold() in TRUSTED_SINGLE_LETTER_WORDS
+                                       or item.alternative.casefold() in TRUSTED_SINGLE_LETTER_WORDS))
+                if (origin != "planned_next_conversion" and not curated_letter
+                        and not WORDS.search(item.field.before) and not WORDS.search(item.field.after)
+                        and deferred_isolated(item.original, item.alternative, item.source_group)):
+                    labelled = "suggest" if item.trigger in ("enter", "tab", "punctuation") else "wait"
+                counts[labelled] += 1
+                result.append(ActionRow(identifier, item.original, item.source_group, field,
+                                        cast(CorrectionTrigger, item.trigger), item.literal_tail, labelled,
+                                        "captured_" + source.path.name.split(".", 1)[0].replace("-", "_"),
+                                        item.boundary_text, source.weight * weight_scale, origin))
+        report[name] = {"available": {action: len(rows) for action, rows in ranked.items()}, "skipped_short": skipped_short,
+                        "unknown_keep_available": len(unknown), "unknown_keep_chosen": len(chosen_unknown),
+                        "chosen": dict(counts), "weight": source.weight * weight_scale}
+    return result, report
+
+
 def legacy_lookahead_rows(
     rows: Sequence[ActionRow], detector: LanguageDetector, ortho: OrthoModel | None, *,
     profile: str, maximum_families: int, seeds_per_family: int,
@@ -726,6 +833,7 @@ def provenance() -> dict[str, str]:
         "tools/action_epoch_selection.py", "tests/test_action_epoch_selection.py",
         "tools/context_lookahead_curriculum.py", "tests/test_context_lookahead_curriculum.py",
         "tools/context_deferral.py",
+        "tools/train_context_model.py", "model/context_v1/captured/manifest.json",
         "tests/test_context_action_training.py", "tests/test_default_input_sequences.py",
         "tools/context_technical_corpus.py", "tools/merge_context_action_corpora.py",
         "tests/test_context_technical_corpus.py", "tests/test_context_action_merge.py",
@@ -929,7 +1037,8 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
     detectors = {name: LanguageDetector(lexical_models[name], intent) for name in profiles}
     output.mkdir(parents=True)
     (output / "recipe.json").write_bytes(canonical(options))
-    frames["train"] = training_order([*frames["train"], *historical_curriculum(intent)])
+    captured, captured_report = captured_curriculum(cast(dict[str, object], options["captured_curriculum"]))
+    frames["train"] = training_order([*frames["train"], *historical_curriculum(intent), *captured])
     feature_paths: dict[tuple[str, str], Path] = {}
     feature_mass = FeatureMass()
     span_budgets = cast(dict[str, int], options["span_maximum_families"])
@@ -1053,6 +1162,7 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
         "lookahead_curriculum": lookahead_reports,
         "natural_lookahead_curriculum": natural_reports,
         "lexical_short_pair_curriculum": lexical_reports,
+        "captured_curriculum": captured_report,
         "planned_mass_balance": balance_reports,
         "test_accessed": False,
         "scope": "natural KEEP plus declared layout/mixed-context interventions; sequence evaluation required"}

@@ -146,15 +146,17 @@ class ContextAfterOriginTests(unittest.TestCase):
             self.assertEqual(model.items[0][0].field.after, "нас")
 
     def test_resolver_labels_the_pending_next_word_before_joint_injection(self) -> None:
+        # Two letters wait as one does; a lone letter would follow only a curated rule, whatever
+        # the model says (ContextPolicy.decide), and `р` is no word of that list.
         with sequences.session() as current:
             model = TransitionModel(lambda: (current.backend.text, len(current.backend.injections)))
             current.engine.context_policy.model = model
-            current.physical("h ")
+            current.physical("hs ")
             current.physical("yfc ")
             self.assertEqual([(item.original, item.after_origin, item.field.after) for item, _ in model.items],
-                             [("h", "none", ""), ("yfc", "none", ""), ("h", "planned_next_conversion", "нас")])
-            self.assertEqual(model.items[-1][1], ("h yfc ", 0))
-            self.assertEqual((current.backend.text, len(current.backend.injections)), ("р нас ", 1))
+                             [("hs", "none", ""), ("yfc", "none", ""), ("hs", "planned_next_conversion", "нас")])
+            self.assertEqual(model.items[-1][1], ("hs yfc ", 0))
+            self.assertEqual((current.backend.text, len(current.backend.injections)), ("ры нас ", 1))
 
     def test_planned_keep_preserves_first_word_and_only_executes_the_next_plan(self) -> None:
         with sequences.session() as current:

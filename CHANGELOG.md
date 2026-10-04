@@ -4,6 +4,77 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- The context model reads what context-v1 schema 7 decided by and the action scheme lacked: where
+  the word stands on its line, whether a reading opens sentences of its language, and how often each
+  reading occurs inside Russian technical text and in text of its own language (the packaged
+  `context-term-frequency.json`). Replayed through the engine, the owner's own typing from the field
+  logs of 0.26-0.36.3 (16 887 scored words on two computers, labelled by what the user did next)
+  showed 0.37.0 leaving words in the wrong layout about twice as often as 0.36.3 (181 against 93),
+  nearly all of them what the tables tell apart: English terms typed in the Russian layout amid
+  Russian prose (`зк` is never seen inside Russian text, `pr` often), common Russian words typed in
+  the English layout after an English term, Russian abbreviations converted into Latin. A token
+  neither reading of which the tables can count (`1С`, `2фа`: digits in both) gets no frequency
+  features; a shared "no entry" bucket made a candidate convert `работаю в 1С` into `1C`. The pair
+  installed with this release (context model retrained on corpus v18, test v18 passed): on that
+  replay it converts 613 words right, leaves 113 in the wrong layout and converts 63 falsely,
+  against 584/181/63 for 0.37.0 and 617/93/67 for 0.36.3, and on the 239 words whose layout the
+  user's own correction shows (Pause, an undo, the same keys typed again) 90/41/7 against 77/54/7
+  and 86/47/8 (the replay's other labels follow what the versions that wrote the logs did, so they
+  favour 0.36.3). On public text it recalls 0.977 of the conversions of corpus v18 calibration with
+  7 false ones per profile (0.975 and 13-14 for the 0.37.0 model), restores 106 and 239 development
+  sequences with the early switch on and off against the frozen baseline's 96 and 217 without
+  corrupting correct text, and passed test v18: 190 against 183 with the early switch off, 15
+  against 16 with it on while the baseline corrupted one or two correct rows and it none. `ghbdtn@`
+  converts again, so three authored expectations stay disclosed instead of four; the quality floors
+  take the new levels, and the two that move down say why in
+  `tests/fixture_values/quality_floors.py` (the restoration margin with the early switch on,
+  measured on a new test set, and the prefix replay's changed correct text).
+- An early layout switch is settled when the word ends. The prefix model switches on four to twelve
+  letters; the completed word used to be judged only in the layout the switch had put it in, where
+  an unknown Russian word made Latin (a brand or a slang word no lexicon holds) reads as gibberish
+  both ways and the model kept what was shown, so a wrong switch stayed. The word is now also asked
+  about as typed, in the same field: a model that keeps it takes the switch back in one correction,
+  a convert confirms it, and a model in doubt leaves the prefix model's choice standing. A switch
+  that produced a word of the lexicon or of the identifier index is never taken back.
+- Keys that are letters in the other layout no longer block the early switch. A word whose prefix
+  held `,` `.` `;` `[` `]` or `'` (б, ю, ж, х, ъ, э in the Russian layout) waited for its boundary
+  in full, because such a key may still be punctuation: in the owner's logs about a third of the
+  long Russian words typed in the English layout. Only a sign key that ends the prefix waits now. On
+  the frozen prefix engine replay the pair restores all 128 sequences instead of 127, 123-126 of
+  them early instead of 112-114, and changes as much correct text as the replay without the prefix
+  model: 20 of 160 rows, one more than with 0.37.0, a Russian word typed in the English layout after
+  a `$` prompt that the replay labels a command to keep.
+- A word the early switch converted counts as converted for the words before it. It reaches its
+  boundary already in the other layout, so the first word of a message was never asked again: `dct`
+  stayed when `ujnjdj` after it became `готово` on its fourth letter. The first words of a line are
+  now asked again with it, as with a word converted at its space (`dct ujnjdj` -> `все готово`), and
+  a word waiting for its neighbour is decided with it; Pause takes the phrase back to the keys as
+  typed.
+- Lone letters are converted by the curated rules only. The action model has no single-letter row -
+  all of them sit in quarantine - and on its own it turned `ч` into `x` and `ы` into `s` at p=0.99;
+  its convert now stands for a lone letter, alone or with digits (`1С`, `а1`), only together with a
+  curated rule. A one-letter Russian word typed in the English layout right after an English term
+  inside a Russian phrase converts by rule (`поправь env b` -> `поправь env и`): a lower-case letter
+  whose other reading is a curated word converts when the words before it on its line are a Latin
+  term of up to three words with a Russian word before the term and no end of a sentence in between.
+  A letter that waits for its neighbour converts with it when the neighbour converts into the layout
+  where the letter is a curated word (`api f gjnjv` -> `api а потом`); the model's answer about a
+  lone letter before its neighbour is no opinion either. A capital letter (`plan B`) and a letter
+  after English text alone stay.
+- A Russian abbreviation or slang word typed as intended stays whatever the model says when Russian
+  technical text uses it again and again and its Latin keys occur neither there nor in English text
+  (`пдф`, `впн`; `context_policy.russian_slang`, the packaged term tables). Such a word is in no
+  lexicon and reads as gibberish both ways, and the language models lean to the Latin reading: the
+  candidate trained with the term evidence still turned `пдф` into `gla`. A form whose Latin keys
+  are a term (`тз` and `np`) is the model's to decide.
+- The action trainer can sample the questions the engine asked while public mixed text was typed
+  (`model/context_v1/captured`: ru.stackoverflow, Tatoeba chat, UD Taiga; context-v1 learned from
+  them since 0.35.0), TRAIN only (recipe `captured_curriculum`), and the holdout and fitting
+  freezers leave out the Tatoeba sentences those questions were typed from. The installed model is
+  trained without them: at half or full weight, and without the questions about the first word of a
+  line, they cut Russian abbreviations converted into Latin but missed more of the words the owner
+  corrected by hand and kept short words opening a message as typed (`ns`, `Lf`).
+
 ## 0.37.0 — 2026-10-03
 
 - CI runs its Linux checks in four parallel jobs (typing, coverage and E2E; the model

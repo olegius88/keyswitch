@@ -20,7 +20,8 @@ from freeze_context_action_holdout import (
     select_holdout_sentences, sentence_documents, sid_holdout_rows, ud_holdout_rows, verified_sid_source,
     arch_holdout_rows, read_arch_commands, verified_arch_source, ARCH_MIRROR,
     fedora_holdout_rows, read_fedora_commands, verified_fedora_source, FEDORA_BASE, OPENSUSE_BASE, RAWHIDE_BASE, RPM_SOURCES,
-    read_tatoeba, tatoeba_sentence, verified_tatoeba_source, TATOEBA_BASE, UBUNTU_CONTENTS_URL, UBUNTU_RELEASE_URL,
+    captured_tatoeba_identifiers, read_tatoeba, tatoeba_sentence, verified_tatoeba_source, TATOEBA_BASE, UBUNTU_CONTENTS_URL,
+    UBUNTU_RELEASE_URL,
     alpine_holdout_rows, read_alpine_commands, verified_alpine_source, ALPINE_BASE, ALPINE_COMMUNITY_BASE,
 )
 from reconcile_context_action_corpus import expanded_aliases
@@ -432,6 +433,24 @@ class TatoebaHoldoutTests(unittest.TestCase):
         foreign = self.export("eng", [("7", "rus", "Не тот язык.")])
         with self.assertRaises(ValueError):
             list(read_tatoeba(foreign, "Tatoeba-eng", "eng", "ns"))
+
+    def test_a_sentence_the_training_questions_were_typed_from_never_enters_a_corpus(self) -> None:
+        lines = [(str(index), "rus", f"Предложение номер {index}.") for index in range(1, TATOEBA_FIXTURE_SENTENCE_COUNT + 1)]
+        path = self.export("rus", lines)
+        kept = list(read_tatoeba(path, "Tatoeba-rus", "rus", "ns", per_mille=TATOEBA_TEST_SAMPLE_PER_MILLE))
+        captured = frozenset(item.identifier.rsplit(":", 1)[1] for item in kept[:1])
+        rest = list(read_tatoeba(path, "Tatoeba-rus", "rus", "ns", per_mille=TATOEBA_TEST_SAMPLE_PER_MILLE, excluded=captured))
+        self.assertEqual([item.identifier for item in rest], [item.identifier for item in kept[1:]])
+
+    def test_the_captured_sentences_are_read_by_identifier(self) -> None:
+        import lzma
+
+        path = self.root / "authors.tsv.xz"
+        with lzma.open(path, "wt", encoding="utf-8") as stream:
+            stream.write("# Tatoeba sentences the captured files hold and their authors\n1286\tsomeone\n1315\t\\N\n")
+        self.assertEqual(captured_tatoeba_identifiers(path), frozenset({"1286", "1315"}))
+        # The pinned file of the captured questions names the sentences the freezers leave out.
+        self.assertTrue(captured_tatoeba_identifiers())
 
     def test_the_receipt_pins_each_export_by_size_and_digest(self) -> None:
         path = self.export("rus", [("1", "rus", "Привет.")])

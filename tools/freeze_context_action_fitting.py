@@ -46,7 +46,8 @@ from freeze_context_action_corpus import (
 )
 from freeze_context_action_holdout import (
     Exclusions, alias_reasons, gzip_member, ledger_test_aliases, ledger_test_families, ledger_test_rows, load_exclusions,
-    read_object, read_tatoeba, select_holdout_sentences, sentence_documents, verified_tatoeba_source,
+    CAPTURED_TATOEBA, captured_tatoeba_identifiers, read_object, read_tatoeba, select_holdout_sentences, sentence_documents,
+    verified_tatoeba_source,
 )
 from reconcile_context_action_corpus import expanded_aliases, membership_aliases, row_aliases
 from keyswitch.constants.model_protocol import FITTING_SPLITS
@@ -283,9 +284,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     exclusions = load_exclusions(ROOT, args.base, args.ud_origin, args.technical_origin,
                                  args.prefix_inventory, args.lexicon, args.extra_exposure, ledger=args.ledger)
     exports, tatoeba_provenance, tatoeba_metadata = verified_tatoeba_source(args.tatoeba_directory, args.tatoeba_language)
+    captured_sentences = captured_tatoeba_identifiers()
+    tatoeba_provenance[str(CAPTURED_TATOEBA.relative_to(ROOT))] = hashlib.sha256(CAPTURED_TATOEBA.read_bytes()).hexdigest()
+    tatoeba_metadata["captured_training_sentences_excluded"] = len(captured_sentences)
     sentences: list[Sentence] = []
     for label, language, path in exports:
-        sentences.extend(read_tatoeba(path, label, language, args.namespace))
+        sentences.extend(read_tatoeba(path, label, language, args.namespace, excluded=captured_sentences))
     sentences = sentence_documents(sentences)
     selected, sampling = select_holdout_sentences(sentences, args.namespace, args.max_documents,
                                                   args.max_sentences_per_document)
