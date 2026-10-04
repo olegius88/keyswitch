@@ -784,30 +784,39 @@ jobs:
           python -m unittest discover -s tests -p test_input_integrity.py
           python tests/test_intent_model.py
 
-      - name: Close the WWAHost window that holds the foreground
+      - name: Clear the sign-in shell windows that hold the foreground
         continue-on-error: true
         shell: powershell
         run: |
           # The Windows 11 desktop image opens a WWAHost window (the host of Windows web
-          # apps) at sign-in, and it keeps the foreground: the E2E window never came to the
-          # front ("did not become foreground ... actual='wwahost'"). Record what it is,
-          # close it, and show what holds the foreground afterwards.
+          # apps) at sign-in and, once that is closed, the search and Start surfaces hold
+          # the foreground: the E2E window never came to the front ("did not become
+          # foreground ... actual='wwahost'", then 'searchhost'). Close the web-app host,
+          # dismiss the shell surfaces with Escape, and log the foreground on the way.
           Add-Type -Namespace KeySwitchCi -Name Foreground -MemberDefinition @'
           [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
           [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+          [DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
           '@
-          function Show-Foreground([string] $When) {
+          function Get-ForegroundName {
             [uint32] $owner = 0
             [void] [KeySwitchCi.Foreground]::GetWindowThreadProcessId([KeySwitchCi.Foreground]::GetForegroundWindow(), [ref] $owner)
-            $process = Get-Process -Id $owner -ErrorAction SilentlyContinue
-            Write-Output "Foreground $When`: $($process.ProcessName) '$($process.MainWindowTitle)'"
+            (Get-Process -Id $owner -ErrorAction SilentlyContinue).ProcessName
           }
-          Show-Foreground "before"
+          Write-Output "Foreground before: $(Get-ForegroundName)"
           Get-CimInstance Win32_Process -Filter "Name = 'WWAHost.exe'" | Format-List ProcessId, CommandLine
           Get-Process WWAHost -ErrorAction SilentlyContinue | Stop-Process -Force
           Start-Sleep -Seconds 2
-          Show-Foreground "after"
-          Get-Process WWAHost -ErrorAction SilentlyContinue | Format-List Id, MainWindowTitle
+          $shellSurfaces = @("WWAHost", "SearchHost", "SearchApp", "StartMenuExperienceHost", "ShellExperienceHost")
+          foreach ($attempt in 1..5) {
+            $name = Get-ForegroundName
+            Write-Output "Foreground: $name"
+            if ($shellSurfaces -notcontains $name) { break }
+            [KeySwitchCi.Foreground]::keybd_event(0x1B, 0, 0, [UIntPtr]::Zero)
+            [KeySwitchCi.Foreground]::keybd_event(0x1B, 0, 2, [UIntPtr]::Zero)
+            Start-Sleep -Seconds 1
+          }
+          Write-Output "Foreground after: $(Get-ForegroundName)"
 
       - name: Run the hook, SendInput and Tk E2E on ARM64
         continue-on-error: true
@@ -822,15 +831,14 @@ jobs:
         shell: pwsh
         run: ./packaging/build-windows.ps1
 
-      - name: Show which architecture the built executable is
+      - name: Check the ARM64 files the build produced
         continue-on-error: true
         shell: pwsh
         run: |
-          $executable = Get-ChildItem -Recurse -Filter KeySwitch.exe build, dist -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $executable) { throw "No KeySwitch.exe was built" }
-          $bytes = [System.IO.File]::ReadAllBytes($executable.FullName)
-          $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
-          $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
-          Write-Host ("{0}: PE machine 0x{1:X4} (0xAA64 is ARM64, 0x8664 is x64)" -f $executable.FullName, $machine)
-          $diagnostics = & $executable.FullName --diagnose
-          Write-Host $diagnostics
+          # build-windows.ps1 names the files after the build Python's architecture and
+          # refuses an executable whose PE machine is not ARM64.
+          $version = (Select-String -Path pyproject.toml -Pattern '^version = "([^"]+)"$').Matches.Groups[1].Value
+          foreach ($file in "dist/KeySwitch-Setup-$version-arm64.exe", "dist/KeySwitch-$version-windows-arm64.zip") {
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "The ARM64 build did not produce $file" }
+            Write-Host ("{0}: {1:N0} bytes" -f $file, (Get-Item -LiteralPath $file).Length)
+          }

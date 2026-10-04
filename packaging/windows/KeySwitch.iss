@@ -10,6 +10,18 @@
 #ifndef SetupIcon
   #error SetupIcon is required
 #endif
+; x64 (the default) or arm64. The x64 installer also installs on Windows 11 on Arm,
+; where the program runs under emulation; the arm64 one installs only there.
+#ifndef Arch
+  #define Arch "x64"
+#endif
+#if Arch == "arm64"
+  #define ArchitecturesSupported "arm64"
+#elif Arch == "x64"
+  #define ArchitecturesSupported "x64compatible"
+#else
+  #error Arch must be x64 or arm64
+#endif
 
 [Setup]
 AppId={{8E630D23-C19A-4B31-9D59-0F75F925BB95}
@@ -24,13 +36,13 @@ DefaultGroupName=KeySwitch
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir={#OutputDir}
-OutputBaseFilename=KeySwitch-Setup-{#MyAppVersion}-x64
+OutputBaseFilename=KeySwitch-Setup-{#MyAppVersion}-{#Arch}
 SetupIconFile={#SetupIcon}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+ArchitecturesAllowed={#ArchitecturesSupported}
+ArchitecturesInstallIn64BitMode={#ArchitecturesSupported}
 UninstallDisplayIcon={app}\KeySwitch.exe
 VersionInfoVersion={#MyAppVersion}.0
 VersionInfoCompany=Oleg Shevchuk
