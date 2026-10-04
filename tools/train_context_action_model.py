@@ -415,6 +415,74 @@ def historical_curriculum(intent: LinearNgramModel | None = None) -> list[Action
     )) for row in result]
 
 
+def term_insertion_curriculum(rows: Sequence[CorpusRow], options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """English terms of Russian technical text inside real Russian sentences of TRAIN, both ways round.
+
+    The owner's own typing (field logs of 0.26-0.36.3, replayed through 0.38.0) leaves two classes
+    in the wrong layout more than any other: an English term typed in the Russian layout amid
+    Russian prose (`вум` for `dev`, `зк` for `pr`), and the Russian word typed in the English layout
+    right after such a term, the layout still English (`private api lkz` for `для`). The corpus
+    holds hardly any: its sentences are monolingual, and the mixed-language frames use a handful of
+    fixed contexts. Each frame here replaces a Russian word of a TRAIN sentence with a term the
+    packaged term table counts inside Russian technical text at least `minimum_term_count` times
+    (a) or puts the term before that word (b), and labels both members of the physical word:
+    the reading typed in its own layout keeps, the other converts. A term whose Cyrillic reading is
+    a word or is counted in Russian text is left out (`ns` is `ты`, `if` is `ша`), and so is a
+    Russian word whose Latin reading is a word or an identifier - the intent of those is not the
+    label of the frame.
+    """
+
+    from keyswitch.context_model import _term_frequency
+
+    budget = int(cast(int, options["maximum_contexts"]))
+    report: dict[str, object] = {"maximum_contexts": budget}
+    if budget <= 0:
+        return [], report
+    weight = float(cast(float, options["weight"]))
+    minimum = int(cast(int, options["minimum_term_count"]))
+    tables = _term_frequency()
+    terms = []
+    for term, count in sorted(tables["latin"].items(), key=lambda item: (-item[1], item[0])):
+        if count < minimum or not term.isalpha() or not term.isascii() or not 2 <= len(term) <= 10:
+            continue
+        cyrillic = translated(term, 0)
+        if plausible_reading(cyrillic, 1) or tables["russian"].get(cyrillic, 0) >= minimum or tables["cyrillic"].get(cyrillic, 0) >= minimum:
+            continue
+        terms.append(term)
+        if len(terms) >= int(cast(int, options["maximum_terms"])):
+            break
+    contexts = [row for row in rows if row.group == 1 and row.layout_representable and row.original.isalpha()
+                and len(row.original) >= 2 and len(re.findall(r"[а-яё]{2,}", row.before.casefold())) >= 2]
+    contexts.sort(key=lambda row: hashlib.sha256(("term-insertion:" + row.identifier).encode()).digest())
+    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+    result: list[ActionRow] = []
+    counts: Counter[str] = Counter()
+    for row in contexts[:budget]:
+        term = terms[variant_choice(row.identifier, "insertion-term", len(terms))]
+        application = applications[variant_choice(row.identifier, "application", len(applications))]
+        before = row.before if row.before.endswith((" ", "\n")) or not row.before else row.before + " "
+        field = FieldContext(application, "public-training", before, "", "unknown")
+        identity = row.identifier + ":term-insertion"
+        result.append(ActionRow(identity + ":term", term, 0, field, "space", "", "keep",
+                                "term_insertion", " ", weight))
+        result.append(ActionRow(identity + ":term:wrong", translated(term, 0), 1, field, "space", "", "convert",
+                                "term_insertion_layout_intervention", " ", weight))
+        counts["term"] += 1
+        latin = translated(row.original, 1)
+        if plausible_reading(latin, 0) or plausible_reading(latin.casefold(), 0):
+            counts["after_term_skipped_plausible_latin"] += 1
+            continue
+        after_term = FieldContext(application, "public-training", before + term + " ", "", "unknown")
+        result.append(ActionRow(identity + ":after", row.original, 1, after_term, "space", "", "keep",
+                                "word_after_term", " ", weight))
+        result.append(ActionRow(identity + ":after:wrong", latin, 0, after_term, "space", "", "convert",
+                                "word_after_term_layout_intervention", " ", weight))
+        counts["after_term"] += 1
+    report.update({"terms": len(terms), "contexts": len(contexts), "frames": len(result), "counts": dict(counts),
+                   "weight": weight, "minimum_term_count": minimum})
+    return result, report
+
+
 # Quarantine reasons that only say a word family also lives in other documents or was read by an
 # earlier test; a row with any other reason (a test document, row or family read before) stays out.
 LETTER_CURRICULUM_REASONS = frozenset({"family-crosses-document-splits", "family-previously-exposed", "family-in-base-corpus"})
@@ -1082,7 +1150,8 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
     # A letter keeps the frames of its own sentence and of an empty field only: the mixed-language
     # frames would teach that `d` after English text is a `в` typed in the wrong layout.
     letter_frames = [row for row in action_rows(letters) if ":observed:" in row.identifier or ":empty:" in row.identifier]
-    frames["train"] = [*frames["train"], *letter_frames]
+    insertions, insertion_report = term_insertion_curriculum(source_rows["train"], cast(dict[str, object], options["term_insertion_curriculum"]))
+    frames["train"] = [*frames["train"], *letter_frames, *insertions]
     if any(not rows for rows in frames.values()):
         raise ValueError("empty fitting split")
     intent = LinearNgramModel.load(ROOT / "src/keyswitch/resources/models/layout_intent_v1.ksm")
@@ -1219,6 +1288,7 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
         "lexical_short_pair_curriculum": lexical_reports,
         "captured_curriculum": captured_report,
         "letter_curriculum": letter_report,
+        "term_insertion_curriculum": insertion_report,
         "planned_mass_balance": balance_reports,
         "test_accessed": False,
         "scope": "natural KEEP plus declared layout/mixed-context interventions; sequence evaluation required"}

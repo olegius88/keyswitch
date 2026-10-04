@@ -138,7 +138,14 @@
   "minimum_word_characters": 2
  },
  "letter_curriculum": {
-  "maximum_rows_per_letter": 60,
+  "maximum_rows_per_letter": 0,
   "scope": "Single letters of TRAIN documents from the quarantine the family split sends them to (train_context_action_model.letter_curriculum)."
+ },
+ "term_insertion_curriculum": {
+  "maximum_contexts": 4000,
+  "maximum_terms": 1500,
+  "minimum_term_count": 50,
+  "weight": 0.5,
+  "scope": "English terms of Russian technical text inside TRAIN Russian sentences, and the Russian word after them (train_context_action_model.term_insertion_curriculum)."
  }
 }
