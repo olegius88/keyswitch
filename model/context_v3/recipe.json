@@ -136,5 +136,9 @@
   ],
   "weight_scale": 0.5,
   "minimum_word_characters": 2
+ },
+ "letter_curriculum": {
+  "maximum_rows_per_letter": 60,
+  "scope": "Single letters of TRAIN documents from the quarantine the family split sends them to (train_context_action_model.letter_curriculum)."
  }
 }

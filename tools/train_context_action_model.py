@@ -415,6 +415,56 @@ def historical_curriculum(intent: LinearNgramModel | None = None) -> list[Action
     )) for row in result]
 
 
+# Quarantine reasons that only say a word family also lives in other documents or was read by an
+# earlier test; a row with any other reason (a test document, row or family read before) stays out.
+LETTER_CURRICULUM_REASONS = frozenset({"family-crosses-document-splits", "family-previously-exposed", "family-in-base-corpus"})
+
+
+def letter_curriculum(corpus: Path, source_rows: Mapping[str, Sequence[CorpusRow]],
+                      options: Mapping[str, object]) -> tuple[list[CorpusRow], dict[str, object]]:
+    """Single letters of TRAIN documents, which the family split sends to quarantine as a class.
+
+    `в`, `и`, `с`, `a` and `I` stand in nearly every document, so their families cross the document
+    splits and every row of them sits in quarantine: the action model was trained without a single
+    one-letter row, and on its own it turned `ч` into `x` and `ы` into `s` at p=0.99 while it left
+    `б` for `,` and a capital `Ф` for `A` (the owner's field logs, 03.10.2026) - a veto in the
+    context policy stood in for the missing class. These rows come only from documents whose every
+    other row is in TRAIN, and never from a row, document or family a test read; a letter family
+    reaches the development and test documents too, which the sequence gates measure as they always
+    did. At most `maximum_rows_per_letter` rows per letter and layout, chosen by hash.
+    """
+
+    budget = int(cast(int, options["maximum_rows_per_letter"]))
+    report: dict[str, object] = {"maximum_rows_per_letter": budget}
+    if budget <= 0:
+        return [], report
+    document_splits: dict[str, set[str]] = defaultdict(set)
+    for split, rows in source_rows.items():
+        for row in rows:
+            document_splits[row.document].add(split)
+    train_documents = {document for document, splits in document_splits.items() if splits == {"train"}}
+    chosen: dict[tuple[int, str], list[tuple[bytes, CorpusRow]]] = defaultdict(list)
+    seen = refused = 0
+    for row in load_split(corpus, "quarantine"):
+        if len(row.original) != 1 or not row.original.isalpha() or row.group not in (0, 1) or not row.layout_representable:
+            continue
+        seen += 1
+        if row.document not in train_documents or not set(row.quarantine_reasons) <= LETTER_CURRICULUM_REASONS:
+            refused += 1
+            continue
+        chosen[row.group, row.original.casefold()].append((hashlib.sha256(("letter:" + row.identifier).encode()).digest(), row))
+    selected: list[CorpusRow] = []
+    per_letter: dict[str, int] = {}
+    for (group, letter), entries in sorted(chosen.items()):
+        entries.sort(key=lambda entry: entry[0])
+        picked = [replace(row, split="train", quarantine_reasons=()) for _, row in entries[:budget]]
+        selected.extend(picked)
+        per_letter[f"{group}:{letter}"] = len(picked)
+    report.update({"quarantined_letter_rows": seen, "refused": refused, "selected": len(selected),
+                   "train_documents": len(train_documents), "per_letter": per_letter})
+    return selected, report
+
+
 def captured_curriculum(options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
     """Questions the engine asked while public mixed text was typed the way a person types it.
 
@@ -1028,6 +1078,11 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
     maximum = cast(dict[str, int], options["maximum_source_rows"])
     source_rows = {split: load_split(corpus, split) for split in FITTING_SPLITS}
     frames = {split: action_rows(select_rows(rows, maximum[split])) for split, rows in source_rows.items()}
+    letters, letter_report = letter_curriculum(corpus, source_rows, cast(dict[str, object], options["letter_curriculum"]))
+    # A letter keeps the frames of its own sentence and of an empty field only: the mixed-language
+    # frames would teach that `d` after English text is a `в` typed in the wrong layout.
+    letter_frames = [row for row in action_rows(letters) if ":observed:" in row.identifier or ":empty:" in row.identifier]
+    frames["train"] = [*frames["train"], *letter_frames]
     if any(not rows for rows in frames.values()):
         raise ValueError("empty fitting split")
     intent = LinearNgramModel.load(ROOT / "src/keyswitch/resources/models/layout_intent_v1.ksm")
@@ -1163,6 +1218,7 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
         "natural_lookahead_curriculum": natural_reports,
         "lexical_short_pair_curriculum": lexical_reports,
         "captured_curriculum": captured_report,
+        "letter_curriculum": letter_report,
         "planned_mass_balance": balance_reports,
         "test_accessed": False,
         "scope": "natural KEEP plus declared layout/mixed-context interventions; sequence evaluation required"}
