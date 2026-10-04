@@ -4,6 +4,12 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- The Windows ARM64 probe in CI closes the WWAHost window before its end-to-end run. The
+  Windows 11 desktop image of that runner opens the window (the host of Windows web apps) at
+  sign-in and it keeps the foreground, so the E2E window never came to the front and the
+  probe's E2E step failed in every run. The new step logs which process holds the foreground
+  before and after closing it.
+
 ## 0.38.0 — 2026-10-04
 
 - The context model reads what context-v1 schema 7 decided by and the action scheme lacked: where
