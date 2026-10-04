@@ -12,9 +12,10 @@ import unittest
 from context_deferral import plausible_reading
 from context_physical_keys import translated
 from freeze_context_action_corpus import CorpusRow
-from train_context_action_model import term_insertion_curriculum
+from train_context_action_model import ActionRow, term_insertion_curriculum
 
-OPTIONS = {"maximum_contexts": 10, "maximum_terms": 1500, "minimum_term_count": 100, "weight": 0.5}
+OPTIONS = {"maximum_contexts": 10, "maximum_terms": 1500, "minimum_term_count": 100, "weight": 0.5,
+           "dominance": 3, "maximum_abbreviation_contexts": 0}
 
 
 def row(identifier: str, original: str, before: str, group: int = 1) -> CorpusRow:
@@ -72,6 +73,37 @@ class TermInsertionTests(unittest.TestCase):
     def test_a_context_without_a_closing_space_gets_one_before_the_term(self) -> None:
         frames, _report = term_insertion_curriculum([row("d6:3", "сегодня", "мы обновили сервер,")], OPTIONS)
         self.assertTrue(all(frame.field.before.startswith("мы обновили сервер, ") for frame in frames))
+
+
+class AbbreviationInsertionTests(unittest.TestCase):
+    def frames(self) -> list[ActionRow]:
+        rows = [SENTENCE, row("d7:2", "сегодня", "надо будет обновить ")]
+        frames, _report = term_insertion_curriculum(rows, {**OPTIONS, "maximum_contexts": 1, "maximum_abbreviation_contexts": 5})
+        return [frame for frame in frames if frame.category.startswith("abbreviation_insertion")]
+
+    def test_a_russian_abbreviation_stays_and_its_latin_keys_convert(self) -> None:
+        frames = self.frames()
+        keep = [frame for frame in frames if frame.category == "abbreviation_insertion"]
+        wrong = [frame for frame in frames if frame.category == "abbreviation_insertion_layout_intervention"]
+        self.assertEqual(len(keep), 1)
+        self.assertEqual((keep[0].group, keep[0].action, wrong[0].group, wrong[0].action), (1, "keep", 0, "convert"))
+        self.assertEqual(wrong[0].original, translated(keep[0].original, 1))
+        self.assertEqual(keep[0].field.before, "надо будет обновить ")
+
+    def test_the_reading_russian_technical_text_uses_more_decides_the_label(self) -> None:
+        # `тз` occurs 744 times in Russian technical text and its keys `np` 80 times: an abbreviation.
+        # `бд` has a comma among its Latin keys and is no pair of words at all.
+        _frames, report = term_insertion_curriculum([SENTENCE], {**OPTIONS, "maximum_abbreviation_contexts": 1})
+        self.assertGreater(cast_int(report["abbreviations"]), 100)
+        frames, _ = term_insertion_curriculum([row(f"d{i}:2", "сегодня", "надо будет обновить ") for i in range(400)],
+                                              {**OPTIONS, "maximum_contexts": 0, "maximum_abbreviation_contexts": 400})
+        self.assertEqual(frames, [])
+        frames, _ = term_insertion_curriculum([row(f"d{i}:2", "сегодня", "надо будет обновить ") for i in range(400)],
+                                              {**OPTIONS, "maximum_contexts": 1, "maximum_abbreviation_contexts": 399})
+        inserted = {frame.original for frame in frames if frame.category == "abbreviation_insertion"}
+        self.assertIn("тз", inserted)
+        self.assertNotIn("бд", inserted)
+        self.assertNotIn("зк", inserted)
 
 
 def cast_int(value: object) -> int:
