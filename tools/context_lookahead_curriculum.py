@@ -17,7 +17,7 @@ import json
 import math
 from pathlib import Path
 
-from context_deferral import held_for_next_word
+from context_deferral import deferred_isolated
 from context_physical_keys import translated
 from keyswitch.context_action_features import extract_action_features
 from keyswitch.context_model import ACTIONS, ContextAction, ContextEvidence
@@ -103,7 +103,7 @@ def _fingerprint(item: ContextEvidence) -> str:
 
 def _eligible(seed: LookaheadSeed) -> bool:
     item = seed.evidence
-    if (not held_for_next_word(item.original, item.alternative, item.source_group) or not item.original.isalpha() or not item.alternative.isalpha()
+    if (not deferred_isolated(item.original, item.alternative, item.source_group) or not item.original.isalpha() or not item.alternative.isalpha()
             or item.trigger != "space" or item.boundary_text != " "
             or item.literal_tail or item.after_origin == "planned_next_conversion"):
         return False

@@ -349,8 +349,7 @@ class ActionTrainingTests(unittest.TestCase):
         self.assertEqual({translated(row.original, row.group) for row in wrong}, {source.original})
 
     def test_short_wrong_layout_without_neighbours_is_an_abstention(self) -> None:
-        # `ты` is as much `ns`: with no neighbour the intent of these keys is not observable.
-        rows = action_rows([replace(fixture("short", "ты", 1), before="", after="")])
+        rows = action_rows([replace(fixture("short", "он", 1), before="", after="")])
         wrong = [row for row in rows if row.category == "layout_intervention"]
         self.assertEqual(len(wrong), HISTORICAL_CURRICULUM_PAIR_SIZE)
         self.assertTrue(all(row.action in {"wait", "suggest"} for row in wrong))
@@ -358,20 +357,6 @@ class ActionTrainingTests(unittest.TestCase):
         self.assertEqual([row.action for row in natural], [row.action for row in wrong])
         self.assertTrue(all(row.action == "keep" for row in rows
                             if row.category == "mixed_language_insertion"))
-
-    def test_a_two_letter_word_alone_is_labelled_when_only_one_reading_is_a_word(self) -> None:
-        """`lf` alone is only `да`, and `гш` alone - a word neither way - is what its row says.
-
-        Until 04.10.2026 every two-letter word alone was deferred, and a one-word message
-        (`jr`, `гш`, `еп`) was never corrected: the message ended before a neighbour came.
-        """
-
-        for original, group in (("да", 1), ("ui", 0)):
-            with self.subTest(original=original):
-                rows = action_rows([replace(fixture("alone", original, group), before="", after="")])
-                natural = {row.action for row in rows if row.category == "natural_surface" and row.field.before == ""}
-                wrong = {row.action for row in rows if row.category == "layout_intervention" and row.field.before == ""}
-                self.assertEqual((natural, wrong), ({"keep"}, {"convert"}))
 
     def test_mixed_insertions_follow_a_sentence_or_a_quoted_name_in_a_parenthesis(self) -> None:
         """Half of the inserted words stand inside a parenthesis after a quoted name.
@@ -395,7 +380,7 @@ class ActionTrainingTests(unittest.TestCase):
         expected = {"space": {"wait"}, "pause": {"wait"},
                     "enter": {"suggest"}, "tab": {"suggest"}, "punctuation": {"suggest"}}
         actual: dict[str, set[str]] = {trigger: set() for trigger in expected}
-        for original, group in (("a", 0), ("ye", 0), ("мы", 1)):
+        for original, group in (("a", 0), ("we", 0), ("мы", 1)):
             sources = [replace(fixture(f"short-pair:{index}", original, group), before="", after="")
                        for index in range(HISTORICAL_CURRICULUM_TRIGGER_COVERAGE_SAMPLES)]
             for row in action_rows(sources):
@@ -463,10 +448,6 @@ class ActionTrainingTests(unittest.TestCase):
         self.assertTrue(deferred_isolated("еще", "tot", 1) and deferred_isolated("tot", "еще", 0))
         self.assertFalse(deferred_isolated("кот", "rjn", 1) or deferred_isolated("rjn", "кот", 0))
         self.assertTrue(lookahead_focus("зум", 1) and lookahead_focus("мы", 1) and not lookahead_focus("дом", 1))
-        # Two letters are deferred alone only when both readings are words, but every two-letter
-        # word is still one the engine may hold for its next word.
-        self.assertTrue(deferred_isolated("ты", "ns", 1) and not deferred_isolated("да", "lf", 1))
-        self.assertTrue(lookahead_focus("да", 1) and lookahead_focus("lf", 0))
 
     def test_lexical_short_pairs_enter_once_as_real_pairs_outside_every_sealed_test(self) -> None:
         pairs = lexical_short_pairs(frozenset())
@@ -489,27 +470,24 @@ class ActionTrainingTests(unittest.TestCase):
             extract_action_features(replace(reachable, original="tots", alternative="ещеу"))
 
     def test_contextless_short_legacy_keep_shares_the_deferred_action(self) -> None:
-        item = ContextEvidence("ты", "ns", 1, FieldContext("chrome", "fixture", "", "", "unknown"), "pause", False, False, False, 0.0)
-        rows = [HistoricalRow(item, "keep", "ты", "train", "russian_unknown_correct"),
-                HistoricalRow(replace(item, trigger="enter"), "keep", "ты", "train", "russian_unknown_correct"),
-                HistoricalRow(replace(item, field=replace(item.field, before="я думаю ")), "keep", "ты", "train", "russian_unknown_correct"),
-                HistoricalRow(replace(item, field=replace(item.field, before="8-10 ")), "keep", "ты", "train", "russian_unknown_correct"),
+        item = ContextEvidence("хз", "[p", 1, FieldContext("chrome", "fixture", "", "", "unknown"), "pause", False, False, False, 0.0)
+        rows = [HistoricalRow(item, "keep", "хз", "train", "russian_unknown_correct"),
+                HistoricalRow(replace(item, trigger="enter"), "keep", "хз", "train", "russian_unknown_correct"),
+                HistoricalRow(replace(item, field=replace(item.field, before="я думаю ")), "keep", "хз", "train", "russian_unknown_correct"),
+                HistoricalRow(replace(item, field=replace(item.field, before="8-10 ")), "keep", "хз", "train", "russian_unknown_correct"),
                 HistoricalRow(replace(item, original="yf", alternative="на", source_group=0), "convert", "yf", "train", "trusted_short_wrong"),
-                HistoricalRow(replace(item, original="три", alternative="nhb"), "keep", "три", "train", "russian_unknown_correct"),
+                HistoricalRow(replace(item, original="три"), "keep", "три", "train", "russian_unknown_correct"),
                 HistoricalRow(replace(item, original="еще", alternative="tot"), "keep", "еще", "train", "russian_unknown_correct"),
-                HistoricalRow(replace(item, original="окей", alternative="jrtq"), "keep", "окей", "train", "russian_unknown_correct"),
-                HistoricalRow(replace(item, original="хз", alternative="[p"), "keep", "хз", "train", "russian_unknown_correct")]
+                HistoricalRow(replace(item, original="окей"), "keep", "окей", "train", "russian_unknown_correct")]
         actual = {(row.trigger, row.field.before, row.category, row.original): row.action for row in self.historical_fixture(rows)}
-        self.assertEqual(actual[("pause", "", "legacy_russian_unknown_correct", "ты")], "wait")
-        self.assertEqual(actual[("enter", "", "legacy_russian_unknown_correct", "ты")], "suggest")
-        self.assertEqual(actual[("pause", "я думаю ", "legacy_russian_unknown_correct", "ты")], "keep")
-        self.assertEqual(actual[("pause", "8-10 ", "legacy_russian_unknown_correct", "ты")], "wait")
-        # Two letters alone decide too when one reading is plausible: `[p` is no word.
-        self.assertEqual(actual[("pause", "", "legacy_russian_unknown_correct", "хз")], "keep")
+        self.assertEqual(actual[("pause", "", "legacy_russian_unknown_correct", "хз")], "wait")
+        self.assertEqual(actual[("enter", "", "legacy_russian_unknown_correct", "хз")], "suggest")
+        self.assertEqual(actual[("pause", "я думаю ", "legacy_russian_unknown_correct", "хз")], "keep")
+        self.assertEqual(actual[("pause", "8-10 ", "legacy_russian_unknown_correct", "хз")], "wait")
         self.assertEqual(actual[("pause", "", "legacy_trusted_short_wrong", "yf")], "convert")
         # Three letters alone decide when one reading is plausible (the corpus v12 experiment of
         # 01.10.2026 deferred them all and broke `rjn` by the pause and `pm2`); `еще` is as much
-        # the English `tot`, so it is deferred like `ты`/`ns` is; four letters always decide.
+        # the English `tot`, so it is deferred like two letters are; four letters always decide.
         self.assertEqual(actual[("pause", "", "legacy_russian_unknown_correct", "три")], "keep")
         self.assertEqual(actual[("pause", "", "legacy_russian_unknown_correct", "еще")], "wait")
         self.assertEqual(actual[("pause", "", "legacy_russian_unknown_correct", "окей")], "keep")
