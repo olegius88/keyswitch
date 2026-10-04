@@ -9,6 +9,13 @@ All notable changes to KeySwitch are documented in this file.
   sign-in and it keeps the foreground, so the E2E window never came to the front and the
   probe's E2E step failed in every run. The new step logs which process holds the foreground
   before and after closing it.
+- The macOS release build notarizes the application and staples the ticket into the bundle
+  when the repository holds an App Store Connect team API key (`MACOS_NOTARY_KEY`,
+  `MACOS_NOTARY_KEY_ID`, `MACOS_NOTARY_ISSUER_ID`); Gatekeeper then opens a downloaded
+  KeySwitch without the detour through Privacy & Security. A tagged build without the key
+  warns that its archive is signed but not notarized. The READMEs describe the macOS
+  installation, its limits, and how KeySwitch compares with Punto Switcher, Caramba Switcher
+  and EveryLang, none of which ships for Linux.
 
 ## 0.38.0 — 2026-10-04
 

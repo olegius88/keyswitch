@@ -12,10 +12,13 @@ by default; it is not built into the KeySwitch input engine.
 [![Native packages](https://github.com/olegius88/keyswitch/actions/workflows/release.yml/badge.svg)](https://github.com/olegius88/keyswitch/actions/workflows/release.yml)
 [![License: GPL v3+](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
-KeySwitch is a desktop application for Windows 10/11 x64 and Ubuntu/Xubuntu
-X11 that automatically corrects words typed using the wrong keyboard layout.
-It serves a similar purpose to Punto Switcher and EveryLang, while running
-entirely locally and using the active EN/RU system layout pair.
+KeySwitch is a desktop application for Windows 10/11 x64, Ubuntu/Xubuntu X11
+and macOS 13 or newer that automatically corrects words typed using the wrong
+keyboard layout. It is a free, open-source alternative to Punto Switcher,
+Caramba Switcher and EveryLang, and unlike them it also runs on Linux: Punto
+Switcher and Caramba Switcher ship only for Windows and macOS, EveryLang only
+for Windows. Recognition runs entirely locally, typed text is never sent
+anywhere, and the layouts come from the active EN/RU system pair.
 
 [Documentation map](docs/README.md) ·
 [Input troubleshooting](docs/troubleshooting.md) ·
@@ -154,6 +157,31 @@ For the complete detection model when running from source, point
 frozen `en_US.lm` and `ru_RU.lm` used for training. KeySwitch's own
 `layout_intent_v1.ksm` is already part of its resources. The Setup EXE and
 portable ZIP bundle the lexicons, KSLM and contextual model automatically.
+
+## Install on macOS
+
+macOS 13 or newer is required. The
+[published 0.38.0 release](https://github.com/olegius88/keyswitch/releases/tag/v0.38.0)
+carries two archives, and exactly one of them is needed:
+
+- `KeySwitch-0.38.0-macos-arm64.zip` — Mac with Apple silicon (M1 and later);
+- `KeySwitch-0.38.0-macos-x86_64.zip` — Mac with an Intel processor.
+
+Unpack the archive and move `KeySwitch.app` to Applications. The application is
+signed with a Developer ID certificate but not yet notarized by Apple, so macOS
+refuses to open it the first time. Open System Settings → Privacy & Security,
+scroll down and click Open Anyway
+([Apple's instructions](https://support.apple.com/en-us/102445)); from then on it
+starts as usual.
+
+On its first start KeySwitch asks for the Accessibility permission: without it the
+program cannot see the keyboard. It shows the system prompt itself, opens the
+settings pane where the switch lives and carries on without a restart once the
+permission is given. KeySwitch appears in the menu bar; the settings window is the
+same as on Windows.
+
+macOS has no automatic updates yet: download a new version from the
+[releases page](https://github.com/olegius88/keyswitch/releases).
 
 ## Quick start on Ubuntu
 
@@ -796,6 +824,12 @@ See [release and recovery procedures](docs/verification.md).
   window running at a higher integrity level. KeySwitch needs a matching level
   for that target window.
 - The published Windows 0.38.0 Setup EXE is not signed with a publisher certificate.
+- macOS: the archives are signed with a Developer ID but not yet notarized by
+  Apple, and there are no automatic updates (see [Install on macOS](#install-on-macos)).
+  The macOS spelling autocorrection (in TextEdit, for example) can change a word
+  at the space before KeySwitch does; KeySwitch then does not write over that
+  edit and the word stays as it is. Turning autocorrection off in such an
+  application avoids it.
 
 ## Privacy
 

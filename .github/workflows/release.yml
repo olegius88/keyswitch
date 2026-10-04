@@ -632,6 +632,11 @@ jobs:
     env:
       SIGNING_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12 }}
       SIGNING_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      # An App Store Connect team API key (role Developer): the .p8 text, its key ID
+      # and the issuer ID. Without them the bundle stays signed but not notarized.
+      NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+      NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+      NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
 
     steps:
       - name: Check out source
@@ -745,6 +750,35 @@ jobs:
           codesign -d --entitlements :- "$bundle" | tee entitlements.txt
           grep -q "com.apple.security.cs.allow-unsigned-executable-memory" entitlements.txt
           codesign -dv --verbose=4 "$bundle" 2>&1 | grep -q "Timestamp="
+
+      # Gatekeeper opens a downloaded bundle without asking only when Apple has
+      # notarized it. The ticket is stapled into the bundle, and the published
+      # archive is made again from the stapled bundle, since a ZIP cannot carry one.
+      - name: Notarize the bundle and staple the ticket
+        if: ${{ env.KEYSWITCH_SIGN_IDENTITY != '' && env.NOTARY_KEY != '' }}
+        run: |
+          bundle="dist/macos-native/KeySwitch.app"
+          key="$RUNNER_TEMP/notary-key.p8"
+          submission="$RUNNER_TEMP/KeySwitch-notarization.zip"
+          trap 'rm -f "$key" "$submission"' EXIT
+          printf '%s\n' "$NOTARY_KEY" > "$key"
+          ditto -c -k --keepParent "$bundle" "$submission"
+          xcrun notarytool submit "$submission" --key "$key" --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER_ID" --wait
+          # Stapling fails when no accepted ticket exists, so a rejected
+          # submission stops the job here.
+          xcrun stapler staple "$bundle"
+          xcrun stapler validate "$bundle"
+          spctl --assess --type execute --verbose=2 "$bundle"
+          archive="$(find dist -maxdepth 1 -name 'KeySwitch-*-macos-*.zip' -print -quit)"
+          test -n "$archive"
+          rm -f "$archive"
+          ditto -c -k --keepParent "$bundle" "$archive"
+
+      - name: Say that the published archive is not notarized
+        if: ${{ startsWith(github.ref, 'refs/tags/') && env.NOTARY_KEY == '' }}
+        run: |
+          printf '::warning::%s\n' "The macOS archive is signed but not notarized: set MACOS_NOTARY_KEY, MACOS_NOTARY_KEY_ID and MACOS_NOTARY_ISSUER_ID."
 
       - name: Upload the macOS release artifact
         uses: actions/upload-artifact@v7
