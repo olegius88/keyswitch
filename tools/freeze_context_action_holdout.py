@@ -171,13 +171,28 @@ def tatoeba_sentence(identifier: str, language: str, text: str, source: str, fil
     return Sentence(f"tatoeba:{language}:{identifier}", f"{source}:sentence:{identifier}", source, filename, text, tokens)
 
 
+# Tatoeba sentences the captured engine questions of model/context_v1/captured were typed from;
+# the action model trains on those questions since corpus v17, so no split of a corpus takes them.
+CAPTURED_TATOEBA = ROOT / "model/context_v1/captured/tatoeba-authors.tsv.xz"
+
+
+def captured_tatoeba_identifiers(path: Path = CAPTURED_TATOEBA) -> frozenset[str]:
+    """Identifiers of the Tatoeba sentences behind the captured training questions."""
+    import lzma
+
+    with lzma.open(path, "rt", encoding="utf-8") as stream:
+        return frozenset(line.split("\t", 1)[0] for line in stream if line[:1].isdigit())
+
+
 def read_tatoeba(path: Path, source: str, language: str, namespace: str,
-                 per_mille: int = TATOEBA_SAMPLE_PER_MILLE) -> Iterator[Sentence]:
+                 per_mille: int = TATOEBA_SAMPLE_PER_MILLE, *,
+                 excluded: frozenset[str] = frozenset()) -> Iterator[Sentence]:
     """Sentences of one Tatoeba export, thinned deterministically by identifier before selection.
 
     An export holds one to two million sentences; keeping a namespace-hashed slice of them
     bounds memory and stays reproducible, and the freezer's own document sampling then
-    applies to what is kept. Lines whose language column disagrees are refused.
+    applies to what is kept. Lines whose language column disagrees are refused, and a
+    sentence the training questions were typed from (`excluded`) never enters a corpus.
     """
     import bz2
 
@@ -194,6 +209,8 @@ def read_tatoeba(path: Path, source: str, language: str, namespace: str,
             identifier, declared, text = columns
             if declared != language:
                 raise ValueError(f"Tatoeba export {path.name} holds a {declared} sentence")
+            if identifier in excluded:
+                continue
             text = " ".join(text.split())
             if not text or len(text) > MAX_TATOEBA_SENTENCE_CHARACTERS:
                 continue
@@ -927,8 +944,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not args.tatoeba_language:
             raise ValueError("--tatoeba-directory needs at least one --tatoeba-language")
         exports, tatoeba_provenance, tatoeba_metadata = verified_tatoeba_source(args.tatoeba_directory, args.tatoeba_language)
+        captured_sentences = captured_tatoeba_identifiers()
+        tatoeba_provenance[str(CAPTURED_TATOEBA.relative_to(ROOT))] = hashlib.sha256(CAPTURED_TATOEBA.read_bytes()).hexdigest()
+        tatoeba_metadata["captured_training_sentences_excluded"] = len(captured_sentences)
         for label, language, path in exports:
-            sentences.extend(read_tatoeba(path, label, language, args.namespace))
+            sentences.extend(read_tatoeba(path, label, language, args.namespace, excluded=captured_sentences))
     elif args.tatoeba_language:
         raise ValueError("--tatoeba-language needs --tatoeba-directory")
     selected, sampling = select_holdout_sentences(sentences, args.namespace, args.max_documents, args.max_sentences_per_document)

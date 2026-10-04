@@ -15,8 +15,9 @@ last one on 20.09.2026. No test carries that decorator at the moment; it stays
 for the next regression that has to be disclosed rather than hidden.
 
 :func:`disclosed_schema3_pair_regression` is its counterpart for the pair installed on
-02.10.2026: authored expectations of context-v1 that the schema-3 model decides
-differently, listed in its docstring with the measured verdicts.
+02.10.2026 and its context model retrained on corpus v18 on 04.10.2026: authored
+expectations of context-v1 that the schema-3 model decides differently, listed in its
+docstring with the measured verdicts.
 """
 
 from __future__ import annotations
@@ -50,18 +51,20 @@ def disclosed_schema3_pair_regression(test: T) -> T:
     """Expected failure while a feature-version-3 pair is installed; a real test otherwise.
 
     The authored expectations below were written against context-v1 and hold for it.
-    The installed context-v3 + prefix-v2 pair (02.10.2026) decides each of them with its
-    own calibrated verdict, measured on the installed artifact:
+    The installed context-v3 + prefix-v2 pair (02.10.2026; the context model retrained on
+    corpus v18 on 04.10.2026) decides each of them with its own calibrated verdict,
+    measured on the installed artifact:
 
-    * `jr.` then `привет`: `jr` with the converted neighbour gets convert p=0.967, under
-      the serving threshold 0.99, so `jr.` stays and only `привет` converts;
-    * `ша` after a protected `ша `: convert p=0.778 with a Russian word before it, so the
-      second `ша` waits instead of becoming `if` by the curated rule, which the model
-      arbitrates in schema 3;
-    * `b/bkb`: convert p=0.312, the model leaves the slash-joined token as typed;
-    * `ghbdtn@`: the token with its sign reads as an address (baseline "код, адрес или
-      аббревиатура"), the model keeps it, and the sign never becomes a closing quote.
+    * `jr.` then `привет`: `jr` waits for its neighbour (wait p=1.000), and the neighbour's
+      conversion is not one the model's vocabulary supports, so the pair is not converted
+      and `jr.` stays;
+    * `ша` after a protected `ша `: wait p=0.998 (convert p=0.000) with a Russian word
+      before it, so the second `ша` waits instead of becoming `if` by the curated rule,
+      which the model arbitrates in schema 3;
+    * `b/bkb`: convert p=0.274, the model leaves the slash-joined token as typed.
 
+    `ghbdtn@` was disclosed for the corpus v16 model as well; the corpus v18 model converts it
+    (p=0.993), and the test holds.
     Each is a text-preserving verdict, never a corruption; whether the expectation or the
     verdict should change is a decision recorded in the test, not hidden by removing it.
     """

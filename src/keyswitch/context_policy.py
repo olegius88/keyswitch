@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import ClassVar, Final
 
-from .context_model import AfterOrigin, ContextEvidence, ContextModel, ContextPrediction, one_typo_from_word
+from .context_model import AfterOrigin, ContextEvidence, ContextModel, ContextPrediction, one_typo_from_word, term_bucket
 from .identifier_lexicon import IdentifierLexicon
 from .detector import DetectionDecision, LanguageDetector, LanguageScorer
 from .input_context import FieldContext, FieldReader, InputContext
@@ -14,7 +14,33 @@ from .ortho_model import OrthoEvidence, OrthoModel, shape_of
 from .short_words import ISOLATED_SHORT_WORD_REASON, is_short_word_override, opens_sentences
 from .word_decision import NOT_A_WORD_REASON
 from .constants.detection import MINIMUM_SHAPED_TOKEN_CHARACTERS
-from .constants.models import CONTEXT_ACTION_FEATURE_VERSION
+from .constants.models import CONTEXT_ACTION_FEATURE_VERSION, RUSSIAN_SLANG_MIN_TERM_BUCKET
+
+# A curated one-letter Russian word typed in the English layout right after an English term inside
+# a Russian phrase (KeySwitchEngine._stranded_letter): an explicit rule like the message-start one.
+STRANDED_SHORT_WORD_REASON: Final = "однобуквенное слово из безопасного списка после английского термина в русской фразе"
+# A lone letter the action model alone would convert: it has never seen one (ContextPolicy.decide).
+LONE_LETTER_REASON: Final = "одиночную букву переводят только правила из безопасного списка"
+# A Russian abbreviation or slang word the action model would convert into Latin keys nobody uses.
+RUSSIAN_SLANG_REASON: Final = "русское сокращение или сленг: латинское прочтение не встречается"
+
+
+def russian_slang(original: str, alternative: str, source_group: int, source_known: bool) -> bool:
+    """A Russian abbreviation or slang word typed as intended: Russian text uses it, nothing uses its Latin keys.
+
+    `пдф` and `впн` are in no lexicon, so they read as gibberish both ways and the language models
+    lean to the Latin reading; the action model learned the term tables (context_action_features)
+    but on the owner's typing still turned them into `gla` and `dgy` (field logs, 03.10.2026). The
+    tables (context-term-frequency.json) say what decides: the Cyrillic form occurs inside Russian
+    technical text again and again, and its Latin keys occur neither there nor in English text.
+    A form whose Latin keys are a term (`тз` and `np`) is the model's to decide.
+    """
+
+    bucket = term_bucket(original, "cyrillic")
+    return (
+        source_group == 1 and not source_known and bucket.isdigit() and int(bucket) >= RUSSIAN_SLANG_MIN_TERM_BUCKET
+        and term_bucket(alternative, "latin") == "0" and term_bucket(alternative, "english") == "0"
+    )
 
 
 @dataclass(frozen=True)
@@ -190,15 +216,26 @@ class ContextPolicy:
         # baseline - `tot привет` stayed (0.31.x logs, 24.09.2026) - while the
         # trainer evaluates and certifies the model on its own verdict, with no
         # such fallback. The flag stays in the log as a diagnostic.
-        if prediction.action == "convert":
+        # A lone letter is outside what the action model learned: every single-letter row of its
+        # corpus sits in quarantine, so its verdict on one is no opinion, and on its own it turned
+        # `ч` into `x` and `ы` into `s` at p=0.99 (field logs, 03.10.2026). It converts a lone
+        # letter only together with a curated rule.
+        # The same holds for a single letter with digits (`1С`, `а1`): a product name or a cell, and in
+        # Russian prose the model turned `1С` into `1C`.
+        action_model = self.model.feature_version == CONTEXT_ACTION_FEATURE_VERSION
+        lone = (action_model and sum(char.isalpha() for char in baseline.original) == 1
+                and all(char.isalpha() or char.isdigit() for char in baseline.original))
+        slang = action_model and russian_slang(baseline.original, alternative, baseline.source_group, source.known)
+        if prediction.action == "convert" and not slang and (not lone or is_short_word_override(baseline)):
             decision = replace(
                 baseline, should_convert=True, replacement=alternative,
                 target_group=target_group, source_score=source, target_score=target,
                 reason="решение контекстной модели", confidence=prediction.probability,
             )
-        elif (is_short_word_override(baseline)
-              and (baseline.reason == ISOLATED_SHORT_WORD_REASON or trigger == "pause"
-                   or (prediction.action != "wait" and self.model.feature_version != CONTEXT_ACTION_FEATURE_VERSION))):
+        elif ((is_short_word_override(baseline)
+               and (baseline.reason == ISOLATED_SHORT_WORD_REASON or trigger == "pause"
+                    or (prediction.action != "wait" and self.model.feature_version != CONTEXT_ACTION_FEATURE_VERSION)))
+              or baseline.reason == STRANDED_SHORT_WORD_REASON):
             # A curated, reviewed exception is an explicit rule, not a guess, so
             # neither a probabilistic `keep` nor an under-confident `convert`
             # cancels it. `wait` still delays it at a boundary, because that is
@@ -221,11 +258,15 @@ class ContextPolicy:
             # sentences, an English one never opens with a lone f/b/c/d/r/e/j/z
             # (UD Taiga and UD EWT, 17.09.2026). Teaching this to the model needs
             # a corpus that keeps those rows; until then it is an exception with
-            # a name, visible in the model card and this comment.
+            # a name, visible in the model card and this comment. The second named
+            # exception is the same letter right after an English term inside a
+            # Russian phrase (`поправь env b`): the term switched the layout,
+            # and the model has no single-letter row to know the letter by.
             return ContextResult(baseline, prediction, field, decision_source="short_word_override",
                                  fallback_reason="trusted_short_word")
         else:
-            decision = replace(baseline, should_convert=False, reason={
+            refusal = RUSSIAN_SLANG_REASON if slang else LONE_LETTER_REASON
+            decision = replace(baseline, should_convert=False, reason=refusal if prediction.action == "convert" else {
                 "keep": "контекстная модель оставляет текст",
                 "wait": "контекстная модель ждёт продолжения",
                 "suggest": "контекстная модель предлагает проверить раскладку",

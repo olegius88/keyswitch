@@ -6,6 +6,7 @@ import itertools
 import json
 import logging
 import queue
+import re
 import threading
 import time
 import unicodedata
@@ -47,7 +48,9 @@ from .layouts import RU_KEYS, US_KEYS, LayoutPair
 from .lexicon_supplement import supplement_words
 from .learning import LearnedRule, LearningStore, RuleAction
 from .intent_model import CorrectionTrigger, LinearNgramModel
-from .context_policy import ContextPolicy, ContextResult, ends_with_typed
+from .context_policy import (
+    STRANDED_SHORT_WORD_REASON, ContextPolicy, ContextResult, ends_with_typed, shared_identifiers,
+)
 from .constants.models import (
     CONTEXT_ACTION_FEATURE_VERSION,
     PLANNED_CONTEXT_WORD_MAX_CHARACTERS,
@@ -61,7 +64,9 @@ from .input_context import CONTEXT_TTL, FieldContext, FieldReader
 from .prefix_model import PrefixInput, PrefixModel
 from .prefix_schema import VersionedPrefixModel
 from .settings_diagnostics import setting_change, settings_snapshot
-from .short_words import ISOLATED_SHORT_WORD_REASON, is_short_word_override
+from .short_words import (
+    ISOLATED_SHORT_WORD_REASON, SINGLE_LETTER_CONFIDENCE, TRUSTED_SINGLE_LETTER_WORDS, is_short_word_override,
+)
 from .word_decision import automatic_word_decision
 from .constants.detection import (
     EARLY_SWITCH_CONFIDENCE,
@@ -72,6 +77,7 @@ from .constants.detection import (
     NATURAL_SOURCE_BOUNDARY_MIN_CHARACTERS,
     NATURAL_SOURCE_BOUNDARY_NGRAM_FLOOR,
     REPLAYED_SIGNS_MIN_STEM_LETTERS,
+    STRANDED_TERM_MAX_WORDS,
     TRUSTED_SHORT_WORD_MAX_LENGTH,
     UNSCORED_CORRECTION_CONFIDENCE,
 )
@@ -156,6 +162,10 @@ class CorrectionPlan:
     # The boundary sign was folded into `strokes` and is replayed in the new layout
     # (_replay_sign_with_word): the word ended there, though no boundary follows it.
     sign_replayed: bool = False
+    # A phrase whose last word the early switch converted while it was typed shows letters
+    # of both layouts, and `original` is that text. Undo types every key in `source_group`;
+    # this is the text it leaves there, the keys as typed.
+    typed: str = ""
 
 
 @dataclass(frozen=True)
@@ -206,6 +216,11 @@ class WaitingContextWord:
 
 # The baseline reason of the question a converted word is asked again (_revert_with_next_word).
 REVISIT_REASON: Final = "слово после соседа, переведённого обратно"
+# The words of a line read by the stranded-letter rule (_stranded_letter): signs that end a
+# sentence, and the two scripts a word may be written in.
+SENTENCE_END_SIGNS: Final = ".!?…"
+_LATIN_LETTER: Final = re.compile("[A-Za-z]")
+_CYRILLIC_LETTER: Final = re.compile("[А-Яа-яЁё]")
 
 
 @dataclass(frozen=True)
@@ -1127,10 +1142,15 @@ class KeySwitchEngine:
     def _maybe_early_switch(self) -> None:
         """Switch the layout as soon as the typed prefix proves it wrong."""
 
-        if self.boundary_model is not None and any(
-            not stroke.character.isalpha() and self._is_layout_letter(stroke)
-            for stroke in self._strokes
+        if self.boundary_model is not None and self._strokes and (
+            not self._strokes[-1].character.isalpha() and self._is_layout_letter(self._strokes[-1])
         ):
+            # A sign key that ends the prefix may still be punctuation; the boundary model
+            # decides it once the word ends. A sign key with a letter after it is a letter of
+            # the other layout (`lj,f` is `доба`), and the prefix model is trained on such
+            # prefixes. Any such key used to block the early switch for the whole word: a
+            # third of the long Russian words typed in the English layout in the owner's logs
+            # carry б, ю, ж, х, э or ъ and could only convert at their boundary.
             return
         if not bool(self.settings.get("detection.early_switch", True)):
             return
@@ -1554,11 +1574,26 @@ class KeySwitchEngine:
                 literal_tail="".join(stroke.character for stroke in (*trailing, *signs)),
                 boundary_text=boundary.character,
             )
+            if inside is None and early_switch_origin is not None and not (trailing or head or signs):
+                decision = self._settle_early_switch(
+                    decision, strokes, source_group, early_switch_origin, application,
+                    self._trigger_for_boundary(boundary), boundary.character)
             excluded = self._application_excluded(application)
+            # The early switch converted this word while it was typed, and the switch stands:
+            # for the words before it, it is a word converted from the switch's origin.
+            switched = (
+                inside is None and early_switch_origin is not None and early_switch_origin != source_group
+                and not (trailing or head or signs) and not decision.should_convert
+            )
+            neighbour = replace(
+                decision, should_convert=True, source_group=early_switch_origin, target_group=source_group,
+                replacement=original,
+            ) if switched and early_switch_origin is not None else decision
             joint = None if trailing or head or signs else self._resolve_context_wait(
-                waiting, strokes, boundary, decision, application, alternatives)
+                waiting, strokes, boundary, neighbour, application, alternatives, switched=switched)
             if joint is not None and waiting is not None:
-                joint = (self._take_along(kept, joint[0], len(waiting.plan.original), application), joint[1])
+                joint = (self._take_along(kept, joint[0], len(waiting.plan.original), application, switched=switched),
+                         joint[1])
             elif waiting is not None and not head and (trailing or not decision.should_convert):
                 # A waiting word whose neighbour did not convert either may still be settled by a
                 # later word (`тщ ш`, then `огые`); one the model declined with a converted
@@ -1574,6 +1609,13 @@ class KeySwitchEngine:
                     len(original), application)
                 if taken.mode == "context_phrase":
                     joint = (taken, decision)
+            elif joint is None and switched and early_switch_origin is not None:
+                taken = self._take_along(kept, CorrectionPlan(
+                    strokes, boundary, early_switch_origin, source_group, original, original, decision.confidence,
+                    application, True, typed=self._text_for_group(strokes, early_switch_origin),
+                ), len(original), application, switched=True)
+                if taken.mode == "context_phrase":
+                    joint = (taken, neighbour)
             if trailing or head:
                 self._log_context_wait("context_wait_cancelled", waiting, "literal_tail" if trailing else "literal_head")
             if joint is not None:
@@ -2050,6 +2092,8 @@ class KeySwitchEngine:
         self._context_result = None
         self._last_baseline = None
         decision = self._baseline_decision(original, alternatives, source_group, application, trigger)
+        if not decision.should_convert and not inside:
+            decision = self._stranded_letter(decision, original, alternatives, source_group)
         self._last_baseline = decision
         context_aware = bool(self.settings.get("detection.context_aware", True))
         ignored_words: list[str] = self.settings.get("exclusions.words", [])
@@ -2071,6 +2115,96 @@ class KeySwitchEngine:
         return self._consult_context_model(
             decision, original, alternatives, rejected_targets, application, trigger,
             literal_tail=literal_tail, boundary_text=boundary_text, field_override=field_override, inside=inside,
+        )
+
+    def _stranded_letter(
+        self, decision: DetectionDecision, original: str, alternatives: dict[int, str], source_group: int,
+    ) -> DetectionDecision:
+        """A curated Russian letter typed in the English layout right after an English term in a Russian phrase.
+
+        A term typed amid Russian prose is converted, or typed in the English layout on purpose,
+        and the layout stays English; the Russian phrase goes on, and its one-letter words come
+        out as `f`, `b`, `d`, `c`: `поправь env b`. The curated rule needs the previous word in
+        Russian, and the model has no single-letter row to know the letter by, so in the owner's
+        logs this was the largest class of words left in the wrong layout (about fifty, a fifth
+        of all). A lower-case letter whose other reading is one of the curated words converts when
+        the words before it on its line are a Latin term of up to STRANDED_TERM_MAX_WORDS words with
+        a Russian word before the term and no end of a sentence in between. A capital letter is
+        left alone (`plan B` in English prose), and so is a letter after Latin text alone.
+        """
+
+        if len(original) != 1 or not _LATIN_LETTER.fullmatch(original) or not original.islower():
+            return decision
+        rejected = self._rejected_targets(source_group, original)
+        targets = [(group, text) for group, text in alternatives.items()
+                   if group != source_group and group not in rejected and text in TRUSTED_SINGLE_LETTER_WORDS]
+        if not targets:
+            return decision
+        words = self.context_policy.stream.before_word(original).rsplit("\n", 1)[-1].split()
+        term = 0
+        while (words and term < STRANDED_TERM_MAX_WORDS
+               and _LATIN_LETTER.search(words[-1]) and not _CYRILLIC_LETTER.search(words[-1])):
+            if words[-1][-1] in SENTENCE_END_SIGNS:
+                return decision
+            words.pop()
+            term += 1
+        if not term or not words or not _CYRILLIC_LETTER.search(words[-1]) or words[-1][-1] in SENTENCE_END_SIGNS:
+            return decision
+        group, replacement = targets[0]
+        return replace(
+            decision, should_convert=True, replacement=replacement, target_group=group,
+            confidence=SINGLE_LETTER_CONFIDENCE, reason=STRANDED_SHORT_WORD_REASON,
+            target_score=self.models[group].score(replacement),
+        )
+
+    def _settle_early_switch(
+        self, shown: DetectionDecision, strokes: list[KeyEvent] | tuple[KeyEvent, ...], shown_group: int, origin: int,
+        application: str, trigger: CorrectionTrigger, boundary_text: str,
+    ) -> DetectionDecision:
+        """Judge an early-switched word, now complete, as the user typed it.
+
+        The early switch answered on a prefix. At the boundary the word used to be judged in
+        the layout the switch had put it in, where an unknown Russian word made Latin (a brand
+        or slang word no lexicon holds) reads as gibberish both ways and the model keeps what
+        is shown: the switch made at the sixth letter stayed for good, while the same model
+        asked about the word as typed keeps it (owner's logs, 24.09.2026; the same with the
+        pair of 0.37.0). The completed word is now asked the question the switch answered too
+        soon - does what was typed need the other layout - in the field the shown word was
+        judged in. A model that keeps the typed word takes the switch back; a convert confirms
+        it; a model in doubt leaves the prefix model's choice standing. A switch that produced a
+        word of the lexicon or the identifier index is not taken back: the prefix model was right
+        about a term typed in the other layout that the context model, asked about the unknown
+        typed reading alone, kept (an English word typed in the Russian layout after Russian prose).
+        """
+
+        if origin == shown_group or origin not in self.models or shown.should_convert:
+            return shown
+        identifiers = shared_identifiers()
+        if shown.source_score.known or (identifiers is not None and identifiers.contains(shown.original)):
+            return shown
+        result, baseline = self._context_result, self._last_baseline
+        if result is None or result.prediction is None:
+            return shown
+        typed = self._text_for_group(strokes, origin)
+        verdict = self._decide_word(
+            typed, {shown_group: shown.original}, origin, application, trigger,
+            boundary_text=boundary_text, field_override=result.field,
+        )
+        judged = self._context_result
+        action = judged.prediction.action if judged is not None and judged.prediction is not None else None
+        self._technical_event(
+            "early_switch_settled", verdict="convert" if verdict.should_convert else action or "baseline",
+            word_characters=len(typed), origin_group=origin,
+        )
+        self._context_result, self._last_baseline = result, baseline
+        if verdict.should_convert or action != "keep" or judged is None or judged.prediction is None:
+            return shown
+        # Taken back: the word is not offered for a revisit by the next word.
+        self._last_baseline = None
+        return replace(
+            shown, should_convert=True, replacement=typed, target_group=origin,
+            confidence=judged.prediction.probability,
+            reason="ранняя смена отменена: целое слово верно в набранной раскладке",
         )
 
     def _rejected_targets(self, source_group: int, original: str) -> set[int]:
@@ -2169,9 +2303,13 @@ class KeySwitchEngine:
     def _resolve_context_wait(
         self, waiting: WaitingContextWord | None, strokes: tuple[KeyEvent, ...],
         boundary: KeyEvent | None, decision: DetectionDecision, application: str,
-        alternatives: dict[int, str],
+        alternatives: dict[int, str], *, switched: bool = False,
     ) -> tuple[CorrectionPlan, DetectionDecision] | None:
-        """Decide a waiting word together with the next word, at its boundary or at a pause."""
+        """Decide a waiting word together with the next word, at its boundary or at a pause.
+
+        `switched` says the early switch converted the next word while it was typed: its keys
+        are in two layouts, and `decision` is that conversion, from the waiting word's layout.
+        """
 
         if waiting is None or self.settings.get("detection.context_policy", "assist") != "assist":
             self._log_context_wait("context_wait_cancelled", waiting, "policy_disabled")
@@ -2181,7 +2319,7 @@ class KeySwitchEngine:
             time.monotonic() > waiting.deadline or waiting.window != (self._focus_window or 0)
             or previous.application != application or previous.boundary is None
             or previous.source_group != decision.source_group
-            or any(stroke.group != previous.source_group for stroke in (*previous.strokes, *strokes))
+            or any(stroke.group != previous.source_group for stroke in (*previous.strokes, *(() if switched else strokes)))
         ):
             self._log_context_wait(
                 "context_wait_cancelled", waiting, "preconditions_changed",
@@ -2230,8 +2368,9 @@ class KeySwitchEngine:
             after_origin=self._neighbour_origin(previous.original),
         )
         pair_decision = result.decision
-        if (not pair_decision.should_convert and waiting.decision.reason == ISOLATED_SHORT_WORD_REASON
-                and planned_baseline.should_convert):
+        if (not pair_decision.should_convert and planned_baseline.should_convert
+                and (waiting.decision.reason == ISOLATED_SHORT_WORD_REASON
+                     or (len(previous.original) == 1 and is_short_word_override(planned_baseline)))):
             # The lone letter opening a message is the one curated rule the model does not
             # arbitrate (context_policy.decide): every single-letter row of its corpus sits in
             # quarantine, so its planned answer is no opinion either. The rule converted the
@@ -2243,11 +2382,12 @@ class KeySwitchEngine:
             self._log_context_wait("context_wait_cancelled", waiting, "lookahead_not_converted")
             return None
         self._technical_event("context_wait_resolved", wait_id=waiting.diagnostic_id, previous_characters=len(previous.original), next_characters=len(decision.original))
+        keys = previous.strokes + (previous.boundary,) + strokes
         return CorrectionPlan(
-            previous.strokes + (previous.boundary,) + strokes,
-            closing, previous.source_group, group,
+            keys, closing, previous.source_group, group,
             original, alternative + previous.boundary.character + decision.replacement,
             pair_decision.confidence, application, True, "context_phrase", self._context_field_id(),
+            typed=self._text_for_group(keys, previous.source_group) if switched else "",
         ), decision
 
     @staticmethod
@@ -2369,6 +2509,7 @@ class KeySwitchEngine:
 
     def _take_along(
         self, kept: tuple[KeptWord, ...], plan: CorrectionPlan, first_characters: int, application: str,
+        *, switched: bool = False,
     ) -> CorrectionPlan:
         """Ask the model about the words before a converted word again, nearest first.
 
@@ -2402,7 +2543,8 @@ class KeySwitchEngine:
                 or plan.source_group != previous.source_group or plan.target_group != previous.target_group
                 or time.monotonic() > word.deadline or word.window != (self._focus_window or 0)
                 or previous.application != application
-                or any(stroke.group != previous.source_group for stroke in (*previous.strokes, *plan.strokes))
+                or any(stroke.group != previous.source_group
+                       for stroke in (*previous.strokes, *(() if switched else plan.strokes)))
                 or not self.context_policy.stream.text.endswith(
                     previous.original + previous.boundary.character + plan.original + suffix)
                 # Only a word whose other reading is a word is asked: a term typed as intended
@@ -2427,6 +2569,7 @@ class KeySwitchEngine:
                 original=previous.original + previous.boundary.character + plan.original,
                 replacement=previous.replacement + previous.boundary.character + plan.replacement,
                 automatic=True, mode="context_phrase", context_field=self._context_field_id(),
+                typed=previous.original + previous.boundary.character + plan.typed if plan.typed else "",
             )
             next_replacement = previous.replacement
         if not taken:
@@ -4018,7 +4161,7 @@ class KeySwitchEngine:
             plan.target_group,
             plan.source_group,
             plan.replacement,
-            plan.original,
+            plan.typed or plan.original,
             plan.confidence,
             plan.application,
             False,

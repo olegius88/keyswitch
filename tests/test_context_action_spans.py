@@ -27,6 +27,7 @@ from context_physical_keys import translated
 from evaluate_context_action_sequences import SequencePlan
 from freeze_context_action_corpus import CorpusRow
 from keyswitch.context_model import ContextEvidence
+from keyswitch.context_policy import ContextPolicy
 from keyswitch.input_context import FieldContext
 from keyswitch.language_model import LanguageModel
 from fixture_values.corpora import FIXTURE_WORD_FREQUENCY
@@ -39,6 +40,14 @@ from fixture_values.counts import (
 )
 from fixture_values.keys import SPAN_CAPTURE_EVENT_SERIAL
 from keyswitch.constants.file_formats import SHA256_HEX_CHARACTERS
+
+
+def tearDownModule() -> None:
+    # The replays here run the engine with the fixture models patched in for LanguageModel.load,
+    # and the shared orthographic model caches the dictionaries it first loads that way
+    # (OrthoModel.feature_values). Later modules would read the fixture's dictionaries; they load
+    # the packaged model and the engine's dictionaries afresh instead.
+    ContextPolicy._shared_ortho = None
 
 
 def row(word: str, group: int, family: str = "") -> CorpusRow:

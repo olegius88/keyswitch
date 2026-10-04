@@ -15,6 +15,9 @@ MAX_WORD_STROKES: Final = 256
 # words of a message have nothing before them to tell their layout by (`hey here` typed in the
 # Russian layout is `рун руку`, two Russian words, until `ерун` shows it was `they`).
 KEPT_WORDS_TAKEN_ALONG: Final = 2
+# Most Latin words an English term inside a Russian phrase may span before a lone Russian letter
+# typed in the English layout is read as that letter (`в git diff d` is `в git diff в`).
+STRANDED_TERM_MAX_WORDS: Final = 3
 # Fewest letters left of a word once the letters at its end that are signs in the other layout are
 # set aside (`руддщб` is `hello,`): `чё` without `ё` is a lone `ч`, and one letter is no word to judge.
 REPLAYED_SIGNS_MIN_STEM_LETTERS: Final = 2
