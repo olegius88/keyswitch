@@ -4,6 +4,33 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- A domain, an address or a file name typed in the other layout is restored. A Latin reading with
+  a dot inside was refused whatever the model said (a guard of 20.09.2026 against a Russian
+  abbreviation such as `дюп` becoming `l.g`), so `example.com` typed in the Russian layout stayed
+  `учфьздуюсщь` with the model sure of it at p=1.0. Letters joined by single dots now pass (a leading dot
+  passed already); a comma, two dots in a row or a dot at the end are still refused, and the installed model keeps
+  `дюп` itself. Replayed through the engine, the owner's own typing has four such names corrected
+  by hand; all four are restored now, with no new false conversion.
+- The context model is retrained on corpus v19 with the recipe of 0.38.0 (test v19 sealed before
+  training and passed): the guard above is part of the engine the model is sealed with, and so is
+  every other runtime file. On that replay it converts 614 words right, leaves 115 in the wrong
+  layout and converts 63 falsely, against 613/113/63 for 0.38.0, and on the 239 words whose layout
+  the user's own correction shows 94/37/8 against 90/41/7. On public text it recalls 0.976 of the
+  conversions of corpus v19 calibration with 7 false ones per profile, restores 117 and 238
+  development sequences with the early switch on and off against the frozen baseline's 107 and
+  210-211 without corrupting correct text, and on test v19 restores 13 rows against 13 with the
+  early switch on and 177 against 167 with it off, corrupting none. The quality floors of the
+  restoration margin take the new levels. The prefix model retrained byte-identical.
+- Measured and not taken (`model/context_v3/README.md`): English terms inserted into Russian
+  sentences of the training text (more words converted on the typing used to tune, but more false
+  conversions on the held-out typing and a lower calibration recall), deciding a two-letter word
+  alone when only one reading is a word (9 more words converted right, as many left in the wrong
+  layout, 12 more false conversions), and leaving
+  a lone letter to the model (9 more false conversions for 3 fewer misses).
+- On Windows, a program path left in the registry by another install never raises on a Python
+  older than 3.14: `Path.is_file` answers False for a name too long for the file system only from
+  3.14, so the check uses `os.path.isfile`.
+
 ## 0.38.1 — 2026-10-04
 
 - Windows on Arm gets a native build: the release carries `KeySwitch-Setup-<version>-arm64.exe`

@@ -16,12 +16,12 @@ from typing import Final
 # A candidate must corrupt no correctly typed row and keep every correct row as typed.
 RECEIPT_MAX_CORRUPTIONS: Final = 0
 # Restorations beyond the frozen baseline pair, by settings mode (early switch on / off).
-# Lowered for the corpus v18 pair (04.10.2026), a new test with the early switch on: 15 rows
-# restored exactly against the baseline's 16, while the baseline corrupted one or two correct
-# rows and the installed pair none, so its net restorations reach the baseline's (the gate of the
-# protocol); with the switch off 190 against 183. A margin measured on one test set is not one of
-# another: test v16 gave 26 against 21 with the switch on.
-RECEIPT_MIN_RESTORATION_MARGIN: Final[dict[str, int]] = {"default": -1, "early_off": 7}
+# Raised for the corpus v19 pair (04.10.2026): on test v19, 13 rows restored exactly against the
+# baseline's 13 with the early switch on and 177 against 167 with it off, no correct row corrupted
+# by either. Test v18 had given 15 against 16 and 190 against 183, and test v16 26 against 21: a
+# margin measured on one test set is not one of another, and a new set that gives less is a
+# lowering its pull request states.
+RECEIPT_MIN_RESTORATION_MARGIN: Final[dict[str, int]] = {"default": 0, "early_off": 10}
 # No replay may fail to execute, change a word's length or land a correction in the wrong layout.
 RECEIPT_MAX_EXECUTION_ERRORS: Final = 0
 RECEIPT_MAX_LENGTH_MISMATCHES: Final = 0
