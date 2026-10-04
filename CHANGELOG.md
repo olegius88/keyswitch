@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.38.1 — 2026-10-04
+
 - Windows on Arm gets a native build: the release carries `KeySwitch-Setup-<version>-arm64.exe`
   and `KeySwitch-<version>-windows-arm64.zip` next to the x64 files. `build-windows.ps1` builds
   for the architecture of the Python that runs it, names the files after it and refuses an
