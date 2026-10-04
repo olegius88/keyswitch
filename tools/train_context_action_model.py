@@ -284,9 +284,10 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
                 # v10, v11). A three-letter reading is deferred only when both of its
                 # readings are plausible (context_deferral). Deciding two letters the same
                 # way was measured on 04.10.2026 (corpus v19, against the replay of the
-                # owner's typing): a one-word message `гш` became `ui` but so did a kept
-                # one, and `чс`, `ер`, `ым`, `тз` alone turned into Latin - 12 more false
-                # conversions for 9 fewer misses; alone, two letters stay deferred.
+                # owner's typing): one-word messages such as `гш` became `ui`, but so did one
+                # the owner kept, and `чс`, `ер`, `ым`, `тз` alone turned into Latin - 9 more
+                # words converted right, as many left in the wrong layout and 12 more false
+                # conversions; alone, two letters stay deferred.
                 action = "suggest" if trigger in ("enter", "tab", "punctuation") else "wait"
                 keep_action = action
             result.append(ActionRow(identity + ":keep", row.original, group, field,
@@ -417,101 +418,6 @@ def historical_curriculum(intent: LinearNgramModel | None = None) -> list[Action
     return [replace(row, sample_weight=1.0 / (
         len(actions[parents[row.identifier]]) * variants[parents[row.identifier], row.action]
     )) for row in result]
-
-
-def term_insertion_curriculum(rows: Sequence[CorpusRow], options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
-    """English terms of Russian technical text inside real Russian sentences of TRAIN, both ways round.
-
-    The owner's own typing (field logs of 0.26-0.36.3, replayed through 0.38.0) leaves two classes
-    in the wrong layout more than any other: an English term typed in the Russian layout amid
-    Russian prose (`вум` for `dev`, `зк` for `pr`), and the Russian word typed in the English layout
-    right after such a term, the layout still English (`private api lkz` for `для`). The corpus
-    holds hardly any: its sentences are monolingual, and the mixed-language frames use a handful of
-    fixed contexts. Each frame here replaces a Russian word of a TRAIN sentence with a term the
-    packaged term table counts inside Russian technical text at least `minimum_term_count` times
-    (a) or puts the term before that word (b), and labels both members of the physical word:
-    the reading typed in its own layout keeps, the other converts. A term whose Cyrillic reading is
-    a word or is counted in Russian text is left out (`ns` is `ты`, `if` is `ша`), and so is a
-    Russian word whose Latin reading is a word or an identifier - the intent of those is not the
-    label of the frame.
-    """
-
-    from keyswitch.context_model import _term_frequency
-
-    budget = int(cast(int, options["maximum_contexts"]))
-    report: dict[str, object] = {"maximum_contexts": budget}
-    if budget <= 0:
-        return [], report
-    weight = float(cast(float, options["weight"]))
-    minimum = int(cast(int, options["minimum_term_count"]))
-    dominance = int(cast(int, options["dominance"]))
-    tables = _term_frequency()
-    terms = []
-    for term, count in sorted(tables["latin"].items(), key=lambda item: (-item[1], item[0])):
-        if count < minimum or not term.isalpha() or not term.isascii() or not 2 <= len(term) <= 10:
-            continue
-        cyrillic = translated(term, 0)
-        if plausible_reading(cyrillic, 1) or tables["cyrillic"].get(cyrillic, 0) * dominance > count:
-            continue
-        terms.append(term)
-        if len(terms) >= int(cast(int, options["maximum_terms"])):
-            break
-    # The mirror image: a Russian abbreviation of technical text (`тз`, `бд`, `пдф`) whose Latin keys
-    # that text uses far less. Both tables count tokens of the same Russian technical text, so the
-    # reading it uses `dominance` times more often is the one a writer of Russian prose means.
-    abbreviations = []
-    for abbreviation, count in sorted(tables["cyrillic"].items(), key=lambda item: (-item[1], item[0])):
-        if count < minimum or not abbreviation.isalpha() or not 2 <= len(abbreviation) <= 6:
-            continue
-        try:
-            latin_keys = translated(abbreviation, 1)
-        except ValueError:
-            continue
-        if not latin_keys.isalpha() or tables["latin"].get(latin_keys, 0) * dominance > count:
-            continue
-        abbreviations.append(abbreviation)
-    contexts = [row for row in rows if row.group == 1 and row.layout_representable and row.original.isalpha()
-                and len(row.original) >= 2 and len(re.findall(r"[а-яё]{2,}", row.before.casefold())) >= 2]
-    contexts.sort(key=lambda row: hashlib.sha256(("term-insertion:" + row.identifier).encode()).digest())
-    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
-    result: list[ActionRow] = []
-    counts: Counter[str] = Counter()
-    for row in contexts[:budget]:
-        term = terms[variant_choice(row.identifier, "insertion-term", len(terms))]
-        application = applications[variant_choice(row.identifier, "application", len(applications))]
-        before = row.before if row.before.endswith((" ", "\n")) or not row.before else row.before + " "
-        field = FieldContext(application, "public-training", before, "", "unknown")
-        identity = row.identifier + ":term-insertion"
-        result.append(ActionRow(identity + ":term", term, 0, field, "space", "", "keep",
-                                "term_insertion", " ", weight))
-        result.append(ActionRow(identity + ":term:wrong", translated(term, 0), 1, field, "space", "", "convert",
-                                "term_insertion_layout_intervention", " ", weight))
-        counts["term"] += 1
-        latin = translated(row.original, 1)
-        if plausible_reading(latin, 0) or plausible_reading(latin.casefold(), 0):
-            counts["after_term_skipped_plausible_latin"] += 1
-            continue
-        after_term = FieldContext(application, "public-training", before + term + " ", "", "unknown")
-        result.append(ActionRow(identity + ":after", row.original, 1, after_term, "space", "", "keep",
-                                "word_after_term", " ", weight))
-        result.append(ActionRow(identity + ":after:wrong", latin, 0, after_term, "space", "", "convert",
-                                "word_after_term_layout_intervention", " ", weight))
-        counts["after_term"] += 1
-    abbreviation_budget = int(cast(int, options["maximum_abbreviation_contexts"]))
-    for row in contexts[budget:budget + abbreviation_budget] if abbreviations else ():
-        abbreviation = abbreviations[variant_choice(row.identifier, "insertion-abbreviation", len(abbreviations))]
-        application = applications[variant_choice(row.identifier, "application", len(applications))]
-        before = row.before if row.before.endswith((" ", "\n")) or not row.before else row.before + " "
-        field = FieldContext(application, "public-training", before, "", "unknown")
-        identity = row.identifier + ":abbreviation-insertion"
-        result.append(ActionRow(identity, abbreviation, 1, field, "space", "", "keep", "abbreviation_insertion", " ", weight))
-        result.append(ActionRow(identity + ":wrong", translated(abbreviation, 1), 0, field, "space", "", "convert",
-                                "abbreviation_insertion_layout_intervention", " ", weight))
-        counts["abbreviation"] += 1
-    report.update({"terms": len(terms), "abbreviations": len(abbreviations), "contexts": len(contexts),
-                   "frames": len(result), "counts": dict(counts),
-                   "weight": weight, "minimum_term_count": minimum})
-    return result, report
 
 
 def captured_curriculum(options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
@@ -1127,8 +1033,6 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
     maximum = cast(dict[str, int], options["maximum_source_rows"])
     source_rows = {split: load_split(corpus, split) for split in FITTING_SPLITS}
     frames = {split: action_rows(select_rows(rows, maximum[split])) for split, rows in source_rows.items()}
-    insertions, insertion_report = term_insertion_curriculum(source_rows["train"], cast(dict[str, object], options["term_insertion_curriculum"]))
-    frames["train"] = [*frames["train"], *insertions]
     if any(not rows for rows in frames.values()):
         raise ValueError("empty fitting split")
     intent = LinearNgramModel.load(ROOT / "src/keyswitch/resources/models/layout_intent_v1.ksm")
@@ -1264,7 +1168,6 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
         "natural_lookahead_curriculum": natural_reports,
         "lexical_short_pair_curriculum": lexical_reports,
         "captured_curriculum": captured_report,
-        "term_insertion_curriculum": insertion_report,
         "planned_mass_balance": balance_reports,
         "test_accessed": False,
         "scope": "natural KEEP plus declared layout/mixed-context interventions; sequence evaluation required"}
