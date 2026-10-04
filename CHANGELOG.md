@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.38.0 — 2026-10-04
+
 - The context model reads what context-v1 schema 7 decided by and the action scheme lacked: where
   the word stands on its line, whether a reading opens sentences of its language, and how often each
   reading occurs inside Russian technical text and in text of its own language (the packaged

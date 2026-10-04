@@ -22,7 +22,7 @@ entirely locally and using the active EN/RU system layout pair.
 [Verification, builds and releases](docs/verification.md) (guides in Russian)
 
 The latest published stable release is
-[0.37.0](https://github.com/olegius88/keyswitch/releases/tag/v0.37.0).
+[0.38.0](https://github.com/olegius88/keyswitch/releases/tag/v0.38.0).
 The changes are listed in [CHANGELOG.md](CHANGELOG.md) and the known defects
 of the release in [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
@@ -120,11 +120,11 @@ scenarios and platform limitations.
 
 ## Install on Windows
 
-Download `KeySwitch-Setup-0.37.0-x64.exe` from the
-[published 0.37.0 release](https://github.com/olegius88/keyswitch/releases/tag/v0.37.0) and run
+Download `KeySwitch-Setup-0.38.0-x64.exe` from the
+[published 0.38.0 release](https://github.com/olegius88/keyswitch/releases/tag/v0.38.0) and run
 it. The per-user installation goes to `%LOCALAPPDATA%\Programs\KeySwitch` and
 does not require administrator privileges. The release also includes the
-portable `KeySwitch-0.37.0-windows-x64.zip` archive.
+portable `KeySwitch-0.38.0-windows-x64.zip` archive.
 
 After launch, KeySwitch appears in the notification area. Left- or right-click
 the `EN/RU` or flag icon to open its menu. Its Switch to action always offers
@@ -204,12 +204,12 @@ Probe the system backend without opening the application window:
 
 ## Install the Debian package
 
-Download `keyswitch_0.37.0_amd64.deb` from the
-[published 0.37.0 release](https://github.com/olegius88/keyswitch/releases/tag/v0.37.0), then
+Download `keyswitch_0.38.0_amd64.deb` from the
+[published 0.38.0 release](https://github.com/olegius88/keyswitch/releases/tag/v0.38.0), then
 install it with:
 
 ```bash
-sudo apt install ./keyswitch_0.37.0_amd64.deb
+sudo apt install ./keyswitch_0.38.0_amd64.deb
 ```
 
 The package installs the required system dependencies and adds KeySwitch to the
@@ -795,7 +795,7 @@ See [release and recovery procedures](docs/verification.md).
 - On Windows, UIPI prevents a regular process from injecting input into a
   window running at a higher integrity level. KeySwitch needs a matching level
   for that target window.
-- The published Windows 0.37.0 Setup EXE is not signed with a publisher certificate.
+- The published Windows 0.38.0 Setup EXE is not signed with a publisher certificate.
 
 ## Privacy
 
