@@ -361,6 +361,13 @@ class ContextEngineTests(InputIntegrityTests):
         self.assertEqual(result.decision_source, "safety")
         self.assertEqual(result.fallback_reason, "replacement_not_a_word")
         self.assertFalse(result.decision.should_convert)
+        # Letters joined by single dots are a name the model may restore: a domain or an address.
+        self.reset_editor(1)
+        self.type("учфьздуюсщь ")
+        self.assertEqual(self.backend.text, "example.com ")
+        self.reset_editor(1)
+        self.type("ыфьздуююсщь ")
+        self.assertEqual(self.backend.text, "ыфьздуююсщь ")
 
     def test_explicit_rules_exclusions_and_manual_layout_are_above_model(self) -> None:
         self.choose("convert")
