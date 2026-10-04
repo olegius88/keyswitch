@@ -1,15 +1,26 @@
 """Which isolated reading the context-action corpus defers instead of labelling.
 
 A word with no word on either side has an observable intent label only when the
-two readings of its keys differ in plausibility. One or two letters are deferred
-whatever they are (``train_context_action_model.action_rows`` keeps the one
-curated-letter exception); three letters are deferred only when both readings
-are plausible - the portable lexicon of the reading's layout knows it, or the
+two readings of its keys differ in plausibility. One letter is deferred whatever
+it is (``train_context_action_model.action_rows`` keeps the one curated-letter
+exception); two and three letters are deferred only when both readings are
+plausible - the portable lexicon of the reading's layout knows it, or the
 shipped identifier index does - because then `tot` is as much `еще` as it is
-English and `зум` is as much the Debian command `pev` as it is a chat word, and
-only a neighbour can tell. One plausible reading decides at once: `rjn` is only
-`кот`, `три` is only Russian, and `зь2`/`pm2`, plausible neither way, are left
-to the model's own evidence.
+English, `ты` as much `ns`, and `зум` as much the Debian command `pev` as it is
+a chat word, and only a neighbour can tell. One plausible reading decides at
+once: `rjn` is only `кот`, `lf` is only `да`, `три` is only Russian, and
+`зь2`/`pm2` or `гш`/`ui`, plausible neither way, are left to the model's own
+evidence.
+
+Until 04.10.2026 every two-letter word alone was deferred too. Replayed on the
+owner's own typing (0.38.0), a one-word message was then never corrected: the
+model answered "wait" for `jr`, `гш`, `зщ`, `еп`, and the message ended before
+any neighbour came - 22 of the 113 words it left in the wrong layout, 13 of
+them marked by the owner by hand.
+
+The engine still holds every one- or two-letter word for its next word
+(``held_for_next_word``): the lookahead curriculum seeds and the planned-mass
+balance ask that, not the isolated label.
 
 Labels never depend on the fitting profile: the reference Hunspell profile adds
 spell-known forms the shipped engine has no dictionary for, and one frame must
@@ -54,11 +65,20 @@ def deferred_isolated(original: str, alternate: str, group: int) -> bool:
     """
 
     length = len(original)
-    if 0 < length <= ACTION_SHORT_WORD_MAX_CHARACTERS:
+    if length == 1:
         return True
-    if ACTION_SHORT_WORD_MAX_CHARACTERS < length <= ACTION_DEFERRED_WORD_MAX_CHARACTERS:
+    if length <= ACTION_DEFERRED_WORD_MAX_CHARACTERS:
         return plausible_reading(original, group) and plausible_reading(alternate, 1 - group)
     return False
+
+
+def held_for_next_word(original: str, alternate: str, group: int) -> bool:
+    """Whether the engine may hold a word for its next word: every one or two letters, and three
+    letters whose two readings are both plausible. The lookahead curriculum's seeds and focus."""
+
+    if 0 < len(original) <= ACTION_SHORT_WORD_MAX_CHARACTERS:
+        return True
+    return deferred_isolated(original, alternate, group)
 
 
 def lookahead_focus(original: str, group: int) -> bool:
@@ -68,4 +88,4 @@ def lookahead_focus(original: str, group: int) -> bool:
         alternate = translated(original, group)
     except ValueError:
         return False
-    return deferred_isolated(original, alternate, group)
+    return held_for_next_word(original, alternate, group)

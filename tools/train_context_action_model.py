@@ -281,8 +281,8 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
                 # (.t/reliable-release-2026-09-12/SHORT-ISOLATED-CURRICULUM.md), and again
                 # on 01.10.2026 (corpus v12: `rjn` by the pause and `pm2` broke); deciding
                 # them all at once turned `зум` alone into the Debian command `pev` (corpus
-                # v10, v11). A three-letter reading is deferred only when both of its
-                # readings are plausible (context_deferral).
+                # v10, v11). A two- or three-letter reading is deferred only when both of
+                # its readings are plausible (context_deferral; two letters since 04.10.2026).
                 action = "suggest" if trigger in ("enter", "tab", "punctuation") else "wait"
                 keep_action = action
             result.append(ActionRow(identity + ":keep", row.original, group, field,
