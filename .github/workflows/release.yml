@@ -588,6 +588,9 @@ jobs:
         run: ./packaging/build-windows.ps1
 
       - name: Smoke-test a silent per-user installation
+        # The step takes under a minute; a hung installer has held a runner for an
+        # hour until GitHub lost it (0.36.2, a branch run of 04.10.2026).
+        timeout-minutes: 15
         shell: pwsh
         run: |
           $version = (Select-String -Path pyproject.toml -Pattern '^version = "([^"]+)"$').Matches.Groups[1].Value
