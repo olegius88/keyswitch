@@ -136,5 +136,14 @@
   ],
   "weight_scale": 0.5,
   "minimum_word_characters": 2
+ },
+ "term_insertion_curriculum": {
+  "maximum_contexts": 0,
+  "maximum_terms": 1500,
+  "minimum_term_count": 100,
+  "weight": 0.5,
+  "scope": "Not used: both budgets 0 leave the frames out of TRAIN. English terms that Russian technical text uses at least 100 times (the packaged term table) put inside Russian sentences of TRAIN, the Russian word after such a term, and Russian abbreviations the same text writes in Cyrillic; both readings of each physical word labelled. Measured 04.10.2026 on corpus v19 against a control trained without them: more words converted on the owner's typing used to tune, but on the held-out typing one more miss and two more false conversions, and calibration recall 0.9736 against 0.9745 with 8 false conversions against 7; train_context_action_model.term_insertion_curriculum.",
+  "dominance": 3,
+  "maximum_abbreviation_contexts": 0
  }
 }
