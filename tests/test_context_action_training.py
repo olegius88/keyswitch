@@ -578,6 +578,11 @@ class ActionTrainingTests(unittest.TestCase):
         kept, _ = capital_citation_curriculum([russian], refused, options)
         self.assertNotIn(rows[0].identifier, {row.identifier for row in kept})
         self.assertEqual(capital_citation_curriculum([], frozenset(), options)[0], [])
+        paired, report = capital_citation_curriculum([russian], frozenset(), {**options, "lowercase_contrast": True})
+        lower = [row for row in paired if row.identifier.endswith(":lower")]
+        self.assertEqual(([row for row in paired if not row.identifier.endswith(":lower")], report["words"]), (rows, len(rows)))
+        self.assertEqual([(row.original, row.action, row.field) for row in lower],
+                         [(row.original.lower(), "convert", row.field) for row in rows])
 
     def test_foreign_insertion_context_does_not_determine_layout_label(self) -> None:
         for original, group in (("deployment", 0), ("обсуждение", 1)):

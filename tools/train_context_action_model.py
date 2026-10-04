@@ -411,10 +411,12 @@ def capital_citation_curriculum(source_rows: Sequence[CorpusRow], refused: froze
     `words_by_length` per length; a word held by this corpus's test or by any accessed test is refused
     by its aliases, as the other lexical curricula refuse it, and so is a word the onboard lexicon
     writes in capitals (capital_citation). Each stands after the left context of a Russian row of
-    TRAIN, chosen by hash, with the keep label only.
+    TRAIN, chosen by hash, with the keep label; with `lowercase_contrast` the same keys in lower case
+    stand in the same frame with the convert label, so case is what the pair tells apart.
     """
     budgets = {int(length): int(count) for length, count in cast(dict[str, int], options["words_by_length"]).items()}
     weight = float(cast(float, options["sample_weight"]))
+    contrast = options.get("lowercase_contrast") is True
     contexts = natural_mixed_contexts(source_rows)[1]
     if not contexts or not any(budgets.values()):
         return [], {"words": 0, "words_by_length": {}, "scope": "not used"}
@@ -453,7 +455,14 @@ def capital_citation_curriculum(source_rows: Sequence[CorpusRow], refused: froze
                                  contexts[variant_choice(identifier, "context", len(contexts))], "", "unknown")
             rows.append(ActionRow(identifier, latin, 0, field, trigger, "", "keep", "mixed_language_insertion",
                                   boundary_text, weight))
-    return rows, {"words": len(rows), "words_by_length": chosen,
+            if contrast:
+                # The same keys in lower case are the Russian word typed in the wrong layout and convert:
+                # without this pair the keep frames taught that any Latin token after Russian prose stays
+                # (the first candidate missed `f` for `а` and `lkz` for `для` in the owner's typing).
+                rows.append(ActionRow(identifier + ":lower", latin.lower(), 0, field, trigger, "", "convert",
+                                      "mixed_language_layout_intervention", boundary_text, weight))
+    return rows, {"words": sum(len(words) for words in chosen.values()), "frames": len(rows),
+                  "lowercase_contrast": contrast, "words_by_length": chosen,
                   "candidates_by_length": {str(length): len(candidates[length]) for length in sorted(budgets)},
                   "sample_weight": weight,
                   "scope": "TRAIN only: keep frames of Latin capitals after Russian prose whose Cyrillic reading is a rare lexicon word (capital_citation_curriculum)."}
