@@ -468,8 +468,6 @@ def term_insertion_curriculum(rows: Sequence[CorpusRow], options: Mapping[str, o
         result.append(ActionRow(identity + ":term:wrong", translated(term, 0), 1, field, "space", "", "convert",
                                 "term_insertion_layout_intervention", " ", weight))
         counts["term"] += 1
-        if not options.get("after_term", True):
-            continue
         latin = translated(row.original, 1)
         if plausible_reading(latin, 0) or plausible_reading(latin.casefold(), 0):
             counts["after_term_skipped_plausible_latin"] += 1
@@ -480,80 +478,9 @@ def term_insertion_curriculum(rows: Sequence[CorpusRow], options: Mapping[str, o
         result.append(ActionRow(identity + ":after:wrong", latin, 0, after_term, "space", "", "convert",
                                 "word_after_term_layout_intervention", " ", weight))
         counts["after_term"] += 1
-    # The other side of the same keys: a real Russian word of a TRAIN sentence whose Latin reading
-    # happens to be a counted term (`вум` is no word, but a rare surname may spell `gs`) stays as
-    # typed; without these the candidate trained on the frames above converted such a word of the
-    # calibration split at p=0.99.
-    lookalikes = int(cast(int, options.get("maximum_lookalikes", 0)))
-    if lookalikes:
-        seen_lookalikes: Counter[str] = Counter()
-        for row in sorted(rows, key=lambda row: hashlib.sha256(("term-lookalike:" + row.identifier).encode()).digest()):
-            if counts["lookalike"] >= lookalikes:
-                break
-            if row.group != 1 or not row.layout_representable or not row.original.isalpha() or len(row.original) < 2:
-                continue
-            latin = translated(row.original, 1).casefold()
-            if tables["latin"].get(latin, 0) < minimum or seen_lookalikes[latin] >= 2:
-                continue
-            seen_lookalikes[latin] += 1
-            application = applications[variant_choice(row.identifier, "application", len(applications))]
-            field = FieldContext(application, "public-training", row.before, "", "unknown")
-            result.append(ActionRow(row.identifier + ":term-lookalike", row.original, 1, field, "space", "", "keep",
-                                    "term_lookalike", " ", float(cast(float, options.get("lookalike_weight", weight)))))
-            counts["lookalike"] += 1
     report.update({"terms": len(terms), "contexts": len(contexts), "frames": len(result), "counts": dict(counts),
                    "weight": weight, "minimum_term_count": minimum})
     return result, report
-
-
-# Quarantine reasons that only say a word family also lives in other documents or was read by an
-# earlier test; a row with any other reason (a test document, row or family read before) stays out.
-LETTER_CURRICULUM_REASONS = frozenset({"family-crosses-document-splits", "family-previously-exposed", "family-in-base-corpus"})
-
-
-def letter_curriculum(corpus: Path, source_rows: Mapping[str, Sequence[CorpusRow]],
-                      options: Mapping[str, object]) -> tuple[list[CorpusRow], dict[str, object]]:
-    """Single letters of TRAIN documents, which the family split sends to quarantine as a class.
-
-    `в`, `и`, `с`, `a` and `I` stand in nearly every document, so their families cross the document
-    splits and every row of them sits in quarantine: the action model was trained without a single
-    one-letter row, and on its own it turned `ч` into `x` and `ы` into `s` at p=0.99 while it left
-    `б` for `,` and a capital `Ф` for `A` (the owner's field logs, 03.10.2026) - a veto in the
-    context policy stood in for the missing class. These rows come only from documents whose every
-    other row is in TRAIN, and never from a row, document or family a test read; a letter family
-    reaches the development and test documents too, which the sequence gates measure as they always
-    did. At most `maximum_rows_per_letter` rows per letter and layout, chosen by hash.
-    """
-
-    budget = int(cast(int, options["maximum_rows_per_letter"]))
-    report: dict[str, object] = {"maximum_rows_per_letter": budget}
-    if budget <= 0:
-        return [], report
-    document_splits: dict[str, set[str]] = defaultdict(set)
-    for split, rows in source_rows.items():
-        for row in rows:
-            document_splits[row.document].add(split)
-    train_documents = {document for document, splits in document_splits.items() if splits == {"train"}}
-    chosen: dict[tuple[int, str], list[tuple[bytes, CorpusRow]]] = defaultdict(list)
-    seen = refused = 0
-    for row in load_split(corpus, "quarantine"):
-        if len(row.original) != 1 or not row.original.isalpha() or row.group not in (0, 1) or not row.layout_representable:
-            continue
-        seen += 1
-        if row.document not in train_documents or not set(row.quarantine_reasons) <= LETTER_CURRICULUM_REASONS:
-            refused += 1
-            continue
-        chosen[row.group, row.original.casefold()].append((hashlib.sha256(("letter:" + row.identifier).encode()).digest(), row))
-    selected: list[CorpusRow] = []
-    per_letter: dict[str, int] = {}
-    for (group, letter), entries in sorted(chosen.items()):
-        entries.sort(key=lambda entry: entry[0])
-        picked = [replace(row, split="train", quarantine_reasons=()) for _, row in entries[:budget]]
-        selected.extend(picked)
-        per_letter[f"{group}:{letter}"] = len(picked)
-    report.update({"quarantined_letter_rows": seen, "refused": refused, "selected": len(selected),
-                   "train_documents": len(train_documents), "per_letter": per_letter})
-    return selected, report
 
 
 def captured_curriculum(options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
@@ -1169,12 +1096,8 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
     maximum = cast(dict[str, int], options["maximum_source_rows"])
     source_rows = {split: load_split(corpus, split) for split in FITTING_SPLITS}
     frames = {split: action_rows(select_rows(rows, maximum[split])) for split, rows in source_rows.items()}
-    letters, letter_report = letter_curriculum(corpus, source_rows, cast(dict[str, object], options["letter_curriculum"]))
-    # A letter keeps the frames of its own sentence and of an empty field only: the mixed-language
-    # frames would teach that `d` after English text is a `в` typed in the wrong layout.
-    letter_frames = [row for row in action_rows(letters) if ":observed:" in row.identifier or ":empty:" in row.identifier]
     insertions, insertion_report = term_insertion_curriculum(source_rows["train"], cast(dict[str, object], options["term_insertion_curriculum"]))
-    frames["train"] = [*frames["train"], *letter_frames, *insertions]
+    frames["train"] = [*frames["train"], *insertions]
     if any(not rows for rows in frames.values()):
         raise ValueError("empty fitting split")
     intent = LinearNgramModel.load(ROOT / "src/keyswitch/resources/models/layout_intent_v1.ksm")
@@ -1310,7 +1233,6 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
         "natural_lookahead_curriculum": natural_reports,
         "lexical_short_pair_curriculum": lexical_reports,
         "captured_curriculum": captured_report,
-        "letter_curriculum": letter_report,
         "term_insertion_curriculum": insertion_report,
         "planned_mass_balance": balance_reports,
         "test_accessed": False,

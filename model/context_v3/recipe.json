@@ -1,5 +1,5 @@
 {
- "data_revision": "symmetric-short-actions-balanced-legacy-actions-debian-commands-natural-lookahead-three-letter-ambiguity-deferral-lexical-short-pairs-and-unambiguous-latin-citations-after-russian-prose-v12",
+ "data_revision": "symmetric-short-actions-balanced-legacy-actions-debian-commands-natural-lookahead-three-letter-ambiguity-deferral-lexical-short-pairs-and-unambiguous-latin-citations-after-russian-prose-v12-and-english-terms-inside-russian-sentences",
  "epochs": 50,
  "feature_revision": "learned-ortho-script-length-right-context-origin-identifier-lexicon-line-opening-and-term-frequency-v7",
  "training_revision": "identifier-evidence-dropout-one-family-in-three-planned-mass-balance-and-model-verdict-stands-and-threshold-plateau-under-authored-ceiling",
@@ -137,15 +137,11 @@
   "weight_scale": 0.5,
   "minimum_word_characters": 2
  },
- "letter_curriculum": {
-  "maximum_rows_per_letter": 0,
-  "scope": "Single letters of TRAIN documents from the quarantine the family split sends them to (train_context_action_model.letter_curriculum)."
- },
  "term_insertion_curriculum": {
   "maximum_contexts": 4000,
   "maximum_terms": 1500,
-  "minimum_term_count": 50,
+  "minimum_term_count": 100,
   "weight": 0.5,
-  "scope": "English terms of Russian technical text inside TRAIN Russian sentences, and the Russian word after them (train_context_action_model.term_insertion_curriculum)."
+  "scope": "English terms that Russian technical text uses at least 100 times (the packaged term table), put inside Russian sentences of TRAIN in place of one of their words, and the Russian word after such a term; both readings of each physical word labelled. Measured 04.10.2026 on corpus v18 against the replay of the owner's typing: 50 occurrences with half the mass and without the word after the term as well; train_context_action_model.term_insertion_curriculum, model/context_v3/README.md."
  }
 }
