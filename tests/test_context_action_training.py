@@ -34,6 +34,8 @@ from train_context_action_model import (
     apply_runtime_support,
     apply_support_mask,
     balance_planned_mass,
+    capital_citation,
+    capital_citation_curriculum,
     choose_threshold,
     development_thresholds,
     identifier_evidence_dropped,
@@ -62,6 +64,7 @@ from keyswitch.input_context import FieldContext
 from train_context_model import Row as HistoricalRow
 from fixture_values.corpora import FIXTURE_WORD_FREQUENCY, PLANNED_EVIDENCE_DOMINANT_WORD_FREQUENCY
 from fixture_values.counts import (
+    CAPITAL_CITATION_FIXTURE_WORDS_BY_LENGTH,
     MIXED_CONTEXT_SAMPLE_ROWS,
     CHOOSE_THRESHOLD_CONVERT_ROW_COUNT,
     CHOOSE_THRESHOLD_PLATEAU_NET_BENEFIT,
@@ -102,6 +105,7 @@ from fixture_values.counts import (
     SELECT_ROWS_REPEATED_FAMILY_ROWS,
 )
 from fixture_values.scores import (
+    CAPITAL_CITATION_FIXTURE_WEIGHT,
     ACTION_TRAINING_CONVERT_PROBABILITY,
     ACTION_TRAINING_RESIDUAL_PROBABILITY,
     CHOOSE_THRESHOLD_AUTHORED_FLOOR,
@@ -539,6 +543,41 @@ class ActionTrainingTests(unittest.TestCase):
         # A left context with words of both scripts never serves as a language's prose.
         self.assertEqual(natural_mixed_contexts([english, russian, mixed_only]), {0: ("the subspecies ",), 1: ("Австралийский подвид ",)})
         self.assertFalse([row for row in action_rows([english]) if ":mixed-natural" in row.identifier])
+
+    def test_a_capital_citation_whose_reading_is_a_rare_word_keeps_after_russian_prose(self) -> None:
+        cited = replace(fixture("wbc", "WBC", 0), before="the title ")  # `ЦИС`: a word, and a rare one
+        russian = replace(fixture("prose", "подвид", 1), before="Австралийский подвид ")
+        rows = {row.identifier: row for row in action_rows([cited, russian])}
+        keep = rows["wbc:mixed-capital"]
+        self.assertEqual((keep.original, keep.group, keep.action, keep.field.before), ("WBC", 0, "keep", "Австралийский подвид "))
+        # Its Cyrillic reading gets no convert frame, and the citation_shaped framing still leaves it out.
+        self.assertFalse([name for name in rows if name.startswith("wbc:mixed-capital:") or name.startswith("wbc:mixed-natural")])
+        self.assertTrue(capital_citation("WBC", "ЦИС") and capital_citation("IBF", "ШИА"))
+        for original, alternate in (("wbc", "цис"), ("CIF", "США"), ("XTV", "ЧЕМ"), ("USB", "ГЫИ"), ("WB", "ЦИ"), ("DLD", "ВДВ")):
+            with self.subTest(original=original):
+                # Lower case; a frequent Russian word or abbreviation; no word at all; two letters;
+                # an abbreviation the onboard lexicon writes in capitals.
+                self.assertFalse(capital_citation(original, alternate))
+
+    def test_the_capital_citation_curriculum_draws_rare_words_and_refuses_held_ones(self) -> None:
+        russian = replace(fixture("prose", "подвид", 1), before="Австралийский подвид ")
+        options = {"words_by_length": CAPITAL_CITATION_FIXTURE_WORDS_BY_LENGTH, "sample_weight": CAPITAL_CITATION_FIXTURE_WEIGHT}
+        rows, report = capital_citation_curriculum([russian], frozenset(), options)
+        again, _ = capital_citation_curriculum([russian], frozenset(), options)
+        self.assertEqual(rows, again)
+        lengths = [int(length) for length, count in sorted(CAPITAL_CITATION_FIXTURE_WORDS_BY_LENGTH.items()) for _ in range(count)]
+        self.assertEqual(([len(row.original) for row in rows], report["words"]), (lengths, len(lengths)))
+        for row in rows:
+            with self.subTest(row=row.identifier):
+                self.assertTrue(row.original.isascii() and row.original.isupper())
+                self.assertEqual((row.group, row.action, row.sample_weight, row.field.before),
+                                 (0, "keep", CAPITAL_CITATION_FIXTURE_WEIGHT, "Австралийский подвид "))
+                self.assertTrue(capital_citation(row.original, translated(row.original, 0)))
+        held = rows[0].identifier.split(":", 1)[1]
+        refused = frozenset(expanded_aliases(held))
+        kept, _ = capital_citation_curriculum([russian], refused, options)
+        self.assertNotIn(rows[0].identifier, {row.identifier for row in kept})
+        self.assertEqual(capital_citation_curriculum([], frozenset(), options)[0], [])
 
     def test_foreign_insertion_context_does_not_determine_layout_label(self) -> None:
         for original, group in (("deployment", 0), ("обсуждение", 1)):

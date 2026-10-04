@@ -687,3 +687,5 @@ TRAY_APP_OFFER_WINDOW: Final = 0x4C0001
 PREFIX_EXPOSURE_FIXTURE_PREFIX_LENGTH = 2
 # Rows enough for a hash over their identifiers to reach every mixed insertion context.
 MIXED_CONTEXT_SAMPLE_ROWS = 12
+# Words per length the capital citation curriculum test draws.
+CAPITAL_CITATION_FIXTURE_WORDS_BY_LENGTH: Final = {"3": 3, "4": 2}

@@ -1,5 +1,5 @@
 {
- "data_revision": "symmetric-short-actions-balanced-legacy-actions-debian-commands-natural-lookahead-three-letter-ambiguity-deferral-lexical-short-pairs-and-unambiguous-latin-citations-after-russian-prose-v12",
+ "data_revision": "symmetric-short-actions-balanced-legacy-actions-debian-commands-natural-lookahead-three-letter-ambiguity-deferral-lexical-short-pairs-and-unambiguous-latin-citations-after-russian-prose-and-rare-reading-capital-citations-v13",
  "epochs": 50,
  "feature_revision": "learned-ortho-script-length-right-context-origin-identifier-lexicon-line-opening-and-term-frequency-v7",
  "training_revision": "identifier-evidence-dropout-one-family-in-three-planned-mass-balance-and-model-verdict-stands-and-threshold-plateau-under-authored-ceiling",
@@ -136,5 +136,14 @@
   ],
   "weight_scale": 0.5,
   "minimum_word_characters": 2
+ },
+ "capital_citation_curriculum": {
+  "words_by_length": {
+   "3": 200,
+   "4": 150,
+   "5": 50
+  },
+  "sample_weight": 1.0,
+  "scope": "TRAIN only: the keys of rare Russian words of the portable lexicon (three to five letters, counted fewer than five times in Russian text, none written in capitals by the onboard lexicon) typed in the Latin layout in capitals - the shape of a cited Latin abbreviation such as `WBC` (`ЦИС`) or `IBF` (`ШИА`) - stand after the left context of a Russian TRAIN row, chosen by hash, labelled keep; no convert frame for their Cyrillic reading, which may be the writer's own abbreviation. Words held by this corpus's test or any accessed test are refused by their aliases. Natural rows of every split with such a Latin word get one keep frame after Russian prose too (mixed-capital). Motivation: the corpus v22 candidate and the baseline pair converted `по версии WBC` into `ЦИС` on test v22 with the early switch off; natural TRAIN held 17 such rows."
  }
 }

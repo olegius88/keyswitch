@@ -46,7 +46,7 @@ from freeze_context_action_corpus import (
 )
 from freeze_context_action_holdout import (
     Exclusions, alias_reasons, gzip_member, ledger_test_aliases, ledger_test_families, ledger_test_rows, load_exclusions,
-    CAPTURED_TATOEBA, captured_tatoeba_identifiers, read_object, read_tatoeba, select_holdout_sentences, sentence_documents,
+    CAPTURED_TATOEBA, captured_tatoeba_identifiers, lookalike_typo, read_object, read_tatoeba, select_holdout_sentences, sentence_documents,
     verified_tatoeba_source,
 )
 from reconcile_context_action_corpus import expanded_aliases, membership_aliases, row_aliases
@@ -291,8 +291,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     for label, language, path in exports:
         sentences.extend(read_tatoeba(path, label, language, args.namespace, excluded=captured_sentences))
     sentences = sentence_documents(sentences)
-    selected, sampling = select_holdout_sentences(sentences, args.namespace, args.max_documents,
+    typed = [sentence for sentence in sentences if not lookalike_typo(sentence)]
+    selected, sampling = select_holdout_sentences(typed, args.namespace, args.max_documents,
                                                   args.max_sentences_per_document)
+    sampling = {**sampling, "lookalike_typo_sentences_dropped": len(sentences) - len(typed)}
     base = base_corpus(args.base)
     ledger_families = ledger_test_families(args.ledger)[0]
     ledger_rows, ledger_documents = ledger_test_rows(args.ledger)

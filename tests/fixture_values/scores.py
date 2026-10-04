@@ -647,3 +647,5 @@ PACKED_FIXTURE_OWN_VALUE: Final = 2.0
 # Share of words the mixed-typing tool test types with a typo.
 MIXED_TYPING_TEST_TYPO_RATE: Final = 0.5
 MIXED_TYPING_TEST_RUSSIAN_SHARE: Final = 0.5
+# Sample weight of the frames the capital citation curriculum test draws.
+CAPITAL_CITATION_FIXTURE_WEIGHT: Final = 0.5
