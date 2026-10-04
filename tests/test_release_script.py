@@ -41,6 +41,8 @@ NOTES_TEXT = """# KeySwitch 0.9.1
 - keyswitch_0.9.1_amd64.deb
 - KeySwitch-Setup-0.9.1-x64.exe
 - KeySwitch-0.9.1-windows-x64.zip
+- KeySwitch-Setup-0.9.1-arm64.exe
+- KeySwitch-0.9.1-windows-arm64.zip
 - KeySwitch-0.9.1-macos-arm64.zip
 - KeySwitch-0.9.1-macos-x86_64.zip
 """
@@ -336,6 +338,8 @@ class GitHubTests(unittest.TestCase):
                     {"name": "keyswitch_0.9.1_amd64.deb"},
                     {"name": "KeySwitch-Setup-0.9.1-x64.exe"},
                     {"name": "KeySwitch-0.9.1-windows-x64.zip"},
+                    {"name": "KeySwitch-Setup-0.9.1-arm64.exe"},
+                    {"name": "KeySwitch-0.9.1-windows-arm64.zip"},
                     {"name": "KeySwitch-0.9.1-macos-arm64.zip"},
                     {"name": "KeySwitch-0.9.1-macos-x86_64.zip"},
                     {"name": "SHA256SUMS"},

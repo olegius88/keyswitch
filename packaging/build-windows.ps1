@@ -1,7 +1,10 @@
 param(
     [string]$OutputDirectory = "",
     [string]$ModelDirectory = "",
-    [string]$ModelLicense = ""
+    [string]$ModelLicense = "",
+    # x64 or arm64; empty means the architecture of the Python that runs the build,
+    # which is the architecture Nuitka compiles for.
+    [string]$Architecture = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -1153,6 +1156,24 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') {
     throw "Windows packaging requires a three-part numeric version"
 }
 
+# The release names each Windows file after its architecture, and Windows on Arm
+# gets its own native build rather than the x64 one under emulation.
+$PythonPlatform = (& python -c "import sysconfig; print(sysconfig.get_platform())" | Out-String).Trim()
+if ($LASTEXITCODE -ne 0) {
+    throw "Cannot read the build Python's platform"
+}
+$PythonArchitecture = switch ($PythonPlatform) {
+    "win-amd64" { "x64" }
+    "win-arm64" { "arm64" }
+    default { throw "Unsupported Python platform for the Windows build: $PythonPlatform" }
+}
+if (-not $Architecture) {
+    $Architecture = $PythonArchitecture
+}
+if ($Architecture -cne $PythonArchitecture) {
+    throw "Requested $Architecture, but the build Python is $PythonPlatform; Nuitka compiles for the Python that runs it"
+}
+
 $IntentConfigObject = Read-BoundedJsonObject `
     -Path $IntentConfig `
     -MaximumBytes 64KB `
@@ -1566,6 +1587,19 @@ if (($BundledEnglishHash -cne $ExpectedLanguageModelHashes.en_US) -or ($BundledR
     throw "Native distribution contains different frozen language models"
 }
 
+# The PE header names the machine the executable runs on natively.
+[byte[]]$ExecutableHeader = Read-BoundedFileBytes `
+    -Path $Executable `
+    -MaximumBytes 512MB `
+    -MinimumBytes 1 `
+    -Label "native executable"
+$PeOffset = [BitConverter]::ToInt32($ExecutableHeader, 0x3C)
+$PeMachine = [BitConverter]::ToUInt16($ExecutableHeader, $PeOffset + 4)
+$ExpectedPeMachine = if ($Architecture -ceq "arm64") { 0xAA64 } else { 0x8664 }
+if ($PeMachine -ne $ExpectedPeMachine) {
+    throw ("KeySwitch.exe is built for PE machine 0x{0:X4}, not {1}" -f $PeMachine, $Architecture)
+}
+
 $PostBuildDiagnosticsPath = Join-Path $BuildDirectory "post-build-diagnostics.json"
 $PostBuildDiagnosticsErrorPath = Join-Path $BuildDirectory "post-build-diagnostics.stderr.txt"
 $PreviousIntentModelOverride = $env:KEYSWITCH_INTENT_MODEL_PATH
@@ -1675,7 +1709,7 @@ if ($BundledLicenseHash -cne $FrozenLicenseHash) {
     throw "Native distribution contains different language-model license evidence"
 }
 
-$ZipPath = Join-Path $OutputDirectory "KeySwitch-$Version-windows-x64.zip"
+$ZipPath = Join-Path $OutputDirectory "KeySwitch-$Version-windows-$Architecture.zip"
 if (Test-Path $ZipPath) {
     Remove-Item -Force $ZipPath
 }
@@ -1698,6 +1732,7 @@ Invoke-NativeCommand `
     -Command $IsccPath `
     -Arguments @(
         "/DMyAppVersion=$Version",
+        "/DArch=$Architecture",
         "/DSourceDir=$NativeDistribution",
         "/DOutputDir=$OutputDirectory",
         "/DSetupIcon=$Icon",
@@ -1705,7 +1740,7 @@ Invoke-NativeCommand `
     ) `
     -FailureMessage "Inno Setup build failed"
 
-$Installer = Join-Path $OutputDirectory "KeySwitch-Setup-$Version-x64.exe"
+$Installer = Join-Path $OutputDirectory "KeySwitch-Setup-$Version-$Architecture.exe"
 if (-not (Test-Path $Installer -PathType Leaf)) {
     throw "Inno Setup did not produce $Installer"
 }

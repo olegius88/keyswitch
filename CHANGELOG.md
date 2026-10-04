@@ -4,11 +4,29 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
-- The Windows ARM64 probe in CI closes the WWAHost window before its end-to-end run. The
-  Windows 11 desktop image of that runner opens the window (the host of Windows web apps) at
-  sign-in and it keeps the foreground, so the E2E window never came to the front and the
-  probe's E2E step failed in every run. The new step logs which process holds the foreground
-  before and after closing it.
+## 0.38.1 — 2026-10-04
+
+- Windows on Arm gets a native build: the release carries `KeySwitch-Setup-<version>-arm64.exe`
+  and `KeySwitch-<version>-windows-arm64.zip` next to the x64 files. `build-windows.ps1` builds
+  for the architecture of the Python that runs it, names the files after it and refuses an
+  executable whose PE machine differs; the arm64 installer installs only on Windows on Arm,
+  while the x64 one still installs there under emulation. Both installers share one application
+  id and install folder. The release workflow builds and tests the arm64 files on the
+  `windows-11-arm` runner as it does the x64 ones: the Win32 tests, the hook, SendInput and Tk
+  correction E2E, a silent install, update and uninstall. The arm64 build does not update
+  itself yet (its update check reports that the architecture is not supported); new versions
+  come from the releases page. On that runner the Windows 11 desktop image keeps a WWAHost
+  window, then the search surface, in the foreground after sign-in, which kept the E2E window
+  from the front in every run of the earlier ARM64 probe; a step now closes the web-app host and
+  dismisses the shell surfaces with Escape. The silent-installation smoke test of the x64 build
+  gives up after fifteen minutes instead of holding a hung runner for an hour.
+- The macOS release build notarizes the application and staples the ticket into the bundle
+  when the repository holds an App Store Connect team API key (`MACOS_NOTARY_KEY`,
+  `MACOS_NOTARY_KEY_ID`, `MACOS_NOTARY_ISSUER_ID`); Gatekeeper then opens a downloaded
+  KeySwitch without the detour through Privacy & Security. A tagged build without the key
+  warns that its archive is signed but not notarized. The READMEs describe the macOS
+  installation, its limits, and how KeySwitch compares with Punto Switcher, Caramba Switcher
+  and EveryLang, none of which ships for Linux.
 
 ## 0.38.0 — 2026-10-04
 

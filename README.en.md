@@ -12,17 +12,20 @@ by default; it is not built into the KeySwitch input engine.
 [![Native packages](https://github.com/olegius88/keyswitch/actions/workflows/release.yml/badge.svg)](https://github.com/olegius88/keyswitch/actions/workflows/release.yml)
 [![License: GPL v3+](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
-KeySwitch is a desktop application for Windows 10/11 x64 and Ubuntu/Xubuntu
-X11 that automatically corrects words typed using the wrong keyboard layout.
-It serves a similar purpose to Punto Switcher and EveryLang, while running
-entirely locally and using the active EN/RU system layout pair.
+KeySwitch is a desktop application for Windows 10/11 x64 and Windows 11 on Arm,
+Ubuntu/Xubuntu X11 and macOS 13 or newer that automatically corrects words typed using the wrong
+keyboard layout. It is a free, open-source alternative to Punto Switcher,
+Caramba Switcher and EveryLang, and unlike them it also runs on Linux: Punto
+Switcher and Caramba Switcher ship only for Windows and macOS, EveryLang only
+for Windows. Recognition runs entirely locally, typed text is never sent
+anywhere, and the layouts come from the active EN/RU system pair.
 
 [Documentation map](docs/README.md) ·
 [Input troubleshooting](docs/troubleshooting.md) ·
 [Verification, builds and releases](docs/verification.md) (guides in Russian)
 
 The latest published stable release is
-[0.38.0](https://github.com/olegius88/keyswitch/releases/tag/v0.38.0).
+[0.38.1](https://github.com/olegius88/keyswitch/releases/tag/v0.38.1).
 The changes are listed in [CHANGELOG.md](CHANGELOG.md) and the known defects
 of the release in [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
@@ -120,11 +123,17 @@ scenarios and platform limitations.
 
 ## Install on Windows
 
-Download `KeySwitch-Setup-0.38.0-x64.exe` from the
-[published 0.38.0 release](https://github.com/olegius88/keyswitch/releases/tag/v0.38.0) and run
+Download `KeySwitch-Setup-0.38.1-x64.exe` from the
+[published 0.38.1 release](https://github.com/olegius88/keyswitch/releases/tag/v0.38.1) and run
 it. The per-user installation goes to `%LOCALAPPDATA%\Programs\KeySwitch` and
 does not require administrator privileges. The release also includes the
-portable `KeySwitch-0.38.0-windows-x64.zip` archive.
+portable `KeySwitch-0.38.1-windows-x64.zip` archive.
+
+Windows on Arm has a build of its own: `KeySwitch-Setup-0.38.1-arm64.exe` and
+`KeySwitch-0.38.1-windows-arm64.zip`. The x64 installer installs there too, but the
+program then runs under emulation. The ARM64 build does not update itself yet:
+download a new version from the
+[releases page](https://github.com/olegius88/keyswitch/releases).
 
 After launch, KeySwitch appears in the notification area. Left- or right-click
 the `EN/RU` or flag icon to open its menu. Its Switch to action always offers
@@ -154,6 +163,28 @@ For the complete detection model when running from source, point
 frozen `en_US.lm` and `ru_RU.lm` used for training. KeySwitch's own
 `layout_intent_v1.ksm` is already part of its resources. The Setup EXE and
 portable ZIP bundle the lexicons, KSLM and contextual model automatically.
+
+## Install on macOS
+
+macOS 13 or newer is required. The
+[published 0.38.1 release](https://github.com/olegius88/keyswitch/releases/tag/v0.38.1)
+carries two archives, and exactly one of them is needed:
+
+- `KeySwitch-0.38.1-macos-arm64.zip` — Mac with Apple silicon (M1 and later);
+- `KeySwitch-0.38.1-macos-x86_64.zip` — Mac with an Intel processor.
+
+Unpack the archive and move `KeySwitch.app` to Applications. The application is
+signed with a Developer ID certificate and notarized by Apple, so it opens with an
+ordinary double click.
+
+On its first start KeySwitch asks for the Accessibility permission: without it the
+program cannot see the keyboard. It shows the system prompt itself, opens the
+settings pane where the switch lives and carries on without a restart once the
+permission is given. KeySwitch appears in the menu bar; the settings window is the
+same as on Windows.
+
+macOS has no automatic updates yet: download a new version from the
+[releases page](https://github.com/olegius88/keyswitch/releases).
 
 ## Quick start on Ubuntu
 
@@ -204,12 +235,12 @@ Probe the system backend without opening the application window:
 
 ## Install the Debian package
 
-Download `keyswitch_0.38.0_amd64.deb` from the
-[published 0.38.0 release](https://github.com/olegius88/keyswitch/releases/tag/v0.38.0), then
+Download `keyswitch_0.38.1_amd64.deb` from the
+[published 0.38.1 release](https://github.com/olegius88/keyswitch/releases/tag/v0.38.1), then
 install it with:
 
 ```bash
-sudo apt install ./keyswitch_0.38.0_amd64.deb
+sudo apt install ./keyswitch_0.38.1_amd64.deb
 ```
 
 The package installs the required system dependencies and adds KeySwitch to the
@@ -795,7 +826,13 @@ See [release and recovery procedures](docs/verification.md).
 - On Windows, UIPI prevents a regular process from injecting input into a
   window running at a higher integrity level. KeySwitch needs a matching level
   for that target window.
-- The published Windows 0.38.0 Setup EXE is not signed with a publisher certificate.
+- The published Windows 0.38.1 Setup EXE is not signed with a publisher certificate.
+- The macOS and Windows on Arm builds do not update themselves (see
+  [Install on macOS](#install-on-macos) and [Install on Windows](#install-on-windows)).
+- macOS: the spelling autocorrection (in TextEdit, for example) can change a word
+  at the space before KeySwitch does; KeySwitch then does not write over that
+  edit and the word stays as it is. Turning autocorrection off in such an
+  application avoids it.
 
 ## Privacy
 
