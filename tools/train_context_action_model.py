@@ -480,6 +480,27 @@ def term_insertion_curriculum(rows: Sequence[CorpusRow], options: Mapping[str, o
         result.append(ActionRow(identity + ":after:wrong", latin, 0, after_term, "space", "", "convert",
                                 "word_after_term_layout_intervention", " ", weight))
         counts["after_term"] += 1
+    # The other side of the same keys: a real Russian word of a TRAIN sentence whose Latin reading
+    # happens to be a counted term (`вум` is no word, but a rare surname may spell `gs`) stays as
+    # typed; without these the candidate trained on the frames above converted such a word of the
+    # calibration split at p=0.99.
+    lookalikes = int(cast(int, options.get("maximum_lookalikes", 0)))
+    if lookalikes:
+        seen_lookalikes: Counter[str] = Counter()
+        for row in sorted(rows, key=lambda row: hashlib.sha256(("term-lookalike:" + row.identifier).encode()).digest()):
+            if counts["lookalike"] >= lookalikes:
+                break
+            if row.group != 1 or not row.layout_representable or not row.original.isalpha() or len(row.original) < 2:
+                continue
+            latin = translated(row.original, 1).casefold()
+            if tables["latin"].get(latin, 0) < minimum or seen_lookalikes[latin] >= 2:
+                continue
+            seen_lookalikes[latin] += 1
+            application = applications[variant_choice(row.identifier, "application", len(applications))]
+            field = FieldContext(application, "public-training", row.before, "", "unknown")
+            result.append(ActionRow(row.identifier + ":term-lookalike", row.original, 1, field, "space", "", "keep",
+                                    "term_lookalike", " ", float(cast(float, options.get("lookalike_weight", weight)))))
+            counts["lookalike"] += 1
     report.update({"terms": len(terms), "contexts": len(contexts), "frames": len(result), "counts": dict(counts),
                    "weight": weight, "minimum_term_count": minimum})
     return result, report
