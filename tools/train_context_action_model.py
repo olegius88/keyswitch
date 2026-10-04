@@ -468,6 +468,8 @@ def term_insertion_curriculum(rows: Sequence[CorpusRow], options: Mapping[str, o
         result.append(ActionRow(identity + ":term:wrong", translated(term, 0), 1, field, "space", "", "convert",
                                 "term_insertion_layout_intervention", " ", weight))
         counts["term"] += 1
+        if not options.get("after_term", True):
+            continue
         latin = translated(row.original, 1)
         if plausible_reading(latin, 0) or plausible_reading(latin.casefold(), 0):
             counts["after_term_skipped_plausible_latin"] += 1
