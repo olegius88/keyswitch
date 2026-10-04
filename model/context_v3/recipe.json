@@ -142,6 +142,8 @@
   "maximum_terms": 1500,
   "minimum_term_count": 100,
   "weight": 0.5,
-  "scope": "English terms that Russian technical text uses at least 100 times (the packaged term table), put inside Russian sentences of TRAIN in place of one of their words, and the Russian word after such a term; both readings of each physical word labelled. Measured 04.10.2026 on corpus v18 against the replay of the owner's typing: 50 occurrences with half the mass and without the word after the term as well; train_context_action_model.term_insertion_curriculum, model/context_v3/README.md."
+  "scope": "English terms that Russian technical text uses at least 100 times (the packaged term table), put inside Russian sentences of TRAIN in place of one of their words, and the Russian word after such a term; both readings of each physical word labelled. Measured 04.10.2026 on corpus v18 against the replay of the owner's typing: 50 occurrences with half the mass and without the word after the term as well; train_context_action_model.term_insertion_curriculum, model/context_v3/README.md.",
+  "dominance": 3,
+  "maximum_abbreviation_contexts": 2000
  }
 }

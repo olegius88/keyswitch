@@ -440,17 +440,32 @@ def term_insertion_curriculum(rows: Sequence[CorpusRow], options: Mapping[str, o
         return [], report
     weight = float(cast(float, options["weight"]))
     minimum = int(cast(int, options["minimum_term_count"]))
+    dominance = int(cast(int, options["dominance"]))
     tables = _term_frequency()
     terms = []
     for term, count in sorted(tables["latin"].items(), key=lambda item: (-item[1], item[0])):
         if count < minimum or not term.isalpha() or not term.isascii() or not 2 <= len(term) <= 10:
             continue
         cyrillic = translated(term, 0)
-        if plausible_reading(cyrillic, 1) or tables["russian"].get(cyrillic, 0) >= minimum or tables["cyrillic"].get(cyrillic, 0) >= minimum:
+        if plausible_reading(cyrillic, 1) or tables["cyrillic"].get(cyrillic, 0) * dominance > count:
             continue
         terms.append(term)
         if len(terms) >= int(cast(int, options["maximum_terms"])):
             break
+    # The mirror image: a Russian abbreviation of technical text (`тз`, `бд`, `пдф`) whose Latin keys
+    # that text uses far less. Both tables count tokens of the same Russian technical text, so the
+    # reading it uses `dominance` times more often is the one a writer of Russian prose means.
+    abbreviations = []
+    for abbreviation, count in sorted(tables["cyrillic"].items(), key=lambda item: (-item[1], item[0])):
+        if count < minimum or not abbreviation.isalpha() or not 2 <= len(abbreviation) <= 6:
+            continue
+        try:
+            latin_keys = translated(abbreviation, 1)
+        except ValueError:
+            continue
+        if not latin_keys.isalpha() or tables["latin"].get(latin_keys, 0) * dominance > count:
+            continue
+        abbreviations.append(abbreviation)
     contexts = [row for row in rows if row.group == 1 and row.layout_representable and row.original.isalpha()
                 and len(row.original) >= 2 and len(re.findall(r"[а-яё]{2,}", row.before.casefold())) >= 2]
     contexts.sort(key=lambda row: hashlib.sha256(("term-insertion:" + row.identifier).encode()).digest())
@@ -478,7 +493,19 @@ def term_insertion_curriculum(rows: Sequence[CorpusRow], options: Mapping[str, o
         result.append(ActionRow(identity + ":after:wrong", latin, 0, after_term, "space", "", "convert",
                                 "word_after_term_layout_intervention", " ", weight))
         counts["after_term"] += 1
-    report.update({"terms": len(terms), "contexts": len(contexts), "frames": len(result), "counts": dict(counts),
+    abbreviation_budget = int(cast(int, options["maximum_abbreviation_contexts"]))
+    for row in contexts[budget:budget + abbreviation_budget] if abbreviations else ():
+        abbreviation = abbreviations[variant_choice(row.identifier, "insertion-abbreviation", len(abbreviations))]
+        application = applications[variant_choice(row.identifier, "application", len(applications))]
+        before = row.before if row.before.endswith((" ", "\n")) or not row.before else row.before + " "
+        field = FieldContext(application, "public-training", before, "", "unknown")
+        identity = row.identifier + ":abbreviation-insertion"
+        result.append(ActionRow(identity, abbreviation, 1, field, "space", "", "keep", "abbreviation_insertion", " ", weight))
+        result.append(ActionRow(identity + ":wrong", translated(abbreviation, 1), 0, field, "space", "", "convert",
+                                "abbreviation_insertion_layout_intervention", " ", weight))
+        counts["abbreviation"] += 1
+    report.update({"terms": len(terms), "abbreviations": len(abbreviations), "contexts": len(contexts),
+                   "frames": len(result), "counts": dict(counts),
                    "weight": weight, "minimum_term_count": minimum})
     return result, report
 
