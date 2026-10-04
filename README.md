@@ -10,10 +10,9 @@
 KeySwitch — настольное приложение для Windows 10/11 x64 и Windows 11 на ARM,
 Ubuntu/Xubuntu X11 и macOS 13 и новее, которое автоматически исправляет слово, набранное в неверной
 раскладке. Это свободная альтернатива Punto Switcher, Caramba Switcher и
-EveryLang, и в отличие от них KeySwitch работает и в Linux: Punto Switcher и
-Caramba Switcher выпускаются только для Windows и macOS, EveryLang — только для
-Windows. Распознавание идёт локально, набранный текст никуда не отправляется, а
-раскладки берутся из системной пары EN/RU.
+EveryLang, и в отличие от них KeySwitch работает и в Linux. Распознавание идёт
+локально, набранный текст никуда не отправляется, а раскладки берутся из
+системной пары EN/RU.
 
 [Карта документации](docs/README.md) ·
 [Диагностика проблем ввода](docs/troubleshooting.md) ·
