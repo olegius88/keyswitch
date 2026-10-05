@@ -603,6 +603,8 @@ class ActionTrainingTests(unittest.TestCase):
         stranded = rows["they:stranded-previous:wrong"]
         self.assertEqual((stranded.original, stranded.group, stranded.action, stranded.field.before),
                          ("ерун", 1, "convert", "I know руку "))
+        opening = rows["they:stranded-previous:opening:wrong"]
+        self.assertEqual((opening.original, opening.action, opening.field.before), ("ерун", "convert", "руку "))
         self.assertEqual(stranded_previous("hello world ", 0), None)  # `цщкдв` is no word
         self.assertEqual(stranded_previous("we went in ", 0), "we went шт ")
         self.assertEqual(stranded_previous("Мы ", 1), "Vs ")
