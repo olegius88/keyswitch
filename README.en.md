@@ -15,10 +15,9 @@ by default; it is not built into the KeySwitch input engine.
 KeySwitch is a desktop application for Windows 10/11 x64 and Windows 11 on Arm,
 Ubuntu/Xubuntu X11 and macOS 13 or newer that automatically corrects words typed using the wrong
 keyboard layout. It is a free, open-source alternative to Punto Switcher,
-Caramba Switcher and EveryLang, and unlike them it also runs on Linux: Punto
-Switcher and Caramba Switcher ship only for Windows and macOS, EveryLang only
-for Windows. Recognition runs entirely locally, typed text is never sent
-anywhere, and the layouts come from the active EN/RU system pair.
+Caramba Switcher and EveryLang, and unlike them it also runs on Linux.
+Recognition runs entirely locally, typed text is never sent anywhere, and the
+layouts come from the active EN/RU system pair.
 
 [Documentation map](docs/README.md) ·
 [Input troubleshooting](docs/troubleshooting.md) ·
