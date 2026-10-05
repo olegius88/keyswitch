@@ -52,6 +52,7 @@ from train_context_action_model import (
     previous_context,
     select_features,
     select_rows,
+    stranded_previous,
     training_order,
     translated,
 )
@@ -595,6 +596,17 @@ class ActionTrainingTests(unittest.TestCase):
             self.assertEqual((wrong.original, wrong.group, wrong.action, wrong.field), ("ghbdtn@", 0, "convert", keep.field))
         english = action_rows([replace(fixture("e", "hello", 0), before="he said ")])
         self.assertFalse([row for row in english if ":quote-tail" in row.identifier])
+
+    def test_a_word_after_a_previous_word_left_in_the_wrong_layout_converts(self) -> None:
+        english = replace(fixture("they", "they", 0), before="I know here ")
+        rows = {row.identifier: row for row in action_rows([english])}
+        stranded = rows["they:stranded-previous:wrong"]
+        self.assertEqual((stranded.original, stranded.group, stranded.action, stranded.field.before),
+                         ("ерун", 1, "convert", "I know руку "))
+        self.assertEqual(stranded_previous("hello world ", 0), None)  # `цщкдв` is no word
+        self.assertEqual(stranded_previous("we went in ", 0), "we went шт ")
+        self.assertEqual(stranded_previous("Мы ", 1), "Vs ")
+        self.assertIsNone(stranded_previous("", 0))
 
     def test_foreign_insertion_context_does_not_determine_layout_label(self) -> None:
         for original, group in (("deployment", 0), ("обсуждение", 1)):

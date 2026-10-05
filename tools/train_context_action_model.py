@@ -76,6 +76,7 @@ from keyswitch.constants.training import (
     MAX_CONTEXTS_PER_FAMILY,
     QUOTE_TAIL,
     QUOTE_TAIL_MODULUS,
+    STRANDED_PREVIOUS_MIN_LETTERS,
     ACTION_DEFERRED_WORD_MAX_CHARACTERS,
     ACTION_SHORT_WORD_MAX_CHARACTERS,
     NET_BENEFIT_FALSE_INDEX,
@@ -187,6 +188,30 @@ def capital_citation(original: str, alternate: str) -> bool:
             and plausible_reading(alternate, 1)
             and term_bucket(alternate, "russian") == CAPITAL_CITATION_RUSSIAN_BUCKET
             and alternate.casefold() not in onboard_capital_forms())
+
+
+def stranded_previous(before: str, group: int) -> str | None:
+    """`before` with its last word as typed in the other layout, when that reading is a word there too.
+
+    The left context of a phrase typed whole in the wrong layout after the engine has converted all
+    but the word whose wrong reading it could not tell from a real one (`we went in` typed in the
+    Russian layout leaves `we went шт`). None when the last word does not end `before`, has fewer
+    than two letters or signs, or reads as no word of the other language.
+    """
+    words = WORDS.findall(before)
+    if not words:
+        return None
+    previous = words[-1]
+    head = before.rstrip()
+    if not head.endswith(previous) or len(previous) < STRANDED_PREVIOUS_MIN_LETTERS or not previous.isalpha():
+        return None
+    try:
+        reading = translated(previous, group)
+    except ValueError:
+        return None
+    if not reading.isalpha() or not plausible_reading(reading, 1 - group):
+        return None
+    return head[:-len(previous)] + reading + before[len(head):]
 
 
 def variant_choice(identifier: str, purpose: str, count: int) -> int:
@@ -393,6 +418,16 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
                                     trigger, "", "keep", "mixed_language_insertion", boundary_text))
             result.append(ActionRow(row.identifier + ":mixed-natural:head:wrong", translated(headed, group), 1 - group,
                                     natural_field, trigger, "", "convert", "mixed_language_layout_intervention", boundary_text))
+        stranded = stranded_previous(row.before, group)
+        if stranded is not None:
+            # A phrase typed whole in the other layout: the engine converts each word, but a previous
+            # word whose wrong reading is a word of the other language stays as typed (`here` typed in
+            # the Russian layout is `руку`). The word after it is still the phrase's, and converts:
+            # `руку ерун` is `here they`. Natural frames only ever stand after correctly typed text,
+            # and the corpus v23 candidates left `ерун` after `руку` as typed (p=0.977).
+            stranded_field = FieldContext(application, "public-training", stranded, "", "unknown")
+            result.append(ActionRow(row.identifier + ":stranded-previous:wrong", alternate, 1 - group, stranded_field,
+                                    trigger, "", "convert", "layout_intervention", boundary_text))
         if group == 1 and row.original.isalpha() and variant_choice(row.identifier, "quote-tail", QUOTE_TAIL_MODULUS) == 0:
             # A quotation closes with its quote typed in the layout of the word, and the Russian `"` is
             # the `@` key: `привет"` typed in the Latin layout is `ghbdtn@`. The corpus splits the quote
