@@ -59,6 +59,9 @@ ACTION_FEATURE_ORTHO_SCORE_BOUND: Final = 128.0
 # Letters of a token in capitals that the capitals evidence describes: an abbreviation is three or
 # more (`WBC`, `ГАК`); two-letter tokens stay with the deferral rules and the owner's `ГА`.
 ACTION_FEATURE_CAPITALS_MIN_LETTERS: Final = 3
+# Separators between the single letters of an initials-shaped token: the period, and the slash that
+# is the period's key in the Russian layout (`Р.Ф.` reads `H/A/` in the Latin layout).
+ACTION_FEATURE_INITIALS_SEPARATORS: Final = "./"
 # ContextModel feature_version of the context-action (orthotactic-aware) scheme, feature schema 3.
 CONTEXT_ACTION_FEATURE_VERSION: Final[int] = 3
 # Shortest prefix the engine offers the prefix model; prefix training mirrors this support.

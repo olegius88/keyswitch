@@ -12,6 +12,7 @@ from .constants.models import (
     ACTION_FEATURE_APPLICATION_TOKEN_COUNT,
     ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS,
     ACTION_FEATURE_CAPITALS_MIN_LETTERS,
+    ACTION_FEATURE_INITIALS_SEPARATORS,
     ACTION_FEATURE_CHARACTER_WEIGHT_CAP,
     ACTION_FEATURE_FIELD_LABEL_MAX_CHARACTERS,
     ACTION_FEATURE_FREQUENCY_CAP,
@@ -140,6 +141,9 @@ def _term_features(features: dict[str, float], item: ContextEvidence, direction:
     latin_bucket = term_bucket(latin, "latin")
     cyrillic_bucket = "lexicon" if cyrillic_known else term_bucket(cyrillic, "cyrillic")
     _capitals_features(features, item, direction, before, cyrillic, cyrillic_known)
+    if _initials(item.original):
+        features[f"initials:direction:{direction}"] = 1.0
+        features[f"initials:before:{_dominant(before)}:direction:{direction}"] = 1.0
     if latin_bucket != "na" or cyrillic_bucket != "na":
         _frequency_features(features, item, direction, (before, after, state), (latin, cyrillic),
                             (latin_bucket, cyrillic_bucket), cyrillic_known)
@@ -148,6 +152,22 @@ def _term_features(features: dict[str, float], item: ContextEvidence, direction:
         kind = "letters" if any(char.isalpha() for char in item.alternative) else "only"
         features[f"signs:{kind}:direction:{direction}"] = 1.0
         features[f"signs:{kind}:digits:{digits}:direction:{direction}"] = 1.0
+
+
+_LETTER_RUN: Final = re.compile(r"[^\W\d_]+")
+
+
+def _initials(token: str) -> bool:
+    """Single letters separated by periods or slashes: initials and dotted abbreviations (`А.С.`, `т.е.`).
+
+    A Russian period is the slash key of the Latin layout, so `Р.Ф.` reads `H/A/` and looked like a
+    path typed in the Russian layout (`.ыкс.` is `/src/`): the corpus v26 candidate converted it after
+    Russian prose at p=0.999. A path names segments of several letters; initials have one each.
+    """
+
+    runs = _LETTER_RUN.findall(token)
+    rest = _LETTER_RUN.sub("", token)
+    return len(runs) > 1 and all(len(run) == 1 for run in runs) and bool(rest) and set(rest) <= set(ACTION_FEATURE_INITIALS_SEPARATORS)
 
 
 def _capitals_features(features: dict[str, float], item: ContextEvidence, direction: str, before: str,

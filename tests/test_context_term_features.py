@@ -48,6 +48,15 @@ class TermFrequencyFeatureTests(unittest.TestCase):
             with self.subTest(original=original):
                 self.assertFalse(named(extract_action_features(evidence(original, alternative, 0, "по версии ")), "capitals:"))
 
+    def test_single_letters_between_periods_or_slashes_are_initials_not_a_path(self) -> None:
+        for original, alternative, group in (("Р.Ф.", "H/A/", 1), ("n/t/", "т.е.", 0), ("А.С.", "F/C/", 1)):
+            with self.subTest(original=original):
+                features = extract_action_features(evidence(original, alternative, group, "по словам "))
+                self.assertEqual(named(features, "initials:"), {f"initials:direction:{group}", f"initials:before:ru:direction:{group}"})
+        for original, alternative, group in ((".ыкс.", "/src/", 1), ("sefan.ru", "ыуафт.ко", 0), ("J.", "О.", 0)):
+            with self.subTest(original=original):
+                self.assertFalse(named(extract_action_features(evidence(original, alternative, group, "по словам ")), "initials:"))
+
     def test_a_reading_the_lexicon_knows_is_bucketed_by_its_frequency_in_its_language(self) -> None:
         word = extract_action_features(evidence("dct", "все", 0, "todo ", target_known=True))
         self.assertTrue(named(word, "freq:cyrillic:lexicon:"))
