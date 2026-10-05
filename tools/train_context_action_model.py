@@ -433,11 +433,14 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
                 result.append(ActionRow(row.identifier + ":stranded-previous" + suffix + ":wrong", alternate, 1 - group,
                                         stranded_field, trigger, "", "convert", "layout_intervention", boundary_text,
                                         STRANDED_PREVIOUS_WEIGHT))
-        if group == 1 and row.original.isalpha() and variant_choice(row.identifier, "quote-tail", QUOTE_TAIL_MODULUS) == 0:
+        isolated = not WORDS.search(row.before) and deferred_isolated(row.original, alternate, group)
+        if (group == 1 and row.original.isalpha() and not isolated
+                and variant_choice(row.identifier, "quote-tail", QUOTE_TAIL_MODULUS) == 0):
             # A quotation closes with its quote typed in the layout of the word, and the Russian `"` is
             # the `@` key: `привет"` typed in the Latin layout is `ghbdtn@`. The corpus splits the quote
             # off as a token of its own, so no frame held a Russian word with the `@` of its quote, and
             # every corpus v23 candidate left `ghbdtn@` as typed with the early switch off (p=0.988).
+            # A short word standing alone keeps its deferred action: the quote tells no intent.
             quoted = row.original + QUOTE_TAIL
             quote_field = FieldContext(application, "public-training", row.before, "", "unknown")
             result.append(ActionRow(row.identifier + ":quote-tail", quoted, group, quote_field,
