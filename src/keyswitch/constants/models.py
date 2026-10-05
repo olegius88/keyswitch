@@ -56,6 +56,9 @@ ACTION_FEATURE_APPLICATION_NAME_CHARACTERS: Final = 128
 ACTION_FEATURE_APPLICATION_TOKEN_COUNT: Final = 4
 # The orthotactic model's score and threshold share this magnitude range.
 ACTION_FEATURE_ORTHO_SCORE_BOUND: Final = 128.0
+# Letters of a token in capitals that the capitals evidence describes: an abbreviation is three or
+# more (`WBC`, `ГАК`); two-letter tokens stay with the deferral rules and the owner's `ГА`.
+ACTION_FEATURE_CAPITALS_MIN_LETTERS: Final = 3
 # ContextModel feature_version of the context-action (orthotactic-aware) scheme, feature schema 3.
 CONTEXT_ACTION_FEATURE_VERSION: Final[int] = 3
 # Shortest prefix the engine offers the prefix model; prefix training mirrors this support.
