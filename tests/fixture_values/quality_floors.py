@@ -26,9 +26,22 @@ RECEIPT_MIN_RESTORATION_MARGIN: Final[dict[str, int]] = {"default": 0, "early_of
 RECEIPT_MAX_EXECUTION_ERRORS: Final = 0
 RECEIPT_MAX_LENGTH_MISMATCHES: Final = 0
 RECEIPT_MAX_CORRECTION_LAYOUT_MISMATCHES: Final = 0
-# Calibration split of the installed pair.
-RECEIPT_MIN_CALIBRATION_RECALL: Final = 0.976
-RECEIPT_MAX_CALIBRATION_FALSE_CONVERSIONS: Final[dict[str, int]] = {"portable": 7, "reference_hunspell": 7}
+# Calibration split of the installed pair. Raised from 0.976 for the corpus v26 pair (05.10.2026),
+# which recalls 0.9778.
+RECEIPT_MIN_CALIBRATION_RECALL: Final = 0.977
+# The calibration split changes with every corpus, and so does how many of its rows are ambiguous
+# enough to convert falsely: the 0.38 pair makes 8 false conversions on calibration v25, 8 on v26
+# and 9 on v27, against the 7 its own calibration v18 counted, so a fixed count judged the split as
+# much as the model. The installed pair is judged against the pair it replaced on the same rows
+# instead: what it nets there - conversions right minus conversions false, per profile - may not
+# fall below what the replaced pair nets. The replaced pair's counts are measured on the corpus the
+# receipt names, with the runtime's own scoring of its artifact; a receipt of another corpus needs
+# them measured anew, and the test refuses it until they are. Corpus v26: the 0.38 pair
+# (context-v3-bb8097ea5941) converts 13 355 and 13 390 of the 13 773 conversion rows with 8 false
+# conversions in each profile.
+RECEIPT_CALIBRATION_REFERENCE_CORPUS: Final = "81431115e9a6b6ddec16bc16b76c0359b0e1f04f49fb1b86021653b37264f8f9"
+RECEIPT_CALIBRATION_REFERENCE_MODEL: Final = "context-v3-bb8097ea5941"
+RECEIPT_CALIBRATION_REFERENCE_NET: Final[dict[str, int]] = {"portable": 13347, "reference_hunspell": 13382}
 # Serving thresholds are part of the contract: a lower threshold converts on weaker evidence.
 RECEIPT_MIN_CONVERSION_THRESHOLD: Final = 0.99
 RECEIPT_MIN_PREFIX_CONVERSION_THRESHOLD: Final = 0.985
