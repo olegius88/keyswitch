@@ -52,6 +52,9 @@ QUOTE_TAIL: Final = '"'
 # Letters of a previous word left in the wrong layout that the stranded-previous frames take: a
 # lone letter waits for its neighbour and is no word left behind.
 STRANDED_PREVIOUS_MIN_LETTERS: Final = 2
+# Sample weight of a stranded-previous frame: natural text holds few of them (corpus v23 TRAIN:
+# 384 rows), and at unit weight the authored `руку ерун` stayed under the threshold (p=0.987).
+STRANDED_PREVIOUS_WEIGHT: Final = 2.0
 # Letters of a Latin abbreviation cited in capitals inside Russian prose whose Cyrillic reading is a
 # rare word (`WBC` is `ЦИС`, `IBF` is `ШИА`): three to five, as abbreviations are written. Two
 # letters stay with the deferral rules and the owner's own Cyrillic abbreviations (`ГА`).
