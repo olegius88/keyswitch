@@ -74,6 +74,8 @@ from keyswitch.constants.training import (
     LOOKAHEAD_ANCHOR_MIN_CHARACTERS,
     MASS_REPORT_DECIMALS,
     MAX_CONTEXTS_PER_FAMILY,
+    QUOTE_TAIL,
+    QUOTE_TAIL_MODULUS,
     ACTION_DEFERRED_WORD_MAX_CHARACTERS,
     ACTION_SHORT_WORD_MAX_CHARACTERS,
     NET_BENEFIT_FALSE_INDEX,
@@ -391,6 +393,17 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
                                     trigger, "", "keep", "mixed_language_insertion", boundary_text))
             result.append(ActionRow(row.identifier + ":mixed-natural:head:wrong", translated(headed, group), 1 - group,
                                     natural_field, trigger, "", "convert", "mixed_language_layout_intervention", boundary_text))
+        if group == 1 and row.original.isalpha() and variant_choice(row.identifier, "quote-tail", QUOTE_TAIL_MODULUS) == 0:
+            # A quotation closes with its quote typed in the layout of the word, and the Russian `"` is
+            # the `@` key: `привет"` typed in the Latin layout is `ghbdtn@`. The corpus splits the quote
+            # off as a token of its own, so no frame held a Russian word with the `@` of its quote, and
+            # every corpus v23 candidate left `ghbdtn@` as typed with the early switch off (p=0.988).
+            quoted = row.original + QUOTE_TAIL
+            quote_field = FieldContext(application, "public-training", row.before, "", "unknown")
+            result.append(ActionRow(row.identifier + ":quote-tail", quoted, group, quote_field,
+                                    trigger, "", "keep", "natural_surface", boundary_text))
+            result.append(ActionRow(row.identifier + ":quote-tail:wrong", translated(quoted, group), 1 - group,
+                                    quote_field, trigger, "", "convert", "layout_intervention", boundary_text))
         for index, typo in enumerate(typo_variants(row.original, row.identifier)):
             result.append(ActionRow(row.identifier + f":spelling:{index}", typo, group,
                                     FieldContext(application, "public-training", row.before, "", "unknown"),

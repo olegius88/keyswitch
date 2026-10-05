@@ -44,6 +44,11 @@ LEXICAL_PAIR_ANCHOR_VARIANTS: Final = 3
 # in the Russian layout: `` is ёё, ' is э, " is Э. A citation that carries one is still the
 # citation, and its Cyrillic reading still no word.
 CITATION_SIGN_HEADS: Final = ("``", "'", '"')
+# A Russian word closing a quotation, typed with its quote in the layout of the word: the Russian
+# `"` is the `@` key, so `привет"` typed in the Latin layout is `ghbdtn@`. One Russian row in this
+# many gets the closing-quote pair, chosen by hash.
+QUOTE_TAIL_MODULUS: Final = 4
+QUOTE_TAIL: Final = '"'
 # Letters of a Latin abbreviation cited in capitals inside Russian prose whose Cyrillic reading is a
 # rare word (`WBC` is `ЦИС`, `IBF` is `ШИА`): three to five, as abbreviations are written. Two
 # letters stay with the deferral rules and the owner's own Cyrillic abbreviations (`ГА`).

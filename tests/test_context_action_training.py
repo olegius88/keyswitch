@@ -584,6 +584,18 @@ class ActionTrainingTests(unittest.TestCase):
         self.assertEqual([(row.original, row.action, row.field) for row in lower],
                          [(row.original.lower(), "convert", row.field) for row in rows])
 
+    def test_a_russian_word_closing_a_quotation_converts_with_the_at_sign_of_its_quote(self) -> None:
+        words = [replace(fixture(f"q{index}", "привет", 1), before="он сказал «") for index in range(MIXED_CONTEXT_SAMPLE_ROWS)]
+        rows = {row.identifier: row for row in action_rows(words)}
+        quoted = sorted(name for name in rows if name.endswith(":quote-tail"))
+        self.assertTrue(0 < len(quoted) < len(words))
+        for name in quoted:
+            keep, wrong = rows[name], rows[name + ":wrong"]
+            self.assertEqual((keep.original, keep.group, keep.action), ('привет"', 1, "keep"))
+            self.assertEqual((wrong.original, wrong.group, wrong.action, wrong.field), ("ghbdtn@", 0, "convert", keep.field))
+        english = action_rows([replace(fixture("e", "hello", 0), before="he said ")])
+        self.assertFalse([row for row in english if ":quote-tail" in row.identifier])
+
     def test_foreign_insertion_context_does_not_determine_layout_label(self) -> None:
         for original, group in (("deployment", 0), ("обсуждение", 1)):
             with self.subTest(group=group):
