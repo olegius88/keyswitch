@@ -22,7 +22,7 @@ from keyswitch.constants.training import (
 from freeze_context_action_corpus import CorpusRow, physical, typo_variants
 from context_deferral import deferred_isolated, lookahead_focus
 from reconcile_context_action_corpus import expanded_aliases
-from keyswitch.constants.training import ACTION_DEFERRED_WORD_MAX_CHARACTERS, CITATION_SIGN_HEADS, DOTTED_RUSSIAN_ABBREVIATIONS
+from keyswitch.constants.training import ACTION_DEFERRED_WORD_MAX_CHARACTERS, CITATION_SIGN_HEADS
 from keyswitch.context_action_features import extract_action_features
 from keyswitch.context_model import ACTIONS, ContextEvidence, ContextModel
 from train_context_action_model import (
@@ -37,7 +37,6 @@ from train_context_action_model import (
     capital_citation,
     capital_citation_curriculum,
     choose_threshold,
-    dotted_abbreviation_curriculum,
     development_thresholds,
     identifier_evidence_dropped,
     identifier_family,
@@ -610,19 +609,6 @@ class ActionTrainingTests(unittest.TestCase):
         self.assertEqual(stranded_previous("we went in ", 0), "we went шт ")
         self.assertEqual(stranded_previous("Мы ", 1), "Vs ")
         self.assertIsNone(stranded_previous("", 0))
-
-    def test_russian_dotted_abbreviations_keep_and_their_latin_keys_convert(self) -> None:
-        russian = replace(fixture("prose", "подвид", 1), before="Австралийский подвид ")
-        options = {"initials": CAPITAL_CITATION_FIXTURE_WORDS_BY_LENGTH["4"], "contexts": 1, "sample_weight": CAPITAL_CITATION_FIXTURE_WEIGHT}
-        rows, report = dotted_abbreviation_curriculum([russian], frozenset(), options)
-        by_id = {row.identifier: row for row in rows}
-        keep, wrong, alone = by_id["dotted:т.е.:0:keep"], by_id["dotted:т.е.:0:wrong"], by_id["dotted:т.е.:alone"]
-        self.assertEqual((keep.original, keep.group, keep.action, keep.field.before), ("т.е.", 1, "keep", "Австралийский подвид "))
-        self.assertEqual((wrong.original, wrong.group, wrong.action, wrong.field), ("n/t/", 0, "convert", keep.field))
-        self.assertEqual((alone.action, alone.field.before), ("keep", ""))
-        self.assertEqual(report["forms"], len(DOTTED_RUSSIAN_ABBREVIATIONS) + CAPITAL_CITATION_FIXTURE_WORDS_BY_LENGTH["4"])
-        refused = frozenset(expanded_aliases("т.е."))
-        self.assertNotIn("dotted:т.е.:alone", {row.identifier for row in dotted_abbreviation_curriculum([russian], refused, options)[0]})
 
     def test_foreign_insertion_context_does_not_determine_layout_label(self) -> None:
         for original, group in (("deployment", 0), ("обсуждение", 1)):

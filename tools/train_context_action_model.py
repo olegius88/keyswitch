@@ -61,7 +61,6 @@ from keyswitch.constants.training import (
     CAPITAL_CITATION_PUNCTUATION,
     CAPITAL_CITATION_RUSSIAN_BUCKET,
     CITATION_SIGN_HEADS,
-    DOTTED_RUSSIAN_ABBREVIATIONS,
     COMMAND_FAMILY_IDENTIFIER_PARTS,
     DETERMINISTIC_CHOICE_HEX_DIGITS,
     DETERMINISTIC_ROUNDING_DECIMALS,
@@ -77,7 +76,6 @@ from keyswitch.constants.training import (
     MAX_CONTEXTS_PER_FAMILY,
     QUOTE_TAIL,
     QUOTE_TAIL_MODULUS,
-    RUSSIAN_INITIAL_LETTERS,
     STRANDED_PREVIOUS_MIN_LETTERS,
     STRANDED_PREVIOUS_WEIGHT,
     ACTION_DEFERRED_WORD_MAX_CHARACTERS,
@@ -524,49 +522,6 @@ def capital_citation_curriculum(source_rows: Sequence[CorpusRow], refused: froze
                   "candidates_by_length": {str(length): len(candidates[length]) for length in sorted(budgets)},
                   "sample_weight": weight,
                   "scope": "TRAIN only: keep frames of Latin capitals after Russian prose whose Cyrillic reading is a rare lexicon word (capital_citation_curriculum)."}
-
-
-def dotted_abbreviation_curriculum(source_rows: Sequence[CorpusRow], refused: frozenset[str],
-                                   options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
-    """Russian initials and dotted abbreviations keep; their keys typed in the Latin layout convert.
-
-    The Russian period is the slash key of the Latin layout, so `Р.Ф.` reads `H/A/`, the shape of a
-    path typed in the Russian layout (`.ыкс.` is `/src/`), and natural TRAIN holds almost no Russian
-    token of single letters and periods (corpus v26: one, against 27 English initials). The corpus
-    v26 candidate converted `Р.Ф.` after Russian prose and alone (calibration v26: three of its ten
-    false conversions). Each form - the dotted abbreviations of DOTTED_RUSSIAN_ABBREVIATIONS and
-    `initials` pairs of RUSSIAN_INITIAL_LETTERS drawn by hash - stands after the left context of
-    `contexts` Russian TRAIN rows and alone, labelled keep, and its Latin keys after the same contexts,
-    labelled convert. A form held by this corpus's test or any accessed test is refused by its aliases.
-    """
-    weight = float(cast(float, options["sample_weight"]))
-    count = int(cast(int, options["contexts"]))
-    contexts = natural_mixed_contexts(source_rows)[1]
-    pairs = [first + "." + second + "." for first in RUSSIAN_INITIAL_LETTERS for second in RUSSIAN_INITIAL_LETTERS]
-    pairs.sort(key=lambda form: hashlib.sha256(("dotted-initials:" + form).encode()).digest())
-    forms = [*DOTTED_RUSSIAN_ABBREVIATIONS, *pairs[:int(cast(int, options["initials"]))]]
-    if not contexts or not count:
-        return [], {"forms": 0, "scope": "not used"}
-    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
-    rows: list[ActionRow] = []
-    kept: list[str] = []
-    for form in forms:
-        latin = translated(form, 1)
-        if refused & (expanded_aliases(form) | expanded_aliases(latin)):
-            continue
-        kept.append(f"{form}/{latin}")
-        for variant in range(count):
-            identifier = f"dotted:{form}:{variant}"
-            application = applications[variant_choice(identifier, "application", len(applications))]
-            before = contexts[variant_choice(identifier, "context", len(contexts))]
-            field = FieldContext(application, "public-training", before, "", "unknown")
-            rows.append(ActionRow(identifier + ":keep", form, 1, field, "space", "", "keep", "natural_surface", " ", weight))
-            rows.append(ActionRow(identifier + ":wrong", latin, 0, field, "space", "", "convert", "layout_intervention",
-                                  " ", weight))
-        alone = FieldContext(applications[variant_choice(form, "application", len(applications))], "public-training", "", "", "unknown")
-        rows.append(ActionRow(f"dotted:{form}:alone", form, 1, alone, "space", "", "keep", "natural_surface", " ", weight))
-    return rows, {"forms": len(kept), "frames": len(rows), "words": kept, "sample_weight": weight,
-                  "scope": "TRAIN only: Russian dotted abbreviations and initials keep after Russian prose and alone; their Latin keys convert after Russian prose."}
 
 
 def historical_curriculum(intent: LinearNgramModel | None = None) -> list[ActionRow]:
@@ -1273,9 +1228,7 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
     refused = refused_aliases(corpus)
     capitals, capital_report = capital_citation_curriculum(
         source_rows["train"], refused, cast(dict[str, object], options["capital_citation_curriculum"]))
-    dotted, dotted_report = dotted_abbreviation_curriculum(
-        source_rows["train"], refused, cast(dict[str, object], options["dotted_abbreviation_curriculum"]))
-    frames["train"] = training_order([*frames["train"], *historical_curriculum(intent), *captured, *capitals, *dotted])
+    frames["train"] = training_order([*frames["train"], *historical_curriculum(intent), *captured, *capitals])
     feature_paths: dict[tuple[str, str], Path] = {}
     feature_mass = FeatureMass()
     span_budgets = cast(dict[str, int], options["span_maximum_families"])
@@ -1400,7 +1353,6 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
         "lexical_short_pair_curriculum": lexical_reports,
         "captured_curriculum": captured_report,
         "capital_citation_curriculum": capital_report,
-        "dotted_abbreviation_curriculum": dotted_report,
         "planned_mass_balance": balance_reports,
         "test_accessed": False,
         "scope": "natural KEEP plus declared layout/mixed-context interventions; sequence evaluation required"}

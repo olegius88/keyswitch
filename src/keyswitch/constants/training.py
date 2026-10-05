@@ -55,10 +55,6 @@ STRANDED_PREVIOUS_MIN_LETTERS: Final = 2
 # Sample weight of a stranded-previous frame: natural text holds few of them (corpus v23 TRAIN:
 # 384 rows), and at unit weight the authored `руку ерун` stayed under the threshold (p=0.987).
 STRANDED_PREVIOUS_WEIGHT: Final = 2.0
-# Russian dotted abbreviations of running prose, and the capital letters of Russian initials whose
-# keys are letters in the Latin layout too (Б, Ж, Х, Э, Ю sit on sign keys).
-DOTTED_RUSSIAN_ABBREVIATIONS: Final = ("т.е.", "т.к.", "т.д.", "т.п.", "т.н.", "и.о.", "в.д.", "с.ш.", "к.т.н.", "д.т.н.")
-RUSSIAN_INITIAL_LETTERS: Final = "АВГДЕЗИКЛМНОПРСТУФЦЧШЯ"
 # Letters of a Latin abbreviation cited in capitals inside Russian prose whose Cyrillic reading is a
 # rare word (`WBC` is `ЦИС`, `IBF` is `ШИА`): three to five, as abbreviations are written. Two
 # letters stay with the deferral rules and the owner's own Cyrillic abbreviations (`ГА`).
