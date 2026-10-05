@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ntpath
+import os
 import shlex
 import subprocess
 import sys
@@ -74,10 +75,11 @@ def _default_registry() -> WindowsRegistry:
 
 
 def _executable_exists(program: str) -> bool:
-    # ``os.path.isfile`` behind ``Path.is_file`` answers False for a path the
-    # system cannot evaluate at all - too long, or carrying a null - so a value
-    # left in the registry by another install never raises here.
-    return Path(program).is_file()
+    # ``os.path.isfile`` answers False for a path the system cannot evaluate at
+    # all - too long, or carrying a null - so a value left in the registry by
+    # another install never raises here. ``Path.is_file`` does the same only
+    # from Python 3.14; before it, a name too long for the file system raised.
+    return os.path.isfile(program)
 
 
 def _exists(path: PurePath) -> bool:

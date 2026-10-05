@@ -11,6 +11,7 @@ from .constants.models import (
     ACTION_FEATURE_APPLICATION_NAME_CHARACTERS,
     ACTION_FEATURE_APPLICATION_TOKEN_COUNT,
     ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS,
+    ACTION_FEATURE_CAPITALS_MIN_LETTERS,
     ACTION_FEATURE_CHARACTER_WEIGHT_CAP,
     ACTION_FEATURE_FIELD_LABEL_MAX_CHARACTERS,
     ACTION_FEATURE_FREQUENCY_CAP,
@@ -138,6 +139,7 @@ def _term_features(features: dict[str, float], item: ContextEvidence, direction:
     cyrillic_known = item.source_known if item.source_group == 1 else item.target_known
     latin_bucket = term_bucket(latin, "latin")
     cyrillic_bucket = "lexicon" if cyrillic_known else term_bucket(cyrillic, "cyrillic")
+    _capitals_features(features, item, direction, before, cyrillic, cyrillic_known)
     if latin_bucket != "na" or cyrillic_bucket != "na":
         _frequency_features(features, item, direction, (before, after, state), (latin, cyrillic),
                             (latin_bucket, cyrillic_bucket), cyrillic_known)
@@ -146,6 +148,27 @@ def _term_features(features: dict[str, float], item: ContextEvidence, direction:
         kind = "letters" if any(char.isalpha() for char in item.alternative) else "only"
         features[f"signs:{kind}:direction:{direction}"] = 1.0
         features[f"signs:{kind}:digits:{digits}:direction:{direction}"] = 1.0
+
+
+def _capitals_features(features: dict[str, float], item: ContextEvidence, direction: str, before: str,
+                       cyrillic: str, cyrillic_known: bool) -> None:
+    """A token of letters only, all capitals, three or more: whether its Cyrillic reading is a known word,
+    how often Russian text uses it, and the script of the text before it.
+
+    `WBC` after Russian prose reads `ЦИС`, which the lexicon knows (the OpenSubtitles supplement) and
+    Russian text never uses; `CIF` reads `США`, which Russian text uses all the time. Without a feature
+    of their own, the frames teaching that such a citation stays moved the weights every Latin token
+    after Russian text shares, and short Latin keys of Russian words (`f` for `а`) stayed with them.
+    """
+
+    from .context_model import term_bucket
+
+    letters = item.original
+    if len(letters) < ACTION_FEATURE_CAPITALS_MIN_LETTERS or not letters.isalpha() or not letters.isupper():
+        return
+    russian = term_bucket(cyrillic, "russian")
+    features[f"capitals:known:{int(cyrillic_known)}:russian:{russian}:direction:{direction}"] = 1.0
+    features[f"capitals:known:{int(cyrillic_known)}:russian:{russian}:before:{_dominant(before)}:direction:{direction}"] = 1.0
 
 
 def _frequency_features(features: dict[str, float], item: ContextEvidence, direction: str,

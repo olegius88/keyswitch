@@ -38,6 +38,16 @@ class TermFrequencyFeatureTests(unittest.TestCase):
         self.assertNotIn("freq:latin:0:direction:1", term)
         self.assertNotIn("freq:cyrillic:0:direction:1", abbreviation)
 
+    def test_capitals_are_told_apart_by_how_russian_text_uses_their_cyrillic_reading(self) -> None:
+        cited = extract_action_features(evidence("WBC", "ЦИС", 0, "чемпион по версии ", target_known=True))
+        country = extract_action_features(evidence("CIF", "США", 0, "санкции ", target_known=True))
+        self.assertEqual(named(cited, "capitals:"), {"capitals:known:1:russian:0:direction:0",
+                                                     "capitals:known:1:russian:0:before:ru:direction:0"})
+        self.assertTrue(named(country, "capitals:") and not named(country, "capitals:known:1:russian:0:"))
+        for original, alternative in (("wbc", "цис"), ("WB", "ЦИ"), ("Wi-Fi", "Шш-Ашш"), ("Wbc", "Цис")):
+            with self.subTest(original=original):
+                self.assertFalse(named(extract_action_features(evidence(original, alternative, 0, "по версии ")), "capitals:"))
+
     def test_a_reading_the_lexicon_knows_is_bucketed_by_its_frequency_in_its_language(self) -> None:
         word = extract_action_features(evidence("dct", "все", 0, "todo ", target_known=True))
         self.assertTrue(named(word, "freq:cyrillic:lexicon:"))

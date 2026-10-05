@@ -254,6 +254,51 @@ def sentence_documents(sentences: Iterable[Sentence]) -> list[Sentence]:
     return result
 
 
+# Letters of one script drawn like letters of the other.
+LATIN_LOOKALIKES: frozenset[str] = frozenset("ABCEHKMOPTXaceopxy")
+CYRILLIC_LOOKALIKES: frozenset[str] = frozenset("АВСЕНКМОРТХасеорху")
+# The one look-alike pair that shares a key: the Latin C is the Cyrillic С in the other layout.
+SAME_KEY_LOOKALIKES: frozenset[str] = frozenset("CcСс")
+# A run of letters with no sign between them: a writer switches layout at a sign (`MP3-плеер`,
+# `Twitter’е`), not inside a run.
+LETTER_RUN = re.compile(r"[A-Za-zА-Яа-яЁё]+")
+
+
+def lookalike_typo(sentence: Sentence) -> bool:
+    """A sentence whose text no writer types: a word in look-alike letters of the other script.
+
+    Test v22 held the Tatoeba proverb `C кем поведёшься, от того и наберёшься.` with a Latin `C`. The
+    sequence replay typed that letter in the Latin layout; the engine wrote the Cyrillic `С` of the
+    same key, which looks the same, and the row counted as corrupted correct text for every pair, the
+    frozen baseline included. Two shapes are refused, both pasted rather than typed: a word mixing
+    both scripts inside one run of letters whose letters of one script are all look-alikes
+    (`pожденья`, `cети` with Latin letters; `MP3-плеер` and `Twitter’е` switch at a sign and stay), and a word of the same-key look-alike alone inside text of the other script (`C кем`,
+    `c бою`), whose conversion cannot be seen. Latin letters cited in Russian text (`A`, `B`, `XX`
+    века, `OP`) stay: converting them would be visible.
+    """
+    words = [token.form for token in sentence.tokens if any(char.isalpha() for char in token.form)]
+    scripts = []
+    for form in words:
+        for run in LETTER_RUN.findall(form):
+            latin = {char for char in run if char.isascii()}
+            cyrillic = set(run) - latin
+            if latin and cyrillic and (latin <= LATIN_LOOKALIKES or cyrillic <= CYRILLIC_LOOKALIKES):
+                return True
+        letters = [char for char in form if char.isalpha()]
+        latin_letters = any(char.isascii() for char in letters)
+        cyrillic_letters = any("а" <= char.casefold() <= "я" or char.casefold() == "ё" for char in letters)
+        scripts.append("latin" if latin_letters and not cyrillic_letters
+                       else "cyrillic" if cyrillic_letters and not latin_letters else "other")
+    for index, form in enumerate(words):
+        if not {char for char in form if char.isalpha()} <= SAME_KEY_LOOKALIKES:
+            continue
+        others = Counter(script for position, script in enumerate(scripts) if position != index)
+        own, other = ("latin", "cyrillic") if scripts[index] == "latin" else ("cyrillic", "latin")
+        if others[other] > others[own]:
+            return True
+    return False
+
+
 def select_holdout_sentences(sentences: Sequence[Sentence], namespace: str, max_documents: int, max_sentences: int) -> tuple[list[Sentence], dict[str, object]]:
     if max_documents < 1 or max_sentences < 1:
         raise ValueError("document and sentence bounds must be positive")
@@ -951,7 +996,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             sentences.extend(read_tatoeba(path, label, language, args.namespace, excluded=captured_sentences))
     elif args.tatoeba_language:
         raise ValueError("--tatoeba-language needs --tatoeba-directory")
-    selected, sampling = select_holdout_sentences(sentences, args.namespace, args.max_documents, args.max_sentences_per_document)
+    typed = [sentence for sentence in sentences if not lookalike_typo(sentence)]
+    selected, sampling = select_holdout_sentences(typed, args.namespace, args.max_documents, args.max_sentences_per_document)
+    sampling = {**sampling, "lookalike_typo_sentences_dropped": len(sentences) - len(typed)}
     ud_rows, ud_summary = ud_holdout_rows(selected, exclusions)
     if args.sid_directory is not None:
         contents, sid_provenance, sid_metadata = verified_sid_source(args.sid_directory)

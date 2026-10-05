@@ -23,7 +23,7 @@ from typing import cast
 from unittest.mock import patch
 
 from keyswitch.context_action_features import extract_action_features
-from keyswitch.context_model import ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel
+from keyswitch.context_model import ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, term_bucket
 from keyswitch.context_policy import evidence_for_decision
 from keyswitch.detector import LanguageDetector
 from keyswitch.identifier_lexicon import IdentifierLexicon
@@ -56,6 +56,10 @@ from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
 from keyswitch.constants.models import CONTEXT_ACTION_FEATURE_VERSION, PLANNED_CONTEXT_WORD_MAX_CHARACTERS
 from keyswitch.constants.training import (
     BOUNDARY_EVENT_CHOICES,
+    CAPITAL_CITATION_MAX_LETTERS,
+    CAPITAL_CITATION_MIN_LETTERS,
+    CAPITAL_CITATION_PUNCTUATION,
+    CAPITAL_CITATION_RUSSIAN_BUCKET,
     CITATION_SIGN_HEADS,
     COMMAND_FAMILY_IDENTIFIER_PARTS,
     DETERMINISTIC_CHOICE_HEX_DIGITS,
@@ -70,6 +74,10 @@ from keyswitch.constants.training import (
     LOOKAHEAD_ANCHOR_MIN_CHARACTERS,
     MASS_REPORT_DECIMALS,
     MAX_CONTEXTS_PER_FAMILY,
+    QUOTE_TAIL,
+    QUOTE_TAIL_MODULUS,
+    STRANDED_PREVIOUS_MIN_LETTERS,
+    STRANDED_PREVIOUS_WEIGHT,
     ACTION_DEFERRED_WORD_MAX_CHARACTERS,
     ACTION_SHORT_WORD_MAX_CHARACTERS,
     NET_BENEFIT_FALSE_INDEX,
@@ -137,6 +145,74 @@ def citation_shaped(original: str, group: int) -> bool:
     """
     letters = "".join(char for char in original if char.isalpha())
     return bool(letters) and (letters.isupper() or letters.istitle() or not plausible_reading(original, group))
+
+
+_ONBOARD_CAPITALS: frozenset[str] | None = None
+
+
+def onboard_capital_forms() -> frozenset[str]:
+    """Russian forms the onboard lexicon writes in capitals (`США`, `ВДВ`), casefolded.
+
+    The ARPA list keeps the case its source wrote; the language model folds it away on load.
+    """
+    global _ONBOARD_CAPITALS
+    if _ONBOARD_CAPITALS is None:
+        forms: set[str] = set()
+        section = ""
+        with (ROOT / "model/intent_v1/sources/ru_RU.lm").open(encoding="utf-8") as stream:
+            for line in stream:
+                line = line.strip()
+                if line.startswith("\\"):
+                    section = line
+                    continue
+                form = line.split()[1] if section == "\\1-grams:" and len(line.split()) > 1 else ""
+                if len(form) > 1 and form.isalpha() and form.isupper():
+                    forms.add(form.casefold())
+        _ONBOARD_CAPITALS = frozenset(forms)
+    return _ONBOARD_CAPITALS
+
+
+def capital_citation(original: str, alternate: str) -> bool:
+    """A Latin abbreviation in capitals whose Cyrillic reading is a rare word, not a Russian abbreviation.
+
+    `WBC` reads `ЦИС`, `IBF` reads `ШИА`: both readings are known to the lexicon (the OpenSubtitles
+    supplement holds `цис` and `шиа`), so citation_shaped framing left them out, and after Russian
+    prose the model converted them (the corpus v22 candidate turned `по версии WBC` into `ЦИС` on
+    test v22 with the early switch off, as did the baseline pair). Russian text counts fewer than five
+    such Cyrillic words (CAPITAL_CITATION_RUSSIAN_BUCKET), and none of them is written in capitals by
+    the onboard lexicon, which writes `США`, `ВДВ`, `МВД` that way: those typed in the Latin layout
+    still convert.
+    """
+    letters = "".join(char for char in original if char.isalpha())
+    return (original.isascii() and original.isalpha() and original.isupper()
+            and CAPITAL_CITATION_MIN_LETTERS <= len(letters) <= CAPITAL_CITATION_MAX_LETTERS
+            and plausible_reading(alternate, 1)
+            and term_bucket(alternate, "russian") == CAPITAL_CITATION_RUSSIAN_BUCKET
+            and alternate.casefold() not in onboard_capital_forms())
+
+
+def stranded_previous(before: str, group: int) -> str | None:
+    """`before` with its last word as typed in the other layout, when that reading is a word there too.
+
+    The left context of a phrase typed whole in the wrong layout after the engine has converted all
+    but the word whose wrong reading it could not tell from a real one (`we went in` typed in the
+    Russian layout leaves `we went шт`). None when the last word does not end `before`, has fewer
+    than two letters or signs, or reads as no word of the other language.
+    """
+    words = WORDS.findall(before)
+    if not words:
+        return None
+    previous = words[-1]
+    head = before.rstrip()
+    if not head.endswith(previous) or len(previous) < STRANDED_PREVIOUS_MIN_LETTERS or not previous.isalpha():
+        return None
+    try:
+        reading = translated(previous, group)
+    except ValueError:
+        return None
+    if not reading.isalpha() or not plausible_reading(reading, 1 - group):
+        return None
+    return head[:-len(previous)] + reading + before[len(head):]
 
 
 def variant_choice(identifier: str, purpose: str, count: int) -> int:
@@ -282,7 +358,12 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
                 # on 01.10.2026 (corpus v12: `rjn` by the pause and `pm2` broke); deciding
                 # them all at once turned `зум` alone into the Debian command `pev` (corpus
                 # v10, v11). A three-letter reading is deferred only when both of its
-                # readings are plausible (context_deferral).
+                # readings are plausible (context_deferral). Deciding two letters the same
+                # way was measured on 04.10.2026 (corpus v19, against the replay of the
+                # owner's typing): one-word messages such as `гш` became `ui`, but so did one
+                # the owner kept, and `чс`, `ер`, `ым`, `тз` alone turned into Latin - 9 more
+                # words converted right, as many left in the wrong layout and 12 more false
+                # conversions; alone, two letters stay deferred.
                 action = "suggest" if trigger in ("enter", "tab", "punctuation") else "wait"
                 keep_action = action
             result.append(ActionRow(identity + ":keep", row.original, group, field,
@@ -303,6 +384,14 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
                                 mixed_field, trigger, "", "convert",
                                 "mixed_language_layout_intervention", boundary_text))
         other = natural_contexts[1 - group]
+        if other and group == 0 and capital_citation(row.original, alternate) and plausible_reading(alternate, 1 - group):
+            # A capital citation whose Cyrillic reading is a rare word keeps after Russian prose. Its
+            # Cyrillic reading gets no convert frame: a Cyrillic word in capitals that no lexicon writes
+            # so may be the writer's own abbreviation (`ГА`, `ГАК` in the owner's typing) and stays.
+            natural_field = FieldContext(application, "public-training",
+                                         other[variant_choice(row.identifier, "mixed-natural", len(other))], "", "unknown")
+            result.append(ActionRow(row.identifier + ":mixed-capital", row.original, group, natural_field,
+                                    trigger, "", "keep", "mixed_language_insertion", boundary_text))
         if other and group == 0 and citation_shaped(row.original, group) and not plausible_reading(alternate, 1 - group):
             # Only the direction that failed: a Latin citation inside Russian prose. The mirror
             # (a Russian name cited by English prose) made the corpus v16 candidate convert
@@ -330,11 +419,109 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
                                     trigger, "", "keep", "mixed_language_insertion", boundary_text))
             result.append(ActionRow(row.identifier + ":mixed-natural:head:wrong", translated(headed, group), 1 - group,
                                     natural_field, trigger, "", "convert", "mixed_language_layout_intervention", boundary_text))
+        stranded = stranded_previous(row.before, group)
+        if stranded is not None:
+            # A phrase typed whole in the other layout: the engine converts each word, but a previous
+            # word whose wrong reading is a word of the other language stays as typed (`here` typed in
+            # the Russian layout is `руку`). The word after it is still the phrase's, and converts:
+            # `руку ерун` is `here they`. Natural frames only ever stand after correctly typed text,
+            # and the corpus v23 candidates left `ерун` after `руку` as typed (p=0.977).
+            # The phrase may open with that word too, the field holding nothing else.
+            opening = stranded[len(stranded.rstrip()) - len(WORDS.findall(stranded)[-1]):]
+            for suffix, left in (("", stranded), (":opening", opening)):
+                stranded_field = FieldContext(application, "public-training", left, "", "unknown")
+                result.append(ActionRow(row.identifier + ":stranded-previous" + suffix + ":wrong", alternate, 1 - group,
+                                        stranded_field, trigger, "", "convert", "layout_intervention", boundary_text,
+                                        STRANDED_PREVIOUS_WEIGHT))
+        isolated = not WORDS.search(row.before) and deferred_isolated(row.original, alternate, group)
+        if (group == 1 and row.original.isalpha() and not isolated
+                and variant_choice(row.identifier, "quote-tail", QUOTE_TAIL_MODULUS) == 0):
+            # A quotation closes with its quote typed in the layout of the word, and the Russian `"` is
+            # the `@` key: `привет"` typed in the Latin layout is `ghbdtn@`. The corpus splits the quote
+            # off as a token of its own, so no frame held a Russian word with the `@` of its quote, and
+            # every corpus v23 candidate left `ghbdtn@` as typed with the early switch off (p=0.988).
+            # A short word standing alone keeps its deferred action: the quote tells no intent.
+            quoted = row.original + QUOTE_TAIL
+            quote_field = FieldContext(application, "public-training", row.before, "", "unknown")
+            result.append(ActionRow(row.identifier + ":quote-tail", quoted, group, quote_field,
+                                    trigger, "", "keep", "natural_surface", boundary_text))
+            result.append(ActionRow(row.identifier + ":quote-tail:wrong", translated(quoted, group), 1 - group,
+                                    quote_field, trigger, "", "convert", "layout_intervention", boundary_text))
         for index, typo in enumerate(typo_variants(row.original, row.identifier)):
             result.append(ActionRow(row.identifier + f":spelling:{index}", typo, group,
                                     FieldContext(application, "public-training", row.before, "", "unknown"),
                                     trigger, "", "keep", "spelling_intervention", boundary_text))
     return result
+
+
+def capital_citation_curriculum(source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                                options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """Latin abbreviations in capitals after Russian prose whose Cyrillic reading is a rare word: keep.
+
+    Natural text holds almost none (corpus v22 TRAIN: 17 Latin rows in capitals whose Cyrillic
+    reading is a known word counted fewer than five times in Russian text, against 421 whose reading
+    is no word), and the model learned from the lexicon alone that a known Cyrillic reading after
+    Russian prose is the word meant. The physical class is the same whichever language named it: the
+    keys of a rare Russian word of three to five letters, typed in the Latin layout and in capitals,
+    are such an abbreviation (`цис` is `WBC`). Words are drawn from the portable lexicon by hash,
+    `words_by_length` per length; a word held by this corpus's test or by any accessed test is refused
+    by its aliases, as the other lexical curricula refuse it, and so is a word the onboard lexicon
+    writes in capitals (capital_citation). Each stands after the left context of a Russian row of
+    TRAIN, chosen by hash, with the keep label; with `lowercase_contrast` the same keys in lower case
+    stand in the same frame with the convert label, so case is what the pair tells apart.
+    """
+    budgets = {int(length): int(count) for length, count in cast(dict[str, int], options["words_by_length"]).items()}
+    weight = float(cast(float, options["sample_weight"]))
+    contrast = options.get("lowercase_contrast") is True
+    contexts = natural_mixed_contexts(source_rows)[1]
+    if not contexts or not any(budgets.values()):
+        return [], {"words": 0, "words_by_length": {}, "scope": "not used"}
+    models = reference_models(False)
+    candidates: dict[int, list[tuple[str, str]]] = defaultdict(list)
+    for word in models[1].frequencies:
+        if len(word) not in budgets or not all("а" <= char <= "я" or char == "ё" for char in word):
+            continue
+        try:
+            latin = translated(word.upper(), 1)
+        except ValueError:
+            continue
+        if not capital_citation(latin, word.upper()):
+            continue
+        if refused & (expanded_aliases(word) | expanded_aliases(latin)):
+            continue
+        candidates[len(word)].append((word, latin))
+    triggers: tuple[CorrectionTrigger, ...] = ("space", "space", "enter", "punctuation", "tab", "pause")
+    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+    rows: list[ActionRow] = []
+    chosen: dict[str, list[str]] = {}
+    for length, budget in sorted(budgets.items()):
+        ranked = sorted(candidates[length], key=lambda pair: hashlib.sha256(("capital-citation:" + pair[0]).encode()).digest())
+        chosen[str(length)] = [f"{word}/{latin}" for word, latin in ranked[:budget]]
+        for word, latin in ranked[:budget]:
+            identifier = "capital-citation:" + word
+            trigger = triggers[variant_choice(identifier, "trigger", len(triggers))]
+            boundary_text = ""
+            if trigger == "space":
+                boundary_text = " "
+            elif trigger == "punctuation":
+                boundary_text = CAPITAL_CITATION_PUNCTUATION[variant_choice(identifier, "punctuation", len(CAPITAL_CITATION_PUNCTUATION))]
+            elif trigger in {"enter", "tab"} and variant_choice(identifier, "boundary-event", BOUNDARY_EVENT_CHOICES):
+                boundary_text = "\n" if trigger == "enter" else "\t"
+            field = FieldContext(applications[variant_choice(identifier, "application", len(applications))], "public-training",
+                                 contexts[variant_choice(identifier, "context", len(contexts))], "", "unknown")
+            rows.append(ActionRow(identifier, latin, 0, field, trigger, "", "keep", "mixed_language_insertion",
+                                  boundary_text, weight))
+            if contrast:
+                # The same keys in lower case are the Russian word typed in the wrong layout and convert:
+                # without this pair the keep frames taught that any Latin token after Russian prose stays
+                # (the first candidate missed `f` for `а` and `lkz` for `для` in the owner's typing).
+                rows.append(ActionRow(identifier + ":lower", latin.lower(), 0, field, trigger, "", "convert",
+                                      "mixed_language_layout_intervention", boundary_text, weight))
+    return rows, {"words": sum(len(words) for words in chosen.values()), "frames": len(rows),
+                  "lowercase_contrast": contrast, "words_by_length": chosen,
+                  "candidates_by_length": {str(length): len(candidates[length]) for length in sorted(budgets)},
+                  "sample_weight": weight,
+                  "scope": "TRAIN only: keep frames of Latin capitals after Russian prose whose Cyrillic reading is a rare lexicon word (capital_citation_curriculum)."}
 
 
 def historical_curriculum(intent: LinearNgramModel | None = None) -> list[ActionRow]:
@@ -1038,7 +1225,10 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
     output.mkdir(parents=True)
     (output / "recipe.json").write_bytes(canonical(options))
     captured, captured_report = captured_curriculum(cast(dict[str, object], options["captured_curriculum"]))
-    frames["train"] = training_order([*frames["train"], *historical_curriculum(intent), *captured])
+    refused = refused_aliases(corpus)
+    capitals, capital_report = capital_citation_curriculum(
+        source_rows["train"], refused, cast(dict[str, object], options["capital_citation_curriculum"]))
+    frames["train"] = training_order([*frames["train"], *historical_curriculum(intent), *captured, *capitals])
     feature_paths: dict[tuple[str, str], Path] = {}
     feature_mass = FeatureMass()
     span_budgets = cast(dict[str, int], options["span_maximum_families"])
@@ -1049,7 +1239,6 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
     natural_reports: dict[str, dict[str, dict[str, object]]] = {}
     lexical_options = cast(dict[str, int], options["lexical_short_pair_curriculum"])
     lexical_reports: dict[str, dict[str, object]] = {}
-    refused = refused_aliases(corpus)
     balance_reports: dict[str, dict[str, object]] = {}
     for profile, detector in detectors.items():
         span_reports[profile] = {}
@@ -1163,6 +1352,7 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
         "natural_lookahead_curriculum": natural_reports,
         "lexical_short_pair_curriculum": lexical_reports,
         "captured_curriculum": captured_report,
+        "capital_citation_curriculum": capital_report,
         "planned_mass_balance": balance_reports,
         "test_accessed": False,
         "scope": "natural KEEP plus declared layout/mixed-context interventions; sequence evaluation required"}

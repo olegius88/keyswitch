@@ -4,6 +4,54 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- A domain, an address or a file name typed in the other layout is restored. A Latin reading with
+  a dot inside was refused whatever the model said (a guard of 20.09.2026 against a Russian
+  abbreviation such as `дюп` becoming `l.g`), so `example.com` typed in the Russian layout stayed
+  `учфьздуюсщь` with the model sure of it at p=1.0. Letters joined by single dots now pass (a
+  leading dot passed already); a comma, two dots in a row or a dot at the end are still refused,
+  and the installed model keeps `дюп` itself. Replayed through the engine, the owner's own typing
+  has four such names corrected by hand; all four are restored now, with no new false conversion.
+- The context model is retrained on corpus v26 (test v26 sealed before training and passed). On
+  the replay of the owner's own typing it converts 606 words right, leaves 114 in the wrong layout
+  and converts 57 falsely, against 613/113/63 for 0.38.0, and on the 239 words whose layout the
+  user's own correction shows 97/34/7 against 90/41/7. On test v26 it keeps all 209 correctly typed
+  rows (the frozen baseline corrupts one) and restores 188 rows against 177 with the early switch
+  off and 14 against 14 with it on; on development v26 it restores 119 and 247 sequences against
+  107 and 219. It recalls 0.978 of the conversions of calibration v26 with 10 false ones per
+  profile; the 0.38.0 pair recalls 0.970-0.972 there with 8, and nets 93-94 fewer. The prefix model
+  retrained byte-identical. What it learned:
+  - A Latin abbreviation in capitals inside Russian text stays when its Cyrillic reading is a word
+    Russian text hardly uses: `по версии WBC` became `ЦИС` because the lexicon knows `цис` from its
+    OpenSubtitles supplement. A token of three or more capitals now has features of its own (whether
+    its Cyrillic reading is known, how often Russian text uses it, the script before it), and the
+    trainer frames the keys of rare Russian words typed in the Latin layout in capitals after
+    Russian prose as kept, and the same keys in lower case as converted. Abbreviations the onboard
+    lexicon writes in capitals (`США`, `ВДВ`) still convert, and a Cyrillic abbreviation of the
+    writer's own (`ГА`) is left alone.
+  - `ghbdtn@` is `привет"`: the Russian closing quote is the `@` key, and the corpus splits quotes
+    off, so the model never saw a Russian word with the `@` of its quote.
+  - In a phrase typed whole in the wrong layout the engine leaves behind exactly the word whose
+    wrong reading is a word too (`here` is `руку`); the word after it still converts (`руку ерун`
+    is `here they`).
+- The corpus freezers refuse a sentence written in look-alike letters of the other script inside
+  one run of letters (`pожденья`, `Алисa`) or with a lone C of the other script (`C кем`, `°C`,
+  `C++`): such text was pasted, not typed, and the engine's same-key correction of it looked like
+  corrupted text on a sealed test.
+- The quality floor of the calibration split no longer counts false conversions against a fixed
+  number: each corpus brings its own ambiguous rows (the 0.38.0 pair makes 8 false conversions on
+  calibration v25 and v26 and 9 on v27, against the 7 of its own calibration). The installed pair
+  must net, per profile, at least what the pair it replaced nets on the same rows. The recall
+  floor rises to 0.977.
+- Measured and not taken (`model/context_v3/README.md`): the corpus v22 retrain (two corrupted
+  rows on test v22, as the baseline), Russian dotted abbreviations and an initials feature (`Р.Ф.`
+  read as the path `H/A/`: those false conversions went, other borderline ones took their place,
+  and the replay got worse), a higher keep weight, and English terms inserted into Russian
+  sentences, two-letter words decided alone and lone letters left to the model, all measured
+  against the corpus v19 retrain that this one replaces.
+- On Windows, a program path left in the registry by another install never raises on a Python
+  older than 3.14: `Path.is_file` answers False for a name too long for the file system only from
+  3.14, so the check uses `os.path.isfile`.
+
 ## 0.38.1 — 2026-10-04
 
 - Windows on Arm gets a native build: the release carries `KeySwitch-Setup-<version>-arm64.exe`

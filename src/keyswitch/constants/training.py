@@ -44,6 +44,27 @@ LEXICAL_PAIR_ANCHOR_VARIANTS: Final = 3
 # in the Russian layout: `` is ёё, ' is э, " is Э. A citation that carries one is still the
 # citation, and its Cyrillic reading still no word.
 CITATION_SIGN_HEADS: Final = ("``", "'", '"')
+# A Russian word closing a quotation, typed with its quote in the layout of the word: the Russian
+# `"` is the `@` key, so `привет"` typed in the Latin layout is `ghbdtn@`. One Russian row in this
+# many gets the closing-quote pair, chosen by hash.
+QUOTE_TAIL_MODULUS: Final = 4
+QUOTE_TAIL: Final = '"'
+# Letters of a previous word left in the wrong layout that the stranded-previous frames take: a
+# lone letter waits for its neighbour and is no word left behind.
+STRANDED_PREVIOUS_MIN_LETTERS: Final = 2
+# Sample weight of a stranded-previous frame: natural text holds few of them (corpus v23 TRAIN:
+# 384 rows), and at unit weight the authored `руку ерун` stayed under the threshold (p=0.987).
+STRANDED_PREVIOUS_WEIGHT: Final = 2.0
+# Letters of a Latin abbreviation cited in capitals inside Russian prose whose Cyrillic reading is a
+# rare word (`WBC` is `ЦИС`, `IBF` is `ШИА`): three to five, as abbreviations are written. Two
+# letters stay with the deferral rules and the owner's own Cyrillic abbreviations (`ГА`).
+CAPITAL_CITATION_MIN_LETTERS: Final = 3
+CAPITAL_CITATION_MAX_LETTERS: Final = 5
+# The frequency bucket of a Russian word counted fewer than the first bound in Russian text
+# (CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS): such a word written in capitals is no abbreviation of it.
+CAPITAL_CITATION_RUSSIAN_BUCKET: Final = "0"
+# The marks a punctuation-triggered capital citation ends with.
+CAPITAL_CITATION_PUNCTUATION: Final = ",."
 LOOKAHEAD_DEFAULT_MAXIMUM_FAMILIES: Final = 64
 LOOKAHEAD_MAXIMUM_FAMILIES_LIMIT: Final = 4096
 # Also the ceiling `seeds_per_family` may not exceed; the default sits at the cap.

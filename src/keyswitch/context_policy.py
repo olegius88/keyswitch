@@ -282,24 +282,28 @@ class ContextPolicy:
         """A word is never replaced by something that is not one, whichever layer asked.
 
         Six Russian letters sit on punctuation keys, so the Latin reading of a
-        Russian abbreviation such as ``збс`` is ``p,c`` and of ``дюп`` it is
-        ``l.g``. The detector's own conversions pass :func:`word_shape_veto` in
-        ``automatic_word_decision``; a conversion the model or the orthotactic
-        licence asked for did not, and the shipped model asked for exactly those,
-        with p=0.997, in every application it knows (found 20.09.2026 while
-        scoring a candidate). The model is, however, trained to restore what the
-        detector is not asked about: a dotfile (``ювшые`` is ``.dist``) and a
-        contraction (``вщтэе`` is ``don't``), so a leading dot and one inner
-        apostrophe are the two shapes a Latin reading may keep; a name with a
-        second dot, such as ``.env.local``, is the accepted cost. The refusal is
-        recorded as a safety decision, not as the model's opinion.
+        Russian abbreviation such as ``збс`` is ``p,c``. The detector's own
+        conversions pass :func:`word_shape_veto` in ``automatic_word_decision``;
+        a conversion the model or the orthotactic licence asked for did not, and
+        the shipped model asked for exactly that, with p=0.997, in every
+        application it knows (found 20.09.2026 while scoring a candidate). The
+        model is, however, trained to restore what the detector is not asked
+        about: a dotfile (``ювшые`` is ``.dist``), a contraction (``вщтэе`` is
+        ``don't``) and a dotted name - a domain, an address or a file
+        (``учфьздуюсщь`` is ``example.com``) - so a leading dot, one inner
+        apostrophe and letters joined by single dots are the shapes a Latin
+        reading may keep. Until 04.10.2026 a dot inside was refused as well (`дюп`
+        is ``l.g``), and on the owner's own typing that left every domain and
+        address typed in the Russian layout as it was, with the model sure of each
+        at p=1.0; the model of 0.38.0 keeps `дюп` itself. The refusal is recorded
+        as a safety decision, not as the model's opinion.
         """
 
         decision = result.decision
         if not decision.should_convert or not decision.original.isalpha():
             return result
         body = decision.replacement.removeprefix(".")
-        if body.isalpha() or word_shaped(body):
+        if body.isalpha() or word_shaped(body) or all(part.isalpha() for part in body.split(".")):
             return result
         vetoed = replace(decision, should_convert=False, reason=NOT_A_WORD_REASON)
         return ContextResult(vetoed, result.prediction, result.field, policy_applied=result.policy_applied,

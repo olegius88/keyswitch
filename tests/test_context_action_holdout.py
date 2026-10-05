@@ -14,13 +14,13 @@ from typing import cast
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from context_technical_corpus import read_commands, Command
-from freeze_context_action_corpus import CorpusRow, Union, canonical, checksum, digest, freeze, load_split, physical, read_conllu
+from freeze_context_action_corpus import CorpusRow, Sentence, Union, canonical, checksum, digest, freeze, load_split, physical, read_conllu
 from freeze_context_action_holdout import (
     PRIOR_TEST, Exclusions, alias_reasons, assemble, base_test_rows_to_quarantine, holdout_inventory, prior_access_overlap,
     select_holdout_sentences, sentence_documents, sid_holdout_rows, ud_holdout_rows, verified_sid_source,
     arch_holdout_rows, read_arch_commands, verified_arch_source, ARCH_MIRROR,
     fedora_holdout_rows, read_fedora_commands, verified_fedora_source, FEDORA_BASE, OPENSUSE_BASE, RAWHIDE_BASE, RPM_SOURCES,
-    captured_tatoeba_identifiers, read_tatoeba, tatoeba_sentence, verified_tatoeba_source, TATOEBA_BASE, UBUNTU_CONTENTS_URL,
+    captured_tatoeba_identifiers, lookalike_typo, read_tatoeba, tatoeba_sentence, verified_tatoeba_source, TATOEBA_BASE, UBUNTU_CONTENTS_URL,
     UBUNTU_RELEASE_URL,
     alpine_holdout_rows, read_alpine_commands, verified_alpine_source, ALPINE_BASE, ALPINE_COMMUNITY_BASE,
 )
@@ -441,6 +441,22 @@ class TatoebaHoldoutTests(unittest.TestCase):
         captured = frozenset(item.identifier.rsplit(":", 1)[1] for item in kept[:1])
         rest = list(read_tatoeba(path, "Tatoeba-rus", "rus", "ns", per_mille=TATOEBA_TEST_SAMPLE_PER_MILLE, excluded=captured))
         self.assertEqual([item.identifier for item in rest], [item.identifier for item in kept[1:]])
+
+    def test_a_sentence_written_in_look_alike_letters_is_no_typed_text(self) -> None:
+        def sentence(text: str, language: str = "rus") -> Sentence:
+            return tatoeba_sentence("1", language, text, "Tatoeba-" + language, language + ".tsv.bz2")
+
+        for text, language in (("C кем поведёшься, от того и наберёшься.", "rus"),  # a Latin C, the key of С
+                               ("Ехал Гpека чеpез pеку.", "rus"), ("Я выпишу Bам рецепт.", "rus"),
+                               ("He didn't really speak Еnglish.", "eng"), ("Вода кипит при 100 °C.", "rus"),
+                               ("I went there с my friend.", "eng")):
+            with self.subTest(text=text):
+                self.assertTrue(lookalike_typo(sentence(text, language)))
+        for text, language in (("A в пять раз длиннее B.", "rus"), ("Это было в XX веке.", "rus"),
+                               ("Я хочу MP3-плеер!", "rus"), ("Вчера я удалил запись в Twitter’е.", "rus"),
+                               ("Подключите кабель USB к порту.", "rus"), ("Он сказал: привет.", "rus")):
+            with self.subTest(text=text):
+                self.assertFalse(lookalike_typo(sentence(text, language)))
 
     def test_the_captured_sentences_are_read_by_identifier(self) -> None:
         import lzma
