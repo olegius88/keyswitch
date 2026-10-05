@@ -467,9 +467,10 @@ class TracedEditor(EditorBackend):
         self, strokes: Iterable[KeyEvent], target_group: int,
         boundary: KeyEvent | None, source_group: int | None = None,
         late: Sequence[KeyEvent] = (), trailing: Sequence[KeyEvent] = (),
+        kept_tail: int = 0,
     ) -> int:
         before, initial, caret = self.text, self.group, self.caret
-        result = super().inject_correction(strokes, target_group, boundary, source_group, late, trailing)
+        result = super().inject_correction(strokes, target_group, boundary, source_group, late, trailing, kept_tail)
         self.corrections.append({"event": self.serial, "before": before, "after": self.text,
                                  "source_group": initial, "target_group": target_group,
                                  "actual_group": self.group, "caret_before": caret, "caret_after": self.caret})

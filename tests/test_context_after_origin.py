@@ -11,6 +11,8 @@ from unittest.mock import patch
 from keyswitch.context_action_features import extract_action_features
 from keyswitch.constants.models import (
     CONTEXT_ACTION_FEATURE_VERSION,
+    KEPT_CONTEXT_WORD_MAX_CHARACTERS,
+    KEPT_FEATURE_PREFIX,
     PLANNED_CONTEXT_AFTER_MAX_CHARACTERS,
 )
 from keyswitch.context_model import ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, ContextPrediction, extract_context_features
@@ -92,6 +94,33 @@ class ContextAfterOriginTests(unittest.TestCase):
             with self.subTest(item=item):
                 result = model.predict(item)
                 self.assertEqual((result.action, result.supported), ("suggest", False))
+
+    def test_a_kept_neighbour_question_has_weights_of_its_own(self) -> None:
+        # Asked beside a kept next word, every feature carries KEPT_FEATURE_PREFIX: the weights of the
+        # question asked at the word's own boundary never answer it, and the reverse.
+        kept = replace(self.item, after_origin="kept_next_word")
+        features = extract_action_features(kept)
+        self.assertTrue(features and all(name.startswith(KEPT_FEATURE_PREFIX) for name in features))
+        self.assertEqual({name.removeprefix(KEPT_FEATURE_PREFIX) for name in features} - {
+            "after_origin:kept_next_word", "after_origin:kept_next_word:direction:0:length:1",
+            "after_origin:kept_next_word:script:ru:direction:0:length:1"},
+            set(extract_action_features(self.item)) - {"after_origin:field", "after_origin:field:direction:0:length:1",
+                                                         "after_origin:field:script:ru:direction:0:length:1"})
+        plain = ContextModel({**self.weights(), "bias": (0.0, AFTER_ORIGIN_DECISIVE_BIAS_WEIGHT, 0.0, 0.0)}, "context-v3-plain",
+                             feature_version=CONTEXT_ACTION_FEATURE_VERSION)
+        self.assertEqual(plain.predict(self.item).action, "convert")
+        self.assertEqual((plain.predict(kept).action, plain.predict(kept).supported), ("suggest", False))
+        own = ContextModel({**{KEPT_FEATURE_PREFIX + name: weights for name, weights in self.weights().items()},
+                            KEPT_FEATURE_PREFIX + "bias": (0.0, AFTER_ORIGIN_DECISIVE_BIAS_WEIGHT, 0.0, 0.0)},
+                           "context-v3-kept", feature_version=CONTEXT_ACTION_FEATURE_VERSION)
+        self.assertEqual(own.predict(kept).action, "convert")
+        self.assertEqual(own.predict(self.item).supported, False)
+        unreachable = [replace(kept, field=replace(kept.field, after=after)) for after in ("", "нас завтра", "я" * (PLANNED_CONTEXT_AFTER_MAX_CHARACTERS + 1))]
+        unreachable += [replace(kept, trigger="enter"), replace(kept, boundary_text="\t"), replace(kept, original=""),
+                        replace(kept, original="r" * (KEPT_CONTEXT_WORD_MAX_CHARACTERS + 1))]
+        for item in unreachable:
+            with self.subTest(item=item):
+                self.assertEqual((own.predict(item).action, own.predict(item).supported), ("suggest", False))
 
     def test_v2_features_and_predictions_ignore_origin_entirely(self) -> None:
         model = ContextModel({"bias": (0.0, AFTER_ORIGIN_CONVERT_BIAS_WEIGHT, 0.0, 0.0), "app:editor": (0.0,) * len(ACTIONS)}, "context-v1-origin")

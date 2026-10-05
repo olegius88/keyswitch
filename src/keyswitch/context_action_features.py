@@ -25,6 +25,8 @@ from .constants.models import (
     ACTION_FEATURE_WHITESPACE_MAX_CHARACTERS,
     ACTION_FEATURE_WORD_MAX_CHARACTERS,
     ACTION_FEATURE_WORD_SCORE_BOUND,
+    KEPT_CONTEXT_WORD_MAX_CHARACTERS,
+    KEPT_FEATURE_PREFIX,
     PLANNED_CONTEXT_AFTER_MAX_CHARACTERS,
     PLANNED_CONTEXT_WORD_MAX_CHARACTERS,
 )
@@ -215,8 +217,15 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
     if type(item.source_group) is not int or item.source_group not in (0, 1):
         raise ValueError("invalid context action direction")
     origin = item.after_origin
-    if origin not in ("none", "field", "planned_next_conversion"):
+    if origin not in ("none", "field", "planned_next_conversion", "kept_next_word"):
         raise ValueError("invalid right-context origin")
+    if origin == "kept_next_word" and (
+        not 0 < len(item.original) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS
+        or item.trigger != "space" or item.boundary_text != " "
+        or not item.field.after or len(item.field.after) > PLANNED_CONTEXT_AFTER_MAX_CHARACTERS
+        or any(char.isspace() for char in item.field.after)
+    ):
+        raise ValueError("unreachable kept right context")
     if origin == "planned_next_conversion" and (
         not 0 < len(item.original) <= PLANNED_CONTEXT_WORD_MAX_CHARACTERS
         or item.trigger != "space" or item.boundary_text != " "
@@ -330,4 +339,9 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
             features[f"ortho:{sign}:direction:{direction}"] = value
             features[f"ortho:{sign}:{category}"] = value
     _term_features(features, item, direction)
+    if origin == "kept_next_word":
+        # A waiting word whose next word stayed as typed is a question of its own: the same
+        # evidence, its own weights (KEPT_FEATURE_PREFIX). Sharing them, the question took the
+        # weights of the converted-neighbour frames and turned `еще` before `поищу` into `tot`.
+        return {KEPT_FEATURE_PREFIX + name: value for name, value in features.items() if value}
     return {name: value for name, value in features.items() if value}

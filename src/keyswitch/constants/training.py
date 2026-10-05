@@ -55,6 +55,13 @@ STRANDED_PREVIOUS_MIN_LETTERS: Final = 2
 # Sample weight of a stranded-previous frame: natural text holds few of them (corpus v23 TRAIN:
 # 384 rows), and at unit weight the authored `руку ерун` stayed under the threshold (p=0.987).
 STRANDED_PREVIOUS_WEIGHT: Final = 2.0
+# Kept-neighbour frames (train_context_action_model.kept_neighbour_curriculum): the shortest waiting
+# word they frame (a lone letter is decided by the curated rules, not by the model), the share of
+# terms framed in capitals (`ДДЬ` for `LLM`), one in this many by hash, and the most frames one term,
+# abbreviation or misspelt word gets, each after a different Russian row.
+KEPT_NEIGHBOUR_MIN_LETTERS: Final = 2
+KEPT_NEIGHBOUR_CAPITALS_MODULUS: Final = 4
+KEPT_NEIGHBOUR_FRAMES_PER_WORD: Final = 3
 # Letters of a Latin abbreviation cited in capitals inside Russian prose whose Cyrillic reading is a
 # rare word (`WBC` is `ЦИС`, `IBF` is `ШИА`): three to five, as abbreviations are written. Two
 # letters stay with the deferral rules and the owner's own Cyrillic abbreviations (`ГА`).

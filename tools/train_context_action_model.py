@@ -23,7 +23,9 @@ from typing import cast
 from unittest.mock import patch
 
 from keyswitch.context_action_features import extract_action_features
-from keyswitch.context_model import ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, term_bucket
+from keyswitch.context_model import (
+    ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, _term_frequency, term_bucket,
+)
 from keyswitch.context_policy import evidence_for_decision
 from keyswitch.detector import LanguageDetector
 from keyswitch.identifier_lexicon import IdentifierLexicon
@@ -53,7 +55,10 @@ from freeze_context_action_holdout import ledger_test_aliases
 from reconcile_context_action_corpus import expanded_aliases
 from keyswitch.constants.file_formats import HEXADECIMAL_BASE, VERSION_HASH_CHARACTERS
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
-from keyswitch.constants.models import CONTEXT_ACTION_FEATURE_VERSION, PLANNED_CONTEXT_WORD_MAX_CHARACTERS
+from keyswitch.constants.models import (
+    CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, KEPT_CONTEXT_WORD_MAX_CHARACTERS,
+    KEPT_FEATURE_PREFIX, PLANNED_CONTEXT_WORD_MAX_CHARACTERS,
+)
 from keyswitch.constants.training import (
     BOUNDARY_EVENT_CHOICES,
     CAPITAL_CITATION_MAX_LETTERS,
@@ -68,6 +73,9 @@ from keyswitch.constants.training import (
     FIELD_AFTER_SAMPLE_MODULUS,
     IDENTIFIER_DROPOUT_FAMILIES,
     IDENTIFIER_SUFFIX_SEGMENTS,
+    KEPT_NEIGHBOUR_CAPITALS_MODULUS,
+    KEPT_NEIGHBOUR_FRAMES_PER_WORD,
+    KEPT_NEIGHBOUR_MIN_LETTERS,
     LEXICAL_PAIR_ANCHOR_VARIANTS,
     LOG_LOSS_PROBABILITY_FLOOR,
     LOOKAHEAD_ANCHOR_MAX_CHARACTERS,
@@ -522,6 +530,148 @@ def capital_citation_curriculum(source_rows: Sequence[CorpusRow], refused: froze
                   "candidates_by_length": {str(length): len(candidates[length]) for length in sorted(budgets)},
                   "sample_weight": weight,
                   "scope": "TRAIN only: keep frames of Latin capitals after Russian prose whose Cyrillic reading is a rare lexicon word (capital_citation_curriculum)."}
+
+
+def _cyrillic(word: str) -> bool:
+    return all("а" <= char.casefold() <= "я" or char.casefold() == "ё" for char in word)
+
+
+def kept_neighbour_curriculum(source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                              options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """A waiting word asked once more beside its next word, which stayed as typed (`kept_next_word`).
+
+    The engine converts a waiting word together with its next word, and a term typed in the Russian
+    layout amid Russian prose has a next word that is right as typed: `зк` stayed in `есть новые зк
+    проверь`, `тзь сш` in `сам выполни тзь сш` (the owner's typing, 0.38 and 0.39). The engine now
+    asks once more with the kept word on the right (KeySwitchEngine._decide_with_kept_neighbour), a
+    question the frames below teach, under feature names of its own (KEPT_FEATURE_PREFIX):
+    - natural: a short word of a TRAIN sentence of either language with the sentence's next word
+      after it, both as written - keep;
+    - term: a Latin word the packaged term table counts in Russian technical text at least
+      `minimum_term_count` times, typed in the Russian layout (its Cyrillic reading no word, no
+      identifier and not counted in Russian text), between the left context of a Russian TRAIN row
+      and that row's word - convert; one term in KEPT_NEIGHBOUR_CAPITALS_MODULUS in capitals;
+    - abbreviation: a Cyrillic token Russian technical text uses at least `minimum_abbreviation_count`
+      times and `abbreviation_dominance` times as often as its Latin keys (`тз`, not `зк`), no lexicon
+      word, in the same place - keep;
+    - misspelt: a Russian lexicon word with one edit of typo_variants, no word in either layout and its
+      Latin keys no counted term, in the same place - keep.
+    Words of this corpus's test and of every accessed test are refused by their aliases.
+    """
+
+    budgets = {name: int(cast(int, options[name])) for name in ("natural_frames", "term_frames", "abbreviation_frames", "typo_frames")}
+    if not any(budgets.values()):
+        return [], {"frames": 0, "scope": "not used"}
+    weight = float(cast(float, options["sample_weight"]))
+    minimum_term = int(cast(int, options["minimum_term_count"]))
+    minimum_abbreviation = int(cast(int, options["minimum_abbreviation_count"]))
+    dominance = float(cast(float, options["abbreviation_dominance"]))
+    uncounted = CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS[0]
+    table = _term_frequency()
+    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+
+    def ranked(values: Iterable[str], purpose: str) -> list[str]:
+        return sorted(values, key=lambda value: hashlib.sha256(f"kept-{purpose}:{value}".encode()).digest())
+
+    def frame(identifier: str, word: str, group: int, before: str, after: str, action: ContextAction, category: str) -> ActionRow:
+        field = FieldContext(applications[variant_choice(identifier, "application", len(applications))], "public-training",
+                             before, after, "unknown")
+        return ActionRow(identifier, word, group, field, "space", "", action, category, " ", weight, "kept_next_word")
+
+    natural: dict[int, dict[str, tuple[str, str, str]]] = {0: {}, 1: {}}
+    russian: list[tuple[str, str]] = []
+    for row in source_rows:
+        if row.group not in (0, 1) or not row.layout_representable or not row.original.isalpha():
+            continue
+        if _cyrillic(row.original) != (row.group == 1):
+            continue
+        text = row.before + row.original
+        tokens = list(WORDS.finditer(text))
+        if any(_cyrillic(token.group()) != (row.group == 1) for token in tokens):
+            continue
+        if row.group == 1:
+            russian.append((row.before, row.original))
+        # Every short word of the sentence followed, after one space, by another word is the question
+        # asked as written: the row's own text up to its word holds many such pairs.
+        for current, following in zip(tokens, tokens[1:]):
+            word = current.group()
+            if (KEPT_NEIGHBOUR_MIN_LETTERS <= len(word) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS and word.isalpha()
+                    and following.group().isalpha() and text[current.end():following.start()] == " "):
+                natural[row.group][text[:current.start()] + "|" + word] = (text[:current.start()], word, following.group())
+    russian.sort()
+    rows: list[ActionRow] = []
+    counts: Counter[str] = Counter()
+    for group in (0, 1):
+        for key in ranked(natural[group], f"natural-{group}")[:budgets["natural_frames"] // LAYOUT_GROUP_COUNT]:
+            before, word, following_word = natural[group][key]
+            identifier = "kept-natural:" + hashlib.sha256(key.encode()).hexdigest()
+            rows.append(frame(identifier, word, group, before, following_word, "keep", "kept_neighbour"))
+            counts[f"natural_{group}"] += 1
+
+    def inserted(words: list[str], budget: int, purpose: str, typed: Callable[[str], str], action: ContextAction) -> list[str]:
+        chosen: list[str] = []
+        if not russian:
+            return chosen
+        for word in words:
+            if counts[purpose] >= budget:
+                break
+            chosen.append(word)
+            for index in range(KEPT_NEIGHBOUR_FRAMES_PER_WORD):
+                if counts[purpose] >= budget:
+                    break
+                identifier = f"kept-{purpose}:{word}:{index}"
+                before, following_word = russian[variant_choice(identifier, "context", len(russian))]
+                rows.append(frame(identifier, typed(word), 1, before, following_word, action, "kept_neighbour_" + purpose))
+                counts[purpose] += 1
+        return chosen
+
+    terms: list[str] = []
+    for term, count in table["latin"].items():
+        if count < minimum_term or not term.isascii() or not term.isalpha() or not term.islower():
+            continue
+        if not KEPT_NEIGHBOUR_MIN_LETTERS <= len(term) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS:
+            continue
+        reading = translated(term, 0)
+        if (not reading.isalpha() or plausible_reading(reading, 1) or table["cyrillic"].get(reading, 0) >= uncounted
+                or table["russian"].get(reading, 0) >= uncounted or refused & (expanded_aliases(term) | expanded_aliases(reading))):
+            continue
+        terms.append(term)
+
+    def term_typed(term: str) -> str:
+        capitals = variant_choice("kept-term:" + term, "capitals", KEPT_NEIGHBOUR_CAPITALS_MODULUS) == 0
+        return translated(term.upper() if capitals else term, 0)
+
+    chosen_terms = inserted(ranked(terms, "term"), budgets["term_frames"], "term", term_typed, "convert")
+    abbreviations: list[str] = []
+    for token, count in table["cyrillic"].items():
+        if (count < minimum_abbreviation or not token.isalpha() or not _cyrillic(token)
+                or not KEPT_NEIGHBOUR_MIN_LETTERS <= len(token) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS
+                or plausible_reading(token, 1)):
+            continue
+        keys = translated(token, 1)
+        if count < dominance * table["latin"].get(keys, 0) or refused & (expanded_aliases(token) | expanded_aliases(keys)):
+            continue
+        abbreviations.append(token)
+    chosen_abbreviations = inserted(ranked(abbreviations, "abbreviation"), budgets["abbreviation_frames"], "abbreviation",
+                                    lambda token: token, "keep")
+    misspelt: list[str] = []
+    for word in reference_models(False)[1].frequencies:
+        if not _cyrillic(word) or not word.isalpha() or refused & expanded_aliases(word):
+            continue
+        for variant in typo_variants(word, "kept-typo:" + word):
+            if (not KEPT_NEIGHBOUR_MIN_LETTERS <= len(variant) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS
+                    or not variant.isalpha() or plausible_reading(variant, 1)):
+                continue
+            keys = translated(variant, 1)
+            if term_bucket(keys, "latin") != "0" or plausible_reading(keys, 0):
+                continue
+            misspelt.append(variant)
+    chosen_misspelt = inserted(ranked(sorted(set(misspelt)), "typo"), budgets["typo_frames"], "typo", lambda word: word, "keep")
+    return rows, {"frames": len(rows), "counts": dict(sorted(counts.items())), "sample_weight": weight,
+                  "candidates": {"natural_0": len(natural[0]), "natural_1": len(natural[1]), "terms": len(terms),
+                                 "abbreviations": len(abbreviations), "misspelt": len(set(misspelt)), "contexts": len(russian)},
+                  "terms": chosen_terms, "abbreviations": chosen_abbreviations, "misspelt": chosen_misspelt,
+                  "scope": "TRAIN only: kept_next_word frames, the question a waiting word is asked again with its kept next word (kept_neighbour_curriculum)."}
 
 
 def historical_curriculum(intent: LinearNgramModel | None = None) -> list[ActionRow]:
@@ -1229,6 +1379,8 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
     capitals, capital_report = capital_citation_curriculum(
         source_rows["train"], refused, cast(dict[str, object], options["capital_citation_curriculum"]))
     frames["train"] = training_order([*frames["train"], *historical_curriculum(intent), *captured, *capitals])
+    kept_options = cast(dict[str, object], options["kept_neighbour_curriculum"])
+    kept, kept_report = kept_neighbour_curriculum(source_rows["train"], refused, kept_options)
     feature_paths: dict[tuple[str, str], Path] = {}
     feature_mass = FeatureMass()
     span_budgets = cast(dict[str, int], options["span_maximum_families"])
@@ -1258,6 +1410,8 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
                     rows, source_rows[split], detector, ortho, refused=refused, profile=profile, split=split,
                     maximum_families=lexical_options["maximum_families"], seeds_per_family=lexical_options["seeds_per_family"])
                 rows, balance_reports[profile] = balance_planned_mass(rows)
+                # After both lookahead curricula, so no kept-neighbour frame seeds a planned one.
+                rows = [*rows, *kept]
             spans = build_span_curriculum(source_rows[split], lexical_models[profile], profile=profile,
                                           maximum_families=span_budgets[split], expected_split=split)
             span_reports[profile][split] = spans.counts
@@ -1282,7 +1436,14 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
                     handle.write(canonical([features, label, importance]))
             print(f"features {profile}/{split}: {len(prepared)}, span frames={len(spans.frames)}", flush=True)
     minimum = float(cast(float, options["minimum_feature_mass"]))
-    names = select_features(feature_mass.values, minimum, int(cast(int, options["maximum_features"])))
+    # The kept-neighbour question has feature names of its own (KEPT_FEATURE_PREFIX) and a budget of
+    # its own: the word decided at its boundary keeps exactly the features it would have without it.
+    names = sorted([
+        *select_features({name: mass for name, mass in feature_mass.values.items() if not name.startswith(KEPT_FEATURE_PREFIX)},
+                         minimum, int(cast(int, options["maximum_features"]))),
+        *select_features({name: mass for name, mass in feature_mass.values.items() if name.startswith(KEPT_FEATURE_PREFIX)},
+                         minimum, int(cast(int, kept_options["maximum_features"]))),
+    ])
     def combined(split: str) -> Iterable[tuple[dict[str, float], int, float]]:
         for profile in profiles:
             yield from feature_rows(feature_paths[profile, split])
@@ -1353,6 +1514,7 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
         "lexical_short_pair_curriculum": lexical_reports,
         "captured_curriculum": captured_report,
         "capital_citation_curriculum": capital_report,
+        "kept_neighbour_curriculum": kept_report,
         "planned_mass_balance": balance_reports,
         "test_accessed": False,
         "scope": "natural KEEP plus declared layout/mixed-context interventions; sequence evaluation required"}

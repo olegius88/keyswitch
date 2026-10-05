@@ -152,6 +152,7 @@ class FakeBackend:
     def __init__(self) -> None:
         self.injections: list[tuple[tuple[KeyEvent, ...], int, KeyEvent | None]] = []
         self.late: list[tuple[KeyEvent, ...]] = []
+        self.kept_tails: list[int] = []
         self.hold_calls = 0
         self.held_count = 0
         self.group = 0
@@ -188,10 +189,13 @@ class FakeBackend:
         source_group: int | None = None,
         late: Sequence[KeyEvent] = (),
         trailing: Sequence[KeyEvent] = (),
+        kept_tail: int = 0,
     ) -> int:
-        self.injections.append((tuple(strokes), target_group, boundary))
+        word = tuple(strokes)
+        self.injections.append((word, target_group, boundary))
         self.late.append(tuple(late))
-        self.group = target_group
+        self.kept_tails.append(kept_tail)
+        self.group = target_group if not kept_tail else source_group if source_group is not None else word[0].group
         return self.held_count
 
     def set_key_filter(

@@ -30,6 +30,13 @@ ACTION_FEATURE_FREQUENCY_CAP: Final = 10**12
 PLANNED_CONTEXT_WORD_MAX_CHARACTERS: Final = 3
 # Longest single-line planned right context a planned_next_conversion origin allows.
 PLANNED_CONTEXT_AFTER_MAX_CHARACTERS: Final = 64
+# `after_origin == "kept_next_word"`: a waiting word of at most this many characters asked once more
+# with its next word, which stayed as typed in the same layout (KeySwitchEngine._decide_with_kept_neighbour).
+# Five covers the terms the owner's typing left behind that way (`шзм6` for `ipv6`, `тзь` for `npm`).
+KEPT_CONTEXT_WORD_MAX_CHARACTERS: Final = 5
+# Every feature of a kept-neighbour question carries this prefix: the question has weights of its own,
+# trained on frames of its own, and never moves the weights of the word decided at its boundary.
+KEPT_FEATURE_PREFIX: Final = "kept|"
 # The "length" feature buckets every word length from here up together (schemas 2 and 3).
 ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: Final = 6
 # Short categorical field labels (role, trigger) truncated before they reach a feature name.
@@ -132,7 +139,7 @@ CONTEXT_FEATURE_NGRAM_ORDERS: Final = (1, 2, 3)
 # What the context model loader accepts (schemas 2 and 3): at most this many features, feature names
 # and version strings of at most these many characters, weights of at most this magnitude, and a
 # conversion threshold from this floor up to one.
-MAX_CONTEXT_MODEL_FEATURES: Final = 50000
+MAX_CONTEXT_MODEL_FEATURES: Final = 70000
 MAX_CONTEXT_FEATURE_NAME_CHARACTERS: Final = 512
 MAX_CONTEXT_MODEL_VERSION_CHARACTERS: Final = 80
 MAX_CONTEXT_WEIGHT_MAGNITUDE: Final = 1000

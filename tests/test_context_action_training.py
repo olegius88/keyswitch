@@ -20,11 +20,11 @@ from keyswitch.constants.training import (
     PLANNED_VARIANT_MASS_DIVISOR,
 )
 from freeze_context_action_corpus import CorpusRow, physical, typo_variants
-from context_deferral import deferred_isolated, lookahead_focus
+from context_deferral import deferred_isolated, lookahead_focus, plausible_reading
 from reconcile_context_action_corpus import expanded_aliases
 from keyswitch.constants.training import ACTION_DEFERRED_WORD_MAX_CHARACTERS, CITATION_SIGN_HEADS
 from keyswitch.context_action_features import extract_action_features
-from keyswitch.context_model import ACTIONS, ContextEvidence, ContextModel
+from keyswitch.context_model import ACTIONS, ContextEvidence, ContextModel, term_bucket
 from train_context_action_model import (
     BLIND_IDENTIFIERS,
     ROOT,
@@ -40,6 +40,7 @@ from train_context_action_model import (
     development_thresholds,
     identifier_evidence_dropped,
     identifier_family,
+    kept_neighbour_curriculum,
     citation_shaped,
     natural_lookahead_rows,
     natural_mixed_contexts,
@@ -66,6 +67,10 @@ from train_context_model import Row as HistoricalRow
 from fixture_values.corpora import FIXTURE_WORD_FREQUENCY, PLANNED_EVIDENCE_DOMINANT_WORD_FREQUENCY
 from fixture_values.counts import (
     CAPITAL_CITATION_FIXTURE_WORDS_BY_LENGTH,
+    KEPT_NEIGHBOUR_FIXTURE_ABBREVIATION_COUNT,
+    KEPT_NEIGHBOUR_FIXTURE_DOMINANCE,
+    KEPT_NEIGHBOUR_FIXTURE_FRAMES,
+    KEPT_NEIGHBOUR_FIXTURE_TERM_COUNT,
     MIXED_CONTEXT_SAMPLE_ROWS,
     CHOOSE_THRESHOLD_CONVERT_ROW_COUNT,
     CHOOSE_THRESHOLD_PLATEAU_NET_BENEFIT,
@@ -107,6 +112,7 @@ from fixture_values.counts import (
 )
 from fixture_values.scores import (
     CAPITAL_CITATION_FIXTURE_WEIGHT,
+    KEPT_NEIGHBOUR_FIXTURE_WEIGHT,
     ACTION_TRAINING_CONVERT_PROBABILITY,
     ACTION_TRAINING_RESIDUAL_PROBABILITY,
     CHOOSE_THRESHOLD_AUTHORED_FLOOR,
@@ -584,6 +590,52 @@ class ActionTrainingTests(unittest.TestCase):
         self.assertEqual(([row for row in paired if not row.identifier.endswith(":lower")], report["words"]), (rows, len(rows)))
         self.assertEqual([(row.original, row.action, row.field) for row in lower],
                          [(row.original.lower(), "convert", row.field) for row in rows])
+
+    def test_the_kept_neighbour_curriculum_frames_the_question_asked_beside_a_kept_word(self) -> None:
+        russian = [replace(fixture(f"k{index}", "сегодня", 1), before="мы обновили сервер и ", after=" ночью")
+                   for index in range(KEPT_NEIGHBOUR_FIXTURE_FRAMES)]
+        english = replace(fixture("e1", "today", 0), before="we have updated the server and ", after=" again")
+        options = {"natural_frames": KEPT_NEIGHBOUR_FIXTURE_FRAMES, "term_frames": KEPT_NEIGHBOUR_FIXTURE_FRAMES,
+                   "abbreviation_frames": KEPT_NEIGHBOUR_FIXTURE_FRAMES, "typo_frames": KEPT_NEIGHBOUR_FIXTURE_FRAMES,
+                   "minimum_term_count": KEPT_NEIGHBOUR_FIXTURE_TERM_COUNT,
+                   "minimum_abbreviation_count": KEPT_NEIGHBOUR_FIXTURE_ABBREVIATION_COUNT,
+                   "abbreviation_dominance": KEPT_NEIGHBOUR_FIXTURE_DOMINANCE, "sample_weight": KEPT_NEIGHBOUR_FIXTURE_WEIGHT}
+        rows, report = kept_neighbour_curriculum([*russian, english], frozenset(), options)
+        self.assertEqual(rows, kept_neighbour_curriculum([*russian, english], frozenset(), options)[0])
+        for row in rows:
+            with self.subTest(row=row.identifier):
+                self.assertEqual((row.after_origin, row.trigger, row.boundary_text, row.sample_weight),
+                                 ("kept_next_word", "space", " ", KEPT_NEIGHBOUR_FIXTURE_WEIGHT))
+                self.assertTrue(row.field.after.isalpha())
+        by_category: dict[str, list[ActionRow]] = {}
+        for row in rows:
+            by_category.setdefault(row.category, []).append(row)
+        # A short word of a sentence with the word after it, as written, both languages.
+        # Words of more than KEPT_CONTEXT_WORD_MAX_CHARACTERS letters are never the word asked about.
+        natural = {(row.group, row.field.before, row.original, row.field.after) for row in by_category["kept_neighbour"]}
+        english_pairs = {(0, "", "we", "have"), (0, "we ", "have", "updated"), (0, "we have updated ", "the", "server"),
+                         (0, "we have updated the server ", "and", "today")}
+        self.assertEqual({entry for entry in natural if entry[0] == 1}, {(1, "", "мы", "обновили")})
+        self.assertEqual(len(natural & english_pairs), KEPT_NEIGHBOUR_FIXTURE_FRAMES // LAYOUT_GROUP_COUNT)
+        self.assertTrue(all(row.action == "keep" for row in by_category["kept_neighbour"]))
+        # A counted term typed in the Russian layout, between a Russian left context and its word.
+        for row in by_category["kept_neighbour_term"]:
+            self.assertEqual((row.group, row.action, row.field.before, row.field.after),
+                             (1, "convert", "мы обновили сервер и ", "сегодня"))
+            self.assertFalse(plausible_reading(row.original, 1))
+            self.assertTrue(term_bucket(translated(row.original, 1).lower(), "latin") not in ("na", "0"))
+        self.assertEqual(cast(dict[str, int], report["counts"])["term"], KEPT_NEIGHBOUR_FIXTURE_FRAMES)
+        for category in ("kept_neighbour_abbreviation", "kept_neighbour_typo"):
+            self.assertTrue(by_category[category])
+            self.assertTrue(all((row.group, row.action) == (1, "keep") for row in by_category[category]))
+        held = cast(list[str], report["terms"])[0]
+        again, _ = kept_neighbour_curriculum([*russian, english], frozenset(expanded_aliases(held)), options)
+        self.assertNotIn(translated(held, 0), {row.original.lower() for row in again if row.category == "kept_neighbour_term"})
+        unused = {**options, "natural_frames": 0, "term_frames": 0, "abbreviation_frames": 0, "typo_frames": 0}
+        self.assertEqual(kept_neighbour_curriculum(russian, frozenset(), unused), ([], {"frames": 0, "scope": "not used"}))
+        # Without a Russian row there is no place to put a term, an abbreviation or a misspelt word.
+        self.assertEqual(kept_neighbour_curriculum([english], frozenset(), options)[1]["counts"],
+                         {"natural_0": KEPT_NEIGHBOUR_FIXTURE_FRAMES // LAYOUT_GROUP_COUNT})
 
     def test_a_russian_word_closing_a_quotation_converts_with_the_at_sign_of_its_quote(self) -> None:
         words = [replace(fixture(f"q{index}", "привет", 1), before="он сказал «") for index in range(MIXED_CONTEXT_SAMPLE_ROWS)]

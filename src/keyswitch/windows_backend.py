@@ -600,6 +600,7 @@ class WindowsBackend:
         source_group: int | None = None,
         late: Sequence[KeyEvent] = (),
         trailing: Sequence[KeyEvent] = (),
+        kept_tail: int = 0,
     ) -> int:
         """Replace the word and return how many held keys were typed again.
 
@@ -607,11 +608,13 @@ class WindowsBackend:
         their characters already follow the word on screen, so they are
         deleted with it and typed again after the replacement, in the new
         layout. Keys arriving during the injection are held by the hook (see
-        :meth:`hold_input`) and typed again last.
+        :meth:`hold_input`) and typed again last. The last ``kept_tail``
+        strokes are a word that stays as it was: they, the boundary and the
+        late keys are typed in the source layout, and the layout stays there.
         """
 
         try:
-            return self._inject_correction(strokes, target_group, boundary, source_group, late, trailing)
+            return self._inject_correction(strokes, target_group, boundary, source_group, late, trailing, kept_tail)
         finally:
             self.release_input()
 
@@ -620,6 +623,7 @@ class WindowsBackend:
         boundary: KeyEvent | None, source_group: int | None,
         late: Sequence[KeyEvent],
         trailing: Sequence[KeyEvent],
+        kept_tail: int = 0,
     ) -> int:
         if not 0 <= target_group < len(self.layouts):
             raise WindowsBackendError(f"Неизвестная группа раскладки {target_group}")
@@ -635,6 +639,9 @@ class WindowsBackend:
             raise WindowsBackendError(
                 f"Неизвестная исходная группа раскладки {rendered_source_group}"
             )
+        if kept_tail < 0 or (kept_tail and (kept_tail >= len(stroke_list) or source_group is None)):
+            raise WindowsBackendError("Некорректная граница сохраняемого слова; замена отменена")
+        final_group = rendered_source_group if kept_tail else target_group
         delete_count = (
             len(stroke_list) + len(literal) + len(late_list)
         )
@@ -643,10 +650,16 @@ class WindowsBackend:
             for _ in range(delete_count)
             for pressed in (True, False)
         )
+        converted = stroke_list[:len(stroke_list) - kept_tail]
         replay_inputs = tuple(
             item
-            for stroke in stroke_list
+            for stroke in converted
             for item in self._stroke_inputs(stroke, group=target_group)
+        )
+        kept_inputs = tuple(
+            item
+            for stroke in stroke_list[len(converted):]
+            for item in self._stroke_inputs(stroke, group=final_group)
         )
         boundary_inputs = tuple(item for stroke in literal for item in self._stroke_inputs(stroke))
         # Typed again as the user's own input: the engine must see these keys
@@ -654,7 +667,7 @@ class WindowsBackend:
         late_inputs = tuple(
             item
             for stroke in late_list
-            for item in self._stroke_inputs(stroke, synthetic=False, group=target_group)
+            for item in self._stroke_inputs(stroke, synthetic=False, group=final_group)
         )
         preserve_boundary_layout = any(stroke.character_for(target_group) != stroke.character for stroke in literal)
         literal_group = literal[0].group if literal else rendered_source_group
@@ -678,10 +691,14 @@ class WindowsBackend:
                 self._send_exact(
                     delete_inputs
                     + replay_inputs
-                    + (() if preserve_boundary_layout else boundary_inputs)
+                    + (() if preserve_boundary_layout or kept_tail else boundary_inputs)
                 )
                 late_deleted = True
-                if preserve_boundary_layout:
+                if kept_tail:
+                    # The kept word is typed in its own layout, and the text goes on there.
+                    self._switch_group(final_group)
+                    self._send_exact(kept_inputs + boundary_inputs)
+                elif preserve_boundary_layout:
                     self._switch_group(literal_group)
                     self._send_exact(boundary_inputs)
                     self._switch_group(target_group)

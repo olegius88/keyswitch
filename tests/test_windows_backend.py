@@ -115,6 +115,10 @@ from fixture_values.clock import (
     WINDOWS_UNMATCHED_RELEASE_TIMESTAMP,
 )
 from fixture_values.counts import (
+    WINDOWS_KEPT_TAIL_DELETED_STROKES,
+    WINDOWS_KEPT_TAIL_SEND_BATCHES,
+    WINDOWS_KEPT_TAIL_TYPED_STROKES,
+    WINDOWS_PRESS_RELEASE_EVENTS,
     EXPECTED_EARLY_SWITCH_MIN_LENGTH_SETTING_MAX,
     EXPECTED_EARLY_SWITCH_MIN_LENGTH_SETTING_MIN,
     OVERLONG_PATH_CHARACTERS,
@@ -798,6 +802,24 @@ class WindowsBackendInjectionTests(unittest.TestCase):
             [item.scan_code for item in api.sent[0] if item.scan_code],
             [SCAN_CODE_A, SCAN_CODE_A, SCAN_CODE_A, SCAN_CODE_A],
         )
+
+    def test_a_kept_tail_is_typed_back_in_the_source_layout_where_the_layout_stays(self) -> None:
+        api = FakeWindowsAPI()
+        backend = WindowsBackend(api)
+        space = key_event(character=" ", characters=(" ", " "), group=1)
+        word, kept = key_event(group=1), key_event(group=1)
+        backend.inject_correction((word, space, kept), 0, space, source_group=1, kept_tail=1)
+        # Deletion and the converted keys in English, then the kept word and the space in Russian.
+        self.assertEqual(api.current_layout, RUSSIAN_HKL)
+        self.assertEqual(len(api.sent), WINDOWS_KEPT_TAIL_SEND_BATCHES)
+        self.assertEqual(sum(item.virtual_key == VK_BACK for item in api.sent[0]),
+                         WINDOWS_KEPT_TAIL_DELETED_STROKES * WINDOWS_PRESS_RELEASE_EVENTS)
+        self.assertEqual([len([item for item in batch if item.scan_code]) for batch in api.sent],
+                         [WINDOWS_KEPT_TAIL_TYPED_STROKES * WINDOWS_PRESS_RELEASE_EVENTS] * WINDOWS_KEPT_TAIL_SEND_BATCHES)
+        strokes = (word, space, kept)
+        for refused in ({"kept_tail": -1}, {"kept_tail": len(strokes)}, {"kept_tail": 1, "source_group": None}):
+            with self.subTest(refused=refused), self.assertRaisesRegex(WindowsBackendError, "сохраняемого слова"):
+                backend.inject_correction(strokes, 0, space, **{"source_group": 1, **refused})  # type: ignore[arg-type]
 
     def test_invalid_groups_partial_send_and_rejected_switch_fail_loudly(self) -> None:
         api = FakeWindowsAPI()
