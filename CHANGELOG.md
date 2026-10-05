@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.39.0 — 2026-10-05
+
 - A domain, an address or a file name typed in the other layout is restored. A Latin reading with
   a dot inside was refused whatever the model said (a guard of 20.09.2026 against a Russian
   abbreviation such as `дюп` becoming `l.g`), so `example.com` typed in the Russian layout stayed

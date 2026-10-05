@@ -19,7 +19,7 @@ EveryLang, и в отличие от них KeySwitch работает и в Lin
 [Проверка, сборка и выпуск](docs/verification.md)
 
 Последний опубликованный стабильный выпуск —
-[0.38.1](https://github.com/olegius88/keyswitch/releases/tag/v0.38.1).
+[0.39.0](https://github.com/olegius88/keyswitch/releases/tag/v0.39.0).
 Изменения перечислены в [CHANGELOG.md](CHANGELOG.md), известные дефекты
 выпуска — в [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
@@ -121,14 +121,14 @@ Telegram. Токен бота и ID группы задаются в её инт
 
 ## Установка в Windows
 
-Скачайте `KeySwitch-Setup-0.38.1-x64.exe` со страницы
-[опубликованного выпуска 0.38.1](https://github.com/olegius88/keyswitch/releases/tag/v0.38.1) и
+Скачайте `KeySwitch-Setup-0.39.0-x64.exe` со страницы
+[опубликованного выпуска 0.39.0](https://github.com/olegius88/keyswitch/releases/tag/v0.39.0) и
 запустите его. Установка выполняется для текущего пользователя в
 `%LOCALAPPDATA%\Programs\KeySwitch` и не требует прав администратора. В выпуск
-также входит переносимый архив `KeySwitch-0.38.1-windows-x64.zip`.
+также входит переносимый архив `KeySwitch-0.39.0-windows-x64.zip`.
 
-Для Windows на ARM есть собственная сборка: `KeySwitch-Setup-0.38.1-arm64.exe` и
-`KeySwitch-0.38.1-windows-arm64.zip`. x64-установщик на таком компьютере тоже
+Для Windows на ARM есть собственная сборка: `KeySwitch-Setup-0.39.0-arm64.exe` и
+`KeySwitch-0.39.0-windows-arm64.zip`. x64-установщик на таком компьютере тоже
 ставится, но программа тогда работает через эмуляцию. Автоматических обновлений
 у ARM64-сборки пока нет: новую версию скачивайте со страницы
 [выпусков](https://github.com/olegius88/keyswitch/releases).
@@ -165,11 +165,11 @@ EXE и переносимый ZIP словари, KSLM и контекстная
 ## Установка на macOS
 
 Нужна macOS 13 или новее. На странице
-[опубликованного выпуска 0.38.1](https://github.com/olegius88/keyswitch/releases/tag/v0.38.1)
+[опубликованного выпуска 0.39.0](https://github.com/olegius88/keyswitch/releases/tag/v0.39.0)
 лежат два архива, и нужен ровно один из них:
 
-- `KeySwitch-0.38.1-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее);
-- `KeySwitch-0.38.1-macos-x86_64.zip` — Mac на процессоре Intel.
+- `KeySwitch-0.39.0-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее);
+- `KeySwitch-0.39.0-macos-x86_64.zip` — Mac на процессоре Intel.
 
 Распакуйте архив и перенесите `KeySwitch.app` в «Программы». Приложение подписано
 сертификатом Developer ID и нотаризовано Apple, поэтому открывается обычным двойным
@@ -232,11 +232,11 @@ AnyDesk), макросы, экранная клавиатура — в Windows �
 
 ## Установка DEB-пакета
 
-Скачайте `keyswitch_0.38.1_amd64.deb` со страницы
-[опубликованного выпуска 0.38.1](https://github.com/olegius88/keyswitch/releases/tag/v0.38.1), затем:
+Скачайте `keyswitch_0.39.0_amd64.deb` со страницы
+[опубликованного выпуска 0.39.0](https://github.com/olegius88/keyswitch/releases/tag/v0.39.0), затем:
 
 ```bash
-sudo apt install ./keyswitch_0.38.1_amd64.deb
+sudo apt install ./keyswitch_0.39.0_amd64.deb
 ```
 
 Пакет установит системные зависимости и добавит KeySwitch в меню приложений.
@@ -836,7 +836,7 @@ python3 tools/release.py --version X.Y.Z            # коммит, тег, push
 - В Windows механизм UIPI не позволяет обычному процессу вводить текст в окно,
   запущенное с более высоким уровнем целостности. Для такого окна KeySwitch
   также должен быть запущен с сопоставимыми правами.
-- Windows Setup EXE опубликованной версии 0.38.1 не подписан сертификатом издателя.
+- Windows Setup EXE опубликованной версии 0.39.0 не подписан сертификатом издателя.
 - Сборки для macOS и Windows на ARM не обновляются автоматически (см.
   [Установка на macOS](#установка-на-macos) и [Установка в Windows](#установка-в-windows)).
 - macOS: автоисправление орфографии (например, в TextEdit) может изменить слово на
