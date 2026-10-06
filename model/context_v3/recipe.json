@@ -183,12 +183,16 @@
   },
   "frozen_base": {
     "artifact": "model/context_v3/frozen-base.json",
-    "sha256": "e7b637e372eb18e0614ca5d9854a7b9f3d417ea3b14cb854b4d0f13ce2a9c1d8",
+    "sha256": "5e180d5fc12b048020df01728874501717cc2465c3185a6c31ebc1018c4b3d5f",
     "heads": {
-      "capitals": {
-        "maximum_features": 10000
+      "alone": {
+        "maximum_features": 5000,
+        "minimum_count": 30,
+        "other_maximum_count": 30,
+        "dominance": 5,
+        "sample_weight": 1.0
       }
     },
-    "scope": "The corpus v26 pair (0.39.0) with every weight fixed; the kept-neighbour question and the capitals head are fitted onto it."
+    "scope": "The corpus v30 model (0.40.0) with every weight fixed, its kept-neighbour question and capitals head included; the lone-word head is fitted onto it. Its frames are the deferred lone two-letter frames of every split, labelled by the term counts where they settle the reading (context_deferral.counted_reading: one reading counted at least minimum_count times and dominance times as often as the other, counted fewer than other_maximum_count times and no lexicon word) and waiting as before where they do not."
   }
 }

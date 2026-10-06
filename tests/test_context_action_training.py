@@ -27,7 +27,8 @@ from context_deferral import deferred_isolated, lookahead_focus, plausible_readi
 from reconcile_context_action_corpus import expanded_aliases
 from keyswitch.constants.training import ACTION_DEFERRED_WORD_MAX_CHARACTERS, CITATION_SIGN_HEADS
 from keyswitch.context_action_features import extract_action_features
-from keyswitch.context_model import ACTIONS, ContextEvidence, ContextModel, term_bucket
+from keyswitch.constants.model_protocol import CALIBRATION, DEVELOPMENT, TRAIN
+from keyswitch.context_model import ACTIONS, AfterOrigin, ContextEvidence, ContextModel, term_bucket
 from train_context_action_model import (
     BLIND_IDENTIFIERS,
     ROOT,
@@ -61,9 +62,13 @@ from train_context_action_model import (
     stranded_previous,
     training_order,
     translated,
+    alone_evidence,
+    alone_labels,
     base_weights,
+    carried_prefixes,
     frozen_base,
     frozen_heads,
+    lone_word_curriculum,
     refused_aliases,
     warm_base,
     log_loss,
@@ -73,10 +78,10 @@ from train_context_action_model import (
 )
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
 from keyswitch.constants.models import (
-    CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_V1_CONVERSION_THRESHOLD, KEPT_FEATURE_PREFIX,
+    ALONE_FEATURE_PREFIX, CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_V1_CONVERSION_THRESHOLD, KEPT_FEATURE_PREFIX,
 )
 from keyswitch.detector import LanguageDetector
-from keyswitch.intent_model import LinearNgramModel
+from keyswitch.intent_model import CorrectionTrigger, LinearNgramModel
 from keyswitch.language_model import LanguageModel
 from keyswitch.input_context import FieldContext
 from train_context_model import Row as HistoricalRow
@@ -88,6 +93,9 @@ from fixture_values.counts import (
     ENGLISH_CAPITAL_FIXTURE_FRAMES_PER_WORD,
     ENGLISH_CAPITAL_FIXTURE_WORDS_BY_LENGTH,
     HEAD_FIXTURE_MAXIMUM_FEATURES,
+    LONE_WORD_FIXTURE_DOMINANCE,
+    LONE_WORD_FIXTURE_MINIMUM_COUNT,
+    LONE_WORD_FIXTURE_OTHER_MAXIMUM_COUNT,
     KEPT_NEIGHBOUR_FIXTURE_ABBREVIATION_COUNT,
     KEPT_NEIGHBOUR_FIXTURE_DOMINANCE,
     KEPT_NEIGHBOUR_FIXTURE_FRAMES,
@@ -777,10 +785,17 @@ class ActionTrainingTests(unittest.TestCase):
             self.assertEqual(list(base_weights(["head", "bias"], base)), [*(0.0,) * len(ACTIONS), *FROZEN_BASE_FIXTURE_WEIGHTS])
             with self.assertRaisesRegex(ValueError, "differs from the recipe"):
                 frozen_base({"frozen_base": {**spec, "sha256": "0" * len(str(spec["sha256"]))}})
-            # A base that answers the kept-neighbour question or a head's class already is no base for them.
-            for prefix in (KEPT_FEATURE_PREFIX, CAPITALS_FEATURE_PREFIX):
+            # A base that answers the kept-neighbour question or a head's class already is no warm base. A frozen
+            # base keeps them frozen with the rest, and a recipe may not fit such a head again.
+            for prefix, head in ((KEPT_FEATURE_PREFIX, ""), (CAPITALS_FEATURE_PREFIX, "capitals")):
+                carrying = save({"bias": FROZEN_BASE_FIXTURE_WEIGHTS, prefix + "bias": FROZEN_BASE_FIXTURE_WEIGHTS})
                 with self.assertRaisesRegex(ValueError, "without kept-neighbour weights or heads"):
-                    frozen_base({"frozen_base": save({"bias": FROZEN_BASE_FIXTURE_WEIGHTS, prefix + "bias": FROZEN_BASE_FIXTURE_WEIGHTS})})
+                    warm_base({"warm_base": carrying})
+                self.assertEqual(carried_prefixes(cast(ContextModel, frozen_base({"frozen_base": carrying}))), {prefix})
+                if head:
+                    with self.assertRaisesRegex(ValueError, "frozen with it"):
+                        frozen_base({"frozen_base": {**carrying, "heads": {head: {"maximum_features": HEAD_FIXTURE_MAXIMUM_FEATURES}}}})
+            self.assertEqual(carried_prefixes(base), frozenset())
             # Heads are named by the recipe and fitted under their prefixes with budgets of their own.
             self.assertEqual(frozen_heads({}), {})
             self.assertEqual(frozen_heads({"frozen_base": spec}), {})
@@ -790,6 +805,38 @@ class ActionTrainingTests(unittest.TestCase):
         convert = FROZEN_BASE_FIXTURE_PROBABILITIES[ACTIONS.index("convert")]
         self.assertAlmostEqual(log_loss(array("d", FROZEN_BASE_FIXTURE_PROBABILITIES), data),
                                -FROZEN_BASE_FIXTURE_IMPORTANCE * math.log(convert))
+
+    def test_lone_two_letter_frames_are_labelled_by_the_term_counts_for_the_lone_word_head(self) -> None:
+        evidence = {"maximum_features": HEAD_FIXTURE_MAXIMUM_FEATURES, "minimum_count": LONE_WORD_FIXTURE_MINIMUM_COUNT,
+                    "other_maximum_count": LONE_WORD_FIXTURE_OTHER_MAXIMUM_COUNT, "dominance": LONE_WORD_FIXTURE_DOMINANCE,
+                    "sample_weight": 1.0}
+        self.assertIsNone(alone_evidence({}))
+        self.assertEqual(alone_evidence({"frozen_base": {"heads": {"alone": evidence}}}), evidence)
+        self.assertEqual(frozen_heads({"frozen_base": {"heads": {"alone": evidence}}}), {ALONE_FEATURE_PREFIX: HEAD_FIXTURE_MAXIMUM_FEATURES})
+
+        def lone(word: str, group: int, trigger: CorrectionTrigger = "space", before: str = "", after: str = "",
+                 origin: AfterOrigin = "none") -> ActionRow:
+            return ActionRow(f"lone:{word}:{before}:{after}", word, group, FieldContext("Telegram", "public-training", before, after, "unknown"),
+                             trigger, "", "suggest" if trigger == "enter" else "wait", "natural_surface", " ", after_origin=origin)
+
+        rows = [lone("гш", 1), lone("UI", 0), lone("yf", 0, "enter"), lone("на", 1), lone("ты", 1), lone("ns", 0), lone("ha", 0),
+                lone("гш", 1, before="есть "), lone("гш", 1, after="кнопка", origin="planned_next_conversion"), lone("хз", 1)]
+        # `ui` is counted 4752 times and `гш` never; `на` outweighs `yf`. Both `ns` and `ты` are counted, and `ha`
+        # is an English word: those wait, and so do words with a neighbour and readings with a sign.
+        self.assertEqual([row.action for row in alone_labels(rows, evidence)],
+                         ["convert", "keep", "convert", "keep", "wait", "wait", "wait", "wait", "wait", "wait"])
+        self.assertEqual(alone_labels(rows, None), rows)
+        # Every pair of two Latin letters lands in one split, both readings framed alone.
+        splits = {split: lone_word_curriculum(split, frozenset(), evidence) for split in (TRAIN, DEVELOPMENT, CALIBRATION)}
+        pairs = {split: {row.original.casefold() for row in rows if row.group == 0} for split, (rows, _report) in splits.items()}
+        self.assertEqual(sum(map(len, pairs.values())), len(set().union(*pairs.values())))
+        train, report = splits[TRAIN]
+        self.assertEqual(report["frames"], len(train))
+        self.assertTrue(all(row.category == "lone_word" and not row.field.before and not row.field.after for row in train))
+        self.assertIn(("гш", "convert"), {(row.original.casefold(), row.action) for row in train} | {
+            (row.original.casefold(), row.action) for rows, _report in splits.values() for row in rows})
+        refused = lone_word_curriculum(TRAIN, frozenset(expanded_aliases("ui")), evidence)[0]
+        self.assertFalse([row for row in refused if row.original.casefold() in ("ui", "гш")])
 
     def test_a_fit_without_the_ledger_its_corpus_was_frozen_against_stops(self) -> None:
         own, accessed = (hashlib.sha256(word.encode()).hexdigest() for word in ("own", "accessed"))

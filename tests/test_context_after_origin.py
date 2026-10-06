@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from keyswitch.context_action_features import extract_action_features
 from keyswitch.constants.models import (
+    ALONE_FEATURE_PREFIX,
     CAPITALS_FEATURE_PREFIX,
     CONTEXT_ACTION_FEATURE_VERSION,
     KEPT_CONTEXT_WORD_MAX_CHARACTERS,
@@ -147,6 +148,35 @@ class ContextAfterOriginTests(unittest.TestCase):
             model = ContextModel(weights, "context-v3-capitals", feature_version=CONTEXT_ACTION_FEATURE_VERSION)
             self.assertEqual(model.predict(capitals).action, expected)
             self.assertEqual(model.predict(self.item).action, "convert")
+
+    def test_a_lone_two_letter_token_has_its_features_once_more_for_the_lone_word_head(self) -> None:
+        lone = ContextEvidence("гш", "ui", 1, FieldContext("Telegram", "1", "", ""), trigger="enter", boundary_text="\n")
+        features = extract_action_features(lone)
+        shared = {name: value for name, value in features.items() if not name.startswith(ALONE_FEATURE_PREFIX)}
+        self.assertEqual({name.removeprefix(ALONE_FEATURE_PREFIX): value for name, value in features.items()
+                          if name.startswith(ALONE_FEATURE_PREFIX)}, shared)
+        # Signs and digits around it leave it alone; a capitalised word too.
+        for item in (replace(lone, field=replace(lone.field, before="1. ", after=" :)")), replace(lone, original="Гш", alternative="Ui")):
+            with self.subTest(item=item):
+                self.assertTrue(any(name.startswith(ALONE_FEATURE_PREFIX) for name in extract_action_features(item)))
+        # A word before or after it, one letter, three letters, a reading with a sign (`хз` is `[p`) and
+        # the kept-neighbour question: no head.
+        for item in (replace(lone, field=replace(lone.field, before="есть ")), replace(lone, field=replace(lone.field, after="кнопка")),
+                     replace(lone, original="г", alternative="u"), replace(lone, original="гшы", alternative="uis"),
+                     replace(lone, original="хз", alternative="[p"),
+                     replace(lone, field=replace(lone.field, after="нас"), trigger="space", boundary_text=" ",
+                             after_origin="kept_next_word")):
+            with self.subTest(item=item):
+                self.assertFalse(any(name.startswith(ALONE_FEATURE_PREFIX) for name in extract_action_features(item)))
+        # Without head weights the shared ones decide; a head weight answers the class alone.
+        support = {name: (0.0,) * len(ACTIONS) for item in (self.item, lone) for name in extract_action_features(item)
+                   if name.startswith(("source:char:", "target:char:"))}
+        plain = {**support, "bias": (AFTER_ORIGIN_DECISIVE_BIAS_WEIGHT, 0.0, 0.0, 0.0)}
+        head = {**plain, ALONE_FEATURE_PREFIX + "bias": (0.0, AFTER_ORIGIN_DECISIVE_BIAS_WEIGHT * len(ACTIONS), 0.0, 0.0)}
+        for weights, expected in ((plain, "keep"), (head, "convert")):
+            model = ContextModel(weights, "context-v3-alone", feature_version=CONTEXT_ACTION_FEATURE_VERSION)
+            self.assertEqual(model.predict(lone).action, expected)
+            self.assertEqual(model.predict(self.item).action, "keep")
 
     def test_v2_features_and_predictions_ignore_origin_entirely(self) -> None:
         model = ContextModel({"bias": (0.0, AFTER_ORIGIN_CONVERT_BIAS_WEIGHT, 0.0, 0.0), "app:editor": (0.0,) * len(ACTIONS)}, "context-v1-origin")

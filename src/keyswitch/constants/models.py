@@ -46,6 +46,13 @@ KEPT_FEATURE_PREFIX: Final = "kept|"
 CAPITALS_FEATURE_PREFIX: Final = "caps|"
 CAPITALS_HEAD_MIN_LETTERS: Final = 2
 CAPITALS_HEAD_MAX_LETTERS: Final = 5
+# A token of ALONE_HEAD_LETTERS letters with no letter on either side in the field - a one-word
+# message, or the first word of one at its boundary - has its features once more under this prefix:
+# the lone-word head, fitted onto a frozen model, answers that class alone. Two letters are where the
+# owner's typing left most lone words in the wrong layout (`гш` for `ui`, `зщ` for `po`), because
+# every such frame of the corpus was deferred (context_deferral).
+ALONE_FEATURE_PREFIX: Final = "alone|"
+ALONE_HEAD_LETTERS: Final = 2
 # The "length" feature buckets every word length from here up together (schemas 2 and 3).
 ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: Final = 6
 # Short categorical field labels (role, trigger) truncated before they reach a feature name.
@@ -149,9 +156,9 @@ CONTEXT_FEATURE_NGRAM_ORDERS: Final = (1, 2, 3)
 # and version strings of at most these many characters, weights of at most this magnitude, and a
 # conversion threshold from this floor up to one.
 MAX_CONTEXT_MODEL_FEATURES: Final = 50000
-# An action model (schema 3) holds up to three feature spaces: the word decided at its boundary, the
-# kept-neighbour question (KEPT_FEATURE_PREFIX) and the capitals head (CAPITALS_FEATURE_PREFIX), each
-# with its own budget in the recipe.
+# An action model (schema 3) holds up to four feature spaces: the word decided at its boundary, the
+# kept-neighbour question (KEPT_FEATURE_PREFIX), the capitals head (CAPITALS_FEATURE_PREFIX) and the
+# lone-word head (ALONE_FEATURE_PREFIX), each with its own budget in the recipe.
 MAX_CONTEXT_ACTION_MODEL_FEATURES: Final = 80000
 MAX_CONTEXT_FEATURE_NAME_CHARACTERS: Final = 512
 MAX_CONTEXT_MODEL_VERSION_CHARACTERS: Final = 80

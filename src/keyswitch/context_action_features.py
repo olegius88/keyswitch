@@ -25,6 +25,8 @@ from .constants.models import (
     ACTION_FEATURE_WHITESPACE_MAX_CHARACTERS,
     ACTION_FEATURE_WORD_MAX_CHARACTERS,
     ACTION_FEATURE_WORD_SCORE_BOUND,
+    ALONE_FEATURE_PREFIX,
+    ALONE_HEAD_LETTERS,
     CAPITALS_FEATURE_PREFIX,
     CAPITALS_HEAD_MAX_LETTERS,
     CAPITALS_HEAD_MIN_LETTERS,
@@ -354,7 +356,20 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         # `BP` in English prose read `ИЗ` at p=0.997, and the frames that kept it moved the weights
         # the Latin keys of `не` and `что` share (`yt`, `xnj` stayed as typed).
         result.update({CAPITALS_FEATURE_PREFIX + name: value for name, value in list(result.items())})
+    if alone_question(item.original, item.alternative, item.field.before, item.field.after):
+        # The class the lone-word head answers, in the same way: every corpus frame of it was deferred,
+        # so the frozen model waits on `гш` alone and never converts it to `ui`.
+        result.update({ALONE_FEATURE_PREFIX + name: value for name, value in list(result.items())})
     return result
+
+
+def alone_question(original: str, alternative: str, before: str, after: str) -> bool:
+    """A token of ALONE_HEAD_LETTERS letters, letters in both layouts, with no letter before or after
+    it in the field: a message of one such word (`гш` for `ui`), or the first word of a message at its
+    boundary. `хз` is no member: its Latin keys `[p` are no word of any language."""
+
+    return (len(original) == ALONE_HEAD_LETTERS and original.isalpha() and alternative.isalpha()
+            and not any(char.isalpha() for char in before) and not any(char.isalpha() for char in after))
 
 
 def capitals_question(original: str, before: str) -> bool:

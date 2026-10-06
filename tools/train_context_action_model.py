@@ -15,16 +15,18 @@ import hashlib
 import json
 import math
 import re
+import string
 from array import array
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field, replace
+from itertools import product
 from pathlib import Path
 from typing import Final, cast
 from unittest.mock import patch
 
-from keyswitch.context_action_features import extract_action_features
+from keyswitch.context_action_features import alone_question, extract_action_features
 from keyswitch.context_model import (
     ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, _term_frequency, term_bucket,
 )
@@ -51,7 +53,7 @@ from keyswitch.constants.model_protocol import (
 from reference_lexicon import reference_models
 from action_epoch_selection import EpochSelection, assess_epoch
 from context_action_spans import SpanCurriculum, SpanFrame
-from context_deferral import deferred_isolated, lookahead_focus, plausible_reading
+from context_deferral import counted_reading, deferred_isolated, lookahead_focus, plausible_reading
 from context_lookahead_curriculum import LookaheadAnchor, LookaheadSeed, build_lookahead_curriculum
 from context_optimizer import Kernel, Packed
 from context_physical_keys import translated as translated
@@ -63,7 +65,7 @@ from train_context_model import CapturedSource
 from keyswitch.constants.file_formats import HEXADECIMAL_BASE, VERSION_HASH_CHARACTERS
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
 from keyswitch.constants.models import (
-    CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS,
+    ALONE_FEATURE_PREFIX, ALONE_HEAD_LETTERS, CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS,
     KEPT_CONTEXT_WORD_MAX_CHARACTERS, KEPT_FEATURE_PREFIX, PLANNED_CONTEXT_WORD_MAX_CHARACTERS,
 )
 from keyswitch.constants.training import (
@@ -88,6 +90,9 @@ from keyswitch.constants.training import (
     KEPT_NEIGHBOUR_MIN_LETTERS,
     LEXICAL_PAIR_ANCHOR_VARIANTS,
     LOG_LOSS_PROBABILITY_FLOOR,
+    LONE_WORD_CASE_MODULUS,
+    LONE_WORD_FRAMES_PER_READING,
+    LONE_WORD_SPLIT_MODULUS,
     LOOKAHEAD_ANCHOR_MAX_CHARACTERS,
     LOOKAHEAD_ANCHOR_MIN_CHARACTERS,
     MASS_REPORT_DECIMALS,
@@ -1435,15 +1440,15 @@ def frozen_base(options: Mapping[str, object]) -> ContextModel | None:
     The kept-neighbour question has feature names of its own (KEPT_FEATURE_PREFIX) and the
     optimizer touches only the weights of the features a row has, so its head can be fitted onto a
     model already sealed and shipped, whose every other weight and threshold stay as they are. The
-    recipe names that model's file and its SHA-256; it must be an action model with no kept-neighbour
-    weights.
+    recipe names that model's file and its SHA-256; the kept-neighbour question and heads it already
+    carries stay frozen with it (carried_prefixes).
     """
 
     return _named_base(options, "frozen_base")
 
 
 # The heads a frozen base can carry besides the kept-neighbour question, by the recipe's name.
-HEAD_PREFIXES: Final = {"capitals": CAPITALS_FEATURE_PREFIX}
+HEAD_PREFIXES: Final = {"capitals": CAPITALS_FEATURE_PREFIX, "alone": ALONE_FEATURE_PREFIX}
 
 
 def frozen_heads(options: Mapping[str, object]) -> dict[str, int]:
@@ -1460,6 +1465,85 @@ def frozen_heads(options: Mapping[str, object]) -> dict[str, int]:
         return {}
     heads = cast(dict[str, dict[str, int]], cast(dict[str, object], value).get("heads", {}))
     return {HEAD_PREFIXES[name]: int(head["maximum_features"]) for name, head in heads.items()}
+
+
+def alone_evidence(options: Mapping[str, object]) -> dict[str, float] | None:
+    """The counts that label lone two-letter frames for the lone-word head, or None without that head."""
+
+    value = options.get("frozen_base")
+    heads = cast(dict[str, dict[str, float]], cast(dict[str, object], value).get("heads", {})) if value is not None else {}
+    return heads.get("alone")
+
+
+def alone_labels(rows: Sequence[ActionRow], evidence: Mapping[str, float] | None) -> list[ActionRow]:
+    """The frames of a split with every deferred lone two-letter frame its counts settle labelled.
+
+    A token of two letters with no word on either side has no observable intent label in the lexicon
+    (context_deferral), and every such frame waits (`wait`, or `suggest` where the boundary acts).
+    The term counts the model reads can still settle one: `гш` alone is `ui` (counted_reading). Such a
+    frame is the lone-word head's class (alone_question), so with that head these frames are labelled
+    by the counts - convert for the weaker reading, keep for the stronger - and the rest wait as before.
+    """
+
+    if evidence is None:
+        return list(rows)
+    result: list[ActionRow] = []
+    for row in rows:
+        if row.action in ("wait", "suggest") and row.after_origin != "planned_next_conversion":
+            alternate = translated(row.original, row.group)
+            if alone_question(row.original, alternate, row.field.before, row.field.after):
+                strong = counted_reading(row.original, alternate, row.group, minimum=int(evidence["minimum_count"]),
+                                         other_maximum=int(evidence["other_maximum_count"]),
+                                         dominance=float(evidence["dominance"]))
+                if strong is not None:
+                    row = replace(row, action="keep" if strong == row.group else "convert")
+        result.append(row)
+    return result
+
+
+def lone_word_curriculum(split: str, refused: frozenset[str], evidence: Mapping[str, float]) -> tuple[list[ActionRow], dict[str, object]]:
+    """Every pair of two Latin letters and its Russian keys, each standing alone, for the lone-word head.
+
+    Corpus sentences open with few words of two letters (corpus v30 TRAIN: 183 such lone frames), and
+    the head needs both kinds: readings the term counts settle (`гш` is `ui`, `yf` is `на`) and
+    readings they do not (`ns` and `ты` are both counted; `ha` is an English word). Each pair goes to
+    one split by hash (LONE_WORD_SPLIT_MODULUS), so DEVELOPMENT chooses the head's epoch on pairs it
+    never saw. Each reading stands alone at LONE_WORD_FRAMES_PER_READING boundaries (_varied_boundary),
+    some in capitals or capitalised (LONE_WORD_CASE_MODULUS); alone_labels labels them. Pairs with an
+    alias of this corpus's test or of any accessed test are refused.
+    """
+
+    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+    shares = {0: DEVELOPMENT, 1: CALIBRATION}
+    rows: list[ActionRow] = []
+    counts: Counter[str] = Counter()
+    for first, second in product(string.ascii_lowercase, repeat=ALONE_HEAD_LETTERS):
+        latin = first + second
+        cyrillic = translated(latin, 0)
+        if not cyrillic.isalpha():
+            continue
+        if shares.get(variant_choice("lone-word:" + latin, "split", LONE_WORD_SPLIT_MODULUS), TRAIN) != split:
+            continue
+        if refused & (expanded_aliases(latin) | expanded_aliases(cyrillic)):
+            counts["refused"] += 1
+            continue
+        counts["pairs"] += 1
+        for group, reading in ((0, latin), (1, cyrillic)):
+            for index in range(LONE_WORD_FRAMES_PER_READING):
+                identifier = f"lone-word:{reading}:{index}"
+                case = variant_choice(identifier, "case", LONE_WORD_CASE_MODULUS)
+                typed = reading.upper() if case == 0 else reading.capitalize() if case == 1 else reading
+                trigger, boundary_text = _varied_boundary(identifier)
+                field = FieldContext(applications[variant_choice(identifier, "application", len(applications))],
+                                     "public-training", "", "", "unknown")
+                action: ContextAction = "suggest" if trigger in ("enter", "tab", "punctuation") else "wait"
+                rows.append(ActionRow(identifier, typed, group, field, trigger, "", action, "lone_word", boundary_text,
+                                      float(evidence["sample_weight"])))
+    rows = alone_labels(rows, evidence)
+    counts.update(row.action for row in rows)
+    return rows, {"frames": len(rows), "counts": dict(sorted(counts.items())), "sample_weight": float(evidence["sample_weight"]),
+                  "scope": "lone_word frames of this split: every pair of two Latin letters whose Russian keys are letters too, "
+                           "each reading alone in the field (lone_word_curriculum), labelled by alone_labels."}
 
 
 def warm_base(options: Mapping[str, object]) -> ContextModel | None:
@@ -1488,10 +1572,26 @@ def _named_base(options: Mapping[str, object], key: str) -> ContextModel | None:
     if checksum(path) != spec["sha256"]:
         raise ValueError(f"{label} artifact differs from the recipe")
     model = ContextModel.load(path)
-    if model.feature_version != CONTEXT_ACTION_FEATURE_VERSION or any(
-            name.startswith((KEPT_FEATURE_PREFIX, *HEAD_PREFIXES.values())) for name in model.weights):
+    if model.feature_version != CONTEXT_ACTION_FEATURE_VERSION:
+        raise ValueError(f"a {label} is an action model")
+    carried = carried_prefixes(model)
+    if key == "warm_base" and carried:
         raise ValueError(f"a {label} is an action model without kept-neighbour weights or heads")
+    if key == "frozen_base" and carried & set(frozen_heads(options)):
+        raise ValueError("a head the frozen base carries is frozen with it, not fitted again")
     return model
+
+
+def carried_prefixes(model: ContextModel) -> frozenset[str]:
+    """The kept-neighbour question and heads a model already has weights for, by feature prefix.
+
+    A frozen base may be a model fitted with heads (the corpus v30 model carries the kept-neighbour
+    question and the capitals head): those weights are frozen with the rest, and a fit onto it selects
+    no new feature under their prefixes, so only the heads the recipe names are fitted.
+    """
+
+    prefixes = (KEPT_FEATURE_PREFIX, *HEAD_PREFIXES.values())
+    return frozenset(prefix for prefix in prefixes if any(name.startswith(prefix) for name in model.weights))
 
 
 def base_weights(names: Sequence[str], base: ContextModel) -> array[float]:
@@ -1736,6 +1836,10 @@ def frame_chain(inputs: FitInputs, profile: str, split: str, rows: Sequence[Acti
             models=inputs.lexicons[False])
         result, reports["balance"] = balance_planned_mass(result)
         result.extend(tail)
+    evidence = alone_evidence(options)
+    if evidence is not None:
+        lone, reports["lone_word"] = lone_word_curriculum(split, inputs.refused, evidence)
+        result = [*alone_labels(result, evidence), *lone]
     return result, reports
 
 
@@ -1828,7 +1932,9 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
     # own: the word decided at its boundary keeps exactly the features it would have without them.
     start = base if base is not None else warm
     own = (KEPT_FEATURE_PREFIX, *HEAD_PREFIXES.values())
-    budgets = {KEPT_FEATURE_PREFIX: int(cast(int, kept_options["maximum_features"])), **heads}
+    carried = carried_prefixes(base) if base is not None else frozenset()
+    budgets = {prefix: budget for prefix, budget in {KEPT_FEATURE_PREFIX: int(cast(int, kept_options["maximum_features"])), **heads}.items()
+               if prefix not in carried}
     names = sorted([
         *(start.weights if start is not None else
           select_features({name: mass for name, mass in masses.items() if not name.startswith(own)},
@@ -1955,6 +2061,8 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
                                                    if "natural" in features.chains[profile, split]} for profile in profiles},
         "lexical_short_pair_curriculum": {profile: features.chains[profile, TRAIN]["lexical"] for profile in profiles
                                           if "lexical" in features.chains[profile, TRAIN]},
+        **({"lone_word_curriculum": {profile: {split: features.chains[profile, split]["lone_word"] for split in splits}
+                                     for profile in profiles}} if alone_evidence(options) is not None else {}),
         "captured_curriculum": features.captured,
         "capital_citation_curriculum": features.capitals,
         "english_capital_curriculum": features.english,
