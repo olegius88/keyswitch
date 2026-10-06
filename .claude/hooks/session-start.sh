@@ -85,9 +85,14 @@ export PATH="$python_bin:$PATH"
 # Pinned mypy for tools/typecheck.sh, built for that interpreter; .typing/ is
 # ignored by git.
 if ! PYTHONPATH="$project_root/.typing" python3 -m mypy --version >/dev/null 2>&1 \
-    || [ ! -d "$project_root/.typing/gi-stubs" ]; then
+    || [ ! -d "$project_root/.typing/gi-stubs" ] || [ ! -d "$project_root/.typing/numpy" ]; then
   rm -rf "$project_root/.typing"
   ./tools/install-typing-tools.sh "$project_root/.typing" >/dev/null
+fi
+
+# NumPy for the context-v3 trainer's cpu back end, in build/training-site (ignored by git).
+if ! PYTHONPATH="$project_root/build/training-site" python3 -c "import numpy" >/dev/null 2>&1; then
+  ./tools/install-training-accelerators.sh >/dev/null
 fi
 
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then

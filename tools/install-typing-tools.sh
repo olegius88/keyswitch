@@ -9,3 +9,9 @@ python3 -m pip install --upgrade --target "$target" \
   "typing_extensions>=4.6"
 python3 -m pip install --upgrade --target "$target" --no-deps \
   "PyGObject-stubs==2.17.0"
+# NumPy's own stubs type the context-v3 trainer's back ends. Those of NumPy 2.3 and later use syntax
+# of Python 3.12, which mypy refuses for the project's target version (3.10), so the stubs come from
+# 2.2.6, the last release for 3.10, as a wheel for 3.12 that nothing imports: training itself runs
+# the NumPy of tools/install-training-accelerators.sh.
+python3 -m pip install --upgrade --target "$target" --no-deps --only-binary=:all: --python-version 3.12 \
+  "numpy==2.2.6"

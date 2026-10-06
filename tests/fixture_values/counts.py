@@ -689,3 +689,11 @@ PREFIX_EXPOSURE_FIXTURE_PREFIX_LENGTH = 2
 MIXED_CONTEXT_SAMPLE_ROWS = 12
 # Words per length the capital citation curriculum test draws.
 CAPITAL_CITATION_FIXTURE_WORDS_BY_LENGTH: Final = {"3": 3, "4": 2}
+# The context-v3 trainer's back ends in their tests: natural frames per split, frames per featurisation
+# task (few, so that a split takes several tasks), worker processes of the forked run, and the feature
+# names and rows of the packing test.
+BACK_END_FIXTURE_FRAMES: Final = 7
+BACK_END_FIXTURE_FRAMES_PER_TASK: Final = 3
+BACK_END_FIXTURE_JOBS: Final = 2
+BACK_END_FIXTURE_NAMES: Final = 9
+BACK_END_FIXTURE_ROWS: Final = 11

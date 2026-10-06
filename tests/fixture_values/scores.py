@@ -649,3 +649,7 @@ MIXED_TYPING_TEST_TYPO_RATE: Final = 0.5
 MIXED_TYPING_TEST_RUSSIAN_SHARE: Final = 0.5
 # Sample weight of the frames the capital citation curriculum test draws.
 CAPITAL_CITATION_FIXTURE_WEIGHT: Final = 0.5
+# The context-v3 back-end tests: the keep importance of their recipe, and a feature value that is no
+# round number.
+BACK_END_FIXTURE_KEEP_IMPORTANCE: Final = 0.25
+BACK_END_FIXTURE_FEATURE_VALUE: Final = 0.375
