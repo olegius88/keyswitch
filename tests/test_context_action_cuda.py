@@ -12,7 +12,9 @@ from typing import cast
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-if not sys.platform.startswith("linux"):
+# A plain flag, not a platform check mypy evaluates: on other platforms it would call the rest unreachable.
+ON_LINUX = sys.platform.startswith("linux")
+if not ON_LINUX:
     raise unittest.SkipTest("the context-v3 trainer runs on Linux: it forks its workers and needs NumPy")
 
 import context_action_pipeline as pipeline
