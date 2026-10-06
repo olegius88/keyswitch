@@ -695,6 +695,7 @@ KEPT_NEIGHBOUR_FIXTURE_FRAMES: Final = 6
 KEPT_NEIGHBOUR_FIXTURE_TERM_COUNT: Final = 50
 KEPT_NEIGHBOUR_FIXTURE_ABBREVIATION_COUNT: Final = 20
 KEPT_NEIGHBOUR_FIXTURE_DOMINANCE: Final = 3
+COUNTED_TOKEN_FIXTURE_FRAMES_PER_WORD: Final = 3
 # X11 kept-tail fixture: taps deleted (three strokes, the boundary, one late key) and taps typed again
 # (two converted strokes, the kept stroke, the boundary and the late key).
 X11_KEPT_TAIL_FIXTURE_DELETES: Final = 5

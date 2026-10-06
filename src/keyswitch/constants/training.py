@@ -62,9 +62,6 @@ STRANDED_PREVIOUS_WEIGHT: Final = 2.0
 KEPT_NEIGHBOUR_MIN_LETTERS: Final = 2
 KEPT_NEIGHBOUR_CAPITALS_MODULUS: Final = 4
 KEPT_NEIGHBOUR_FRAMES_PER_WORD: Final = 3
-# The most frames one counted term or abbreviation gets where the word is decided at its own boundary
-# (train_context_action_model.counted_token_curriculum), each after a different Russian row.
-COUNTED_TOKEN_FRAMES_PER_WORD: Final = 3
 # Letters of a Latin abbreviation cited in capitals inside Russian prose whose Cyrillic reading is a
 # rare word (`WBC` is `ЦИС`, `IBF` is `ШИА`): three to five, as abbreviations are written. Two
 # letters stay with the deferral rules and the owner's own Cyrillic abbreviations (`ГА`).

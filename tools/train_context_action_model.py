@@ -67,7 +67,6 @@ from keyswitch.constants.training import (
     CAPITAL_CITATION_RUSSIAN_BUCKET,
     CITATION_SIGN_HEADS,
     COMMAND_FAMILY_IDENTIFIER_PARTS,
-    COUNTED_TOKEN_FRAMES_PER_WORD,
     DETERMINISTIC_CHOICE_HEX_DIGITS,
     DETERMINISTIC_ROUNDING_DECIMALS,
     FEATURE_MASS_TOLERANCE,
@@ -731,12 +730,13 @@ def counted_token_curriculum(source_rows: Sequence[CorpusRow], refused: frozense
     - abbreviation: the token as typed - keep;
     - term: a counted Latin term's keys in the Russian layout - convert, so the pair tells the counts
       apart rather than teaching that a short unknown Cyrillic token after Russian prose stays.
-    Each word gets up to COUNTED_TOKEN_FRAMES_PER_WORD frames, with the boundaries of the capital
-    citations (_varied_boundary). Words of this corpus's test and of every accessed test are refused by
+    Each word gets up to `frames_per_word` frames, each after a different Russian row, with the
+    boundaries of the capital citations (_varied_boundary). Words of this corpus's test and of every accessed test are refused by
     their aliases.
     """
 
     budgets = {name: int(cast(int, options[name])) for name in ("term_frames", "abbreviation_frames")}
+    per_word = int(cast(int, options["frames_per_word"]))
     russian = _russian_contexts(source_rows)
     if not any(budgets.values()) or not russian:
         return [], {"frames": 0, "scope": "not used"}
@@ -759,7 +759,7 @@ def counted_token_curriculum(source_rows: Sequence[CorpusRow], refused: frozense
             if frames >= budgets[purpose + "_frames"]:
                 break
             chosen[purpose].append(word)
-            for index in range(min(COUNTED_TOKEN_FRAMES_PER_WORD, budgets[purpose + "_frames"] - frames)):
+            for index in range(min(per_word, budgets[purpose + "_frames"] - frames)):
                 identifier = f"counted-{purpose}:{word}:{index}"
                 trigger, boundary_text = _varied_boundary(identifier)
                 before, _ = russian[variant_choice(identifier, "context", len(russian))]
@@ -770,7 +770,8 @@ def counted_token_curriculum(source_rows: Sequence[CorpusRow], refused: frozense
                 frames += 1
     return rows, {"frames": len(rows), "counts": dict(sorted(Counter(row.category for row in rows).items())),
                   "candidates": {purpose: len(words) for purpose, words in candidates.items()},
-                  "sample_weight": weight, "terms": chosen["term"], "abbreviations": chosen["abbreviation"],
+                  "sample_weight": weight, "frames_per_word": per_word,
+                  "terms": chosen["term"], "abbreviations": chosen["abbreviation"],
                   "scope": "TRAIN only: counted Russian abbreviations (keep) and counted Latin terms typed in the Russian layout (convert) after Russian prose, decided at their own boundary (counted_token_curriculum)."}
 
 

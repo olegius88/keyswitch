@@ -71,6 +71,7 @@ from train_context_model import Row as HistoricalRow
 from fixture_values.corpora import FIXTURE_WORD_FREQUENCY, PLANNED_EVIDENCE_DOMINANT_WORD_FREQUENCY
 from fixture_values.counts import (
     CAPITAL_CITATION_FIXTURE_WORDS_BY_LENGTH,
+    COUNTED_TOKEN_FIXTURE_FRAMES_PER_WORD,
     KEPT_NEIGHBOUR_FIXTURE_ABBREVIATION_COUNT,
     KEPT_NEIGHBOUR_FIXTURE_DOMINANCE,
     KEPT_NEIGHBOUR_FIXTURE_FRAMES,
@@ -653,6 +654,7 @@ class ActionTrainingTests(unittest.TestCase):
                    for index in range(KEPT_NEIGHBOUR_FIXTURE_FRAMES)]
         english = replace(fixture("e1", "today", 0), before="we have updated the server and ")
         options = {"term_frames": KEPT_NEIGHBOUR_FIXTURE_FRAMES, "abbreviation_frames": KEPT_NEIGHBOUR_FIXTURE_FRAMES,
+                   "frames_per_word": COUNTED_TOKEN_FIXTURE_FRAMES_PER_WORD,
                    "minimum_term_count": KEPT_NEIGHBOUR_FIXTURE_TERM_COUNT,
                    "minimum_abbreviation_count": KEPT_NEIGHBOUR_FIXTURE_ABBREVIATION_COUNT,
                    "abbreviation_dominance": KEPT_NEIGHBOUR_FIXTURE_DOMINANCE, "sample_weight": KEPT_NEIGHBOUR_FIXTURE_WEIGHT}
@@ -660,6 +662,10 @@ class ActionTrainingTests(unittest.TestCase):
         self.assertEqual(rows, counted_token_curriculum([*russian, english], frozenset(), options)[0])
         self.assertEqual(report["counts"], {"counted_abbreviation": KEPT_NEIGHBOUR_FIXTURE_FRAMES,
                                             "counted_term": KEPT_NEIGHBOUR_FIXTURE_FRAMES})
+        # One frame a word takes as many words as the budget has frames.
+        single, report_single = counted_token_curriculum([*russian, english], frozenset(), {**options, "frames_per_word": 1})
+        self.assertEqual(len(cast(list[str], report_single["terms"])), KEPT_NEIGHBOUR_FIXTURE_FRAMES)
+        self.assertTrue(all(row.identifier.endswith(":0") for row in single))
         abbreviations = cast(list[str], report["abbreviations"])
         for row in rows:
             with self.subTest(row=row.identifier):

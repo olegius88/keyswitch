@@ -162,6 +162,7 @@
  "counted_token_curriculum": {
   "term_frames": 6000,
   "abbreviation_frames": 3000,
+  "frames_per_word": 3,
   "minimum_term_count": 50,
   "minimum_abbreviation_count": 20,
   "abbreviation_dominance": 3,
