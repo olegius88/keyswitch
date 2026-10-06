@@ -564,8 +564,8 @@ def english_capital_curriculum(source_rows: Sequence[CorpusRow], refused: frozen
     """Latin capitals inside English prose stay, whatever their Cyrillic reading is.
 
     Test v28, read by a candidate whose every decision outside the kept-neighbour question was the
-    corpus v26 pair's, holds `affected by the BP oil spill.`: with the reference lexicons and the early
-    switch off `BP` became `ИЗ` at p=0.997, for `из` is among the commonest Russian words and the
+    corpus v26 pair's, holds two Latin capitals inside an English sentence whose keys spell `из`: with
+    the reference lexicons and the early switch off they became `ИЗ` at p=0.997, for `из` is among the commonest Russian words and the
     model had seen Latin capitals framed after Russian prose only (capital_citation_curriculum).
     English text cites abbreviations of a few capitals constantly, and their keys spell a Russian word
     as often as not. The frames: the keys of the Russian lexicon's commonest words of each length of

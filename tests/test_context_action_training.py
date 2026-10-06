@@ -625,8 +625,8 @@ class ActionTrainingTests(unittest.TestCase):
 
     def test_the_english_capital_curriculum_keeps_capitals_after_english_prose(self) -> None:
         # `из` is among the commonest Russian words, and its keys in capitals are `BP`: inside English
-        # prose that is an abbreviation (`affected by the BP oil spill.`, test v28).
-        english = replace(fixture("bp", "spill", 0), before="affected by the ")
+        # prose that is an abbreviation (a row of test v28 had it so).
+        english = replace(fixture("bp", "report", 0), before="according to the ")
         russian = replace(fixture("ru", "подвид", 1), before="Австралийский подвид ")
         options = {"words_by_length": ENGLISH_CAPITAL_FIXTURE_WORDS_BY_LENGTH,
                    "frames_per_word": ENGLISH_CAPITAL_FIXTURE_FRAMES_PER_WORD, "sample_weight": CAPITAL_CITATION_FIXTURE_WEIGHT}
@@ -639,7 +639,7 @@ class ActionTrainingTests(unittest.TestCase):
             with self.subTest(row=row.identifier):
                 self.assertTrue(row.original.isascii() and row.original.isupper())
                 self.assertEqual((row.group, row.action, row.category, row.sample_weight, row.field.before),
-                                 (0, "keep", "english_capital", CAPITAL_CITATION_FIXTURE_WEIGHT, "affected by the "))
+                                 (0, "keep", "english_capital", CAPITAL_CITATION_FIXTURE_WEIGHT, "according to the "))
                 self.assertEqual((row.trigger, row.boundary_text), _varied_boundary(row.identifier))
         again, _ = english_capital_curriculum([english, russian], frozenset(expanded_aliases("из")), options)
         self.assertNotIn("BP", {row.original for row in again})

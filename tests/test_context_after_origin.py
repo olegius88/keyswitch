@@ -126,7 +126,7 @@ class ContextAfterOriginTests(unittest.TestCase):
                 self.assertEqual((own.predict(item).action, own.predict(item).supported), ("suggest", False))
 
     def test_a_token_in_capitals_has_its_features_once_more_for_the_capitals_head(self) -> None:
-        capitals = ContextEvidence("BP", "ИЗ", 0, FieldContext("Editor", "1", "affected by the ", ""), boundary_text=" ")
+        capitals = ContextEvidence("BP", "ИЗ", 0, FieldContext("Editor", "1", "according to the ", ""), boundary_text=" ")
         features = extract_action_features(capitals)
         shared = {name: value for name, value in features.items() if not name.startswith(CAPITALS_FEATURE_PREFIX)}
         self.assertEqual({name.removeprefix(CAPITALS_FEATURE_PREFIX): value for name, value in features.items()

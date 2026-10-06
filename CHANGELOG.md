@@ -24,9 +24,9 @@ All notable changes to KeySwitch are documented in this file.
 - The context model is the 0.39.0 model with two heads fitted onto it (corpus v30; test v30 sealed
   before training and passed): every weight of the 0.39.0 model stays, and only the question above
   and a token of two to five capitals after Latin-script text have weights of their own. `BP` in
-  English prose (`affected by the BP oil spill.`) stays instead of becoming `ИЗ`, and so do `NBA`
-  and `VS` there; after Russian prose a word in capitals is decided as before, a word typed with
-  Caps Lock (`я YT`) still becoming `я НЕ`. On the replay of the owner's own typing it converts 716
+  English prose stays instead of becoming `ИЗ`, and so do `NBA` and `VS` there; after Russian
+  prose a word in capitals is decided as before, a word typed with Caps Lock (`я YT`) still
+  becoming `я НЕ`. On the replay of the owner's own typing it converts 716
   words right, leaves 119 in the wrong layout and converts 66 falsely, against 707/128/64 for 0.39.0
   (the two new conversions translate terms right: `сым` → `csv`, `йуьг` → `qemu`), and on the words
   the user's own correction labels 110/40/8 against 108/42/8; development v30, the authored

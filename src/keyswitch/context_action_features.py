@@ -397,7 +397,7 @@ def _alone_counts(item: ContextEvidence, direction: str) -> dict[str, float]:
 
 def capitals_question(original: str, before: str) -> bool:
     """A token of letters only, all capitals, of CAPITALS_HEAD_MIN_LETTERS to CAPITALS_HEAD_MAX_LETTERS,
-    after text with more Latin letters than Cyrillic ones (`affected by the BP`).
+    after text with more Latin letters than Cyrillic ones (`according to the BP`).
 
     After Russian prose the same shape is as often a word typed with Caps Lock (`я YT` for `я НЕ`) as a
     cited abbreviation (`по версии WBC`), and a head fitted there kept 54 of 72 such words the corpus
