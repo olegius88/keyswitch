@@ -37,6 +37,7 @@ from train_context_action_model import (
     capital_citation,
     capital_citation_curriculum,
     choose_threshold,
+    counted_token_curriculum,
     development_thresholds,
     identifier_evidence_dropped,
     identifier_family,
@@ -56,6 +57,9 @@ from train_context_action_model import (
     stranded_previous,
     training_order,
     translated,
+    _counted_abbreviations,
+    _counted_terms,
+    _varied_boundary,
 )
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
 from keyswitch.constants.models import CONTEXT_ACTION_FEATURE_VERSION
@@ -636,6 +640,47 @@ class ActionTrainingTests(unittest.TestCase):
         # Without a Russian row there is no place to put a term, an abbreviation or a misspelt word.
         self.assertEqual(kept_neighbour_curriculum([english], frozenset(), options)[1]["counts"],
                          {"natural_0": KEPT_NEIGHBOUR_FIXTURE_FRAMES // LAYOUT_GROUP_COUNT})
+
+    def test_the_counted_token_curriculum_keeps_counted_abbreviations_and_converts_counted_terms(self) -> None:
+        # `тз` is counted 744 times in Russian technical text and its keys `np` 80 times: typed after
+        # Russian prose it is the abbreviation meant. `зк` is counted nowhere, and `pr` is a term.
+        self.assertIn("тз", _counted_abbreviations(frozenset(), KEPT_NEIGHBOUR_FIXTURE_ABBREVIATION_COUNT,
+                                                    KEPT_NEIGHBOUR_FIXTURE_DOMINANCE))
+        terms = _counted_terms(frozenset(), KEPT_NEIGHBOUR_FIXTURE_TERM_COUNT)
+        self.assertIn("pr", terms)
+        self.assertNotIn("np", terms)
+        russian = [replace(fixture(f"c{index}", "сегодня", 1), before="мы обновили сервер и ")
+                   for index in range(KEPT_NEIGHBOUR_FIXTURE_FRAMES)]
+        english = replace(fixture("e1", "today", 0), before="we have updated the server and ")
+        options = {"term_frames": KEPT_NEIGHBOUR_FIXTURE_FRAMES, "abbreviation_frames": KEPT_NEIGHBOUR_FIXTURE_FRAMES,
+                   "minimum_term_count": KEPT_NEIGHBOUR_FIXTURE_TERM_COUNT,
+                   "minimum_abbreviation_count": KEPT_NEIGHBOUR_FIXTURE_ABBREVIATION_COUNT,
+                   "abbreviation_dominance": KEPT_NEIGHBOUR_FIXTURE_DOMINANCE, "sample_weight": KEPT_NEIGHBOUR_FIXTURE_WEIGHT}
+        rows, report = counted_token_curriculum([*russian, english], frozenset(), options)
+        self.assertEqual(rows, counted_token_curriculum([*russian, english], frozenset(), options)[0])
+        self.assertEqual(report["counts"], {"counted_abbreviation": KEPT_NEIGHBOUR_FIXTURE_FRAMES,
+                                            "counted_term": KEPT_NEIGHBOUR_FIXTURE_FRAMES})
+        abbreviations = cast(list[str], report["abbreviations"])
+        for row in rows:
+            with self.subTest(row=row.identifier):
+                # Decided at its own boundary after a Russian left context, with nothing after it.
+                self.assertEqual((row.group, row.after_origin, row.field.before, row.field.after, row.sample_weight),
+                                 (1, "none", "мы обновили сервер и ", "", KEPT_NEIGHBOUR_FIXTURE_WEIGHT))
+                self.assertEqual((row.trigger, row.boundary_text), _varied_boundary(row.identifier))
+                self.assertFalse(plausible_reading(row.original, 1))
+                if row.category == "counted_term":
+                    self.assertEqual(row.action, "convert")
+                    self.assertNotIn(term_bucket(translated(row.original, 1).lower(), "latin"), ("na", "0"))
+                else:
+                    self.assertEqual((row.category, row.action), ("counted_abbreviation", "keep"))
+                    self.assertIn(row.original, abbreviations)
+        held = abbreviations[0]
+        again, _ = counted_token_curriculum([*russian, english], frozenset(expanded_aliases(held)), options)
+        self.assertNotIn(held, {row.original for row in again})
+        # Without a Russian row there is no place to put them, and a zero budget frames nothing.
+        unused = {**options, "term_frames": 0, "abbreviation_frames": 0}
+        for source, chosen in (([english], options), (russian, unused)):
+            self.assertEqual(counted_token_curriculum(source, frozenset(), chosen), ([], {"frames": 0, "scope": "not used"}))
 
     def test_a_russian_word_closing_a_quotation_converts_with_the_at_sign_of_its_quote(self) -> None:
         words = [replace(fixture(f"q{index}", "привет", 1), before="он сказал «") for index in range(MIXED_CONTEXT_SAMPLE_ROWS)]

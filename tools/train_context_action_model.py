@@ -16,7 +16,7 @@ import math
 import re
 from array import array
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import cast
@@ -67,6 +67,7 @@ from keyswitch.constants.training import (
     CAPITAL_CITATION_RUSSIAN_BUCKET,
     CITATION_SIGN_HEADS,
     COMMAND_FAMILY_IDENTIFIER_PARTS,
+    COUNTED_TOKEN_FRAMES_PER_WORD,
     DETERMINISTIC_CHOICE_HEX_DIGITS,
     DETERMINISTIC_ROUNDING_DECIMALS,
     FEATURE_MASS_TOLERANCE,
@@ -462,6 +463,22 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
     return result
 
 
+def _varied_boundary(identifier: str) -> tuple[CorrectionTrigger, str]:
+    """The boundary a curriculum word ends at, by hash: a space (twice as often), Enter, a punctuation
+    mark, Tab or a pause, with the character Enter and Tab type in half of their frames."""
+
+    triggers: tuple[CorrectionTrigger, ...] = ("space", "space", "enter", "punctuation", "tab", "pause")
+    trigger = triggers[variant_choice(identifier, "trigger", len(triggers))]
+    boundary_text = ""
+    if trigger == "space":
+        boundary_text = " "
+    elif trigger == "punctuation":
+        boundary_text = CAPITAL_CITATION_PUNCTUATION[variant_choice(identifier, "punctuation", len(CAPITAL_CITATION_PUNCTUATION))]
+    elif trigger in {"enter", "tab"} and variant_choice(identifier, "boundary-event", BOUNDARY_EVENT_CHOICES):
+        boundary_text = "\n" if trigger == "enter" else "\t"
+    return trigger, boundary_text
+
+
 def capital_citation_curriculum(source_rows: Sequence[CorpusRow], refused: frozenset[str],
                                 options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
     """Latin abbreviations in capitals after Russian prose whose Cyrillic reading is a rare word: keep.
@@ -498,7 +515,6 @@ def capital_citation_curriculum(source_rows: Sequence[CorpusRow], refused: froze
         if refused & (expanded_aliases(word) | expanded_aliases(latin)):
             continue
         candidates[len(word)].append((word, latin))
-    triggers: tuple[CorrectionTrigger, ...] = ("space", "space", "enter", "punctuation", "tab", "pause")
     applications = ("Telegram", "Code", "chrome", "UnseenEditor")
     rows: list[ActionRow] = []
     chosen: dict[str, list[str]] = {}
@@ -507,14 +523,7 @@ def capital_citation_curriculum(source_rows: Sequence[CorpusRow], refused: froze
         chosen[str(length)] = [f"{word}/{latin}" for word, latin in ranked[:budget]]
         for word, latin in ranked[:budget]:
             identifier = "capital-citation:" + word
-            trigger = triggers[variant_choice(identifier, "trigger", len(triggers))]
-            boundary_text = ""
-            if trigger == "space":
-                boundary_text = " "
-            elif trigger == "punctuation":
-                boundary_text = CAPITAL_CITATION_PUNCTUATION[variant_choice(identifier, "punctuation", len(CAPITAL_CITATION_PUNCTUATION))]
-            elif trigger in {"enter", "tab"} and variant_choice(identifier, "boundary-event", BOUNDARY_EVENT_CHOICES):
-                boundary_text = "\n" if trigger == "enter" else "\t"
+            trigger, boundary_text = _varied_boundary(identifier)
             field = FieldContext(applications[variant_choice(identifier, "application", len(applications))], "public-training",
                                  contexts[variant_choice(identifier, "context", len(contexts))], "", "unknown")
             rows.append(ActionRow(identifier, latin, 0, field, trigger, "", "keep", "mixed_language_insertion",
@@ -534,6 +543,76 @@ def capital_citation_curriculum(source_rows: Sequence[CorpusRow], refused: froze
 
 def _cyrillic(word: str) -> bool:
     return all("а" <= char.casefold() <= "я" or char.casefold() == "ё" for char in word)
+
+
+def _monolingual_rows(source_rows: Sequence[CorpusRow]) -> Iterator[tuple[CorpusRow, int, str, list[re.Match[str]]]]:
+    """Rows whose word and every word before it are in the script of the row's layout: each with its
+    layout, its text through its word and the words of that text."""
+
+    for row in source_rows:
+        if row.group not in (0, 1) or not row.layout_representable or not row.original.isalpha():
+            continue
+        if _cyrillic(row.original) != (row.group == 1):
+            continue
+        text = row.before + row.original
+        tokens = list(WORDS.finditer(text))
+        if any(_cyrillic(token.group()) != (row.group == 1) for token in tokens):
+            continue
+        yield row, row.group, text, tokens
+
+
+def _russian_contexts(source_rows: Sequence[CorpusRow]) -> list[tuple[str, str]]:
+    """The left context and the word of every Russian row of Russian words only, in a fixed order."""
+
+    return sorted((row.before, row.original) for row, group, _, _ in _monolingual_rows(source_rows) if group == 1)
+
+
+def _counted_terms(refused: frozenset[str], minimum: int) -> list[str]:
+    """Latin words Russian technical text uses at least `minimum` times whose Cyrillic reading is nothing.
+
+    Their keys in the Russian layout are no word, no identifier and not counted in Russian text: typed
+    there amid Russian prose, they are the term typed in the wrong layout (`зк` is `pr`).
+    """
+
+    uncounted = CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS[0]
+    table = _term_frequency()
+    terms: list[str] = []
+    for term, count in table["latin"].items():
+        if count < minimum or not term.isascii() or not term.isalpha() or not term.islower():
+            continue
+        if not KEPT_NEIGHBOUR_MIN_LETTERS <= len(term) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS:
+            continue
+        reading = translated(term, 0)
+        if (not reading.isalpha() or plausible_reading(reading, 1) or table["cyrillic"].get(reading, 0) >= uncounted
+                or table["russian"].get(reading, 0) >= uncounted or refused & (expanded_aliases(term) | expanded_aliases(reading))):
+            continue
+        terms.append(term)
+    return terms
+
+
+def _counted_abbreviations(refused: frozenset[str], minimum: int, dominance: float) -> list[str]:
+    """Cyrillic tokens Russian technical text uses at least `minimum` times and `dominance` times as
+    often as their Latin keys, no lexicon word: `тз` (744 against 80 for `np`), not `зк`."""
+
+    table = _term_frequency()
+    abbreviations: list[str] = []
+    for token, count in table["cyrillic"].items():
+        if (count < minimum or not token.isalpha() or not _cyrillic(token)
+                or not KEPT_NEIGHBOUR_MIN_LETTERS <= len(token) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS
+                or plausible_reading(token, 1)):
+            continue
+        keys = translated(token, 1)
+        if count < dominance * table["latin"].get(keys, 0) or refused & (expanded_aliases(token) | expanded_aliases(keys)):
+            continue
+        abbreviations.append(token)
+    return abbreviations
+
+
+def _term_typed(term: str) -> str:
+    """A counted term's keys in the Russian layout, one term in KEPT_NEIGHBOUR_CAPITALS_MODULUS in capitals."""
+
+    capitals = variant_choice("kept-term:" + term, "capitals", KEPT_NEIGHBOUR_CAPITALS_MODULUS) == 0
+    return translated(term.upper() if capitals else term, 0)
 
 
 def kept_neighbour_curriculum(source_rows: Sequence[CorpusRow], refused: frozenset[str],
@@ -566,8 +645,6 @@ def kept_neighbour_curriculum(source_rows: Sequence[CorpusRow], refused: frozens
     minimum_term = int(cast(int, options["minimum_term_count"]))
     minimum_abbreviation = int(cast(int, options["minimum_abbreviation_count"]))
     dominance = float(cast(float, options["abbreviation_dominance"]))
-    uncounted = CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS[0]
-    table = _term_frequency()
     applications = ("Telegram", "Code", "chrome", "UnseenEditor")
 
     def ranked(values: Iterable[str], purpose: str) -> list[str]:
@@ -579,26 +656,15 @@ def kept_neighbour_curriculum(source_rows: Sequence[CorpusRow], refused: frozens
         return ActionRow(identifier, word, group, field, "space", "", action, category, " ", weight, "kept_next_word")
 
     natural: dict[int, dict[str, tuple[str, str, str]]] = {0: {}, 1: {}}
-    russian: list[tuple[str, str]] = []
-    for row in source_rows:
-        if row.group not in (0, 1) or not row.layout_representable or not row.original.isalpha():
-            continue
-        if _cyrillic(row.original) != (row.group == 1):
-            continue
-        text = row.before + row.original
-        tokens = list(WORDS.finditer(text))
-        if any(_cyrillic(token.group()) != (row.group == 1) for token in tokens):
-            continue
-        if row.group == 1:
-            russian.append((row.before, row.original))
+    for _, group, text, tokens in _monolingual_rows(source_rows):
         # Every short word of the sentence followed, after one space, by another word is the question
         # asked as written: the row's own text up to its word holds many such pairs.
         for current, following in zip(tokens, tokens[1:]):
             word = current.group()
             if (KEPT_NEIGHBOUR_MIN_LETTERS <= len(word) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS and word.isalpha()
                     and following.group().isalpha() and text[current.end():following.start()] == " "):
-                natural[row.group][text[:current.start()] + "|" + word] = (text[:current.start()], word, following.group())
-    russian.sort()
+                natural[group][text[:current.start()] + "|" + word] = (text[:current.start()], word, following.group())
+    russian = _russian_contexts(source_rows)
     rows: list[ActionRow] = []
     counts: Counter[str] = Counter()
     for group in (0, 1):
@@ -625,33 +691,9 @@ def kept_neighbour_curriculum(source_rows: Sequence[CorpusRow], refused: frozens
                 counts[purpose] += 1
         return chosen
 
-    terms: list[str] = []
-    for term, count in table["latin"].items():
-        if count < minimum_term or not term.isascii() or not term.isalpha() or not term.islower():
-            continue
-        if not KEPT_NEIGHBOUR_MIN_LETTERS <= len(term) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS:
-            continue
-        reading = translated(term, 0)
-        if (not reading.isalpha() or plausible_reading(reading, 1) or table["cyrillic"].get(reading, 0) >= uncounted
-                or table["russian"].get(reading, 0) >= uncounted or refused & (expanded_aliases(term) | expanded_aliases(reading))):
-            continue
-        terms.append(term)
-
-    def term_typed(term: str) -> str:
-        capitals = variant_choice("kept-term:" + term, "capitals", KEPT_NEIGHBOUR_CAPITALS_MODULUS) == 0
-        return translated(term.upper() if capitals else term, 0)
-
-    chosen_terms = inserted(ranked(terms, "term"), budgets["term_frames"], "term", term_typed, "convert")
-    abbreviations: list[str] = []
-    for token, count in table["cyrillic"].items():
-        if (count < minimum_abbreviation or not token.isalpha() or not _cyrillic(token)
-                or not KEPT_NEIGHBOUR_MIN_LETTERS <= len(token) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS
-                or plausible_reading(token, 1)):
-            continue
-        keys = translated(token, 1)
-        if count < dominance * table["latin"].get(keys, 0) or refused & (expanded_aliases(token) | expanded_aliases(keys)):
-            continue
-        abbreviations.append(token)
+    terms = _counted_terms(refused, minimum_term)
+    chosen_terms = inserted(ranked(terms, "term"), budgets["term_frames"], "term", _term_typed, "convert")
+    abbreviations = _counted_abbreviations(refused, minimum_abbreviation, dominance)
     chosen_abbreviations = inserted(ranked(abbreviations, "abbreviation"), budgets["abbreviation_frames"], "abbreviation",
                                     lambda token: token, "keep")
     misspelt: list[str] = []
@@ -672,6 +714,64 @@ def kept_neighbour_curriculum(source_rows: Sequence[CorpusRow], refused: frozens
                                  "abbreviations": len(abbreviations), "misspelt": len(set(misspelt)), "contexts": len(russian)},
                   "terms": chosen_terms, "abbreviations": chosen_abbreviations, "misspelt": chosen_misspelt,
                   "scope": "TRAIN only: kept_next_word frames, the question a waiting word is asked again with its kept next word (kept_neighbour_curriculum)."}
+
+
+def counted_token_curriculum(source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                             options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """Counted Russian abbreviations amid Russian prose stay; counted Latin terms typed there convert.
+
+    The word decided at its own boundary tells a token's language by the lexicons and the language
+    models, and a Russian abbreviation of technical text is in neither while its Latin keys often are
+    a word: `тз` amid Russian prose became `np` at p=0.993 in the owner's typing (`если тз готов`,
+    the corpus v27 candidate of 06.10.2026), and so did `2фа`, `кз` and `ви`. How often Russian
+    technical text uses a token (744 times for `тз`, 80 for `np`) is a feature already, but no frame of
+    this question held such a token, and the count lost to the language models. The frames put the
+    tokens of the kept-neighbour curriculum (_counted_abbreviations, _counted_terms) after the left
+    context of a Russian TRAIN row, chosen by hash, with nothing after them:
+    - abbreviation: the token as typed - keep;
+    - term: a counted Latin term's keys in the Russian layout - convert, so the pair tells the counts
+      apart rather than teaching that a short unknown Cyrillic token after Russian prose stays.
+    Each word gets up to COUNTED_TOKEN_FRAMES_PER_WORD frames, with the boundaries of the capital
+    citations (_varied_boundary). Words of this corpus's test and of every accessed test are refused by
+    their aliases.
+    """
+
+    budgets = {name: int(cast(int, options[name])) for name in ("term_frames", "abbreviation_frames")}
+    russian = _russian_contexts(source_rows)
+    if not any(budgets.values()) or not russian:
+        return [], {"frames": 0, "scope": "not used"}
+    weight = float(cast(float, options["sample_weight"]))
+    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+    candidates = {
+        "term": _counted_terms(refused, int(cast(int, options["minimum_term_count"]))),
+        "abbreviation": _counted_abbreviations(refused, int(cast(int, options["minimum_abbreviation_count"])),
+                                               float(cast(float, options["abbreviation_dominance"]))),
+    }
+    plans: tuple[tuple[str, Callable[[str], str], ContextAction], ...] = (
+        ("term", _term_typed, "convert"), ("abbreviation", str, "keep"))
+    rows: list[ActionRow] = []
+    chosen: dict[str, list[str]] = {}
+    for purpose, typed, action in plans:
+        words = sorted(candidates[purpose], key=lambda word: hashlib.sha256(f"counted-{purpose}:{word}".encode()).digest())
+        chosen[purpose] = []
+        frames = 0
+        for word in words:
+            if frames >= budgets[purpose + "_frames"]:
+                break
+            chosen[purpose].append(word)
+            for index in range(min(COUNTED_TOKEN_FRAMES_PER_WORD, budgets[purpose + "_frames"] - frames)):
+                identifier = f"counted-{purpose}:{word}:{index}"
+                trigger, boundary_text = _varied_boundary(identifier)
+                before, _ = russian[variant_choice(identifier, "context", len(russian))]
+                field = FieldContext(applications[variant_choice(identifier, "application", len(applications))],
+                                     "public-training", before, "", "unknown")
+                rows.append(ActionRow(identifier, typed(word), 1, field, trigger, "", action, "counted_" + purpose,
+                                      boundary_text, weight))
+                frames += 1
+    return rows, {"frames": len(rows), "counts": dict(sorted(Counter(row.category for row in rows).items())),
+                  "candidates": {purpose: len(words) for purpose, words in candidates.items()},
+                  "sample_weight": weight, "terms": chosen["term"], "abbreviations": chosen["abbreviation"],
+                  "scope": "TRAIN only: counted Russian abbreviations (keep) and counted Latin terms typed in the Russian layout (convert) after Russian prose, decided at their own boundary (counted_token_curriculum)."}
 
 
 def historical_curriculum(intent: LinearNgramModel | None = None) -> list[ActionRow]:
@@ -1381,6 +1481,8 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
     frames["train"] = training_order([*frames["train"], *historical_curriculum(intent), *captured, *capitals])
     kept_options = cast(dict[str, object], options["kept_neighbour_curriculum"])
     kept, kept_report = kept_neighbour_curriculum(source_rows["train"], refused, kept_options)
+    counted, counted_report = counted_token_curriculum(
+        source_rows["train"], refused, cast(dict[str, object], options["counted_token_curriculum"]))
     feature_paths: dict[tuple[str, str], Path] = {}
     feature_mass = FeatureMass()
     span_budgets = cast(dict[str, int], options["span_maximum_families"])
@@ -1410,8 +1512,9 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
                     rows, source_rows[split], detector, ortho, refused=refused, profile=profile, split=split,
                     maximum_families=lexical_options["maximum_families"], seeds_per_family=lexical_options["seeds_per_family"])
                 rows, balance_reports[profile] = balance_planned_mass(rows)
-                # After both lookahead curricula, so no kept-neighbour frame seeds a planned one.
-                rows = [*rows, *kept]
+                # After both lookahead curricula, so no kept-neighbour or counted-token frame seeds a
+                # planned one.
+                rows = [*rows, *kept, *counted]
             spans = build_span_curriculum(source_rows[split], lexical_models[profile], profile=profile,
                                           maximum_families=span_budgets[split], expected_split=split)
             span_reports[profile][split] = spans.counts
@@ -1515,6 +1618,7 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
         "captured_curriculum": captured_report,
         "capital_citation_curriculum": capital_report,
         "kept_neighbour_curriculum": kept_report,
+        "counted_token_curriculum": counted_report,
         "planned_mass_balance": balance_reports,
         "test_accessed": False,
         "scope": "natural KEEP plus declared layout/mixed-context interventions; sequence evaluation required"}

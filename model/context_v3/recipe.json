@@ -158,5 +158,14 @@
   "sample_weight": 1.0,
   "maximum_features": 20000,
   "scope": "TRAIN only: the question a waiting word is asked again beside its next word, which stayed as typed (after_origin kept_next_word, features under KEPT_FEATURE_PREFIX with their own budget). Natural short words of either language with the sentence's next word keep; Latin terms the term table counts in Russian technical text, typed in the Russian layout before the word of a Russian row, convert; frequent Russian abbreviations and misspelt Russian words in the same place keep (tools/train_context_action_model.kept_neighbour_curriculum)."
+ },
+ "counted_token_curriculum": {
+  "term_frames": 2400,
+  "abbreviation_frames": 2400,
+  "minimum_term_count": 50,
+  "minimum_abbreviation_count": 20,
+  "abbreviation_dominance": 3,
+  "sample_weight": 1.0,
+  "scope": "TRAIN only: the word decided at its own boundary (after_origin none). Russian abbreviations the term table counts in Russian technical text at least minimum_abbreviation_count times and abbreviation_dominance times as often as their Latin keys (`тз`, not `зк`), no lexicon word, typed as intended after the left context of a Russian row, keep; Latin terms counted at least minimum_term_count times whose Cyrillic reading is nothing, typed in the Russian layout in the same place, convert; up to three frames a word, the boundaries of the capital citations. Motivation: the corpus v27 candidate converted `тз` to `np` (p=0.993), `2фа`, `кз` and `ви` in the owner's typing while the token's count pulled the other way without a frame to learn from (tools/train_context_action_model.counted_token_curriculum)."
  }
 }
