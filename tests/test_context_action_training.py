@@ -63,6 +63,7 @@ from train_context_action_model import (
     translated,
     base_weights,
     frozen_base,
+    refused_aliases,
     warm_base,
     log_loss,
     _counted_abbreviations,
@@ -765,6 +766,23 @@ class ActionTrainingTests(unittest.TestCase):
         convert = FROZEN_BASE_FIXTURE_PROBABILITIES[ACTIONS.index("convert")]
         self.assertAlmostEqual(log_loss(array("d", FROZEN_BASE_FIXTURE_PROBABILITIES), data),
                                -FROZEN_BASE_FIXTURE_IMPORTANCE * math.log(convert))
+
+    def test_a_fit_without_the_ledger_its_corpus_was_frozen_against_stops(self) -> None:
+        own, accessed = (hashlib.sha256(word.encode()).hexdigest() for word in ("own", "accessed"))
+        with tempfile.TemporaryDirectory() as directory:
+            corpus, ledger = Path(directory) / "corpus", Path(directory) / "ledger"
+            corpus.mkdir()
+            (corpus / "test-membership.json").write_text(json.dumps({"alias_sha256": [own]}), encoding="utf-8")
+            # Frozen refusing its own test's alias and one of an accessed test.
+            (corpus / "manifest.json").write_text(json.dumps({"metadata": {"refused_test_aliases": len((own, accessed))}}),
+                                                  encoding="utf-8")
+            with patch("train_context_action_model.LEDGER_ROOT", ledger):
+                with self.assertRaisesRegex(ValueError, "missing or older"):
+                    refused_aliases(corpus)
+                ledger.mkdir()
+                (ledger / "test.access.json").write_text(json.dumps({"test_membership": {"alias_sha256": [accessed]}}),
+                                                         encoding="utf-8")
+                self.assertEqual(refused_aliases(corpus), {own, accessed})
 
     def test_a_russian_word_closing_a_quotation_converts_with_the_at_sign_of_its_quote(self) -> None:
         words = [replace(fixture(f"q{index}", "привет", 1), before="он сказал «") for index in range(MIXED_CONTEXT_SAMPLE_ROWS)]

@@ -1162,11 +1162,22 @@ def natural_anchors(source_rows: Sequence[CorpusRow], split: str) -> list[Lookah
 
 
 def refused_aliases(corpus: Path) -> frozenset[str]:
-    """Aliases of every word a sealed test holds: this corpus's test and every accessed one."""
+    """Aliases of every word a sealed test holds: this corpus's test and every accessed one.
+
+    The ledger of accessed tests lives outside the repository (LEDGER_ROOT). A corpus records how
+    many test aliases it was frozen against; a fit that would refuse fewer has no ledger, or an older
+    one, and stops rather than frame words of a test already read.
+    """
     membership = cast(dict[str, object], json.loads((corpus / "test-membership.json").read_bytes()))
     aliases = set(cast(list[str], membership.get("alias_sha256", [])))
     ledger, _ = ledger_test_aliases(LEDGER_ROOT)
-    return frozenset(aliases | ledger)
+    refused = frozenset(aliases | ledger)
+    metadata = cast(dict[str, object], json.loads((corpus / "manifest.json").read_bytes()).get("metadata", {}))
+    frozen_against = metadata.get("refused_test_aliases")
+    if isinstance(frozen_against, int) and len(refused) < frozen_against:
+        raise ValueError(f"the fit would refuse {len(refused)} test aliases and the corpus was frozen refusing {frozen_against}: "
+                         f"the test ledger ({LEDGER_ROOT}) is missing or older than the corpus")
+    return refused
 
 
 def lexical_short_pairs(refused: frozenset[str], models: dict[int, LanguageModel] | None = None) -> list[tuple[str, str, int]]:
