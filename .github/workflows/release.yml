@@ -80,6 +80,9 @@ jobs:
           KEYSWITCH_TYPING_ROOT: ${{ runner.temp }}/keyswitch-typing
         run: ./tools/typecheck.sh
 
+      - name: Install NumPy for the context-v3 trainer's back ends
+        run: ./tools/install-training-accelerators.sh
+
       - name: Run unit and GTK interaction tests with 100% branch coverage
         run: >-
           ./tools/run-gui-test.sh --
@@ -498,6 +501,9 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           python -m pip install coverage==7.15.4 mypy==2.3.1 Nuitka==4.2 ordered-set==4.1.0 pystray==0.19.5 Pillow==12.3.0 comtypes==1.4.16
           python -m pip install --no-deps PyGObject-stubs==2.17.0
+          # NumPy's stubs for the trainer's back ends, from 2.2.6 (tools/install-typing-tools.sh says why).
+          # Only its .pyi files are read, so the x64 wheel serves the ARM64 runner too.
+          python -m pip install --target "$env:RUNNER_TEMP\numpy-typing" --no-deps --only-binary=:all: --python-version 3.12 --platform win_amd64 numpy==2.2.6
 
       - name: Configure the EN and RU keyboard layouts for the E2E
         shell: powershell
@@ -519,8 +525,11 @@ jobs:
           # pwsh reports only the last command's exit code; without this a
           # failing command earlier in the step would leave it green.
           $PSNativeCommandUseErrorActionPreference = $true
+          # The type check reads NumPy's stubs; the tests run without them.
+          $env:PYTHONPATH = "src;$env:RUNNER_TEMP\numpy-typing"
           python -m mypy --config-file pyproject.toml --exclude "^tools/freeze_intent_development_corpus\.py$"
           python -m mypy --config-file pyproject.toml --platform linux tools/freeze_intent_development_corpus.py
+          $env:PYTHONPATH = "src"
           python -m coverage erase
           python -m coverage run --branch --source=src/keyswitch tests/test_intent_model.py -v
           python -m coverage run --append --branch --source=src/keyswitch -m unittest discover -s tests -p test_windows_backend.py -v
