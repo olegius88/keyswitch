@@ -35,6 +35,8 @@ from .constants.models import (
     KEPT_FEATURE_PREFIX,
     PLANNED_CONTEXT_AFTER_MAX_CHARACTERS,
     PLANNED_CONTEXT_WORD_MAX_CHARACTERS,
+    START_FEATURE_PREFIX,
+    START_HEAD_MIN_LETTERS,
 )
 
 if TYPE_CHECKING:
@@ -364,6 +366,12 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         # around it: `ой` (Russian prose, 1298 times) and `гш` (never) were the same to it.
         result.update({ALONE_FEATURE_PREFIX + name: value for name, value in list(result.items())})
         result.update(_alone_counts(item, direction))
+    if start_question(item.original, item.alternative, item.field.before, item.field.after):
+        # The class the message-start head answers, in the same way. With nothing around the word the
+        # shared features leave out how often each reading occurs in prose, and a rare Russian word
+        # opening a message was converted on its letters alone; the head reads both prose counts.
+        result.update({START_FEATURE_PREFIX + name: value for name, value in list(result.items())})
+        result.update(_start_counts(item, direction))
     return result
 
 
@@ -393,6 +401,31 @@ def _alone_counts(item: ContextEvidence, direction: str) -> dict[str, float]:
     names = (f"count:latin:{magnitudes[0]}", f"count:cyrillic:{magnitudes[1]}", f"count:ratio:{ratio}",
              f"count:{magnitudes[0]}:{magnitudes[1]}")
     return {f"{ALONE_FEATURE_PREFIX}{name}:direction:{direction}": 1.0 for name in names}
+
+
+def start_question(original: str, alternative: str, before: str, after: str) -> bool:
+    """A word of at least START_HEAD_MIN_LETTERS letters, letters in both layouts, with no letter before or
+    after it in the field: the first word of a message, at any boundary. Two letters are the lone-word
+    head's (alone_question) or wait for the next word; a word whose other reading has signs (`J,thyed`)
+    is no member."""
+
+    return (len(original) >= START_HEAD_MIN_LETTERS and original.isalpha() and alternative.isalpha()
+            and not any(char.isalpha() for char in before) and not any(char.isalpha() for char in after))
+
+
+def _start_counts(item: ContextEvidence, direction: str) -> dict[str, float]:
+    """The message-start head's own count evidence: the binary order of magnitude of how often the Latin
+    reading occurs in English prose and the Cyrillic one in Russian prose, and of their ratio."""
+
+    from .context_model import _term_frequency
+
+    table = _term_frequency()
+    latin, cyrillic = (item.original, item.alternative) if item.source_group == 0 else (item.alternative, item.original)
+    magnitudes = (table["english"].get(latin.casefold(), 0).bit_length(), table["russian"].get(cyrillic.casefold(), 0).bit_length())
+    ratio = max(-ALONE_COUNT_RATIO_BOUND, min(ALONE_COUNT_RATIO_BOUND, magnitudes[0] - magnitudes[1]))
+    names = (f"count:english:{magnitudes[0]}", f"count:russian:{magnitudes[1]}", f"count:ratio:{ratio}",
+             f"count:{magnitudes[0]}:{magnitudes[1]}")
+    return {f"{START_FEATURE_PREFIX}{name}:direction:{direction}": 1.0 for name in names}
 
 
 def capitals_question(original: str, before: str) -> bool:

@@ -67,7 +67,7 @@ from keyswitch.constants.file_formats import HEXADECIMAL_BASE, VERSION_HASH_CHAR
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
 from keyswitch.constants.models import (
     ALONE_FEATURE_PREFIX, ALONE_HEAD_LETTERS, CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS,
-    KEPT_CONTEXT_WORD_MAX_CHARACTERS, KEPT_FEATURE_PREFIX, PLANNED_CONTEXT_WORD_MAX_CHARACTERS,
+    KEPT_CONTEXT_WORD_MAX_CHARACTERS, KEPT_FEATURE_PREFIX, PLANNED_CONTEXT_WORD_MAX_CHARACTERS, START_FEATURE_PREFIX,
 )
 from keyswitch.constants.training import (
     CONTEXT_ACTION_BACKEND_AUTO,
@@ -1448,7 +1448,7 @@ def frozen_base(options: Mapping[str, object]) -> ContextModel | None:
 
 
 # The heads a frozen base can carry besides the kept-neighbour question, by the recipe's name.
-HEAD_PREFIXES: Final = {"capitals": CAPITALS_FEATURE_PREFIX, "alone": ALONE_FEATURE_PREFIX}
+HEAD_PREFIXES: Final = {"capitals": CAPITALS_FEATURE_PREFIX, "alone": ALONE_FEATURE_PREFIX, "start": START_FEATURE_PREFIX}
 
 
 def frozen_heads(options: Mapping[str, object]) -> dict[str, int]:

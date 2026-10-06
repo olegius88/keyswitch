@@ -79,6 +79,7 @@ from train_context_action_model import (
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
 from keyswitch.constants.models import (
     ALONE_FEATURE_PREFIX, CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_V1_CONVERSION_THRESHOLD, KEPT_FEATURE_PREFIX,
+    START_FEATURE_PREFIX,
 )
 from keyswitch.detector import LanguageDetector
 from keyswitch.intent_model import CorrectionTrigger, LinearNgramModel
@@ -813,6 +814,8 @@ class ActionTrainingTests(unittest.TestCase):
         self.assertIsNone(alone_evidence({}))
         self.assertEqual(alone_evidence({"frozen_base": {"heads": {"alone": evidence}}}), evidence)
         self.assertEqual(frozen_heads({"frozen_base": {"heads": {"alone": evidence}}}), {ALONE_FEATURE_PREFIX: HEAD_FIXTURE_MAXIMUM_FEATURES})
+        self.assertEqual(frozen_heads({"frozen_base": {"heads": {"alone": evidence, "start": {"maximum_features": HEAD_FIXTURE_MAXIMUM_FEATURES}}}}),
+                         {ALONE_FEATURE_PREFIX: HEAD_FIXTURE_MAXIMUM_FEATURES, START_FEATURE_PREFIX: HEAD_FIXTURE_MAXIMUM_FEATURES})
 
         def lone(word: str, group: int, trigger: CorrectionTrigger = "pause", before: str = "", after: str = "",
                  origin: AfterOrigin = "none") -> ActionRow:

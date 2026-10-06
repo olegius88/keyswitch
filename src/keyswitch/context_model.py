@@ -424,7 +424,7 @@ class ContextModel:
             _term_frequency()
         raw_weights: object = payload.get("weights")
         if feature_version == CONTEXT_ACTION_FEATURE_VERSION:
-            # Two feature spaces, each with its own budget (MAX_CONTEXT_ACTION_MODEL_FEATURES).
+            # Up to five feature spaces, each with its own budget in the recipe (MAX_CONTEXT_ACTION_MODEL_FEATURES).
             if not isinstance(raw_weights, dict) or not 0 < len(raw_weights) <= MAX_CONTEXT_ACTION_MODEL_FEATURES:
                 raise ValueError("invalid context weights")
         elif not isinstance(raw_weights, dict) or not 0 < len(raw_weights) <= MAX_FEATURES:

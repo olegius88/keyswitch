@@ -17,6 +17,7 @@ from keyswitch.constants.models import (
     KEPT_CONTEXT_WORD_MAX_CHARACTERS,
     KEPT_FEATURE_PREFIX,
     PLANNED_CONTEXT_AFTER_MAX_CHARACTERS,
+    START_FEATURE_PREFIX,
 )
 from keyswitch.context_model import ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, ContextPrediction, extract_context_features
 from keyswitch.context_policy import ContextPolicy, evidence_for_decision
@@ -183,6 +184,40 @@ class ContextAfterOriginTests(unittest.TestCase):
         for weights, expected in ((plain, "keep"), (head, "convert")):
             model = ContextModel(weights, "context-v3-alone", feature_version=CONTEXT_ACTION_FEATURE_VERSION)
             self.assertEqual(model.predict(lone).action, expected)
+            self.assertEqual(model.predict(self.item).action, "keep")
+
+    def test_a_word_alone_in_the_field_has_its_features_once_more_for_the_message_start_head(self) -> None:
+        first = ContextEvidence("руддщ", "hello", 1, FieldContext("Telegram", "1", "", ""), trigger="space", boundary_text=" ")
+        features = extract_action_features(first)
+        shared = {name: value for name, value in features.items() if not name.startswith(START_FEATURE_PREFIX)}
+        own = {name.removeprefix(START_FEATURE_PREFIX): value for name, value in features.items() if name.startswith(START_FEATURE_PREFIX)}
+        # The shared features once more, and the orders of magnitude of the two prose counts: `hello` occurs
+        # 483 times in English prose (9 binary digits), `руддщ` never in Russian.
+        self.assertEqual({name: value for name, value in own.items() if not name.startswith("count:")}, shared)
+        self.assertEqual(sorted(name for name in own if name.startswith("count:")),
+                         ["count:9:0:direction:1", "count:english:9:direction:1",
+                          f"count:ratio:{ALONE_COUNT_RATIO_BOUND}:direction:1", "count:russian:0:direction:1"])
+        # Any boundary, signs and digits around it, a capitalised word: the first word of a message.
+        for item in (replace(first, trigger="enter", boundary_text="\n"), replace(first, field=replace(first.field, before="1. ", after=" :)")),
+                     replace(first, original="Руддщ", alternative="Hello")):
+            with self.subTest(item=item):
+                self.assertTrue(any(name.startswith(START_FEATURE_PREFIX) for name in extract_action_features(item)))
+        # A word before or after it, two letters (the lone-word head's or the next word's), a reading with a
+        # sign (`хлопнув` is `{kjgyed`) and the kept-neighbour question: no head.
+        for item in (replace(first, field=replace(first.field, before="есть ")), replace(first, field=replace(first.field, after="кнопка")),
+                     replace(first, original="гш", alternative="ui"), replace(first, original="хлопнув", alternative="{kjgyed"),
+                     replace(first, original="руд", alternative="hel", field=replace(first.field, after="нас"),
+                             after_origin="kept_next_word")):
+            with self.subTest(item=item):
+                self.assertFalse(any(name.startswith(START_FEATURE_PREFIX) for name in extract_action_features(item)))
+        # Without head weights the shared ones decide; a head weight answers the class alone.
+        support = {name: (0.0,) * len(ACTIONS) for item in (self.item, first) for name in extract_action_features(item)
+                   if name.startswith(("source:char:", "target:char:"))}
+        plain = {**support, "bias": (AFTER_ORIGIN_DECISIVE_BIAS_WEIGHT, 0.0, 0.0, 0.0)}
+        head = {**plain, START_FEATURE_PREFIX + "bias": (0.0, AFTER_ORIGIN_DECISIVE_BIAS_WEIGHT * len(ACTIONS), 0.0, 0.0)}
+        for weights, expected in ((plain, "keep"), (head, "convert")):
+            model = ContextModel(weights, "context-v3-start", feature_version=CONTEXT_ACTION_FEATURE_VERSION)
+            self.assertEqual(model.predict(first).action, expected)
             self.assertEqual(model.predict(self.item).action, "keep")
 
     def test_v2_features_and_predictions_ignore_origin_entirely(self) -> None:
