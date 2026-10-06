@@ -91,8 +91,7 @@ from keyswitch.constants.training import (
     KEPT_NEIGHBOUR_MIN_LETTERS,
     LEXICAL_PAIR_ANCHOR_VARIANTS,
     LOG_LOSS_PROBABILITY_FLOOR,
-    LONE_WORD_CASE_MODULUS,
-    LONE_WORD_FRAMES_PER_READING,
+    LONE_WORD_BOUNDARIES,
     LONE_WORD_SPLIT_MODULUS,
     LOOKAHEAD_ANCHOR_MAX_CHARACTERS,
     LOOKAHEAD_ANCHOR_MIN_CHARACTERS,
@@ -478,12 +477,11 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
     return result
 
 
-def _varied_boundary(identifier: str, triggers: tuple[CorrectionTrigger, ...] = ("space", "space", "enter", "punctuation", "tab", "pause"),
-                     ) -> tuple[CorrectionTrigger, str]:
+def _varied_boundary(identifier: str) -> tuple[CorrectionTrigger, str]:
     """The boundary a curriculum word ends at, by hash: a space (twice as often), Enter, a punctuation
-    mark, Tab or a pause, with the character Enter and Tab type in half of their frames; `triggers`
-    narrows the choice."""
+    mark, Tab or a pause, with the character Enter and Tab type in half of their frames."""
 
+    triggers: tuple[CorrectionTrigger, ...] = ("space", "space", "enter", "punctuation", "tab", "pause")
     trigger = triggers[variant_choice(identifier, "trigger", len(triggers))]
     boundary_text = ""
     if trigger == "space":
@@ -1519,15 +1517,15 @@ def lone_word_curriculum(split: str, refused: frozenset[str], evidence: Mapping[
     the head needs both kinds: readings the term counts settle (`гш` is `ui`, `yf` is `на`) and
     readings they do not (`ns` and `ты` are both counted; `ha` is an English word). Each pair goes to
     one split by hash (LONE_WORD_SPLIT_MODULUS), so DEVELOPMENT chooses the head's epoch on pairs it
-    never saw. Each reading ends at LONE_WORD_FRAMES_PER_READING boundaries other than a space
-    (_varied_boundary), some in capitals or capitalised (LONE_WORD_CASE_MODULUS); alone_labels labels
+    never saw. Each reading ends at every boundary other than a space (LONE_WORD_BOUNDARIES) in lower
+    case, capitalised and in capitals: with three frames a reading, the head of candidate B31 learned
+    the frozen model's answer for `lf` at Enter and a pause and lost it for `Lf?`. alone_labels labels
     them, with `decide` for the pairs the counts leave open. Pairs with an alias of this corpus's test
     or of any accessed test are refused.
     """
 
     applications = ("Telegram", "Code", "chrome", "UnseenEditor")
     shares = {0: DEVELOPMENT, 1: CALIBRATION}
-    final: tuple[CorrectionTrigger, ...] = ("enter", "punctuation", "tab", "pause")
     rows: list[ActionRow] = []
     counts: Counter[str] = Counter()
     for first, second in product(string.ascii_lowercase, repeat=ALONE_HEAD_LETTERS):
@@ -1542,16 +1540,14 @@ def lone_word_curriculum(split: str, refused: frozenset[str], evidence: Mapping[
             continue
         counts["pairs"] += 1
         for group, reading in ((0, latin), (1, cyrillic)):
-            for index in range(LONE_WORD_FRAMES_PER_READING):
-                identifier = f"lone-word:{reading}:{index}"
-                case = variant_choice(identifier, "case", LONE_WORD_CASE_MODULUS)
-                typed = reading.upper() if case == 0 else reading.capitalize() if case == 1 else reading
-                trigger, boundary_text = _varied_boundary(identifier, final)
-                field = FieldContext(applications[variant_choice(identifier, "application", len(applications))],
-                                     "public-training", "", "", "unknown")
-                action: ContextAction = "wait" if trigger == "pause" else "suggest"
-                rows.append(ActionRow(identifier, typed, group, field, trigger, "", action, "lone_word", boundary_text,
-                                      float(evidence["sample_weight"])))
+            for typed in (reading, reading.capitalize(), reading.upper()):
+                for trigger, boundary_text in LONE_WORD_BOUNDARIES:
+                    identifier = f"lone-word:{typed}:{trigger}:{boundary_text!r}"
+                    field = FieldContext(applications[variant_choice(identifier, "application", len(applications))],
+                                         "public-training", "", "", "unknown")
+                    action: ContextAction = "wait" if trigger == "pause" else "suggest"
+                    rows.append(ActionRow(identifier, typed, group, field, cast(CorrectionTrigger, trigger), "", action,
+                                          "lone_word", boundary_text, float(evidence["sample_weight"])))
     rows = alone_labels(rows, evidence, decide)
     counts.update(row.action for row in rows)
     return rows, {"frames": len(rows), "counts": dict(sorted(counts.items())), "sample_weight": float(evidence["sample_weight"]),

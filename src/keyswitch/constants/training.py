@@ -64,11 +64,14 @@ KEPT_NEIGHBOUR_CAPITALS_MODULUS: Final = 4
 KEPT_NEIGHBOUR_FRAMES_PER_WORD: Final = 3
 # Lone-word frames (train_context_action_model.lone_word_curriculum): each pair of two Latin letters
 # goes to one split by hash - DEVELOPMENT and CALIBRATION one in LONE_WORD_SPLIT_MODULUS each, TRAIN
-# the rest - and each of its two readings stands alone at LONE_WORD_FRAMES_PER_READING boundaries,
-# one frame in LONE_WORD_CASE_MODULUS in capitals and one with its first letter capitalised.
+# the rest - and each of its two readings stands alone in lower case, capitalised and in capitals at
+# every one of these boundaries: Enter and Tab with and without their character, four punctuation
+# marks and a pause.
 LONE_WORD_SPLIT_MODULUS: Final = 10
-LONE_WORD_FRAMES_PER_READING: Final = 3
-LONE_WORD_CASE_MODULUS: Final = 4
+LONE_WORD_BOUNDARIES: Final = (
+    ("enter", "\n"), ("enter", ""), ("tab", "\t"), ("tab", ""),
+    ("punctuation", "."), ("punctuation", ","), ("punctuation", "?"), ("punctuation", "!"), ("pause", ""),
+)
 # Letters of a Latin abbreviation cited in capitals inside Russian prose whose Cyrillic reading is a
 # rare word (`WBC` is `ЦИС`, `IBF` is `ШИА`): three to five, as abbreviations are written. Two
 # letters stay with the deferral rules and the owner's own Cyrillic abbreviations (`ГА`).

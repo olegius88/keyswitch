@@ -820,7 +820,8 @@ class ActionTrainingTests(unittest.TestCase):
                              FieldContext("Telegram", "public-training", before, after, "unknown"),
                              trigger, "", "suggest" if trigger == "enter" else "wait", "natural_surface", " ", after_origin=origin)
 
-        rows = [lone("гш", 1), lone("UI", 0), lone("yf", 0, "enter"), lone("на", 1), lone("ты", 1), lone("ns", 0), lone("ha", 0),
+        unsettled = [lone("ты", 1), lone("ns", 0), lone("ha", 0)]
+        rows = [lone("гш", 1), lone("UI", 0), lone("yf", 0, "enter"), lone("на", 1), *unsettled,
                 lone("гш", 1, before="есть "), lone("гш", 1, after="кнопка", origin="planned_next_conversion"), lone("хз", 1),
                 lone("гш", 1, "space")]
         # `ui` is counted 4752 times and `гш` never; `на` outweighs `yf`. Both `ns` and `ты` are counted, and `ha`
@@ -831,7 +832,7 @@ class ActionTrainingTests(unittest.TestCase):
         self.assertEqual(alone_labels(rows, None), rows)
         # What the counts leave open takes the frozen model's answer, where it has one.
         answers: dict[str, ContextAction | None] = {"ns": "convert", "ты": None}
-        self.assertEqual([row.action for row in alone_labels(rows[4:7], evidence, lambda row: answers.get(row.original))],
+        self.assertEqual([row.action for row in alone_labels(unsettled, evidence, lambda row: answers.get(row.original))],
                          ["wait", "convert", "wait"])
         # Every pair of two Latin letters lands in one split, both readings framed alone.
         splits = {split: lone_word_curriculum(split, frozenset(), evidence) for split in (TRAIN, DEVELOPMENT, CALIBRATION)}
