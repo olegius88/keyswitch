@@ -348,7 +348,7 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         # weights of the converted-neighbour frames and turned `еще` before `поищу` into `tot`.
         return {KEPT_FEATURE_PREFIX + name: value for name, value in features.items() if value}
     result = {name: value for name, value in features.items() if value}
-    if capitals_question(item.original):
+    if capitals_question(item.original, item.field.before):
         # The class the capitals head answers: its features once more under their own names, beside
         # the shared ones, so a head fitted onto a frozen model moves no decision outside the class.
         # `BP` in English prose read `ИЗ` at p=0.997, and the frames that kept it moved the weights
@@ -357,7 +357,14 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
     return result
 
 
-def capitals_question(original: str) -> bool:
-    """A token of letters only, all capitals, of CAPITALS_HEAD_MIN_LETTERS to CAPITALS_HEAD_MAX_LETTERS (`BP`, `КЕЫ`)."""
+def capitals_question(original: str, before: str) -> bool:
+    """A token of letters only, all capitals, of CAPITALS_HEAD_MIN_LETTERS to CAPITALS_HEAD_MAX_LETTERS,
+    after text with more Latin letters than Cyrillic ones (`affected by the BP`).
 
-    return CAPITALS_HEAD_MIN_LETTERS <= len(original) <= CAPITALS_HEAD_MAX_LETTERS and original.isalpha() and original.isupper()
+    After Russian prose the same shape is as often a word typed with Caps Lock (`я YT` for `я НЕ`) as a
+    cited abbreviation (`по версии WBC`), and a head fitted there kept 54 of 72 such words the corpus
+    v26 pair converts, or converted the abbreviations; there the frozen model decides alone.
+    """
+
+    return (CAPITALS_HEAD_MIN_LETTERS <= len(original) <= CAPITALS_HEAD_MAX_LETTERS and original.isalpha() and original.isupper()
+            and _dominant(before[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:].casefold()) == "en")

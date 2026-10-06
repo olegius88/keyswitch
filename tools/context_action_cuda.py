@@ -706,7 +706,7 @@ class Items:
                 # (KEPT_FEATURE_PREFIX), and the capitals head's second copy of a token's features
                 # (CAPITALS_FEATURE_PREFIX): those frames take the CPU path.
                 fits[number] = (row.trigger in trigger_index and row.after_origin in origin_index
-                                and row.after_origin != "kept_next_word" and not capitals_question(row.original)
+                                and row.after_origin != "kept_next_word" and not capitals_question(row.original, row.field.before)
                                 and row.group in range(LAYOUT_GROUP_COUNT))
                 dropped[number] = split == TRAIN and trainer.identifier_evidence_dropped(row.identifier)
                 action_row[number] = True

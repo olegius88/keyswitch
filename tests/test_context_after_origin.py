@@ -129,9 +129,11 @@ class ContextAfterOriginTests(unittest.TestCase):
         shared = {name: value for name, value in features.items() if not name.startswith(CAPITALS_FEATURE_PREFIX)}
         self.assertEqual({name.removeprefix(CAPITALS_FEATURE_PREFIX): value for name, value in features.items()
                           if name.startswith(CAPITALS_FEATURE_PREFIX)}, shared)
-        # One letter, a word longer than an abbreviation, a word not all in capitals, a token with a sign
-        # and the kept-neighbour question: no head.
-        for item in (replace(capitals, original="B", alternative="И"), replace(capitals, original="PFGHJC", alternative="ЗАПРОС"),
+        # After Russian prose or nothing (`я YT` is `я НЕ` typed with Caps Lock), one letter, a word longer
+        # than an abbreviation, a word not all in capitals, a token with a sign and the kept-neighbour
+        # question: no head.
+        for item in (replace(capitals, field=replace(capitals.field, before="я ")), replace(capitals, field=replace(capitals.field, before="")),
+                     replace(capitals, original="B", alternative="И"), replace(capitals, original="PFGHJC", alternative="ЗАПРОС"),
                      replace(capitals, original="Bp", alternative="Из"), replace(capitals, original="BP2", alternative="ИЗ2"),
                      replace(capitals, field=replace(capitals.field, after="нас"), after_origin="kept_next_word")):
             with self.subTest(item=item):
