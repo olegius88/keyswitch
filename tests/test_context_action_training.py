@@ -9,6 +9,9 @@ import json
 import sys
 from types import SimpleNamespace
 from typing import cast
+import hashlib
+import math
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -57,17 +60,21 @@ from train_context_action_model import (
     stranded_previous,
     training_order,
     translated,
+    base_weights,
+    frozen_base,
+    log_loss,
     _counted_abbreviations,
     _counted_terms,
     _varied_boundary,
 )
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
-from keyswitch.constants.models import CONTEXT_ACTION_FEATURE_VERSION
+from keyswitch.constants.models import CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_V1_CONVERSION_THRESHOLD, KEPT_FEATURE_PREFIX
 from keyswitch.detector import LanguageDetector
 from keyswitch.intent_model import LinearNgramModel
 from keyswitch.language_model import LanguageModel
 from keyswitch.input_context import FieldContext
 from train_context_model import Row as HistoricalRow
+from context_optimizer import Packed
 from fixture_values.corpora import FIXTURE_WORD_FREQUENCY, PLANNED_EVIDENCE_DOMINANT_WORD_FREQUENCY
 from fixture_values.counts import (
     CAPITAL_CITATION_FIXTURE_WORDS_BY_LENGTH,
@@ -117,6 +124,9 @@ from fixture_values.counts import (
 )
 from fixture_values.scores import (
     CAPITAL_CITATION_FIXTURE_WEIGHT,
+    FROZEN_BASE_FIXTURE_IMPORTANCE,
+    FROZEN_BASE_FIXTURE_PROBABILITIES,
+    FROZEN_BASE_FIXTURE_WEIGHTS,
     KEPT_NEIGHBOUR_FIXTURE_WEIGHT,
     ACTION_TRAINING_CONVERT_PROBABILITY,
     ACTION_TRAINING_RESIDUAL_PROBABILITY,
@@ -687,6 +697,35 @@ class ActionTrainingTests(unittest.TestCase):
         unused = {**options, "term_frames": 0, "abbreviation_frames": 0}
         for source, chosen in (([english], options), (russian, unused)):
             self.assertEqual(counted_token_curriculum(source, frozenset(), chosen), ([], {"frames": 0, "scope": "not used"}))
+
+    def test_a_kept_neighbour_head_is_fitted_onto_a_frozen_base_it_leaves_alone(self) -> None:
+        self.assertIsNone(frozen_base({}))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "base.json"
+
+            def save(weights: dict[str, tuple[float, ...]]) -> dict[str, object]:
+                digest = hashlib.sha256(json.dumps(weights, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+                path.write_text(json.dumps({
+                    "feature_version": CONTEXT_ACTION_FEATURE_VERSION, "actions": list(ACTIONS), "weights": weights,
+                    "weights_sha256": digest, "version": "context-v3-test",
+                    "conversion_threshold": CONTEXT_V1_CONVERSION_THRESHOLD}), encoding="utf-8")
+                return {"artifact": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+            spec = save({"bias": FROZEN_BASE_FIXTURE_WEIGHTS})
+            base = frozen_base({"frozen_base": spec})
+            assert base is not None
+            # The head's features start at zero, the base's at the base's weights.
+            self.assertEqual(list(base_weights(["head", "bias"], base)), [*(0.0,) * len(ACTIONS), *FROZEN_BASE_FIXTURE_WEIGHTS])
+            with self.assertRaisesRegex(ValueError, "differs from the recipe"):
+                frozen_base({"frozen_base": {**spec, "sha256": "0" * len(str(spec["sha256"]))}})
+            # A base that answers the kept-neighbour question already is no base for its head.
+            with self.assertRaisesRegex(ValueError, "without kept-neighbour weights"):
+                frozen_base({"frozen_base": save({"bias": FROZEN_BASE_FIXTURE_WEIGHTS,
+                                                  KEPT_FEATURE_PREFIX + "bias": FROZEN_BASE_FIXTURE_WEIGHTS})})
+        data = Packed.build([({"bias": 1.0}, ACTIONS.index("convert"), FROZEN_BASE_FIXTURE_IMPORTANCE)], ["bias"])
+        convert = FROZEN_BASE_FIXTURE_PROBABILITIES[ACTIONS.index("convert")]
+        self.assertAlmostEqual(log_loss(array("d", FROZEN_BASE_FIXTURE_PROBABILITIES), data),
+                               -FROZEN_BASE_FIXTURE_IMPORTANCE * math.log(convert))
 
     def test_a_russian_word_closing_a_quotation_converts_with_the_at_sign_of_its_quote(self) -> None:
         words = [replace(fixture(f"q{index}", "привет", 1), before="он сказал «") for index in range(MIXED_CONTEXT_SAMPLE_ROWS)]

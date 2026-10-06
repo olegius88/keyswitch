@@ -160,13 +160,18 @@
   "scope": "TRAIN only: the question a waiting word is asked again beside its next word, which stayed as typed (after_origin kept_next_word, features under KEPT_FEATURE_PREFIX with their own budget). Natural short words of either language with the sentence's next word keep; Latin terms the term table counts in Russian technical text, typed in the Russian layout before the word of a Russian row, convert; frequent Russian abbreviations and misspelt Russian words in the same place keep (tools/train_context_action_model.kept_neighbour_curriculum)."
  },
  "counted_token_curriculum": {
-  "term_frames": 6000,
-  "abbreviation_frames": 3000,
+  "term_frames": 0,
+  "abbreviation_frames": 0,
   "frames_per_word": 3,
   "minimum_term_count": 50,
   "minimum_abbreviation_count": 20,
   "abbreviation_dominance": 3,
   "sample_weight": 1.0,
-  "scope": "TRAIN only: the word decided at its own boundary (after_origin none). Russian abbreviations the term table counts in Russian technical text at least minimum_abbreviation_count times and abbreviation_dominance times as often as their Latin keys (`тз`, not `зк`), no lexicon word, typed as intended after the left context of a Russian row, keep; Latin terms counted at least minimum_term_count times whose Cyrillic reading is nothing, typed in the Russian layout in the same place, convert; three frames for every such term and abbreviation (the budgets cover both classes whole: a candidate that framed 800 of the 1752 terms and all 802 abbreviations kept `тз` but missed `тзь` for `npm`), the boundaries of the capital citations. Motivation: the corpus v27 candidate converted `тз` to `np` (p=0.993), `2фа`, `кз` and `ви` in the owner's typing while the token's count pulled the other way without a frame to learn from (tools/train_context_action_model.counted_token_curriculum)."
+  "scope": "TRAIN only: the word decided at its own boundary (after_origin none). Russian abbreviations the term table counts in Russian technical text at least minimum_abbreviation_count times and abbreviation_dominance times as often as their Latin keys (`тз`, not `зк`), no lexicon word, typed as intended after the left context of a Russian row, keep; Latin terms counted at least minimum_term_count times whose Cyrillic reading is nothing, typed in the Russian layout in the same place, convert; three frames for every such term and abbreviation (the budgets cover both classes whole: a candidate that framed 800 of the 1752 terms and all 802 abbreviations kept `тз` but missed `тзь` for `npm`), the boundaries of the capital citations. Motivation: the corpus v27 candidate converted `тз` to `np` (p=0.993), `2фа`, `кз` and `ви` in the owner's typing while the token's count pulled the other way without a frame to learn from (tools/train_context_action_model.counted_token_curriculum). Not used while a frozen base is named: its frames moved the shared frequency features, and the `ша` before `hello` stayed `ша` (corpus v27 and v28 candidates)."
+ },
+ "frozen_base": {
+  "artifact": "model/context_v3/frozen-base.json",
+  "sha256": "e7b637e372eb18e0614ca5d9854a7b9f3d417ea3b14cb854b4d0f13ce2a9c1d8",
+  "scope": "The corpus v26 pair's context model (context-v3-984962d926d3, installed in 0.39.0), copied byte for byte. Only the kept-neighbour question (KEPT_FEATURE_PREFIX, kept_neighbour_curriculum) is fitted onto it; every other weight and the serving threshold stay the base's, checked after fitting, and the epoch is the one whose kept-neighbour frames of DEVELOPMENT it predicts best. Fits of the full model on corpora a few dozen TRAIN rows apart (v26, v27, v28) turned different borderline words across the threshold (`тз`, `гг.`, the `ша` before `hello`), more than any curriculum under test changed (tools/train_context_action_model.frozen_base)."
  }
 }
