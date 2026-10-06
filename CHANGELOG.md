@@ -4,6 +4,32 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- A short word that waits for its neighbour is asked again beside a next word that stayed as typed.
+  A term typed in the Russian layout amid Russian prose waited for its neighbour, the neighbour was
+  a Russian word right as typed, and nothing converted (`есть новые зк проверь`, `сам выполни тзь
+  сш`). The engine now asks the context model once more about the waiting word (up to five letters)
+  with the kept word after it; a conversion replaces that word alone, types the next word again in
+  its own layout and leaves the layout there, and undo restores both words. The question has
+  weights of its own, so the word decided at its own boundary is decided as before.
+- The context model is the 0.39.0 model with two heads fitted onto it (corpus v30; test v30 sealed
+  before training and passed): every weight of the 0.39.0 model stays, and only the question above
+  and a token of two to five capitals after Latin-script text have weights of their own. `BP` in
+  English prose (`affected by the BP oil spill.`) stays instead of becoming `ИЗ`, and so do `NBA`
+  and `VS` there; after Russian prose a word in capitals is decided as before, a word typed with
+  Caps Lock (`я YT`) still becoming `я НЕ`. On the replay of the owner's own typing it converts 716
+  words right, leaves 119 in the wrong layout and converts 66 falsely, against 707/128/64 for 0.39.0
+  (the two new conversions translate terms right: `сым` → `csv`, `йуьг` → `qemu`), and on the words
+  the user's own correction labels 110/40/8 against 108/42/8; development v30, the authored
+  abbreviations and the engine's model tests come out as with 0.39.0. On test v30 it keeps all 201
+  correctly typed rows (the frozen baseline corrupts one) and restores 175 of 201 rows with the
+  early switch off against 157, and 15 against 15 with it on. It recalls 0.978 of the conversions
+  of calibration v30 with 10 false ones per profile, one conversion more per profile than the
+  0.39.0 model. The prefix model retrained byte-identical.
+- The context-v3 trainer fits heads onto a frozen model (`frozen_base` with `heads`): the model's
+  weights stay where they are because their AdaGrad accumulators start infinite, and each head learns
+  on the features of its own class only, so no decision outside the class moves. It can also start
+  a full fit from a model's weights (`warm_base`), and it stops when the ledger of accessed tests its
+  corpus was frozen against is missing instead of framing words of tests already read.
 - The context-v3 trainer runs on the CPU or on a CUDA GPU (`--backend cpu|gpu|auto`, `--jobs N`)
   and fits the same candidate, byte for byte, on either. On the CPU the curricula and the features
   of the frames are computed by the trainer's own Python in worker processes; on the GPU the
