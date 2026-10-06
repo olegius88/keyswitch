@@ -25,6 +25,7 @@ from keyswitch.constants.file_formats import (
 )
 from keyswitch.constants.models import CONTEXT_ACTION_FEATURE_VERSION
 from keyswitch.constants.training import (
+    CONTEXT_ACTION_BACK_END_SOURCES,
     CONTEXT_ACTION_GATE_POLICY,
     CONTEXT_ACTION_PROTOCOL_PHYSICAL_KEY_PERIOD_MS,
     CONTEXT_ACTION_SEQUENCE_PROTOCOL_VERSION,
@@ -182,6 +183,7 @@ def required_provenance(root: Path) -> set[str]:
                  "evaluate_context_action_sequences.py", "context_evidence.py", "reference_lexicon.py", "context_optimizer.py",
                  "context_optimizer.c", "train_context_model.py", "context_physical_keys.py",
                  "reconcile_context_action_corpus.py", "context_action_spans.py"))
+    paths.update(CONTEXT_ACTION_BACK_END_SOURCES)
     paths.update("tests/" + name for name in ("test_input_integrity.py", "test_engine_behaviour.py",
                  "test_windows_backend.py", "test_x11_backend.py", "test_language_intent_regressions.py",
                  "test_input_sequence_matrix.py", "test_context_policy.py", "test_context_action_spans.py"))

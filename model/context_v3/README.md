@@ -79,6 +79,9 @@ trailing strokes, выделенные движком. Reconstruction преды
 отдельно иметь ноль ложных преобразований и recall не ниже 0.9 на calibration.
 Пройденная calibration только разрешает следующий этап проверки.
 
+Обучать можно на CPU или на GPU ([бэкенды обучения](../../docs/context-v3-training-backends.md));
+кандидат и seal от выбора не зависят.
+
 Затем сохраняется неизменный seal и выполняется отдельный
 [sequence evaluator](../../tools/evaluate_context_action_sequences.py).
 Выбор документов и focus определяется хешами до моделирования или scoring;

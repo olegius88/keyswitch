@@ -1,0 +1,25 @@
+{
+ "schema_version": 1,
+ "sources": {
+  "src/keyswitch/context_action_features.py": "4e6ef1bc120afaffffed90c8a3fc7ffe5ae60dd5d34080c32bf75975414cd94b",
+  "src/keyswitch/context_model.py": "88a665fd3c9a2c00a27a13f15f84a436c46c8a1f49ad28f73864a70138380fd5",
+  "src/keyswitch/context_policy.py": "cd5e6fee8c5e561594e612a51e2c7dbd5f01c2658a705524486d9aeab3247f97",
+  "src/keyswitch/detector.py": "5a78cd5961af57426b6cb42b3757b42baeacd7344a06557111a1067cb0cbb2c0",
+  "src/keyswitch/identifier_lexicon.py": "80c1af6de67833ebc957355199e5ebab011282ddf6bbcc556d06bfef237c31bb",
+  "src/keyswitch/input_context.py": "5888734e31228f8923b0df13a56b61a1746e3e3506fb373506416cc63ccdd0b4",
+  "src/keyswitch/intent_model.py": "c64764c8d347ef382c61213f8b0d5c5328cd9288395577e3a055c745ecb2302f",
+  "src/keyswitch/language_model.py": "5af2e9aa744b80f75a79b603513e61c7c4bdb3bfa076c7d3810d3888a14ac844",
+  "src/keyswitch/layouts.py": "374e8913fe51c72370ae8f775875847e47c2a1db7c8deaa2fc919944dd45597c",
+  "src/keyswitch/ortho_model.py": "8f7ae78442aad29e7d763457c1e5cf323ba02399db0157b51ac46e7729f89442",
+  "src/keyswitch/short_words.py": "1f477e1a5947602548438e1e1d09271dd54da623a98b43b56615fbd679467ef3",
+  "src/keyswitch/word_decision.py": "6b04a60b5fa9308b837838021dd8fc2115a8514fac5a00d26286a9a50e8a4368",
+  "tools/context_physical_keys.py": "a24a1635e1ac8f8d511c9cd9c1e4784aa1edf2604852ae261dc8424a40903f16",
+  "tools/train_context_action_model.py:ActionRow": "770e96f550f236817a56d4e746c774de03f537bd6b86a3ef3ac660a0b5deedb2",
+  "tools/train_context_action_model.py:evidence": "8b6c6e91bca68f27602636b129e1e59a5a579099be9bb687d8b30e0631ddf565",
+  "tools/train_context_action_model.py:frame_evidence": "6d14e1712a31f48291b928057d4e4c9c5dcc5806124413db0a27c1367942cbd7",
+  "tools/train_context_action_model.py:frame_features": "a69d31aa0b984fb6b1e43ae55038c6c69004bc33ce466b0f6f21043dbd144cb0",
+  "tools/train_context_action_model.py:identifier_evidence_dropped": "cb0b1b09e083c8e9832c88e3c9a5261100e0b56864b06a071470e9582edeb88d",
+  "tools/train_context_action_model.py:identifier_family": "0c0fe91709a9dbcf096e69c1c0d40eb78959a79036c289166f84c3c98d0fd788",
+  "tools/train_context_action_model.py:previous_context": "98338cd289a1c96784a5dec041f68f0b1db0bb1f37df3d7b20993fcecf56cd5b"
+ }
+}

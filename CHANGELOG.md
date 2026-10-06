@@ -4,6 +4,18 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- The context-v3 trainer runs on the CPU or on a CUDA GPU (`--backend cpu|gpu|auto`, `--jobs N`)
+  and fits the same candidate, byte for byte, on either. On the CPU the curricula and the features
+  of the frames are computed by the trainer's own Python in worker processes; on the GPU the
+  evidence and features of the frames are computed by CUDA kernels that repeat that Python
+  operation for operation, and every 64th frame is recomputed on the CPU and compared. On corpus
+  v16 the model of the 0.39.0 trainer took 31 minutes; now it takes 14.5 minutes in one process,
+  6 in four and 3 on the GPU. The GPU path refuses to run once the Python its kernels follow has
+  changed, until a parity check on a GPU records the new sources (`tools/context_action_cuda.py
+  --refresh-parity`); `auto` then trains on the CPU. NumPy is now required for training
+  (`tools/install-training-accelerators.sh`, with `--cuda` for CuPy), and the trainer no longer
+  writes the `features-*.jsonl.gz` files only it read.
+
 ## 0.39.0 — 2026-10-05
 
 - A domain, an address or a file name typed in the other layout is restored. A Latin reading with
