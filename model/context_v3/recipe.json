@@ -1,184 +1,194 @@
 {
- "data_revision": "symmetric-short-actions-balanced-legacy-actions-debian-commands-natural-lookahead-three-letter-ambiguity-deferral-lexical-short-pairs-and-unambiguous-latin-citations-after-russian-prose-and-rare-reading-capital-citations-and-closing-quotes-and-stranded-previous-words-v15",
- "epochs": 50,
- "feature_revision": "learned-ortho-script-length-right-context-origin-identifier-lexicon-line-opening-and-term-frequency-and-capitals-v8",
- "training_revision": "identifier-evidence-dropout-one-family-in-three-planned-mass-balance-and-model-verdict-stands-and-threshold-plateau-under-authored-ceiling",
- "lexicon_supplement": {
-  "name": "opensubtitles-2018-ru-full-min10-outside-onboard-v2",
-  "resource_sha256": "17c9a477925ee8c18d310d021472703fb61ba6fdbfe261d8b2a38ca607f1c12a",
-  "ru_RU": "src/keyswitch/resources/lexicon-supplement-ru_RU.json",
-  "scope": "Cyrillic forms of the pinned OpenSubtitles 2018 full Russian frequency list with list count >= 10 absent from the frozen onboard ru_RU.lm vocabulary (199,680 forms; v1 was the top-50k list, 27 209 forms). The count floor is a noise bound chosen from the list itself before any fit: samples at counts 1-9 still carry one-off misspellings and transliterations, loaded as extra known forms with the fallback frequency by LanguageModel.load and by the trainers' reference models alike; a lexical resource, not a training split. Motivation: correctly typed colloquial words, interjections and transliterated names unknown to the portable lexicon were the class behind the isolated short-token deferrals and the residual convert-vs-keep confusions."
- },
- "identifier_lexicon": {
-  "evidence": "source_identifier and target_identifier flags from exact case-insensitive membership; feature identifier:{source}:{target}, and only when a reading is an identifier its combinations with direction, length and left-context script (identifier:0:0 combinations would duplicate existing evidence), plus source:identifier and target:identifier",
-  "path": "src/keyswitch/resources/identifiers.json",
-  "scope": "Debian trixie main amd64 executable names, the same index the technical corpus was frozen from; a resource shared byte-for-byte by engine, trainer and evaluator, not a training split. Calibration and test technical rows measure commands present in the shipped index; identifiers outside it are measured by the lexicon-blind development diagnostic and are not gated.",
-  "training_dropout": {
-   "families": 3,
-   "scope": "TRAIN only: one family in three (a command with all its contexts and spelling variants; otherwise the row), chosen by the corpus variant hash of the family key with purpose identifier-dropout, is featurised with an empty identifier lexicon, so command-like strings outside the shipped index keep converting on their own evidence. Development, calibration and test always use the full lexicon."
-  }
- },
- "runtime_policy": {
-  "model_verdict_stands": {
-   "removed": "unlicensed_isolated and short_uppercase_unknown_source, both class-wide vetoes, were removed on 17.09.2026: they overruled the model on the input it was trained to tell apart, cost 14 of 300 restorations on chat-like first words and prevented no corruption (.t/reliable-release-2026-09-12/SHORT-ISOLATED-CURRICULUM.md). The earlier short_unknown_source entry named the same ban from the training side and is gone with it.",
-   "rule": "The model's verdict decides. This layer refuses nothing for a class of input; a conversion is refused only by an exception the user can see - an excluded word or application, their own switching settings, a rule they taught the engine - or by the model's own calibrated threshold."
-  }
- },
- "feature_version": 3,
- "gate_policy": {
-  "minimum_calibration_conversion_recall": 0.0,
-  "minimum_calibration_net_benefit": 1,
-  "minimum_sequence_documents_per_group": 32,
-  "sequence_corruptions_at_most_baseline": true,
-  "sequence_length_mismatches": 0,
-  "sequence_net_restorations_at_least_baseline": true
- },
- "historical_label_profile": "pinned KSLM and reference_hunspell",
- "keep_importance": 4.0,
- "learning_rate": 0.15,
- "legacy_variant_policy": "Preserve semantic fields and completed-word lookahead. Each original family/category/trigger has unit pre-class mass shared equally across its actions, then equally across variants of that action.",
- "maximum_features": 45000,
- "maximum_source_rows": {
-  "calibration": 4000,
-  "development": 4000,
-  "train": 20000
- },
- "minimum_feature_mass": 3.0,
- "namespace": "keyswitch:context-action-v3:20260912",
- "natural_tail_policy": "direct-boundary natural frames have empty segmented tails; supplementary physical spans provide actual engine tails and preceding whitespace in train/development/calibration",
- "profiles": [
-  "portable",
-  "reference_hunspell"
- ],
- "schema_version": 1,
- "span_maximum_families": {
-  "calibration": 32,
-  "development": 32,
-  "train": 128
- },
- "span_policy": "fixed-hash families and same-split anchors; literal suffix and repeated-space variants; exact captured parent body and counterfactual full-prefix labels; one pre-class sample unit per retained family",
- "threshold_candidates": [
-  0.95,
-  0.975,
-  0.985,
-  0.99,
-  0.995,
-  0.999,
-  0.9995,
-  0.9999,
-  1.0
- ],
- "training_order": "SHA256 of frame identifiers mixes natural and legacy rows deterministically",
- "variant_policy": "separate SHA256 streams for trigger, application, optional field-after and boundary event",
- "vocabulary_policy": "Kahan-summed pre-class sample mass; presence only; cutoff tolerance 1e-9; mass rounded to 9 decimal places for ranking ties",
- "short_pair_policy": "Both readings of an isolated token share WAIT/SUGGEST when neither neighbour contains a word and the token's intent is not observable: any token of at most two letters (the curated single letters aside), and a token of three letters whose two readings are both plausible - a known word of the portable lexicon of its layout or a shipped identifier each (tools/context_deferral.py; `tot`/`еще`, `зум`/the Debian command `pev`). A three-letter token with one plausible reading is labelled at once (`rjn`/`кот`, `три`), and one with none is left to the model's own evidence (`зь2`/`pm2`). Digits and punctuation alone are not a language label. Historical KEEP frames of such isolated tokens take the same deferred action, so natural and legacy frames never label one observable situation differently; historical CONVERT frames keep their declared label.",
- "epoch_selection": {
-  "calibration": "independent final serving-threshold selection after weights are selected, never below the development operating threshold of the selected epoch: a threshold that already converted falsely on development is not a serving candidate whatever calibration says",
-  "minimum_net_benefit_per_profile": 1,
-  "ranking": [
-   "minimum_profile_runtime_conversion_recall",
-   "pooled_runtime_conversion_recall",
-   "lower_weighted_log_loss",
-   "lower_development_operating_threshold"
-  ],
-  "rounding": "nine decimal places before development prediction",
-  "serving_threshold_floor": "development operating threshold of the selected epoch",
-  "split": "development",
-  "support": "same vocabulary-dependent check as runtime",
-  "threshold_grid": "threshold_candidates"
- },
- "lookahead_curriculum": {
-  "maximum_families": 64,
-  "seeds_per_family": 128
- },
- "natural_lookahead_curriculum": {
-  "maximum_families": 1024,
-  "scope": "Every split separately (train, development, calibration): natural deferrable space-boundary frames of a document are seeds (one- and two-letter words, and three-letter words whose two readings are both plausible, the words the engine may hold for their next word), the first word of the same row's own sentence continuation is the anchor, and the observed/empty variants divide their mass between the original frame and a planned_next_conversion variant, so field-start lookahead is trained, selected and calibrated on the same evidence the engine builds. Anchors never cross a split.",
-  "seeds_per_family": 32
- },
- "planned_mass_policy": "TRAIN only, after both lookahead curricula: per (direction, focus length of 1 or 2) the planned_next_conversion frames are rescaled to carry exactly the total mass of the isolated deferred (wait/suggest, no word on either side) frames of the same class. The two are the same physical moment seen before and after the next word is known; legacy parent budgets alone left the planned regime at about one hundredth of that mass and the model could not learn the after-context distinction (planned `у этого` stayed below the serving threshold in exp05-exp08). Development and calibration frames are never rescaled.",
- "lookahead_policy": "Replace bounded old TRAIN short-space seeds with original/planned variants of equal total mass. Positives retain annotated next words; KEEP negatives retain their original/before annotation with an explicitly mixed existing TRAIN anchor. A frozen lexical baseline proposal is an entry condition, not a label. No candidate context-model prediction selects labels.",
- "joint_acceptance": {
-  "policy": "A context candidate is accepted only together with an explicit prefix candidate: the candidate pair is replayed against the frozen baseline context plus the frozen baseline prefix under unmodified application defaults (early switch, pause correction, manual-layout protection) and under the previous early-off control. Every sequence gate must hold in both modes and both lexical profiles. Installed context and prefix bytes are never read by the evaluation; the joint receipt records both evaluated artifacts so packaging installs exactly those bytes.",
-  "prefix_baseline_path": "model/prefix_v2/baseline-prefix-v1.json",
-  "protocol_version": 3,
-  "settings_modes": [
-   "early_off",
-   "default"
-  ]
- },
- "acceptance_note": "A model is judged by what it nets: conversions it gets right minus conversions it gets wrong, in each deployment profile. The zero-false-conversion budget was removed on 17.09.2026 together with the class-wide runtime vetoes it depended on; the sealed test still requires no more corrupted text than the installed pair and a net result at least as good.",
- "threshold_selection": {
-  "net_benefit_tolerance": 0.01,
-  "rule": "Among the thresholds whose calibration balance is within the tolerance of the best, serve the one with the fewest false conversions, the lowest such threshold on a tie. The balance decides which thresholds are admissible; within a plateau of equal value the safer point is served, because the two sides are not equally sensitive to it - on corpus v12 (18.09.2026) moving from 0.95 to 0.995 gave up 0.8 % of the correct conversions and removed two thirds of the false ones.",
-  "maximum_threshold": 0.99,
-  "ceiling_rule": "The served threshold stays inside the band the product's own pinned cases define, which are open data and never a sealed test. Measured 18.09.2026: it must clear the cases that have to stay as typed - `лут` against the command name `ken` at 0.9887 and `Вас` against `Dfc` at 0.9889 - and it must not exceed the tightest case that has to convert, the idle correction of `rjn` to `кот` at 0.994424. Calibration counts rows and can see neither end: outside the band it picks a model that is careless on one side or cautious about the wrong thing on the other.",
-  "authored_floor": 0.9895
- },
- "lexical_short_pair_curriculum": {
-  "maximum_families": 512,
-  "seeds_per_family": 8,
-  "scope": "TRAIN only: every three-letter word of the pinned onboard lexicons and the shipped identifier index whose other reading is a real word or command too (tools/train_context_action_model.py lexical_short_pairs; supplement-only forms are never a conversion target), standing alone in both readings with the deferred label and, per reading, LEXICAL_PAIR_ANCHOR_VARIANTS planned_next_conversion variants with words of the split's own right contexts labelled convert, one unit of mass per reading. Natural text holds almost no such pair (corpus v12 TRAIN: 21 rows in 45 544), so the corpus v13 candidate trained without it had no convert-labelled planned frame for a Latin three-letter word and kept `tot` after a converted `привет`. Words of this corpus's test and of every accessed test are refused by the same aliases the fitting extension refuses."
- },
- "mixed_insertion_policy": "Every natural row frames both readings of its word as an insertion into prose of the other language with the fixed phrases of MIXED_INSERTION_CONTEXTS (one of them cites the word in a parenthesis after a quoted name). Since corpus v18 a citation-shaped Latin word - capitalised, upper-case or unknown to the portable lexicon and the identifier index - whose Cyrillic reading is no Russian word is framed once more after the left context of a real Russian row of the same split, chosen by hash, when that context has words and all of them are Cyrillic: the Latin reading keeps, the Cyrillic reading converts. The base treebanks are monolingual (corpus v13 TRAIN: 130 Latin rows after Russian text among 18 363), while encyclopedic prose cites Latin names and abbreviations constantly; the v15 candidate left an abbreviation of three capitals and a capitalised name typed in the Russian layout as typed on test v13. Framing every word of both languages that way (corpus v16) taught that any Latin token after a Russian clause may be an insertion and that `чем` after Russian prose is the command its Latin keys spell; framing every citation-shaped Latin word (corpus v17) still held `ns` after `мы решили, что ` at p=0.983, because `ns` is an unknown Latin token whose Cyrillic reading, `ты`, is the word meant. Since corpus v20 each such citation is framed once more with an opening sign typed in the Latin layout (two backticks, an apostrophe or a double quote, chosen by hash), because those keys are the letters ёё, э and Э in the Russian layout and the Cyrillic reading of the whole token is letters only: the corpus v19 candidate converted two backtick-opened capitalised Latin citations after Russian prose on test v15 that the baseline pair kept. Since corpus v24 one Russian row in four (QUOTE_TAIL_MODULUS, chosen by hash) is framed once more closing a quotation with its quote typed in the layout of the word: the Russian reading with `\"` keeps, its keys in the Latin layout (`ghbdtn@`: the Russian `\"` is the `@` key) convert. The corpus splits the quote off as a token of its own, and every corpus v23 candidate left `ghbdtn@` as typed with the early switch off. Since corpus v24 a row whose previous word reads as a word in the other layout (two letters or more) is framed once more with that previous word as typed in the other layout and the row's word typed there too, labelled convert: a phrase typed whole in the wrong layout leaves behind exactly the word whose wrong reading is a word (`here` is `руку`), and the next word is still the phrase's (`руку ерун` is `here they`); natural frames only ever followed correctly typed text.",
- "captured_curriculum": {
-  "manifest": "model/context_v1/captured/manifest.json",
-  "maximum_rows_per_source": 0,
-  "convert_share": 0.3,
-  "excluded_file_markers": [
-   "inside"
-  ],
-  "scope": "Not used: maximum_rows_per_source 0 leaves the captured questions out of TRAIN; the corpus and its curricula alone. Measured 03.10.2026 on corpus v17 with the line, opening and term-frequency evidence, against the private replay of the owner's own typing: the questions at half weight with 30% convert, at full weight with 50% convert, and without the questions about the first word of a line each converted Russian abbreviations into Latin less often, but missed more of the words the owner corrected by hand (49-50 against 42 without them) and the first two kept short words opening a message as typed (`ns`, `Lf`); model/context_v3/README.md.",
-  "keep_unknown_share": 0.5,
-  "unknown_keep_groups": [
-   0,
-   1
-  ],
-  "weight_scale": 0.5,
-  "minimum_word_characters": 2
- },
- "capital_citation_curriculum": {
-  "words_by_length": {
-   "3": 200,
-   "4": 150,
-   "5": 50
+  "data_revision": "symmetric-short-actions-balanced-legacy-actions-debian-commands-natural-lookahead-three-letter-ambiguity-deferral-lexical-short-pairs-and-unambiguous-latin-citations-after-russian-prose-and-rare-reading-capital-citations-and-closing-quotes-and-stranded-previous-words-v15",
+  "epochs": 50,
+  "feature_revision": "learned-ortho-script-length-right-context-origin-identifier-lexicon-line-opening-and-term-frequency-and-capitals-v8",
+  "training_revision": "identifier-evidence-dropout-one-family-in-three-planned-mass-balance-and-model-verdict-stands-and-threshold-plateau-under-authored-ceiling",
+  "lexicon_supplement": {
+    "name": "opensubtitles-2018-ru-full-min10-outside-onboard-v2",
+    "resource_sha256": "17c9a477925ee8c18d310d021472703fb61ba6fdbfe261d8b2a38ca607f1c12a",
+    "ru_RU": "src/keyswitch/resources/lexicon-supplement-ru_RU.json",
+    "scope": "Cyrillic forms of the pinned OpenSubtitles 2018 full Russian frequency list with list count >= 10 absent from the frozen onboard ru_RU.lm vocabulary (199,680 forms; v1 was the top-50k list, 27 209 forms). The count floor is a noise bound chosen from the list itself before any fit: samples at counts 1-9 still carry one-off misspellings and transliterations, loaded as extra known forms with the fallback frequency by LanguageModel.load and by the trainers' reference models alike; a lexical resource, not a training split. Motivation: correctly typed colloquial words, interjections and transliterated names unknown to the portable lexicon were the class behind the isolated short-token deferrals and the residual convert-vs-keep confusions."
   },
-  "sample_weight": 1.0,
-  "scope": "TRAIN only: the keys of rare Russian words of the portable lexicon (three to five letters, counted fewer than five times in Russian text, none written in capitals by the onboard lexicon) typed in the Latin layout in capitals - the shape of a cited Latin abbreviation such as `WBC` (`ЦИС`) or `IBF` (`ШИА`) - stand after the left context of a Russian TRAIN row, chosen by hash, labelled keep, and the same keys in lower case in the same frame labelled convert (the Russian word typed in the wrong layout), so the pair tells case apart rather than teaching that Latin after Russian prose stays; no convert frame for their Cyrillic reading, which may be the writer's own abbreviation. Words held by this corpus's test or any accessed test are refused by their aliases. Natural rows of every split with such a Latin word get one keep frame after Russian prose too (mixed-capital). Motivation: the corpus v22 candidate and the baseline pair converted `по версии WBC` into `ЦИС` on test v22 with the early switch off; natural TRAIN held 17 such rows. Without the lower-case pair (corpus v23, 400 words) the candidate missed 9 more of the owner's words than the same recipe without the curriculum, nearly all short lower-case Latin keys of Russian words after Russian text (`f` for `а`, `lkz` for `для`).",
-  "lowercase_contrast": true
- },
- "english_capital_curriculum": {
-  "words_by_length": {
-   "2": 107,
-   "3": 300,
-   "4": 300,
-   "5": 300
+  "identifier_lexicon": {
+    "evidence": "source_identifier and target_identifier flags from exact case-insensitive membership; feature identifier:{source}:{target}, and only when a reading is an identifier its combinations with direction, length and left-context script (identifier:0:0 combinations would duplicate existing evidence), plus source:identifier and target:identifier",
+    "path": "src/keyswitch/resources/identifiers.json",
+    "scope": "Debian trixie main amd64 executable names, the same index the technical corpus was frozen from; a resource shared byte-for-byte by engine, trainer and evaluator, not a training split. Calibration and test technical rows measure commands present in the shipped index; identifiers outside it are measured by the lexicon-blind development diagnostic and are not gated.",
+    "training_dropout": {
+      "families": 3,
+      "scope": "TRAIN only: one family in three (a command with all its contexts and spelling variants; otherwise the row), chosen by the corpus variant hash of the family key with purpose identifier-dropout, is featurised with an empty identifier lexicon, so command-like strings outside the shipped index keep converting on their own evidence. Development, calibration and test always use the full lexicon."
+    }
   },
-  "frames_per_word": 2,
-  "lowercase_contrast": true,
-  "sample_weight": 1.0,
-  "scope": "TRAIN only: the keys of the Russian lexicon's commonest words of two to five letters (all 107 two-letter ones the keys spell in Latin letters), typed in the Latin layout in capitals, after the left context of an English TRAIN row whose words are all Latin, chosen by hash, two contexts a word - keep, and the same keys in lower case in the same frame - convert (without that pair the first corpus v29 candidates left 31 more of the owner's Russian words typed in the Latin layout as typed: `yt`, `yf`, `rfr`, `xnj`). Motivation: test v28 holds `affected by the BP oil spill.`, and the corpus v26 pair turned `BP` into `ИЗ` (p=0.997, reference lexicons, early switch off): Latin capitals had been framed after Russian prose only (tools/train_context_action_model.english_capital_curriculum)."
- },
- "kept_neighbour_curriculum": {
-  "natural_frames": 6000,
-  "term_frames": 4000,
-  "abbreviation_frames": 1500,
-  "typo_frames": 1500,
-  "minimum_term_count": 50,
-  "minimum_abbreviation_count": 20,
-  "abbreviation_dominance": 3,
-  "sample_weight": 1.0,
-  "maximum_features": 20000,
-  "scope": "TRAIN only: the question a waiting word is asked again beside its next word, which stayed as typed (after_origin kept_next_word, features under KEPT_FEATURE_PREFIX with their own budget). Natural short words of either language with the sentence's next word keep; Latin terms the term table counts in Russian technical text, typed in the Russian layout before the word of a Russian row, convert; frequent Russian abbreviations and misspelt Russian words in the same place keep (tools/train_context_action_model.kept_neighbour_curriculum)."
- },
- "counted_token_curriculum": {
-  "term_frames": 0,
-  "abbreviation_frames": 0,
-  "frames_per_word": 3,
-  "minimum_term_count": 50,
-  "minimum_abbreviation_count": 20,
-  "abbreviation_dominance": 3,
-  "sample_weight": 1.0,
-  "scope": "TRAIN only: the word decided at its own boundary (after_origin none). Russian abbreviations the term table counts in Russian technical text at least minimum_abbreviation_count times and abbreviation_dominance times as often as their Latin keys (`тз`, not `зк`), no lexicon word, typed as intended after the left context of a Russian row, keep; Latin terms counted at least minimum_term_count times whose Cyrillic reading is nothing, typed in the Russian layout in the same place, convert; three frames for every such term and abbreviation (the budgets cover both classes whole: a candidate that framed 800 of the 1752 terms and all 802 abbreviations kept `тз` but missed `тзь` for `npm`), the boundaries of the capital citations. Motivation: the corpus v27 candidate converted `тз` to `np` (p=0.993), `2фа`, `кз` and `ви` in the owner's typing while the token's count pulled the other way without a frame to learn from (tools/train_context_action_model.counted_token_curriculum). Not used while a frozen base is named: its frames moved the shared frequency features, and the `ша` before `hello` stayed `ша` (corpus v27 and v28 candidates)."
- }
+  "runtime_policy": {
+    "model_verdict_stands": {
+      "removed": "unlicensed_isolated and short_uppercase_unknown_source, both class-wide vetoes, were removed on 17.09.2026: they overruled the model on the input it was trained to tell apart, cost 14 of 300 restorations on chat-like first words and prevented no corruption (.t/reliable-release-2026-09-12/SHORT-ISOLATED-CURRICULUM.md). The earlier short_unknown_source entry named the same ban from the training side and is gone with it.",
+      "rule": "The model's verdict decides. This layer refuses nothing for a class of input; a conversion is refused only by an exception the user can see - an excluded word or application, their own switching settings, a rule they taught the engine - or by the model's own calibrated threshold."
+    }
+  },
+  "feature_version": 3,
+  "gate_policy": {
+    "minimum_calibration_conversion_recall": 0.0,
+    "minimum_calibration_net_benefit": 1,
+    "minimum_sequence_documents_per_group": 32,
+    "sequence_corruptions_at_most_baseline": true,
+    "sequence_length_mismatches": 0,
+    "sequence_net_restorations_at_least_baseline": true
+  },
+  "historical_label_profile": "pinned KSLM and reference_hunspell",
+  "keep_importance": 4.0,
+  "learning_rate": 0.15,
+  "legacy_variant_policy": "Preserve semantic fields and completed-word lookahead. Each original family/category/trigger has unit pre-class mass shared equally across its actions, then equally across variants of that action.",
+  "maximum_features": 45000,
+  "maximum_source_rows": {
+    "calibration": 4000,
+    "development": 4000,
+    "train": 20000
+  },
+  "minimum_feature_mass": 3.0,
+  "namespace": "keyswitch:context-action-v3:20260912",
+  "natural_tail_policy": "direct-boundary natural frames have empty segmented tails; supplementary physical spans provide actual engine tails and preceding whitespace in train/development/calibration",
+  "profiles": [
+    "portable",
+    "reference_hunspell"
+  ],
+  "schema_version": 1,
+  "span_maximum_families": {
+    "calibration": 32,
+    "development": 32,
+    "train": 128
+  },
+  "span_policy": "fixed-hash families and same-split anchors; literal suffix and repeated-space variants; exact captured parent body and counterfactual full-prefix labels; one pre-class sample unit per retained family",
+  "threshold_candidates": [
+    0.95,
+    0.975,
+    0.985,
+    0.99,
+    0.995,
+    0.999,
+    0.9995,
+    0.9999,
+    1.0
+  ],
+  "training_order": "SHA256 of frame identifiers mixes natural and legacy rows deterministically",
+  "variant_policy": "separate SHA256 streams for trigger, application, optional field-after and boundary event",
+  "vocabulary_policy": "Kahan-summed pre-class sample mass; presence only; cutoff tolerance 1e-9; mass rounded to 9 decimal places for ranking ties",
+  "short_pair_policy": "Both readings of an isolated token share WAIT/SUGGEST when neither neighbour contains a word and the token's intent is not observable: any token of at most two letters (the curated single letters aside), and a token of three letters whose two readings are both plausible - a known word of the portable lexicon of its layout or a shipped identifier each (tools/context_deferral.py; `tot`/`еще`, `зум`/the Debian command `pev`). A three-letter token with one plausible reading is labelled at once (`rjn`/`кот`, `три`), and one with none is left to the model's own evidence (`зь2`/`pm2`). Digits and punctuation alone are not a language label. Historical KEEP frames of such isolated tokens take the same deferred action, so natural and legacy frames never label one observable situation differently; historical CONVERT frames keep their declared label.",
+  "epoch_selection": {
+    "calibration": "independent final serving-threshold selection after weights are selected, never below the development operating threshold of the selected epoch: a threshold that already converted falsely on development is not a serving candidate whatever calibration says",
+    "minimum_net_benefit_per_profile": 1,
+    "ranking": [
+      "minimum_profile_runtime_conversion_recall",
+      "pooled_runtime_conversion_recall",
+      "lower_weighted_log_loss",
+      "lower_development_operating_threshold"
+    ],
+    "rounding": "nine decimal places before development prediction",
+    "serving_threshold_floor": "development operating threshold of the selected epoch",
+    "split": "development",
+    "support": "same vocabulary-dependent check as runtime",
+    "threshold_grid": "threshold_candidates"
+  },
+  "lookahead_curriculum": {
+    "maximum_families": 64,
+    "seeds_per_family": 128
+  },
+  "natural_lookahead_curriculum": {
+    "maximum_families": 1024,
+    "scope": "Every split separately (train, development, calibration): natural deferrable space-boundary frames of a document are seeds (one- and two-letter words, and three-letter words whose two readings are both plausible, the words the engine may hold for their next word), the first word of the same row's own sentence continuation is the anchor, and the observed/empty variants divide their mass between the original frame and a planned_next_conversion variant, so field-start lookahead is trained, selected and calibrated on the same evidence the engine builds. Anchors never cross a split.",
+    "seeds_per_family": 32
+  },
+  "planned_mass_policy": "TRAIN only, after both lookahead curricula: per (direction, focus length of 1 or 2) the planned_next_conversion frames are rescaled to carry exactly the total mass of the isolated deferred (wait/suggest, no word on either side) frames of the same class. The two are the same physical moment seen before and after the next word is known; legacy parent budgets alone left the planned regime at about one hundredth of that mass and the model could not learn the after-context distinction (planned `у этого` stayed below the serving threshold in exp05-exp08). Development and calibration frames are never rescaled.",
+  "lookahead_policy": "Replace bounded old TRAIN short-space seeds with original/planned variants of equal total mass. Positives retain annotated next words; KEEP negatives retain their original/before annotation with an explicitly mixed existing TRAIN anchor. A frozen lexical baseline proposal is an entry condition, not a label. No candidate context-model prediction selects labels.",
+  "joint_acceptance": {
+    "policy": "A context candidate is accepted only together with an explicit prefix candidate: the candidate pair is replayed against the frozen baseline context plus the frozen baseline prefix under unmodified application defaults (early switch, pause correction, manual-layout protection) and under the previous early-off control. Every sequence gate must hold in both modes and both lexical profiles. Installed context and prefix bytes are never read by the evaluation; the joint receipt records both evaluated artifacts so packaging installs exactly those bytes.",
+    "prefix_baseline_path": "model/prefix_v2/baseline-prefix-v1.json",
+    "protocol_version": 3,
+    "settings_modes": [
+      "early_off",
+      "default"
+    ]
+  },
+  "acceptance_note": "A model is judged by what it nets: conversions it gets right minus conversions it gets wrong, in each deployment profile. The zero-false-conversion budget was removed on 17.09.2026 together with the class-wide runtime vetoes it depended on; the sealed test still requires no more corrupted text than the installed pair and a net result at least as good.",
+  "threshold_selection": {
+    "net_benefit_tolerance": 0.01,
+    "rule": "Among the thresholds whose calibration balance is within the tolerance of the best, serve the one with the fewest false conversions, the lowest such threshold on a tie. The balance decides which thresholds are admissible; within a plateau of equal value the safer point is served, because the two sides are not equally sensitive to it - on corpus v12 (18.09.2026) moving from 0.95 to 0.995 gave up 0.8 % of the correct conversions and removed two thirds of the false ones.",
+    "maximum_threshold": 0.99,
+    "ceiling_rule": "The served threshold stays inside the band the product's own pinned cases define, which are open data and never a sealed test. Measured 18.09.2026: it must clear the cases that have to stay as typed - `лут` against the command name `ken` at 0.9887 and `Вас` against `Dfc` at 0.9889 - and it must not exceed the tightest case that has to convert, the idle correction of `rjn` to `кот` at 0.994424. Calibration counts rows and can see neither end: outside the band it picks a model that is careless on one side or cautious about the wrong thing on the other.",
+    "authored_floor": 0.9895
+  },
+  "lexical_short_pair_curriculum": {
+    "maximum_families": 512,
+    "seeds_per_family": 8,
+    "scope": "TRAIN only: every three-letter word of the pinned onboard lexicons and the shipped identifier index whose other reading is a real word or command too (tools/train_context_action_model.py lexical_short_pairs; supplement-only forms are never a conversion target), standing alone in both readings with the deferred label and, per reading, LEXICAL_PAIR_ANCHOR_VARIANTS planned_next_conversion variants with words of the split's own right contexts labelled convert, one unit of mass per reading. Natural text holds almost no such pair (corpus v12 TRAIN: 21 rows in 45 544), so the corpus v13 candidate trained without it had no convert-labelled planned frame for a Latin three-letter word and kept `tot` after a converted `привет`. Words of this corpus's test and of every accessed test are refused by the same aliases the fitting extension refuses."
+  },
+  "mixed_insertion_policy": "Every natural row frames both readings of its word as an insertion into prose of the other language with the fixed phrases of MIXED_INSERTION_CONTEXTS (one of them cites the word in a parenthesis after a quoted name). Since corpus v18 a citation-shaped Latin word - capitalised, upper-case or unknown to the portable lexicon and the identifier index - whose Cyrillic reading is no Russian word is framed once more after the left context of a real Russian row of the same split, chosen by hash, when that context has words and all of them are Cyrillic: the Latin reading keeps, the Cyrillic reading converts. The base treebanks are monolingual (corpus v13 TRAIN: 130 Latin rows after Russian text among 18 363), while encyclopedic prose cites Latin names and abbreviations constantly; the v15 candidate left an abbreviation of three capitals and a capitalised name typed in the Russian layout as typed on test v13. Framing every word of both languages that way (corpus v16) taught that any Latin token after a Russian clause may be an insertion and that `чем` after Russian prose is the command its Latin keys spell; framing every citation-shaped Latin word (corpus v17) still held `ns` after `мы решили, что ` at p=0.983, because `ns` is an unknown Latin token whose Cyrillic reading, `ты`, is the word meant. Since corpus v20 each such citation is framed once more with an opening sign typed in the Latin layout (two backticks, an apostrophe or a double quote, chosen by hash), because those keys are the letters ёё, э and Э in the Russian layout and the Cyrillic reading of the whole token is letters only: the corpus v19 candidate converted two backtick-opened capitalised Latin citations after Russian prose on test v15 that the baseline pair kept. Since corpus v24 one Russian row in four (QUOTE_TAIL_MODULUS, chosen by hash) is framed once more closing a quotation with its quote typed in the layout of the word: the Russian reading with `\"` keeps, its keys in the Latin layout (`ghbdtn@`: the Russian `\"` is the `@` key) convert. The corpus splits the quote off as a token of its own, and every corpus v23 candidate left `ghbdtn@` as typed with the early switch off. Since corpus v24 a row whose previous word reads as a word in the other layout (two letters or more) is framed once more with that previous word as typed in the other layout and the row's word typed there too, labelled convert: a phrase typed whole in the wrong layout leaves behind exactly the word whose wrong reading is a word (`here` is `руку`), and the next word is still the phrase's (`руку ерун` is `here they`); natural frames only ever followed correctly typed text.",
+  "captured_curriculum": {
+    "manifest": "model/context_v1/captured/manifest.json",
+    "maximum_rows_per_source": 0,
+    "convert_share": 0.3,
+    "excluded_file_markers": [
+      "inside"
+    ],
+    "scope": "Not used: maximum_rows_per_source 0 leaves the captured questions out of TRAIN; the corpus and its curricula alone. Measured 03.10.2026 on corpus v17 with the line, opening and term-frequency evidence, against the private replay of the owner's own typing: the questions at half weight with 30% convert, at full weight with 50% convert, and without the questions about the first word of a line each converted Russian abbreviations into Latin less often, but missed more of the words the owner corrected by hand (49-50 against 42 without them) and the first two kept short words opening a message as typed (`ns`, `Lf`); model/context_v3/README.md.",
+    "keep_unknown_share": 0.5,
+    "unknown_keep_groups": [
+      0,
+      1
+    ],
+    "weight_scale": 0.5,
+    "minimum_word_characters": 2
+  },
+  "capital_citation_curriculum": {
+    "words_by_length": {
+      "3": 200,
+      "4": 150,
+      "5": 50
+    },
+    "sample_weight": 1.0,
+    "scope": "TRAIN only: the keys of rare Russian words of the portable lexicon (three to five letters, counted fewer than five times in Russian text, none written in capitals by the onboard lexicon) typed in the Latin layout in capitals - the shape of a cited Latin abbreviation such as `WBC` (`ЦИС`) or `IBF` (`ШИА`) - stand after the left context of a Russian TRAIN row, chosen by hash, labelled keep, and the same keys in lower case in the same frame labelled convert (the Russian word typed in the wrong layout), so the pair tells case apart rather than teaching that Latin after Russian prose stays; no convert frame for their Cyrillic reading, which may be the writer's own abbreviation. Words held by this corpus's test or any accessed test are refused by their aliases. Natural rows of every split with such a Latin word get one keep frame after Russian prose too (mixed-capital). Motivation: the corpus v22 candidate and the baseline pair converted `по версии WBC` into `ЦИС` on test v22 with the early switch off; natural TRAIN held 17 such rows. Without the lower-case pair (corpus v23, 400 words) the candidate missed 9 more of the owner's words than the same recipe without the curriculum, nearly all short lower-case Latin keys of Russian words after Russian text (`f` for `а`, `lkz` for `для`).",
+    "lowercase_contrast": true
+  },
+  "english_capital_curriculum": {
+    "words_by_length": {
+      "2": 107,
+      "3": 300,
+      "4": 300,
+      "5": 300
+    },
+    "frames_per_word": 2,
+    "lowercase_contrast": true,
+    "sample_weight": 1.0,
+    "scope": "TRAIN only: the keys of the Russian lexicon's commonest words of two to five letters (all 107 two-letter ones the keys spell in Latin letters), typed in the Latin layout in capitals, after the left context of an English TRAIN row whose words are all Latin, chosen by hash, two contexts a word - keep, and the same keys in lower case in the same frame - convert (without that pair the first corpus v29 candidates left 31 more of the owner's Russian words typed in the Latin layout as typed: `yt`, `yf`, `rfr`, `xnj`). Motivation: test v28 holds `affected by the BP oil spill.`, and the corpus v26 pair turned `BP` into `ИЗ` (p=0.997, reference lexicons, early switch off): Latin capitals had been framed after Russian prose only (tools/train_context_action_model.english_capital_curriculum)."
+  },
+  "kept_neighbour_curriculum": {
+    "natural_frames": 6000,
+    "term_frames": 4000,
+    "abbreviation_frames": 1500,
+    "typo_frames": 1500,
+    "minimum_term_count": 50,
+    "minimum_abbreviation_count": 20,
+    "abbreviation_dominance": 3,
+    "sample_weight": 1.0,
+    "maximum_features": 20000,
+    "scope": "TRAIN only: the question a waiting word is asked again beside its next word, which stayed as typed (after_origin kept_next_word, features under KEPT_FEATURE_PREFIX with their own budget). Natural short words of either language with the sentence's next word keep; Latin terms the term table counts in Russian technical text, typed in the Russian layout before the word of a Russian row, convert; frequent Russian abbreviations and misspelt Russian words in the same place keep (tools/train_context_action_model.kept_neighbour_curriculum)."
+  },
+  "counted_token_curriculum": {
+    "term_frames": 0,
+    "abbreviation_frames": 0,
+    "frames_per_word": 3,
+    "minimum_term_count": 50,
+    "minimum_abbreviation_count": 20,
+    "abbreviation_dominance": 3,
+    "sample_weight": 1.0,
+    "scope": "TRAIN only: the word decided at its own boundary (after_origin none). Russian abbreviations the term table counts in Russian technical text at least minimum_abbreviation_count times and abbreviation_dominance times as often as their Latin keys (`тз`, not `зк`), no lexicon word, typed as intended after the left context of a Russian row, keep; Latin terms counted at least minimum_term_count times whose Cyrillic reading is nothing, typed in the Russian layout in the same place, convert; three frames for every such term and abbreviation (the budgets cover both classes whole: a candidate that framed 800 of the 1752 terms and all 802 abbreviations kept `тз` but missed `тзь` for `npm`), the boundaries of the capital citations. Motivation: the corpus v27 candidate converted `тз` to `np` (p=0.993), `2фа`, `кз` and `ви` in the owner's typing while the token's count pulled the other way without a frame to learn from (tools/train_context_action_model.counted_token_curriculum). Not used while a frozen base is named: its frames moved the shared frequency features, and the `ша` before `hello` stayed `ша` (corpus v27 and v28 candidates)."
+  },
+  "frozen_base": {
+    "artifact": "model/context_v3/frozen-base.json",
+    "sha256": "e7b637e372eb18e0614ca5d9854a7b9f3d417ea3b14cb854b4d0f13ce2a9c1d8",
+    "heads": {
+      "capitals": {
+        "maximum_features": 10000
+      }
+    },
+    "scope": "The corpus v26 pair (0.39.0) with every weight fixed; the kept-neighbour question and the capitals head are fitted onto it."
+  }
 }
