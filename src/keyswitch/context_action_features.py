@@ -25,6 +25,7 @@ from .constants.models import (
     ACTION_FEATURE_WHITESPACE_MAX_CHARACTERS,
     ACTION_FEATURE_WORD_MAX_CHARACTERS,
     ACTION_FEATURE_WORD_SCORE_BOUND,
+    ALONE_COUNT_RATIO_BOUND,
     ALONE_FEATURE_PREFIX,
     ALONE_HEAD_LETTERS,
     CAPITALS_FEATURE_PREFIX,
@@ -356,20 +357,42 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         # `BP` in English prose read `ИЗ` at p=0.997, and the frames that kept it moved the weights
         # the Latin keys of `не` and `что` share (`yt`, `xnj` stayed as typed).
         result.update({CAPITALS_FEATURE_PREFIX + name: value for name, value in list(result.items())})
-    if alone_question(item.original, item.alternative, item.field.before, item.field.after):
+    if alone_question(item.original, item.alternative, item.field.before, item.field.after, item.trigger):
         # The class the lone-word head answers, in the same way: every corpus frame of it was deferred,
-        # so the frozen model waits on `гш` alone and never converts it to `ui`.
+        # so the frozen model waits on `гш` alone and never converts it to `ui`. The head also reads how
+        # often each reading occurs, which the shared features leave out for a word with nothing
+        # around it: `ой` (Russian prose, 1298 times) and `гш` (never) were the same to it.
         result.update({ALONE_FEATURE_PREFIX + name: value for name, value in list(result.items())})
+        result.update(_alone_counts(item, direction))
     return result
 
 
-def alone_question(original: str, alternative: str, before: str, after: str) -> bool:
-    """A token of ALONE_HEAD_LETTERS letters, letters in both layouts, with no letter before or after
-    it in the field: a message of one such word (`гш` for `ui`), or the first word of a message at its
-    boundary. `хз` is no member: its Latin keys `[p` are no word of any language."""
+def alone_question(original: str, alternative: str, before: str, after: str, trigger: str) -> bool:
+    """A token of ALONE_HEAD_LETTERS letters, letters in both layouts, with no letter before or after it
+    in the field, at a boundary that ends it for good: a message of one such word (`гш` for `ui`) sent,
+    or left at a pause. At a space the next word may still come and decide it with its neighbour, so
+    the frozen model's wait stands there. `хз` is no member: its Latin keys `[p` are no word."""
 
     return (len(original) == ALONE_HEAD_LETTERS and original.isalpha() and alternative.isalpha()
+            and trigger != "space"
             and not any(char.isalpha() for char in before) and not any(char.isalpha() for char in after))
+
+
+def _alone_counts(item: ContextEvidence, direction: str) -> dict[str, float]:
+    """The lone-word head's own count evidence: the order of magnitude of each reading's count in the
+    term table (`latin`; `cyrillic` or `russian`, whichever is larger) and of their ratio."""
+
+    from .context_model import _term_frequency
+
+    table = _term_frequency()
+    latin, cyrillic = (item.original, item.alternative) if item.source_group == 0 else (item.alternative, item.original)
+    latin_count = table["latin"].get(latin.casefold(), 0)
+    cyrillic_count = max(table["cyrillic"].get(cyrillic.casefold(), 0), table["russian"].get(cyrillic.casefold(), 0))
+    magnitudes = (latin_count.bit_length(), cyrillic_count.bit_length())
+    ratio = max(-ALONE_COUNT_RATIO_BOUND, min(ALONE_COUNT_RATIO_BOUND, magnitudes[0] - magnitudes[1]))
+    names = (f"count:latin:{magnitudes[0]}", f"count:cyrillic:{magnitudes[1]}", f"count:ratio:{ratio}",
+             f"count:{magnitudes[0]}:{magnitudes[1]}")
+    return {f"{ALONE_FEATURE_PREFIX}{name}:direction:{direction}": 1.0 for name in names}
 
 
 def capitals_question(original: str, before: str) -> bool:

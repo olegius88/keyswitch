@@ -21,6 +21,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field, replace
+from functools import partial
 from itertools import product
 from pathlib import Path
 from typing import Final, cast
@@ -477,11 +478,12 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
     return result
 
 
-def _varied_boundary(identifier: str) -> tuple[CorrectionTrigger, str]:
+def _varied_boundary(identifier: str, triggers: tuple[CorrectionTrigger, ...] = ("space", "space", "enter", "punctuation", "tab", "pause"),
+                     ) -> tuple[CorrectionTrigger, str]:
     """The boundary a curriculum word ends at, by hash: a space (twice as often), Enter, a punctuation
-    mark, Tab or a pause, with the character Enter and Tab type in half of their frames."""
+    mark, Tab or a pause, with the character Enter and Tab type in half of their frames; `triggers`
+    narrows the choice."""
 
-    triggers: tuple[CorrectionTrigger, ...] = ("space", "space", "enter", "punctuation", "tab", "pause")
     trigger = triggers[variant_choice(identifier, "trigger", len(triggers))]
     boundary_text = ""
     if trigger == "space":
@@ -1475,14 +1477,18 @@ def alone_evidence(options: Mapping[str, object]) -> dict[str, float] | None:
     return heads.get("alone")
 
 
-def alone_labels(rows: Sequence[ActionRow], evidence: Mapping[str, float] | None) -> list[ActionRow]:
-    """The frames of a split with every deferred lone two-letter frame its counts settle labelled.
+def alone_labels(rows: Sequence[ActionRow], evidence: Mapping[str, float] | None,
+                 decide: Callable[[ActionRow], ContextAction | None] | None = None) -> list[ActionRow]:
+    """The frames of a split with every deferred frame of the lone-word head's class labelled.
 
     A token of two letters with no word on either side has no observable intent label in the lexicon
     (context_deferral), and every such frame waits (`wait`, or `suggest` where the boundary acts).
-    The term counts the model reads can still settle one: `гш` alone is `ui` (counted_reading). Such a
-    frame is the lone-word head's class (alone_question), so with that head these frames are labelled
-    by the counts - convert for the weaker reading, keep for the stronger - and the rest wait as before.
+    The term counts the model reads can still settle one: `гш` alone is `ui` (counted_reading). With
+    the lone-word head such a frame at a boundary that ends it (alone_question) is labelled by the
+    counts - convert for the weaker reading, keep for the stronger. One the counts do not settle takes
+    the frozen model's own answer (`decide`), so the head moves nothing it has no evidence for: `ye`
+    sent alone is `ну` as before, and `ой` (counted in Russian prose and `jq` in technical text) is
+    not turned into Latin. Without an answer it waits as before.
     """
 
     if evidence is None:
@@ -1491,30 +1497,37 @@ def alone_labels(rows: Sequence[ActionRow], evidence: Mapping[str, float] | None
     for row in rows:
         if row.action in ("wait", "suggest") and row.after_origin != "planned_next_conversion":
             alternate = translated(row.original, row.group)
-            if alone_question(row.original, alternate, row.field.before, row.field.after):
+            if alone_question(row.original, alternate, row.field.before, row.field.after, row.trigger):
                 strong = counted_reading(row.original, alternate, row.group, minimum=int(evidence["minimum_count"]),
                                          other_maximum=int(evidence["other_maximum_count"]),
                                          dominance=float(evidence["dominance"]))
+                own = None if strong is not None or decide is None else decide(row)
                 if strong is not None:
                     row = replace(row, action="keep" if strong == row.group else "convert")
+                elif own is not None:
+                    row = replace(row, action=own)
         result.append(row)
     return result
 
 
-def lone_word_curriculum(split: str, refused: frozenset[str], evidence: Mapping[str, float]) -> tuple[list[ActionRow], dict[str, object]]:
-    """Every pair of two Latin letters and its Russian keys, each standing alone, for the lone-word head.
+def lone_word_curriculum(split: str, refused: frozenset[str], evidence: Mapping[str, float],
+                         decide: Callable[[ActionRow], ContextAction | None] | None = None,
+                         ) -> tuple[list[ActionRow], dict[str, object]]:
+    """Every pair of two Latin letters and its Russian keys, each sent alone, for the lone-word head.
 
     Corpus sentences open with few words of two letters (corpus v30 TRAIN: 183 such lone frames), and
     the head needs both kinds: readings the term counts settle (`гш` is `ui`, `yf` is `на`) and
     readings they do not (`ns` and `ты` are both counted; `ha` is an English word). Each pair goes to
     one split by hash (LONE_WORD_SPLIT_MODULUS), so DEVELOPMENT chooses the head's epoch on pairs it
-    never saw. Each reading stands alone at LONE_WORD_FRAMES_PER_READING boundaries (_varied_boundary),
-    some in capitals or capitalised (LONE_WORD_CASE_MODULUS); alone_labels labels them. Pairs with an
-    alias of this corpus's test or of any accessed test are refused.
+    never saw. Each reading ends at LONE_WORD_FRAMES_PER_READING boundaries other than a space
+    (_varied_boundary), some in capitals or capitalised (LONE_WORD_CASE_MODULUS); alone_labels labels
+    them, with `decide` for the pairs the counts leave open. Pairs with an alias of this corpus's test
+    or of any accessed test are refused.
     """
 
     applications = ("Telegram", "Code", "chrome", "UnseenEditor")
     shares = {0: DEVELOPMENT, 1: CALIBRATION}
+    final: tuple[CorrectionTrigger, ...] = ("enter", "punctuation", "tab", "pause")
     rows: list[ActionRow] = []
     counts: Counter[str] = Counter()
     for first, second in product(string.ascii_lowercase, repeat=ALONE_HEAD_LETTERS):
@@ -1533,17 +1546,33 @@ def lone_word_curriculum(split: str, refused: frozenset[str], evidence: Mapping[
                 identifier = f"lone-word:{reading}:{index}"
                 case = variant_choice(identifier, "case", LONE_WORD_CASE_MODULUS)
                 typed = reading.upper() if case == 0 else reading.capitalize() if case == 1 else reading
-                trigger, boundary_text = _varied_boundary(identifier)
+                trigger, boundary_text = _varied_boundary(identifier, final)
                 field = FieldContext(applications[variant_choice(identifier, "application", len(applications))],
                                      "public-training", "", "", "unknown")
-                action: ContextAction = "suggest" if trigger in ("enter", "tab", "punctuation") else "wait"
+                action: ContextAction = "wait" if trigger == "pause" else "suggest"
                 rows.append(ActionRow(identifier, typed, group, field, trigger, "", action, "lone_word", boundary_text,
                                       float(evidence["sample_weight"])))
-    rows = alone_labels(rows, evidence)
+    rows = alone_labels(rows, evidence, decide)
     counts.update(row.action for row in rows)
     return rows, {"frames": len(rows), "counts": dict(sorted(counts.items())), "sample_weight": float(evidence["sample_weight"]),
                   "scope": "lone_word frames of this split: every pair of two Latin letters whose Russian keys are letters too, "
-                           "each reading alone in the field (lone_word_curriculum), labelled by alone_labels."}
+                           "each reading alone in the field at a boundary other than a space (lone_word_curriculum), "
+                           "labelled by alone_labels with the frozen model's answer where the counts settle nothing."}
+
+
+_BASE_ACTIONS: dict[str, ContextModel] = {}
+
+
+def base_action(row: ActionRow, inputs: FitInputs) -> ContextAction | None:
+    """The frozen base's own action on a frame, or None when the profiles' answers differ."""
+
+    spec = cast(dict[str, object], inputs.options["frozen_base"])
+    key = str(spec["sha256"])
+    if key not in _BASE_ACTIONS:
+        _BASE_ACTIONS[key] = cast(ContextModel, frozen_base(inputs.options))
+    base = _BASE_ACTIONS[key]
+    actions = {base.predict(evidence(row, inputs.detectors[profile], inputs.ortho)).action for profile in inputs.profiles}
+    return actions.pop() if len(actions) == 1 else None
 
 
 def warm_base(options: Mapping[str, object]) -> ContextModel | None:
@@ -1838,8 +1867,8 @@ def frame_chain(inputs: FitInputs, profile: str, split: str, rows: Sequence[Acti
         result.extend(tail)
     evidence = alone_evidence(options)
     if evidence is not None:
-        lone, reports["lone_word"] = lone_word_curriculum(split, inputs.refused, evidence)
-        result = [*alone_labels(result, evidence), *lone]
+        lone, reports["lone_word"] = lone_word_curriculum(split, inputs.refused, evidence, partial(base_action, inputs=inputs))
+        result = [*alone_labels(result, evidence, partial(base_action, inputs=inputs)), *lone]
     return result, reports
 
 

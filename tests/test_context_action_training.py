@@ -28,7 +28,7 @@ from reconcile_context_action_corpus import expanded_aliases
 from keyswitch.constants.training import ACTION_DEFERRED_WORD_MAX_CHARACTERS, CITATION_SIGN_HEADS
 from keyswitch.context_action_features import extract_action_features
 from keyswitch.constants.model_protocol import CALIBRATION, DEVELOPMENT, TRAIN
-from keyswitch.context_model import ACTIONS, AfterOrigin, ContextEvidence, ContextModel, term_bucket
+from keyswitch.context_model import ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, term_bucket
 from train_context_action_model import (
     BLIND_IDENTIFIERS,
     ROOT,
@@ -814,25 +814,33 @@ class ActionTrainingTests(unittest.TestCase):
         self.assertEqual(alone_evidence({"frozen_base": {"heads": {"alone": evidence}}}), evidence)
         self.assertEqual(frozen_heads({"frozen_base": {"heads": {"alone": evidence}}}), {ALONE_FEATURE_PREFIX: HEAD_FIXTURE_MAXIMUM_FEATURES})
 
-        def lone(word: str, group: int, trigger: CorrectionTrigger = "space", before: str = "", after: str = "",
+        def lone(word: str, group: int, trigger: CorrectionTrigger = "pause", before: str = "", after: str = "",
                  origin: AfterOrigin = "none") -> ActionRow:
-            return ActionRow(f"lone:{word}:{before}:{after}", word, group, FieldContext("Telegram", "public-training", before, after, "unknown"),
+            return ActionRow(f"lone:{word}:{trigger}:{before}:{after}", word, group,
+                             FieldContext("Telegram", "public-training", before, after, "unknown"),
                              trigger, "", "suggest" if trigger == "enter" else "wait", "natural_surface", " ", after_origin=origin)
 
         rows = [lone("гш", 1), lone("UI", 0), lone("yf", 0, "enter"), lone("на", 1), lone("ты", 1), lone("ns", 0), lone("ha", 0),
-                lone("гш", 1, before="есть "), lone("гш", 1, after="кнопка", origin="planned_next_conversion"), lone("хз", 1)]
+                lone("гш", 1, before="есть "), lone("гш", 1, after="кнопка", origin="planned_next_conversion"), lone("хз", 1),
+                lone("гш", 1, "space")]
         # `ui` is counted 4752 times and `гш` never; `на` outweighs `yf`. Both `ns` and `ты` are counted, and `ha`
-        # is an English word: those wait, and so do words with a neighbour and readings with a sign.
+        # is an English word: those wait, and so do words with a neighbour, readings with a sign and a word at a
+        # space, which its next word may still decide.
         self.assertEqual([row.action for row in alone_labels(rows, evidence)],
-                         ["convert", "keep", "convert", "keep", "wait", "wait", "wait", "wait", "wait", "wait"])
+                         ["convert", "keep", "convert", "keep", "wait", "wait", "wait", "wait", "wait", "wait", "wait"])
         self.assertEqual(alone_labels(rows, None), rows)
+        # What the counts leave open takes the frozen model's answer, where it has one.
+        answers: dict[str, ContextAction | None] = {"ns": "convert", "ты": None}
+        self.assertEqual([row.action for row in alone_labels(rows[4:7], evidence, lambda row: answers.get(row.original))],
+                         ["wait", "convert", "wait"])
         # Every pair of two Latin letters lands in one split, both readings framed alone.
         splits = {split: lone_word_curriculum(split, frozenset(), evidence) for split in (TRAIN, DEVELOPMENT, CALIBRATION)}
         pairs = {split: {row.original.casefold() for row in rows if row.group == 0} for split, (rows, _report) in splits.items()}
         self.assertEqual(sum(map(len, pairs.values())), len(set().union(*pairs.values())))
         train, report = splits[TRAIN]
         self.assertEqual(report["frames"], len(train))
-        self.assertTrue(all(row.category == "lone_word" and not row.field.before and not row.field.after for row in train))
+        self.assertTrue(all(row.category == "lone_word" and not row.field.before and not row.field.after and row.trigger != "space"
+                            for row in train))
         self.assertIn(("гш", "convert"), {(row.original.casefold(), row.action) for row in train} | {
             (row.original.casefold(), row.action) for rows, _report in splits.values() for row in rows})
         refused = lone_word_curriculum(TRAIN, frozenset(expanded_aliases("ui")), evidence)[0]

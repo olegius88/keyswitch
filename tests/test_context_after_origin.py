@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from keyswitch.context_action_features import extract_action_features
 from keyswitch.constants.models import (
+    ALONE_COUNT_RATIO_BOUND,
     ALONE_FEATURE_PREFIX,
     CAPITALS_FEATURE_PREFIX,
     CONTEXT_ACTION_FEATURE_VERSION,
@@ -153,15 +154,21 @@ class ContextAfterOriginTests(unittest.TestCase):
         lone = ContextEvidence("гш", "ui", 1, FieldContext("Telegram", "1", "", ""), trigger="enter", boundary_text="\n")
         features = extract_action_features(lone)
         shared = {name: value for name, value in features.items() if not name.startswith(ALONE_FEATURE_PREFIX)}
-        self.assertEqual({name.removeprefix(ALONE_FEATURE_PREFIX): value for name, value in features.items()
-                          if name.startswith(ALONE_FEATURE_PREFIX)}, shared)
+        own = {name.removeprefix(ALONE_FEATURE_PREFIX): value for name, value in features.items() if name.startswith(ALONE_FEATURE_PREFIX)}
+        # The shared features once more, and the orders of magnitude of the two counts: `ui` is counted 4752
+        # times (13 binary digits), `гш` never.
+        self.assertEqual({name: value for name, value in own.items() if not name.startswith("count:")}, shared)
+        self.assertEqual(sorted(name for name in own if name.startswith("count:")),
+                         ["count:13:0:direction:1", "count:cyrillic:0:direction:1", "count:latin:13:direction:1",
+                          f"count:ratio:{ALONE_COUNT_RATIO_BOUND}:direction:1"])
         # Signs and digits around it leave it alone; a capitalised word too.
         for item in (replace(lone, field=replace(lone.field, before="1. ", after=" :)")), replace(lone, original="Гш", alternative="Ui")):
             with self.subTest(item=item):
                 self.assertTrue(any(name.startswith(ALONE_FEATURE_PREFIX) for name in extract_action_features(item)))
-        # A word before or after it, one letter, three letters, a reading with a sign (`хз` is `[p`) and
-        # the kept-neighbour question: no head.
+        # A word before or after it, a space after it (the next word may come), one letter, three letters, a
+        # reading with a sign (`хз` is `[p`) and the kept-neighbour question: no head.
         for item in (replace(lone, field=replace(lone.field, before="есть ")), replace(lone, field=replace(lone.field, after="кнопка")),
+                     replace(lone, trigger="space", boundary_text=" "),
                      replace(lone, original="г", alternative="u"), replace(lone, original="гшы", alternative="uis"),
                      replace(lone, original="хз", alternative="[p"),
                      replace(lone, field=replace(lone.field, after="нас"), trigger="space", boundary_text=" ",
