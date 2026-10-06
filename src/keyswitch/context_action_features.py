@@ -25,6 +25,8 @@ from .constants.models import (
     ACTION_FEATURE_WHITESPACE_MAX_CHARACTERS,
     ACTION_FEATURE_WORD_MAX_CHARACTERS,
     ACTION_FEATURE_WORD_SCORE_BOUND,
+    CAPITALS_FEATURE_PREFIX,
+    CAPITALS_HEAD_MIN_LETTERS,
     KEPT_CONTEXT_WORD_MAX_CHARACTERS,
     KEPT_FEATURE_PREFIX,
     PLANNED_CONTEXT_AFTER_MAX_CHARACTERS,
@@ -344,4 +346,17 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         # evidence, its own weights (KEPT_FEATURE_PREFIX). Sharing them, the question took the
         # weights of the converted-neighbour frames and turned `еще` before `поищу` into `tot`.
         return {KEPT_FEATURE_PREFIX + name: value for name, value in features.items() if value}
-    return {name: value for name, value in features.items() if value}
+    result = {name: value for name, value in features.items() if value}
+    if capitals_question(item.original):
+        # The class the capitals head answers: its features once more under their own names, beside
+        # the shared ones, so a head fitted onto a frozen model moves no decision outside the class.
+        # `BP` in English prose read `ИЗ` at p=0.997, and the frames that kept it moved the weights
+        # the Latin keys of `не` and `что` share (`yt`, `xnj` stayed as typed).
+        result.update({CAPITALS_FEATURE_PREFIX + name: value for name, value in list(result.items())})
+    return result
+
+
+def capitals_question(original: str) -> bool:
+    """A token of letters only, all capitals, at least CAPITALS_HEAD_MIN_LETTERS long (`BP`, `КЕЫ`)."""
+
+    return len(original) >= CAPITALS_HEAD_MIN_LETTERS and original.isalpha() and original.isupper()

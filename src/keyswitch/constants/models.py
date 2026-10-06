@@ -37,6 +37,11 @@ KEPT_CONTEXT_WORD_MAX_CHARACTERS: Final = 5
 # Every feature of a kept-neighbour question carries this prefix: the question has weights of its own,
 # trained on frames of its own, and never moves the weights of the word decided at its boundary.
 KEPT_FEATURE_PREFIX: Final = "kept|"
+# A token of letters only, all capitals, of at least CAPITALS_HEAD_MIN_LETTERS, has its features once
+# more under this prefix: the capitals head, fitted onto a frozen model with its every other weight
+# fixed, answers that class alone; a model without such weights decides as it did.
+CAPITALS_FEATURE_PREFIX: Final = "caps|"
+CAPITALS_HEAD_MIN_LETTERS: Final = 2
 # The "length" feature buckets every word length from here up together (schemas 2 and 3).
 ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: Final = 6
 # Short categorical field labels (role, trigger) truncated before they reach a feature name.
@@ -140,9 +145,10 @@ CONTEXT_FEATURE_NGRAM_ORDERS: Final = (1, 2, 3)
 # and version strings of at most these many characters, weights of at most this magnitude, and a
 # conversion threshold from this floor up to one.
 MAX_CONTEXT_MODEL_FEATURES: Final = 50000
-# An action model (schema 3) holds two feature spaces: the word decided at its boundary and the
-# kept-neighbour question (KEPT_FEATURE_PREFIX), each with its own budget in the recipe.
-MAX_CONTEXT_ACTION_MODEL_FEATURES: Final = 70000
+# An action model (schema 3) holds up to three feature spaces: the word decided at its boundary, the
+# kept-neighbour question (KEPT_FEATURE_PREFIX) and the capitals head (CAPITALS_FEATURE_PREFIX), each
+# with its own budget in the recipe.
+MAX_CONTEXT_ACTION_MODEL_FEATURES: Final = 80000
 MAX_CONTEXT_FEATURE_NAME_CHARACTERS: Final = 512
 MAX_CONTEXT_MODEL_VERSION_CHARACTERS: Final = 80
 MAX_CONTEXT_WEIGHT_MAGNITUDE: Final = 1000

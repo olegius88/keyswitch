@@ -85,6 +85,7 @@ from keyswitch.constants.training import (
     CONTEXT_OPTIMIZER_CACHE_DIGEST_CHARACTERS,
 )
 from keyswitch.constants.models import FNV1A64_OFFSET_BASIS, FNV1A64_PRIME
+from keyswitch.context_action_features import capitals_question
 from keyswitch.context_model import AfterOrigin, ContextEvidence, _term_frequency
 from keyswitch.detector import PROTECTED_TOKENS
 from keyswitch.identifier_lexicon import IdentifierLexicon
@@ -702,9 +703,11 @@ class Items:
                 triggers[number] = trigger_index.get(row.trigger, 0)
                 origins[number] = origin_index.get(row.after_origin, 0)
                 # The kernels leave out the kept-neighbour question, whose features are renamed
-                # (KEPT_FEATURE_PREFIX): its frames take the CPU path.
+                # (KEPT_FEATURE_PREFIX), and the capitals head's second copy of a token's features
+                # (CAPITALS_FEATURE_PREFIX): those frames take the CPU path.
                 fits[number] = (row.trigger in trigger_index and row.after_origin in origin_index
-                                and row.after_origin != "kept_next_word" and row.group in range(LAYOUT_GROUP_COUNT))
+                                and row.after_origin != "kept_next_word" and not capitals_question(row.original)
+                                and row.group in range(LAYOUT_GROUP_COUNT))
                 dropped[number] = split == TRAIN and trainer.identifier_evidence_dropped(row.identifier)
                 action_row[number] = True
             else:

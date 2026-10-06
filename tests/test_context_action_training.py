@@ -63,6 +63,7 @@ from train_context_action_model import (
     translated,
     base_weights,
     frozen_base,
+    frozen_heads,
     refused_aliases,
     warm_base,
     log_loss,
@@ -71,7 +72,9 @@ from train_context_action_model import (
     _varied_boundary,
 )
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
-from keyswitch.constants.models import CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_V1_CONVERSION_THRESHOLD, KEPT_FEATURE_PREFIX
+from keyswitch.constants.models import (
+    CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_V1_CONVERSION_THRESHOLD, KEPT_FEATURE_PREFIX,
+)
 from keyswitch.detector import LanguageDetector
 from keyswitch.intent_model import LinearNgramModel
 from keyswitch.language_model import LanguageModel
@@ -84,6 +87,7 @@ from fixture_values.counts import (
     COUNTED_TOKEN_FIXTURE_FRAMES_PER_WORD,
     ENGLISH_CAPITAL_FIXTURE_FRAMES_PER_WORD,
     ENGLISH_CAPITAL_FIXTURE_WORDS_BY_LENGTH,
+    HEAD_FIXTURE_MAXIMUM_FEATURES,
     KEPT_NEIGHBOUR_FIXTURE_ABBREVIATION_COUNT,
     KEPT_NEIGHBOUR_FIXTURE_DOMINANCE,
     KEPT_NEIGHBOUR_FIXTURE_FRAMES,
@@ -758,10 +762,15 @@ class ActionTrainingTests(unittest.TestCase):
             self.assertEqual(list(base_weights(["head", "bias"], base)), [*(0.0,) * len(ACTIONS), *FROZEN_BASE_FIXTURE_WEIGHTS])
             with self.assertRaisesRegex(ValueError, "differs from the recipe"):
                 frozen_base({"frozen_base": {**spec, "sha256": "0" * len(str(spec["sha256"]))}})
-            # A base that answers the kept-neighbour question already is no base for its head.
-            with self.assertRaisesRegex(ValueError, "without kept-neighbour weights"):
-                frozen_base({"frozen_base": save({"bias": FROZEN_BASE_FIXTURE_WEIGHTS,
-                                                  KEPT_FEATURE_PREFIX + "bias": FROZEN_BASE_FIXTURE_WEIGHTS})})
+            # A base that answers the kept-neighbour question or a head's class already is no base for them.
+            for prefix in (KEPT_FEATURE_PREFIX, CAPITALS_FEATURE_PREFIX):
+                with self.assertRaisesRegex(ValueError, "without kept-neighbour weights or heads"):
+                    frozen_base({"frozen_base": save({"bias": FROZEN_BASE_FIXTURE_WEIGHTS, prefix + "bias": FROZEN_BASE_FIXTURE_WEIGHTS})})
+            # Heads are named by the recipe and fitted under their prefixes with budgets of their own.
+            self.assertEqual(frozen_heads({}), {})
+            self.assertEqual(frozen_heads({"frozen_base": spec}), {})
+            self.assertEqual(frozen_heads({"frozen_base": {**spec, "heads": {"capitals": {"maximum_features": HEAD_FIXTURE_MAXIMUM_FEATURES}}}}),
+                             {CAPITALS_FEATURE_PREFIX: HEAD_FIXTURE_MAXIMUM_FEATURES})
         data = Packed.build([({"bias": 1.0}, ACTIONS.index("convert"), FROZEN_BASE_FIXTURE_IMPORTANCE)], ["bias"])
         convert = FROZEN_BASE_FIXTURE_PROBABILITIES[ACTIONS.index("convert")]
         self.assertAlmostEqual(log_loss(array("d", FROZEN_BASE_FIXTURE_PROBABILITIES), data),

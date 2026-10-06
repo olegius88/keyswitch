@@ -21,7 +21,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import cast
+from typing import Final, cast
 from unittest.mock import patch
 
 from keyswitch.context_action_features import extract_action_features
@@ -63,8 +63,8 @@ from train_context_model import CapturedSource
 from keyswitch.constants.file_formats import HEXADECIMAL_BASE, VERSION_HASH_CHARACTERS
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
 from keyswitch.constants.models import (
-    CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, KEPT_CONTEXT_WORD_MAX_CHARACTERS,
-    KEPT_FEATURE_PREFIX, PLANNED_CONTEXT_WORD_MAX_CHARACTERS,
+    CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS,
+    KEPT_CONTEXT_WORD_MAX_CHARACTERS, KEPT_FEATURE_PREFIX, PLANNED_CONTEXT_WORD_MAX_CHARACTERS,
 )
 from keyswitch.constants.training import (
     CONTEXT_ACTION_BACKEND_AUTO,
@@ -1430,6 +1430,26 @@ def frozen_base(options: Mapping[str, object]) -> ContextModel | None:
     return _named_base(options, "frozen_base")
 
 
+# The heads a frozen base can carry besides the kept-neighbour question, by the recipe's name.
+HEAD_PREFIXES: Final = {"capitals": CAPITALS_FEATURE_PREFIX}
+
+
+def frozen_heads(options: Mapping[str, object]) -> dict[str, int]:
+    """The heads fitted onto a frozen base over every TRAIN frame: feature prefix -> feature budget.
+
+    A head answers a class of its own under feature names of its own (the class's features once more
+    under its prefix, context_action_features): fitted with the base's every weight fixed, it moves no
+    decision outside its class. Without heads a frozen base is fitted with the kept-neighbour question
+    alone, and TRAIN holds the kept-neighbour frames only.
+    """
+
+    value = options.get("frozen_base")
+    if value is None:
+        return {}
+    heads = cast(dict[str, dict[str, int]], cast(dict[str, object], value).get("heads", {}))
+    return {HEAD_PREFIXES[name]: int(head["maximum_features"]) for name, head in heads.items()}
+
+
 def warm_base(options: Mapping[str, object]) -> ContextModel | None:
     """The action model a full fit starts from, or None to start from zero weights.
 
@@ -1456,8 +1476,9 @@ def _named_base(options: Mapping[str, object], key: str) -> ContextModel | None:
     if checksum(path) != spec["sha256"]:
         raise ValueError(f"{label} artifact differs from the recipe")
     model = ContextModel.load(path)
-    if model.feature_version != CONTEXT_ACTION_FEATURE_VERSION or any(name.startswith(KEPT_FEATURE_PREFIX) for name in model.weights):
-        raise ValueError(f"a {label} is an action model without kept-neighbour weights")
+    if model.feature_version != CONTEXT_ACTION_FEATURE_VERSION or any(
+            name.startswith((KEPT_FEATURE_PREFIX, *HEAD_PREFIXES.values())) for name in model.weights):
+        raise ValueError(f"a {label} is an action model without kept-neighbour weights or heads")
     return model
 
 
@@ -1667,7 +1688,8 @@ def load_inputs(corpus: Path, options: dict[str, object]) -> FitInputs:
                      LinearNgramModel.load(ROOT / "src/keyswitch/resources/models/layout_intent_v1.ksm"),
                      OrthoModel.load(ROOT / "src/keyswitch/resources/models/ortho_v1.json"),
                      {spelling: reference_models(spelling) for spelling in (False, True)},
-                     cast(list[str], options["profiles"]), refused_aliases(corpus), frozen_base(options))
+                     cast(list[str], options["profiles"]), refused_aliases(corpus),
+                     frozen_base(options) if not frozen_heads(options) else None)
 
 
 def frame_chain(inputs: FitInputs, profile: str, split: str, rows: Sequence[ActionRow],
@@ -1754,16 +1776,20 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
     corpus_hash = checksum(corpus / "manifest.json")
     inputs = load_inputs(corpus, options)
     profiles = inputs.profiles
-    base = inputs.base
+    # The pipeline frames TRAIN with the kept-neighbour frames alone for a frozen base without heads
+    # (inputs.base); with heads every TRAIN frame is framed, and the base's weights stay where they are
+    # because their AdaGrad accumulators start infinite: every step of theirs is zero.
+    base = frozen_base(options)
+    heads = frozen_heads(options)
     warm = warm_base(options)
     if base is not None and warm is not None:
         raise ValueError("a recipe names a frozen base or a warm base, not both")
     kept_options = cast(dict[str, object], options["kept_neighbour_curriculum"])
     counted_options = cast(dict[str, object], options["counted_token_curriculum"])
     english_options = cast(dict[str, object], options["english_capital_curriculum"])
-    if base is not None and any(cast(dict[str, int], english_options["words_by_length"]).values()):
+    if base is not None and not heads and any(cast(dict[str, int], english_options["words_by_length"]).values()):
         raise ValueError("English-capital frames fit the word decided at its own boundary, which a frozen base keeps")
-    if base is not None and any(int(cast(int, counted_options[name])) for name in ("term_frames", "abbreviation_frames")):
+    if base is not None and not heads and any(int(cast(int, counted_options[name])) for name in ("term_frames", "abbreviation_frames")):
         raise ValueError("counted-token frames fit the word decided at its own boundary, which a frozen base keeps")
     output.mkdir(parents=True)
     (output / "recipe.json").write_bytes(canonical(options))
@@ -1786,15 +1812,17 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
     gc.collect()
     minimum = float(cast(float, options["minimum_feature_mass"]))
     masses = features.masses()
-    # The kept-neighbour question has feature names of its own (KEPT_FEATURE_PREFIX) and a budget of
-    # its own: the word decided at its boundary keeps exactly the features it would have without it.
+    # The kept-neighbour question and every head have feature names of their own and a budget of their
+    # own: the word decided at its boundary keeps exactly the features it would have without them.
     start = base if base is not None else warm
+    own = (KEPT_FEATURE_PREFIX, *HEAD_PREFIXES.values())
+    budgets = {KEPT_FEATURE_PREFIX: int(cast(int, kept_options["maximum_features"])), **heads}
     names = sorted([
         *(start.weights if start is not None else
-          select_features({name: mass for name, mass in masses.items() if not name.startswith(KEPT_FEATURE_PREFIX)},
+          select_features({name: mass for name, mass in masses.items() if not name.startswith(own)},
                           minimum, int(cast(int, options["maximum_features"])))),
-        *select_features({name: mass for name, mass in masses.items() if name.startswith(KEPT_FEATURE_PREFIX)},
-                         minimum, int(cast(int, kept_options["maximum_features"]))),
+        *(name for prefix, budget in budgets.items()
+          for name in select_features({name: mass for name, mass in masses.items() if name.startswith(prefix)}, minimum, budget)),
     ])
     train, development, calibration = features.packed(names)
     support_model = ContextModel({name: (0.0,) * len(ACTIONS) for name in names}, "context-v3-vocabulary", feature_version=CONTEXT_ACTION_FEATURE_VERSION)
@@ -1803,11 +1831,16 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
     kernel = Kernel.load()
     weights = array("d", [0.0]) * (len(names) * len(ACTIONS)) if start is None else base_weights(names, start)
     accumulators = array("d", [1.0]) * (len(names) * len(ACTIONS))
+    if base is not None:
+        for index, name in enumerate(names):
+            if name in base.weights:
+                accumulators[index * len(ACTIONS):(index + 1) * len(ACTIONS)] = array("d", [math.inf]) * len(ACTIONS)
     rate = float(cast(float, cast(dict[str, object], options["warm_base"])["learning_rate"] if warm is not None
                       else options["learning_rate"]))
     epochs = int(cast(int, options["epochs"]))
     best, best_epoch, best_loss = array("d"), 0, math.inf
     best_selection: EpochSelection | None = None
+    kept_best, kept_epoch, kept_loss = array("d"), 0, math.inf
     history: list[dict[str, object]] = []
     kept_check = {name: Packed.build(rows, names) for name, rows in kept_development.items()}
     kept_mass = sum(sum(data.importance) for data in kept_check.values())
@@ -1817,14 +1850,17 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
         for epoch in range(epochs):
             rounded = array("d", (round(value, DETERMINISTIC_ROUNDING_DECIMALS) for value in weights))
             next_epoch = following.submit(kernel.epoch, train, weights, accumulators, rate) if epoch + 1 < epochs else None
+            record: dict[str, object] = {"epoch": epoch + 1}
             if base is not None:
-                # The head's epoch is the one whose kept-neighbour frames of DEVELOPMENT it predicts best; the
-                # base's weights never move (no TRAIN row has their features), so its rows cannot choose.
+                # The kept-neighbour head's epoch is the one whose kept-neighbour frames of DEVELOPMENT it
+                # predicts best; the base's weights never move, so its rows cannot choose.
                 loss = sum(log_loss(kernel.predict(data, rounded), data) for data in kept_check.values()) / kept_mass
-                if loss < best_loss:
-                    best, best_epoch, best_loss = rounded, epoch + 1, loss
-                history.append({"epoch": epoch + 1, "kept_development_loss": loss})
-                print(f"epoch {epoch + 1}: kept_development_loss={loss:.9f}, best={best_epoch}", flush=True)
+                if loss < kept_loss:
+                    kept_best, kept_epoch, kept_loss = rounded, epoch + 1, loss
+                record["kept_development_loss"] = loss
+                print(f"epoch {epoch + 1}: kept_development_loss={loss:.9f}, best={kept_epoch}", flush=True)
+            if base is not None and not heads:
+                history.append(record)
                 if next_epoch is not None:
                     next_epoch.result()
                 continue
@@ -1837,13 +1873,20 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
                                      minimum_net_benefit=int(cast(dict[str, int], options["epoch_selection"])["minimum_net_benefit_per_profile"]))
             if selection is not None and (best_selection is None or selection.rank > best_selection.rank):
                 best, best_epoch, best_loss, best_selection = rounded, epoch + 1, loss, selection
-            history.append({"epoch": epoch + 1, "development_loss": loss,
-                            "selection": asdict(selection) if selection is not None else None})
+            history.append({**record, "development_loss": loss, "selection": asdict(selection) if selection is not None else None})
             print(f"epoch {epoch + 1}: development_loss={loss:.9f}, best={best_epoch}", flush=True)
             if next_epoch is not None:
                 next_epoch.result()
-    if base is None and best_selection is None:
+    if (base is None or heads) and best_selection is None:
         raise ValueError("no epoch repaired more than it broke on development")
+    if base is not None and not heads:
+        best, best_epoch, best_loss = kept_best, kept_epoch, kept_loss
+    elif base is not None:
+        # The heads at the epoch development ranks best, the kept-neighbour head at its own: no frame
+        # holds the features of both, so neither moves the other's answers.
+        for index, name in enumerate(names):
+            if name.startswith(KEPT_FEATURE_PREFIX):
+                best[index * len(ACTIONS):(index + 1) * len(ACTIONS)] = kept_best[index * len(ACTIONS):(index + 1) * len(ACTIONS)]
     gates = cast(dict[str, int | float | bool], options["gate_policy"])
     mapping = {name: list(best[index * len(ACTIONS):index * len(ACTIONS) + len(ACTIONS)]) for index, name in enumerate(names)}
     candidate = ContextModel({name: tuple(values) for name, values in mapping.items()},
@@ -1852,12 +1895,15 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
                                       data.labels) for name, data in calibration.items()}
     if base is not None and any(mapping[name] != list(values) for name, values in base.weights.items()):
         raise ValueError("a weight of the frozen base moved")
+    if base is not None:
+        # Equal, and now the very values of the base: a zero step may leave -0.0 as 0.0.
+        mapping.update({name: list(values) for name, values in base.weights.items()})
     # A head fitted onto a frozen base serves at the base's threshold: every other decision is the base's.
     threshold, calibration_report, passed = choose_threshold(
         calibration_predictions,
         cast(list[float], options["threshold_candidates"]) if base is None else [base.conversion_threshold],
         int(gates["minimum_calibration_net_benefit"]), float(gates["minimum_calibration_conversion_recall"]),
-        minimum_threshold=best_selection.threshold if best_selection is not None else base.conversion_threshold if base is not None else 0.0,
+        minimum_threshold=base.conversion_threshold if base is not None else best_selection.threshold if best_selection is not None else 0.0,
         net_benefit_tolerance=float(cast(float, cast(dict[str, object], options["threshold_selection"])["net_benefit_tolerance"])),
         maximum_threshold=float(cast(float, cast(dict[str, object], options["threshold_selection"])["maximum_threshold"])),
         authored_floor=float(cast(float, cast(dict[str, object], options["threshold_selection"])["authored_floor"])),
@@ -1876,7 +1922,8 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
         "provenance": before_provenance, "corpus_manifest_sha256": corpus_hash,
         "recipe": options, "gate_policy": gates, "calibration": calibration_report,
         "development": {"selected_epoch": best_epoch, "loss": best_loss, "history": history,
-                        "selection": asdict(best_selection) if best_selection is not None else None},
+                        "selection": asdict(best_selection) if best_selection is not None else None,
+                        **({"kept_selected_epoch": kept_epoch, "kept_loss": kept_loss} if base is not None and heads else {})},
         "frozen_base": None if base is None else {
             "artifact": cast(dict[str, object], options["frozen_base"])["artifact"],
             "sha256": cast(dict[str, object], options["frozen_base"])["sha256"],
