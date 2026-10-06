@@ -155,8 +155,9 @@
    "5": 300
   },
   "frames_per_word": 2,
+  "lowercase_contrast": true,
   "sample_weight": 1.0,
-  "scope": "TRAIN only: the keys of the Russian lexicon's commonest words of two to five letters (all 107 two-letter ones the keys spell in Latin letters), typed in the Latin layout in capitals, after the left context of an English TRAIN row whose words are all Latin, chosen by hash, two contexts a word - keep; no convert pair. Motivation: test v28 holds `affected by the BP oil spill.`, and the corpus v26 pair turned `BP` into `ИЗ` (p=0.997, reference lexicons, early switch off): Latin capitals had been framed after Russian prose only (tools/train_context_action_model.english_capital_curriculum)."
+  "scope": "TRAIN only: the keys of the Russian lexicon's commonest words of two to five letters (all 107 two-letter ones the keys spell in Latin letters), typed in the Latin layout in capitals, after the left context of an English TRAIN row whose words are all Latin, chosen by hash, two contexts a word - keep, and the same keys in lower case in the same frame - convert (without that pair the first corpus v29 candidates left 31 more of the owner's Russian words typed in the Latin layout as typed: `yt`, `yf`, `rfr`, `xnj`). Motivation: test v28 holds `affected by the BP oil spill.`, and the corpus v26 pair turned `BP` into `ИЗ` (p=0.997, reference lexicons, early switch off): Latin capitals had been framed after Russian prose only (tools/train_context_action_model.english_capital_curriculum)."
  },
  "kept_neighbour_curriculum": {
   "natural_frames": 6000,

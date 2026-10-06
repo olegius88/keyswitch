@@ -551,15 +551,18 @@ def english_capital_curriculum(source_rows: Sequence[CorpusRow], refused: frozen
     English text cites abbreviations of a few capitals constantly, and their keys spell a Russian word
     as often as not. The frames: the keys of the Russian lexicon's commonest words of each length of
     `words_by_length`, typed in the Latin layout in capitals, after the left context of an English
-    TRAIN row whose words are all Latin, chosen by hash, `frames_per_word` contexts a word - keep. No
-    convert frame pairs them: a Russian word typed in capitals in the wrong layout inside English
-    prose is not a case the corpus or the owner's typing holds. Words of this corpus's test and of
-    every accessed test are refused by their aliases.
+    TRAIN row whose words are all Latin, chosen by hash, `frames_per_word` contexts a word - keep;
+    with `lowercase_contrast` the same keys in lower case stand in the same frame with the convert
+    label, so case is what the pair tells apart. Without that pair the keep frames taught that the
+    keys of `не`, `на`, `как`, `что` stay in any case: the first candidates of corpus v29 left 31 more
+    of the owner's Russian words typed in the Latin layout as typed (`yt`, `yf`, `rfr`, `xnj`). Words
+    of this corpus's test and of every accessed test are refused by their aliases.
     """
 
     budgets = {int(length): int(count) for length, count in cast(dict[str, int], options["words_by_length"]).items()}
     per_word = int(cast(int, options["frames_per_word"]))
     weight = float(cast(float, options["sample_weight"]))
+    contrast = options.get("lowercase_contrast") is True
     contexts = natural_mixed_contexts(source_rows)[0]
     if not contexts or not any(budgets.values()) or not per_word:
         return [], {"frames": 0, "scope": "not used"}
@@ -586,7 +589,11 @@ def english_capital_curriculum(source_rows: Sequence[CorpusRow], refused: frozen
                                      "", "unknown")
                 rows.append(ActionRow(identifier, latin, 0, field, trigger, "", "keep", "english_capital",
                                       boundary_text, weight))
+                if contrast:
+                    rows.append(ActionRow(identifier + ":lower", latin.lower(), 0, field, trigger, "", "convert",
+                                          "english_capital_lower", boundary_text, weight))
     return rows, {"frames": len(rows), "sample_weight": weight, "frames_per_word": per_word,
+                  "lowercase_contrast": contrast,
                   "words_by_length": chosen,
                   "candidates_by_length": {str(length): len(candidates[length]) for length in sorted(budgets)},
                   "scope": "TRAIN only: keep frames of the keys of common Russian words typed in Latin capitals after English prose (english_capital_curriculum)."}

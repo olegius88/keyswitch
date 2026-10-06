@@ -629,6 +629,12 @@ class ActionTrainingTests(unittest.TestCase):
                 self.assertEqual((row.trigger, row.boundary_text), _varied_boundary(row.identifier))
         again, _ = english_capital_curriculum([english, russian], frozenset(expanded_aliases("из")), options)
         self.assertNotIn("BP", {row.original for row in again})
+        # In lower case the same keys are the Russian word typed in the wrong layout: `bp` is `из`.
+        paired, _ = english_capital_curriculum([english, russian], frozenset(), {**options, "lowercase_contrast": True})
+        lower = [row for row in paired if row.identifier.endswith(":lower")]
+        self.assertEqual([row for row in paired if not row.identifier.endswith(":lower")], rows)
+        self.assertEqual([(row.original, row.action, row.category, row.field) for row in lower],
+                         [(row.original.lower(), "convert", "english_capital_lower", row.field) for row in rows])
         # Without an English row there is no prose to put them in, and a zero budget frames nothing.
         for source, chosen in (([russian], options), ([english], {**options, "frames_per_word": 0})):
             self.assertEqual(english_capital_curriculum(source, frozenset(), chosen), ([], {"frames": 0, "scope": "not used"}))
