@@ -27,8 +27,9 @@ RECEIPT_MAX_EXECUTION_ERRORS: Final = 0
 RECEIPT_MAX_LENGTH_MISMATCHES: Final = 0
 RECEIPT_MAX_CORRECTION_LAYOUT_MISMATCHES: Final = 0
 # Calibration split of the installed pair. Raised from 0.976 for the corpus v26 pair (05.10.2026),
-# which recalls 0.9778.
-RECEIPT_MIN_CALIBRATION_RECALL: Final = 0.977
+# which recalls 0.9778; lowered back to 0.976 for the corpus v27 pair (06.10.2026, the owner's
+# decision), which recalls 0.97626 pooled where the corpus v26 pair recalls 0.97746 on the same rows.
+RECEIPT_MIN_CALIBRATION_RECALL: Final = 0.976
 # The calibration split changes with every corpus, and so does how many of its rows are ambiguous
 # enough to convert falsely: the 0.38 pair makes 8 false conversions on calibration v25, 8 on v26
 # and 9 on v27, against the 7 its own calibration v18 counted, so a fixed count judged the split as
@@ -37,11 +38,20 @@ RECEIPT_MIN_CALIBRATION_RECALL: Final = 0.977
 # fall below what the replaced pair nets. The replaced pair's counts are measured on the corpus the
 # receipt names, with the runtime's own scoring of its artifact; a receipt of another corpus needs
 # them measured anew, and the test refuses it until they are. Corpus v26: the 0.38 pair
-# (context-v3-bb8097ea5941) converts 13 355 and 13 390 of the 13 773 conversion rows with 8 false
-# conversions in each profile.
-RECEIPT_CALIBRATION_REFERENCE_CORPUS: Final = "81431115e9a6b6ddec16bc16b76c0359b0e1f04f49fb1b86021653b37264f8f9"
-RECEIPT_CALIBRATION_REFERENCE_MODEL: Final = "context-v3-bb8097ea5941"
-RECEIPT_CALIBRATION_REFERENCE_NET: Final[dict[str, int]] = {"portable": 13347, "reference_hunspell": 13382}
+# (context-v3-bb8097ea5941) converted 13 355 and 13 390 of the 13 773 conversion rows with 8 false
+# conversions in each profile. Corpus v27: the corpus v26 pair (context-v3-984962d926d3) converts
+# 13 446 and 13 481 of the 13 774 conversion rows with 10 false conversions in each profile.
+RECEIPT_CALIBRATION_REFERENCE_CORPUS: Final = "5abe6ad8f8943ca91b99317b54d67e1e44831750a4bc53ffe30a39df45363e45"
+RECEIPT_CALIBRATION_REFERENCE_MODEL: Final = "context-v3-984962d926d3"
+RECEIPT_CALIBRATION_REFERENCE_NET: Final[dict[str, int]] = {"portable": 13436, "reference_hunspell": 13471}
+# How far below the replaced pair's net the installed pair may fall, as a share of the conversion
+# rows of its profile (0.2 %: 27 of 13 774 rows). Two fits of one recipe on corpora twelve TRAIN rows
+# apart (v26 and v27) differ by about 20 rows of calibration, all of them within 0.02 of the serving
+# threshold, so a strict comparison judged the draw as much as the model. Set on 06.10.2026 by the
+# owner's decision for the corpus v27 pair, which nets 13 417 and 13 449 there: 19 and 22 rows below
+# the corpus v26 pair, while it restores 178 rows of test v27 against 161 with the early switch off
+# and nets more on the owner's own typing.
+RECEIPT_CALIBRATION_NET_TOLERANCE_SHARE: Final = 0.002
 # Serving thresholds are part of the contract: a lower threshold converts on weaker evidence.
 RECEIPT_MIN_CONVERSION_THRESHOLD: Final = 0.99
 RECEIPT_MIN_PREFIX_CONVERSION_THRESHOLD: Final = 0.985

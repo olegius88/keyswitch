@@ -4,6 +4,47 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- A short word that waits for its neighbour is asked about once more when the neighbour stays as
+  typed. The pair converted only when the next word converted too, and a term typed in the Russian
+  layout amid Russian prose has a next word that is right as typed: `зк` stayed in `есть новые зк
+  проверь` and `тзь сш` in `сам выполни тзь сш`. Now the model is asked about the waiting word (up
+  to five letters) with the kept word after it, a question with weights and training frames of its
+  own (`kept_next_word`); a conversion replaces that word alone, types the next word again as it
+  was, and leaves the layout there. Undo restores both words. A model without these weights answers
+  `suggest`, so nothing changes with an older pair.
+- The context model is retrained on corpus v27 (test v27 sealed before training and passed). On the
+  replay of the owner's own typing it converts 620 words right, leaves 106 in the wrong layout and
+  converts 59 falsely, against 606/114/57 for 0.39.0; on the 239 words whose layout the user's own
+  correction shows, 97/35/8 against 97/34/7; on the newer logs of 0.37-0.38.1 (3 171 words),
+  104/11/7 against 101/14/7. On test v27 it keeps all 204 correctly typed rows, as the frozen
+  baseline does, and restores 178 rows against 161 with the early switch off and 24 against 24 with
+  it on; development v27 is unchanged (119 and 246 sequences against 119 and 247). The prefix model
+  retrained byte-identical. What it learned:
+  - The question above, from natural word pairs of either language (keep), counted Latin terms
+    typed in the Russian layout before a Russian word (convert), and counted Russian abbreviations
+    and misspelt Russian words in the same place (keep).
+  - A Russian abbreviation that Russian technical text uses far more often than its Latin keys
+    stays: `тз` amid Russian prose became `np` at p=0.993 (`если тз готов`), because the language
+    models know `np` and neither knows `тз`; how often each reading occurs was a feature already,
+    but no frame of the word decided at its own boundary held such a token. The trainer frames every
+    such abbreviation (802, `тз`, `хз`, `впс`) as kept after Russian prose, and every counted Latin
+    term whose Cyrillic reading is nothing (1 752) typed in the Russian layout there as converted.
+- The calibration floor of the installed pair moves to corpus v27, with the corpus v26 pair as the
+  pair it replaced, and allows 0.2 % of the conversion rows of a profile (27 rows) below what that
+  pair nets, by the owner's decision. Two fits of one recipe on corpora twelve training rows apart
+  differ by about 20 calibration rows, all within 0.02 of the serving threshold. The new pair nets
+  13 417 and 13 449 there against 13 436 and 13 471, with 14 false conversions per profile against
+  10; the recall floor returns to 0.976 (0.97626 pooled, against 0.97746).
+- Disclosed: with the early switch off and the portable lexicons, the authored sentence `Он играл в
+  NBA шесть сезонов.` gets `ТИФ` for `NBA`; the other 37 authored Latin citations stay, and with the
+  early switch on all 38 do. In the owner's typing `кз` still becomes `rp` and `иишку` `bbire`, and
+  `зы` typed for `ps` stays.
+- Measured and not taken (`model/context_v3/README.md`): the same pair without the abbreviation
+  frames (more right conversions, but `тз`, `2фа`, `кз` and `ви` converted: 616/108/67), the
+  abbreviation frames with half the counted terms (`npm`, `apk`, `env` typed in the Russian layout
+  missed: 611/113/59), and convert frames for Cyrillic tokens whose Latin keys Russian technical
+  text counts more often, which would have converted `ща` to `of`.
+
 ## 0.39.0 — 2026-10-05
 
 - A domain, an address or a file name typed in the other layout is restored. A Latin reading with
