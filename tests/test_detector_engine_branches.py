@@ -730,11 +730,12 @@ class FakeBackend:
         source_group: int | None = None,
         late: Sequence[KeyEvent] = (),
         trailing: Sequence[KeyEvent] = (),
+        kept_tail: int = 0,
     ) -> int:
         if self.inject_error:
             raise self.inject_error
         self.injections.append((tuple(strokes), target_group, boundary, source_group))
-        self.group = target_group
+        self.group = target_group if not kept_tail or source_group is None else source_group
         return 0
 
     def set_key_filter(

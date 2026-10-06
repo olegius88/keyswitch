@@ -53,6 +53,7 @@ from .context_policy import (
 )
 from .constants.models import (
     CONTEXT_ACTION_FEATURE_VERSION,
+    KEPT_CONTEXT_WORD_MAX_CHARACTERS,
     PLANNED_CONTEXT_WORD_MAX_CHARACTERS,
     PREFIX_MAX_CHARACTERS,
     PREFIX_MIN_CHARACTERS,
@@ -146,7 +147,7 @@ class CorrectionPlan:
     application: str
     automatic: bool = True
     # boundary | pause | manual | undo | early | symbols | late_stroke
-    # | mention_shown | mention_hidden
+    # | mention_shown | mention_hidden | context_phrase | context_word
     mode: str = "boundary"
     context_field: str = ""
     # Literal punctuation before `boundary`, not replayed in the new layout.
@@ -166,6 +167,10 @@ class CorrectionPlan:
     # of both layouts, and `original` is that text. Undo types every key in `source_group`;
     # this is the text it leaves there, the keys as typed.
     typed: str = ""
+    # The last strokes of `strokes` that stay in `source_group`: a waiting word converted alone
+    # before its next word, which is typed again as it was (_decide_with_kept_neighbour). The
+    # layout stays `source_group`.
+    kept_tail: int = 0
 
 
 @dataclass(frozen=True)
@@ -212,6 +217,9 @@ class WaitingContextWord:
     # A word the model only suggested converting is asked again when its neighbour
     # arrives, never at a pause: a pause brings no new context to decide with.
     settles_on_pause: bool = True
+    # The detector's verdict on the word at its own boundary: the baseline the model saw there,
+    # and the one it is asked with again beside a kept next word.
+    baseline: DetectionDecision | None = None
 
 
 # The baseline reason of the question a converted word is asked again (_revert_with_next_word).
@@ -1591,9 +1599,14 @@ class KeySwitchEngine:
             ) if switched and early_switch_origin is not None else decision
             joint = None if trailing or head or signs else self._resolve_context_wait(
                 waiting, strokes, boundary, neighbour, application, alternatives, switched=switched)
+            alone: CorrectionPlan | None = None
             if joint is not None and waiting is not None:
                 joint = (self._take_along(kept, joint[0], len(waiting.plan.original), application, switched=switched),
                          joint[1])
+            elif (waiting is not None and not (head or trailing or signs or switched) and not decision.should_convert
+                  and (alone := self._decide_with_kept_neighbour(waiting, strokes, boundary, decision, application))):
+                # The waiting word converts on its own; its kept neighbour stays as it was typed.
+                pass
             elif waiting is not None and not head and (trailing or not decision.should_convert):
                 # A waiting word whose neighbour did not convert either may still be settled by a
                 # later word (`тщ ш`, then `огые`); one the model declined with a converted
@@ -1653,6 +1666,11 @@ class KeySwitchEngine:
                 if decision.reason == ISOLATED_SHORT_WORD_REASON or self._opening_conversion(inside, original):
                     self._start_context_wait(plan, decision, boundary, trailing, head, fallback=True)
             else:
+                if alone is not None:
+                    self._log_pending_dropped("superseded_by_boundary")
+                    self._pending = alone
+                    self._learning_prompt_after = None
+                    self._pending_trigger_keycode = boundary.keycode
                 self._remember_context(application, source_group, typed[:head] + strokes + signs)
                 waits = False if signs else self._start_context_wait(plan, decision, boundary, trailing, head)
                 if inside is None and not trailing and not head and not signs:
@@ -2390,6 +2408,57 @@ class KeySwitchEngine:
             typed=self._text_for_group(keys, previous.source_group) if switched else "",
         ), decision
 
+    def _decide_with_kept_neighbour(
+        self, waiting: WaitingContextWord, strokes: tuple[KeyEvent, ...], boundary: KeyEvent,
+        decision: DetectionDecision, application: str,
+    ) -> CorrectionPlan | None:
+        """A waiting word whose next word stayed, asked once more with that word after it.
+
+        The pair converts together only when the next word converts too, and a term typed in the
+        Russian layout amid Russian prose has a next word that is right as typed: `зк` stayed in
+        `есть новые зк проверь`, `тзь сш` in `сам выполни тзь сш` (the owner's typing, 0.38 and
+        0.39). The model is asked about the waiting word with the kept word as its right context,
+        the `kept_next_word` question it has weights and frames of its own for, and a conversion
+        it is sure of replaces that word alone: the next word is typed again in its own layout,
+        and the layout stays there.
+        """
+
+        previous = waiting.plan
+        model = self.context_policy.model
+        if (
+            model is None or model.feature_version != CONTEXT_ACTION_FEATURE_VERSION or waiting.baseline is None
+            or previous.boundary is None or previous.boundary.character != " "
+            or boundary.character != " " or boundary.deferred
+            or not 0 < len(previous.original) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS
+            or not decision.original or any(char.isspace() for char in decision.original)
+            or time.monotonic() > waiting.deadline or waiting.window != (self._focus_window or 0)
+            or previous.application != application or previous.source_group != decision.source_group
+            or any(stroke.group != previous.source_group for stroke in (*previous.strokes, *strokes))
+        ):
+            return None
+        original = previous.original + previous.boundary.character + decision.original
+        if not self.context_policy.stream.text.endswith(original + boundary.character):
+            return None
+        group = previous.target_group
+        alternative = self._text_for_group(previous.strokes, group)
+        result = self.context_policy.decide(
+            waiting.baseline, alternative, group, self.detector, "space", "assist",
+            after=decision.original, field_override=waiting.field,
+            boundary_text=previous.boundary.character, after_origin="kept_next_word",
+        )
+        if not result.decision.should_convert:
+            self._log_context_wait("context_wait_cancelled", waiting, "kept_neighbour_declined")
+            return None
+        self._technical_event("context_wait_resolved", wait_id=waiting.diagnostic_id,
+                              previous_characters=len(previous.original), next_characters=len(decision.original),
+                              next_word_kept=True)
+        return CorrectionPlan(
+            previous.strokes + (previous.boundary,) + strokes, boundary, previous.source_group, group,
+            original, alternative + previous.boundary.character + decision.original,
+            result.decision.confidence, application, True, "context_word", self._context_field_id(),
+            kept_tail=len(strokes),
+        )
+
     @staticmethod
     def _neighbour_origin(word: str) -> AfterOrigin:
         """How a word asked again with its converted neighbour names that right context.
@@ -2635,7 +2704,7 @@ class KeySwitchEngine:
             # window, a caret move, Backspace, a changed field.
             self._context_waiting = WaitingContextWord(
                 plan, decision, result.field, self._focus_window or 0, time.monotonic() + CONTEXT_TTL,
-                self._context_wait_sequence, settles,
+                self._context_wait_sequence, settles, self._last_baseline,
             )
             # The pause that settles this wait (_settle_context_wait_after_pause) is
             # counted from its boundary. The commit has just cleared the word timer,
@@ -4017,15 +4086,20 @@ class KeySwitchEngine:
                     )
                     self._last_committed_stale = True
                     return False
-                options = {"trailing": plan.trailing} if plan.trailing else {}
-                held = self.backend.inject_correction(
-                    plan.strokes,
-                    plan.target_group,
-                    plan.boundary,
-                    plan.source_group,
-                    late=late,
-                    **options,
-                )
+                if plan.kept_tail:
+                    held = self.backend.inject_correction(
+                        plan.strokes, plan.target_group, plan.boundary, plan.source_group,
+                        late=late, trailing=plan.trailing, kept_tail=plan.kept_tail,
+                    )
+                elif plan.trailing:
+                    held = self.backend.inject_correction(
+                        plan.strokes, plan.target_group, plan.boundary, plan.source_group,
+                        late=late, trailing=plan.trailing,
+                    )
+                else:
+                    held = self.backend.inject_correction(
+                        plan.strokes, plan.target_group, plan.boundary, plan.source_group, late=late,
+                    )
             finally:
                 held += self.backend.release_input()
         except Exception as error:
@@ -4051,7 +4125,9 @@ class KeySwitchEngine:
             self._clear_word(reason="injection_failed")
             self._update(last_error=str(error), last_action="Ошибка замены · проверьте текст в приложении")
             return False
-        self._note_engine_switch(plan.target_group)
+        # A word converted before a kept neighbour leaves the layout where the neighbour was typed.
+        layout_after = plan.source_group if plan.kept_tail else plan.target_group
+        self._note_engine_switch(layout_after)
         replayed_only_releases = (
             held > 0 and self._typed_events - typed_before == held
             and self._typed_presses == presses_before
@@ -4182,11 +4258,13 @@ class KeySwitchEngine:
             self._update(current_word=plan.replacement)
             if not plan.automatic:
                 self._manual_layout_group = plan.target_group
-        self._remember_context(plan.application, plan.target_group, plan.strokes)
+        if not plan.kept_tail:
+            # The kept neighbour was remembered at its own boundary and is still the last word.
+            self._remember_context(plan.application, plan.target_group, plan.strokes)
         count = self.snapshot.correction_count + (1 if plan.automatic else 0)
         action = f"{plan.original} → {plan.replacement}"
         self._update(
-            current_group=plan.target_group,
+            current_group=layout_after,
             correction_count=count,
             last_action=action,
             last_error="",

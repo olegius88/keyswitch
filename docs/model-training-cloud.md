@@ -23,6 +23,8 @@
   импортируются;
 - ставит закреплённый mypy и заглушки PyGObject в `.typing/` тем же
   интерпретатором (`tools/install-typing-tools.sh`);
+- ставит NumPy в `build/training-site` (`tools/install-training-accelerators.sh`):
+  без него тренер context-v3 не работает;
 - экспортирует в сессию `PATH`, `PYTHONPATH=src` и `KEYSWITCH_TYPING_ROOT=.typing`.
 
 Хук идемпотентен: уже установленные пакеты не переустанавливаются. Он начнёт
@@ -150,7 +152,8 @@ CI работает на ubuntu-26.04 с более новым Python, чем о
       --prefix-inventory <inventory.json> --ledger <ledger> --report <r>` —
       естественные предложения Tatoeba в обучающих сплитах.
    9. Обучение и оценка — как в README context v3: `train_context_action_model.py
-      --corpus <fit>`, `train_prefix_v2_model.py`, затем
+      --corpus <fit>` (видеокарты в контейнере нет, тренер считает на всех ядрах CPU, см.
+      [бэкенды обучения](context-v3-training-backends.md)), `train_prefix_v2_model.py`, затем
       `evaluate_context_action_sequences.py` на development и один раз на test
       (`--corpus <fit>`; журнал пишется в `LEDGER_ROOT` evaluator'а).
 
@@ -163,7 +166,7 @@ CI работает на ubuntu-26.04 с более новым Python, чем о
 
 - коммитьте и пушьте то, что по протоколу модели входит в репозиторий
   (recipe, candidate, seal, публичный отчёт, README);
-- приватные выходы (`features-*.jsonl.gz`, строки отчётов, журналы) переносите
+- приватные выходы (строки отчётов, журналы) переносите
   тем же приватным путём, что и корпус;
 - журнал доступа к test сохраняйте вместе с корпусом, иначе следующий запуск
   оценит уже израсходованный test как новый.

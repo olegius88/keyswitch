@@ -689,3 +689,33 @@ PREFIX_EXPOSURE_FIXTURE_PREFIX_LENGTH = 2
 MIXED_CONTEXT_SAMPLE_ROWS = 12
 # Words per length the capital citation curriculum test draws.
 CAPITAL_CITATION_FIXTURE_WORDS_BY_LENGTH: Final = {"3": 3, "4": 2}
+# Kept-neighbour curriculum fixtures: frames of each kind, the least count a term or an abbreviation
+# needs in the packaged term table, and how much more often an abbreviation is counted than its keys.
+KEPT_NEIGHBOUR_FIXTURE_FRAMES: Final = 6
+KEPT_NEIGHBOUR_FIXTURE_TERM_COUNT: Final = 50
+KEPT_NEIGHBOUR_FIXTURE_ABBREVIATION_COUNT: Final = 20
+KEPT_NEIGHBOUR_FIXTURE_DOMINANCE: Final = 3
+COUNTED_TOKEN_FIXTURE_FRAMES_PER_WORD: Final = 3
+# English-capital frames of the fixture: the four commonest two-letter Russian words, two contexts each.
+ENGLISH_CAPITAL_FIXTURE_WORDS_BY_LENGTH: Final = {"2": 4}
+ENGLISH_CAPITAL_FIXTURE_FRAMES_PER_WORD: Final = 2
+# Feature budget of the capitals head a frozen-base fixture names.
+HEAD_FIXTURE_MAXIMUM_FEATURES: Final = 7
+# X11 kept-tail fixture: taps deleted (three strokes, the boundary, one late key) and taps typed again
+# (two converted strokes, the kept stroke, the boundary and the late key).
+X11_KEPT_TAIL_FIXTURE_DELETES: Final = 5
+X11_KEPT_TAIL_FIXTURE_TAPS: Final = 5
+# Windows kept-tail fixture: SendInput batches (deletion with the converted keys, then the kept word with
+# the boundary), strokes deleted (three and the boundary), strokes typed in each batch, events per stroke.
+WINDOWS_KEPT_TAIL_SEND_BATCHES: Final = 2
+WINDOWS_KEPT_TAIL_DELETED_STROKES: Final = 4
+WINDOWS_KEPT_TAIL_TYPED_STROKES: Final = 2
+WINDOWS_PRESS_RELEASE_EVENTS: Final = 2
+# The context-v3 trainer's back ends in their tests: natural frames per split, frames per featurisation
+# task (few, so that a split takes several tasks), worker processes of the forked run, and the feature
+# names and rows of the packing test.
+BACK_END_FIXTURE_FRAMES: Final = 7
+BACK_END_FIXTURE_FRAMES_PER_TASK: Final = 3
+BACK_END_FIXTURE_JOBS: Final = 2
+BACK_END_FIXTURE_NAMES: Final = 9
+BACK_END_FIXTURE_ROWS: Final = 11

@@ -48,6 +48,8 @@ from .constants.models import (
     CONTEXT_TYPO_FEATURE_VERSION,
     CONTEXT_TYPO_MIN_CHARACTERS,
     CONTEXT_V1_CONVERSION_THRESHOLD,
+    KEPT_FEATURE_PREFIX,
+    MAX_CONTEXT_ACTION_MODEL_FEATURES,
     MAX_CONTEXT_FEATURE_NAME_CHARACTERS,
     MAX_CONTEXT_MODEL_FEATURES as MAX_FEATURES,
     MAX_CONTEXT_MODEL_VERSION_CHARACTERS,
@@ -64,7 +66,7 @@ __all__ = [
 ]
 
 ContextAction = Literal["keep", "convert", "wait", "suggest"]
-AfterOrigin = Literal["none", "field", "planned_next_conversion"]
+AfterOrigin = Literal["none", "field", "planned_next_conversion", "kept_next_word"]
 ACTIONS: Final[tuple[ContextAction, ...]] = ("keep", "convert", "wait", "suggest")
 ARTIFACT_PATH = Path(__file__).parent / "resources" / "models" / "context_policy_v1.json"
 _WORDS = re.compile(r"[^\W\d_]+(?:['’\-][^\W\d_]+)*", re.UNICODE)
@@ -421,7 +423,11 @@ class ContextModel:
             # Schema 7 reads how often each reading occurs in Russian text: the model is not whole without it.
             _term_frequency()
         raw_weights: object = payload.get("weights")
-        if not isinstance(raw_weights, dict) or not 0 < len(raw_weights) <= MAX_FEATURES:
+        if feature_version == CONTEXT_ACTION_FEATURE_VERSION:
+            # Two feature spaces, each with its own budget (MAX_CONTEXT_ACTION_MODEL_FEATURES).
+            if not isinstance(raw_weights, dict) or not 0 < len(raw_weights) <= MAX_CONTEXT_ACTION_MODEL_FEATURES:
+                raise ValueError("invalid context weights")
+        elif not isinstance(raw_weights, dict) or not 0 < len(raw_weights) <= MAX_FEATURES:
             raise ValueError("invalid context weights")
         weights: dict[str, tuple[float, ...]] = {}
         for name, values in raw_weights.items():
@@ -460,7 +466,8 @@ class ContextModel:
             text = ACTION_FEATURE_CHARACTER_TEXT_FIELD_INDEX
             return all(any(
                 name in self.weights for name in features
-                if name.startswith(label + ":char:") and any(char.isalpha() for char in name.split(":", text)[text])
+                if (bare := name.removeprefix(KEPT_FEATURE_PREFIX)).startswith(label + ":char:")
+                and any(char.isalpha() for char in bare.split(":", text)[text])
             ) for label in ("source", "target"))
         return any(
             name in self.weights

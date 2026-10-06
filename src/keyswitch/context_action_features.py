@@ -25,6 +25,11 @@ from .constants.models import (
     ACTION_FEATURE_WHITESPACE_MAX_CHARACTERS,
     ACTION_FEATURE_WORD_MAX_CHARACTERS,
     ACTION_FEATURE_WORD_SCORE_BOUND,
+    CAPITALS_FEATURE_PREFIX,
+    CAPITALS_HEAD_MAX_LETTERS,
+    CAPITALS_HEAD_MIN_LETTERS,
+    KEPT_CONTEXT_WORD_MAX_CHARACTERS,
+    KEPT_FEATURE_PREFIX,
     PLANNED_CONTEXT_AFTER_MAX_CHARACTERS,
     PLANNED_CONTEXT_WORD_MAX_CHARACTERS,
 )
@@ -215,8 +220,15 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
     if type(item.source_group) is not int or item.source_group not in (0, 1):
         raise ValueError("invalid context action direction")
     origin = item.after_origin
-    if origin not in ("none", "field", "planned_next_conversion"):
+    if origin not in ("none", "field", "planned_next_conversion", "kept_next_word"):
         raise ValueError("invalid right-context origin")
+    if origin == "kept_next_word" and (
+        not 0 < len(item.original) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS
+        or item.trigger != "space" or item.boundary_text != " "
+        or not item.field.after or len(item.field.after) > PLANNED_CONTEXT_AFTER_MAX_CHARACTERS
+        or any(char.isspace() for char in item.field.after)
+    ):
+        raise ValueError("unreachable kept right context")
     if origin == "planned_next_conversion" and (
         not 0 < len(item.original) <= PLANNED_CONTEXT_WORD_MAX_CHARACTERS
         or item.trigger != "space" or item.boundary_text != " "
@@ -330,4 +342,29 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
             features[f"ortho:{sign}:direction:{direction}"] = value
             features[f"ortho:{sign}:{category}"] = value
     _term_features(features, item, direction)
-    return {name: value for name, value in features.items() if value}
+    if origin == "kept_next_word":
+        # A waiting word whose next word stayed as typed is a question of its own: the same
+        # evidence, its own weights (KEPT_FEATURE_PREFIX). Sharing them, the question took the
+        # weights of the converted-neighbour frames and turned `еще` before `поищу` into `tot`.
+        return {KEPT_FEATURE_PREFIX + name: value for name, value in features.items() if value}
+    result = {name: value for name, value in features.items() if value}
+    if capitals_question(item.original, item.field.before):
+        # The class the capitals head answers: its features once more under their own names, beside
+        # the shared ones, so a head fitted onto a frozen model moves no decision outside the class.
+        # `BP` in English prose read `ИЗ` at p=0.997, and the frames that kept it moved the weights
+        # the Latin keys of `не` and `что` share (`yt`, `xnj` stayed as typed).
+        result.update({CAPITALS_FEATURE_PREFIX + name: value for name, value in list(result.items())})
+    return result
+
+
+def capitals_question(original: str, before: str) -> bool:
+    """A token of letters only, all capitals, of CAPITALS_HEAD_MIN_LETTERS to CAPITALS_HEAD_MAX_LETTERS,
+    after text with more Latin letters than Cyrillic ones (`affected by the BP`).
+
+    After Russian prose the same shape is as often a word typed with Caps Lock (`я YT` for `я НЕ`) as a
+    cited abbreviation (`по версии WBC`), and a head fitted there kept 54 of 72 such words the corpus
+    v26 pair converts, or converted the abbreviations; there the frozen model decides alone.
+    """
+
+    return (CAPITALS_HEAD_MIN_LETTERS <= len(original) <= CAPITALS_HEAD_MAX_LETTERS and original.isalpha() and original.isupper()
+            and _dominant(before[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:].casefold()) == "en")

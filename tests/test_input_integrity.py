@@ -79,19 +79,24 @@ class EditorBackend(FakeBackend):
         boundary: KeyEvent | None, source_group: int | None = None,
         late: Sequence[KeyEvent] = (),
         trailing: Sequence[KeyEvent] = (),
+        kept_tail: int = 0,
     ) -> int:
         word = tuple(strokes)
         count = len(word) + len(trailing) + int(boundary is not None) + len(late)
         start = self.caret - count
         if start < 0:
             raise AssertionError("Correction attempted to erase text outside the word")
-        replacement = "".join(stroke.character_for(target_group) for stroke in word)
+        # The kept tail and the keys after it are typed in the layout the tail was typed in.
+        final_group = target_group if not kept_tail else source_group if source_group is not None else word[0].group
+        replacement = "".join(
+            stroke.character_for(final_group if index >= len(word) - kept_tail else target_group)
+            for index, stroke in enumerate(word))
         replacement += "".join(stroke.character for stroke in trailing)
         replacement += boundary.character if boundary else ""
-        replacement += "".join(stroke.character_for(target_group) for stroke in late)
+        replacement += "".join(stroke.character_for(final_group) for stroke in late)
         self.text = self.text[:start] + replacement + self.text[self.caret:]
         self.caret = start + len(replacement)
-        return super().inject_correction(word, target_group, boundary, source_group, late, trailing)
+        return super().inject_correction(word, target_group, boundary, source_group, late, trailing, kept_tail)
 
 
 class InputIntegrityTests(unittest.TestCase):

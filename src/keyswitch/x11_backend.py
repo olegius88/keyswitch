@@ -809,11 +809,16 @@ class X11Backend:
         source_group: int | None = None,
         late: Sequence[KeyEvent] = (),
         trailing: Sequence[KeyEvent] = (),
+        kept_tail: int = 0,
     ) -> int:
+        """Replace the word; the last ``kept_tail`` strokes, the boundary and the late keys stay in the source layout."""
+
         if not self._control:
             raise X11Error("X11 backend не запущен")
         stroke_list = list(strokes)
         late_list = list(late)
+        if kept_tail < 0 or (kept_tail and (kept_tail >= len(stroke_list) or source_group is None)):
+            raise X11Error("Некорректная граница сохраняемого слова; замена отменена")
         literal = tuple(trailing) + (() if boundary is None else (boundary,))
         keyboard_state = XkbStateRec()
         if self._libraries.x11.XkbGetState(self._control, XKB_USE_CORE_KBD, ctypes.byref(keyboard_state)) != 0:
@@ -844,19 +849,25 @@ class X11Backend:
         )
         for _ in range(delete_count):
             tap(sequence, backspace_keycode)
-        for stroke in stroke_list:
-            tap(sequence, stroke.keycode, shifted(stroke, target_group))
-        # Keys typed after the word are deleted with it and typed again in the
-        # new layout. They are left out of ``_expected`` on purpose: the engine
-        # must see them come back as the user's own input.
-        late_sequence: list[tuple[bool, int]] = []
-        for stroke in late_list:
-            tap(late_sequence, stroke.keycode, shifted(stroke, target_group))
         rendered_source_group = (
             source_group
             if source_group is not None
             else stroke_list[0].group if stroke_list else target_group
         )
+        final_group = rendered_source_group if kept_tail else target_group
+        converted = stroke_list[:len(stroke_list) - kept_tail]
+        for stroke in converted:
+            tap(sequence, stroke.keycode, shifted(stroke, target_group))
+        # A kept word is typed again in its own layout, after the switch back.
+        kept_sequence: list[tuple[bool, int]] = []
+        for stroke in stroke_list[len(converted):]:
+            tap(kept_sequence, stroke.keycode, shifted(stroke, final_group))
+        # Keys typed after the word are deleted with it and typed again in the
+        # new layout. They are left out of ``_expected`` on purpose: the engine
+        # must see them come back as the user's own input.
+        late_sequence: list[tuple[bool, int]] = []
+        for stroke in late_list:
+            tap(late_sequence, stroke.keycode, shifted(stroke, final_group))
         preserve_boundary_layout = any(stroke.character_for(target_group) != stroke.character for stroke in literal)
         literal_group = literal[0].group if literal else rendered_source_group
         if not 0 <= literal_group < self.group_count or any(stroke.group != literal_group for stroke in literal):
@@ -871,21 +882,27 @@ class X11Backend:
             )
         )
         target_boundary_sequence = (
-            () if preserve_boundary_layout else boundary_sequence
+            () if preserve_boundary_layout or kept_tail else boundary_sequence
         )
         source_boundary_sequence = (
-            boundary_sequence if preserve_boundary_layout else ()
+            boundary_sequence if preserve_boundary_layout and not kept_tail else ()
         )
+        # After a kept word the boundary follows it in the same layout.
+        kept_boundary_sequence = boundary_sequence if kept_tail else ()
         expected_count = (
             len(sequence)
             + len(target_boundary_sequence)
             + len(source_boundary_sequence)
+            + len(kept_sequence)
+            + len(kept_boundary_sequence)
         )
         with self._inject_lock:
             with self._expected_lock:
                 self._expected.extend(sequence)
                 self._expected.extend(target_boundary_sequence)
                 self._expected.extend(source_boundary_sequence)
+                self._expected.extend(kept_sequence)
+                self._expected.extend(kept_boundary_sequence)
                 self._expected_deadline = time.monotonic() + max(
                     MIN_INJECTION_DEADLINE_SECONDS, expected_count * INJECTION_SECONDS_PER_EVENT
                 )
@@ -924,6 +941,16 @@ class X11Backend:
                         raise X11Error(
                             f"Не удалось восстановить XKB-группу {target_group}"
                         )
+                if kept_tail:
+                    if not self._libraries.x11.XkbLockGroup(
+                        self._control, XKB_USE_CORE_KBD, final_group
+                    ):
+                        raise X11Error(f"Не удалось вернуть XKB-группу {final_group}")
+                    for pressed, keycode in (*kept_sequence, *kept_boundary_sequence):
+                        if not self._libraries.xtst.XTestFakeKeyEvent(
+                            self._control, keycode, int(pressed), 0
+                        ):
+                            raise X11Error(f"XTest отклонил keycode {keycode}")
                 for pressed, keycode in late_sequence:
                     if not self._libraries.xtst.XTestFakeKeyEvent(
                         self._control, keycode, int(pressed), 0

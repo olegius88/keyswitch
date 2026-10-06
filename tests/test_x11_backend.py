@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+from dataclasses import replace
 import os
 import struct
 import threading
@@ -47,6 +48,8 @@ from fixture_values.clock import X11_EXPECTED_DEADLINE_MARGIN_SECONDS, X11_FIXTU
 from fixture_values.counts import (
     X11_DELETE_TAP_EVENTS,
     X11_EVENTS_PER_TAP,
+    X11_KEPT_TAIL_FIXTURE_DELETES,
+    X11_KEPT_TAIL_FIXTURE_TAPS,
     X11_EXCESSIVE_GROUP_COUNT,
     X11_LIBRARY_INIT_COUNT,
     X11_MIN_FREE_CALLS,
@@ -871,6 +874,41 @@ class BackendInjectionTests(unittest.TestCase):
                 self.assertEqual(backend._expected, deque())
                 libraries.xtst.XTestGrabControl.assert_called_with(1, 0)
                 libraries.x11.XFlush.assert_called_with(1)
+
+    def test_a_kept_tail_is_typed_back_in_the_source_group_where_the_layout_stays(self) -> None:
+        backend, libraries = backend_with()
+        backend._control = 1
+        space = KeyEvent(True, SPACE_KEYCODE, "space", " ", (" ", " "), 1, 0, 1)
+        word, kept = replace(self.stroke(), group=1), replace(self.stroke(), group=1)
+        strokes = [word, space, kept]
+        backend.inject_correction(strokes, 0, space, source_group=1, late=[self.stroke()], kept_tail=1)
+        # Converted keys in the target group, then the kept word, the boundary and the late key in the source.
+        group_of = {"target": 0, "source": 1}
+        self.assertEqual([call.args[-1] for call in libraries.x11.XkbLockGroup.call_args_list],
+                         [group_of["target"], group_of["source"]])
+        self.assertEqual(libraries.xtst.XTestFakeKeyEvent.call_count,
+                         (X11_KEPT_TAIL_FIXTURE_DELETES + X11_KEPT_TAIL_FIXTURE_TAPS) * X11_EVENTS_PER_TAP)
+        self.assertEqual(len(backend._expected), (X11_KEPT_TAIL_FIXTURE_DELETES + X11_KEPT_TAIL_FIXTURE_TAPS - 1) * X11_EVENTS_PER_TAP)
+        for refused in ({"kept_tail": -1}, {"kept_tail": len(strokes)}, {"kept_tail": 1, "source_group": None}):
+            with self.subTest(refused=refused), self.assertRaisesRegex(X11Error, "сохраняемого слова"):
+                backend.inject_correction(strokes, 0, space, **{"source_group": 1, **refused})  # type: ignore[arg-type]
+
+    def test_a_kept_tail_whose_group_or_key_is_refused_fails_and_clears_expected(self) -> None:
+        space = KeyEvent(True, SPACE_KEYCODE, "space", " ", (" ", " "), 1, 0, 1)
+        word = replace(self.stroke(), group=1)
+        for mode in ("lock", "fake"):
+            with self.subTest(mode=mode):
+                backend, libraries = backend_with()
+                backend._control = 1
+                if mode == "lock":
+                    libraries.x11.XkbLockGroup.side_effect = [1, 0]
+                else:
+                    # The deletion without a late key and the two converted strokes go through; the kept one fails.
+                    accepted = X11_KEPT_TAIL_FIXTURE_DELETES - 1 + len([word, space])
+                    libraries.xtst.XTestFakeKeyEvent.side_effect = [1] * accepted * X11_EVENTS_PER_TAP + [0]
+                with self.assertRaises(X11Error):
+                    backend.inject_correction([word, space, word], 0, space, source_group=1, kept_tail=1)
+                self.assertEqual(backend._expected, deque())
 
     def test_target_boundary_fake_event_error_clears_expected(self) -> None:
         backend, libraries = backend_with()

@@ -582,6 +582,24 @@ class InjectionDetailTests(unittest.TestCase):
         codes = [(item.pressed, item.keycode) for item in self.api.posted]
         self.assertIn((True, MAC_VK_ANSI_Z), codes)
 
+    def test_a_kept_tail_is_typed_back_in_the_source_layout_where_the_layout_stays(self) -> None:
+        batches: list[tuple[str, tuple[int, ...]]] = []
+        post = self.api.post_inputs
+
+        def recording(inputs: tuple[NativeInput, ...]) -> int:
+            batches.append((self.api.current, tuple(item.keycode for item in inputs if item.pressed)))
+            return post(inputs)
+
+        self.api.post_inputs = recording  # type: ignore[method-assign]
+        word, kept = self.stroke(MAC_VK_ANSI_Q, 1), self.stroke(MAC_VK_ANSI_Z, 1)
+        self.backend.inject_correction([word, kept], 0, None, source_group=1, kept_tail=1)
+        self.assertEqual(self.api.current, RUSSIAN)
+        self.assertEqual([batch for batch in batches if batch[1]],
+                         [(ENGLISH, (MAC_VK_BACKSPACE, MAC_VK_BACKSPACE, MAC_VK_ANSI_Q)), (RUSSIAN, (MAC_VK_ANSI_Z,))])
+        for refused in ({"kept_tail": -1}, {"kept_tail": len([word, kept])}, {"kept_tail": 1, "source_group": None}):
+            with self.subTest(refused=refused), self.assertRaisesRegex(MacBackendError, "сохраняемого слова"):
+                self.backend.inject_correction([word, kept], 0, None, **{"source_group": 1, **refused})  # type: ignore[arg-type]
+
     def test_late_keys_are_typed_again_after_the_replacement(self) -> None:
         late = self.stroke(MAC_VK_ANSI_Z)
         self.backend.inject_correction([self.stroke(MAC_VK_ANSI_Q)], 1, None, late=(late,))

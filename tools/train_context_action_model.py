@@ -9,6 +9,7 @@ The engine evaluator must separately check the complete physical input stream.
 from __future__ import annotations
 
 import argparse
+import gc
 import gzip
 import hashlib
 import json
@@ -16,14 +17,17 @@ import math
 import re
 from array import array
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass, replace
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import cast
+from typing import Final, cast
 from unittest.mock import patch
 
 from keyswitch.context_action_features import extract_action_features
-from keyswitch.context_model import ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, term_bucket
+from keyswitch.context_model import (
+    ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, _term_frequency, term_bucket,
+)
 from keyswitch.context_policy import evidence_for_decision
 from keyswitch.detector import LanguageDetector
 from keyswitch.identifier_lexicon import IdentifierLexicon
@@ -36,13 +40,17 @@ from keyswitch.short_words import TRUSTED_SINGLE_LETTER_WORDS
 from keyswitch.word_decision import automatic_word_decision
 
 from keyswitch.constants.model_protocol import (
+    CALIBRATION,
+    DEVELOPMENT,
     FITTING_SPLITS,
+    REFERENCE_HUNSPELL,
     REJECTED_BEFORE_TEST,
     SEALED_BEFORE_TEST,
+    TRAIN,
 )
 from reference_lexicon import reference_models
 from action_epoch_selection import EpochSelection, assess_epoch
-from context_action_spans import SpanFrame, build_span_curriculum
+from context_action_spans import SpanCurriculum, SpanFrame
 from context_deferral import deferred_isolated, lookahead_focus, plausible_reading
 from context_lookahead_curriculum import LookaheadAnchor, LookaheadSeed, build_lookahead_curriculum
 from context_optimizer import Kernel, Packed
@@ -51,10 +59,17 @@ from evaluate_context_action_sequences import LEDGER_ROOT, runtime_provenance
 from freeze_context_action_corpus import CorpusRow, load_split, physical, typo_variants
 from freeze_context_action_holdout import ledger_test_aliases
 from reconcile_context_action_corpus import expanded_aliases
+from train_context_model import CapturedSource
 from keyswitch.constants.file_formats import HEXADECIMAL_BASE, VERSION_HASH_CHARACTERS
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
-from keyswitch.constants.models import CONTEXT_ACTION_FEATURE_VERSION, PLANNED_CONTEXT_WORD_MAX_CHARACTERS
+from keyswitch.constants.models import (
+    CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS,
+    KEPT_CONTEXT_WORD_MAX_CHARACTERS, KEPT_FEATURE_PREFIX, PLANNED_CONTEXT_WORD_MAX_CHARACTERS,
+)
 from keyswitch.constants.training import (
+    CONTEXT_ACTION_BACKEND_AUTO,
+    CONTEXT_ACTION_BACKENDS,
+    CONTEXT_ACTION_BACK_END_SOURCES,
     BOUNDARY_EVENT_CHOICES,
     CAPITAL_CITATION_MAX_LETTERS,
     CAPITAL_CITATION_MIN_LETTERS,
@@ -68,6 +83,9 @@ from keyswitch.constants.training import (
     FIELD_AFTER_SAMPLE_MODULUS,
     IDENTIFIER_DROPOUT_FAMILIES,
     IDENTIFIER_SUFFIX_SEGMENTS,
+    KEPT_NEIGHBOUR_CAPITALS_MODULUS,
+    KEPT_NEIGHBOUR_FRAMES_PER_WORD,
+    KEPT_NEIGHBOUR_MIN_LETTERS,
     LEXICAL_PAIR_ANCHOR_VARIANTS,
     LOG_LOSS_PROBABILITY_FLOOR,
     LOOKAHEAD_ANCHOR_MAX_CHARACTERS,
@@ -454,8 +472,25 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
     return result
 
 
+def _varied_boundary(identifier: str) -> tuple[CorrectionTrigger, str]:
+    """The boundary a curriculum word ends at, by hash: a space (twice as often), Enter, a punctuation
+    mark, Tab or a pause, with the character Enter and Tab type in half of their frames."""
+
+    triggers: tuple[CorrectionTrigger, ...] = ("space", "space", "enter", "punctuation", "tab", "pause")
+    trigger = triggers[variant_choice(identifier, "trigger", len(triggers))]
+    boundary_text = ""
+    if trigger == "space":
+        boundary_text = " "
+    elif trigger == "punctuation":
+        boundary_text = CAPITAL_CITATION_PUNCTUATION[variant_choice(identifier, "punctuation", len(CAPITAL_CITATION_PUNCTUATION))]
+    elif trigger in {"enter", "tab"} and variant_choice(identifier, "boundary-event", BOUNDARY_EVENT_CHOICES):
+        boundary_text = "\n" if trigger == "enter" else "\t"
+    return trigger, boundary_text
+
+
 def capital_citation_curriculum(source_rows: Sequence[CorpusRow], refused: frozenset[str],
-                                options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+                                options: Mapping[str, object], models: dict[int, LanguageModel] | None = None,
+                                ) -> tuple[list[ActionRow], dict[str, object]]:
     """Latin abbreviations in capitals after Russian prose whose Cyrillic reading is a rare word: keep.
 
     Natural text holds almost none (corpus v22 TRAIN: 17 Latin rows in capitals whose Cyrillic
@@ -468,7 +503,8 @@ def capital_citation_curriculum(source_rows: Sequence[CorpusRow], refused: froze
     by its aliases, as the other lexical curricula refuse it, and so is a word the onboard lexicon
     writes in capitals (capital_citation). Each stands after the left context of a Russian row of
     TRAIN, chosen by hash, with the keep label; with `lowercase_contrast` the same keys in lower case
-    stand in the same frame with the convert label, so case is what the pair tells apart.
+    stand in the same frame with the convert label, so case is what the pair tells apart. `models` are
+    the reference lexicons without morphology when the caller already holds them.
     """
     budgets = {int(length): int(count) for length, count in cast(dict[str, int], options["words_by_length"]).items()}
     weight = float(cast(float, options["sample_weight"]))
@@ -476,7 +512,8 @@ def capital_citation_curriculum(source_rows: Sequence[CorpusRow], refused: froze
     contexts = natural_mixed_contexts(source_rows)[1]
     if not contexts or not any(budgets.values()):
         return [], {"words": 0, "words_by_length": {}, "scope": "not used"}
-    models = reference_models(False)
+    if models is None:
+        models = reference_models(False)
     candidates: dict[int, list[tuple[str, str]]] = defaultdict(list)
     for word in models[1].frequencies:
         if len(word) not in budgets or not all("а" <= char <= "я" or char == "ё" for char in word):
@@ -490,7 +527,6 @@ def capital_citation_curriculum(source_rows: Sequence[CorpusRow], refused: froze
         if refused & (expanded_aliases(word) | expanded_aliases(latin)):
             continue
         candidates[len(word)].append((word, latin))
-    triggers: tuple[CorrectionTrigger, ...] = ("space", "space", "enter", "punctuation", "tab", "pause")
     applications = ("Telegram", "Code", "chrome", "UnseenEditor")
     rows: list[ActionRow] = []
     chosen: dict[str, list[str]] = {}
@@ -499,14 +535,7 @@ def capital_citation_curriculum(source_rows: Sequence[CorpusRow], refused: froze
         chosen[str(length)] = [f"{word}/{latin}" for word, latin in ranked[:budget]]
         for word, latin in ranked[:budget]:
             identifier = "capital-citation:" + word
-            trigger = triggers[variant_choice(identifier, "trigger", len(triggers))]
-            boundary_text = ""
-            if trigger == "space":
-                boundary_text = " "
-            elif trigger == "punctuation":
-                boundary_text = CAPITAL_CITATION_PUNCTUATION[variant_choice(identifier, "punctuation", len(CAPITAL_CITATION_PUNCTUATION))]
-            elif trigger in {"enter", "tab"} and variant_choice(identifier, "boundary-event", BOUNDARY_EVENT_CHOICES):
-                boundary_text = "\n" if trigger == "enter" else "\t"
+            trigger, boundary_text = _varied_boundary(identifier)
             field = FieldContext(applications[variant_choice(identifier, "application", len(applications))], "public-training",
                                  contexts[variant_choice(identifier, "context", len(contexts))], "", "unknown")
             rows.append(ActionRow(identifier, latin, 0, field, trigger, "", "keep", "mixed_language_insertion",
@@ -524,26 +553,340 @@ def capital_citation_curriculum(source_rows: Sequence[CorpusRow], refused: froze
                   "scope": "TRAIN only: keep frames of Latin capitals after Russian prose whose Cyrillic reading is a rare lexicon word (capital_citation_curriculum)."}
 
 
-def historical_curriculum(intent: LinearNgramModel | None = None) -> list[ActionRow]:
+def english_capital_curriculum(source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                               options: Mapping[str, object], models: dict[int, LanguageModel] | None = None,
+                               ) -> tuple[list[ActionRow], dict[str, object]]:
+    """Latin capitals inside English prose stay, whatever their Cyrillic reading is.
+
+    Test v28, read by a candidate whose every decision outside the kept-neighbour question was the
+    corpus v26 pair's, holds `affected by the BP oil spill.`: with the reference lexicons and the early
+    switch off `BP` became `ИЗ` at p=0.997, for `из` is among the commonest Russian words and the
+    model had seen Latin capitals framed after Russian prose only (capital_citation_curriculum).
+    English text cites abbreviations of a few capitals constantly, and their keys spell a Russian word
+    as often as not. The frames: the keys of the Russian lexicon's commonest words of each length of
+    `words_by_length`, typed in the Latin layout in capitals, after the left context of an English
+    TRAIN row whose words are all Latin, chosen by hash, `frames_per_word` contexts a word - keep;
+    with `lowercase_contrast` the same keys in lower case stand in the same frame with the convert
+    label, so case is what the pair tells apart. Without that pair the keep frames taught that the
+    keys of `не`, `на`, `как`, `что` stay in any case: the first candidates of corpus v29 left 31 more
+    of the owner's Russian words typed in the Latin layout as typed (`yt`, `yf`, `rfr`, `xnj`). With
+    `russian_contrast` the same keys in capitals stand after the left context of a Russian TRAIN row
+    with the convert label: the word typed with Caps Lock, which a capitals head would otherwise learn
+    to keep with the cited abbreviations. Words of this corpus's test and of every accessed test are
+    refused by their aliases. `models` are the reference lexicons without morphology when the caller
+    already holds them.
+    """
+
+    budgets = {int(length): int(count) for length, count in cast(dict[str, int], options["words_by_length"]).items()}
+    per_word = int(cast(int, options["frames_per_word"]))
+    weight = float(cast(float, options["sample_weight"]))
+    contrast = options.get("lowercase_contrast") is True
+    contexts, russian = natural_mixed_contexts(source_rows)[0], natural_mixed_contexts(source_rows)[1]
+    russian_contrast = options.get("russian_contrast") is True and bool(russian)
+    if not contexts or not any(budgets.values()) or not per_word:
+        return [], {"frames": 0, "scope": "not used"}
+    frequencies = (models if models is not None else reference_models(False))[1].frequencies
+    candidates: dict[int, list[tuple[str, str]]] = defaultdict(list)
+    for word in sorted(frequencies, key=lambda word: (-frequencies[word], word)):
+        if len(word) not in budgets or not _cyrillic(word) or not word.islower():
+            continue
+        latin = translated(word.upper(), 1)
+        if not latin.isascii() or not latin.isalpha() or refused & (expanded_aliases(word) | expanded_aliases(latin)):
+            continue
+        candidates[len(word)].append((word, latin))
+    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+    rows: list[ActionRow] = []
+    chosen: dict[str, list[str]] = {}
+    for length, budget in sorted(budgets.items()):
+        chosen[str(length)] = [f"{word}/{latin}" for word, latin in candidates[length][:budget]]
+        for word, latin in candidates[length][:budget]:
+            for index in range(per_word):
+                identifier = f"english-capital:{word}:{index}"
+                trigger, boundary_text = _varied_boundary(identifier)
+                field = FieldContext(applications[variant_choice(identifier, "application", len(applications))],
+                                     "public-training", contexts[variant_choice(identifier, "context", len(contexts))],
+                                     "", "unknown")
+                rows.append(ActionRow(identifier, latin, 0, field, trigger, "", "keep", "english_capital",
+                                      boundary_text, weight))
+                if contrast:
+                    rows.append(ActionRow(identifier + ":lower", latin.lower(), 0, field, trigger, "", "convert",
+                                          "english_capital_lower", boundary_text, weight))
+                if russian_contrast:
+                    other = identifier + ":russian"
+                    rows.append(ActionRow(other, latin, 0, replace(field, before=russian[variant_choice(other, "context", len(russian))]),
+                                          trigger, "", "convert", "english_capital_russian", boundary_text, weight))
+    return rows, {"frames": len(rows), "sample_weight": weight, "frames_per_word": per_word,
+                  "lowercase_contrast": contrast, "russian_contrast": russian_contrast,
+                  "words_by_length": chosen,
+                  "candidates_by_length": {str(length): len(candidates[length]) for length in sorted(budgets)},
+                  "scope": "TRAIN only: keep frames of the keys of common Russian words typed in Latin capitals after English prose (english_capital_curriculum)."}
+
+
+def _cyrillic(word: str) -> bool:
+    return all("а" <= char.casefold() <= "я" or char.casefold() == "ё" for char in word)
+
+
+def _monolingual_rows(source_rows: Sequence[CorpusRow]) -> Iterator[tuple[CorpusRow, int, str, list[re.Match[str]]]]:
+    """Rows whose word and every word before it are in the script of the row's layout: each with its
+    layout, its text through its word and the words of that text."""
+
+    for row in source_rows:
+        if row.group not in (0, 1) or not row.layout_representable or not row.original.isalpha():
+            continue
+        if _cyrillic(row.original) != (row.group == 1):
+            continue
+        text = row.before + row.original
+        tokens = list(WORDS.finditer(text))
+        if any(_cyrillic(token.group()) != (row.group == 1) for token in tokens):
+            continue
+        yield row, row.group, text, tokens
+
+
+def _russian_contexts(source_rows: Sequence[CorpusRow]) -> list[tuple[str, str]]:
+    """The left context and the word of every Russian row of Russian words only, in a fixed order."""
+
+    return sorted((row.before, row.original) for row, group, _, _ in _monolingual_rows(source_rows) if group == 1)
+
+
+def _counted_terms(refused: frozenset[str], minimum: int) -> list[str]:
+    """Latin words Russian technical text uses at least `minimum` times whose Cyrillic reading is nothing.
+
+    Their keys in the Russian layout are no word, no identifier and not counted in Russian text: typed
+    there amid Russian prose, they are the term typed in the wrong layout (`зк` is `pr`).
+    """
+
+    uncounted = CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS[0]
+    table = _term_frequency()
+    terms: list[str] = []
+    for term, count in table["latin"].items():
+        if count < minimum or not term.isascii() or not term.isalpha() or not term.islower():
+            continue
+        if not KEPT_NEIGHBOUR_MIN_LETTERS <= len(term) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS:
+            continue
+        reading = translated(term, 0)
+        if (not reading.isalpha() or plausible_reading(reading, 1) or table["cyrillic"].get(reading, 0) >= uncounted
+                or table["russian"].get(reading, 0) >= uncounted or refused & (expanded_aliases(term) | expanded_aliases(reading))):
+            continue
+        terms.append(term)
+    return terms
+
+
+def _counted_abbreviations(refused: frozenset[str], minimum: int, dominance: float) -> list[str]:
+    """Cyrillic tokens Russian technical text uses at least `minimum` times and `dominance` times as
+    often as their Latin keys, no lexicon word: `тз` (744 against 80 for `np`), not `зк`."""
+
+    table = _term_frequency()
+    abbreviations: list[str] = []
+    for token, count in table["cyrillic"].items():
+        if (count < minimum or not token.isalpha() or not _cyrillic(token)
+                or not KEPT_NEIGHBOUR_MIN_LETTERS <= len(token) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS
+                or plausible_reading(token, 1)):
+            continue
+        keys = translated(token, 1)
+        if count < dominance * table["latin"].get(keys, 0) or refused & (expanded_aliases(token) | expanded_aliases(keys)):
+            continue
+        abbreviations.append(token)
+    return abbreviations
+
+
+def _term_typed(term: str) -> str:
+    """A counted term's keys in the Russian layout, one term in KEPT_NEIGHBOUR_CAPITALS_MODULUS in capitals."""
+
+    capitals = variant_choice("kept-term:" + term, "capitals", KEPT_NEIGHBOUR_CAPITALS_MODULUS) == 0
+    return translated(term.upper() if capitals else term, 0)
+
+
+def kept_neighbour_curriculum(source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                              options: Mapping[str, object], models: dict[int, LanguageModel] | None = None,
+                              ) -> tuple[list[ActionRow], dict[str, object]]:
+    """A waiting word asked once more beside its next word, which stayed as typed (`kept_next_word`).
+
+    The engine converts a waiting word together with its next word, and a term typed in the Russian
+    layout amid Russian prose has a next word that is right as typed: `зк` stayed in `есть новые зк
+    проверь`, `тзь сш` in `сам выполни тзь сш` (the owner's typing, 0.38 and 0.39). The engine now
+    asks once more with the kept word on the right (KeySwitchEngine._decide_with_kept_neighbour), a
+    question the frames below teach, under feature names of its own (KEPT_FEATURE_PREFIX):
+    - natural: a short word of a TRAIN sentence of either language with the sentence's next word
+      after it, both as written - keep;
+    - term: a Latin word the packaged term table counts in Russian technical text at least
+      `minimum_term_count` times, typed in the Russian layout (its Cyrillic reading no word, no
+      identifier and not counted in Russian text), between the left context of a Russian TRAIN row
+      and that row's word - convert; one term in KEPT_NEIGHBOUR_CAPITALS_MODULUS in capitals;
+    - abbreviation: a Cyrillic token Russian technical text uses at least `minimum_abbreviation_count`
+      times and `abbreviation_dominance` times as often as its Latin keys (`тз`, not `зк`), no lexicon
+      word, in the same place - keep;
+    - misspelt: a Russian lexicon word with one edit of typo_variants, no word in either layout and its
+      Latin keys no counted term, in the same place - keep.
+    Words of this corpus's test and of every accessed test are refused by their aliases. `models` are
+    the reference lexicons without morphology when the caller already holds them.
+    """
+
+    budgets = {name: int(cast(int, options[name])) for name in ("natural_frames", "term_frames", "abbreviation_frames", "typo_frames")}
+    if not any(budgets.values()):
+        return [], {"frames": 0, "scope": "not used"}
+    weight = float(cast(float, options["sample_weight"]))
+    minimum_term = int(cast(int, options["minimum_term_count"]))
+    minimum_abbreviation = int(cast(int, options["minimum_abbreviation_count"]))
+    dominance = float(cast(float, options["abbreviation_dominance"]))
+    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+
+    def ranked(values: Iterable[str], purpose: str) -> list[str]:
+        return sorted(values, key=lambda value: hashlib.sha256(f"kept-{purpose}:{value}".encode()).digest())
+
+    def frame(identifier: str, word: str, group: int, before: str, after: str, action: ContextAction, category: str) -> ActionRow:
+        field = FieldContext(applications[variant_choice(identifier, "application", len(applications))], "public-training",
+                             before, after, "unknown")
+        return ActionRow(identifier, word, group, field, "space", "", action, category, " ", weight, "kept_next_word")
+
+    natural: dict[int, dict[str, tuple[str, str, str]]] = {0: {}, 1: {}}
+    for _, group, text, tokens in _monolingual_rows(source_rows):
+        # Every short word of the sentence followed, after one space, by another word is the question
+        # asked as written: the row's own text up to its word holds many such pairs.
+        for current, following in zip(tokens, tokens[1:]):
+            word = current.group()
+            if (KEPT_NEIGHBOUR_MIN_LETTERS <= len(word) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS and word.isalpha()
+                    and following.group().isalpha() and text[current.end():following.start()] == " "):
+                natural[group][text[:current.start()] + "|" + word] = (text[:current.start()], word, following.group())
+    russian = _russian_contexts(source_rows)
+    rows: list[ActionRow] = []
+    counts: Counter[str] = Counter()
+    for group in (0, 1):
+        for key in ranked(natural[group], f"natural-{group}")[:budgets["natural_frames"] // LAYOUT_GROUP_COUNT]:
+            before, word, following_word = natural[group][key]
+            identifier = "kept-natural:" + hashlib.sha256(key.encode()).hexdigest()
+            rows.append(frame(identifier, word, group, before, following_word, "keep", "kept_neighbour"))
+            counts[f"natural_{group}"] += 1
+
+    def inserted(words: list[str], budget: int, purpose: str, typed: Callable[[str], str], action: ContextAction) -> list[str]:
+        chosen: list[str] = []
+        if not russian:
+            return chosen
+        for word in words:
+            if counts[purpose] >= budget:
+                break
+            chosen.append(word)
+            for index in range(KEPT_NEIGHBOUR_FRAMES_PER_WORD):
+                if counts[purpose] >= budget:
+                    break
+                identifier = f"kept-{purpose}:{word}:{index}"
+                before, following_word = russian[variant_choice(identifier, "context", len(russian))]
+                rows.append(frame(identifier, typed(word), 1, before, following_word, action, "kept_neighbour_" + purpose))
+                counts[purpose] += 1
+        return chosen
+
+    terms = _counted_terms(refused, minimum_term)
+    chosen_terms = inserted(ranked(terms, "term"), budgets["term_frames"], "term", _term_typed, "convert")
+    abbreviations = _counted_abbreviations(refused, minimum_abbreviation, dominance)
+    chosen_abbreviations = inserted(ranked(abbreviations, "abbreviation"), budgets["abbreviation_frames"], "abbreviation",
+                                    lambda token: token, "keep")
+    misspelt: list[str] = []
+    for word in (models if models is not None else reference_models(False))[1].frequencies:
+        if not _cyrillic(word) or not word.isalpha() or refused & expanded_aliases(word):
+            continue
+        for variant in typo_variants(word, "kept-typo:" + word):
+            if (not KEPT_NEIGHBOUR_MIN_LETTERS <= len(variant) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS
+                    or not variant.isalpha() or plausible_reading(variant, 1)):
+                continue
+            keys = translated(variant, 1)
+            if term_bucket(keys, "latin") != "0" or plausible_reading(keys, 0):
+                continue
+            misspelt.append(variant)
+    chosen_misspelt = inserted(ranked(sorted(set(misspelt)), "typo"), budgets["typo_frames"], "typo", lambda word: word, "keep")
+    return rows, {"frames": len(rows), "counts": dict(sorted(counts.items())), "sample_weight": weight,
+                  "candidates": {"natural_0": len(natural[0]), "natural_1": len(natural[1]), "terms": len(terms),
+                                 "abbreviations": len(abbreviations), "misspelt": len(set(misspelt)), "contexts": len(russian)},
+                  "terms": chosen_terms, "abbreviations": chosen_abbreviations, "misspelt": chosen_misspelt,
+                  "scope": "TRAIN only: kept_next_word frames, the question a waiting word is asked again with its kept next word (kept_neighbour_curriculum)."}
+
+
+def counted_token_curriculum(source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                             options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """Counted Russian abbreviations amid Russian prose stay; counted Latin terms typed there convert.
+
+    The word decided at its own boundary tells a token's language by the lexicons and the language
+    models, and a Russian abbreviation of technical text is in neither while its Latin keys often are
+    a word: `тз` amid Russian prose became `np` at p=0.993 in the owner's typing (`если тз готов`,
+    the corpus v27 candidate of 06.10.2026), and so did `2фа`, `кз` and `ви`. How often Russian
+    technical text uses a token (744 times for `тз`, 80 for `np`) is a feature already, but no frame of
+    this question held such a token, and the count lost to the language models. The frames put the
+    tokens of the kept-neighbour curriculum (_counted_abbreviations, _counted_terms) after the left
+    context of a Russian TRAIN row, chosen by hash, with nothing after them:
+    - abbreviation: the token as typed - keep;
+    - term: a counted Latin term's keys in the Russian layout - convert, so the pair tells the counts
+      apart rather than teaching that a short unknown Cyrillic token after Russian prose stays.
+    Each word gets up to `frames_per_word` frames, each after a different Russian row, with the
+    boundaries of the capital citations (_varied_boundary). With `capitals` every token is typed in
+    capitals (`ТЗ` keeps, `ФЗШ` for `API` converts): such frames teach the capitals head alone when a
+    frozen base keeps every other weight. Words of this corpus's test and of every accessed test are
+    refused by their aliases.
+    """
+
+    budgets = {name: int(cast(int, options[name])) for name in ("term_frames", "abbreviation_frames")}
+    per_word = int(cast(int, options["frames_per_word"]))
+    russian = _russian_contexts(source_rows)
+    if not any(budgets.values()) or not russian:
+        return [], {"frames": 0, "scope": "not used"}
+    weight = float(cast(float, options["sample_weight"]))
+    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+    candidates = {
+        "term": _counted_terms(refused, int(cast(int, options["minimum_term_count"]))),
+        "abbreviation": _counted_abbreviations(refused, int(cast(int, options["minimum_abbreviation_count"])),
+                                               float(cast(float, options["abbreviation_dominance"]))),
+    }
+    capitals = options.get("capitals") is True
+    plans: tuple[tuple[str, Callable[[str], str], ContextAction], ...] = (
+        ("term", (lambda term: translated(term.upper(), 0)) if capitals else _term_typed, "convert"),
+        ("abbreviation", str.upper if capitals else str, "keep"))
+    rows: list[ActionRow] = []
+    chosen: dict[str, list[str]] = {}
+    for purpose, typed, action in plans:
+        words = sorted(candidates[purpose], key=lambda word: hashlib.sha256(f"counted-{purpose}:{word}".encode()).digest())
+        chosen[purpose] = []
+        frames = 0
+        for word in words:
+            if frames >= budgets[purpose + "_frames"]:
+                break
+            chosen[purpose].append(word)
+            for index in range(min(per_word, budgets[purpose + "_frames"] - frames)):
+                identifier = f"counted-{purpose}:{word}:{index}"
+                trigger, boundary_text = _varied_boundary(identifier)
+                before, _ = russian[variant_choice(identifier, "context", len(russian))]
+                field = FieldContext(applications[variant_choice(identifier, "application", len(applications))],
+                                     "public-training", before, "", "unknown")
+                rows.append(ActionRow(identifier, typed(word), 1, field, trigger, "", action, "counted_" + purpose,
+                                      boundary_text, weight))
+                frames += 1
+    return rows, {"frames": len(rows), "counts": dict(sorted(Counter(row.category for row in rows).items())),
+                  "candidates": {purpose: len(words) for purpose, words in candidates.items()},
+                  "sample_weight": weight, "frames_per_word": per_word, "capitals": capitals,
+                  "terms": chosen["term"], "abbreviations": chosen["abbreviation"],
+                  "scope": "TRAIN only: counted Russian abbreviations (keep) and counted Latin terms typed in the Russian layout (convert) after Russian prose, decided at their own boundary (counted_token_curriculum)."}
+
+
+def historical_curriculum(intent: LinearNgramModel | None = None,
+                          models: dict[int, LanguageModel] | None = None) -> list[ActionRow]:
     """Reuse distinct old TRAIN situations, never its evaluation labels.
 
     A physical family identifies the split, not the language decision. Keep
     its different labels, neighbours, applications and field roles. Remove
     only repeated identical frames. Completed-word lookahead mirrors the
     engine's second decision; the original longer field context also remains.
+    `models` are the reference lexicons with morphology when the caller already holds them.
     """
     from train_context_model import build_corpus
 
     if intent is None:
         intent = LinearNgramModel.load(ROOT / "src/keyswitch/resources/models/layout_intent_v1.ksm")
-    models = reference_models(True)
+    if models is None:
+        models = reference_models(True)
+    lexicons = models
     status = IntentModelStatus(True, ROOT / "src/keyswitch/resources/models/layout_intent_v1.ksm",
                                intent.model_version, intent.checksum, None)
 
     def load(locale: str, extra_words: Iterable[str] = ()) -> LanguageModel:
         # The reference lexicons already carry the packaged supplements the engine
         # would pass here (build_corpus: LanguageModel.load(locale, supplement_words(locale))).
-        return models[0 if locale == "en_US" else 1]
+        return lexicons[0 if locale == "en_US" else 1]
 
     with patch("train_context_model.LinearNgramModel.try_load_default", return_value=(intent, status)), \
             patch("train_context_model.LanguageModel.load", side_effect=load):
@@ -622,7 +965,19 @@ def captured_curriculum(options: Mapping[str, object]) -> tuple[list[ActionRow],
     flag), and a planned frame of a word longer than the planned context allows is asked with
     the field origin, as the engine asks it (KeySwitchEngine._neighbour_origin).
     """
-    from train_context_model import captured_rows, captured_sources
+    from train_context_model import captured_sources
+
+    result: list[ActionRow] = []
+    report: dict[str, object] = {}
+    for source in captured_sources(ROOT / str(options["manifest"])):
+        rows, report[source.path.name] = captured_source_curriculum(source, options)
+        result.extend(rows)
+    return result, report
+
+
+def captured_source_curriculum(source: CapturedSource, options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """The frames of one captured question file and its report; each file is chosen on its own."""
+    from train_context_model import captured_rows
 
     budget = int(cast(int, options["maximum_rows_per_source"]))
     # None keeps each file's own share of convert questions.
@@ -634,79 +989,75 @@ def captured_curriculum(options: Mapping[str, object]) -> tuple[list[ActionRow],
     excluded = tuple(cast(list[str], options["excluded_file_markers"]))
     applications = ("Telegram", "Code", "chrome", "UnseenEditor")
     result: list[ActionRow] = []
-    report: dict[str, object] = {}
-    for source in captured_sources(ROOT / str(options["manifest"])):
-        name = source.path.name
-        if any(marker in name for marker in excluded):
-            report[name] = {"excluded": True}
+    name = source.path.name
+    if any(marker in name for marker in excluded):
+        return [], {"excluded": True}
+    ranked: dict[ContextAction, list[tuple[bytes, ContextEvidence]]] = {"keep": [], "convert": []}
+    skipped_short = 0
+    for item, label, _count in captured_rows(source.path):
+        action = ACTIONS[label]
+        if action not in ranked:
             continue
-        ranked: dict[ContextAction, list[tuple[bytes, ContextEvidence]]] = {"keep": [], "convert": []}
-        skipped_short = 0
-        for item, label, _count in captured_rows(source.path):
-            action = ACTIONS[label]
-            if action not in ranked:
+        if len(item.original) < minimum_characters:
+            # A lone letter is left out, as the corpus leaves it out: in these files a lone
+            # `b`, `c`, `d` or `f` is nearly always a Russian word typed in the English layout,
+            # and a model taught so converted a capital letter in English prose.
+            skipped_short += 1
+            continue
+        try:
+            translated(item.original, item.source_group)
+        except ValueError:
+            continue
+        key = hashlib.sha256(canonical(["captured", name, item.original, item.source_group, item.trigger,
+                                        item.literal_tail, item.boundary_text, item.after_origin,
+                                        item.field.before, item.field.after, item.field.role])).digest()
+        ranked[action].append((key, item))
+    available = len(ranked["convert"]) + len(ranked["keep"])
+    share = convert_share if convert_share is not None else len(ranked["convert"]) / max(1, available)
+    converts = sorted(ranked["convert"], key=lambda entry: entry[0])[:int(budget * share)]
+    # Correctly typed words no lexicon knows - slang, names, brands, abbreviations, English
+    # terms typed in the English layout - are the keep answers a uniform sample nearly never
+    # draws, and exactly the ones both model lines turned into gibberish of the other layout
+    # (an invented `шупшуп` became `iegieg` at p=0.994). Those of the layouts the recipe names
+    # get their own share of the keeps; without the Latin ones, a month name and a capital
+    # abbreviation in English prose were converted.
+    keep_budget = budget - len(converts)
+    ordered_keeps = sorted(ranked["keep"], key=lambda entry: entry[0])
+    unknown = [entry for entry in ordered_keeps if entry[1].source_group in unknown_keep_groups
+               and not plausible_reading(entry[1].original, entry[1].source_group)]
+    chosen_unknown = unknown[:int(keep_budget * keep_unknown_share)]
+    taken = {entry[0] for entry in chosen_unknown}
+    keeps = chosen_unknown + [entry for entry in ordered_keeps if entry[0] not in taken][:keep_budget - len(chosen_unknown)]
+    counts: Counter[str] = Counter()
+    for action, chosen in (("convert", converts), ("keep", keeps)):
+        for key, item in chosen:
+            identifier = f"captured:{source.path.stem}:{key.hex()}"
+            application = applications[variant_choice(identifier, "application", len(applications))]
+            field = FieldContext(application, "captured", item.field.before, item.field.after, item.field.role)
+            origin = item.after_origin
+            if origin == "planned_next_conversion" and len(item.original) > PLANNED_CONTEXT_WORD_MAX_CHARACTERS:
+                origin = "field"
+            if origin == "planned_next_conversion" and WORDS.match(item.field.after.lstrip()) is None:
+                # The engine plans a next word only once one was typed; a planned
+                # question without a leading word cannot have been asked.
+                counts["skipped_planned_without_word"] += 1
                 continue
-            if len(item.original) < minimum_characters:
-                # A lone letter is left out, as the corpus leaves it out: in these files a lone
-                # `b`, `c`, `d` or `f` is nearly always a Russian word typed in the English layout,
-                # and a model taught so converted a capital letter in English prose.
-                skipped_short += 1
-                continue
-            try:
-                translated(item.original, item.source_group)
-            except ValueError:
-                continue
-            key = hashlib.sha256(canonical(["captured", name, item.original, item.source_group, item.trigger,
-                                            item.literal_tail, item.boundary_text, item.after_origin,
-                                            item.field.before, item.field.after, item.field.role])).digest()
-            ranked[action].append((key, item))
-        available = len(ranked["convert"]) + len(ranked["keep"])
-        share = convert_share if convert_share is not None else len(ranked["convert"]) / max(1, available)
-        converts = sorted(ranked["convert"], key=lambda entry: entry[0])[:int(budget * share)]
-        # Correctly typed words no lexicon knows - slang, names, brands, abbreviations, English
-        # terms typed in the English layout - are the keep answers a uniform sample nearly never
-        # draws, and exactly the ones both model lines turned into gibberish of the other layout
-        # (an invented `шупшуп` became `iegieg` at p=0.994). Those of the layouts the recipe names
-        # get their own share of the keeps; without the Latin ones, a month name and a capital
-        # abbreviation in English prose were converted.
-        keep_budget = budget - len(converts)
-        ordered_keeps = sorted(ranked["keep"], key=lambda entry: entry[0])
-        unknown = [entry for entry in ordered_keeps if entry[1].source_group in unknown_keep_groups
-                   and not plausible_reading(entry[1].original, entry[1].source_group)]
-        chosen_unknown = unknown[:int(keep_budget * keep_unknown_share)]
-        taken = {entry[0] for entry in chosen_unknown}
-        keeps = chosen_unknown + [entry for entry in ordered_keeps if entry[0] not in taken][:keep_budget - len(chosen_unknown)]
-        counts: Counter[str] = Counter()
-        for action, chosen in (("convert", converts), ("keep", keeps)):
-            for key, item in chosen:
-                identifier = f"captured:{source.path.stem}:{key.hex()}"
-                application = applications[variant_choice(identifier, "application", len(applications))]
-                field = FieldContext(application, "captured", item.field.before, item.field.after, item.field.role)
-                origin = item.after_origin
-                if origin == "planned_next_conversion" and len(item.original) > PLANNED_CONTEXT_WORD_MAX_CHARACTERS:
-                    origin = "field"
-                if origin == "planned_next_conversion" and WORDS.match(item.field.after.lstrip()) is None:
-                    # The engine plans a next word only once one was typed; a planned
-                    # question without a leading word cannot have been asked.
-                    counts["skipped_planned_without_word"] += 1
-                    continue
-                labelled: ContextAction = action
-                curated_letter = (len(item.original) == 1 and len(item.alternative) == 1
-                                  and (item.original.casefold() in TRUSTED_SINGLE_LETTER_WORDS
-                                       or item.alternative.casefold() in TRUSTED_SINGLE_LETTER_WORDS))
-                if (origin != "planned_next_conversion" and not curated_letter
-                        and not WORDS.search(item.field.before) and not WORDS.search(item.field.after)
-                        and deferred_isolated(item.original, item.alternative, item.source_group)):
-                    labelled = "suggest" if item.trigger in ("enter", "tab", "punctuation") else "wait"
-                counts[labelled] += 1
-                result.append(ActionRow(identifier, item.original, item.source_group, field,
-                                        cast(CorrectionTrigger, item.trigger), item.literal_tail, labelled,
-                                        "captured_" + source.path.name.split(".", 1)[0].replace("-", "_"),
-                                        item.boundary_text, source.weight * weight_scale, origin))
-        report[name] = {"available": {action: len(rows) for action, rows in ranked.items()}, "skipped_short": skipped_short,
-                        "unknown_keep_available": len(unknown), "unknown_keep_chosen": len(chosen_unknown),
-                        "chosen": dict(counts), "weight": source.weight * weight_scale}
-    return result, report
+            labelled: ContextAction = action
+            curated_letter = (len(item.original) == 1 and len(item.alternative) == 1
+                              and (item.original.casefold() in TRUSTED_SINGLE_LETTER_WORDS
+                                   or item.alternative.casefold() in TRUSTED_SINGLE_LETTER_WORDS))
+            if (origin != "planned_next_conversion" and not curated_letter
+                    and not WORDS.search(item.field.before) and not WORDS.search(item.field.after)
+                    and deferred_isolated(item.original, item.alternative, item.source_group)):
+                labelled = "suggest" if item.trigger in ("enter", "tab", "punctuation") else "wait"
+            counts[labelled] += 1
+            result.append(ActionRow(identifier, item.original, item.source_group, field,
+                                    cast(CorrectionTrigger, item.trigger), item.literal_tail, labelled,
+                                    "captured_" + source.path.name.split(".", 1)[0].replace("-", "_"),
+                                    item.boundary_text, source.weight * weight_scale, origin))
+    return result, {"available": {action: len(rows) for action, rows in ranked.items()}, "skipped_short": skipped_short,
+                    "unknown_keep_available": len(unknown), "unknown_keep_chosen": len(chosen_unknown),
+                    "chosen": dict(counts), "weight": source.weight * weight_scale}
 
 
 def legacy_lookahead_rows(
@@ -823,28 +1174,42 @@ def natural_anchors(source_rows: Sequence[CorpusRow], split: str) -> list[Lookah
 
 
 def refused_aliases(corpus: Path) -> frozenset[str]:
-    """Aliases of every word a sealed test holds: this corpus's test and every accessed one."""
+    """Aliases of every word a sealed test holds: this corpus's test and every accessed one.
+
+    The ledger of accessed tests lives outside the repository (LEDGER_ROOT). A corpus records how
+    many test aliases it was frozen against; a fit that would refuse fewer has no ledger, or an older
+    one, and stops rather than frame words of a test already read.
+    """
     membership = cast(dict[str, object], json.loads((corpus / "test-membership.json").read_bytes()))
     aliases = set(cast(list[str], membership.get("alias_sha256", [])))
     ledger, _ = ledger_test_aliases(LEDGER_ROOT)
-    return frozenset(aliases | ledger)
+    refused = frozenset(aliases | ledger)
+    metadata = cast(dict[str, object], json.loads((corpus / "manifest.json").read_bytes()).get("metadata", {}))
+    frozen_against = metadata.get("refused_test_aliases")
+    if isinstance(frozen_against, int) and len(refused) < frozen_against:
+        raise ValueError(f"the fit would refuse {len(refused)} test aliases and the corpus was frozen refusing {frozen_against}: "
+                         f"the test ledger ({LEDGER_ROOT}) is missing or older than the corpus")
+    return refused
 
 
-def lexical_short_pairs(refused: frozenset[str]) -> list[tuple[str, str, int]]:
+def lexical_short_pairs(refused: frozenset[str], models: dict[int, LanguageModel] | None = None) -> list[tuple[str, str, int]]:
     """Three-letter words of the pinned lexicons whose other reading is a word or a command too.
 
     Both readings must be real: a form of the onboard lexicon (the OpenSubtitles supplement
     marks a form as known for the deferral rule, but it also holds one-off noise, and a
     conversion into such a form is never taught) or an entry of the shipped identifier
     index. A pair whose word is held by a sealed test stays out, by the same aliases the
-    fitting extension refuses.
+    fitting extension refuses. `models` are the reference lexicons without morphology when the
+    caller already holds them.
     """
-    models = reference_models(False)
+    if models is None:
+        models = reference_models(False)
+    lexicons = models
     supplement = {0: frozenset(supplement_words("en_US")), 1: frozenset(supplement_words("ru_RU"))}
 
     def real(text: str, group: int) -> bool:
-        return (text not in supplement[group] and models[group].score(text).known) or (
-            plausible_reading(text, group) and not models[group].score(text).known)
+        return (text not in supplement[group] and lexicons[group].score(text).known) or (
+            plausible_reading(text, group) and not lexicons[group].score(text).known)
 
     pairs: list[tuple[str, str, int]] = []
     seen: set[str] = set()
@@ -873,6 +1238,7 @@ def lexical_short_pairs(refused: frozenset[str]) -> list[tuple[str, str, int]]:
 def lexical_short_pair_rows(
     rows: Sequence[ActionRow], source_rows: Sequence[CorpusRow], detector: LanguageDetector, ortho: OrthoModel | None,
     *, refused: frozenset[str], profile: str, split: str, maximum_families: int, seeds_per_family: int,
+    models: dict[int, LanguageModel] | None = None,
 ) -> tuple[list[ActionRow], dict[str, object]]:
     """Teach a deferred three-letter word to follow its converted neighbour.
 
@@ -884,7 +1250,7 @@ def lexical_short_pair_rows(
     neighbour converted to the other language the pair is that language, which is the
     decision the engine asks the model for. The frames carry one unit of mass per reading.
     """
-    pairs = lexical_short_pairs(refused)
+    pairs = lexical_short_pairs(refused, models)
     applications = ("Telegram", "Code", "chrome", "UnseenEditor")
     seeds: list[LookaheadSeed] = []
     originals: dict[str, ActionRow] = {}
@@ -1051,7 +1417,98 @@ def provenance() -> dict[str, str]:
     result.update({path: checksum(ROOT / path) for path in (
         "tools/context_action_spans.py", "tests/test_context_action_spans.py",
     )})
+    # The back ends build the same candidate; their code is pinned all the same.
+    result.update({path: checksum(ROOT / path) for path in CONTEXT_ACTION_BACK_END_SOURCES})
+    for key in ("frozen_base", "warm_base"):
+        base = cast(dict[str, object], json.loads(RECIPE.read_bytes())).get(key)
+        if isinstance(base, dict):
+            result[str(base["artifact"])] = checksum(ROOT / str(base["artifact"]))
     return result
+
+
+def frozen_base(options: Mapping[str, object]) -> ContextModel | None:
+    """The action model a kept-neighbour head is fitted onto, or None for a full fit.
+
+    The word decided at its own boundary moves with every fit: two fits of one recipe on corpora
+    a few dozen TRAIN rows apart (v26, v27, v28) turned different borderline words across the 0.99
+    threshold (`тз`, `гг.`, the `ша` before `hello`), more than any curriculum under test changed.
+    The kept-neighbour question has feature names of its own (KEPT_FEATURE_PREFIX) and the
+    optimizer touches only the weights of the features a row has, so its head can be fitted onto a
+    model already sealed and shipped, whose every other weight and threshold stay as they are. The
+    recipe names that model's file and its SHA-256; it must be an action model with no kept-neighbour
+    weights.
+    """
+
+    return _named_base(options, "frozen_base")
+
+
+# The heads a frozen base can carry besides the kept-neighbour question, by the recipe's name.
+HEAD_PREFIXES: Final = {"capitals": CAPITALS_FEATURE_PREFIX}
+
+
+def frozen_heads(options: Mapping[str, object]) -> dict[str, int]:
+    """The heads fitted onto a frozen base over every TRAIN frame: feature prefix -> feature budget.
+
+    A head answers a class of its own under feature names of its own (the class's features once more
+    under its prefix, context_action_features): fitted with the base's every weight fixed, it moves no
+    decision outside its class. Without heads a frozen base is fitted with the kept-neighbour question
+    alone, and TRAIN holds the kept-neighbour frames only.
+    """
+
+    value = options.get("frozen_base")
+    if value is None:
+        return {}
+    heads = cast(dict[str, dict[str, int]], cast(dict[str, object], value).get("heads", {}))
+    return {HEAD_PREFIXES[name]: int(head["maximum_features"]) for name, head in heads.items()}
+
+
+def warm_base(options: Mapping[str, object]) -> ContextModel | None:
+    """The action model a full fit starts from, or None to start from zero weights.
+
+    A fit from zero weights turns borderline words across the 0.99 threshold whatever the curricula
+    under test do (frozen_base): the corpus v29 candidates that let `BP` stay in English prose
+    converted words the corpus v26 pair had kept or left words it had converted. Started from that
+    pair's weights, over its own vocabulary of the word decided at its boundary (the kept-neighbour
+    question selects its features as before), at the recipe's `learning_rate` for this start, the
+    fit moves the weights the new frames pull and leaves the rest near where they were. Every
+    weight trains, and the epoch and threshold are chosen as in any full fit. The recipe names the
+    model's file and its SHA-256; it must be an action model with no kept-neighbour weights.
+    """
+
+    return _named_base(options, "warm_base")
+
+
+def _named_base(options: Mapping[str, object], key: str) -> ContextModel | None:
+    value = options.get(key)
+    if value is None:
+        return None
+    spec = cast(dict[str, object], value)
+    path = ROOT / str(spec["artifact"])
+    label = key.replace("_", " ")
+    if checksum(path) != spec["sha256"]:
+        raise ValueError(f"{label} artifact differs from the recipe")
+    model = ContextModel.load(path)
+    if model.feature_version != CONTEXT_ACTION_FEATURE_VERSION or any(
+            name.startswith((KEPT_FEATURE_PREFIX, *HEAD_PREFIXES.values())) for name in model.weights):
+        raise ValueError(f"a {label} is an action model without kept-neighbour weights or heads")
+    return model
+
+
+def base_weights(names: Sequence[str], base: ContextModel) -> array[float]:
+    """Initial weights of a head fitted onto `base`: the base's own, zero for the head's features."""
+
+    weights = array("d", [0.0]) * (len(names) * len(ACTIONS))
+    for index, name in enumerate(names):
+        for action, value in enumerate(base.weights.get(name, ())):
+            weights[index * len(ACTIONS) + action] = value
+    return weights
+
+
+def log_loss(predictions: array[float], data: Packed) -> float:
+    """The importance-weighted log loss of `predictions` on `data`, summed over its rows."""
+
+    return sum(-data.importance[row] * math.log(max(LOG_LOSS_PROBABILITY_FLOOR, predictions[row * len(ACTIONS) + label]))
+               for row, label in enumerate(data.labels))
 
 
 def metrics(probabilities: array[float], labels: array[int], threshold: float) -> dict[str, int | float]:
@@ -1204,129 +1661,261 @@ def apply_support_mask(
     return result
 
 
-def fit(corpus: Path, output: Path) -> dict[str, object]:
-    if output.exists():
-        raise ValueError("candidate directory already exists; never overwrite an experiment")
+@dataclass
+class FitInputs:
+    """What every stage of a fit reads: the recipe, the corpus splits, the natural frames and the models."""
+    options: dict[str, object]
+    source_rows: dict[str, list[CorpusRow]]
+    frames: dict[str, list[ActionRow]]
+    intent: LinearNgramModel
+    ortho: OrthoModel
+    lexicons: dict[bool, dict[int, LanguageModel]]
+    profiles: list[str]
+    refused: frozenset[str]
+    # The model a kept-neighbour head is fitted onto (frozen_base), or None for a full fit.
+    base: ContextModel | None = None
+    lexical_models: dict[str, dict[int, LanguageModel]] = field(init=False)
+    detectors: dict[str, LanguageDetector] = field(init=False)
+
+    def __post_init__(self) -> None:
+        # Per profile: the reference lexicons, with morphology for the reference_hunspell profile.
+        self.lexical_models = {name: self.lexicons[name == REFERENCE_HUNSPELL] for name in self.profiles}
+        self.detectors = {name: LanguageDetector(models, self.intent) for name, models in self.lexical_models.items()}
+
+
+def recipe() -> dict[str, object]:
     options = cast(dict[str, object], json.loads(RECIPE.read_bytes()))
     if options.get("schema_version") != 1 or options.get("feature_version") != CONTEXT_ACTION_FEATURE_VERSION:
         raise ValueError("invalid action recipe")
-    before_provenance = provenance()
-    corpus_hash = checksum(corpus / "manifest.json")
+    return options
+
+
+def load_inputs(corpus: Path, options: dict[str, object]) -> FitInputs:
     maximum = cast(dict[str, int], options["maximum_source_rows"])
     source_rows = {split: load_split(corpus, split) for split in FITTING_SPLITS}
     frames = {split: action_rows(select_rows(rows, maximum[split])) for split, rows in source_rows.items()}
     if any(not rows for rows in frames.values()):
         raise ValueError("empty fitting split")
-    intent = LinearNgramModel.load(ROOT / "src/keyswitch/resources/models/layout_intent_v1.ksm")
-    ortho = OrthoModel.load(ROOT / "src/keyswitch/resources/models/ortho_v1.json")
-    profiles = cast(list[str], options["profiles"])
-    lexical_models = {name: reference_models(name == "reference_hunspell") for name in profiles}
-    detectors = {name: LanguageDetector(lexical_models[name], intent) for name in profiles}
-    output.mkdir(parents=True)
-    (output / "recipe.json").write_bytes(canonical(options))
-    captured, captured_report = captured_curriculum(cast(dict[str, object], options["captured_curriculum"]))
-    refused = refused_aliases(corpus)
-    capitals, capital_report = capital_citation_curriculum(
-        source_rows["train"], refused, cast(dict[str, object], options["capital_citation_curriculum"]))
-    frames["train"] = training_order([*frames["train"], *historical_curriculum(intent), *captured, *capitals])
-    feature_paths: dict[tuple[str, str], Path] = {}
-    feature_mass = FeatureMass()
-    span_budgets = cast(dict[str, int], options["span_maximum_families"])
-    span_reports: dict[str, dict[str, dict[str, int]]] = {}
-    lookahead_reports: dict[str, dict[str, object]] = {}
+    return FitInputs(options, source_rows, frames,
+                     LinearNgramModel.load(ROOT / "src/keyswitch/resources/models/layout_intent_v1.ksm"),
+                     OrthoModel.load(ROOT / "src/keyswitch/resources/models/ortho_v1.json"),
+                     {spelling: reference_models(spelling) for spelling in (False, True)},
+                     cast(list[str], options["profiles"]), refused_aliases(corpus),
+                     frozen_base(options) if not frozen_heads(options) else None)
+
+
+def frame_chain(inputs: FitInputs, profile: str, split: str, rows: Sequence[ActionRow],
+                tail: Sequence[ActionRow] = ()) -> tuple[list[ActionRow], dict[str, object]]:
+    """The curricula one profile adds to the frames of one split, and their reports.
+
+    `tail`, the kept-neighbour and counted-token frames of TRAIN (tail_curricula), joins after both
+    lookahead curricula, so that none of its frames seeds a planned one.
+    """
+    if split == TRAIN and inputs.base is not None:
+        # A frozen base keeps every weight of the word decided at its own boundary: only the
+        # kept-neighbour question is fitted, and nothing else is framed for TRAIN.
+        return list(tail), {}
+    options = inputs.options
+    detector = inputs.detectors[profile]
     lookahead_options = cast(dict[str, int], options["lookahead_curriculum"])
     natural_options = cast(dict[str, int], options["natural_lookahead_curriculum"])
-    natural_reports: dict[str, dict[str, dict[str, object]]] = {}
     lexical_options = cast(dict[str, int], options["lexical_short_pair_curriculum"])
-    lexical_reports: dict[str, dict[str, object]] = {}
-    balance_reports: dict[str, dict[str, object]] = {}
-    for profile, detector in detectors.items():
-        span_reports[profile] = {}
-        natural_reports[profile] = {}
-        for split, rows in frames.items():
-            if split == "train":
-                rows, lookahead_reports[profile] = legacy_lookahead_rows(
-                    rows, detector, ortho, profile=profile,
-                    maximum_families=lookahead_options["maximum_families"],
-                    seeds_per_family=lookahead_options["seeds_per_family"])
-            rows, natural_reports[profile][split] = natural_lookahead_rows(
-                rows, source_rows[split], detector, ortho, profile=profile, split=split,
-                maximum_families=natural_options["maximum_families"],
-                seeds_per_family=natural_options["seeds_per_family"])
-            if split == "train":
-                rows, lexical_reports[profile] = lexical_short_pair_rows(
-                    rows, source_rows[split], detector, ortho, refused=refused, profile=profile, split=split,
-                    maximum_families=lexical_options["maximum_families"], seeds_per_family=lexical_options["seeds_per_family"])
-                rows, balance_reports[profile] = balance_planned_mass(rows)
-            spans = build_span_curriculum(source_rows[split], lexical_models[profile], profile=profile,
-                                          maximum_families=span_budgets[split], expected_split=split)
-            span_reports[profile][split] = spans.counts
-            prepared: list[tuple[str, ActionRow | SpanFrame]] = [(row.identifier, row) for row in rows]
-            prepared.extend((f"span:{row.sequence_id}:{index}", row) for index, row in enumerate(spans.frames))
-            if split == "train":
-                prepared.sort(key=lambda entry: (hashlib.sha256(entry[0].encode()).digest(), entry[0]))
-            path = output / f"features-{profile}-{split}.jsonl.gz"
-            feature_paths[profile, split] = path
-            with gzip.open(path, "wb") as handle:
-                for _, row in prepared:
-                    label = ACTIONS.index(row.action)
-                    importance = row.sample_weight * (float(cast(float, options["keep_importance"])) if label == 0 else 1.0)
-                    if isinstance(row, ActionRow):
-                        dropped = split == "train" and identifier_evidence_dropped(row.identifier)
-                        item = evidence(row, detector, ortho, identifiers=BLIND_IDENTIFIERS if dropped else None)
-                    else:
-                        item = row.evidence
-                    features = extract_action_features(item)
-                    if split == "train":
-                        feature_mass.add(features, row.sample_weight)
-                    handle.write(canonical([features, label, importance]))
-            print(f"features {profile}/{split}: {len(prepared)}, span frames={len(spans.frames)}", flush=True)
+    reports: dict[str, object] = {}
+    result = list(rows)
+    if split == TRAIN:
+        result, reports["lookahead"] = legacy_lookahead_rows(
+            result, detector, inputs.ortho, profile=profile,
+            maximum_families=lookahead_options["maximum_families"], seeds_per_family=lookahead_options["seeds_per_family"])
+    result, reports["natural"] = natural_lookahead_rows(
+        result, inputs.source_rows[split], detector, inputs.ortho, profile=profile, split=split,
+        maximum_families=natural_options["maximum_families"], seeds_per_family=natural_options["seeds_per_family"])
+    if split == TRAIN:
+        result, reports["lexical"] = lexical_short_pair_rows(
+            result, inputs.source_rows[split], detector, inputs.ortho, refused=inputs.refused, profile=profile, split=split,
+            maximum_families=lexical_options["maximum_families"], seeds_per_family=lexical_options["seeds_per_family"],
+            models=inputs.lexicons[False])
+        result, reports["balance"] = balance_planned_mass(result)
+        result.extend(tail)
+    return result, reports
+
+
+def tail_curricula(inputs: FitInputs) -> tuple[list[ActionRow], dict[str, object]]:
+    """The TRAIN frames that join after the lookahead curricula (frame_chain): the kept-neighbour
+    question and the counted tokens, with their reports by curriculum."""
+    options = inputs.options
+    kept, kept_report = kept_neighbour_curriculum(inputs.source_rows[TRAIN], inputs.refused,
+                                                  cast(dict[str, object], options["kept_neighbour_curriculum"]), inputs.lexicons[False])
+    counted, counted_report = counted_token_curriculum(inputs.source_rows[TRAIN], inputs.refused,
+                                                       cast(dict[str, object], options["counted_token_curriculum"]))
+    return [*kept, *counted], {"kept_neighbour_curriculum": kept_report, "counted_token_curriculum": counted_report}
+
+
+def prepared_frames(rows: Sequence[ActionRow], spans: SpanCurriculum, split: str) -> list[tuple[str, ActionRow | SpanFrame]]:
+    """The frames of one profile and split in the order the optimizer reads them."""
+    prepared: list[tuple[str, ActionRow | SpanFrame]] = [(row.identifier, row) for row in rows]
+    prepared.extend((f"span:{row.sequence_id}:{index}", row) for index, row in enumerate(spans.frames))
+    if split == TRAIN:
+        prepared.sort(key=lambda entry: (hashlib.sha256(entry[0].encode()).digest(), entry[0]))
+    return prepared
+
+
+def frame_evidence(row: ActionRow, split: str, detector: LanguageDetector, ortho: OrthoModel | None) -> ContextEvidence:
+    """The evidence of an action frame; TRAIN drops the identifier evidence of some families."""
+    dropped = split == TRAIN and identifier_evidence_dropped(row.identifier)
+    return evidence(row, detector, ortho, identifiers=BLIND_IDENTIFIERS if dropped else None)
+
+
+def frame_features(frame: ActionRow | SpanFrame, split: str, detector: LanguageDetector, ortho: OrthoModel | None) -> dict[str, float]:
+    if isinstance(frame, ActionRow):
+        return extract_action_features(frame_evidence(frame, split, detector, ortho))
+    return extract_action_features(frame.evidence)
+
+
+def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUTO, jobs: int | None = None) -> dict[str, object]:
+    """Fit a candidate; every back end (context_action_pipeline) builds the same one, byte for byte."""
+    if output.exists():
+        raise ValueError("candidate directory already exists; never overwrite an experiment")
+    options = recipe()
+    try:
+        import context_action_pipeline
+    except ImportError as error:
+        raise RuntimeError(f"{error}: the trainer needs NumPy, see tools/install-training-accelerators.sh") from error
+
+    backend = context_action_pipeline.choose_backend(backend)
+    jobs = context_action_pipeline.choose_jobs(jobs)
+    print(f"back end {backend}, " + (f"{jobs} worker processes" if jobs > 1 else "in this process"), flush=True)
+    before_provenance = provenance()
+    corpus_hash = checksum(corpus / "manifest.json")
+    inputs = load_inputs(corpus, options)
+    profiles = inputs.profiles
+    # The pipeline frames TRAIN with the kept-neighbour frames alone for a frozen base without heads
+    # (inputs.base); with heads every TRAIN frame is framed, and the base's weights stay where they are
+    # because their AdaGrad accumulators start infinite: every step of theirs is zero.
+    base = frozen_base(options)
+    heads = frozen_heads(options)
+    warm = warm_base(options)
+    if base is not None and warm is not None:
+        raise ValueError("a recipe names a frozen base or a warm base, not both")
+    kept_options = cast(dict[str, object], options["kept_neighbour_curriculum"])
+    counted_options = cast(dict[str, object], options["counted_token_curriculum"])
+    english_options = cast(dict[str, object], options["english_capital_curriculum"])
+    if base is not None and not heads and any(cast(dict[str, int], english_options["words_by_length"]).values()):
+        raise ValueError("English-capital frames fit the word decided at its own boundary, which a frozen base keeps")
+    if base is not None and not heads and any(int(cast(int, counted_options[name])) for name in ("term_frames", "abbreviation_frames")):
+        raise ValueError("counted-token frames fit the word decided at its own boundary, which a frozen base keeps")
+    output.mkdir(parents=True)
+    (output / "recipe.json").write_bytes(canonical(options))
+    features = context_action_pipeline.build_features(inputs, backend, jobs)
+    # Kept-neighbour frames of DEVELOPMENT choose the epoch of a head fitted onto a frozen base: its
+    # development rows are decided by the base alone and say nothing about the head.
+    kept_development: dict[str, list[tuple[dict[str, float], int, float]]] = {}
+    if base is not None:
+        keep_importance = float(cast(float, options["keep_importance"]))
+        kept_frames = kept_neighbour_curriculum(inputs.source_rows[DEVELOPMENT], inputs.refused, kept_options, inputs.lexicons[False])[0]
+        # In name order, as the serial fit read them back from its feature files: the sums of a prediction
+        # run in the same order and the epoch is chosen on the same losses to the last bit.
+        kept_development = {profile: [(dict(sorted(frame_features(row, DEVELOPMENT, inputs.detectors[profile], inputs.ortho).items())),
+                                       ACTIONS.index(row.action), row.sample_weight * (keep_importance if row.action == "keep" else 1.0))
+                                      for row in kept_frames] for profile in profiles}
+        print(f"features kept-development: {len(kept_frames)} per profile", flush=True)
+    # The frames, curricula and lexicons are not needed any more; the epochs need the memory.
+    splits = list(inputs.frames)
+    del inputs
+    gc.collect()
     minimum = float(cast(float, options["minimum_feature_mass"]))
-    names = select_features(feature_mass.values, minimum, int(cast(int, options["maximum_features"])))
-    def combined(split: str) -> Iterable[tuple[dict[str, float], int, float]]:
-        for profile in profiles:
-            yield from feature_rows(feature_paths[profile, split])
-    train = Packed.build(combined("train"), names)
-    development = {name: Packed.build(feature_rows(feature_paths[name, "development"]), names) for name in profiles}
-    calibration = {name: Packed.build(feature_rows(feature_paths[name, "calibration"]), names) for name in profiles}
+    masses = features.masses()
+    # The kept-neighbour question and every head have feature names of their own and a budget of their
+    # own: the word decided at its boundary keeps exactly the features it would have without them.
+    start = base if base is not None else warm
+    own = (KEPT_FEATURE_PREFIX, *HEAD_PREFIXES.values())
+    budgets = {KEPT_FEATURE_PREFIX: int(cast(int, kept_options["maximum_features"])), **heads}
+    names = sorted([
+        *(start.weights if start is not None else
+          select_features({name: mass for name, mass in masses.items() if not name.startswith(own)},
+                          minimum, int(cast(int, options["maximum_features"])))),
+        *(name for prefix, budget in budgets.items()
+          for name in select_features({name: mass for name, mass in masses.items() if name.startswith(prefix)}, minimum, budget)),
+    ])
+    train, development, calibration = features.packed(names)
     support_model = ContextModel({name: (0.0,) * len(ACTIONS) for name in names}, "context-v3-vocabulary", feature_version=CONTEXT_ACTION_FEATURE_VERSION)
-    development_masks = {name: runtime_masks(feature_rows(feature_paths[name, "development"]), support_model)
-                         for name in profiles}
+    development_masks = {name: runtime_masks(features.rows(name, DEVELOPMENT), support_model) for name in profiles}
     development_mass = sum(sum(data.importance) for data in development.values())
     kernel = Kernel.load()
-    weights = array("d", [0.0]) * (len(names) * len(ACTIONS))
+    weights = array("d", [0.0]) * (len(names) * len(ACTIONS)) if start is None else base_weights(names, start)
     accumulators = array("d", [1.0]) * (len(names) * len(ACTIONS))
+    if base is not None:
+        for index, name in enumerate(names):
+            if name in base.weights:
+                accumulators[index * len(ACTIONS):(index + 1) * len(ACTIONS)] = array("d", [math.inf]) * len(ACTIONS)
+    rate = float(cast(float, cast(dict[str, object], options["warm_base"])["learning_rate"] if warm is not None
+                      else options["learning_rate"]))
+    epochs = int(cast(int, options["epochs"]))
     best, best_epoch, best_loss = array("d"), 0, math.inf
     best_selection: EpochSelection | None = None
+    kept_best, kept_epoch, kept_loss = array("d"), 0, math.inf
     history: list[dict[str, object]] = []
-    for epoch in range(int(cast(int, options["epochs"]))):
-        kernel.epoch(train, weights, accumulators, float(cast(float, options["learning_rate"])))
-        rounded = array("d", (round(value, DETERMINISTIC_ROUNDING_DECIMALS) for value in weights))
-        predictions = {name: kernel.predict(data, rounded) for name, data in development.items()}
-        loss = sum(-data.importance[row] * math.log(max(LOG_LOSS_PROBABILITY_FLOOR, predictions[name][row * len(ACTIONS) + label]))
-                   for name, data in development.items() for row, label in enumerate(data.labels)) / development_mass
-        selection = assess_epoch({name: (apply_support_mask(predictions[name], *development_masks[name]), data.labels)
-                                  for name, data in development.items()},
-                                 thresholds=development_thresholds(options), loss=loss,
-                                 minimum_net_benefit=int(cast(dict[str, int], options["epoch_selection"])["minimum_net_benefit_per_profile"]))
-        if selection is not None and (best_selection is None or selection.rank > best_selection.rank):
-            best, best_epoch, best_loss, best_selection = rounded, epoch + 1, loss, selection
-        history.append({"epoch": epoch + 1, "development_loss": loss,
-                        "selection": asdict(selection) if selection is not None else None})
-        print(f"epoch {epoch + 1}: development_loss={loss:.9f}, best={best_epoch}", flush=True)
-    if best_selection is None:
+    kept_check = {name: Packed.build(rows, names) for name, rows in kept_development.items()}
+    kept_mass = sum(sum(data.importance) for data in kept_check.values())
+    # The kernel releases the GIL: the next epoch trains in a thread while this one is scored.
+    with ThreadPoolExecutor(max_workers=1) as following:
+        kernel.epoch(train, weights, accumulators, rate)
+        for epoch in range(epochs):
+            rounded = array("d", (round(value, DETERMINISTIC_ROUNDING_DECIMALS) for value in weights))
+            next_epoch = following.submit(kernel.epoch, train, weights, accumulators, rate) if epoch + 1 < epochs else None
+            record: dict[str, object] = {"epoch": epoch + 1}
+            if base is not None:
+                # The kept-neighbour head's epoch is the one whose kept-neighbour frames of DEVELOPMENT it
+                # predicts best; the base's weights never move, so its rows cannot choose.
+                loss = sum(log_loss(kernel.predict(data, rounded), data) for data in kept_check.values()) / kept_mass
+                if loss < kept_loss:
+                    kept_best, kept_epoch, kept_loss = rounded, epoch + 1, loss
+                record["kept_development_loss"] = loss
+                print(f"epoch {epoch + 1}: kept_development_loss={loss:.9f}, best={kept_epoch}", flush=True)
+            if base is not None and not heads:
+                history.append(record)
+                if next_epoch is not None:
+                    next_epoch.result()
+                continue
+            predictions = {name: kernel.predict(data, rounded) for name, data in development.items()}
+            loss = sum(-data.importance[row] * math.log(max(LOG_LOSS_PROBABILITY_FLOOR, predictions[name][row * len(ACTIONS) + label]))
+                       for name, data in development.items() for row, label in enumerate(data.labels)) / development_mass
+            selection = assess_epoch({name: (apply_support_mask(predictions[name], *development_masks[name]), data.labels)
+                                      for name, data in development.items()},
+                                     thresholds=development_thresholds(options), loss=loss,
+                                     minimum_net_benefit=int(cast(dict[str, int], options["epoch_selection"])["minimum_net_benefit_per_profile"]))
+            if selection is not None and (best_selection is None or selection.rank > best_selection.rank):
+                best, best_epoch, best_loss, best_selection = rounded, epoch + 1, loss, selection
+            history.append({**record, "development_loss": loss, "selection": asdict(selection) if selection is not None else None})
+            print(f"epoch {epoch + 1}: development_loss={loss:.9f}, best={best_epoch}", flush=True)
+            if next_epoch is not None:
+                next_epoch.result()
+    if (base is None or heads) and best_selection is None:
         raise ValueError("no epoch repaired more than it broke on development")
+    if base is not None and not heads:
+        best, best_epoch, best_loss = kept_best, kept_epoch, kept_loss
+    elif base is not None:
+        # The heads at the epoch development ranks best, the kept-neighbour head at its own: no frame
+        # holds the features of both, so neither moves the other's answers.
+        for index, name in enumerate(names):
+            if name.startswith(KEPT_FEATURE_PREFIX):
+                best[index * len(ACTIONS):(index + 1) * len(ACTIONS)] = kept_best[index * len(ACTIONS):(index + 1) * len(ACTIONS)]
     gates = cast(dict[str, int | float | bool], options["gate_policy"])
     mapping = {name: list(best[index * len(ACTIONS):index * len(ACTIONS) + len(ACTIONS)]) for index, name in enumerate(names)}
     candidate = ContextModel({name: tuple(values) for name, values in mapping.items()},
                              "context-v3-fitting", feature_version=CONTEXT_ACTION_FEATURE_VERSION)
-    calibration_predictions = {name: (apply_runtime_support(kernel.predict(data, best),
-                        feature_rows(feature_paths[name, "calibration"]), candidate), data.labels)
-                   for name, data in calibration.items()}
+    calibration_predictions = {name: (apply_runtime_support(kernel.predict(data, best), features.rows(name, CALIBRATION), candidate),
+                                      data.labels) for name, data in calibration.items()}
+    if base is not None and any(mapping[name] != list(values) for name, values in base.weights.items()):
+        raise ValueError("a weight of the frozen base moved")
+    if base is not None:
+        # Equal, and now the very values of the base: a zero step may leave -0.0 as 0.0.
+        mapping.update({name: list(values) for name, values in base.weights.items()})
+    # A head fitted onto a frozen base serves at the base's threshold: every other decision is the base's.
     threshold, calibration_report, passed = choose_threshold(
-        calibration_predictions, cast(list[float], options["threshold_candidates"]),
+        calibration_predictions,
+        cast(list[float], options["threshold_candidates"]) if base is None else [base.conversion_threshold],
         int(gates["minimum_calibration_net_benefit"]), float(gates["minimum_calibration_conversion_recall"]),
-        minimum_threshold=best_selection.threshold,
+        minimum_threshold=base.conversion_threshold if base is not None else best_selection.threshold if best_selection is not None else 0.0,
         net_benefit_tolerance=float(cast(float, cast(dict[str, object], options["threshold_selection"])["net_benefit_tolerance"])),
         maximum_threshold=float(cast(float, cast(dict[str, object], options["threshold_selection"])["maximum_threshold"])),
         authored_floor=float(cast(float, cast(dict[str, object], options["threshold_selection"])["authored_floor"])),
@@ -1345,15 +1934,33 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
         "provenance": before_provenance, "corpus_manifest_sha256": corpus_hash,
         "recipe": options, "gate_policy": gates, "calibration": calibration_report,
         "development": {"selected_epoch": best_epoch, "loss": best_loss, "history": history,
-                        "selection": asdict(best_selection)},
+                        "selection": asdict(best_selection) if best_selection is not None else None,
+                        **({"kept_selected_epoch": kept_epoch, "kept_loss": kept_loss} if base is not None and heads else {})},
+        "frozen_base": None if base is None else {
+            "artifact": cast(dict[str, object], options["frozen_base"])["artifact"],
+            "sha256": cast(dict[str, object], options["frozen_base"])["sha256"],
+            "model_version": base.version, "conversion_threshold": base.conversion_threshold},
+        "warm_base": None if warm is None else {
+            "artifact": cast(dict[str, object], options["warm_base"])["artifact"],
+            "sha256": cast(dict[str, object], options["warm_base"])["sha256"],
+            "model_version": warm.version, "learning_rate": rate},
         "conversion_threshold": threshold, "feature_count": len(names),
-        "span_curriculum": span_reports,
-        "lookahead_curriculum": lookahead_reports,
-        "natural_lookahead_curriculum": natural_reports,
-        "lexical_short_pair_curriculum": lexical_reports,
-        "captured_curriculum": captured_report,
-        "capital_citation_curriculum": capital_report,
-        "planned_mass_balance": balance_reports,
+        # A frozen base frames TRAIN with its kept-neighbour frames alone: no span, lookahead, lexical or
+        # balance report of TRAIN then.
+        "span_curriculum": {profile: {split: features.spans[profile, split] for split in splits if (profile, split) in features.spans}
+                            for profile in profiles},
+        "lookahead_curriculum": {profile: features.chains[profile, TRAIN]["lookahead"] for profile in profiles
+                                 if "lookahead" in features.chains[profile, TRAIN]},
+        "natural_lookahead_curriculum": {profile: {split: features.chains[profile, split]["natural"] for split in splits
+                                                   if "natural" in features.chains[profile, split]} for profile in profiles},
+        "lexical_short_pair_curriculum": {profile: features.chains[profile, TRAIN]["lexical"] for profile in profiles
+                                          if "lexical" in features.chains[profile, TRAIN]},
+        "captured_curriculum": features.captured,
+        "capital_citation_curriculum": features.capitals,
+        "english_capital_curriculum": features.english,
+        **features.tail,
+        "planned_mass_balance": {profile: features.chains[profile, TRAIN]["balance"] for profile in profiles
+                                 if "balance" in features.chains[profile, TRAIN]},
         "test_accessed": False,
         "scope": "natural KEEP plus declared layout/mixed-context interventions; sequence evaluation required"}
     (output / SEAL).write_bytes(canonical(seal))
@@ -1372,10 +1979,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--corpus", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--backend", choices=CONTEXT_ACTION_BACKENDS, default=CONTEXT_ACTION_BACKEND_AUTO,
+                        help="cpu: the trainer's Python in worker processes; gpu: evidence and features on CUDA; "
+                             "auto: gpu when it can run here. Every back end fits the same candidate.")
+    parser.add_argument("--jobs", type=int, default=None,
+                        help="worker processes (default: one per core, as far as the available memory allows)")
     args = parser.parse_args(argv)
-    seal = fit(args.corpus, args.output)
+    seal = fit(args.corpus, args.output, backend=args.backend, jobs=args.jobs)
     return 0 if seal["stage"] == SEALED_BEFORE_TEST else 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # Run as the named module: the back ends import it by name, and its classes must be the same ones.
+    import train_context_action_model
+
+    raise SystemExit(train_context_action_model.main())

@@ -10,7 +10,10 @@ from unittest.mock import patch
 
 from keyswitch.context_action_features import extract_action_features
 from keyswitch.constants.models import (
+    CAPITALS_FEATURE_PREFIX,
     CONTEXT_ACTION_FEATURE_VERSION,
+    KEPT_CONTEXT_WORD_MAX_CHARACTERS,
+    KEPT_FEATURE_PREFIX,
     PLANNED_CONTEXT_AFTER_MAX_CHARACTERS,
 )
 from keyswitch.context_model import ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, ContextPrediction, extract_context_features
@@ -92,6 +95,58 @@ class ContextAfterOriginTests(unittest.TestCase):
             with self.subTest(item=item):
                 result = model.predict(item)
                 self.assertEqual((result.action, result.supported), ("suggest", False))
+
+    def test_a_kept_neighbour_question_has_weights_of_its_own(self) -> None:
+        # Asked beside a kept next word, every feature carries KEPT_FEATURE_PREFIX: the weights of the
+        # question asked at the word's own boundary never answer it, and the reverse.
+        kept = replace(self.item, after_origin="kept_next_word")
+        features = extract_action_features(kept)
+        self.assertTrue(features and all(name.startswith(KEPT_FEATURE_PREFIX) for name in features))
+        self.assertEqual({name.removeprefix(KEPT_FEATURE_PREFIX) for name in features} - {
+            "after_origin:kept_next_word", "after_origin:kept_next_word:direction:0:length:1",
+            "after_origin:kept_next_word:script:ru:direction:0:length:1"},
+            set(extract_action_features(self.item)) - {"after_origin:field", "after_origin:field:direction:0:length:1",
+                                                         "after_origin:field:script:ru:direction:0:length:1"})
+        plain = ContextModel({**self.weights(), "bias": (0.0, AFTER_ORIGIN_DECISIVE_BIAS_WEIGHT, 0.0, 0.0)}, "context-v3-plain",
+                             feature_version=CONTEXT_ACTION_FEATURE_VERSION)
+        self.assertEqual(plain.predict(self.item).action, "convert")
+        self.assertEqual((plain.predict(kept).action, plain.predict(kept).supported), ("suggest", False))
+        own = ContextModel({**{KEPT_FEATURE_PREFIX + name: weights for name, weights in self.weights().items()},
+                            KEPT_FEATURE_PREFIX + "bias": (0.0, AFTER_ORIGIN_DECISIVE_BIAS_WEIGHT, 0.0, 0.0)},
+                           "context-v3-kept", feature_version=CONTEXT_ACTION_FEATURE_VERSION)
+        self.assertEqual(own.predict(kept).action, "convert")
+        self.assertEqual(own.predict(self.item).supported, False)
+        unreachable = [replace(kept, field=replace(kept.field, after=after)) for after in ("", "нас завтра", "я" * (PLANNED_CONTEXT_AFTER_MAX_CHARACTERS + 1))]
+        unreachable += [replace(kept, trigger="enter"), replace(kept, boundary_text="\t"), replace(kept, original=""),
+                        replace(kept, original="r" * (KEPT_CONTEXT_WORD_MAX_CHARACTERS + 1))]
+        for item in unreachable:
+            with self.subTest(item=item):
+                self.assertEqual((own.predict(item).action, own.predict(item).supported), ("suggest", False))
+
+    def test_a_token_in_capitals_has_its_features_once_more_for_the_capitals_head(self) -> None:
+        capitals = ContextEvidence("BP", "ИЗ", 0, FieldContext("Editor", "1", "affected by the ", ""), boundary_text=" ")
+        features = extract_action_features(capitals)
+        shared = {name: value for name, value in features.items() if not name.startswith(CAPITALS_FEATURE_PREFIX)}
+        self.assertEqual({name.removeprefix(CAPITALS_FEATURE_PREFIX): value for name, value in features.items()
+                          if name.startswith(CAPITALS_FEATURE_PREFIX)}, shared)
+        # After Russian prose or nothing (`я YT` is `я НЕ` typed with Caps Lock), one letter, a word longer
+        # than an abbreviation, a word not all in capitals, a token with a sign and the kept-neighbour
+        # question: no head.
+        for item in (replace(capitals, field=replace(capitals.field, before="я ")), replace(capitals, field=replace(capitals.field, before="")),
+                     replace(capitals, original="B", alternative="И"), replace(capitals, original="PFGHJC", alternative="ЗАПРОС"),
+                     replace(capitals, original="Bp", alternative="Из"), replace(capitals, original="BP2", alternative="ИЗ2"),
+                     replace(capitals, field=replace(capitals.field, after="нас"), after_origin="kept_next_word")):
+            with self.subTest(item=item):
+                self.assertFalse(any(name.startswith(CAPITALS_FEATURE_PREFIX) for name in extract_action_features(item)))
+        # Without head weights the shared ones decide; a head weight answers the class alone.
+        support = {name: (0.0,) * len(ACTIONS) for item in (self.item, capitals) for name in extract_action_features(item)
+                   if name.startswith(("source:char:", "target:char:"))}
+        plain = {**support, "bias": (0.0, AFTER_ORIGIN_DECISIVE_BIAS_WEIGHT, 0.0, 0.0)}
+        head = {**plain, CAPITALS_FEATURE_PREFIX + "bias": (AFTER_ORIGIN_DECISIVE_BIAS_WEIGHT * len(ACTIONS), 0.0, 0.0, 0.0)}
+        for weights, expected in ((plain, "convert"), (head, "keep")):
+            model = ContextModel(weights, "context-v3-capitals", feature_version=CONTEXT_ACTION_FEATURE_VERSION)
+            self.assertEqual(model.predict(capitals).action, expected)
+            self.assertEqual(model.predict(self.item).action, "convert")
 
     def test_v2_features_and_predictions_ignore_origin_entirely(self) -> None:
         model = ContextModel({"bias": (0.0, AFTER_ORIGIN_CONVERT_BIAS_WEIGHT, 0.0, 0.0), "app:editor": (0.0,) * len(ACTIONS)}, "context-v1-origin")

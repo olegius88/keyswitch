@@ -132,4 +132,5 @@ class InputBackend(Protocol):
         source_group: int | None = None,
         late: Sequence[KeyEvent] = (),
         trailing: Sequence[KeyEvent] = (),
+        kept_tail: int = 0,
     ) -> int: ...

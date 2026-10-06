@@ -55,6 +55,13 @@ STRANDED_PREVIOUS_MIN_LETTERS: Final = 2
 # Sample weight of a stranded-previous frame: natural text holds few of them (corpus v23 TRAIN:
 # 384 rows), and at unit weight the authored `руку ерун` stayed under the threshold (p=0.987).
 STRANDED_PREVIOUS_WEIGHT: Final = 2.0
+# Kept-neighbour frames (train_context_action_model.kept_neighbour_curriculum): the shortest waiting
+# word they frame (a lone letter is decided by the curated rules, not by the model), the share of
+# terms framed in capitals (`ДДЬ` for `LLM`), one in this many by hash, and the most frames one term,
+# abbreviation or misspelt word gets, each after a different Russian row.
+KEPT_NEIGHBOUR_MIN_LETTERS: Final = 2
+KEPT_NEIGHBOUR_CAPITALS_MODULUS: Final = 4
+KEPT_NEIGHBOUR_FRAMES_PER_WORD: Final = 3
 # Letters of a Latin abbreviation cited in capitals inside Russian prose whose Cyrillic reading is a
 # rare word (`WBC` is `ЦИС`, `IBF` is `ШИА`): three to five, as abbreviations are written. Two
 # letters stay with the deferral rules and the owner's own Cyrillic abbreviations (`ГА`).
@@ -379,3 +386,96 @@ ORTHO_V2_PRINTED_REPORT_MAX_CHARACTERS: Final = 4000
 # Share of wanted conversions the rejected ortho-v2 weights separate at an ideal threshold, as its
 # report states it.
 ORTHO_V2_IDEAL_SEPARATION_PERCENT: Final = 99.7
+# The context-v3 trainer's back ends (tools/context_action_pipeline.py, tools/context_action_cuda.py and
+# the kernels in tools/context_action_kernels/). Every back end fits the candidate the others fit, byte
+# for byte; these values only place and schedule the work. Where tools/install-training-accelerators.sh
+# puts NumPy and CuPy; frames per featurisation task; tasks queued per worker process; how often the
+# scheduler looks for finished tasks; the entries each remembered pure function keeps; the feature
+# entries packed at a time; the differing features an error quotes; and the memory a fit's main process
+# and each worker process take at most, with a margin: worker processes start only as far as the
+# available memory allows (corpus v16, 06.10.2026: main process 4.9 GiB, each worker 1.1 GiB, PSS).
+TRAINING_ACCELERATOR_SITE: Final = "build/training-site"
+# The back ends a fit may run on (--backend): chosen by what the machine has, or one of the two.
+CONTEXT_ACTION_BACKEND_AUTO: Final = "auto"
+CONTEXT_ACTION_BACKEND_CPU: Final = "cpu"
+CONTEXT_ACTION_BACKEND_GPU: Final = "gpu"
+CONTEXT_ACTION_BACKENDS: Final = (CONTEXT_ACTION_BACKEND_AUTO, CONTEXT_ACTION_BACKEND_CPU, CONTEXT_ACTION_BACKEND_GPU)
+# The back ends' sources, pinned in the provenance of every candidate whichever back end fitted it.
+CONTEXT_ACTION_BACK_END_SOURCES: Final = (
+    "tools/context_action_pipeline.py", "tools/context_action_cuda.py", "tools/context_action_mass.c") + tuple(
+    "tools/context_action_kernels/" + name for name in (
+        "core.cuh", "decide.cuh", "rows.cuh", "evidence.cuh", "features.cuh", "featurizer.cu", "parity.json"))
+CONTEXT_ACTION_FRAMES_PER_TASK: Final = 2000
+CONTEXT_ACTION_TASKS_PER_WORKER: Final = 2
+CONTEXT_ACTION_SCHEDULER_POLL_SECONDS: Final = 0.05
+CONTEXT_ACTION_MEMO_ENTRIES: Final = 1 << 20
+CONTEXT_ACTION_PACKING_CHUNK_ENTRIES: Final = 1 << 23
+CONTEXT_ACTION_REPORTED_DIFFERENCES: Final = 10
+CONTEXT_ACTION_MAIN_PROCESS_BYTES: Final = 6 << 30
+CONTEXT_ACTION_WORKER_BYTES: Final = 3 << 29
+# The Python the CUDA kernels repeat: whole files, and the trainer's functions for one frame. Their hashes
+# as of the last parity check are in tools/context_action_kernels/parity.json. Every this-many-th frame of
+# a fit on the GPU is featurised on the CPU too and compared.
+CONTEXT_ACTION_CUDA_MIRRORED_SOURCES: Final = tuple("src/keyswitch/" + name + ".py" for name in (
+    "context_action_features", "context_model", "context_policy", "detector", "identifier_lexicon", "input_context",
+    "intent_model", "language_model", "layouts", "ortho_model", "short_words", "word_decision",
+)) + ("tools/context_physical_keys.py",)
+CONTEXT_ACTION_CUDA_MIRRORED_TRAINER_PARTS: Final = (
+    "ActionRow", "previous_context", "evidence", "identifier_family", "identifier_evidence_dropped", "frame_evidence",
+    "frame_features",
+)
+CONTEXT_ACTION_CUDA_SPOT_CHECK_STRIDE: Final = 64
+# What one CUDA thread holds: the longest token and context slice (longer frames take the CPU path),
+# the bytes of one feature name, the features of one frame, the hash-table slots of a frame's
+# features, of its intent buckets and of the n-grams of one order (as powers of two), the intent
+# buckets of one prediction, Knuth's multiplicative hash, the partial sums of math.fsum (non-overlapping
+# doubles: the exponent range allows about forty), the triggers, ortho features, ortho order and small tables a
+# model carries, and the digits of a 64-bit decimal.
+CONTEXT_ACTION_CUDA_TOKEN_CHARACTERS: Final = 160
+CONTEXT_ACTION_CUDA_CONTEXT_CHARACTERS: Final = 128
+CONTEXT_ACTION_CUDA_NAME_BYTES: Final = 480
+CONTEXT_ACTION_CUDA_FEATURES_PER_FRAME: Final = 768
+CONTEXT_ACTION_CUDA_FEATURE_SLOT_BITS: Final = 11
+CONTEXT_ACTION_CUDA_INTENT_SLOT_BITS: Final = 11
+CONTEXT_ACTION_CUDA_NGRAM_SLOT_BITS: Final = 8
+CONTEXT_ACTION_CUDA_INTENT_ENTRIES: Final = 704
+CONTEXT_ACTION_CUDA_MULTIPLICATIVE_HASH: Final = 2654435761
+CONTEXT_ACTION_CUDA_FSUM_PARTIALS: Final = 48
+CONTEXT_ACTION_CUDA_TRIGGER_CAPACITY: Final = 8
+CONTEXT_ACTION_CUDA_ORTHO_FEATURE_CAPACITY: Final = 16
+CONTEXT_ACTION_CUDA_ORTHO_ORDER_CAPACITY: Final = 16
+CONTEXT_ACTION_CUDA_SMALL_TABLE_CAPACITY: Final = 8
+CONTEXT_ACTION_CUDA_DECIMAL_DIGITS: Final = 24
+# How the host drives the kernels: threads per block, frames per feature batch, feature entries
+# reserved per frame, the stack of one thread, and the Hunspell questions one pass may record.
+CONTEXT_ACTION_CUDA_BLOCK_THREADS: Final = 64
+CONTEXT_ACTION_CUDA_BATCH_FRAMES: Final = 32768
+CONTEXT_ACTION_CUDA_RESERVED_FEATURES_PER_FRAME: Final = 200
+CONTEXT_ACTION_CUDA_STACK_BYTES: Final = 32768
+CONTEXT_ACTION_CUDA_HUNSPELL_QUESTIONS: Final = 1 << 20
+# The characters a kernel reads: the Basic Multilingual Plane, its surrogates, and the blocks whose
+# characters compose under NFC only through combining marks (which take the CPU path anyway).
+CONTEXT_ACTION_CUDA_CODE_POINTS: Final = 0x10000
+CONTEXT_ACTION_CUDA_SURROGATES: Final = (0xD800, 0xDFFF)
+CONTEXT_ACTION_CUDA_SIMPLE_BLOCKS: Final = ((0x0000, 0x02FF), (0x0370, 0x052F), (0x1E00, 0x1FFF), (0x2000, 0x2BFF), (0xFF00, 0xFFEF))
+# Bit order of the character properties exported from Python's str methods, of the evidence flags a
+# record carries, and the order of the term tables the kernels index.
+CONTEXT_ACTION_CUDA_CHARACTER_PROPERTIES: Final = (
+    "known", "alpha", "digit", "decimal", "space", "upper", "lower", "title", "alnum", "word", "cyrillic_name", "latin_name",
+)
+CONTEXT_ACTION_CUDA_RECORD_FLAGS: Final = (
+    "probability", "threshold", "ortho_score", "ortho_threshold", "baseline", "source_known", "target_known",
+    "source_identifier", "target_identifier", "source_opening", "target_opening", "inside",
+)
+CONTEXT_ACTION_CUDA_TERM_TABLES: Final = ("latin", "cyrillic", "english", "russian")
+# The fields of a word score in a record, the bits of its flags, and the states of a frame in the kernels:
+# done, waiting for Hunspell answers, sent to the CPU path, and waiting for room in the output.
+CONTEXT_ACTION_CUDA_SCORE_FIELDS: Final = ("value", "gram_ratio", "ngram_score", "invalid_ratio", "raw_ngram_score")
+CONTEXT_ACTION_CUDA_SCORE_FLAGS: Final = ("exact", "spell_known", "present")
+CONTEXT_ACTION_CUDA_ROW_STATES: Final = ("done", "asking", "cpu", "retry")
+# The second hash of a feature name (the first is FNV-1a): seed, multiplier, the shift folded back
+# after each byte and the shift of the name's length mixed in at the end.
+CONTEXT_ACTION_NAME_HASH_SEED: Final = 0x84222325CBF29CE4
+CONTEXT_ACTION_NAME_HASH_MULTIPLIER: Final = 0x9E3779B97F4A7C15
+CONTEXT_ACTION_NAME_HASH_SHIFT: Final = 29
+CONTEXT_ACTION_NAME_HASH_LENGTH_SHIFT: Final = 48

@@ -30,6 +30,22 @@ ACTION_FEATURE_FREQUENCY_CAP: Final = 10**12
 PLANNED_CONTEXT_WORD_MAX_CHARACTERS: Final = 3
 # Longest single-line planned right context a planned_next_conversion origin allows.
 PLANNED_CONTEXT_AFTER_MAX_CHARACTERS: Final = 64
+# `after_origin == "kept_next_word"`: a waiting word of at most this many characters asked once more
+# with its next word, which stayed as typed in the same layout (KeySwitchEngine._decide_with_kept_neighbour).
+# Five covers the terms the owner's typing left behind that way (`шзм6` for `ipv6`, `тзь` for `npm`).
+KEPT_CONTEXT_WORD_MAX_CHARACTERS: Final = 5
+# Every feature of a kept-neighbour question carries this prefix: the question has weights of its own,
+# trained on frames of its own, and never moves the weights of the word decided at its boundary.
+KEPT_FEATURE_PREFIX: Final = "kept|"
+# A token of letters only, all capitals, of CAPITALS_HEAD_MIN_LETTERS to CAPITALS_HEAD_MAX_LETTERS, after
+# text with more Latin letters than Cyrillic ones, has its features once more under this prefix: the
+# capitals head, fitted onto a frozen model with its every other weight fixed, answers that class
+# alone; a model without such weights decides as it did. The class is the shape of a cited
+# abbreviation (`BP`, `NASA`) in Latin-script text; a longer word in capitals is a word typed with
+# Caps Lock (`PFGHJC` for `ЗАПРОС`), which the first head turned into a keep.
+CAPITALS_FEATURE_PREFIX: Final = "caps|"
+CAPITALS_HEAD_MIN_LETTERS: Final = 2
+CAPITALS_HEAD_MAX_LETTERS: Final = 5
 # The "length" feature buckets every word length from here up together (schemas 2 and 3).
 ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: Final = 6
 # Short categorical field labels (role, trigger) truncated before they reach a feature name.
@@ -133,6 +149,10 @@ CONTEXT_FEATURE_NGRAM_ORDERS: Final = (1, 2, 3)
 # and version strings of at most these many characters, weights of at most this magnitude, and a
 # conversion threshold from this floor up to one.
 MAX_CONTEXT_MODEL_FEATURES: Final = 50000
+# An action model (schema 3) holds up to three feature spaces: the word decided at its boundary, the
+# kept-neighbour question (KEPT_FEATURE_PREFIX) and the capitals head (CAPITALS_FEATURE_PREFIX), each
+# with its own budget in the recipe.
+MAX_CONTEXT_ACTION_MODEL_FEATURES: Final = 80000
 MAX_CONTEXT_FEATURE_NAME_CHARACTERS: Final = 512
 MAX_CONTEXT_MODEL_VERSION_CHARACTERS: Final = 80
 MAX_CONTEXT_WEIGHT_MAGNITUDE: Final = 1000

@@ -9,6 +9,9 @@ import json
 import sys
 from types import SimpleNamespace
 from typing import cast
+import hashlib
+import math
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -20,11 +23,11 @@ from keyswitch.constants.training import (
     PLANNED_VARIANT_MASS_DIVISOR,
 )
 from freeze_context_action_corpus import CorpusRow, physical, typo_variants
-from context_deferral import deferred_isolated, lookahead_focus
+from context_deferral import deferred_isolated, lookahead_focus, plausible_reading
 from reconcile_context_action_corpus import expanded_aliases
 from keyswitch.constants.training import ACTION_DEFERRED_WORD_MAX_CHARACTERS, CITATION_SIGN_HEADS
 from keyswitch.context_action_features import extract_action_features
-from keyswitch.context_model import ACTIONS, ContextEvidence, ContextModel
+from keyswitch.context_model import ACTIONS, ContextEvidence, ContextModel, term_bucket
 from train_context_action_model import (
     BLIND_IDENTIFIERS,
     ROOT,
@@ -37,9 +40,12 @@ from train_context_action_model import (
     capital_citation,
     capital_citation_curriculum,
     choose_threshold,
+    counted_token_curriculum,
+    english_capital_curriculum,
     development_thresholds,
     identifier_evidence_dropped,
     identifier_family,
+    kept_neighbour_curriculum,
     citation_shaped,
     natural_lookahead_rows,
     natural_mixed_contexts,
@@ -55,17 +61,37 @@ from train_context_action_model import (
     stranded_previous,
     training_order,
     translated,
+    base_weights,
+    frozen_base,
+    frozen_heads,
+    refused_aliases,
+    warm_base,
+    log_loss,
+    _counted_abbreviations,
+    _counted_terms,
+    _varied_boundary,
 )
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
-from keyswitch.constants.models import CONTEXT_ACTION_FEATURE_VERSION
+from keyswitch.constants.models import (
+    CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_V1_CONVERSION_THRESHOLD, KEPT_FEATURE_PREFIX,
+)
 from keyswitch.detector import LanguageDetector
 from keyswitch.intent_model import LinearNgramModel
 from keyswitch.language_model import LanguageModel
 from keyswitch.input_context import FieldContext
 from train_context_model import Row as HistoricalRow
+from context_optimizer import Packed
 from fixture_values.corpora import FIXTURE_WORD_FREQUENCY, PLANNED_EVIDENCE_DOMINANT_WORD_FREQUENCY
 from fixture_values.counts import (
     CAPITAL_CITATION_FIXTURE_WORDS_BY_LENGTH,
+    COUNTED_TOKEN_FIXTURE_FRAMES_PER_WORD,
+    ENGLISH_CAPITAL_FIXTURE_FRAMES_PER_WORD,
+    ENGLISH_CAPITAL_FIXTURE_WORDS_BY_LENGTH,
+    HEAD_FIXTURE_MAXIMUM_FEATURES,
+    KEPT_NEIGHBOUR_FIXTURE_ABBREVIATION_COUNT,
+    KEPT_NEIGHBOUR_FIXTURE_DOMINANCE,
+    KEPT_NEIGHBOUR_FIXTURE_FRAMES,
+    KEPT_NEIGHBOUR_FIXTURE_TERM_COUNT,
     MIXED_CONTEXT_SAMPLE_ROWS,
     CHOOSE_THRESHOLD_CONVERT_ROW_COUNT,
     CHOOSE_THRESHOLD_PLATEAU_NET_BENEFIT,
@@ -107,6 +133,10 @@ from fixture_values.counts import (
 )
 from fixture_values.scores import (
     CAPITAL_CITATION_FIXTURE_WEIGHT,
+    FROZEN_BASE_FIXTURE_IMPORTANCE,
+    FROZEN_BASE_FIXTURE_PROBABILITIES,
+    FROZEN_BASE_FIXTURE_WEIGHTS,
+    KEPT_NEIGHBOUR_FIXTURE_WEIGHT,
     ACTION_TRAINING_CONVERT_PROBABILITY,
     ACTION_TRAINING_RESIDUAL_PROBABILITY,
     CHOOSE_THRESHOLD_AUTHORED_FLOOR,
@@ -584,6 +614,199 @@ class ActionTrainingTests(unittest.TestCase):
         self.assertEqual(([row for row in paired if not row.identifier.endswith(":lower")], report["words"]), (rows, len(rows)))
         self.assertEqual([(row.original, row.action, row.field) for row in lower],
                          [(row.original.lower(), "convert", row.field) for row in rows])
+
+    def test_the_english_capital_curriculum_keeps_capitals_after_english_prose(self) -> None:
+        # `из` is among the commonest Russian words, and its keys in capitals are `BP`: inside English
+        # prose that is an abbreviation (`affected by the BP oil spill.`, test v28).
+        english = replace(fixture("bp", "spill", 0), before="affected by the ")
+        russian = replace(fixture("ru", "подвид", 1), before="Австралийский подвид ")
+        options = {"words_by_length": ENGLISH_CAPITAL_FIXTURE_WORDS_BY_LENGTH,
+                   "frames_per_word": ENGLISH_CAPITAL_FIXTURE_FRAMES_PER_WORD, "sample_weight": CAPITAL_CITATION_FIXTURE_WEIGHT}
+        rows, report = english_capital_curriculum([english, russian], frozenset(), options)
+        self.assertEqual(rows, english_capital_curriculum([english, russian], frozenset(), options)[0])
+        words = cast(dict[str, list[str]], report["words_by_length"])["2"]
+        self.assertIn("из/BP", words)
+        self.assertEqual(len(rows), len(words) * ENGLISH_CAPITAL_FIXTURE_FRAMES_PER_WORD)
+        for row in rows:
+            with self.subTest(row=row.identifier):
+                self.assertTrue(row.original.isascii() and row.original.isupper())
+                self.assertEqual((row.group, row.action, row.category, row.sample_weight, row.field.before),
+                                 (0, "keep", "english_capital", CAPITAL_CITATION_FIXTURE_WEIGHT, "affected by the "))
+                self.assertEqual((row.trigger, row.boundary_text), _varied_boundary(row.identifier))
+        again, _ = english_capital_curriculum([english, russian], frozenset(expanded_aliases("из")), options)
+        self.assertNotIn("BP", {row.original for row in again})
+        # In lower case the same keys are the Russian word typed in the wrong layout: `bp` is `из`.
+        paired, _ = english_capital_curriculum([english, russian], frozenset(), {**options, "lowercase_contrast": True})
+        lower = [row for row in paired if row.identifier.endswith(":lower")]
+        self.assertEqual([row for row in paired if not row.identifier.endswith(":lower")], rows)
+        self.assertEqual([(row.original, row.action, row.category, row.field) for row in lower],
+                         [(row.original.lower(), "convert", "english_capital_lower", row.field) for row in rows])
+        # After Russian prose the same capitals are the word typed with Caps Lock: `BP` there is `ИЗ`.
+        contrasted, contrast_report = english_capital_curriculum([english, russian], frozenset(), {**options, "russian_contrast": True})
+        typed = [row for row in contrasted if row.identifier.endswith(":russian")]
+        self.assertEqual([row for row in contrasted if not row.identifier.endswith(":russian")], rows)
+        self.assertEqual([(row.original, row.action, row.category, row.field.before) for row in typed],
+                         [(row.original, "convert", "english_capital_russian", "Австралийский подвид ") for row in rows])
+        self.assertIs(contrast_report["russian_contrast"], True)
+        self.assertIs(english_capital_curriculum([english], frozenset(), {**options, "russian_contrast": True})[1]["russian_contrast"], False)
+        # Without an English row there is no prose to put them in, and a zero budget frames nothing.
+        for source, chosen in (([russian], options), ([english], {**options, "frames_per_word": 0})):
+            self.assertEqual(english_capital_curriculum(source, frozenset(), chosen), ([], {"frames": 0, "scope": "not used"}))
+
+    def test_the_kept_neighbour_curriculum_frames_the_question_asked_beside_a_kept_word(self) -> None:
+        russian = [replace(fixture(f"k{index}", "сегодня", 1), before="мы обновили сервер и ", after=" ночью")
+                   for index in range(KEPT_NEIGHBOUR_FIXTURE_FRAMES)]
+        english = replace(fixture("e1", "today", 0), before="we have updated the server and ", after=" again")
+        options = {"natural_frames": KEPT_NEIGHBOUR_FIXTURE_FRAMES, "term_frames": KEPT_NEIGHBOUR_FIXTURE_FRAMES,
+                   "abbreviation_frames": KEPT_NEIGHBOUR_FIXTURE_FRAMES, "typo_frames": KEPT_NEIGHBOUR_FIXTURE_FRAMES,
+                   "minimum_term_count": KEPT_NEIGHBOUR_FIXTURE_TERM_COUNT,
+                   "minimum_abbreviation_count": KEPT_NEIGHBOUR_FIXTURE_ABBREVIATION_COUNT,
+                   "abbreviation_dominance": KEPT_NEIGHBOUR_FIXTURE_DOMINANCE, "sample_weight": KEPT_NEIGHBOUR_FIXTURE_WEIGHT}
+        rows, report = kept_neighbour_curriculum([*russian, english], frozenset(), options)
+        self.assertEqual(rows, kept_neighbour_curriculum([*russian, english], frozenset(), options)[0])
+        for row in rows:
+            with self.subTest(row=row.identifier):
+                self.assertEqual((row.after_origin, row.trigger, row.boundary_text, row.sample_weight),
+                                 ("kept_next_word", "space", " ", KEPT_NEIGHBOUR_FIXTURE_WEIGHT))
+                self.assertTrue(row.field.after.isalpha())
+        by_category: dict[str, list[ActionRow]] = {}
+        for row in rows:
+            by_category.setdefault(row.category, []).append(row)
+        # A short word of a sentence with the word after it, as written, both languages.
+        # Words of more than KEPT_CONTEXT_WORD_MAX_CHARACTERS letters are never the word asked about.
+        natural = {(row.group, row.field.before, row.original, row.field.after) for row in by_category["kept_neighbour"]}
+        english_pairs = {(0, "", "we", "have"), (0, "we ", "have", "updated"), (0, "we have updated ", "the", "server"),
+                         (0, "we have updated the server ", "and", "today")}
+        self.assertEqual({entry for entry in natural if entry[0] == 1}, {(1, "", "мы", "обновили")})
+        self.assertEqual(len(natural & english_pairs), KEPT_NEIGHBOUR_FIXTURE_FRAMES // LAYOUT_GROUP_COUNT)
+        self.assertTrue(all(row.action == "keep" for row in by_category["kept_neighbour"]))
+        # A counted term typed in the Russian layout, between a Russian left context and its word.
+        for row in by_category["kept_neighbour_term"]:
+            self.assertEqual((row.group, row.action, row.field.before, row.field.after),
+                             (1, "convert", "мы обновили сервер и ", "сегодня"))
+            self.assertFalse(plausible_reading(row.original, 1))
+            self.assertTrue(term_bucket(translated(row.original, 1).lower(), "latin") not in ("na", "0"))
+        self.assertEqual(cast(dict[str, int], report["counts"])["term"], KEPT_NEIGHBOUR_FIXTURE_FRAMES)
+        for category in ("kept_neighbour_abbreviation", "kept_neighbour_typo"):
+            self.assertTrue(by_category[category])
+            self.assertTrue(all((row.group, row.action) == (1, "keep") for row in by_category[category]))
+        held = cast(list[str], report["terms"])[0]
+        again, _ = kept_neighbour_curriculum([*russian, english], frozenset(expanded_aliases(held)), options)
+        self.assertNotIn(translated(held, 0), {row.original.lower() for row in again if row.category == "kept_neighbour_term"})
+        unused = {**options, "natural_frames": 0, "term_frames": 0, "abbreviation_frames": 0, "typo_frames": 0}
+        self.assertEqual(kept_neighbour_curriculum(russian, frozenset(), unused), ([], {"frames": 0, "scope": "not used"}))
+        # Without a Russian row there is no place to put a term, an abbreviation or a misspelt word.
+        self.assertEqual(kept_neighbour_curriculum([english], frozenset(), options)[1]["counts"],
+                         {"natural_0": KEPT_NEIGHBOUR_FIXTURE_FRAMES // LAYOUT_GROUP_COUNT})
+
+    def test_the_counted_token_curriculum_keeps_counted_abbreviations_and_converts_counted_terms(self) -> None:
+        # `тз` is counted 744 times in Russian technical text and its keys `np` 80 times: typed after
+        # Russian prose it is the abbreviation meant. `зк` is counted nowhere, and `pr` is a term.
+        self.assertIn("тз", _counted_abbreviations(frozenset(), KEPT_NEIGHBOUR_FIXTURE_ABBREVIATION_COUNT,
+                                                    KEPT_NEIGHBOUR_FIXTURE_DOMINANCE))
+        terms = _counted_terms(frozenset(), KEPT_NEIGHBOUR_FIXTURE_TERM_COUNT)
+        self.assertIn("pr", terms)
+        self.assertNotIn("np", terms)
+        russian = [replace(fixture(f"c{index}", "сегодня", 1), before="мы обновили сервер и ")
+                   for index in range(KEPT_NEIGHBOUR_FIXTURE_FRAMES)]
+        english = replace(fixture("e1", "today", 0), before="we have updated the server and ")
+        options = {"term_frames": KEPT_NEIGHBOUR_FIXTURE_FRAMES, "abbreviation_frames": KEPT_NEIGHBOUR_FIXTURE_FRAMES,
+                   "frames_per_word": COUNTED_TOKEN_FIXTURE_FRAMES_PER_WORD,
+                   "minimum_term_count": KEPT_NEIGHBOUR_FIXTURE_TERM_COUNT,
+                   "minimum_abbreviation_count": KEPT_NEIGHBOUR_FIXTURE_ABBREVIATION_COUNT,
+                   "abbreviation_dominance": KEPT_NEIGHBOUR_FIXTURE_DOMINANCE, "sample_weight": KEPT_NEIGHBOUR_FIXTURE_WEIGHT}
+        rows, report = counted_token_curriculum([*russian, english], frozenset(), options)
+        self.assertEqual(rows, counted_token_curriculum([*russian, english], frozenset(), options)[0])
+        self.assertEqual(report["counts"], {"counted_abbreviation": KEPT_NEIGHBOUR_FIXTURE_FRAMES,
+                                            "counted_term": KEPT_NEIGHBOUR_FIXTURE_FRAMES})
+        # One frame a word takes as many words as the budget has frames.
+        single, report_single = counted_token_curriculum([*russian, english], frozenset(), {**options, "frames_per_word": 1})
+        self.assertEqual(len(cast(list[str], report_single["terms"])), KEPT_NEIGHBOUR_FIXTURE_FRAMES)
+        self.assertTrue(all(row.identifier.endswith(":0") for row in single))
+        abbreviations = cast(list[str], report["abbreviations"])
+        for row in rows:
+            with self.subTest(row=row.identifier):
+                # Decided at its own boundary after a Russian left context, with nothing after it.
+                self.assertEqual((row.group, row.after_origin, row.field.before, row.field.after, row.sample_weight),
+                                 (1, "none", "мы обновили сервер и ", "", KEPT_NEIGHBOUR_FIXTURE_WEIGHT))
+                self.assertEqual((row.trigger, row.boundary_text), _varied_boundary(row.identifier))
+                self.assertFalse(plausible_reading(row.original, 1))
+                if row.category == "counted_term":
+                    self.assertEqual(row.action, "convert")
+                    self.assertNotIn(term_bucket(translated(row.original, 1).lower(), "latin"), ("na", "0"))
+                else:
+                    self.assertEqual((row.category, row.action), ("counted_abbreviation", "keep"))
+                    self.assertIn(row.original, abbreviations)
+        held = abbreviations[0]
+        again, _ = counted_token_curriculum([*russian, english], frozenset(expanded_aliases(held)), options)
+        self.assertNotIn(held, {row.original for row in again})
+        # In capitals the same tokens teach a capitals head: `ТЗ` keeps, the keys of `PR` convert.
+        capitals, capitals_report = counted_token_curriculum([*russian, english], frozenset(), {**options, "capitals": True})
+        self.assertIs(capitals_report["capitals"], True)
+        self.assertEqual([(row.identifier, row.action) for row in capitals], [(row.identifier, row.action) for row in rows])
+        self.assertTrue(all(row.original.isupper() and row.original.lower() == (
+            row.original.lower() if row.category == "counted_abbreviation" else translated(translated(row.original, 1).lower(), 0))
+            for row in capitals))
+        # Without a Russian row there is no place to put them, and a zero budget frames nothing.
+        unused = {**options, "term_frames": 0, "abbreviation_frames": 0}
+        for source, chosen in (([english], options), (russian, unused)):
+            self.assertEqual(counted_token_curriculum(source, frozenset(), chosen), ([], {"frames": 0, "scope": "not used"}))
+
+    def test_a_kept_neighbour_head_is_fitted_onto_a_frozen_base_it_leaves_alone(self) -> None:
+        self.assertIsNone(frozen_base({}))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "base.json"
+
+            def save(weights: dict[str, tuple[float, ...]]) -> dict[str, object]:
+                digest = hashlib.sha256(json.dumps(weights, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+                path.write_text(json.dumps({
+                    "feature_version": CONTEXT_ACTION_FEATURE_VERSION, "actions": list(ACTIONS), "weights": weights,
+                    "weights_sha256": digest, "version": "context-v3-test",
+                    "conversion_threshold": CONTEXT_V1_CONVERSION_THRESHOLD}), encoding="utf-8")
+                return {"artifact": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+            spec = save({"bias": FROZEN_BASE_FIXTURE_WEIGHTS})
+            base = frozen_base({"frozen_base": spec})
+            assert base is not None
+            # A warm base is named and checked the same way; its weights are where a full fit starts.
+            self.assertIsNone(warm_base({}))
+            self.assertEqual(cast(ContextModel, warm_base({"warm_base": spec})).weights, base.weights)
+            with self.assertRaisesRegex(ValueError, "warm base artifact differs"):
+                warm_base({"warm_base": {**spec, "sha256": "0" * len(str(spec["sha256"]))}})
+            # The head's features start at zero, the base's at the base's weights.
+            self.assertEqual(list(base_weights(["head", "bias"], base)), [*(0.0,) * len(ACTIONS), *FROZEN_BASE_FIXTURE_WEIGHTS])
+            with self.assertRaisesRegex(ValueError, "differs from the recipe"):
+                frozen_base({"frozen_base": {**spec, "sha256": "0" * len(str(spec["sha256"]))}})
+            # A base that answers the kept-neighbour question or a head's class already is no base for them.
+            for prefix in (KEPT_FEATURE_PREFIX, CAPITALS_FEATURE_PREFIX):
+                with self.assertRaisesRegex(ValueError, "without kept-neighbour weights or heads"):
+                    frozen_base({"frozen_base": save({"bias": FROZEN_BASE_FIXTURE_WEIGHTS, prefix + "bias": FROZEN_BASE_FIXTURE_WEIGHTS})})
+            # Heads are named by the recipe and fitted under their prefixes with budgets of their own.
+            self.assertEqual(frozen_heads({}), {})
+            self.assertEqual(frozen_heads({"frozen_base": spec}), {})
+            self.assertEqual(frozen_heads({"frozen_base": {**spec, "heads": {"capitals": {"maximum_features": HEAD_FIXTURE_MAXIMUM_FEATURES}}}}),
+                             {CAPITALS_FEATURE_PREFIX: HEAD_FIXTURE_MAXIMUM_FEATURES})
+        data = Packed.build([({"bias": 1.0}, ACTIONS.index("convert"), FROZEN_BASE_FIXTURE_IMPORTANCE)], ["bias"])
+        convert = FROZEN_BASE_FIXTURE_PROBABILITIES[ACTIONS.index("convert")]
+        self.assertAlmostEqual(log_loss(array("d", FROZEN_BASE_FIXTURE_PROBABILITIES), data),
+                               -FROZEN_BASE_FIXTURE_IMPORTANCE * math.log(convert))
+
+    def test_a_fit_without_the_ledger_its_corpus_was_frozen_against_stops(self) -> None:
+        own, accessed = (hashlib.sha256(word.encode()).hexdigest() for word in ("own", "accessed"))
+        with tempfile.TemporaryDirectory() as directory:
+            corpus, ledger = Path(directory) / "corpus", Path(directory) / "ledger"
+            corpus.mkdir()
+            (corpus / "test-membership.json").write_text(json.dumps({"alias_sha256": [own]}), encoding="utf-8")
+            # Frozen refusing its own test's alias and one of an accessed test.
+            (corpus / "manifest.json").write_text(json.dumps({"metadata": {"refused_test_aliases": len((own, accessed))}}),
+                                                  encoding="utf-8")
+            with patch("train_context_action_model.LEDGER_ROOT", ledger):
+                with self.assertRaisesRegex(ValueError, "missing or older"):
+                    refused_aliases(corpus)
+                ledger.mkdir()
+                (ledger / "test.access.json").write_text(json.dumps({"test_membership": {"alias_sha256": [accessed]}}),
+                                                         encoding="utf-8")
+                self.assertEqual(refused_aliases(corpus), {own, accessed})
 
     def test_a_russian_word_closing_a_quotation_converts_with_the_at_sign_of_its_quote(self) -> None:
         words = [replace(fixture(f"q{index}", "привет", 1), before="он сказал «") for index in range(MIXED_CONTEXT_SAMPLE_ROWS)]

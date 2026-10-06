@@ -38,7 +38,7 @@ class TrainingDoctorTest(unittest.TestCase):
 
         probes = tuple((lambda name=name: passing(name)) for name in (
             "compiler", "system_lexicons", "system_hunspell", "reference_models",
-            "prefix_v1_data", "context_action_corpus", "context_action_ledger"))
+            "prefix_v1_data", "context_action_corpus", "context_action_ledger", "numpy", "cuda_backend"))
         output = io.StringIO()
         with patch.object(doctor, "CHECKS", probes), redirect_stdout(output), redirect_stderr(io.StringIO()):
             self.assertEqual(doctor.main(["--stage", "train-prefix-v2"]), 0)

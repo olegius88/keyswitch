@@ -68,9 +68,9 @@ STAGES: Final = (
           ("compiler", "reference_models", "prefix_v1_data"),
           "PYTHONPATH=src python3 tools/train_prefix_v2_model.py --output .t/prefix-v2/<run>"),
     Stage("train-context-v3", "new context-v3 candidate from model/context_v3/recipe.json",
-          ("compiler", "reference_models", "context_action_corpus"),
-          "PYTHONPATH=src python3 tools/train_context_action_model.py "
-          "--corpus .t/reliable-release-2026-09-12/context-action-corpus --output .t/context-v3/<run>"),
+          ("compiler", "numpy", "reference_models", "context_action_corpus"),
+          "PYTHONPATH=src:tools python3 tools/train_context_action_model.py "
+          "--corpus .t/reliable-release-2026-09-12/context-action-corpus --output .t/context-v3/<run> [--backend cpu|gpu]"),
     Stage("evaluate-context-v3", "sequence evaluation of a context-v3 + prefix-v2 pair",
           ("reference_models", "context_action_corpus", "context_action_ledger"),
           "PYTHONPATH=src python3 tools/evaluate_context_action_sequences.py --candidate ... --seal ... "
@@ -149,6 +149,26 @@ def check_prefix_v1_data() -> Check:
     return Check("prefix_v1_data", not missing, "missing " + ", ".join(missing) if missing else "prefix-v1 splits present")
 
 
+def check_numpy() -> Check:
+    """The context-v3 trainer's back ends need NumPy (tools/install-training-accelerators.sh)."""
+    try:
+        import context_action_pipeline  # noqa: F401  (puts build/training-site on the path)
+        import numpy
+    except ImportError as error:
+        return Check("numpy", False, f"{error}: run tools/install-training-accelerators.sh")
+    return Check("numpy", True, "NumPy " + numpy.__version__)
+
+
+def check_cuda_backend() -> Check:
+    """Whether the context-v3 trainer can use CUDA here; without it the trainer runs on the CPU."""
+    try:
+        import context_action_pipeline
+    except ImportError:
+        return Check("cuda_backend", False, "needs NumPy first; the cpu back end serves")
+    available, reason = context_action_pipeline.cuda_status()
+    return Check("cuda_backend", available, reason if available else reason + "; the cpu back end serves")
+
+
 def check_context_action_corpus() -> Check:
     manifest = CONTEXT_ACTION_CORPUS / "manifest.json"
     if manifest.is_file():
@@ -167,7 +187,7 @@ def check_context_action_ledger() -> Check:
 
 CHECKS: Final[tuple[Callable[[], Check], ...]] = (
     check_compiler, check_system_lexicons, check_system_hunspell, check_reference_models,
-    check_prefix_v1_data, check_context_action_corpus, check_context_action_ledger,
+    check_prefix_v1_data, check_context_action_corpus, check_context_action_ledger, check_numpy, check_cuda_backend,
 )
 
 
