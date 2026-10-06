@@ -1774,9 +1774,11 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
     if base is not None:
         keep_importance = float(cast(float, options["keep_importance"]))
         kept_frames = kept_neighbour_curriculum(inputs.source_rows[DEVELOPMENT], inputs.refused, kept_options, inputs.lexicons[False])[0]
-        kept_development = {profile: [(frame_features(row, DEVELOPMENT, inputs.detectors[profile], inputs.ortho), ACTIONS.index(row.action),
-                                       row.sample_weight * (keep_importance if row.action == "keep" else 1.0)) for row in kept_frames]
-                            for profile in profiles}
+        # In name order, as the serial fit read them back from its feature files: the sums of a prediction
+        # run in the same order and the epoch is chosen on the same losses to the last bit.
+        kept_development = {profile: [(dict(sorted(frame_features(row, DEVELOPMENT, inputs.detectors[profile], inputs.ortho).items())),
+                                       ACTIONS.index(row.action), row.sample_weight * (keep_importance if row.action == "keep" else 1.0))
+                                      for row in kept_frames] for profile in profiles}
         print(f"features kept-development: {len(kept_frames)} per profile", flush=True)
     # The frames, curricula and lexicons are not needed any more; the epochs need the memory.
     splits = list(inputs.frames)
