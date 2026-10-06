@@ -540,6 +540,58 @@ def capital_citation_curriculum(source_rows: Sequence[CorpusRow], refused: froze
                   "scope": "TRAIN only: keep frames of Latin capitals after Russian prose whose Cyrillic reading is a rare lexicon word (capital_citation_curriculum)."}
 
 
+def english_capital_curriculum(source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                               options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """Latin capitals inside English prose stay, whatever their Cyrillic reading is.
+
+    Test v28, read by a candidate whose every decision outside the kept-neighbour question was the
+    corpus v26 pair's, holds `affected by the BP oil spill.`: with the reference lexicons and the early
+    switch off `BP` became `ИЗ` at p=0.997, for `из` is among the commonest Russian words and the
+    model had seen Latin capitals framed after Russian prose only (capital_citation_curriculum).
+    English text cites abbreviations of a few capitals constantly, and their keys spell a Russian word
+    as often as not. The frames: the keys of the Russian lexicon's commonest words of each length of
+    `words_by_length`, typed in the Latin layout in capitals, after the left context of an English
+    TRAIN row whose words are all Latin, chosen by hash, `frames_per_word` contexts a word - keep. No
+    convert frame pairs them: a Russian word typed in capitals in the wrong layout inside English
+    prose is not a case the corpus or the owner's typing holds. Words of this corpus's test and of
+    every accessed test are refused by their aliases.
+    """
+
+    budgets = {int(length): int(count) for length, count in cast(dict[str, int], options["words_by_length"]).items()}
+    per_word = int(cast(int, options["frames_per_word"]))
+    weight = float(cast(float, options["sample_weight"]))
+    contexts = natural_mixed_contexts(source_rows)[0]
+    if not contexts or not any(budgets.values()) or not per_word:
+        return [], {"frames": 0, "scope": "not used"}
+    frequencies = reference_models(False)[1].frequencies
+    candidates: dict[int, list[tuple[str, str]]] = defaultdict(list)
+    for word in sorted(frequencies, key=lambda word: (-frequencies[word], word)):
+        if len(word) not in budgets or not _cyrillic(word) or not word.islower():
+            continue
+        latin = translated(word.upper(), 1)
+        if not latin.isascii() or not latin.isalpha() or refused & (expanded_aliases(word) | expanded_aliases(latin)):
+            continue
+        candidates[len(word)].append((word, latin))
+    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+    rows: list[ActionRow] = []
+    chosen: dict[str, list[str]] = {}
+    for length, budget in sorted(budgets.items()):
+        chosen[str(length)] = [f"{word}/{latin}" for word, latin in candidates[length][:budget]]
+        for word, latin in candidates[length][:budget]:
+            for index in range(per_word):
+                identifier = f"english-capital:{word}:{index}"
+                trigger, boundary_text = _varied_boundary(identifier)
+                field = FieldContext(applications[variant_choice(identifier, "application", len(applications))],
+                                     "public-training", contexts[variant_choice(identifier, "context", len(contexts))],
+                                     "", "unknown")
+                rows.append(ActionRow(identifier, latin, 0, field, trigger, "", "keep", "english_capital",
+                                      boundary_text, weight))
+    return rows, {"frames": len(rows), "sample_weight": weight, "frames_per_word": per_word,
+                  "words_by_length": chosen,
+                  "candidates_by_length": {str(length): len(candidates[length]) for length in sorted(budgets)},
+                  "scope": "TRAIN only: keep frames of the keys of common Russian words typed in Latin capitals after English prose (english_capital_curriculum)."}
+
+
 def _cyrillic(word: str) -> bool:
     return all("а" <= char.casefold() <= "я" or char.casefold() == "ё" for char in word)
 
@@ -1526,7 +1578,11 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
     refused = refused_aliases(corpus)
     capitals, capital_report = capital_citation_curriculum(
         source_rows["train"], refused, cast(dict[str, object], options["capital_citation_curriculum"]))
-    frames["train"] = training_order([*frames["train"], *historical_curriculum(intent), *captured, *capitals])
+    english_options = cast(dict[str, object], options["english_capital_curriculum"])
+    if base is not None and any(cast(dict[str, int], english_options["words_by_length"]).values()):
+        raise ValueError("English-capital frames fit the word decided at its own boundary, which a frozen base keeps")
+    english, english_report = english_capital_curriculum(source_rows["train"], refused, english_options)
+    frames["train"] = training_order([*frames["train"], *historical_curriculum(intent), *captured, *capitals, *english])
     kept_options = cast(dict[str, object], options["kept_neighbour_curriculum"])
     kept, kept_report = kept_neighbour_curriculum(source_rows["train"], refused, kept_options)
     counted_options = cast(dict[str, object], options["counted_token_curriculum"])
@@ -1709,6 +1765,7 @@ def fit(corpus: Path, output: Path) -> dict[str, object]:
         "lexical_short_pair_curriculum": lexical_reports,
         "captured_curriculum": captured_report,
         "capital_citation_curriculum": capital_report,
+        "english_capital_curriculum": english_report,
         "kept_neighbour_curriculum": kept_report,
         "counted_token_curriculum": counted_report,
         "planned_mass_balance": balance_reports,

@@ -41,6 +41,7 @@ from train_context_action_model import (
     capital_citation_curriculum,
     choose_threshold,
     counted_token_curriculum,
+    english_capital_curriculum,
     development_thresholds,
     identifier_evidence_dropped,
     identifier_family,
@@ -79,6 +80,8 @@ from fixture_values.corpora import FIXTURE_WORD_FREQUENCY, PLANNED_EVIDENCE_DOMI
 from fixture_values.counts import (
     CAPITAL_CITATION_FIXTURE_WORDS_BY_LENGTH,
     COUNTED_TOKEN_FIXTURE_FRAMES_PER_WORD,
+    ENGLISH_CAPITAL_FIXTURE_FRAMES_PER_WORD,
+    ENGLISH_CAPITAL_FIXTURE_WORDS_BY_LENGTH,
     KEPT_NEIGHBOUR_FIXTURE_ABBREVIATION_COUNT,
     KEPT_NEIGHBOUR_FIXTURE_DOMINANCE,
     KEPT_NEIGHBOUR_FIXTURE_FRAMES,
@@ -605,6 +608,30 @@ class ActionTrainingTests(unittest.TestCase):
         self.assertEqual(([row for row in paired if not row.identifier.endswith(":lower")], report["words"]), (rows, len(rows)))
         self.assertEqual([(row.original, row.action, row.field) for row in lower],
                          [(row.original.lower(), "convert", row.field) for row in rows])
+
+    def test_the_english_capital_curriculum_keeps_capitals_after_english_prose(self) -> None:
+        # `из` is among the commonest Russian words, and its keys in capitals are `BP`: inside English
+        # prose that is an abbreviation (`affected by the BP oil spill.`, test v28).
+        english = replace(fixture("bp", "spill", 0), before="affected by the ")
+        russian = replace(fixture("ru", "подвид", 1), before="Австралийский подвид ")
+        options = {"words_by_length": ENGLISH_CAPITAL_FIXTURE_WORDS_BY_LENGTH,
+                   "frames_per_word": ENGLISH_CAPITAL_FIXTURE_FRAMES_PER_WORD, "sample_weight": CAPITAL_CITATION_FIXTURE_WEIGHT}
+        rows, report = english_capital_curriculum([english, russian], frozenset(), options)
+        self.assertEqual(rows, english_capital_curriculum([english, russian], frozenset(), options)[0])
+        words = cast(dict[str, list[str]], report["words_by_length"])["2"]
+        self.assertIn("из/BP", words)
+        self.assertEqual(len(rows), len(words) * ENGLISH_CAPITAL_FIXTURE_FRAMES_PER_WORD)
+        for row in rows:
+            with self.subTest(row=row.identifier):
+                self.assertTrue(row.original.isascii() and row.original.isupper())
+                self.assertEqual((row.group, row.action, row.category, row.sample_weight, row.field.before),
+                                 (0, "keep", "english_capital", CAPITAL_CITATION_FIXTURE_WEIGHT, "affected by the "))
+                self.assertEqual((row.trigger, row.boundary_text), _varied_boundary(row.identifier))
+        again, _ = english_capital_curriculum([english, russian], frozenset(expanded_aliases("из")), options)
+        self.assertNotIn("BP", {row.original for row in again})
+        # Without an English row there is no prose to put them in, and a zero budget frames nothing.
+        for source, chosen in (([russian], options), ([english], {**options, "frames_per_word": 0})):
+            self.assertEqual(english_capital_curriculum(source, frozenset(), chosen), ([], {"frames": 0, "scope": "not used"}))
 
     def test_the_kept_neighbour_curriculum_frames_the_question_asked_beside_a_kept_word(self) -> None:
         russian = [replace(fixture(f"k{index}", "сегодня", 1), before="мы обновили сервер и ", after=" ночью")

@@ -147,6 +147,17 @@
   "scope": "TRAIN only: the keys of rare Russian words of the portable lexicon (three to five letters, counted fewer than five times in Russian text, none written in capitals by the onboard lexicon) typed in the Latin layout in capitals - the shape of a cited Latin abbreviation such as `WBC` (`ЦИС`) or `IBF` (`ШИА`) - stand after the left context of a Russian TRAIN row, chosen by hash, labelled keep, and the same keys in lower case in the same frame labelled convert (the Russian word typed in the wrong layout), so the pair tells case apart rather than teaching that Latin after Russian prose stays; no convert frame for their Cyrillic reading, which may be the writer's own abbreviation. Words held by this corpus's test or any accessed test are refused by their aliases. Natural rows of every split with such a Latin word get one keep frame after Russian prose too (mixed-capital). Motivation: the corpus v22 candidate and the baseline pair converted `по версии WBC` into `ЦИС` on test v22 with the early switch off; natural TRAIN held 17 such rows. Without the lower-case pair (corpus v23, 400 words) the candidate missed 9 more of the owner's words than the same recipe without the curriculum, nearly all short lower-case Latin keys of Russian words after Russian text (`f` for `а`, `lkz` for `для`).",
   "lowercase_contrast": true
  },
+ "english_capital_curriculum": {
+  "words_by_length": {
+   "2": 107,
+   "3": 300,
+   "4": 300,
+   "5": 300
+  },
+  "frames_per_word": 2,
+  "sample_weight": 1.0,
+  "scope": "TRAIN only: the keys of the Russian lexicon's commonest words of two to five letters (all 107 two-letter ones the keys spell in Latin letters), typed in the Latin layout in capitals, after the left context of an English TRAIN row whose words are all Latin, chosen by hash, two contexts a word - keep; no convert pair. Motivation: test v28 holds `affected by the BP oil spill.`, and the corpus v26 pair turned `BP` into `ИЗ` (p=0.997, reference lexicons, early switch off): Latin capitals had been framed after Russian prose only (tools/train_context_action_model.english_capital_curriculum)."
+ },
  "kept_neighbour_curriculum": {
   "natural_frames": 6000,
   "term_frames": 4000,
@@ -168,10 +179,5 @@
   "abbreviation_dominance": 3,
   "sample_weight": 1.0,
   "scope": "TRAIN only: the word decided at its own boundary (after_origin none). Russian abbreviations the term table counts in Russian technical text at least minimum_abbreviation_count times and abbreviation_dominance times as often as their Latin keys (`тз`, not `зк`), no lexicon word, typed as intended after the left context of a Russian row, keep; Latin terms counted at least minimum_term_count times whose Cyrillic reading is nothing, typed in the Russian layout in the same place, convert; three frames for every such term and abbreviation (the budgets cover both classes whole: a candidate that framed 800 of the 1752 terms and all 802 abbreviations kept `тз` but missed `тзь` for `npm`), the boundaries of the capital citations. Motivation: the corpus v27 candidate converted `тз` to `np` (p=0.993), `2фа`, `кз` and `ви` in the owner's typing while the token's count pulled the other way without a frame to learn from (tools/train_context_action_model.counted_token_curriculum). Not used while a frozen base is named: its frames moved the shared frequency features, and the `ша` before `hello` stayed `ша` (corpus v27 and v28 candidates)."
- },
- "frozen_base": {
-  "artifact": "model/context_v3/frozen-base.json",
-  "sha256": "e7b637e372eb18e0614ca5d9854a7b9f3d417ea3b14cb854b4d0f13ce2a9c1d8",
-  "scope": "The corpus v26 pair's context model (context-v3-984962d926d3, installed in 0.39.0), copied byte for byte. Only the kept-neighbour question (KEPT_FEATURE_PREFIX, kept_neighbour_curriculum) is fitted onto it; every other weight and the serving threshold stay the base's, checked after fitting, and the epoch is the one whose kept-neighbour frames of DEVELOPMENT it predicts best. Fits of the full model on corpora a few dozen TRAIN rows apart (v26, v27, v28) turned different borderline words across the threshold (`тз`, `гг.`, the `ша` before `hello`), more than any curriculum under test changed (tools/train_context_action_model.frozen_base)."
  }
 }
