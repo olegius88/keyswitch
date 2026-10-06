@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.40.0 — 2026-10-06
+
 - A short word that waits for its neighbour is asked again beside a next word that stayed as typed.
   A term typed in the Russian layout amid Russian prose waited for its neighbour, the neighbour was
   a Russian word right as typed, and nothing converted (`есть новые зк проверь`, `сам выполни тзь
