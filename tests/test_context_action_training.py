@@ -56,6 +56,7 @@ from train_context_action_model import (
     legacy_lookahead_rows,
     lexical_short_pairs,
     metrics,
+    outside_lone_word,
     previous_context,
     select_features,
     select_rows,
@@ -955,6 +956,19 @@ class ActionTrainingTests(unittest.TestCase):
         self.assertEqual(threshold, CHOOSE_THRESHOLD_HIGH_CANDIDATE)
         self.assertEqual(report["false_conversions"], 0)
         self.assertEqual(report["conversion_recall"], 1.0)
+
+    def test_calibration_outside_the_lone_word_class_leaves_out_the_frames_of_that_class(self) -> None:
+        # Both frames convert: the first falsely (its label keeps), the second rightly.
+        predictions = {name: scores(CHOOSE_THRESHOLD_HIGH_CONVERT_CONFIDENCE, CHOOSE_THRESHOLD_HIGH_CONVERT_CONFIDENCE)
+                       for name in ("portable", "reference_hunspell")}
+        plain, lone = {"bias": 1.0}, {"bias": 1.0, ALONE_FEATURE_PREFIX + "bias": 1.0}
+        for frames, expected in ((((plain, 0, 1.0), (lone, 1, 1.0)), (1, 0, 0, 1)), (((lone, 0, 1.0), (plain, 1, 1.0)), (1, 1, 1, 0))):
+            with self.subTest(frames=frames):
+                report = outside_lone_word(predictions, lambda _name, frames=frames: iter(frames), CHOOSE_THRESHOLD_HIGH_CANDIDATE)
+                profile = cast(dict[str, dict[str, object]], report["by_profile"])["portable"]
+                self.assertEqual((profile["rows"], profile["convert_rows"], profile["converted_correctly"], profile["false_conversions"]), expected)
+                self.assertEqual(report["rows"], expected[0] * len(predictions))
+                self.assertEqual(report["conversion_recall"], profile["conversion_recall"])
 
     def test_serving_threshold_never_drops_below_the_development_operating_threshold(self) -> None:
         predictions = {"portable": scores(CHOOSE_THRESHOLD_PORTABLE_FALSE_SCORE, CHOOSE_THRESHOLD_HIGH_CONVERT_CONFIDENCE),

@@ -53,6 +53,8 @@ COUNTS = frozenset({"rows", "initially_correct", "initially_wrong", "preserved_c
                     "correct_text_corruptions", "length_mismatches", "injections", "execution_errors",
                     "correction_layout_mismatches", "final_layout_mismatches"})
 CALIBRATION = frozenset({"rows", "convert_rows", "converted_correctly", "false_conversions", "conversion_recall"})
+# The calibration of the frames outside the lone-word head's class (train_context_action_model.outside_lone_word).
+OUTSIDE_LONE_WORD = "outside_lone_word"
 SCOPE = "Sealed private-corpus test aggregates and current artifact/provenance verification; fresh-fit reproducibility, reviewed human-intent labels and native OS execution are not asserted."
 AUDITED_SEQUENCE_PROTOCOL_SHA256 = "59b9e6e9d4ca222fb732d9c59d9aac68b6081867fdbfe119f3aa7f7547636fab"
 PROTOCOL: dict[str, object] = {
@@ -218,13 +220,32 @@ def calibration_counts(value: object) -> dict[str, object]:
     return row
 
 
-def validate_calibration(value: object) -> None:
-    total = mapping(value, "calibration", CALIBRATION | {"by_profile"})
+def validate_calibration_block(value: object, label: str, fields: frozenset[str]) -> dict[str, object]:
+    total = mapping(value, label, fields)
     aggregate = calibration_counts({key: total[key] for key in CALIBRATION})
-    profiles = mapping(total["by_profile"], "calibration profiles", frozenset(PROFILES))
+    profiles = mapping(total["by_profile"], label + " profiles", frozenset(PROFILES))
     counts = [calibration_counts(profiles[name]) for name in PROFILES]
     if any(aggregate[key] != sum(cast(int, row[key]) for row in counts) for key in CALIBRATION - {"conversion_recall"}):
-        raise ValueError("calibration aggregate mismatch")
+        raise ValueError(label + " aggregate mismatch")
+    return total
+
+
+def validate_calibration(value: object) -> None:
+    """Every calibration frame, and apart the frames outside the lone-word head's class, whose labels are
+    the text itself (train_context_action_model.outside_lone_word)."""
+    total = validate_calibration_block(value, "calibration", CALIBRATION | {"by_profile", OUTSIDE_LONE_WORD})
+    outside = validate_calibration_block(total[OUTSIDE_LONE_WORD], "calibration outside the lone-word class", CALIBRATION | {"by_profile"})
+    if any(cast(int, outside[key]) > cast(int, total[key]) for key in CALIBRATION - {"conversion_recall"}):
+        raise ValueError("calibration outside the lone-word class exceeds the calibration")
+
+
+def public_calibration_block(value: object, label: str) -> dict[str, object]:
+    block = mapping(value, label)
+    by_profile = mapping(block.get("by_profile"), label + " profiles", frozenset(PROFILES))
+    public: dict[str, object] = {name: block[name] for name in CALIBRATION}
+    public["by_profile"] = {profile: {name: mapping(by_profile[profile], label + " profile")[name] for name in CALIBRATION}
+                            for profile in PROFILES}
+    return public
 
 
 def sequence_counts(value: object, documents: Mapping[str, int]) -> dict[str, int]:
@@ -517,10 +538,8 @@ def export_receipt(artifact: Path, seal_path: Path, report_path: Path, corpus: P
         hashes[name] = fingerprint
     hashes.pop(VERSION_MODULE, None)
     calibration = mapping(seal.get("calibration"), "calibration")
-    by_profile = mapping(calibration.get("by_profile"), "calibration profiles", frozenset(PROFILES))
-    public_calibration = {name: calibration[name] for name in CALIBRATION}
-    public_calibration["by_profile"] = {profile: {name: mapping(by_profile[profile], "calibration profile")[name]
-                                                  for name in CALIBRATION} for profile in PROFILES}
+    public_calibration = public_calibration_block(calibration, "calibration")
+    public_calibration[OUTSIDE_LONE_WORD] = public_calibration_block(calibration.get(OUTSIDE_LONE_WORD), "calibration outside the lone-word class")
     selection = mapping(report.get("selection"), "selection")
     unsupported = selection.get("unsupported")
     if not isinstance(unsupported, list):

@@ -1651,6 +1651,31 @@ def metrics(probabilities: array[float], labels: array[int], threshold: float) -
             "correct_classes": correct}
 
 
+def outside_lone_word(predictions: Mapping[str, tuple[array[float], array[int]]],
+                      rows: Callable[[str], Iterable[tuple[dict[str, float], int, float]]], threshold: float) -> dict[str, object]:
+    """Calibration at the serving threshold on the frames outside the lone-word head's class.
+
+    The lone-word curriculum puts frames of its class into every split labelled by the term counts
+    (lone_word_curriculum), not by text anyone typed, and the frames of that class the corpus has are
+    relabelled the same way (alone_labels): on corpus v32 that is 617 conversions per profile, of which
+    the model it replaces (0.40.0) converts 17 and the corpus v32 candidate 458. The receipt's recall
+    floor reads the frames outside the class, where a label is the text itself; what the pair nets is
+    still compared on every frame (tests/test_quality_ratchet.py).
+    """
+    by_profile: dict[str, dict[str, int | float]] = {}
+    for name, (values, labels) in predictions.items():
+        kept = [index for index, (features, _label, _weight) in enumerate(rows(name))
+                if not any(feature.startswith(ALONE_FEATURE_PREFIX) for feature in features)]
+        subset = array("d", (values[index * len(ACTIONS) + action] for index in kept for action in range(len(ACTIONS))))
+        by_profile[name] = metrics(subset, array("B", (labels[index] for index in kept)), threshold)
+    true = sum(int(row["converted_correctly"]) for row in by_profile.values())
+    possible = sum(int(row["convert_rows"]) for row in by_profile.values())
+    return {"rows": sum(int(row["rows"]) for row in by_profile.values()),
+            "false_conversions": sum(int(row["false_conversions"]) for row in by_profile.values()),
+            "converted_correctly": true, "convert_rows": possible,
+            "conversion_recall": true / possible if possible else 0.0, "by_profile": by_profile}
+
+
 def choose_threshold(
     predictions: dict[str, tuple[array[float], array[int]]], candidates: list[float],
     minimum_net_benefit: int, minimum_recall: float, *, minimum_threshold: float = 0.0,
@@ -2051,6 +2076,8 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
         maximum_threshold=float(cast(float, cast(dict[str, object], options["threshold_selection"])["maximum_threshold"])),
         authored_floor=float(cast(float, cast(dict[str, object], options["threshold_selection"])["authored_floor"])),
     )
+    calibration_report["outside_lone_word"] = outside_lone_word(
+        calibration_predictions, lambda name: features.rows(name, CALIBRATION), threshold)
     weight_hash = hashlib.sha256(json.dumps(mapping, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
     payload = {"actions": list(ACTIONS), "feature_version": CONTEXT_ACTION_FEATURE_VERSION, "weights": mapping,
                "weights_sha256": weight_hash, "version": "context-v3-" + weight_hash[:VERSION_HASH_CHARACTERS],
