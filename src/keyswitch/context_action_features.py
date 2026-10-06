@@ -26,6 +26,7 @@ from .constants.models import (
     ACTION_FEATURE_WORD_MAX_CHARACTERS,
     ACTION_FEATURE_WORD_SCORE_BOUND,
     CAPITALS_FEATURE_PREFIX,
+    CAPITALS_HEAD_MAX_LETTERS,
     CAPITALS_HEAD_MIN_LETTERS,
     KEPT_CONTEXT_WORD_MAX_CHARACTERS,
     KEPT_FEATURE_PREFIX,
@@ -357,6 +358,6 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
 
 
 def capitals_question(original: str) -> bool:
-    """A token of letters only, all capitals, at least CAPITALS_HEAD_MIN_LETTERS long (`BP`, `КЕЫ`)."""
+    """A token of letters only, all capitals, of CAPITALS_HEAD_MIN_LETTERS to CAPITALS_HEAD_MAX_LETTERS (`BP`, `КЕЫ`)."""
 
-    return len(original) >= CAPITALS_HEAD_MIN_LETTERS and original.isalpha() and original.isupper()
+    return CAPITALS_HEAD_MIN_LETTERS <= len(original) <= CAPITALS_HEAD_MAX_LETTERS and original.isalpha() and original.isupper()

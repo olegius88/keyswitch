@@ -641,6 +641,14 @@ class ActionTrainingTests(unittest.TestCase):
         self.assertEqual([row for row in paired if not row.identifier.endswith(":lower")], rows)
         self.assertEqual([(row.original, row.action, row.category, row.field) for row in lower],
                          [(row.original.lower(), "convert", "english_capital_lower", row.field) for row in rows])
+        # After Russian prose the same capitals are the word typed with Caps Lock: `BP` there is `ИЗ`.
+        contrasted, contrast_report = english_capital_curriculum([english, russian], frozenset(), {**options, "russian_contrast": True})
+        typed = [row for row in contrasted if row.identifier.endswith(":russian")]
+        self.assertEqual([row for row in contrasted if not row.identifier.endswith(":russian")], rows)
+        self.assertEqual([(row.original, row.action, row.category, row.field.before) for row in typed],
+                         [(row.original, "convert", "english_capital_russian", "Австралийский подвид ") for row in rows])
+        self.assertIs(contrast_report["russian_contrast"], True)
+        self.assertIs(english_capital_curriculum([english], frozenset(), {**options, "russian_contrast": True})[1]["russian_contrast"], False)
         # Without an English row there is no prose to put them in, and a zero budget frames nothing.
         for source, chosen in (([russian], options), ([english], {**options, "frames_per_word": 0})):
             self.assertEqual(english_capital_curriculum(source, frozenset(), chosen), ([], {"frames": 0, "scope": "not used"}))
@@ -732,6 +740,13 @@ class ActionTrainingTests(unittest.TestCase):
         held = abbreviations[0]
         again, _ = counted_token_curriculum([*russian, english], frozenset(expanded_aliases(held)), options)
         self.assertNotIn(held, {row.original for row in again})
+        # In capitals the same tokens teach a capitals head: `ТЗ` keeps, the keys of `PR` convert.
+        capitals, capitals_report = counted_token_curriculum([*russian, english], frozenset(), {**options, "capitals": True})
+        self.assertIs(capitals_report["capitals"], True)
+        self.assertEqual([(row.identifier, row.action) for row in capitals], [(row.identifier, row.action) for row in rows])
+        self.assertTrue(all(row.original.isupper() and row.original.lower() == (
+            row.original.lower() if row.category == "counted_abbreviation" else translated(translated(row.original, 1).lower(), 0))
+            for row in capitals))
         # Without a Russian row there is no place to put them, and a zero budget frames nothing.
         unused = {**options, "term_frames": 0, "abbreviation_frames": 0}
         for source, chosen in (([english], options), (russian, unused)):

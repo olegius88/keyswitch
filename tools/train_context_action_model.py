@@ -569,16 +569,20 @@ def english_capital_curriculum(source_rows: Sequence[CorpusRow], refused: frozen
     with `lowercase_contrast` the same keys in lower case stand in the same frame with the convert
     label, so case is what the pair tells apart. Without that pair the keep frames taught that the
     keys of `не`, `на`, `как`, `что` stay in any case: the first candidates of corpus v29 left 31 more
-    of the owner's Russian words typed in the Latin layout as typed (`yt`, `yf`, `rfr`, `xnj`). Words
-    of this corpus's test and of every accessed test are refused by their aliases. `models` are the
-    reference lexicons without morphology when the caller already holds them.
+    of the owner's Russian words typed in the Latin layout as typed (`yt`, `yf`, `rfr`, `xnj`). With
+    `russian_contrast` the same keys in capitals stand after the left context of a Russian TRAIN row
+    with the convert label: the word typed with Caps Lock, which a capitals head would otherwise learn
+    to keep with the cited abbreviations. Words of this corpus's test and of every accessed test are
+    refused by their aliases. `models` are the reference lexicons without morphology when the caller
+    already holds them.
     """
 
     budgets = {int(length): int(count) for length, count in cast(dict[str, int], options["words_by_length"]).items()}
     per_word = int(cast(int, options["frames_per_word"]))
     weight = float(cast(float, options["sample_weight"]))
     contrast = options.get("lowercase_contrast") is True
-    contexts = natural_mixed_contexts(source_rows)[0]
+    contexts, russian = natural_mixed_contexts(source_rows)[0], natural_mixed_contexts(source_rows)[1]
+    russian_contrast = options.get("russian_contrast") is True and bool(russian)
     if not contexts or not any(budgets.values()) or not per_word:
         return [], {"frames": 0, "scope": "not used"}
     frequencies = (models if models is not None else reference_models(False))[1].frequencies
@@ -607,8 +611,12 @@ def english_capital_curriculum(source_rows: Sequence[CorpusRow], refused: frozen
                 if contrast:
                     rows.append(ActionRow(identifier + ":lower", latin.lower(), 0, field, trigger, "", "convert",
                                           "english_capital_lower", boundary_text, weight))
+                if russian_contrast:
+                    other = identifier + ":russian"
+                    rows.append(ActionRow(other, latin, 0, replace(field, before=russian[variant_choice(other, "context", len(russian))]),
+                                          trigger, "", "convert", "english_capital_russian", boundary_text, weight))
     return rows, {"frames": len(rows), "sample_weight": weight, "frames_per_word": per_word,
-                  "lowercase_contrast": contrast,
+                  "lowercase_contrast": contrast, "russian_contrast": russian_contrast,
                   "words_by_length": chosen,
                   "candidates_by_length": {str(length): len(candidates[length]) for length in sorted(budgets)},
                   "scope": "TRAIN only: keep frames of the keys of common Russian words typed in Latin capitals after English prose (english_capital_curriculum)."}
@@ -807,8 +815,10 @@ def counted_token_curriculum(source_rows: Sequence[CorpusRow], refused: frozense
     - term: a counted Latin term's keys in the Russian layout - convert, so the pair tells the counts
       apart rather than teaching that a short unknown Cyrillic token after Russian prose stays.
     Each word gets up to `frames_per_word` frames, each after a different Russian row, with the
-    boundaries of the capital citations (_varied_boundary). Words of this corpus's test and of every accessed test are refused by
-    their aliases.
+    boundaries of the capital citations (_varied_boundary). With `capitals` every token is typed in
+    capitals (`ТЗ` keeps, `ФЗШ` for `API` converts): such frames teach the capitals head alone when a
+    frozen base keeps every other weight. Words of this corpus's test and of every accessed test are
+    refused by their aliases.
     """
 
     budgets = {name: int(cast(int, options[name])) for name in ("term_frames", "abbreviation_frames")}
@@ -823,8 +833,10 @@ def counted_token_curriculum(source_rows: Sequence[CorpusRow], refused: frozense
         "abbreviation": _counted_abbreviations(refused, int(cast(int, options["minimum_abbreviation_count"])),
                                                float(cast(float, options["abbreviation_dominance"]))),
     }
+    capitals = options.get("capitals") is True
     plans: tuple[tuple[str, Callable[[str], str], ContextAction], ...] = (
-        ("term", _term_typed, "convert"), ("abbreviation", str, "keep"))
+        ("term", (lambda term: translated(term.upper(), 0)) if capitals else _term_typed, "convert"),
+        ("abbreviation", str.upper if capitals else str, "keep"))
     rows: list[ActionRow] = []
     chosen: dict[str, list[str]] = {}
     for purpose, typed, action in plans:
@@ -846,7 +858,7 @@ def counted_token_curriculum(source_rows: Sequence[CorpusRow], refused: frozense
                 frames += 1
     return rows, {"frames": len(rows), "counts": dict(sorted(Counter(row.category for row in rows).items())),
                   "candidates": {purpose: len(words) for purpose, words in candidates.items()},
-                  "sample_weight": weight, "frames_per_word": per_word,
+                  "sample_weight": weight, "frames_per_word": per_word, "capitals": capitals,
                   "terms": chosen["term"], "abbreviations": chosen["abbreviation"],
                   "scope": "TRAIN only: counted Russian abbreviations (keep) and counted Latin terms typed in the Russian layout (convert) after Russian prose, decided at their own boundary (counted_token_curriculum)."}
 

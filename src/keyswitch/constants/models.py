@@ -37,11 +37,14 @@ KEPT_CONTEXT_WORD_MAX_CHARACTERS: Final = 5
 # Every feature of a kept-neighbour question carries this prefix: the question has weights of its own,
 # trained on frames of its own, and never moves the weights of the word decided at its boundary.
 KEPT_FEATURE_PREFIX: Final = "kept|"
-# A token of letters only, all capitals, of at least CAPITALS_HEAD_MIN_LETTERS, has its features once
-# more under this prefix: the capitals head, fitted onto a frozen model with its every other weight
-# fixed, answers that class alone; a model without such weights decides as it did.
+# A token of letters only, all capitals, of CAPITALS_HEAD_MIN_LETTERS to CAPITALS_HEAD_MAX_LETTERS, has
+# its features once more under this prefix: the capitals head, fitted onto a frozen model with its every
+# other weight fixed, answers that class alone; a model without such weights decides as it did. The
+# class is the shape of a cited abbreviation (`BP`, `WBC`, `NASA`); a longer word in capitals is a
+# word typed with Caps Lock (`PFGHJC` for `ЗАПРОС`), which the first head turned into a keep.
 CAPITALS_FEATURE_PREFIX: Final = "caps|"
 CAPITALS_HEAD_MIN_LETTERS: Final = 2
+CAPITALS_HEAD_MAX_LETTERS: Final = 5
 # The "length" feature buckets every word length from here up together (schemas 2 and 3).
 ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: Final = 6
 # Short categorical field labels (role, trigger) truncated before they reach a feature name.
