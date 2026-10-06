@@ -49,7 +49,7 @@ from .lexicon_supplement import supplement_words
 from .learning import LearnedRule, LearningStore, RuleAction
 from .intent_model import CorrectionTrigger, LinearNgramModel
 from .context_policy import (
-    STRANDED_SHORT_WORD_REASON, ContextPolicy, ContextResult, ends_with_typed, shared_identifiers,
+    STRANDED_SHORT_WORD_REASON, ContextPolicy, ContextResult, caret_lag, shared_identifiers,
 )
 from .constants.models import (
     CONTEXT_ACTION_FEATURE_VERSION,
@@ -1265,9 +1265,12 @@ class KeySwitchEngine:
                     self._contexts.clear()
                     self._update(current_word="", last_action="Защищённое поле: обработка отключена")
                     return snapshot, "sensitive_field"
-                if snapshot.selection or not snapshot.field_id or snapshot.application != application or not snapshot.before.endswith(original):
+                lag = caret_lag(snapshot.before, snapshot.after, original, exact=True)
+                before = snapshot.before + snapshot.after[:lag or 0]
+                if (snapshot.selection or not snapshot.field_id or snapshot.application != application or lag is None
+                        or not before.endswith(original)):
                     return snapshot, "context_field_changed"
-                field = replace(snapshot, before=snapshot.before[:-len(original)])
+                field = replace(snapshot, before=before[:-len(original)], after=snapshot.after[lag:])
         return field, ""
 
     def _decide_prefix(self, baseline: EarlySwitchDecision, field: FieldContext | None) -> tuple[EarlySwitchDecision, float]:
@@ -1986,11 +1989,15 @@ class KeySwitchEngine:
         snapshot = reader.read(application, self._focus_window or 0)
         if snapshot is None or snapshot.sensitive or snapshot.selection or snapshot.application != application:
             return None
-        before = snapshot.before
-        # The key may already have reached the editor, or not yet.
+        before, after = snapshot.before, snapshot.after
+        # The key may already have reached the editor, or not yet, and the editor may report its
+        # caret short of the key that has (caret_lag): VS Code Insiders put the first letter of
+        # every new word after the caret, and each read as typed into the word it began.
         if event.character and before.endswith(event.character):
             before = before[:-len(event.character)]
-        point = InsertionPoint(self._letters_before(before), self._letters_after(snapshot.after))
+        elif event.character and after.startswith(event.character):
+            after = after[len(event.character):]
+        point = InsertionPoint(self._letters_before(before), self._letters_after(after))
         if point.inside_word:
             self._technical_event(
                 "word_started_inside_text", application=application,
@@ -2285,6 +2292,18 @@ class KeySwitchEngine:
             literal_tail=literal_tail, boundary_text=boundary_text, field_override=field_override, inside=inside,
         )
         self._context_result = result
+        if result.fallback_reason == "field_changed" and result.field is not None:
+            # Where the typed word stands against the caret the field reported, as numbers only:
+            # the shape tells a lagging caret from a field that really changed.
+            anchor = original + literal_tail
+            text = result.field.before + result.field.after
+            end = text.rfind(anchor)
+            self._technical_event(
+                "field_contradiction", application=application, trigger=trigger,
+                before_characters=len(result.field.before), after_characters=len(result.field.after),
+                typed_characters=len(anchor),
+                typed_end_from_caret=None if end < 0 else end + len(anchor) - len(result.field.before),
+            )
         if result.field is not None and result.field.sensitive:
             self._sensitive_context_window = self._focus_window
             self.context_policy.stream.clear()
@@ -4046,7 +4065,7 @@ class KeySwitchEngine:
             if (
                 field is None or field.field_id != plan.context_field
                 or field.application != plan.application or field.sensitive or field.selection
-                or not ends_with_typed(field.before, suffix)
+                or caret_lag(field.before, field.after, suffix, exact=True) is None
             ):
                 typed_after_boundary = bool(self._strokes)
                 self._clear_word(reason="context_field_changed")

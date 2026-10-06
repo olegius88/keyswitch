@@ -4,6 +4,14 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- Automatic correction works again in a field that reports its caret a character or two short of
+  what was typed. VS Code Insiders did so for its chat box on 06.10.2026: every word there was
+  refused as typed into a changed field, a word just begun read as typed into another one, and
+  only the manual conversion went through. The text before the caret, together with up to
+  FIELD_CARET_LAG_MAX_CHARACTERS characters after it, has to end with the typed word for the
+  correction to run; a field that holds other text is still refused, and the technical log now
+  records where the typed word stood against the reported caret, as numbers only.
+
 ## 0.40.0 — 2026-10-06
 
 - A short word that waits for its neighbour is asked again beside a next word that stayed as typed.
