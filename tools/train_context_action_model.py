@@ -1396,9 +1396,10 @@ def provenance() -> dict[str, str]:
     )})
     # The back ends build the same candidate; their code is pinned all the same.
     result.update({path: checksum(ROOT / path) for path in CONTEXT_ACTION_BACK_END_SOURCES})
-    base = cast(dict[str, object], json.loads(RECIPE.read_bytes())).get("frozen_base")
-    if isinstance(base, dict):
-        result[str(base["artifact"])] = checksum(ROOT / str(base["artifact"]))
+    for key in ("frozen_base", "warm_base"):
+        base = cast(dict[str, object], json.loads(RECIPE.read_bytes())).get(key)
+        if isinstance(base, dict):
+            result[str(base["artifact"])] = checksum(ROOT / str(base["artifact"]))
     return result
 
 
@@ -1415,16 +1416,37 @@ def frozen_base(options: Mapping[str, object]) -> ContextModel | None:
     weights.
     """
 
-    value = options.get("frozen_base")
+    return _named_base(options, "frozen_base")
+
+
+def warm_base(options: Mapping[str, object]) -> ContextModel | None:
+    """The action model a full fit starts from, or None to start from zero weights.
+
+    A fit from zero weights turns borderline words across the 0.99 threshold whatever the curricula
+    under test do (frozen_base): the corpus v29 candidates that let `BP` stay in English prose
+    converted words the corpus v26 pair had kept or left words it had converted. Started from that
+    pair's weights, over its own vocabulary of the word decided at its boundary (the kept-neighbour
+    question selects its features as before), at the recipe's `learning_rate` for this start, the
+    fit moves the weights the new frames pull and leaves the rest near where they were. Every
+    weight trains, and the epoch and threshold are chosen as in any full fit. The recipe names the
+    model's file and its SHA-256; it must be an action model with no kept-neighbour weights.
+    """
+
+    return _named_base(options, "warm_base")
+
+
+def _named_base(options: Mapping[str, object], key: str) -> ContextModel | None:
+    value = options.get(key)
     if value is None:
         return None
     spec = cast(dict[str, object], value)
     path = ROOT / str(spec["artifact"])
+    label = key.replace("_", " ")
     if checksum(path) != spec["sha256"]:
-        raise ValueError("frozen base artifact differs from the recipe")
+        raise ValueError(f"{label} artifact differs from the recipe")
     model = ContextModel.load(path)
     if model.feature_version != CONTEXT_ACTION_FEATURE_VERSION or any(name.startswith(KEPT_FEATURE_PREFIX) for name in model.weights):
-        raise ValueError("a frozen base is an action model without kept-neighbour weights")
+        raise ValueError(f"a {label} is an action model without kept-neighbour weights")
     return model
 
 
@@ -1722,6 +1744,9 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
     inputs = load_inputs(corpus, options)
     profiles = inputs.profiles
     base = inputs.base
+    warm = warm_base(options)
+    if base is not None and warm is not None:
+        raise ValueError("a recipe names a frozen base or a warm base, not both")
     kept_options = cast(dict[str, object], options["kept_neighbour_curriculum"])
     counted_options = cast(dict[str, object], options["counted_token_curriculum"])
     english_options = cast(dict[str, object], options["english_capital_curriculum"])
@@ -1750,8 +1775,9 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
     masses = features.masses()
     # The kept-neighbour question has feature names of its own (KEPT_FEATURE_PREFIX) and a budget of
     # its own: the word decided at its boundary keeps exactly the features it would have without it.
+    start = base if base is not None else warm
     names = sorted([
-        *(base.weights if base is not None else
+        *(start.weights if start is not None else
           select_features({name: mass for name, mass in masses.items() if not name.startswith(KEPT_FEATURE_PREFIX)},
                           minimum, int(cast(int, options["maximum_features"])))),
         *select_features({name: mass for name, mass in masses.items() if name.startswith(KEPT_FEATURE_PREFIX)},
@@ -1762,9 +1788,10 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
     development_masks = {name: runtime_masks(features.rows(name, DEVELOPMENT), support_model) for name in profiles}
     development_mass = sum(sum(data.importance) for data in development.values())
     kernel = Kernel.load()
-    weights = array("d", [0.0]) * (len(names) * len(ACTIONS)) if base is None else base_weights(names, base)
+    weights = array("d", [0.0]) * (len(names) * len(ACTIONS)) if start is None else base_weights(names, start)
     accumulators = array("d", [1.0]) * (len(names) * len(ACTIONS))
-    rate = float(cast(float, options["learning_rate"]))
+    rate = float(cast(float, cast(dict[str, object], options["warm_base"])["learning_rate"] if warm is not None
+                      else options["learning_rate"]))
     epochs = int(cast(int, options["epochs"]))
     best, best_epoch, best_loss = array("d"), 0, math.inf
     best_selection: EpochSelection | None = None
@@ -1841,6 +1868,10 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
             "artifact": cast(dict[str, object], options["frozen_base"])["artifact"],
             "sha256": cast(dict[str, object], options["frozen_base"])["sha256"],
             "model_version": base.version, "conversion_threshold": base.conversion_threshold},
+        "warm_base": None if warm is None else {
+            "artifact": cast(dict[str, object], options["warm_base"])["artifact"],
+            "sha256": cast(dict[str, object], options["warm_base"])["sha256"],
+            "model_version": warm.version, "learning_rate": rate},
         "conversion_threshold": threshold, "feature_count": len(names),
         # A frozen base frames TRAIN with its kept-neighbour frames alone: no span, lookahead, lexical or
         # balance report of TRAIN then.

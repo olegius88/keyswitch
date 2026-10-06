@@ -63,6 +63,7 @@ from train_context_action_model import (
     translated,
     base_weights,
     frozen_base,
+    warm_base,
     log_loss,
     _counted_abbreviations,
     _counted_terms,
@@ -747,6 +748,11 @@ class ActionTrainingTests(unittest.TestCase):
             spec = save({"bias": FROZEN_BASE_FIXTURE_WEIGHTS})
             base = frozen_base({"frozen_base": spec})
             assert base is not None
+            # A warm base is named and checked the same way; its weights are where a full fit starts.
+            self.assertIsNone(warm_base({}))
+            self.assertEqual(cast(ContextModel, warm_base({"warm_base": spec})).weights, base.weights)
+            with self.assertRaisesRegex(ValueError, "warm base artifact differs"):
+                warm_base({"warm_base": {**spec, "sha256": "0" * len(str(spec["sha256"]))}})
             # The head's features start at zero, the base's at the base's weights.
             self.assertEqual(list(base_weights(["head", "bias"], base)), [*(0.0,) * len(ACTIONS), *FROZEN_BASE_FIXTURE_WEIGHTS])
             with self.assertRaisesRegex(ValueError, "differs from the recipe"):
