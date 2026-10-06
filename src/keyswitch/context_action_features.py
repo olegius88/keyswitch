@@ -35,6 +35,8 @@ from .constants.models import (
     KEPT_FEATURE_PREFIX,
     PLANNED_CONTEXT_AFTER_MAX_CHARACTERS,
     PLANNED_CONTEXT_WORD_MAX_CHARACTERS,
+    START_DELTA_BAND_WIDTH,
+    START_DELTA_BANDS,
     START_FEATURE_PREFIX,
     START_HEAD_MIN_LETTERS,
 )
@@ -369,9 +371,10 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
     if start_question(item.original, item.alternative, item.field.before, item.field.after):
         # The class the message-start head answers, in the same way. With nothing around the word the
         # shared features leave out how often each reading occurs in prose, and a rare Russian word
-        # opening a message was converted on its letters alone; the head reads both prose counts.
+        # opening a message was converted on its letters alone; the head reads both prose counts and the
+        # score delta beyond the shared feature's bound.
         result.update({START_FEATURE_PREFIX + name: value for name, value in list(result.items())})
-        result.update(_start_counts(item, direction))
+        result.update(_start_evidence(item, direction))
     return result
 
 
@@ -413,9 +416,10 @@ def start_question(original: str, alternative: str, before: str, after: str) -> 
             and not any(char.isalpha() for char in before) and not any(char.isalpha() for char in after))
 
 
-def _start_counts(item: ContextEvidence, direction: str) -> dict[str, float]:
-    """The message-start head's own count evidence: the binary order of magnitude of how often the Latin
-    reading occurs in English prose and the Cyrillic one in Russian prose, and of their ratio."""
+def _start_evidence(item: ContextEvidence, direction: str) -> dict[str, float]:
+    """The message-start head's own evidence: the binary order of magnitude of how often the Latin reading
+    occurs in English prose and the Cyrillic one in Russian prose, and of their ratio; and the band of the
+    detector's score delta (START_DELTA_BAND_WIDTH wide, START_DELTA_BANDS either way)."""
 
     from .context_model import _term_frequency
 
@@ -423,8 +427,9 @@ def _start_counts(item: ContextEvidence, direction: str) -> dict[str, float]:
     latin, cyrillic = (item.original, item.alternative) if item.source_group == 0 else (item.alternative, item.original)
     magnitudes = (table["english"].get(latin.casefold(), 0).bit_length(), table["russian"].get(cyrillic.casefold(), 0).bit_length())
     ratio = max(-ALONE_COUNT_RATIO_BOUND, min(ALONE_COUNT_RATIO_BOUND, magnitudes[0] - magnitudes[1]))
+    band = max(-START_DELTA_BANDS, min(START_DELTA_BANDS, math.floor(item.score_delta / START_DELTA_BAND_WIDTH)))
     names = (f"count:english:{magnitudes[0]}", f"count:russian:{magnitudes[1]}", f"count:ratio:{ratio}",
-             f"count:{magnitudes[0]}:{magnitudes[1]}")
+             f"count:{magnitudes[0]}:{magnitudes[1]}", f"delta:{band}")
     return {f"{START_FEATURE_PREFIX}{name}:direction:{direction}": 1.0 for name in names}
 
 

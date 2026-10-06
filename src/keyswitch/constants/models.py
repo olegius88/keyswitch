@@ -63,9 +63,17 @@ ALONE_COUNT_RATIO_BOUND: Final = 8
 # a word with text around it, so the first word was decided by its letters and the term tables, in which
 # neither reading of a rare Russian word occurs: a correctly typed gerund opening a message turned into
 # its Latin keys, whose ending reads like an English past tense. The head reads both prose counts too
-# (the same ratio bound as the lone-word head). Two letters belong to the lone-word head.
+# (the same ratio bound as the lone-word head). Two letters belong to the lone-word head; three letters
+# alone are deferred where both readings are plausible (context_deferral), and a head fitted on them
+# turned the owner's `чук`, `дес` and `дые` into Latin, so the class starts at four.
 START_FEATURE_PREFIX: Final = "start|"
-START_HEAD_MIN_LETTERS: Final = 3
+START_HEAD_MIN_LETTERS: Final = 4
+# The message-start head also reads the detector's score delta in bands of this width, up to this many
+# bands either way: the shared feature is clamped at ACTION_FEATURE_WORD_SCORE_BOUND, where nearly every
+# correctly typed first word and every rare Russian word the model converted at once both lie, and a
+# band of its own lets the head answer that end and the other one apart.
+START_DELTA_BAND_WIDTH: Final = 2.5
+START_DELTA_BANDS: Final = 6
 # The "length" feature buckets every word length from here up together (schemas 2 and 3).
 ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: Final = 6
 # Short categorical field labels (role, trigger) truncated before they reach a feature name.

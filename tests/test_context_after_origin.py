@@ -17,6 +17,8 @@ from keyswitch.constants.models import (
     KEPT_CONTEXT_WORD_MAX_CHARACTERS,
     KEPT_FEATURE_PREFIX,
     PLANNED_CONTEXT_AFTER_MAX_CHARACTERS,
+    START_DELTA_BAND_WIDTH,
+    START_DELTA_BANDS,
     START_FEATURE_PREFIX,
 )
 from keyswitch.context_model import ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, ContextPrediction, extract_context_features
@@ -191,21 +193,28 @@ class ContextAfterOriginTests(unittest.TestCase):
         features = extract_action_features(first)
         shared = {name: value for name, value in features.items() if not name.startswith(START_FEATURE_PREFIX)}
         own = {name.removeprefix(START_FEATURE_PREFIX): value for name, value in features.items() if name.startswith(START_FEATURE_PREFIX)}
-        # The shared features once more, and the orders of magnitude of the two prose counts: `hello` occurs
-        # 483 times in English prose (9 binary digits), `руддщ` never in Russian.
-        self.assertEqual({name: value for name, value in own.items() if not name.startswith("count:")}, shared)
-        self.assertEqual(sorted(name for name in own if name.startswith("count:")),
+        # The shared features once more, the orders of magnitude of the two prose counts (`hello` occurs 483
+        # times in English prose, 9 binary digits; `руддщ` never in Russian) and the band of the score delta.
+        self.assertEqual({name: value for name, value in own.items() if not name.startswith(("count:", "delta:"))}, shared)
+        self.assertEqual(sorted(name for name in own if name.startswith(("count:", "delta:"))),
                          ["count:9:0:direction:1", "count:english:9:direction:1",
-                          f"count:ratio:{ALONE_COUNT_RATIO_BOUND}:direction:1", "count:russian:0:direction:1"])
+                          f"count:ratio:{ALONE_COUNT_RATIO_BOUND}:direction:1", "count:russian:0:direction:1", "delta:0:direction:1"])
+        # The band reads the delta past the shared feature's bound, and stops at its own.
+        far = START_DELTA_BAND_WIDTH * START_DELTA_BANDS * START_DELTA_BANDS
+        for delta, band in ((START_DELTA_BAND_WIDTH, 1), (-START_DELTA_BAND_WIDTH, -1), (far, START_DELTA_BANDS), (-far, -START_DELTA_BANDS)):
+            with self.subTest(delta=delta):
+                self.assertIn(f"{START_FEATURE_PREFIX}delta:{band}:direction:1", extract_action_features(replace(first, score_delta=delta)))
         # Any boundary, signs and digits around it, a capitalised word: the first word of a message.
         for item in (replace(first, trigger="enter", boundary_text="\n"), replace(first, field=replace(first.field, before="1. ", after=" :)")),
                      replace(first, original="Руддщ", alternative="Hello")):
             with self.subTest(item=item):
                 self.assertTrue(any(name.startswith(START_FEATURE_PREFIX) for name in extract_action_features(item)))
-        # A word before or after it, two letters (the lone-word head's or the next word's), a reading with a
-        # sign (`хлопнув` is `{kjgyed`) and the kept-neighbour question: no head.
+        # A word before or after it, two letters (the lone-word head's or the next word's), three (deferred
+        # where both readings are plausible), a reading with a sign (`хлопнув` is `{kjgyed`) and the
+        # kept-neighbour question: no head.
         for item in (replace(first, field=replace(first.field, before="есть ")), replace(first, field=replace(first.field, after="кнопка")),
-                     replace(first, original="гш", alternative="ui"), replace(first, original="хлопнув", alternative="{kjgyed"),
+                     replace(first, original="гш", alternative="ui"), replace(first, original="чук", alternative="xer"),
+                     replace(first, original="хлопнув", alternative="{kjgyed"),
                      replace(first, original="руд", alternative="hel", field=replace(first.field, after="нас"),
                              after_origin="kept_next_word")):
             with self.subTest(item=item):
