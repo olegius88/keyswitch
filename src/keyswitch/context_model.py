@@ -49,6 +49,7 @@ from .constants.models import (
     CONTEXT_TYPO_MIN_CHARACTERS,
     CONTEXT_V1_CONVERSION_THRESHOLD,
     KEPT_FEATURE_PREFIX,
+    MAX_CONTEXT_ACTION_MODEL_FEATURES,
     MAX_CONTEXT_FEATURE_NAME_CHARACTERS,
     MAX_CONTEXT_MODEL_FEATURES as MAX_FEATURES,
     MAX_CONTEXT_MODEL_VERSION_CHARACTERS,
@@ -422,7 +423,11 @@ class ContextModel:
             # Schema 7 reads how often each reading occurs in Russian text: the model is not whole without it.
             _term_frequency()
         raw_weights: object = payload.get("weights")
-        if not isinstance(raw_weights, dict) or not 0 < len(raw_weights) <= MAX_FEATURES:
+        if feature_version == CONTEXT_ACTION_FEATURE_VERSION:
+            # Two feature spaces, each with its own budget (MAX_CONTEXT_ACTION_MODEL_FEATURES).
+            if not isinstance(raw_weights, dict) or not 0 < len(raw_weights) <= MAX_CONTEXT_ACTION_MODEL_FEATURES:
+                raise ValueError("invalid context weights")
+        elif not isinstance(raw_weights, dict) or not 0 < len(raw_weights) <= MAX_FEATURES:
             raise ValueError("invalid context weights")
         weights: dict[str, tuple[float, ...]] = {}
         for name, values in raw_weights.items():

@@ -139,7 +139,10 @@ CONTEXT_FEATURE_NGRAM_ORDERS: Final = (1, 2, 3)
 # What the context model loader accepts (schemas 2 and 3): at most this many features, feature names
 # and version strings of at most these many characters, weights of at most this magnitude, and a
 # conversion threshold from this floor up to one.
-MAX_CONTEXT_MODEL_FEATURES: Final = 70000
+MAX_CONTEXT_MODEL_FEATURES: Final = 50000
+# An action model (schema 3) holds two feature spaces: the word decided at its boundary and the
+# kept-neighbour question (KEPT_FEATURE_PREFIX), each with its own budget in the recipe.
+MAX_CONTEXT_ACTION_MODEL_FEATURES: Final = 70000
 MAX_CONTEXT_FEATURE_NAME_CHARACTERS: Final = 512
 MAX_CONTEXT_MODEL_VERSION_CHARACTERS: Final = 80
 MAX_CONTEXT_WEIGHT_MAGNITUDE: Final = 1000

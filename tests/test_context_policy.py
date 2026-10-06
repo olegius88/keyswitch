@@ -162,6 +162,21 @@ class ContextModelTests(unittest.TestCase):
         self.save([])
         with self.assertRaises(ValueError):
             ContextModel.load(self.path)
+        # An action model has a feature budget of its own, larger than the older schemas' one.
+        action = {**self.payload(), "feature_version": CONTEXT_ACTION_FEATURE_VERSION, "version": "context-v3-test"}
+        self.save(action)
+        self.assertEqual(ContextModel.load(self.path).feature_version, CONTEXT_ACTION_FEATURE_VERSION)
+        for limit, refused, accepted in (("MAX_CONTEXT_ACTION_MODEL_FEATURES", action, self.payload()),
+                                         ("MAX_FEATURES", self.payload(), action)):
+            with self.subTest(limit=limit), patch(f"keyswitch.context_model.{limit}", 0):
+                self.save(refused)
+                with self.assertRaises(ValueError):
+                    ContextModel.load(self.path)
+                self.save(accepted)
+                ContextModel.load(self.path)
+        self.save({**action, "weights": {}})
+        with self.assertRaises(ValueError):
+            ContextModel.load(self.path)
         with patch("keyswitch.context_model.MAX_ARTIFACT_BYTES", 1):
             with self.assertRaises(ValueError):
                 ContextModel.load(self.path)
