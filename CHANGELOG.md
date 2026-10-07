@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.42.0 — 2026-10-07
+
 - A Russian word of one letter typed in the English layout right after a Latin term is corrected:
   `nats b redis` gives `nats и redis`, `lid f номер` gives `lid а номер`. The corpus holds no word
   of one letter, so the model had never seen one after a Latin word and kept it at p=1.00. A head
