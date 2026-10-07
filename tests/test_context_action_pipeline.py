@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 import json
@@ -33,6 +33,9 @@ from fixture_values.scores import (
     BACK_END_FIXTURE_FEATURE_VALUE, BACK_END_FIXTURE_KEEP_IMPORTANCE, CONTEXT_V2_KERNEL_LEARNING_RATE, FEATURE_MASS_OVERFLOW_WEIGHT,
 )
 from keyswitch.constants.model_protocol import CALIBRATION, DEVELOPMENT, FITTING_SPLITS as SPLITS, PORTABLE, PROFILES, REFERENCE_HUNSPELL, TRAIN
+from keyswitch.constants.models import (
+    ALONE_FEATURE_PREFIX, CAPITALS_FEATURE_PREFIX, KEPT_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, START_FEATURE_PREFIX,
+)
 from keyswitch.constants.training import (
     CONTEXT_ACTION_BACK_END_SOURCES,
     CONTEXT_ACTION_BACKEND_AUTO,
@@ -42,7 +45,7 @@ from keyswitch.constants.training import (
 from keyswitch.context_model import ACTIONS, ContextAction, ContextEvidence, ContextModel
 from keyswitch.detector import LanguageDetector
 from keyswitch.input_context import FieldContext
-from keyswitch.intent_model import LinearNgramModel
+from keyswitch.intent_model import CorrectionTrigger, LinearNgramModel
 from keyswitch.language_model import LanguageModel
 from keyswitch.ortho_model import OrthoModel
 from train_context_model import CapturedSource
@@ -128,8 +131,10 @@ def fixture_inputs() -> trainer.FitInputs:
     return inputs
 
 
-def serial(inputs: trainer.FitInputs) -> dict[tuple[str, str], list[tuple[dict[str, float], int, float]]]:
-    """The serial fit's frames and features, written out with the same stand-ins."""
+def serial(inputs: trainer.FitInputs, asks: Callable[[pipeline.Frame], bool] | None = None,
+           ) -> dict[tuple[str, str], list[tuple[dict[str, float], int, float]]]:
+    """The serial fit's frames and features, written out with the same stand-ins; TRAIN's frames that `asks`
+    a head's question alone, when given."""
     extra = [*fake_historical(None), *(row for source in SOURCES for row in fake_captured(source, {})[0]),
              *fake_capitals([], frozenset(), {})[0], *fake_english([], frozenset(), {})[0]]
     tail = fake_tail(inputs)[0]
@@ -142,6 +147,8 @@ def serial(inputs: trainer.FitInputs) -> dict[tuple[str, str], list[tuple[dict[s
             if split == TRAIN and inputs.base is not None:
                 spans = SpanCurriculum((), {}, profile, 0, split)
             frames = trainer.prepared_frames(chained, spans, split)
+            if asks is not None and split == TRAIN:
+                frames = [(identifier, item) for identifier, item in frames if asks(item)]
             rows_out = []
             for _identifier, item in frames:
                 label = ACTIONS.index(item.action)
@@ -193,6 +200,40 @@ class BuildTest(unittest.TestCase):
                 self.assertEqual(built.chains[REFERENCE_HUNSPELL, CALIBRATION]["split"], CALIBRATION)
                 self.assertEqual(built.columns[PORTABLE, TRAIN].importance.tolist(), [importance for _features, _label, importance
                                                                                      in expected[PORTABLE, TRAIN]])
+
+    def test_heads_on_a_frozen_base_featurise_the_train_frames_that_ask_their_questions_alone(self) -> None:
+        def asks(frame: pipeline.Frame, prefixes: frozenset[str] = frozenset()) -> bool:
+            return frame.action == "convert"
+
+        expected = serial(fixture_inputs(), asks)
+        self.assertTrue(0 < len(expected[PORTABLE, TRAIN]) < len(serial(fixture_inputs())[PORTABLE, TRAIN]))
+        for jobs in (1, BACK_END_FIXTURE_JOBS):
+            with self.subTest(jobs=jobs), patch.object(trainer, "trainable_prefixes", return_value=frozenset({LETTER_FEATURE_PREFIX})), \
+                    patch.object(pipeline, "head_frame", side_effect=asks):
+                built = self.build(jobs)
+                for key, rows in expected.items():
+                    self.assertEqual(exact(built.rows(*key)), exact(rows), key)
+
+    def test_a_frame_asks_a_heads_question_by_the_classes_its_features_take(self) -> None:
+        letter, kept = frozenset({LETTER_FEATURE_PREFIX}), frozenset({KEPT_FEATURE_PREFIX})
+        word = trainer.ActionRow("w", "b", 0, FieldContext("Telegram", "public-training", "nats ", "redis"), "space", "",
+                                 "convert", "letter_term", " ", after_origin="kept_next_word")
+        self.assertTrue(pipeline.head_frame(word, letter))
+        self.assertTrue(pipeline.head_frame(word, kept))
+        self.assertFalse(pipeline.head_frame(replace(word, field=replace(word.field, before="текст ")), letter))
+        self.assertTrue(pipeline.head_frame(replace(word, after_origin="none", field=replace(word.field, after="")), letter))
+        self.assertFalse(pipeline.head_frame(replace(word, after_origin="none", field=replace(word.field, after="")), kept))
+        cases: tuple[tuple[str, str, str, CorrectionTrigger], ...] = (
+            (CAPITALS_FEATURE_PREFIX, "BP", "according to the ", "space"),
+            (ALONE_FEATURE_PREFIX, "гш", "", "enter"),
+            (START_FEATURE_PREFIX, "руддщ", "", "space"))
+        for prefix, original, before, trigger in cases:
+            with self.subTest(prefix=prefix):
+                frame = replace(word, original=original, group=0 if original.isascii() else 1, trigger=trigger,
+                                after_origin="none", field=replace(word.field, before=before, after=""))
+                self.assertTrue(pipeline.head_frame(frame, frozenset({prefix})))
+                self.assertFalse(pipeline.head_frame(frame, letter))
+        self.assertIsNone(trainer.trainable_prefixes({}))
 
     def test_a_frozen_base_fits_the_tail_alone_and_builds_no_other_train_curriculum(self) -> None:
         inputs = fixture_inputs()

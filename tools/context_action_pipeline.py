@@ -744,6 +744,17 @@ class ProfileStore:
 
 # ---- the fit's work ---------------------------------------------------------------------------------
 
+def head_frame(frame: Frame, prefixes: frozenset[str]) -> bool:
+    """Whether a frame asks a question of one of the heads (or the kept-neighbour question) these prefixes name."""
+    if isinstance(frame, trainer.ActionRow):
+        return trainer.head_question(frame.original, trainer.translated(frame.original, frame.group), frame.field.before,
+                                     frame.field.after, frame.trigger, frame.after_origin, prefixes)
+    item = frame.evidence
+    return trainer.head_question(item.original, item.alternative, item.field.before, item.field.after, item.trigger,
+                                 item.after_origin, prefixes)
+
+
+
 class Build:
     """Curricula and features of one fit on the chosen back end; `run` returns the FeatureSet."""
 
@@ -764,6 +775,9 @@ class Build:
         self.tail: tuple[list[trainer.ActionRow], dict[str, object]] | None = None
         # A head fitted onto a frozen base is fitted on the tail's kept-neighbour frames alone (frame_chain).
         self.frozen = inputs.base is not None
+        # Heads fitted onto a frozen base move only the features of their classes: TRAIN is featurised for
+        # the frames that ask a head's question alone (trainer.head_question), the frames the epochs read.
+        self.heads = trainer.trainable_prefixes(inputs.options)
         self.extra: list[trainer.ActionRow] = []
         self.chains: dict[Key, tuple[list[trainer.ActionRow], dict[str, object]]] = {}
         self.spans: dict[Key, SpanCurriculum] = {}
@@ -809,7 +823,7 @@ class Build:
             else:
                 for profile in self.profiles:
                     for split, frames in self.inputs.frames.items():
-                        if self.frozen and split == TRAIN:
+                        if (self.frozen or self.heads is not None) and split == TRAIN:
                             continue
                         for start in range(0, len(frames), CONTEXT_ACTION_FRAMES_PER_TASK):
                             scheduler.add(AHEAD, features_task, FeatureTask(profile, split, "natural", start, None), self.chunk_done)
@@ -884,7 +898,7 @@ class Build:
         for profile in self.profiles:
             key = (profile, TRAIN)
             self.scheduler.add(CRITICAL, chain_task, (profile, TRAIN, self.extra, tail), partial(self.chain_done, key))
-            if self.backend == CONTEXT_ACTION_BACKEND_CPU:
+            if self.backend == CONTEXT_ACTION_BACKEND_CPU and self.heads is None:
                 for source, frames in (("extra", self.extra), ("tail", tail)):
                     for start in range(0, len(frames), CONTEXT_ACTION_FRAMES_PER_TASK):
                         task = FeatureTask(profile, TRAIN, source, start, list(frames[start:start + CONTEXT_ACTION_FRAMES_PER_TASK]))
@@ -906,14 +920,18 @@ class Build:
         entries = trainer.prepared_frames(rows, self.spans[key], key[1])
         self.entries[key] = [frame for _identifier, frame in entries]
         self.note(f"{key[0]}/{key[1]}: {len(entries)} frames, span frames={len(self.spans[key].frames)}")
+        selected = self.heads is not None and key[1] == TRAIN
+        if selected:
+            self.entries[key] = [frame for frame in self.entries[key] if head_frame(frame, cast(frozenset[str], self.heads))]
+            self.note(f"{key[0]}/{key[1]}: {len(self.entries[key])} frames ask a question of a head")
         if self.backend == CONTEXT_ACTION_BACKEND_GPU:
             self.gpu_split_ready(key[1])
             return
         # Each final frame: one featurised ahead (the same frame, compared field by field), or a fresh one.
-        natural = self.inputs.frames[key[1]] if not (self.frozen and key[1] == TRAIN) else []
+        natural = self.inputs.frames[key[1]] if not ((self.frozen or selected) and key[1] == TRAIN) else []
         natural_at = {row.identifier: number for number, row in enumerate(natural)}
-        extra_at = {row.identifier: number for number, row in enumerate(self.extra)} if key[1] == TRAIN else {}
-        tail = self.tail[0] if key[1] == TRAIN and self.tail is not None else []
+        extra_at = {row.identifier: number for number, row in enumerate(self.extra)} if key[1] == TRAIN and not selected else {}
+        tail = self.tail[0] if key[1] == TRAIN and self.tail is not None and not selected else []
         tail_at = {row.identifier: number for number, row in enumerate(tail)}
         plan: list[tuple[str, int]] = []
         fresh: list[Frame] = []

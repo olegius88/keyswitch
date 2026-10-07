@@ -27,7 +27,9 @@ from pathlib import Path
 from typing import Final, cast
 from unittest.mock import patch
 
-from keyswitch.context_action_features import alone_question, extract_action_features
+from keyswitch.context_action_features import (
+    alone_question, capitals_question, extract_action_features, letter_question, start_question,
+)
 from keyswitch.context_model import (
     ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, _term_frequency, term_bucket,
 )
@@ -1720,6 +1722,34 @@ def _named_base(options: Mapping[str, object], key: str) -> ContextModel | None:
     if key == "frozen_base" and any(HEAD_PREFIXES[name] not in carried for name in cast(dict[str, object], spec.get("carried", {}))):
         raise ValueError("the recipe names a carried head the frozen base has no weights for")
     return model
+
+
+def trainable_prefixes(options: Mapping[str, object]) -> frozenset[str] | None:
+    """The feature prefixes a fit onto a frozen base with heads can move, or None for any other fit.
+
+    Every weight of the base is fixed, so only the heads the recipe names and the kept-neighbour
+    question, unless the base carries it, take a step: a TRAIN frame outside their classes holds no
+    feature the fit can move (trainable_frames).
+    """
+
+    heads = frozen_heads(options)
+    if not heads:
+        return None
+    base = cast(ContextModel, frozen_base(options))
+    return frozenset(heads) | (frozenset({KEPT_FEATURE_PREFIX}) - carried_prefixes(base))
+
+
+def head_question(original: str, alternative: str, before: str, after: str, trigger: str, origin: str,
+                  prefixes: frozenset[str]) -> bool:
+    """Whether the features of a frame (extract_action_features) hold one of these prefixes: the frame
+    asks a question of a head or of the kept-neighbour question they name."""
+
+    letter = LETTER_FEATURE_PREFIX in prefixes and letter_question(original, alternative, before)
+    if origin == "kept_next_word":
+        return KEPT_FEATURE_PREFIX in prefixes or letter
+    return (letter or (CAPITALS_FEATURE_PREFIX in prefixes and capitals_question(original, before))
+            or (ALONE_FEATURE_PREFIX in prefixes and alone_question(original, alternative, before, after, trigger))
+            or (START_FEATURE_PREFIX in prefixes and start_question(original, alternative, before, after)))
 
 
 def carried_prefixes(model: ContextModel) -> frozenset[str]:
