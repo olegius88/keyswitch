@@ -181,6 +181,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--report", type=Path, required=True, help="where the sealed test report goes")
     parser.add_argument("--check-only", action="store_true", help="run the checks and stop before the test")
     arguments = parser.parse_args(argv)
+    # The seal is checked in this process: against this tree's runtime, not an installed package's.
+    sys.path.insert(0, str(ROOT / "src"))
     failures = preflight(arguments.candidate, arguments.prefix_candidate, arguments.corpus)
     if failures:
         print("not reading the sealed test; fix first: " + "; ".join(failures), flush=True)

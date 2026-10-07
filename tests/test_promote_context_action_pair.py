@@ -88,9 +88,12 @@ class PromotionTests(unittest.TestCase):
         self.assertFalse(any("evaluate_context_action_sequences.py" in " ".join(command) for command in runner.commands))
         # No candidate tree is built while anything else fails.
         self.assertNotIn(SCRATCH_TREE, runner.trees)
-        with patch.object(promotion, "preflight", return_value=failures), patch.object(promotion, "promote") as promote:
+        with (patch.object(promotion, "preflight", return_value=failures), patch.object(promotion, "promote") as promote,
+              patch.object(sys, "path", list(sys.path))):
             self.assertEqual(promotion.main(["--candidate", str(self.candidate), "--prefix-candidate", str(self.prefix),
                                              "--corpus", str(self.corpus), "--report", str(self.corpus / "r.json")]), 1)
+            # The seal is checked against this tree's runtime, whatever PYTHONPATH the tool was started with.
+            self.assertEqual(sys.path[0], str(promotion.ROOT / "src"))
         promote.assert_not_called()
 
     def test_a_seal_the_corpus_refuses_and_a_missing_prefix_file_fail_the_checks(self) -> None:
