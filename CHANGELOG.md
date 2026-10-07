@@ -4,6 +4,18 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- An English message that opens with an initial, a list or a name stays as typed: `J. Smith said`
+  became `О. Smith said`, `C, D and E` became `С, В and E`, `C# rocks` became `С№ rocks` and
+  `D. Knuth wrote it` became `В. Лтгер wrote it` (0.38-0.42). The rule that turns a lone `f`, `b`,
+  `c`, `d`, `r`, `e`, `j` or `z` opening a message into the Russian word its key spells now reads it
+  as that word only when the Russian layout prints a space, nothing or a clause sign right after it:
+  `J.` is `Ою` there and `C#` is `С№`, no word a message opens with, while a Russian message typed in
+  the English layout is corrected as before (`f? gjyznyj` is `а, понятно`, `f& xnj` is `а? что`).
+- The Windows installer is built beside the Windows tests instead of after them: the ARM64 job of
+  the 0.42.0 release took 19.2 minutes, 10 of them the installer and its smoke test. The prefix
+  engine replay runs on a runner of its own beside the other model replays: the Tests workflow took
+  11 minutes instead of about 18.
+
 ## 0.42.0 — 2026-10-07
 
 - A Russian word of one letter typed in the English layout right after a Latin term is corrected:

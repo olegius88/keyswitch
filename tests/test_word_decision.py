@@ -95,6 +95,19 @@ class OpeningLetterTests(unittest.TestCase):
         self.assertFalse(decision.should_convert)
         self.assertNotEqual(decision.reason, ISOLATED_SHORT_WORD_REASON)
 
+    def test_a_letter_the_target_layout_continues_with_a_letter_or_a_number_sign_is_no_word(self) -> None:
+        # `J. Smith said` read in the Russian layout is `Ою Smith said`, `C, D and E` is `Сб D and E` and
+        # `C# rocks` is `С№ rocks`: English opens with initials, lists and names, and the rule made them
+        # `О. Smith said` (0.38-0.42).
+        for original, replacement, following in (("j", "о", "ю "), ("c", "с", "б "), ("c", "с", "№ ")):
+            with self.subTest(following=following):
+                self.assertFalse(self.decide(original, replacement, None, following={1: following}).should_convert)
+        # Nothing, a space or a sign that ends a clause keeps it a word: `f?` is `а,` and `f&` is `а?`.
+        for following in ("", " ", ", ", "? ", "!", ":", ")", "-", "."):
+            with self.subTest(following=following):
+                decision = self.decide("f", "а", None, following={1: following})
+                self.assertEqual((decision.should_convert, decision.reason), (True, ISOLATED_SHORT_WORD_REASON))
+
     def test_an_english_neighbour_a_foreign_letter_and_exclusions_keep_the_letter(self) -> None:
         self.assertFalse(self.decide("z", "я", 0).should_convert)
         self.assertFalse(self.decide("g", "п", None).should_convert)

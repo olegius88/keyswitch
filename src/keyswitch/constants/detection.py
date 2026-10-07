@@ -18,6 +18,12 @@ KEPT_WORDS_TAKEN_ALONG: Final = 2
 # Most Latin words an English term inside a Russian phrase may span before a lone Russian letter
 # typed in the English layout is read as that letter (`в git diff d` is `в git diff в`).
 STRANDED_TERM_MAX_WORDS: Final = 3
+# What the Russian layout may print right after a one-letter Russian word that opens a message, for the
+# message-start rule (word_decision.opening_letter_decision) to read it as that word: a space, nothing,
+# or a sign that ends a clause (`а, понятно`, `а? что`, `о! круто`, `а) пункт`, `а-а-а`). A key that
+# prints a letter or `№` there makes the letter part of a token, an initial or a name: `J. Smith` read
+# in the Russian layout is `Ою Smith`, `C# rocks` is `С№ rocks`, and English opens with those.
+OPENING_LETTER_FOLLOWING_SIGNS: Final[frozenset[str]] = frozenset(",.?!:;)-")
 # Fewest letters left of a word once the letters at its end that are signs in the other layout are
 # set aside (`руддщб` is `hello,`): `чё` without `ё` is a lone `ч`, and one letter is no word to judge.
 REPLAYED_SIGNS_MIN_STEM_LETTERS: Final = 2

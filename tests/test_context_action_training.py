@@ -53,6 +53,7 @@ from train_context_action_model import (
     natural_lookahead_rows,
     natural_mixed_contexts,
     evidence,
+    following_reading,
     historical_curriculum,
     MIXED_INSERTION_CONTEXTS,
     legacy_lookahead_rows,
@@ -1444,3 +1445,21 @@ class PlannedEvidenceTests(unittest.TestCase):
         self.assertTrue(evidence(with_context, detector, None).baseline_convert)
         with self.assertRaises(ValueError):
             evidence(replace(planned, field=FieldContext("Telegram", "public-training", "", "...")), detector, None)
+
+    def test_the_baseline_reads_the_keys_after_a_lone_letter_in_the_other_layout_as_the_engine_does(self) -> None:
+        # The message-start rule (word_decision.opening_letter_decision) reads a lone letter as the Russian
+        # word only when the Russian layout prints a space or a clause sign after it: `J.` is `Ою` there,
+        # an initial, and `z` before a space is `я`. A glyph no key of the pair prints passes as it is.
+        detector = LanguageDetector({
+            0: LanguageModel("en_US", {"hello": FIXTURE_WORD_FREQUENCY}, "fixture", enable_spellcheck=False),
+            1: LanguageModel("ru_RU", {"привет": FIXTURE_WORD_FREQUENCY}, "fixture", enable_spellcheck=False),
+        })
+        letter = ActionRow("opening:letter", "j", 0, FieldContext("Telegram", "public-training", "", ""), "space", "", "keep",
+                           "natural_surface", " ")
+        self.assertEqual([following_reading(row) for row in (letter, replace(letter, literal_tail="."),
+                                                             replace(letter, trigger="punctuation", boundary_text="?"),
+                                                             replace(letter, trigger="enter", boundary_text="\n"))],
+                         [" ", "ю", ",", "\n"])
+        self.assertTrue(evidence(letter, detector, None).baseline_convert)
+        self.assertFalse(evidence(replace(letter, literal_tail="."), detector, None).baseline_convert)
+        self.assertTrue(evidence(replace(letter, trigger="punctuation", boundary_text="?"), detector, None).baseline_convert)

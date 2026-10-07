@@ -1467,6 +1467,19 @@ def identifier_evidence_dropped(identifier: str) -> bool:
     return variant_choice(identifier_family(identifier), "identifier-dropout", IDENTIFIER_DROPOUT_FAMILIES) == 0
 
 
+def following_reading(row: ActionRow) -> str:
+    """What was typed right after the word, as the other layout prints those keys (automatic_word_decision).
+
+    The engine reads the same keys from its key events; a glyph no key of the pair prints is passed
+    as it is.
+    """
+    typed = (row.literal_tail + row.boundary_text)[:1]
+    try:
+        return translated(typed, row.group)
+    except ValueError:
+        return typed
+
+
 def evidence(row: ActionRow, detector: LanguageDetector, ortho: OrthoModel | None,
              *, identifiers: IdentifierLexicon | None = None) -> ContextEvidence:
     alternative = translated(row.original, row.group)
@@ -1482,6 +1495,7 @@ def evidence(row: ActionRow, detector: LanguageDetector, ortho: OrthoModel | Non
     decision = automatic_word_decision(
         detector, row.original, {1 - row.group: alternative}, row.group,
         previous_words=previous, context_group=context_group, trigger=row.trigger,
+        following={1 - row.group: following_reading(row)},
     )
     return evidence_for_decision(
         decision, alternative, 1 - row.group, detector, row.field, row.trigger,

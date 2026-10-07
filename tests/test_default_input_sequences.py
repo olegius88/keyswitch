@@ -172,6 +172,21 @@ class DefaultInputSequenceTests(unittest.TestCase):
                 session.type(text, 1)
                 self.assert_sent_once(session, text)
 
+    def test_an_english_message_opening_with_an_initial_a_list_or_a_name_stays(self) -> None:
+        # The message-start rule reads a lone letter as the Russian word its keys spell only when the
+        # Russian layout prints a space or a clause sign after it. English opens with initials, lists
+        # and names, which the rule turned into `О. Smith said` and `В. Лтгер wrote it` (0.38-0.42).
+        for text in ("J. Smith said ", "C, D and E ", "C# rocks ", "D. Knuth wrote it "):
+            with self.subTest(text=text), self.session(group=0) as session:
+                session.type(text, 0)
+                self.assert_sent_once(session, text)
+        # A Russian message opened by such a word in the English layout is still corrected, its comma
+        # and question mark typed with the Russian keys (`f? gjyznyj`, `f& xnj`).
+        for text in ("а, понятно ", "а? что ", "я сегодня "):
+            with self.subTest(text=text), self.session(group=0) as session:
+                session.type(text, 1)
+                self.assert_sent_once(session, text)
+
     def test_code_editor_keeps_russian_comment_before_manual_english_insert(self) -> None:
         with self.session(application="Code") as session:
             session.type("// сохрани гифку  ", 1)

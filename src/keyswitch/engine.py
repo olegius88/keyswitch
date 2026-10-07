@@ -1584,6 +1584,7 @@ class KeySwitchEngine:
                 self._trigger_for_boundary(boundary),
                 literal_tail="".join(stroke.character for stroke in (*trailing, *signs)),
                 boundary_text=boundary.character,
+                following={group: self._text_for_group((*trailing, *signs, boundary), group) for group in alternatives},
             )
             if inside is None and early_switch_origin is not None and not (trailing or head or signs):
                 decision = self._settle_early_switch(
@@ -2113,10 +2114,11 @@ class KeySwitchEngine:
         trigger: CorrectionTrigger = "space",
         *, literal_tail: str = "", boundary_text: str = "",
         field_override: FieldContext | None = None, inside: bool = False,
+        following: dict[int, str] | None = None,
     ) -> DetectionDecision:
         self._context_result = None
         self._last_baseline = None
-        decision = self._baseline_decision(original, alternatives, source_group, application, trigger)
+        decision = self._baseline_decision(original, alternatives, source_group, application, trigger, following=following)
         if not decision.should_convert and not inside:
             decision = self._stranded_letter(decision, original, alternatives, source_group)
         self._last_baseline = decision
@@ -2241,9 +2243,12 @@ class KeySwitchEngine:
 
     def _baseline_decision(
         self, original: str, alternatives: dict[int, str], source_group: int,
-        application: str, trigger: CorrectionTrigger,
+        application: str, trigger: CorrectionTrigger, *, following: dict[int, str] | None = None,
     ) -> DetectionDecision:
-        """What the detector decides about a word before the context model is asked."""
+        """What the detector decides about a word before the context model is asked.
+
+        `following` is what was typed right after the word, as each target layout prints it.
+        """
 
         context_words, context_group = self._context_for(application)
         context_aware = bool(self.settings.get("detection.context_aware", True))
@@ -2274,6 +2279,7 @@ class KeySwitchEngine:
             ),
             # Context is kept per named application (_remember_context).
             context_tracked=context_aware and bool(application.strip()),
+            following=following,
         )
 
     def _consult_context_model(
@@ -3277,6 +3283,7 @@ class KeySwitchEngine:
         decision = inside if inside is not None else self._decide_word(
             original, alternatives, source_group, application, "pause",
             literal_tail="".join(stroke.character for stroke in trailing),
+            following={group: self._text_for_group(trailing, group) for group in alternatives},
         )
         excluded = self._application_excluded(application)
         self._log_word_evaluation(
