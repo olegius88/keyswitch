@@ -4,6 +4,32 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- A Russian word of one letter typed in the English layout right after a Latin term is corrected:
+  `nats b redis` gives `nats и redis`, `lid f номер` gives `lid а номер`. The corpus holds no word
+  of one letter, so the model had never seen one after a Latin word and kept it at p=1.00. A head
+  of its own answers a letter right after a word of Latin letters, at its boundary and beside its
+  next word, reading how often the words on either side occur in English prose and in Russian
+  technical text: `plan b then` stays. Elsewhere a lone letter still needs a curated rule.
+- The context model is the 0.41.0 model with that head fitted onto it (corpus v34; test v34 sealed
+  before training and passed): every other decision is the 0.41.0 model's. On the replay of the
+  owner's own typing it converts 726 words right, leaves 104 in the wrong layout and converts 68
+  falsely, against 720/110/68 for 0.41.0; the development replay, the calibration split and the
+  authored cases are the same. On test v34 it keeps all 201 correctly typed rows and restores 180
+  of 201 rows with the early switch off against 159, and 16 against 16 with it on. The prefix model
+  retrained byte-identical.
+- The test suites run module by module in parallel processes (`tools/run_test_modules.py`): the
+  Linux coverage step took 8.3 minutes instead of 14.7 on the CI runner and the Windows test step
+  about 3 instead of 9-13, with the same 100% branch coverage. Four test modules that imported
+  `tools/` only because an earlier module had put it on the path now do it themselves.
+- The prefix engine replay, 21 of the 30 minutes of the model evidence job, replays its profiles,
+  field contexts and variants in worker processes (1342 s to 458 s here, the same report byte for
+  byte), and so does the sequence evaluation of a candidate pair (69.6 s to 25.3 s on 600 rows).
+- A sealed test is read only after every check of the files its seal pins holds
+  (`tools/promote_context_action_pair.py`): a committed tree, a seal valid for the corpus, strict
+  typing, the named values and the pinned test modules; then the tool installs the pair, exports
+  and verifies the receipt and refreshes the engine replays. A frozen-base fit reads only the frames
+  that hold a weight it can move.
+
 ## 0.41.0 — 2026-10-07
 
 - A word of two letters sent alone is corrected. The context model waited on a lone `гш` for a next
