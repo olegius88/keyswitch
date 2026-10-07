@@ -62,6 +62,12 @@ STRANDED_PREVIOUS_WEIGHT: Final = 2.0
 KEPT_NEIGHBOUR_MIN_LETTERS: Final = 2
 KEPT_NEIGHBOUR_CAPITALS_MODULUS: Final = 4
 KEPT_NEIGHBOUR_FRAMES_PER_WORD: Final = 3
+# Single-letter frames (train_context_action_model.letter_curriculum): one Russian sentence in this many
+# opens with the counted term put before its word of one letter (a message such as `nats и redis`), the
+# others keep their prose before it.
+LETTER_CURRICULUM_MESSAGE_START_MODULUS: Final = 3
+# The words a single-letter frame reads: the word before the letter, the letter and the word after it.
+LETTER_CONTEXT_TOKENS: Final = 3
 # Lone-word frames (train_context_action_model.lone_word_curriculum): each pair of two Latin letters
 # goes to one split by hash - DEVELOPMENT and CALIBRATION one in LONE_WORD_SPLIT_MODULUS each, TRAIN
 # the rest - and each of its two readings stands alone in lower case, capitalised and in capitals at

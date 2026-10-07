@@ -67,7 +67,8 @@ from keyswitch.constants.file_formats import HEXADECIMAL_BASE, VERSION_HASH_CHAR
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
 from keyswitch.constants.models import (
     ALONE_FEATURE_PREFIX, ALONE_HEAD_LETTERS, CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS,
-    KEPT_CONTEXT_WORD_MAX_CHARACTERS, KEPT_FEATURE_PREFIX, PLANNED_CONTEXT_WORD_MAX_CHARACTERS, START_FEATURE_PREFIX,
+    KEPT_CONTEXT_WORD_MAX_CHARACTERS, KEPT_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, PLANNED_CONTEXT_AFTER_MAX_CHARACTERS,
+    PLANNED_CONTEXT_WORD_MAX_CHARACTERS, START_FEATURE_PREFIX,
 )
 from keyswitch.constants.training import (
     CONTEXT_ACTION_BACKEND_AUTO,
@@ -89,6 +90,8 @@ from keyswitch.constants.training import (
     KEPT_NEIGHBOUR_CAPITALS_MODULUS,
     KEPT_NEIGHBOUR_FRAMES_PER_WORD,
     KEPT_NEIGHBOUR_MIN_LETTERS,
+    LETTER_CONTEXT_TOKENS,
+    LETTER_CURRICULUM_MESSAGE_START_MODULUS,
     LEXICAL_PAIR_ANCHOR_VARIANTS,
     LOG_LOSS_PROBABILITY_FLOOR,
     LONE_WORD_BOUNDARIES,
@@ -868,6 +871,108 @@ def counted_token_curriculum(source_rows: Sequence[CorpusRow], refused: frozense
                   "scope": "TRAIN only: counted Russian abbreviations (keep) and counted Latin terms typed in the Russian layout (convert) after Russian prose, decided at their own boundary (counted_token_curriculum)."}
 
 
+def _technical_terms(refused: frozenset[str], minimum: int) -> list[str]:
+    """Latin words of letters that Russian technical text uses at least `minimum` times and at least as
+    often as English prose does (`redis`, `todo`, `docker`; not `plan` or `the`), in a fixed order."""
+
+    table = _term_frequency()
+    return sorted(term for term, count in table["latin"].items()
+                  if count >= minimum and count >= table["english"].get(term, 0) and len(term) > 1
+                  and term.isascii() and term.isalpha() and term.islower() and not refused & expanded_aliases(term))
+
+
+def letter_curriculum(source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                      options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """A word of one letter right after a word of Latin letters, the single-letter head's class
+    (context_action_features.letter_question), at its boundary and beside its next word.
+
+    Russian technical text puts a Russian word of one letter after a Latin term (`nats и redis`), and
+    typed in the English layout the letter is a Latin one: the owner's `nats b redis`, `lid f номер`,
+    `todo b` (0.32-0.41). No corpus frame stands there: the corpus's Russian sentences have Cyrillic
+    words before their letters, and the frozen model kept `f` before the converted `номер` at p=1.00.
+    The frames, by sentence chosen by hash:
+    - term: a Russian TRAIN sentence's word of one letter (а и в с к у о я) and the word after it, the
+      word before the letter replaced by a counted technical term (_technical_terms), or the term alone
+      before it in one sentence in LETTER_CURRICULUM_MESSAGE_START_MODULUS. Typed in the English layout
+      the letter waits at its boundary and converts beside its next word, converted (`номер`) or kept as
+      typed (another counted term); typed as written it keeps in all three places.
+    - english: an English TRAIN sentence's word between two words, replaced by the Latin keys of one of
+      those Russian letters (`plan b then`), waits at its boundary and keeps beside its next word kept as
+      typed; an English word of one letter (`a`, `I`) keeps at its boundary and beside it.
+    Terms and words of this corpus's test and of every accessed test are refused by their aliases.
+    """
+
+    budgets = {name: int(cast(int, options[name])) for name in ("term_sentences", "english_sentences")}
+    terms = _technical_terms(refused, int(cast(int, options["minimum_term_count"])))
+    if not any(budgets.values()) or not terms:
+        return [], {"frames": 0, "scope": "not used"}
+    weight = float(cast(float, options["sample_weight"]))
+    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+    letters = sorted(translated(letter, 1) for letter in TRUSTED_SINGLE_LETTER_WORDS)
+
+    def frame(identifier: str, word: str, group: int, before: str, after: str, action: ContextAction,
+              category: str, origin: AfterOrigin) -> ActionRow:
+        field = FieldContext(applications[variant_choice(identifier, "application", len(applications))], "public-training",
+                             before, after, "unknown")
+        return ActionRow(identifier, word, group, field, "space", "", action, category, " ", weight, origin)
+
+    sentences: dict[int, dict[str, tuple[str, str, str, str]]] = {0: {}, 1: {}}
+    for _, group, text, tokens in _monolingual_rows(source_rows):
+        for previous, current, following in zip(tokens, tokens[1:], tokens[LETTER_CONTEXT_TOKENS - 1:]):
+            word, after = current.group(), following.group()
+            if (text[previous.end():current.start()] != " " or text[current.end():following.start()] != " "
+                    or not word.isalpha() or not after.isalpha() or len(after) > PLANNED_CONTEXT_AFTER_MAX_CHARACTERS
+                    or refused & (expanded_aliases(word) | expanded_aliases(after))):
+                continue
+            if group == 1 and word in TRUSTED_SINGLE_LETTER_WORDS:
+                sentences[1][text[:current.start()] + "|" + word] = (text[:previous.start()], word, after, "")
+            elif group == 0 and previous.group().isalpha():
+                sentences[0][text[:current.start()] + "|" + word] = (text[:previous.start()], previous.group(), word, after)
+    rows: list[ActionRow] = []
+    counts: Counter[str] = Counter()
+
+    def ranked(values: Iterable[str], purpose: str) -> list[str]:
+        return sorted(values, key=lambda value: hashlib.sha256(f"letter-{purpose}:{value}".encode()).digest())
+
+    for key in ranked(sentences[1], "term")[:budgets["term_sentences"]]:
+        prose, word, after, _ = sentences[1][key]
+        identifier = "letter-term:" + hashlib.sha256(key.encode()).hexdigest()
+        term = terms[variant_choice(identifier, "term", len(terms))]
+        other = terms[variant_choice(identifier, "next-term", len(terms))]
+        start = variant_choice(identifier, "message-start", LETTER_CURRICULUM_MESSAGE_START_MODULUS) == 0
+        before = term + " " if start else prose + term + " "
+        keys = translated(word, 1)
+        rows.extend((
+            frame(identifier + ":own", keys, 0, before, "", "wait", "letter_term", "none"),
+            frame(identifier + ":planned", keys, 0, before, after, "convert", "letter_term", "planned_next_conversion"),
+            frame(identifier + ":kept", keys, 0, before, other, "convert", "letter_term", "kept_next_word"),
+            frame(identifier + ":own-keep", word, 1, before, "", "keep", "letter_term_kept", "none"),
+            frame(identifier + ":planned-keep", word, 1, before, other, "keep", "letter_term_kept", "planned_next_conversion"),
+            frame(identifier + ":kept-keep", word, 1, before, after, "keep", "letter_term_kept", "kept_next_word"),
+        ))
+        counts["term_sentences"] += 1
+        counts["message_start"] += int(start)
+    for key in ranked(sentences[0], "english")[:budgets["english_sentences"]]:
+        prose, previous_word, word, after = sentences[0][key]
+        identifier = "letter-english:" + hashlib.sha256(key.encode()).hexdigest()
+        before = prose + previous_word + " "
+        if len(word) == 1:
+            rows.extend((frame(identifier + ":own", word, 0, before, "", "keep", "letter_english_word", "none"),
+                         frame(identifier + ":kept", word, 0, before, after, "keep", "letter_english_word", "kept_next_word")))
+            counts["english_letters"] += 1
+            continue
+        letter = letters[variant_choice(identifier, "letter", len(letters))]
+        rows.extend((
+            frame(identifier + ":own", letter, 0, before, "", "wait", "letter_english", "none"),
+            frame(identifier + ":kept", letter, 0, before, after, "keep", "letter_english", "kept_next_word"),
+        ))
+        counts["english_sentences"] += 1
+    return rows, {"frames": len(rows), "counts": dict(sorted(counts.items())), "sample_weight": weight,
+                  "candidates": {"terms": len(terms), "russian_sentences": len(sentences[1]), "english_sentences": len(sentences[0])},
+                  "scope": "TRAIN only: a word of one letter after a counted technical term in Russian sentences and in place of a "
+                           "word of English ones, at its boundary and beside its next word (letter_curriculum)."}
+
+
 def historical_curriculum(intent: LinearNgramModel | None = None,
                           models: dict[int, LanguageModel] | None = None) -> list[ActionRow]:
     """Reuse distinct old TRAIN situations, never its evaluation labels.
@@ -1448,7 +1553,11 @@ def frozen_base(options: Mapping[str, object]) -> ContextModel | None:
 
 
 # The heads a frozen base can carry besides the kept-neighbour question, by the recipe's name.
-HEAD_PREFIXES: Final = {"capitals": CAPITALS_FEATURE_PREFIX, "alone": ALONE_FEATURE_PREFIX, "start": START_FEATURE_PREFIX}
+HEAD_PREFIXES: Final = {"capitals": CAPITALS_FEATURE_PREFIX, "alone": ALONE_FEATURE_PREFIX, "start": START_FEATURE_PREFIX,
+                         "letter": LETTER_FEATURE_PREFIX}
+# A recipe without single-letter frames (the recipes before corpus v34).
+NO_LETTER_CURRICULUM: Final[dict[str, object]] = {"term_sentences": 0, "english_sentences": 0, "minimum_term_count": 0,
+                                                  "sample_weight": 1.0}
 
 
 def frozen_heads(options: Mapping[str, object]) -> dict[str, int]:
@@ -1468,11 +1577,15 @@ def frozen_heads(options: Mapping[str, object]) -> dict[str, int]:
 
 
 def alone_evidence(options: Mapping[str, object]) -> dict[str, float] | None:
-    """The counts that label lone two-letter frames for the lone-word head, or None without that head."""
+    """The counts that label lone two-letter frames for the lone-word head, or None without that head.
 
-    value = options.get("frozen_base")
-    heads = cast(dict[str, dict[str, float]], cast(dict[str, object], value).get("heads", {})) if value is not None else {}
-    return heads.get("alone")
+    A frozen base that carries the head (the corpus v33 model) names its counts under `carried`: its
+    frames are labelled as they were when it was fitted, so the calibration reads the same labels."""
+
+    value = cast(dict[str, object], options.get("frozen_base") or {})
+    heads = cast(dict[str, dict[str, float]], value.get("heads", {}))
+    carried = cast(dict[str, dict[str, float]], value.get("carried", {}))
+    return heads.get("alone") or carried.get("alone")
 
 
 def alone_labels(rows: Sequence[ActionRow], evidence: Mapping[str, float] | None,
@@ -1604,6 +1717,8 @@ def _named_base(options: Mapping[str, object], key: str) -> ContextModel | None:
         raise ValueError(f"a {label} is an action model without kept-neighbour weights or heads")
     if key == "frozen_base" and carried & set(frozen_heads(options)):
         raise ValueError("a head the frozen base carries is frozen with it, not fitted again")
+    if key == "frozen_base" and any(HEAD_PREFIXES[name] not in carried for name in cast(dict[str, object], spec.get("carried", {}))):
+        raise ValueError("the recipe names a carried head the frozen base has no weights for")
     return model
 
 
@@ -1886,6 +2001,12 @@ def frame_chain(inputs: FitInputs, profile: str, split: str, rows: Sequence[Acti
             models=inputs.lexicons[False])
         result, reports["balance"] = balance_planned_mass(result)
         result.extend(tail)
+    if split == DEVELOPMENT:
+        # The corpus leaves words of one letter out, so DEVELOPMENT holds no frame of the single-letter head's
+        # class: the head's epoch is chosen on the same curriculum drawn from DEVELOPMENT's own sentences.
+        letter, reports["letter"] = letter_curriculum(inputs.source_rows[split], inputs.refused,
+                                                      cast(dict[str, object], options.get("letter_curriculum", NO_LETTER_CURRICULUM)))
+        result.extend(letter)
     evidence = alone_evidence(options)
     if evidence is not None:
         lone, reports["lone_word"] = lone_word_curriculum(split, inputs.refused, evidence, partial(base_action, inputs=inputs))
@@ -1901,7 +2022,10 @@ def tail_curricula(inputs: FitInputs) -> tuple[list[ActionRow], dict[str, object
                                                   cast(dict[str, object], options["kept_neighbour_curriculum"]), inputs.lexicons[False])
     counted, counted_report = counted_token_curriculum(inputs.source_rows[TRAIN], inputs.refused,
                                                        cast(dict[str, object], options["counted_token_curriculum"]))
-    return [*kept, *counted], {"kept_neighbour_curriculum": kept_report, "counted_token_curriculum": counted_report}
+    letter, letter_report = letter_curriculum(inputs.source_rows[TRAIN], inputs.refused,
+                                              cast(dict[str, object], options.get("letter_curriculum", NO_LETTER_CURRICULUM)))
+    return [*kept, *counted, *letter], {"kept_neighbour_curriculum": kept_report, "counted_token_curriculum": counted_report,
+                                        "letter_curriculum": letter_report}
 
 
 def prepared_frames(rows: Sequence[ActionRow], spans: SpanCurriculum, split: str) -> list[tuple[str, ActionRow | SpanFrame]]:

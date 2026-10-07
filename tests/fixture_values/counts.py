@@ -732,3 +732,8 @@ PREFIX_REPLAY_FIXTURE_FAILURE_PERIOD: Final = 3
 PREFIX_REPLAY_FIXTURE_EARLY_PERIOD: Final = 4
 PREFIX_REPLAY_FIXTURE_INJECTION_PERIOD: Final = 5
 PREFIX_REPLAY_FIXTURE_JOBS: Final = 4
+# The single-letter curriculum in its test: the Russian sentences framed (the fixture holds two words of
+# one letter), the frames of each, and the English sentences framed (the fixture's four inner words).
+LETTER_FIXTURE_TERM_SENTENCES: Final = 2
+LETTER_FIXTURE_FRAMES_PER_TERM_SENTENCE: Final = 6
+LETTER_FIXTURE_ENGLISH_SENTENCES: Final = 4

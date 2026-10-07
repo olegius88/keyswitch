@@ -27,7 +27,8 @@ from freeze_context_action_corpus import CorpusRow, physical, typo_variants
 from context_deferral import deferred_isolated, lookahead_focus, plausible_reading
 from reconcile_context_action_corpus import expanded_aliases
 from keyswitch.constants.training import ACTION_DEFERRED_WORD_MAX_CHARACTERS, CITATION_SIGN_HEADS
-from keyswitch.context_action_features import extract_action_features
+from keyswitch.context_action_features import extract_action_features, letter_question
+from keyswitch.short_words import TRUSTED_SINGLE_LETTER_WORDS
 from keyswitch.constants.model_protocol import CALIBRATION, DEVELOPMENT, TRAIN
 from keyswitch.context_model import ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, term_bucket
 from train_context_action_model import (
@@ -76,12 +77,14 @@ from train_context_action_model import (
     log_loss,
     _counted_abbreviations,
     _counted_terms,
+    _technical_terms,
     _varied_boundary,
+    letter_curriculum,
 )
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
 from keyswitch.constants.models import (
     ALONE_FEATURE_PREFIX, CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_V1_CONVERSION_THRESHOLD, KEPT_FEATURE_PREFIX,
-    START_FEATURE_PREFIX,
+    LETTER_FEATURE_PREFIX, START_FEATURE_PREFIX,
 )
 from keyswitch.detector import LanguageDetector
 from keyswitch.intent_model import CorrectionTrigger, LinearNgramModel
@@ -100,6 +103,9 @@ from fixture_values.counts import (
     LONE_WORD_FIXTURE_MINIMUM_COUNT,
     LONE_WORD_FIXTURE_OTHER_MAXIMUM_COUNT,
     KEPT_NEIGHBOUR_FIXTURE_ABBREVIATION_COUNT,
+    LETTER_FIXTURE_ENGLISH_SENTENCES,
+    LETTER_FIXTURE_FRAMES_PER_TERM_SENTENCE,
+    LETTER_FIXTURE_TERM_SENTENCES,
     KEPT_NEIGHBOUR_FIXTURE_DOMINANCE,
     KEPT_NEIGHBOUR_FIXTURE_FRAMES,
     KEPT_NEIGHBOUR_FIXTURE_TERM_COUNT,
@@ -710,6 +716,59 @@ class ActionTrainingTests(unittest.TestCase):
         self.assertEqual(kept_neighbour_curriculum([english], frozenset(), options)[1]["counts"],
                          {"natural_0": KEPT_NEIGHBOUR_FIXTURE_FRAMES // LAYOUT_GROUP_COUNT})
 
+    def test_the_letter_curriculum_frames_a_word_of_one_letter_after_a_latin_word(self) -> None:
+        russian = replace(fixture("l1", "сегодня", 1), before="мы обновили сервер и вчера и ", after=" ночью")
+        english = replace(fixture("e1", "today", 0), before="we have a plan and ", after=" again")
+        options = {"term_sentences": LETTER_FIXTURE_TERM_SENTENCES, "english_sentences": LETTER_FIXTURE_ENGLISH_SENTENCES,
+                   "minimum_term_count": KEPT_NEIGHBOUR_FIXTURE_TERM_COUNT, "sample_weight": KEPT_NEIGHBOUR_FIXTURE_WEIGHT}
+        terms = set(_technical_terms(frozenset(), KEPT_NEIGHBOUR_FIXTURE_TERM_COUNT))
+        self.assertIn("redis", terms)
+        self.assertFalse({"plan", "the", "and"} & terms)
+        rows, report = letter_curriculum([russian, english], frozenset(), options)
+        self.assertEqual(rows, letter_curriculum([russian, english], frozenset(), options)[0])
+        for row in rows:
+            with self.subTest(row=row.identifier):
+                # Every frame is in the head's class, asked at a space, at its boundary or beside its next word.
+                self.assertTrue(letter_question(row.original, translated(row.original, row.group), row.field.before))
+                self.assertEqual((row.trigger, row.boundary_text, row.sample_weight), ("space", " ", KEPT_NEIGHBOUR_FIXTURE_WEIGHT))
+                self.assertEqual(bool(row.field.after), row.after_origin != "none")
+        # Both words `и` of the Russian sentence, the word before each replaced by a technical term (or the term
+        # alone before it): typed in the English layout it waits, then converts beside its next word, converted
+        # (`вчера`, `сегодня`) or kept as typed (another term); typed as written it keeps.
+        term_rows = [row for row in rows if row.category.startswith("letter_term")]
+        self.assertEqual(len(term_rows), LETTER_FIXTURE_TERM_SENTENCES * LETTER_FIXTURE_FRAMES_PER_TERM_SENTENCE)
+        actions = {(row.group, row.after_origin, row.action) for row in term_rows}
+        self.assertEqual(actions, {(0, "none", "wait"), (0, "planned_next_conversion", "convert"), (0, "kept_next_word", "convert"),
+                                   (1, "none", "keep"), (1, "planned_next_conversion", "keep"), (1, "kept_next_word", "keep")})
+        for row in term_rows:
+            self.assertEqual(row.original, "b" if row.group == 0 else "и")
+            prose, _, term = row.field.before[:-1].rpartition(" ")
+            self.assertIn(term, terms)
+            self.assertIn(prose, ("", "мы обновили", "мы обновили сервер и"))
+            if (row.group, row.after_origin) in ((0, "planned_next_conversion"), (1, "kept_next_word")):
+                self.assertIn(row.field.after, ("вчера", "сегодня"))
+            elif row.after_origin != "none":
+                self.assertIn(row.field.after, terms)
+        # In the English sentence each inner word is replaced by the keys of a Russian letter, which waits and then
+        # keeps beside the English word after it; its own word of one letter keeps.
+        english_rows = [row for row in rows if row.category.startswith("letter_english")]
+        self.assertTrue({("a", "we have ", "plan", "keep", "kept_next_word"), ("a", "we have ", "", "keep", "none")}
+                        <= {(row.original, row.field.before, row.field.after, row.action, row.after_origin) for row in english_rows})
+        letters = {translated(letter, 1) for letter in TRUSTED_SINGLE_LETTER_WORDS}
+        for row in english_rows:
+            if row.category == "letter_english":
+                self.assertIn(row.original, letters)
+                self.assertEqual(row.action, "wait" if row.after_origin == "none" else "keep")
+        self.assertEqual(cast(dict[str, int], report["counts"]),
+                         {"english_letters": 1, "english_sentences": LETTER_FIXTURE_ENGLISH_SENTENCES - 1,
+                          "message_start": sum(row.field.before.count(" ") == 1 for row in term_rows) // LETTER_FIXTURE_FRAMES_PER_TERM_SENTENCE,
+                          "term_sentences": LETTER_FIXTURE_TERM_SENTENCES})
+        # A sentence whose words a test holds is refused, and without budgets nothing is framed.
+        again, _ = letter_curriculum([russian, english], frozenset(expanded_aliases("вчера")), options)
+        self.assertFalse(any("вчера" in (row.field.before + row.field.after) for row in again))
+        unused = {**options, "term_sentences": 0, "english_sentences": 0}
+        self.assertEqual(letter_curriculum([russian, english], frozenset(), unused), ([], {"frames": 0, "scope": "not used"}))
+
     def test_the_counted_token_curriculum_keeps_counted_abbreviations_and_converts_counted_terms(self) -> None:
         # `тз` is counted 744 times in Russian technical text and its keys `np` 80 times: typed after
         # Russian prose it is the abbreviation meant. `зк` is counted nowhere, and `pr` is a term.
@@ -799,6 +858,11 @@ class ActionTrainingTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "frozen with it"):
                         frozen_base({"frozen_base": {**carrying, "heads": {head: {"maximum_features": HEAD_FIXTURE_MAXIMUM_FEATURES}}}})
             self.assertEqual(carried_prefixes(base), frozenset())
+            # A carried head is one the frozen base has weights for.
+            with self.assertRaisesRegex(ValueError, "carried head the frozen base has no weights for"):
+                frozen_base({"frozen_base": {**save({"bias": FROZEN_BASE_FIXTURE_WEIGHTS}), "carried": {"alone": {}}}})
+            lone = save({"bias": FROZEN_BASE_FIXTURE_WEIGHTS, ALONE_FEATURE_PREFIX + "bias": FROZEN_BASE_FIXTURE_WEIGHTS})
+            self.assertIsNotNone(frozen_base({"frozen_base": {**lone, "carried": {"alone": {}}}}))
             # Heads are named by the recipe and fitted under their prefixes with budgets of their own.
             self.assertEqual(frozen_heads({}), {})
             self.assertEqual(frozen_heads({"frozen_base": spec}), {})
@@ -815,6 +879,11 @@ class ActionTrainingTests(unittest.TestCase):
                     "sample_weight": 1.0}
         self.assertIsNone(alone_evidence({}))
         self.assertEqual(alone_evidence({"frozen_base": {"heads": {"alone": evidence}}}), evidence)
+        # A frozen base that carries the head labels its frames with the counts it was fitted with, and fits nothing.
+        self.assertEqual(alone_evidence({"frozen_base": {"carried": {"alone": evidence}}}), evidence)
+        self.assertEqual(frozen_heads({"frozen_base": {"carried": {"alone": evidence}}}), {})
+        self.assertEqual(frozen_heads({"frozen_base": {"heads": {"letter": {"maximum_features": HEAD_FIXTURE_MAXIMUM_FEATURES}}}}),
+                         {LETTER_FEATURE_PREFIX: HEAD_FIXTURE_MAXIMUM_FEATURES})
         self.assertEqual(frozen_heads({"frozen_base": {"heads": {"alone": evidence}}}), {ALONE_FEATURE_PREFIX: HEAD_FIXTURE_MAXIMUM_FEATURES})
         self.assertEqual(frozen_heads({"frozen_base": {"heads": {"alone": evidence, "start": {"maximum_features": HEAD_FIXTURE_MAXIMUM_FEATURES}}}}),
                          {ALONE_FEATURE_PREFIX: HEAD_FIXTURE_MAXIMUM_FEATURES, START_FEATURE_PREFIX: HEAD_FIXTURE_MAXIMUM_FEATURES})

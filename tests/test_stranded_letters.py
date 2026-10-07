@@ -83,9 +83,34 @@ class LoneLetterModelTests(ContextEngineTests):
         self.assertEqual(self.backend.text, "привет а ")
 
 
+class LetterHeadTests(ContextEngineTests):
+    """A model with the single-letter head has learned the letter right after a Latin word: there its
+    verdict stands, and elsewhere a lone letter still needs a curated rule."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        model = ScriptedActionModel(letters)
+        model.answers_letters = True
+        self.engine.context_policy.model = model
+
+    def test_a_letter_after_a_latin_word_follows_a_model_that_learned_it(self) -> None:
+        # `nats b redis` is `nats и redis`: no curated rule reads a letter after Latin text alone.
+        self.reset_editor(0)
+        self.type("nats b ")
+        self.assertEqual(self.backend.text, "nats и ")
+
+    def test_outside_the_heads_class_a_lone_letter_still_needs_a_rule(self) -> None:
+        self.reset_editor(1)
+        self.type("подробнее ч ", group=1)
+        self.assertEqual(self.backend.text, "подробнее ч ")
+        self.reset_editor(1)
+        self.type("работаю в 1С и а1 ", group=1)
+        self.assertEqual(self.backend.text, "работаю в 1С и а1 ")
+
+
 def load_tests(loader: unittest.TestLoader, tests: unittest.TestSuite, pattern: str | None) -> unittest.TestSuite:
     suite = unittest.TestSuite()
-    for case in (StrandedLetterTests, LoneLetterModelTests):
+    for case in (StrandedLetterTests, LoneLetterModelTests, LetterHeadTests):
         for name in case.__dict__:
             if name.startswith("test_"):
                 suite.addTest(case(name))

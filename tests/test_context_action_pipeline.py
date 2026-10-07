@@ -32,7 +32,7 @@ from fixture_values.counts import (
 from fixture_values.scores import (
     BACK_END_FIXTURE_FEATURE_VALUE, BACK_END_FIXTURE_KEEP_IMPORTANCE, CONTEXT_V2_KERNEL_LEARNING_RATE, FEATURE_MASS_OVERFLOW_WEIGHT,
 )
-from keyswitch.constants.model_protocol import CALIBRATION, FITTING_SPLITS as SPLITS, PORTABLE, PROFILES, REFERENCE_HUNSPELL, TRAIN
+from keyswitch.constants.model_protocol import CALIBRATION, DEVELOPMENT, FITTING_SPLITS as SPLITS, PORTABLE, PROFILES, REFERENCE_HUNSPELL, TRAIN
 from keyswitch.constants.training import (
     CONTEXT_ACTION_BACK_END_SOURCES,
     CONTEXT_ACTION_BACKEND_AUTO,
@@ -211,6 +211,23 @@ class BuildTest(unittest.TestCase):
                 self.assertEqual(built.tail, fake_tail(inputs)[1])
         self.assertEqual(trainer.frame_chain(inputs, PORTABLE, TRAIN, inputs.frames[TRAIN], fake_tail(inputs)[0]),
                          (fake_tail(inputs)[0], {}))
+
+    def test_development_holds_the_single_letter_frames_the_heads_epoch_is_chosen_on(self) -> None:
+        from test_context_action_training import fixture
+
+        inputs = fixture_inputs()
+        letter = {"term_sentences": 1, "english_sentences": 1, "minimum_term_count": 1, "sample_weight": 1.0}
+        inputs.options = {**inputs.options, "lookahead_curriculum": {}, "lexical_short_pair_curriculum": {},
+                          "natural_lookahead_curriculum": {"maximum_families": 0, "seeds_per_family": 0}, "letter_curriculum": letter}
+        sentence = replace(fixture("l1", "сегодня", 1), before="мы обновили сервер и ", after="")
+        inputs.source_rows = {split: [sentence] for split in SPLITS}
+        expected = trainer.letter_curriculum([sentence], frozenset(), letter)[0]
+        self.assertTrue(expected)
+        with patch.object(trainer, "natural_lookahead_rows", side_effect=lambda rows, *_args, **_options: (list(rows), {})):
+            rows, reports = trainer.frame_chain(inputs, PORTABLE, DEVELOPMENT, [])
+            self.assertEqual((rows, sorted(reports)), (expected, ["letter", "natural"]))
+            # Calibration measures the corpus's own frames: the curriculum is never framed there.
+            self.assertEqual(trainer.frame_chain(inputs, PORTABLE, CALIBRATION, []), ([], {"natural": {}}))
 
     def test_a_frame_the_serial_fit_rejects_stops_the_fit(self) -> None:
         import numpy as np

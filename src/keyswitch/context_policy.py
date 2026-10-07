@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import ClassVar, Final
 
+from .context_action_features import letter_question
 from .context_model import AfterOrigin, ContextEvidence, ContextModel, ContextPrediction, one_typo_from_word, term_bucket
 from .identifier_lexicon import IdentifierLexicon
 from .detector import DetectionDecision, LanguageDetector, LanguageScorer
@@ -247,9 +248,13 @@ class ContextPolicy:
         # letter only together with a curated rule.
         # The same holds for a single letter with digits (`1С`, `а1`): a product name or a cell, and in
         # Russian prose the model turned `1С` into `1C`.
+        # A model with the single-letter head has learned the letter right after a Latin word
+        # (context_action_features.letter_question): there its verdict on a letter is an opinion, and
+        # `nats b redis` is `nats и redis` (the owner's typing, 0.32-0.41).
         action_model = self.model.feature_version == CONTEXT_ACTION_FEATURE_VERSION
+        learned = self.model.answers_letters and letter_question(baseline.original, alternative, field.before)
         lone = (action_model and sum(char.isalpha() for char in baseline.original) == 1
-                and all(char.isalpha() or char.isdigit() for char in baseline.original))
+                and all(char.isalpha() or char.isdigit() for char in baseline.original) and not learned)
         slang = action_model and russian_slang(baseline.original, alternative, baseline.source_group, source.known)
         if prediction.action == "convert" and not slang and (not lone or is_short_word_override(baseline)):
             decision = replace(

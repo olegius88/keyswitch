@@ -183,19 +183,28 @@
   },
   "frozen_base": {
     "artifact": "model/context_v3/frozen-base.json",
-    "sha256": "5e180d5fc12b048020df01728874501717cc2465c3185a6c31ebc1018c4b3d5f",
-    "heads": {
+    "sha256": "a5bfe1d994458809bc12fdb1fd8b652e4bbeb97167c29d0b658be8f9303486c1",
+    "carried": {
       "alone": {
         "maximum_features": 5000,
         "minimum_count": 30,
         "other_maximum_count": 30,
         "dominance": 5,
         "sample_weight": 1.0
-      },
-      "start": {
-        "maximum_features": 12000
       }
     },
-    "scope": "The corpus v30 model (0.40.0) with every weight fixed, its kept-neighbour question and capitals head included; the lone-word head and the message-start head are fitted onto it. The lone-word head's frames are the deferred lone two-letter frames of every split, labelled by the term counts where they settle the reading (context_deferral.counted_reading: one reading counted at least minimum_count times and dominance times as often as the other, counted fewer than other_maximum_count times and no lexicon word) and waiting as before where they do not. The message-start head's frames are the corpus frames of a word of four letters or more alone in the field (every row is framed once in an empty field), with their own labels; it reads how often each reading occurs in English and in Russian prose, which the shared features leave out for a word with nothing around it, and the band of the detector's score delta past the shared feature's bound. Motivation: test v31 holds a correctly typed sentence opening with a Russian word of five letters the portable lexicon does not know, which the corpus v26 and v30 models turned into its Latin keys at p=1.00 (context_action_features.start_question)."
+    "heads": {
+      "letter": {
+        "maximum_features": 6000
+      }
+    },
+    "scope": "The corpus v33 model (0.41.0) with every weight fixed: the word decided at its boundary, the kept-neighbour question and the capitals, lone-word and message-start heads it carries. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone: one reading counted at least minimum_count times and dominance times as often as the other, counted fewer than other_maximum_count times and no lexicon word; the frozen model's own answer where they settle nothing), so calibration reads the same labels. The single-letter head is fitted onto it: a word of one letter, a letter in both layouts, right after a word whose letters are all Latin (context_action_features.letter_question), at its boundary and beside its next word, with how often the words on either side occur in English prose and in Russian technical text. Motivation: the owner's typing holds Russian words of one letter typed in the English layout after Latin terms (`nats b redis`, `lid f номер`, 0.32-0.41), which the corpus v33 model kept at p=1.00 beside the converted or kept next word: no frame of the corpus puts a Russian word of one letter after a Latin word."
+  },
+  "letter_curriculum": {
+    "term_sentences": 1500,
+    "english_sentences": 1500,
+    "minimum_term_count": 50,
+    "sample_weight": 1.0,
+    "scope": "TRAIN only: a Russian TRAIN sentence's word of one letter (а и в с к у о я) with the word before it replaced by a Latin term Russian technical text counts at least minimum_term_count times and at least as often as English prose does (or the term alone before it, one sentence in three); typed in the English layout the letter waits at its boundary and converts beside its next word, converted or kept as typed (another term); typed as written it keeps. An English TRAIN sentence's word between two words replaced by the Latin keys of one of those letters waits and keeps beside its next word; an English word of one letter keeps at its boundary and beside it (tools/train_context_action_model.letter_curriculum)."
   }
 }

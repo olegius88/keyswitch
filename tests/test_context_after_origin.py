@@ -16,6 +16,7 @@ from keyswitch.constants.models import (
     CONTEXT_ACTION_FEATURE_VERSION,
     KEPT_CONTEXT_WORD_MAX_CHARACTERS,
     KEPT_FEATURE_PREFIX,
+    LETTER_FEATURE_PREFIX,
     PLANNED_CONTEXT_AFTER_MAX_CHARACTERS,
     START_DELTA_BAND_WIDTH,
     START_DELTA_BANDS,
@@ -227,6 +228,53 @@ class ContextAfterOriginTests(unittest.TestCase):
         for weights, expected in ((plain, "keep"), (head, "convert")):
             model = ContextModel(weights, "context-v3-start", feature_version=CONTEXT_ACTION_FEATURE_VERSION)
             self.assertEqual(model.predict(first).action, expected)
+            self.assertEqual(model.predict(self.item).action, "keep")
+
+    def test_a_letter_after_a_latin_word_has_its_features_once_more_for_the_single_letter_head(self) -> None:
+        letter = ContextEvidence("b", "и", 0, FieldContext("Telegram", "1", "nats ", ""), trigger="space", boundary_text=" ")
+        features = extract_action_features(letter)
+        shared = {name: value for name, value in features.items() if not name.startswith(LETTER_FEATURE_PREFIX)}
+        own = {name.removeprefix(LETTER_FEATURE_PREFIX): value for name, value in features.items() if name.startswith(LETTER_FEATURE_PREFIX)}
+        # The shared features once more, and how often the words around it occur: `nats` 12 times among the
+        # Latin words of Russian technical text (4 binary digits) and never in English prose; nothing after it.
+        self.assertEqual({name: value for name, value in own.items() if not name.startswith(("previous_word:", "next_word:"))}, shared)
+        self.assertEqual(sorted(name for name in own if name.startswith(("previous_word:", "next_word:"))),
+                         ["next_word:none:direction:0", "previous_word:0:4:direction:0", "previous_word:english:0:direction:0",
+                          "previous_word:latin:4:direction:0"])
+        # Beside its next word: converted (`номер`, 14 binary digits in Russian prose), or kept as typed (`redis`),
+        # where the kept-neighbour question's own features are the ones taken once more.
+        planned = replace(letter, field=replace(letter.field, after="номер"), after_origin="planned_next_conversion")
+        self.assertIn(LETTER_FEATURE_PREFIX + "next_word:russian:14:direction:0", extract_action_features(planned))
+        kept = extract_action_features(replace(letter, field=replace(letter.field, after="redis"), after_origin="kept_next_word"))
+        self.assertIn(LETTER_FEATURE_PREFIX + KEPT_FEATURE_PREFIX + "bias", kept)
+        self.assertIn(LETTER_FEATURE_PREFIX + "next_word:0:10:direction:0", kept)
+        self.assertTrue(all(name.startswith((KEPT_FEATURE_PREFIX, LETTER_FEATURE_PREFIX)) for name in kept))
+        # The kept-neighbour frames hold no word of one letter: the head's copies of its letters are what the
+        # model knows of them, and they give the language support a conversion needs.
+        letters = {name: (0.0,) * len(ACTIONS) for name in kept if name.startswith(LETTER_FEATURE_PREFIX + KEPT_FEATURE_PREFIX) and ":char:" in name}
+        self.assertTrue(ContextModel(letters, "context-v3-letter", feature_version=CONTEXT_ACTION_FEATURE_VERSION).supports_features(kept))
+        self.assertFalse(ContextModel({"bias": (0.0,) * len(ACTIONS)}, "context-v3-letter",
+                                      feature_version=CONTEXT_ACTION_FEATURE_VERSION).supports_features(kept))
+        # Typed as written, after a word with signs and digits (`2FA,`), at a pause: members.
+        for item in (replace(letter, original="и", alternative="b", source_group=1), replace(letter, field=replace(letter.field, before="2FA, ")),
+                     replace(letter, trigger="pause", boundary_text="")):
+            with self.subTest(item=item):
+                self.assertTrue(any(name.startswith(LETTER_FEATURE_PREFIX) for name in extract_action_features(item)))
+        # After Cyrillic, after signs alone, with nothing before it, right after a word with no space, two letters
+        # and a digit: no head.
+        for item in (replace(letter, field=replace(letter.field, before="текст ")), replace(letter, field=replace(letter.field, before="-- ")),
+                     replace(letter, field=replace(letter.field, before="")), replace(letter, field=replace(letter.field, before="nats")),
+                     replace(letter, original="bb", alternative="ии"), replace(letter, original="1", alternative="1")):
+            with self.subTest(item=item):
+                self.assertFalse(any(name.startswith(LETTER_FEATURE_PREFIX) for name in extract_action_features(item)))
+        # Without head weights the shared ones decide; a head weight answers the class alone.
+        support = {name: (0.0,) * len(ACTIONS) for item in (self.item, letter) for name in extract_action_features(item)
+                   if name.startswith(("source:char:", "target:char:"))}
+        plain = {**support, "bias": (AFTER_ORIGIN_DECISIVE_BIAS_WEIGHT, 0.0, 0.0, 0.0)}
+        head = {**plain, LETTER_FEATURE_PREFIX + "bias": (0.0, AFTER_ORIGIN_DECISIVE_BIAS_WEIGHT * len(ACTIONS), 0.0, 0.0)}
+        for weights, expected in ((plain, "keep"), (head, "convert")):
+            model = ContextModel(weights, "context-v3-letter", feature_version=CONTEXT_ACTION_FEATURE_VERSION)
+            self.assertEqual(model.predict(letter).action, expected)
             self.assertEqual(model.predict(self.item).action, "keep")
 
     def test_v2_features_and_predictions_ignore_origin_entirely(self) -> None:

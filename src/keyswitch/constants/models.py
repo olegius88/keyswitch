@@ -74,6 +74,11 @@ START_HEAD_MIN_LETTERS: Final = 4
 # band of its own lets the head answer that end and the other one apart.
 START_DELTA_BAND_WIDTH: Final = 2.5
 START_DELTA_BANDS: Final = 6
+# A word of one letter, a letter in both layouts, right after a word whose letters are all Latin, has a
+# head of its own (context_action_features.letter_question): the class's features once more under this
+# prefix, and how often the word before it and the word after it occur in English prose and in Russian
+# technical text. `nats b redis` is `nats и redis` typed in the wrong layout, `plan b then` stays.
+LETTER_FEATURE_PREFIX: Final = "letter|"
 # The "length" feature buckets every word length from here up together (schemas 2 and 3).
 ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: Final = 6
 # Short categorical field labels (role, trigger) truncated before they reach a feature name.
@@ -177,11 +182,11 @@ CONTEXT_FEATURE_NGRAM_ORDERS: Final = (1, 2, 3)
 # and version strings of at most these many characters, weights of at most this magnitude, and a
 # conversion threshold from this floor up to one.
 MAX_CONTEXT_MODEL_FEATURES: Final = 50000
-# An action model (schema 3) holds up to five feature spaces: the word decided at its boundary, the
+# An action model (schema 3) holds up to six feature spaces: the word decided at its boundary, the
 # kept-neighbour question (KEPT_FEATURE_PREFIX), the capitals head (CAPITALS_FEATURE_PREFIX), the
-# lone-word head (ALONE_FEATURE_PREFIX) and the message-start head (START_FEATURE_PREFIX), each with its
-# own budget in the recipe.
-MAX_CONTEXT_ACTION_MODEL_FEATURES: Final = 95000
+# lone-word head (ALONE_FEATURE_PREFIX), the message-start head (START_FEATURE_PREFIX) and the
+# single-letter head (LETTER_FEATURE_PREFIX), each with its own budget in the recipe.
+MAX_CONTEXT_ACTION_MODEL_FEATURES: Final = 100000
 MAX_CONTEXT_FEATURE_NAME_CHARACTERS: Final = 512
 MAX_CONTEXT_MODEL_VERSION_CHARACTERS: Final = 80
 MAX_CONTEXT_WEIGHT_MAGNITUDE: Final = 1000
