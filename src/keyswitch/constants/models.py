@@ -79,6 +79,17 @@ START_DELTA_BANDS: Final = 6
 # prefix, and how often the word before it and the word after it occur in English prose and in Russian
 # technical text. `nats b redis` is `nats и redis` typed in the wrong layout, `plan b then` stays.
 LETTER_FEATURE_PREFIX: Final = "letter|"
+# A Cyrillic abbreviation in capitals that Russian technical text uses and the lexicon does not hold, whose Latin
+# reading is letters too, after text with more Cyrillic letters than Latin ones has evidence of its own under this
+# prefix: the abbreviation head (context_action_features.abbreviation_question), fitted onto a frozen model, answers
+# that class alone. After Russian prose the frozen model turned such abbreviations into the Latin readings they spell
+# (`страны ЕС приняли` became `страны TC приняли`, `поздравляю с НГ` became `поздравляю с YU`, 0.37-0.42): the corpus
+# framed every Latin abbreviation typed in the Russian layout after Russian prose with the convert label, whatever
+# its keys spelled. The capitals head answers the same shape after Latin text.
+ABBREVIATION_FEATURE_PREFIX: Final = "abbr|"
+# Letters no Russian word starts with, so no abbreviation of Russian words holds them: their keys are the Latin
+# `M`, `S`, `]` and `Q` (`ДДЬ` is `LLM`, `ЫЫР` is `SSH`, `ЙФ` is `QA`).
+ABBREVIATION_NON_INITIAL_LETTERS: Final = frozenset("ЪЬЫЙ")
 # The "length" feature buckets every word length from here up together (schemas 2 and 3).
 ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: Final = 6
 # Short categorical field labels (role, trigger) truncated before they reach a feature name.
@@ -182,10 +193,11 @@ CONTEXT_FEATURE_NGRAM_ORDERS: Final = (1, 2, 3)
 # and version strings of at most these many characters, weights of at most this magnitude, and a
 # conversion threshold from this floor up to one.
 MAX_CONTEXT_MODEL_FEATURES: Final = 50000
-# An action model (schema 3) holds up to six feature spaces: the word decided at its boundary, the
+# An action model (schema 3) holds up to seven feature spaces: the word decided at its boundary, the
 # kept-neighbour question (KEPT_FEATURE_PREFIX), the capitals head (CAPITALS_FEATURE_PREFIX), the
-# lone-word head (ALONE_FEATURE_PREFIX), the message-start head (START_FEATURE_PREFIX) and the
-# single-letter head (LETTER_FEATURE_PREFIX), each with its own budget in the recipe.
+# lone-word head (ALONE_FEATURE_PREFIX), the message-start head (START_FEATURE_PREFIX), the
+# single-letter head (LETTER_FEATURE_PREFIX) and the abbreviation head (ABBREVIATION_FEATURE_PREFIX),
+# each with its own budget in the recipe.
 MAX_CONTEXT_ACTION_MODEL_FEATURES: Final = 100000
 MAX_CONTEXT_FEATURE_NAME_CHARACTERS: Final = 512
 MAX_CONTEXT_MODEL_VERSION_CHARACTERS: Final = 80

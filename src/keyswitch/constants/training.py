@@ -78,6 +78,9 @@ LONE_WORD_BOUNDARIES: Final = (
     ("enter", "\n"), ("enter", ""), ("tab", "\t"), ("tab", ""),
     ("punctuation", "."), ("punctuation", ","), ("punctuation", "?"), ("punctuation", "!"), ("pause", ""),
 )
+# Abbreviation frames (train_context_action_model.abbreviation_curriculum): one attested abbreviation in
+# this many goes to DEVELOPMENT by hash, so DEVELOPMENT chooses the head's epoch on forms it never fitted.
+ABBREVIATION_SPLIT_MODULUS: Final = 5
 # Letters of a Latin abbreviation cited in capitals inside Russian prose whose Cyrillic reading is a
 # rare word (`WBC` is `ЦИС`, `IBF` is `ШИА`): three to five, as abbreviations are written. Two
 # letters stay with the deferral rules and the owner's own Cyrillic abbreviations (`ГА`).

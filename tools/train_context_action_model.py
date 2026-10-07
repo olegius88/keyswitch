@@ -27,7 +27,10 @@ from pathlib import Path
 from typing import Final, cast
 from unittest.mock import patch
 
-from keyswitch.context_action_features import alone_question, extract_action_features
+from keyswitch.context_action_features import (
+    abbreviation_question, alone_question, attested_abbreviation, capitals_question, extract_action_features, letter_question,
+    start_question,
+)
 from keyswitch.context_model import (
     ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, _term_frequency, term_bucket,
 )
@@ -66,11 +69,13 @@ from train_context_model import CapturedSource
 from keyswitch.constants.file_formats import HEXADECIMAL_BASE, VERSION_HASH_CHARACTERS
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
 from keyswitch.constants.models import (
-    ALONE_FEATURE_PREFIX, ALONE_HEAD_LETTERS, CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS,
+    ABBREVIATION_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, ALONE_HEAD_LETTERS, CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION,
+    CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS,
     KEPT_CONTEXT_WORD_MAX_CHARACTERS, KEPT_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, PLANNED_CONTEXT_AFTER_MAX_CHARACTERS,
     PLANNED_CONTEXT_WORD_MAX_CHARACTERS, START_FEATURE_PREFIX,
 )
 from keyswitch.constants.training import (
+    ABBREVIATION_SPLIT_MODULUS,
     CONTEXT_ACTION_BACKEND_AUTO,
     CONTEXT_ACTION_BACKENDS,
     CONTEXT_ACTION_BACK_END_SOURCES,
@@ -406,9 +411,14 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
         result.append(ActionRow(row.identifier + ":mixed", row.original, group,
                                 mixed_field,
                                 trigger, "", "keep", "mixed_language_insertion", boundary_text))
-        result.append(ActionRow(row.identifier + ":mixed:wrong", alternate, 1 - group,
-                                mixed_field, trigger, "", "convert",
-                                "mixed_language_layout_intervention", boundary_text))
+        # The keys of a Latin abbreviation that spell one Russian text uses (`TC` is `ЕС`) are that abbreviation
+        # after Russian prose: no frame says they convert. Labelled convert, they taught the model to turn
+        # `страны ЕС` into `страны TC` (0.37-0.42).
+        attested = group == 0 and attested_abbreviation(alternate)
+        if not attested:
+            result.append(ActionRow(row.identifier + ":mixed:wrong", alternate, 1 - group,
+                                    mixed_field, trigger, "", "convert",
+                                    "mixed_language_layout_intervention", boundary_text))
         other = natural_contexts[1 - group]
         if other and group == 0 and capital_citation(row.original, alternate) and plausible_reading(alternate, 1 - group):
             # A capital citation whose Cyrillic reading is a rare word keeps after Russian prose. Its
@@ -431,8 +441,9 @@ def action_rows(rows: Sequence[CorpusRow]) -> list[ActionRow]:
                                          other[variant_choice(row.identifier, "mixed-natural", len(other))], "", "unknown")
             result.append(ActionRow(row.identifier + ":mixed-natural", row.original, group, natural_field,
                                     trigger, "", "keep", "mixed_language_insertion", boundary_text))
-            result.append(ActionRow(row.identifier + ":mixed-natural:wrong", alternate, 1 - group, natural_field,
-                                    trigger, "", "convert", "mixed_language_layout_intervention", boundary_text))
+            if not attested:
+                result.append(ActionRow(row.identifier + ":mixed-natural:wrong", alternate, 1 - group, natural_field,
+                                        trigger, "", "convert", "mixed_language_layout_intervention", boundary_text))
             # Edited prose opens the citation with a sign typed in the Latin layout; the keys of
             # ``, ' and " are the letters ёё, э and Э in the Russian layout, so the Cyrillic reading
             # of the whole token is letters only and the token looks like a word of five. The
@@ -628,6 +639,72 @@ def english_capital_curriculum(source_rows: Sequence[CorpusRow], refused: frozen
                   "words_by_length": chosen,
                   "candidates_by_length": {str(length): len(candidates[length]) for length in sorted(budgets)},
                   "scope": "TRAIN only: keep frames of the keys of common Russian words typed in Latin capitals after English prose (english_capital_curriculum)."}
+
+
+def abbreviation_label(form: str, latin: str, options: Mapping[str, object]) -> ContextAction:
+    """The abbreviation head's label for an attested Cyrillic abbreviation typed as written after Russian prose:
+    convert when its Latin reading occurs `minimum_latin_count` times or more and `dominance` times as often as
+    it does among the words of Russian technical text (`ФШ` is `AI`), keep otherwise (`ЕС` is not `TC`, `ИД` is
+    not `BL`): both counts are the term table's, of the same text."""
+
+    table = _term_frequency()
+    cyrillic = table["cyrillic"].get(form.casefold(), 0)
+    latin_count = table["latin"].get(latin.casefold(), 0)
+    convert = (latin_count >= int(cast(int, options["minimum_latin_count"]))
+               and latin_count >= float(cast(float, options["dominance"])) * cyrillic)
+    return "convert" if convert else "keep"
+
+
+def abbreviation_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                            options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """Every attested Cyrillic abbreviation (context_action_features.attested_abbreviation) typed as written
+    after Russian prose, the abbreviation head's class, labelled by abbreviation_label.
+
+    The frozen model turned Russian abbreviations into the Latin readings their keys spell
+    (`страны ЕС приняли` became `страны TC приняли`, `поздравляю с НГ` became `поздравляю с YU`,
+    0.37-0.42): the corpus framed Latin abbreviations typed in the Russian layout after Russian prose with
+    the convert label whatever their keys spelled, and Russian abbreviations are few in its rows. The forms
+    are the term table's Cyrillic words of CAPITALS_HEAD_MIN_LETTERS to CAPITALS_HEAD_MAX_LETTERS letters in
+    capitals whose Latin reading is letters too, the table the head reads at runtime; each goes to TRAIN or
+    DEVELOPMENT by hash (ABBREVIATION_SPLIT_MODULUS), so DEVELOPMENT chooses the head's epoch on forms TRAIN
+    never saw, and stands after `frames_per_form` left contexts of Russian rows of the split, each ending at
+    a boundary chosen by hash (_varied_boundary). Forms of this corpus's test and of every accessed test are
+    refused by their aliases.
+    """
+
+    per_form = int(cast(int, options["frames_per_form"]))
+    contexts = natural_mixed_contexts(source_rows)[1]
+    if not per_form or not contexts or split not in (TRAIN, DEVELOPMENT):
+        return [], {"frames": 0, "scope": "not used"}
+    weight = float(cast(float, options["sample_weight"]))
+    table = _term_frequency()
+    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+    rows: list[ActionRow] = []
+    counts: Counter[str] = Counter()
+    forms = sorted(word.upper() for word in table["cyrillic"])
+    for form in forms:
+        if not attested_abbreviation(form):
+            continue
+        latin = translated(form, 1)
+        if not latin.isalpha():
+            continue
+        share = DEVELOPMENT if variant_choice("abbreviation:" + form, "split", ABBREVIATION_SPLIT_MODULUS) == 0 else TRAIN
+        if share != split:
+            continue
+        if refused & (expanded_aliases(form) | expanded_aliases(latin)):
+            counts["refused"] += 1
+            continue
+        action = abbreviation_label(form, latin, options)
+        counts[action] += 1
+        for index in range(per_form):
+            identifier = f"abbreviation:{form}:{index}"
+            trigger, boundary_text = _varied_boundary(identifier)
+            field = FieldContext(applications[variant_choice(identifier, "application", len(applications))], "public-training",
+                                 contexts[variant_choice(identifier, "context", len(contexts))], "", "unknown")
+            rows.append(ActionRow(identifier, form, 1, field, trigger, "", action, "abbreviation", boundary_text, weight))
+    return rows, {"frames": len(rows), "forms": dict(sorted(counts.items())), "frames_per_form": per_form, "sample_weight": weight,
+                  "scope": "attested Cyrillic abbreviations of this split's share, typed as written after Russian prose, labelled "
+                           "by the term counts of both readings (abbreviation_curriculum)."}
 
 
 def _cyrillic(word: str) -> bool:
@@ -1465,6 +1542,19 @@ def identifier_evidence_dropped(identifier: str) -> bool:
     return variant_choice(identifier_family(identifier), "identifier-dropout", IDENTIFIER_DROPOUT_FAMILIES) == 0
 
 
+def following_reading(row: ActionRow) -> str:
+    """What was typed right after the word, as the other layout prints those keys (automatic_word_decision).
+
+    The engine reads the same keys from its key events; a glyph no key of the pair prints is passed
+    as it is.
+    """
+    typed = (row.literal_tail + row.boundary_text)[:1]
+    try:
+        return translated(typed, row.group)
+    except ValueError:
+        return typed
+
+
 def evidence(row: ActionRow, detector: LanguageDetector, ortho: OrthoModel | None,
              *, identifiers: IdentifierLexicon | None = None) -> ContextEvidence:
     alternative = translated(row.original, row.group)
@@ -1480,6 +1570,7 @@ def evidence(row: ActionRow, detector: LanguageDetector, ortho: OrthoModel | Non
     decision = automatic_word_decision(
         detector, row.original, {1 - row.group: alternative}, row.group,
         previous_words=previous, context_group=context_group, trigger=row.trigger,
+        following={1 - row.group: following_reading(row)},
     )
     return evidence_for_decision(
         decision, alternative, 1 - row.group, detector, row.field, row.trigger,
@@ -1554,10 +1645,13 @@ def frozen_base(options: Mapping[str, object]) -> ContextModel | None:
 
 # The heads a frozen base can carry besides the kept-neighbour question, by the recipe's name.
 HEAD_PREFIXES: Final = {"capitals": CAPITALS_FEATURE_PREFIX, "alone": ALONE_FEATURE_PREFIX, "start": START_FEATURE_PREFIX,
-                         "letter": LETTER_FEATURE_PREFIX}
+                         "letter": LETTER_FEATURE_PREFIX, "abbreviation": ABBREVIATION_FEATURE_PREFIX}
 # A recipe without single-letter frames (the recipes before corpus v34).
 NO_LETTER_CURRICULUM: Final[dict[str, object]] = {"term_sentences": 0, "english_sentences": 0, "minimum_term_count": 0,
                                                   "sample_weight": 1.0}
+# A recipe without abbreviation frames (the recipes before corpus v36).
+NO_ABBREVIATION_CURRICULUM: Final[dict[str, object]] = {"frames_per_form": 0, "minimum_latin_count": 0, "dominance": 1.0,
+                                                        "sample_weight": 1.0}
 
 
 def frozen_heads(options: Mapping[str, object]) -> dict[str, int]:
@@ -1720,6 +1814,35 @@ def _named_base(options: Mapping[str, object], key: str) -> ContextModel | None:
     if key == "frozen_base" and any(HEAD_PREFIXES[name] not in carried for name in cast(dict[str, object], spec.get("carried", {}))):
         raise ValueError("the recipe names a carried head the frozen base has no weights for")
     return model
+
+
+def trainable_prefixes(options: Mapping[str, object]) -> frozenset[str] | None:
+    """The feature prefixes a fit onto a frozen base with heads can move, or None for any other fit.
+
+    Every weight of the base is fixed, so only the heads the recipe names and the kept-neighbour
+    question, unless the base carries it, take a step: a TRAIN frame outside their classes holds no
+    feature the fit can move (trainable_frames).
+    """
+
+    heads = frozen_heads(options)
+    if not heads:
+        return None
+    base = cast(ContextModel, frozen_base(options))
+    return frozenset(heads) | (frozenset({KEPT_FEATURE_PREFIX}) - carried_prefixes(base))
+
+
+def head_question(original: str, alternative: str, before: str, after: str, trigger: str, origin: str,
+                  prefixes: frozenset[str]) -> bool:
+    """Whether the features of a frame (extract_action_features) hold one of these prefixes: the frame
+    asks a question of a head or of the kept-neighbour question they name."""
+
+    letter = LETTER_FEATURE_PREFIX in prefixes and letter_question(original, alternative, before)
+    if origin == "kept_next_word":
+        return KEPT_FEATURE_PREFIX in prefixes or letter
+    return (letter or (CAPITALS_FEATURE_PREFIX in prefixes and capitals_question(original, before))
+            or (ABBREVIATION_FEATURE_PREFIX in prefixes and abbreviation_question(original, alternative, before))
+            or (ALONE_FEATURE_PREFIX in prefixes and alone_question(original, alternative, before, after, trigger))
+            or (START_FEATURE_PREFIX in prefixes and start_question(original, alternative, before, after)))
 
 
 def carried_prefixes(model: ContextModel) -> frozenset[str]:
@@ -2007,6 +2130,11 @@ def frame_chain(inputs: FitInputs, profile: str, split: str, rows: Sequence[Acti
         letter, reports["letter"] = letter_curriculum(inputs.source_rows[split], inputs.refused,
                                                       cast(dict[str, object], options.get("letter_curriculum", NO_LETTER_CURRICULUM)))
         result.extend(letter)
+        # The abbreviation head's epoch is chosen on the same curriculum drawn from DEVELOPMENT's own rows.
+        abbreviation, reports["abbreviation"] = abbreviation_curriculum(
+            split, inputs.source_rows[split], inputs.refused,
+            cast(dict[str, object], options.get("abbreviation_curriculum", NO_ABBREVIATION_CURRICULUM)))
+        result.extend(abbreviation)
     evidence = alone_evidence(options)
     if evidence is not None:
         lone, reports["lone_word"] = lone_word_curriculum(split, inputs.refused, evidence, partial(base_action, inputs=inputs))
@@ -2024,8 +2152,12 @@ def tail_curricula(inputs: FitInputs) -> tuple[list[ActionRow], dict[str, object
                                                        cast(dict[str, object], options["counted_token_curriculum"]))
     letter, letter_report = letter_curriculum(inputs.source_rows[TRAIN], inputs.refused,
                                               cast(dict[str, object], options.get("letter_curriculum", NO_LETTER_CURRICULUM)))
-    return [*kept, *counted, *letter], {"kept_neighbour_curriculum": kept_report, "counted_token_curriculum": counted_report,
-                                        "letter_curriculum": letter_report}
+    abbreviation, abbreviation_report = abbreviation_curriculum(
+        TRAIN, inputs.source_rows[TRAIN], inputs.refused,
+        cast(dict[str, object], options.get("abbreviation_curriculum", NO_ABBREVIATION_CURRICULUM)))
+    return [*kept, *counted, *letter, *abbreviation], {
+        "kept_neighbour_curriculum": kept_report, "counted_token_curriculum": counted_report, "letter_curriculum": letter_report,
+        "abbreviation_curriculum": abbreviation_report}
 
 
 def prepared_frames(rows: Sequence[ActionRow], spans: SpanCurriculum, split: str) -> list[tuple[str, ActionRow | SpanFrame]]:

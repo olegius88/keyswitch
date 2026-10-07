@@ -183,7 +183,7 @@
   },
   "frozen_base": {
     "artifact": "model/context_v3/frozen-base.json",
-    "sha256": "a5bfe1d994458809bc12fdb1fd8b652e4bbeb97167c29d0b658be8f9303486c1",
+    "sha256": "ac7f5fd2644812df0d15c7661fafc7103f93654b21f93e021c58bed95ff335d6",
     "carried": {
       "alone": {
         "maximum_features": 5000,
@@ -194,11 +194,11 @@
       }
     },
     "heads": {
-      "letter": {
-        "maximum_features": 6000
+      "abbreviation": {
+        "maximum_features": 1000
       }
     },
-    "scope": "The corpus v33 model (0.41.0) with every weight fixed: the word decided at its boundary, the kept-neighbour question and the capitals, lone-word and message-start heads it carries. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone: one reading counted at least minimum_count times and dominance times as often as the other, counted fewer than other_maximum_count times and no lexicon word; the frozen model's own answer where they settle nothing), so calibration reads the same labels. The single-letter head is fitted onto it: a word of one letter, a letter in both layouts, right after a word whose letters are all Latin (context_action_features.letter_question), at its boundary and beside its next word, with how often the words on either side occur in English prose and in Russian technical text. Motivation: the owner's typing holds Russian words of one letter typed in the English layout after Latin terms (`nats b redis`, `lid f номер`, 0.32-0.41), which the corpus v33 model kept at p=1.00 beside the converted or kept next word: no frame of the corpus puts a Russian word of one letter after a Latin word."
+    "scope": "The corpus v35 model (context-v3-8a679c1eb72e) with every weight fixed: the word decided at its boundary, the kept-neighbour question and the capitals, lone-word, message-start and single-letter heads it carries. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone). The abbreviation head is fitted onto it: a token in capitals in Cyrillic, whose Latin reading is letters too, after Russian prose (context_action_features.abbreviation_question), with how often each reading occurs in Russian and technical text."
   },
   "letter_curriculum": {
     "term_sentences": 1500,
@@ -206,5 +206,12 @@
     "minimum_term_count": 50,
     "sample_weight": 1.0,
     "scope": "TRAIN only: a Russian TRAIN sentence's word of one letter (а и в с к у о я) with the word before it replaced by a Latin term Russian technical text counts at least minimum_term_count times and at least as often as English prose does (or the term alone before it, one sentence in three); typed in the English layout the letter waits at its boundary and converts beside its next word, converted or kept as typed (another term); typed as written it keeps. An English TRAIN sentence's word between two words replaced by the Latin keys of one of those letters waits and keeps beside its next word; an English word of one letter keeps at its boundary and beside it (tools/train_context_action_model.letter_curriculum)."
+  },
+  "abbreviation_curriculum": {
+    "frames_per_form": 2,
+    "minimum_latin_count": 50,
+    "dominance": 4.0,
+    "sample_weight": 1.0,
+    "scope": "TRAIN, and DEVELOPMENT for the head's epoch (one form in ABBREVIATION_SPLIT_MODULUS by hash): every Cyrillic word of two to five letters of the term table in capitals whose Latin reading is letters too, typed as written after frames_per_form left contexts of Russian rows of the split; convert when the Latin reading is counted at least minimum_latin_count times and dominance times as often, keep otherwise (tools/train_context_action_model.abbreviation_curriculum)."
   }
 }

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping, Set
 from dataclasses import replace
 
+from .constants.detection import OPENING_LETTER_FOLLOWING_SIGNS
 from .constants.settings_defaults import DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_MINIMUM_WORD_LENGTH
 from .detector import DetectionDecision, LanguageDetector
 from .intent_model import CorrectionTrigger
@@ -27,6 +28,7 @@ def automatic_word_decision(
     previous_words: dict[int, str] | None = None, context_group: int | None = None,
     forced_target_group: int | None = None, rejected_targets: set[int] | None = None,
     trigger: CorrectionTrigger = "space", use_intent_model: bool = True, context_tracked: bool = True,
+    following: Mapping[int, str] | None = None,
 ) -> DetectionDecision:
     """The detector's verdict with the curated short-word rules applied.
 
@@ -35,6 +37,9 @@ def automatic_word_decision(
     off, or an application without a name the engine could keep context for -
     means the previous word is unknown, and the message-start exception for a
     lone letter does not apply: inside ``plan b`` the ``b`` is not ``и``.
+    ``following`` is what was typed right after the word, as each target layout
+    prints those keys (the boundary and any signs before it); the message-start
+    exception reads it.
     """
     decision = detector.decide(
         original, alternatives, source_group, minimum_length=minimum_length,
@@ -58,7 +63,7 @@ def automatic_word_decision(
             detector, original, alternatives, source_group, context_group=context_group,
             ignored_words=() if ignored_words is None else ignored_words,
             rejected_targets=frozenset() if rejected_targets is None else rejected_targets,
-            protect_code=protect_code,
+            protect_code=protect_code, following={} if following is None else following,
         ) if context_tracked else None
         if opening is not None:
             return opening
@@ -68,6 +73,7 @@ def automatic_word_decision(
 def opening_letter_decision(
     detector: LanguageDetector, original: str, alternatives: Mapping[int, str], source_group: int, *,
     context_group: int | None, ignored_words: Collection[str], rejected_targets: Set[int], protect_code: bool,
+    following: Mapping[int, str],
 ) -> DetectionDecision | None:
     """A lone curated letter with no previous word converts; after an English word it stays.
 
@@ -82,6 +88,16 @@ def opening_letter_decision(
     in .t/reliable-release-2026-09-12/corpus-sources. The rule sits here, in the
     layer the engine and the context-action corpus share, and not in the curated
     table that generates the frozen context-v1 training scenarios.
+
+    Those counts are of the letter as a word. The treebanks keep an initial with
+    its period (`J.`), so they could not show that English does open with a
+    letter followed by a sign: an initial, a list or a name (`J. Smith said`,
+    `C, D and E`, `C# rocks`), which the rule turned into `О. Smith said`,
+    `С, В and E` and `С№ rocks` (0.38-0.42). The rule therefore reads the letter
+    as a word only when the target layout prints a space, nothing or a clause
+    sign right after it (OPENING_LETTER_FOLLOWING_SIGNS): `f?` is `а,` and
+    `f& xnj` is `а? что`, while `J.` is `Ою` and `C#` is `С№` in the Russian
+    layout, no word a message opens with.
     """
 
     if context_group is not None or len(LanguageModel.normalize(original)) != 1:
@@ -92,9 +108,11 @@ def opening_letter_decision(
     source_model = detector.models[source_group]
     for target_group, replacement in alternatives.items():
         target_model = detector.models.get(target_group)
+        after = following.get(target_group, "")[:1]
         if (target_group == source_group or target_model is None or replacement == original
                 or target_group in rejected_targets
-                or LanguageModel.normalize(replacement) not in TRUSTED_SINGLE_LETTER_WORDS):
+                or LanguageModel.normalize(replacement) not in TRUSTED_SINGLE_LETTER_WORDS
+                or not (not after or after.isspace() or after in OPENING_LETTER_FOLLOWING_SIGNS)):
             continue
         return DetectionDecision(
             True, original, replacement, source_group, target_group, SINGLE_LETTER_CONFIDENCE,
