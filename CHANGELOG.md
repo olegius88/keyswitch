@@ -33,6 +33,9 @@ All notable changes to KeySwitch are documented in this file.
   v36 as the corpus v35 model. On test v36 it keeps all 214 correctly typed rows in both profiles
   and restores 186 of 213 mistyped rows with the early switch off against 171 and 172, and 17 as
   before with it on.
+- The promotion preflight runs the pinned test modules a second time in a scratch worktree of the
+  committed tree with the candidate pair installed, before any byte of the sealed test is read: a
+  candidate that breaks one of them once installed no longer costs a test.
 - The Windows installer is built beside the Windows tests instead of after them: the ARM64 job of
   the 0.42.0 release took 19.2 minutes, 10 of them the installer and its smoke test. The prefix
   engine replay runs on a runner of its own beside the other model replays: the Tests workflow took
