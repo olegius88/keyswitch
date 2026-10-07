@@ -63,7 +63,9 @@ from keyswitch.constants.training import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-SITE = ROOT / TRAINING_ACCELERATOR_SITE
+# One site may serve every checkout of a machine (the cloud session hook exports it for its worktrees).
+TRAINING_SITE_VARIABLE = "KEYSWITCH_TRAINING_SITE"
+SITE = Path(os.environ.get(TRAINING_SITE_VARIABLE) or ROOT / TRAINING_ACCELERATOR_SITE)
 # tools/install-training-accelerators.sh puts NumPy (and, with --cuda, CuPy and the CUDA libraries)
 # here; a package installed for the interpreter itself serves as well.
 if SITE.is_dir() and str(SITE) not in sys.path:

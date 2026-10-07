@@ -15,3 +15,6 @@ python3 -m pip install --upgrade --target "$target" --no-deps \
 # the NumPy of tools/install-training-accelerators.sh.
 python3 -m pip install --upgrade --target "$target" --no-deps --only-binary=:all: --python-version 3.12 \
   "numpy==2.2.6"
+# mypy is compiled for the interpreter that installed it; tools/typecheck.sh runs it with that one even
+# when python3 on PATH later names another.
+ln -sfn "$(python3 -c 'import sys; print(sys.executable)')" "$target/python3"

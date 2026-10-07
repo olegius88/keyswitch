@@ -74,12 +74,12 @@ class PromotionTests(unittest.TestCase):
     def test_a_failed_sealed_test_installs_nothing_and_a_read_report_is_not_read_again(self) -> None:
         report = self.corpus / "sequences-test.json"
         runner = Recorder("evaluate_context_action_sequences.py")
-        with patch.object(promotion.shutil, "copyfile") as copy:
+        with patch("shutil.copyfile") as copy:
             self.assertNotEqual(promotion.promote(self.candidate, self.prefix, self.corpus, report, runner), 0)
         copy.assert_not_called()
         report.write_text("{}", encoding="utf-8")
         runner = Recorder()
-        with patch.object(promotion.shutil, "copyfile") as copy, patch.object(Path, "unlink"):
+        with patch("shutil.copyfile") as copy, patch.object(Path, "unlink"):
             self.assertEqual(promotion.promote(self.candidate, self.prefix, self.corpus, report, runner), 0)
         self.assertFalse(any("evaluate_context_action_sequences.py" in " ".join(command) for command in runner.commands))
         self.assertEqual(len(copy.call_args_list), len(promotion.INSTALLED))
