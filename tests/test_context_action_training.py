@@ -8,6 +8,7 @@ from pathlib import Path
 import json
 import sys
 from types import SimpleNamespace
+from collections.abc import Iterator
 from typing import cast
 import hashlib
 import math
@@ -962,9 +963,13 @@ class ActionTrainingTests(unittest.TestCase):
         predictions = {name: scores(CHOOSE_THRESHOLD_HIGH_CONVERT_CONFIDENCE, CHOOSE_THRESHOLD_HIGH_CONVERT_CONFIDENCE)
                        for name in ("portable", "reference_hunspell")}
         plain, lone = {"bias": 1.0}, {"bias": 1.0, ALONE_FEATURE_PREFIX + "bias": 1.0}
-        for frames, expected in ((((plain, 0, 1.0), (lone, 1, 1.0)), (1, 0, 0, 1)), (((lone, 0, 1.0), (plain, 1, 1.0)), (1, 1, 1, 0))):
+        cases: list[tuple[tuple[tuple[dict[str, float], int, float], ...], tuple[int, int, int, int]]] = [
+            (((plain, 0, 1.0), (lone, 1, 1.0)), (1, 0, 0, 1)), (((lone, 0, 1.0), (plain, 1, 1.0)), (1, 1, 1, 0))]
+        for frames, expected in cases:
+            def rows(_name: str, frames: tuple[tuple[dict[str, float], int, float], ...] = frames) -> Iterator[tuple[dict[str, float], int, float]]:
+                return iter(frames)
             with self.subTest(frames=frames):
-                report = outside_lone_word(predictions, lambda _name, frames=frames: iter(frames), CHOOSE_THRESHOLD_HIGH_CANDIDATE)
+                report = outside_lone_word(predictions, rows, CHOOSE_THRESHOLD_HIGH_CANDIDATE)
                 profile = cast(dict[str, dict[str, object]], report["by_profile"])["portable"]
                 self.assertEqual((profile["rows"], profile["convert_rows"], profile["converted_correctly"], profile["false_conversions"]), expected)
                 self.assertEqual(report["rows"], expected[0] * len(predictions))
