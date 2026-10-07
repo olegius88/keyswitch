@@ -4,6 +4,33 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- A word of two letters sent alone is corrected. The context model waited on a lone `гш` for a next
+  word that never came, because every such frame of the corpus was deferred; now a lone two-letter
+  word that ends at Enter, Tab, a sign or a pause is answered by a head of its own, fitted on frames
+  labelled by how often each reading occurs (a reading counted at least 30 times and five times as
+  often as the other, which is no dictionary word, is the one meant): `гш` → `ui`, `зщ` → `po`,
+  `фш` → `ai`, `еп` → `tg`. At a space the next word still decides it, and a pair the counts do not
+  settle keeps the 0.40.0 answer (`ye` sent alone is `ну`).
+- The first word of a message is decided with how often each reading occurs in English and Russian
+  prose. The model read those counts only for a word with text around it, so a word alone in the
+  field was decided by its letters and the technical term tables: rare Russian words opening a
+  message were turned into their Latin keys, and many first words typed in the wrong layout were
+  left as typed. A head of its own answers a word of four letters or more with no letter around
+  it, reading both counts and the detector's score delta past the bound where the shared feature
+  stops. Put alone at the start of a message, the words of a development set convert falsely 16
+  times instead of 26 and correct 7 415 instead of 7 041 of those typed in the wrong layout.
+- The context model is the 0.40.0 model with those two heads fitted onto it (corpus v33; test v33
+  sealed before training and passed): every other decision is the 0.40.0 model's. On the replay of
+  the owner's own typing it converts 720 words right, leaves 110 in the wrong layout and converts
+  68 falsely, against 716/119/66 for 0.40.0, and on the words the user's own correction labels
+  115/35/8 against 110/40/8. On test v33 it keeps all 193 correctly typed rows and restores 173 of
+  193 rows with the early switch off against 160, and 15 against 15 with it on. The prefix model
+  retrained byte-identical.
+- The receipt's calibration recall floor (0.977) reads the frames outside the lone-word class: the
+  lone-word frames are labelled by the counts, not by text anyone typed, and pull the recall of
+  every pair down (0.40.0 recalls 0.935 of all the corpus v33 frames, the new pair 0.968; outside
+  the class 0.9771 and 0.9786). What the pair nets is still compared with the pair it replaces on
+  every frame: 13 869 and 13 900 against 13 450 and 13 485.
 - Automatic correction works again in a field that reports its caret a character or two short of
   what was typed. VS Code Insiders did so for its chat box on 06.10.2026: every word there was
   refused as typed into a changed field, a word just begun read as typed into another one, and
