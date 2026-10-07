@@ -2003,6 +2003,10 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
         for index, name in enumerate(names):
             if name in base.weights:
                 accumulators[index * len(ACTIONS):(index + 1) * len(ACTIONS)] = array("d", [math.inf]) * len(ACTIONS)
+        # The epochs read only the frames that hold a weight the fit can move: the others step nothing.
+        frames = len(train.labels)
+        train = context_action_pipeline.trainable_frames(train, accumulators)
+        print(f"frames with a trainable feature: {len(train.labels)} of {frames}", flush=True)
     rate = float(cast(float, cast(dict[str, object], options["warm_base"])["learning_rate"] if warm is not None
                       else options["learning_rate"]))
     epochs = int(cast(int, options["epochs"]))

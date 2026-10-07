@@ -590,6 +590,30 @@ def packed(parts: Sequence[Columns], column: Int64Array, sort: Callable[[Int64Ar
     return result
 
 
+def trainable_frames(data: Packed, accumulators: array[float]) -> Packed:
+    """The frames of `data` that hold a feature whose AdaGrad accumulator is finite, in their order.
+
+    A frozen base starts its accumulators at infinity, so every step of its weights is zero
+    (tools/context_optimizer.c: g / sqrt(inf)); a frame whose every feature is the base's moves no
+    weight at all, and an epoch over the remaining frames ends with the very same weights. Fitting the
+    heads onto a frozen model, most TRAIN frames are such frames.
+    """
+    offsets = np.frombuffer(data.offsets, dtype=np.uint64).astype(np.int64)
+    indices = np.frombuffer(data.indices, dtype=np.uint32)
+    counts = np.diff(offsets)
+    finite = np.isfinite(np.frombuffer(accumulators, dtype=np.float64)[::len(ACTIONS)])
+    rows = np.repeat(np.arange(len(counts), dtype=np.int64), counts)
+    keep_row = np.bincount(rows, weights=finite[indices].astype(np.float64), minlength=len(counts)) > 0
+    keep_entry = keep_row[rows]
+    result = Packed(array("Q", [0]), array("I"), array("d"), array("B"), array("d"))
+    result.offsets.frombytes(np.cumsum(counts[keep_row]).astype(np.uint64).tobytes())
+    result.indices.frombytes(indices[keep_entry].tobytes())
+    result.values.frombytes(np.frombuffer(data.values, dtype=np.float64)[keep_entry].tobytes())
+    result.labels.frombytes(np.frombuffer(data.labels, dtype=np.uint8)[keep_row].tobytes())
+    result.importance.frombytes(np.frombuffer(data.importance, dtype=np.float64)[keep_row].tobytes())
+    return result
+
+
 class MassKernel:
     """tools/context_action_mass.c, built with the optimizer's flags and kept in build/ by its digest."""
 
