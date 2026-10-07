@@ -27,7 +27,7 @@ from freeze_context_action_corpus import CorpusRow, physical, typo_variants
 from context_deferral import deferred_isolated, lookahead_focus, plausible_reading
 from reconcile_context_action_corpus import expanded_aliases
 from keyswitch.constants.training import ACTION_DEFERRED_WORD_MAX_CHARACTERS, CITATION_SIGN_HEADS
-from keyswitch.context_action_features import extract_action_features, letter_question
+from keyswitch.context_action_features import abbreviation_question, attested_abbreviation, extract_action_features, letter_question
 from keyswitch.short_words import TRUSTED_SINGLE_LETTER_WORDS
 from keyswitch.constants.model_protocol import CALIBRATION, DEVELOPMENT, TRAIN
 from keyswitch.context_model import ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, term_bucket
@@ -52,6 +52,8 @@ from train_context_action_model import (
     citation_shaped,
     natural_lookahead_rows,
     natural_mixed_contexts,
+    abbreviation_curriculum,
+    abbreviation_label,
     evidence,
     following_reading,
     historical_curriculum,
@@ -81,6 +83,7 @@ from train_context_action_model import (
     _technical_terms,
     _varied_boundary,
     letter_curriculum,
+    NO_ABBREVIATION_CURRICULUM,
 )
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
 from keyswitch.constants.models import (
@@ -104,6 +107,7 @@ from fixture_values.counts import (
     LONE_WORD_FIXTURE_MINIMUM_COUNT,
     LONE_WORD_FIXTURE_OTHER_MAXIMUM_COUNT,
     KEPT_NEIGHBOUR_FIXTURE_ABBREVIATION_COUNT,
+    ABBREVIATION_FIXTURE_FRAMES_PER_FORM,
     LETTER_FIXTURE_ENGLISH_SENTENCES,
     LETTER_FIXTURE_FRAMES_PER_TERM_SENTENCE,
     LETTER_FIXTURE_TERM_SENTENCES,
@@ -150,6 +154,7 @@ from fixture_values.counts import (
     SELECT_ROWS_REPEATED_FAMILY_ROWS,
 )
 from fixture_values.scores import (
+    ABBREVIATION_FIXTURE_DOMINANCE,
     CAPITAL_CITATION_FIXTURE_WEIGHT,
     FROZEN_BASE_FIXTURE_IMPORTANCE,
     FROZEN_BASE_FIXTURE_PROBABILITIES,
@@ -592,6 +597,47 @@ class ActionTrainingTests(unittest.TestCase):
         # A left context with words of both scripts never serves as a language's prose.
         self.assertEqual(natural_mixed_contexts([english, russian, mixed_only]), {0: ("the subspecies ",), 1: ("Австралийский подвид ",)})
         self.assertFalse([row for row in action_rows([english]) if ":mixed-natural" in row.identifier])
+
+    def test_the_keys_of_a_latin_abbreviation_that_spell_one_russian_text_uses_are_never_framed_to_convert(self) -> None:
+        # `TC` typed in the Russian layout is `ЕС`, which Russian technical text uses (attested_abbreviation): after
+        # Russian prose those keys are the abbreviation as written. `QRT` reads `ЙКЕ`, which nothing uses.
+        cited = replace(fixture("tc", "TC", 0), before="the code ")
+        unknown = replace(fixture("qrt", "QRT", 0), before="the code ")
+        russian = replace(fixture("prose", "подвид", 1), before="Австралийский подвид ")
+        self.assertTrue(attested_abbreviation("ЕС"))
+        self.assertFalse(attested_abbreviation("ЙКЕ") or attested_abbreviation("ЛУНЫ") or attested_abbreviation("TC"))
+        names = {row.identifier for row in action_rows([cited, unknown, russian])}
+        self.assertTrue({"tc:mixed", "qrt:mixed", "qrt:mixed:wrong"} <= names)
+        self.assertFalse({"tc:mixed:wrong", "tc:mixed-natural:wrong"} & names)
+
+    def test_the_abbreviation_curriculum_labels_attested_abbreviations_by_both_counts(self) -> None:
+        # `ЕС` is counted 41 times among the Cyrillic words of Russian technical text and its keys `tc` 117 times:
+        # after Russian prose it is the abbreviation meant. `ФШ` is counted 23 times and its keys `ai` 185 times.
+        options = {"frames_per_form": ABBREVIATION_FIXTURE_FRAMES_PER_FORM, "minimum_latin_count": KEPT_NEIGHBOUR_FIXTURE_TERM_COUNT,
+                   "dominance": ABBREVIATION_FIXTURE_DOMINANCE, "sample_weight": KEPT_NEIGHBOUR_FIXTURE_WEIGHT}
+        self.assertEqual((abbreviation_label("ЕС", "TC", options), abbreviation_label("ФШ", "AI", options)), ("keep", "convert"))
+        russian = replace(fixture("a1", "сегодня", 1), before="мы обновили сервер и ", after=" ночью")
+        shares = {split: abbreviation_curriculum(split, [russian], frozenset(), options) for split in (TRAIN, DEVELOPMENT)}
+        forms: dict[str, set[str]] = {}
+        for split, (rows, report) in shares.items():
+            forms[split] = {row.original for row in rows}
+            self.assertEqual(len(rows), len(forms[split]) * ABBREVIATION_FIXTURE_FRAMES_PER_FORM)
+            self.assertEqual(report["frames"], len(rows))
+            for row in rows:
+                latin = translated(row.original, 1)
+                self.assertTrue(abbreviation_question(row.original, latin, row.field.before))
+                self.assertEqual((row.group, row.field.before, row.sample_weight, row.category),
+                                 (1, russian.before, KEPT_NEIGHBOUR_FIXTURE_WEIGHT, "abbreviation"))
+                self.assertEqual(row.action, abbreviation_label(row.original, latin, options))
+        # Each form goes to one split by hash, so DEVELOPMENT chooses the head's epoch on forms TRAIN never saw.
+        self.assertFalse(forms[TRAIN] & forms[DEVELOPMENT])
+        self.assertIn("ЕС", forms[TRAIN] | forms[DEVELOPMENT])
+        refused, _ = abbreviation_curriculum(TRAIN if "ЕС" in forms[TRAIN] else DEVELOPMENT, [russian],
+                                             frozenset(expanded_aliases("ес")), options)
+        self.assertNotIn("ЕС", {row.original for row in refused})
+        self.assertEqual(abbreviation_curriculum(CALIBRATION, [russian], frozenset(), options), ([], {"frames": 0, "scope": "not used"}))
+        self.assertEqual(abbreviation_curriculum(TRAIN, [russian], frozenset(), NO_ABBREVIATION_CURRICULUM),
+                         ([], {"frames": 0, "scope": "not used"}))
 
     def test_a_capital_citation_whose_reading_is_a_rare_word_keeps_after_russian_prose(self) -> None:
         cited = replace(fixture("wbc", "WBC", 0), before="the title ")  # `ЦИС`: a word, and a rare one

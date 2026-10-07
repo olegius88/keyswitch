@@ -7,6 +7,8 @@ import re
 import unicodedata
 from typing import TYPE_CHECKING, Final
 from .constants.models import (
+    ABBREVIATION_FEATURE_PREFIX,
+    ABBREVIATION_NON_INITIAL_LETTERS,
     ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS,
     ACTION_FEATURE_APPLICATION_NAME_CHARACTERS,
     ACTION_FEATURE_APPLICATION_TOKEN_COUNT,
@@ -389,7 +391,67 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         # the owner's typing): no frame of the corpus puts a Russian word of one letter there.
         result.update({LETTER_FEATURE_PREFIX + name: value for name, value in list(result.items())})
         result.update(_letter_evidence(item, direction))
+    if abbreviation_question(item.original, item.alternative, item.field.before):
+        # The class the abbreviation head answers. After Russian prose the frozen model turned abbreviations
+        # Russian text uses into the Latin readings they spell (`страны ЕС приняли` became `страны TC
+        # приняли`). Unlike the other heads it reads no copy of the shared features: the corpus holds a few
+        # hundred kinds of abbreviation, and a head reading their letter n-grams learned those kinds by heart
+        # and turned `ТЗ` into `NP`. It reads what tells the kinds apart instead: how often each reading
+        # occurs.
+        result.update(_abbreviation_evidence(item, direction))
     return result
+
+
+def attested_abbreviation(original: str) -> bool:
+    """A token of letters only, all capitals, of CAPITALS_HEAD_MIN_LETTERS to CAPITALS_HEAD_MAX_LETTERS, in
+    Cyrillic, that Russian technical text uses and the lexicon does not hold: counted among the Cyrillic words
+    of Russian technical text, which the term table keeps for words outside the lexicon (`ЕС`, `ТЗ`, `ИД`). A
+    lexicon word in capitals (`ЛУНЫ`) is a word typed with Caps Lock, which the frozen model keeps."""
+
+    if not (CAPITALS_HEAD_MIN_LETTERS <= len(original) <= CAPITALS_HEAD_MAX_LETTERS and original.isalpha()
+            and original.isupper() and not any(char.isascii() for char in original)):
+        return False
+    from .context_model import _term_frequency
+
+    table = _term_frequency()
+    return bool(table["cyrillic"].get(original.casefold()))
+
+
+def abbreviation_question(original: str, alternative: str, before: str) -> bool:
+    """An attested Cyrillic abbreviation (attested_abbreviation) whose Latin reading is letters too, after text
+    with more Cyrillic letters than Latin ones: the abbreviation as written (`страны ЕС`) or a Latin one typed
+    in the Russian layout whose keys spell it (`TC`). After Latin text the capitals head answers the same
+    shape (capitals_question); an abbreviation Russian text does not use is the frozen model's."""
+
+    return (attested_abbreviation(original) and alternative.isalpha()
+            and _dominant(before[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:].casefold()) == "ru")
+
+
+def _abbreviation_evidence(item: ContextEvidence, direction: str) -> dict[str, float]:
+    """The abbreviation head's evidence: the binary order of magnitude of how often the Latin reading occurs
+    among the Latin words of Russian technical text and in English prose, and the Cyrillic one in Russian
+    prose and among the Cyrillic words of Russian technical text, and of their ratio; whether the lexicons
+    and the identifier index know each reading; the length; whether the Cyrillic reading has a letter no
+    Russian word starts with (ABBREVIATION_NON_INITIAL_LETTERS), which no abbreviation of Russian words
+    has; the boundary. No letter of its own: a head reading them learned the corpus's kinds of
+    abbreviation and turned `ДТП` into `LNG`."""
+
+    from .context_model import _term_frequency
+
+    table = _term_frequency()
+    latin, cyrillic = item.alternative.casefold(), item.original.casefold()
+    magnitudes = {"latin": table["latin"].get(latin, 0).bit_length(), "english": table["english"].get(latin, 0).bit_length(),
+                  "russian": table["russian"].get(cyrillic, 0).bit_length(), "cyrillic": table["cyrillic"].get(cyrillic, 0).bit_length()}
+    latin_side = max(magnitudes["latin"], magnitudes["english"])
+    cyrillic_side = max(magnitudes["russian"], magnitudes["cyrillic"])
+    ratio = max(-ALONE_COUNT_RATIO_BOUND, min(ALONE_COUNT_RATIO_BOUND, latin_side - cyrillic_side))
+    names = ["bias", *(f"count:{name}:{value}" for name, value in magnitudes.items()), f"count:ratio:{ratio}",
+             f"count:{latin_side}:{cyrillic_side}", f"letters:{len(item.original)}",
+             f"known:{int(item.source_known)}:{int(item.target_known)}",
+             f"identifier:{int(item.source_identifier)}:{int(item.target_identifier)}",
+             f"non_initial:{int(any(char in ABBREVIATION_NON_INITIAL_LETTERS for char in item.original))}",
+             f"trigger:{item.trigger[:ACTION_FEATURE_FIELD_LABEL_MAX_CHARACTERS]}"]
+    return {f"{ABBREVIATION_FEATURE_PREFIX}{name}:direction:{direction}": 1.0 for name in names}
 
 
 def alone_question(original: str, alternative: str, before: str, after: str, trigger: str) -> bool:

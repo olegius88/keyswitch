@@ -651,6 +651,9 @@ MIXED_TYPING_TEST_RUSSIAN_SHARE: Final = 0.5
 CAPITAL_CITATION_FIXTURE_WEIGHT: Final = 0.5
 # Sample weight of the kept-neighbour curriculum fixture.
 KEPT_NEIGHBOUR_FIXTURE_WEIGHT: Final = 0.5
+# How many times as often the Latin reading of an attested abbreviation is counted when the abbreviation curriculum
+# fixture labels it convert (abbreviation_label).
+ABBREVIATION_FIXTURE_DOMINANCE: Final = 4.0
 # A frozen base's one weight, the softmax a fixture row is scored with and that row's importance
 # (train_context_action_model.base_weights, log_loss).
 FROZEN_BASE_FIXTURE_WEIGHTS: Final = (0.0, 2.0, 0.0, 0.0)
