@@ -622,6 +622,33 @@ def score_pair(plans: Sequence[SequencePlan], model: ContextModel, prefix: Prefi
     return counts, results
 
 
+# The replays of every profile, settings mode and pair share nothing: each builds its own engines from
+# the plans and models it is given. They run in worker processes (fork, where the platform has it),
+# at most this many by default, and the report is assembled in the order the serial loop wrote it.
+EVALUATION_JOBS_VARIABLE = "KEYSWITCH_EVALUATION_JOBS"
+_REPLAY_STATE: dict[str, object] = {}
+
+
+def _score_task(task: tuple[str, str, str, str]) -> tuple[Counter[str], list[dict[str, object]]]:
+    profile, mode, context_name, prefix_name = task
+    plans = cast(list[SequencePlan], _REPLAY_STATE["plans"])
+    contexts = cast(dict[str, ContextModel], _REPLAY_STATE["contexts"])
+    prefixes = cast(dict[str, PrefixModel], _REPLAY_STATE["prefixes"])
+    return score_pair(plans, contexts[context_name], prefixes[prefix_name], reference_models(profile == "reference_hunspell"), mode)
+
+
+def _scored(tasks: list[tuple[str, str, str, str]]) -> list[tuple[Counter[str], list[dict[str, object]]]]:
+    """Every task's counts and cases, in task order; in worker processes when more than one may run."""
+    import multiprocessing
+
+    cores = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count() or 1
+    jobs = min(len(tasks), int(os.environ.get(EVALUATION_JOBS_VARIABLE, cores)))
+    if jobs <= 1 or "fork" not in multiprocessing.get_all_start_methods():
+        return [_score_task(task) for task in tasks]
+    with multiprocessing.get_context("fork").Pool(jobs) as pool:
+        return pool.map(_score_task, tasks, chunksize=1)
+
+
 def score_sequences(rows: Sequence[CorpusRow], candidate: ContextModel, baseline: ContextModel, *,
                     prefix_candidate: PrefixModel, prefix_baseline: PrefixModel) -> dict[str, object]:
     """Replay every pair in both settings modes; acceptance needs every gate in every mode and profile."""
@@ -637,18 +664,23 @@ def score_sequences(rows: Sequence[CorpusRow], candidate: ContextModel, baseline
         "unsupported": [{"identifier": plan.identifier, "codepoints": plan.unsupported}
                         for plan in plans if plan.unsupported and not plan.initially_wrong],
     }
-    contexts = {"baseline": baseline, "candidate": candidate}
-    prefixes = {"baseline": prefix_baseline, "candidate": prefix_candidate}
+    _REPLAY_STATE.update(plans=plans, contexts={"baseline": baseline, "candidate": candidate},
+                         prefixes={"baseline": prefix_baseline, "candidate": prefix_candidate})
+    tasks = [(profile, mode, context_name, prefix_name) for profile in PROFILES for mode in SETTINGS_MODES
+             for _name, context_name, prefix_name in PAIRS[mode]]
+    try:
+        scored = iter(_scored(tasks))
+    finally:
+        _REPLAY_STATE.clear()
     profiles: dict[str, object] = {}
     all_passed = True
     for profile in PROFILES:
-        models = reference_models(profile == "reference_hunspell")
         blocks: dict[str, dict[str, object]] = {}
         for mode in SETTINGS_MODES:
             totals: dict[str, Counter[str]] = {}
             cases: dict[str, list[dict[str, object]]] = {}
-            for name, context_name, prefix_name in PAIRS[mode]:
-                totals[name], cases[name] = score_pair(plans, contexts[context_name], prefixes[prefix_name], models, mode)
+            for name, _context_name, _prefix_name in PAIRS[mode]:
+                totals[name], cases[name] = next(scored)
             gates = profile_gates(totals["candidate"], totals["baseline"], documents)
             all_passed = all_passed and all(gates.values())
             gated = {"counts": {name: totals[name] for name in ("baseline", "candidate")},

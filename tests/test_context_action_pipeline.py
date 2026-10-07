@@ -29,8 +29,10 @@ from fixture_values.counts import (
     BACK_END_FIXTURE_NAMES,
     BACK_END_FIXTURE_ROWS,
 )
-from fixture_values.scores import BACK_END_FIXTURE_FEATURE_VALUE, BACK_END_FIXTURE_KEEP_IMPORTANCE, FEATURE_MASS_OVERFLOW_WEIGHT
-from keyswitch.constants.model_protocol import CALIBRATION, FITTING_SPLITS as SPLITS, PORTABLE, PROFILES, REFERENCE_HUNSPELL, TRAIN
+from fixture_values.scores import (
+    BACK_END_FIXTURE_FEATURE_VALUE, BACK_END_FIXTURE_KEEP_IMPORTANCE, CONTEXT_V2_KERNEL_LEARNING_RATE, FEATURE_MASS_OVERFLOW_WEIGHT,
+)
+from keyswitch.constants.model_protocol import CALIBRATION, DEVELOPMENT, FITTING_SPLITS as SPLITS, PORTABLE, PROFILES, REFERENCE_HUNSPELL, TRAIN
 from keyswitch.constants.training import (
     CONTEXT_ACTION_BACK_END_SOURCES,
     CONTEXT_ACTION_BACKEND_AUTO,
@@ -210,6 +212,23 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(trainer.frame_chain(inputs, PORTABLE, TRAIN, inputs.frames[TRAIN], fake_tail(inputs)[0]),
                          (fake_tail(inputs)[0], {}))
 
+    def test_development_holds_the_single_letter_frames_the_heads_epoch_is_chosen_on(self) -> None:
+        from test_context_action_training import fixture
+
+        inputs = fixture_inputs()
+        letter = {"term_sentences": 1, "english_sentences": 1, "minimum_term_count": 1, "sample_weight": 1.0}
+        inputs.options = {**inputs.options, "lookahead_curriculum": {}, "lexical_short_pair_curriculum": {},
+                          "natural_lookahead_curriculum": {"maximum_families": 0, "seeds_per_family": 0}, "letter_curriculum": letter}
+        sentence = replace(fixture("l1", "сегодня", 1), before="мы обновили сервер и ", after="")
+        inputs.source_rows = {split: [sentence] for split in SPLITS}
+        expected = trainer.letter_curriculum([sentence], frozenset(), letter)[0]
+        self.assertTrue(expected)
+        with patch.object(trainer, "natural_lookahead_rows", side_effect=lambda rows, *_args, **_options: (list(rows), {})):
+            rows, reports = trainer.frame_chain(inputs, PORTABLE, DEVELOPMENT, [])
+            self.assertEqual((rows, sorted(reports)), (expected, ["letter", "natural"]))
+            # Calibration measures the corpus's own frames: the curriculum is never framed there.
+            self.assertEqual(trainer.frame_chain(inputs, PORTABLE, CALIBRATION, []), ([], {"natural": {}}))
+
     def test_a_frame_the_serial_fit_rejects_stops_the_fit(self) -> None:
         import numpy as np
 
@@ -297,6 +316,30 @@ class PackingTest(unittest.TestCase):
         self.assert_packed_equal(train, Packed.build(read_back * len(PROFILES), selected))
         self.assert_packed_equal(development[PORTABLE], Packed.build(read_back, selected))
         self.assert_packed_equal(calibration[REFERENCE_HUNSPELL], Packed.build(read_back, selected))
+
+    def test_an_epoch_over_the_trainable_frames_leaves_the_weights_of_one_over_every_frame(self) -> None:
+        import math
+        from array import array
+        from context_optimizer import Kernel, python_epoch
+
+        rows = self.rows()
+        names = sorted({name for features, _, _ in rows for name in features})
+        data = Packed.build(rows, names)
+        # Every other feature belongs to a frozen base: its accumulators start infinite.
+        frozen = set(names[::len(PROFILES)])
+        accumulators = array("d", [math.inf if name in frozen else 1.0 for name in names for _ in ACTIONS])
+        trainable = pipeline.trainable_frames(data, accumulators)
+        kept = [row for row in rows if any(name not in frozen for name in row[0])]
+        self.assertTrue(0 < len(kept) < len(rows))
+        self.assert_packed_equal(trainable, Packed.build(kept, names))
+        for epoch in (python_epoch, Kernel.load().epoch):
+            with self.subTest(epoch=epoch):
+                weights = array("d", [BACK_END_FIXTURE_FEATURE_VALUE * position for position in range(len(names) * len(ACTIONS))])
+                every, some = array("d", weights), array("d", weights)
+                every_accumulators, some_accumulators = array("d", accumulators), array("d", accumulators)
+                epoch(data, every, every_accumulators, CONTEXT_V2_KERNEL_LEARNING_RATE)
+                epoch(trainable, some, some_accumulators, CONTEXT_V2_KERNEL_LEARNING_RATE)
+                self.assertEqual((every.tobytes(), every_accumulators.tobytes()), (some.tobytes(), some_accumulators.tobytes()))
 
     def test_masses_follow_feature_mass_in_the_serial_order(self) -> None:
         rows = self.rows()

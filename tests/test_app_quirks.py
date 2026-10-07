@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import tempfile
 import unittest
 from collections.abc import Iterator
@@ -9,6 +10,8 @@ from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from keyswitch.app_quirks import MENTION_HEADS, TELEGRAM_QUOTE_MENTION, mention_head
 from keyswitch.backend import KeyEvent

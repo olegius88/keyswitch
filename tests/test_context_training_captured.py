@@ -13,6 +13,8 @@ from array import array
 from pathlib import Path
 from unittest.mock import patch
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+
 import train_context_model as trainer
 from context_optimizer import Kernel, Packed
 from keyswitch.context_model import ACTIONS, ContextEvidence

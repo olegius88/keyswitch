@@ -33,6 +33,7 @@ from .constants.models import (
     CAPITALS_HEAD_MIN_LETTERS,
     KEPT_CONTEXT_WORD_MAX_CHARACTERS,
     KEPT_FEATURE_PREFIX,
+    LETTER_FEATURE_PREFIX,
     PLANNED_CONTEXT_AFTER_MAX_CHARACTERS,
     PLANNED_CONTEXT_WORD_MAX_CHARACTERS,
     START_DELTA_BAND_WIDTH,
@@ -349,11 +350,18 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
             features[f"ortho:{sign}:direction:{direction}"] = value
             features[f"ortho:{sign}:{category}"] = value
     _term_features(features, item, direction)
+    letter = letter_question(item.original, item.alternative, item.field.before)
     if origin == "kept_next_word":
         # A waiting word whose next word stayed as typed is a question of its own: the same
         # evidence, its own weights (KEPT_FEATURE_PREFIX). Sharing them, the question took the
         # weights of the converted-neighbour frames and turned `еще` before `поищу` into `tot`.
-        return {KEPT_FEATURE_PREFIX + name: value for name, value in features.items() if value}
+        kept = {KEPT_FEATURE_PREFIX + name: value for name, value in features.items() if value}
+        if letter:
+            # The kept-neighbour frames hold no word of one letter, and the question answered `keep`
+            # at p=1.00 for `b` before `redis` in `nats b redis` (`nats и redis`, the owner's typing).
+            kept.update({LETTER_FEATURE_PREFIX + name: value for name, value in list(kept.items())})
+            kept.update(_letter_evidence(item, direction))
+        return kept
     result = {name: value for name, value in features.items() if value}
     if capitals_question(item.original, item.field.before):
         # The class the capitals head answers: its features once more under their own names, beside
@@ -375,6 +383,12 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         # score delta beyond the shared feature's bound.
         result.update({START_FEATURE_PREFIX + name: value for name, value in list(result.items())})
         result.update(_start_evidence(item, direction))
+    if letter:
+        # The class the single-letter head answers, in the same way. After a word of Latin letters the
+        # frozen model kept `f` in `lid f номер` at p=1.00 with the next word converted (`lid а номер`,
+        # the owner's typing): no frame of the corpus puts a Russian word of one letter there.
+        result.update({LETTER_FEATURE_PREFIX + name: value for name, value in list(result.items())})
+        result.update(_letter_evidence(item, direction))
     return result
 
 
@@ -431,6 +445,41 @@ def _start_evidence(item: ContextEvidence, direction: str) -> dict[str, float]:
     names = (f"count:english:{magnitudes[0]}", f"count:russian:{magnitudes[1]}", f"count:ratio:{ratio}",
              f"count:{magnitudes[0]}:{magnitudes[1]}", f"delta:{band}")
     return {f"{START_FEATURE_PREFIX}{name}:direction:{direction}": 1.0 for name in names}
+
+
+def letter_question(original: str, alternative: str, before: str) -> bool:
+    """A word of one letter, a letter in both layouts, right after a word whose letters are all Latin:
+    `b` after `nats ` (`nats и redis`), `f` after `lid ` (`lid а номер`), `a` after `use `. The engine
+    asks it at the letter's boundary and again beside the next word, converted or kept as typed. After
+    Cyrillic, after a sign or with nothing before it the frozen model decides alone."""
+
+    if len(original) != 1 or not original.isalpha() or not alternative.isalpha() or not before[-1:].isspace():
+        return False
+    words = before.split()
+    letters = [char for char in words[-1] if char.isalpha()] if words else []
+    return bool(letters) and all(char.isascii() for char in letters)
+
+
+def _letter_evidence(item: ContextEvidence, direction: str) -> dict[str, float]:
+    """The single-letter head's own evidence: the binary order of magnitude of how often the word before
+    the letter, and the word after it, occur in English prose and among the Latin words of Russian
+    technical text (a Cyrillic word after it: in Russian prose). `nats` and `redis` are counted in Russian
+    technical text alone, `plan` and `then` in English prose."""
+
+    from .context_model import _term_frequency
+
+    table = _term_frequency()
+    names: list[str] = []
+    for side, text in (("previous_word", item.field.before.split()[-1]), ("next_word", (item.field.after.split() or [""])[0])):
+        word = "".join(char for char in text if char.isalpha()).casefold()
+        if not word:
+            names.append(f"{side}:none")
+        elif all(char.isascii() for char in word):
+            english, latin = table["english"].get(word, 0).bit_length(), table["latin"].get(word, 0).bit_length()
+            names.extend((f"{side}:english:{english}", f"{side}:latin:{latin}", f"{side}:{english}:{latin}"))
+        else:
+            names.append(f"{side}:russian:{table['russian'].get(word, 0).bit_length()}")
+    return {f"{LETTER_FEATURE_PREFIX}{name}:direction:{direction}": 1.0 for name in names}
 
 
 def capitals_question(original: str, before: str) -> bool:

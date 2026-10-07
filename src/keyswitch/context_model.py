@@ -49,6 +49,7 @@ from .constants.models import (
     CONTEXT_TYPO_MIN_CHARACTERS,
     CONTEXT_V1_CONVERSION_THRESHOLD,
     KEPT_FEATURE_PREFIX,
+    LETTER_FEATURE_PREFIX,
     MAX_CONTEXT_ACTION_MODEL_FEATURES,
     MAX_CONTEXT_FEATURE_NAME_CHARACTERS,
     MAX_CONTEXT_MODEL_FEATURES as MAX_FEATURES,
@@ -405,6 +406,9 @@ class ContextModel:
         self.version = version
         self.conversion_threshold = conversion_threshold
         self.feature_version = feature_version
+        # Whether the single-letter head has weights here: its class is the one place a verdict on a letter
+        # is the model's own opinion (context_policy).
+        self.answers_letters = any(name.startswith(LETTER_FEATURE_PREFIX) for name in self.weights)
 
     @classmethod
     def load(cls, path: Path = ARTIFACT_PATH) -> ContextModel:
@@ -424,7 +428,7 @@ class ContextModel:
             _term_frequency()
         raw_weights: object = payload.get("weights")
         if feature_version == CONTEXT_ACTION_FEATURE_VERSION:
-            # Up to five feature spaces, each with its own budget in the recipe (MAX_CONTEXT_ACTION_MODEL_FEATURES).
+            # Up to six feature spaces, each with its own budget in the recipe (MAX_CONTEXT_ACTION_MODEL_FEATURES).
             if not isinstance(raw_weights, dict) or not 0 < len(raw_weights) <= MAX_CONTEXT_ACTION_MODEL_FEATURES:
                 raise ValueError("invalid context weights")
         elif not isinstance(raw_weights, dict) or not 0 < len(raw_weights) <= MAX_FEATURES:
@@ -464,9 +468,12 @@ class ContextModel:
 
         if self.feature_version == CONTEXT_ACTION_FEATURE_VERSION:
             text = ACTION_FEATURE_CHARACTER_TEXT_FIELD_INDEX
+            # The kept-neighbour question names its letters under its own prefix, and the single-letter head
+            # once more under its own: the kept-neighbour frames hold no word of one letter, so only the head
+            # knows the letters of `b` before a kept `redis`.
             return all(any(
                 name in self.weights for name in features
-                if (bare := name.removeprefix(KEPT_FEATURE_PREFIX)).startswith(label + ":char:")
+                if (bare := name.removeprefix(LETTER_FEATURE_PREFIX).removeprefix(KEPT_FEATURE_PREFIX)).startswith(label + ":char:")
                 and any(char.isalpha() for char in bare.split(":", text)[text])
             ) for label in ("source", "target"))
         return any(

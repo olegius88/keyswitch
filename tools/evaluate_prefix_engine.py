@@ -8,6 +8,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import multiprocessing
+import os
 import sys
 import tempfile
 import time
@@ -116,6 +118,52 @@ def replay(row: dict[str, object], model: PrefixModel | None, models: dict[int, 
                     "early_at": early_at, "injections": len(backend.injections)}
 
 
+# The replays of each profile, field context and variant share nothing: each builds its own engine per
+# row from the lexicons and model it is given. They run in worker processes (fork, where the platform
+# has it), as many as the cores this process may use unless EVALUATION_JOBS_VARIABLE says otherwise
+# (1 runs them here), and the report is assembled in the order the serial loop wrote it.
+EVALUATION_JOBS_VARIABLE = "KEYSWITCH_EVALUATION_JOBS"
+_REPLAY_STATE: dict[str, object] = {}
+Task = tuple[str, bool, str]
+
+
+def _replay_task(task: Task) -> tuple[dict[str, int], list[dict[str, object]]]:
+    """One profile, field context and variant over every selected row: its counts and first failures."""
+
+    profile, native, name = task
+    lexicons = cast(dict[str, tuple[dict[int, LanguageModel], dict[int, PrefixIndex]]], _REPLAY_STATE["lexicons"])
+    model = cast(dict[str, PrefixModel | None], _REPLAY_STATE["variants"])[name]
+    models, indexes = lexicons[profile]
+    context = profile + ("/field" if native else "/observed")
+    counts: Counter[str] = Counter()
+    failures: list[dict[str, object]] = []
+    for row in cast(list[dict[str, object]], _REPLAY_STATE["selected"]):
+        result = replay(row, model, models, indexes, native)
+        desired = bool(row["desired"])
+        exact = result["actual"] == result["expected"]
+        early = result["early_at"] is not None and cast(int, result["early_at"]) < len(str(row["text"]))
+        counts.update({"sequences": 1, "desired": int(desired), "exact": int(exact),
+                       "restored": int(desired and exact), "changed_correct": int(not desired and not exact),
+                       "early_restored": int(desired and exact and early),
+                       "length_mismatches": int(len(str(result["actual"])) != len(str(result["expected"]))),
+                       "injections": cast(int, result["injections"])})
+        if not exact and len(failures) < PREFIX_EVALUATION_MAX_RECORDED_FAILURES:
+            failures.append({"variant": name, "profile": context, "sequence": row["sequence"],
+                             "category": row["category"], "desired": desired, **result})
+    return dict(counts), failures
+
+
+def _replayed(tasks: list[Task]) -> list[tuple[dict[str, int], list[dict[str, object]]]]:
+    """Every task's counts and failures, in task order; in worker processes when more than one may run."""
+
+    cores = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count() or 1
+    jobs = min(len(tasks), int(os.environ.get(EVALUATION_JOBS_VARIABLE, cores)))
+    if jobs <= 1 or "fork" not in multiprocessing.get_all_start_methods():
+        return [_replay_task(task) for task in tasks]
+    with multiprocessing.get_context("fork").Pool(jobs) as pool:
+        return pool.map(_replay_task, tasks, chunksize=1)
+
+
 def evaluate(split: str) -> dict[str, object]:
     verify_receipt()
     runtime = provenance()
@@ -123,27 +171,17 @@ def evaluate(split: str) -> dict[str, object]:
     variants = {"shipping_no_prefix": None, "candidate": PrefixModel.load(CANDIDATE)}
     results: dict[str, dict[str, dict[str, int]]] = {}
     failures: list[dict[str, object]] = []
-    for profile in PROFILES:
-        models, indexes = lexicon(profile)
-        for native in (False, True):
-            context = profile + ("/field" if native else "/observed")
-            for name, model in variants.items():
-                counts: Counter[str] = Counter()
-                for row in selected:
-                    result = replay(row, model, models, indexes, native)
-                    desired = bool(row["desired"])
-                    exact = result["actual"] == result["expected"]
-                    early = result["early_at"] is not None and cast(int, result["early_at"]) < len(str(row["text"]))
-                    counts.update({"sequences": 1, "desired": int(desired), "exact": int(exact),
-                                   "restored": int(desired and exact), "changed_correct": int(not desired and not exact),
-                                   "early_restored": int(desired and exact and early),
-                                   "length_mismatches": int(len(str(result["actual"])) != len(str(result["expected"]))),
-                                   "injections": cast(int, result["injections"])})
-                    if not exact and len(failures) < PREFIX_EVALUATION_MAX_RECORDED_FAILURES:
-                        failures.append({"variant": name, "profile": context, "sequence": row["sequence"],
-                                         "category": row["category"], "desired": desired, **result})
-                results.setdefault(context, {})[name] = dict(sorted(counts.items()))
-                print(context, name, dict(counts), flush=True)
+    tasks = [(profile, native, name) for profile in PROFILES for native in (False, True) for name in variants]
+    _REPLAY_STATE.update(selected=selected, variants=variants, lexicons={profile: lexicon(profile) for profile in PROFILES})
+    try:
+        replayed = _replayed(tasks)
+    finally:
+        _REPLAY_STATE.clear()
+    for (profile, native, name), (counts, failed) in zip(tasks, replayed):
+        context = profile + ("/field" if native else "/observed")
+        failures.extend(failed[:PREFIX_EVALUATION_MAX_RECORDED_FAILURES - len(failures)])
+        results.setdefault(context, {})[name] = dict(sorted(counts.items()))
+        print(context, name, counts, flush=True)
     passed = all(
         variant["candidate"]["length_mismatches"] == 0
         and variant["candidate"]["changed_correct"] <= variant["shipping_no_prefix"]["changed_correct"]

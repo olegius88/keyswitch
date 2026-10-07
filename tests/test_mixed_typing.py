@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import gzip
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 import mixed_typing as tool
 from keyswitch.constants.corpus import MIXED_EDIT_WORD_MIN_LETTERS

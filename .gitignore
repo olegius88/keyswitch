@@ -7,6 +7,7 @@ __pycache__/
 .typing/
 .venv/
 .coverage
+.coverage.*
 coverage.xml
 htmlcov/
 build/

@@ -724,3 +724,16 @@ BACK_END_FIXTURE_FRAMES_PER_TASK: Final = 3
 BACK_END_FIXTURE_JOBS: Final = 2
 BACK_END_FIXTURE_NAMES: Final = 9
 BACK_END_FIXTURE_ROWS: Final = 11
+# The prefix engine replay in its test: row categories, and the periods by which a fixture row is
+# desired, fails, switches early and injects; worker processes of the forked run.
+PREFIX_REPLAY_FIXTURE_CATEGORIES: Final = 3
+PREFIX_REPLAY_FIXTURE_DESIRED_PERIOD: Final = 2
+PREFIX_REPLAY_FIXTURE_FAILURE_PERIOD: Final = 3
+PREFIX_REPLAY_FIXTURE_EARLY_PERIOD: Final = 4
+PREFIX_REPLAY_FIXTURE_INJECTION_PERIOD: Final = 5
+PREFIX_REPLAY_FIXTURE_JOBS: Final = 4
+# The single-letter curriculum in its test: the Russian sentences framed (the fixture holds two words of
+# one letter), the frames of each, and the English sentences framed (the fixture's four inner words).
+LETTER_FIXTURE_TERM_SENTENCES: Final = 2
+LETTER_FIXTURE_FRAMES_PER_TERM_SENTENCE: Final = 6
+LETTER_FIXTURE_ENGLISH_SENTENCES: Final = 4
