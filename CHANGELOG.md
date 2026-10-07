@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.41.0 — 2026-10-07
+
 - A word of two letters sent alone is corrected. The context model waited on a lone `гш` for a next
   word that never came, because every such frame of the corpus was deferred; now a lone two-letter
   word that ends at Enter, Tab, a sign or a pause is answered by a head of its own, fitted on frames
