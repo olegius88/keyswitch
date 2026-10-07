@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.43.0 — 2026-10-07
+
 - An English message that opens with an initial, a list or a name stays as typed: `J. Smith said`
   became `О. Smith said`, `C, D and E` became `С, В and E`, `C# rocks` became `С№ rocks` and
   `D. Knuth wrote it` became `В. Лтгер wrote it` (0.38-0.42). The rule that turns a lone `f`, `b`,
