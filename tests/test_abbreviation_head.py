@@ -13,6 +13,7 @@ from keyswitch.constants.models import ABBREVIATION_FEATURE_PREFIX
 from keyswitch.context_action_features import abbreviation_question, attested_abbreviation, extract_action_features
 from keyswitch.context_model import ContextEvidence
 from keyswitch.input_context import FieldContext
+from test_context_policy import ContextEngineTests
 
 
 def evidence(original: str, alternative: str, before: str) -> ContextEvidence:
@@ -51,6 +52,27 @@ class AbbreviationHeadTests(unittest.TestCase):
         self.assertIn(ABBREVIATION_FEATURE_PREFIX + "non_initial:1:direction:1", head("ЗЫ", "PS", "в конце "))
         self.assertEqual(head("ЕС", "TC", "the countries "), {})
         self.assertEqual(head("ЛУНЫ", "KEYS", "свет "), {})
+
+
+class InstalledAbbreviationTests(ContextEngineTests):
+    """The installed model answers an attested abbreviation after Russian prose with its own head."""
+
+    def test_an_abbreviation_russian_text_uses_stays_after_russian_prose(self) -> None:
+        # The corpus v35 model turned each into the Latin reading its keys spell: `TC`, `AYC`, `YU`.
+        for text in ("Страны ЕС приняли санкции ", "Письмо из ФНС пришло ", "Поздравляю с НГ всех "):
+            with self.subTest(text=text):
+                self.reset_editor(1)
+                self.type(text, group=1)
+                self.assertEqual(self.backend.text, text)
+
+
+def load_tests(loader: unittest.TestLoader, tests: unittest.TestSuite, pattern: str | None) -> unittest.TestSuite:
+    suite = unittest.TestSuite()
+    for case in (AbbreviationHeadTests, InstalledAbbreviationTests):
+        for name in case.__dict__:
+            if name.startswith("test_"):
+                suite.addTest(case(name))
+    return suite
 
 
 if __name__ == "__main__":

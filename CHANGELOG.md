@@ -11,15 +11,28 @@ All notable changes to KeySwitch are documented in this file.
   as that word only when the Russian layout prints a space, nothing or a clause sign right after it:
   `J.` is `Ою` there and `C#` is `С№`, no word a message opens with, while a Russian message typed in
   the English layout is corrected as before (`f? gjyznyj` is `а, понятно`, `f& xnj` is `а? что`).
-- The context model is the 0.42.0 model with its single-letter head fitted on corpus v35
-  (`context-v3-8a679c1eb72e`; test v35 sealed before training and passed), trained and certified
-  with the corrected rule. It decides every word of the owner's typing replay as 0.42.0 (726 right,
-  104 missed, 68 false) and every calibration frame of corpus v35; of the 51 809 development frames
-  one differs, a curriculum letter at the serving threshold (`typescript e csv`). On test v35
-  it keeps all 213 correctly typed rows and restores 180 of 211 mistyped rows with the early switch
-  off against 159, and 16 against 15 with it on. The prefix model retrained byte-identical. A
-  frozen-base fit builds only the frames that ask a head's question: its features are ready in
-  140 seconds instead of 506.
+- The 0.42.0 model with its single-letter head fitted on corpus v35 (`context-v3-8a679c1eb72e`; test
+  v35 sealed before training and passed) was trained and certified with the corrected rule, and is
+  the base of the installed model below. It decides every word of the owner's typing replay as
+  0.42.0 (726 right, 104 missed, 68 false) and every calibration frame of corpus v35; of the 51 809
+  development frames one differs, a curriculum letter at the serving threshold (`typescript e csv`).
+  On test v35 it keeps all 213 correctly typed rows and restores 180 of 211 mistyped rows with the
+  early switch off against 159, and 16 against 15 with it on. The prefix model retrained
+  byte-identical. A frozen-base fit builds only the frames that ask a head's question: its features
+  are ready in 140 seconds instead of 506.
+- A Russian abbreviation in capitals after Russian text stays as typed: `Страны ЕС приняли` became
+  `Страны TC приняли`, `Письмо из ФНС` became `Письмо из AYC` and `Поздравляю с НГ` became
+  `Поздравляю с YU` (0.37-0.42). The context model has an abbreviation head, fitted on corpus v36
+  onto the corpus v35 model with every weight of that model fixed (`context-v3-55d3df05fe3a`; test
+  v36 sealed before training and passed): it answers a Cyrillic token of two to five capitals that
+  Russian technical text uses, whose Latin reading is letters too, with how often each reading
+  occurs. The corpus no longer frames the keys of a Latin abbreviation that spell such a Russian one
+  as a conversion. Of 60 Russian abbreviations written in Russian sentences for this cycle it keeps
+  55 against 50, and restores the 26 of 30 Latin ones typed in the Russian layout it restored
+  before. It decides every word of the owner's typing replay and every calibration frame of corpus
+  v36 as the corpus v35 model. On test v36 it keeps all 214 correctly typed rows in both profiles
+  and restores 186 of 213 mistyped rows with the early switch off against 171 and 172, and 17 as
+  before with it on.
 - The Windows installer is built beside the Windows tests instead of after them: the ARM64 job of
   the 0.42.0 release took 19.2 minutes, 10 of them the installer and its smoke test. The prefix
   engine replay runs on a runner of its own beside the other model replays: the Tests workflow took
