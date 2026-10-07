@@ -54,7 +54,8 @@ class PromotionTests(unittest.TestCase):
         self.assertEqual(promotion.pinned_test_modules(seal), ["test_context_policy", "test_core"])
         runner = Recorder()
         self.assertEqual(self.checks(runner), [])
-        self.assertEqual(runner.commands[-1][-len(["test_context_policy", "test_core"]):], ["test_context_policy", "test_core"])
+        command = runner.commands[-1]
+        self.assertEqual(command[1:command.index("--")], ["tools/run_test_modules.py", "test_context_policy.py", "test_core.py"])
         self.assertTrue(any("tools/typecheck.sh" in command for command in runner.commands))
         self.assertTrue(any(part.endswith("check_named_values.py") for command in runner.commands for part in command))
 

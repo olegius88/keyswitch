@@ -93,7 +93,9 @@ def preflight(candidate: Path, prefix_candidate: Path, corpus: Path, runner: Run
               ("named values", [python, "tools/check_named_values.py"])]
     if seal_path.is_file():
         modules = pinned_test_modules(json.loads(seal_path.read_bytes()))
-        checks.append(("tests the seal pins", [python, "-m", "unittest", "-q", *modules]))
+        # Each module in a process of its own, as CI runs them (tools/run_test_modules.py).
+        checks.append(("tests the seal pins", [python, "tools/run_test_modules.py", *(module + ".py" for module in modules),
+                                               "--", python, "-m", "unittest", "discover", "-s", "tests", "-p"]))
     for name, command in checks:
         if runner(command) != 0:
             failures.append(name)
