@@ -266,7 +266,9 @@ class BuildTest(unittest.TestCase):
         self.assertTrue(expected)
         with patch.object(trainer, "natural_lookahead_rows", side_effect=lambda rows, *_args, **_options: (list(rows), {})):
             rows, reports = trainer.frame_chain(inputs, PORTABLE, DEVELOPMENT, [])
-            self.assertEqual((rows, sorted(reports)), (expected, ["letter", "natural"]))
+            self.assertEqual((rows, sorted(reports)), (expected, ["abbreviation", "letter", "natural"]))
+            # A recipe without the abbreviation curriculum frames none there.
+            self.assertEqual(reports["abbreviation"], {"frames": 0, "scope": "not used"})
             # Calibration measures the corpus's own frames: the curriculum is never framed there.
             self.assertEqual(trainer.frame_chain(inputs, PORTABLE, CALIBRATION, []), ([], {"natural": {}}))
 
