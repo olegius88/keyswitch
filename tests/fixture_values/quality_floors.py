@@ -29,9 +29,9 @@ RECEIPT_MAX_CORRECTION_LAYOUT_MISMATCHES: Final = 0
 # Calibration split of the installed pair, on the frames outside the lone-word head's class. Raised from
 # 0.976 for the corpus v26 pair (05.10.2026), which recalls 0.9778. Since corpus v32 the floor reads the
 # frames outside that class (train_context_action_model.outside_lone_word): the lone-word curriculum
-# labels its frames by the term counts, not by text anyone typed, and on corpus v32 its 617 conversions
-# per profile pull every recall down - 0.40.0 recalls 0.935 of all the frames, the corpus v32 candidate
-# 0.968 - though outside the class 0.40.0 recalls 0.9773 and the candidate 0.9788. What the pair nets is
+# labels its frames by the term counts, not by text anyone typed, and on corpus v33 its 617 conversions
+# per profile pull every recall down - 0.40.0 recalls 0.936 of all the frames, the installed pair 0.968 -
+# though outside the class 0.40.0 recalls 0.9771 and the installed pair 0.9786. What the pair nets is
 # compared on every frame (RECEIPT_CALIBRATION_REFERENCE_NET).
 RECEIPT_MIN_CALIBRATION_RECALL: Final = 0.977
 # The calibration split changes with every corpus, and so does how many of its rows are ambiguous
@@ -45,13 +45,13 @@ RECEIPT_MIN_CALIBRATION_RECALL: Final = 0.977
 # (context-v3-984962d926d3, 0.39.0) converts 13 446 and 13 482 of the 13 774 conversion rows with
 # 10 false conversions in each profile (measured as the seal of that pair with the kept-neighbour
 # head alone, which no calibration frame asks, scores it; on corpus v29 that seal and the runtime
-# scoring of the bare pair agreed to the row). Corpus v32: the corpus v30 pair (context-v3-4f77286aafe8,
-# 0.40.0), scored by the runtime on every calibration frame of the corpus v32 recipe, the lone-word
-# curriculum included, converts 13 463 and 13 497 of the 14 393 conversion rows with 10 and 13 false
-# conversions (its own replay of the seal's frames, which gave the candidate's seal counts to the row).
-RECEIPT_CALIBRATION_REFERENCE_CORPUS: Final = "54b6af4e5337d2979f2d4850a7201fdfd9330831282f9e32b32be55d237b68a6"
+# scoring of the bare pair agreed to the row). Corpus v33: the corpus v30 pair (context-v3-4f77286aafe8,
+# 0.40.0), scored by the runtime on every calibration frame of the corpus v33 recipe, the lone-word
+# curriculum included, converts 13 460 and 13 498 of the 14 394 conversion rows with 10 and 13 false
+# conversions (a replay of the seal's frames that gives the installed pair's seal counts to the row).
+RECEIPT_CALIBRATION_REFERENCE_CORPUS: Final = "3697cbe8a8a850162d7d05994eb48a6763892a04a3df8f1d854c39c63c6a69a3"
 RECEIPT_CALIBRATION_REFERENCE_MODEL: Final = "context-v3-4f77286aafe8"
-RECEIPT_CALIBRATION_REFERENCE_NET: Final[dict[str, int]] = {"portable": 13453, "reference_hunspell": 13484}
+RECEIPT_CALIBRATION_REFERENCE_NET: Final[dict[str, int]] = {"portable": 13450, "reference_hunspell": 13485}
 # Serving thresholds are part of the contract: a lower threshold converts on weaker evidence.
 RECEIPT_MIN_CONVERSION_THRESHOLD: Final = 0.99
 RECEIPT_MIN_PREFIX_CONVERSION_THRESHOLD: Final = 0.985
