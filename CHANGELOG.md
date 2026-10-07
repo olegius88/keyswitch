@@ -4,6 +4,13 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- `tools/compare_context_candidates.py` scores context models on a corpus's calibration and
+  development frames as the trainer does (its frames with the spans and curricula, the runtime's
+  support checks, the serving threshold), per profile and head class, and counts the frames a
+  candidate decides otherwise than the installed pair. The quality ratchet's calibration reference
+  and the comparison before a sealed test is read were measured with session scripts until now; on
+  corpus v36 the tool gives the same counts (13 967 and 13 997 of 14 403 conversions, 12 false).
+
 ## 0.43.0 — 2026-10-07
 
 - An English message that opens with an initial, a list or a name stays as typed: `J. Smith said`

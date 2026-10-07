@@ -40,8 +40,8 @@ RECEIPT_MIN_CALIBRATION_RECALL: Final = 0.977
 # much as the model. The installed pair is judged against the pair it replaced on the same rows
 # instead: what it nets there - conversions right minus conversions false, per profile - may not
 # fall below what the replaced pair nets. The replaced pair's counts are measured on the corpus the
-# receipt names, with the runtime's own scoring of its artifact; a receipt of another corpus needs
-# them measured anew, and the test refuses it until they are. Corpus v30: the corpus v26 pair
+# receipt names, with the runtime's own scoring of its artifact (tools/compare_context_candidates.py); a
+# receipt of another corpus needs them measured anew, and the test refuses it until they are. Corpus v30: the corpus v26 pair
 # (context-v3-984962d926d3, 0.39.0) converts 13 446 and 13 482 of the 13 774 conversion rows with
 # 10 false conversions in each profile (measured as the seal of that pair with the kept-neighbour
 # head alone, which no calibration frame asks, scores it; on corpus v29 that seal and the runtime
