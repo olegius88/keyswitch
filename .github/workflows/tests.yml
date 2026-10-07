@@ -498,7 +498,7 @@ jobs:
             _ "$package"
 
   windows:
-    name: Strict Win32 tests and native installer
+    name: Strict Win32 tests and E2E
     runs-on: windows-2025
 
     steps:
@@ -510,18 +510,6 @@ jobs:
         with:
           python-version: "3.14"
           cache: pip
-
-      - name: Point Nuitka at a cache that survives the job
-        shell: bash
-        run: echo "NUITKA_CACHE_DIR=$RUNNER_TEMP/nuitka-cache" >> "$GITHUB_ENV"
-
-      - name: Restore the Nuitka compiler cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ runner.temp }}/nuitka-cache
-          key: nuitka-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/keyswitch/**', 'packaging/**', 'tools/install-build-tools.sh') }}
-          restore-keys: |
-            nuitka-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install pinned typing, runtime and build dependencies
         run: |
@@ -589,6 +577,40 @@ jobs:
             python tests/e2e_windows.py
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
+
+  windows-installer:
+    # The installer does not wait for the tests: it builds on a runner of its own beside them.
+    name: Native Windows installer (x64)
+    runs-on: windows-2025
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Point Nuitka at a cache that survives the job
+        shell: bash
+        run: echo "NUITKA_CACHE_DIR=$RUNNER_TEMP/nuitka-cache" >> "$GITHUB_ENV"
+
+      - name: Restore the Nuitka compiler cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/nuitka-cache
+          key: nuitka-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/keyswitch/**', 'packaging/**', 'tools/install-build-tools.sh') }}
+          restore-keys: |
+            nuitka-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install pinned runtime and build dependencies
+        run: |
+          # pwsh reports only the last command's exit code; without this a
+          # failing command earlier in the step would leave it green.
+          $PSNativeCommandUseErrorActionPreference = $true
+          python -m pip install Nuitka==4.2 ordered-set==4.1.0 pystray==0.19.5 Pillow==12.3.0 comtypes==1.4.16
 
       - name: Build and self-diagnose native ZIP and Inno Setup installer
         shell: pwsh
