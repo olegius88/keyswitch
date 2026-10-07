@@ -11,6 +11,15 @@ All notable changes to KeySwitch are documented in this file.
   as that word only when the Russian layout prints a space, nothing or a clause sign right after it:
   `J.` is `Ою` there and `C#` is `С№`, no word a message opens with, while a Russian message typed in
   the English layout is corrected as before (`f? gjyznyj` is `а, понятно`, `f& xnj` is `а? что`).
+- The context model is the 0.42.0 model with its single-letter head fitted on corpus v35
+  (`context-v3-8a679c1eb72e`; test v35 sealed before training and passed), trained and certified
+  with the corrected rule. It decides every word of the owner's typing replay as 0.42.0 (726 right,
+  104 missed, 68 false) and every calibration frame of corpus v35; of the 51 809 development frames
+  one differs, a curriculum letter at the serving threshold (`typescript e csv`). On test v35
+  it keeps all 213 correctly typed rows and restores 180 of 211 mistyped rows with the early switch
+  off against 159, and 16 against 15 with it on. The prefix model retrained byte-identical. A
+  frozen-base fit builds only the frames that ask a head's question: its features are ready in
+  140 seconds instead of 506.
 - The Windows installer is built beside the Windows tests instead of after them: the ARM64 job of
   the 0.42.0 release took 19.2 minutes, 10 of them the installer and its smoke test. The prefix
   engine replay runs on a runner of its own beside the other model replays: the Tests workflow took
