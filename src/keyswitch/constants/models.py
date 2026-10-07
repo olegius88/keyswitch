@@ -46,6 +46,34 @@ KEPT_FEATURE_PREFIX: Final = "kept|"
 CAPITALS_FEATURE_PREFIX: Final = "caps|"
 CAPITALS_HEAD_MIN_LETTERS: Final = 2
 CAPITALS_HEAD_MAX_LETTERS: Final = 5
+# A token of ALONE_HEAD_LETTERS letters with no letter on either side in the field, sent or left at a
+# pause - a one-word message - has its features once more under this prefix: the lone-word head,
+# fitted onto a frozen model, answers that class alone. Two letters are where the
+# owner's typing left most lone words in the wrong layout (`гш` for `ui`, `зщ` for `po`), because
+# every such frame of the corpus was deferred (context_deferral).
+ALONE_FEATURE_PREFIX: Final = "alone|"
+ALONE_HEAD_LETTERS: Final = 2
+# The lone-word head reads the ratio of a word's two counts as the difference of their binary orders of
+# magnitude, clamped to this bound either way.
+ALONE_COUNT_RATIO_BOUND: Final = 8
+# A word of letters of at least START_HEAD_MIN_LETTERS, letters in both layouts, with no letter on either
+# side in the field - the first word of a message, decided before anything follows it - has its features
+# once more under this prefix: the message-start head, fitted onto a frozen model, answers that class
+# alone. The shared features read how often each reading occurs in Russian and in English prose only for
+# a word with text around it, so the first word was decided by its letters and the term tables, in which
+# neither reading of a rare Russian word occurs: a correctly typed gerund opening a message turned into
+# its Latin keys, whose ending reads like an English past tense. The head reads both prose counts too
+# (the same ratio bound as the lone-word head). Two letters belong to the lone-word head; three letters
+# alone are deferred where both readings are plausible (context_deferral), and a head fitted on them
+# turned the owner's `чук`, `дес` and `дые` into Latin, so the class starts at four.
+START_FEATURE_PREFIX: Final = "start|"
+START_HEAD_MIN_LETTERS: Final = 4
+# The message-start head also reads the detector's score delta in bands of this width, up to this many
+# bands either way: the shared feature is clamped at ACTION_FEATURE_WORD_SCORE_BOUND, where nearly every
+# correctly typed first word and every rare Russian word the model converted at once both lie, and a
+# band of its own lets the head answer that end and the other one apart.
+START_DELTA_BAND_WIDTH: Final = 2.5
+START_DELTA_BANDS: Final = 6
 # The "length" feature buckets every word length from here up together (schemas 2 and 3).
 ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: Final = 6
 # Short categorical field labels (role, trigger) truncated before they reach a feature name.
@@ -149,10 +177,11 @@ CONTEXT_FEATURE_NGRAM_ORDERS: Final = (1, 2, 3)
 # and version strings of at most these many characters, weights of at most this magnitude, and a
 # conversion threshold from this floor up to one.
 MAX_CONTEXT_MODEL_FEATURES: Final = 50000
-# An action model (schema 3) holds up to three feature spaces: the word decided at its boundary, the
-# kept-neighbour question (KEPT_FEATURE_PREFIX) and the capitals head (CAPITALS_FEATURE_PREFIX), each
-# with its own budget in the recipe.
-MAX_CONTEXT_ACTION_MODEL_FEATURES: Final = 80000
+# An action model (schema 3) holds up to five feature spaces: the word decided at its boundary, the
+# kept-neighbour question (KEPT_FEATURE_PREFIX), the capitals head (CAPITALS_FEATURE_PREFIX), the
+# lone-word head (ALONE_FEATURE_PREFIX) and the message-start head (START_FEATURE_PREFIX), each with its
+# own budget in the recipe.
+MAX_CONTEXT_ACTION_MODEL_FEATURES: Final = 95000
 MAX_CONTEXT_FEATURE_NAME_CHARACTERS: Final = 512
 MAX_CONTEXT_MODEL_VERSION_CHARACTERS: Final = 80
 MAX_CONTEXT_WEIGHT_MAGNITUDE: Final = 1000

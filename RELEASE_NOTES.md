@@ -4,7 +4,7 @@
 
 Короткий термин, набранный в русской раскладке посреди русского текста, теперь исправляется,
 даже если следующее слово набрано верно: `есть новые зк проверь` → `есть новые pr проверь`.
-Латинская аббревиатура заглавными в английском тексте остаётся латиницей (`the BP oil spill`
+Латинская аббревиатура заглавными в английском тексте остаётся латиницей (`BP` в английской фразе
 больше не становится `ИЗ`). Всё остальное модель решает так же, как 0.39.0: её веса не тронуты,
 поверх них обучены две отдельные части — для таких терминов и для заглавных после латиницы.
 Полный перечень — в [CHANGELOG.md](CHANGELOG.md).
@@ -46,8 +46,8 @@
   `pr`, `тзь` → `npm`, `фзл` → `apk`, `вум` → `dev`, `ьв` → `md`), следующее слово остаётся как
   было, а отмена возвращает оба.
 - Латинская аббревиатура заглавными посреди английского текста остаётся латиницей, даже если
-  её клавиши в русской раскладке дают частое русское слово: `affected by the BP oil spill`
-  больше не превращает `BP` в `ИЗ`, `Lakers VS` — в `МЫ`.
+  её клавиши в русской раскладке дают частое русское слово: в английской фразе `BP` больше
+  не становится `ИЗ`, а `Lakers VS` — `Lakers МЫ`.
 
 ### Что осталось
 
@@ -66,8 +66,8 @@
 
 A short term typed in the Russian layout amid Russian text is now corrected even when the next
 word is typed right: `есть новые зк проверь` → `есть новые pr проверь`. A Latin abbreviation in
-capitals inside English text stays Latin (`the BP oil spill` no longer becomes `ИЗ`). Everything
-else is decided as in 0.39.0: its weights are untouched, and two separate parts are trained on
+capitals inside English text stays Latin (`BP` in an English sentence no longer becomes `ИЗ`).
+Everything else is decided as in 0.39.0: its weights are untouched, and two separate parts are trained on
 top of them, one for such terms and one for capitals after Latin text. The full list is in
 [CHANGELOG.md](CHANGELOG.md).
 
@@ -107,8 +107,8 @@ versa.
   `npm`, `фзл` → `apk`, `вум` → `dev`, `ьв` → `md`), the next word stays as it was, and undo
   restores both.
 - A Latin abbreviation in capitals inside English text stays Latin even when its keys in the
-  Russian layout spell a common Russian word: `affected by the BP oil spill` no longer turns `BP`
-  into `ИЗ`, nor `Lakers VS` into `МЫ`.
+  Russian layout spell a common Russian word: in an English sentence `BP` no longer turns into `ИЗ`,
+  nor `Lakers VS` into `Lakers МЫ`.
 
 ### What remains
 

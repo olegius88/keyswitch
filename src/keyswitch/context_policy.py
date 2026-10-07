@@ -15,6 +15,7 @@ from .short_words import ISOLATED_SHORT_WORD_REASON, is_short_word_override, ope
 from .word_decision import NOT_A_WORD_REASON
 from .constants.detection import MINIMUM_SHAPED_TOKEN_CHARACTERS
 from .constants.models import CONTEXT_ACTION_FEATURE_VERSION, RUSSIAN_SLANG_MIN_TERM_BUCKET
+from .constants.text import FIELD_CARET_LAG_MAX_CHARACTERS
 
 # A curated one-letter Russian word typed in the English layout right after an English term inside
 # a Russian phrase (KeySwitchEngine._stranded_letter): an explicit rule like the message-start one.
@@ -115,6 +116,27 @@ def ends_with_typed(text: str, typed: str) -> bool:
         tail[:1].casefold() == typed[:1].casefold())
 
 
+def caret_lag(before: str, after: str, typed: str, *, exact: bool = False) -> int | None:
+    """How many characters a field reports its caret short of the end of ``typed``, or None.
+
+    A native snapshot normally ends its text before the caret with what was typed, the boundary
+    after it or not yet (ends_with_typed). VS Code Insiders (06.10.2026) reported the caret of its
+    chat box one character early: the last typed letter stood after the caret, a word just begun
+    read as typed into another one, and every word was refused as a changed field although the
+    text was exactly the one typed, as the manual conversion of the same words showed. Up to
+    FIELD_CARET_LAG_MAX_CHARACTERS characters after the reported caret are taken as typed before
+    it when that is what makes the text end with the typed word; text that does not hold it
+    there is still a changed field. `exact` asks for the text to end with ``typed`` itself, the
+    boundary already part of it and nothing after it.
+    """
+
+    for lag in range(min(FIELD_CARET_LAG_MAX_CHARACTERS, len(after)) + 1):
+        head = before + after[:lag]
+        if ends_with_typed(head, typed) or (not exact and ends_with_typed(head[:-1], typed)):
+            return lag
+    return None
+
+
 def evidence_for_decision(
     baseline: DetectionDecision, alternative: str, target_group: int,
     detector: LanguageDetector, field: FieldContext, trigger: str,
@@ -187,6 +209,9 @@ class ContextPolicy:
                 # boundary. Only use it if anchored to this exact suffix.
                 if snapshot.sensitive or snapshot.selection:
                     return ContextResult(replace(baseline, should_convert=False, reason="защищённое поле или выделение"), field=snapshot, decision_source="safety", fallback_reason="sensitive_or_selected_field")
+                lag = caret_lag(snapshot.before, snapshot.after, anchor)
+                if lag:
+                    snapshot = replace(snapshot, before=snapshot.before + snapshot.after[:lag], after=snapshot.after[lag:])
                 before = snapshot.before
                 if anchor and ends_with_typed(before, anchor):
                     field = replace(snapshot, before=before[:-len(anchor)])

@@ -85,7 +85,7 @@ from keyswitch.constants.training import (
     CONTEXT_OPTIMIZER_CACHE_DIGEST_CHARACTERS,
 )
 from keyswitch.constants.models import FNV1A64_OFFSET_BASIS, FNV1A64_PRIME
-from keyswitch.context_action_features import capitals_question
+from keyswitch.context_action_features import alone_question, capitals_question, start_question
 from keyswitch.context_model import AfterOrigin, ContextEvidence, _term_frequency
 from keyswitch.detector import PROTECTED_TOKENS
 from keyswitch.identifier_lexicon import IdentifierLexicon
@@ -604,6 +604,17 @@ RECORD = np.dtype([("source", "f8", SCORE_COUNT), ("target", "f8", SCORE_COUNT),
                    ("flags", "i8"), ("source_group", "i8"), ("after_origin", "i8")])
 
 
+def heads_question(original: str, before: str, after: str, trigger: str) -> bool:
+    """Whether a frame may have a head's second copy of its features, which the kernels do not make.
+
+    The lone-word and message-start heads' classes also ask for the other reading to be letters; every
+    frame they could hold takes the CPU path, which decides that as the features do.
+    """
+
+    return (capitals_question(original, before) or alone_question(original, original, before, after, trigger)
+            or start_question(original, original, before, after))
+
+
 def record_of(evidence: ContextEvidence) -> npt.NDArray[np.void]:
     """One ContextEvidence as a record: the host path for frames whose evidence Python made (span frames)."""
     record = np.zeros(1, dtype=RECORD)
@@ -703,10 +714,11 @@ class Items:
                 triggers[number] = trigger_index.get(row.trigger, 0)
                 origins[number] = origin_index.get(row.after_origin, 0)
                 # The kernels leave out the kept-neighbour question, whose features are renamed
-                # (KEPT_FEATURE_PREFIX), and the capitals head's second copy of a token's features
-                # (CAPITALS_FEATURE_PREFIX): those frames take the CPU path.
+                # (KEPT_FEATURE_PREFIX), and the heads' second copy of a token's features
+                # (CAPITALS_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, START_FEATURE_PREFIX): those frames take the CPU path.
                 fits[number] = (row.trigger in trigger_index and row.after_origin in origin_index
-                                and row.after_origin != "kept_next_word" and not capitals_question(row.original, row.field.before)
+                                and row.after_origin != "kept_next_word"
+                                and not heads_question(row.original, row.field.before, row.field.after, row.trigger)
                                 and row.group in range(LAYOUT_GROUP_COUNT))
                 dropped[number] = split == TRAIN and trainer.identifier_evidence_dropped(row.identifier)
                 action_row[number] = True
@@ -717,6 +729,7 @@ class Items:
                           evidence.trigger, evidence.literal_tail, evidence.boundary_text)
                 self.span_records[number] = record_of(evidence)
                 span_alternatives.append((number, evidence.alternative))
+                fits[number] = not heads_question(evidence.original, field.before, field.after, evidence.trigger)
             for column, value in enumerate(values):
                 strings[column].append(value)
         host_columns = [encode(texts) for texts in strings]

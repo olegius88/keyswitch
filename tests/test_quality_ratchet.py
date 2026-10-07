@@ -114,7 +114,9 @@ class ReleaseReceiptFloorTests(unittest.TestCase):
 
     def test_calibration_recall_holds_and_the_pair_nets_at_least_the_one_it_replaced(self) -> None:
         calibration = section(self.receipt, "calibration")
-        self.assertGreaterEqual(number(calibration, "conversion_recall"), RECEIPT_MIN_CALIBRATION_RECALL)
+        # The recall floor reads the frames outside the lone-word head's class, whose labels are the text
+        # itself; the balance below, every frame.
+        self.assertGreaterEqual(number(section(calibration, "outside_lone_word"), "conversion_recall"), RECEIPT_MIN_CALIBRATION_RECALL)
         # The replaced pair was measured on these very rows; another corpus needs it measured anew.
         self.assertEqual(self.receipt["corpus_manifest_sha256"], RECEIPT_CALIBRATION_REFERENCE_CORPUS)
         self.assertNotEqual(self.receipt["model_version"], RECEIPT_CALIBRATION_REFERENCE_MODEL)

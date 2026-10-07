@@ -10,11 +10,16 @@ from unittest.mock import patch
 
 from keyswitch.context_action_features import extract_action_features
 from keyswitch.constants.models import (
+    ALONE_COUNT_RATIO_BOUND,
+    ALONE_FEATURE_PREFIX,
     CAPITALS_FEATURE_PREFIX,
     CONTEXT_ACTION_FEATURE_VERSION,
     KEPT_CONTEXT_WORD_MAX_CHARACTERS,
     KEPT_FEATURE_PREFIX,
     PLANNED_CONTEXT_AFTER_MAX_CHARACTERS,
+    START_DELTA_BAND_WIDTH,
+    START_DELTA_BANDS,
+    START_FEATURE_PREFIX,
 )
 from keyswitch.context_model import ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, ContextPrediction, extract_context_features
 from keyswitch.context_policy import ContextPolicy, evidence_for_decision
@@ -124,7 +129,7 @@ class ContextAfterOriginTests(unittest.TestCase):
                 self.assertEqual((own.predict(item).action, own.predict(item).supported), ("suggest", False))
 
     def test_a_token_in_capitals_has_its_features_once_more_for_the_capitals_head(self) -> None:
-        capitals = ContextEvidence("BP", "ИЗ", 0, FieldContext("Editor", "1", "affected by the ", ""), boundary_text=" ")
+        capitals = ContextEvidence("BP", "ИЗ", 0, FieldContext("Editor", "1", "according to the ", ""), boundary_text=" ")
         features = extract_action_features(capitals)
         shared = {name: value for name, value in features.items() if not name.startswith(CAPITALS_FEATURE_PREFIX)}
         self.assertEqual({name.removeprefix(CAPITALS_FEATURE_PREFIX): value for name, value in features.items()
@@ -147,6 +152,82 @@ class ContextAfterOriginTests(unittest.TestCase):
             model = ContextModel(weights, "context-v3-capitals", feature_version=CONTEXT_ACTION_FEATURE_VERSION)
             self.assertEqual(model.predict(capitals).action, expected)
             self.assertEqual(model.predict(self.item).action, "convert")
+
+    def test_a_lone_two_letter_token_has_its_features_once_more_for_the_lone_word_head(self) -> None:
+        lone = ContextEvidence("гш", "ui", 1, FieldContext("Telegram", "1", "", ""), trigger="enter", boundary_text="\n")
+        features = extract_action_features(lone)
+        shared = {name: value for name, value in features.items() if not name.startswith(ALONE_FEATURE_PREFIX)}
+        own = {name.removeprefix(ALONE_FEATURE_PREFIX): value for name, value in features.items() if name.startswith(ALONE_FEATURE_PREFIX)}
+        # The shared features once more, and the orders of magnitude of the two counts: `ui` is counted 4752
+        # times (13 binary digits), `гш` never.
+        self.assertEqual({name: value for name, value in own.items() if not name.startswith("count:")}, shared)
+        self.assertEqual(sorted(name for name in own if name.startswith("count:")),
+                         ["count:13:0:direction:1", "count:cyrillic:0:direction:1", "count:latin:13:direction:1",
+                          f"count:ratio:{ALONE_COUNT_RATIO_BOUND}:direction:1"])
+        # Signs and digits around it leave it alone; a capitalised word too.
+        for item in (replace(lone, field=replace(lone.field, before="1. ", after=" :)")), replace(lone, original="Гш", alternative="Ui")):
+            with self.subTest(item=item):
+                self.assertTrue(any(name.startswith(ALONE_FEATURE_PREFIX) for name in extract_action_features(item)))
+        # A word before or after it, a space after it (the next word may come), one letter, three letters, a
+        # reading with a sign (`хз` is `[p`) and the kept-neighbour question: no head.
+        for item in (replace(lone, field=replace(lone.field, before="есть ")), replace(lone, field=replace(lone.field, after="кнопка")),
+                     replace(lone, trigger="space", boundary_text=" "),
+                     replace(lone, original="г", alternative="u"), replace(lone, original="гшы", alternative="uis"),
+                     replace(lone, original="хз", alternative="[p"),
+                     replace(lone, field=replace(lone.field, after="нас"), trigger="space", boundary_text=" ",
+                             after_origin="kept_next_word")):
+            with self.subTest(item=item):
+                self.assertFalse(any(name.startswith(ALONE_FEATURE_PREFIX) for name in extract_action_features(item)))
+        # Without head weights the shared ones decide; a head weight answers the class alone.
+        support = {name: (0.0,) * len(ACTIONS) for item in (self.item, lone) for name in extract_action_features(item)
+                   if name.startswith(("source:char:", "target:char:"))}
+        plain = {**support, "bias": (AFTER_ORIGIN_DECISIVE_BIAS_WEIGHT, 0.0, 0.0, 0.0)}
+        head = {**plain, ALONE_FEATURE_PREFIX + "bias": (0.0, AFTER_ORIGIN_DECISIVE_BIAS_WEIGHT * len(ACTIONS), 0.0, 0.0)}
+        for weights, expected in ((plain, "keep"), (head, "convert")):
+            model = ContextModel(weights, "context-v3-alone", feature_version=CONTEXT_ACTION_FEATURE_VERSION)
+            self.assertEqual(model.predict(lone).action, expected)
+            self.assertEqual(model.predict(self.item).action, "keep")
+
+    def test_a_word_alone_in_the_field_has_its_features_once_more_for_the_message_start_head(self) -> None:
+        first = ContextEvidence("руддщ", "hello", 1, FieldContext("Telegram", "1", "", ""), trigger="space", boundary_text=" ")
+        features = extract_action_features(first)
+        shared = {name: value for name, value in features.items() if not name.startswith(START_FEATURE_PREFIX)}
+        own = {name.removeprefix(START_FEATURE_PREFIX): value for name, value in features.items() if name.startswith(START_FEATURE_PREFIX)}
+        # The shared features once more, the orders of magnitude of the two prose counts (`hello` occurs 483
+        # times in English prose, 9 binary digits; `руддщ` never in Russian) and the band of the score delta.
+        self.assertEqual({name: value for name, value in own.items() if not name.startswith(("count:", "delta:"))}, shared)
+        self.assertEqual(sorted(name for name in own if name.startswith(("count:", "delta:"))),
+                         ["count:9:0:direction:1", "count:english:9:direction:1",
+                          f"count:ratio:{ALONE_COUNT_RATIO_BOUND}:direction:1", "count:russian:0:direction:1", "delta:0:direction:1"])
+        # The band reads the delta past the shared feature's bound, and stops at its own.
+        far = START_DELTA_BAND_WIDTH * START_DELTA_BANDS * START_DELTA_BANDS
+        for delta, band in ((START_DELTA_BAND_WIDTH, 1), (-START_DELTA_BAND_WIDTH, -1), (far, START_DELTA_BANDS), (-far, -START_DELTA_BANDS)):
+            with self.subTest(delta=delta):
+                self.assertIn(f"{START_FEATURE_PREFIX}delta:{band}:direction:1", extract_action_features(replace(first, score_delta=delta)))
+        # Any boundary, signs and digits around it, a capitalised word: the first word of a message.
+        for item in (replace(first, trigger="enter", boundary_text="\n"), replace(first, field=replace(first.field, before="1. ", after=" :)")),
+                     replace(first, original="Руддщ", alternative="Hello")):
+            with self.subTest(item=item):
+                self.assertTrue(any(name.startswith(START_FEATURE_PREFIX) for name in extract_action_features(item)))
+        # A word before or after it, two letters (the lone-word head's or the next word's), three (deferred
+        # where both readings are plausible), a reading with a sign (`хлопнув` is `{kjgyed`) and the
+        # kept-neighbour question: no head.
+        for item in (replace(first, field=replace(first.field, before="есть ")), replace(first, field=replace(first.field, after="кнопка")),
+                     replace(first, original="гш", alternative="ui"), replace(first, original="чук", alternative="xer"),
+                     replace(first, original="хлопнув", alternative="{kjgyed"),
+                     replace(first, original="руд", alternative="hel", field=replace(first.field, after="нас"),
+                             after_origin="kept_next_word")):
+            with self.subTest(item=item):
+                self.assertFalse(any(name.startswith(START_FEATURE_PREFIX) for name in extract_action_features(item)))
+        # Without head weights the shared ones decide; a head weight answers the class alone.
+        support = {name: (0.0,) * len(ACTIONS) for item in (self.item, first) for name in extract_action_features(item)
+                   if name.startswith(("source:char:", "target:char:"))}
+        plain = {**support, "bias": (AFTER_ORIGIN_DECISIVE_BIAS_WEIGHT, 0.0, 0.0, 0.0)}
+        head = {**plain, START_FEATURE_PREFIX + "bias": (0.0, AFTER_ORIGIN_DECISIVE_BIAS_WEIGHT * len(ACTIONS), 0.0, 0.0)}
+        for weights, expected in ((plain, "keep"), (head, "convert")):
+            model = ContextModel(weights, "context-v3-start", feature_version=CONTEXT_ACTION_FEATURE_VERSION)
+            self.assertEqual(model.predict(first).action, expected)
+            self.assertEqual(model.predict(self.item).action, "keep")
 
     def test_v2_features_and_predictions_ignore_origin_entirely(self) -> None:
         model = ContextModel({"bias": (0.0, AFTER_ORIGIN_CONVERT_BIAS_WEIGHT, 0.0, 0.0), "app:editor": (0.0,) * len(ACTIONS)}, "context-v1-origin")

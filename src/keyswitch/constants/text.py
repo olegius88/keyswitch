@@ -13,6 +13,10 @@ ATSPI_MAX_VISITED_NODES: Final = 128
 # Characters a platform field reader reads after the caret; the before side is bounded by
 # FIELD_CONTEXT_MAX_CHARACTERS, a different limit.
 FIELD_AFTER_CARET_MAX_CHARACTERS: Final = 128
+# The most characters a field reader may report its caret short of the end of what was typed and
+# still be taken as the same text: VS Code Insiders (06.10.2026) reported the caret of its chat box
+# one character early, the last typed letter after it, and every word there was refused.
+FIELD_CARET_LAG_MAX_CHARACTERS: Final = 2
 # Field text kept on each side of the caret, typed or read (input_context exports it as
 # CONTEXT_LIMIT), and the longest application name, field identifier and source label a field
 # context carries.

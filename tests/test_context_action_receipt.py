@@ -135,7 +135,11 @@ class ContextActionReceiptTests(unittest.TestCase):
             "provenance": self.hashes, "recipe": self.recipe, "gate_policy": CONTEXT_ACTION_GATE_POLICY,
             "calibration": {"rows": SEAL_FIXTURE_CALIBRATION_ROWS, "convert_rows": SEAL_FIXTURE_CALIBRATION_CONVERT_ROWS,
                 "converted_correctly": SEAL_FIXTURE_CALIBRATION_CONVERTED_CORRECTLY, "false_conversions": 0,
-                "conversion_recall": SEAL_FIXTURE_CONVERSION_RECALL, "by_profile": {name: dict(profile) for name in PROFILES}},
+                "conversion_recall": SEAL_FIXTURE_CONVERSION_RECALL, "by_profile": {name: dict(profile) for name in PROFILES},
+                # The fixture has no lone-word frame: outside that class is every frame.
+                "outside_lone_word": {"rows": SEAL_FIXTURE_CALIBRATION_ROWS, "convert_rows": SEAL_FIXTURE_CALIBRATION_CONVERT_ROWS,
+                    "converted_correctly": SEAL_FIXTURE_CALIBRATION_CONVERTED_CORRECTLY, "false_conversions": 0,
+                    "conversion_recall": SEAL_FIXTURE_CONVERSION_RECALL, "by_profile": {name: dict(profile) for name in PROFILES}}},
             "private_note": self.secret}
         self.seal_path.write_bytes(verifier.canonical(self.seal))
         self.prefix_seal_path = self.corpus / "prefix-seal.json"
@@ -282,15 +286,25 @@ class ContextActionReceiptTests(unittest.TestCase):
 
     def test_calibration_profile_and_aggregate_consistency_are_required(self) -> None:
         original = self.exported()
-        for target in ("portable", "reference_hunspell", "aggregate"):
-            for field, value in (("false_conversions", 1), ("conversion_recall", 1.0), ("rows", -1), ("convert_rows", True)):
-                with self.subTest(target=target, field=field):
-                    changed = deepcopy(original)
-                    aggregate = cast(dict[str, object], changed["calibration"])
-                    current = aggregate if target == "aggregate" else cast(dict[str, dict[str, object]], aggregate["by_profile"])[target]
-                    current[field] = value
-                    with self.assertRaises(ValueError):
-                        self.verify(changed)
+        self.assertEqual(cast(dict[str, object], original["calibration"])["outside_lone_word"],
+                         {name: value for name, value in cast(dict[str, object], original["calibration"]).items() if name != "outside_lone_word"})
+        for block in ("calibration", "outside_lone_word"):
+            for target in ("portable", "reference_hunspell", "aggregate"):
+                for field, value in (("false_conversions", 1), ("conversion_recall", 1.0), ("rows", -1), ("convert_rows", True)):
+                    with self.subTest(block=block, target=target, field=field):
+                        changed = deepcopy(original)
+                        aggregate = cast(dict[str, object], changed["calibration"])
+                        if block == "outside_lone_word":
+                            aggregate = cast(dict[str, object], aggregate[block])
+                        current = aggregate if target == "aggregate" else cast(dict[str, dict[str, object]], aggregate["by_profile"])[target]
+                        current[field] = value
+                        with self.assertRaises(ValueError):
+                            self.verify(changed)
+        # The calibration outside the lone-word class is part of the receipt, and no larger than the whole.
+        missing = deepcopy(original)
+        del cast(dict[str, object], missing["calibration"])["outside_lone_word"]
+        with self.assertRaises(ValueError):
+            self.verify(missing)
 
     def test_artifact_recipe_and_provenance_tampering_fail_closed(self) -> None:
         original = self.exported()
