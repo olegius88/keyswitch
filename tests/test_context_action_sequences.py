@@ -465,8 +465,10 @@ class PhysicalSequenceTests(unittest.TestCase):
                     "expected_final_group": plan.expected_final_group, "final_layout_matches": True,
                     "corrections": [], "error": None}
 
+        # One process, so that the replays this test records are recorded here.
         with patch.object(evaluator, "reference_models", side_effect=models), \
-                patch.object(evaluator, "replay", side_effect=replay) as replayed:
+                patch.object(evaluator, "replay", side_effect=replay) as replayed, \
+                patch.dict(os.environ, {evaluator.EVALUATION_JOBS_VARIABLE: "1"}):
             report = evaluator.score_sequences(rows, candidate, baseline,
                                                prefix_candidate=prefix_candidate, prefix_baseline=prefix_baseline)
         profiles = cast(dict[str, dict[str, object]], report["profiles"])
@@ -516,6 +518,29 @@ class PhysicalSequenceTests(unittest.TestCase):
             control = cast(dict[str, object], profiles[profile]["early_off"])
             self.assertFalse(cast(dict[str, bool], control["gates"])["net_restorations_at_least_baseline"])
         self.assertIs(report["promotion_passed"], False)
+
+    def test_replays_in_worker_processes_give_the_report_of_one_process(self) -> None:
+        rows = [row("hello" if group == 0 else "привет", group,
+                    identifier=f"source:{group}:{index}", document=f"document:{group}:{index}")
+                for group in (0, 1) for index in range(FIXTURE_ROWS_PER_GROUP)]
+        candidate, baseline = authored_model(), authored_model()
+
+        def replay(plan: evaluator.SequencePlan, model: ContextModel, language_models: dict[int, LanguageModel], *,
+                   prefix: PrefixModel | None = None, mode: str = "early_off") -> dict[str, object]:
+            restored = plan.initially_wrong and model is candidate and mode == "default"
+            actual = plan.expected if restored or not plan.initially_wrong else "wrong"
+            return {"mode": mode, "actual": actual, "exact": actual == plan.expected, "length_mismatch": False,
+                    "final_group": plan.expected_final_group, "expected_final_group": plan.expected_final_group,
+                    "final_layout_matches": True, "corrections": [], "error": None}
+
+        reports = []
+        for jobs in ("1", str(len(PROFILES))):
+            with patch.object(evaluator, "reference_models", return_value={}), patch.object(evaluator, "replay", side_effect=replay), \
+                    patch.dict(os.environ, {evaluator.EVALUATION_JOBS_VARIABLE: jobs}):
+                reports.append(json.dumps(evaluator.score_sequences(rows, candidate, baseline, prefix_candidate=authored_prefix(),
+                                                                    prefix_baseline=authored_prefix()), sort_keys=True))
+        self.assertEqual(reports[0], reports[1])
+        self.assertEqual(evaluator._REPLAY_STATE, {})
 
     def test_replay_injects_explicit_prefix_and_both_modes_run_engine_timers(self) -> None:
         intent = cast(LinearNgramModel, Mock(spec=LinearNgramModel, model_version="authored-intent", checksum="f" * SHA256_HEX_CHARACTERS))
