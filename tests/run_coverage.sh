@@ -11,5 +11,11 @@ export GTK_A11Y="${GTK_A11Y:-none}"
 export PYTHONWARNINGS="${PYTHONWARNINGS:-ignore::DeprecationWarning}"
 
 python3 -m coverage erase
-python3 -m coverage run -m unittest discover -s tests -v
+# Every module in a process of its own, as many at a time as there are cores (tools/run_test_modules.py);
+# the modules that open windows, read the clipboard or listen to AT-SPI on the shared display take turns.
+python3 tools/run_test_modules.py \
+  --serial test_context_access.py --serial test_input_integrity.py --serial test_learning_prompt.py \
+  --serial test_tray_app.py --serial test_ui.py --serial test_x11_backend.py \
+  'test_*.py' -- python3 -m coverage run --parallel-mode -m unittest discover -s tests -v -p
+python3 -m coverage combine --quiet
 python3 -m coverage report
