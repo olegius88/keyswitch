@@ -29,6 +29,14 @@ from fixture_values.scores import (
     FROZEN_GATE_FIXTURE_THRESHOLD,
     FROZEN_GATE_MINIMUM_DECIDED_FRACTION_PER_STRATUM,
 )
+from fixture_values.counts import (
+    PREFIX_REPLAY_FIXTURE_CATEGORIES,
+    PREFIX_REPLAY_FIXTURE_DESIRED_PERIOD,
+    PREFIX_REPLAY_FIXTURE_EARLY_PERIOD,
+    PREFIX_REPLAY_FIXTURE_FAILURE_PERIOD,
+    PREFIX_REPLAY_FIXTURE_INJECTION_PERIOD,
+    PREFIX_REPLAY_FIXTURE_JOBS,
+)
 from keyswitch.constants.file_formats import SHA256_HEX_CHARACTERS
 
 # The installed anchors, read before any test patches them.
@@ -298,6 +306,36 @@ class FrozenGateDispatchTests(unittest.TestCase):
                 patch.object(PrefixModel, "load", return_value=None), redirect_stdout(io.StringIO()):
             with self.assertRaisesRegex(ValueError, "runtime inputs changed"):
                 prefix.evaluate("development")
+
+    def test_the_prefix_engine_replay_in_worker_processes_gives_the_report_of_one_process(self) -> None:
+        import os
+        import evaluate_prefix_engine as prefix
+        from keyswitch.constants.training import PREFIX_EVALUATION_MAX_RECORDED_FAILURES
+        from keyswitch.prefix_model import PrefixModel
+        # More failing rows than are recorded, each variant and field context failing different ones.
+        rows = [{"sequence": number, "text": "input", "category": f"category-{number % PREFIX_REPLAY_FIXTURE_CATEGORIES}",
+                 "desired": number % PREFIX_REPLAY_FIXTURE_DESIRED_PERIOD == 0}
+                for number in range(PREFIX_EVALUATION_MAX_RECORDED_FAILURES)]
+        candidate = object()
+
+        def replay(row: dict[str, object], model: object, models: object, indexes: object, native: bool) -> dict[str, object]:
+            number = cast(int, row["sequence"])
+            exact = (number + int(native) + int(model is candidate)) % PREFIX_REPLAY_FIXTURE_FAILURE_PERIOD != 0
+            return {"expected": "output ", "actual": "output " if exact else "wrong ",
+                    "early_at": number % PREFIX_REPLAY_FIXTURE_EARLY_PERIOD or None,
+                    "injections": number % PREFIX_REPLAY_FIXTURE_INJECTION_PERIOD}
+
+        reports = []
+        for jobs in ("1", str(PREFIX_REPLAY_FIXTURE_JOBS)):
+            with patch.object(prefix, "verify_receipt"), patch.object(prefix, "lexicon", return_value=({}, {})), \
+                    patch.object(prefix, "provenance", return_value={"runtime.py": "same"}), \
+                    patch.object(prefix, "select", return_value=rows), patch.object(prefix, "replay", side_effect=replay), \
+                    patch.object(PrefixModel, "load", return_value=candidate), \
+                    patch.dict(os.environ, {prefix.EVALUATION_JOBS_VARIABLE: jobs}), redirect_stdout(io.StringIO()):
+                reports.append(json.dumps(prefix.evaluate("development"), sort_keys=True))
+        self.assertEqual(reports[0], reports[1])
+        self.assertEqual(len(json.loads(reports[0])["examples"]), PREFIX_EVALUATION_MAX_RECORDED_FAILURES)
+        self.assertEqual(prefix._REPLAY_STATE, {})
 
 
 if __name__ == "__main__":
