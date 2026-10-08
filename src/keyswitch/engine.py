@@ -3759,6 +3759,14 @@ class KeySwitchEngine:
             self._strokes = [
                 stroke for stroke in self._strokes if id(stroke) in planned
             ]
+            if not self._strokes:
+                # The letters begun after the boundary go with the correction and come back,
+                # typed again in the new layout, as the start of a word: nothing ties that word
+                # to the old layout any more. Kept, it read the first key coming back as a layout
+                # change in the middle of a word and cleared the observed text with it: `тфеы и`
+                # with the `и` down before the space came up became `nats b`, and the `b` lost
+                # the `и redis` it gets when typed after the space.
+                self._source_group = -1
         return tuple(late)
 
     def _reopenable_committed_word(self) -> CorrectionPlan | None:
@@ -4204,6 +4212,9 @@ class KeySwitchEngine:
         try:
             try:
                 self.backend.hold_input()
+                planned = {id(stroke) for stroke in (*plan.strokes, *plan.trailing)}
+                # Letters of the next word the engine has taken already, and so the observed text too.
+                rolled = "".join(stroke.character for stroke in self._strokes if id(stroke) not in planned)
                 late = self._collect_late_input(plan)
                 if late is None:
                     self._technical_event(
@@ -4259,6 +4270,12 @@ class KeySwitchEngine:
             and self._typed_presses == presses_before
         )
         context_reset_reason = "late_input" if late else "held_text_or_unknown" if held and not replayed_only_releases else ""
+        if context_reset_reason == "late_input" and not (held and not replayed_only_releases) and (
+                self.context_policy.stream.withdraw(rolled)):
+            # The late keys come back typed again and are observed then: the text before them
+            # stays the context of the next word. Cleared, it left the word after `nats` with
+            # nothing before it, and the model declined `b redis` as `и redis` (rollover typing).
+            context_reset_reason = ""
         if context_reset_reason:
             self.context_policy.stream.clear()
         else:
