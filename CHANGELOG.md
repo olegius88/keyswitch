@@ -4,6 +4,14 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- CI keeps the strict intent-model report for unchanged inputs. The evaluation took six to twelve minutes of a
+  runner on every push (6.5 minutes on 07.10, 11.5 on 08.10, the same code and 4 workers: the runners differ) and
+  was the longest path of the test workflow, while its inputs last changed with 0.33.0.
+  `tools/intent_strict_inputs.py` prints one digest of every file the evaluation reads, taken from an audit trace of
+  a whole strict run, and of the constant values those files use; the test workflow keeps the report under it, the
+  interpreter and the dictionaries, and a kept report passes `tools/verify_intent_strict_report.py` before the
+  package job takes it, as a fresh one does. The release build still evaluates on every tag.
+
 ## 0.46.0 — 2026-10-08
 
 - A word finished after part of it was erased with Backspace is decided as that word: `первую игру` cut back to
