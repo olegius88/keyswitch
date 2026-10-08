@@ -3616,6 +3616,53 @@ class KeySwitchEngine:
             and not (event.control or event.alt or event.super_key)
         )
 
+    def _typed_ahead(self, plan: CorrectionPlan) -> str:
+        """The text typed after a plan's word that the field may already show.
+
+        The hook passes every key on to the window as it queues it, and a correction
+        runs only once the key that triggered it is up. A user who presses the next
+        letter before the space comes up (rollover typing) has the next word begun by
+        then, and keys still queued behind the trigger stand in the field too.
+        _collect_late_input deletes such keys with the word and types them again; the
+        field check has to expect them as well. It refused every such correction as a
+        changed field: with the field reader on, `ghbdtn vbh` typed with the `v` pressed
+        before the space came up stayed as typed, its next word with it (Windows field
+        logs, 08.10.2026). Plain text only, up to the first key that is not.
+        """
+
+        planned = {id(stroke) for stroke in (*plan.strokes, *plan.trailing)}
+        with self._events.mutex:
+            queued = tuple(self._events.queue)
+        ahead: list[str] = []
+        for item in (*(stroke for stroke in self._strokes if id(stroke) not in planned), *queued):
+            if not isinstance(item, KeyEvent):
+                break
+            if not item.pressed or item.key_name in MODIFIER_KEYS:
+                continue
+            if not (item.character and item.character.isprintable()) or item.control or item.alt or item.super_key:
+                break
+            ahead.append(item.character)
+        return "".join(ahead)
+
+    @staticmethod
+    def _field_refusal(plan: CorrectionPlan, field: FieldContext | None, suffix: str, ahead: str) -> str:
+        """Why the field read before a correction is not where its word was typed; empty if it is.
+
+        The text before the caret ends with the word and its boundary, and then with as much
+        of the text typed ahead as the window has taken in so far.
+        """
+
+        if field is None:
+            return "unread"
+        if field.field_id != plan.context_field or field.application != plan.application:
+            return "other_field"
+        if field.sensitive or field.selection:
+            return "sensitive_or_selected"
+        if any(caret_lag(field.before, field.after, suffix + ahead[:taken], exact=True) is not None
+               for taken in range(len(ahead) + 1)):
+            return ""
+        return "other_text"
+
     def _collect_late_input(self, plan: CorrectionPlan) -> tuple[KeyEvent, ...] | None:
         """Keys typed after the word but before its correction lands.
 
@@ -4069,11 +4116,10 @@ class KeySwitchEngine:
             reader = self.context_policy.reader
             field = None if reader is None else reader.read(plan.application, self._focus_window or 0)
             suffix = plan.original + "".join(stroke.character for stroke in plan.trailing) + (plan.boundary.character if plan.boundary else "")
-            if (
-                field is None or field.field_id != plan.context_field
-                or field.application != plan.application or field.sensitive or field.selection
-                or caret_lag(field.before, field.after, suffix, exact=True) is None
-            ):
+            # Read after the field: whatever the field can show was typed by then.
+            ahead = self._typed_ahead(plan)
+            refusal = self._field_refusal(plan, field, suffix, ahead)
+            if refusal:
                 typed_after_boundary = bool(self._strokes)
                 self._clear_word(reason="context_field_changed")
                 # The letters already typed for the next word stand somewhere
@@ -4083,7 +4129,7 @@ class KeySwitchEngine:
                 self._untracked_token = self._untracked_token or typed_after_boundary
                 self._technical_event(
                     "correction_aborted", mode=plan.mode, reason="context_field_changed",
-                    letters_untracked=typed_after_boundary,
+                    letters_untracked=typed_after_boundary, field_check=refusal, typed_ahead=len(ahead),
                 )
                 return False
         application_excluded = self._application_excluded(plan.application)
