@@ -17,6 +17,13 @@ All notable changes to KeySwitch are documented in this file.
   late by the computer's uptime. Such keys are counted apart (`unstamped_keys`) and alone log nothing; keys
   another program injects (TeamViewer's characters on the computer it controls) are timed by the hook's answer
   (`foreign_keys`), so the log of a remotely controlled computer says whether KeySwitch held its input up.
+- The context model is the 0.45.0 recipe fitted on corpus v40 (`context-v3-bd091e29a2be`; test v40 sealed before
+  training and passed), so that its seal pins the changed engine. It decides every calibration frame of corpus v40,
+  the owner's typing and the development sequences as 0.45.0; its Latin-context abbreviation head, refitted, decides
+  11 of its own development frames otherwise (five right conversions gained, five lost, one false gained). On test
+  v40 it keeps all 182 correctly typed rows (the baseline pair corrupts one with the early switch) and restores 164
+  of 180 mistyped rows with the early switch off against 154, 11 with it as the baseline pair. The prefix model
+  retrained byte-identical.
 
 ## 0.45.0 — 2026-10-08
 
