@@ -11,7 +11,7 @@ import threading
 import time
 import unicodedata
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from typing import Final
 
 from . import __version__
@@ -62,6 +62,7 @@ from .context_model import AfterOrigin
 from .context_access import PlatformFieldReader
 from .constants.units import MILLISECONDS_PER_SECOND
 from .input_context import CONTEXT_TTL, FieldContext, FieldReader
+from .input_delay import InputDelayReport
 from .prefix_model import PrefixInput, PrefixModel
 from .prefix_schema import VersionedPrefixModel
 from .settings_diagnostics import setting_change, settings_snapshot
@@ -93,6 +94,9 @@ from .constants.timing import (
     ENGINE_LOOP_MIN_WAKE_SECONDS,
     ENGINE_SWITCH_GRACE_SECONDS,
     ENGINE_WORKER_JOIN_TIMEOUT_SECONDS,
+    INPUT_DELAY_LATE_MS,
+    INPUT_DELAY_REPORT_INTERVAL_SECONDS,
+    INPUT_DELAY_SLOW_CALLBACK_MS,
     LATE_STROKE_GRACE_SECONDS,
     LEARNING_PROMPT_TIMEOUT_SECONDS,
     MANUAL_RELEASE_TIMEOUT_SECONDS,
@@ -411,6 +415,7 @@ class KeySwitchEngine:
         }
         self._pending: CorrectionPlan | None = None
         self._pending_trigger_keycode = -1
+        self._input_delay_due = time.monotonic() + INPUT_DELAY_REPORT_INTERVAL_SECONDS
         # The key an application quirk has just rewritten; pressing it again undoes that.
         self._manual_release_deadline = 0.0
         self._last_committed: CorrectionPlan | None = None
@@ -693,6 +698,26 @@ class KeySwitchEngine:
         self._poll_current_group()
         self._maybe_correct_after_pause()
         self._expire_learning_prompt()
+        self._report_input_delay()
+
+    def _report_input_delay(self) -> None:
+        """Log how late the keyboard hook saw keys, once a minute and only when one was late.
+
+        A backend that cannot tell (X11 observes keys after the window has them) has no
+        take_input_delay; see input_delay.
+        """
+
+        now = time.monotonic()
+        take = getattr(self.backend, "take_input_delay", None)
+        if now < self._input_delay_due or take is None:
+            return
+        self._input_delay_due = now + INPUT_DELAY_REPORT_INTERVAL_SECONDS
+        report: InputDelayReport = take()
+        if report.stalled:
+            self._technical_event(
+                "input_delay", **asdict(report), late_threshold_ms=INPUT_DELAY_LATE_MS,
+                slow_threshold_ms=INPUT_DELAY_SLOW_CALLBACK_MS,
+            )
 
     def _recover_from_error(self, error: Exception) -> None:
         self._clear_word(reason="input_error")

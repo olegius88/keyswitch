@@ -195,6 +195,7 @@ class FakeWindowsAPI:
         self.foreground = WINDOWS_FAKE_HWND
         self.window_owners: dict[int, int] = {WINDOWS_FAKE_HWND: FAKE_FOREGROUND_PROCESS_ID}
         self.process_id = WINDOWS_OWN_PROCESS_ID
+        self.ticks = 0
         self.inactive_windows: list[int] = []
 
     def loaded_layouts(self) -> tuple[int, ...]:
@@ -245,6 +246,9 @@ class FakeWindowsAPI:
 
     def current_process_id(self) -> int:
         return self.process_id
+
+    def tick_count(self) -> int:
+        return self.ticks
 
     def keep_window_inactive(self, window: int) -> bool:
         self.inactive_windows.append(window)

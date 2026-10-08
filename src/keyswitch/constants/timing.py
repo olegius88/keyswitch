@@ -81,3 +81,11 @@ UIA_TRANSACTION_TIMEOUT_MS: Final = 200
 # the server to echo it.
 MIN_INJECTION_DEADLINE_SECONDS: Final = 1.0
 INJECTION_SECONDS_PER_EVENT: Final = 0.02
+# A key the keyboard hook sees this long after the system stamped it was held up on its way: every
+# window waited for it (input_delay).
+INPUT_DELAY_LATE_MS: Final = 100
+# A hook callback that takes this long has held every key behind it; the callback normally takes
+# well under a millisecond.
+INPUT_DELAY_SLOW_CALLBACK_MS: Final = 20
+# The engine logs the hook's delays at most this often, and only when a key was late.
+INPUT_DELAY_REPORT_INTERVAL_SECONDS: Final = 60.0

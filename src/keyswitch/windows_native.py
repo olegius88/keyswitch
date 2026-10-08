@@ -315,6 +315,8 @@ class CtypesWindowsAPI:
         kernel32.GetCurrentThreadId.restype = ctypes.c_ulong
         kernel32.GetCurrentProcessId.argtypes = []
         kernel32.GetCurrentProcessId.restype = ctypes.c_ulong
+        kernel32.GetTickCount.argtypes = []
+        kernel32.GetTickCount.restype = ctypes.c_uint32
         kernel32.GetLastError.argtypes = []
         kernel32.GetLastError.restype = ctypes.c_ulong
         kernel32.OpenProcess.argtypes = [
@@ -371,6 +373,9 @@ class CtypesWindowsAPI:
 
     def current_process_id(self) -> int:
         return int(self.kernel32.GetCurrentProcessId())
+
+    def tick_count(self) -> int:
+        return int(self.kernel32.GetTickCount())
 
     def keep_window_inactive(self, window: int) -> bool:
         """Mark a popup so that showing or clicking it never takes the foreground.

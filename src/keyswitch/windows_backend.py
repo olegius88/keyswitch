@@ -10,6 +10,8 @@ from dataclasses import dataclass, replace
 from typing import Protocol
 
 from .backend import BackendProbe, FocusInfo, KeyEvent, KeyDisposition, ScreenAnchor
+from .constants.units import MILLISECONDS_PER_SECOND
+from .input_delay import InputDelay, InputDelayReport
 from .constants.keyboard import (
     ALT_MASK,
     COMPLETED_ACTION_EVENT_COUNT,
@@ -155,6 +157,10 @@ class WindowsAPI(Protocol):
 
     def caps_lock_enabled(self) -> bool: ...
 
+    def tick_count(self) -> int:
+        """GetTickCount: milliseconds since boot, the clock of a hook's key time."""
+        ...
+
     def run_keyboard_hook(
         self,
         listener: Callable[[NativeKeyEvent], bool],
@@ -270,6 +276,7 @@ class WindowsBackend:
         self._deferred_action: NativeKeyEvent | None = None
         self._action_prior_keys: set[int] = set()
         self._inject_lock = threading.Lock()
+        self._input_delay = InputDelay()
 
     @property
     def running(self) -> bool:
@@ -511,7 +518,25 @@ class WindowsBackend:
             self.release_input()
         return COMPLETED_ACTION_EVENT_COUNT if deliver else 0
 
+    def take_input_delay(self) -> InputDelayReport:
+        """How late the hook saw the keys typed since the last call (input_delay)."""
+
+        return self._input_delay.take()
+
     def _handle_native(self, native: NativeKeyEvent) -> bool:
+        if native.virtual_key == 0 or native.injected or native.replayed:
+            return self._answer_native(native)
+        # A typed key: how long after its key time the hook ran, and how long the answer took.
+        started = time.perf_counter()
+        late = (self._api.tick_count() - native.timestamp) & DWORD_MASK
+        try:
+            return self._answer_native(native)
+        finally:
+            # A key time ahead of the clock (a program stamping its own keys) says nothing.
+            if late <= DWORD_MASK >> 1:
+                self._input_delay.record(late, round((time.perf_counter() - started) * MILLISECONDS_PER_SECOND))
+
+    def _answer_native(self, native: NativeKeyEvent) -> bool:
         if native.virtual_key == 0:
             self._pointer_epoch += 1
             if self._listener is not None:
