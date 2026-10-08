@@ -4,6 +4,20 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- A word finished after part of it was erased with Backspace is decided as that word: `первую игру` cut back to
+  `перв` and finished as `первый` had `ый` judged a word of its own, and `sq` replaced it (0.44.0 logs,
+  08.10.2026). A Backspace that erases text no word of the engine holds leaves the caret's position unknown, as a
+  click does, and the next word reads the field as it begins: letters typed right after letters of their own
+  layout stay as part of that word; after letters of the other layout the whole word is decided.
+- A pause on the first two letters of a word no longer converts them: `иг` of `игру` became `bu` at a pause and
+  `фл` of `флагом` became `ak`, and the finished words came back. Two letters that at least 100 words of their own
+  language begin with and whose other reading is no word of the other language's prose are decided at the word's
+  boundary; `ша` typed for `if` and `gj` typed for `по` still convert at a pause.
+- `input_delay` counts only real delays: every report of 0.44.0 held a key some program sent with a time of zero,
+  late by the computer's uptime. Such keys are counted apart (`unstamped_keys`) and alone log nothing; keys
+  another program injects (TeamViewer's characters on the computer it controls) are timed by the hook's answer
+  (`foreign_keys`), so the log of a remotely controlled computer says whether KeySwitch held its input up.
+
 ## 0.45.0 — 2026-10-08
 
 - A Russian abbreviation typed after Latin text stays: `/designv2 ТЗ` became `/designv2 NP` (0.44.0 logs,
