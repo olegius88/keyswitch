@@ -18,6 +18,12 @@ All notable changes to KeySwitch are documented in this file.
   `зк` at p=1.00. A keep with a conversion at least 0.3 likely is now a suggestion
   (`CONTEXT_DOUBTFUL_KEEP_PROBABILITY`): nothing is converted, and at a space the engine waits for the next word
   as after a conversion below the threshold. Calibration and the development sequences are decided as by 0.44.0.
+- A sign typed the same in either layout no longer cuts the words before it from the word after it:
+  `Ytn - ult` became `Ytn - где`. The first word of a message was kept at its space, `-` waited for a neighbour of
+  its own, and the converted `где` could not take `Ytn` along. Such a sign (`-`, `2`), alone after a kept word, now
+  stands among the kept words: the word before it is asked with the converted word after the sign, and the sign is
+  replaced along only if that word converts (`Нет - где`). A sign the other layout types differently (`.` is `ю`)
+  still ends the chain. A row of sealed test v38 lost its first word this way.
 - The GPU trainer sends every frame of a head's class to the CPU path, the abbreviation heads included: the
   kernels do not make a head's own evidence, and a frame of the corpus v36 abbreviation head would have been
   fitted without it on a CUDA machine.
