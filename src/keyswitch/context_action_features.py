@@ -35,6 +35,7 @@ from .constants.models import (
     CAPITALS_HEAD_MIN_LETTERS,
     KEPT_CONTEXT_WORD_MAX_CHARACTERS,
     KEPT_FEATURE_PREFIX,
+    LATIN_ABBREVIATION_FEATURE_PREFIX,
     LETTER_FEATURE_PREFIX,
     PLANNED_CONTEXT_AFTER_MAX_CHARACTERS,
     PLANNED_CONTEXT_WORD_MAX_CHARACTERS,
@@ -399,6 +400,11 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         # and turned `ТЗ` into `NP`. It reads what tells the kinds apart instead: how often each reading
         # occurs.
         result.update(_abbreviation_evidence(item, direction))
+    if latin_abbreviation_question(item.original, item.alternative, item.field.before):
+        # The same abbreviation after Latin text, the Latin-context abbreviation head's class: the same counts,
+        # and how often the word before it occurs in English prose and in Russian technical text, which tell a
+        # sentence of English prose from a command or an identifier (`/designv2 ТЗ`, the owner's typing).
+        result.update(_latin_abbreviation_evidence(item, direction))
     return result
 
 
@@ -436,6 +442,12 @@ def _abbreviation_evidence(item: ContextEvidence, direction: str) -> dict[str, f
     has; the boundary. No letter of its own: a head reading them learned the corpus's kinds of
     abbreviation and turned `ДТП` into `LNG`."""
 
+    return {f"{ABBREVIATION_FEATURE_PREFIX}{name}:direction:{direction}": 1.0 for name in _abbreviation_names(item)}
+
+
+def _abbreviation_names(item: ContextEvidence) -> list[str]:
+    """The evidence both abbreviation heads read (_abbreviation_evidence), without their prefix."""
+
     from .context_model import _term_frequency
 
     table = _term_frequency()
@@ -445,13 +457,34 @@ def _abbreviation_evidence(item: ContextEvidence, direction: str) -> dict[str, f
     latin_side = max(magnitudes["latin"], magnitudes["english"])
     cyrillic_side = max(magnitudes["russian"], magnitudes["cyrillic"])
     ratio = max(-ALONE_COUNT_RATIO_BOUND, min(ALONE_COUNT_RATIO_BOUND, latin_side - cyrillic_side))
-    names = ["bias", *(f"count:{name}:{value}" for name, value in magnitudes.items()), f"count:ratio:{ratio}",
-             f"count:{latin_side}:{cyrillic_side}", f"letters:{len(item.original)}",
-             f"known:{int(item.source_known)}:{int(item.target_known)}",
-             f"identifier:{int(item.source_identifier)}:{int(item.target_identifier)}",
-             f"non_initial:{int(any(char in ABBREVIATION_NON_INITIAL_LETTERS for char in item.original))}",
-             f"trigger:{item.trigger[:ACTION_FEATURE_FIELD_LABEL_MAX_CHARACTERS]}"]
-    return {f"{ABBREVIATION_FEATURE_PREFIX}{name}:direction:{direction}": 1.0 for name in names}
+    return ["bias", *(f"count:{name}:{value}" for name, value in magnitudes.items()), f"count:ratio:{ratio}",
+            f"count:{latin_side}:{cyrillic_side}", f"letters:{len(item.original)}",
+            f"known:{int(item.source_known)}:{int(item.target_known)}",
+            f"identifier:{int(item.source_identifier)}:{int(item.target_identifier)}",
+            f"non_initial:{int(any(char in ABBREVIATION_NON_INITIAL_LETTERS for char in item.original))}",
+            f"trigger:{item.trigger[:ACTION_FEATURE_FIELD_LABEL_MAX_CHARACTERS]}"]
+
+
+def latin_abbreviation_question(original: str, alternative: str, before: str) -> bool:
+    """An attested Cyrillic abbreviation (attested_abbreviation) whose Latin reading is letters too, after text with
+    more Latin letters than Cyrillic ones: `ТЗ` after `/designv2 `, or `US` after English prose typed in the Russian
+    layout (`ГЫ`). The capitals head answers the same shape with a copy of the shared features, and both turned
+    abbreviations the Latin reading of which nobody writes into it (`ТЗ` into `NP`, `НГ` into `YU`)."""
+
+    return (attested_abbreviation(original) and alternative.isalpha()
+            and _dominant(before[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:].casefold()) == "en")
+
+
+def _latin_abbreviation_evidence(item: ContextEvidence, direction: str) -> dict[str, float]:
+    """The Latin-context abbreviation head's evidence: the abbreviation head's (_abbreviation_names), and the binary
+    order of magnitude of how often the word before it occurs in English prose and among the Latin words of Russian
+    technical text (_neighbour_names)."""
+
+    from .context_model import _term_frequency
+
+    words = item.field.before.split()
+    names = [*_abbreviation_names(item), *_neighbour_names("previous_word", words[-1] if words else "", _term_frequency())]
+    return {f"{LATIN_ABBREVIATION_FEATURE_PREFIX}{name}:direction:{direction}": 1.0 for name in names}
 
 
 def alone_question(original: str, alternative: str, before: str, after: str, trigger: str) -> bool:
@@ -531,17 +564,22 @@ def _letter_evidence(item: ContextEvidence, direction: str) -> dict[str, float]:
     from .context_model import _term_frequency
 
     table = _term_frequency()
-    names: list[str] = []
-    for side, text in (("previous_word", item.field.before.split()[-1]), ("next_word", (item.field.after.split() or [""])[0])):
-        word = "".join(char for char in text if char.isalpha()).casefold()
-        if not word:
-            names.append(f"{side}:none")
-        elif all(char.isascii() for char in word):
-            english, latin = table["english"].get(word, 0).bit_length(), table["latin"].get(word, 0).bit_length()
-            names.extend((f"{side}:english:{english}", f"{side}:latin:{latin}", f"{side}:{english}:{latin}"))
-        else:
-            names.append(f"{side}:russian:{table['russian'].get(word, 0).bit_length()}")
+    names = [*_neighbour_names("previous_word", item.field.before.split()[-1], table),
+             *_neighbour_names("next_word", (item.field.after.split() or [""])[0], table)]
     return {f"{LETTER_FEATURE_PREFIX}{name}:direction:{direction}": 1.0 for name in names}
+
+
+def _neighbour_names(side: str, text: str, table: dict[str, dict[str, int]]) -> list[str]:
+    """How often a neighbouring word occurs: a Latin one in English prose and among the Latin words of Russian
+    technical text, a Cyrillic one in Russian prose, each as a binary order of magnitude; `none` without letters."""
+
+    word = "".join(char for char in text if char.isalpha()).casefold()
+    if not word:
+        return [f"{side}:none"]
+    if all(char.isascii() for char in word):
+        english, latin = table["english"].get(word, 0).bit_length(), table["latin"].get(word, 0).bit_length()
+        return [f"{side}:english:{english}", f"{side}:latin:{latin}", f"{side}:{english}:{latin}"]
+    return [f"{side}:russian:{table['russian'].get(word, 0).bit_length()}"]
 
 
 def capitals_question(original: str, before: str) -> bool:

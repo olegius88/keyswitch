@@ -183,7 +183,7 @@
   },
   "frozen_base": {
     "artifact": "model/context_v3/frozen-base.json",
-    "sha256": "ac7f5fd2644812df0d15c7661fafc7103f93654b21f93e021c58bed95ff335d6",
+    "sha256": "5129029cdda9ffc2c6e67d8212ea8a7ede710764089ebde53c00b0ddc30ff6ae",
     "carried": {
       "alone": {
         "maximum_features": 5000,
@@ -194,11 +194,11 @@
       }
     },
     "heads": {
-      "abbreviation": {
+      "latin_abbreviation": {
         "maximum_features": 1000
       }
     },
-    "scope": "The corpus v35 model (context-v3-8a679c1eb72e) with every weight fixed: the word decided at its boundary, the kept-neighbour question and the capitals, lone-word, message-start and single-letter heads it carries. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone). The abbreviation head is fitted onto it: a token in capitals in Cyrillic, whose Latin reading is letters too, after Russian prose (context_action_features.abbreviation_question), with how often each reading occurs in Russian and technical text."
+    "scope": "The corpus v37 model (context-v3-2ae75d2b9e38, 0.44.0) with every weight fixed: the word decided at its boundary, the kept-neighbour question and the capitals, lone-word, message-start, single-letter and abbreviation heads it carries. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone). The Latin-context abbreviation head is fitted onto it: a Cyrillic abbreviation in capitals that Russian technical text uses, after Latin text (context_action_features.latin_abbreviation_question), with how often each reading occurs in Russian and technical text and in English prose and how often the word before it does. Motivation: the owner's typing of 08.10.2026, where `/designv2 ТЗ` became `/designv2 NP`."
   },
   "letter_curriculum": {
     "term_sentences": 1500,
@@ -213,5 +213,13 @@
     "dominance": 4.0,
     "sample_weight": 1.0,
     "scope": "TRAIN, and DEVELOPMENT for the head's epoch (one form in ABBREVIATION_SPLIT_MODULUS by hash): every Cyrillic word of two to five letters of the term table in capitals whose Latin reading is letters too, typed as written after frames_per_form left contexts of Russian rows of the split; convert when the Latin reading is counted at least minimum_latin_count times and dominance times as often, keep otherwise (tools/train_context_action_model.abbreviation_curriculum)."
+  },
+  "latin_abbreviation_curriculum": {
+    "frames_per_form": 2,
+    "minimum_cyrillic_count": 20,
+    "dominance": 4.0,
+    "minimum_term_count": 50,
+    "sample_weight": 1.0,
+    "scope": "TRAIN, and DEVELOPMENT for the head's epoch (the abbreviation curriculum's share of forms): every Cyrillic word of two to five letters of the term table in capitals whose Latin reading is letters too, typed as written after frames_per_form left contexts, in turn of an English row of the split and of one or two Latin terms counted at least minimum_term_count times; keep when the Cyrillic word is counted at least minimum_cyrillic_count times and dominance times as often as its Latin reading among the Latin words of Russian technical text or in English prose, whichever is more, convert otherwise (tools/train_context_action_model.latin_abbreviation_curriculum)."
   }
 }

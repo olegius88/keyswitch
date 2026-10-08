@@ -28,8 +28,8 @@ from typing import Final, cast
 from unittest.mock import patch
 
 from keyswitch.context_action_features import (
-    abbreviation_question, alone_question, attested_abbreviation, capitals_question, extract_action_features, letter_question,
-    start_question,
+    abbreviation_question, alone_question, attested_abbreviation, capitals_question, extract_action_features,
+    latin_abbreviation_question, letter_question, start_question,
 )
 from keyswitch.context_model import (
     ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, _term_frequency, term_bucket,
@@ -71,8 +71,8 @@ from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
 from keyswitch.constants.models import (
     ABBREVIATION_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, ALONE_HEAD_LETTERS, CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION,
     CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS,
-    KEPT_CONTEXT_WORD_MAX_CHARACTERS, KEPT_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, PLANNED_CONTEXT_AFTER_MAX_CHARACTERS,
-    PLANNED_CONTEXT_WORD_MAX_CHARACTERS, START_FEATURE_PREFIX,
+    KEPT_CONTEXT_WORD_MAX_CHARACTERS, KEPT_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX, LETTER_FEATURE_PREFIX,
+    PLANNED_CONTEXT_AFTER_MAX_CHARACTERS, PLANNED_CONTEXT_WORD_MAX_CHARACTERS, START_FEATURE_PREFIX,
 )
 from keyswitch.constants.training import (
     ABBREVIATION_SPLIT_MODULUS,
@@ -705,6 +705,78 @@ def abbreviation_curriculum(split: str, source_rows: Sequence[CorpusRow], refuse
     return rows, {"frames": len(rows), "forms": dict(sorted(counts.items())), "frames_per_form": per_form, "sample_weight": weight,
                   "scope": "attested Cyrillic abbreviations of this split's share, typed as written after Russian prose, labelled "
                            "by the term counts of both readings (abbreviation_curriculum)."}
+
+
+def latin_abbreviation_label(form: str, latin: str, options: Mapping[str, object]) -> ContextAction:
+    """The Latin-context abbreviation head's label for an attested Cyrillic abbreviation typed as written after Latin
+    text: keep when Russian technical text uses it `minimum_cyrillic_count` times or more and `dominance` times as
+    often as its Latin reading occurs among the Latin words of that text or in English prose (`ТЗ`, 744 times against
+    80 for `NP`; `НГ`, whose keys `YU` nobody writes), convert otherwise (`ГЫ` is `US`, 19 273 times in English prose;
+    `УГ` is `EU`). After Latin text the writer is in Latin more often than not, so the abbreviation stays only where
+    its own count clearly outweighs its keys'."""
+
+    table = _term_frequency()
+    cyrillic = table["cyrillic"].get(form.casefold(), 0)
+    latin_count = max(table["latin"].get(latin.casefold(), 0), table["english"].get(latin.casefold(), 0))
+    keep = (cyrillic >= int(cast(int, options["minimum_cyrillic_count"]))
+            and cyrillic >= float(cast(float, options["dominance"])) * latin_count)
+    return "keep" if keep else "convert"
+
+
+def latin_abbreviation_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                                  options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """Every attested Cyrillic abbreviation (context_action_features.attested_abbreviation) typed as written after
+    Latin text, the Latin-context abbreviation head's class, labelled by latin_abbreviation_label.
+
+    After Latin text the frozen model turned such abbreviations into the Latin readings their keys spell whatever
+    their counts: `/designv2 ТЗ` became `/designv2 NP` in the owner's typing (08.10.2026), and `ЛС`, `ТГ` and `НГ`
+    became `KC`, `NU` and `YU` the same way. The forms and their TRAIN or DEVELOPMENT share are the abbreviation
+    curriculum's (the same hash), so DEVELOPMENT holds no form either abbreviation head was fitted on. Each form
+    stands after `frames_per_form` left contexts, in turn of an English row of the split (prose) and of one or two
+    Latin terms Russian technical text counts at least `minimum_term_count` times (_counted_terms: a command or an
+    identifier the writer typed before it), each ending at a boundary chosen by hash (_varied_boundary). Forms and
+    terms of this corpus's test and of every accessed test are refused by their aliases.
+    """
+
+    per_form = int(cast(int, options["frames_per_form"]))
+    english = natural_mixed_contexts(source_rows)[0]
+    terms = _counted_terms(refused, int(cast(int, options["minimum_term_count"]))) if per_form else []
+    if not per_form or not english or not terms or split not in (TRAIN, DEVELOPMENT):
+        return [], {"frames": 0, "scope": "not used"}
+    weight = float(cast(float, options["sample_weight"]))
+    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+    rows: list[ActionRow] = []
+    counts: Counter[str] = Counter()
+    for form in sorted(word.upper() for word in _term_frequency()["cyrillic"]):
+        if not attested_abbreviation(form):
+            continue
+        latin = translated(form, 1)
+        if not latin.isalpha():
+            continue
+        share = DEVELOPMENT if variant_choice("abbreviation:" + form, "split", ABBREVIATION_SPLIT_MODULUS) == 0 else TRAIN
+        if share != split:
+            continue
+        if refused & (expanded_aliases(form) | expanded_aliases(latin)):
+            counts["refused"] += 1
+            continue
+        action = latin_abbreviation_label(form, latin, options)
+        counts[action] += 1
+        for index in range(per_form):
+            identifier = f"latin-abbreviation:{form}:{index}"
+            trigger, boundary_text = _varied_boundary(identifier)
+            if index % LAYOUT_GROUP_COUNT == 0:
+                before = english[variant_choice(identifier, "context", len(english))]
+            else:
+                words = [terms[variant_choice(identifier, "context", len(terms))]]
+                if variant_choice(identifier, "context-words", LAYOUT_GROUP_COUNT):
+                    words.insert(0, terms[variant_choice(identifier, "first-context", len(terms))])
+                before = " ".join(words) + " "
+            field = FieldContext(applications[variant_choice(identifier, "application", len(applications))], "public-training",
+                                 before, "", "unknown")
+            rows.append(ActionRow(identifier, form, 1, field, trigger, "", action, "latin_abbreviation", boundary_text, weight))
+    return rows, {"frames": len(rows), "forms": dict(sorted(counts.items())), "frames_per_form": per_form, "sample_weight": weight,
+                  "scope": "attested Cyrillic abbreviations of this split's share, typed as written after English prose or Latin terms, "
+                           "labelled by the term counts of both readings (latin_abbreviation_curriculum)."}
 
 
 def _cyrillic(word: str) -> bool:
@@ -1645,13 +1717,17 @@ def frozen_base(options: Mapping[str, object]) -> ContextModel | None:
 
 # The heads a frozen base can carry besides the kept-neighbour question, by the recipe's name.
 HEAD_PREFIXES: Final = {"capitals": CAPITALS_FEATURE_PREFIX, "alone": ALONE_FEATURE_PREFIX, "start": START_FEATURE_PREFIX,
-                         "letter": LETTER_FEATURE_PREFIX, "abbreviation": ABBREVIATION_FEATURE_PREFIX}
+                         "letter": LETTER_FEATURE_PREFIX, "abbreviation": ABBREVIATION_FEATURE_PREFIX,
+                         "latin_abbreviation": LATIN_ABBREVIATION_FEATURE_PREFIX}
 # A recipe without single-letter frames (the recipes before corpus v34).
 NO_LETTER_CURRICULUM: Final[dict[str, object]] = {"term_sentences": 0, "english_sentences": 0, "minimum_term_count": 0,
                                                   "sample_weight": 1.0}
 # A recipe without abbreviation frames (the recipes before corpus v36).
 NO_ABBREVIATION_CURRICULUM: Final[dict[str, object]] = {"frames_per_form": 0, "minimum_latin_count": 0, "dominance": 1.0,
                                                         "sample_weight": 1.0}
+# A recipe without Latin-context abbreviation frames (the recipes before corpus v38).
+NO_LATIN_ABBREVIATION_CURRICULUM: Final[dict[str, object]] = {"frames_per_form": 0, "minimum_cyrillic_count": 0, "dominance": 1.0,
+                                                              "minimum_term_count": 0, "sample_weight": 1.0}
 
 
 def frozen_heads(options: Mapping[str, object]) -> dict[str, int]:
@@ -1841,6 +1917,7 @@ def head_question(original: str, alternative: str, before: str, after: str, trig
         return KEPT_FEATURE_PREFIX in prefixes or letter
     return (letter or (CAPITALS_FEATURE_PREFIX in prefixes and capitals_question(original, before))
             or (ABBREVIATION_FEATURE_PREFIX in prefixes and abbreviation_question(original, alternative, before))
+            or (LATIN_ABBREVIATION_FEATURE_PREFIX in prefixes and latin_abbreviation_question(original, alternative, before))
             or (ALONE_FEATURE_PREFIX in prefixes and alone_question(original, alternative, before, after, trigger))
             or (START_FEATURE_PREFIX in prefixes and start_question(original, alternative, before, after)))
 
@@ -2135,6 +2212,11 @@ def frame_chain(inputs: FitInputs, profile: str, split: str, rows: Sequence[Acti
             split, inputs.source_rows[split], inputs.refused,
             cast(dict[str, object], options.get("abbreviation_curriculum", NO_ABBREVIATION_CURRICULUM)))
         result.extend(abbreviation)
+        # So is the Latin-context abbreviation head's.
+        latin_abbreviation, reports["latin_abbreviation"] = latin_abbreviation_curriculum(
+            split, inputs.source_rows[split], inputs.refused,
+            cast(dict[str, object], options.get("latin_abbreviation_curriculum", NO_LATIN_ABBREVIATION_CURRICULUM)))
+        result.extend(latin_abbreviation)
     evidence = alone_evidence(options)
     if evidence is not None:
         lone, reports["lone_word"] = lone_word_curriculum(split, inputs.refused, evidence, partial(base_action, inputs=inputs))
@@ -2155,9 +2237,12 @@ def tail_curricula(inputs: FitInputs) -> tuple[list[ActionRow], dict[str, object
     abbreviation, abbreviation_report = abbreviation_curriculum(
         TRAIN, inputs.source_rows[TRAIN], inputs.refused,
         cast(dict[str, object], options.get("abbreviation_curriculum", NO_ABBREVIATION_CURRICULUM)))
-    return [*kept, *counted, *letter, *abbreviation], {
+    latin_abbreviation, latin_abbreviation_report = latin_abbreviation_curriculum(
+        TRAIN, inputs.source_rows[TRAIN], inputs.refused,
+        cast(dict[str, object], options.get("latin_abbreviation_curriculum", NO_LATIN_ABBREVIATION_CURRICULUM)))
+    return [*kept, *counted, *letter, *abbreviation, *latin_abbreviation], {
         "kept_neighbour_curriculum": kept_report, "counted_token_curriculum": counted_report, "letter_curriculum": letter_report,
-        "abbreviation_curriculum": abbreviation_report}
+        "abbreviation_curriculum": abbreviation_report, "latin_abbreviation_curriculum": latin_abbreviation_report}
 
 
 def prepared_frames(rows: Sequence[ActionRow], spans: SpanCurriculum, split: str) -> list[tuple[str, ActionRow | SpanFrame]]:

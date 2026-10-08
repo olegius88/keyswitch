@@ -34,6 +34,7 @@ from keyswitch.constants.models import (
     ALONE_FEATURE_PREFIX,
     CAPITALS_FEATURE_PREFIX,
     KEPT_FEATURE_PREFIX,
+    LATIN_ABBREVIATION_FEATURE_PREFIX,
     LETTER_FEATURE_PREFIX,
     START_FEATURE_PREFIX,
 )
@@ -42,7 +43,8 @@ from keyswitch.constants.training import CONTEXT_ACTION_BACKEND_AUTO, CONTEXT_AC
 from keyswitch.context_model import ACTIONS, ContextModel
 
 # The class of a frame: the first head prefix among its features, in this order; `base` for none.
-HEAD_CLASSES: Final = (("abbreviation", ABBREVIATION_FEATURE_PREFIX), ("letter", LETTER_FEATURE_PREFIX),
+HEAD_CLASSES: Final = (("abbreviation", ABBREVIATION_FEATURE_PREFIX), ("latin_abbreviation", LATIN_ABBREVIATION_FEATURE_PREFIX),
+                       ("letter", LETTER_FEATURE_PREFIX),
                        ("alone", ALONE_FEATURE_PREFIX), ("start", START_FEATURE_PREFIX),
                        ("capitals", CAPITALS_FEATURE_PREFIX), ("kept", KEPT_FEATURE_PREFIX))
 BASE_CLASS: Final = "base"
