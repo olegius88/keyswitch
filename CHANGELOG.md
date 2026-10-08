@@ -4,6 +4,24 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- A Russian abbreviation typed after Latin text stays: `/designv2 ТЗ` became `/designv2 NP` (0.44.0 logs,
+  08.10.2026), and after a command, an identifier or English prose `ЛС`, `ТГ` and `НГ` became `KC`, `NU` and `YU`.
+  After Latin text such a token was decided by the capitals head and the shared features, which turned it into
+  the Latin reading its keys spell whatever how often each reading occurs. A head of its own now answers it
+  (`latin_abbreviation_question`, prefix `labbr|`), fitted onto the frozen 0.44.0 model with how often each reading
+  occurs in Russian technical text and in English prose and how often the word before it does; a Latin
+  abbreviation typed in the Russian layout after English prose is restored as before (`ГЫ` is `US`). On authored
+  sentences 27 of 30 such abbreviations stay against 11.
+- A Latin term typed in the Russian layout after Russian text that the model was unsure of is decided beside the
+  next word: `принимай зк и продолжай` became `принимай pr и продолжай`. At its boundary the model kept `зк` at
+  p=0.51 against 0.49 for `pr`, and a keep never waits for the next word; asked beside it, the same model converts
+  `зк` at p=1.00. A keep with a conversion at least 0.3 likely is now a suggestion
+  (`CONTEXT_DOUBTFUL_KEEP_PROBABILITY`): nothing is converted, and at a space the engine waits for the next word
+  as after a conversion below the threshold. Calibration and the development sequences are decided as by 0.44.0.
+- The GPU trainer sends every frame of a head's class to the CPU path, the abbreviation heads included: the
+  kernels do not make a head's own evidence, and a frame of the corpus v36 abbreviation head would have been
+  fitted without it on a CUDA machine.
+
 ## 0.44.0 — 2026-10-08
 
 - With the field reader on (the Windows default) a word typed with the next letter pressed before
