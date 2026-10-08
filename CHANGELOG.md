@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.45.0 — 2026-10-08
+
 - A Russian abbreviation typed after Latin text stays: `/designv2 ТЗ` became `/designv2 NP` (0.44.0 logs,
   08.10.2026), and after a command, an identifier or English prose `ЛС`, `ТГ` and `НГ` became `KC`, `NU` and `YU`.
   After Latin text such a token was decided by the capitals head and the shared features, which turned it into

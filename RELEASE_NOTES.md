@@ -1,28 +1,27 @@
-# KeySwitch 0.44.0
+# KeySwitch 0.45.0
 
 ## Русский
 
-Автоматическая смена раскладки больше не пропадает при быстром наборе. Если следующую букву
-нажать раньше, чем отпущен пробел, исправление отменялось, и слово оставалось как набрано вместе
-со следующим: `ghbdtn vbh`, `z ctujlyz`, `rfr ltkf` теперь становятся `привет мир`, `я сегодня`,
-`как дела`. Ранняя смена раскладки теперь работает в Firefox, приложении Claude, VS Code и других
-программах на Electron: они показывают последнюю букву чуть позже, и раньше ранняя смена в них
-часто отказывала (в Firefox — в пяти словах из шести). Прокрутка колесом мыши больше не сбрасывает набираемое слово. Полный
-перечень — в [CHANGELOG.md](CHANGELOG.md).
+Русская аббревиатура после латинского текста остаётся как набрана: `/designv2 ТЗ` больше не
+становится `/designv2 NP`, а `ЛС`, `ТГ`, `НГ` после команды или английской фразы — `KC`, `NU`,
+`YU`. Латинский термин, набранный в русской раскладке после русского текста, в котором модель
+сомневалась, теперь решается вместе со следующим словом: `принимай зк и продолжай` становится
+`принимай pr и продолжай`. Дефис между словами больше не мешает исправить первое слово
+сообщения: `Ytn - ult` становится `Нет - где`. Полный перечень — в [CHANGELOG.md](CHANGELOG.md).
 
 ### Файлы выпуска
 
-- `KeySwitch-Setup-0.44.0-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
+- `KeySwitch-Setup-0.45.0-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
   сертификатом издателя: SmartScreen покажет предупреждение.
-- `KeySwitch-0.44.0-windows-x64.zip` — переносимый архив для Windows x64.
-- `KeySwitch-Setup-0.44.0-arm64.exe` — установщик для Windows 11 на ARM. Тоже не подписан
+- `KeySwitch-0.45.0-windows-x64.zip` — переносимый архив для Windows x64.
+- `KeySwitch-Setup-0.45.0-arm64.exe` — установщик для Windows 11 на ARM. Тоже не подписан
   сертификатом издателя.
-- `KeySwitch-0.44.0-windows-arm64.zip` — переносимый архив для Windows на ARM. У ARM64-сборки
+- `KeySwitch-0.45.0-windows-arm64.zip` — переносимый архив для Windows на ARM. У ARM64-сборки
   пока нет автоматических обновлений: новую версию скачивайте со страницы выпусков.
-- `keyswitch_0.44.0_amd64.deb` — Ubuntu/Xubuntu, сеанс X11. Если стоит 0.28.0 или
+- `keyswitch_0.45.0_amd64.deb` — Ubuntu/Xubuntu, сеанс X11. Если стоит 0.28.0 или
   новее, эта версия придёт через обычное обновление системы.
-- `KeySwitch-0.44.0-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее), macOS 13 и новее.
-- `KeySwitch-0.44.0-macos-x86_64.zip` — Mac на процессоре Intel, macOS 13 и новее.
+- `KeySwitch-0.45.0-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее), macOS 13 и новее.
+- `KeySwitch-0.45.0-macos-x86_64.zip` — Mac на процессоре Intel, macOS 13 и новее.
 - `SHA256SUMS` — контрольные суммы всех файлов; сверьте их перед установкой.
 
 Архив для Mac нужен ровно один: сборка для Apple Silicon не запускается на Intel и
@@ -30,70 +29,68 @@
 
 ### Что исправлено
 
-- Быстрый набор. Исправление выполняется, когда отпущена клавиша, которая его запустила; при
-  чтении поля (на Windows оно включено по умолчанию) проверка перед исправлением видела в поле
-  уже нажатую следующую букву и отменяла замену. Теперь эти буквы ожидаются: на журналах набора,
-  воспроизведённых так, как печатает быстрый наборщик, 0.43.0 исправляла верно 218 слов и
-  пропускала 911, эта версия — 555 и 73.
-- Буква следующего слова, нажатая до отпускания пробела, после исправления печатается в новой
-  раскладке и начинает следующее слово как обычно: пара `nats b redis` снова становится
-  `nats и redis`.
-- Ранняя смена раскладки в браузерах и редакторах на Electron: поле, которое ещё не показало одну
-  или две последние буквы, больше не считается изменённым. Если оно отстаёт и в момент замены,
-  слово исправляется на своём пробеле, как раньше.
-- Колесо мыши больше не считается щелчком: прокрутка не сбрасывает набираемое слово и слова
-  перед ним.
-
-### Диагностика
-
-- Если клавиши доходят до KeySwitch с опозданием (подвисание набора), технический журнал раз в
-  минуту пишет `input_delay`: сколько клавиш пришло на 100 мс позже и сколько ответов самого
-  KeySwitch заняли 20 мс и дольше. Так видно, кто задержал ввод.
-- Диагностика называет и модель префиксов (`prefix_model`), которая переключает раскладку во
-  время набора, рядом с моделью намерения (`intent-v1-…`) и контекстной моделью (`context-v3-…`).
-- Отменённое исправление пишет в журнал, какая проверка поля не прошла (`field_check`).
+- Русская аббревиатура после латиницы. После текста, где латинских букв больше, чем русских,
+  модель переводила заглавную русскую аббревиатуру в латинские буквы её клавиш, как бы редко они
+  ни встречались. Теперь такую аббревиатуру решает отдельная часть модели, которая знает, как
+  часто встречается каждое прочтение в русском техническом тексте и в английской прозе:
+  `ТЗ`, `ЛС`, `НГ` остаются, а `ГЫ`, набранное в русской раскладке после английского текста,
+  по-прежнему становится `US`. На подобранных фразах остаются 27 аббревиатур из 30 против 11.
+- Сомнение модели. Если модель оставляет слово, но перевод для неё не менее вероятен, чем 0.3,
+  слово теперь ждёт следующее и решается вместе с ним: `зк` после `принимай` модель на пробеле
+  оставляла с вероятностью 0.51 против 0.49, а рядом со следующим словом переводит уверенно.
+- Знак между словами. Одиночный знак, который в обеих раскладках печатается одинаково (`-`,
+  цифра), больше не разрывает цепочку слов: первое слово сообщения, оставленное на своём
+  пробеле, исправляется вместе со словом после знака, если модель его переводит.
 
 ### Модель
 
-- Контекстная модель `context-v3-2ae75d2b9e38` обучена тем же рецептом, что в 0.43.0, на свежем
-  корпусе, чтобы проверка закрепила исправленный движок; решения те же: по журналам набора 726
-  верных, 104 пропуска, 68 ложных, как в 0.43.0. Модель префиксов прежняя,
+- Контекстная модель `context-v3-19c791a547f4` — модель 0.44.0 с отдельной частью для
+  аббревиатур после латиницы, обученной на свежем корпусе. Модель префиксов прежняя,
   `prefix-v2-bf3dc28f8567`.
-- На новой запечатанной проверке правильно набранный текст не испорчен ни в одной из 195 строк,
-  без ранней смены восстановлено 174 строки против 159 у эталонной пары.
+- На новой запечатанной проверке правильно набранный текст не испорчен ни в одной из 197 строк,
+  без ранней смены восстановлено 175 строк из 196 против 162 у эталонной пары, с ранней сменой —
+  18, как у эталонной пары.
+- По журналам набора: 822 верных исправления, 120 пропусков, 80 ложных (у 0.44.0 — 79). Разница —
+  `зк` в оборванной строке `принимай все зк делай` теперь становится `pr`; на следующий день то же
+  слово исправлялось вручную.
 
 ### Что осталось
 
-- Короткий латинский термин строчными, набранный в русской раскладке после русского текста,
-  может остаться кириллицей: `принимай зк и продолжай` остаётся с `зк` вместо `pr`. Его
-  исправляет клавиша `Pause`.
+- `ЗК` заглавными перед знаком вопроса после русского текста остаётся кириллицей (`почему ты не
+  создал ЗК?`): на знаке препинания слово не ждёт следующего. Его исправляет клавиша `Pause`.
+- Пауза посреди слова может перевести его начало (`иг` становится `bu`); дописанное слово
+  возвращается обратно (`игру`).
+- Окончание, допечатанное после стирания части слова, решается как отдельное слово: `ый` может
+  стать `sq`.
+- Счётчик задержек `input_delay` в техническом журнале принимает за опоздавшую клавишу с нулевым
+  временем от другой программы (опоздание около времени работы системы). На скорость ввода это
+  не влияет; исправим в следующей версии.
 - Набор через TeamViewer и другие программы удалённого доступа на управляемом компьютере
   по-прежнему не обрабатывается (настройка «Ввод от других программ»): исправляет KeySwitch на
   компьютере, с которого печатают.
 
 ## English
 
-Automatic layout switching no longer drops out under fast typing. When the next letter went
-down before the space came up, the correction was cancelled and the word stayed as typed, its
-next word with it: `ghbdtn vbh`, `z ctujlyz`, `rfr ltkf` now become `привет мир`, `я сегодня`,
-`как дела`. The early layout switch now works in Firefox, the Claude app, VS Code and other
-Electron programs: they show the last letter a moment later, and the early switch was often
-refused there (five words in six in Firefox). Scrolling with the mouse wheel no longer discards the word being typed.
-The full list is in [CHANGELOG.md](CHANGELOG.md).
+A Russian abbreviation typed after Latin text stays as typed: `/designv2 ТЗ` no longer becomes
+`/designv2 NP`, nor `ЛС`, `ТГ`, `НГ` after a command or English prose `KC`, `NU`, `YU`. A Latin
+term typed in the Russian layout after Russian text that the model was unsure of is now decided
+together with the next word: `принимай зк и продолжай` becomes `принимай pr и продолжай`. A
+hyphen between words no longer keeps the first word of a message from being corrected:
+`Ytn - ult` becomes `Нет - где`. The full list is in [CHANGELOG.md](CHANGELOG.md).
 
 ### Release files
 
-- `KeySwitch-Setup-0.44.0-x64.exe` — installer for Windows 10/11 x64. It is not signed with
+- `KeySwitch-Setup-0.45.0-x64.exe` — installer for Windows 10/11 x64. It is not signed with
   a publisher certificate, so SmartScreen shows a warning.
-- `KeySwitch-0.44.0-windows-x64.zip` — portable archive for Windows x64.
-- `KeySwitch-Setup-0.44.0-arm64.exe` — installer for Windows 11 on Arm. It is not signed with a
+- `KeySwitch-0.45.0-windows-x64.zip` — portable archive for Windows x64.
+- `KeySwitch-Setup-0.45.0-arm64.exe` — installer for Windows 11 on Arm. It is not signed with a
   publisher certificate either.
-- `KeySwitch-0.44.0-windows-arm64.zip` — portable archive for Windows on Arm. The ARM64 build
+- `KeySwitch-0.45.0-windows-arm64.zip` — portable archive for Windows on Arm. The ARM64 build
   does not update itself yet: download a new version from the releases page.
-- `keyswitch_0.44.0_amd64.deb` — Ubuntu/Xubuntu on an X11 session. With 0.28.0 or newer
+- `keyswitch_0.45.0_amd64.deb` — Ubuntu/Xubuntu on an X11 session. With 0.28.0 or newer
   installed, this version arrives through the ordinary system update.
-- `KeySwitch-0.44.0-macos-arm64.zip` — Mac with Apple silicon (M1 and later), macOS 13 or newer.
-- `KeySwitch-0.44.0-macos-x86_64.zip` — Mac with an Intel processor, macOS 13 or newer.
+- `KeySwitch-0.45.0-macos-arm64.zip` — Mac with Apple silicon (M1 and later), macOS 13 or newer.
+- `KeySwitch-0.45.0-macos-x86_64.zip` — Mac with an Intel processor, macOS 13 or newer.
 - `SHA256SUMS` — checksums of every file; verify them before installing.
 
 Exactly one Mac archive is needed: the Apple silicon build does not run on Intel and vice
@@ -101,41 +98,42 @@ versa.
 
 ### Fixed
 
-- Fast typing. A correction runs once the key that triggered it is up; with the field reader on
-  (the Windows default), the check before the correction saw the next letter already in the field
-  and cancelled the replacement. Those letters are now expected: on the typing logs replayed the
-  way a fast typist types, 0.43.0 converted 218 words right and missed 911, this version 555
-  and 73.
-- A letter of the next word pressed before the space came up is typed again in the new layout
-  after the correction and starts the next word as usual: `nats b redis` becomes
-  `nats и redis` again.
-- The early layout switch in browsers and Electron editors: a field that has not shown the last
-  one or two letters yet is no longer taken for a changed field. If it is still behind when the
-  switch would run, the word is corrected at its space, as before.
-- The mouse wheel is no longer taken for a click: scrolling does not discard the word being typed
-  and the words before it.
-
-### Diagnostics
-
-- When keys reach KeySwitch late (typing stalls), the technical log writes `input_delay` once a
-  minute: how many keys came 100 ms late and how many answers of KeySwitch itself took 20 ms or
-  more. It shows who held the input up.
-- The diagnostics also name the prefix model (`prefix_model`), which switches the layout while a
-  word is typed, beside the intent model (`intent-v1-…`) and the context model (`context-v3-…`).
-- A cancelled correction logs which field check failed (`field_check`).
+- A Russian abbreviation after Latin text. After text with more Latin letters than Russian ones
+  the model turned a Russian abbreviation in capitals into the Latin letters of its keys, however
+  rarely they occur. Such an abbreviation is now decided by a part of the model of its own that
+  knows how often each reading occurs in Russian technical text and in English prose: `ТЗ`, `ЛС`,
+  `НГ` stay, while `ГЫ` typed in the Russian layout after English text still becomes `US`. On
+  authored sentences 27 of 30 such abbreviations stay against 11.
+- The model's doubt. When the model keeps a word but finds the conversion at least 0.3 likely,
+  the word now waits for the next one and is decided with it: at its space the model kept `зк`
+  after `принимай` at 0.51 against 0.49, and beside the next word it converts it with certainty.
+- A sign between words. A lone sign typed the same in either layout (`-`, a digit) no longer
+  breaks the chain of words: the first word of a message, kept at its space, is corrected
+  together with the word after the sign when the model converts it.
 
 ### Model
 
-- The context model `context-v3-2ae75d2b9e38` is trained with the 0.43.0 recipe on a fresh corpus,
-  so that the check pins the corrected engine; it decides the same: 726 right, 104 missed and
-  68 false on the typing logs, as 0.43.0. The prefix model stays `prefix-v2-bf3dc28f8567`.
-- On the new sealed check it corrupted none of 195 correctly typed rows and, without the early
-  switch, restored 174 rows against 159 for the reference pair.
+- The context model `context-v3-19c791a547f4` is the 0.44.0 model with a part of its own for
+  abbreviations after Latin text, trained on a fresh corpus. The prefix model stays
+  `prefix-v2-bf3dc28f8567`.
+- On the new sealed check it corrupted none of 197 correctly typed rows and, without the early
+  switch, restored 175 of 196 rows against 162 for the reference pair; with the early switch 18,
+  as the reference pair.
+- On the typing logs: 822 right corrections, 120 missed, 80 false (79 for 0.44.0). The difference
+  is `зк` in the cut-off line `принимай все зк делай`, which now becomes `pr`; the same word was
+  corrected by hand the next day.
 
 ### What remains
 
-- A short lower-case Latin term typed in the Russian layout after Russian text may stay
-  Cyrillic: `принимай зк и продолжай` keeps `зк` for `pr`. `Pause` corrects it.
+- `ЗК` in capitals before a question mark after Russian text stays Cyrillic (`почему ты не создал
+  ЗК?`): at a punctuation mark a word does not wait for the next one. `Pause` corrects it.
+- A pause in the middle of a word may convert its start (`иг` becomes `bu`); the finished word
+  converts back (`игру`).
+- An ending typed after part of a word was erased is decided as a word of its own: `ый` may
+  become `sq`.
+- The `input_delay` counter of the technical log takes a key with a zero time from another
+  program for a late one (late by about the system's uptime). Typing speed is not affected; the
+  next version fixes it.
 - Typing through TeamViewer and other remote-control programs is still not handled on the
   controlled computer (the «Ввод от других программ» setting): KeySwitch on the computer the
   typing comes from corrects it.
