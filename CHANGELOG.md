@@ -4,6 +4,25 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- With the field reader on (the Windows default) a word typed with the next letter pressed before
+  the space came up stays corrected: `ghbdtn vbh` stayed as typed, `z ctujlyz` too, and in VS Code
+  `l` stayed for `в` (0.43.0 logs, 08.10.2026). A correction runs once the key that triggered it is
+  up; by then the field shows the letters typed after the word, and the check before the correction
+  refused them as a changed field and left the next word unjudged. The check now expects the text
+  typed ahead (the same keys the correction deletes and types again), and a refusal names the check
+  that failed (`field_check`).
+- The early switch works in browsers and Electron editors: read as the fourth letter goes down,
+  the field there often does not show that letter yet, and the switch was refused as a changed
+  field at the fourth letter in 175 of 210 words in Firefox, 174 of 416 in the Claude app and 532 of
+  2 275 in VS Code (Windows logs, 05.09-08.10.2026). A field up to two letters behind is the word
+  being typed; if it is still behind when the switch would run, the switch is dropped and the word
+  is corrected at its boundary as before.
+- Scrolling with the mouse wheel no longer discards the word being typed and the words before it
+  (Windows, macOS, X11): a scroll moves the view, not the caret.
+- On Windows the technical log says when the keyboard hook saw keys late (`input_delay`, once a
+  minute at most): how many keys came 100 ms or more after their key time and how many answers of
+  KeySwitch itself took 20 ms or more, with the worst of each. A typing stall the log could not
+  explain so far now shows whether KeySwitch held the keys up.
 - `tools/compare_context_candidates.py` scores context models on a corpus's calibration and
   development frames as the trainer does (its frames with the spans and curricula, the runtime's
   support checks, the serving threshold), per profile and head class, and counts the frames a
