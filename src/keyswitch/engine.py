@@ -4166,6 +4166,13 @@ class KeySwitchEngine:
             # Read after the field: whatever the field can show was typed by then.
             ahead = self._typed_ahead((*plan.strokes, *plan.trailing))
             refusal = self._field_refusal(plan, field, suffix, ahead)
+            if (refusal == "other_text" and plan.mode == "early" and field is not None
+                    and self._typed_in_field(field, plan.original, ahead) is not None):
+                # The field has not taken the last letters in yet (_typed_in_field). The word is
+                # still the one typed: it stays tracked for a later letter or its boundary.
+                self._technical_event("early_switch_dropped", reason="field_behind",
+                                      current_word_length=len(self._strokes))
+                return False
             if refusal:
                 typed_after_boundary = bool(self._strokes)
                 self._clear_word(reason="context_field_changed")

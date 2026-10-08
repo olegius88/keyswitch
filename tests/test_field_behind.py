@@ -71,6 +71,26 @@ class FieldBehindTests(unittest.TestCase):
             self.assertFalse([event for event in events if event["event"] == "early_switch_evaluation"
                               and "context_field_changed" in str(event["decision"])])
 
+    def test_a_field_still_behind_when_the_switch_would_run_leaves_the_word_to_its_boundary(self) -> None:
+        with sequences.session(0) as current:
+            current.settings.set("detection.early_switch", True)
+            current.settings.set("detection.context_read_field", True)
+            current.settings.set("diagnostics.technical_logging", True)
+            reader = BehindReader(lambda: current.backend.text)
+            current.engine.context_policy.reader = reader
+            with self.assertLogs("keyswitch.engine", level=logging.INFO) as logs:
+                # A slow editor: a letter behind whenever it is read, until the space.
+                reader.behind = 1
+                current.physical("ghbdtn")
+                reader.behind = 0
+                current.physical(" ")
+                current.flush()
+            events = technical_events(logs.output)
+            self.assertEqual(current.backend.text, "привет ")
+            self.assertEqual([event["mode"] for event in events if event["event"] == "correction_applied"], ["boundary"])
+            self.assertIn("field_behind", [event["reason"] for event in events if event["event"] == "early_switch_dropped"])
+            self.assertFalse([event for event in events if event["event"] == "correction_aborted"])
+
 
 if __name__ == "__main__":
     unittest.main()
