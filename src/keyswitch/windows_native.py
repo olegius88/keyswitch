@@ -582,7 +582,7 @@ class CtypesWindowsAPI:
         ready: Callable[[], None],
     ) -> None:
         def mouse_callback(code: int, message: int, data: int) -> int:
-            # Button-down and wheel events invalidate the caret position.
+            # A button press invalidates the caret position; a scroll does not.
             # Observe only: never suppress the user's pointer action.
             if code == HC_ACTION and message in POINTER_INVALIDATING_MESSAGES:
                 listener(NativeKeyEvent(True, 0, 0, False, False, 0))
