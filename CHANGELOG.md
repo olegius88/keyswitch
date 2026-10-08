@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.44.0 — 2026-10-08
+
 - With the field reader on (the Windows default) a word typed with the next letter pressed before
   the space came up stays corrected: `ghbdtn vbh` stayed as typed, `z ctujlyz` too, and in VS Code
   `l` stayed for `в` (0.43.0 logs, 08.10.2026). A correction runs once the key that triggered it is
