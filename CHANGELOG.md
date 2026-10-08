@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.46.0 — 2026-10-08
+
 - A word finished after part of it was erased with Backspace is decided as that word: `первую игру` cut back to
   `перв` and finished as `первый` had `ый` judged a word of its own, and `sq` replaced it (0.44.0 logs,
   08.10.2026). A Backspace that erases text no word of the engine holds leaves the caret's position unknown, as a
