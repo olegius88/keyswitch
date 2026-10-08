@@ -15,6 +15,7 @@ from .constants.file_formats import DIAGNOSTICS_JSON_INDENT
 from .logsetup import configure_logging as configure_logging
 from .intent_model import LinearNgramModel
 from .context_model import ContextModel
+from .prefix_schema import prefix_diagnostics
 from .windows_context import probe_uia
 from .windows_backend import WindowsBackend
 from .windows_system import WindowsAutostartManager, WindowsSystemError
@@ -48,6 +49,7 @@ def diagnose() -> int:
                 "current_group": probe.current_group,
                 "intent_model": intent_status.as_dict(),
                 "context_model": {"available": context_model is not None, "status": context_status},
+                "prefix_model": prefix_diagnostics(),
                 "context_field_access": probe_uia(),
                 "autostart": autostart_status(),
                 "error": probe.error,

@@ -24,6 +24,7 @@ from .history import HistoryStore, data_dir
 from .intent_model import LinearNgramModel
 from .logsetup import configure_logging as configure_logging
 from .macos_backend import MacBackend
+from .prefix_schema import prefix_diagnostics
 from .config import SettingsStore
 from .macos_context import SOURCE as CONTEXT_SOURCE
 from .constants.timing import MACOS_PERMISSION_POLL_SECONDS
@@ -61,6 +62,7 @@ def diagnose() -> int:
         "current_group": probe.current_group,
         "intent_model": intent_status.as_dict(),
         "context_model": {"available": context_model is not None, "status": context_status},
+        "prefix_model": prefix_diagnostics(),
         # The accessibility tree answers both questions, so the reader is
         # available exactly when the permission is.
         "context_field_access": {"available": permission, "source": CONTEXT_SOURCE},
