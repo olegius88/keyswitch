@@ -161,6 +161,15 @@ CI работает на ubuntu-26.04 с более новым Python, чем о
       [бэкенды обучения](context-v3-training-backends.md)), `train_prefix_v2_model.py`, затем
       `evaluate_context_action_sequences.py` на development и один раз на test
       (`--corpus <fit>`; журнал пишется в `LEDGER_ROOT` evaluator'а).
+      Кандидата сравнивают с установленной парой до чтения test —
+      `compare_context_candidates.py --corpus <fit> --artifact
+      installed=src/keyswitch/resources/models/context_policy_v1.json --artifact
+      candidate=<ctx>/context-action.json --output <ctx>/reports/compare.json`: кадры calibration и
+      development, которые строит тренер (вместе со spans и учебными планами), решены так, как их решает
+      тренер, — проверки поддержки рантайма и порог артефакта; по каждому профилю и классу головы —
+      строки конверсий, верные и ложные конверсии и нетто, и сколько кадров кандидат решает иначе, чем
+      установленная пара. Нетто установленной пары на calibration нового корпуса — эталон храповика
+      (`RECEIPT_CALIBRATION_REFERENCE_*` в `tests/fixture_values/quality_floors.py`).
    10. Продвижение пары — `promote_context_action_pair.py --candidate <ctx> --prefix-candidate
       <prefix> --corpus <fit> --report <ctx>/reports/sequences-test.json`. До чтения test он
       проверяет всё, что пинит печать: дерево закоммичено, печать годна для корпуса, строгая
