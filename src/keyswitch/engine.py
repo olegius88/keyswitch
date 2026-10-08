@@ -3759,14 +3759,13 @@ class KeySwitchEngine:
             self._strokes = [
                 stroke for stroke in self._strokes if id(stroke) in planned
             ]
-            if not self._strokes:
-                # The letters begun after the boundary go with the correction and come back,
-                # typed again in the new layout, as the start of a word: nothing ties that word
-                # to the old layout any more. Kept, it read the first key coming back as a layout
-                # change in the middle of a word and cleared the observed text with it: `тфеы и`
-                # with the `и` down before the space came up became `nats b`, and the `b` lost
-                # the `и redis` it gets when typed after the space.
-                self._source_group = -1
+            # Letters begun after the boundary go with the correction and come back, typed again
+            # in the new layout, as the start of a word: with none of the word left, nothing ties
+            # it to the old layout. Kept, that layout read the first key coming back as a layout
+            # change in the middle of a word and cleared the observed text with it: `тфеы и` with
+            # the `и` down before the space came up became `nats b`, and the `b` lost the
+            # `и redis` it gets when typed after the space.
+            self._source_group = self._source_group if self._strokes else -1
         return tuple(late)
 
     def _reopenable_committed_word(self) -> CorrectionPlan | None:

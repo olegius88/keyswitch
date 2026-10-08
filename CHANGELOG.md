@@ -17,6 +17,17 @@ All notable changes to KeySwitch are documented in this file.
   2 275 in VS Code (Windows logs, 05.09-08.10.2026). A field up to two letters behind is the word
   being typed; if it is still behind when the switch would run, the switch is dropped and the word
   is corrected at its boundary as before.
+- A word typed after a correction with its first letter down before the space came up is decided
+  as when typed after the space: the correction types that letter again in the new layout and it
+  comes back as the start of the word, but the engine kept the old layout for it, read the letter
+  as a layout change in the middle of a word and cleared the text observed before it (`тфеы и`
+  became `nats b`, and `b redis` stayed where `и redis` is the answer). On the owner's typing
+  replayed the way a fast typist types (each next letter down before the space comes up, the
+  field a key behind), 0.43.0 got 218 conversions right and missed 911 on the PC log (54 and 216
+  on the notebook); this branch gets 555 right and misses 73 (138 and 20), as on the same typing
+  replayed key by key (506 and 75, 115 and 19), with 42 and 19 false conversions against 40 and 20.
+- The diagnostics name the prefix model (`prefix_model`, the one that switches the layout while a
+  word is typed) beside the intent model and the context model.
 - Scrolling with the mouse wheel no longer discards the word being typed and the words before it
   (Windows, macOS, X11): a scroll moves the view, not the caret.
 - On Windows the technical log says when the keyboard hook saw keys late (`input_delay`, once a
