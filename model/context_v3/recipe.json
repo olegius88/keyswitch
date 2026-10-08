@@ -183,7 +183,7 @@
   },
   "frozen_base": {
     "artifact": "model/context_v3/frozen-base.json",
-    "sha256": "5129029cdda9ffc2c6e67d8212ea8a7ede710764089ebde53c00b0ddc30ff6ae",
+    "sha256": "89603aead61a87aead1b512b91f57e5e519c5ba29fddc1c089bc1e8be8180c6f",
     "carried": {
       "alone": {
         "maximum_features": 5000,
@@ -198,7 +198,7 @@
         "maximum_features": 1000
       }
     },
-    "scope": "The corpus v37 model (context-v3-2ae75d2b9e38, 0.44.0) with every weight fixed: the word decided at its boundary, the kept-neighbour question and the capitals, lone-word, message-start, single-letter and abbreviation heads it carries. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone). The Latin-context abbreviation head is fitted onto it: a Cyrillic abbreviation in capitals that Russian technical text uses, after Latin text (context_action_features.latin_abbreviation_question), with how often each reading occurs in Russian and technical text and in English prose and how often the word before it does. Motivation: the owner's typing of 08.10.2026, where `/designv2 ТЗ` became `/designv2 NP`."
+    "scope": "The corpus v39 model (context-v3-19c791a547f4, 0.45.0) with every weight fixed: the word decided at its boundary, the kept-neighbour question and the capitals, lone-word, message-start, single-letter, abbreviation and Latin-context abbreviation heads it carries. Refitted on corpus v40 the Latin-context abbreviation head moved with the corpus: on its development frames it gained five right conversions, lost five and gained a false one (`СЕРТ` after English prose became Latin). With the corpus v39 head fixed as well, only feature names the corpus v39 fit never saw can take a step. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone). The fit certifies the engine of corpus v40 (a word edited with Backspace, a pause on the first letters of a word, the input delay counts) with the decisions of 0.45.0."
   },
   "letter_curriculum": {
     "term_sentences": 1500,
