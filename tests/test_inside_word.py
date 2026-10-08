@@ -141,6 +141,32 @@ class InsideWordTests(ContextEngineTests):
                 self.assertEqual(self.backend.text, "мы хотим сдtлать это")
                 self.assertEqual(self.engine._insertion, InsertionPoint("сд", "лать"))
 
+    def test_letters_typed_after_erasing_back_into_a_word_continue_it(self) -> None:
+        # `первую игру` cut back to `перв` and finished as `первый`: `ый` was judged a word of its
+        # own, and `sq` replaced it (0.44.0 log, 08.10.2026).
+        model = self.script({"ый": "convert"})
+        self.reset_editor(1)
+        self.type("первую игру ", group=1)
+        for _erased in "ую игру ":
+            self.tap(self.key("BackSpace", group=1))
+        self.assertEqual(self.backend.text, "перв")
+        self.type("ый ", group=1)
+        self.assertEqual(self.backend.text, "первый ")
+        self.assertNotIn("ый", [question[0] for question in model.questions])
+
+    def test_letters_typed_after_erasing_a_whole_word_begin_a_word(self) -> None:
+        model = self.script({"ghbdtn": "convert"})
+        self.reset_editor(0)
+        self.backend.group = 1
+        self.type("мы ", group=1)
+        self.tap(self.key("BackSpace", group=1))
+        self.tap(self.key("BackSpace", group=1))
+        self.tap(self.key("BackSpace", group=1))
+        self.backend.group = 0
+        self.type("ghbdtn ", group=0)
+        self.assertEqual(self.backend.text, "привет ")
+        self.assertIn(("ghbdtn", "", ""), model.questions)
+
     def test_a_space_typed_into_a_word_ends_the_word_there(self) -> None:
         """Only the letters before the caret belong to the word the space ends."""
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import itertools
 import json
 import logging
@@ -10,6 +11,7 @@ import re
 import threading
 import time
 import unicodedata
+from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, replace
 from typing import Final
@@ -53,12 +55,13 @@ from .context_policy import (
 )
 from .constants.models import (
     CONTEXT_ACTION_FEATURE_VERSION,
+    CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS,
     KEPT_CONTEXT_WORD_MAX_CHARACTERS,
     PLANNED_CONTEXT_WORD_MAX_CHARACTERS,
     PREFIX_MAX_CHARACTERS,
     PREFIX_MIN_CHARACTERS,
 )
-from .context_model import AfterOrigin
+from .context_model import AfterOrigin, _term_frequency
 from .context_access import PlatformFieldReader
 from .constants.units import MILLISECONDS_PER_SECOND
 from .input_context import CONTEXT_TTL, FieldContext, FieldReader
@@ -78,6 +81,8 @@ from .constants.detection import (
     MAX_WORD_STROKES as MAX_WORD_STROKES,
     NATURAL_SOURCE_BOUNDARY_MIN_CHARACTERS,
     NATURAL_SOURCE_BOUNDARY_NGRAM_FLOOR,
+    PAUSE_WORD_START_LETTERS,
+    PAUSE_WORD_START_MIN_WORDS,
     REPLAYED_SIGNS_MIN_STEM_LETTERS,
     STRANDED_TERM_MAX_WORDS,
     TRUSTED_SHORT_WORD_MAX_LENGTH,
@@ -97,6 +102,7 @@ from .constants.timing import (
     INPUT_DELAY_LATE_MS,
     INPUT_DELAY_REPORT_INTERVAL_SECONDS,
     INPUT_DELAY_SLOW_CALLBACK_MS,
+    INPUT_DELAY_UNSTAMPED_MS,
     LATE_STROKE_GRACE_SECONDS,
     LEARNING_PROMPT_TIMEOUT_SECONDS,
     MANUAL_RELEASE_TIMEOUT_SECONDS,
@@ -129,6 +135,14 @@ class _FocusChange:
 
     changed: bool
     ignore_layout: bool
+
+
+@functools.lru_cache(maxsize=LAYOUT_GROUP_COUNT)
+def _word_starts(model: LanguageModel) -> Counter[str]:
+    """How many words of a lexicon begin with each PAUSE_WORD_START_LETTERS letters, counted once per model."""
+
+    starts = (word[:PAUSE_WORD_START_LETTERS] for word in model.frequencies if len(word) > PAUSE_WORD_START_LETTERS)
+    return Counter(starts)
 
 
 def _default_backend(group_count: int) -> InputBackend:
@@ -716,7 +730,7 @@ class KeySwitchEngine:
         if report.stalled:
             self._technical_event(
                 "input_delay", **asdict(report), late_threshold_ms=INPUT_DELAY_LATE_MS,
-                slow_threshold_ms=INPUT_DELAY_SLOW_CALLBACK_MS,
+                slow_threshold_ms=INPUT_DELAY_SLOW_CALLBACK_MS, unstamped_threshold_ms=INPUT_DELAY_UNSTAMPED_MS,
             )
 
     def _recover_from_error(self, error: Exception) -> None:
@@ -982,6 +996,13 @@ class KeySwitchEngine:
                 self._update(
                     current_word=self._text_for_group(self._strokes, self._source_group)
                 )
+            else:
+                # This Backspace erased text no word of the engine holds: letters typed now may
+                # continue a word in front of the caret, as after a click. `первую игру` cut back
+                # to `перв` and finished as `первый` had its `ый` judged a word of its own, and
+                # `sq` replaced it (0.44.0 log, 08.10.2026); the next word reads the field as it
+                # begins (_read_insertion).
+                self._position_unknown = True
             if self._mention_shown is not None and self._strokes:
                 # The pending write-back went with the erased letter; the
                 # letters left still stand after the "@".
@@ -3347,6 +3368,14 @@ class KeySwitchEngine:
             return
         if not segmentation_certain:
             return
+        inside_word = self._insertion is not None and self._insertion.inside_word
+        target = next(iter(alternatives), source_group)
+        if not (trailing or head or inside_word) and self._word_begun(
+                original, source_group, alternatives.get(target, ""), target):
+            # A pause in the middle of a word is a pause to think: the word is decided at its boundary.
+            self._technical_event("pause_correction_skipped", reason="word_begun", idle_ms=idle_ms,
+                                  word_characters=len(original))
+            return
         inside = None if trailing or head else self._decide_inside_word(
             strokes, source_group, alternatives, application, "pause", None)
         decision = inside if inside is not None else self._decide_word(
@@ -3789,6 +3818,19 @@ class KeySwitchEngine:
             # `и redis` it gets when typed after the space.
             self._source_group = self._source_group if self._strokes else -1
         return tuple(late)
+
+    def _word_begun(self, original: str, group: int, alternative: str, target: int) -> bool:
+        """The start of a word still being typed: PAUSE_WORD_START_LETTERS letters that many words of
+        their own language begin with, whose other reading is no word of the other language's prose.
+        `иг` is the start of `игру` and `bu` no English word, while `ша` typed for `if` is."""
+
+        if len(original) != PAUSE_WORD_START_LETTERS or not original.isalpha() or group not in self.models:
+            return False
+        if _word_starts(self.models[group])[original.casefold()] < PAUSE_WORD_START_MIN_WORDS:
+            return False
+        prose = {"us": "english", "ru": "russian"}.get(self._layout_name(target))
+        return prose is not None and (
+            _term_frequency()[prose].get(alternative.casefold(), 0) < CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS[0])
 
     def _reopenable_committed_word(self) -> CorrectionPlan | None:
         """The last word, if one Backspace puts the caret right after it.
