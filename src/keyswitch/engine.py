@@ -10,7 +10,7 @@ import re
 import threading
 import time
 import unicodedata
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, replace
 from typing import Final
 
@@ -86,7 +86,7 @@ from .constants.detection import (
 from .constants.keyboard import LAYOUT_GROUP_COUNT, UNICODE_PACKET_KEY_NAME
 from .constants.file_formats import LEGACY_RULE_CONFIRMATIONS_REQUIRED
 from .constants.log_files import LOGGED_SCORE_DECIMALS
-from .constants.text import BASIC_MULTILINGUAL_PLANE_MAX_CODEPOINT
+from .constants.text import BASIC_MULTILINGUAL_PLANE_MAX_CODEPOINT, FIELD_PENDING_MAX_CHARACTERS
 from .constants.timing import (
     ACTION_TIMEOUT_SECONDS,
     DOUBLE_CONVERT_PRESS_WINDOW_SECONDS,
@@ -1290,13 +1290,35 @@ class KeySwitchEngine:
                     self._contexts.clear()
                     self._update(current_word="", last_action="Защищённое поле: обработка отключена")
                     return snapshot, "sensitive_field"
-                lag = caret_lag(snapshot.before, snapshot.after, original, exact=True)
-                before = snapshot.before + snapshot.after[:lag or 0]
-                if (snapshot.selection or not snapshot.field_id or snapshot.application != application or lag is None
-                        or not before.endswith(original)):
+                around = self._typed_in_field(snapshot, original, self._typed_ahead(self._strokes))
+                if snapshot.selection or not snapshot.field_id or snapshot.application != application or around is None:
                     return snapshot, "context_field_changed"
-                field = replace(snapshot, before=before[:-len(original)], after=snapshot.after[lag:])
+                field = replace(snapshot, before=around[0], after=around[1])
         return field, ""
+
+    @staticmethod
+    def _typed_in_field(field: FieldContext, typed: str, ahead: str) -> tuple[str, str] | None:
+        """The text before and after a word being typed, from a field read as its last key goes down.
+
+        The field may not show that key yet: a browser or an Electron editor reports its text a
+        moment after the key, and the early switch was refused at the fourth letter as a changed
+        field in 175 of 210 words in Firefox, 174 of 416 in the Claude app and 532 of 2 275 in VS
+        Code (Windows logs, 05.09-08.10.2026). Up to FIELD_PENDING_MAX_CHARACTERS of the last letters
+        may be missing, the caret right after the rest. Text typed ahead may follow the word, and
+        the caret may be reported short of it (caret_lag). None for any other text.
+        """
+
+        for taken in range(len(ahead), -1, -1):
+            shown = typed + ahead[:taken]
+            lag = caret_lag(field.before, field.after, shown, exact=True)
+            head = field.before + field.after[:lag or 0]
+            if lag is not None and head.endswith(shown):
+                return head[:len(head) - len(shown)], field.after[lag:]
+        for pending in range(1, min(FIELD_PENDING_MAX_CHARACTERS, len(typed) - 1) + 1):
+            shown = typed[:-pending]
+            if field.before.endswith(shown):
+                return field.before[:-len(shown)], field.after
+        return None
 
     def _decide_prefix(self, baseline: EarlySwitchDecision, field: FieldContext | None) -> tuple[EarlySwitchDecision, float]:
         mode = str(self.settings.get("detection.context_policy", "assist"))
@@ -3641,8 +3663,8 @@ class KeySwitchEngine:
             and not (event.control or event.alt or event.super_key)
         )
 
-    def _typed_ahead(self, plan: CorrectionPlan) -> str:
-        """The text typed after a plan's word that the field may already show.
+    def _typed_ahead(self, typed: Sequence[KeyEvent]) -> str:
+        """The text typed after the given strokes that the field may already show.
 
         The hook passes every key on to the window as it queues it, and a correction
         runs only once the key that triggered it is up. A user who presses the next
@@ -3655,7 +3677,7 @@ class KeySwitchEngine:
         logs, 08.10.2026). Plain text only, up to the first key that is not.
         """
 
-        planned = {id(stroke) for stroke in (*plan.strokes, *plan.trailing)}
+        planned = {id(stroke) for stroke in typed}
         with self._events.mutex:
             queued = tuple(self._events.queue)
         ahead: list[str] = []
@@ -4142,7 +4164,7 @@ class KeySwitchEngine:
             field = None if reader is None else reader.read(plan.application, self._focus_window or 0)
             suffix = plan.original + "".join(stroke.character for stroke in plan.trailing) + (plan.boundary.character if plan.boundary else "")
             # Read after the field: whatever the field can show was typed by then.
-            ahead = self._typed_ahead(plan)
+            ahead = self._typed_ahead((*plan.strokes, *plan.trailing))
             refusal = self._field_refusal(plan, field, suffix, ahead)
             if refusal:
                 typed_after_boundary = bool(self._strokes)

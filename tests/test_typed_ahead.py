@@ -93,20 +93,19 @@ class TypedAheadTests(unittest.TestCase):
             engine = current.engine
             current.physical("ghbdtn")
             word = tuple(engine._strokes)
-            plan = CorrectionPlan(word, None, 0, 1, "ghbdtn", "привет", 1.0, "", True, "early")
-            self.assertEqual(engine._typed_ahead(plan), "")
+            self.assertEqual(engine._typed_ahead(word), "")
             shift = current.key("", name="Shift_L")
             for event in (current.key("V"), replace(current.key("V"), pressed=False), shift, current.key("b"),
                           current.key("", name="Left"), current.key("h")):
                 engine.enqueue(event)
             # The Shift typed nothing, the key-up neither; the caret move ends what can be told.
-            self.assertEqual(engine._typed_ahead(plan), "Vb")
+            self.assertEqual(engine._typed_ahead(word), "Vb")
             current.engine._events.queue.clear()
             engine.enqueue(replace(current.key("c"), state=CONTROL_MASK))
-            self.assertEqual(engine._typed_ahead(plan), "")
+            self.assertEqual(engine._typed_ahead(word), "")
             current.engine._events.queue.clear()
             engine._events.put_nowait(None)
-            self.assertEqual(engine._typed_ahead(plan), "")
+            self.assertEqual(engine._typed_ahead(word), "")
 
     def test_the_refusal_names_what_differs(self) -> None:
         stroke = KeyEvent(True, 1, "g", "g", ("g", "п"), 0, 0, 1)
