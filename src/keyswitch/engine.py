@@ -2633,9 +2633,21 @@ class KeySwitchEngine:
         if word is not None and not any(char.isalpha() for char in word.plan.original):
             # A token of signs alone (`.`, `1.2`, `...`) is never converted on its own, and a
             # converted next word does not make it a word either: `.` before `ghbdtn` is no `ю`.
+            # One that reads the same in either layout, alone after a kept word, stands between
+            # that word and the next as it is (_take_along): `Ytn - ult` kept `Ytn` for good
+            # once `-` had cut the words apart, and only `где` converted.
+            if self._reads_alike(word.plan) and kept and not self._reads_alike(kept[-1].plan):
+                self._kept = (*kept, word)
             return
         chain = kept if word is None or word.plan.target_group == word.plan.source_group else (*kept, word)
-        self._kept = chain[-KEPT_WORDS_TAKEN_ALONG:]
+        words = [index for index, item in enumerate(chain) if not self._reads_alike(item.plan)]
+        self._kept = chain[words[-KEPT_WORDS_TAKEN_ALONG]:] if len(words) > KEPT_WORDS_TAKEN_ALONG else chain
+
+    @staticmethod
+    def _reads_alike(plan: CorrectionPlan) -> bool:
+        """A token of signs that the other layout types the same (`-`, `2`): nothing in it to convert."""
+
+        return plan.original == plan.replacement and not any(char.isalpha() for char in plan.original)
 
     def _sign_reads_as_letter(self, plan: CorrectionPlan) -> bool:
         """Only the whole token, the sign split off its end included, reads as a word in the other layout.
@@ -2676,9 +2688,13 @@ class KeySwitchEngine:
         # split off the converted word's end stays literal after the whole correction.
         closing = None if plan.boundary is None or plan.boundary.deferred else plan.boundary
         suffix = "".join(stroke.character for stroke in plan.trailing) + ("" if closing is None else closing.character)
-        start, taken = plan, list[KeptWord]()
+        start, taken, settled = plan, list[KeptWord](), plan
         for word in reversed(kept):
             previous = word.plan
+            # A sign that reads the same in either layout (`-` in `Ytn - ult`) is passed as it
+            # stands: the word before it is asked with the converted word after the sign, and
+            # the sign goes with it only if that word converts.
+            passed = self._reads_alike(previous)
             if (
                 previous.boundary is None
                 or plan.source_group != previous.source_group or plan.target_group != previous.target_group
@@ -2691,20 +2707,22 @@ class KeySwitchEngine:
                 # Only a word whose other reading is a word is asked: a term typed as intended
                 # before a Russian word typed in the English layout (`htop gjrfpsdftn`) is no
                 # `рещз`, yet asked with `показывает` after it the model converts it.
-                or not self.models[previous.target_group].score(previous.replacement).known
+                or not passed and not self.models[previous.target_group].score(previous.replacement).known
             ):
                 break
-            baseline = word.baseline if word.baseline is not None else self._baseline_decision(
-                previous.original, {previous.target_group: previous.replacement}, previous.source_group,
-                application, "space")
-            again = self.context_policy.decide(
-                baseline, previous.replacement, previous.target_group, self.detector, "space", "assist",
-                after=next_replacement, field_override=word.field,
-                boundary_text=previous.boundary.character, after_origin=self._neighbour_origin(previous.replacement),
-            )
-            if not again.decision.should_convert:
-                break
-            taken.append(word)
+            if not passed:
+                baseline = word.baseline if word.baseline is not None else self._baseline_decision(
+                    previous.original, {previous.target_group: previous.replacement}, previous.source_group,
+                    application, "space")
+                again = self.context_policy.decide(
+                    baseline, previous.replacement, previous.target_group, self.detector, "space", "assist",
+                    after=next_replacement, field_override=word.field,
+                    boundary_text=previous.boundary.character,
+                    after_origin=self._neighbour_origin(previous.replacement),
+                )
+                if not again.decision.should_convert:
+                    break
+                taken.append(word)
             plan = replace(
                 plan, strokes=previous.strokes + (previous.boundary,) + plan.strokes, boundary=closing,
                 original=previous.original + previous.boundary.character + plan.original,
@@ -2712,10 +2730,11 @@ class KeySwitchEngine:
                 automatic=True, mode="context_phrase", context_field=self._context_field_id(),
                 typed=previous.original + previous.boundary.character + plan.typed if plan.typed else "",
             )
-            next_replacement = previous.replacement
+            if not passed:
+                settled, next_replacement = plan, previous.replacement
         if not taken:
             return start
-        farthest = taken[-1]
+        plan, farthest = settled, taken[-1]
         before = (farthest.field.before if farthest.field is not None
                   else self.context_policy.stream.text[:-len(plan.original + suffix)])
         if any(char.isalpha() for char in before.rsplit("\n", 1)[-1]):
@@ -2754,7 +2773,9 @@ class KeySwitchEngine:
         message-start rule waits as well, whatever the model said: if the user
         keeps typing, the immediate correction aborts as unsafe and the next word
         has to decide the letter; if it went through, the observed text no longer
-        matches and the wait cancels itself.
+        matches and the wait cancels itself. A token of signs the other layout
+        types the same (`-`) has nothing to wait for: it stands among the kept
+        words instead (_keep_for_next_word).
         """
 
         result = self._context_result
@@ -2766,6 +2787,7 @@ class KeySwitchEngine:
             and boundary.character == " "
             and not trailing and not head
             and not boundary.deferred
+            and not self._reads_alike(plan)
             and self.settings.get("detection.context_policy", "assist") == "assist"
         ):
             self._context_wait_sequence += 1
