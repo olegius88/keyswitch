@@ -4,6 +4,42 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- With the field reader on (the Windows default) a word typed with the next letter pressed before
+  the space came up stays corrected: `ghbdtn vbh` stayed as typed, `z ctujlyz` too, and in VS Code
+  `l` stayed for `в` (0.43.0 logs, 08.10.2026). A correction runs once the key that triggered it is
+  up; by then the field shows the letters typed after the word, and the check before the correction
+  refused them as a changed field and left the next word unjudged. The check now expects the text
+  typed ahead (the same keys the correction deletes and types again), and a refusal names the check
+  that failed (`field_check`).
+- The early switch works in browsers and Electron editors: read as the fourth letter goes down,
+  the field there often does not show that letter yet, and the switch was refused as a changed
+  field at the fourth letter in 175 of 210 words in Firefox, 174 of 416 in the Claude app and 532 of
+  2 275 in VS Code (Windows logs, 05.09-08.10.2026). A field up to two letters behind is the word
+  being typed; if it is still behind when the switch would run, the switch is dropped and the word
+  is corrected at its boundary as before.
+- A word typed after a correction with its first letter down before the space came up is decided
+  as when typed after the space: the correction types that letter again in the new layout and it
+  comes back as the start of the word, but the engine kept the old layout for it, read the letter
+  as a layout change in the middle of a word and cleared the text observed before it (`тфеы и`
+  became `nats b`, and `b redis` stayed where `и redis` is the answer). On the owner's typing
+  replayed the way a fast typist types (each next letter down before the space comes up, the
+  field a key behind), 0.43.0 got 218 conversions right and missed 911 on the PC log (54 and 216
+  on the notebook); this branch gets 555 right and misses 73 (138 and 20), as on the same typing
+  replayed key by key (506 and 75, 115 and 19), with 42 and 19 false conversions against 40 and 20.
+- The context model is the 0.43.0 recipe fitted on corpus v37 (`context-v3-2ae75d2b9e38`; test v37
+  sealed before training and passed), so that its seal pins the corrected engine: it decides every
+  calibration frame of corpus v37 and every word of the owner's typing replay as the 0.43.0 model.
+  On test v37 it keeps all 195 correctly typed rows (the baseline pair corrupts one with the early
+  switch) and restores 174 of 193 mistyped rows with the early switch off against 159. The prefix
+  model retrained byte-identical.
+- The diagnostics name the prefix model (`prefix_model`, the one that switches the layout while a
+  word is typed) beside the intent model and the context model.
+- Scrolling with the mouse wheel no longer discards the word being typed and the words before it
+  (Windows, macOS, X11): a scroll moves the view, not the caret.
+- On Windows the technical log says when the keyboard hook saw keys late (`input_delay`, once a
+  minute at most): how many keys came 100 ms or more after their key time and how many answers of
+  KeySwitch itself took 20 ms or more, with the worst of each. A typing stall the log could not
+  explain so far now shows whether KeySwitch held the keys up.
 - `tools/compare_context_candidates.py` scores context models on a corpus's calibration and
   development frames as the trainer does (its frames with the spans and curricula, the runtime's
   support checks, the serving threshold), per profile and head class, and counts the frames a

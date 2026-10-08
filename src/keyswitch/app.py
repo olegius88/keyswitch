@@ -469,6 +469,7 @@ def diagnose() -> int:
     probe = backend.probe()
     from .intent_model import LinearNgramModel
     from .context_model import ContextModel
+    from .prefix_schema import prefix_diagnostics
 
     _intent_model, intent_status = LinearNgramModel.try_load_default()
     context_model, context_status = ContextModel.try_load()
@@ -483,6 +484,7 @@ def diagnose() -> int:
         "current_group": probe.current_group,
         "intent_model": intent_status.as_dict(),
         "context_model": {"available": context_model is not None, "status": context_status},
+        "prefix_model": prefix_diagnostics(),
         "error": probe.error,
     }
     print(json.dumps(payload, ensure_ascii=False, indent=DIAGNOSTICS_JSON_INDENT))

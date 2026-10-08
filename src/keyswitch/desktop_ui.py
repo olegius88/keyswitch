@@ -2197,6 +2197,13 @@ class DesktopApplication:
                 "read_field": self.settings.get("detection.context_read_field", False),
                 "last_action": self.engine.snapshot.context_action,
             },
+            # The third model, beside the intent model of the baseline and the context model: the one
+            # that switches the layout while the word is typed.
+            "prefix_model": {
+                "available": self.engine.prefix_model is not None,
+                "status": "" if self.engine.prefix_model is None else self.engine.prefix_model.version,
+                "early_switch": self.settings.get("detection.early_switch", True),
+            },
             "autostart": self._autostart_diagnostics(),
             "technical_logging": bool(
                 self.settings.get("diagnostics.technical_logging", False)

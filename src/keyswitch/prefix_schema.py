@@ -113,3 +113,11 @@ class VersionedPrefixModel(PrefixModel):
             return VersionedPrefixModel.load()
         except (OSError, ValueError, TypeError):
             return None
+
+
+def prefix_diagnostics() -> dict[str, object]:
+    """The installed prefix model for a support report: the third model, beside the intent model of the
+    baseline and the context model, the one that switches the layout while a word is typed."""
+
+    model = VersionedPrefixModel.default()
+    return {"available": model is not None, "status": "" if model is None else model.version}

@@ -7,6 +7,11 @@ from typing import Final
 # X11 reports the wheel as button presses; Windows reports a signed delta.
 X11_WHEEL_UP_BUTTON: Final = 4
 X11_WHEEL_DOWN_BUTTON: Final = 5
+X11_WHEEL_LEFT_BUTTON: Final = 6
+X11_WHEEL_RIGHT_BUTTON: Final = 7
+# A scroll moves the view, not the caret: a press of these buttons is no click.
+X11_WHEEL_BUTTONS: Final = frozenset({X11_WHEEL_UP_BUTTON, X11_WHEEL_DOWN_BUTTON, X11_WHEEL_LEFT_BUTTON,
+                                      X11_WHEEL_RIGHT_BUTTON})
 X11_KEY_PRESS: Final = 2
 X11_BUTTON_PRESS: Final = 4
 X11_KEY_RELEASE: Final = 3

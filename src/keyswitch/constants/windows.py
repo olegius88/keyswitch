@@ -84,8 +84,8 @@ WM_QUIT: Final = 0x0012
 WM_USER: Final = 0x0400
 WM_INPUTLANGCHANGEREQUEST: Final = 0x0050
 PM_NOREMOVE: Final = 0x0000
-# Mouse messages that invalidate the caret position; observed only, never suppressed (see
-# run_keyboard_hook's mouse_callback).
+# Mouse messages; a button press invalidates the caret position. Observed only, never suppressed
+# (see run_keyboard_hook's mouse_callback).
 WM_LBUTTONDOWN: Final = 0x0201
 WM_RBUTTONDOWN: Final = 0x0204
 WM_MBUTTONDOWN: Final = 0x0207
@@ -131,4 +131,8 @@ SHIFT_KEYS: Final = frozenset((VK_SHIFT, VK_LSHIFT, VK_RSHIFT))
 CONTROL_KEYS: Final = frozenset((VK_CONTROL, VK_LCONTROL, VK_RCONTROL))
 ALT_KEYS: Final = frozenset((VK_MENU, VK_LMENU, VK_RMENU))
 SUPER_KEYS: Final = frozenset((VK_LWIN, VK_RWIN))
-POINTER_INVALIDATING_MESSAGES: Final = frozenset({WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN, WM_MOUSEWHEEL, WM_XBUTTONDOWN, WM_MOUSEHWHEEL})
+# Not the wheel (WHEEL_MESSAGES): a scroll moves the view, not the caret. Reported as
+# a click it discarded the word being typed and the words before it, 141 times a minute while a
+# page was scrolled (Windows log, 08.10.2026).
+POINTER_INVALIDATING_MESSAGES: Final = frozenset({WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN, WM_XBUTTONDOWN})
+WHEEL_MESSAGES: Final = frozenset({WM_MOUSEWHEEL, WM_MOUSEHWHEEL})

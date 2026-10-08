@@ -50,6 +50,7 @@ from .constants.x11 import (
     X11_KEY_PRESS,
     X11_KEY_RELEASE,
     X11_REVERT_TO_PARENT,
+    X11_WHEEL_BUTTONS,
     XA_CARDINAL,
     XKB_GROUP_STATE_MASK,
     XKB_GROUP_STATE_SHIFT,
@@ -552,7 +553,8 @@ class X11Backend:
         ) = struct.unpack("=BBHIIIIhhhhHBB", payload)
         event_type &= XRECORD_EVENT_TYPE_MASK
         if event_type == X11_BUTTON_PRESS:
-            return KeyEvent(True, 0, "Pointer", "", ("", ""), -1, 0, timestamp)
+            # For a button event the detail byte is the button: the wheel moves the view, not the caret.
+            return None if keycode in X11_WHEEL_BUTTONS else KeyEvent(True, 0, "Pointer", "", ("", ""), -1, 0, timestamp)
         if event_type not in (X11_KEY_PRESS, X11_KEY_RELEASE):
             return None
         pressed = event_type == X11_KEY_PRESS

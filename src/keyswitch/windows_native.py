@@ -315,6 +315,8 @@ class CtypesWindowsAPI:
         kernel32.GetCurrentThreadId.restype = ctypes.c_ulong
         kernel32.GetCurrentProcessId.argtypes = []
         kernel32.GetCurrentProcessId.restype = ctypes.c_ulong
+        kernel32.GetTickCount.argtypes = []
+        kernel32.GetTickCount.restype = ctypes.c_uint32
         kernel32.GetLastError.argtypes = []
         kernel32.GetLastError.restype = ctypes.c_ulong
         kernel32.OpenProcess.argtypes = [
@@ -371,6 +373,9 @@ class CtypesWindowsAPI:
 
     def current_process_id(self) -> int:
         return int(self.kernel32.GetCurrentProcessId())
+
+    def tick_count(self) -> int:
+        return int(self.kernel32.GetTickCount())
 
     def keep_window_inactive(self, window: int) -> bool:
         """Mark a popup so that showing or clicking it never takes the foreground.
@@ -582,7 +587,7 @@ class CtypesWindowsAPI:
         ready: Callable[[], None],
     ) -> None:
         def mouse_callback(code: int, message: int, data: int) -> int:
-            # Button-down and wheel events invalidate the caret position.
+            # A button press invalidates the caret position; a scroll does not.
             # Observe only: never suppress the user's pointer action.
             if code == HC_ACTION and message in POINTER_INVALIDATING_MESSAGES:
                 listener(NativeKeyEvent(True, 0, 0, False, False, 0))

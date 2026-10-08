@@ -113,6 +113,15 @@ class InputContext:
             return self.text[:-len(original) - 1]
         return ""
 
+    def withdraw(self, typed: str) -> bool:
+        """Take back the text observed last, to be typed and observed again; False if it is not there."""
+
+        if not self.text.endswith(typed):
+            return False
+        self.text = self.text[:len(self.text) - len(typed)]
+        self.revision += 1
+        return True
+
     def replace_suffix(self, original: str, replacement: str, boundary: str) -> None:
         old = original + boundary
         if old and self.text.endswith(old):

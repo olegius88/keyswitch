@@ -10,8 +10,8 @@ import re
 import threading
 import time
 import unicodedata
-from collections.abc import Callable
-from dataclasses import dataclass, replace
+from collections.abc import Callable, Sequence
+from dataclasses import asdict, dataclass, replace
 from typing import Final
 
 from . import __version__
@@ -62,6 +62,7 @@ from .context_model import AfterOrigin
 from .context_access import PlatformFieldReader
 from .constants.units import MILLISECONDS_PER_SECOND
 from .input_context import CONTEXT_TTL, FieldContext, FieldReader
+from .input_delay import InputDelayReport
 from .prefix_model import PrefixInput, PrefixModel
 from .prefix_schema import VersionedPrefixModel
 from .settings_diagnostics import setting_change, settings_snapshot
@@ -85,7 +86,7 @@ from .constants.detection import (
 from .constants.keyboard import LAYOUT_GROUP_COUNT, UNICODE_PACKET_KEY_NAME
 from .constants.file_formats import LEGACY_RULE_CONFIRMATIONS_REQUIRED
 from .constants.log_files import LOGGED_SCORE_DECIMALS
-from .constants.text import BASIC_MULTILINGUAL_PLANE_MAX_CODEPOINT
+from .constants.text import BASIC_MULTILINGUAL_PLANE_MAX_CODEPOINT, FIELD_PENDING_MAX_CHARACTERS
 from .constants.timing import (
     ACTION_TIMEOUT_SECONDS,
     DOUBLE_CONVERT_PRESS_WINDOW_SECONDS,
@@ -93,6 +94,9 @@ from .constants.timing import (
     ENGINE_LOOP_MIN_WAKE_SECONDS,
     ENGINE_SWITCH_GRACE_SECONDS,
     ENGINE_WORKER_JOIN_TIMEOUT_SECONDS,
+    INPUT_DELAY_LATE_MS,
+    INPUT_DELAY_REPORT_INTERVAL_SECONDS,
+    INPUT_DELAY_SLOW_CALLBACK_MS,
     LATE_STROKE_GRACE_SECONDS,
     LEARNING_PROMPT_TIMEOUT_SECONDS,
     MANUAL_RELEASE_TIMEOUT_SECONDS,
@@ -411,6 +415,7 @@ class KeySwitchEngine:
         }
         self._pending: CorrectionPlan | None = None
         self._pending_trigger_keycode = -1
+        self._input_delay_due = time.monotonic() + INPUT_DELAY_REPORT_INTERVAL_SECONDS
         # The key an application quirk has just rewritten; pressing it again undoes that.
         self._manual_release_deadline = 0.0
         self._last_committed: CorrectionPlan | None = None
@@ -693,6 +698,26 @@ class KeySwitchEngine:
         self._poll_current_group()
         self._maybe_correct_after_pause()
         self._expire_learning_prompt()
+        self._report_input_delay()
+
+    def _report_input_delay(self) -> None:
+        """Log how late the keyboard hook saw keys, once a minute and only when one was late.
+
+        A backend that cannot tell (X11 observes keys after the window has them) has no
+        take_input_delay; see input_delay.
+        """
+
+        now = time.monotonic()
+        take = getattr(self.backend, "take_input_delay", None)
+        if now < self._input_delay_due or take is None:
+            return
+        self._input_delay_due = now + INPUT_DELAY_REPORT_INTERVAL_SECONDS
+        report: InputDelayReport = take()
+        if report.stalled:
+            self._technical_event(
+                "input_delay", **asdict(report), late_threshold_ms=INPUT_DELAY_LATE_MS,
+                slow_threshold_ms=INPUT_DELAY_SLOW_CALLBACK_MS,
+            )
 
     def _recover_from_error(self, error: Exception) -> None:
         self._clear_word(reason="input_error")
@@ -1265,13 +1290,35 @@ class KeySwitchEngine:
                     self._contexts.clear()
                     self._update(current_word="", last_action="Защищённое поле: обработка отключена")
                     return snapshot, "sensitive_field"
-                lag = caret_lag(snapshot.before, snapshot.after, original, exact=True)
-                before = snapshot.before + snapshot.after[:lag or 0]
-                if (snapshot.selection or not snapshot.field_id or snapshot.application != application or lag is None
-                        or not before.endswith(original)):
+                around = self._typed_in_field(snapshot, original, self._typed_ahead(self._strokes))
+                if snapshot.selection or not snapshot.field_id or snapshot.application != application or around is None:
                     return snapshot, "context_field_changed"
-                field = replace(snapshot, before=before[:-len(original)], after=snapshot.after[lag:])
+                field = replace(snapshot, before=around[0], after=around[1])
         return field, ""
+
+    @staticmethod
+    def _typed_in_field(field: FieldContext, typed: str, ahead: str) -> tuple[str, str] | None:
+        """The text before and after a word being typed, from a field read as its last key goes down.
+
+        The field may not show that key yet: a browser or an Electron editor reports its text a
+        moment after the key, and the early switch was refused at the fourth letter as a changed
+        field in 175 of 210 words in Firefox, 174 of 416 in the Claude app and 532 of 2 275 in VS
+        Code (Windows logs, 05.09-08.10.2026). Up to FIELD_PENDING_MAX_CHARACTERS of the last letters
+        may be missing, the caret right after the rest. Text typed ahead may follow the word, and
+        the caret may be reported short of it (caret_lag). None for any other text.
+        """
+
+        for taken in range(len(ahead), -1, -1):
+            shown = typed + ahead[:taken]
+            lag = caret_lag(field.before, field.after, shown, exact=True)
+            head = field.before + field.after[:lag or 0]
+            if lag is not None and head.endswith(shown):
+                return head[:len(head) - len(shown)], field.after[lag:]
+        for pending in range(1, min(FIELD_PENDING_MAX_CHARACTERS, len(typed) - 1) + 1):
+            shown = typed[:-pending]
+            if field.before.endswith(shown):
+                return field.before[:-len(shown)], field.after
+        return None
 
     def _decide_prefix(self, baseline: EarlySwitchDecision, field: FieldContext | None) -> tuple[EarlySwitchDecision, float]:
         mode = str(self.settings.get("detection.context_policy", "assist"))
@@ -3616,6 +3663,53 @@ class KeySwitchEngine:
             and not (event.control or event.alt or event.super_key)
         )
 
+    def _typed_ahead(self, typed: Sequence[KeyEvent]) -> str:
+        """The text typed after the given strokes that the field may already show.
+
+        The hook passes every key on to the window as it queues it, and a correction
+        runs only once the key that triggered it is up. A user who presses the next
+        letter before the space comes up (rollover typing) has the next word begun by
+        then, and keys still queued behind the trigger stand in the field too.
+        _collect_late_input deletes such keys with the word and types them again; the
+        field check has to expect them as well. It refused every such correction as a
+        changed field: with the field reader on, `ghbdtn vbh` typed with the `v` pressed
+        before the space came up stayed as typed, its next word with it (Windows field
+        logs, 08.10.2026). Plain text only, up to the first key that is not.
+        """
+
+        planned = {id(stroke) for stroke in typed}
+        with self._events.mutex:
+            queued = tuple(self._events.queue)
+        ahead: list[str] = []
+        for item in (*(stroke for stroke in self._strokes if id(stroke) not in planned), *queued):
+            if not isinstance(item, KeyEvent):
+                break
+            if not item.pressed or item.key_name in MODIFIER_KEYS:
+                continue
+            if not (item.character and item.character.isprintable()) or item.control or item.alt or item.super_key:
+                break
+            ahead.append(item.character)
+        return "".join(ahead)
+
+    @staticmethod
+    def _field_refusal(plan: CorrectionPlan, field: FieldContext | None, suffix: str, ahead: str) -> str:
+        """Why the field read before a correction is not where its word was typed; empty if it is.
+
+        The text before the caret ends with the word and its boundary, and then with as much
+        of the text typed ahead as the window has taken in so far.
+        """
+
+        if field is None:
+            return "unread"
+        if field.field_id != plan.context_field or field.application != plan.application:
+            return "other_field"
+        if field.sensitive or field.selection:
+            return "sensitive_or_selected"
+        if any(caret_lag(field.before, field.after, suffix + ahead[:taken], exact=True) is not None
+               for taken in range(len(ahead) + 1)):
+            return ""
+        return "other_text"
+
     def _collect_late_input(self, plan: CorrectionPlan) -> tuple[KeyEvent, ...] | None:
         """Keys typed after the word but before its correction lands.
 
@@ -3665,6 +3759,13 @@ class KeySwitchEngine:
             self._strokes = [
                 stroke for stroke in self._strokes if id(stroke) in planned
             ]
+            # Letters begun after the boundary go with the correction and come back, typed again
+            # in the new layout, as the start of a word: with none of the word left, nothing ties
+            # it to the old layout. Kept, that layout read the first key coming back as a layout
+            # change in the middle of a word and cleared the observed text with it: `тфеы и` with
+            # the `и` down before the space came up became `nats b`, and the `b` lost the
+            # `и redis` it gets when typed after the space.
+            self._source_group = self._source_group if self._strokes else -1
         return tuple(late)
 
     def _reopenable_committed_word(self) -> CorrectionPlan | None:
@@ -4069,11 +4170,17 @@ class KeySwitchEngine:
             reader = self.context_policy.reader
             field = None if reader is None else reader.read(plan.application, self._focus_window or 0)
             suffix = plan.original + "".join(stroke.character for stroke in plan.trailing) + (plan.boundary.character if plan.boundary else "")
-            if (
-                field is None or field.field_id != plan.context_field
-                or field.application != plan.application or field.sensitive or field.selection
-                or caret_lag(field.before, field.after, suffix, exact=True) is None
-            ):
+            # Read after the field: whatever the field can show was typed by then.
+            ahead = self._typed_ahead((*plan.strokes, *plan.trailing))
+            refusal = self._field_refusal(plan, field, suffix, ahead)
+            if (refusal == "other_text" and plan.mode == "early" and field is not None
+                    and self._typed_in_field(field, plan.original, ahead) is not None):
+                # The field has not taken the last letters in yet (_typed_in_field). The word is
+                # still the one typed: it stays tracked for a later letter or its boundary.
+                self._technical_event("early_switch_dropped", reason="field_behind",
+                                      current_word_length=len(self._strokes))
+                return False
+            if refusal:
                 typed_after_boundary = bool(self._strokes)
                 self._clear_word(reason="context_field_changed")
                 # The letters already typed for the next word stand somewhere
@@ -4083,7 +4190,7 @@ class KeySwitchEngine:
                 self._untracked_token = self._untracked_token or typed_after_boundary
                 self._technical_event(
                     "correction_aborted", mode=plan.mode, reason="context_field_changed",
-                    letters_untracked=typed_after_boundary,
+                    letters_untracked=typed_after_boundary, field_check=refusal, typed_ahead=len(ahead),
                 )
                 return False
         application_excluded = self._application_excluded(plan.application)
@@ -4104,6 +4211,9 @@ class KeySwitchEngine:
         try:
             try:
                 self.backend.hold_input()
+                planned = {id(stroke) for stroke in (*plan.strokes, *plan.trailing)}
+                # Letters of the next word the engine has taken already, and so the observed text too.
+                rolled = "".join(stroke.character for stroke in self._strokes if id(stroke) not in planned)
                 late = self._collect_late_input(plan)
                 if late is None:
                     self._technical_event(
@@ -4159,6 +4269,12 @@ class KeySwitchEngine:
             and self._typed_presses == presses_before
         )
         context_reset_reason = "late_input" if late else "held_text_or_unknown" if held and not replayed_only_releases else ""
+        if context_reset_reason == "late_input" and not (held and not replayed_only_releases) and (
+                self.context_policy.stream.withdraw(rolled)):
+            # The late keys come back typed again and are observed then: the text before them
+            # stays the context of the next word. Cleared, it left the word after `nats` with
+            # nothing before it, and the model declined `b redis` as `и redis` (rollover typing).
+            context_reset_reason = ""
         if context_reset_reason:
             self.context_policy.stream.clear()
         else:
