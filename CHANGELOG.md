@@ -24,6 +24,13 @@ All notable changes to KeySwitch are documented in this file.
   stands among the kept words: the word before it is asked with the converted word after the sign, and the sign is
   replaced along only if that word converts (`Нет - где`). A sign the other layout types differently (`.` is `ю`)
   still ends the chain. A row of sealed test v38 lost its first word this way.
+- The context model is the 0.44.0 model with the Latin-context abbreviation head fitted on corpus v39
+  (`context-v3-19c791a547f4`; test v39 sealed before training and passed). It decides every calibration frame
+  of corpus v39 as 0.44.0. On test v39 it keeps all 197 correctly typed rows and restores 175 of 196 mistyped
+  rows with the early switch off against 162 for the baseline pair, 18 with it as the baseline pair. Test v38
+  was read with the corpus v38 fit of the same recipe and failed by one row with the early switch, the row the
+  sign above cut apart (16 against 17 of 184; 165 against 146 without the early switch); that pair was not
+  installed. The prefix model retrained byte-identical.
 - The GPU trainer sends every frame of a head's class to the CPU path, the abbreviation heads included: the
   kernels do not make a head's own evidence, and a frame of the corpus v36 abbreviation head would have been
   fitted without it on a CUDA machine.
