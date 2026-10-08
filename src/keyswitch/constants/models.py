@@ -90,6 +90,12 @@ ABBREVIATION_FEATURE_PREFIX: Final = "abbr|"
 # Letters no Russian word starts with, so no abbreviation of Russian words holds them: their keys are the Latin
 # `M`, `S`, `]` and `Q` (`ДДЬ` is `LLM`, `ЫЫР` is `SSH`, `ЙФ` is `QA`).
 ABBREVIATION_NON_INITIAL_LETTERS: Final = frozenset("ЪЬЫЙ")
+# The same attested abbreviation after text with more Latin letters than Cyrillic ones has evidence of its own under
+# this prefix: the Latin-context abbreviation head (context_action_features.latin_abbreviation_question). There the
+# capitals head and the shared features answered alone and turned the abbreviation into the Latin reading its keys
+# spell whatever its counts (`/designv2 ТЗ` became `/designv2 NP`, the owner's typing of 08.10.2026; `ЛС`, `ТГ`
+# and `НГ` the same way).
+LATIN_ABBREVIATION_FEATURE_PREFIX: Final = "labbr|"
 # The "length" feature buckets every word length from here up together (schemas 2 and 3).
 ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: Final = 6
 # Short categorical field labels (role, trigger) truncated before they reach a feature name.
@@ -144,6 +150,11 @@ SYNTHETIC_FREQUENCY_DIVISOR: Final = 20
 # Conversion threshold of the context-v1 model: ContextModel's default, and the threshold the
 # context-v1 trainer selects its epoch with and writes into the artifact.
 CONTEXT_V1_CONVERSION_THRESHOLD: Final = 0.985
+# An action model's keep with the other layout at least this likely is a suggestion instead (ContextModel.predict):
+# the model is unsure, and at a space the engine asks once more beside the next word, as after a conversion below
+# the threshold. `зк` after `принимай ` was kept at p=0.51 against 0.49 for `pr` (the owner's typing, 08.10.2026);
+# asked beside its next word the same model converts it at p=1.00.
+CONTEXT_DOUBTFUL_KEEP_PROBABILITY: Final = 0.3
 # ContextModel feature_version of the context-v1/v2 scheme, feature schema 2; context_model.py
 # exports it as FEATURE_VERSION.
 CONTEXT_MODEL_FEATURE_VERSION: Final = 2
@@ -193,11 +204,11 @@ CONTEXT_FEATURE_NGRAM_ORDERS: Final = (1, 2, 3)
 # and version strings of at most these many characters, weights of at most this magnitude, and a
 # conversion threshold from this floor up to one.
 MAX_CONTEXT_MODEL_FEATURES: Final = 50000
-# An action model (schema 3) holds up to seven feature spaces: the word decided at its boundary, the
+# An action model (schema 3) holds up to eight feature spaces: the word decided at its boundary, the
 # kept-neighbour question (KEPT_FEATURE_PREFIX), the capitals head (CAPITALS_FEATURE_PREFIX), the
 # lone-word head (ALONE_FEATURE_PREFIX), the message-start head (START_FEATURE_PREFIX), the
-# single-letter head (LETTER_FEATURE_PREFIX) and the abbreviation head (ABBREVIATION_FEATURE_PREFIX),
-# each with its own budget in the recipe.
+# single-letter head (LETTER_FEATURE_PREFIX) and the abbreviation heads (ABBREVIATION_FEATURE_PREFIX,
+# LATIN_ABBREVIATION_FEATURE_PREFIX), each with its own budget in the recipe.
 MAX_CONTEXT_ACTION_MODEL_FEATURES: Final = 100000
 MAX_CONTEXT_FEATURE_NAME_CHARACTERS: Final = 512
 MAX_CONTEXT_MODEL_VERSION_CHARACTERS: Final = 80

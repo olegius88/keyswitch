@@ -739,3 +739,5 @@ LETTER_FIXTURE_FRAMES_PER_TERM_SENTENCE: Final = 6
 LETTER_FIXTURE_ENGLISH_SENTENCES: Final = 4
 # The abbreviation curriculum in its test: the frames of each form.
 ABBREVIATION_FIXTURE_FRAMES_PER_FORM: Final = 2
+# The Latin-context abbreviation curriculum in its test: how often Russian technical text uses a form it keeps.
+LATIN_ABBREVIATION_FIXTURE_CYRILLIC_COUNT: Final = 20

@@ -27,7 +27,9 @@ from freeze_context_action_corpus import CorpusRow, physical, typo_variants
 from context_deferral import deferred_isolated, lookahead_focus, plausible_reading
 from reconcile_context_action_corpus import expanded_aliases
 from keyswitch.constants.training import ACTION_DEFERRED_WORD_MAX_CHARACTERS, CITATION_SIGN_HEADS
-from keyswitch.context_action_features import abbreviation_question, attested_abbreviation, extract_action_features, letter_question
+from keyswitch.context_action_features import (
+    abbreviation_question, attested_abbreviation, extract_action_features, latin_abbreviation_question, letter_question,
+)
 from keyswitch.short_words import TRUSTED_SINGLE_LETTER_WORDS
 from keyswitch.constants.model_protocol import CALIBRATION, DEVELOPMENT, TRAIN
 from keyswitch.context_model import ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, term_bucket
@@ -83,7 +85,10 @@ from train_context_action_model import (
     _technical_terms,
     _varied_boundary,
     letter_curriculum,
+    latin_abbreviation_curriculum,
+    latin_abbreviation_label,
     NO_ABBREVIATION_CURRICULUM,
+    NO_LATIN_ABBREVIATION_CURRICULUM,
 )
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
 from keyswitch.constants.models import (
@@ -108,6 +113,7 @@ from fixture_values.counts import (
     LONE_WORD_FIXTURE_OTHER_MAXIMUM_COUNT,
     KEPT_NEIGHBOUR_FIXTURE_ABBREVIATION_COUNT,
     ABBREVIATION_FIXTURE_FRAMES_PER_FORM,
+    LATIN_ABBREVIATION_FIXTURE_CYRILLIC_COUNT,
     LETTER_FIXTURE_ENGLISH_SENTENCES,
     LETTER_FIXTURE_FRAMES_PER_TERM_SENTENCE,
     LETTER_FIXTURE_TERM_SENTENCES,
@@ -637,6 +643,39 @@ class ActionTrainingTests(unittest.TestCase):
         self.assertNotIn("ЕС", {row.original for row in refused})
         self.assertEqual(abbreviation_curriculum(CALIBRATION, [russian], frozenset(), options), ([], {"frames": 0, "scope": "not used"}))
         self.assertEqual(abbreviation_curriculum(TRAIN, [russian], frozenset(), NO_ABBREVIATION_CURRICULUM),
+                         ([], {"frames": 0, "scope": "not used"}))
+
+    def test_the_latin_abbreviation_curriculum_keeps_only_abbreviations_whose_count_outweighs_their_keys(self) -> None:
+        # `ТЗ` is counted 744 times and its keys `np` 80 times; `ГЫ` 25 times, its keys `us` 19 273 times in English
+        # prose; `УГ` (`EU`) only 18 times.
+        options = {"frames_per_form": ABBREVIATION_FIXTURE_FRAMES_PER_FORM, "minimum_cyrillic_count": LATIN_ABBREVIATION_FIXTURE_CYRILLIC_COUNT,
+                   "dominance": ABBREVIATION_FIXTURE_DOMINANCE, "minimum_term_count": KEPT_NEIGHBOUR_FIXTURE_TERM_COUNT,
+                   "sample_weight": KEPT_NEIGHBOUR_FIXTURE_WEIGHT}
+        self.assertEqual([latin_abbreviation_label(form, latin, options) for form, latin in (("ТЗ", "NP"), ("ГЫ", "US"), ("УГ", "EU"))],
+                         ["keep", "convert", "convert"])
+        english = replace(fixture("e1", "server", 0), before="we restarted the ", after=" tonight")
+        shares = {split: latin_abbreviation_curriculum(split, [english], frozenset(), options) for split in (TRAIN, DEVELOPMENT)}
+        forms: dict[str, set[str]] = {}
+        for split, (rows, report) in shares.items():
+            forms[split] = {row.original for row in rows}
+            self.assertEqual(len(rows), len(forms[split]) * ABBREVIATION_FIXTURE_FRAMES_PER_FORM)
+            self.assertEqual(report["frames"], len(rows))
+            contexts = set()
+            for row in rows:
+                latin = translated(row.original, 1)
+                self.assertTrue(latin_abbreviation_question(row.original, latin, row.field.before))
+                self.assertEqual((row.group, row.sample_weight, row.category), (1, KEPT_NEIGHBOUR_FIXTURE_WEIGHT, "latin_abbreviation"))
+                self.assertEqual(row.action, latin_abbreviation_label(row.original, latin, options))
+                contexts.add(row.field.before == english.before)
+            # In turn after English prose and after Latin terms of Russian technical text.
+            self.assertEqual(contexts, {True, False})
+        # The abbreviation curriculum's shares: no form either abbreviation head was fitted on chooses its epoch.
+        self.assertFalse(forms[TRAIN] & forms[DEVELOPMENT])
+        russian = replace(fixture("a1", "сегодня", 1), before="мы обновили сервер и ", after=" ночью")
+        self.assertEqual(forms[DEVELOPMENT], {row.original for row in abbreviation_curriculum(
+            DEVELOPMENT, [russian], frozenset(), {**options, "minimum_latin_count": KEPT_NEIGHBOUR_FIXTURE_TERM_COUNT})[0]})
+        self.assertEqual(latin_abbreviation_curriculum(CALIBRATION, [english], frozenset(), options), ([], {"frames": 0, "scope": "not used"}))
+        self.assertEqual(latin_abbreviation_curriculum(TRAIN, [english], frozenset(), NO_LATIN_ABBREVIATION_CURRICULUM),
                          ([], {"frames": 0, "scope": "not used"}))
 
     def test_a_capital_citation_whose_reading_is_a_rare_word_keeps_after_russian_prose(self) -> None:

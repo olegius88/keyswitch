@@ -85,7 +85,9 @@ from keyswitch.constants.training import (
     CONTEXT_OPTIMIZER_CACHE_DIGEST_CHARACTERS,
 )
 from keyswitch.constants.models import FNV1A64_OFFSET_BASIS, FNV1A64_PRIME
-from keyswitch.context_action_features import alone_question, capitals_question, letter_question, start_question
+from keyswitch.context_action_features import (
+    abbreviation_question, alone_question, capitals_question, latin_abbreviation_question, letter_question, start_question,
+)
 from keyswitch.context_model import AfterOrigin, ContextEvidence, _term_frequency
 from keyswitch.detector import PROTECTED_TOKENS
 from keyswitch.identifier_lexicon import IdentifierLexicon
@@ -605,14 +607,16 @@ RECORD = np.dtype([("source", "f8", SCORE_COUNT), ("target", "f8", SCORE_COUNT),
 
 
 def heads_question(original: str, before: str, after: str, trigger: str) -> bool:
-    """Whether a frame may have a head's second copy of its features, which the kernels do not make.
+    """Whether a frame may have a head's second copy of its features or a head's own evidence, which the kernels do
+    not make.
 
-    The lone-word, message-start and single-letter heads' classes also ask for the other reading to be
+    The lone-word, message-start, single-letter and abbreviation heads' classes also ask for the other reading to be
     letters; every frame they could hold takes the CPU path, which decides that as the features do.
     """
 
     return (capitals_question(original, before) or alone_question(original, original, before, after, trigger)
-            or start_question(original, original, before, after) or letter_question(original, original, before))
+            or start_question(original, original, before, after) or letter_question(original, original, before)
+            or abbreviation_question(original, original, before) or latin_abbreviation_question(original, original, before))
 
 
 def record_of(evidence: ContextEvidence) -> npt.NDArray[np.void]:
@@ -714,9 +718,9 @@ class Items:
                 triggers[number] = trigger_index.get(row.trigger, 0)
                 origins[number] = origin_index.get(row.after_origin, 0)
                 # The kernels leave out the kept-neighbour question, whose features are renamed
-                # (KEPT_FEATURE_PREFIX), and the heads' second copy of a token's features
-                # (CAPITALS_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, START_FEATURE_PREFIX, LETTER_FEATURE_PREFIX): those
-                # frames take the CPU path.
+                # (KEPT_FEATURE_PREFIX), the heads' second copy of a token's features (CAPITALS_FEATURE_PREFIX,
+                # ALONE_FEATURE_PREFIX, START_FEATURE_PREFIX, LETTER_FEATURE_PREFIX) and the heads' own evidence
+                # (ABBREVIATION_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX): those frames take the CPU path.
                 fits[number] = (row.trigger in trigger_index and row.after_origin in origin_index
                                 and row.after_origin != "kept_next_word"
                                 and not heads_question(row.original, row.field.before, row.field.after, row.trigger)

@@ -100,6 +100,34 @@ class KeptWordTests(ContextEngineTests):
         self.assertEqual(self.backend.text, ". привет ")
         self.assertNotIn((".", "", "привет"), model.questions)
 
+    def test_a_sign_typed_the_same_in_either_layout_stands_between_kept_words(self) -> None:
+        # `-` is `-` in either layout: asked for a wait, it has nothing to wait for, and `руку`
+        # before it is asked with the converted word after the sign.
+        model = self.script(lambda item: "wait" if item.original == "-" else english_phrase(item))
+        self.reset_editor(1)
+        self.type("руку - ерун ", group=1)
+        self.assertEqual(self.backend.text, "here - they ")
+        self.assertIn(("руку", "", "they"), model.questions)
+
+    def test_a_passed_sign_stays_when_the_word_before_it_does(self) -> None:
+        self.script(lambda item: "convert" if item.original == "ерун" else "keep")
+        self.reset_editor(1)
+        self.type("руку - ерун ", group=1)
+        self.assertEqual(self.backend.text, "руку - they ")
+
+    def test_two_signs_in_a_row_cut_the_kept_words_apart(self) -> None:
+        model = self.script()
+        self.reset_editor(1)
+        self.type("руку - - ерун ", group=1)
+        self.assertEqual(self.backend.text, "руку - - they ")
+        self.assertNotIn(("руку", "", "they"), model.questions)
+
+    def test_a_passed_sign_does_not_count_among_the_words_taken_along(self) -> None:
+        self.script()
+        self.reset_editor(1)
+        self.type("рун - руку ерун ", group=1)
+        self.assertEqual(self.backend.text, "hey - here they ")
+
     def test_a_word_the_model_still_keeps_stops_the_walk(self) -> None:
         self.script(lambda item: "convert" if item.original == "ерун" else "keep")
         self.reset_editor(1)
@@ -210,6 +238,11 @@ class KeptWordModelTests(ContextEngineTests):
     def test_a_token_the_boundary_model_could_not_split_is_decided_with_the_next_word(self) -> None:
         self.assertEqual(self.typed(0, "dc`", "njn"), "всё тот ")
         self.assertEqual(self.typed(0, "levf.", "jy"), "думаю он ")
+
+    def test_a_first_word_is_decided_with_the_next_word_across_a_dash(self) -> None:
+        # `Ytn` stayed for good once `-` had cut it off from `где`; a row of sealed test v38 lost
+        # its first word the same way.
+        self.assertEqual(self.typed(0, "Ytn", "-", "ult"), "Нет - где ")
 
     def test_a_sign_split_off_the_first_word_is_decided_with_the_next_word(self) -> None:
         # `её` is `t\`` and a backtick to the boundary model; `е` alone is no word.

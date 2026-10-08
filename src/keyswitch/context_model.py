@@ -36,6 +36,7 @@ from .constants.models import (
     ACTION_FEATURE_WORD_MAX_CHARACTERS,
     ACTION_FEATURE_WORD_SCORE_BOUND,
     CONTEXT_ACTION_FEATURE_VERSION,
+    CONTEXT_DOUBTFUL_KEEP_PROBABILITY,
     CONTEXT_FEATURE_AFTER_WORD_COUNT,
     CONTEXT_FEATURE_BEFORE_WORD_COUNT,
     CONTEXT_FEATURE_NGRAM_ORDERS,
@@ -525,6 +526,13 @@ class ContextModel:
         selected = max(range(len(ACTIONS)), key=probabilities.__getitem__)
         action = ACTIONS[selected]
         if action == "convert" and probabilities[selected] < self.conversion_threshold:
+            action = "suggest"
+        if (self.feature_version == CONTEXT_ACTION_FEATURE_VERSION and action == "keep"
+                and probabilities[ACTIONS.index("convert")] >= CONTEXT_DOUBTFUL_KEEP_PROBABILITY):
+            # A keep the model is unsure of, as sure as not of the other layout, is a suggestion too: nothing is
+            # converted, and at a space the engine waits for the next word and asks again with it, the question
+            # the model is trained on (the kept-neighbour question). `зк` after `принимай ` was kept at p=0.51
+            # against 0.49 for `pr` and stayed; asked beside `и` the same model converts it at p=1.00.
             action = "suggest"
         if self.feature_version == CONTEXT_ACTION_FEATURE_VERSION and action == "convert" and not self.allows_automatic_conversion(features):
             action = "suggest"

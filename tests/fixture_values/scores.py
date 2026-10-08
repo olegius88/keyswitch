@@ -663,3 +663,7 @@ FROZEN_BASE_FIXTURE_IMPORTANCE: Final = 2.0
 # round number.
 BACK_END_FIXTURE_KEEP_IMPORTANCE: Final = 0.25
 BACK_END_FIXTURE_FEATURE_VALUE: Final = 0.375
+# A schema-3 model's keep and convert probabilities in the doubtful-keep tests (ContextModel.predict): one keep it is
+# unsure of, the other layout nearly as likely, and one it is sure of.
+DOUBTFUL_KEEP_FIXTURE_PROBABILITIES: Final = (0.55, 0.45)
+SURE_KEEP_FIXTURE_PROBABILITIES: Final = (0.8, 0.2)
