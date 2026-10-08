@@ -26,6 +26,12 @@ All notable changes to KeySwitch are documented in this file.
   field a key behind), 0.43.0 got 218 conversions right and missed 911 on the PC log (54 and 216
   on the notebook); this branch gets 555 right and misses 73 (138 and 20), as on the same typing
   replayed key by key (506 and 75, 115 and 19), with 42 and 19 false conversions against 40 and 20.
+- The context model is the 0.43.0 recipe fitted on corpus v37 (`context-v3-2ae75d2b9e38`; test v37
+  sealed before training and passed), so that its seal pins the corrected engine: it decides every
+  calibration frame of corpus v37 and every word of the owner's typing replay as the 0.43.0 model.
+  On test v37 it keeps all 195 correctly typed rows (the baseline pair corrupts one with the early
+  switch) and restores 174 of 193 mistyped rows with the early switch off against 159. The prefix
+  model retrained byte-identical.
 - The diagnostics name the prefix model (`prefix_model`, the one that switches the layout while a
   word is typed) beside the intent model and the context model.
 - Scrolling with the mouse wheel no longer discards the word being typed and the words before it
