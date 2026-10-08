@@ -15,6 +15,7 @@ from keyswitch.constants.timing import (
     INPUT_DELAY_LATE_MS,
     INPUT_DELAY_REPORT_INTERVAL_SECONDS,
     INPUT_DELAY_SLOW_CALLBACK_MS,
+    INPUT_DELAY_UNSTAMPED_MS,
 )
 from keyswitch.constants.units import MILLISECONDS_PER_SECOND
 from keyswitch.constants.windows import DWORD_MASK, VK_RETURN
@@ -40,6 +41,24 @@ class InputDelayTests(unittest.TestCase):
         self.assertEqual(delay.take(), InputDelayReport(0, 0, 0, 0, 0))
         self.assertFalse(delay.take().stalled)
 
+    def test_a_key_stamped_with_a_time_of_its_own_is_no_delay(self) -> None:
+        # One such key every ten minutes or so read as late by the computer's uptime (0.44.0).
+        delay = InputDelay()
+        delay.record(INPUT_DELAY_UNSTAMPED_MS, 0)
+        delay.record(INPUT_DELAY_UNSTAMPED_MS - 1, 0)
+        report = delay.take()
+        self.assertEqual(report, InputDelayReport(len("ab"), 1, INPUT_DELAY_UNSTAMPED_MS - 1, 0, 0, unstamped_keys=1))
+        delay.record(INPUT_DELAY_UNSTAMPED_MS, 0)
+        self.assertFalse(delay.take().stalled)
+
+    def test_another_programs_keys_are_timed_by_the_answer_alone(self) -> None:
+        delay = InputDelay()
+        delay.record_foreign(INPUT_DELAY_SLOW_CALLBACK_MS)
+        delay.record_foreign(0)
+        report = delay.take()
+        self.assertEqual(report, InputDelayReport(0, 0, 0, 1, INPUT_DELAY_SLOW_CALLBACK_MS, foreign_keys=len("ab")))
+        self.assertTrue(report.stalled)
+
     def test_the_windows_hook_measures_typed_keys_only(self) -> None:
         api = FakeWindowsAPI()
         backend = WindowsBackend(api)
@@ -58,6 +77,22 @@ class InputDelayTests(unittest.TestCase):
         api.ticks = 0
         backend._handle_native(replace(key, pressed=False, timestamp=DWORD_MASK))
         self.assertEqual(backend.take_input_delay(), InputDelayReport(1, 0, 1, 0, 0))
+        # A key another program sent with a time of zero, long after the computer started.
+        api.ticks = INPUT_DELAY_UNSTAMPED_MS
+        backend._handle_native(replace(key, timestamp=0))
+        self.assertEqual(backend.take_input_delay(), InputDelayReport(1, 0, 0, 0, 0, unstamped_keys=1))
+
+    def test_the_windows_hook_times_its_answer_to_another_programs_keys(self) -> None:
+        # TeamViewer types every character it receives on the computer it controls.
+        api = FakeWindowsAPI()
+        backend = WindowsBackend(api)
+        api.ticks = HOOK_KEY_TIME_MS + INPUT_DELAY_UNSTAMPED_MS
+        seconds = INPUT_DELAY_SLOW_CALLBACK_MS / MILLISECONDS_PER_SECOND
+        with patch("keyswitch.windows_backend.time.perf_counter", side_effect=(0.0, seconds)):
+            backend._handle_native(
+                NativeKeyEvent(True, VK_RETURN, SCAN_CODE_ENTER, False, False, HOOK_KEY_TIME_MS, foreign=True))
+        self.assertEqual(backend.take_input_delay(),
+                         InputDelayReport(0, 0, 0, 1, INPUT_DELAY_SLOW_CALLBACK_MS, foreign_keys=1))
 
     def test_a_slow_answer_is_counted_with_its_length(self) -> None:
         api = FakeWindowsAPI()
@@ -90,7 +125,8 @@ class InputDelayTests(unittest.TestCase):
             events = [event for event in technical_events(logs.output) if event["event"] == "input_delay"]
             self.assertEqual(events, [{"schema": 1, "event": "input_delay", **asdict(stalled),
                                        "late_threshold_ms": INPUT_DELAY_LATE_MS,
-                                       "slow_threshold_ms": INPUT_DELAY_SLOW_CALLBACK_MS}])
+                                       "slow_threshold_ms": INPUT_DELAY_SLOW_CALLBACK_MS,
+                                       "unstamped_threshold_ms": INPUT_DELAY_UNSTAMPED_MS}])
 
 
 if __name__ == "__main__":

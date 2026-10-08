@@ -84,6 +84,11 @@ INJECTION_SECONDS_PER_EVENT: Final = 0.02
 # A key the keyboard hook sees this long after the system stamped it was held up on its way: every
 # window waited for it (input_delay).
 INPUT_DELAY_LATE_MS: Final = 100
+# A key stamped this long before the hook saw it was not held up: Windows takes a low-level hook
+# that does not answer within a second out of the chain. Some program sends keys with a time of
+# its own (zero): on the owner's computer one such key every ten minutes or so read as late by the
+# computer's uptime, 443 026 750 ms, and filled every report of 0.44.0 (field log, 08.10.2026).
+INPUT_DELAY_UNSTAMPED_MS: Final = 60_000
 # A hook callback that takes this long has held every key behind it; the callback normally takes
 # well under a millisecond.
 INPUT_DELAY_SLOW_CALLBACK_MS: Final = 20

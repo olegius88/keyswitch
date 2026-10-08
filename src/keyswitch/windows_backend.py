@@ -526,15 +526,20 @@ class WindowsBackend:
     def _handle_native(self, native: NativeKeyEvent) -> bool:
         if native.virtual_key == 0 or native.injected or native.replayed:
             return self._answer_native(native)
-        # A typed key: how long after its key time the hook ran, and how long the answer took.
+        # A typed key: how long after its key time the hook ran, and how long the answer took. A
+        # key another program injected (TeamViewer types what it receives on the computer it
+        # controls) was pressed at no time the hook can know: only its answer is timed.
         started = time.perf_counter()
         late = (self._api.tick_count() - native.timestamp) & DWORD_MASK
         try:
             return self._answer_native(native)
         finally:
+            callback = round((time.perf_counter() - started) * MILLISECONDS_PER_SECOND)
+            if native.foreign:
+                self._input_delay.record_foreign(callback)
             # A key time ahead of the clock (a program stamping its own keys) says nothing.
-            if late <= DWORD_MASK >> 1:
-                self._input_delay.record(late, round((time.perf_counter() - started) * MILLISECONDS_PER_SECOND))
+            elif late <= DWORD_MASK >> 1:
+                self._input_delay.record(late, callback)
 
     def _answer_native(self, native: NativeKeyEvent) -> bool:
         if native.virtual_key == 0:

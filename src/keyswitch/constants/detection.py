@@ -27,6 +27,15 @@ OPENING_LETTER_FOLLOWING_SIGNS: Final[frozenset[str]] = frozenset(",.?!:;)-")
 # Fewest letters left of a word once the letters at its end that are signs in the other layout are
 # set aside (`руддщб` is `hello,`): `чё` without `ё` is a lone `ч`, and one letter is no word to judge.
 REPLAYED_SIGNS_MIN_STEM_LETTERS: Final = 2
+# A fragment of this many letters that a pause leaves is the start of a word being typed, not a word,
+# when at least PAUSE_WORD_START_MIN_WORDS words of its own language's lexicon begin with it and its other
+# reading is no word of the other language's prose: `иг` in `первую иг` (226 Russian words) and `фл` of
+# `флагом` (344) became `bu` and `ak` at a pause and came back once the word was finished (owner's logs,
+# 03.10 and 08.10.2026). `ша` typed for `if` begins 663 Russian words, and English prose has `if`. The
+# Russian words typed in the English layout that a pause converts (`gj` is `по`, `lf` is `да`) begin at
+# most 39 English words. Such a fragment is decided at its boundary, as every word is.
+PAUSE_WORD_START_LETTERS: Final = 2
+PAUSE_WORD_START_MIN_WORDS: Final = 100
 # Input events the engine queues before the producer blocks.
 ENGINE_EVENT_QUEUE_MAX_SIZE: Final = 4096
 # Per-application remembered context words; oldest is dropped past this cap.
