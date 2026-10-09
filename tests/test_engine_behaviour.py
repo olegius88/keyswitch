@@ -29,7 +29,11 @@ from keyswitch.constants.settings_defaults import (
     PAUSE_DELAY_SETTING_MIN_SECONDS,
 )
 from keyswitch.engine import KeySwitchEngine, CorrectionPlan, LearningPrompt
-from keyswitch.constants.timing import DOUBLE_CONVERT_PRESS_WINDOW_SECONDS, ENGINE_SWITCH_GRACE_SECONDS
+from keyswitch.constants.timing import (
+    DOUBLE_CONVERT_PRESS_WINDOW_SECONDS,
+    ENGINE_SWITCH_GRACE_SECONDS,
+    PAUSE_CORRECTION_AGREEMENT_SECONDS,
+)
 from keyswitch.learning import LearnedRule, RuleAction, RuleMatch
 from keyswitch.history import HistoryStore
 from keyswitch.indicator import layout_label
@@ -50,6 +54,7 @@ from fixture_values.counts import (
     INJECTIONS_AFTER_QUOTE_PAUSE,
     INJECTIONS_AFTER_REOPENED_PAUSE,
     INJECTIONS_AFTER_REPEATED_CORRECTION,
+    INJECTIONS_AFTER_REVERSED_PAUSE_CORRECTION,
     INJECTIONS_AFTER_SECOND_EARLY_SWITCH,
     INJECTIONS_AFTER_TOGGLE_BACK,
     INJECTIONS_AFTER_TOGGLES,
@@ -82,6 +87,7 @@ from fixture_values.clock import (
     MODIFIER_SHORTCUT_EVENT_TIMESTAMP,
     NON_DEFAULT_PAUSE_DELAY_SECONDS,
     OVERSIZED_PAUSE_DELAY_SECONDS,
+    PAUSE_AGREEMENT_OVERSTEP_SECONDS,
     PENDING_CORRECTION_CHECK_OFFSET_SECONDS,
     PLAIN_KEY_TIMESTAMP,
     PROMPT_DEADLINE_OFFSET_SECONDS,
@@ -155,6 +161,10 @@ class FakeBackend:
         self.kept_tails: list[int] = []
         self.hold_calls = 0
         self.held_count = 0
+        # Keys the hook held back during an injection and types again after it: they reach the
+        # engine through `enqueue` like typed keys.
+        self.replayed: tuple[KeyEvent, ...] = ()
+        self.enqueue: Callable[[KeyEvent], None] | None = None
         self.group = 0
         self.window = 1
         self.own_window = False
@@ -196,6 +206,9 @@ class FakeBackend:
         self.late.append(tuple(late))
         self.kept_tails.append(kept_tail)
         self.group = target_group if not kept_tail else source_group if source_group is not None else word[0].group
+        if self.enqueue is not None:
+            for event in self.replayed:
+                self.enqueue(event)
         return self.held_count
 
     def set_key_filter(
@@ -753,6 +766,78 @@ class EngineBehaviourTests(unittest.TestCase):
         self.type_word("ghbdtn")
         self.press_space(0)
         self.assertEqual(len(self.backend.injections), INJECTIONS_AFTER_REPEATED_CORRECTION)
+
+    def correct_hello_at_a_pause(self) -> None:
+        """Type ghbdtn and stop: the pause converts it to привет, the word left open."""
+
+        self.type_word("ghbdtn")
+        last_input = self.engine._last_word_input_at
+        assert last_input is not None
+        self.engine._maybe_correct_after_pause(now=last_input + DEFAULT_PAUSE_DELAY_SECONDS)
+        self.assertEqual(len(self.backend.injections), 1)
+        self.assertEqual(self.engine.snapshot.current_group, 1)
+
+    def test_pause_right_after_a_pause_correction_asks_for_that_correction(self) -> None:
+        self.settings.set("detection.respect_manual_layout", False)
+        self.correct_hello_at_a_pause()
+        # The user stopped typing to press the hotkey and pressed it as the word changed.
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.hit_pause()
+        events = self.technical_events(logs.output)
+        absorbed = next(e for e in events if e["event"] == "manual_conversion_absorbed")
+        self.assertEqual((absorbed["mode"], absorbed["source"]), ("pause", "current_word"))
+        self.assertNotIn("manual_conversion_scheduled", [e["event"] for e in events])
+        self.assertEqual(len(self.backend.injections), 1)
+        self.assertEqual(self.engine.snapshot.current_group, 1)
+
+        # Once: the next press converts the word back, and the two are no double press.
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.hit_pause()
+        scheduled = next(
+            e for e in self.technical_events(logs.output) if e["event"] == "manual_conversion_scheduled"
+        )
+        self.assertEqual(scheduled["reversal"], "automatic")
+        self.assertEqual(len(self.backend.injections), INJECTIONS_AFTER_REVERSED_PAUSE_CORRECTION)
+        self.assertEqual(self.engine.snapshot.current_group, 0)
+        self.assertIsNone(self.engine.learning_prompt)
+
+    def test_pause_after_the_agreement_window_converts_a_pause_correction_back(self) -> None:
+        self.settings.set("detection.respect_manual_layout", False)
+        self.correct_hello_at_a_pause()
+        self.engine._last_correction_time -= PAUSE_CORRECTION_AGREEMENT_SECONDS + PAUSE_AGREEMENT_OVERSTEP_SECONDS
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.hit_pause()
+        events = self.technical_events(logs.output)
+        self.assertNotIn("manual_conversion_absorbed", [e["event"] for e in events])
+        scheduled = next(e for e in events if e["event"] == "manual_conversion_scheduled")
+        self.assertEqual(scheduled["reversal"], "automatic")
+        self.assertEqual(len(self.backend.injections), INJECTIONS_AFTER_REVERSED_PAUSE_CORRECTION)
+
+    def test_keys_held_back_during_a_correction_leave_its_context_standing(self) -> None:
+        self.settings.set("detection.respect_manual_layout", False)
+        typed = letter_event("d", SECOND_WORD_KEYCODE_BASE, 1, self.pair)
+        self.backend.replayed = (typed, replace(typed, pressed=False))
+        self.backend.held_count = len(self.backend.replayed)
+        self.backend.enqueue = self.engine.enqueue
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.correct_hello()
+        applied = next(e for e in self.technical_events(logs.output) if e["event"] == "correction_applied")
+        self.assertEqual((applied["held_keys"], applied["context_reset_reason"]), (len(self.backend.replayed), ""))
+        self.assertFalse(self.engine._last_committed_stale)
+
+    def test_input_that_came_through_unheld_during_a_correction_clears_its_context(self) -> None:
+        self.settings.set("detection.respect_manual_layout", False)
+        typed = letter_event("d", SECOND_WORD_KEYCODE_BASE, 1, self.pair)
+        # A click is never held back: it reaches the engine beside the replayed keys.
+        click = KeyEvent(True, 0, "Pointer", "", ("", ""), -1, 0, PLAIN_KEY_TIMESTAMP)
+        self.backend.held_count = len((typed, replace(typed, pressed=False)))
+        self.backend.replayed = (click, typed, replace(typed, pressed=False))
+        self.backend.enqueue = self.engine.enqueue
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.correct_hello()
+        applied = next(e for e in self.technical_events(logs.output) if e["event"] == "correction_applied")
+        self.assertEqual(applied["context_reset_reason"], "held_text_or_unknown")
+        self.assertTrue(self.engine._last_committed_stale)
 
     def test_toggling_a_manual_conversion_is_not_a_confirmation(self) -> None:
         self.settings.set("detection.respect_manual_layout", False)

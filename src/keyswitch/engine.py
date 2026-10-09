@@ -106,6 +106,7 @@ from .constants.timing import (
     LATE_STROKE_GRACE_SECONDS,
     LEARNING_PROMPT_TIMEOUT_SECONDS,
     MANUAL_RELEASE_TIMEOUT_SECONDS,
+    PAUSE_CORRECTION_AGREEMENT_SECONDS,
     STALE_PRESS_SECONDS,
     UNDO_AVAILABLE_WINDOW_SECONDS,
 )
@@ -434,6 +435,10 @@ class KeySwitchEngine:
         self._manual_release_deadline = 0.0
         self._last_committed: CorrectionPlan | None = None
         self._last_correction: CorrectionPlan | None = None
+        self._last_correction_time = 0.0
+        # The last correction was made at a pause and no press of the hotkey has been taken as
+        # agreeing with it yet (_agrees_with_pause_correction).
+        self._pause_agreement_open = False
         # The rule offer to show once the pending plan has run: a double press
         # that had to put the word back first.
         self._learning_prompt_after: LearningPrompt | None = None
@@ -3712,6 +3717,19 @@ class KeySwitchEngine:
         # teaches nothing: a rule comes only from the rule window, which a
         # double press of the hotkey offers.
         reversal = self._reversal_of_last_correction(plan)
+        if reversal is not None and self._agrees_with_pause_correction(plan):
+            self._pause_agreement_open = False
+            self._technical_event(
+                "manual_conversion_absorbed",
+                reason="pause_correction_just_made",
+                source=source,
+                mode=reversal.mode,
+                elapsed_ms=round((time.monotonic() - self._last_correction_time) * MILLISECONDS_PER_SECOND),
+                application=application,
+                application_excluded=self._application_excluded(application),
+            )
+            self._update(last_action=f"Уже преобразовано: {original} · ещё одно нажатие вернёт")
+            return
         # A second Pause before the first one ran replaces the plan; without
         # this line the first conversion would vanish without a trace.
         self._log_pending_dropped("replaced_by_manual_conversion")
@@ -3917,6 +3935,27 @@ class KeySwitchEngine:
             self._correction_origin = plan
         self._last_correction = plan
         self._last_correction_time = time.monotonic()
+        # _maybe_correct_after_pause ends no word: its plans alone carry no boundary key.
+        self._pause_agreement_open = (
+            plan.automatic and plan.boundary is None and plan.mode in {"pause", "context_phrase"}
+        )
+
+    def _agrees_with_pause_correction(self, plan: CorrectionPlan) -> bool:
+        """Whether ``plan``, the reversal of the last correction, asks for that correction instead.
+
+        A word the engine converts at a pause is a word the user stopped typing to look at,
+        and a user who sees it in the wrong layout stops to press the hotkey. Both answer the
+        same moment: in the field logs the press came 7 ms to 1.2 s after the correction, often
+        held back behind it, so it converted the word straight back and the user pressed the
+        hotkey again. A press that soon, with nothing typed since, is taken as that agreement,
+        once; the next press converts the word back as before.
+        """
+
+        return (
+            self._pause_agreement_open
+            and plan.boundary is None
+            and time.monotonic() - self._last_correction_time <= PAUSE_CORRECTION_AGREEMENT_SECONDS
+        )
 
     def _chain_origin(self, plan: CorrectionPlan) -> CorrectionPlan:
         """The chain ``plan`` would continue once it runs."""
@@ -4383,7 +4422,12 @@ class KeySwitchEngine:
             held > 0 and self._typed_events - typed_before == held
             and self._typed_presses == presses_before
         )
-        context_reset_reason = "late_input" if late else "held_text_or_unknown" if held and not replayed_only_releases else ""
+        # The keys held back while the word was replaced are typed again after it, in order, and reach
+        # the engine after this line like any typed key: the text before them is still the context.
+        # Cleared, it took `нажимаю на` from the `b` after an early-switched `Pause`, and the letter
+        # stayed `b`. Only input that came through unheld (a click) leaves the text unknown.
+        unheld_input = held > 0 and self._typed_events - typed_before != held
+        context_reset_reason = "late_input" if late else "held_text_or_unknown" if unheld_input else ""
         if context_reset_reason == "late_input" and not (held and not replayed_only_releases) and (
                 self.context_policy.stream.withdraw(rolled)):
             # The late keys come back typed again and are observed then: the text before them

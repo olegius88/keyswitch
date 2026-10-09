@@ -39,6 +39,11 @@ LEARNING_PROMPT_TIMEOUT_SECONDS: Final = 8.0
 # between and no other key, asks for a switching rule instead of converting the word back. The
 # Windows default double-click time is the same half second.
 DOUBLE_CONVERT_PRESS_WINDOW_SECONDS: Final = 0.5
+# A press of the manual conversion hotkey this soon after the engine converted the word at a pause,
+# with nothing typed since, asks for the conversion that has just been made: the user stopped typing
+# to press it. In the field logs of 01-09.10.2026 every one of the eight such presses (7 ms to 1.2 s
+# after the correction) undid a right correction, and the user then converted the word again.
+PAUSE_CORRECTION_AGREEMENT_SECONDS: Final = 1.5
 # A layout change observed this soon after the engine switched the layout itself (correction, menu
 # action) is the engine's own switch, not the user's.
 ENGINE_SWITCH_GRACE_SECONDS: Final = 1.5

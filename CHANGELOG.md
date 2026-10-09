@@ -4,6 +4,21 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- `Pause` pressed within 1.5 seconds of a word the engine converted at a pause, with nothing typed since, no longer
+  converts the word straight back. A user who sees a word in the wrong layout stops typing to press `Pause`, and the
+  pause is the very moment the engine converts the word on its own: in the owner's logs of 01–09.10.2026 every one of
+  the eight `Pause` presses that came 7 ms to 1.2 s after such a correction — often held back behind its injection —
+  undid a right conversion, and the user pressed `Pause` again or retyped the word. That press now counts as
+  agreement (`manual_conversion_absorbed`, once); the next press converts the word back as before. Corrections made
+  at a space keep the old behaviour: there a quick `Pause` undid a wrong conversion as often as a right one.
+- The text before a corrected word stays the context of the next one when keys were typed while the word was being
+  replaced. Those keys are held back and typed again after the word, in order, and the engine observes them like any
+  typed key, yet the observed text was cleared whenever one of them was a press: after `Pause` was switched early with
+  `e` typed into the switch, `нажимаю на Pause b` lost its Russian start, the rule for a single letter after an English
+  term in a Russian phrase no longer applied, and `b` stayed `b` (it became `и` when the same words were typed again a
+  minute later). The text is still cleared when input the hook does not hold back, such as a click, arrived during the
+  replacement. In the owner's logs this applied to 19 corrections, mostly early switches.
+
 ## 0.48.0 — 2026-10-09
 
 - The Windows installer and uninstaller stop a running KeySwitch before they touch its files. Restart Manager closes
