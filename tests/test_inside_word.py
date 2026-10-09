@@ -14,6 +14,7 @@ from collections.abc import Callable
 from dataclasses import replace
 
 from keyswitch.backend import KeyEvent
+from keyswitch.constants.text import FIELD_CARET_LAG_MAX_CHARACTERS
 from keyswitch.context_model import ContextAction, ContextEvidence
 from keyswitch.engine import InsertionPoint
 from keyswitch.input_context import FieldContext
@@ -190,6 +191,69 @@ class InsideWordTests(ContextEngineTests):
         self.click_into("мы хотим сдлать это", len("мы хотим сд"), 0)
         self.type("t")
         self.assertEqual(self.engine._early_prefix_protection("t", 0, 1), "inside_word")
+
+    def test_a_key_queued_behind_the_first_is_not_a_letter_after_the_caret(self) -> None:
+        # `делай` began with `lt` in the Claude app's field and the caret after `l`: the `t` was
+        # read as a letter of a word after the caret, and the early switch waited (09.10.2026).
+        self.reset_editor(0)
+        self.backend.text, self.backend.caret = "lt", len("l")
+        first = self.key("l", "l")
+        self.assertEqual(self.engine._read_insertion(first), InsertionPoint("", "t"))
+        self.engine.enqueue(self.key("t", "t"))
+        self.assertEqual(self.engine._read_insertion(first), InsertionPoint("", ""))
+
+    def test_the_early_switch_reads_the_field_again_before_waiting_inside_a_word(self) -> None:
+        self.reset_editor(0)
+        self.engine._insertion = InsertionPoint("", "t")
+        self.backend.text, self.backend.caret = "ltkf", len("ltkf")
+        self.assertEqual(self.engine._early_prefix_protection("ltkf", 0, 1), "")
+        self.assertIsNone(self.engine._insertion)
+        # Letters of a word still beside it: the first read stands.
+        self.engine._insertion = InsertionPoint("", "x")
+        self.backend.text = "ltkfx"
+        self.assertEqual(self.engine._early_prefix_protection("ltkf", 0, 1), "inside_word")
+        self.assertEqual(self.engine._insertion, InsertionPoint("", "x"))
+
+    def test_a_first_read_the_word_outgrew_is_dropped_at_its_boundary(self) -> None:
+        # Read as begun before a letter, and at the boundary the caret two characters short of the
+        # space: the word was kept as typed into a changed field (`офыы` for `jass`, 08.10.2026).
+        self.script({"ghbdtn": "convert"})
+        self.reset_editor(0)
+
+        def lagging(field: FieldContext) -> FieldContext:
+            text = field.before + field.after
+            if text == "g":
+                # The next letter shown after the caret as the word begins.
+                return replace(field, before="g", after="h")
+            cut = max(0, len(text) - FIELD_CARET_LAG_MAX_CHARACTERS)
+            return replace(field, before=text[:cut], after=text[cut:])
+
+        self.reader.override = lagging
+        self.engine._position_unknown = True
+        self.type("ghbdtn ")
+        self.assertEqual(self.backend.text, "привет ")
+
+    def test_the_first_read_stands_where_the_field_cannot_be_read_again(self) -> None:
+        cases: tuple[Callable[[], None], ...] = (
+            lambda: setattr(self.engine.context_policy, "reader", None),
+            lambda: self.settings.set("detection.context_read_field", False),
+            lambda: setattr(self.reader, "override", lambda _field: None),
+            lambda: setattr(self.reader, "override", lambda field: replace(field, sensitive=True)),
+            lambda: setattr(self.reader, "override", lambda field: replace(field, selection=True)),
+            lambda: setattr(self.reader, "override", lambda field: replace(field, application="other")),
+            lambda: setattr(self.reader, "override", lambda field: replace(field, before="something else")),
+        )
+        for prepare in cases:
+            with self.subTest(prepare=prepare):
+                self.setUp()
+                self.reset_editor(0)
+                self.backend.text, self.backend.caret = "ltkf", len("ltkf")
+                self.engine._insertion = InsertionPoint("", "t")
+                prepare()
+                self.assertTrue(self.engine._insertion_holds("ltkf", "", self.application))
+                self.assertEqual(self.engine._insertion, InsertionPoint("", "t"))
+        self.engine._insertion = None
+        self.assertFalse(self.engine._insertion_holds("ltkf", "", self.application))
 
     def test_no_insertion_point_without_a_readable_field(self) -> None:
         event = self.key("t", "t")
