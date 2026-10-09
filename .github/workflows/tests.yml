@@ -132,8 +132,15 @@ jobs:
           python3 -m coverage report
 
   replays:
-    name: Model evidence replays (context, ortho, boundary)
+    name: Model evidence replay (${{ matrix.replay }})
     runs-on: ubuntu-26.04
+    # The context, orthotactic and boundary replays share nothing but the checkout and the
+    # environment fingerprint. One after another they were the longest job whenever their
+    # markers were not kept (6.5 to 9.4 minutes), so each takes a runner of its own.
+    strategy:
+      fail-fast: false
+      matrix:
+        replay: [context, ortho, boundary]
 
     steps:
       - name: Check out source
@@ -196,7 +203,7 @@ jobs:
 
       - name: Look up a verified context replay of this exact tree
         id: restore_context
-        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' }}
+        if: ${{ matrix.replay == 'context' && vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' }}
         uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/replay-markers/context.ok
@@ -204,21 +211,21 @@ jobs:
           lookup-only: true
 
       - name: Verify active contextual evidence and versioned replay
-        if: ${{ steps.restore_context.outputs.cache-hit != 'true' }}
+        if: ${{ matrix.replay == 'context' && steps.restore_context.outputs.cache-hit != 'true' }}
         run: PYTHONPATH=src python3 tools/verify_context_model.py --replay
 
       - name: Verify historical rejected context-v2 numeric evidence
-        if: ${{ steps.restore_context.outputs.cache-hit != 'true' }}
+        if: ${{ matrix.replay == 'context' && steps.restore_context.outputs.cache-hit != 'true' }}
         run: PYTHONPATH=src python3 tools/verify_context_v2.py --verify-frozen
 
       - name: Record the verified context replay for this tree
-        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_context.outputs.cache-hit != 'true' }}
+        if: ${{ matrix.replay == 'context' && vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_context.outputs.cache-hit != 'true' }}
         run: |
           mkdir -p "$RUNNER_TEMP/replay-markers"
           date -u +%Y-%m-%dT%H:%M:%SZ > "$RUNNER_TEMP/replay-markers/context.ok"
 
       - name: Save the verified context replay marker
-        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_context.outputs.cache-hit != 'true' }}
+        if: ${{ matrix.replay == 'context' && vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_context.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/replay-markers/context.ok
@@ -226,7 +233,7 @@ jobs:
 
       - name: Look up a verified ortho replay of this exact tree
         id: restore_ortho
-        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' }}
+        if: ${{ matrix.replay == 'ortho' && vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' }}
         uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/replay-markers/ortho.ok
@@ -234,7 +241,7 @@ jobs:
           lookup-only: true
 
       - name: Replay key-space orthotactic training and promotion guard
-        if: ${{ steps.restore_ortho.outputs.cache-hit != 'true' }}
+        if: ${{ matrix.replay == 'ortho' && steps.restore_ortho.outputs.cache-hit != 'true' }}
         run: |
           PYTHONPATH=src python3 tools/ortho_corpus.py
           KEYSWITCH_MODEL_PATH=model/intent_v1/sources KEYSWITCH_HUNSPELL_PATH=model/intent_v1/sources/hunspell PYTHONPATH=src python3 tools/ortho_known.py
@@ -250,13 +257,13 @@ jobs:
           PYTHONPATH=src:tools python3 tools/verify_ortho_v2.py
 
       - name: Record the verified ortho replay for this tree
-        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_ortho.outputs.cache-hit != 'true' }}
+        if: ${{ matrix.replay == 'ortho' && vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_ortho.outputs.cache-hit != 'true' }}
         run: |
           mkdir -p "$RUNNER_TEMP/replay-markers"
           date -u +%Y-%m-%dT%H:%M:%SZ > "$RUNNER_TEMP/replay-markers/ortho.ok"
 
       - name: Save the verified ortho replay marker
-        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_ortho.outputs.cache-hit != 'true' }}
+        if: ${{ matrix.replay == 'ortho' && vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_ortho.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/replay-markers/ortho.ok
@@ -264,7 +271,7 @@ jobs:
 
       - name: Look up a verified boundary replay of this exact tree
         id: restore_boundary
-        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' }}
+        if: ${{ matrix.replay == 'boundary' && vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' }}
         uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/replay-markers/boundary.ok
@@ -272,25 +279,25 @@ jobs:
           lookup-only: true
 
       - name: Replay boundary segmentation training and prevent rejected rollout
-        if: ${{ steps.restore_boundary.outputs.cache-hit != 'true' }}
+        if: ${{ matrix.replay == 'boundary' && steps.restore_boundary.outputs.cache-hit != 'true' }}
         run: |
           PYTHONPATH=src python3 tools/verify_boundary_model.py --verify-frozen
           PYTHONPATH=src python3 tools/evaluate_boundary_engine.py --verify
 
       - name: Verify frozen boundary-v2 numeric evidence and current engine gate
-        if: ${{ steps.restore_boundary.outputs.cache-hit != 'true' }}
+        if: ${{ matrix.replay == 'boundary' && steps.restore_boundary.outputs.cache-hit != 'true' }}
         run: |
           PYTHONPATH=src python3 tools/verify_boundary_v2.py --verify-frozen
           PYTHONPATH=src python3 tools/verify_boundary_v2.py
 
       - name: Record the verified boundary replay for this tree
-        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_boundary.outputs.cache-hit != 'true' }}
+        if: ${{ matrix.replay == 'boundary' && vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_boundary.outputs.cache-hit != 'true' }}
         run: |
           mkdir -p "$RUNNER_TEMP/replay-markers"
           date -u +%Y-%m-%dT%H:%M:%SZ > "$RUNNER_TEMP/replay-markers/boundary.ok"
 
       - name: Save the verified boundary replay marker
-        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_boundary.outputs.cache-hit != 'true' }}
+        if: ${{ matrix.replay == 'boundary' && vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' && steps.restore_boundary.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/replay-markers/boundary.ok

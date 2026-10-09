@@ -4,6 +4,10 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- The context, orthotactic and boundary replays run on three runners side by side. One after another they took 6.5
+  to 9.4 minutes whenever their markers were not kept, as on every release build (9.4 minutes for 0.47.0), and with
+  the coverage step split they were the longest job of both workflows. Each leg runs only its replay, keeps its own
+  marker under the same key as before, and the release still waits for all three.
 - Test modules that build an engine for every test share its models. Building an engine loads both language models
   with the packaged supplement and parses the context model; the language models are cached, but each load
   normalises the supplement's words again (0.86 seconds a language), and the 7.5 MB context artifact was parsed again
