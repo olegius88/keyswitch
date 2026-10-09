@@ -11,7 +11,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from keyswitch.backend import FocusInfo, KeyDisposition
+from keyswitch.backend import FocusInfo, KeyDisposition, LayoutSwitchUnconfirmed
 from keyswitch.constants.keyboard import ALT_MASK, CONTROL_MASK, UNICODE_PACKET_KEY_NAME
 from keyswitch.config import SettingsStore
 from keyswitch.constants.settings_defaults import (
@@ -517,6 +517,28 @@ class EngineBehaviourTests(unittest.TestCase):
             if event["event"] == "correction_failed"
         )
         self.assertEqual(failed["keys_during_injection"], 0)
+
+    def test_a_layout_the_application_confirms_late_is_still_the_engines_switch(self) -> None:
+        # VS Code confirmed a requested layout a second after it was posted: the correction had been
+        # given up by then, and the layout that came must not pass for the user's own pick.
+        self.type_word("ghbdtn")
+        with (
+            patch.object(
+                self.backend, "inject_correction",
+                side_effect=LayoutSwitchUnconfirmed("Приложение не подтвердило смену раскладки", 1),
+            ),
+            self.assertLogs("keyswitch.engine", level="INFO"),
+        ):
+            self.press_space(0)
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._observe_group(1)
+        observed = next(
+            event for event in self.technical_events(logs.output)
+            if event["event"] in {"layout_change_observed", "manual_layout_observed"}
+        )
+        self.assertEqual(observed["event"], "layout_change_observed")
+        self.assertIs(observed["initiated_by_engine"], True)
+        self.assertIs(observed["protects_next_word"], False)
 
     def test_a_scheduled_conversion_that_never_runs_is_logged(self) -> None:
         self.type_word("ghbdtn")

@@ -18,6 +18,7 @@ from .backend import ScreenAnchor
 from .constants.keyboard import ALT_MASK, CONTROL_MASK, LOCK_MASK, SHIFT_MASK, SUPER_MASK
 from .windows_backend import NativeInput, NativeKeyEvent, WindowsBackendError
 from .constants.windows import (
+    ASYNC_KEY_DOWN_BIT,
     GA_ROOT,
     GWL_EXSTYLE,
     HC_ACTION,
@@ -41,6 +42,7 @@ from .constants.windows import (
     SWP_NOMOVE,
     SWP_NOSIZE,
     SWP_NOZORDER,
+    THREAD_PRIORITY_ABOVE_NORMAL,
     TO_UNICODE_KEEP_KEYBOARD_STATE_FLAG,
     TRANSLATED_TEXT_BUFFER_CHARACTERS,
     VIRTUAL_KEY_BYTE_MASK,
@@ -254,6 +256,8 @@ class CtypesWindowsAPI:
         user32.AttachThreadInput.restype = ctypes.c_int
         user32.GetKeyState.argtypes = [ctypes.c_int]
         user32.GetKeyState.restype = ctypes.c_short
+        user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+        user32.GetAsyncKeyState.restype = ctypes.c_short
         user32.GetWindowThreadProcessId.argtypes = [
             ctypes.c_void_p,
             ctypes.POINTER(ctypes.c_ulong),
@@ -313,6 +317,10 @@ class CtypesWindowsAPI:
         kernel32.GetModuleHandleW.restype = ctypes.c_void_p
         kernel32.GetCurrentThreadId.argtypes = []
         kernel32.GetCurrentThreadId.restype = ctypes.c_ulong
+        kernel32.GetCurrentThread.argtypes = []
+        kernel32.GetCurrentThread.restype = ctypes.c_void_p
+        kernel32.SetThreadPriority.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        kernel32.SetThreadPriority.restype = ctypes.c_int
         kernel32.GetCurrentProcessId.argtypes = []
         kernel32.GetCurrentProcessId.restype = ctypes.c_ulong
         kernel32.GetTickCount.argtypes = []
@@ -349,11 +357,29 @@ class CtypesWindowsAPI:
             raise self._error("Windows не заполнила список раскладок")
         return tuple(int(values[index] or 0) for index in range(actual))
 
-    def foreground_layout(self) -> int:
-        window = self.user32.GetForegroundWindow()
+    def _input_window(self) -> tuple[int, int]:
+        """The window typed keys go to, and its thread, which owns the layout they are read in.
+
+        Windows keeps a keyboard layout per thread. The text control of Windows 11 Notepad
+        lives in a thread of its own: that thread's layout is the one the user types with
+        and switches, while the thread of the window in front keeps its old layout. When the
+        focused control shares the thread of the window in front, as in nearly every program,
+        the window in front is asked, as before.
+        """
+
+        window = int(self.user32.GetForegroundWindow() or 0)
         if not window:
-            return 0
+            return 0, 0
         thread_id = int(self.user32.GetWindowThreadProcessId(window, None))
+        focus = self.focused_control()
+        if focus and focus != window:
+            focus_thread = int(self.user32.GetWindowThreadProcessId(focus, None))
+            if focus_thread and focus_thread != thread_id:
+                return focus, focus_thread
+        return window, thread_id
+
+    def foreground_layout(self) -> int:
+        _window, thread_id = self._input_window()
         if not thread_id:
             return 0
         return int(self.user32.GetKeyboardLayout(thread_id) or 0)
@@ -461,7 +487,8 @@ class CtypesWindowsAPI:
         return None
 
     def request_layout(self, layout: int) -> bool:
-        window = self.user32.GetForegroundWindow()
+        # The request goes to the thread whose layout foreground_layout reads.
+        window, _thread_id = self._input_window()
         return bool(
             window
             and self.user32.PostMessageW(
@@ -581,6 +608,9 @@ class CtypesWindowsAPI:
     def caps_lock_enabled(self) -> bool:
         return bool(int(self.user32.GetKeyState(VK_CAPITAL)) & 1)
 
+    def key_down(self, virtual_key: int) -> bool:
+        return bool(int(self.user32.GetAsyncKeyState(virtual_key)) & ASYNC_KEY_DOWN_BIT)
+
     def run_keyboard_hook(
         self,
         listener: Callable[[NativeKeyEvent], bool],
@@ -627,6 +657,9 @@ class CtypesWindowsAPI:
                     return 1
             return int(self.user32.CallNextHookEx(None, code, message, data))
 
+        # Windows removes a low-level hook, without a word, whose callback answers too late, and
+        # a thread of normal priority waits behind every busy thread of the same priority.
+        self.kernel32.SetThreadPriority(self.kernel32.GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL)
         callback_object = self.hook_callback_type(callback)
         self._hook_callback = cast(_HookCallback, callback_object)
         # PostThreadMessageW fails when the target thread has no message queue.

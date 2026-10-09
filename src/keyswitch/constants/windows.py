@@ -118,6 +118,10 @@ SWP_FRAMECHANGED: Final = 0x0020
 # lpKeyState / GetKeyboardState). High bit set means down.
 KEYBOARD_STATE_ARRAY_SIZE: Final = 256
 VK_STATE_DOWN_BIT: Final = 0x80
+# GetAsyncKeyState sets the most significant bit of its SHORT while the key is down.
+ASYNC_KEY_DOWN_BIT: Final = 0x8000
+# SetThreadPriority: one step above the normal priority of the process.
+THREAD_PRIORITY_ABOVE_NORMAL: Final = 1
 VIRTUAL_KEY_BYTE_MASK: Final = 0xFF
 TRANSLATED_TEXT_BUFFER_CHARACTERS: Final = 8
 # ToUnicodeEx wFlags bit 2 (Windows 10 1607+): keyboard state is not changed.
@@ -131,6 +135,7 @@ SHIFT_KEYS: Final = frozenset((VK_SHIFT, VK_LSHIFT, VK_RSHIFT))
 CONTROL_KEYS: Final = frozenset((VK_CONTROL, VK_LCONTROL, VK_RCONTROL))
 ALT_KEYS: Final = frozenset((VK_MENU, VK_LMENU, VK_RMENU))
 SUPER_KEYS: Final = frozenset((VK_LWIN, VK_RWIN))
+MODIFIER_KEYS: Final = SHIFT_KEYS | CONTROL_KEYS | ALT_KEYS | SUPER_KEYS
 # Not the wheel (WHEEL_MESSAGES): a scroll moves the view, not the caret. Reported as
 # a click it discarded the word being typed and the words before it, 141 times a minute while a
 # page was scrolled (Windows log, 08.10.2026).

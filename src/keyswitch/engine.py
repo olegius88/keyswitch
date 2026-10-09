@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass, replace
 from typing import Final
 
 from . import __version__
-from .backend import InputBackend, KeyEvent, KeyDisposition
+from .backend import InputBackend, KeyEvent, KeyDisposition, LayoutSwitchUnconfirmed
 from .app_quirks import mention_head
 from .boundary_model import BoundaryModel, MAX_SUFFIX, features as boundary_features
 from .boundary_policy import BoundaryPolicy
@@ -1465,6 +1465,17 @@ class KeySwitchEngine:
         # pick; otherwise that pick would revive when the engine returned to
         # its group minutes later.
         self._manual_layout_group = None
+
+    def _note_unconfirmed_switch(self, error: Exception) -> None:
+        """A layout asked for and not confirmed in time is still the engine's when it arrives.
+
+        The request stays posted. VS Code confirmed one a second after it was asked for, the
+        correction had been given up by then, and the layout that came was booked as the
+        user's own pick: it protected the next word from correction.
+        """
+
+        if isinstance(error, LayoutSwitchUnconfirmed):
+            self._note_engine_switch(error.group)
 
     def _word_protected(self, source_group: int) -> bool:
         """The current word must be neither corrected nor switched early."""
@@ -4092,6 +4103,7 @@ class KeySwitchEngine:
                 requested_group=target,
                 error=str(error),
             )
+            self._note_unconfirmed_switch(error)
             self._update(last_error=str(error), last_action="Раскладка не переключена")
             return
         self._note_engine_switch(target)
@@ -4358,6 +4370,7 @@ class KeySwitchEngine:
                 text_verified=False,
                 error=str(error),
             )
+            self._note_unconfirmed_switch(error)
             self._early_switch_origin = None
             self._early_switch_at = None
             self._clear_word(reason="injection_failed")

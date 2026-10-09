@@ -16,12 +16,13 @@ import warnings
 from collections.abc import Callable
 from pathlib import Path, PureWindowsPath
 from types import ModuleType, SimpleNamespace
+from typing import cast
 from unittest.mock import patch
 
 from keyswitch import logsetup
 from keyswitch import windows_app as windows_app_module
 from keyswitch import launcher as launcher_module
-from keyswitch.backend import BackendProbe, FocusInfo, KeyEvent, ScreenAnchor
+from keyswitch.backend import BackendProbe, FocusInfo, KeyEvent, LayoutSwitchUnconfirmed, ScreenAnchor
 from keyswitch.constants.keyboard import (
     ALT_MASK,
     CONTROL_MASK,
@@ -34,6 +35,7 @@ from keyswitch.constants.keyboard import (
 from keyswitch.constants.models import PREFIX_MAX_CHARACTERS, PREFIX_MIN_CHARACTERS
 from keyswitch.constants.timing import (
     LAYOUT_SWITCH_POLL_SECONDS,
+    MODIFIER_RECHECK_GAP_MS,
     SMOKE_UI_QUIT_AFTER_MS,
     UNDO_AVAILABLE_WINDOW_SECONDS,
 )
@@ -58,13 +60,16 @@ from keyswitch.windows_backend import (
     select_layout_pair,
 )
 from keyswitch.constants.windows import (
+    ASYNC_KEY_DOWN_BIT,
     GA_ROOT,
     LANG_ENGLISH,
     LANG_RUSSIAN,
     STARTUP_APPROVAL_ENABLED_BYTES,
     VK_BACK,
     VK_CAPITAL,
+    VK_A,
     VK_CONTROL,
+    VK_LCONTROL,
     VK_LWIN,
     VK_MENU,
     VK_OEM_7,
@@ -73,6 +78,7 @@ from keyswitch.constants.windows import (
     VK_PACKET,
     VK_RETURN,
     VK_SHIFT,
+    WM_INPUTLANGCHANGEREQUEST,
 )
 from keyswitch.windows_system import (
     AutostartStatus,
@@ -95,7 +101,10 @@ from keyswitch.windows_tray import (
 from keyswitch.windows_native import CtypesWindowsAPI
 from keyswitch.windows_ui_model import ALL_SETTING_SPECS
 from fixture_values.clock import (
-    LAYOUT_SWITCH_POLL_MONOTONIC_READINGS,
+    WINDOWS_AFTER_PROMPT_LETTER_TIMESTAMP,
+    WINDOWS_CHORD_LETTER_TIMESTAMP,
+    WINDOWS_CHORD_MODIFIER_TIMESTAMP,
+    WINDOWS_LAYOUT_SWITCH_POLL_MONOTONIC_READINGS,
     SHORT_LISTENER_START_TIMEOUT_SECONDS,
     WINDOWS_CAPS_LOCK_REPEAT_TIMESTAMP,
     WINDOWS_FAKE_KEY_TIMESTAMP,
@@ -142,6 +151,9 @@ from fixture_values.keys import (
     WINDOWS_CURRENT_THREAD_ID,
     WINDOWS_FAKE_HWND,
     WINDOWS_FOREGROUND_HWND,
+    WINDOWS_TEXT_CONTROL_HWND,
+    WINDOWS_TEXT_CONTROL_THREAD_ID,
+    ASYNC_KEY_PRESSED_SINCE_BIT,
     WINDOWS_FOREGROUND_THREAD_ID,
     WINDOWS_INACTIVE_HWND,
     WINDOWS_INVALID_SOURCE_GROUP,
@@ -197,6 +209,9 @@ class FakeWindowsAPI:
         self.process_id = WINDOWS_OWN_PROCESS_ID
         self.ticks = 0
         self.inactive_windows: list[int] = []
+        # Keys the keyboard has already let go of; every other key reads as down.
+        self.released_keys: set[int] = set()
+        self.key_down_calls: list[int] = []
 
     def loaded_layouts(self) -> tuple[int, ...]:
         self.layout_calls += 1
@@ -256,6 +271,10 @@ class FakeWindowsAPI:
 
     def caps_lock_enabled(self) -> bool:
         return self.caps_lock
+
+    def key_down(self, virtual_key: int) -> bool:
+        self.key_down_calls.append(virtual_key)
+        return virtual_key not in self.released_keys
 
     def run_keyboard_hook(
         self,
@@ -532,6 +551,98 @@ class WindowsNativeActivationTests(unittest.TestCase):
         self.assertEqual(user32.show_calls, [])
 
 
+class FakeInputUser32:
+    """The window in front, the focused control and the layout of each thread."""
+
+    def __init__(self, *, foreground: int, focus: int, threads: dict[int, int], layouts: dict[int, int]) -> None:
+        self.foreground = foreground
+        self.focus = focus
+        self.threads = threads
+        self.layouts = layouts
+        self.posted: list[tuple[int, int, int]] = []
+        self.async_state = 0
+
+    def GetForegroundWindow(self) -> int | None:
+        return self.foreground or None
+
+    def GetWindowThreadProcessId(self, window: int, _process: object) -> int:
+        return self.threads.get(window, 0)
+
+    def GetGUIThreadInfo(self, _thread: int, info: object) -> int:
+        cast(SimpleNamespace, info)._obj.hwndFocus = self.focus or None
+        return 1
+
+    def GetKeyboardLayout(self, thread: int) -> int:
+        return self.layouts.get(thread, 0)
+
+    def PostMessageW(self, window: int, message: int, _wparam: int, layout: int) -> int:
+        self.posted.append((window, message, layout))
+        return 1
+
+    def GetAsyncKeyState(self, _virtual_key: int) -> int:
+        return self.async_state
+
+
+class WindowsNativeInputWindowTests(unittest.TestCase):
+
+    @staticmethod
+    def api_with(user32: FakeInputUser32) -> CtypesWindowsAPI:
+        api = CtypesWindowsAPI.__new__(CtypesWindowsAPI)
+        object.__setattr__(api, "user32", user32)
+        return api
+
+    def test_a_text_control_in_a_thread_of_its_own_owns_the_layout(self) -> None:
+        # Windows 11 Notepad: the thread of the window in front keeps its old layout.
+        user32 = FakeInputUser32(
+            foreground=WINDOWS_FOREGROUND_HWND, focus=WINDOWS_TEXT_CONTROL_HWND,
+            threads={WINDOWS_FOREGROUND_HWND: WINDOWS_FOREGROUND_THREAD_ID,
+                     WINDOWS_TEXT_CONTROL_HWND: WINDOWS_TEXT_CONTROL_THREAD_ID},
+            layouts={WINDOWS_FOREGROUND_THREAD_ID: ENGLISH_HKL, WINDOWS_TEXT_CONTROL_THREAD_ID: RUSSIAN_HKL},
+        )
+        api = self.api_with(user32)
+        self.assertEqual(api.foreground_layout(), RUSSIAN_HKL)
+        self.assertTrue(api.request_layout(ENGLISH_HKL))
+        self.assertEqual(user32.posted, [(WINDOWS_TEXT_CONTROL_HWND, WM_INPUTLANGCHANGEREQUEST, ENGLISH_HKL)])
+
+    def test_a_focused_control_of_the_same_thread_leaves_the_window_in_front_asked(self) -> None:
+        user32 = FakeInputUser32(
+            foreground=WINDOWS_FOREGROUND_HWND, focus=WINDOWS_TEXT_CONTROL_HWND,
+            threads={WINDOWS_FOREGROUND_HWND: WINDOWS_FOREGROUND_THREAD_ID,
+                     WINDOWS_TEXT_CONTROL_HWND: WINDOWS_FOREGROUND_THREAD_ID},
+            layouts={WINDOWS_FOREGROUND_THREAD_ID: RUSSIAN_HKL},
+        )
+        api = self.api_with(user32)
+        self.assertEqual(api.foreground_layout(), RUSSIAN_HKL)
+        self.assertTrue(api.request_layout(ENGLISH_HKL))
+        # A control whose thread is unknown, and no control at all, leave it too.
+        user32.threads[WINDOWS_TEXT_CONTROL_HWND] = 0
+        self.assertTrue(api.request_layout(ENGLISH_HKL))
+        user32.focus = 0
+        self.assertTrue(api.request_layout(ENGLISH_HKL))
+        self.assertEqual(
+            user32.posted,
+            [(WINDOWS_FOREGROUND_HWND, WM_INPUTLANGCHANGEREQUEST, ENGLISH_HKL)] * len("abc"),
+        )
+
+    def test_no_window_in_front_reads_no_layout_and_asks_nobody(self) -> None:
+        user32 = FakeInputUser32(foreground=0, focus=0, threads={}, layouts={})
+        api = self.api_with(user32)
+        self.assertEqual(api.foreground_layout(), 0)
+        self.assertFalse(api.request_layout(ENGLISH_HKL))
+        # A window whose thread Windows does not name has no layout either.
+        user32.foreground = WINDOWS_FOREGROUND_HWND
+        self.assertEqual(api.foreground_layout(), 0)
+        self.assertEqual(user32.posted, [])
+
+    def test_a_key_is_down_only_while_its_most_significant_bit_is_set(self) -> None:
+        user32 = FakeInputUser32(foreground=0, focus=0, threads={}, layouts={})
+        api = self.api_with(user32)
+        user32.async_state = ASYNC_KEY_DOWN_BIT
+        self.assertTrue(api.key_down(VK_LCONTROL))
+        user32.async_state = ASYNC_KEY_PRESSED_SINCE_BIT
+        self.assertFalse(api.key_down(VK_LCONTROL))
+
+
 class WindowsBackendLifecycleTests(unittest.TestCase):
 
     def test_layouts_probe_group_and_application(self) -> None:
@@ -709,6 +820,46 @@ class WindowsBackendLifecycleTests(unittest.TestCase):
         backend.stop()
         self.assertFalse(backend.running)
         self.assertEqual(api.stop_calls, 1)
+
+    def test_a_modifier_whose_release_the_hook_missed_is_forgotten(self) -> None:
+        api = FakeWindowsAPI()
+        backend = WindowsBackend(api)
+        collected: list[KeyEvent] = []
+        backend._listener = collected.append
+
+        def press(virtual_key: int, timestamp: int, **marks: bool) -> None:
+            backend._handle_native(NativeKeyEvent(True, virtual_key, virtual_key, False, False, timestamp, **marks))
+
+        # Ctrl+A in one go: the keyboard is not asked, the letter carries Ctrl.
+        press(VK_LCONTROL, WINDOWS_CHORD_MODIFIER_TIMESTAMP)
+        press(VK_A, WINDOWS_CHORD_LETTER_TIMESTAMP)
+        self.assertEqual(collected[-1].state, CONTROL_MASK)
+        self.assertEqual(api.key_down_calls, [])
+
+        # A UAC prompt took the release of Ctrl; the next key comes in another window.
+        api.released_keys.add(VK_LCONTROL)
+        api.foreground = WINDOWS_FOREGROUND_HWND
+        with self.assertLogs("keyswitch.windows_backend", level="INFO") as logs:
+            press(VK_A, WINDOWS_AFTER_PROMPT_LETTER_TIMESTAMP)
+        self.assertEqual(collected[-1].state, 0)
+        self.assertEqual(api.key_down_calls, [VK_LCONTROL])
+        self.assertIn(key_name(VK_LCONTROL), logs.output[0])
+
+        # Ctrl held down through a pause stays down.
+        api.released_keys.clear()
+        api.key_down_calls.clear()
+        press(VK_LCONTROL, WINDOWS_CHORD_MODIFIER_TIMESTAMP)
+        press(VK_A, WINDOWS_CHORD_MODIFIER_TIMESTAMP + MODIFIER_RECHECK_GAP_MS)
+        self.assertEqual(collected[-1].state, CONTROL_MASK)
+        self.assertEqual(api.key_down_calls, [VK_LCONTROL])
+
+        # Keys another program injected, and KeySwitch's own, ask nothing of the keyboard.
+        api.released_keys.add(VK_LCONTROL)
+        api.foreground = WINDOWS_FAKE_HWND
+        press(VK_A, WINDOWS_AFTER_PROMPT_LETTER_TIMESTAMP, foreign=True)
+        press(VK_A, WINDOWS_AFTER_PROMPT_LETTER_TIMESTAMP, replayed=True)
+        self.assertEqual(collected[-1].state, CONTROL_MASK)
+        self.assertEqual(api.key_down_calls, [VK_LCONTROL])
 
     def test_event_state_tracks_modifiers_caps_and_unknown_group(self) -> None:
         api = FakeWindowsAPI()
@@ -1073,13 +1224,17 @@ class WindowsBackendInjectionTests(unittest.TestCase):
         with (
             patch(
                 "keyswitch.windows_backend.time.monotonic",
-                side_effect=LAYOUT_SWITCH_POLL_MONOTONIC_READINGS,
+                side_effect=WINDOWS_LAYOUT_SWITCH_POLL_MONOTONIC_READINGS,
             ),
             patch("keyswitch.windows_backend.time.sleep") as sleep,
         ):
-            with self.assertRaisesRegex(WindowsBackendError, "не подтвердило"):
+            with self.assertRaisesRegex(WindowsBackendError, "не подтвердило") as raised:
                 backend._switch_group(1)
+        # Half a second is no longer the end of the wait: a busy editor answers later.
         sleep.assert_called_once_with(LAYOUT_SWITCH_POLL_SECONDS)
+        # The request stays posted: the engine books the layout as its own if it comes.
+        self.assertIsInstance(raised.exception, LayoutSwitchUnconfirmed)
+        self.assertEqual(cast(LayoutSwitchUnconfirmed, raised.exception).group, 1)
 
 
 class WindowsSystemTests(unittest.TestCase):

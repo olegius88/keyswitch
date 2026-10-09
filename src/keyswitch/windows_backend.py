@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 import threading
 import time
@@ -9,7 +10,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from typing import Protocol
 
-from .backend import BackendProbe, FocusInfo, KeyEvent, KeyDisposition, ScreenAnchor
+from .backend import BackendProbe, FocusInfo, KeyEvent, KeyDisposition, LayoutSwitchUnconfirmed, ScreenAnchor
 from .constants.units import MILLISECONDS_PER_SECOND
 from .input_delay import InputDelay, InputDelayReport
 from .constants.keyboard import (
@@ -25,7 +26,8 @@ from .constants.timing import (
     KEYBOARD_LISTENER_START_TIMEOUT_SECONDS,
     KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS,
     LAYOUT_SWITCH_POLL_SECONDS,
-    LAYOUT_SWITCH_TIMEOUT_SECONDS,
+    MODIFIER_RECHECK_GAP_MS,
+    WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS,
 )
 from .constants.windows import (
     ALT_KEYS,
@@ -34,6 +36,7 @@ from .constants.windows import (
     LANG_ENGLISH,
     LANG_RUSSIAN,
     LOWORD_MASK,
+    MODIFIER_KEYS,
     PRIMARY_LANGID_MASK,
     SHIFT_KEYS,
     SUPER_KEYS,
@@ -84,6 +87,8 @@ from .constants.windows import (
 )
 from .russian_text import SECONDS, quantity
 
+LOGGER = logging.getLogger(__name__)
+
 
 def _running_on_windows() -> bool:
     """Keep the runtime guard testable without platform-based type narrowing."""
@@ -92,6 +97,10 @@ def _running_on_windows() -> bool:
 
 
 class WindowsBackendError(RuntimeError):
+    pass
+
+
+class WindowsLayoutSwitchUnconfirmed(WindowsBackendError, LayoutSwitchUnconfirmed):
     pass
 
 
@@ -156,6 +165,10 @@ class WindowsAPI(Protocol):
     def keep_window_inactive(self, window: int) -> bool: ...
 
     def caps_lock_enabled(self) -> bool: ...
+
+    def key_down(self, virtual_key: int) -> bool:
+        """GetAsyncKeyState: whether the key is down on the keyboard right now."""
+        ...
 
     def tick_count(self) -> int:
         """GetTickCount: milliseconds since boot, the clock of a hook's key time."""
@@ -275,6 +288,8 @@ class WindowsBackend:
         self._hold_window = 0
         self._deferred_action: NativeKeyEvent | None = None
         self._action_prior_keys: set[int] = set()
+        # Key time and window in front at the last key typed on this keyboard.
+        self._last_typed: tuple[int, int] = (0, 0)
         self._inject_lock = threading.Lock()
         self._input_delay = InputDelay()
 
@@ -556,6 +571,8 @@ class WindowsBackend:
                     return True
         if native.virtual_key != VK_PACKET:
             # A packet is a character, not a key: nothing is held down by it.
+            if not native.injected and not native.replayed and not native.foreign:
+                self._recheck_modifiers(native)
             self._track_key_state(native)
         state = self._normalized_state()
         characters = tuple(
@@ -592,6 +609,34 @@ class WindowsBackend:
         if listener is not None and not repeated_answer:
             listener(event)
         return bool(consumed)
+
+    def _recheck_modifiers(self, native: NativeKeyEvent) -> None:
+        """Forget a modifier whose release went where the hook does not reach.
+
+        A UAC prompt, the Ctrl+Alt+Del screen or an elevated window takes the key-up of a
+        modifier held when it appeared, and the hook never sees it: every later letter would
+        carry Ctrl and pass for a shortcut until that key was pressed again. So when a key
+        comes after a pause or in another window, each modifier still in the books is asked
+        of the keyboard. Only then: the key being answered is not in the keyboard state yet,
+        and asking at every key would race the user's own chord.
+        """
+
+        window = self._api.foreground_window()
+        previous_time, previous_window = self._last_typed
+        self._last_typed = (native.timestamp, window)
+        held = (self._pressed & MODIFIER_KEYS) - {native.virtual_key}
+        if not held or (
+            window == previous_window
+            and (native.timestamp - previous_time) & DWORD_MASK < MODIFIER_RECHECK_GAP_MS
+        ):
+            return
+        released = sorted(key for key in held if not self._api.key_down(key))
+        if released:
+            self._pressed.difference_update(released)
+            LOGGER.info(
+                "Отпускание модификаторов не дошло до перехватчика, они забыты: %s",
+                ", ".join(key_name(key) for key in released),
+            )
 
     def _track_key_state(self, native: NativeKeyEvent) -> None:
         if native.pressed:
@@ -786,9 +831,9 @@ class WindowsBackend:
             return
         if not self._api.request_layout(layout):
             raise WindowsBackendError("Окно отклонило запрос смены раскладки")
-        deadline = time.monotonic() + LAYOUT_SWITCH_TIMEOUT_SECONDS
+        deadline = time.monotonic() + WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
             if self._group_for_layout(self._api.foreground_layout()) == group:
                 return
             time.sleep(LAYOUT_SWITCH_POLL_SECONDS)
-        raise WindowsBackendError("Приложение не подтвердило смену раскладки")
+        raise WindowsLayoutSwitchUnconfirmed("Приложение не подтвердило смену раскладки", group)

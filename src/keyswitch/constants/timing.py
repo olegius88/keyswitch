@@ -12,8 +12,17 @@ ATSPI_FIELD_READ_DEADLINE_SECONDS: Final = 0.15
 # A layout switch requested from the operating system is asynchronous: a native backend polls for
 # the new layout at this step, and gives up after the timeout.
 LAYOUT_SWITCH_TIMEOUT_SECONDS: Final = 0.5
+# A Windows application answers the layout request from its own message loop, which a busy editor
+# runs late: VS Code Insiders confirmed one about a second after it was posted (field log of
+# 09.10.2026), when the correction had already been given up after half a second and the switch
+# that arrived was taken for the user's own.
+WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS: Final = 1.5
 # Step at which a native backend polls for the layout it asked the operating system to switch to.
 LAYOUT_SWITCH_POLL_SECONDS: Final = 0.01
+# A modifier the Windows hook saw go down is checked against the keyboard when the next key comes
+# this many milliseconds later or in another window: its release may have gone where the hook does
+# not reach (a UAC prompt, the Ctrl+Alt+Del screen, an elevated window).
+MODIFIER_RECHECK_GAP_MS: Final = 1000
 # Back-off before the field reader is tried again after successive failures.
 FIELD_READER_RETRY_DELAYS_SECONDS: Final = (5.0, 15.0, 60.0)
 # The desktop window shows the learning prompt this long after the engine asks for it.
