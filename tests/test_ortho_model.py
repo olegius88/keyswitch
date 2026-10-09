@@ -33,9 +33,14 @@ from fixture_values.models import (
     ORTHO_OUT_OF_RANGE_ORDER,
     UNSUPPORTED_ORTHO_SCHEMA_VERSION,
 )
+from engine_models import share_engine_models
 
 SCORE = WordScore(0.0, False, 0, 0.0)
 KNOWN = WordScore(0.0, True, 0, 0.0)
+
+
+def setUpModule() -> None:
+    share_engine_models()
 
 
 def channel() -> dict[str, object]:

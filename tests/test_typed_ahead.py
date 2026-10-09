@@ -20,6 +20,11 @@ from keyswitch.input_context import FieldContext
 import test_input_sequence_matrix as sequences
 from test_field_caret_lag import LaggingReader
 from test_reopened_word import ConvertingModel, technical_events
+from engine_models import share_engine_models
+
+
+def setUpModule() -> None:
+    share_engine_models()
 
 
 def rolled(current: sequences.PhysicalSession, words: list[str], *, queued: bool = False) -> None:

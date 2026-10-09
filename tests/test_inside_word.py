@@ -21,6 +21,11 @@ from keyswitch.input_context import FieldContext
 from test_context_policy import ContextEngineTests
 from test_context_wait_pairs import ScriptedModel
 from fixture_values.clock import LAST_WORD_INPUT_AT_SECONDS, WAIT_PAIR_PAUSE_CHECK_SECONDS
+from engine_models import share_engine_models
+
+
+def setUpModule() -> None:
+    share_engine_models()
 
 
 class CaretReader:

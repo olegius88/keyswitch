@@ -32,6 +32,7 @@ from fixture_values.clock import (
     SIMULATED_KEY_RELEASE_GAP_SECONDS,
 )
 from fixture_values.keys import NAMED_KEY_PLACEHOLDER_KEYCODE, PAUSE_KEYCODE
+from engine_models import share_engine_models
 
 # Shift+2 on the digit row: "@" in the English layout, the quote in the Russian one.
 QUOTE_KEY = next(key for key in KEYS if key.characters == ("@", '"'))
@@ -39,6 +40,10 @@ SPACE_KEY = next(key for key in KEYS if key.characters == (" ", " "))
 SLASH_KEY = next(key for key in KEYS if key.characters == ("/", "."))
 BY_LATIN = {key.characters[0]: key for key in KEYS if len(key.characters[0]) == 1}
 BY_RUSSIAN = {key.characters[1]: key for key in KEYS if len(key.characters[1]) == 1}
+
+
+def setUpModule() -> None:
+    share_engine_models()
 
 
 class MentionHeadTableTests(unittest.TestCase):

@@ -56,6 +56,11 @@ from fixture_values.scores import (
     BOUNDARY_MODEL_THRESHOLD_BELOW_RANGE,
     BOUNDARY_MODEL_VALID_THRESHOLD,
 )
+from engine_models import share_engine_models
+
+
+def setUpModule() -> None:
+    share_engine_models()
 
 
 class BoundaryArtifactTests(unittest.TestCase):

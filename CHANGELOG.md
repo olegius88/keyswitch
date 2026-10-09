@@ -4,6 +4,43 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- The context, orthotactic and boundary replays run on three runners side by side. One after another they took 6.5
+  to 9.4 minutes whenever their markers were not kept, as on every release build (9.4 minutes for 0.47.0), and with
+  the coverage step split they were the longest job of both workflows. Each leg runs only its replay, keeps its own
+  marker under the same key as before, and the release still waits for all three.
+- Test modules that build an engine for every test share its models. Building an engine loads both language models
+  with the packaged supplement and parses the context model; the language models are cached, but each load
+  normalises the supplement's words again (0.86 seconds a language), and the 7.5 MB context artifact was parsed again
+  (0.7 seconds), so `test_engine_behaviour` spent 332 of its 333 profiled seconds building engines.
+  `tests/engine_models.py` gives a module that calls `share_engine_models()` from setUpModule the model a repeated
+  load returns for a language with its supplement and a fresh copy of the once-parsed installed context model; every
+  other load, and a test's own patch, works as before, and the application loads its models as it did. Twenty modules
+  not pinned by a model seal use it: the suite under coverage takes 1373 seconds of one core instead of 2196 (350
+  seconds on four cores instead of about 560), still at 100%, and the two CI parts come to 697 and 676 seconds.
+  The modules the context pair's seal pins keep loading as before; making the runtime cache the parsed context model
+  and the normalised supplement itself (2196 to 1178 seconds) changes files the context seal and the intent
+  model's toolchain pin, so it waits for a cycle that changes them anyway.
+- The prefix and boundary engine replays parse the installed context model once per process. Each replayed row
+  builds an engine, and its context policy parsed the 7.5 MB artifact again: 0.7 seconds a row, 97% of the prefix
+  replay, which took 5.7 to 9 minutes of CI on 09.10 and was, after the coverage step, the longest path of the test
+  workflow. The prefix replay now takes 28 seconds and the boundary replay 7 locally; both reports were refreshed
+  with `--refresh-runtime` and differ only in the evaluator's own checksum in their provenance.
+- CI runs the Linux suite under coverage on two runners. The step took 5.4 to 9.3 minutes of a four-core runner,
+  about 37 minutes of one core, and was the longest path of the test workflow and of the release build (9.3 of
+  12.2 minutes on 09.10). `tools/run_test_modules.py --part K/N` deals the modules from the largest file down in
+  snake order, so the parts get a like share of the long modules (280 and 281 seconds by the CI timings of 0.47.0,
+  265 and 302 locally); `tests/run_coverage.sh` runs the part `KEYSWITCH_TEST_PART` names and leaves its data
+  without a report. Each part of the `verify` job uploads its data, typing and the X11, AT-SPI and tray E2E run in
+  the first, and the `coverage` job joins both and requires 100% branch coverage of the union; the release
+  publishes nothing before it passes.
+- `tools/compare_context_candidates.py --show N` names up to N of the development and calibration frames a candidate
+  decides otherwise than the first artifact, per split and profile: how its decision moved, the head class, the
+  word, its other reading and the words around it. A frame keeps features, not text, so the words are spelled back
+  from its character n-grams: the chains of four-character n-grams from the word's start to its end, used as often
+  as their values say, kept when their n-grams of every order reproduce the frame's exactly. On corpus v41 it names
+  all eight Latin-context abbreviation frames the v41 head decides otherwise than 0.46.0's (`ВЕРТ`, `ИМО` gained,
+  `КОЛОР` lost, `ТС` falsely converted after English text).
+
 ## 0.47.0 — 2026-10-09
 
 - A word read by mistake as begun inside text no longer holds the early switch back or stays as typed. The field

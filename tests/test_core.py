@@ -97,6 +97,11 @@ from fixture_values.scores import (
     SHORT_SOURCE_VETO_TARGET_WORD_SCORE,
 )
 from disclosed_regressions import disclosed_schema3_pair_regression
+from engine_models import share_engine_models
+
+
+def setUpModule() -> None:
+    share_engine_models()
 
 
 class FakeBackend:

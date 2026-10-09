@@ -16,7 +16,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import compare_context_candidates as comparison
 from fixture_values.scores import DOMINANT_BIAS_WEIGHT, EPOCH_SELECTION_BELOW_THRESHOLD_SCORE, EPOCH_SELECTION_RUNTIME_THRESHOLD
 from keyswitch.constants.model_protocol import CALIBRATION, DEVELOPMENT
-from keyswitch.constants.models import CONTEXT_ACTION_FEATURE_VERSION
+from keyswitch.constants.models import (
+    ACTION_FEATURE_NEIGHBOUR_WORD_COUNT,
+    ACTION_FEATURE_NEIGHBOUR_WORD_MAX_CHARACTERS,
+    ACTION_FEATURE_WORD_MAX_CHARACTERS,
+    CONTEXT_ACTION_FEATURE_VERSION,
+    KEPT_FEATURE_PREFIX,
+    LETTER_FEATURE_PREFIX,
+)
+from keyswitch.context_action_features import _characters
 from keyswitch.context_model import ACTIONS, ContextModel
 
 KEEP, CONVERT = ACTIONS.index("keep"), ACTIONS.index("convert")
@@ -24,16 +32,24 @@ KEEP, CONVERT = ACTIONS.index("keep"), ACTIONS.index("convert")
 LETTERS = {"source:char:0:1:a": 1.0, "target:char:0:1:b": 1.0}
 
 
-def model(action: str, version: str) -> ContextModel:
+def model(action: str, version: str, names: tuple[str, ...] = ()) -> ContextModel:
     """A model that answers every supported frame with `action`, sure of it."""
     bias = tuple(DOMINANT_BIAS_WEIGHT if name == action else 0.0 for name in ACTIONS)
-    weights = {"bias": bias, **{name: (0.0,) * len(ACTIONS) for name in LETTERS}}
+    weights = {**{name: (0.0,) * len(ACTIONS) for name in (*LETTERS, *names)}, "bias": bias}
     return ContextModel(weights, version, EPOCH_SELECTION_RUNTIME_THRESHOLD, feature_version=CONTEXT_ACTION_FEATURE_VERSION)
 
 
 def row(label: int, *extra: str, supported: bool = True) -> tuple[dict[str, float], int, float]:
     features = {"bias": 1.0, **(LETTERS if supported else {}), **{name: 1.0 for name in extra}}
     return features, label, 1.0
+
+
+def characters(label: str, *words: str, direction: str = "1") -> dict[str, float]:
+    """The character n-grams the feature extraction gives `words` under `label`."""
+    features: dict[str, float] = {}
+    for word in words:
+        _characters(features, label, word, direction)
+    return features
 
 
 class CandidateComparisonTests(unittest.TestCase):
@@ -77,6 +93,58 @@ class CandidateComparisonTests(unittest.TestCase):
         scores[KEEP] = 1.0 - EPOCH_SELECTION_BELOW_THRESHOLD_SCORE
         self.assertEqual(comparison.converted(array("d", scores), EPOCH_SELECTION_RUNTIME_THRESHOLD), [False])
         self.assertEqual(comparison.converted(array("d", scores), EPOCH_SELECTION_BELOW_THRESHOLD_SCORE), [True])
+
+    def test_a_word_is_spelled_back_from_its_character_ngrams_under_any_head_prefix(self) -> None:
+        for word in ("a", "ab", "ltkfq", "ееееее", "abcabcabc", "x" * ACTION_FEATURE_WORD_MAX_CHARACTERS):
+            features = characters("source", word)
+            prefixed = {LETTER_FEATURE_PREFIX + KEPT_FEATURE_PREFIX + name: value for name, value in features.items()}
+            for frame in (features, prefixed):
+                with self.subTest(word=word, prefixed=frame is prefixed):
+                    self.assertEqual(comparison.spelled(frame, "source", 1, ACTION_FEATURE_WORD_MAX_CHARACTERS), [word])
+        # The other labels' n-grams are not the word's.
+        self.assertEqual(comparison.spelled({**characters("source", "ltkfq"), **characters("target", "делай")},
+                                            "target", 1, ACTION_FEATURE_WORD_MAX_CHARACTERS), ["делай"])
+
+    def test_neighbouring_words_are_spelled_together_in_no_particular_order(self) -> None:
+        for words in (("в", "не"), ("да", "да"), ("tests", "test"), ("аааа", "ааа"), ("привет",)):
+            with self.subTest(words=words):
+                spelled = comparison.spelled(characters("before", *words), "before", ACTION_FEATURE_NEIGHBOUR_WORD_COUNT,
+                                             ACTION_FEATURE_NEIGHBOUR_WORD_MAX_CHARACTERS)
+                self.assertEqual(sorted(spelled or ()), sorted(words))
+
+    def test_no_ngrams_spell_no_words_and_ngrams_of_no_word_spell_none(self) -> None:
+        self.assertEqual(comparison.spelled({"bias": 1.0}, "after", ACTION_FEATURE_NEIGHBOUR_WORD_COUNT,
+                                            ACTION_FEATURE_NEIGHBOUR_WORD_MAX_CHARACTERS), [])
+        self.assertIsNone(comparison.spelled(LETTERS, "source", 1, ACTION_FEATURE_WORD_MAX_CHARACTERS))
+        # Three words where two may stand, and a word longer than its label holds.
+        self.assertIsNone(comparison.spelled(characters("after", "а", "б", "в"), "after", ACTION_FEATURE_NEIGHBOUR_WORD_COUNT,
+                                             ACTION_FEATURE_NEIGHBOUR_WORD_MAX_CHARACTERS))
+        self.assertIsNone(comparison.spelled(characters("source", "abcdef"), "source", 1, len("abcde")))
+
+    def test_a_spelled_word_takes_back_the_case_it_was_typed_in(self) -> None:
+        for case, expected in (("upper", "LTKFQ"), ("title", "Ltkfq"), ("lower", "ltkfq"), ("mixed", "ltkfq")):
+            with self.subTest(case=case):
+                features = {LETTER_FEATURE_PREFIX + f"source:case:{case}": 1.0, "target:case:lower": 1.0}
+                self.assertEqual(comparison.cased("ltkfq", comparison.word_case(features, "source")), expected)
+        self.assertEqual(comparison.word_case({}, "source"), "none")
+
+    def test_the_frames_decided_otherwise_are_named_as_many_as_asked(self) -> None:
+        frame = {"bias": 1.0, **characters("source", "ltkfq"), **characters("target", "делай"), "source:case:title": 1.0,
+                 "target:case:title": 1.0, **characters("before", "ну", "давай"), "abbr|bias": 1.0}
+        names = tuple(frame)
+        rows = [(frame, CONVERT, 1.0), row(KEEP)]
+        models = {"keeps": model("keep", "context-v3-keeps", names), "converts": model("convert", "context-v3-converts", names)}
+        self.assertEqual(comparison.score_split(models, rows)["converts"].examples, [])
+        scored = comparison.score_split(models, rows, show=len(rows))
+        self.assertEqual(scored["keeps"].examples, [])
+        first, second = scored["converts"].examples
+        self.assertEqual(first, comparison.Example("gained_right", "abbreviation", "Ltkfq", "Делай", ["давай", "ну"], []))
+        # The test helper's letters are no word: they spell none.
+        self.assertEqual((second.kind, second.head, second.word, second.reading), ("gained_false", comparison.BASE_CLASS, None, None))
+        self.assertEqual(comparison.score_split(models, rows, show=1)["converts"].examples, [first])
+        lines = comparison.summary({DEVELOPMENT: {"portable": scored}})
+        self.assertIn("    gained_right abbreviation: [давай ну] Ltkfq -> Делай [-]", lines)
+        self.assertIn("gained_false base: [-] ? -> ? [-]", " ".join(lines))
 
     def test_the_report_names_every_split_profile_and_artifact_and_reads_no_test(self) -> None:
         rows = {(profile, split): [row(CONVERT), row(KEEP, "start|bias")]

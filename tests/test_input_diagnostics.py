@@ -18,6 +18,11 @@ from fixture_values.counts import (
     INPUT_DIAGNOSTICS_FIRST_EDIT_CHARACTERS_BEFORE,
 )
 from fixture_values.scores import DOMINANT_BIAS_WEIGHT
+from engine_models import share_engine_models
+
+
+def setUpModule() -> None:
+    share_engine_models()
 
 
 class InputDiagnosticsTests(InputIntegrityTests):

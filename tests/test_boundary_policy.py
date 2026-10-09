@@ -29,6 +29,11 @@ from verify_context_v2 import read_object
 from keyswitch.constants.boundary import BOUNDARY_POLICY_MAX_BYTES, BOUNDARY_THRESHOLD_EXCLUSIVE_MIN
 from fixture_values.clock import PAUSE_TRIGGER_OFFSET_SECONDS
 from fixture_values.scores import BOUNDARY_POLICY_VALID_THRESHOLD
+from engine_models import share_engine_models
+
+
+def setUpModule() -> None:
+    share_engine_models()
 
 
 class BoundaryPolicyArtifactTests(unittest.TestCase):

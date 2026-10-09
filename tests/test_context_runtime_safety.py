@@ -22,6 +22,11 @@ from fixture_values.clock import (
 )
 from fixture_values.corpora import HELD_KEY_CONTEXT_REPLAY_CASES
 from fixture_values.scores import DOMINANT_BIAS_WEIGHT
+from engine_models import share_engine_models
+
+
+def setUpModule() -> None:
+    share_engine_models()
 
 
 class ContextRuntimeSafetyTests(InputIntegrityTests):

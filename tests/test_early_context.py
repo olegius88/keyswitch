@@ -19,6 +19,11 @@ from test_input_integrity import EditorBackend, InputIntegrityTests
 from fixture_values.counts import RAISED_EARLY_SWITCH_MIN_LENGTH
 from fixture_values.keys import UNSUPPORTED_LAYOUT_GROUP
 from fixture_values.scores import DOMINANT_BIAS_WEIGHT
+from engine_models import share_engine_models
+
+
+def setUpModule() -> None:
+    share_engine_models()
 
 
 class EditorReader:

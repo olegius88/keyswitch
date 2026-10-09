@@ -9,6 +9,11 @@ from unittest.mock import patch
 from test_input_integrity import InputIntegrityTests
 from fixture_values.clock import PAUSE_TRIGGER_OFFSET_SECONDS
 from disclosed_regressions import disclosed_schema3_pair_regression
+from engine_models import share_engine_models
+
+
+def setUpModule() -> None:
+    share_engine_models()
 
 
 class LiteralHeadTests(InputIntegrityTests):

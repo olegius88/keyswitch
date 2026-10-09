@@ -7,6 +7,11 @@ import unittest
 from typing import cast
 
 from test_input_integrity import InputIntegrityTests
+from engine_models import share_engine_models
+
+
+def setUpModule() -> None:
+    share_engine_models()
 
 
 class Reader:

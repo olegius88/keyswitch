@@ -13,6 +13,11 @@ whole when it ends, and the run fails when any module fails.
         python3 -m coverage run --parallel-mode -m unittest discover -s tests -v -p
 
 The module's file name is appended to the command (the value of `discover -p`).
+
+`--part K/N` runs the K-th of N parts of the chosen modules, so that N runners share one suite: the
+modules are dealt from the largest down in snake order (1..N, N..1, ...), a file's size standing in
+for its running time, so that each part gets a like share of the long ones. The parts of one tree
+are disjoint and together hold every chosen module.
 """
 
 from __future__ import annotations
@@ -56,19 +61,40 @@ def lanes(names: Sequence[str], serial: Sequence[str], directory: Path = TESTS) 
     return ([shared] if shared else []) + [[name] for name in alone]
 
 
+def part(names: Sequence[str], index: int, count: int, directory: Path = TESTS) -> list[str]:
+    """The modules of part `index` (from 1) of `count`: dealt from the largest down in snake order."""
+
+    ordered = sorted(names, key=lambda name: (-(directory / name).stat().st_size, name))
+    rounds = count + count
+    return [name for position, name in enumerate(ordered)
+            if min(position % rounds, rounds - 1 - position % rounds) == index - 1]
+
+
+def parse_part(text: str) -> tuple[int, int]:
+    """`K/N`: part K of N, 1 <= K <= N."""
+
+    index, separator, count = text.partition("/")
+    if not (separator and index.isdigit() and count.isdigit() and 1 <= int(index) <= int(count)):
+        raise argparse.ArgumentTypeError(f"a part is K/N with 1 <= K <= N, not {text!r}")
+    return int(index), int(count)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--jobs", type=int, default=int(os.environ.get(JOBS_VARIABLE, os.cpu_count() or 1)),
                         help=f"modules at a time (default: {JOBS_VARIABLE} or the number of cores)")
     parser.add_argument("--serial", action="append", default=[], metavar="PATTERN",
                         help="modules that run one after another in one lane")
+    parser.add_argument("--part", type=parse_part, default=(1, 1), metavar="K/N",
+                        help="run only part K of N of the modules (default: all of them)")
     parser.add_argument("patterns", nargs="+", metavar="PATTERN", help="test files in tests/, as glob patterns")
     given = list(sys.argv[1:] if argv is None else argv)
     if "--" not in given or given.index("--") == len(given) - 1:
         parser.error("give the command to run each module with after --")
     split = given.index("--")
     arguments, command = parser.parse_args(given[:split]), given[split + 1:]
-    names = modules(arguments.patterns, TESTS)
+    index, count = arguments.part
+    names = part(modules(arguments.patterns, TESTS), index, count, TESTS)
     order = lanes(names, arguments.serial, TESTS)
     lock = threading.Lock()
     failed: list[str] = []

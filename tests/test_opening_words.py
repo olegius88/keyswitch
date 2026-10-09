@@ -17,6 +17,11 @@ from test_context_policy import ContextEngineTests
 from test_context_wait_pairs import ScriptedModel
 from test_inside_word import CaretReader
 from fixture_values.clock import LAST_WORD_INPUT_AT_SECONDS, WAIT_PAIR_PAUSE_CHECK_SECONDS
+from engine_models import share_engine_models
+
+
+def setUpModule() -> None:
+    share_engine_models()
 
 
 def english_after(item: ContextEvidence) -> ContextAction:
