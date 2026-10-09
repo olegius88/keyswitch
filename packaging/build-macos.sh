@@ -37,6 +37,10 @@ bundle="$native_output/$app_name.app"
 binary_name="keyswitch-bin"
 export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-1787749200}"
 
+# run_signing: signs again while Apple's timestamp service does not answer.
+# shellcheck source=packaging/macos-signing.sh
+source "$project_dir/packaging/macos-signing.sh"
+
 if [[ "$(uname -s)" != "Darwin" ]]; then
     printf 'This build runs on macOS only.\n' >&2
     exit 1
@@ -79,8 +83,9 @@ fi
 
 # "app-dist" is a standalone build that macOS receives as a bundle.
 # "ui-element" keeps KeySwitch out of the dock while still letting it open the
-# settings window, which is what a keyboard helper should look like.
-PYTHONPATH="${nuitka_path:+$nuitka_path:}$project_dir/src" \
+# settings window, which is what a keyboard helper should look like. Nuitka signs
+# what it builds, so the build runs again when only the timestamp was missing.
+run_signing env PYTHONPATH="${nuitka_path:+$nuitka_path:}$project_dir/src" \
 "$python_bin" -m nuitka \
     --mode=app-dist \
     --lto=no \
@@ -125,7 +130,7 @@ if [[ -n "$sign_identity" ]]; then
     [[ -n "$sign_keychain" ]] && keychain_arguments+=(--keychain "$sign_keychain")
     # Nuitka signs the bundle; this re-signs it as one piece with a timestamp,
     # so the signature survives being moved and can be notarized.
-    codesign --force --deep --options runtime --timestamp \
+    run_signing codesign --force --deep --options runtime --timestamp \
         --entitlements "$entitlements" \
         ${keychain_arguments[@]+"${keychain_arguments[@]}"} \
         --sign "$sign_identity" "$bundle"
