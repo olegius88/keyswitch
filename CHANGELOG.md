@@ -4,6 +4,14 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- CI runs the Linux suite under coverage on two runners. The step took 5.4 to 9.3 minutes of a four-core runner,
+  about 37 minutes of one core, and was the longest path of the test workflow and of the release build (9.3 of
+  12.2 minutes on 09.10). `tools/run_test_modules.py --part K/N` deals the modules from the largest file down in
+  snake order, so the parts get a like share of the long modules (280 and 281 seconds by the CI timings of 0.47.0,
+  265 and 302 locally); `tests/run_coverage.sh` runs the part `KEYSWITCH_TEST_PART` names and leaves its data
+  without a report. Each part of the `verify` job uploads its data, typing and the X11, AT-SPI and tray E2E run in
+  the first, and the `coverage` job joins both and requires 100% branch coverage of the union; the release
+  publishes nothing before it passes.
 - `tools/compare_context_candidates.py --show N` names up to N of the development and calibration frames a candidate
   decides otherwise than the first artifact, per split and profile: how its decision moved, the head class, the
   word, its other reading and the words around it. A frame keeps features, not text, so the words are spelled back

@@ -17,9 +17,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The suite takes about 37 minutes of one core under coverage; two runners share it
+  # (tools/run_test_modules.py --part), and the coverage job joins their data for the report.
   verify:
-    name: Typing, coverage, X11 and tray E2E
+    name: Tests under coverage, part ${{ matrix.part }} of 2${{ matrix.part == 1 && '; typing, X11 and tray E2E' || '' }}
     runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2]
 
     steps:
       - name: Check out source
@@ -73,9 +79,11 @@ jobs:
             xvfb
 
       - name: Install static typing tools
+        if: matrix.part == 1
         run: ./tools/install-typing-tools.sh "$RUNNER_TEMP/keyswitch-typing"
 
       - name: Run maximum strict Python type checking
+        if: matrix.part == 1
         env:
           KEYSWITCH_TYPING_ROOT: ${{ runner.temp }}/keyswitch-typing
         run: ./tools/typecheck.sh
@@ -83,21 +91,60 @@ jobs:
       - name: Install NumPy for the context-v3 trainer's back ends
         run: ./tools/install-training-accelerators.sh
 
-      - name: Run unit and GTK interaction tests with 100% branch coverage
+      - name: Run this part of the unit and GTK interaction tests under branch coverage
+        env:
+          KEYSWITCH_TEST_PART: ${{ matrix.part }}/2
         run: >-
           ./tools/run-gui-test.sh --
           ./tests/run_coverage.sh
 
+      - name: Hand this part's coverage data to the coverage job
+        uses: actions/upload-artifact@v7
+        with:
+          name: keyswitch-coverage-part-${{ matrix.part }}
+          path: .coverage
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Run real X11 RECORD/XTEST end-to-end test
+        if: matrix.part == 1
         run: |
           ./tools/run-gui-test.sh --noreset -- \
             bash -c 'setxkbmap -layout us,ru && GTK_A11Y=none PYTHONPATH=src python3 tests/e2e_x11.py'
 
       - name: Run isolated native AT-SPI context and unavailable-bus E2E
+        if: matrix.part == 1
         run: ./tools/run-atspi-e2e.sh
 
       - name: Run real StatusNotifierItem and DBusMenu integration test
+        if: matrix.part == 1
         run: dbus-run-session -- env PYTHONPATH=src python3 tests/e2e_tray_menu.py
+
+  coverage:
+    name: 100% branch coverage of both parts
+    needs: [verify]
+    runs-on: ubuntu-26.04
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install the coverage tool the parts ran
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends python3-coverage
+
+      - name: Take every part's coverage data
+        uses: actions/download-artifact@v8
+        with:
+          pattern: keyswitch-coverage-part-*
+          path: ${{ runner.temp }}/coverage-parts
+
+      - name: Join the parts and require 100% branch coverage
+        run: |
+          python3 -m coverage combine "$RUNNER_TEMP"/coverage-parts/keyswitch-coverage-part-*/.coverage
+          python3 -m coverage report
 
   replays:
     name: Model evidence replays (context, ortho, boundary)
@@ -970,7 +1017,7 @@ jobs:
 
   apt-repository:
     name: Publish the signed APT repository that serves updates
-    needs: [verify, replays, prefix-replay, intent, package, windows, windows-installer, macos]
+    needs: [verify, coverage, replays, prefix-replay, intent, package, windows, windows-installer, macos]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-26.04
     # The published repository is what keeps an installed KeySwitch up to date,
@@ -1078,7 +1125,7 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    needs: [verify, replays, prefix-replay, intent, package, windows, windows-installer, macos, apt-repository]
+    needs: [verify, coverage, replays, prefix-replay, intent, package, windows, windows-installer, macos, apt-repository]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-26.04
     permissions:
