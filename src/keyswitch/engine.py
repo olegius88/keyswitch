@@ -1291,7 +1291,7 @@ class KeySwitchEngine:
             return "protected_token"
         if self._context_waiting is not None:
             return "context_word_waiting"
-        if self._insertion is not None and self._insertion.inside_word:
+        if self._insertion_holds(original, self._typed_ahead(self._strokes), self.backend.active_application()):
             # Letters typed into another word are not the start of one.
             return "inside_word"
         return ""
@@ -1580,7 +1580,10 @@ class KeySwitchEngine:
         mention = self._mention_head(self.backend.active_application())
         head = self._literal_head(typed, self._source_group)
         strokes, trailing, segmentation_certain = self._completed_word(typed[head:], self._source_group)
-        if self._insertion is not None and self._insertion.inside_word:
+        if self._insertion_holds(
+                self._text_for_group(typed, self._source_group),
+                ("" if boundary.deferred else boundary.character) + self._typed_ahead(typed),
+                self.backend.active_application()):
             # Typed into a word, every key is part of it: `,` between `те` and `е`
             # is the `б` of `тебе`, not punctuation in front of a word.
             head, strokes, trailing, segmentation_certain = 0, typed, (), True
@@ -2061,11 +2064,12 @@ class KeySwitchEngine:
         before, after = snapshot.before, snapshot.after
         # The key may already have reached the editor, or not yet, and the editor may report its
         # caret short of the key that has (caret_lag): VS Code Insiders put the first letter of
-        # every new word after the caret, and each read as typed into the word it began.
-        if event.character and before.endswith(event.character):
-            before = before[:-len(event.character)]
-        elif event.character and after.startswith(event.character):
-            after = after[len(event.character):]
+        # every new word after the caret, and each read as typed into the word it began. The keys
+        # queued behind it may stand there too: the Claude app showed `lt` with the caret after `l`
+        # as `делай` began, and the `t` read as a word's letter after the caret (09.10.2026).
+        around = self._typed_in_field(snapshot, event.character, self._typed_ahead((event,))) if event.character else None
+        if around is not None:
+            before, after = around
         point = InsertionPoint(self._letters_before(before), self._letters_after(after))
         if point.inside_word:
             self._technical_event(
@@ -2073,6 +2077,39 @@ class KeySwitchEngine:
                 head_letters=len(point.head), tail_letters=len(point.tail),
             )
         return point
+
+    def _insertion_holds(self, typed: str, ahead: str, application: str) -> bool:
+        """Whether the word begun inside text still has letters of that text around it.
+
+        The first read can be wrong: an editor that shows a key before its caret has moved puts the
+        word's own next letter after the caret. Of the 188 words read as begun inside text in the
+        owner's logs (Claude app, VS Code, Telegram, Firefox, 05.09-09.10.2026), 121 had no letters
+        around them by their decision; the early switch waited inside them 55 times (`делай` took
+        three tries, 09.10.2026), and 22 were left as typed as a changed field (`офыы` for `jass`).
+        Before the early switch, the boundary and the pause rely on it, the field is read again
+        and the word typed so far found in it as the early switch finds it (_typed_in_field): with
+        no letter right before or after it, the first read is dropped. A field that cannot be read
+        or matched keeps it.
+        """
+
+        point = self._insertion
+        if point is None or not point.inside_word:
+            return False
+        reader = self.context_policy.reader
+        if reader is None or not bool(self.settings.get("detection.context_read_field", False)):
+            return True
+        snapshot = reader.read(application, self._focus_window or 0)
+        if snapshot is None or snapshot.sensitive or snapshot.selection or snapshot.application != application:
+            return True
+        around = self._typed_in_field(snapshot, typed, ahead)
+        if around is None or self._letters_before(around[0]) or self._letters_after(around[1]):
+            return True
+        self._technical_event(
+            "insertion_dropped", application=application,
+            head_letters=len(point.head), tail_letters=len(point.tail),
+        )
+        self._insertion = None
+        return False
 
     @staticmethod
     def _letters_before(text: str) -> str:
@@ -2120,17 +2157,17 @@ class KeySwitchEngine:
         fragment = self._text_for_group(strokes, source_group)
         closing = "" if boundary is None or boundary.deferred else boundary.character
         snapshot = reader.read(application, self._focus_window or 0)
-        before: str | None = None
+        around: tuple[str, str] | None = None
         if (snapshot is not None and not snapshot.sensitive and not snapshot.selection
                 and snapshot.application == application):
-            for suffix in ((fragment + closing, fragment) if closing else (fragment,)):
-                if snapshot.before.endswith(suffix):
-                    before = snapshot.before[:-len(suffix)]
-                    break
-        if snapshot is None or before is None:
+            # Found as the early switch finds a word: the boundary and the keys queued behind it may
+            # stand after it, the caret short of them, or its last letters may not be shown yet.
+            around = self._typed_in_field(snapshot, fragment, closing + self._typed_ahead(strokes))
+        if snapshot is None or around is None:
             return self._kept_inside_word(fragment, source_group, "field_changed", point)
+        before, after = around
         head = self._letters_before(before)
-        tail = "" if boundary is not None else self._letters_after(snapshot.after)
+        tail = "" if boundary is not None else self._letters_after(after)
         if not head and not tail:
             return None
         surroundings = head + tail
@@ -2146,7 +2183,7 @@ class KeySwitchEngine:
         decision = self._decide_word(
             whole, {target: head + alternatives[target] + tail}, source_group, application, trigger,
             boundary_text=closing,
-            field_override=replace(snapshot, before=before[:len(before) - len(head)], after=snapshot.after[len(tail):]),
+            field_override=replace(snapshot, before=before[:len(before) - len(head)], after=after[len(tail):]),
             inside=True,
         )
         converted = decision.should_convert and decision.target_group == target
@@ -3316,7 +3353,8 @@ class KeySwitchEngine:
         typed = tuple(self._strokes)
         head = self._literal_head(typed, self._source_group)
         strokes, trailing, segmentation_certain = self._completed_word(typed[head:], self._source_group)
-        if self._insertion is not None and self._insertion.inside_word:
+        if self._insertion_holds(
+                self._text_for_group(typed, self._source_group), self._typed_ahead(typed), self.backend.active_application()):
             # Typed into a word, every key is part of it: `,` between `те` and `е`
             # is the `б` of `тебе`, not punctuation in front of a word.
             head, strokes, trailing, segmentation_certain = 0, typed, (), True

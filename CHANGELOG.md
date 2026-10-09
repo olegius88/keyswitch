@@ -4,6 +4,33 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- A word read by mistake as begun inside text no longer holds the early switch back or stays as typed. The field
+  is read once as a word begins, and an editor that shows a key before its caret has moved puts the word's own next
+  letter after the caret: as `делай` began in the Claude app the field held `lt` with the caret after `l`, the early
+  switch waited inside a word that was not there, and the word converted on the third try (09.10.2026). Of 188
+  words read as begun inside text in the owner's logs, 121 had no letters around them by their decision; the early
+  switch waited 55 times and 22 words were kept as typed into a changed field (`офыы` for `jass`, `здфн` for
+  `play`). The first read takes the keys queued behind the first one as typed; the early switch, the boundary and
+  the pause read the field again and find the word as the early switch finds it, dropping the first read when no
+  letter stands before or after the word (`insertion_dropped`); a field that cannot be read or matched keeps it.
+- The context model is the 0.46.0 recipe fitted on corpus v41 (`context-v3-158f1f70aa6e`; test v41 sealed before
+  training and passed), so that its seal pins the changed engine. It decides every calibration frame of corpus v41,
+  the owner's typing (seven batteries, the evening of 08.10.2026 among them) and the development sequences as
+  0.46.0; its Latin-context abbreviation head, refitted, decides 8 of its own development frames otherwise (three
+  right conversions gained, three lost, two false gained). On test v41 it keeps all 196 correctly typed rows (the
+  baseline pair corrupts two with the early switch) and restores 174 of 196 mistyped rows with the early switch off
+  against 159, 9 with it as the baseline pair. The prefix model retrained byte-identical.
+- CI keeps the strict intent-model report for unchanged inputs. The evaluation took six to twelve minutes of a
+  runner on every push (6.5 minutes on 07.10, 11.5 on 08.10, the same code and 4 workers: the runners differ) and
+  was the longest path of the test workflow, while its inputs last changed with 0.33.0.
+  `tools/intent_strict_inputs.py` prints one digest of every file the evaluation reads, taken from an audit trace of
+  a whole strict run, and of the constant values those files use; the test workflow keeps the report under it, the
+  interpreter and the dictionaries, and a kept report passes `tools/verify_intent_strict_report.py` before the
+  package job takes it, as a fresh one does. The release build looks up the report kept on main under the test
+  workflow's key: a release commit moves only `__version__`, which the evaluation never reads and its report
+  does not carry, so the digest leaves that one line out, and the tag build evaluates only when main kept no
+  report for its inputs.
+
 ## 0.46.0 — 2026-10-08
 
 - A word finished after part of it was erased with Backspace is decided as that word: `первую игру` cut back to
