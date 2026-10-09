@@ -40,12 +40,15 @@ SEQUENCE_LEXICON_LOW_FREQUENCY: Final = 3000
 FIXTURE_WORD_FREQUENCY: Final = 5000
 PLANNED_EVIDENCE_DOMINANT_WORD_FREQUENCY: Final = 20000
 CONTEXT_FRAMES_SECOND_PHRASE_ID: Final = 2
+# Keys held back during a correction (held), the events that reached the engine meanwhile (observed), whether those
+# were presses, and the observed text left before the next word.
 HELD_KEY_CONTEXT_REPLAY_CASES: Final = (
         (0, 0, False, "контекст привет"),
         (1, 1, False, "контекст привет"),
         (2, 2, False, "контекст привет"),
+        (1, 1, True, "контекст привет"),
         (1, 0, False, ""),
-        (1, 1, True, ""),
+        (1, 2, True, ""),
     )
 HISTORICAL_CONTEXT_V1_TEST_COUNTS: Final = {
     "rows": 10000, "desired_conversions": 5000,
