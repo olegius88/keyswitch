@@ -4,6 +4,11 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- The prefix and boundary engine replays parse the installed context model once per process. Each replayed row
+  builds an engine, and its context policy parsed the 7.5 MB artifact again: 0.7 seconds a row, 97% of the prefix
+  replay, which took 5.7 to 9 minutes of CI on 09.10 and was, after the coverage step, the longest path of the test
+  workflow. The prefix replay now takes 28 seconds and the boundary replay 7 locally; both reports were refreshed
+  with `--refresh-runtime` and differ only in the evaluator's own checksum in their provenance.
 - CI runs the Linux suite under coverage on two runners. The step took 5.4 to 9.3 minutes of a four-core runner,
   about 37 minutes of one core, and was the longest path of the test workflow and of the release build (9.3 of
   12.2 minutes on 09.10). `tools/run_test_modules.py --part K/N` deals the modules from the largest file down in

@@ -7,6 +7,7 @@ import json
 import sys
 import tempfile
 from dataclasses import replace
+from functools import cache
 from pathlib import Path
 from collections.abc import Iterable, Sequence
 from unittest.mock import patch
@@ -17,6 +18,7 @@ from keyswitch.backend import KeyEvent
 from keyswitch.boundary_model import BoundaryModel
 from keyswitch.boundary_policy import ARTIFACT, BoundaryPolicy
 from keyswitch.config import SettingsStore
+from keyswitch.context_model import ContextModel
 from keyswitch.engine import KeySwitchEngine
 from keyswitch.history import HistoryStore
 from keyswitch.language_model import LanguageModel
@@ -51,6 +53,14 @@ def provenance() -> dict[str, str]:
         ROOT / "src/keyswitch/resources/lexicon-supplement-ru_RU.json"])
 
 
+@cache
+def installed_context() -> tuple[ContextModel | None, str]:
+    """The installed context model, parsed once: each scenario builds an engine, whose context policy
+    parsed the artifact again (0.7 s a scenario). The model is not changed once loaded, and the
+    provenance binds the artifact's bytes."""
+    return ContextModel.try_load()
+
+
 def replay(original: str, model: BoundaryModel | None, models: dict[int, LanguageModel]) -> tuple[str, int]:
     pair = LayoutPair()
     with tempfile.TemporaryDirectory(prefix="keyswitch-boundary-replay-") as temporary:
@@ -64,7 +74,8 @@ def replay(original: str, model: BoundaryModel | None, models: dict[int, Languag
         def load(locale: str, extra_words: Iterable[str] = ()) -> LanguageModel:
             return models[0 if locale == "en_US" else 1]
         with patch("keyswitch.engine.LanguageModel.load", side_effect=load), \
-                patch("keyswitch.engine.LinearNgramModel.try_load_default", return_value=packaged_intent(ROOT)):
+                patch("keyswitch.engine.LinearNgramModel.try_load_default", return_value=packaged_intent(ROOT)), \
+                patch("keyswitch.context_policy.ContextModel.try_load", return_value=installed_context()):
             engine = KeySwitchEngine(settings, HistoryStore(root / "history.jsonl"), backend)
         engine.boundary_model = model
         early = 0

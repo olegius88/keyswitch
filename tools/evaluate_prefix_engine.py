@@ -16,6 +16,7 @@ import time
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import replace
+from functools import cache
 from pathlib import Path
 from typing import cast
 from unittest.mock import patch
@@ -30,6 +31,7 @@ from prefix_corpus import DIRECTORY, lexicon, rows, verify_receipt
 from train_prefix_model import CANDIDATE, SEAL
 from keyswitch.backend import KeyEvent
 from keyswitch.config import SettingsStore
+from keyswitch.context_model import ContextModel
 from keyswitch.early_switch import PrefixIndex
 from keyswitch.engine import KeySwitchEngine
 from keyswitch.history import HistoryStore
@@ -76,6 +78,14 @@ class Reader:
         return FieldContext(application, str(window), self.backend.text[:self.backend.caret], role=self.role, source="fixture-field")
 
 
+@cache
+def installed_context() -> tuple[ContextModel | None, str]:
+    """The installed context model, parsed once per process. Each replayed row builds an engine, whose
+    context policy parsed the artifact again: 0.7 s a row, 97% of the replay. The model is not changed
+    once loaded, and the provenance binds the artifact's bytes."""
+    return ContextModel.try_load()
+
+
 def replay(row: dict[str, object], model: PrefixModel | None, models: dict[int, LanguageModel],
            indexes: dict[int, PrefixIndex], read_field: bool) -> dict[str, object]:
     pair = LayoutPair()
@@ -95,6 +105,7 @@ def replay(row: dict[str, object], model: PrefixModel | None, models: dict[int, 
             return models[0 if locale == "en_US" else 1]
         with patch("keyswitch.engine.LanguageModel.load", side_effect=load), \
                 patch("keyswitch.engine.LinearNgramModel.try_load_default", return_value=packaged_intent(ROOT)), \
+                patch("keyswitch.context_policy.ContextModel.try_load", return_value=installed_context()), \
                 patch.object(backend, "active_application", return_value=application):
             engine = KeySwitchEngine(settings, HistoryStore(root / "history.jsonl"), backend,
                                      context_reader=Reader(backend, cast(FieldRole, row["role"])))
