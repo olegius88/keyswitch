@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.47.0 — 2026-10-09
+
 - A word read by mistake as begun inside text no longer holds the early switch back or stays as typed. The field
   is read once as a word begins, and an editor that shows a key before its caret has moved puts the word's own next
   letter after the caret: as `делай` began in the Claude app the field held `lt` with the caret after `l`, the early
