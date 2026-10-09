@@ -17,6 +17,18 @@ from .constants.keyboard import (
 KeyDisposition = bool | Literal["defer"]
 
 
+class LayoutSwitchUnconfirmed(RuntimeError):
+    """The layout was asked for, but the application did not confirm it in time.
+
+    The request stays posted: the layout may still arrive, and when it does it is the
+    engine's switch, not the user's.
+    """
+
+    def __init__(self, message: str, group: int) -> None:
+        super().__init__(message)
+        self.group = group
+
+
 @dataclass(frozen=True)
 class KeyEvent:
     pressed: bool

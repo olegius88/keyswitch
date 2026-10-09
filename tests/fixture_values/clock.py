@@ -198,6 +198,12 @@ WINDOWS_POST_HOLD_PRESS_TIMESTAMP: Final = 13
 # time.monotonic() readings that make the poll loop see the deadline pass: the start, one reading
 # still inside it, one past it.
 LAYOUT_SWITCH_POLL_MONOTONIC_READINGS: Final = (0.0, 0.1, 0.6)
+# The same for the Windows backend: the reading past half a second is still inside its longer wait.
+WINDOWS_LAYOUT_SWITCH_POLL_MONOTONIC_READINGS: Final = (0.0, 0.6, 1.6)
+# Key times of a chord whose modifier went down before a UAC prompt took its release.
+WINDOWS_CHORD_MODIFIER_TIMESTAMP: Final = 5000
+WINDOWS_CHORD_LETTER_TIMESTAMP: Final = 5100
+WINDOWS_AFTER_PROMPT_LETTER_TIMESTAMP: Final = 5200
 X11_FIXTURE_EVENT_TIMESTAMP: Final = 77
 X11_EXPECTED_DEADLINE_MARGIN_SECONDS: Final = 5
 # A fixture "now" just past the pause-correction delay after the last word.

@@ -244,5 +244,11 @@ PACKET_CHARACTER_CODE: Final = 0x0430
 WINDOWS_FOREGROUND_HWND: Final = 0x5150
 WINDOWS_FOREGROUND_THREAD_ID: Final = 4242
 WINDOWS_CURRENT_THREAD_ID: Final = 1717
+# The text control of Windows 11 Notepad and the thread it runs in, apart from the thread of the
+# window in front.
+WINDOWS_TEXT_CONTROL_HWND: Final = 0x5160
+WINDOWS_TEXT_CONTROL_THREAD_ID: Final = 4343
+# What GetAsyncKeyState answers for a key pressed and released since the last call, but up now.
+ASYNC_KEY_PRESSED_SINCE_BIT: Final = 1
 # The primary mouse button, as X11 numbers it.
 X11_PRIMARY_BUTTON: Final = 1

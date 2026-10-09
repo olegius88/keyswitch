@@ -25,7 +25,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from typing import Protocol
 
-from .backend import BackendProbe, FocusInfo, KeyDisposition, KeyEvent, ScreenAnchor
+from .backend import BackendProbe, FocusInfo, KeyDisposition, KeyEvent, LayoutSwitchUnconfirmed, ScreenAnchor
 from .constants.keyboard import (
     ALT_MASK,
     COMPLETED_ACTION_EVENT_COUNT,
@@ -135,6 +135,10 @@ POST_NAME = "CGEventPost"
 
 class MacBackendError(RuntimeError):
     """The macOS backend cannot do what was asked."""
+
+
+class MacLayoutSwitchUnconfirmed(MacBackendError, LayoutSwitchUnconfirmed):
+    pass
 
 
 @dataclass(frozen=True)
@@ -785,7 +789,7 @@ class MacBackend:
             if self.current_group() == group:
                 return
             time.sleep(LAYOUT_SWITCH_POLL_SECONDS)
-        raise MacBackendError("macOS не подтвердила смену раскладки")
+        raise MacLayoutSwitchUnconfirmed("macOS не подтвердила смену раскладки", group)
 
     def _post_exact(self, inputs: tuple[NativeInput, ...]) -> None:
         if not inputs:

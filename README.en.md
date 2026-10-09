@@ -139,6 +139,13 @@ the `EN/RU` or flag icon to open its menu. Its Switch to action always offers
 the language opposite to the current one. Startup, start minimized, indicator,
 sound and notifications can be changed on the Appearance and System page.
 
+Windows 11 hides the icons of new programs behind the Show hidden icons arrow;
+only the user can bring `EN/RU` onto the taskbar: Settings → Personalization →
+Taskbar → Other system tray icons, the KeySwitch switch. If the laptop keyboard
+has no `Pause` key, assign the manual conversion to another key or chord (for
+example `Ctrl+Alt+K`) on the «Горячие клавиши» (hotkeys) page, item «Преобразовать
+последнее слово» (convert the last word).
+
 Automatic checks and installation are enabled by default on the Updates page.
 Thirty seconds after startup and every six hours thereafter, KeySwitch reads
 the latest stable release from
