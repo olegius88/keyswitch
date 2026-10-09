@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.48.0 — 2026-10-09
+
 - The Windows installer and uninstaller stop a running KeySwitch before they touch its files. Restart Manager closes
   only programs that answer the request to end the session; KeySwitch lives in the tray and its window only hides,
   so a manual installation over the running application stopped at the Preparing step with exit code 5 and left it
