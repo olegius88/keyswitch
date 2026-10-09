@@ -32,6 +32,14 @@ All notable changes to KeySwitch are documented in this file.
   user's own chord, and never for keys other programs inject or KeySwitch replays.
 - Windows: the hook thread runs one step above normal priority. Windows removes a low-level hook, without a word,
   whose callback answers too late, and a thread of normal priority waits behind every busy thread of its priority.
+- The context model `context-v3-309759404d7d` (corpus v42) replaces `context-v3-158f1f70aa6e`: the recipe of pairs
+  v39–v41 retrained on a new corpus, so that the seal pins the changed Windows backend and engine. It decides the
+  owner's six field batteries, the abbreviation and term batteries and calibration v42 exactly as 0.47.x does; on
+  development v42 its head for abbreviations after Latin-script text gains seven right conversions, loses two and
+  drops two false ones. Test v42 was read once and passed in both lexical profiles: all 190 correctly typed sequences
+  kept, 169 of the 189 typed in the wrong layout restored without the early switch (156 for the base pair), 13 with
+  it as before. The prefix model `prefix-v2-bf3dc28f8567` is unchanged (retrained byte-identical), and the prefix
+  and boundary engine reports were refreshed for the new runtime.
 - README: Windows 11 hides the icons of new programs, and only the user can bring `EN/RU` onto the taskbar; on a
   laptop keyboard without `Pause`, the manual conversion can be given another key on the «Горячие клавиши» page.
 - The macOS build signs again when Apple's timestamp service does not answer. Signing with the hardened runtime asks
