@@ -63,7 +63,11 @@ of the release in [RELEASE_NOTES.md](RELEASE_NOTES.md).
 - case preservation: `Ghbdtn` becomes `Привет`;
 - manual conversion with `Pause` of the unfinished word, of symbols typed
   after a word boundary (for example `"` meant as `@`), or of the last word;
-  once anything else was typed after it, `Pause` only switches the layout;
+  once anything else was typed after it, `Pause` only switches the layout. When
+  KeySwitch itself converted the word at a pause in typing less than 1.5 seconds
+  before the press and nothing was typed since, the first `Pause` changes
+  nothing: it asked for that very conversion. A second press converts the word
+  back;
 - undo of the last correction for 10 seconds with `Ctrl+Alt+Z`;
 - global pause with `Ctrl+Alt+P`;
 - application exclusions selected from the active window, the installed
