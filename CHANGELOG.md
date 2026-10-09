@@ -4,6 +4,10 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.47.1 — 2026-10-09
+
+- The application is unchanged since 0.47.0: the same models, settings and decisions. The changes below shorten
+  the verification every build goes through and add to the training tools.
 - The context, orthotactic and boundary replays run on three runners side by side. One after another they took 6.5
   to 9.4 minutes whenever their markers were not kept, as on every release build (9.4 minutes for 0.47.0), and with
   the coverage step split they were the longest job of both workflows. Each leg runs only its replay, keeps its own
