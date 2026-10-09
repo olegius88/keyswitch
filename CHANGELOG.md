@@ -4,6 +4,14 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- `tools/compare_context_candidates.py --show N` names up to N of the development and calibration frames a candidate
+  decides otherwise than the first artifact, per split and profile: how its decision moved, the head class, the
+  word, its other reading and the words around it. A frame keeps features, not text, so the words are spelled back
+  from its character n-grams: the chains of four-character n-grams from the word's start to its end, used as often
+  as their values say, kept when their n-grams of every order reproduce the frame's exactly. On corpus v41 it names
+  all eight Latin-context abbreviation frames the v41 head decides otherwise than 0.46.0's (`ВЕРТ`, `ИМО` gained,
+  `КОЛОР` lost, `ТС` falsely converted after English text).
+
 ## 0.47.0 — 2026-10-09
 
 - A word read by mistake as begun inside text no longer holds the early switch back or stays as typed. The field
