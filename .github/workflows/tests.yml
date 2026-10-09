@@ -760,7 +760,16 @@ jobs:
               Select-Object -First 1
           }
           if (-not $keyswitchUpdatedProcess) { throw "Auto-update installer did not relaunch KeySwitch" }
-          Stop-Process -Id $keyswitchUpdatedProcess.Id -Force
+          # A manual installation over the running tray application has to replace
+          # files the application holds open.
+          $reinstall = Start-Process -FilePath $installer -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$installRoot" -PassThru
+          if (-not $reinstall.WaitForExit(120000)) {
+            $reinstall.Kill()
+            throw "Installer over the running KeySwitch did not finish in two minutes"
+          }
+          if ($reinstall.ExitCode -ne 0) { throw "Installer over the running KeySwitch exited with $($reinstall.ExitCode)" }
+          if (-not $keyswitchUpdatedProcess.HasExited) { throw "Installer over the running KeySwitch left it running" }
+          Stop-Process -Id $keyswitchUpdatedProcess.Id -Force -ErrorAction SilentlyContinue
           Wait-Process -Id $keyswitchUpdatedProcess.Id -ErrorAction SilentlyContinue
           $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
           New-Item -Path $runKey -Force | Out-Null
