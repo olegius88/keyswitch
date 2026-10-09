@@ -394,8 +394,8 @@ jobs:
       # tools/intent_strict_inputs.py: the model files, the toolchain files and the constants
       # they use), the same interpreter, dictionaries and workflow is handed on instead, and
       # it has to pass tools/verify_intent_strict_report.py just as a fresh one does. Set the
-      # repository variable KEYSWITCH_CI_REPLAY_CACHE to "off" to evaluate on every run;
-      # the release build evaluates again on every tag.
+      # repository variable KEYSWITCH_CI_REPLAY_CACHE to "off" to evaluate on every run. The
+      # release build looks up the report kept here under this same key.
       - name: Fingerprint the strict evaluation inputs
         id: intent_inputs
         run: |

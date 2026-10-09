@@ -10,7 +10,10 @@ All notable changes to KeySwitch are documented in this file.
   `tools/intent_strict_inputs.py` prints one digest of every file the evaluation reads, taken from an audit trace of
   a whole strict run, and of the constant values those files use; the test workflow keeps the report under it, the
   interpreter and the dictionaries, and a kept report passes `tools/verify_intent_strict_report.py` before the
-  package job takes it, as a fresh one does. The release build still evaluates on every tag.
+  package job takes it, as a fresh one does. The release build looks up the report kept on main under the test
+  workflow's key: a release commit moves only `__version__`, which the evaluation never reads and its report
+  does not carry, so the digest leaves that one line out, and the tag build evaluates only when main kept no
+  report for its inputs.
 
 ## 0.46.0 — 2026-10-08
 

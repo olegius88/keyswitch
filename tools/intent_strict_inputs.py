@@ -17,6 +17,12 @@ cannot. This file and the verifier are inputs too. The system Hunspell dictionar
 onboard-data models and the interpreter are not files of the tree: the workflow adds them
 to the cache key itself.
 
+The package version is the one thing left out: a release commit changes `__version__` and
+nothing else the evaluation reads, the evaluation never reads it, and its report does not
+carry it (the reports of the 0.43.0 and the 0.46.0 tree differ only in timings and paths).
+So the release build takes the report kept on `main` for the same inputs; any other change
+to `src/keyswitch/__init__.py` still moves the digest.
+
 A kept report still has to pass `tools/verify_intent_strict_report.py` before anything
 uses it, so a digest that missed an input could only make CI re-verify an old report
 against the tree, never accept one the verifier would refuse.
@@ -27,6 +33,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from collections.abc import Iterable, Sequence
 from pathlib import Path
@@ -52,6 +59,9 @@ INPUT_FILES: Final = (
 # The detector imports the history module, which reads two constants of its own.
 VALUE_SOURCES: Final = (*INTENT_TOOLCHAIN_VALUE_SOURCES, "src/keyswitch/history.py")
 SKIPPED_DIRECTORY: Final = "__pycache__"
+VERSION_FILE: Final = "src/keyswitch/__init__.py"
+VERSION_LINE: Final = re.compile(rb'^__version__ = "[^"\n]*"$', re.MULTILINE)
+UNVERSIONED_LINE: Final = b'__version__ = ""'
 
 
 class InputsUnreadable(Exception):
@@ -76,9 +86,12 @@ def file_digests(project_root: Path, paths: Iterable[str]) -> dict[str, str]:
     digests: dict[str, str] = {}
     for relative in paths:
         try:
-            digests[relative] = hashlib.sha256((project_root / relative).read_bytes()).hexdigest()
+            payload = (project_root / relative).read_bytes()
         except OSError as error:
             raise InputsUnreadable(f"{relative} is unreadable: {error}") from error
+        if relative == VERSION_FILE:
+            payload = VERSION_LINE.sub(UNVERSIONED_LINE, payload)
+        digests[relative] = hashlib.sha256(payload).hexdigest()
     return digests
 
 

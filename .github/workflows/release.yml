@@ -408,12 +408,43 @@ jobs:
           PYTHONPATH=src tools/evaluate_detector.py
           --sample 10000 --dictionary-sample 10000 --strict
 
+      # The release commit only moves the version, which the strict evaluation never reads
+      # (tools/intent_strict_inputs.py), so the report the test workflow kept on main for the
+      # same inputs, interpreter and dictionaries is taken under the test workflow's own key
+      # instead of six to twelve minutes of evaluating again. It has to pass
+      # tools/verify_intent_strict_report.py against this tree as a fresh one does; without
+      # one (the tag pushed before main's tests kept it, or KEYSWITCH_CI_REPLAY_CACHE "off")
+      # the release evaluates as before. This workflow keeps no report of its own.
+      - name: Fingerprint the strict evaluation inputs
+        id: intent_inputs
+        run: |
+          python_version="$(python3 -c 'import sys; print(sys.version.replace(" ", "_"))')"
+          packages="$(dpkg-query -W -f='${binary:Package}=${Version}\n' onboard-data hunspell-ru hunspell-en-us libhunspell-1.7-0 | tr '\n' ';')"
+          echo "environment=$(printf '%s|%s' "$python_version" "$packages" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+          echo "inputs=$(python3 tools/intent_strict_inputs.py)" >> "$GITHUB_OUTPUT"
+
+      - name: Look up the strict report the test workflow kept for these inputs
+        id: restore_intent
+        if: ${{ vars.KEYSWITCH_CI_REPLAY_CACHE != 'off' }}
+        uses: actions/cache/restore@v6
+        with:
+          path: build/keyswitch-intent-strict.json
+          key: intent-strict-${{ runner.os }}-${{ runner.arch }}-${{ steps.intent_inputs.outputs.environment }}-${{ steps.intent_inputs.outputs.inputs }}-${{ hashFiles('.github/workflows/tests.yml') }}
+
       - name: Enforce linear intent-model quality gates
+        if: ${{ steps.restore_intent.outputs.cache-hit != 'true' }}
         run: |
           (cd model/intent_v1/sources && sha256sum --check SHA256SUMS)
           mkdir -p build
           PYTHONPATH=src tools/evaluate_intent_model.py --strict \
             > build/keyswitch-intent-strict.json
+          python3 tools/verify_intent_strict_report.py \
+            --report build/keyswitch-intent-strict.json
+
+      - name: Verify the kept strict report against this tree
+        if: ${{ steps.restore_intent.outputs.cache-hit == 'true' }}
+        run: |
+          (cd model/intent_v1/sources && sha256sum --check SHA256SUMS)
           python3 tools/verify_intent_strict_report.py \
             --report build/keyswitch-intent-strict.json
 
