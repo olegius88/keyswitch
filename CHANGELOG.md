@@ -4,6 +4,36 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- The Windows installer and uninstaller stop a running KeySwitch before they touch its files. Restart Manager closes
+  only programs that answer the request to end the session; KeySwitch lives in the tray and its window only hides,
+  so a manual installation over the running application stopped at the Preparing step with exit code 5 and left it
+  running (reproduced by the new CI check before the fix), and the uninstaller could not remove the running
+  executable. `PrepareToInstall` waits for the application's single-instance mutex to disappear — up to ten seconds
+  for an auto-update, which the application starts and then shuts itself down, at once for a manual installation —
+  then ends the process with `taskkill` and waits for the mutex again; the uninstaller does the same. CI installs
+  over the application the auto-update check relaunched and uninstalls a running application, in both the test and
+  the release workflow, and `tests/test_updates.py` ties the installer's mutex name to the application's.
+- Windows: the keyboard layout is read from, and the switch requested of, the focused control when it runs in a
+  thread of its own. Windows keeps a layout per thread; the text control of Windows 11 Notepad has its own, the one
+  the user types with and switches, while the thread of the window in front keeps its old layout, so KeySwitch read
+  the wrong layout there and switched one nobody typed in. Every window whose focused control shares the thread of
+  the window in front is asked exactly as before, and the application name still comes from the window in front, so
+  exclusions keep matching programs whose control lives in a helper process (WebView2).
+- Windows: a requested layout is awaited for 1.5 seconds instead of 0.5. On 09.10.2026 VS Code Insiders confirmed one
+  about a second after it was posted; the `Pause` correction had been given up as unconfirmed, the word stayed
+  unconverted, and the layout that arrived was booked as the user's own pick and protected the next word. A switch
+  that is still unconfirmed raises `LayoutSwitchUnconfirmed` (on macOS as well), and the engine books the layout as
+  its own if it arrives.
+- Windows: a modifier whose release went where the hook does not reach — a UAC prompt, the Ctrl+Alt+Del screen, an
+  elevated window — is forgotten. The backend kept it held, so every later letter carried it and passed for a
+  shortcut, and automatic switching stayed silent until that key was pressed again (the bug KeySwitcher and
+  SimpleSwitcher users met). When a typed key comes a second after the previous one or in another window, each
+  modifier still held is asked of the keyboard with `GetAsyncKeyState`; never at every key, which would race the
+  user's own chord, and never for keys other programs inject or KeySwitch replays.
+- Windows: the hook thread runs one step above normal priority. Windows removes a low-level hook, without a word,
+  whose callback answers too late, and a thread of normal priority waits behind every busy thread of its priority.
+- README: Windows 11 hides the icons of new programs, and only the user can bring `EN/RU` onto the taskbar; on a
+  laptop keyboard without `Pause`, the manual conversion can be given another key on the «Горячие клавиши» page.
 - The macOS build signs again when Apple's timestamp service does not answer. Signing with the hardened runtime asks
   that service for a secure timestamp; on 09.10.2026 the macos-15 arm64 build of 0.47.1 failed inside Nuitka's
   signing with `A timestamp was expected but was not found` while the same commit had built and signed on main
