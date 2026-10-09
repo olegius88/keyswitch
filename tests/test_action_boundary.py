@@ -57,6 +57,7 @@ from fixture_values.keys import (
     SCAN_CODE_Z,
     UNRELATED_HELD_KEYCODE,
 )
+from engine_models import share_engine_models
 
 
 SCANS = {
@@ -67,6 +68,10 @@ SCANS = {
     "x": SCAN_CODE_X, "c": SCAN_CODE_C, "v": SCAN_CODE_V, "b": SCAN_CODE_B, "n": SCAN_CODE_N,
     "m": SCAN_CODE_M, " ": SCAN_CODE_SPACE,
 }
+
+
+def setUpModule() -> None:
+    share_engine_models()
 
 
 class ActionEditorAPI(FakeWindowsAPI):

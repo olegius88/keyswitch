@@ -68,9 +68,14 @@ from fixture_values.scores import (
 )
 from fixture_values.ui import EXPECTED_CONTEXT_MODE_OFF_INDEX, GTK_HISTORY_NAVIGATION_INDEX
 from keyswitch.constants.timing import APPLICATION_CAPTURE_DELAY_MS
+from engine_models import share_engine_models
 
 
 DISPLAY_AVAILABLE = bool(os.environ.get("DISPLAY")) and Gtk.init_check()
+
+
+def setUpModule() -> None:
+    share_engine_models()
 
 
 class FakeBackend:

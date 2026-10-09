@@ -163,6 +163,11 @@ from keyswitch.constants.settings_defaults import (
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_MINIMUM_WORD_LENGTH,
 )
+from engine_models import share_engine_models
+
+
+def setUpModule() -> None:
+    share_engine_models()
 
 
 def score(

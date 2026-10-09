@@ -80,11 +80,16 @@ from fixture_values.scores import (
     SAMPLE_MODEL_PROBABILITY,
     SAMPLE_MODEL_THRESHOLD,
 )
+from engine_models import share_engine_models
 
 
 SCORE = WordScore(ACTION_FEATURES_SAMPLE_WORD_VALUE, False, ACTION_FEATURES_SAMPLE_WORD_FREQUENCY,
                   ACTION_FEATURES_SAMPLE_GRAM_RATIO, False, False, ACTION_FEATURES_SAMPLE_NGRAM_SCORE, 0.0,
                   ACTION_FEATURES_SAMPLE_RAW_NGRAM_SCORE)
+
+
+def setUpModule() -> None:
+    share_engine_models()
 
 
 def supported_weights(item: ContextEvidence) -> dict[str, tuple[float, ...]]:

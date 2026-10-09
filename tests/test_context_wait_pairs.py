@@ -27,6 +27,11 @@ from fixture_values.clock import (
     WAIT_PAIR_SECOND_TYPING_WITHIN_TTL_SECONDS,
 )
 from fixture_values.counts import WAIT_PAIR_CONTEXT_SUFFIX_CHARACTERS
+from engine_models import share_engine_models
+
+
+def setUpModule() -> None:
+    share_engine_models()
 
 
 class ScriptedModel(ContextModel):

@@ -19,9 +19,14 @@ from test_context_wait_pairs import ScriptedModel, before_greeting
 from test_inside_word import CaretReader
 from fixture_values.clock import LAST_WORD_INPUT_AT_SECONDS, WAIT_PAIR_PAUSE_CHECK_SECONDS
 from disclosed_regressions import disclosed_schema3_pair_regression
+from engine_models import share_engine_models
 
 # What each word is once the word after it is known: `руку` before `they` is `here`.
 NEXT_WORD_TELLS = {"руку": "they", "рун": "here", "ура": "hey", "dc`": "тот", "t`": "мать", "kb[": "привет"}
+
+
+def setUpModule() -> None:
+    share_engine_models()
 
 
 def english_phrase(item: ContextEvidence) -> ContextAction:

@@ -21,9 +21,14 @@ from keyswitch.language_model import LanguageModel
 from keyswitch.early_switch import PrefixIndex
 from keyswitch.prefix_model import PrefixInput
 from test_context_policy import ContextEngineTests
+from engine_models import share_engine_models
 
 # A Russian-looking word no lexicon holds, the shape of a brand or slang word.
 INVENTED_WORD = "шупшуп"
+
+
+def setUpModule() -> None:
+    share_engine_models()
 
 
 class ScriptedActionModel(ContextModel):

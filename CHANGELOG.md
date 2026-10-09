@@ -4,6 +4,18 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- Test modules that build an engine for every test share its models. Building an engine loads both language models
+  with the packaged supplement and parses the context model; the language models are cached, but each load
+  normalises the supplement's words again (0.86 seconds a language), and the 7.5 MB context artifact was parsed again
+  (0.7 seconds), so `test_engine_behaviour` spent 332 of its 333 profiled seconds building engines.
+  `tests/engine_models.py` gives a module that calls `share_engine_models()` from setUpModule the model a repeated
+  load returns for a language with its supplement and a fresh copy of the once-parsed installed context model; every
+  other load, and a test's own patch, works as before, and the application loads its models as it did. Twenty modules
+  not pinned by a model seal use it: the suite under coverage takes 1373 seconds of one core instead of 2196 (350
+  seconds on four cores instead of about 560), still at 100%, and the two CI parts come to 697 and 676 seconds.
+  The modules the context pair's seal pins keep loading as before; making the runtime cache the parsed context model
+  and the normalised supplement itself (2196 to 1178 seconds) changes files the context seal and the intent
+  model's toolchain pin, so it waits for a cycle that changes them anyway.
 - The prefix and boundary engine replays parse the installed context model once per process. Each replayed row
   builds an engine, and its context policy parsed the 7.5 MB artifact again: 0.7 seconds a row, 97% of the prefix
   replay, which took 5.7 to 9 minutes of CI on 09.10 and was, after the coverage step, the longest path of the test
