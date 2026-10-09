@@ -69,6 +69,16 @@ Filename: "{app}\KeySwitch.exe"; Description: "Запустить KeySwitch"; Fl
 Filename: "{app}\KeySwitch.exe"; Parameters: "--hidden"; Flags: nowait skipifnotsilent; Check: IsKeySwitchAutoUpdate
 
 [Code]
+const
+  // The single-instance mutex of the running application (windows_instance_native.MUTEX_NAME).
+  KeySwitchMutex = 'Local\io.github.olegius88.KeySwitch';
+  // An update is installed by the application, which shuts itself down after starting it.
+  UpdateExitGraceMilliseconds = 10000;
+  ForcedExitWaitMilliseconds = 5000;
+  // Windows releases the files of a process a moment after its handles.
+  FileReleaseMilliseconds = 500;
+  PollMilliseconds = 100;
+
 function IsKeySwitchAutoUpdate: Boolean;
 begin
   Result := CompareText(
@@ -76,11 +86,54 @@ begin
     '1') = 0;
 end;
 
+function WaitForKeySwitchToExit(Milliseconds: Integer): Boolean;
+var
+  Waited: Integer;
+begin
+  Waited := 0;
+  while CheckForMutexes(KeySwitchMutex) and (Waited < Milliseconds) do
+  begin
+    Sleep(PollMilliseconds);
+    Waited := Waited + PollMilliseconds;
+  end;
+  Result := not CheckForMutexes(KeySwitchMutex);
+end;
+
+// Restart Manager closes only programs that answer the request to end the session;
+// KeySwitch lives in the tray and its window only hides, so a running KeySwitch kept
+// its files and the installation stopped with exit code 5.
+procedure StopKeySwitch(GraceMilliseconds: Integer);
+var
+  ResultCode: Integer;
+begin
+  if not CheckForMutexes(KeySwitchMutex) then
+    Exit;
+  if not WaitForKeySwitchToExit(GraceMilliseconds) then
+  begin
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM KeySwitch.exe', '', SW_HIDE,
+      ewWaitUntilTerminated, ResultCode);
+    WaitForKeySwitchToExit(ForcedExitWaitMilliseconds);
+  end;
+  Sleep(FileReleaseMilliseconds);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  if IsKeySwitchAutoUpdate then
+    StopKeySwitch(UpdateExitGraceMilliseconds)
+  else
+    StopKeySwitch(0);
+  Result := '';
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then
+  begin
+    StopKeySwitch(0);
     RegDeleteValue(
       HKEY_CURRENT_USER,
       'Software\Microsoft\Windows\CurrentVersion\Run',
       'KeySwitch');
+  end;
 end;

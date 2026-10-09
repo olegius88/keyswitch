@@ -13,6 +13,7 @@ from urllib.request import Request
 from unittest.mock import Mock, patch
 
 from keyswitch import updates
+from keyswitch.windows_instance_native import MUTEX_NAME
 from keyswitch.updates import (
     GitHubReleaseClient,
     ReleaseAsset,
@@ -699,8 +700,15 @@ class WindowsInstallerLaunchTests(unittest.TestCase):
             "{param:KEYSWITCHUPDATE|0}",
             'Parameters: "--hidden"',
             "skipifnotsilent",
+            # The running application is stopped before its files are replaced or removed:
+            # Restart Manager cannot close a tray application.
+            f"KeySwitchMutex = '{MUTEX_NAME}';",
+            "function PrepareToInstall(",
+            "StopKeySwitch(UpdateExitGraceMilliseconds)",
+            "taskkill.exe",
         ):
             self.assertIn(required, installer_script)
+        self.assertIn("    StopKeySwitch(0);\n    RegDeleteValue(", installer_script)
         for workflow_name in ("tests.yml", "release.yml"):
             workflow = (
                 project / ".github/workflows" / workflow_name
@@ -711,6 +719,10 @@ class WindowsInstallerLaunchTests(unittest.TestCase):
                 "Auto-update installer did not relaunch KeySwitch",
                 "tests/test_updates.py",
                 "*/updates.py",
+                "Installer over the running KeySwitch exited with",
+                "Installer over the running KeySwitch left it running",
+                "Uninstaller left KeySwitch running",
+                f'TryOpenExisting("{MUTEX_NAME}"',
             ):
                 self.assertIn(required, workflow)
             update_launch = next(

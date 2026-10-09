@@ -762,6 +762,18 @@ jobs:
           if (-not $keyswitchUpdatedProcess) { throw "Auto-update installer did not relaunch KeySwitch" }
           # A manual installation over the running tray application has to replace
           # files the application holds open.
+          function Wait-KeySwitchMutex {
+            $mutex = $null
+            for ($attempt = 0; $attempt -lt 80; $attempt++) {
+              if ([System.Threading.Mutex]::TryOpenExisting("Local\io.github.olegius88.KeySwitch", [ref]$mutex)) {
+                $mutex.Dispose()
+                return
+              }
+              Start-Sleep -Milliseconds 250
+            }
+            throw "KeySwitch did not take its single-instance mutex in 20 seconds"
+          }
+          Wait-KeySwitchMutex
           $reinstall = Start-Process -FilePath $installer -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$installRoot" -PassThru
           if (-not $reinstall.WaitForExit(120000)) {
             $reinstall.Kill()
@@ -776,9 +788,13 @@ jobs:
           New-ItemProperty -Path $runKey -Name "KeySwitch" -Value (Join-Path $installRoot "KeySwitch.exe") -PropertyType String -Force | Out-Null
           $uninstaller = Get-ChildItem -Path $installRoot -Filter "unins*.exe" | Select-Object -First 1
           if (-not $uninstaller) { throw "The installed uninstaller is missing" }
+          # The uninstaller removes a running application too.
+          $keyswitchRunning = Start-Process -FilePath (Join-Path $installRoot "KeySwitch.exe") -ArgumentList "--hidden" -PassThru
+          Wait-KeySwitchMutex
           $uninstall = Start-Process -FilePath $uninstaller.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
           if ($uninstall.ExitCode -ne 0) { throw "Uninstaller exited with $($uninstall.ExitCode)" }
           if (Test-Path (Join-Path $installRoot "KeySwitch.exe")) { throw "Uninstaller left KeySwitch.exe behind" }
+          if (-not $keyswitchRunning.HasExited) { throw "Uninstaller left KeySwitch running" }
           $runProperties = Get-ItemProperty -Path $runKey
           if ($runProperties.PSObject.Properties.Name -contains "KeySwitch") { throw "Uninstaller left the KeySwitch autostart value behind" }
 
