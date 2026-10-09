@@ -4,6 +4,13 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- The macOS build signs again when Apple's timestamp service does not answer. Signing with the hardened runtime asks
+  that service for a secure timestamp; on 09.10.2026 the macos-15 arm64 build of 0.47.1 failed inside Nuitka's
+  signing with `A timestamp was expected but was not found` while the same commit had built and signed on main
+  minutes before. `packaging/macos-signing.sh` runs Nuitka's build and the final re-signing again, up to three
+  attempts thirty seconds apart, when their output names a missing timestamp; any other failure stops the build at
+  once. `tests/test_macos_signing.py` pins that, on the macOS runners' own bash as well.
+
 ## 0.47.1 — 2026-10-09
 
 - The application is unchanged since 0.47.0: the same models, settings and decisions. The changes below shorten
