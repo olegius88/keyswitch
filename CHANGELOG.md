@@ -18,6 +18,14 @@ All notable changes to KeySwitch are documented in this file.
   term in a Russian phrase no longer applied, and `b` stayed `b` (it became `и` when the same words were typed again a
   minute later). The text is still cleared when input the hook does not hold back, such as a click, arrived during the
   replacement. In the owner's logs this applied to 19 corrections, mostly early switches.
+- The context model `context-v3-e6e581145f16` (corpus v43) replaces `context-v3-309759404d7d`: the recipe of pairs
+  v39–v42 retrained on a new corpus, so that the seal pins the changed engine. It decides the owner's six field
+  batteries (through the changed engine), the abbreviation and term batteries, calibration v43 and the development
+  sequences exactly as 0.48.0 does; on development v43 its head for abbreviations after Latin-script text decides six
+  of its curriculum frames differently (one right conversion gained, four lost, one false one dropped). On the sealed
+  test v43, read once, it kept all 201 correctly typed sequences (the base pair corrupts one) and, without the early
+  switch, restored 186 of the 199 typed in the wrong layout against 167 for the base pair. The prefix model
+  `prefix-v2-bf3dc28f8567` retrained byte-identical.
 
 ## 0.48.0 — 2026-10-09
 
