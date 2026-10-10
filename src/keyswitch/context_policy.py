@@ -187,6 +187,14 @@ class ContextPolicy:
         if ContextPolicy._shared_ortho is None:
             ContextPolicy._shared_ortho = OrthoModel.try_load()
         self.ortho, self.ortho_status = ContextPolicy._shared_ortho
+        if self.model is not None:
+            # Every question to the model asks whether a reading is a known identifier, and scores it with the
+            # orthotactic model, which binds the engine's dictionaries at its first score: finding them
+            # normalises the Russian supplement once more (0.6 s, its sort holding the interpreter). Both are
+            # done here, before the keyboard hook starts, and not on the first word typed (ContextModel.load).
+            shared_identifiers()
+            if self.ortho is not None:
+                self.ortho.score(OrthoEvidence("ghbdtn", "lower", "en"))
         self.reader = reader
 
     def decide(

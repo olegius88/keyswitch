@@ -77,8 +77,8 @@ TECHNICAL_MARKS: Final = "_/@\\=<>"
 _LATIN_DOT: Final = re.compile(r"[A-Za-z]\.[A-Za-z]")
 # Signs stripped off both ends of a token before its frequency is looked up, as when it was counted.
 _TERM_EDGE_SIGNS: Final = ".,!?:;\"'()[]{}<>«»-"
-# How often plain words occur (schema 7), read on first use: `latin` and `cyrillic` count words inside
-# Russian text, `english` and `russian` words in text of their own language.
+# How often plain words occur (schemas 7 and 3), read as a model that counts them loads: `latin` and
+# `cyrillic` count words inside Russian text, `english` and `russian` words in text of their own language.
 TERM_FREQUENCY_PATH: Final = Path(__file__).with_name("resources") / "models" / "context-term-frequency.json"
 TERM_ALPHABETS: Final = ("cyrillic", "english", "latin", "russian")
 _TERM_FREQUENCY: dict[str, dict[str, int]] | None = None
@@ -424,8 +424,12 @@ class ContextModel:
         if (type(feature_version) is not int or feature_version not in SUPPORTED_FEATURE_VERSIONS
                 or payload.get("actions") != list(ACTIONS)):
             raise ValueError("incompatible context model")
-        if feature_version == CONTEXT_LINE_FEATURE_VERSION:
-            # Schema 7 reads how often each reading occurs in Russian text: the model is not whole without it.
+        if feature_version in (CONTEXT_LINE_FEATURE_VERSION, CONTEXT_ACTION_FEATURE_VERSION):
+            # Both schemas read how often each reading occurs: the model is not whole without the table. It is
+            # read here, before the keyboard hook starts, and not on the first word typed: its parse holds the
+            # interpreter, and the hook's thread waits for the interpreter before any key reaches a window.
+            # Every slow hook answer in the owner's logs since 0.46.0, 31 to 249 ms, came with the first word
+            # the model was asked about after a start, while this table was parsed (09-10.10.2026).
             _term_frequency()
         raw_weights: object = payload.get("weights")
         if feature_version == CONTEXT_ACTION_FEATURE_VERSION:
