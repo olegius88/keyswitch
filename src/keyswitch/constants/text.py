@@ -20,6 +20,10 @@ FIELD_CARET_LAG_MAX_CHARACTERS: Final = 2
 # The most of the last typed letters a field read as their key goes down may not show yet: a browser
 # or an Electron editor reports the text a moment after the key (engine._typed_in_field).
 FIELD_PENDING_MAX_CHARACTERS: Final = 2
+# The most an editor's input buffer shows when it is what UI Automation reads instead of the text: VS Code with its
+# screen-reader support off keeps the input it takes keys through empty, and a read shows at most the key in flight
+# (FieldContext.input_buffer_only).
+FIELD_INPUT_BUFFER_MAX_CHARACTERS: Final = 1
 # Field text kept on each side of the caret, typed or read (input_context exports it as
 # CONTEXT_LIMIT), and the longest application name, field identifier and source label a field
 # context carries.

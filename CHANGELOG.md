@@ -4,6 +4,26 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- A field read through the accessibility interface that shows only an editor's input buffer no longer refuses the
+  word. VS Code with its screen-reader support off takes keys through an input it keeps empty, and that input is what
+  UI Automation reads: on the owner's laptop every read after `ghbdtn` held one character around the caret
+  (10.10.2026), so the word was refused as typed into a changed field (`текст активного поля изменился`), or, after a
+  click, as typed into another word, the early switch was refused as well, and only `Pause` converted it. A read of
+  at most one character after a longer word is not the text the keys went into: the decision, the early switch and
+  the check for a word begun inside another one now take the keys the engine observed, as they do where a field
+  cannot be read at all, and the context decision says `field_input_buffer`. A read with more than that and without
+  the word is still a changed field: `hbdtn` after `ghbdtn` lost a letter, and erasing the word there would take one
+  before it.
+- The context model `context-v3-86437b6d1577` (corpus v45) replaces `context-v3-e6e581145f16`: the recipe of pairs
+  v39–v43 retrained on a new corpus, so that the seal pins the changed engine. It decides the owner's six field
+  batteries (through the changed engine), the abbreviation and term batteries, calibration v45 and the development
+  sequences exactly as 0.49.0 does; on development v45 its head for abbreviations after Latin-script text decides ten
+  of its curriculum frames differently (three right conversions gained, seven lost, one false one added). On the
+  sealed test v45, read once, it kept all 196 correctly typed sequences and, without the early switch, restored 172
+  of the 196 typed in the wrong layout against 160 for the base pair. A corpus v44 pair sealed the first, broader
+  version of the field rule and was replaced in the branch (its test v44 was read and passed). The prefix model
+  `prefix-v2-bf3dc28f8567` retrained byte-identical.
+
 ## 0.49.0 — 2026-10-10
 
 - `Pause` pressed within 1.5 seconds of a word the engine converted at a pause, with nothing typed since, no longer

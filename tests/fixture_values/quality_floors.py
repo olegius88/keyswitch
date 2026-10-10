@@ -74,10 +74,13 @@ RECEIPT_MIN_CALIBRATION_RECALL: Final = 0.977
 # frame of the corpus v42 recipe, converts 13 952 and 13 987 of the 14 401 conversion rows with 16 false conversions
 # in each profile. Corpus v43: the corpus v42 pair (context-v3-309759404d7d, 0.48.0), scored by
 # tools/compare_context_candidates.py on every calibration frame of the corpus v43 recipe, converts 13 963 and 13 998
-# of the 14 401 conversion rows with 16 false conversions in each profile.
-RECEIPT_CALIBRATION_REFERENCE_CORPUS: Final = "9ebb4301e08c08f6c8fd988bf37a1824752696449bbd0969f9c4d9806fb4356f"
-RECEIPT_CALIBRATION_REFERENCE_MODEL: Final = "context-v3-309759404d7d"
-RECEIPT_CALIBRATION_REFERENCE_NET: Final[dict[str, int]] = {"portable": 13947, "reference_hunspell": 13982}
+# of the 14 401 conversion rows with 16 false conversions in each profile. Corpus v45: the corpus v43 pair
+# (context-v3-e6e581145f16, 0.49.0), scored by tools/compare_context_candidates.py on every calibration frame of the
+# corpus v45 recipe, converts 13 962 and 13 996 of the 14 401 conversion rows with 16 false conversions in each profile
+# (the corpus v44 pair was installed in the branch and replaced before a release).
+RECEIPT_CALIBRATION_REFERENCE_CORPUS: Final = "b4aa287ee309b2594e16b350892c072d5a9685e0074f36b9b9f264ccd0608c42"
+RECEIPT_CALIBRATION_REFERENCE_MODEL: Final = "context-v3-e6e581145f16"
+RECEIPT_CALIBRATION_REFERENCE_NET: Final[dict[str, int]] = {"portable": 13946, "reference_hunspell": 13980}
 # Serving thresholds are part of the contract: a lower threshold converts on weaker evidence.
 RECEIPT_MIN_CONVERSION_THRESHOLD: Final = 0.99
 RECEIPT_MIN_PREFIX_CONVERSION_THRESHOLD: Final = 0.985

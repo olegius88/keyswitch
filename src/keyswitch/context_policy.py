@@ -202,6 +202,7 @@ class ContextPolicy:
         original = baseline.original
         anchor = original + literal_tail
         field = field_override or self.stream.snapshot(anchor)
+        ignored_read = ""
         if read_field and self.reader is not None:
             snapshot = self.reader.read(field.application, self.stream.window)
             if snapshot is not None and snapshot.application == field.application:
@@ -210,18 +211,23 @@ class ContextPolicy:
                 # boundary. Only use it if anchored to this exact suffix.
                 if snapshot.sensitive or snapshot.selection:
                     return ContextResult(replace(baseline, should_convert=False, reason="защищённое поле или выделение"), field=snapshot, decision_source="safety", fallback_reason="sensitive_or_selected_field")
-                lag = caret_lag(snapshot.before, snapshot.after, anchor)
-                if lag:
-                    snapshot = replace(snapshot, before=snapshot.before + snapshot.after[:lag], after=snapshot.after[lag:])
-                before = snapshot.before
-                if anchor and ends_with_typed(before, anchor):
-                    field = replace(snapshot, before=before[:-len(anchor)])
-                elif anchor and ends_with_typed(before[:-1], anchor):
-                    field = replace(snapshot, before=before[:-len(anchor) - 1])
+                if snapshot.input_buffer_only(anchor):
+                    # Not the text the word went into: the observed keys stand, as for a field
+                    # that cannot be read at all.
+                    ignored_read = "field_input_buffer"
                 else:
-                    # The editor contradicts the observer: do not fall back
-                    # to stale strokes and erase a different span of text.
-                    return ContextResult(replace(baseline, should_convert=False, reason="текст активного поля изменился"), field=snapshot, decision_source="safety", fallback_reason="field_changed")
+                    lag = caret_lag(snapshot.before, snapshot.after, anchor)
+                    if lag:
+                        snapshot = replace(snapshot, before=snapshot.before + snapshot.after[:lag], after=snapshot.after[lag:])
+                    before = snapshot.before
+                    if anchor and ends_with_typed(before, anchor):
+                        field = replace(snapshot, before=before[:-len(anchor)])
+                    elif anchor and ends_with_typed(before[:-1], anchor):
+                        field = replace(snapshot, before=before[:-len(anchor) - 1])
+                    else:
+                        # The editor contradicts the observer: do not fall back
+                        # to stale strokes and erase a different span of text.
+                        return ContextResult(replace(baseline, should_convert=False, reason="текст активного поля изменился"), field=snapshot, decision_source="safety", fallback_reason="field_changed")
         if after:
             field = replace(field, after=after)
         evidence = evidence_for_decision(
@@ -302,7 +308,7 @@ class ContextPolicy:
                 "suggest": "контекстная модель предлагает проверить раскладку",
             }[prediction.action])
         result = ContextResult(decision, prediction, field, policy_applied=True,
-                               decision_source="context_model")
+                               decision_source="context_model", fallback_reason=ignored_read)
         if self.model.feature_version != CONTEXT_ACTION_FEATURE_VERSION:
             result = self._licensed(result, baseline, alternative, target_group, field, detector)
         return self._spelling_a_word(result)
