@@ -14,13 +14,15 @@ All notable changes to KeySwitch are documented in this file.
   cannot be read at all, and the context decision says `field_input_buffer`. A read with more than that and without
   the word is still a changed field: `hbdtn` after `ghbdtn` lost a letter, and erasing the word there would take one
   before it.
-- The context model `context-v3-70e2635bbbaa` (corpus v44) replaces `context-v3-e6e581145f16`: the recipe of pairs
+- The context model `context-v3-86437b6d1577` (corpus v45) replaces `context-v3-e6e581145f16`: the recipe of pairs
   v39–v43 retrained on a new corpus, so that the seal pins the changed engine. It decides the owner's six field
-  batteries (through the changed engine), the abbreviation and term batteries, calibration v44 and the development
-  sequences exactly as 0.49.0 does; on development v44 its head for abbreviations after Latin-script text decides
-  five of its curriculum frames differently (one right conversion gained, four lost). On the sealed test v44, read
-  once, it kept all 198 correctly typed sequences and, without the early switch, restored 180 of the 196 typed in the
-  wrong layout against 167 for the base pair. The prefix model `prefix-v2-bf3dc28f8567` retrained byte-identical.
+  batteries (through the changed engine), the abbreviation and term batteries, calibration v45 and the development
+  sequences exactly as 0.49.0 does; on development v45 its head for abbreviations after Latin-script text decides ten
+  of its curriculum frames differently (three right conversions gained, seven lost, one false one added). On the
+  sealed test v45, read once, it kept all 196 correctly typed sequences and, without the early switch, restored 172
+  of the 196 typed in the wrong layout against 160 for the base pair. A corpus v44 pair sealed the first, broader
+  version of the field rule and was replaced in the branch (its test v44 was read and passed). The prefix model
+  `prefix-v2-bf3dc28f8567` retrained byte-identical.
 
 ## 0.49.0 — 2026-10-10
 
