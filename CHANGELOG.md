@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.52.0 — 2026-10-10
+
 - The Windows (x64 and ARM64) and macOS builds move to Python 3.15.0 from 3.14.8, as do LogCourier's packages:
   Nuitka 4.3 compiles KeySwitch on 3.15 and the result passes the same smoke, installer and upgrade checks, and
   setup-python now serves the 3.15.0 final on every runner. CI tests the Windows and LogCourier code on 3.15 alone,
@@ -13,6 +15,11 @@ All notable changes to KeySwitch are documented in this file.
   interpreter series it names. Its environment probe moves in one cell only, `unicode`: Python 3.15 carries Unicode
   17.0.0 instead of 16.0.0, which changes 4,806 code points, none of them a letter of the English or Russian layout
   (the only one in the Latin, Cyrillic and punctuation blocks is U+0295, a phonetic letter no layout types).
+  Nuitka 4.3 warns that it supports 3.15 only experimentally, and comtypes 1.4.17 that the `IntFlag` enumerations
+  it generates from a type library may behave differently on 3.15 when they hold negative members
+  (enthought/comtypes#894). KeySwitch reads no enumeration from the UI Automation wrapper, only plain integers it
+  names itself, and the check after each Windows build confirms on 3.15, for x64 and ARM64, that the built
+  executable opens its UI Automation bridge.
 
 ## 0.51.0 — 2026-10-10
 

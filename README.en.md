@@ -24,7 +24,7 @@ layouts come from the active EN/RU system pair.
 [Verification, builds and releases](docs/verification.md) (guides in Russian)
 
 The latest published stable release is
-[0.51.0](https://github.com/olegius88/keyswitch/releases/tag/v0.51.0).
+[0.52.0](https://github.com/olegius88/keyswitch/releases/tag/v0.52.0).
 The changes are listed in [CHANGELOG.md](CHANGELOG.md) and the known defects
 of the release in [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
@@ -126,14 +126,14 @@ scenarios and platform limitations.
 
 ## Install on Windows
 
-Download `KeySwitch-Setup-0.51.0-x64.exe` from the
-[published 0.51.0 release](https://github.com/olegius88/keyswitch/releases/tag/v0.51.0) and run
+Download `KeySwitch-Setup-0.52.0-x64.exe` from the
+[published 0.52.0 release](https://github.com/olegius88/keyswitch/releases/tag/v0.52.0) and run
 it. The per-user installation goes to `%LOCALAPPDATA%\Programs\KeySwitch` and
 does not require administrator privileges. The release also includes the
-portable `KeySwitch-0.51.0-windows-x64.zip` archive.
+portable `KeySwitch-0.52.0-windows-x64.zip` archive.
 
-Windows on Arm has a build of its own: `KeySwitch-Setup-0.51.0-arm64.exe` and
-`KeySwitch-0.51.0-windows-arm64.zip`. The x64 installer installs there too, but the
+Windows on Arm has a build of its own: `KeySwitch-Setup-0.52.0-arm64.exe` and
+`KeySwitch-0.52.0-windows-arm64.zip`. The x64 installer installs there too, but the
 program then runs under emulation. The ARM64 build does not update itself yet:
 download a new version from the
 [releases page](https://github.com/olegius88/keyswitch/releases).
@@ -177,11 +177,11 @@ portable ZIP bundle the lexicons, KSLM and contextual model automatically.
 ## Install on macOS
 
 macOS 13 or newer is required. The
-[published 0.51.0 release](https://github.com/olegius88/keyswitch/releases/tag/v0.51.0)
+[published 0.52.0 release](https://github.com/olegius88/keyswitch/releases/tag/v0.52.0)
 carries two archives, and exactly one of them is needed:
 
-- `KeySwitch-0.51.0-macos-arm64.zip` — Mac with Apple silicon (M1 and later);
-- `KeySwitch-0.51.0-macos-x86_64.zip` — Mac with an Intel processor.
+- `KeySwitch-0.52.0-macos-arm64.zip` — Mac with Apple silicon (M1 and later);
+- `KeySwitch-0.52.0-macos-x86_64.zip` — Mac with an Intel processor.
 
 Unpack the archive and move `KeySwitch.app` to Applications. The application is
 signed with a Developer ID certificate and notarized by Apple, so it opens with an
@@ -245,12 +245,12 @@ Probe the system backend without opening the application window:
 
 ## Install the Debian package
 
-Download `keyswitch_0.51.0_amd64.deb` from the
-[published 0.51.0 release](https://github.com/olegius88/keyswitch/releases/tag/v0.51.0), then
+Download `keyswitch_0.52.0_amd64.deb` from the
+[published 0.52.0 release](https://github.com/olegius88/keyswitch/releases/tag/v0.52.0), then
 install it with:
 
 ```bash
-sudo apt install ./keyswitch_0.51.0_amd64.deb
+sudo apt install ./keyswitch_0.52.0_amd64.deb
 ```
 
 The package installs the required system dependencies and adds KeySwitch to the
@@ -836,7 +836,7 @@ See [release and recovery procedures](docs/verification.md).
 - On Windows, UIPI prevents a regular process from injecting input into a
   window running at a higher integrity level. KeySwitch needs a matching level
   for that target window.
-- The published Windows 0.51.0 Setup EXE is not signed with a publisher certificate.
+- The published Windows 0.52.0 Setup EXE is not signed with a publisher certificate.
 - The macOS and Windows on Arm builds do not update themselves (see
   [Install on macOS](#install-on-macos) and [Install on Windows](#install-on-windows)).
 - macOS: the spelling autocorrection (in TextEdit, for example) can change a word
