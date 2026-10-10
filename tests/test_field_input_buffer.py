@@ -1,9 +1,10 @@
-"""A field read too short to hold the word just typed is not the text the word went into.
+"""A field read that shows only an editor's input buffer is not the text the word went into.
 
 VS Code with its screen-reader support off takes keys through an input it keeps empty, and UI Automation
 reads that input: on the owner's laptop every read after `ghbdtn` held one character around the caret
 (10.10.2026). The word was refused as typed into a changed field, or into another word after a click,
-and only `Pause` converted it.
+and only `Pause` converted it. A read with more of the word than that is the text, changed, and keeps
+refusing.
 
 These cases live outside `test_context_policy` and `test_engine_behaviour` on purpose: those modules'
 bytes are pinned by the context-action release receipt.
@@ -39,7 +40,7 @@ BUFFERS: dict[str, Callable[[str], tuple[str, str]]] = {
 }
 
 
-class TooShortFieldTests(unittest.TestCase):
+class InputBufferFieldTests(unittest.TestCase):
     def typed(self, shown: Callable[[str], tuple[str, str]], keys: str, *, click: bool = False,
               ) -> tuple[str, list[dict[str, object]]]:
         with sequences.session(0) as current:
@@ -63,7 +64,7 @@ class TooShortFieldTests(unittest.TestCase):
                                   if event["event"] in ("field_contradiction", "correction_aborted")])
                 [decision] = [event for event in events if event["event"] == "context_decision"]
                 self.assertEqual((decision["context_source"], decision["fallback_reason"]),
-                                 ("observed", "field_too_short"))
+                                 ("observed", "field_input_buffer"))
 
     def test_a_word_begun_after_a_click_is_not_read_as_typed_into_another(self) -> None:
         # The first read, one letter after the caret, says the word began inside a word; the read
@@ -74,7 +75,7 @@ class TooShortFieldTests(unittest.TestCase):
         self.assertEqual((started["head_letters"], started["tail_letters"]), (0, 1))
         dropped = [event for event in events if event["event"] == "insertion_dropped"]
         self.assertTrue(dropped)
-        self.assertTrue(all(event["reason"] == "field_too_short" for event in dropped))
+        self.assertTrue(all(event["reason"] == "field_input_buffer" for event in dropped))
         self.assertFalse([event for event in events if event["event"] == "inside_word_decision"])
 
     def test_the_early_switch_keeps_the_observed_prefix(self) -> None:
@@ -85,13 +86,16 @@ class TooShortFieldTests(unittest.TestCase):
                 field, reason = current.engine._early_prefix_field("ghbd", current.backend.active_application())
                 self.assertEqual((reason, field.source), ("", "observed"))
 
-    def test_a_field_long_enough_for_the_word_and_without_it_is_still_a_changed_field(self) -> None:
+    def test_a_field_with_more_than_a_key_and_without_the_word_is_still_a_changed_field(self) -> None:
+        # The editor dropped the word's first letter: erasing the word there would take a letter before it.
+        text, _events = self.typed(lambda text: ("hbdtn", ""), "ghbdtn ")
+        self.assertEqual(text, "ghbdtn ")
         text, events = self.typed(lambda text: ("other text ", ""), "ghbdtn ")
         self.assertEqual(text, "ghbdtn ")
         self.assertTrue([event for event in events if event["event"] == "field_contradiction"])
         with sequences.session(0) as current:
             current.settings.set("detection.context_read_field", True)
-            current.engine.context_policy.reader = InputBufferReader(lambda text: ("x" * len("ghbd"), ""), lambda: "")
+            current.engine.context_policy.reader = InputBufferReader(lambda text: ("hbd", ""), lambda: "")
             _field, reason = current.engine._early_prefix_field("ghbd", current.backend.active_application())
             self.assertEqual(reason, "context_field_changed")
 

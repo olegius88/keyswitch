@@ -211,10 +211,10 @@ class ContextPolicy:
                 # boundary. Only use it if anchored to this exact suffix.
                 if snapshot.sensitive or snapshot.selection:
                     return ContextResult(replace(baseline, should_convert=False, reason="защищённое поле или выделение"), field=snapshot, decision_source="safety", fallback_reason="sensitive_or_selected_field")
-                if snapshot.too_short_for(anchor):
+                if snapshot.input_buffer_only(anchor):
                     # Not the text the word went into: the observed keys stand, as for a field
                     # that cannot be read at all.
-                    ignored_read = "field_too_short"
+                    ignored_read = "field_input_buffer"
                 else:
                     lag = caret_lag(snapshot.before, snapshot.after, anchor)
                     if lag:

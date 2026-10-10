@@ -1317,9 +1317,9 @@ class KeySwitchEngine:
                     self._update(current_word="", last_action="Защищённое поле: обработка отключена")
                     return snapshot, "sensitive_field"
                 around = self._typed_in_field(snapshot, original, self._typed_ahead(self._strokes))
-                if (around is None and snapshot.too_short_for(original) and not snapshot.selection
+                if (around is None and snapshot.input_buffer_only(original) and not snapshot.selection
                         and snapshot.application == application):
-                    # Not the text the prefix went into (FieldContext.too_short_for): the observed keys stand.
+                    # Not the text the prefix went into (FieldContext.input_buffer_only): the observed keys stand.
                     return field, ""
                 if snapshot.selection or not snapshot.field_id or snapshot.application != application or around is None:
                     return snapshot, "context_field_changed"
@@ -2121,16 +2121,16 @@ class KeySwitchEngine:
         snapshot = reader.read(application, self._focus_window or 0)
         if snapshot is None or snapshot.sensitive or snapshot.selection or snapshot.application != application:
             return True
-        # A read too short to hold the word typed so far was never the text around it, and neither
-        # was the first one (FieldContext.too_short_for).
-        too_short = snapshot.too_short_for(typed)
+        # An input buffer read in place of the text was never the text around the word, and neither
+        # was the first read (FieldContext.input_buffer_only).
+        buffer = snapshot.input_buffer_only(typed)
         around = self._typed_in_field(snapshot, typed, ahead)
-        if not too_short and (around is None or self._letters_before(around[0]) or self._letters_after(around[1])):
+        if not buffer and (around is None or self._letters_before(around[0]) or self._letters_after(around[1])):
             return True
         self._technical_event(
             "insertion_dropped", application=application,
             head_letters=len(point.head), tail_letters=len(point.tail),
-            reason="field_too_short" if too_short else "no_letters_around",
+            reason="field_input_buffer" if buffer else "no_letters_around",
         )
         self._insertion = None
         return False

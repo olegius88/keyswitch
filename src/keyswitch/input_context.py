@@ -18,6 +18,7 @@ from .constants.text import (
     FIELD_CONTEXT_APPLICATION_MAX_CHARACTERS,
     FIELD_CONTEXT_FIELD_ID_MAX_CHARACTERS,
     FIELD_CONTEXT_SOURCE_MAX_CHARACTERS,
+    FIELD_INPUT_BUFFER_MAX_CHARACTERS,
 )
 from .constants.timing import FIELD_CONTEXT_TTL_SECONDS as CONTEXT_TTL
 
@@ -48,17 +49,18 @@ class FieldContext:
             self.selection, private, self.source[:FIELD_CONTEXT_SOURCE_MAX_CHARACTERS],
         )
 
-    def too_short_for(self, typed: str) -> bool:
-        """Whether the read holds fewer characters than were just typed into the field.
+    def input_buffer_only(self, typed: str) -> bool:
+        """Whether the read shows an editor's input buffer instead of the text a word was typed into.
 
-        Such a read is not of the text the keys went into. VS Code with its screen-reader support
-        off keeps the input it takes keys through empty and shows at most the key in flight: on the
-        owner's laptop every read after `ghbdtn` held one character around the caret, the word was
-        refused as typed into a changed field or into another word, and only `Pause` converted it
-        (10.10.2026). The keys the engine saw are then the only account of the text.
+        VS Code with its screen-reader support off takes keys through an input it keeps empty and
+        shows at most the key in flight: on the owner's laptop every read after `ghbdtn` held one
+        character around the caret, the word was refused as typed into a changed field or into
+        another word, and only `Pause` converted it (10.10.2026). The keys the engine saw are then
+        the only account of the text. A read with more of the word is the text itself, changed:
+        `hbdtn` after `ghbdtn` lost its first letter, and the word stays refused there.
         """
 
-        return len(self.before) + len(self.after) < len(typed)
+        return len(self.before) + len(self.after) <= FIELD_INPUT_BUFFER_MAX_CHARACTERS < len(typed)
 
 
 class FieldReader(Protocol):
