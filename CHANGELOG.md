@@ -4,6 +4,25 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- The first word typed after KeySwitch starts no longer holds up the keyboard. The context model read its term
+  frequency table (4.5 MB) and the identifier lexicon on the first question it was asked, and the orthotactic model
+  bound its dictionaries on its first score, normalising the Russian lexicon supplement once more. That parsing and
+  sorting holds the interpreter, and the keyboard hook's thread waits for the interpreter before any key reaches a
+  window: every slow hook answer in the owner's logs since 0.46.0 (`input_delay`, once per start, 31 to 249 ms) came
+  with the first word the model was asked about after a start. The model now reads its table as it loads (a
+  context-v3 model without it no longer loads, as a schema-7 model did not), and the policy reads the identifier
+  lexicon and makes the orthotactic model's first score as it starts, before the hook is installed. On a cloud
+  machine the first word took 757–891 ms to decide, with a thread like the hook's kept waiting up to 142–185 ms at a
+  time; it now takes 26 ms, with waits of 7–8 ms, about as long as every later word.
+- The context model `context-v3-6291162f5dbd` (corpus v46) replaces `context-v3-86437b6d1577`: the recipe of pairs
+  v39–v45 retrained on a new corpus, so that the seal pins the changed engine. It decides the owner's nine field
+  batteries (two of them new, from the logs of 09–10.10.2026), the abbreviation and term batteries, calibration v46
+  and the development sequences exactly as 0.50.0 does; on development v46 its head for abbreviations after
+  Latin-script text decides ten of its curriculum frames differently (eight right conversions gained, two lost). On
+  the sealed test v46, read once, it kept all 193 correctly typed sequences (the base pair corrupts one with the
+  early switch) and, without the early switch, restored 178 of the 192 typed in the wrong layout against 156 for the
+  base pair. The prefix model `prefix-v2-bf3dc28f8567` retrained byte-identical.
+
 ## 0.50.0 — 2026-10-10
 
 - A field read through the accessibility interface that shows only an editor's input buffer no longer refuses the

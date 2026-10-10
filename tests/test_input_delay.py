@@ -150,6 +150,18 @@ class FirstWordTests(unittest.TestCase):
             self.assertIsNotNone(context_model._TERM_FREQUENCY)
             self.assertIsNotNone(context_policy._SHARED_IDENTIFIERS)
 
+    def test_a_policy_reads_only_what_its_models_ask_for(self) -> None:
+        # Without a context model nothing asks for the identifiers; without an orthotactic model nothing is bound.
+        with patch.object(context_policy, "_SHARED_IDENTIFIERS", None), \
+                patch.object(ContextModel, "try_load", return_value=(None, "missing")):
+            self.assertIsNone(ContextPolicy().model)
+            self.assertIsNone(context_policy._SHARED_IDENTIFIERS)
+        with patch.object(context_policy, "_SHARED_IDENTIFIERS", None), \
+                patch.object(ContextPolicy, "_shared_ortho", (None, "unavailable")):
+            policy = ContextPolicy()
+            self.assertEqual((policy.model is not None, policy.ortho), (True, None))
+            self.assertIsNotNone(context_policy._SHARED_IDENTIFIERS)
+
     def test_an_action_model_without_its_table_does_not_load(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             missing = Path(directory) / "missing.json"
