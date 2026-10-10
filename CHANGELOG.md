@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.50.0 — 2026-10-10
+
 - A field read through the accessibility interface that shows only an editor's input buffer no longer refuses the
   word. VS Code with its screen-reader support off takes keys through an input it keeps empty, and that input is what
   UI Automation reads: on the owner's laptop every read after `ghbdtn` held one character around the caret
