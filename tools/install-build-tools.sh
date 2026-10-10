@@ -4,5 +4,5 @@ set -euo pipefail
 target="${1:-.nuitka}"
 
 python3 -m pip install --upgrade --target "$target" \
-  "Nuitka==4.2" \
+  "Nuitka==4.3" \
   "ordered-set==4.1.0"

@@ -20,7 +20,9 @@ module_version="$(sed -nE 's/^__version__ = "([^"]+)"/\1/p' "$project_dir/src/ke
 # Nuitka may live in its own directory, as it does on a development machine, or
 # be installed into the interpreter, as it is on a build runner.
 nuitka_root="${KEYSWITCH_NUITKA_ROOT:-$HOME/.nuitka}"
-nuitka_version="4.2"
+nuitka_version="4.3"
+# The oldest macOS the README promises.
+minimum_macos="13.0"
 python_bin="${KEYSWITCH_PYTHON:-python3}"
 frozen_model_sources="$project_dir/model/intent_v1/sources"
 frozen_english_model="$frozen_model_sources/en_US.lm"
@@ -123,6 +125,25 @@ fi
 if [[ "$built_bundle" != "$bundle" ]]; then
     rm -rf "$bundle"
     mv "$built_bundle" "$bundle"
+fi
+
+# The README promises macOS 13 or newer. The runner's Xcode builds against the SDK of its own system,
+# so no binary of the bundle may ask for a newer one than that: the deployment target decides the
+# minimum, never the image the build happened to run on.
+newer_than_promised=""
+while IFS= read -r -d '' file; do
+    [[ "$(file -b "$file")" == *Mach-O* ]] || continue
+    while read -r minimum; do
+        if [[ "$(printf '%s\n%s\n' "$minimum" "$minimum_macos" | sort -V | tail -n 1)" != "$minimum_macos" ]]; then
+            newer_than_promised+="  ${file#"$bundle/"} needs macOS $minimum"$'\n'
+        fi
+    done < <(otool -arch all -l "$file" | awk '
+        /cmd LC_BUILD_VERSION/ { build = 1 } build && $1 == "minos" { print $2; build = 0 }
+        /cmd LC_VERSION_MIN_MACOSX/ { legacy = 1 } legacy && $1 == "version" { print $2; legacy = 0 }')
+done < <(find "$bundle" -type f -print0)
+if [[ -n "$newer_than_promised" ]]; then
+    printf 'The bundle needs a newer macOS than %s:\n%s' "$minimum_macos" "$newer_than_promised" >&2
+    exit 1
 fi
 
 if [[ -n "$sign_identity" ]]; then

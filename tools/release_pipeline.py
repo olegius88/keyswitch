@@ -171,8 +171,8 @@ LATEST_LINK: Final[str] = "latest"
 
 XVFB_SCREEN: Final[str] = "-screen 0 1280x800x24"
 XVFB_SCREEN_NORESET: Final[str] = "-screen 0 1280x800x24 -noreset"
-MYPY_VERSION: Final[str] = "2.3.1"
-NUITKA_VERSION: Final[str] = "4.2"
+MYPY_VERSION: Final[str] = "2.4.0"
+NUITKA_VERSION: Final[str] = "4.3"
 TYPING_ROOT: Final[Path] = PROJECT_ROOT / ".typing"
 NUITKA_ROOT: Final[Path] = PROJECT_ROOT / ".nuitka"
 

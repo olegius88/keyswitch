@@ -22,6 +22,18 @@ All notable changes to KeySwitch are documented in this file.
   the sealed test v46, read once, it kept all 193 correctly typed sequences (the base pair corrupts one with the
   early switch) and, without the early switch, restored 178 of the 192 typed in the wrong layout against 156 for the
   base pair. The prefix model `prefix-v2-bf3dc28f8567` retrained byte-identical.
+- Build and test tools move to their newest releases: Nuitka 4.3 (from 4.2), mypy 2.4.0 (2.3.1), coverage 7.16.2
+  (7.15.4) and comtypes 1.4.17 (1.4.16); LogCourier takes PySide6 6.12.0 (6.11.2) and PyInstaller 6.22.3 (6.22.2).
+  Pillow, pystray, PyGObject-stubs, NumPy, CuPy and the CUDA toolkit were already the newest, as were the GitHub
+  Actions. The macOS builds run on the macOS 26 runners (Apple silicon and Intel) and the Windows ARM64 jobs on the
+  image with Visual Studio 2026, as the x64 ones already did. The macOS build now refuses a bundle with a binary that
+  asks for a newer system than macOS 13, the oldest the README promises, so a newer runner cannot raise it unnoticed.
+- Python 3.15.0 (released 09.10.2026): the whole suite passes on it with 100% branch coverage (PyGObject 3.58.1,
+  NumPy 2.5.3), as do LogCourier's checks and tests, and CI now runs the Windows tests, the Windows installer build
+  with its smoke test, and LogCourier's tests on 3.15 beside 3.14. The released builds stay on Python 3.14.8 for
+  now: Nuitka 4.3 compiles 3.15 only experimentally and itself advises 3.14, setup-python serves no 3.15.0 yet
+  (only its release candidate), and the intent model was built on 3.14, the interpreter series a build has to run
+  (`model/intent_v1/build-environment.json`); moving to 3.15 means rebuilding and resealing that model.
 
 ## 0.50.0 — 2026-10-10
 
