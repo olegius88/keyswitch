@@ -13,6 +13,13 @@ All notable changes to KeySwitch are documented in this file.
   inside another one now take the keys the engine observed, as they do where a field cannot be read at all, and
   the context decision says `field_too_short`. A read long enough to hold the word and without it is still a
   changed field.
+- The context model `context-v3-70e2635bbbaa` (corpus v44) replaces `context-v3-e6e581145f16`: the recipe of pairs
+  v39–v43 retrained on a new corpus, so that the seal pins the changed engine. It decides the owner's six field
+  batteries (through the changed engine), the abbreviation and term batteries, calibration v44 and the development
+  sequences exactly as 0.49.0 does; on development v44 its head for abbreviations after Latin-script text decides
+  five of its curriculum frames differently (one right conversion gained, four lost). On the sealed test v44, read
+  once, it kept all 198 correctly typed sequences and, without the early switch, restored 180 of the 196 typed in the
+  wrong layout against 167 for the base pair. The prefix model `prefix-v2-bf3dc28f8567` retrained byte-identical.
 
 ## 0.49.0 — 2026-10-10
 
