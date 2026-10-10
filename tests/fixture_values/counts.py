@@ -279,6 +279,7 @@ DISCARDED_WORD_LENGTH: Final = 2
 INJECTIONS_AFTER_REPEATED_CORRECTION: Final = 3
 # A manual conversion and the plain toggle back of a second press that came too late.
 INJECTIONS_AFTER_TOGGLE_BACK: Final = 2
+INJECTIONS_AFTER_REVERSED_PAUSE_CORRECTION: Final = 2
 # A double Pause after a wrong correction: the correction and its undo by the first press.
 DOUBLE_PAUSE_INJECTIONS_AFTER_UNDO: Final = 2
 # A double Pause after the user had undone the correction: those two, the first press undoing

@@ -35,7 +35,9 @@ class ContextRuntimeSafetyTests(InputIntegrityTests):
     def events(lines: list[str]) -> list[dict[str, object]]:
         return [cast(dict[str, object], json.loads(line.split("TECHNICAL ", 1)[1])) for line in lines]
 
-    def test_replayed_releases_preserve_context_but_unknown_or_pressed_events_do_not(self) -> None:
+    def test_held_keys_that_come_back_preserve_context_but_unknown_input_does_not(self) -> None:
+        # Held keys are typed again after the word and observed like typed keys; an event the hook did not
+        # hold (a click), or a held key that never came back, leaves the text before the next word unknown.
         self.settings.set("detection.context_policy", "shadow")
         for held, observed, pressed, expected in HELD_KEY_CONTEXT_REPLAY_CASES:
             with self.subTest(held=held, observed=observed, pressed=pressed):

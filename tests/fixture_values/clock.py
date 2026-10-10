@@ -149,6 +149,8 @@ PENDING_CORRECTION_CHECK_OFFSET_SECONDS: Final = 2.3
 SUCCESSFUL_CORRECTION_CHECK_OFFSET_SECONDS: Final = 2.4
 IDLE_LOWER_BOUND_MS: Final = 2000
 EARLY_SWITCH_STALE_AGE_SECONDS: Final = 5.0
+# How far past the agreement window a press of the hotkey after a pause correction comes.
+PAUSE_AGREEMENT_OVERSTEP_SECONDS: Final = 0.1
 # Safety timeout for the subprocess calls below, in seconds.
 GUI_TEST_SCRIPT_TIMEOUT_SECONDS: Final = 10
 INTENT_LOADER_WAIT_TIMEOUT_SECONDS: Final = 5.0
