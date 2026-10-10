@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.51.0 — 2026-10-10
+
 - The first word typed after KeySwitch starts no longer holds up the keyboard. The context model read its term
   frequency table (4.5 MB) and the identifier lexicon on the first question it was asked, and the orthotactic model
   bound its dictionaries on its first score, normalising the Russian lexicon supplement once more. That parsing and
