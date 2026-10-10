@@ -590,15 +590,7 @@ jobs:
             _ "$package"
 
   windows:
-    name: Strict Win32 tests and E2E${{ matrix.python != '3.14' && format(' on Python {0}', matrix.python) || '' }}
-    # The release builds run on Python 3.14, the newest version Nuitka 4.3 supports: it compiles 3.15 only
-    # experimentally. The 3.15 entry tests the code and the installer ahead of the switch and never fails
-    # the run; setup-python serves its release candidate until the final reaches its manifest.
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ["3.14", "3.15"]
-    continue-on-error: ${{ matrix.python != '3.14' }}
+    name: Strict Win32 tests and E2E
     runs-on: windows-2025
 
     steps:
@@ -608,8 +600,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: ${{ matrix.python }}
-          allow-prereleases: ${{ matrix.python != '3.14' }}
+          python-version: "3.15"
           cache: pip
 
       - name: Install pinned typing, runtime and build dependencies
@@ -681,15 +672,7 @@ jobs:
 
   windows-installer:
     # The installer does not wait for the tests: it builds on a runner of its own beside them.
-    name: Native Windows installer (x64)${{ matrix.python != '3.14' && format(' on Python {0}', matrix.python) || '' }}
-    # The release builds run on Python 3.14, the newest version Nuitka 4.3 supports: it compiles 3.15 only
-    # experimentally. The 3.15 entry tests the code and the installer ahead of the switch and never fails
-    # the run; setup-python serves its release candidate until the final reaches its manifest.
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ["3.14", "3.15"]
-    continue-on-error: ${{ matrix.python != '3.14' }}
+    name: Native Windows installer (x64)
     runs-on: windows-2025
 
     steps:
@@ -699,8 +682,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: ${{ matrix.python }}
-          allow-prereleases: ${{ matrix.python != '3.14' }}
+          python-version: "3.15"
           cache: pip
 
       - name: Point Nuitka at a cache that survives the job
@@ -711,9 +693,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/nuitka-cache
-          key: nuitka-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-${{ hashFiles('src/keyswitch/**', 'packaging/**', 'tools/install-build-tools.sh') }}
+          key: nuitka-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/keyswitch/**', 'packaging/**', 'tools/install-build-tools.sh') }}
           restore-keys: |
-            nuitka-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-
+            nuitka-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install pinned runtime and build dependencies
         run: |
@@ -817,7 +799,6 @@ jobs:
           if ($runProperties.PSObject.Properties.Name -contains "KeySwitch") { throw "Uninstaller left the KeySwitch autostart value behind" }
 
       - name: Upload Windows artifacts
-        if: matrix.python == '3.14'
         uses: actions/upload-artifact@v7
         with:
           name: keyswitch-windows-package
@@ -850,7 +831,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.14"
+          python-version: "3.15"
           cache: pip
 
       - name: Point Nuitka at a cache that survives the job
@@ -963,7 +944,7 @@ jobs:
       - name: Set up native ARM64 Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.14"
+          python-version: "3.15"
           architecture: arm64
 
       - name: Point Nuitka at a cache that survives the job

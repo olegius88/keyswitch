@@ -7,7 +7,9 @@
 
 ## Среда и быстрые проверки
 
-Linux reference CI использует Ubuntu 26.04 и системный Python 3.14.
+Linux reference CI использует Ubuntu 26.04 и системный Python 3.14, тот же,
+на котором работает пакет `.deb`. Сборки для Windows и macOS и их тесты
+в CI идут на Python 3.15.
 Минимальная версия Python из `pyproject.toml` не означает, что любая такая
 среда может побайтно воспроизвести обучение. Полные зависимости перечислены
 в [Tests workflow](../.github/workflows/tests.yml) и

@@ -629,7 +629,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.14"
+          python-version: "3.15"
           architecture: ${{ matrix.architecture }}
           cache: pip
 
@@ -750,7 +750,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.14"
+          python-version: "3.15"
           architecture: ${{ matrix.architecture }}
           cache: pip
 
@@ -905,7 +905,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.14"
+          python-version: "3.15"
           cache: pip
 
       - name: Point Nuitka at a cache that survives the job

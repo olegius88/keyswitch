@@ -3,7 +3,7 @@
   "artifact_sha256": "d0b90ad59a48eb7c2aa8c89680a2bc0dd2290c1e9c717068af49087c165878bb",
   "build_provenance_sha256": "8bccdf50b0281fe8078b8262247cec8dadb423dc8ca9ce43da6bdc482a41ace9",
   "byteorder": "little",
-  "compiler": "/usr/bin/gcc: gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+  "compiler": "/usr/bin/gcc: gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
   "environment_probe": {
     "cells": {
       "builtin_sum": {
@@ -103,8 +103,8 @@
       },
       "unicode": {
         "buckets": {
-          "plane-00": "6a08971e84aac61456503fd4bf06b7c9286c351a61cca693f4924ea3f1012510",
-          "plane-01": "8509b4e8714ac3bfc2483bc3ae2de29e3499a27beac858901ebb019219b21890",
+          "plane-00": "ca1e4dd2b6f3de595bcdc6ecaed4144ad50f319646b5e8ea04b73db991bc2161",
+          "plane-01": "67018e1626a9a293bccb1631d56ec0df21793c1cdd874d7db8475ce14f50842b",
           "plane-02": "b46fc240868a5151c3f1615c5f3e47ef97c9c0b4841446a7ad6b808b999b9847",
           "plane-03": "0c76e8e1657b9f3461d24c26bb8f596bd10817ea04c016a9586d4aefe26f783f",
           "plane-04": "0bb8f3dd5c043f65b08e0cc3f96fd2bc60b5f50b5d60c554128a140e11e6b1e8",
@@ -122,19 +122,19 @@
           "plane-10": "59556ad87a9dfc40527928545c263d1f2d6afe2f2dfbbd6522c51bce4b61da16",
           "str": "0d8dce958326d6f89f0a5c7453b9e452bb1c8a54307d0a26932e1a2e95ef4d25"
         },
-        "entries": 1171684,
-        "sha256": "83fc396a747c2e3e10d85213b6adebc8cdcfbedf9509c6392d84dd68979c1a38"
+        "entries": 1171796,
+        "sha256": "e17d5c4751430af3a144e0323b7454d5dee346c2b58e4f319f2c34cb1b2c86ef"
       }
     },
-    "probe_sha256": "dba649eeacd263bb1f4206ad19ff1d1a16b581efac6227c471e5151349f0637d",
+    "probe_sha256": "0022d7125a751490ce65c6cd6b4c6756d3f9e3c5d71fa9e6006e67351230789a",
     "schema_version": 1
   },
   "ftrl_kernel": "native",
-  "libc": "glibc 2.43",
+  "libc": "glibc 2.39",
   "machine": "x86_64",
-  "python_build": "3.14.4 (main, Aug 20 2026, 10:41:58) [GCC 15.2.0]",
+  "python_build": "3.15.0 (main, Oct 9 2026, 15:24:40) [Clang 22.1.3 ]",
   "python_implementation": "cpython",
-  "python_version": "3.14.4",
+  "python_version": "3.15.0",
   "schema_version": 1,
   "system": "Linux"
 }
