@@ -6,10 +6,13 @@ timed every correction, had nothing to say about the hook every key passes throu
 
 from __future__ import annotations
 
+import tempfile
 import unittest
 from dataclasses import asdict, replace
+from pathlib import Path
 from unittest.mock import patch
 
+from keyswitch import context_model, context_policy, ortho_model
 from keyswitch.backend import KeyEvent
 from keyswitch.constants.timing import (
     INPUT_DELAY_LATE_MS,
@@ -19,6 +22,8 @@ from keyswitch.constants.timing import (
 )
 from keyswitch.constants.units import MILLISECONDS_PER_SECOND
 from keyswitch.constants.windows import DWORD_MASK, VK_RETURN
+from keyswitch.context_model import ContextModel
+from keyswitch.context_policy import ContextPolicy
 from keyswitch.input_delay import InputDelay, InputDelayReport
 from keyswitch.windows_backend import NativeKeyEvent, WindowsBackend
 import test_input_sequence_matrix as sequences
@@ -127,6 +132,59 @@ class InputDelayTests(unittest.TestCase):
                                        "late_threshold_ms": INPUT_DELAY_LATE_MS,
                                        "slow_threshold_ms": INPUT_DELAY_SLOW_CALLBACK_MS,
                                        "unstamped_threshold_ms": INPUT_DELAY_UNSTAMPED_MS}])
+
+
+class FirstWordTests(unittest.TestCase):
+    """The first word after a start is answered from tables already read.
+
+    Every slow hook answer in the owner's logs since 0.46.0, 31 to 249 ms, came with the first word the context
+    model was asked about after a start (09-10.10.2026): the model read its frequency table and the identifier
+    lexicon on that first question, and the hook's thread waited for the interpreter while they were parsed. The
+    orthotactic model bound its dictionaries there too, normalising the Russian supplement once more.
+    """
+
+    def test_the_policy_reads_its_model_s_tables_as_it_starts(self) -> None:
+        with patch.object(context_model, "_TERM_FREQUENCY", None), patch.object(context_policy, "_SHARED_IDENTIFIERS", None):
+            policy = ContextPolicy()
+            self.assertIsNotNone(policy.model)
+            self.assertIsNotNone(context_model._TERM_FREQUENCY)
+            self.assertIsNotNone(context_policy._SHARED_IDENTIFIERS)
+
+    def test_a_policy_reads_only_what_its_models_ask_for(self) -> None:
+        # Without a context model nothing asks for the identifiers; without an orthotactic model nothing is bound.
+        with patch.object(context_policy, "_SHARED_IDENTIFIERS", None), \
+                patch.object(ContextModel, "try_load", return_value=(None, "missing")):
+            self.assertIsNone(ContextPolicy().model)
+            self.assertIsNone(context_policy._SHARED_IDENTIFIERS)
+        with patch.object(context_policy, "_SHARED_IDENTIFIERS", None), \
+                patch.object(ContextPolicy, "_shared_ortho", (None, "unavailable")):
+            policy = ContextPolicy()
+            self.assertEqual((policy.model is not None, policy.ortho), (True, None))
+            self.assertIsNotNone(context_policy._SHARED_IDENTIFIERS)
+
+    def test_an_action_model_without_its_table_does_not_load(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing.json"
+            with patch.object(context_model, "_TERM_FREQUENCY", None), \
+                    patch.object(context_model, "TERM_FREQUENCY_PATH", missing):
+                model, reason = ContextModel.try_load()
+        self.assertIsNone(model)
+        self.assertIn(missing.name, reason)
+
+    def test_the_first_word_parses_nothing_and_binds_no_dictionaries(self) -> None:
+        # A fresh start: no table read, no orthotactic model bound to its dictionaries.
+        with patch.object(context_model, "_TERM_FREQUENCY", None), patch.object(context_policy, "_SHARED_IDENTIFIERS", None), \
+                patch.object(ContextPolicy, "_shared_ortho", None), \
+                patch.object(ortho_model, "_engine_dictionaries", wraps=ortho_model._engine_dictionaries) as dictionaries, \
+                sequences.session(0) as current:
+            model = current.engine.context_policy.model
+            assert model is not None
+            self.assertEqual(dictionaries.call_count, 1)
+            with patch("json.loads", side_effect=AssertionError) as parse, \
+                    patch.object(model, "predict", wraps=model.predict) as predict:
+                current.physical("ghbdtn ")
+            self.assertEqual((current.backend.text, parse.call_count, dictionaries.call_count), ("привет ", 0, 1))
+            self.assertTrue(predict.called)
 
 
 if __name__ == "__main__":

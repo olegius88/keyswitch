@@ -7,7 +7,7 @@ version="$(sed -nE 's/^version = "([^"]+)"/\1/p' "$project_dir/pyproject.toml" |
 module_version="$(sed -nE 's/^__version__ = "([^"]+)"/\1/p' "$project_dir/src/keyswitch/__init__.py" | head -n 1)"
 architecture="${DEB_HOST_ARCH:-$(dpkg --print-architecture)}"
 nuitka_root="${KEYSWITCH_NUITKA_ROOT:-$project_dir/.nuitka}"
-nuitka_version="4.2"
+nuitka_version="4.3"
 intent_model="$project_dir/src/keyswitch/resources/models/layout_intent_v1.ksm"
 apt_sources="$project_dir/packaging/debian/keyswitch.sources"
 apt_keyring="$project_dir/packaging/keyswitch-archive-keyring.asc"

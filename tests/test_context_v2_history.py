@@ -22,7 +22,7 @@ import context_corpus
 from context_evidence import canonical, key
 from keyswitch.constants.model_protocol import PROFILES
 from context_frames import Frame
-from keyswitch.context_model import ACTIONS, ContextModel
+from keyswitch.context_model import ACTIONS, TERM_FREQUENCY_PATH, ContextModel
 import train_context_v2 as trainer
 import verify_context_v2 as verifier
 import verify_context_v2_history as history
@@ -231,6 +231,11 @@ class HistoricalContextV2Tests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory(prefix="keyswitch-feature-two-numeric-") as temporary:
             variant = Path(temporary) / "context_model.py"
+            # The live loader reads the frequency table beside its own file as an action model loads: without it
+            # the installed artifact would not load, and the feature-3 payload could not pass as feature 2.
+            table = Path(temporary) / TERM_FREQUENCY_PATH.relative_to((history.ROOT / history.CURRENT_MODEL).parent)
+            table.parent.mkdir(parents=True)
+            shutil.copyfile(TERM_FREQUENCY_PATH, table)
             for description, pattern, replacement in changes:
                 with self.subTest(change=description):
                     variant.write_text(altered(source, pattern, replacement), encoding="utf-8")

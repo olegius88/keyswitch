@@ -590,7 +590,15 @@ jobs:
             _ "$package"
 
   windows:
-    name: Strict Win32 tests and E2E
+    name: Strict Win32 tests and E2E${{ matrix.python != '3.14' && format(' on Python {0}', matrix.python) || '' }}
+    # The release builds run on Python 3.14, the newest version Nuitka 4.3 supports: it compiles 3.15 only
+    # experimentally. The 3.15 entry tests the code and the installer ahead of the switch and never fails
+    # the run; setup-python serves its release candidate until the final reaches its manifest.
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.14", "3.15"]
+    continue-on-error: ${{ matrix.python != '3.14' }}
     runs-on: windows-2025
 
     steps:
@@ -600,7 +608,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.14"
+          python-version: ${{ matrix.python }}
+          allow-prereleases: ${{ matrix.python != '3.14' }}
           cache: pip
 
       - name: Install pinned typing, runtime and build dependencies
@@ -608,7 +617,7 @@ jobs:
           # pwsh reports only the last command's exit code; without this a
           # failing command earlier in the step would leave it green.
           $PSNativeCommandUseErrorActionPreference = $true
-          python -m pip install coverage==7.15.4 mypy==2.3.1 Nuitka==4.2 ordered-set==4.1.0 pystray==0.19.5 Pillow==12.3.0 comtypes==1.4.16
+          python -m pip install coverage==7.16.2 mypy==2.4.0 Nuitka==4.3 ordered-set==4.1.0 pystray==0.19.5 Pillow==12.3.0 comtypes==1.4.17
           python -m pip install --no-deps PyGObject-stubs==2.17.0
           # NumPy's stubs for the trainer's back ends, from 2.2.6 (tools/install-typing-tools.sh says why).
           python -m pip install --target "$env:RUNNER_TEMP\numpy-typing" --no-deps --only-binary=:all: --python-version 3.12 numpy==2.2.6
@@ -672,7 +681,15 @@ jobs:
 
   windows-installer:
     # The installer does not wait for the tests: it builds on a runner of its own beside them.
-    name: Native Windows installer (x64)
+    name: Native Windows installer (x64)${{ matrix.python != '3.14' && format(' on Python {0}', matrix.python) || '' }}
+    # The release builds run on Python 3.14, the newest version Nuitka 4.3 supports: it compiles 3.15 only
+    # experimentally. The 3.15 entry tests the code and the installer ahead of the switch and never fails
+    # the run; setup-python serves its release candidate until the final reaches its manifest.
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.14", "3.15"]
+    continue-on-error: ${{ matrix.python != '3.14' }}
     runs-on: windows-2025
 
     steps:
@@ -682,7 +699,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.14"
+          python-version: ${{ matrix.python }}
+          allow-prereleases: ${{ matrix.python != '3.14' }}
           cache: pip
 
       - name: Point Nuitka at a cache that survives the job
@@ -693,16 +711,16 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/nuitka-cache
-          key: nuitka-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/keyswitch/**', 'packaging/**', 'tools/install-build-tools.sh') }}
+          key: nuitka-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-${{ hashFiles('src/keyswitch/**', 'packaging/**', 'tools/install-build-tools.sh') }}
           restore-keys: |
-            nuitka-${{ runner.os }}-${{ runner.arch }}-
+            nuitka-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-
 
       - name: Install pinned runtime and build dependencies
         run: |
           # pwsh reports only the last command's exit code; without this a
           # failing command earlier in the step would leave it green.
           $PSNativeCommandUseErrorActionPreference = $true
-          python -m pip install Nuitka==4.2 ordered-set==4.1.0 pystray==0.19.5 Pillow==12.3.0 comtypes==1.4.16
+          python -m pip install Nuitka==4.3 ordered-set==4.1.0 pystray==0.19.5 Pillow==12.3.0 comtypes==1.4.17
 
       - name: Build and self-diagnose native ZIP and Inno Setup installer
         shell: pwsh
@@ -799,6 +817,7 @@ jobs:
           if ($runProperties.PSObject.Properties.Name -contains "KeySwitch") { throw "Uninstaller left the KeySwitch autostart value behind" }
 
       - name: Upload Windows artifacts
+        if: matrix.python == '3.14'
         uses: actions/upload-artifact@v7
         with:
           name: keyswitch-windows-package
@@ -813,9 +832,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15
+          - runner: macos-26
             architecture: arm64
-          - runner: macos-15-intel
+          - runner: macos-26-intel
             architecture: x86_64
     runs-on: ${{ matrix.runner }}
     # Read here rather than inside the step: a step cannot test its own
@@ -848,7 +867,7 @@ jobs:
 
       - name: Install pinned typing and build dependencies
         run: |
-          python -m pip install coverage==7.15.4 mypy==2.3.1 Nuitka==4.2 ordered-set==4.1.0
+          python -m pip install coverage==7.16.2 mypy==2.4.0 Nuitka==4.3 ordered-set==4.1.0
           python -m pip install --no-deps PyGObject-stubs==2.17.0
 
       - name: Run strict type checking and the macOS unit tests
@@ -933,7 +952,7 @@ jobs:
     # the run; read its step results. The build script still names its output
     # x64 here and the files are not published.
     name: Probe the Win32 tests and build on Windows ARM64
-    runs-on: windows-11-arm
+    runs-on: windows-11-vs2026-arm
     continue-on-error: true
     timeout-minutes: 120
 
@@ -969,7 +988,7 @@ jobs:
         continue-on-error: true
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
-          python -m pip install coverage==7.15.4 Nuitka==4.2 ordered-set==4.1.0 pystray==0.19.5 Pillow==12.3.0 comtypes==1.4.16
+          python -m pip install coverage==7.16.2 Nuitka==4.3 ordered-set==4.1.0 pystray==0.19.5 Pillow==12.3.0 comtypes==1.4.17
 
       - name: Configure the EN and RU keyboard layouts for the E2E
         continue-on-error: true

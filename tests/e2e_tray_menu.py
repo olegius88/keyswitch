@@ -10,7 +10,6 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import cast
 
 import dbus
 import dbus.service
@@ -72,7 +71,7 @@ def read_line(process: subprocess.Popen[str], timeout: float) -> str:
     readable, _, _ = select.select([process.stdout], [], [], timeout)
     if not readable:
         raise RuntimeError("StatusNotifierWatcher did not answer in time")
-    line = cast(str, process.stdout.readline().strip())
+    line = process.stdout.readline().strip()
     if not line:
         stderr = process.stderr.read().strip() if process.stderr else ""
         raise RuntimeError(
