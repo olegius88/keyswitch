@@ -48,6 +48,18 @@ class FieldContext:
             self.selection, private, self.source[:FIELD_CONTEXT_SOURCE_MAX_CHARACTERS],
         )
 
+    def too_short_for(self, typed: str) -> bool:
+        """Whether the read holds fewer characters than were just typed into the field.
+
+        Such a read is not of the text the keys went into. VS Code with its screen-reader support
+        off keeps the input it takes keys through empty and shows at most the key in flight: on the
+        owner's laptop every read after `ghbdtn` held one character around the caret, the word was
+        refused as typed into a changed field or into another word, and only `Pause` converted it
+        (10.10.2026). The keys the engine saw are then the only account of the text.
+        """
+
+        return len(self.before) + len(self.after) < len(typed)
+
 
 class FieldReader(Protocol):
     def read(self, application: str, window: int) -> FieldContext | None: ...

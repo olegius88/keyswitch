@@ -4,6 +4,16 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- A field read through the accessibility interface that holds fewer characters than were just typed into it no
+  longer refuses the word. VS Code with its screen-reader support off takes keys through an input it keeps empty, and
+  that input is what UI Automation reads: on the owner's laptop every read after `ghbdtn` held one character around
+  the caret (10.10.2026), so the word was refused as typed into a changed field (`текст активного поля изменился`),
+  or, after a click, as typed into another word, the early switch was refused as well, and only `Pause` converted
+  it. Such a read is not the text the keys went into: the decision, the early switch and the check for a word begun
+  inside another one now take the keys the engine observed, as they do where a field cannot be read at all, and
+  the context decision says `field_too_short`. A read long enough to hold the word and without it is still a
+  changed field.
+
 ## 0.49.0 — 2026-10-10
 
 - `Pause` pressed within 1.5 seconds of a word the engine converted at a pause, with nothing typed since, no longer
