@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.49.0 — 2026-10-10
+
 - `Pause` pressed within 1.5 seconds of a word the engine converted at a pause, with nothing typed since, no longer
   converts the word straight back. A user who sees a word in the wrong layout stops typing to press `Pause`, and the
   pause is the very moment the engine converts the word on its own: in the owner's logs of 01–09.10.2026 every one of
