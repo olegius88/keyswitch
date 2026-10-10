@@ -4,6 +4,16 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- The Windows (x64 and ARM64) and macOS builds move to Python 3.15.0 from 3.14.8, as do LogCourier's packages:
+  Nuitka 4.3 compiles KeySwitch on 3.15 and the result passes the same smoke, installer and upgrade checks, and
+  setup-python now serves the 3.15.0 final on every runner. CI tests the Windows and LogCourier code on 3.15 alone,
+  without the 3.14 entries beside it; Linux keeps testing on Ubuntu 26.04's own Python 3.14, the interpreter the
+  `.deb` runs on. The intent model rebuilt on Python 3.15.0 is byte-identical (artifact, manifest and test report), and
+  `model/intent_v1/build-environment.json` now records that rebuild, as the Windows builds have to ship the
+  interpreter series it names. Its environment probe moves in one cell only, `unicode`: Python 3.15 carries Unicode
+  17.0.0 instead of 16.0.0, which changes 4,806 code points, none of them a letter of the English or Russian layout
+  (the only one in the Latin, Cyrillic and punctuation blocks is U+0295, a phonetic letter no layout types).
+
 ## 0.51.0 — 2026-10-10
 
 - The first word typed after KeySwitch starts no longer holds up the keyboard. The context model read its term
