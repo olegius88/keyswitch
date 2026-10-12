@@ -1,22 +1,23 @@
-# KeySwitch 0.52.0
+# KeySwitch 0.53.0
 
 ## Русский
 
-Выпуск переводит сборки для Windows и macOS на Python 3.15. Полный перечень — в [CHANGELOG.md](CHANGELOG.md).
+Выпуск укорачивает паузу, после которой исправляется слово, и чинит несколько случаев на паузе и в VS Code.
+Полный перечень — в [CHANGELOG.md](CHANGELOG.md).
 
 ### Файлы выпуска
 
-- `KeySwitch-Setup-0.52.0-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
+- `KeySwitch-Setup-0.53.0-x64.exe` — установщик для Windows 10/11 x64. Он не подписан
   сертификатом издателя: SmartScreen покажет предупреждение.
-- `KeySwitch-0.52.0-windows-x64.zip` — переносимый архив для Windows x64.
-- `KeySwitch-Setup-0.52.0-arm64.exe` — установщик для Windows 11 на ARM. Тоже не подписан
+- `KeySwitch-0.53.0-windows-x64.zip` — переносимый архив для Windows x64.
+- `KeySwitch-Setup-0.53.0-arm64.exe` — установщик для Windows 11 на ARM. Тоже не подписан
   сертификатом издателя.
-- `KeySwitch-0.52.0-windows-arm64.zip` — переносимый архив для Windows на ARM. У ARM64-сборки
+- `KeySwitch-0.53.0-windows-arm64.zip` — переносимый архив для Windows на ARM. У ARM64-сборки
   пока нет автоматических обновлений: новую версию скачивайте со страницы выпусков.
-- `keyswitch_0.52.0_amd64.deb` — Ubuntu/Xubuntu, сеанс X11. Если стоит 0.28.0 или
+- `keyswitch_0.53.0_amd64.deb` — Ubuntu/Xubuntu, сеанс X11. Если стоит 0.28.0 или
   новее, эта версия придёт через обычное обновление системы.
-- `KeySwitch-0.52.0-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее), macOS 13 и новее.
-- `KeySwitch-0.52.0-macos-x86_64.zip` — Mac на процессоре Intel, macOS 13 и новее.
+- `KeySwitch-0.53.0-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее), macOS 13 и новее.
+- `KeySwitch-0.53.0-macos-x86_64.zip` — Mac на процессоре Intel, macOS 13 и новее.
 - `SHA256SUMS` — контрольные суммы всех файлов; сверьте их перед установкой.
 
 Архив для Mac нужен ровно один: сборка для Apple Silicon не запускается на Intel и
@@ -24,15 +25,29 @@
 
 ### Что изменилось
 
-- Сборки для Windows (x64 и ARM) и для Mac собраны на Python 3.15.0 вместо 3.14.8, как и LogCourier. Работает
-  KeySwitch так же: те же модели принимают те же решения, весь набор тестов и проверки установки, обновления и
-  удаления проходят на 3.15. Пакет для Ubuntu по-прежнему работает на системном Python 3.14.
-- Модель намерений пересобрана на Python 3.15.0 и совпала с прежней байт в байт.
+- Исправление на паузе срабатывает через 0,7 секунды без набора вместо 1,5. Слово в чужой раскладке, начало которого
+  ранняя смена ещё не может решить, раньше переключалось только после полуторасекундной паузы посреди слова. Пауза
+  внутри слова, которое ещё может стать словом своей раскладки, по-прежнему ничего не исправляет. Если в настройках
+  стояло прежнее значение по умолчанию, оно один раз заменится новым; выбранная вручную пауза сохраняется.
+- Знак в конце слова, набранный клавишей знака другой раскладки, отделяется от слова и допечатывается после
+  исправления — и на пробеле, и на паузе: `текст.`, набранное в английской раскладке как `ntrcn/`, становится
+  `текст.`, а `What.`, набранное в русской раскладке одним сообщением, — `What.`. Раньше слово решалось вместе со
+  знаком и оставалось как набрано.
+- Слово, решённое на паузе после ожидания соседа, исправляется сразу. Раньше исправление ждало следующей клавиши и
+  перепечатывало её в другой раскладке: из `вход` получалось `dход`.
+- Слово, переведённое на паузе, пересматривается вместе со следующим словом, как переведённое на пробеле: если
+  следующее слово вернулось в исходную раскладку, первое тоже может вернуться.
+- В VS Code однобуквенное слово (`b` вместо «и», `d` вместо «в») больше не отклоняется как набранное в изменившееся
+  поле.
+- Слово, набранное перед текстом, который уже стоит в поле, решается так же, как набранное в конце. Раньше английский
+  текст справа от курсора (например, вставленный в чат VS Code) сбивал модель: русское «мне» становилось `vyt`, «нет» —
+  `ytn`, а `vyt`, набранное вместо «мне», оставалось как есть.
 
 ### Модель
 
-- Модели те же, что в 0.51.0: контекстная `context-v3-6291162f5dbd` (корпус v46) и модель префиксов
-  `prefix-v2-bf3dc28f8567`.
+- Контекстная модель `context-v3-d26f82e59d8b` (корпус v52) закрепляет новый движок; модель префиксов прежняя,
+  `prefix-v2-bf3dc28f8567`. На запечатанном test v52 правильный текст сохранён во всех 193 строках, а без ранней
+  смены восстановлено 189 строк из 192, набранных не в той раскладке, против 188 у базовой пары.
 
 ### Что осталось
 
@@ -50,21 +65,22 @@
 
 ## English
 
-This release moves the Windows and macOS builds to Python 3.15. The full list is in [CHANGELOG.md](CHANGELOG.md).
+This release shortens the pause after which a word is corrected and fixes several cases at a pause and in VS Code.
+The full list is in [CHANGELOG.md](CHANGELOG.md).
 
 ### Release files
 
-- `KeySwitch-Setup-0.52.0-x64.exe` — installer for Windows 10/11 x64. It is not signed with
+- `KeySwitch-Setup-0.53.0-x64.exe` — installer for Windows 10/11 x64. It is not signed with
   a publisher certificate, so SmartScreen shows a warning.
-- `KeySwitch-0.52.0-windows-x64.zip` — portable archive for Windows x64.
-- `KeySwitch-Setup-0.52.0-arm64.exe` — installer for Windows 11 on Arm. It is not signed with a
+- `KeySwitch-0.53.0-windows-x64.zip` — portable archive for Windows x64.
+- `KeySwitch-Setup-0.53.0-arm64.exe` — installer for Windows 11 on Arm. It is not signed with a
   publisher certificate either.
-- `KeySwitch-0.52.0-windows-arm64.zip` — portable archive for Windows on Arm. The ARM64 build
+- `KeySwitch-0.53.0-windows-arm64.zip` — portable archive for Windows on Arm. The ARM64 build
   does not update itself yet: download a new version from the releases page.
-- `keyswitch_0.52.0_amd64.deb` — Ubuntu/Xubuntu on an X11 session. With 0.28.0 or newer
+- `keyswitch_0.53.0_amd64.deb` — Ubuntu/Xubuntu on an X11 session. With 0.28.0 or newer
   installed, this version arrives through the ordinary system update.
-- `KeySwitch-0.52.0-macos-arm64.zip` — Mac with Apple silicon (M1 and later), macOS 13 or newer.
-- `KeySwitch-0.52.0-macos-x86_64.zip` — Mac with an Intel processor, macOS 13 or newer.
+- `KeySwitch-0.53.0-macos-arm64.zip` — Mac with Apple silicon (M1 and later), macOS 13 or newer.
+- `KeySwitch-0.53.0-macos-x86_64.zip` — Mac with an Intel processor, macOS 13 or newer.
 - `SHA256SUMS` — checksums of every file; verify them before installing.
 
 Exactly one Mac archive is needed: the Apple silicon build does not run on Intel and vice
@@ -72,15 +88,28 @@ versa.
 
 ### Changed
 
-- The Windows (x64 and Arm) and Mac builds are built on Python 3.15.0 instead of 3.14.8, as is LogCourier. KeySwitch
-  works as before: the same models make the same decisions, and the whole test suite and the install, upgrade and
-  uninstall checks pass on 3.15. The Ubuntu package still runs on the system's Python 3.14.
-- The intent model was rebuilt on Python 3.15.0 and came out byte for byte the same.
+- The pause correction comes after 0.7 s of no typing instead of 1.5 s. A word typed in the wrong layout whose start
+  the early switch cannot decide yet used to switch only after a pause of a second and a half in the middle of the
+  word. A pause inside a word that may still become a word of its layout corrects nothing, as before. A settings file
+  with the old default takes the new one once; a pause chosen in the settings is kept.
+- A sign at the end of a word typed with the other layout's sign key is split off and replayed after the correction,
+  at a space and at a pause: `текст.` typed in the English layout as `ntrcn/` becomes `текст.`, and `What.` typed in
+  the Russian layout as a one-word message becomes `What.`. The word used to be judged with its sign and stayed as
+  typed.
+- A word decided at a pause after waiting for its neighbour is corrected at once. The correction used to wait for the
+  next key and type it again in the other layout: `вход` came out as `dход`.
+- A word converted at a pause is reconsidered together with the next word, as one converted at a space is: when the
+  next word goes back to the first word's layout, the first may go back too.
+- In VS Code a one-letter word (`b` for `и`, `d` for `в`) is no longer refused as typed into a changed field.
+- A word typed in front of text already in the field is decided as one typed at its end. English text right of the
+  caret (pasted into a VS Code chat box, for instance) used to mislead the model: Russian `мне` became `vyt`, `нет`
+  `ytn`, and `vyt` typed for `мне` stayed as it was.
 
 ### Model
 
-- The models are those of 0.51.0: the context model `context-v3-6291162f5dbd` (corpus v46) and the prefix model
-  `prefix-v2-bf3dc28f8567`.
+- The context model `context-v3-d26f82e59d8b` (corpus v52) seals the new engine; the prefix model is still
+  `prefix-v2-bf3dc28f8567`. On the sealed test v52 it kept all 193 correctly typed rows and, without the early
+  switch, restored 189 of the 192 typed in the wrong layout against 188 for the baseline pair.
 
 ### What remains
 

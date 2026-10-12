@@ -37,6 +37,7 @@ from fixture_values.quality_floors import (
     RECEIPT_MIN_CONVERSION_THRESHOLD,
     RECEIPT_MIN_PREFIX_CONVERSION_THRESHOLD,
     RECEIPT_MIN_RESTORATION_MARGIN,
+    RECEIPT_MIN_RESTORED_SHARE,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -111,6 +112,16 @@ class ReleaseReceiptFloorTests(unittest.TestCase):
                 margin = modal["candidate"]["exactly_restored"] - modal["baseline"]["exactly_restored"]
                 with self.subTest(profile=name, mode=mode):
                     self.assertGreaterEqual(margin, RECEIPT_MIN_RESTORATION_MARGIN[mode])
+
+    def test_the_installed_pair_restores_its_share_of_the_rows_typed_in_the_wrong_layout(self) -> None:
+        for name, profile in section(self.receipt, "test", "profiles").items():
+            for mode, modal in mode_counts(cast(Section, profile)).items():
+                if mode not in RECEIPT_MIN_RESTORED_SHARE:
+                    continue
+                candidate = modal["candidate"]
+                with self.subTest(profile=name, mode=mode):
+                    self.assertGreaterEqual(
+                        candidate["exactly_restored"] / candidate["initially_wrong"], RECEIPT_MIN_RESTORED_SHARE[mode])
 
     def test_calibration_recall_holds_and_the_pair_nets_at_least_the_one_it_replaced(self) -> None:
         calibration = section(self.receipt, "calibration")

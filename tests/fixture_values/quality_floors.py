@@ -21,7 +21,18 @@ RECEIPT_MAX_CORRUPTIONS: Final = 0
 # by either. Test v18 had given 15 against 16 and 190 against 183, and test v16 26 against 21: a
 # margin measured on one test set is not one of another, and a new set that gives less is a
 # lowering its pull request states.
-RECEIPT_MIN_RESTORATION_MARGIN: Final[dict[str, int]] = {"default": 0, "early_off": 10}
+# Lowered to 1 with the early switch off for the corpus v52 pair (12.10.2026), and replaced in substance by the share
+# below. The margin measured how often the baseline pair fails, and the engine both pairs run on has since corrected a
+# word at a pause and split signs off a word's end for both: on test v52 the baseline restores 188 of 192 rows, so a
+# pair restoring all 192 would have a margin of 4, and on test v51 179 of 185 (a ceiling of 6). A margin of 10 could
+# only be met by a test the baseline happens to fail ten times. The candidate must still restore more than the baseline.
+RECEIPT_MIN_RESTORATION_MARGIN: Final[dict[str, int]] = {"default": 0, "early_off": 1}
+# Rows typed in the wrong layout the installed pair restores exactly, as a share of all such rows of its sealed test, by
+# settings mode. With the early switch off the pairs of corpora v49-v52 restored 0.983, 0.957, 0.973 and 0.984 (tests
+# v49-v52; the v47 and v48 pairs, on the engine before the pause and sign fixes, 0.889 and 0.922); 0.97 is the level of
+# the last two. With the early switch on the protocol counts a row restored only if the early switch left it exact, and
+# both pairs restore a few percent of the rows there (15 of 192 each on test v52), so that mode keeps the margin alone.
+RECEIPT_MIN_RESTORED_SHARE: Final[dict[str, float]] = {"early_off": 0.97}
 # No replay may fail to execute, change a word's length or land a correction in the wrong layout.
 RECEIPT_MAX_EXECUTION_ERRORS: Final = 0
 RECEIPT_MAX_LENGTH_MISMATCHES: Final = 0
@@ -80,9 +91,15 @@ RECEIPT_MIN_CALIBRATION_RECALL: Final = 0.977
 # (the corpus v44 pair was installed in the branch and replaced before a release). Corpus v46: the corpus v45 pair
 # (context-v3-86437b6d1577, 0.50.0), scored by tools/compare_context_candidates.py on every calibration frame of the
 # corpus v46 recipe, converts 13 962 and 13 996 of the 14 401 conversion rows with 16 false conversions in each profile.
-RECEIPT_CALIBRATION_REFERENCE_CORPUS: Final = "32d83402b5f6c4c6d600f43ed6431cf0388af768b6dd36f7bcdfe8ec6e26f29a"
-RECEIPT_CALIBRATION_REFERENCE_MODEL: Final = "context-v3-86437b6d1577"
-RECEIPT_CALIBRATION_REFERENCE_NET: Final[dict[str, int]] = {"portable": 13946, "reference_hunspell": 13980}
+# Corpus v52: the corpus v46 pair (context-v3-6291162f5dbd, 0.51.0 and 0.52.0), scored by
+# tools/compare_context_candidates.py on every calibration frame of the corpus v52 recipe, converts 13 953 and 13 988 of
+# the 14 398 conversion rows with 15 false conversions in each profile (the corpus v47-v51 pairs were not released:
+# test v47 showed one corrupted row, tests v48 and v50 one restoration fewer than the baseline pair with the early
+# switch, the corpus v49 pair sealed an engine whose pause deadline depended on rounding, and the corpus v51 pair one
+# that gave the model the text a field reader shows right of the caret).
+RECEIPT_CALIBRATION_REFERENCE_CORPUS: Final = "cfdc16ab4d04dad87e815ce72e6d85dfc804ab223772123ea55f00ac8725e64c"
+RECEIPT_CALIBRATION_REFERENCE_MODEL: Final = "context-v3-6291162f5dbd"
+RECEIPT_CALIBRATION_REFERENCE_NET: Final[dict[str, int]] = {"portable": 13938, "reference_hunspell": 13973}
 # Serving thresholds are part of the contract: a lower threshold converts on weaker evidence.
 RECEIPT_MIN_CONVERSION_THRESHOLD: Final = 0.99
 RECEIPT_MIN_PREFIX_CONVERSION_THRESHOLD: Final = 0.985
