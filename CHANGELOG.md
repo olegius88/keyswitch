@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.53.0 — 2026-10-13
+
 - The pause correction now comes after 0.7 s of no typing instead of 1.5 s. A word typed in the wrong layout switches
   as early as the early switch is sure of its first letters; when it is not, the word is converted at the pause, and
   with the layout's wrong letters on screen the typist slows down and waits for it in the middle of the word (`умук`
