@@ -619,6 +619,17 @@ def heads_question(original: str, before: str, after: str, trigger: str) -> bool
             or abbreviation_question(original, original, before) or latin_abbreviation_question(original, original, before))
 
 
+def opening_letter_followed(original: str, literal_tail: str, boundary_text: str) -> bool:
+    """Whether a lone letter has a glyph right after it other than a space.
+
+    word_decision.opening_letter_decision reads that glyph in the target layout (`J.` opens no
+    message as `Ою`), and the kernels do not have it: such a frame takes the CPU path.
+    """
+
+    following = (literal_tail + boundary_text)[:1]
+    return len(LanguageModel.normalize(original)) == 1 and bool(following) and not following.isspace()
+
+
 def record_of(evidence: ContextEvidence) -> npt.NDArray[np.void]:
     """One ContextEvidence as a record: the host path for frames whose evidence Python made (span frames)."""
     record = np.zeros(1, dtype=RECORD)
@@ -724,6 +735,7 @@ class Items:
                 fits[number] = (row.trigger in trigger_index and row.after_origin in origin_index
                                 and row.after_origin != "kept_next_word"
                                 and not heads_question(row.original, row.field.before, row.field.after, row.trigger)
+                                and not opening_letter_followed(row.original, row.literal_tail, row.boundary_text)
                                 and row.group in range(LAYOUT_GROUP_COUNT))
                 dropped[number] = split == TRAIN and trainer.identifier_evidence_dropped(row.identifier)
                 action_row[number] = True

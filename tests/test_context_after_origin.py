@@ -28,6 +28,7 @@ from keyswitch.detector import LanguageDetector
 from keyswitch.input_context import FieldContext
 from keyswitch.language_model import LanguageModel
 import test_input_sequence_matrix as sequences
+from test_default_input_sequences import _CaretReader
 from fixture_values.counts import TRANSITION_FIXTURE_PENDING_TOKEN_MAX_CHARACTERS
 from fixture_values.models import NON_STRING_FIELD_VALUE
 from fixture_values.scores import (
@@ -315,7 +316,7 @@ class ContextAfterOriginTests(unittest.TestCase):
                                        detector, self.item.field, "space", ortho=ortho)
         self.assertIsNotNone(scored.ortho_score)
 
-    def test_native_field_after_is_not_a_planned_conversion(self) -> None:
+    def test_native_field_after_is_withheld_from_the_model(self) -> None:
         class Reader:
             def read(self, application: str, window: int) -> FieldContext:
                 return FieldContext(application, str(window), "r ", "нас", source="native")
@@ -326,8 +327,23 @@ class ContextAfterOriginTests(unittest.TestCase):
             current.engine.context_policy.reader = Reader()
             current.settings.set("detection.context_read_field", True)
             current.physical("r ")
-            self.assertEqual(model.items[0][0].after_origin, "field")
-            self.assertEqual(model.items[0][0].field.after, "нас")
+            self.assertEqual(model.items[0][0].after_origin, "none")
+            self.assertEqual(model.items[0][0].field.after, "")
+            result = current.engine._context_result
+            assert result is not None
+            self.assertEqual(result.withheld_after_characters, len("нас"))
+
+    def test_a_word_typed_in_front_of_text_in_the_field_is_judged_as_typed_last(self) -> None:
+        # The owner typed Russian in front of English text already in a VS Code chat box: the reader
+        # showed it right of the caret, and the model took `мне` for `vyt` (12.10.2026).
+        for group, keys, expected in ((1, "vyt ", "мне "), (0, "vyt ", "мне "), (1, "ytn ", "нет ")):
+            with self.subTest(group=group, keys=keys), sequences.session(group) as current:
+                current.settings.set("detection.context_read_field", True)
+                current.engine.context_policy.reader = _CaretReader(current.backend)
+                current.backend.text, current.backend.caret = "deepseek-v3.2, qwen3-max", 0
+                current.physical(keys)
+                current.flush()
+                self.assertEqual(current.backend.text[:current.backend.caret], expected)
 
     def test_resolver_labels_the_pending_next_word_before_joint_injection(self) -> None:
         # Two letters wait as one does; a lone letter would follow only a curated rule, whatever

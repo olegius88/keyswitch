@@ -4,6 +4,92 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- The pause correction now comes after 0.7 s of no typing instead of 1.5 s. A word typed in the wrong layout switches
+  as early as the early switch is sure of its first letters; when it is not, the word is converted at the pause, and
+  with the layout's wrong letters on screen the typist slows down and waits for it in the middle of the word (`умук`
+  became `ever`, `сщьз` `comp`, `тщге` `nout` only after 1.5 s of waiting, the owner's logs of 0.47-0.52). A pause
+  inside a word that may still become a word of its layout stays a pause to think and corrects nothing, as before.
+  Replayed through the engine, the 239 hesitations of 0.7 to 1.5 s inside a word in those logs end as before but for
+  two, converted right and earlier (`шзеф` for `iptables`). A settings file that carries the old default takes the new
+  one once (settings schema 8); a pause chosen in the settings is kept. A word waiting for its neighbour (`tot` before
+  `ghbdtn`) is still settled no sooner than 1.5 s after its space, so a thought between two words leaves the next word
+  its say, and the sealed sequence protocol runs at its own 1.5 s as before. The pause is measured against its
+  deadline as a caller computes it, so a delay with no exact binary value, as 0.7 s, fires at its mark (`now - last`
+  read 0.6999999999999993 for 0.7 s after 10.0 s).
+- A word that waited for its neighbour and was decided at a pause is now corrected at the pause. The model asks to
+  wait on a word whose layout only the next word can tell (`tot` may be `еще`); when no next word comes, the pause
+  asks the model once more, and a conversion it decides there used to be left pending until the next key came up. By
+  then that key was in the field after the word, and the correction typed it again in the other layout: `tot` and a
+  space, a pause and `вход` gave `еще dход`. Being a correction at a pause, it is now made only while KeySwitch is on
+  and corrects at a pause, and a key still held at the pause puts it off to a later moment (logged once as
+  `context_wait_deferred`). The owner's logs since 01.10.2026 hold no such settled wait, so the case is rare; the
+  tests had checked the pending plan rather than the text on screen.
+- A word converted at a pause before its space is now asked about again when the next word goes back the other way, as
+  a word converted at its space has been (`vs code`). A correction at a pause leaves the word open, its space then
+  commits the converted reading as a word of its own, and the engine kept no claim of the next word on it: an English
+  message opening with a token whose sign is the key of a Russian letter (a capital, an apostrophe and a lowercase
+  letter) was converted at the pause, the next English word, typed in the Russian layout that followed, went back to
+  English, and the first word stayed Cyrillic. Of 676 such authored openings followed by an English sentence, replayed
+  as the sealed sequences are, the installed model left 262 corrupted and leaves 73 now, the ones whose Cyrillic
+  reading looks like a Russian word (`Сэр`); the development sequences, the owner's field batteries and the term
+  battery decide as before, and the abbreviation batteries keep 58 Russian abbreviations of 60 in Russian prose
+  instead of 55 and 28 of 30 after Latin text instead of 27.
+- Keys at the end of a word that type a sign in the other layout are split off, the word is judged without them and,
+  if it converts, they are replayed with it, at a pause as at a space, and now for keys that type another sign there
+  too. `текст.` typed in the English layout is `ntrcn/`: the period is the `/` key, the word was judged with the
+  slash, and the model, sure of `ntrcn`, was unsure of `ntrcn/`; it stayed as typed even at a space. `What.` typed in
+  the Russian layout and left without a space (a one-word message) was judged whole at a pause, with its period, and
+  the check that a word must not turn into something that is not one refused the conversion. A key that is a letter in
+  the other layout counts as a letter of the word (`Ct,z/` is `Себя.`); a token with digits or signs inside is still
+  judged whole. Of 160 authored one-word English messages closed by `.`, `,`, `;` or `'` and typed in the Russian
+  layout, replayed as the sealed sequences are with the early switch on, the installed model restored 116 and restores
+  155 now; of 1,500 Russian one-word messages closed by a period and typed in the English layout, the same model
+  restores 1,460 instead of 1,426 with the slash split off, and of 800 with a letter on a sign key all 800, where
+  0.52.0 restored 798; one more development sequence is restored without the early switch.
+- A one-letter word typed in VS Code is no longer refused as typed into a changed field. VS Code with its
+  screen-reader support off shows the accessibility interface only an input buffer of at most one character; since
+  0.50.0 such a read after a longer word is not taken for the text, but a one-letter word was never covered, and
+  the buffer, holding the space in flight, did not hold the letter: `b` for `и` after `vscode` and `d` for `в` stayed
+  as typed until `Pause` (the owner's PC, 0.52.0). A read of at most one character that does not hold the typed
+  letter is now the buffer too, and the word is decided on the keys the engine saw; a read that holds the letter is
+  still the text.
+- A word typed in front of text already in a field is decided as a word typed at its end. The model is no longer given
+  what the field shows right of the caret, only the right-hand neighbour the engine itself knows: the word it is about
+  to convert or the word it kept. The sealed sequence protocol never reads the field, and the corpus holds right-hand
+  text only as a sentence's own continuation, so the model took its script for the word's language: Russian typed in
+  a VS Code chat box in front of English text already there turned `мне` into `vyt`, `нет` into `ytn` and `кеш` into
+  `rti` at p=0.995 to 0.9999, and `vyt` typed for `мне` stayed (the owner's laptop, 0.38.1 and 0.52.0: 7 false
+  conversions and 6 missed words in 102 words typed in front of such text). The owner's PC, with 470 words read with
+  text right of the caret, showed no gain from it. A letter typed into a written word is still decided as the whole
+  word, with the text before it. The length of what was read there stays in the log (`withheld_after_characters` of
+  `context_decision`).
+- The context model `context-v3-d26f82e59d8b` (corpus v52) replaces `context-v3-6291162f5dbd`: the recipe of pairs
+  v39-v46 retrained on a new corpus, so that the seal pins the changed engine; the prefix model
+  `prefix-v2-bf3dc28f8567` retrained byte-identical. On the same engine it decides calibration v52, the development
+  sequences, the owner's eleven field batteries and the abbreviation and term batteries as the model of 0.52.0 does,
+  but its head for abbreviations after Latin-script text keeps one of 30 Latin-script abbreviations fewer without the
+  early switch (27 against 28) and, on development v52, makes one right conversion fewer and two false ones more in
+  each profile. On the sealed test v52, read once, it kept all 193 correctly typed sequences, where the baseline pair
+  corrupted one, and restored 189 of the 192 typed in the wrong layout without the early switch against 188 for the
+  baseline pair, and 15 with it, as many as the baseline pair. Five pairs before it were not released: on test v47 the
+  corpus v47 pair corrupted one correctly typed row (an English message opening with a capital, an apostrophe and a
+  lowercase letter, converted at a pause; the baseline pair corrupts it too); on tests v48 and v50 the corpus v48 and
+  v50 pairs restored one row fewer than the baseline pair with the early switch (a one-word English message with a
+  closing sign typed in the Russian layout, and a one-word Russian message closed by a period typed in the English
+  layout); the corpus v49 pair passed test v49 but sealed an engine whose pause deadline depended on rounding; and the
+  corpus v51 pair passed test v51 but sealed the engine that still gave the model the text right of the caret. The
+  engine fixes above for words at a pause and for signs at a word's end come from them.
+- The quality floor on restorations without the early switch changes from a margin of 10 rows over the frozen baseline
+  pair to a margin of 1 and a share of 0.97 of the rows typed in the wrong layout
+  (`tests/fixture_values/quality_floors.py`). The engine fixes above correct words for the baseline pair as well: on
+  test v52 it restores 188 of 192 such rows and on test v51 179 of 185, so even a pair restoring every row would have
+  a margin of 4 and 6, and the margin had come to measure how often the baseline pair fails. The pairs of corpora
+  v49-v52 restored 0.983, 0.957, 0.973 and 0.984 of those rows; the installed pair must still restore more than the
+  baseline pair and corrupt no correctly typed row.
+- The context-v3 trainer's GPU back end runs again: frames whose lone letter has a sign right after it, which the
+  message-start rule reads since 0.43.0 and the CUDA kernels do not, take the CPU path, and the kernels agree with
+  the trainer's Python on 12,000 frames of corpus v47 (`tools/context_action_kernels/parity.json` refreshed).
+
 ## 0.52.0 — 2026-10-10
 
 - The Windows (x64 and ARM64) and macOS builds move to Python 3.15.0 from 3.14.8, as do LogCourier's packages:

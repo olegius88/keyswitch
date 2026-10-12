@@ -66,6 +66,10 @@ ENGINE_LOOP_MIN_WAKE_SECONDS: Final = 0.01
 # Typed field context older than this is dropped, and the engine waits as long for the neighbour of a
 # waiting word (input_context exports it as CONTEXT_TTL).
 FIELD_CONTEXT_TTL_SECONDS: Final = 45.0
+# A word waiting for its neighbour is decided at a pause no sooner than this after its space, however short
+# the pause correction is set: the pause that settles it ends the neighbour's chance to decide it, and a
+# thought between two words (`tot`, then `ghbdtn`) takes longer than a hesitation inside one.
+CONTEXT_WAIT_SETTLE_MIN_SECONDS: Final = 1.5
 # Undo stays available for this long after a correction.
 UNDO_AVAILABLE_WINDOW_SECONDS: Final = 10.0
 # The macOS app re-checks the accessibility permission this often while it waits for it.

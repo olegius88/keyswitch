@@ -12,7 +12,13 @@ import time
 from pathlib import Path
 from typing import Callable, TypeVar, cast, overload
 from .constants.file_formats import UNREADABLE_FILE_SUFFIX, UNREADABLE_FILE_TIME_FORMAT, USER_DATA_JSON_INDENT
-from .constants.settings_defaults import DEFAULT_SETTINGS, EARLY_SWITCH_DEFAULT_SCHEMA_VERSION
+from .constants.settings_defaults import (
+    DEFAULT_PAUSE_DELAY_SECONDS,
+    DEFAULT_SETTINGS,
+    EARLY_SWITCH_DEFAULT_SCHEMA_VERSION,
+    PAUSE_DELAY_DEFAULT_SCHEMA_VERSION,
+    PREVIOUS_DEFAULT_PAUSE_DELAY_SECONDS,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -118,17 +124,22 @@ class SettingsStore:
 
         The persisted file is seeded from the shipped defaults, so a value equal to the
         old default is most likely the seed and not a choice. Schema 7 turned the early
-        layout switch on; a schema-6 file with it off adopts that once, and the schema
-        version written back marks the adoption done, so turning it off again holds.
+        layout switch on; a schema-6 file with it off adopts that once. Schema 8 shortened
+        the pause correction from 1.5 s; an older file with the old pause adopts the new
+        one once. The schema version written back marks the adoption done, so a value set
+        again afterwards holds.
         """
 
         version = loaded.get("schema_version")
-        if not isinstance(version, int) or isinstance(version, bool) or version >= EARLY_SWITCH_DEFAULT_SCHEMA_VERSION:
+        if not isinstance(version, int) or isinstance(version, bool) or version >= PAUSE_DELAY_DEFAULT_SCHEMA_VERSION:
             return
         detection = _string_keyed_mapping(loaded.get("detection"))
         current = self._data.get("detection")
-        if detection is not None and detection.get("early_switch") is False and isinstance(current, dict):
-            current["early_switch"] = True
+        if detection is not None and isinstance(current, dict):
+            if version < EARLY_SWITCH_DEFAULT_SCHEMA_VERSION and detection.get("early_switch") is False:
+                current["early_switch"] = True
+            if detection.get("pause_delay_seconds") == PREVIOUS_DEFAULT_PAUSE_DELAY_SECONDS:
+                current["pause_delay_seconds"] = DEFAULT_PAUSE_DELAY_SECONDS
         self._data["schema_version"] = DEFAULT_SETTINGS["schema_version"]
 
     def save(self) -> None:

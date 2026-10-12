@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from collections.abc import Callable, Iterable, Sequence
@@ -11,6 +12,9 @@ from keyswitch.config import SettingsStore
 from keyswitch.constants.settings_defaults import (
     DEFAULT_SETTINGS,
     DEFAULT_CONFIDENCE_THRESHOLD,
+    DEFAULT_PAUSE_DELAY_SECONDS,
+    EARLY_SWITCH_DEFAULT_SCHEMA_VERSION,
+    PREVIOUS_DEFAULT_PAUSE_DELAY_SECONDS,
 )
 from keyswitch.detector import DetectionDecision, LanguageDetector
 from keyswitch.engine import Hotkey, KeySwitchEngine, LearningPrompt
@@ -40,6 +44,7 @@ from keyswitch.x11_backend import BackendProbe, KeyEvent
 from keyswitch.backend import KeyDisposition
 from keyswitch.constants.keyboard import ALT_MASK, CONTROL_MASK
 from fixture_values.clock import (
+    NON_DEFAULT_PAUSE_DELAY_SECONDS,
     BOUNDARY_EVENT_TIMESTAMP,
     CORE_ENTER_TIMESTAMP,
     CORE_FIRST_PAUSE_START_SECONDS,
@@ -274,6 +279,29 @@ class SettingsTests(unittest.TestCase):
             path.write_text('{"schema_version": 6, "detection": {"early_switch": true}}', encoding="utf-8")
             store = SettingsStore(path)
             self.assertTrue(store.get("detection.early_switch"))
+            self.assertEqual(store.get("schema_version"), DEFAULT_SETTINGS["schema_version"])
+
+    def test_an_older_file_adopts_the_shorter_pause_once(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            seeded = json.dumps({"schema_version": EARLY_SWITCH_DEFAULT_SCHEMA_VERSION,
+                                 "detection": {"pause_delay_seconds": PREVIOUS_DEFAULT_PAUSE_DELAY_SECONDS}})
+            path.write_text(seeded, encoding="utf-8")
+            store = SettingsStore(path)
+            self.assertEqual(store.get("detection.pause_delay_seconds"), DEFAULT_PAUSE_DELAY_SECONDS)
+            self.assertEqual(store.get("schema_version"), DEFAULT_SETTINGS["schema_version"])
+            store.set("detection.pause_delay_seconds", PREVIOUS_DEFAULT_PAUSE_DELAY_SECONDS)
+            # The written-back schema version marks the adoption done: the old pause chosen again holds.
+            self.assertEqual(SettingsStore(path).get("detection.pause_delay_seconds"), PREVIOUS_DEFAULT_PAUSE_DELAY_SECONDS)
+            # A pause the user chose in an older file is kept.
+            path.write_text(json.dumps({"schema_version": EARLY_SWITCH_DEFAULT_SCHEMA_VERSION,
+                                        "detection": {"pause_delay_seconds": NON_DEFAULT_PAUSE_DELAY_SECONDS}}),
+                            encoding="utf-8")
+            self.assertEqual(SettingsStore(path).get("detection.pause_delay_seconds"), NON_DEFAULT_PAUSE_DELAY_SECONDS)
+            # An older file without a detection section takes the shipped defaults and the new schema version.
+            path.write_text(json.dumps({"schema_version": EARLY_SWITCH_DEFAULT_SCHEMA_VERSION}), encoding="utf-8")
+            store = SettingsStore(path)
+            self.assertEqual(store.get("detection.pause_delay_seconds"), DEFAULT_PAUSE_DELAY_SECONDS)
             self.assertEqual(store.get("schema_version"), DEFAULT_SETTINGS["schema_version"])
 
     def test_a_single_setting_reports_and_restores_its_default(self) -> None:
@@ -558,6 +586,17 @@ class EngineTests(unittest.TestCase):
         self.assertEqual("".join(item.character_for(target) for item in strokes), "привет")
         self.assertIsNotNone(boundary)
         self.assertEqual(self.engine.snapshot.last_action, "ghbdtn → привет")
+
+    def test_the_pause_correction_comes_exactly_at_its_delay(self) -> None:
+        """`now - last < delay` read 0.6999999999999993 for a pause of 0.7 s typed at 10.0 s and corrected nothing at the
+        delay itself; the deadline is compared as the caller computes it, so the boundary does not depend on rounding."""
+        with patch("keyswitch.engine.time.monotonic", return_value=CORE_FIRST_PAUSE_START_SECONDS):
+            for index, character in enumerate("ghbdtn", start=SYNTHETIC_KEYCODE_BASE):
+                event = letter_event(character, index, 0, self.pair)
+                self.engine._handle(event)
+                self.engine._handle(release_event(event))
+        self.engine._maybe_correct_after_pause(now=CORE_FIRST_PAUSE_START_SECONDS + DEFAULT_PAUSE_DELAY_SECONDS)
+        self.assertEqual(len(self.backend.injections), 1)
 
     def test_word_is_corrected_after_typing_pause_without_boundary(self) -> None:
         with patch("keyswitch.engine.time.monotonic", return_value=CORE_FIRST_PAUSE_START_SECONDS):

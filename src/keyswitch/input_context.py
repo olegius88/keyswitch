@@ -57,10 +57,14 @@ class FieldContext:
         character around the caret, the word was refused as typed into a changed field or into
         another word, and only `Pause` converted it (10.10.2026). The keys the engine saw are then
         the only account of the text. A read with more of the word is the text itself, changed:
-        `hbdtn` after `ghbdtn` lost its first letter, and the word stays refused there.
+        `hbdtn` after `ghbdtn` lost its first letter, and the word stays refused there. A word as
+        short as the buffer is told apart by its letters: a read that does not hold it is the
+        buffer (`b` in `vscode b` read as the space in flight was refused, 11.10.2026), and a read
+        that does is the text.
         """
 
-        return len(self.before) + len(self.after) <= FIELD_INPUT_BUFFER_MAX_CHARACTERS < len(typed)
+        shown = self.before + self.after
+        return len(shown) <= FIELD_INPUT_BUFFER_MAX_CHARACTERS and typed not in shown
 
 
 class FieldReader(Protocol):

@@ -110,6 +110,10 @@ BOUNDARY_EVALUATION_FIRST_KEY_SERIAL: Final = 100
 SIMULATED_KEY_DOWN_SECONDS: Final = 0.05
 SIMULATED_KEY_UP_SECONDS: Final = 0.03
 SIMULATED_WORD_IDLE_SECONDS: Final = 1.7
+# The pause-correction delay the sealed sequence protocol runs the engine with, written into its audited
+# description: the shipped default of detection.pause_delay_seconds until schema 8. The protocol states
+# its own setting, so a new shipped default leaves every sealed test comparable with the earlier ones.
+SEQUENCE_PROTOCOL_PAUSE_DELAY_SECONDS: Final = 1.5
 # Permissions of the test-access ledger lock file.
 TEST_LEDGER_LOCK_FILE_MODE: Final = 0o600
 SIMULATED_CLOCK_START_SECONDS: Final = 1000.0

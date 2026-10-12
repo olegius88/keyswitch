@@ -82,8 +82,9 @@ class InsideWordTests(ContextEngineTests):
         self.type("t")
         self.pause()
         self.assertEqual(self.backend.text, "мы хотим сделать это")
-        # The model saw the whole word and the text around it, not the letter.
-        self.assertIn(("cltkfnm", "мы хотим ", " это"), model.questions)
+        # The model saw the whole word and the text before it, not the letter; what the field shows
+        # right of the caret is not its evidence (ContextPolicy.decide).
+        self.assertIn(("cltkfnm", "мы хотим ", ""), model.questions)
 
     def test_the_model_is_told_that_the_word_is_edited_in_place(self) -> None:
         told: list[bool] = []
@@ -180,7 +181,7 @@ class InsideWordTests(ContextEngineTests):
         self.click_into("мы хотим сдлать это", len("мы хотим сд"), 0)
         self.type("t ")
         self.assertEqual(self.backend.text, "мы хотим сде лать это")
-        self.assertIn(("clt", "мы хотим ", "лать это"), model.questions)
+        self.assertIn(("clt", "мы хотим ", ""), model.questions)
 
     def test_a_word_typed_between_words_is_a_word_of_its_own(self) -> None:
         self.script({"jxtym": "convert"})
