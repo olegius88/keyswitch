@@ -99,6 +99,22 @@ class RussianLayoutSignTailTests(unittest.TestCase):
         self.assertEqual(typed(0, "src/main/ "), "src/main/ ")
         self.assertEqual(typed(0, "docs/ "), "docs/ ")
 
+    def test_a_token_whose_stem_stays_is_judged_whole_at_a_pause(self) -> None:
+        # As at a space: the tail is split off only for a word the model converts without it. `ok` stays, so `ok/`
+        # is asked about again as one token, and stays as typed.
+        for group, keys in ((0, "ok/"), (0, "docs/")):
+            with self.subTest(keys=keys), sequences.session(group) as current:
+                current.physical(keys)
+                current.flush()
+                last = current.engine._last_word_input_at
+                assert last is not None
+                current.engine._maybe_correct_after_pause(now=PAUSE_TRIGGER_OFFSET_SECONDS + last)
+                current.flush()
+                self.assertEqual(current.backend.text, keys)
+                baseline = current.engine._last_baseline
+                assert baseline is not None
+                self.assertEqual(baseline.original, keys)
+
     def test_a_russian_word_ending_in_those_letters_stays(self) -> None:
         # `хлеб` ends with `б`, the key of the comma, and is a word as typed.
         self.assertEqual(typed(1, "[kt, ntcn "), "хлеб тест ")
