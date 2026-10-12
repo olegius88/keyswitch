@@ -66,6 +66,26 @@ class InputBufferFieldTests(unittest.TestCase):
                 self.assertEqual((decision["context_source"], decision["fallback_reason"]),
                                  ("observed", "field_input_buffer"))
 
+    def test_a_one_letter_word_converts_where_the_field_shows_only_an_input_buffer(self) -> None:
+        # A buffer that does not hold the letter cannot be the text it went into, whatever its
+        # length: `vscode b` for `vscode и` was refused as a changed field and only `Pause`
+        # converted the `b` (the owner's PC, 0.52.0, 11.10.2026).
+        for name, shown in BUFFERS.items():
+            with self.subTest(buffer=name):
+                text, events = self.typed(shown, "d ")
+                self.assertEqual(text, "в ")
+                self.assertFalse([event for event in events
+                                  if event["event"] in ("field_contradiction", "correction_aborted")])
+
+    def test_a_one_letter_word_the_field_shows_is_read_from_the_field(self) -> None:
+        # The letter itself before the caret is the text, not a buffer, and is read as the text.
+        with sequences.session(0) as current:
+            current.settings.set("detection.context_read_field", True)
+            current.engine.context_policy.reader = InputBufferReader(lambda text: ("d", ""), lambda: "")
+            self.assertFalse(current.engine.context_policy.reader.read("", 0).input_buffer_only("d"))
+            self.assertTrue(current.engine.context_policy.reader.read("", 0).input_buffer_only("dc"))
+        self.assertFalse(FieldContext("app", "1", "", "").input_buffer_only(""))
+
     def test_a_word_begun_after_a_click_is_not_read_as_typed_into_another(self) -> None:
         # The first read, one letter after the caret, says the word began inside a word; the read
         # at its space cannot hold the word and drops that.

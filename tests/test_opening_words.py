@@ -66,6 +66,37 @@ class ConvertedWordRevisitTests(ContextEngineTests):
         self.type("сщву ", group=1)
         self.assertEqual(self.backend.text, "ты code ")
 
+    def test_a_word_converted_at_a_pause_is_asked_again_too(self) -> None:
+        """A word converted at a pause before its space stays open; kept at that space, it is the same
+        converted word, and a next word going back the other way asks the model about it again. Only a
+        conversion at a space used to be asked: an English message opening with a token whose sign is a
+        Russian letter's key, converted at a pause, stayed Cyrillic while the rest went back to English."""
+        def answer(item: ContextEvidence) -> ContextAction:
+            if item.original == "ns":
+                return "keep" if item.field.after == "code" else "convert"
+            return "convert" if item.original == "сщву" else "keep"
+        model = self.script(answer)
+        self.reset_editor(0)
+        self.type("ns")
+        self.pause()
+        self.assertEqual((self.backend.text, self.backend.group), ("ты", 1))
+        self.type(" сщву ", group=1)
+        self.assertEqual((self.backend.text, self.backend.group), ("ns code ", 0))
+        self.assertIn(("ns", "", "code"), model.questions)
+
+    def test_a_word_converted_at_a_pause_then_changed_is_not_asked_again(self) -> None:
+        """Letters typed after the pause make another word; that one is no conversion to take back."""
+        def answer(item: ContextEvidence) -> ContextAction:
+            if item.original == "ns":
+                return "keep" if item.field.after == "code" else "convert"
+            return "convert" if item.original == "сщву" else "keep"
+        model = self.script(answer)
+        self.reset_editor(0)
+        self.type("ns")
+        self.pause()
+        self.type("q сщву ", group=1)
+        self.assertNotIn(("ns", "", "code"), model.questions)
+
     def test_a_next_word_in_the_same_language_asks_nothing(self) -> None:
         model = self.script(english_after)
         self.reset_editor(0)

@@ -49,12 +49,12 @@ from keyswitch.constants.corpus import (
 )
 from keyswitch.constants.file_formats import VERSION_HASH_CHARACTERS
 from keyswitch.constants.models import CONTEXT_ACTION_FEATURE_VERSION
-from keyswitch.constants.settings_defaults import DEFAULT_PAUSE_DELAY_SECONDS
 from keyswitch.constants.training import (
     CONTEXT_ACTION_GATE_POLICY,
     CONTEXT_ACTION_SEQUENCE_PROTOCOL_VERSION,
     MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP,
     SEQUENCE_DOCUMENT_CAP_PER_GROUP,
+    SEQUENCE_PROTOCOL_PAUSE_DELAY_SECONDS,
     SIMULATED_CLOCK_START_SECONDS,
     SIMULATED_KEY_DOWN_SECONDS,
     SIMULATED_KEY_UP_SECONDS,
@@ -130,7 +130,7 @@ PROTOCOL: dict[str, object] = {
         # "four letters" spells DEFAULT_EARLY_SWITCH_MIN_LENGTH in the audited words; it stays as written.
         "default": ("application defaults with the early switch enabled explicitly, the configuration a user gets by "
                     "turning that feature on: early switch from four letters, "
-                    f"pause correction after {DEFAULT_PAUSE_DELAY_SECONDS} s, manual-layout protection, learning, "
+                    f"pause correction after {SEQUENCE_PROTOCOL_PAUSE_DELAY_SECONDS} s, manual-layout protection, learning, "
                     f"context assist without field reading; {TYPING_PACE}; a layout selection is a manual switch only "
                     "when it changes the live backend group"),
     },
@@ -503,6 +503,8 @@ def replay(plan: SequencePlan, model: ContextModel, models: dict[int, LanguageMo
     with tempfile.TemporaryDirectory(prefix="keyswitch-context-sequence-") as temporary:
         directory = Path(temporary)
         settings = SettingsStore(directory / "settings.json")
+        # The protocol's own pause, whatever the shipped default is (SEQUENCE_PROTOCOL_PAUSE_DELAY_SECONDS).
+        settings.set("detection.pause_delay_seconds", SEQUENCE_PROTOCOL_PAUSE_DELAY_SECONDS)
         if mode == "default":
             # This mode measures the early switch, so it is enabled explicitly whatever the
             # shipped default says (off from 0.23.0, on again since the corpus v13 candidate), and

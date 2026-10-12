@@ -32,7 +32,7 @@ of the release in [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
 - global input observation through `WH_KEYBOARD_LL` on Windows and XRecord in
   regular Linux X11 applications;
-- automatic English and Russian word detection after a typing pause (1.5
+- automatic English and Russian word detection after a typing pause (0.7
   seconds by default, configurable), as well as after Space or
   unambiguous punctuation; idle correction can be disabled independently in
   settings. Keys that can be letters in the other layout remain buffered until
@@ -208,7 +208,7 @@ cd keyswitch
 ```
 
 The application window includes a test field. Select EN, type `test `, then
-`ghbdtn` and stop: the default idle check runs after about 1.5 seconds to
+`ghbdtn` and stop: the default idle check runs after about 0.7 seconds to
 convert it to `привет` and select RU. Space requests an immediate check.
 The initial `test ` completes the default one-word protection after a manual
 language choice; that protection is intentional, not a lost event.

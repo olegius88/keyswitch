@@ -53,6 +53,8 @@ class ContextResult:
     policy_applied: bool = False
     decision_source: str = "baseline"
     fallback_reason: str = ""
+    # Characters the field reader showed right of the caret; the model is not given them.
+    withheld_after_characters: int = 0
 
 
 INNER_MARKS: Final[str] = "-'’"
@@ -236,8 +238,16 @@ class ContextPolicy:
                         # The editor contradicts the observer: do not fall back
                         # to stale strokes and erase a different span of text.
                         return ContextResult(replace(baseline, should_convert=False, reason="текст активного поля изменился"), field=snapshot, decision_source="safety", fallback_reason="field_changed")
-        if after:
-            field = replace(field, after=after)
+        # The text right of the caret is the model's evidence only when the engine knows where it
+        # came from: the neighbour it is about to convert or the word it kept. What a field reader
+        # shows there is not given to the model. The certified protocol never reads the field,
+        # and the corpus has right text only as a sentence's own continuation, so the model took
+        # its script for the word's language: `мне` typed in front of English text already in a
+        # VS Code chat box became `vyt` at p=0.9998, and `vyt` stayed (the owner's laptop, 0.38.1
+        # and 0.52.0: 7 false conversions and 6 missed words in 102 such words, 12.10.2026). The
+        # owner's PC showed no gain from the text in 470 words read with it.
+        withheld = len(field.after)
+        field = replace(field, after=after)
         evidence = evidence_for_decision(
             baseline, alternative, target_group, detector, field, trigger,
             literal_tail=literal_tail, boundary_text=boundary_text,
@@ -248,7 +258,7 @@ class ContextPolicy:
         assert source is not None and target is not None
         prediction = self.model.predict(evidence)
         if mode == "shadow":
-            return ContextResult(baseline, prediction, field, fallback_reason="shadow_mode")
+            return ContextResult(baseline, prediction, field, fallback_reason="shadow_mode", withheld_after_characters=withheld)
         # The model's verdict stands whatever its support flag says. The flag only
         # tells whether some weight names this application or these exact
         # neighbour words; the model knows a handful of each, so in Firefox, Edge
@@ -307,7 +317,7 @@ class ContextPolicy:
             # Russian phrase (`поправь env b`): the term switched the layout,
             # and the model has no single-letter row to know the letter by.
             return ContextResult(baseline, prediction, field, decision_source="short_word_override",
-                                 fallback_reason="trusted_short_word")
+                                 fallback_reason="trusted_short_word", withheld_after_characters=withheld)
         else:
             refusal = RUSSIAN_SLANG_REASON if slang else LONE_LETTER_REASON
             decision = replace(baseline, should_convert=False, reason=refusal if prediction.action == "convert" else {
@@ -319,7 +329,7 @@ class ContextPolicy:
                                decision_source="context_model", fallback_reason=ignored_read)
         if self.model.feature_version != CONTEXT_ACTION_FEATURE_VERSION:
             result = self._licensed(result, baseline, alternative, target_group, field, detector)
-        return self._spelling_a_word(result)
+        return replace(self._spelling_a_word(result), withheld_after_characters=withheld)
 
     @staticmethod
     def _spelling_a_word(result: ContextResult) -> ContextResult:

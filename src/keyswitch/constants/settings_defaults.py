@@ -8,8 +8,12 @@ from typing import Final
 DEFAULT_MINIMUM_WORD_LENGTH: Final = 3
 # Default of detection.confidence; every fallback to the setting uses it.
 DEFAULT_CONFIDENCE_THRESHOLD: Final = 2.0
-# Default of detection.pause_delay_seconds; every fallback to the setting uses it.
-DEFAULT_PAUSE_DELAY_SECONDS: Final = 1.5
+# Default of detection.pause_delay_seconds; every fallback to the setting uses it. A word typed in the
+# wrong layout whose first letters the early switch cannot yet decide is converted after this pause, and
+# the user watching it waited the whole pause in the middle of the word: 1.5 s until schema 8.
+DEFAULT_PAUSE_DELAY_SECONDS: Final = 0.7
+# The pause delay schema 7 and older seeded the settings file with; such a file adopts the new default once.
+PREVIOUS_DEFAULT_PAUSE_DELAY_SECONDS: Final = 1.5
 # Default of detection.early_switch_min_length; every fallback to the setting uses it.
 DEFAULT_EARLY_SWITCH_MIN_LENGTH: Final = 4
 # Default of history.limit; every fallback to the setting uses it.
@@ -17,9 +21,12 @@ DEFAULT_HISTORY_LIMIT: Final = 200
 # Settings files written by schema 6 carry `early_switch: false` as the seeded default of
 # the releases that kept the early switch off; loading them adopts the new default once.
 EARLY_SWITCH_DEFAULT_SCHEMA_VERSION: Final = 7
+# Settings files written by schema 7 or older carry the old pause delay as its seeded default; loading
+# them adopts the shorter one once.
+PAUSE_DELAY_DEFAULT_SCHEMA_VERSION: Final = 8
 # The shipped settings; the persisted file is seeded from it and merged over it.
 DEFAULT_SETTINGS: Final[dict[str, object]] = {
-    "schema_version": EARLY_SWITCH_DEFAULT_SCHEMA_VERSION,
+    "schema_version": PAUSE_DELAY_DEFAULT_SCHEMA_VERSION,
     "enabled": True,
     "general": {
         "start_hidden": True,

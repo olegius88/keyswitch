@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 from keyswitch.constants.settings_defaults import DEFAULT_PAUSE_DELAY_SECONDS
+from keyswitch.constants.timing import CONTEXT_WAIT_SETTLE_MIN_SECONDS
 
 # The AT-SPI-unavailable probe subprocess must finish within this long.
 ATSPI_UNAVAILABLE_PROBE_TIMEOUT_SECONDS: Final = 10
@@ -76,7 +77,7 @@ FAKE_CLOCK_START_SECONDS: Final = 1000.0
 SIMULATED_KEY_HOLD_SECONDS: Final = 0.05
 SIMULATED_KEY_RELEASE_GAP_SECONDS: Final = 0.03
 # Default and short idle gaps fed to idle(), comfortably either side of the real pause-correction
-# delay (DEFAULT_PAUSE_DELAY_SECONDS = 1.5).
+# delay (DEFAULT_PAUSE_DELAY_SECONDS).
 APP_QUIRKS_IDLE_PAUSE_SECONDS: Final = 2.0
 APP_QUIRKS_SHORT_IDLE_SECONDS: Final = 0.5
 # A file's mtime is moved forward by this much so a cache keyed on it must reload.
@@ -112,18 +113,21 @@ UNDO_CHORD_Z_UP_TIMESTAMP: Final = 3003
 UNDO_CHORD_ALT_UP_TIMESTAMP: Final = 3004
 UNDO_CHORD_CONTROL_UP_TIMESTAMP: Final = 3005
 CORE_FIRST_PAUSE_START_SECONDS: Final = 10.0
-CORE_PAUSE_CHECK_JUST_BEFORE_SECONDS: Final = 11.49
-CORE_PAUSE_CHECK_AT_THRESHOLD_SECONDS: Final = 11.5
 CORE_SECOND_PAUSE_START_SECONDS: Final = 20.0
 CORE_SECOND_PAUSE_CHECK_SECONDS: Final = 22.0
 CORE_MANUAL_LAYOUT_PAUSE_CHECK_SECONDS: Final = 12.0
 # Longer than DEFAULT_PAUSE_DELAY_SECONDS so a plain idle() always crosses it.
 DEFAULT_SEQUENCE_IDLE_SECONDS: Final = 1.7
-DEFAULT_SEQUENCE_SHORT_IDLE_SECONDS: Final = 1.3
+DEFAULT_SEQUENCE_SHORT_IDLE_SECONDS: Final = 0.5
 DEFAULT_SEQUENCE_REMAINING_IDLE_SECONDS: Final = 0.4
 DEFAULT_SEQUENCE_EXTENDED_IDLE_SECONDS: Final = 12.0
 LEARNING_PROMPT_EARLY_NOW_SECONDS: Final = 10.0
 JUST_BEFORE_DEADLINE_MARGIN_SECONDS: Final = 0.01
+# Just short of, and just past, the shipped pause-correction delay after the first pause's keys.
+CORE_PAUSE_CHECK_JUST_BEFORE_SECONDS: Final = (CORE_FIRST_PAUSE_START_SECONDS + DEFAULT_PAUSE_DELAY_SECONDS
+                                               - JUST_BEFORE_DEADLINE_MARGIN_SECONDS)
+CORE_PAUSE_CHECK_AT_THRESHOLD_SECONDS: Final = (CORE_FIRST_PAUSE_START_SECONDS + DEFAULT_PAUSE_DELAY_SECONDS
+                                                + JUST_BEFORE_DEADLINE_MARGIN_SECONDS)
 MANUAL_LAYOUT_PAUSE_NOW_SECONDS: Final = 3.0
 PAUSE_GUARD_INPUT_AT_SECONDS: Final = 10.0
 PAUSE_GUARD_NOW_SECONDS: Final = 12.0
@@ -208,8 +212,8 @@ WINDOWS_CHORD_LETTER_TIMESTAMP: Final = 5100
 WINDOWS_AFTER_PROMPT_LETTER_TIMESTAMP: Final = 5200
 X11_FIXTURE_EVENT_TIMESTAMP: Final = 77
 X11_EXPECTED_DEADLINE_MARGIN_SECONDS: Final = 5
-# A fixture "now" just past the pause-correction delay after the last word.
-SETTLED_NOW_SECONDS: Final = LAST_WORD_INPUT_AT_SECONDS + DEFAULT_PAUSE_DELAY_SECONDS + PAST_PAUSE_THRESHOLD_MARGIN_SECONDS
+# A fixture "now" just past the pause that settles a waiting word after the last word.
+SETTLED_NOW_SECONDS: Final = LAST_WORD_INPUT_AT_SECONDS + CONTEXT_WAIT_SETTLE_MIN_SECONDS + PAST_PAUSE_THRESHOLD_MARGIN_SECONDS
 # A fixture "now" well short of the pause-correction delay after the last word.
 TOO_SOON_NOW_SECONDS: Final = LAST_WORD_INPUT_AT_SECONDS + BEFORE_PAUSE_THRESHOLD_MARGIN_SECONDS
 # keyswitch.macos_main_thread: a wait the simulated main thread never answers in time, the delay after

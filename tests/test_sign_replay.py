@@ -12,6 +12,7 @@ import unittest
 from unittest.mock import patch
 
 import test_input_sequence_matrix as sequences
+from fixture_values.clock import PAUSE_TRIGGER_OFFSET_SECONDS
 
 
 def typed(group: int, keys: str) -> str:
@@ -57,6 +58,46 @@ class RussianLayoutSignTailTests(unittest.TestCase):
     def test_a_word_with_a_sign_typed_in_the_russian_layout_converts_whole(self) -> None:
         self.assertEqual(typed(1, "hello, world "), "hello, world ")
         self.assertEqual(typed(1, "HTML. ok "), "HTML. ok ")
+
+    def test_a_word_with_a_sign_left_at_a_pause_converts_as_at_a_space(self) -> None:
+        # A one-word message: `What.` typed in the Russian layout and left without a space. The pause
+        # used to judge the whole token, `What.` with its period, and the shape check refused a word
+        # turned into letters and a sign; at a space the period was split off and replayed (`What. `).
+        for keys in ("What.", "Yeah.", "hello,"):
+            with self.subTest(keys=keys), sequences.session(1) as current:
+                current.physical(keys)
+                current.flush()
+                last = current.engine._last_word_input_at
+                assert last is not None
+                current.engine._maybe_correct_after_pause(now=PAUSE_TRIGGER_OFFSET_SECONDS + last)
+                current.flush()
+                self.assertEqual(current.backend.text, keys)
+        with sequences.session(1) as current:
+            current.physical("[kt,")
+            last = current.engine._last_word_input_at
+            assert last is not None
+            current.engine._maybe_correct_after_pause(now=PAUSE_TRIGGER_OFFSET_SECONDS + last)
+            self.assertEqual(current.backend.text, "хлеб")
+
+    def test_a_sign_of_the_other_layout_at_the_end_is_split_off_too(self) -> None:
+        # `текст.` typed in the English layout is `ntrcn/`: the period of the Russian layout is the `/` key. The word
+        # was judged with the slash, and the model was unsure of `ntrcn/` while sure of `ntrcn`.
+        self.assertEqual(typed(0, "ntrcn/ "), "текст. ")
+        with sequences.session(0) as current:
+            current.physical("ntrcn/")
+            current.flush()
+            last = current.engine._last_word_input_at
+            assert last is not None
+            current.engine._maybe_correct_after_pause(now=PAUSE_TRIGGER_OFFSET_SECONDS + last)
+            current.flush()
+            self.assertEqual(current.backend.text, "текст.")
+        with sequences.session(0) as current:
+            self.assertEqual(current.engine._replayed_signs(tuple(current.key(key) for key in "ntrcn/"), 0), 1)
+        # A key that is a letter in the Russian layout is a letter of the word (`б` is the comma key).
+        self.assertEqual(typed(0, "Ct,z/ "), "Себя. ")
+        # A path keeps its slash: the rest is no word of letters only, and an English word stays.
+        self.assertEqual(typed(0, "src/main/ "), "src/main/ ")
+        self.assertEqual(typed(0, "docs/ "), "docs/ ")
 
     def test_a_russian_word_ending_in_those_letters_stays(self) -> None:
         # `хлеб` ends with `б`, the key of the comma, and is a word as typed.
