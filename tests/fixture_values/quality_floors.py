@@ -91,15 +91,13 @@ RECEIPT_MIN_CALIBRATION_RECALL: Final = 0.977
 # (the corpus v44 pair was installed in the branch and replaced before a release). Corpus v46: the corpus v45 pair
 # (context-v3-86437b6d1577, 0.50.0), scored by tools/compare_context_candidates.py on every calibration frame of the
 # corpus v46 recipe, converts 13 962 and 13 996 of the 14 401 conversion rows with 16 false conversions in each profile.
-# Corpus v52: the corpus v46 pair (context-v3-6291162f5dbd, 0.51.0 and 0.52.0), scored by
-# tools/compare_context_candidates.py on every calibration frame of the corpus v52 recipe, converts 13 953 and 13 988 of
-# the 14 398 conversion rows with 15 false conversions in each profile (the corpus v47-v51 pairs were not released:
-# test v47 showed one corrupted row, tests v48 and v50 one restoration fewer than the baseline pair with the early
-# switch, the corpus v49 pair sealed an engine whose pause deadline depended on rounding, and the corpus v51 pair one
-# that gave the model the text a field reader shows right of the caret).
-RECEIPT_CALIBRATION_REFERENCE_CORPUS: Final = "cfdc16ab4d04dad87e815ce72e6d85dfc804ab223772123ea55f00ac8725e64c"
-RECEIPT_CALIBRATION_REFERENCE_MODEL: Final = "context-v3-6291162f5dbd"
-RECEIPT_CALIBRATION_REFERENCE_NET: Final[dict[str, int]] = {"portable": 13938, "reference_hunspell": 13973}
+# Corpus v54: the corpus v52 pair (context-v3-d26f82e59d8b, 0.53.0), scored by tools/compare_context_candidates.py on
+# every calibration frame of the corpus v54 recipe, converts 13 948 and 13 983 of the 14 393 conversion rows with 15
+# false conversions in each profile (the corpus v53 pair was not installed: test v53 restored one row fewer than the
+# baseline pair without the early switch, a Russian message whose last word was typed in the English layout).
+RECEIPT_CALIBRATION_REFERENCE_CORPUS: Final = "02c42fe6492051e7aa7a0e82b264d31781179b2dcd0577094c9992457e18bc7e"
+RECEIPT_CALIBRATION_REFERENCE_MODEL: Final = "context-v3-d26f82e59d8b"
+RECEIPT_CALIBRATION_REFERENCE_NET: Final[dict[str, int]] = {"portable": 13933, "reference_hunspell": 13968}
 # Serving thresholds are part of the contract: a lower threshold converts on weaker evidence.
 RECEIPT_MIN_CONVERSION_THRESHOLD: Final = 0.99
 RECEIPT_MIN_PREFIX_CONVERSION_THRESHOLD: Final = 0.985
