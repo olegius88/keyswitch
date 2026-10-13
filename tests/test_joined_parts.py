@@ -82,11 +82,18 @@ class JoinedPartTests(InputIntegrityTests):
         self.assertEqual((evaluation["trigger"], evaluation["literal_head"]), ("pause", "mongo-"))
 
     def test_a_pause_in_the_middle_of_the_part_is_a_pause_to_think(self) -> None:
-        self.type("git-ht", group=0)
-        last = self.engine._last_word_input_at
-        assert last is not None
-        self.engine._maybe_correct_after_pause(now=last + PAUSE_TRIGGER_OFFSET_SECONDS)
-        self.assertEqual(self.backend.text, "git-ht")
+        # `sh` starts many English words: the part is still being typed, as a word would be.
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.type("mongo-sh", group=0)
+            last = self.engine._last_word_input_at
+            assert last is not None
+            self.engine._maybe_correct_after_pause(now=last + PAUSE_TRIGGER_OFFSET_SECONDS)
+        self.assertEqual(self.backend.text, "mongo-sh")
+        self.assertEqual(self.events(logs.output, "joined_part_decision"), [])
+
+    def test_signs_in_a_row_join_as_one(self) -> None:
+        self.type("redis--rkfcnth ", group=0)
+        self.assertEqual(self.backend.text, "redis--кластер ")
 
     def test_tokens_right_or_wrong_as_a_whole_are_decided_whole(self) -> None:
         # A token typed in one layout, right as typed or converted whole; a head the model only suggests to

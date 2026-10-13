@@ -10,6 +10,7 @@ And a letter no rule names stays whatever the model says: it never saw a lone le
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 
 from keyswitch.context_model import ContextAction, ContextEvidence
 from test_context_policy import ContextEngineTests
@@ -39,21 +40,31 @@ class StrandedLetterTests(ContextEngineTests):
         self.assertEqual(self.phrase("что-то вроде как в ", "git diff d "), "что-то вроде как в git diff в ")
 
     def test_a_letter_typed_into_a_line_reads_the_phrase_from_the_field(self) -> None:
-        # After a click into `почему я не вижу  /home` the engine saw no Russian word typed before the
-        # term; the field shows them (the owner's laptop, VS Code, 13.10.2026).
+        # After a click into `почему я не вижу в  /home` the engine saw only `vscode` typed before the letter,
+        # no Russian word; the field shows them (the owner's laptop, VS Code, 13.10.2026).
         from test_default_input_sequences import _CaretReader
         from keyswitch.backend import KeyEvent
+        from keyswitch.input_context import FieldContext
+
+        class NoRead:
+            status = "available"
+
+            def read(self, application: str, window: int) -> FieldContext | None:
+                return None
 
         self.settings.set("detection.context_read_field", True)
-        self.engine.context_policy.reader = _CaretReader(self.backend)
-        self.reset_editor(0)
-        self.backend.text = "почему я не вижу в vscode  /home"
-        self.backend.caret = len("почему я не вижу в vscode ")
         pointer = KeyEvent(True, 0, "Pointer", "", ("", ""), 0, 0, 0)
-        self.engine._handle(pointer)
-        self.engine._handle(KeyEvent(False, 0, "Pointer", "", ("", ""), 0, 0, 0))
-        self.type("d ")
-        self.assertEqual(self.backend.text, "почему я не вижу в vscode в  /home")
+        for reader, expected in ((_CaretReader(self.backend), "почему я не вижу в vscode в  /home"),
+                                 (NoRead(), "почему я не вижу в vscode d  /home")):
+            with self.subTest(reader=type(reader).__name__):
+                self.engine.context_policy.reader = reader
+                self.reset_editor(0)
+                self.backend.text = "почему я не вижу в  /home"
+                self.backend.caret = len("почему я не вижу в ")
+                self.engine._handle(pointer)
+                self.engine._handle(replace(pointer, pressed=False))
+                self.type("vscode d ")
+                self.assertEqual(self.backend.text, expected)
 
     def test_a_letter_after_latin_text_alone_stays(self) -> None:
         self.reset_editor(0)
