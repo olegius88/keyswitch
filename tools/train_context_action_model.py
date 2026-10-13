@@ -29,7 +29,7 @@ from unittest.mock import patch
 
 from keyswitch.context_action_features import (
     abbreviation_question, alone_question, attested_abbreviation, capitals_question, extract_action_features,
-    latin_abbreviation_question, letter_question, start_question,
+    latin_abbreviation_question, letter_question, start_question, unknown_question, unknown_shape,
 )
 from keyswitch.context_model import (
     ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, _term_frequency, term_bucket,
@@ -62,20 +62,26 @@ from context_lookahead_curriculum import LookaheadAnchor, LookaheadSeed, build_l
 from context_optimizer import Kernel, Packed
 from context_physical_keys import translated as translated
 from evaluate_context_action_sequences import LEDGER_ROOT, runtime_provenance
-from freeze_context_action_corpus import CorpusRow, load_split, physical, typo_variants
+from freeze_context_action_corpus import CorpusRow, load_split, physical, readable, typo_variants
 from freeze_context_action_holdout import ledger_test_aliases
 from reconcile_context_action_corpus import expanded_aliases
 from train_context_model import CapturedSource
 from keyswitch.constants.file_formats import HEXADECIMAL_BASE, VERSION_HASH_CHARACTERS
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
 from keyswitch.constants.models import (
-    ABBREVIATION_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, ALONE_HEAD_LETTERS, CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION,
+    ABBREVIATION_FEATURE_PREFIX, ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS, ALONE_FEATURE_PREFIX, ALONE_HEAD_LETTERS,
+    CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION,
     CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS,
     KEPT_CONTEXT_WORD_MAX_CHARACTERS, KEPT_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX, LETTER_FEATURE_PREFIX,
-    PLANNED_CONTEXT_AFTER_MAX_CHARACTERS, PLANNED_CONTEXT_WORD_MAX_CHARACTERS, START_FEATURE_PREFIX,
+    PLANNED_CONTEXT_AFTER_MAX_CHARACTERS, PLANNED_CONTEXT_WORD_MAX_CHARACTERS, START_FEATURE_PREFIX, UNKNOWN_FEATURE_PREFIX,
+    UNKNOWN_HEAD_MIN_CHARACTERS,
 )
 from keyswitch.constants.training import (
     ABBREVIATION_SPLIT_MODULUS,
+    TERM_COUNT_DROPOUT_FAMILIES,
+    TERM_COUNT_DROPOUT_MIN_LETTERS,
+    UNKNOWN_TOKEN_MAX_CHARACTERS,
+    UNKNOWN_TOKEN_SPLIT_MODULUS,
     CONTEXT_ACTION_BACKEND_AUTO,
     CONTEXT_ACTION_BACKENDS,
     CONTEXT_ACTION_BACK_END_SOURCES,
@@ -777,6 +783,116 @@ def latin_abbreviation_curriculum(split: str, source_rows: Sequence[CorpusRow], 
     return rows, {"frames": len(rows), "forms": dict(sorted(counts.items())), "frames_per_form": per_form, "sample_weight": weight,
                   "scope": "attested Cyrillic abbreviations of this split's share, typed as written after English prose or Latin terms, "
                            "labelled by the term counts of both readings (latin_abbreviation_curriculum)."}
+
+
+def unknown_token_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                             options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """Tokens of the unknown-token head's class (context_action_features.unknown_question) after Russian prose.
+
+    The frozen model kept a token no table counts after Russian prose as Russian slang, and the terms typed in the
+    wrong layout with it: `цуиоы` (`webjs`), `мгуоы` (`vuejs`), `реьч` (`htmx`) stayed (the owner's typing in a chat
+    input of VS Code, 13.10.2026). The corpus already frames the class's Russian words: rare words, names and typos of
+    its Russian rows typed as written, keep. This curriculum adds what it lacks:
+    - terms: one in `item_modulus` of the Latin tokens of letters and digits Russian technical text uses at least
+      `minimum_term_count` times whose keys in the Russian layout are a token of the class's shape that no lexicon
+      holds and Russian prose does not use, each after the left context of a Russian row of the split: typed in the
+      Russian layout with the term typed right a sentence before (convert; the owner typed `webjs` and then `цуиоы` in
+      one message, and the head answers Russian letters only after such an echo), and typed as meant (keep), for one
+      term in `echo_modulus` also after itself and after its keys left in Cyrillic by an earlier miss. Each term goes to
+      TRAIN or DEVELOPMENT by hash (UNKNOWN_TOKEN_SPLIT_MODULUS);
+    - echoes kept: one in `echo_modulus` of the class's Russian words of the split's own rows, after their left context,
+      with their keys typed earlier in the text as a miss left them there - keep, so that the other reading earlier in
+      the text alone converts nothing.
+    A TRAIN family of TERM_COUNT_DROPOUT_MIN_LETTERS letters or more drops its own term counts one time in
+    TERM_COUNT_DROPOUT_FAMILIES (frame_evidence). Items of this corpus's test, of every accessed test and of the
+    recipe's `held_out` list (the tokens of the authored batteries that gate this head) are refused.
+    """
+
+    item_modulus = int(cast(int, options["item_modulus"]))
+    contexts = natural_mixed_contexts(source_rows)[1]
+    if not item_modulus or not contexts or split not in (TRAIN, DEVELOPMENT):
+        return [], {"frames": 0, "scope": "not used"}
+    weight = float(cast(float, options["sample_weight"]))
+    echo_modulus = int(cast(int, options["echo_modulus"]))
+    held_out = frozenset(str(token).casefold() for token in cast(list[object], options.get("held_out", [])))
+    uncounted = CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS[0]
+    table = _term_frequency()
+    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+    rows: list[ActionRow] = []
+    counts: Counter[str] = Counter()
+
+    def frame(identifier: str, typed: str, group: int, before: str, action: ContextAction) -> ActionRow:
+        trigger, boundary_text = _varied_boundary(identifier)
+        field = FieldContext(applications[variant_choice(identifier, "application", len(applications))], "public-training",
+                             before[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:], "", "unknown")
+        return ActionRow(identifier, typed, group, field, trigger, "", action, "unknown_token", boundary_text, weight)
+
+    for term, count in sorted(table["latin"].items()):
+        if (count < int(cast(int, options["minimum_term_count"])) or not term.isascii() or not term.isalnum()
+                or not term.islower() or len(set(term)) < UNKNOWN_HEAD_MIN_CHARACTERS
+                or not UNKNOWN_HEAD_MIN_CHARACTERS <= len(term) <= UNKNOWN_TOKEN_MAX_CHARACTERS):
+            continue
+        typed = translated(term, 0)
+        family = f"unknown-term:{typed}"
+        if (not unknown_shape(typed) or plausible_reading(typed, 1) or table["cyrillic"].get(typed, 0) >= uncounted
+                or table["russian"].get(typed, 0) >= uncounted or variant_choice(family, "draw", item_modulus)):
+            continue
+        share = DEVELOPMENT if variant_choice(family, "split", UNKNOWN_TOKEN_SPLIT_MODULUS) == 0 else TRAIN
+        if share != split:
+            continue
+        if term in held_out or typed in held_out or refused & (expanded_aliases(term) | expanded_aliases(typed)):
+            counts["refused"] += 1
+            continue
+        echo = bool(echo_modulus) and variant_choice(family, "echo", echo_modulus) == 0
+        # (typed as, layout, label, what stands earlier in the text): the term typed in the Russian layout converts once
+        # it was typed right before (the head answers Russian letters only then); typed as meant it stays, alone, after
+        # itself, and after its keys left in Cyrillic by an earlier miss.
+        frames = [(typed, 1, "convert", term), (term, 0, "keep", term if echo else "")]
+        if echo:
+            frames.append((term, 0, "keep", typed))
+        for index, (shown, group, action, earlier_word) in enumerate(frames):
+            identifier = f"{family}:{index}"
+            before = contexts[variant_choice(identifier, "context", len(contexts))]
+            if earlier_word:
+                earlier = contexts[variant_choice(identifier, "earlier-context", len(contexts))].rstrip()
+                before = f"{earlier} {earlier_word}. {before}"
+            if not unknown_question(shown, before):
+                # A long term earlier in a short text makes it Latin text: no frame of the class.
+                counts["outside_class"] += 1
+                continue
+            counts[f"echo:{action}" if earlier_word else action] += 1
+            rows.append(frame(identifier, shown, group, before, action))
+    for row, group, _, _ in _monolingual_rows(source_rows):
+        word = row.original
+        if (group != 1 or not echo_modulus or not unknown_question(word, row.before) or plausible_reading(word, 1)
+                or variant_choice(row.identifier, "echo-word", echo_modulus)):
+            continue
+        keys = translated(word, 1)
+        if word.casefold() in held_out or keys.casefold() in held_out or refused & (expanded_aliases(word) | expanded_aliases(keys)):
+            counts["refused"] += 1
+            continue
+        identifier = f"unknown-echo:{row.identifier}"
+        earlier = contexts[variant_choice(identifier, "earlier-context", len(contexts))].rstrip()
+        before = f"{earlier} {keys}. {row.before}"
+        if not unknown_question(word, before):
+            counts["outside_class"] += 1
+            continue
+        counts["echo:keep"] += 1
+        rows.append(frame(identifier, word, 1, before, "keep"))
+    return rows, {"frames": len(rows), "items": dict(sorted(counts.items())), "item_modulus": item_modulus,
+                  "echo_modulus": echo_modulus, "held_out": len(held_out), "sample_weight": weight,
+                  "scope": "terms of the Latin table typed in the Russian layout after Russian prose (convert), some with the term "
+                           "typed right earlier in the text, and the class's Russian words of the split's rows with their keys "
+                           "earlier in the text (keep), of this split's share (unknown_token_curriculum)."}
+
+
+def term_counts_dropped(identifier: str, original: str) -> bool:
+    """Deterministic: one unknown-token family in TERM_COUNT_DROPOUT_FAMILIES of TERM_COUNT_DROPOUT_MIN_LETTERS letters or
+    more is trained with its own term counts dropped (unknown_token_curriculum)."""
+
+    if not identifier.startswith("unknown-") or sum(char.isalpha() for char in original) < TERM_COUNT_DROPOUT_MIN_LETTERS:
+        return False
+    return variant_choice(identifier.rsplit(":", 1)[0], "count-dropout", TERM_COUNT_DROPOUT_FAMILIES) == 0
 
 
 def _cyrillic(word: str) -> bool:
@@ -1718,7 +1834,7 @@ def frozen_base(options: Mapping[str, object]) -> ContextModel | None:
 # The heads a frozen base can carry besides the kept-neighbour question, by the recipe's name.
 HEAD_PREFIXES: Final = {"capitals": CAPITALS_FEATURE_PREFIX, "alone": ALONE_FEATURE_PREFIX, "start": START_FEATURE_PREFIX,
                          "letter": LETTER_FEATURE_PREFIX, "abbreviation": ABBREVIATION_FEATURE_PREFIX,
-                         "latin_abbreviation": LATIN_ABBREVIATION_FEATURE_PREFIX}
+                         "latin_abbreviation": LATIN_ABBREVIATION_FEATURE_PREFIX, "unknown": UNKNOWN_FEATURE_PREFIX}
 # A recipe without single-letter frames (the recipes before corpus v34).
 NO_LETTER_CURRICULUM: Final[dict[str, object]] = {"term_sentences": 0, "english_sentences": 0, "minimum_term_count": 0,
                                                   "sample_weight": 1.0}
@@ -1728,6 +1844,9 @@ NO_ABBREVIATION_CURRICULUM: Final[dict[str, object]] = {"frames_per_form": 0, "m
 # A recipe without Latin-context abbreviation frames (the recipes before corpus v38).
 NO_LATIN_ABBREVIATION_CURRICULUM: Final[dict[str, object]] = {"frames_per_form": 0, "minimum_cyrillic_count": 0, "dominance": 1.0,
                                                               "minimum_term_count": 0, "sample_weight": 1.0}
+# A recipe without unknown-token frames (the recipes before corpus v57).
+NO_UNKNOWN_TOKEN_CURRICULUM: Final[dict[str, object]] = {"item_modulus": 0, "echo_modulus": 0, "minimum_term_count": 0,
+                                                         "held_out": [], "sample_weight": 1.0}
 
 
 def frozen_heads(options: Mapping[str, object]) -> dict[str, int]:
@@ -1919,7 +2038,8 @@ def head_question(original: str, alternative: str, before: str, after: str, trig
             or (ABBREVIATION_FEATURE_PREFIX in prefixes and abbreviation_question(original, alternative, before))
             or (LATIN_ABBREVIATION_FEATURE_PREFIX in prefixes and latin_abbreviation_question(original, alternative, before))
             or (ALONE_FEATURE_PREFIX in prefixes and alone_question(original, alternative, before, after, trigger))
-            or (START_FEATURE_PREFIX in prefixes and start_question(original, alternative, before, after)))
+            or (START_FEATURE_PREFIX in prefixes and start_question(original, alternative, before, after))
+            or (UNKNOWN_FEATURE_PREFIX in prefixes and unknown_question(original, before)))
 
 
 def carried_prefixes(model: ContextModel) -> frozenset[str]:
@@ -2217,6 +2337,11 @@ def frame_chain(inputs: FitInputs, profile: str, split: str, rows: Sequence[Acti
             split, inputs.source_rows[split], inputs.refused,
             cast(dict[str, object], options.get("latin_abbreviation_curriculum", NO_LATIN_ABBREVIATION_CURRICULUM)))
         result.extend(latin_abbreviation)
+        # And the unknown-token head's, on terms and words TRAIN never framed.
+        unknown, reports["unknown_token"] = unknown_token_curriculum(
+            split, inputs.source_rows[split], inputs.refused,
+            cast(dict[str, object], options.get("unknown_token_curriculum", NO_UNKNOWN_TOKEN_CURRICULUM)))
+        result.extend(unknown)
     evidence = alone_evidence(options)
     if evidence is not None:
         lone, reports["lone_word"] = lone_word_curriculum(split, inputs.refused, evidence, partial(base_action, inputs=inputs))
@@ -2240,9 +2365,13 @@ def tail_curricula(inputs: FitInputs) -> tuple[list[ActionRow], dict[str, object
     latin_abbreviation, latin_abbreviation_report = latin_abbreviation_curriculum(
         TRAIN, inputs.source_rows[TRAIN], inputs.refused,
         cast(dict[str, object], options.get("latin_abbreviation_curriculum", NO_LATIN_ABBREVIATION_CURRICULUM)))
-    return [*kept, *counted, *letter, *abbreviation, *latin_abbreviation], {
+    unknown, unknown_report = unknown_token_curriculum(
+        TRAIN, inputs.source_rows[TRAIN], inputs.refused,
+        cast(dict[str, object], options.get("unknown_token_curriculum", NO_UNKNOWN_TOKEN_CURRICULUM)))
+    return [*kept, *counted, *letter, *abbreviation, *latin_abbreviation, *unknown], {
         "kept_neighbour_curriculum": kept_report, "counted_token_curriculum": counted_report, "letter_curriculum": letter_report,
-        "abbreviation_curriculum": abbreviation_report, "latin_abbreviation_curriculum": latin_abbreviation_report}
+        "abbreviation_curriculum": abbreviation_report, "latin_abbreviation_curriculum": latin_abbreviation_report,
+        "unknown_token_curriculum": unknown_report}
 
 
 def prepared_frames(rows: Sequence[ActionRow], spans: SpanCurriculum, split: str) -> list[tuple[str, ActionRow | SpanFrame]]:
@@ -2255,9 +2384,13 @@ def prepared_frames(rows: Sequence[ActionRow], spans: SpanCurriculum, split: str
 
 
 def frame_evidence(row: ActionRow, split: str, detector: LanguageDetector, ortho: OrthoModel | None) -> ContextEvidence:
-    """The evidence of an action frame; TRAIN drops the identifier evidence of some families."""
+    """The evidence of an action frame; TRAIN drops the identifier evidence of some families, and the term counts of
+    some unknown-token families (term_counts_dropped)."""
     dropped = split == TRAIN and identifier_evidence_dropped(row.identifier)
-    return evidence(row, detector, ortho, identifiers=BLIND_IDENTIFIERS if dropped else None)
+    item = evidence(row, detector, ortho, identifiers=BLIND_IDENTIFIERS if dropped else None)
+    if split == TRAIN and term_counts_dropped(row.identifier, row.original):
+        item = replace(item, term_counts_dropped=True)
+    return item
 
 
 def frame_features(frame: ActionRow | SpanFrame, split: str, detector: LanguageDetector, ortho: OrthoModel | None) -> dict[str, float]:
@@ -2468,7 +2601,7 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
                                  if "balance" in features.chains[profile, TRAIN]},
         "test_accessed": False,
         "scope": "natural KEEP plus declared layout/mixed-context interventions; sequence evaluation required"}
-    (output / SEAL).write_bytes(canonical(seal))
+    (output / SEAL).write_bytes(readable(seal))
     print(f"{seal['stage']}: {payload['version']}; threshold={threshold}; test not read", flush=True)
     return seal
 

@@ -43,6 +43,9 @@ from .constants.models import (
     START_DELTA_BANDS,
     START_FEATURE_PREFIX,
     START_HEAD_MIN_LETTERS,
+    UNKNOWN_FEATURE_PREFIX,
+    UNKNOWN_HEAD_MIN_CHARACTERS,
+    UNKNOWN_HEAD_SIGN_KEY_LETTERS,
 )
 
 if TYPE_CHECKING:
@@ -115,6 +118,20 @@ def _dominant(text: str) -> str:
     return "ru" if ru > en else "en" if en > ru else "none"
 
 
+def own_bucket(item: ContextEvidence, text: str, alphabet: str) -> str:
+    """How often a reading of the decided token occurs in one term table (context_model.term_bucket).
+
+    A training frame drawn with its counts dropped (ContextEvidence.term_counts_dropped) reads as uncounted: a term
+    no table holds (`webjs`) is what such a frame stands for, and its shape and context must decide it. The counts
+    of the words around the token are never dropped.
+    """
+
+    from .context_model import term_bucket
+
+    bucket = term_bucket(text, alphabet)
+    return "0" if item.term_counts_dropped and bucket != "na" else bucket
+
+
 def _term_features(features: dict[str, float], item: ContextEvidence, direction: str) -> None:
     """Where the word stands on its line, whether a reading opens sentences, how often each occurs.
 
@@ -129,8 +146,6 @@ def _term_features(features: dict[str, float], item: ContextEvidence, direction:
     public text; an artifact trained before these features carries no weight for them and scores as
     it did.
     """
-
-    from .context_model import term_bucket
 
     before = item.field.before[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:].casefold()
     after = item.field.after[:ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS].casefold()
@@ -153,8 +168,8 @@ def _term_features(features: dict[str, float], item: ContextEvidence, direction:
     features[f"latin:dot:direction:{direction}"] = float(bool(_LATIN_DOT.search(latin)))
     features[f"latin:underscore:direction:{direction}"] = float("_" in latin.strip("_"))
     cyrillic_known = item.source_known if item.source_group == 1 else item.target_known
-    latin_bucket = term_bucket(latin, "latin")
-    cyrillic_bucket = "lexicon" if cyrillic_known else term_bucket(cyrillic, "cyrillic")
+    latin_bucket = own_bucket(item, latin, "latin")
+    cyrillic_bucket = "lexicon" if cyrillic_known else own_bucket(item, cyrillic, "cyrillic")
     _capitals_features(features, item, direction, before, cyrillic, cyrillic_known)
     if latin_bucket != "na" or cyrillic_bucket != "na":
         _frequency_features(features, item, direction, (before, after, state), (latin, cyrillic),
@@ -177,12 +192,10 @@ def _capitals_features(features: dict[str, float], item: ContextEvidence, direct
     after Russian text shares, and short Latin keys of Russian words (`f` for `а`) stayed with them.
     """
 
-    from .context_model import term_bucket
-
     letters = item.original
     if len(letters) < ACTION_FEATURE_CAPITALS_MIN_LETTERS or not letters.isalpha() or not letters.isupper():
         return
-    russian = term_bucket(cyrillic, "russian")
+    russian = own_bucket(item, cyrillic, "russian")
     features[f"capitals:known:{int(cyrillic_known)}:russian:{russian}:direction:{direction}"] = 1.0
     features[f"capitals:known:{int(cyrillic_known)}:russian:{russian}:before:{_dominant(before)}:direction:{direction}"] = 1.0
 
@@ -198,16 +211,14 @@ def _frequency_features(features: dict[str, float], item: ContextEvidence, direc
     and `а1` in Russian prose became `1C`, `2af` and `f1`. An absent count is no evidence.
     """
 
-    from .context_model import term_bucket
-
     before, after, state = surroundings
     latin, cyrillic = readings
     latin_bucket, cyrillic_bucket = buckets
     planned = item.after_origin == "planned_next_conversion"
     context = f"before:{_dominant(before)}:{'next' if planned else 'after'}:{_dominant(after)}"
     if not item.inside and (before.strip() or after.strip()):
-        english_bucket = term_bucket(latin, "english")
-        russian_bucket = term_bucket(cyrillic, "russian")
+        english_bucket = own_bucket(item, latin, "english")
+        russian_bucket = own_bucket(item, cyrillic, "russian")
         if latin_bucket == "0":
             latin_bucket = f"0:{english_bucket}"
         if cyrillic_known:
@@ -405,6 +416,15 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         # and how often the word before it occurs in English prose and in Russian technical text, which tell a
         # sentence of English prose from a command or an identifier (`/designv2 ТЗ`, the owner's typing).
         result.update(_latin_abbreviation_evidence(item, direction))
+    if unknown_question(item.original, item.field.before) and not item.source_known:
+        # The class the unknown-token head answers: its features once more under their own names, beside the shared
+        # ones, and evidence of its own. After Russian prose the frozen model kept a token no table counts as Russian
+        # slang or a Latin citation, and the words typed in the wrong layout with it: `цуиоы` (`webjs`) at p=0.94 with
+        # `webjs` typed right earlier in the same field, `мгуоы` (`vuejs`), `реьч` (`htmx`) (the owner's typing,
+        # 13.10.2026), and the last word of a short Russian message, a word no table counts, typed in the English
+        # layout (test v56).
+        result.update({UNKNOWN_FEATURE_PREFIX + name: value for name, value in features.items() if value})
+        result.update(_unknown_evidence(item))
     return result
 
 
@@ -593,3 +613,72 @@ def capitals_question(original: str, before: str) -> bool:
 
     return (CAPITALS_HEAD_MIN_LETTERS <= len(original) <= CAPITALS_HEAD_MAX_LETTERS and original.isalpha() and original.isupper()
             and _dominant(before[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:].casefold()) == "en")
+
+
+_TOKENS: Final = re.compile(r"[^\W_]+", re.UNICODE)
+
+
+def unknown_shape(original: str) -> bool:
+    """A token the unknown-token head's class may hold (unknown_question): UNKNOWN_HEAD_MIN_CHARACTERS long or more, not
+    all capitals, of digits and of letters of one script - Russian letters whose keys are letters too, or Latin ones.
+    Capitals are the abbreviation heads' shapes; a Russian letter whose key is a sign (UNKNOWN_HEAD_SIGN_KEY_LETTERS)
+    makes the Latin reading no term (`фолбек` is `ajk,tr`), and a Latin token's keys are such letters in no case."""
+
+    if len(original) < UNKNOWN_HEAD_MIN_CHARACTERS or not original.isalnum() or original.isupper():
+        return False
+    letters = [char.casefold() for char in original if char.isalpha()]
+    return bool(letters) and (all("a" <= char <= "z" for char in letters)
+                              or all("а" <= char <= "я" and char not in UNKNOWN_HEAD_SIGN_KEY_LETTERS for char in letters))
+
+
+def unknown_cyrillic(original: str) -> str:
+    """The Cyrillic reading of a token of the head's shape: the token itself, or the Russian letters of its keys."""
+
+    from .layouts import LayoutPair
+
+    return original if any("а" <= char.casefold() <= "я" for char in original) else LayoutPair().translate(original, "us", "ru")
+
+
+def _earlier_words(before: str) -> set[str]:
+    """The words of the text before a token, as the unknown-token head compares readings with them."""
+
+    return {word.casefold() for word in _TOKENS.findall(before[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:])}
+
+
+def unknown_question(original: str, before: str) -> bool:
+    """A token of the unknown-token head's shape (unknown_shape) whose Cyrillic reading Russian prose does not use, after
+    text with more Cyrillic letters than Latin ones: Latin letters typed in either layout (a Russian word no table
+    counts typed in the English layout, which test v56 found kept, or a Latin term typed as meant), or Russian letters
+    whose Latin reading the text before already holds as a word (`цуиоы` after `webjs` typed right earlier in the same
+    message). With its typed reading no lexicon word of its layout it is the head's class (extract_action_features).
+    Russian letters without that echo stay with the frozen model: there the class is Russian slang, truncations and
+    brands in Cyrillic as often as terms, and the head fitted on them converted `пукты` and `иишку` in the owner's
+    typing. The question reads only the typed token, the text before it and the packaged term table, as the trainer
+    and the GPU path route frames by them (head_question, context_action_cuda.heads_question)."""
+
+    from .context_model import term_bucket
+    from .layouts import LayoutPair
+
+    if not (unknown_shape(original) and term_bucket(unknown_cyrillic(original), "russian") in ("0", "na")
+            and _dominant(before[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:].casefold()) == "ru"):
+        return False
+    latin = unknown_cyrillic(original) != original
+    return latin or LayoutPair().translate(original, "ru", "us").casefold() in _earlier_words(before)
+
+
+def _unknown_evidence(item: ContextEvidence) -> dict[str, float]:
+    """The unknown-token head's evidence beside its copy of the shared features.
+
+    Whether either reading occurs as a whole word earlier in the field: a term typed right earlier in the same message
+    is the term typed again (`webjs не дает информацию о номерах ... дело в цуиоы`), while the shared features read only
+    the two words next to the token. Whether a reading is no word but one typo from one (`вляется`), which the shared
+    features do not read either. And the token's length.
+    """
+
+    words = _earlier_words(item.field.before)
+    echo = f"echo:{int(item.alternative.casefold() in words)}:{int(item.original.casefold() in words)}"
+    letters = f"letters:{min(len(item.original), ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS)}"
+    names = (echo, f"typo:{int(item.source_typo)}:{int(item.target_typo)}", letters, f"{echo}:{letters}")
+    # Each layout learns its own weights: an echo converts `цуиоы` after `webjs`, while `vscode` typed right after its
+    # keys left as `мысщву` by a miss stays.
+    return {f"{UNKNOWN_FEATURE_PREFIX}{name}:direction:{item.source_group}": 1.0 for name in names}

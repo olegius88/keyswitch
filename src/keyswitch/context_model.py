@@ -115,6 +115,9 @@ class ContextEvidence:
     # Whether letters were typed into the middle of a word whose other letters are all in the
     # other layout (engine._decide_inside_word): the question is then what the whole word is.
     inside: bool = False
+    # A training frame whose token reads as uncounted in every term table, as a term no table holds does at
+    # serving (context_action_features.own_bucket); never set outside training.
+    term_counts_dropped: bool = False
 
     def __post_init__(self) -> None:
         # Replacing literal field contents must not retain a stale empty flag.

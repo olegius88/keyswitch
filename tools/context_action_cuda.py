@@ -87,6 +87,7 @@ from keyswitch.constants.training import (
 from keyswitch.constants.models import FNV1A64_OFFSET_BASIS, FNV1A64_PRIME
 from keyswitch.context_action_features import (
     abbreviation_question, alone_question, capitals_question, latin_abbreviation_question, letter_question, start_question,
+    unknown_question,
 )
 from keyswitch.context_model import AfterOrigin, ContextEvidence, _term_frequency
 from keyswitch.detector import PROTECTED_TOKENS
@@ -616,7 +617,8 @@ def heads_question(original: str, before: str, after: str, trigger: str) -> bool
 
     return (capitals_question(original, before) or alone_question(original, original, before, after, trigger)
             or start_question(original, original, before, after) or letter_question(original, original, before)
-            or abbreviation_question(original, original, before) or latin_abbreviation_question(original, original, before))
+            or abbreviation_question(original, original, before) or latin_abbreviation_question(original, original, before)
+            or unknown_question(original, before))
 
 
 def opening_letter_followed(original: str, literal_tail: str, boundary_text: str) -> bool:
@@ -731,9 +733,13 @@ class Items:
                 # The kernels leave out the kept-neighbour question, whose features are renamed
                 # (KEPT_FEATURE_PREFIX), the heads' second copy of a token's features (CAPITALS_FEATURE_PREFIX,
                 # ALONE_FEATURE_PREFIX, START_FEATURE_PREFIX, LETTER_FEATURE_PREFIX) and the heads' own evidence
-                # (ABBREVIATION_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX): those frames take the CPU path.
+                # (ABBREVIATION_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX, UNKNOWN_FEATURE_PREFIX): those frames
+                # take the CPU path.
+                # A frame trained with its term counts dropped (train_context_action_model.term_counts_dropped)
+                # takes the CPU path too: the kernels read the term tables as they are.
                 fits[number] = (row.trigger in trigger_index and row.after_origin in origin_index
                                 and row.after_origin != "kept_next_word"
+                                and not (split == TRAIN and trainer.term_counts_dropped(row.identifier, row.original))
                                 and not heads_question(row.original, row.field.before, row.field.after, row.trigger)
                                 and not opening_letter_followed(row.original, row.literal_tail, row.boundary_text)
                                 and row.group in range(LAYOUT_GROUP_COUNT))

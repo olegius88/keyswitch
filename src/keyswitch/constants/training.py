@@ -81,6 +81,18 @@ LONE_WORD_BOUNDARIES: Final = (
 # Abbreviation frames (train_context_action_model.abbreviation_curriculum): one attested abbreviation in
 # this many goes to DEVELOPMENT by hash, so DEVELOPMENT chooses the head's epoch on forms it never fitted.
 ABBREVIATION_SPLIT_MODULUS: Final = 5
+# Unknown-token frames (train_context_action_model.unknown_token_curriculum): one term or Russian word in this many goes
+# to DEVELOPMENT by hash, as the abbreviation forms do.
+UNKNOWN_TOKEN_SPLIT_MODULUS: Final = 5
+# One TRAIN family in this many of the unknown-token curriculum is featurised with its own term counts dropped
+# (ContextEvidence.term_counts_dropped), as one command family in IDENTIFIER_DROPOUT_FAMILIES loses its identifier
+# evidence: a term no table counts must still be told by its shape. Dropping two families in three taught the head that a
+# token no table counts converts, and Russian slang and truncations went with it (`пукты`, `иишку`). Only tokens of
+# TERM_COUNT_DROPOUT_MIN_LETTERS letters or more.
+TERM_COUNT_DROPOUT_FAMILIES: Final = 3
+TERM_COUNT_DROPOUT_MIN_LETTERS: Final = 5
+# The longest term or word the unknown-token curriculum frames.
+UNKNOWN_TOKEN_MAX_CHARACTERS: Final = 20
 # Letters of a Latin abbreviation cited in capitals inside Russian prose whose Cyrillic reading is a
 # rare word (`WBC` is `ЦИС`, `IBF` is `ШИА`): three to five, as abbreviations are written. Two
 # letters stay with the deferral rules and the owner's own Cyrillic abbreviations (`ГА`).
