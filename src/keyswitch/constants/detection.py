@@ -27,6 +27,9 @@ OPENING_LETTER_FOLLOWING_SIGNS: Final[frozenset[str]] = frozenset(",.?!:;)-")
 # Fewest letters left of a word once the letters at its end that are signs in the other layout are
 # set aside (`руддщб` is `hello,`): `чё` without `ё` is a lone `ч`, and one letter is no word to judge.
 REPLAYED_SIGNS_MIN_STEM_LETTERS: Final = 2
+# Letters a part after a joining sign needs to be asked alone (engine._joined_head): one letter there is part of the
+# term (`usb-c`, `plan-b`), and the curated one-letter words are words standing on their own.
+JOINED_PART_MIN_LETTERS: Final = 2
 # A fragment of this many letters that a pause leaves is the start of a word being typed, not a word,
 # when at least PAUSE_WORD_START_MIN_WORDS words of its own language's lexicon begin with it and its other
 # reading is no word of the other language's prose: `иг` in `первую иг` (226 Russian words) and `фл` of

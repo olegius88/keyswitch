@@ -76,6 +76,7 @@ from .word_decision import automatic_word_decision
 from .constants.detection import (
     EARLY_SWITCH_CONFIDENCE,
     ENGINE_EVENT_QUEUE_MAX_SIZE,
+    JOINED_PART_MIN_LETTERS,
     KEPT_WORDS_TAKEN_ALONG,
     MAX_REMEMBERED_APPLICATION_CONTEXTS,
     MAX_WORD_STROKES as MAX_WORD_STROKES,
@@ -1683,6 +1684,7 @@ class KeySwitchEngine:
                 boundary_text=boundary.character,
                 following={group: self._text_for_group((*trailing, *signs, boundary), group) for group in alternatives},
             )
+            stem, stem_signs = strokes, signs
             if signs and inside is None and not decision.should_convert:
                 # The tail is split off only for a word the model converts without it (_replayed_signs);
                 # otherwise the token is judged whole, as before: `'nb/` is `эти.` at p=0.9998 and
@@ -1699,6 +1701,15 @@ class KeySwitchEngine:
                 decision = self._settle_early_switch(
                     decision, strokes, source_group, early_switch_origin, application,
                     self._trigger_for_boundary(boundary), boundary.character)
+            if (inside is None and not (head or trailing)
+                    and (parted := self._decide_joined_part(
+                        stem, stem_signs, source_group, tuple(alternatives), application,
+                        self._trigger_for_boundary(boundary), boundary, decision))):
+                # `mongo-cthdbcf` converts after its hyphen: `mongo-сервиса`.
+                head, decision = parted
+                strokes, signs = stem[head:], stem_signs
+                original = self._text_for_group(strokes, source_group)
+                alternatives = {group: self._text_for_group(strokes, group) for group in alternatives}
             excluded = self._application_excluded(application)
             # The early switch converted this word while it was typed, and the switch stands:
             # for the words before it, it is a word converted from the switch's origin.
@@ -2029,6 +2040,113 @@ class KeySwitchEngine:
                 segment = []
         return head
 
+    @staticmethod
+    def _joins_parts(stroke: KeyEvent) -> bool:
+        """A key that types one and the same sign in every layout (`-`, `_`, `+`, `=`) can join two
+        words typed in different layouts. A sign that is a letter in another layout is a letter of the
+        word: `,` is the `б` of `cj,thb` (`собери`), `;` the `ж` of `ye;yj` (`нужно`)."""
+
+        return (len(set(stroke.characters)) == 1 and stroke.character in stroke.characters
+                and not any(character.isalnum() or character.isspace() for character in stroke.characters))
+
+    def _joined_head(self, strokes: tuple[KeyEvent, ...], source_group: int) -> int:
+        """Count the strokes up to the last joining sign that stay as typed while the part after it is asked alone.
+
+        A hyphen joins an English term and a Russian word in Russian prose (`mongo-сервиса`,
+        `docker-образ`), and the layout the term was typed in often types the word after it:
+        `mongo-cthdbcf`, `lid-ht;bvt`, `multidevice-htitybz[` stayed in the owner's logs, since
+        the token was judged whole and its whole other reading (`ьщтпщ-сервиса`) is no word
+        either. Asked alone, behind the head as typed, the part after the hyphen is decided as
+        any word (19 of 20 authored terms and Russian words, 13.10.2026). Any sign typed the same
+        in both layouts joins parts the same way (_joins_parts); a slash has its own rule
+        (_literal_head). A token the code guard protects stays whole, as before: an identifier, an
+        assignment or an address (`user_name`, `foo=bar`, `user@host`) is not prose whose words were
+        typed in two layouts. As after a slash, the head is never replaced, a head segment that itself
+        looks like a word in the wrong layout abstains (one span cannot fix two words), and only
+        the contextual model is asked.
+        """
+
+        if (
+            source_group not in self.models
+            or not bool(self.settings.get("detection.context_aware", True))
+            or str(self.settings.get("detection.context_policy", "assist")) != "assist"
+            or self.context_policy.model is None
+        ):
+            return 0
+        joins = [index for index, stroke in enumerate(strokes) if self._joins_parts(stroke)]
+        targets = [group for group in self.models if group != source_group]
+        if not joins or not targets or self.detector.is_protected_token(self._text_for_group(strokes, source_group)):
+            return 0
+        head = joins[-1] + 1
+        tail = strokes[head:]
+        if len(tail) < JOINED_PART_MIN_LETTERS or not all(
+                stroke.character.isalpha() or self._is_layout_letter(stroke) for stroke in tail):
+            return 0
+        segment: list[KeyEvent] = []
+        lettered = False
+        for stroke in strokes[:head]:
+            if not self._joins_parts(stroke):
+                segment.append(stroke)
+            elif segment:
+                # Signs in a row (`C++-`) join as one; each run of letters must be settled as typed.
+                if not self._head_segment_settled(tuple(segment), source_group, targets[0]):
+                    return 0
+                lettered, segment = True, []
+        return head if lettered else 0
+
+    def _decide_joined_part(
+        self, strokes: tuple[KeyEvent, ...], signs: tuple[KeyEvent, ...], source_group: int, targets: tuple[int, ...],
+        application: str, trigger: CorrectionTrigger, boundary: KeyEvent | None, whole: DetectionDecision,
+    ) -> tuple[int, DetectionDecision] | None:
+        """The part after the last joining sign asked as a word of its own (_joined_head).
+
+        Returns the head's length and the part's decision when the model converts the part and the
+        head stays: a token kept whole (`mongo-cthdbcf`), or one converted whole although the model,
+        asked about the head alone, keeps it (`docker-j,hfp` became `вщслук-образ`; `docker` alone is
+        kept at p=1.0, while `BB` of `BB-fccbcntyn` is only a suggestion and the whole `ИИ-ассистент`
+        stands). Signs split off the end (_replayed_signs) stay split off the part: `mongo-cthdbcf/` is
+        `mongo-сервиса.`. Otherwise the token stays as the whole of it was judged, with that
+        judgement's context result.
+        """
+
+        split = self._joined_head(strokes, source_group)
+        if not split:
+            return None
+        head, tail = strokes[:split - 1], strokes[split:]
+        original = self._text_for_group(tail, source_group)
+        alternatives = {group: self._text_for_group(tail, group) for group in targets}
+        if trigger == "pause" and not signs and self._word_begun(original, source_group, alternatives[targets[0]], targets[0]):
+            # A pause in the middle of the part is a pause to think, as in the middle of a word.
+            return None
+        result, baseline = self._context_result, self._last_baseline
+        closing = (*signs, *(() if boundary is None else (boundary,)))
+        decision = self._decide_word(
+            original, alternatives, source_group, application, trigger,
+            literal_tail="".join(stroke.character for stroke in signs),
+            boundary_text="" if boundary is None else boundary.character,
+            following={group: self._text_for_group(closing, group) for group in targets},
+        )
+        parted, parted_baseline = self._context_result, self._last_baseline
+        head_action = None
+        if decision.should_convert and whole.should_convert:
+            self._decide_word(
+                self._text_for_group(head, source_group), {group: self._text_for_group(head, group) for group in targets},
+                source_group, application, "punctuation", boundary_text=strokes[split - 1].character,
+            )
+            asked = self._context_result
+            head_action = asked.prediction.action if asked is not None and asked.prediction is not None else "none"
+        taken = decision.should_convert and head_action in (None, "keep")
+        self._technical_event(
+            "joined_part_decision", trigger=trigger, head_characters=split, part_characters=len(tail),
+            signs=len(signs), whole_converted=whole.should_convert, part_converted=decision.should_convert,
+            head_action=head_action, taken=taken,
+        )
+        if not taken:
+            self._context_result, self._last_baseline = result, baseline
+            return None
+        self._context_result, self._last_baseline = parted, parted_baseline
+        return split, decision
+
     def _head_segment_settled(self, segment: tuple[KeyEvent, ...], source_group: int, target: int) -> bool:
         """A head segment is settled when nothing suggests it needs conversion."""
 
@@ -2316,22 +2434,50 @@ class KeySwitchEngine:
                    if group != source_group and group not in rejected and text in TRUSTED_SINGLE_LETTER_WORDS]
         if not targets:
             return decision
-        words = self.context_policy.stream.before_word(original).rsplit("\n", 1)[-1].split()
-        term = 0
-        while (words and term < STRANDED_TERM_MAX_WORDS
-               and _LATIN_LETTER.search(words[-1]) and not _CYRILLIC_LETTER.search(words[-1])):
-            if words[-1][-1] in SENTENCE_END_SIGNS:
+        # The words the engine saw typed first; a word typed into text already there (after a click)
+        # has none of them, and the field's own text before it tells: `почему я не вижу в vscode d`,
+        # `в vscode d` typed in the middle of the line, kept `d` (the owner's laptop, 13.10.2026).
+        if not self._after_russian_term(self.context_policy.stream.before_word(original)):
+            field = self._field_before(original)
+            if field is None or not self._after_russian_term(field):
                 return decision
-            words.pop()
-            term += 1
-        if not term or not words or not _CYRILLIC_LETTER.search(words[-1]) or words[-1][-1] in SENTENCE_END_SIGNS:
-            return decision
         group, replacement = targets[0]
         return replace(
             decision, should_convert=True, replacement=replacement, target_group=group,
             confidence=SINGLE_LETTER_CONFIDENCE, reason=STRANDED_SHORT_WORD_REASON,
             target_score=self.models[group].score(replacement),
         )
+
+    @staticmethod
+    def _after_russian_term(before: str) -> bool:
+        """Whether text ends, on its line, with a Latin term of up to STRANDED_TERM_MAX_WORDS words after a
+        Russian word, with no end of a sentence in between, and a space after it."""
+
+        if not before or not before[-1].isspace():
+            # A letter joined to the term (`usb-c`, `gen-z`) is part of it, not a word of the phrase.
+            return False
+        words = before.rsplit("\n", 1)[-1].split()
+        term = 0
+        while (words and term < STRANDED_TERM_MAX_WORDS
+               and _LATIN_LETTER.search(words[-1]) and not _CYRILLIC_LETTER.search(words[-1])):
+            if words[-1][-1] in SENTENCE_END_SIGNS:
+                return False
+            words.pop()
+            term += 1
+        return bool(term and words and _CYRILLIC_LETTER.search(words[-1]) and words[-1][-1] not in SENTENCE_END_SIGNS)
+
+    def _field_before(self, typed: str) -> str | None:
+        """The field's text before a word just typed, as the reader shows it; None without a read that holds it."""
+
+        reader = self.context_policy.reader
+        if reader is None or not bool(self.settings.get("detection.context_read_field", False)):
+            return None
+        application = self.backend.active_application()
+        snapshot = reader.read(application, self._focus_window or 0)
+        if snapshot is None or snapshot.sensitive or snapshot.selection or snapshot.application != application:
+            return None
+        around = self._typed_in_field(snapshot.bounded(), typed, " ")
+        return None if around is None else around[0]
 
     def _settle_early_switch(
         self, shown: DetectionDecision, strokes: list[KeyEvent] | tuple[KeyEvent, ...], shown_group: int, origin: int,
@@ -2489,7 +2635,8 @@ class KeySwitchEngine:
                 field_role=field.role if field else "unknown",
                 # Context content and surrounding sentences are never logged.
             )
-            if prediction.action == "suggest" and self.settings.get("detection.context_policy", "assist") == "assist":
+            if (prediction.action == "suggest" and not result.decision.should_convert
+                    and self.settings.get("detection.context_policy", "assist") == "assist"):
                 self._update(last_action=f"Возможно: {original} → {alternative} · Pause для замены")
         return result.decision
 
@@ -3029,12 +3176,14 @@ class KeySwitchEngine:
                 break
             count += 1
         if (not count or len(strokes) - count < REPLAYED_SIGNS_MIN_STEM_LETTERS
-                or any(not (stroke.character.isalpha() or stroke.character_for(targets[0]).isalpha())
+                or any(not (stroke.character.isalpha() or stroke.character_for(targets[0]).isalpha()
+                            or self._joins_parts(stroke))
                        for stroke in strokes[:-count])
                 or self.models[source_group].score(self._text_for_group(strokes, source_group)).known):
-            # A token with digits or signs inside (`з+1ю` for `p+1.`) is judged whole, as before, and
-            # so is one whose rest is a single letter: `чё` is not `ч` with a backtick. A key that is a
-            # letter in the other layout is a letter of the word: `Ct,z/` is `Себя.`.
+            # A token with digits or other signs inside (`з+1ю` for `p+1.`) is judged whole, as before,
+            # and so is one whose rest is a single letter: `чё` is not `ч` with a backtick. A key that is
+            # a letter in the other layout is a letter of the word: `Ct,z/` is `Себя.`; a sign typed the
+            # same in both layouts joins its parts (_joins_parts): `mongo-cthdbcf/` is `mongo-сервиса.`.
             return 0
         return count
 
@@ -3516,6 +3665,7 @@ class KeySwitchEngine:
             literal_tail="".join(stroke.character for stroke in (*trailing, *signs)),
             following={group: self._text_for_group((*trailing, *signs), group) for group in alternatives},
         )
+        stem, stem_signs = strokes, signs
         if signs and inside is None and not decision.should_convert:
             # As at a boundary (_commit_word): the tail is split off only for a word the model converts without it.
             strokes, signs = (*strokes, *signs), ()
@@ -3526,6 +3676,15 @@ class KeySwitchEngine:
                 literal_tail="".join(stroke.character for stroke in trailing),
                 following={group: self._text_for_group(trailing, group) for group in alternatives},
             )
+        if (inside is None and not (head or trailing)
+                and (parted := self._decide_joined_part(
+                    stem, stem_signs, source_group, tuple(alternatives), application, "pause", None, decision))):
+            # As at a boundary (_commit_word): the token converts after its hyphen.
+            head, decision = parted
+            strokes, signs = stem[head:], stem_signs
+            original = self._text_for_group(strokes, source_group)
+            alternatives = {group: self._text_for_group(strokes, group) for group in alternatives}
+            literal_head = self._text_for_group(typed[:head], source_group)
         excluded = self._application_excluded(application)
         self._log_word_evaluation(
             trigger="pause",

@@ -106,7 +106,10 @@ class RecordModel(ContextModel):
 
     def predict(self, item: ContextEvidence) -> ContextPrediction:
         self.items.append(item)
-        return super().predict(item)
+        # A keep outright: a suggestion the detector confirms would convert (ContextPolicy.decide), and these
+        # tests watch what the model is asked, not the policy's answer.
+        prediction = super().predict(item)
+        return replace(prediction, action="keep") if prediction.action == "suggest" else prediction
 
 
 class ContextActionEngineTests(unittest.TestCase):
