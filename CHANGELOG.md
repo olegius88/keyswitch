@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.54.0 — 2026-10-13
+
 - A word typed in the wrong layout that the context model only suggests converting is converted when the detector
   converts it too. The model's suggestion leans to the other layout without the certainty of its threshold, and a word
   no lexicon holds was left as typed there (`byzpt` for `инязе`, `ntby` for `теин`) while the detector, and the

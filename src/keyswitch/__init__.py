@@ -1,3 +1,3 @@
 """KeySwitch — automatic EN/RU keyboard layout correction."""
 
-__version__ = "0.53.0"
+__version__ = "0.54.0"
