@@ -30,6 +30,9 @@ REPLAYED_SIGNS_MIN_STEM_LETTERS: Final = 2
 # Letters a part after a joining sign needs to be asked alone (engine._joined_head): one letter there is part of the
 # term (`usb-c`, `plan-b`), and the curated one-letter words are words standing on their own.
 JOINED_PART_MIN_LETTERS: Final = 2
+# Most keys between the last word and the caret through which Pause still converts that word: its boundary and
+# the spaces and signs typed the same in every layout after it (`цуиоы - `), each typed again as it was.
+PAUSE_TRAILING_MAX_KEYS: Final = 8
 # A fragment of this many letters that a pause leaves is the start of a word being typed, not a word,
 # when at least PAUSE_WORD_START_MIN_WORDS words of its own language's lexicon begin with it and its other
 # reading is no word of the other language's prose: `иг` in `первую иг` (226 Russian words) and `фл` of

@@ -377,6 +377,21 @@ class InputIntegrityTests(unittest.TestCase):
                 self.assertEqual(len(self.backend.injections), before)
                 self.assertEqual(self.backend.text, visible)
 
+    def test_undo_is_unavailable_after_the_next_word_or_a_dash(self) -> None:
+        # Undo deletes the corrected word and its boundary. With a word typed after it the plan deleted the end
+        # of that word and typed the old one there: `привет мир ` became `привghbdtn `.
+        for after in ("vbh ", "- "):
+            with self.subTest(after=after):
+                self.reset_editor()
+                self.type("ghbdtn ")
+                self.type(after)
+                visible = self.backend.text
+                before = len(self.backend.injections)
+                self.engine._schedule_undo(UNDO_TRIGGER_SENTINEL_KEYCODE)
+                self.send(plain_key("z", UNDO_TRIGGER_SENTINEL_KEYCODE, self.backend.group, False))
+                self.assertEqual(len(self.backend.injections), before)
+                self.assertEqual(self.backend.text, visible)
+
     def test_changed_focus_cancels_pending_even_when_current_word_is_empty(self) -> None:
         self.type("ghbdtn")
         boundary = self.key("space", " ")

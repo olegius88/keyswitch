@@ -4,6 +4,33 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- Pause converts the last word past the spaces and signs typed after it. A word stayed Pause's only until the next
+  key, and any further space or sign left Pause nothing but switching the layout: `цуиоы` (meant `webjs`) with a few
+  such keys after it stayed, and in the owner's PC logs since 01.10 nine of the sixteen presses that found the last
+  word out of reach were followed by that word erased and typed again by hand. Now spaces and signs typed the same in
+  every layout (`-`, `+`, `!`) keep the
+  word in reach, up to eight keys after it, and the conversion types them again as they were: `цуиоы - ` becomes
+  `webjs - `. A sign another in the other layout that ended the word stays as typed (`ЗК? ` becomes `PR? `). A
+  letter, Backspace, the arrow keys, a click, Enter and Tab end the reach as before, and a token of such signs alone
+  is no longer what Pause converts instead of the word.
+- Pause on a token of parts joined by a sign typed the same in both layouts converts its last part when the parts
+  before it are settled as typed. `lid-'ne` became `дшв-эту`, and the owner pressed Pause again and typed the part
+  anew; it now becomes `lid-эту`, as the automatic correction of joined parts decides (`mongo-cthdbcf` is
+  `mongo-сервиса`). A head that itself reads as a word in the other layout leaves the token whole (`ghbdtn-vbh` is
+  `привет-мир`), and Pause on a token a correction typed takes back all of it. The log's
+  `manual_conversion_scheduled` records the characters kept in front (`kept_head_characters`) and the keys typed
+  again after the word (`trailing_characters`).
+- The undo shortcut (`Ctrl+Alt+Z`) no longer rewrites text typed after the corrected word. Undo deletes the corrected
+  word and its boundary and types the original back, and it stayed available when another word, or a dash between
+  words, followed the correction: `ghbdtn vbh ` (`привет мир `) and undo gave `привghbdtn `. Undo now requires the text
+  before the caret to end as the correction left it; otherwise it reports that the correction can no longer be undone.
+- The protection Pause gives the word being typed ends with that word. After Pause on an unfinished word the next
+  word typed in the chosen layout was protected from automatic correction however much later it came: Pause made
+  `ля` into `kz`, the arrow keys left the word, and a minute later `ntcn` at the start of another field stayed as
+  typed (the owner's log, 13.10.2026). The same held for a word whose early switch was undone. Now leaving such a word
+  unfinished (the arrow keys, a click, a shortcut, another window) ends its protection; a layout the user picks
+  still protects the next word whatever comes before it. The log names the protection's source (`current_word`).
+
 ## 0.54.0 — 2026-10-13
 
 - A word typed in the wrong layout that the context model only suggests converting is converted when the detector
@@ -46,6 +73,7 @@ All notable changes to KeySwitch are documented in this file.
   the confirmed suggestions, was not installed: on test v53 it restored one row fewer than the baseline pair without
   the early switch, a short Russian message whose last word was typed in the English layout. Of 345 development
   sentences of that shape, the corpus v53 model with the confirmed suggestions restores 343 and the baseline pair 342.
+
 ## 0.53.0 — 2026-10-13
 
 - The pause correction now comes after 0.7 s of no typing instead of 1.5 s. A word typed in the wrong layout switches

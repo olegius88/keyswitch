@@ -82,6 +82,7 @@ from .constants.detection import (
     MAX_WORD_STROKES as MAX_WORD_STROKES,
     NATURAL_SOURCE_BOUNDARY_MIN_CHARACTERS,
     NATURAL_SOURCE_BOUNDARY_NGRAM_FLOOR,
+    PAUSE_TRAILING_MAX_KEYS,
     PAUSE_WORD_START_LETTERS,
     PAUSE_WORD_START_MIN_WORDS,
     REPLAYED_SIGNS_MIN_STEM_LETTERS,
@@ -421,6 +422,11 @@ class KeySwitchEngine:
         self._engine_switch_group: int | None = None
         self._manual_layout_observed_at: float | None = None
         self._manual_layout_source = ""
+        # The manual layout protects the word being typed (Pause on it, or an undone early
+        # switch), not whatever word comes next: when that word is left unfinished, so is the
+        # protection (_clear_word). Pause on `ля` made it `kz`, the arrow keys left the word,
+        # and a minute later `ntcn` at the start of another field stayed as typed.
+        self._manual_layout_word = False
         self._focus_window: int | None = None
         # Set while the user has undone an early switch of the word being
         # typed: that word is left alone even with manual layout respect off.
@@ -811,6 +817,7 @@ class KeySwitchEngine:
         )
         self._manual_layout_observed_at = time.monotonic()
         self._manual_layout_source = "menu"
+        self._manual_layout_word = False
         self._technical_event(
             "layout_selected_from_menu",
             selected_group=group,
@@ -1102,13 +1109,17 @@ class KeySwitchEngine:
             self._pending = None
             self._learning_prompt_after = None
             # Nothing typed since the last boundary: remember layout-dependent
-            # symbols so Pause converts just them (RU quote -> "@"), and never
-            # rewrite the previous word after further input.
+            # symbols so Pause converts just them (RU quote -> "@"). A space or a
+            # sign typed the same in every layout leaves the previous word to
+            # Pause (_extend_last_committed); anything else ends its reach.
             if event.key_name in WORD_BOUNDARY_KEYS or event.character.isspace():
                 self._symbol_strokes = []
             elif self._layout_dependent(event):
                 self._symbol_strokes.append(event)
-            self._last_committed_stale = True
+            if self._pause_reaches_past((event,)):
+                self._extend_last_committed((event,))
+            else:
+                self._last_committed_stale = True
             if self._mention_shown is not None:
                 self._after_mention_head(event, event)
             elif len(self._symbol_strokes) == 1 and self._symbol_strokes[0] is event:
@@ -1122,7 +1133,10 @@ class KeySwitchEngine:
             self._caret_moved = True
             return
         if event.character:
-            self._last_committed_stale = True
+            if not (self._joins_parts(event) and all(self._joins_parts(stroke) for stroke in self._strokes)):
+                # A token of signs typed the same in every layout (`+`, `=>`) is no word: the word
+                # before it stays Pause's until a letter or a digit comes (_pause_reaches_past).
+                self._last_committed_stale = True
             if self._strokes:
                 # A digit or another printable key inside a word ("зь2") stays
                 # part of it, so Pause still converts the whole token. Nothing
@@ -1642,8 +1656,12 @@ class KeySwitchEngine:
             False,
             trailing=trailing,
         )
-        self._last_committed = plan
-        self._last_committed_stale = False
+        if all(self._joins_parts(stroke) for stroke in typed) and self._pause_reaches_past((*typed, boundary)):
+            # `цуиоы - `: a dash between words is no word of its own, and Pause still converts `цуиоы`.
+            self._extend_last_committed((*typed, boundary))
+        else:
+            self._last_committed = plan
+            self._last_committed_stale = False
         self._symbol_strokes = []
         early_switch_origin = self._early_switch_origin
         manual_layout_selected = self._word_protected(source_group)
@@ -1653,6 +1671,7 @@ class KeySwitchEngine:
         protection = self._protection_details() if manual_layout_selected else None
         if manual_layout_selected:
             self._manual_layout_group = None
+            self._manual_layout_word = False
             self._early_switch_undone = False
         enabled = bool(self.settings.get("enabled", True))
         trigger_enabled = self._boundary_enabled(boundary)
@@ -2067,15 +2086,22 @@ class KeySwitchEngine:
         """
 
         if (
-            source_group not in self.models
-            or not bool(self.settings.get("detection.context_aware", True))
+            not bool(self.settings.get("detection.context_aware", True))
             or str(self.settings.get("detection.context_policy", "assist")) != "assist"
             or self.context_policy.model is None
         ):
             return 0
+        return self._joined_split(strokes, source_group)
+
+    def _joined_split(self, strokes: tuple[KeyEvent, ...], source_group: int) -> int:
+        """The strokes up to the last joining sign, when the token is parts joined by it and every part before
+        it is settled as typed (_joined_head); 0 otherwise. Pause converts the part after them alone, whatever
+        decides automatic corrections (_schedule_manual_conversion)."""
+
         joins = [index for index, stroke in enumerate(strokes) if self._joins_parts(stroke)]
         targets = [group for group in self.models if group != source_group]
-        if not joins or not targets or self.detector.is_protected_token(self._text_for_group(strokes, source_group)):
+        if (source_group not in self.models or not joins or not targets
+                or self.detector.is_protected_token(self._text_for_group(strokes, source_group))):
             return 0
         head = joins[-1] + 1
         tail = strokes[head:]
@@ -3950,6 +3976,14 @@ class KeySwitchEngine:
         if not targets:
             return
         target = targets[0]
+        # A token of parts joined by a sign typed the same in both layouts, every part but the last settled as
+        # typed: Pause converts the last part. `lid-'ne` was `дшв-эту` (the owner's log, 13.10.2026), and the
+        # owner pressed Pause again and typed the part anew; `lid-эту` was meant. Pause on what a correction
+        # typed takes back all of it (`mongo-service`, converted whole, is `ьщтпщ-ыукмшсу` again).
+        previous = self._last_correction
+        restores = previous is not None and strokes == previous.strokes and source_group == previous.target_group
+        kept_head = self._joined_split(strokes, source_group) if mode == "manual" and not restores else 0
+        strokes = strokes[kept_head:]
         original = self._text_for_group(strokes, source_group)
         replacement = self._text_for_group(strokes, target)
         plan = CorrectionPlan(
@@ -4007,6 +4041,8 @@ class KeySwitchEngine:
                 if reversal is None
                 else "automatic" if reversal.automatic else "manual"
             ),
+            kept_head_characters=kept_head,
+            trailing_characters=len(trailing),
         )
         # Explicit intent supersedes the model's old lookahead even while the
         # manual plan is waiting for release. Retain its ID in the event above,
@@ -4150,6 +4186,41 @@ class KeySwitchEngine:
         prose = {"us": "english", "ru": "russian"}.get(self._layout_name(target))
         return prose is not None and (
             _term_frequency()[prose].get(alternative.casefold(), 0) < CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS[0])
+
+    def _pause_reaches_past(self, keys: Sequence[KeyEvent]) -> bool:
+        """Whether Pause still converts the last word once `keys` follow it.
+
+        Spaces and signs typed the same in every layout change nothing a conversion of the word would have to
+        undo: they are deleted with it and typed again as they were. The owner pressed Pause on `цуиоы` with a
+        few such keys typed after it, got only the other layout, and erased and typed the word again (13.10.2026;
+        9 of the 16 such presses in the PC logs since 01.10 were followed by the word typed again by hand).
+        Letters, Backspace, the arrow keys, a click, Enter and Tab end the reach as before.
+        """
+
+        plan = self._last_committed
+        return (
+            plan is not None and not self._last_committed_stale and plan.boundary is not None
+            and plan.boundary.key_name not in ACTION_BOUNDARY_KEYS
+            and any(character.isalpha() for character in plan.original)
+            and len(plan.trailing) + 1 + len(keys) <= PAUSE_TRAILING_MAX_KEYS
+            and all(
+                key.key_name not in ACTION_BOUNDARY_KEYS
+                and (set(key.characters) == {" "} and key.character == " " or self._joins_parts(key))
+                for key in keys
+            )
+        )
+
+    def _extend_last_committed(self, keys: Sequence[KeyEvent]) -> None:
+        """Make `keys`, typed after the last word, part of what Pause deletes and types again (_pause_reaches_past).
+
+        They are the same in every layout, so they take the group of the word's boundary: a correction types its
+        literal keys in one layout."""
+
+        plan = self._last_committed
+        assert plan is not None and plan.boundary is not None
+        group = plan.boundary.group
+        extra = tuple(replace(key, group=group) for key in keys)
+        self._last_committed = replace(plan, trailing=(*plan.trailing, plan.boundary, *extra[:-1]), boundary=extra[-1])
 
     def _reopenable_committed_word(self) -> CorrectionPlan | None:
         """The last word, if one Backspace puts the caret right after it.
@@ -4403,6 +4474,7 @@ class KeySwitchEngine:
         self._manual_layout_group = target if protects else None
         self._manual_layout_observed_at = time.monotonic()
         self._manual_layout_source = "convert_last"
+        self._manual_layout_word = False
         self._technical_event(
             "layout_switched_without_word",
             trigger_keycode=trigger_keycode,
@@ -4464,10 +4536,16 @@ class KeySwitchEngine:
             self._schedule_early_switch_undo(early_origin, trigger_keycode)
             return
         previous = self._last_correction
+        committed = self._last_committed
         if (
             previous is None
             or self._last_committed_stale
             or bool(self._strokes and tuple(self._strokes) != previous.strokes)
+            # The text before the caret must end as the correction left it: undo deletes the corrected word and
+            # its boundary. After `ghbdtn vbh ` it deleted `ет мир ` and typed `ghbdtn ` there (`привghbdtn `), and
+            # the spaces Pause reaches past (_extend_last_committed) are no part of this plan either.
+            or committed is None or committed.strokes != previous.strokes
+            or committed.trailing != previous.trailing or committed.boundary != previous.boundary
             or self._symbol_strokes
             or time.monotonic() - getattr(self, "_last_correction_time", 0.0) > UNDO_AVAILABLE_WINDOW_SECONDS
         ):
@@ -4756,6 +4834,7 @@ class KeySwitchEngine:
             )
             self._manual_layout_observed_at = time.monotonic()
             self._manual_layout_source = "early_undo"
+            self._manual_layout_word = True
             self._update(
                 current_group=plan.target_group,
                 current_word=self._text_for_group(self._strokes, plan.target_group),
@@ -4815,6 +4894,9 @@ class KeySwitchEngine:
             self._update(current_word=plan.replacement)
             if not plan.automatic:
                 self._manual_layout_group = plan.target_group
+                self._manual_layout_observed_at = time.monotonic()
+                self._manual_layout_source = "current_word"
+                self._manual_layout_word = True
         if not plan.kept_tail:
             # The kept neighbour was remembered at its own boundary and is still the last word.
             self._remember_context(plan.application, plan.target_group, plan.strokes)
@@ -5057,6 +5139,9 @@ class KeySwitchEngine:
             )
             self._last_committed_stale = True
         self._early_switch_undone = False
+        if self._manual_layout_word:
+            self._manual_layout_group = None
+            self._manual_layout_word = False
         self._strokes = []
         self._symbol_strokes = []
         # A shown "@" followed by the arrow keys, a click or Enter was the member
@@ -5216,6 +5301,7 @@ class KeySwitchEngine:
             self._manual_layout_group = group
             self._manual_layout_observed_at = time.monotonic()
             self._manual_layout_source = source
+            self._manual_layout_word = False
             self._update(
                 current_group=group,
                 last_action=(
