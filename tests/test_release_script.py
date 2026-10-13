@@ -198,6 +198,20 @@ class ReleaseNotesTests(unittest.TestCase):
         with self.assertRaisesRegex(driver.ReleaseError, "does not name the published files"):
             driver.check_release_notes("0.9.1")
 
+    def test_notes_with_a_paragraph_over_several_lines_stop_the_release(self) -> None:
+        # GitHub shows the release text with every line break kept: a wrapped item reads as ragged lines.
+        self.path.write_text(NOTES_TEXT + "\n- A change described\n  over two lines.\n\nA paragraph\nwrapped too.\n",
+                             encoding="utf-8")
+        with self.assertRaisesRegex(driver.ReleaseError, "on lines 12, 15; GitHub"):
+            driver.check_release_notes("0.9.1")
+
+    def test_headings_items_tables_quotes_and_code_are_lines_of_their_own(self) -> None:
+        text = (NOTES_TEXT + "\n## Section\nText after a heading.\n- One item.\n  - A nested item.\n1. A numbered one.\n"
+                "> A quote.\n| a | b |\n| - | - |\n<br>\n```\ncode line one\ncode line two\n```\n")
+        self.path.write_text(text, encoding="utf-8")
+        driver.check_release_notes("0.9.1")
+        self.assertEqual(driver.wrapped_lines(text), [])
+
 
 class PipelineResultTests(unittest.TestCase):
     def test_a_missing_or_failing_summary_is_reported(self) -> None:

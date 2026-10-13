@@ -25,6 +25,8 @@ STRANDED_SHORT_WORD_REASON: Final = "однобуквенное слово из 
 LONE_LETTER_REASON: Final = "одиночную букву переводят только правила из безопасного списка"
 # A Russian abbreviation or slang word the action model would convert into Latin keys nobody uses.
 RUSSIAN_SLANG_REASON: Final = "русское сокращение или сленг: латинское прочтение не встречается"
+# A word the action model only suggests converting while the detector converts it (ContextPolicy.decide).
+SUGGESTION_CONFIRMED_REASON: Final = "контекстная модель предлагает другую раскладку, детектор её подтверждает"
 
 
 def russian_slang(original: str, alternative: str, source_group: int, source_known: bool) -> bool:
@@ -286,6 +288,22 @@ class ContextPolicy:
                 target_group=target_group, source_score=source, target_score=target,
                 reason="решение контекстной модели", confidence=prediction.probability,
             )
+        elif prediction.action == "suggest" and baseline.should_convert and action_model and not slang and not lone:
+            # The model leans to the other layout without its threshold's certainty, and the detector,
+            # which the model was asked to overrule, converts: two verdicts of the same direction. A word
+            # no lexicon holds (`byzpt` for `инязе`, `ntby` for `теин`) was left as typed at a suggestion
+            # while the baseline pair converted it, and in the owner's typing (0.44-0.53) such words were
+            # meant converted in 6 of the 7 cases of more than one letter. Measured on the owner's field
+            # batteries: 15 more words converted right, 20 fewer missed, no more converted wrongly; the
+            # development and calibration sequences lost no restoration and corrupted nothing. One live word
+            # of the seven was meant as typed (`lokim`). A curated short word converts on a suggestion too: left
+            # to wait for its neighbour, `b[` after `the.hoster` stayed where `их` was meant. The model's wait
+            # still delays it below.
+            decision = replace(
+                baseline, should_convert=True, replacement=alternative,
+                target_group=target_group, source_score=source, target_score=target,
+                reason=SUGGESTION_CONFIRMED_REASON, confidence=prediction.probability,
+            )
         elif ((is_short_word_override(baseline)
                and (baseline.reason == ISOLATED_SHORT_WORD_REASON or trigger == "pause"
                     or (prediction.action != "wait" and self.model.feature_version != CONTEXT_ACTION_FEATURE_VERSION)))
@@ -327,7 +345,11 @@ class ContextPolicy:
             }[prediction.action])
         result = ContextResult(decision, prediction, field, policy_applied=True,
                                decision_source="context_model", fallback_reason=ignored_read)
-        if self.model.feature_version != CONTEXT_ACTION_FEATURE_VERSION:
+        if self.model.feature_version != CONTEXT_ACTION_FEATURE_VERSION or prediction.action == "suggest":
+            # A feature-version-3 model decides alone, but when it only suggests the other layout, the
+            # orthotactic model may settle it: the keys of a word no lexicon holds (`byzpt` for `инязе`,
+            # `ntby` for `теин`) were left as typed at a suggestion, while the baseline pair converted them
+            # on that licence. Its keep and wait stand.
             result = self._licensed(result, baseline, alternative, target_group, field, detector)
         return replace(self._spelling_a_word(result), withheld_after_characters=withheld)
 

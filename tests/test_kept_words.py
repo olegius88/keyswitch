@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import unittest
 
+import test_input_sequence_matrix as sequences
+
 from keyswitch.context_model import ContextAction, ContextEvidence
 from test_context_policy import ContextEngineTests
 from test_context_wait_pairs import ScriptedModel, before_greeting
@@ -246,8 +248,13 @@ class KeptWordModelTests(ContextEngineTests):
 
     def test_a_first_word_is_decided_with_the_next_word_across_a_dash(self) -> None:
         # `Ytn` stayed for good once `-` had cut it off from `где`; a row of sealed test v38 lost
-        # its first word the same way.
-        self.assertEqual(self.typed(0, "Ytn", "-", "ult"), "Нет - где ")
+        # its first word the same way. The detector confirms the model's suggestion for `Ytn` at
+        # its own space now (ContextPolicy.decide), and the keys of `где` go on in the layout that
+        # follows, so the phrase is typed with the physical keys.
+        with sequences.session(0) as current:
+            current.physical("Ytn - ult ")
+            current.flush()
+            self.assertEqual(current.backend.text, "Нет - где ")
 
     def test_a_sign_split_off_the_first_word_is_decided_with_the_next_word(self) -> None:
         # `её` is `t\`` and a backtick to the boundary model; `е` alone is no word.

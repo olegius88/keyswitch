@@ -4,6 +4,46 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- A word typed in the wrong layout that the context model only suggests converting is converted when the detector
+  converts it too. The model's suggestion leans to the other layout without the certainty of its threshold, and a word
+  no lexicon holds was left as typed there (`byzpt` for `инязе`, `ntby` for `теин`) while the detector, and the
+  baseline pair, converted it; in the owner's typing such words were meant converted in 6 of the 7 cases of more than
+  one letter (the seventh, `lokim`, was meant as typed). Where the detector keeps the word, the orthotactic model may
+  settle a suggestion as it does for the context-v1 models. A lone letter still converts only by a curated rule, and
+  the model's keep and wait stand. On the owner's field batteries 15 more words are converted right and 20 fewer are
+  missed, with no more converted wrongly; the term battery fixes 25 terms of 35 instead of 23 and the Russian
+  abbreviation battery 28 of 30 instead of 26; the development and calibration sequences lose no restoration and
+  corrupt nothing.
+- A one-letter Russian word typed in the English layout after an English term is corrected when the term was typed in
+  the middle of a line too. The rule reads the words before the term, and it read only the words KeySwitch saw typed:
+  after a click into `почему я не вижу  /home` the words `в vscode d` gave it no Russian word before `vscode`, and `d`
+  stayed. It now reads the field's own text before the word when the stream of keys has none.
+- A word joined to another by a hyphen, or by another sign typed the same in both layouts (`_`, `+`, `=`), is decided
+  on its own when the token is not right as a whole. An English term and a Russian word joined by a hyphen are common
+  in Russian prose, and the layout the term was typed in often types the word after it: `mongo-cthdbcf`, `lid-ht;bvt`
+  and `multidevice-htitybz[` stayed in the owner's logs (`mongo-сервиса`, `lid-режиме`, `multidevice-решениях`), since
+  the token was judged whole and its whole other reading (`ьщтпщ-сервиса`) is no word either, and `docker-j,hfp`
+  became `вщслук-образ`. The part after the last joining sign is now asked about as a word of its own, behind the head
+  as typed, and converted alone when the model converts it and, for a token it would convert whole, keeps the head
+  alone (`ИИ-ассистент` typed in the English layout still converts whole). A sign at the end is replayed with the part
+  (`mongo-сервиса.`), and Pause after such a correction takes back only the part. The head is never replaced: a head
+  that itself reads as a word in the other layout leaves the token whole (`ьщтпщ-сервиса` typed in the Russian layout
+  stays), and so do a part of one letter (`usb-c`, `plan-b`) and a token the code guard protects (`user_name`,
+  `foo=bar`, `user@host`). A sign that is a letter in the other layout remains a letter of the word (`,` is the `б` of
+  `cj,thb`, `собери`). Of 24 authored hyphenated tokens, typed in either layout and corrected at a space or at a
+  pause, all now end as meant; terms and words typed right as a whole (`какой-то`, `из-за`, `e-mail`,
+  `state-of-the-art`, `node-telegram`) stay. The log records each such question as `joined_part_decision`.
+- The context model `context-v3-8849f92656fd` (corpus v54) replaces `context-v3-d26f82e59d8b`: the recipe of pairs
+  v39-v53 retrained on a new corpus, so that the seal pins the changed engine; the prefix model
+  `prefix-v2-bf3dc28f8567` retrained byte-identical. On the same engine it decides calibration v54 as the model of
+  0.53.0 does, and its head for abbreviations after Latin-script text keeps 28 of 30 Latin-script abbreviations and
+  fixes 19 to 20 of 20 without the early switch (0.53.0: 27 and 18 to 19), with two more right conversions on
+  development v54 in the reference-dictionary profile. On the sealed test v54, read once, it kept all 187 correctly
+  typed sequences and restored 186 to 187 of the 187 typed in the wrong layout without the early switch against 185
+  for the baseline pair, and 16 with it, as many as the baseline pair. The pair of corpus v53, on the engine without
+  the confirmed suggestions, was not installed: on test v53 it restored one row fewer than the baseline pair without
+  the early switch, a short Russian message whose last word was typed in the English layout. Of 345 development
+  sentences of that shape, the corpus v53 model with the confirmed suggestions restores 343 and the baseline pair 342.
 ## 0.53.0 — 2026-10-13
 
 - The pause correction now comes after 0.7 s of no typing instead of 1.5 s. A word typed in the wrong layout switches

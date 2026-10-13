@@ -129,14 +129,17 @@ class EarlySwitchSettlingTests(ContextEngineTests):
         self.assertEqual(settled["verdict"], "convert")
 
     def test_a_model_in_doubt_leaves_the_prefix_models_choice(self) -> None:
-        for doubt in ("wait", "suggest"):
+        # A suggestion the detector confirms is a conversion of the typed word (ContextPolicy.decide), which
+        # confirms the switch as well: either way the prefix model's choice stands.
+        cases: tuple[tuple[ContextAction, str], ...] = (("wait", "wait"), ("suggest", "convert"))
+        for doubt, verdict in cases:
             with self.subTest(doubt=doubt):
                 self.reset_editor(1)
                 self.judge(doubt)
                 with self.assertLogs("keyswitch.engine", level="INFO") as logs:
                     self.type_keys(INVENTED_WORD + " ", 1)
                 self.assertEqual(self.backend.text, "iegieg ")
-                self.assertEqual(self.settled(logs.output)[0]["verdict"], doubt)
+                self.assertEqual(self.settled(logs.output)[0]["verdict"], verdict)
 
     def test_a_shown_word_the_model_converts_back_needs_no_second_question(self) -> None:
         self.reset_editor(1)

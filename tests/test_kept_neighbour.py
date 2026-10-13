@@ -20,10 +20,15 @@ from test_context_wait_pairs import ScriptedModel
 
 
 def term_amid_russian(item: ContextEvidence) -> ContextAction:
-    """`зк` and `зкщсуыы` wait at their space; beside a kept `проверь` they convert."""
+    """`зк` and `зкщсуыы` wait at their space; beside a kept `проверь` they convert.
+
+    `зкщсуыы` waits on a wait: the detector converts it (`process`), and a suggestion the detector
+    confirms converts at once (ContextPolicy.decide)."""
 
     if item.original in {"зк", "зкщсуыы"}:
-        return "convert" if item.after_origin == "kept_next_word" and item.field.after == "проверь" else "suggest"
+        if item.after_origin == "kept_next_word" and item.field.after == "проверь":
+            return "convert"
+        return "wait" if item.original == "зкщсуыы" else "suggest"
     return "keep"
 
 

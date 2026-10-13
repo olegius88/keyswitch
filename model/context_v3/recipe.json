@@ -21,7 +21,7 @@
   "runtime_policy": {
     "model_verdict_stands": {
       "removed": "unlicensed_isolated and short_uppercase_unknown_source, both class-wide vetoes, were removed on 17.09.2026: they overruled the model on the input it was trained to tell apart, cost 14 of 300 restorations on chat-like first words and prevented no corruption (.t/reliable-release-2026-09-12/SHORT-ISOLATED-CURRICULUM.md). The earlier short_unknown_source entry named the same ban from the training side and is gone with it.",
-      "rule": "The model's verdict decides. This layer refuses nothing for a class of input; a conversion is refused only by an exception the user can see - an excluded word or application, their own switching settings, a rule they taught the engine - or by the model's own calibrated threshold."
+      "rule": "The model's verdict decides. This layer refuses nothing for a class of input; a conversion is refused only by an exception the user can see - an excluded word or application, their own switching settings, a rule they taught the engine - or by the model's own calibrated threshold. A suggestion - the model leaning to the other layout below its threshold - converts when the detector converts the word too, a lone letter excepted (ContextPolicy.decide, 13.10.2026): two verdicts of the same direction; the model's keep and wait stand."
     }
   },
   "feature_version": 3,

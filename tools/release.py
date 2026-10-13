@@ -67,6 +67,10 @@ VERSION_PATTERN: Final[re.Pattern[str]] = re.compile(r"^\d+\.\d+\.\d+$")
 CHANGELOG: Final[Path] = PROJECT_ROOT / "CHANGELOG.md"
 RELEASE_NOTES: Final[Path] = PROJECT_ROOT / "RELEASE_NOTES.md"
 UNRELEASED_HEADING: Final[str] = "## Unreleased"
+# The release workflow publishes RELEASE_NOTES.md as the release text, and GitHub and the in-app update notice
+# show every line break in it: a paragraph wrapped in the file reads as ragged lines (0.51.0-0.53.0). A line
+# that starts none of these blocks continues the paragraph or list item above it.
+MARKDOWN_BLOCK_START: Final[re.Pattern[str]] = re.compile(r"#|\s*[-*+] |\s*\d+[.)] |\||>|```|<")
 # Assets the release workflow attaches; a release without one of them is a
 # failed publication even when the workflow reports success.
 RELEASE_ASSETS: Final[tuple[str, ...]] = (
@@ -314,7 +318,30 @@ def check_release_notes(version: str) -> None:
         raise ReleaseError(
             "RELEASE_NOTES.md does not name the published files: " + ", ".join(missing)
         )
+    wrapped = wrapped_lines(text)
+    if wrapped:
+        raise ReleaseError(
+            "RELEASE_NOTES.md continues a paragraph or list item on lines " + ", ".join(map(str, wrapped))
+            + "; GitHub and the update notice show every line break, so write each paragraph and item on one line"
+        )
     note("release notes describe this version")
+
+
+def wrapped_lines(text: str) -> list[int]:
+    """The numbers of the lines that continue the paragraph or list item above them; code blocks are left alone."""
+
+    wrapped: list[int] = []
+    fenced = continued = False
+    for number, line in enumerate(text.split("\n"), start=1):
+        if line.startswith("```"):
+            fenced, continued = not fenced, False
+        elif fenced or not line.strip():
+            continued = False
+        elif continued and MARKDOWN_BLOCK_START.match(line) is None:
+            wrapped.append(number)
+        else:
+            continued = not line.startswith(("#", "|", "<"))
+    return wrapped
 
 
 def run_pipeline(options: Options) -> Path:
