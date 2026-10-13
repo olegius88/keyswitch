@@ -30,6 +30,11 @@ All notable changes to KeySwitch are documented in this file.
   typed (the owner's log, 13.10.2026). The same held for a word whose early switch was undone. Now leaving such a word
   unfinished (the arrow keys, a click, a shortcut, another window) ends its protection; a layout the user picks
   still protects the next word whatever comes before it. The log names the protection's source (`current_word`).
+- Seals, the release receipt and the engine reports are written indented, keys sorted, instead of on one line, so that
+  they read in an editor. A file whose bytes something pins stays as it was: the installed weights (their SHA-256 is
+  in the receipt and the installers, and indented they would outgrow their 8 MiB cap), the history files named by the
+  hash of their own bytes, and the frozen families' seals and reports, which CI compares byte for byte. The
+  development histories and reports nothing hashes are rewritten indented once.
 
 ## 0.54.0 — 2026-10-13
 

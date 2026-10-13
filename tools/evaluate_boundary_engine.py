@@ -24,7 +24,8 @@ from keyswitch.history import HistoryStore
 from keyswitch.language_model import LanguageModel
 from keyswitch.layouts import LayoutPair
 from context_corpus import ROOT
-from context_evidence import canonical, checksum
+from context_evidence import checksum
+from freeze_context_action_corpus import readable
 # The engine serves the onboard lexicon plus the packaged supplement, so the replay does too.
 from reference_lexicon import reference_models
 from train_boundary_model import CANDIDATE, DIRECTORY
@@ -112,7 +113,8 @@ def evaluate() -> bytes:
                           "injections_before_hard_boundary": premature, "length_mismatches": mismatched_length}
     if provenance() != runtime:
         raise ValueError("boundary runtime inputs changed during replay")
-    return canonical({"schema_version": 1, "scope": "authored in-process regression; fixed physical keys/live layout; no native OS proof or independent model evaluation",
+    # A report people open to read, written and verified indented (freeze_context_action_corpus.readable).
+    return readable({"schema_version": 1, "scope": "authored in-process regression; fixed physical keys/live layout; no native OS proof or independent model evaluation",
                       "provenance": runtime, "results": results})
 
 

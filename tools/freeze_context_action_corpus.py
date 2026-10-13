@@ -47,7 +47,7 @@ from keyswitch.constants.corpus import (
     TYPO_SOURCE_MIN_CHARACTERS,
     TYPO_TRANSPOSE_MARGIN_CHARACTERS,
 )
-from keyswitch.constants.file_formats import HASH_CHUNK_BYTES, HEXADECIMAL_BASE
+from keyswitch.constants.file_formats import HASH_CHUNK_BYTES, HEXADECIMAL_BASE, REPORT_JSON_INDENT
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,6 +69,12 @@ CONTEXT_WINDOW_TEXT = f"before<={CORPUS_BEFORE_WINDOW_CHARACTERS} and after<={CO
 
 def canonical(value: object) -> bytes:
     return (json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+
+def readable(value: object) -> bytes:
+    """A record a person opens to read (a seal, a receipt): indented, keys sorted. Every hash of it is of these very
+    bytes; what hashes re-serialised content (canonical), and the test ledger, stay canonical."""
+    return (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=REPORT_JSON_INDENT) + "\n").encode()
 
 
 def digest(value: str) -> str:
