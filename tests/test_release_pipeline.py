@@ -32,6 +32,12 @@ from fixture_values.release import (
     PIPELINE_SAMPLE_OPTIONAL_NUMBER_INPUT,
     PIPELINE_SAMPLE_REPLAYS,
     PIPELINE_SECOND_JSON_VALUE,
+    PIPELINE_LOG_SAMPLE_CAP_BYTES,
+    PIPELINE_LOG_SAMPLE_CHUNK_BYTES,
+    PIPELINE_LOG_SAMPLE_LINES,
+    PIPELINE_LOG_SAMPLE_POLL_SECONDS,
+    PIPELINE_LOG_SAMPLE_TAIL_LINES,
+    PIPELINE_LOG_SAMPLE_WINDOW_BYTES,
     PIPELINE_TYPECHECK_DURATION_SECONDS,
     PIPELINE_TYPECHECK_PEAK_RSS_MIB,
 )
@@ -485,6 +491,74 @@ class ProcessAccountingTests(unittest.TestCase):
     def test_process_command_lines_include_this_interpreter(self) -> None:
         lines = pipeline.process_command_lines()
         self.assertTrue(any("python" in line for line in lines))
+
+
+class PhaseLogTests(unittest.TestCase):
+    """A phase log can outgrow memory: on 2026-10-14 one GTK warning filled 37 GB in 25 minutes."""
+
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.log = pipeline.PhaseLog(Path(directory.name) / "phase.log")
+        self.addCleanup(self.log.close)
+
+    def written(self, data: bytes) -> pipeline.PhaseLog:
+        self.log.handle.write(data)
+        self.log.handle.flush()
+        return self.log
+
+    def test_the_tail_is_read_from_the_end_of_the_log(self) -> None:
+        lines = [f"line {number}" for number in range(PIPELINE_LOG_SAMPLE_LINES)]
+        log = self.written(("\n".join(lines) + "\n").encode("utf-8"))
+        with patch.object(pipeline, "LOG_TAIL_READ_BYTES", PIPELINE_LOG_SAMPLE_WINDOW_BYTES), \
+                patch.object(Path, "read_bytes", side_effect=AssertionError("the whole log was read")):
+            self.assertEqual(log.tail(PIPELINE_LOG_SAMPLE_TAIL_LINES), lines[-PIPELINE_LOG_SAMPLE_TAIL_LINES:])
+            # The window starts within a line; that cut line is left out.
+            window = log.tail(len(lines))
+        self.assertTrue(window)
+        self.assertTrue(all(line in lines for line in window))
+
+    def test_a_log_shorter_than_the_window_keeps_its_first_line(self) -> None:
+        self.log.write("the only line")
+        self.assertEqual(len(self.log.tail()), 1)
+        self.assertTrue(self.log.tail()[0].endswith("the only line"))
+
+    def test_a_marker_split_between_chunks_is_found(self) -> None:
+        log = self.written(b"abcdefgE2E_OKxyz")
+        with patch.object(pipeline, "LOG_SEARCH_CHUNK_BYTES", PIPELINE_LOG_SAMPLE_CHUNK_BYTES):
+            self.assertTrue(log.contains("E2E_OK"))
+            self.assertTrue(log.contains("abcdefgE2E_OKxyz"))
+            self.assertTrue(log.contains("z"))
+            self.assertFalse(log.contains("E2E_FAILED"))
+
+
+class CommandRunnerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        self.context = pipeline.Context(root / "run", _options(), ())
+        self.log = pipeline.PhaseLog(root / "phase.log")
+        self.addCleanup(self.log.close)
+        poll = patch.object(pipeline, "PHASE_LOG_POLL_SECONDS", PIPELINE_LOG_SAMPLE_POLL_SECONDS)
+        poll.start()
+        self.addCleanup(poll.stop)
+
+    def test_a_command_that_ends_gives_its_status(self) -> None:
+        argv = [sys.executable, "-c", "print('done')"]
+        self.assertEqual(self.context.run_command("quick", self.log, argv, timeout=SECONDS_PER_HOUR), 0)
+        self.assertTrue(self.log.contains("done"))
+
+    def test_a_command_whose_log_outgrows_the_cap_is_stopped(self) -> None:
+        flood = [sys.executable, "-c", "import sys\nwhile True:\n    sys.stdout.write('vkWaitForFences(): device lost\\n')"]
+        with patch.object(pipeline, "PHASE_LOG_MAX_BYTES", PIPELINE_LOG_SAMPLE_CAP_BYTES), \
+                self.assertRaisesRegex(pipeline.PhaseFailure, "wrote more than .* to phase.log; stopped"):
+            self.context.run_command("e2e-x11", self.log, flood, timeout=SECONDS_PER_HOUR)
+
+    def test_a_command_that_outlives_its_timeout_is_stopped(self) -> None:
+        slow = [sys.executable, "-c", "import time\ntime.sleep(60)"]
+        with self.assertRaisesRegex(pipeline.PhaseFailure, "timed out after 1 seconds"):
+            self.context.run_command("slow", self.log, slow, timeout=1)
 
 
 if __name__ == "__main__":

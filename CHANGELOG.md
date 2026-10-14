@@ -17,6 +17,10 @@ All notable changes to KeySwitch are documented in this file.
   these installers, so this version has to be installed there by hand once.
 - The technical log names the platform of the build at start (`build_platform` in `engine_initialized`): one version
   ships a build per architecture.
+- The release pipeline reads the tail of a phase log from its end, looks for a marker a chunk at a time and stops a
+  command whose log grows past 256 MiB. A GTK renderer that had lost its Vulkan device inside Xvfb wrote one warning
+  into the X11 end-to-end phase's log for 25 minutes, 37 GB, and the run reading that log whole for its summary was
+  killed for want of memory. GUI tests render with GTK's cairo renderer unless told otherwise.
 
 ## 0.55.0 — 2026-10-14
 

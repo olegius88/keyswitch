@@ -61,6 +61,16 @@ PROC_STAT_SESSION_INDEX: Final[int] = 3
 PROC_STAT_RSS_PAGES_INDEX: Final[int] = 21
 PROC_STAT_MIN_FIELDS_AFTER_COMM: Final[int] = PROC_STAT_RSS_PAGES_INDEX + 1
 DEFAULT_LOG_TAIL_LINES: Final[int] = 40
+# The tail of a phase log is read from its last bytes and a marker is looked for a chunk at a time:
+# on 2026-10-14 a GTK renderer that had lost its Vulkan device wrote one warning into the X11 E2E
+# phase's log for 25 minutes, 37 GB, and the run reading that log whole was killed for want of memory.
+LOG_TAIL_READ_BYTES: Final[int] = BYTES_PER_MEBIBYTE
+LOG_SEARCH_CHUNK_BYTES: Final[int] = BYTES_PER_MEBIBYTE
+# A command whose phase log or stdout file outgrows this is stopped; the largest log of a release run,
+# the coverage phase's, stays under 400 KB.
+PHASE_LOG_MAX_BYTES: Final[int] = 256 * BYTES_PER_MEBIBYTE
+# How often the output of a running command is measured.
+PHASE_LOG_POLL_SECONDS: Final[float] = 2.0
 COMMAND_PREVIEW_ARGUMENT_COUNT: Final[int] = 2
 # Per-phase subprocess timeouts.
 DEVELOPMENT_REPLAY_TIMEOUT_SECONDS: Final[int] = 3 * SECONDS_PER_HOUR

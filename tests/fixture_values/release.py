@@ -26,6 +26,15 @@ PIPELINE_COVERAGE_DURATION_SECONDS: Final = 3661
 PIPELINE_COVERAGE_PEAK_RSS_MIB: Final = 400
 PIPELINE_COVERAGE_TEST_COUNT: Final = 346
 PIPELINE_SECOND_JSON_VALUE: Final = 2
+# A phase log of many short lines read through a small tail window, and a marker split between chunks
+# smaller than itself.
+PIPELINE_LOG_SAMPLE_LINES: Final = 1000
+PIPELINE_LOG_SAMPLE_WINDOW_BYTES: Final = 64
+PIPELINE_LOG_SAMPLE_TAIL_LINES: Final = 3
+PIPELINE_LOG_SAMPLE_CHUNK_BYTES: Final = 4
+# A cap a flooding command passes within a poll, and a poll short enough for a test.
+PIPELINE_LOG_SAMPLE_CAP_BYTES: Final = 65536
+PIPELINE_LOG_SAMPLE_POLL_SECONDS: Final = 0.05
 RELEASE_SCRIPT_PIPELINE_FAILURE_RETURN_CODE: Final = 3
 RELEASE_SCRIPT_TARGET_RUN_ID: Final = 2
 SAMPLE_RELEASE_ASSET_SIZE_BYTES: Final = 3
