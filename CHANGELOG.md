@@ -4,6 +4,97 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- Pause converts the last word past the spaces and signs typed after it. A word stayed Pause's only until the next
+  key, and any further space or sign left Pause nothing but switching the layout: `цуиоы` (meant `webjs`) with a few
+  such keys after it stayed, and in the owner's PC logs since 01.10 nine of the sixteen presses that found the last
+  word out of reach were followed by that word erased and typed again by hand. Now spaces and signs typed the same in
+  every layout (`-`, `+`, `!`) keep the
+  word in reach, up to eight keys after it, and the conversion types them again as they were: `цуиоы - ` becomes
+  `webjs - `. A sign another in the other layout that ended the word stays as typed (`ЗК? ` becomes `PR? `). A
+  letter, Backspace, the arrow keys, a click, Enter and Tab end the reach as before, and a token of such signs alone
+  is no longer what Pause converts instead of the word.
+- Pause on a token of parts joined by a sign typed the same in both layouts converts its last part when the parts
+  before it are settled as typed. `lid-'ne` became `дшв-эту`, and the owner pressed Pause again and typed the part
+  anew; it now becomes `lid-эту`, as the automatic correction of joined parts decides (`mongo-cthdbcf` is
+  `mongo-сервиса`). A head that itself reads as a word in the other layout leaves the token whole (`ghbdtn-vbh` is
+  `привет-мир`), and Pause on a token a correction typed takes back all of it. The log's
+  `manual_conversion_scheduled` records the characters kept in front (`kept_head_characters`) and the keys typed
+  again after the word (`trailing_characters`).
+- The undo shortcut (`Ctrl+Alt+Z`) no longer rewrites text typed after the corrected word. Undo deletes the corrected
+  word and its boundary and types the original back, and it stayed available when another word, or a dash between
+  words, followed the correction: `ghbdtn vbh ` (`привет мир `) and undo gave `привghbdtn `. Undo now requires the text
+  before the caret to end as the correction left it; otherwise it reports that the correction can no longer be undone.
+- The protection Pause gives the word being typed ends with that word. After Pause on an unfinished word the next
+  word typed in the chosen layout was protected from automatic correction however much later it came: Pause made
+  `ля` into `kz`, the arrow keys left the word, and a minute later `ntcn` at the start of another field stayed as
+  typed (the owner's log, 13.10.2026). The same held for a word whose early switch was undone. Now leaving such a word
+  unfinished (the arrow keys, a click, a shortcut, another window) ends its protection; a layout the user picks
+  still protects the next word whatever comes before it. The log names the protection's source (`current_word`).
+- A term typed in the Russian layout amid a Russian phrase is converted when the same text already holds it typed
+  right: `webjs не дает информацию ... дело в цуиоы` gives `webjs`. The context model saw only the two words next to
+  a token, and `цуиоы` stayed four times in one session in a chat input of VS Code, twice after `webjs` typed a few
+  seconds before. A token no table counts typed in the English layout after Russian text is decided by the same new
+  part of the model (`htpdt` in a Russian sentence is `резве`); a Latin name or term typed right stays. The context
+  model gains a head for such tokens (`unknown|`): four letters or more of one script, not in capitals, its Cyrillic
+  reading unused in Russian prose, after Russian text - Latin letters in either layout, Russian letters only after
+  their Latin reading earlier in the text. Without that echo Russian letters stay with the model as before: fitted on
+  them too, the head converted slang, truncations and brands written in Cyrillic (`пукты`, `иишку`, `гупшуп`) in the
+  owner's typing, so a term typed in the Russian layout the first time in a text is still left to Pause, which now
+  reaches it past the spaces and signs after it. On the owner's field batteries, on the same engine, the pair converts
+  2 more words right than the 0.54.0 pair and none wrongly that it kept; the authored echo battery converts 20 of 20
+  instead of 18.
+- A Russian word typed in the English layout whose last letter sits on a sign key (`х` on `[`, `ю` on `.`) is
+  converted in the middle of a sentence too. The boundary model cannot tell whether such a key ends the word as a
+  sign (`vbkkbjyf[` is `миллиона` and a bracket or `миллионах`), so the token waits for the next word, and only the
+  first words of a line were taken along when that word converted: `в 2 vbkkbjyf[ cdtnjds[` became
+  `в 2 vbkkbjyf[ световых`, and the same left `неверностью`, `дикую` and `трудах` in sentences the pairs are measured
+  on and `начинаю` in the owner's typing. Such a token was decided neither with the words before it nor at all, so
+  it is now asked about wherever it stands on its line, with the text before it, and taken along on the model's own
+  conversion only, not on a suggestion the detector confirms: the detector reads `it.` as no English word and `шею`
+  as a Russian one. When its other reading is no word, it is asked only if the orthotactic model reads its keys as
+  the other layout's language (`vehpbkrf[` is `мурзилках`; `repo,` and `UI,` stay), and a token the code guard keeps
+  whole (`-PHP,` before `значит`) is no such token. A word converted at a pause with a sign after it (`rjire/`
+  ending a message is `кошку.`) takes such tokens along as at a space, a word waiting for it among them. On the
+  development rows of the class both pairs restore 33 of 37 instead of 17. The log names a token left unasked for
+  its keys (`kept_word_not_asked`).
+- A Russian word of two joined by a hyphen, typed in the English layout, is converted when each half is an English
+  word as typed: `Re-re!` after a Russian sentence is `Ку-ку!`. No term table counts a hyphenated word, so the context
+  model read no count of such a token at all, though its words tell the language (`ку` occurs in Russian prose, `re`
+  nowhere in English prose), and it kept the token at p=0.99. The context model gains a head for these tokens
+  (`joined|`) that reads how often the most and the least frequent word of each reading occurs in its language's
+  prose and whether the token repeats one word, fitted on the words joined by hyphens of the training text, typed as
+  written and in the other layout.
+- A word the user excluded, or one a rule of theirs keeps, is no longer converted with the word after it. When the
+  next word converted, the engine asked the model about such a word again, and an excluded `tot` before `ghbdtn`
+  became `еще привет`.
+- Seals, the release receipt and the engine reports are written indented, keys sorted, instead of on one line, so that
+  they read in an editor. A file whose bytes something pins stays as it was: the installed weights (their SHA-256 is
+  in the receipt and the installers, and indented they would outgrow their 8 MiB cap), the history files named by the
+  hash of their own bytes, and the frozen families' seals and reports, which CI compares byte for byte. The
+  development histories and reports nothing hashes are rewritten indented once.
+- The context model `context-v3-83ddd9dc063a` (corpus v60) replaces `context-v3-8849f92656fd`: the frozen base of the
+  pairs since 0.44.0 with three heads fitted onto it - for abbreviations after Latin-script text, for tokens no table
+  counts (`unknown|`) and for words joined by hyphens (`joined|`), which chooses its epoch on its own development
+  frames while the other heads are ranked without its weights - so that the seal pins the changed engine; the prefix
+  model `prefix-v2-bf3dc28f8567` retrained byte-identical. On the same engine it decides calibration v60 with 10 and 6
+  more right conversions per profile than the model of 0.54.0 and one more false (16 against 15: two spellings of the
+  Russian name `эль-халфы` read in the English layout, while `V-Belt` is no longer read in the Russian one),
+  development v60 with 121 and 115 more and as many false ones, the owner's field batteries with 2 more words right
+  and none wrong that the 0.54.0 model kept, a term typed again after the same term typed right 20 times of 20
+  (0.54.0: 18) and a Russian word joined by a hyphen typed in the English layout 10 times of 10 (0.54.0: 7). Of three
+  such terms quoted in a bug report as they were typed by mistake (`webjs набралось как цуиоы`), meant as typed, it
+  converts all three, where 0.54.0 left one, and of the authored abbreviations after Latin-script text it converts one
+  more Russian one (`deploy staging ЗП` becomes `PG` without Hunspell, at p=0.991) and restores one Latin one typed in
+  the Russian layout fewer (`Ask РК about the leave`). On the sealed test v60, read once, it kept all 185 correctly
+  typed sequences, restored all 185 typed in the wrong layout without the early switch against 182 and 183 for the
+  baseline pair, and 13 with it against 12; the baseline pair corrupted two and one correct rows. The pairs of corpora
+  v55-v59 were not installed: the corpus v55 pair's seal was withdrawn before a release, test v56 restored one row
+  fewer than the baseline pair, on tests v57 and v58 the pairs restored exactly the rows the baseline pair did (180 of
+  182, 196 of 197), short of the margin, and the corpus v59 pair, which passed test v59 (193 against 192), sealed
+  files the strict type check of CI failed. The rows both pairs lost on tests v57 and v58 were a word ending in a
+  letter on a sign key in the middle of a sentence, an unknown name opening a message and `Ку-ку!` typed in the
+  English layout; the first and the last are now restored.
+
 ## 0.54.0 — 2026-10-13
 
 - A word typed in the wrong layout that the context model only suggests converting is converted when the detector
@@ -46,6 +137,7 @@ All notable changes to KeySwitch are documented in this file.
   the confirmed suggestions, was not installed: on test v53 it restored one row fewer than the baseline pair without
   the early switch, a short Russian message whose last word was typed in the English layout. Of 345 development
   sentences of that shape, the corpus v53 model with the confirmed suggestions restores 343 and the baseline pair 342.
+
 ## 0.53.0 — 2026-10-13
 
 - The pause correction now comes after 0.7 s of no typing instead of 1.5 s. A word typed in the wrong layout switches

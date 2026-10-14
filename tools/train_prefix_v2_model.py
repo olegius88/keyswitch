@@ -440,7 +440,8 @@ def fit(output: Path, recipe_path: Path = RECIPE) -> dict[str, object]:
     loaded = VersionedPrefixModel.load(output / "prefix-candidate.json")
     if loaded.feature_version != feature_version or loaded.version != version or loaded.model.weights != learned:
         raise ValueError("prefix export and runtime model differ")
-    (output / "seal.json").write_bytes(canonical(seal))
+    # A seal a person opens to read: indented (REPORT_JSON_INDENT); every hash of it is of these very bytes.
+    (output / "seal.json").write_bytes((json.dumps(seal, sort_keys=True, ensure_ascii=False, indent=REPORT_JSON_INDENT) + "\n").encode())
     (output / "recipe.json").write_bytes(recipe_path.read_bytes())
     return seal
 

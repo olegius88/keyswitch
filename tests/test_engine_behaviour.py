@@ -416,7 +416,9 @@ class EngineBehaviourTests(unittest.TestCase):
     def test_pause_with_nothing_new_only_switches_the_layout(self) -> None:
         self.correct_hello()
         with self.assertLogs("keyswitch.engine", level="INFO") as logs:
-            self.press_space()  # second space: the word is now stale
+            # The arrow keys moved the caret off the word: it is now stale.
+            self.engine._handle(plain_key("Left", SYNTHETIC_LEFT_ARROW_KEYCODE, 1))
+            self.engine._handle(plain_key("Left", SYNTHETIC_LEFT_ARROW_KEYCODE, 1, pressed=False))
             self.press_pause()
         self.assertEqual(len(self.backend.injections), 1)
         self.assertEqual(self.backend.group, 0)
@@ -1629,6 +1631,45 @@ class EngineBehaviourTests(unittest.TestCase):
             event for event in self.technical_events(logs.output) if event["event"] == "word_evaluation"
         )
         self.assertIsNone(evaluation["skipped_reason"])
+
+    def test_a_word_converted_by_pause_protects_only_itself(self) -> None:
+        # Pause on the unfinished word protects it while it is typed on, and only it. A field log:
+        # Pause made `ля` into `kz`, the arrow keys left the word, and `ntcn` typed at the start of
+        # another line a minute later stayed as typed.
+        self.type_word("руддщ", group=1)
+        self.hit_pause()
+        self.assertEqual(self.engine.snapshot.current_word, "hello")
+        self.assertEqual((self.engine._manual_layout_group, self.engine._manual_layout_source), (0, "current_word"))
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.type_word("s", start=SECOND_WORD_KEYCODE_BASE)
+            self.press_space(0)
+        evaluation = next(event for event in self.technical_events(logs.output) if event["event"] == "word_evaluation")
+        self.assertEqual((evaluation["original"], evaluation["skipped_reason"]), ("hellos", "manual_layout_protected"))
+        self.assertIsNone(self.engine._manual_layout_group)
+
+        # The field of the log could be read, so a word after the arrow keys is decided.
+        self.settings.set("detection.hold_after_caret_move", False)
+        self.type_word("руддщ", group=1, start=THIRD_WORD_KEYCODE_BASE)
+        self.hit_pause()
+        self.assertEqual(self.engine._manual_layout_group, 0)
+        self.engine._handle(plain_key("Left", SYNTHETIC_LEFT_ARROW_KEYCODE, 0))
+        self.engine._handle(plain_key("Left", SYNTHETIC_LEFT_ARROW_KEYCODE, 0, pressed=False))
+        self.assertIsNone(self.engine._manual_layout_group)
+        injections = len(self.backend.injections)
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.type_word("ghbdtn", start=FOURTH_WORD_KEYCODE_BASE)
+            self.press_space(0)
+        evaluation = next(event for event in self.technical_events(logs.output) if event["event"] == "word_evaluation")
+        self.assertIsNone(evaluation["skipped_reason"])
+        self.assertEqual(len(self.backend.injections), injections + 1)
+        self.assertEqual(self.engine.snapshot.current_group, 1)
+
+        # A layout the user picks is for the next word, whatever was left unfinished before it.
+        self.type_word("ghb", start=FIFTH_WORD_KEYCODE_BASE)
+        self.engine._observe_group(0, source="keystroke")
+        self.engine._handle(plain_key("Left", SYNTHETIC_LEFT_ARROW_KEYCODE, 0))
+        self.engine._handle(plain_key("Left", SYNTHETIC_LEFT_ARROW_KEYCODE, 0, pressed=False))
+        self.assertEqual((self.engine._manual_layout_group, self.engine._manual_layout_source), (0, "keystroke"))
 
     def test_moving_to_another_window_drops_the_unfinished_word(self) -> None:
         self.correct_hello()

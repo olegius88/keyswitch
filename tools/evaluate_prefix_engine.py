@@ -23,7 +23,8 @@ from unittest.mock import patch
 
 from auxiliary_runtime_evidence import packaged_intent, runtime_provenance
 from context_corpus import ROOT
-from context_evidence import canonical, checksum
+from context_evidence import checksum
+from freeze_context_action_corpus import readable
 from keyswitch.constants.model_protocol import PROFILES
 # The replay scores and indexes prefixes with what the engine builds (prefix_corpus.lexicon): the
 # onboard lexicon plus the packaged supplement for scoring, the onboard lexicon for the index.
@@ -233,7 +234,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             result["runtime_regression"] = {"previous_report": archive.relative_to(ROOT).as_posix(), "previous_sha256": checksum(REPORT)}
         elif "runtime_regression" in previous:
             result["runtime_regression"] = previous["runtime_regression"]
-    content = canonical(result)
+    # A report people open to read, written and verified indented (freeze_context_action_corpus.readable).
+    content = readable(result)
     if args.verify:
         if REPORT.read_bytes() != content:
             raise ValueError("prefix engine replay changed")

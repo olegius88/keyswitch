@@ -174,15 +174,18 @@ class InputSequenceMatrixTests(unittest.TestCase):
                 self.assertEqual(current.backend.group, 0)
                 self.assertEqual(current.backend.injections, [])
 
-    def test_whitespace_run_disarms_old_word_undo_without_rewriting_it(self) -> None:
-        for spacing in ("  ", " \u00a0", "\u202f ", "\u2009\u2009", "   "):
+    def test_pause_reaches_an_old_word_past_plain_spaces_only(self) -> None:
+        # Plain spaces after the word leave it to Pause, typed again as they were (test_pause_reach); any other
+        # whitespace after its boundary ends the reach, and Pause only switches the layout.
+        cases = (("  ", True), ("\u202f ", True), ("   ", True), (" \u00a0", False), ("\u2009\u2009", False))
+        for spacing, reached in cases:
             with self.subTest(spacing=repr(spacing)), session() as current:
                 current.physical("/c,jhrb" + spacing)
                 self.assertEqual(current.backend.text, "/сборки" + spacing)
                 current.command("Pause")
-                self.assertEqual(current.backend.text, "/сборки" + spacing)
+                self.assertEqual(current.backend.text, ("/c,jhrb" if reached else "/сборки") + spacing)
                 self.assertEqual(current.backend.group, 0)
-                self.assertEqual(len(current.backend.injections), 1)
+                self.assertEqual(len(current.backend.injections), 1 + int(reached))
 
     def test_action_boundary_releases_exact_completed_text_once(self) -> None:
         for name in ("Return", "Tab"):

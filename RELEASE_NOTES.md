@@ -1,34 +1,43 @@
-# KeySwitch 0.54.0
+# KeySwitch 0.55.0
 
 ## Русский
 
-Выпуск исправляет слова, склеенные дефисом из частей в разных раскладках, однобуквенное слово при вставке в середину строки и редкие слова, которые модель только предлагала перевести. Полный перечень — в [CHANGELOG.md](CHANGELOG.md).
+Выпуск делает клавишу `Pause` надёжнее: она переводит последнее слово и после пробелов и знаков за ним, а в слове с дефисом — только неверную часть. Технический термин, набранный в русской раскладке, исправляется, если тот же термин уже набран верно раньше в этом тексте. Русское слово, набранное в английской раскладке, исправляется и посреди фразы, если его последняя буква стоит на клавише знака (`х`, `ю`), а слово из двух через дефис — даже если каждая половина похожа на английское слово. Ещё исправлены три ошибки: защита от автоисправления больше не задерживается на чужих словах, отмена `Ctrl+Alt+Z` больше не портит текст, набранный после исправления, а слово, которое вы исключили, больше не исправляется вместе со следующим. Полный перечень — в [CHANGELOG.md](CHANGELOG.md).
 
 ### Файлы выпуска
 
-- `KeySwitch-Setup-0.54.0-x64.exe` — установщик для Windows 10/11 x64. Он не подписан сертификатом издателя: SmartScreen покажет предупреждение.
-- `KeySwitch-0.54.0-windows-x64.zip` — переносимый архив для Windows x64.
-- `KeySwitch-Setup-0.54.0-arm64.exe` — установщик для Windows 11 на ARM. Тоже не подписан сертификатом издателя.
-- `KeySwitch-0.54.0-windows-arm64.zip` — переносимый архив для Windows на ARM. У ARM64-сборки пока нет автоматических обновлений: новую версию скачивайте со страницы выпусков.
-- `keyswitch_0.54.0_amd64.deb` — Ubuntu/Xubuntu, сеанс X11. Если стоит 0.28.0 или новее, эта версия придёт через обычное обновление системы.
-- `KeySwitch-0.54.0-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее), macOS 13 и новее.
-- `KeySwitch-0.54.0-macos-x86_64.zip` — Mac на процессоре Intel, macOS 13 и новее.
+- `KeySwitch-Setup-0.55.0-x64.exe` — установщик для Windows 10/11 x64. Он не подписан сертификатом издателя: SmartScreen покажет предупреждение.
+- `KeySwitch-0.55.0-windows-x64.zip` — переносимый архив для Windows x64.
+- `KeySwitch-Setup-0.55.0-arm64.exe` — установщик для Windows 11 на ARM. Тоже не подписан сертификатом издателя.
+- `KeySwitch-0.55.0-windows-arm64.zip` — переносимый архив для Windows на ARM. У ARM64-сборки пока нет автоматических обновлений: новую версию скачивайте со страницы выпусков.
+- `keyswitch_0.55.0_amd64.deb` — Ubuntu/Xubuntu, сеанс X11. Если стоит 0.28.0 или новее, эта версия придёт через обычное обновление системы.
+- `KeySwitch-0.55.0-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее), macOS 13 и новее.
+- `KeySwitch-0.55.0-macos-x86_64.zip` — Mac на процессоре Intel, macOS 13 и новее.
 - `SHA256SUMS` — контрольные суммы всех файлов; сверьте их перед установкой.
 
 Архив для Mac нужен ровно один: сборка для Apple Silicon не запускается на Intel и наоборот.
 
 ### Что изменилось
 
-- Слово после дефиса решается отдельно, если весь токен целиком не верен: `mongo-cthdbcf` становится `mongo-сервиса`, `docker-j,hfp` — `docker-образ` (раньше получалось `вщслук-образ`). То же для других знаков, одинаковых в обеих раскладках (`_`, `+`, `=`). Знак в конце допечатывается (`mongo-сервиса.`), а `Pause` после такого исправления возвращает только эту часть. Слова, верные целиком (`какой-то`, `из-за`, `e-mail`, `ИИ-ассистент`), решаются как раньше; идентификаторы, адреса и присваивания (`user_name`, `foo=bar`, `user@host`) и одна буква после знака (`usb-c`) не делятся.
-- Однобуквенное русское слово, набранное в английской раскладке после английского термина, исправляется и тогда, когда фраза вставлена в середину строки: `почему я не вижу в vscode d` даёт `в`. Раньше слова перед термином брались только из набранного подряд, а после щелчка в середину строки их не было.
-- Слово, которое контекстная модель только предлагает перевести, переводится, если перевод подтверждает и детектор раскладки. Так исправляются редкие слова, которых нет в словаре (`byzpt` — «инязе», `ntby` — «теин»). Одиночная буква по-прежнему переводится только по правилам из безопасного списка.
+- `Pause` переводит последнее слово, даже если после него уже набраны пробелы или знаки, одинаковые в обеих раскладках (`-`, `+`, `!`): `цуиоы - ` становится `webjs - `, а знаки печатаются заново как были. Знак, который в другой раскладке другой, остаётся как набран: `ЗК? ` становится `PR? `. Раньше в таких случаях `Pause` только переключал раскладку, и слово приходилось стирать и набирать заново. Буква, стёртый символ, стрелки, щелчок мышью, Enter и Tab по-прежнему завершают слово.
+- В слове из частей, соединённых дефисом или другим знаком, одинаковым в обеих раскладках, `Pause` переводит последнюю часть, если части перед ней верны как набраны: `lid-'ne` становится `lid-эту`, а не `дшв-эту`. Слово, голова которого сама похожа на слово другой раскладки, переводится целиком (`ghbdtn-vbh` — `привет-мир`), а `Pause` после исправления программы возвращает его целиком.
+- Защита от автоисправления, которую `Pause` даёт незавершённому слову, теперь заканчивается вместе с ним. Раньше, если после `Pause` слово было брошено (стрелки, щелчок), защита переходила на следующее слово в той же раскладке, даже через минуту: так `ntcn` в начале другого поля не стал `тест`. Выбор раскладки вручную по-прежнему защищает следующее слово.
+- Отмена `Ctrl+Alt+Z` больше не переписывает текст, набранный после исправленного слова: `привет мир ` с отменой давал `привghbdtn `. Теперь отмена доступна, только пока за исправленным словом ничего не набрано.
+- Технический термин, набранный в русской раскладке посреди русской фразы, исправляется, если этот же термин уже набран верно раньше в том же тексте: `webjs не дает информацию… дело в цуиоы` даёт `webjs`. Редкое русское слово, набранное в английской раскладке после русского текста, решает та же новая часть модели (`htpdt` в русской фразе — `резве`); латинское название, набранное верно, остаётся.
+- Русское слово, последняя буква которого стоит на клавише знака (`х` — на `[`, `ю` — на `.`), набранное в английской раскладке посреди фразы, теперь исправляется вместе со следующим словом: `в 2 vbkkbjyf[ cdtnjds[` давало `в 2 vbkkbjyf[ световых`, теперь — `в 2 миллионах световых`. Так же в конце сообщения: `lbre. rjire/` становится `дикую кошку.`. Термин со знаком после него, набранный нарочно (`-PHP,`, `UI,`, `repo,`), остаётся как набран.
+- Слово, которое вы исключили, или слово, которое держит ваше правило «оставлять», больше не исправляется вместе со следующим словом: исключённое `tot` перед `ghbdtn` давало `еще привет`.
+- Русское слово из двух через дефис, набранное в английской раскладке, исправляется, даже если каждая половина — английское слово: `Re-re!` после русской фразы становится `Ку-ку!`.
 
 ### Модель
 
-- Контекстная модель `context-v3-8849f92656fd` (корпус v54) закрепляет новый движок; модель префиксов прежняя, `prefix-v2-bf3dc28f8567`. На запечатанном test v54 правильный текст сохранён во всех 187 строках, а без ранней смены восстановлено 186–187 строк из 187, набранных не в той раскладке, против 185 у базовой пары.
+- Контекстная модель `context-v3-83ddd9dc063a` (корпус v60) закрепляет новый движок; модель префиксов прежняя, `prefix-v2-bf3dc28f8567`. Поверх весов модели 0.44.0 обучены три головы: для аббревиатур после латиницы, для незнакомых токенов и для слов через дефис. На калибровочных данных она делает на 10 и 6 верных исправлений больше модели 0.54.0 и на одно ложное больше (16 против 15), а на журналах реального набора исправляет верно на 2 слова больше и не ошибается ни в одном слове, которое модель 0.54.0 решала верно. На запечатанном test v60 правильный текст сохранён во всех 185 строках, а без ранней смены восстановлены все 185 строк, набранных не в той раскладке, против 182–183 у базовой пары.
 
 ### Что осталось
 
+- Короткое техническое слово, впервые набранное в русской раскладке посреди русской фразы (`цуиоы` вместо `webjs`, `мгуоы` вместо `vuejs`, `реьч` вместо `htmx`), часто остаётся кириллицей: без того же слова раньше в тексте модель не отличает его от незнакомого русского слова, сленга или опечатки. Его исправляет `Pause`, теперь и после пробелов и знаков за словом.
+- Английское слово через дефис, набранное целиком в русской раскладке (`зку-щквук` вместо `pre-order`), исправляется только после дефиса: получается `зку-order`.
+- Термин, процитированный в сообщении об ошибке так, как он набрался (`webjs набралось как цуиоы`), переводится в `webjs`, если этот же термин уже набран выше. Вернуть набранное можно клавишей `Pause` сразу после исправления.
+- Два авторских примера аббревиатур решаются хуже, чем в 0.54.0: `Ask РК about the leave` (латинское `HR`, набранное в русской раскладке после английского текста) остаётся `РК`, а без словарей Hunspell `deploy staging ЗП` становится `deploy staging PG`. Слово исправляет или возвращает клавиша `Pause`.
 - `Pause` сразу после исправления на пробеле по-прежнему возвращает слово, даже если исправление было верным: по времени нажатия не отличить, отменяете вы ошибочное исправление или нажали по привычке.
 - `ЗК` заглавными в конце русской фразы (`почему ты не создал ЗК?`) остаётся кириллицей, а не становится `PR`: следующего слова, с которым модель решила бы его, нет. Его исправляет клавиша `Pause`.
 - `кз` в русской фразе (`говорит он кз домене`) может стать `rp`: в таблицах частот, которыми модель проверяет слова, нет разговорного русского, а `rp` там встречается. Вернуть слово можно клавишей `Pause`.
@@ -38,33 +47,42 @@
 
 ## English
 
-This release fixes words joined by a hyphen from parts typed in different layouts, a one-letter word in a phrase typed into the middle of a line, and rare words the model only suggested converting. The full list is in [CHANGELOG.md](CHANGELOG.md).
+This release makes the `Pause` key more dependable: it converts the last word past the spaces and signs after it, and only the wrong part of a hyphenated word. A technical term typed in the Russian layout is corrected when the same term was typed right earlier in the text. A Russian word typed in the English layout is now corrected in the middle of a sentence too when its last letter sits on a sign key (`х`, `ю`), and a Russian word of two joined by a hyphen even when each half looks like an English word. It also fixes three bugs: the protection from automatic correction no longer lingers onto unrelated words, undo (`Ctrl+Alt+Z`) no longer damages text typed after the correction, and a word you excluded is no longer converted with the word after it. The full list is in [CHANGELOG.md](CHANGELOG.md).
 
 ### Release files
 
-- `KeySwitch-Setup-0.54.0-x64.exe` — installer for Windows 10/11 x64. It is not signed with a publisher certificate, so SmartScreen shows a warning.
-- `KeySwitch-0.54.0-windows-x64.zip` — portable archive for Windows x64.
-- `KeySwitch-Setup-0.54.0-arm64.exe` — installer for Windows 11 on Arm. It is not signed with a publisher certificate either.
-- `KeySwitch-0.54.0-windows-arm64.zip` — portable archive for Windows on Arm. The ARM64 build does not update itself yet: download a new version from the releases page.
-- `keyswitch_0.54.0_amd64.deb` — Ubuntu/Xubuntu on an X11 session. With 0.28.0 or newer installed, this version arrives through the ordinary system update.
-- `KeySwitch-0.54.0-macos-arm64.zip` — Mac with Apple silicon (M1 and later), macOS 13 or newer.
-- `KeySwitch-0.54.0-macos-x86_64.zip` — Mac with an Intel processor, macOS 13 or newer.
+- `KeySwitch-Setup-0.55.0-x64.exe` — installer for Windows 10/11 x64. It is not signed with a publisher certificate, so SmartScreen shows a warning.
+- `KeySwitch-0.55.0-windows-x64.zip` — portable archive for Windows x64.
+- `KeySwitch-Setup-0.55.0-arm64.exe` — installer for Windows 11 on Arm. It is not signed with a publisher certificate either.
+- `KeySwitch-0.55.0-windows-arm64.zip` — portable archive for Windows on Arm. The ARM64 build does not update itself yet: download a new version from the releases page.
+- `keyswitch_0.55.0_amd64.deb` — Ubuntu/Xubuntu on an X11 session. With 0.28.0 or newer installed, this version arrives through the ordinary system update.
+- `KeySwitch-0.55.0-macos-arm64.zip` — Mac with Apple silicon (M1 and later), macOS 13 or newer.
+- `KeySwitch-0.55.0-macos-x86_64.zip` — Mac with an Intel processor, macOS 13 or newer.
 - `SHA256SUMS` — checksums of every file; verify them before installing.
 
 Exactly one Mac archive is needed: the Apple silicon build does not run on Intel and vice versa.
 
 ### Changed
 
-- The part after a hyphen is decided on its own when the whole token is not right: `mongo-cthdbcf` becomes `mongo-сервиса`, and `docker-j,hfp` becomes `docker-образ` (it used to come out as `вщслук-образ`). The same goes for other signs typed the same in both layouts (`_`, `+`, `=`). A sign at the end is replayed (`mongo-сервиса.`), and `Pause` after such a correction takes back only that part. Words right as a whole (`какой-то`, `из-за`, `e-mail`, `ИИ-ассистент`) are decided as before; identifiers, addresses and assignments (`user_name`, `foo=bar`, `user@host`) and one letter after a sign (`usb-c`) are not split.
-- A one-letter Russian word typed in the English layout after an English term is corrected when the phrase was typed into the middle of a line too: `почему я не вижу в vscode d` gives `в`. The words before the term used to come only from what was typed in a row, and after a click into the middle of a line there were none.
-- A word the context model only suggests converting is converted when the layout detector confirms it. Rare words no lexicon holds are corrected this way (`byzpt` is `инязе`, `ntby` is `теин`). A lone letter still converts only by the rules of the safe list.
+- `Pause` converts the last word even when spaces or signs typed the same in both layouts (`-`, `+`, `!`) follow it: `цуиоы - ` becomes `webjs - `, and the signs are typed again as they were. A sign that is another one in the other layout stays as typed: `ЗК? ` becomes `PR? `. Before, `Pause` only switched the layout there, and the word had to be erased and typed again. A letter, an erased character, the arrow keys, a click, Enter and Tab still end the word.
+- In a word of parts joined by a hyphen or another sign typed the same in both layouts, `Pause` converts the last part when the parts before it are right as typed: `lid-'ne` becomes `lid-эту`, not `дшв-эту`. A word whose head itself reads as a word in the other layout converts whole (`ghbdtn-vbh` is `привет-мир`), and `Pause` after a correction KeySwitch made takes all of it back.
+- The protection from automatic correction that `Pause` gives an unfinished word now ends with that word. When the word was left (the arrow keys, a click), the protection used to pass to the next word in that layout, even a minute later: `ntcn` at the start of another field did not become `тест`. Picking a layout by hand still protects the next word.
+- Undo (`Ctrl+Alt+Z`) no longer rewrites text typed after the corrected word: `привет мир ` and undo gave `привghbdtn `. Undo is now available only while nothing follows the corrected word.
+- A technical term typed in the Russian layout amid a Russian phrase is corrected when the same term was typed right earlier in that text: `webjs не дает информацию… дело в цуиоы` gives `webjs`. A rare Russian word typed in the English layout after Russian text is decided by the same new part of the model (`htpdt` in a Russian sentence is `резве`); a Latin name typed right stays.
+- A Russian word whose last letter sits on a sign key (`х` on `[`, `ю` on `.`), typed in the English layout in the middle of a sentence, is now converted with the next word: `в 2 vbkkbjyf[ cdtnjds[` gave `в 2 vbkkbjyf[ световых` and now gives `в 2 миллионах световых`. The same at the end of a message: `lbre. rjire/` becomes `дикую кошку.`. A term typed as intended with a sign after it (`-PHP,`, `UI,`, `repo,`) stays as typed.
+- A word you excluded, or one a rule of yours keeps, is no longer converted with the word after it: an excluded `tot` before `ghbdtn` gave `еще привет`.
+- A Russian word of two joined by a hyphen, typed in the English layout, is converted even when each half is an English word: `Re-re!` after a Russian sentence becomes `Ку-ку!`.
 
 ### Model
 
-- The context model `context-v3-8849f92656fd` (corpus v54) seals the new engine; the prefix model is still `prefix-v2-bf3dc28f8567`. On the sealed test v54 it kept all 187 correctly typed rows and, without the early switch, restored 186 to 187 of the 187 typed in the wrong layout against 185 for the baseline pair.
+- The context model `context-v3-83ddd9dc063a` (corpus v60) seals the new engine; the prefix model is still `prefix-v2-bf3dc28f8567`. Three heads are fitted onto the weights of the 0.44.0 model: for abbreviations after Latin-script text, for unknown tokens and for words joined by hyphens. On the calibration data it makes 10 and 6 more right conversions than the 0.54.0 model and one more false one (16 against 15); on logs of real typing it converts 2 more words right and gets no word wrong that the 0.54.0 model got right. On the sealed test v60 it kept all 185 correctly typed rows and, without the early switch, restored all 185 typed in the wrong layout against 182–183 for the baseline pair.
 
 ### What remains
 
+- A short technical word typed in the Russian layout amid a Russian phrase for the first time in a text (`цуиоы` for `webjs`, `мгуоы` for `vuejs`, `реьч` for `htmx`) often stays Cyrillic: without the same word earlier in the text the model cannot tell it from an unknown Russian word, slang or a typo. `Pause` corrects it, now also past the spaces and signs after the word.
+- An English word joined by a hyphen and typed whole in the Russian layout (`зку-щквук` for `pre-order`) is converted only after the hyphen: it becomes `зку-order`.
+- A term quoted in a bug report the way it came out (`webjs набралось как цуиоы`) is converted to `webjs` when the same term was typed earlier in the text. `Pause` right after the correction brings back what was typed.
+- Two authored abbreviation examples are decided worse than in 0.54.0: `Ask РК about the leave` (the Latin `HR` typed in the Russian layout after English text) stays `РК`, and without Hunspell dictionaries `deploy staging ЗП` becomes `deploy staging PG`. `Pause` corrects the word or brings it back.
 - `Pause` right after a correction made at a space still converts the word back, even a right one: the moment of the press cannot tell an undo of a wrong correction from a press out of habit.
 - `ЗК` in capitals at the end of a Russian phrase (`почему ты не создал ЗК?`) stays Cyrillic instead of becoming `PR`: there is no next word for the model to decide it with. `Pause` corrects it.
 - `кз` in a Russian phrase (`говорит он кз домене`) may become `rp`: the frequency tables the model checks words with hold no conversational Russian, while `rp` occurs there. `Pause` brings the word back.

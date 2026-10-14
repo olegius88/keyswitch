@@ -58,6 +58,8 @@ class CandidateComparisonTests(unittest.TestCase):
         self.assertEqual(comparison.head_class(["letter|bias"]), "letter")
         # A Latin-context abbreviation frame holds the capitals head's copy too; it counts for its own head.
         self.assertEqual(comparison.head_class(["caps|bias", "labbr|bias:direction:1"]), "latin_abbreviation")
+        self.assertEqual(comparison.head_class(["bias", "unknown|bias", "unknown|echo:1:0"]), "unknown")
+        self.assertEqual(comparison.head_class(["bias", "joined|bias", "joined|repeat:1:direction:0"]), "joined")
         self.assertEqual(comparison.head_class(["kept|bias"]), "kept")
         self.assertEqual(comparison.head_class(["bias", "source:char:0:1:a"]), comparison.BASE_CLASS)
 

@@ -573,7 +573,8 @@ def export_receipt(artifact: Path, seal_path: Path, report_path: Path, corpus: P
         "gate_policy": CONTEXT_ACTION_GATE_POLICY, "protocol": PROTOCOL, "scope": SCOPE, "quality_gates_passed": True,
     }
     validate_receipt(receipt, artifact, ROOT, prefix_artifact)
-    evaluator.immutable_record(output, receipt)
+    # The receipt is read by people and hashed by nobody: it is written indented (freeze_context_action_corpus.readable).
+    evaluator.immutable_record(output, receipt, for_reading=True)
     return receipt
 
 

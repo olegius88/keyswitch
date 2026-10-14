@@ -42,7 +42,7 @@ from test_input_integrity import EditorBackend
 from keyswitch.constants.model_protocol import PROFILES, SEALED_BEFORE_TEST
 from reference_lexicon import reference_models
 from context_physical_keys import KEYS as KEYS, PhysicalKey as PhysicalKey, physical_keys as physical_keys
-from freeze_context_action_corpus import CorpusRow, canonical, checksum, digest, load_split
+from freeze_context_action_corpus import CorpusRow, canonical, checksum, digest, load_split, readable
 from keyswitch.constants.corpus import (
     CORPUS_AFTER_WINDOW_CHARACTERS,
     CORPUS_BEFORE_WINDOW_CHARACTERS,
@@ -274,9 +274,9 @@ def runtime_provenance() -> dict[str, str]:
     return {path.relative_to(ROOT).as_posix(): checksum(path) for path in sorted(paths)}
 
 
-def immutable_record(path: Path, value: object) -> bool:
-    """Atomically create a record or verify the exact existing bytes."""
-    encoded = canonical(value)
+def immutable_record(path: Path, value: object, *, for_reading: bool = False) -> bool:
+    """Atomically create a record or verify the exact existing bytes (`readable` ones for a person to open)."""
+    encoded = readable(value) if for_reading else canonical(value)
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".pending-", delete=False) as stream:
         temporary = Path(stream.name)

@@ -16,10 +16,14 @@ import unittest
 import test_input_sequence_matrix as sequences
 
 from keyswitch.context_model import ContextAction, ContextEvidence
+from keyswitch.learning import LearnedRule
 from test_context_policy import ContextEngineTests
 from test_context_wait_pairs import ScriptedModel, before_greeting
+from test_early_switch_settling import ScriptedActionModel
 from test_inside_word import CaretReader
 from fixture_values.clock import LAST_WORD_INPUT_AT_SECONDS, WAIT_PAIR_PAUSE_CHECK_SECONDS
+from fixture_values.keys import UNDO_TRIGGER_SENTINEL_KEYCODE
+from test_engine_behaviour import plain_key
 from disclosed_regressions import disclosed_schema3_pair_regression
 from engine_models import share_engine_models
 
@@ -175,6 +179,92 @@ class KeptWordTests(ContextEngineTests):
         self.type("njn ")
         self.assertEqual(self.backend.text, "всё тот ")
 
+    def test_a_token_the_boundary_model_could_not_split_is_taken_along_in_the_middle_of_a_line(self) -> None:
+        # It was decided neither with the words before it nor at all: after `через` too,
+        # `dc\`` is `всё` or `вс` with a backtick until the next word tells which.
+        model = self.script()
+        self.settings.set("detection.respect_manual_layout", False)
+        self.reset_editor(1)
+        self.type("через ", group=1)
+        self.backend.group = 0
+        self.type("dc` njn ")
+        self.assertEqual(self.backend.text, "через всё тот ")
+        self.assertIn(("dc`", "через ", "тот"), model.questions)
+
+    def test_an_undecided_token_whose_other_reading_no_lexicon_holds_is_asked(self) -> None:
+        # `мурзилках` is in no lexicon, but the orthotactic model reads `vehpbkrf[` as Russian keys:
+        # unlike `htop`, it is no term typed as intended (`старческую` is in a Hunspell dictionary only).
+        model = self.script(lambda item: "convert" if item.original != "vehpbkrf[" or item.field.after else "keep")
+        self.reset_editor(0)
+        self.type("vehpbkrf[ ghbdtn ")
+        self.assertEqual(self.backend.text, "мурзилках привет ")
+        self.assertIn(("vehpbkrf[", "", "привет"), model.questions)
+
+    def test_a_token_the_code_guard_keeps_whole_is_not_asked(self) -> None:
+        # `-PHP,` is undecided, as the code guard keeps it from segmentation, but not open, and
+        # `-ЗРЗб` is no word. Asked with `значит` after it, the model converted it in the owner's
+        # typing (25.09.2026) once undecided tokens were asked whatever they were.
+        model = self.script(lambda item: "convert")
+        self.reset_editor(0)
+        self.type("-PHP, pyfxbn ")
+        self.assertEqual(self.backend.text, "-PHP, значит ")
+        self.assertFalse(any(question[0] == "-PHP," for question in model.questions))
+
+    def test_an_open_token_whose_keys_read_as_typed_is_not_asked(self) -> None:
+        # `repo,` may be `кузщ` and a comma or `кузщб`: no word, and English keys to the orthotactic model.
+        model = self.script(lambda item: "convert")
+        self.settings.set("diagnostics.technical_logging", True)
+        self.reset_editor(0)
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.type("repo, ghbdtn ")
+        self.assertEqual(self.backend.text, "repo, привет ")
+        self.assertFalse(any(question[0] == "repo," for question in model.questions))
+        self.assertTrue(any('"event":"kept_word_not_asked"' in line for line in logs.output))
+
+    def test_a_word_the_user_excluded_is_not_taken_along(self) -> None:
+        # The model is asked about an excluded word neither at its space nor after it (_decide_word).
+        model = self.script()
+        self.settings.set("exclusions.words", ["руку"])
+        self.reset_editor(1)
+        self.type("руку ерун ", group=1)
+        self.assertEqual(self.backend.text, "руку they ")
+        self.assertNotIn(("руку", "", "they"), model.questions)
+
+    def test_a_word_a_rule_of_the_user_keeps_is_not_taken_along(self) -> None:
+        model = self.script()
+        self.settings.set("detection.learning", True)
+        self.engine.learning.add_rule(LearnedRule("руку", 1, 0, "keep"))
+        self.reset_editor(1)
+        self.type("руку ерун ", group=1)
+        self.assertEqual(self.backend.text, "руку they ")
+        self.assertNotIn(("руку", "", "they"), model.questions)
+
+    def test_an_undecided_token_too_short_for_the_orthotactic_model_is_not_asked(self) -> None:
+        # `o.` is `щ` and a period or `щю`: no word, and two keys tell the orthotactic model nothing.
+        model = self.script(lambda item: "convert")
+        self.reset_editor(0)
+        self.type("o. ghbdtn ")
+        self.assertEqual(self.backend.text, "o. привет ")
+        self.assertFalse(any(question[0] == "o." for question in model.questions))
+
+    def test_an_undecided_token_is_not_asked_without_the_orthotactic_model(self) -> None:
+        model = self.script(lambda item: "convert")
+        self.engine.context_policy.ortho = None
+        self.reset_editor(0)
+        self.type("vehpbkrf[ ghbdtn ")
+        self.assertEqual(self.backend.text, "vehpbkrf[ привет ")
+        self.assertFalse(any(question[0] == "vehpbkrf[" for question in model.questions))
+
+    def test_an_undecided_token_is_taken_along_on_the_model_s_own_conversion_only(self) -> None:
+        # The detector, asked about `it.` now, reads the period as typed and the key of `ю` in the other
+        # reading - no English word against the Russian `шею` - and would confirm a mere suggestion.
+        model = ScriptedActionModel(lambda item: "suggest" if item.original == "it." else "convert")
+        self.engine.context_policy.model = model
+        self.reset_editor(0)
+        self.type("it. ntgthm ")
+        self.assertEqual(self.backend.text, "it. теперь ")
+        self.assertIn(("it.", "", "теперь"), model.questions)
+
     def test_a_sign_split_off_a_letter_of_the_whole_word_is_taken_along_with_it(self) -> None:
         # The boundary model keeps the backtick of `t\`` literal; `е` alone is no word, `её` is.
         model = self.script()
@@ -222,6 +312,56 @@ class KeptWordTests(ContextEngineTests):
         self.engine._maybe_correct_after_pause(now=WAIT_PAIR_PAUSE_CHECK_SECONDS)
         self.assertEqual(self.backend.text, "here they")
 
+    def test_a_word_converted_at_a_pause_with_a_sign_split_off_takes_the_kept_word_along(self) -> None:
+        # As at a space: the comma stays as typed after the whole correction.
+        self.script()
+        self.reset_editor(1)
+        self.type("руку ", group=1)
+        self.type("ерун,", group=1)
+        self.engine._last_word_input_at = LAST_WORD_INPUT_AT_SECONDS
+        self.engine._maybe_correct_after_pause(now=WAIT_PAIR_PAUSE_CHECK_SECONDS)
+        self.assertEqual(self.backend.text, "here they,")
+
+    def test_an_undecided_token_is_taken_along_by_the_word_that_ends_the_message(self) -> None:
+        # The last word converts at the pause with its period, the Russian one typed on `/`; the keys
+        # are the sequence session's, where `/` types that period in the Russian layout.
+        with sequences.session(0) as current:
+            current.engine.context_policy.model = ScriptedModel(
+                lambda item: "keep" if item.original == "lbre." and not item.field.after else "convert")
+            current.physical("lbre. rjire/")
+            current.flush()
+            current.engine._last_word_input_at = LAST_WORD_INPUT_AT_SECONDS
+            current.engine._maybe_correct_after_pause(now=WAIT_PAIR_PAUSE_CHECK_SECONDS)
+            current.flush()
+            self.assertEqual(current.backend.text, "дикую кошку.")
+
+    def test_undo_types_back_what_the_word_ending_the_message_took_along(self) -> None:
+        # One correction took the token, its space, the word and the period: undo takes back all of it.
+        with sequences.session(0) as current:
+            current.engine.context_policy.model = ScriptedModel(
+                lambda item: "keep" if item.original == "lbre." and not item.field.after else "convert")
+            current.physical("lbre. rjire/")
+            current.flush()
+            current.engine._last_word_input_at = LAST_WORD_INPUT_AT_SECONDS
+            current.engine._maybe_correct_after_pause(now=WAIT_PAIR_PAUSE_CHECK_SECONDS)
+            current.flush()
+            self.assertEqual(current.backend.text, "дикую кошку.")
+            current.engine._schedule_undo(UNDO_TRIGGER_SENTINEL_KEYCODE)
+            current.send(plain_key("z", UNDO_TRIGGER_SENTINEL_KEYCODE, current.backend.group, False))
+            current.flush()
+            self.assertEqual(current.backend.text, "lbre. rjire/")
+
+    def test_a_word_converted_at_a_pause_after_a_literal_head_takes_nothing_along(self) -> None:
+        # Only the part after the slash converts; the words before the head stay as typed.
+        model = self.script()
+        self.reset_editor(1)
+        self.type("руку ", group=1)
+        self.type("ура/ерун", group=1)
+        self.engine._last_word_input_at = LAST_WORD_INPUT_AT_SECONDS
+        self.engine._maybe_correct_after_pause(now=WAIT_PAIR_PAUSE_CHECK_SECONDS)
+        self.assertTrue(self.backend.text.startswith("руку "))
+        self.assertNotIn(("руку", "", "they"), model.questions)
+
 
 class KeptWordModelTests(ContextEngineTests):
     """What the bundled model decides about the first words of a message once the next word is known."""
@@ -255,6 +395,17 @@ class KeptWordModelTests(ContextEngineTests):
             current.physical("Ytn - ult ")
             current.flush()
             self.assertEqual(current.backend.text, "Нет - где ")
+
+    def test_a_word_left_undecided_in_the_middle_of_a_sentence_is_decided_with_the_next_word(self) -> None:
+        # `vbkkbjyf[` is `миллиона` and a bracket or `миллионах`: the boundary model cannot tell, and the
+        # words before it on its line did not decide it either (development rows of corpus v57).
+        with sequences.session(1) as current:
+            current.physical("d 2 ")
+            current.flush()
+            current.backend.group = 0
+            current.physical("vbkkbjyf[ cdtnjds[ ")
+            current.flush()
+            self.assertEqual(current.backend.text, "в 2 миллионах световых ")
 
     def test_a_sign_split_off_the_first_word_is_decided_with_the_next_word(self) -> None:
         # `её` is `t\`` and a backtick to the boundary model; `е` alone is no word.
