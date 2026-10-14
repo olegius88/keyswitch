@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.55.0 — 2026-10-14
+
 - Pause converts the last word past the spaces and signs typed after it. A word stayed Pause's only until the next
   key, and any further space or sign left Pause nothing but switching the layout: `цуиоы` (meant `webjs`) with a few
   such keys after it stayed, and in the owner's PC logs since 01.10 nine of the sixteen presses that found the last
