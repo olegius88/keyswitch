@@ -33,6 +33,7 @@ from .constants.models import (
     CAPITALS_FEATURE_PREFIX,
     CAPITALS_HEAD_MAX_LETTERS,
     CAPITALS_HEAD_MIN_LETTERS,
+    JOINED_FEATURE_PREFIX,
     KEPT_CONTEXT_WORD_MAX_CHARACTERS,
     KEPT_FEATURE_PREFIX,
     LATIN_ABBREVIATION_FEATURE_PREFIX,
@@ -130,6 +131,15 @@ def own_bucket(item: ContextEvidence, text: str, alphabet: str) -> str:
 
     bucket = term_bucket(text, alphabet)
     return "0" if item.term_counts_dropped and bucket != "na" else bucket
+
+
+def joined_parts(text: str) -> list[str] | None:
+    """The words of a token of letters joined by hyphens, its edge signs aside (`ку-ку`, `pre-order`); None otherwise."""
+
+    from .context_model import _TERM_EDGE_SIGNS
+
+    parts = text.strip(_TERM_EDGE_SIGNS).split("-")
+    return parts if len(parts) > 1 and all(part.isalpha() for part in parts) else None
 
 
 def _term_features(features: dict[str, float], item: ContextEvidence, direction: str) -> None:
@@ -425,6 +435,13 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         # layout (test v56).
         result.update({UNKNOWN_FEATURE_PREFIX + name: value for name, value in features.items() if value})
         result.update(_unknown_evidence(item))
+    if joined_question(item.original):
+        # The class the joined-token head answers: its features once more under their own names, beside the shared
+        # ones, and evidence of its own. No term table counts such a token, so the shared features read no count of
+        # it at all, and the frozen model kept `Re-re!` after a Russian sentence, meant as `Ку-ку!`, at p=0.99
+        # (sealed test v58, both pairs); the head reads the counts of its words.
+        result.update({JOINED_FEATURE_PREFIX + name: value for name, value in features.items() if value})
+        result.update(_joined_evidence(item))
     return result
 
 
@@ -682,3 +699,47 @@ def _unknown_evidence(item: ContextEvidence) -> dict[str, float]:
     # Each layout learns its own weights: an echo converts `цуиоы` after `webjs`, while `vscode` typed right after its
     # keys left as `мысщву` by a miss stays.
     return {f"{UNKNOWN_FEATURE_PREFIX}{name}:direction:{item.source_group}": 1.0 for name in names}
+
+
+def joined_question(original: str) -> bool:
+    """A token one of whose readings is words joined by hyphens (joined_parts): the joined-token head's class.
+
+    The other reading is the same keys in the other layout: `j,sxyj-nfr` is `обычно-так`. The question reads only the
+    typed token, as the trainer and the GPU path route frames by it (head_question, context_action_cuda.heads_question).
+    """
+
+    from .layouts import LayoutPair
+
+    if joined_parts(original) is not None:
+        return True
+    latin = any("a" <= char.casefold() <= "z" for char in original)
+    return joined_parts(LayoutPair().translate(original, "us", "ru") if latin
+                        else LayoutPair().translate(original, "ru", "us")) is not None
+
+
+def _joined_evidence(item: ContextEvidence) -> dict[str, float]:
+    """The joined-token head's evidence beside its copy of the shared features: how often the most and the least
+    frequent word of each reading occurs in its language's prose, and whether the token repeats one word.
+
+    No term table counts a token of words joined by hyphens, and the shared features read no count of it, while its
+    words tell the language: `ку` occurs in Russian prose and `re` nowhere in English (`Re-re!` is `Ку-ку!`), and
+    `pre-order` is English by `order` though `pre` is no word of either prose. The shared features stay as the frozen
+    model read them: fed these counts, its weights for single words turned `bye-bye` typed as meant into `ину-ину`.
+    """
+
+    from .context_model import term_bucket
+
+    latin = item.original if item.source_group == 0 else item.alternative
+    cyrillic = item.alternative if item.source_group == 0 else item.original
+    names: list[str] = []
+    for reading, alphabet in ((latin, "english"), (cyrillic, "russian")):
+        parts = joined_parts(reading)
+        buckets = ["na"] if parts is None else sorted((term_bucket(part, alphabet) for part in parts), key=int)
+        if item.term_counts_dropped:
+            buckets = ["0" if bucket != "na" else bucket for bucket in buckets]
+        names.append(f"{alphabet}:most:{buckets[-1]}:least:{buckets[0]}")
+    words = joined_parts(item.original) or joined_parts(item.alternative) or []
+    repeat = f"repeat:{int(len({word.casefold() for word in words}) == 1)}"
+    counts = f"{names[0]}:{names[1]}"
+    return {f"{JOINED_FEATURE_PREFIX}{name}:direction:{item.source_group}": 1.0
+            for name in (*names, counts, repeat, f"{repeat}:{counts}")}

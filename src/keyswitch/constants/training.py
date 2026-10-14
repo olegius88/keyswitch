@@ -93,6 +93,13 @@ TERM_COUNT_DROPOUT_FAMILIES: Final = 3
 TERM_COUNT_DROPOUT_MIN_LETTERS: Final = 5
 # The longest term or word the unknown-token curriculum frames.
 UNKNOWN_TOKEN_MAX_CHARACTERS: Final = 20
+# Repeated tokens of the joined-token curriculum (train_context_action_model.joined_token_curriculum): a word of this many
+# letters that prose counts, joined to itself (`ку-ку`, `bye-bye`); one word in JOINED_REPEAT_SPLIT_MODULUS goes to
+# DEVELOPMENT by hash, and one token in JOINED_REPEAT_CAPITAL_CHOICES opens a sentence with a capital (`Ку-ку!`).
+JOINED_REPEAT_MIN_LETTERS: Final = 2
+JOINED_REPEAT_MAX_LETTERS: Final = 4
+JOINED_REPEAT_SPLIT_MODULUS: Final = 5
+JOINED_REPEAT_CAPITAL_CHOICES: Final = 2
 # Letters of a Latin abbreviation cited in capitals inside Russian prose whose Cyrillic reading is a
 # rare word (`WBC` is `ЦИС`, `IBF` is `ШИА`): three to five, as abbreviations are written. Two
 # letters stay with the deferral rules and the owner's own Cyrillic abbreviations (`ГА`).

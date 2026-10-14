@@ -44,6 +44,13 @@ All notable changes to KeySwitch are documented in this file.
   ending a message is `кошку.`) takes such tokens along as at a space, a word waiting for it among them. On the
   development rows of the class both pairs restore 33 of 37 instead of 17. The log names a token left unasked for
   its keys (`kept_word_not_asked`).
+- A Russian word of two joined by a hyphen, typed in the English layout, is converted when each half is an English
+  word as typed: `Re-re!` after a Russian sentence is `Ку-ку!`. No term table counts a hyphenated word, so the context
+  model read no count of such a token at all, though its words tell the language (`ку` occurs in Russian prose, `re`
+  nowhere in English prose), and it kept the token at p=0.99. The context model gains a head for these tokens
+  (`joined|`) that reads how often the most and the least frequent word of each reading occurs in its language's
+  prose and whether the token repeats one word, fitted on the words joined by hyphens of the training text, typed as
+  written and in the other layout.
 - A word the user excluded, or one a rule of theirs keeps, is no longer converted with the word after it. When the
   next word converted, the engine asked the model about such a word again, and an excluded `tot` before `ghbdtn`
   became `еще привет`.

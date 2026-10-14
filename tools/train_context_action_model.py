@@ -29,7 +29,7 @@ from unittest.mock import patch
 
 from keyswitch.context_action_features import (
     abbreviation_question, alone_question, attested_abbreviation, capitals_question, extract_action_features,
-    latin_abbreviation_question, letter_question, start_question, unknown_question, unknown_shape,
+    joined_question, latin_abbreviation_question, letter_question, start_question, unknown_question, unknown_shape,
 )
 from keyswitch.context_model import (
     ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, _term_frequency, term_bucket,
@@ -71,13 +71,17 @@ from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
 from keyswitch.constants.models import (
     ABBREVIATION_FEATURE_PREFIX, ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS, ALONE_FEATURE_PREFIX, ALONE_HEAD_LETTERS,
     CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION,
-    CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS,
+    CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, JOINED_FEATURE_PREFIX,
     KEPT_CONTEXT_WORD_MAX_CHARACTERS, KEPT_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX, LETTER_FEATURE_PREFIX,
     PLANNED_CONTEXT_AFTER_MAX_CHARACTERS, PLANNED_CONTEXT_WORD_MAX_CHARACTERS, START_FEATURE_PREFIX, UNKNOWN_FEATURE_PREFIX,
-    UNKNOWN_HEAD_MIN_CHARACTERS,
+    UNKNOWN_HEAD_MIN_CHARACTERS, UNKNOWN_HEAD_SIGN_KEY_LETTERS,
 )
 from keyswitch.constants.training import (
     ABBREVIATION_SPLIT_MODULUS,
+    JOINED_REPEAT_CAPITAL_CHOICES,
+    JOINED_REPEAT_MAX_LETTERS,
+    JOINED_REPEAT_MIN_LETTERS,
+    JOINED_REPEAT_SPLIT_MODULUS,
     TERM_COUNT_DROPOUT_FAMILIES,
     TERM_COUNT_DROPOUT_MIN_LETTERS,
     UNKNOWN_TOKEN_MAX_CHARACTERS,
@@ -127,6 +131,8 @@ RECIPE = ROOT / "model/context_v3/recipe.json"
 ARTIFACT = "context-action.json"
 SEAL = "candidate-seal.json"
 WORDS = re.compile(r"[A-Za-zА-Яа-яЁё]+(?:['’\-][A-Za-zА-Яа-яЁё]+)*")
+# Words joined by hyphens, as the joined-token curriculum finds them in a row's text.
+JOINED_WORDS = re.compile(r"[A-Za-zА-Яа-яЁё]+(?:-[A-Za-zА-Яа-яЁё]+)+")
 
 
 def canonical(value: object) -> bytes:
@@ -884,6 +890,107 @@ def unknown_token_curriculum(split: str, source_rows: Sequence[CorpusRow], refus
                   "scope": "terms of the Latin table typed in the Russian layout after Russian prose (convert), some with the term "
                            "typed right earlier in the text, and the class's Russian words of the split's rows with their keys "
                            "earlier in the text (keep), of this split's share (unknown_token_curriculum)."}
+
+
+def joined_token_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                            options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """Words joined by hyphens (context_action_features.joined_question), as the split's own text uses them.
+
+    No term table counts such a token, and the frozen model, with no frequency evidence for it, kept `Re-re!` after a
+    Russian sentence where `Ку-ку!` was meant (sealed test v58, both pairs). Each token of words of one script joined
+    by hyphens in the text of the split's rows, one occurrence in `item_modulus` and at most `per_token` of one token,
+    after the text before it: typed as written (keep) and its keys typed in the other layout (convert). An occurrence
+    counts once however many rows of its sentence hold it. The text uses few repeated tokens (`чуть-чуть`, `ha-ha`), the
+    shape `Ку-ку!` is: `repeat_words` words of each language, in hash order, that its prose counts at least
+    `repeat_minimum_count` times, of JOINED_REPEAT_MIN_LETTERS to JOINED_REPEAT_MAX_LETTERS letters whose keys are letters
+    in either layout, are each joined to itself after the left context of a row of their language, some opening a
+    sentence with a capital - typed as written (keep) and in the other layout (convert); one word in
+    JOINED_REPEAT_SPLIT_MODULUS goes to DEVELOPMENT by hash, the rest to TRAIN. Items of this corpus's test, of every accessed test and of the recipe's `held_out` list (the
+    tokens of the authored battery that gates this head) are refused.
+    """
+
+    item_modulus = int(cast(int, options["item_modulus"]))
+    if not item_modulus or split not in (TRAIN, DEVELOPMENT):
+        return [], {"frames": 0, "scope": "not used"}
+    weight = float(cast(float, options["sample_weight"]))
+    per_token = int(cast(int, options["per_token"]))
+    held_out = frozenset(str(token).casefold() for token in cast(list[object], options.get("held_out", [])))
+    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+    rows: list[ActionRow] = []
+    counts: Counter[str] = Counter()
+    taken: Counter[str] = Counter()
+    seen: set[tuple[str, str, str]] = set()
+    for row in source_rows:
+        if not row.layout_representable:
+            continue
+        text = row.before + row.original + row.after
+        for match in JOINED_WORDS.finditer(text):
+            token = match.group()
+            letters = token.replace("-", "")
+            group = 1 if _cyrillic(letters) else 0 if letters.isascii() else None
+            before = text[:match.start()][-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:]
+            occurrence = (row.document, before, token)
+            if group is None or occurrence in seen:
+                continue
+            seen.add(occurrence)
+            identifier = "joined:" + hashlib.sha256("\0".join(occurrence).encode()).hexdigest()[:VERSION_HASH_CHARACTERS]
+            if variant_choice(identifier, "draw", item_modulus):
+                continue
+            if taken[token.casefold()] >= per_token:
+                counts["capped"] += 1
+                continue
+            keys = translated(token, group)
+            if (token.casefold() in held_out or keys.casefold() in held_out
+                    or refused & (expanded_aliases(token) | expanded_aliases(keys))):
+                counts["refused"] += 1
+                continue
+            taken[token.casefold()] += 1
+            kind = "repeat" if len({part.casefold() for part in token.split("-")}) == 1 else "words"
+            for index, (shown, layout, action) in enumerate(((token, group, "keep"), (keys, 1 - group, "convert"))):
+                frame = f"{identifier}:{index}"
+                trigger, boundary_text = _varied_boundary(frame)
+                field = FieldContext(applications[variant_choice(frame, "application", len(applications))], "public-training",
+                                     before, "", "unknown")
+                counts[f"{action}:{kind}"] += 1
+                rows.append(ActionRow(frame, shown, layout, field, trigger, "", action, "joined_token", boundary_text, weight))
+    repeat_words = int(cast(int, options.get("repeat_words", 0)))
+    minimum = int(cast(int, options.get("repeat_minimum_count", 0)))
+    contexts = natural_mixed_contexts(source_rows)
+    table = _term_frequency()
+    for group, alphabet in ((1, "russian"), (0, "english")):
+        words = sorted((word for word, count in table[alphabet].items()
+                        if count >= minimum and JOINED_REPEAT_MIN_LETTERS <= len(word) <= JOINED_REPEAT_MAX_LETTERS
+                        and word.isalpha() and (_cyrillic(word) and not set(word) & UNKNOWN_HEAD_SIGN_KEY_LETTERS
+                                                if group else word.isascii())),
+                       key=lambda word, language=alphabet: hashlib.sha256(f"joined-repeat:{language}:{word}".encode()).hexdigest())
+        # The first `repeat_words` words in hash order, of both splits: each split frames its share of them.
+        for word in words[:repeat_words if contexts[group] else 0]:
+            identifier = f"joined-repeat:{alphabet}:{word}"
+            if (DEVELOPMENT if variant_choice(identifier, "split", JOINED_REPEAT_SPLIT_MODULUS) == 0 else TRAIN) != split:
+                continue
+            capital = variant_choice(identifier, "capital", JOINED_REPEAT_CAPITAL_CHOICES) == 0
+            token = f"{word}-{word}"
+            token = token[:1].upper() + token[1:] if capital else token
+            keys = translated(token, group)
+            if (token.casefold() in held_out or keys.casefold() in held_out
+                    or refused & (expanded_aliases(token) | expanded_aliases(keys))):
+                counts["refused"] += 1
+                continue
+            context = contexts[group][variant_choice(identifier, "context", len(contexts[group]))]
+            before = (f"{context.rstrip()}. " if capital else context)[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:]
+            for index, (shown, layout, action) in enumerate(((token, group, "keep"), (keys, 1 - group, "convert"))):
+                frame = f"{identifier}:{index}"
+                trigger, boundary_text = _varied_boundary(frame)
+                field = FieldContext(applications[variant_choice(frame, "application", len(applications))], "public-training",
+                                     before, "", "unknown")
+                counts[f"{action}:synthetic"] += 1
+                rows.append(ActionRow(frame, shown, layout, field, trigger, "", action, "joined_token", boundary_text, weight))
+    return rows, {"frames": len(rows), "items": dict(sorted(counts.items())), "tokens": len(taken),
+                  "item_modulus": item_modulus, "per_token": per_token, "repeat_words": repeat_words,
+                  "repeat_minimum_count": minimum, "held_out": len(held_out), "sample_weight": weight,
+                  "scope": "words joined by hyphens in the text of this split's rows, and counted words of either language joined "
+                           "to themselves, after the text before them: typed as written (keep) and their keys in the other "
+                           "layout (convert) (joined_token_curriculum)."}
 
 
 def term_counts_dropped(identifier: str, original: str) -> bool:
@@ -1834,7 +1941,8 @@ def frozen_base(options: Mapping[str, object]) -> ContextModel | None:
 # The heads a frozen base can carry besides the kept-neighbour question, by the recipe's name.
 HEAD_PREFIXES: Final = {"capitals": CAPITALS_FEATURE_PREFIX, "alone": ALONE_FEATURE_PREFIX, "start": START_FEATURE_PREFIX,
                          "letter": LETTER_FEATURE_PREFIX, "abbreviation": ABBREVIATION_FEATURE_PREFIX,
-                         "latin_abbreviation": LATIN_ABBREVIATION_FEATURE_PREFIX, "unknown": UNKNOWN_FEATURE_PREFIX}
+                         "latin_abbreviation": LATIN_ABBREVIATION_FEATURE_PREFIX, "unknown": UNKNOWN_FEATURE_PREFIX,
+                         "joined": JOINED_FEATURE_PREFIX}
 # A recipe without single-letter frames (the recipes before corpus v34).
 NO_LETTER_CURRICULUM: Final[dict[str, object]] = {"term_sentences": 0, "english_sentences": 0, "minimum_term_count": 0,
                                                   "sample_weight": 1.0}
@@ -1847,6 +1955,8 @@ NO_LATIN_ABBREVIATION_CURRICULUM: Final[dict[str, object]] = {"frames_per_form":
 # A recipe without unknown-token frames (the recipes before corpus v57).
 NO_UNKNOWN_TOKEN_CURRICULUM: Final[dict[str, object]] = {"item_modulus": 0, "echo_modulus": 0, "minimum_term_count": 0,
                                                          "held_out": [], "sample_weight": 1.0}
+# A recipe without joined-token frames (the recipes before corpus v59).
+NO_JOINED_TOKEN_CURRICULUM: Final[dict[str, object]] = {"item_modulus": 0, "per_token": 0, "held_out": [], "sample_weight": 1.0}
 
 
 def frozen_heads(options: Mapping[str, object]) -> dict[str, int]:
@@ -2039,7 +2149,8 @@ def head_question(original: str, alternative: str, before: str, after: str, trig
             or (LATIN_ABBREVIATION_FEATURE_PREFIX in prefixes and latin_abbreviation_question(original, alternative, before))
             or (ALONE_FEATURE_PREFIX in prefixes and alone_question(original, alternative, before, after, trigger))
             or (START_FEATURE_PREFIX in prefixes and start_question(original, alternative, before, after))
-            or (UNKNOWN_FEATURE_PREFIX in prefixes and unknown_question(original, before)))
+            or (UNKNOWN_FEATURE_PREFIX in prefixes and unknown_question(original, before))
+            or (JOINED_FEATURE_PREFIX in prefixes and joined_question(original)))
 
 
 def carried_prefixes(model: ContextModel) -> frozenset[str]:
@@ -2342,6 +2453,8 @@ def frame_chain(inputs: FitInputs, profile: str, split: str, rows: Sequence[Acti
             split, inputs.source_rows[split], inputs.refused,
             cast(dict[str, object], options.get("unknown_token_curriculum", NO_UNKNOWN_TOKEN_CURRICULUM)))
         result.extend(unknown)
+        # The joined-token head's curriculum is not framed here: its epoch is its own, chosen on that curriculum (fit),
+        # and the other heads' epoch is chosen without its weights.
     evidence = alone_evidence(options)
     if evidence is not None:
         lone, reports["lone_word"] = lone_word_curriculum(split, inputs.refused, evidence, partial(base_action, inputs=inputs))
@@ -2368,10 +2481,13 @@ def tail_curricula(inputs: FitInputs) -> tuple[list[ActionRow], dict[str, object
     unknown, unknown_report = unknown_token_curriculum(
         TRAIN, inputs.source_rows[TRAIN], inputs.refused,
         cast(dict[str, object], options.get("unknown_token_curriculum", NO_UNKNOWN_TOKEN_CURRICULUM)))
-    return [*kept, *counted, *letter, *abbreviation, *latin_abbreviation, *unknown], {
+    joined, joined_report = joined_token_curriculum(
+        TRAIN, inputs.source_rows[TRAIN], inputs.refused,
+        cast(dict[str, object], options.get("joined_token_curriculum", NO_JOINED_TOKEN_CURRICULUM)))
+    return [*kept, *counted, *letter, *abbreviation, *latin_abbreviation, *unknown, *joined], {
         "kept_neighbour_curriculum": kept_report, "counted_token_curriculum": counted_report, "letter_curriculum": letter_report,
         "abbreviation_curriculum": abbreviation_report, "latin_abbreviation_curriculum": latin_abbreviation_report,
-        "unknown_token_curriculum": unknown_report}
+        "unknown_token_curriculum": unknown_report, "joined_token_curriculum": joined_report}
 
 
 def prepared_frames(rows: Sequence[ActionRow], spans: SpanCurriculum, split: str) -> list[tuple[str, ActionRow | SpanFrame]]:
@@ -2446,6 +2562,20 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
                                        ACTIONS.index(row.action), row.sample_weight * (keep_importance if row.action == "keep" else 1.0))
                                       for row in kept_frames] for profile in profiles}
         print(f"features kept-development: {len(kept_frames)} per profile", flush=True)
+    # The joined-token head's own frames of DEVELOPMENT choose its epoch, as the kept-neighbour frames choose the
+    # kept-neighbour question's. Ranked with the other heads, its frames moved their shared epoch from 38 to 31-33, and
+    # the unknown-token head lost `htpdt` (`резве`) and `f` (`а`) in the owner's typing.
+    joined_development: dict[str, list[tuple[dict[str, float], int, float]]] = {}
+    if base is not None and JOINED_FEATURE_PREFIX in heads:
+        joined_importance = float(cast(float, options["keep_importance"]))
+        joined_frames = joined_token_curriculum(
+            DEVELOPMENT, inputs.source_rows[DEVELOPMENT], inputs.refused,
+            cast(dict[str, object], options.get("joined_token_curriculum", NO_JOINED_TOKEN_CURRICULUM)))[0]
+        joined_development = {profile: [(dict(sorted(frame_features(row, DEVELOPMENT, inputs.detectors[profile], inputs.ortho).items())),
+                                         ACTIONS.index(row.action),
+                                         row.sample_weight * (joined_importance if row.action == "keep" else 1.0))
+                                        for row in joined_frames] for profile in profiles}
+        print(f"features joined-development: {len(joined_frames)} per profile", flush=True)
     # The frames, curricula and lexicons are not needed any more; the epochs need the memory.
     splits = list(inputs.frames)
     del inputs
@@ -2490,6 +2620,11 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
     history: list[dict[str, object]] = []
     kept_check = {name: Packed.build(rows, names) for name, rows in kept_development.items()}
     kept_mass = sum(sum(data.importance) for data in kept_check.values())
+    joined_check = {name: Packed.build(rows, names) for name, rows in joined_development.items() if rows}
+    joined_mass = sum(sum(data.importance) for data in joined_check.values())
+    joined_slots = [index * len(ACTIONS) + action for index, name in enumerate(names)
+                    if name.startswith(JOINED_FEATURE_PREFIX) for action in range(len(ACTIONS))]
+    joined_best, joined_epoch, joined_loss = array("d"), 0, math.inf
     # The kernel releases the GIL: the next epoch trains in a thread while this one is scored.
     with ThreadPoolExecutor(max_workers=1) as following:
         kernel.epoch(train, weights, accumulators, rate)
@@ -2505,6 +2640,15 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
                     kept_best, kept_epoch, kept_loss = rounded, epoch + 1, loss
                 record["kept_development_loss"] = loss
                 print(f"epoch {epoch + 1}: kept_development_loss={loss:.9f}, best={kept_epoch}", flush=True)
+            if joined_check:
+                loss = sum(log_loss(kernel.predict(data, rounded), data) for data in joined_check.values()) / joined_mass
+                if loss < joined_loss:
+                    joined_best, joined_epoch, joined_loss = array("d", rounded), epoch + 1, loss
+                record["joined_development_loss"] = loss
+                print(f"epoch {epoch + 1}: joined_development_loss={loss:.9f}, best={joined_epoch}", flush=True)
+                # The other heads are ranked without the joined-token head: no frame holds the features of both.
+                for slot in joined_slots:
+                    rounded[slot] = 0.0
             if base is not None and not heads:
                 history.append(record)
                 if next_epoch is not None:
@@ -2533,6 +2677,8 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
         for index, name in enumerate(names):
             if name.startswith(KEPT_FEATURE_PREFIX):
                 best[index * len(ACTIONS):(index + 1) * len(ACTIONS)] = kept_best[index * len(ACTIONS):(index + 1) * len(ACTIONS)]
+            elif name.startswith(JOINED_FEATURE_PREFIX) and joined_epoch:
+                best[index * len(ACTIONS):(index + 1) * len(ACTIONS)] = joined_best[index * len(ACTIONS):(index + 1) * len(ACTIONS)]
     gates = cast(dict[str, int | float | bool], options["gate_policy"])
     mapping = {name: list(best[index * len(ACTIONS):index * len(ACTIONS) + len(ACTIONS)]) for index, name in enumerate(names)}
     candidate = ContextModel({name: tuple(values) for name, values in mapping.items()},
@@ -2571,7 +2717,8 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
         "recipe": options, "gate_policy": gates, "calibration": calibration_report,
         "development": {"selected_epoch": best_epoch, "loss": best_loss, "history": history,
                         "selection": asdict(best_selection) if best_selection is not None else None,
-                        **({"kept_selected_epoch": kept_epoch, "kept_loss": kept_loss} if base is not None and heads else {})},
+                        **({"kept_selected_epoch": kept_epoch, "kept_loss": kept_loss} if base is not None and heads else {}),
+                        **({"joined_selected_epoch": joined_epoch, "joined_loss": joined_loss} if joined_epoch else {})},
         "frozen_base": None if base is None else {
             "artifact": cast(dict[str, object], options["frozen_base"])["artifact"],
             "sha256": cast(dict[str, object], options["frozen_base"])["sha256"],

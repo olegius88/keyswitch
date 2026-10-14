@@ -86,8 +86,8 @@ from keyswitch.constants.training import (
 )
 from keyswitch.constants.models import FNV1A64_OFFSET_BASIS, FNV1A64_PRIME
 from keyswitch.context_action_features import (
-    abbreviation_question, alone_question, capitals_question, latin_abbreviation_question, letter_question, start_question,
-    unknown_question,
+    abbreviation_question, alone_question, capitals_question, joined_question, latin_abbreviation_question, letter_question,
+    start_question, unknown_question,
 )
 from keyswitch.context_model import AfterOrigin, ContextEvidence, _term_frequency
 from keyswitch.detector import PROTECTED_TOKENS
@@ -618,7 +618,7 @@ def heads_question(original: str, before: str, after: str, trigger: str) -> bool
     return (capitals_question(original, before) or alone_question(original, original, before, after, trigger)
             or start_question(original, original, before, after) or letter_question(original, original, before)
             or abbreviation_question(original, original, before) or latin_abbreviation_question(original, original, before)
-            or unknown_question(original, before))
+            or unknown_question(original, before) or joined_question(original))
 
 
 def opening_letter_followed(original: str, literal_tail: str, boundary_text: str) -> bool:

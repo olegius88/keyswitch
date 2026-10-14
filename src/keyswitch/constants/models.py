@@ -111,6 +111,12 @@ UNKNOWN_HEAD_MIN_CHARACTERS: Final = 4
 # token holding one has a Latin reading with a sign in it, no term, and the engine never types such a replacement
 # (context_policy._spelling_a_word).
 UNKNOWN_HEAD_SIGN_KEY_LETTERS: Final = frozenset("бюжэхъё")
+# A token one of whose readings is words joined by hyphens (`ку-ку`, `pre-order`, `что-то`) has the shared features once
+# more under this prefix, with evidence of its own: the joined-token head (context_action_features.joined_question). No
+# term table counts such a token, so it had no frequency evidence at all, and the frozen model kept a Russian word of
+# two short ones typed in the English layout, each an English word as typed (`Re-re!` after a Russian sentence, meant
+# as `Ку-ку!`, stayed in sealed test v58 with both pairs). The head reads how often the token's words occur.
+JOINED_FEATURE_PREFIX: Final = "joined|"
 # The "length" feature buckets every word length from here up together (schemas 2 and 3).
 ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: Final = 6
 # Short categorical field labels (role, trigger) truncated before they reach a feature name.
@@ -219,12 +225,13 @@ CONTEXT_FEATURE_NGRAM_ORDERS: Final = (1, 2, 3)
 # and version strings of at most these many characters, weights of at most this magnitude, and a
 # conversion threshold from this floor up to one.
 MAX_CONTEXT_MODEL_FEATURES: Final = 50000
-# An action model (schema 3) holds up to nine feature spaces: the word decided at its boundary, the
+# An action model (schema 3) holds up to ten feature spaces: the word decided at its boundary, the
 # kept-neighbour question (KEPT_FEATURE_PREFIX), the capitals head (CAPITALS_FEATURE_PREFIX), the
 # lone-word head (ALONE_FEATURE_PREFIX), the message-start head (START_FEATURE_PREFIX), the
 # single-letter head (LETTER_FEATURE_PREFIX), the abbreviation heads (ABBREVIATION_FEATURE_PREFIX,
-# LATIN_ABBREVIATION_FEATURE_PREFIX) and the unknown-token head (UNKNOWN_FEATURE_PREFIX), each with its own
-# budget in the recipe. Raised from 100 000 with the unknown-token head: the 0.54.0 pair holds 98 498.
+# LATIN_ABBREVIATION_FEATURE_PREFIX), the unknown-token head (UNKNOWN_FEATURE_PREFIX) and the joined-token head
+# (JOINED_FEATURE_PREFIX), each with its own budget in the recipe. Raised from 100 000 with the unknown-token head: the
+# 0.54.0 pair holds 98 498.
 MAX_CONTEXT_ACTION_MODEL_FEATURES: Final = 110000
 MAX_CONTEXT_FEATURE_NAME_CHARACTERS: Final = 512
 MAX_CONTEXT_MODEL_VERSION_CHARACTERS: Final = 80
