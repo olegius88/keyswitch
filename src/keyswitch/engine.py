@@ -66,6 +66,7 @@ from .context_access import PlatformFieldReader
 from .constants.units import MILLISECONDS_PER_SECOND
 from .input_context import CONTEXT_TTL, FieldContext, FieldReader
 from .input_delay import InputDelayReport
+from .ortho_model import OrthoEvidence, shape_of
 from .prefix_model import PrefixInput, PrefixModel
 from .prefix_schema import VersionedPrefixModel
 from .settings_diagnostics import setting_change, settings_snapshot
@@ -266,8 +267,11 @@ class ProvisionalWord:
 class KeptWord:
     """A word left as typed at a space that the next word may still take along.
 
-    `baseline` is the detector's decision, or None for a token the boundary model
-    could not split (`dc\\``: `всё` or `вс` and a backtick), which was not decided at all.
+    `baseline` is the detector's decision, or None for a token that was not decided at all.
+    `segmentation_open` marks one of those whose last keys may be letters or signs: the
+    boundary model could not split it (`dc\\``: `всё` or `вс` and a backtick), or split a
+    sign off a word that only reads as one with it (`t\\``: `её`). A token the code guard,
+    an exclusion or a rule kept from segmentation is undecided without being open.
     """
 
     plan: CorrectionPlan
@@ -275,6 +279,7 @@ class KeptWord:
     field: FieldContext | None
     window: int
     deadline: float
+    segmentation_open: bool = False
 
 
 @dataclass(frozen=True)
@@ -1619,14 +1624,14 @@ class KeySwitchEngine:
         shown, self._mention_shown = self._mention_shown, None
         mention = self._mention_head(self.backend.active_application())
         head = self._literal_head(typed, self._source_group)
-        strokes, trailing, segmentation_certain = self._completed_word(typed[head:], self._source_group)
+        strokes, trailing, segmentation_certain, abstained = self._completed_word(typed[head:], self._source_group)
         if self._insertion_holds(
                 self._text_for_group(typed, self._source_group),
                 ("" if boundary.deferred else boundary.character) + self._typed_ahead(typed),
                 self.backend.active_application()):
             # Typed into a word, every key is part of it: `,` between `те` and `е`
             # is the `б` of `тебе`, not punctuation in front of a word.
-            head, strokes, trailing, segmentation_certain = 0, typed, (), True
+            head, strokes, trailing, segmentation_certain, abstained = 0, typed, (), True, False
         signs: tuple[KeyEvent, ...] = ()
         if not trailing and segmentation_certain and not (self._insertion is not None and self._insertion.inside_word):
             count = self._replayed_signs(strokes, self._source_group)
@@ -1832,7 +1837,8 @@ class KeySwitchEngine:
                     self._keep_for_next_word(kept, KeptWord(replace(
                         plan, strokes=typed[:head] + whole, original=self._text_for_group(whole, source_group),
                         replacement=self._text_for_group(whole, plan.target_group), trailing=(),
-                    ), None, None, self._focus_window or 0, time.monotonic() + CONTEXT_TTL), boundary)
+                    ), None, None, self._focus_window or 0, time.monotonic() + CONTEXT_TTL, segmentation_open=True),
+                        boundary)
         else:
             self._log_context_wait("context_wait_cancelled", waiting, "analysis_skipped")
             self._remember_context(application, source_group, typed[:head] + strokes)
@@ -1841,7 +1847,8 @@ class KeySwitchEngine:
             if (enabled and trigger_enabled and not manual_layout_protected and not caret_unknown
                     and not segmentation_certain and not excluded and not head):
                 self._keep_for_next_word(kept, KeptWord(
-                    plan, None, None, self._focus_window or 0, time.monotonic() + CONTEXT_TTL), boundary)
+                    plan, None, None, self._focus_window or 0, time.monotonic() + CONTEXT_TTL,
+                    segmentation_open=abstained), boundary)
         self._log_word_evaluation(
             trigger=self._trigger_for_boundary(boundary),
             original=original,
@@ -1968,17 +1975,20 @@ class KeySwitchEngine:
 
     def _completed_word(
         self, strokes: tuple[KeyEvent, ...], source_group: int,
-    ) -> tuple[tuple[KeyEvent, ...], tuple[KeyEvent, ...], bool]:
+    ) -> tuple[tuple[KeyEvent, ...], tuple[KeyEvent, ...], bool, bool]:
+        """The word's keys, the signs split off its end, whether its segmentation is certain, and
+        whether the boundary model, asked, could not split it (it abstained)."""
+
         model = self.boundary_model
         if model is None or source_group not in self.models:
-            return strokes, (), True
+            return strokes, (), True, False
         tail = 0
         for stroke in reversed(strokes):
             if stroke.character.isalpha() or not self._is_layout_letter(stroke):
                 break
             tail += 1
         if not tail:
-            return strokes, (), True
+            return strokes, (), True, False
         targets = [group for group in self.models if group != source_group]
         if tail >= len(strokes) or tail > MAX_SUFFIX or not targets:
             self._technical_event(
@@ -1986,16 +1996,16 @@ class KeySwitchEngine:
                 reason="no_word" if tail >= len(strokes) else "suffix_too_long" if tail > MAX_SUFFIX else "no_target",
                 observed_characters=len(strokes), ambiguous_tail=tail,
             )
-            return strokes, (), False
+            return strokes, (), False, False
         original = self._text_for_group(strokes, source_group)
         if self._forced_target_group(source_group, original) is not None:
-            return strokes, (), True  # Explicit full-token rule outranks segmentation.
+            return strokes, (), True, False  # Explicit full-token rule outranks segmentation.
         # Segmentation cannot turn an excluded token/path into an eligible word.
         ignored: list[str] = self.settings.get("exclusions.words", [])
         if ((bool(self.settings.get("detection.protect_code", True)) and self.detector.is_protected_token(original))
                 or original.casefold() in {word.casefold() for word in ignored}
                 or set(targets) <= self._rejected_targets(source_group, original)):
-            return strokes, (), False
+            return strokes, (), False, False
         target = targets[0]
         alternative = self._text_for_group(strokes, target)
         extract = model.extract if isinstance(model, BoundaryPolicy) else boundary_features
@@ -2011,8 +2021,8 @@ class KeySwitchEngine:
             candidates=tail + 1, observed_characters=len(strokes),
         )
         if length is None:
-            return strokes, (), False
-        return (strokes[:-length], strokes[-length:], True) if length else (strokes, (), True)
+            return strokes, (), False, True
+        return (strokes[:-length], strokes[-length:], True, False) if length else (strokes, (), True, False)
 
     def _literal_head(self, strokes: tuple[KeyEvent, ...], source_group: int) -> int:
         """Count leading strokes up to the last ``/`` that stay literal.
@@ -2945,6 +2955,27 @@ class KeySwitchEngine:
 
         return plan.original == plan.replacement and not any(char.isalpha() for char in plan.original)
 
+    def _keys_of_target_language(self, plan: CorrectionPlan, before: str) -> bool:
+        """Whether the orthotactic model reads a token's keys as the language of its other layout.
+
+        The model of the policy's licence (ContextPolicy._licensed), asked about the whole token,
+        signs at its end included: those are the keys of letters (`[` is `х`, `.` is `ю`).
+        """
+
+        ortho = self.context_policy.ortho
+        if ortho is None:
+            return False
+        script = "en" if plan.source_group == 0 else "ru"
+        # The model reads keys as the US layout types them, whichever layout typed the token.
+        keys = plan.original if script == "en" else plan.replacement
+        if len(keys) < ortho.minimum_length:
+            return False
+        score = ortho.score(
+            OrthoEvidence(keys, shape_of(plan.original, not before.strip()), script),
+            known=lambda language, word: self.models[0 if language == "en" else 1].score(word).known,
+        )
+        return score.supported and score.total > ortho.thresholds[script]
+
     def _sign_reads_as_letter(self, plan: CorrectionPlan) -> bool:
         """Only the whole token, the sign split off its end included, reads as a word in the other layout.
 
@@ -2974,7 +3005,14 @@ class KeySwitchEngine:
         on its line was decided with them, and asked again it reads to the model like
         a first word. A Russian word typed as intended before a term typed in the other
         layout was converted then: `склонируй репо пшерги` would become
-        `склонируй htgj github`.
+        `склонируй htgj github`. A token whose segmentation the boundary model left open
+        (KeptWord.segmentation_open) was decided neither with the words before it nor at
+        all, and is taken along wherever it stands on its line, on the model's own
+        conversion and with the text before it read now: Russian words ending in a letter
+        the English layout types as a sign stayed in the middle of every sentence
+        (`в 2 vbkkbjyf[ cdtnjds[` converted only `световых`, though the model, asked,
+        converts `миллионах` before it at p=1.0). A word the user excluded, or one a rule
+        of theirs keeps, is never taken along: the model is not asked about it (_decide_word).
         """
 
         if self.settings.get("detection.context_policy", "assist") != "assist":
@@ -2984,6 +3022,7 @@ class KeySwitchEngine:
         # split off the converted word's end stays literal after the whole correction.
         closing = None if plan.boundary is None or plan.boundary.deferred else plan.boundary
         suffix = "".join(stroke.character for stroke in plan.trailing) + ("" if closing is None else closing.character)
+        ignored = {self.detector.token_key(item) for item in self.settings.get("exclusions.words", [])}
         start, taken, settled = plan, list[KeptWord](), plan
         for word in reversed(kept):
             previous = word.plan
@@ -3000,23 +3039,46 @@ class KeySwitchEngine:
                        for stroke in (*previous.strokes, *(() if switched else plan.strokes)))
                 or not self.context_policy.stream.text.endswith(
                     previous.original + previous.boundary.character + plan.original + suffix)
-                # Only a word whose other reading is a word is asked: a term typed as intended
-                # before a Russian word typed in the English layout (`htop gjrfpsdftn`) is no
-                # `рещз`, yet asked with `показывает` after it the model converts it.
-                or not passed and not self.models[previous.target_group].score(previous.replacement).known
+                # The user's exclusions and rules stand, as at the word's own space.
+                or self.detector.token_key(previous.original) in ignored
+                or previous.target_group in self._rejected_targets(previous.source_group, previous.original)
             ):
                 break
+            # A token that was not decided has no field of its own: the text before it is read now.
+            field = word.field if word.field is not None else self.context_policy.stream.snapshot(
+                previous.original + previous.boundary.character + plan.original + suffix)
+            if not passed and not self.models[previous.target_group].score(previous.replacement).known:
+                # Only a word whose other reading is a word is asked: a term typed as intended before
+                # a Russian word typed in the English layout (`htop gjrfpsdftn`) is no `рещз`, yet
+                # asked with `показывает` after it the model converts it. A token whose segmentation
+                # is open is asked as well when the orthotactic model reads its keys as the other
+                # layout's language, as it does for words no lexicon holds (`vehpbkrf[` is
+                # `мурзилках`) and does not for terms with a sign after them (`docs.`, `UI,`).
+                if not (word.segmentation_open and self._keys_of_target_language(previous, field.before)):
+                    if word.segmentation_open:
+                        self._technical_event(
+                            "kept_word_not_asked", previous_characters=len(previous.original),
+                            reason="keys_of_typed_language",
+                        )
+                    break
             if not passed:
                 baseline = word.baseline if word.baseline is not None else self._baseline_decision(
                     previous.original, {previous.target_group: previous.replacement}, previous.source_group,
                     application, "space")
                 again = self.context_policy.decide(
                     baseline, previous.replacement, previous.target_group, self.detector, "space", "assist",
-                    after=next_replacement, field_override=word.field,
+                    after=next_replacement, field_override=field,
                     boundary_text=previous.boundary.character,
                     after_origin=self._neighbour_origin(previous.replacement),
                 )
-                if not again.decision.should_convert:
+                # A token whose segmentation is open has no verdict of its own to confirm: the detector,
+                # asked now, reads its sign as typed and the letter in the other reading - `it.` is no
+                # English word to it, `шею` a Russian one - and its confirmation of a suggestion
+                # (ContextPolicy.decide) does not take such a token along. The model's own conversion
+                # or a curated short word does.
+                if not again.decision.should_convert or word.segmentation_open and not (
+                        again.decision_source == "short_word_override"
+                        or again.prediction is not None and again.prediction.action == "convert"):
                     break
                 taken.append(word)
             plan = replace(
@@ -3033,7 +3095,8 @@ class KeySwitchEngine:
         plan, farthest = settled, taken[-1]
         before = (farthest.field.before if farthest.field is not None
                   else self.context_policy.stream.text[:-len(plan.original + suffix)])
-        if any(char.isalpha() for char in before.rsplit("\n", 1)[-1]):
+        if (not all(word.segmentation_open for word in taken)
+                and any(char.isalpha() for char in before.rsplit("\n", 1)[-1])):
             self._technical_event("kept_words_left", words=len(taken), reason="words_before_on_line")
             return start
         for word in taken:
@@ -3614,7 +3677,7 @@ class KeySwitchEngine:
             return
         typed = tuple(self._strokes)
         head = self._literal_head(typed, self._source_group)
-        strokes, trailing, segmentation_certain = self._completed_word(typed[head:], self._source_group)
+        strokes, trailing, segmentation_certain, _abstained = self._completed_word(typed[head:], self._source_group)
         if self._insertion_holds(
                 self._text_for_group(typed, self._source_group), self._typed_ahead(typed), self.backend.active_application()):
             # Typed into a word, every key is part of it: `,` between `те` and `е`
@@ -3747,6 +3810,17 @@ class KeySwitchEngine:
         joint = None
         if trailing or head or signs:
             self._log_context_wait("context_wait_cancelled", waiting, "literal_tail" if trailing or signs else "literal_head")
+            if not head:
+                # As at a space (_commit_word): a word with a sign split off its end takes the words
+                # before it along, a waiting one among them (`tot ghbdtn,`), and the sign stays as
+                # typed after them. `lbre. rjire/` at the end of a message was left `lbre. кошку.`.
+                if waiting is not None and trailing:
+                    kept = (*kept, KeptWord(waiting.plan, waiting.decision, waiting.field, waiting.window, waiting.deadline))
+                taken = self._take_along(kept, self._with_signs(replace(
+                    self._plan_from_decision(strokes, None, application, decision, "pause"), trailing=trailing), signs),
+                    len(original), application)
+                if taken.mode == "context_phrase":
+                    joint = (taken, decision)
         else:
             joint = self._resolve_context_wait(waiting, strokes, None, decision, application, alternatives)
             if joint is not None and waiting is not None:

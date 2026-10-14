@@ -171,10 +171,18 @@ class ContextWaitPairTests(ContextEngineTests):
         self.assertEqual(self.backend.text, "еще привет")
         self.assertIsNone(self.engine._context_waiting)
 
-    def test_a_next_word_with_literal_punctuation_converts_alone_at_a_pause(self) -> None:
-        """As at a space, punctuation typed against the next word ends the wait: the pair is
-        not rewritten across a literal the user put there."""
+    def test_a_next_word_with_literal_punctuation_ends_the_wait_at_a_pause(self) -> None:
+        """As at a space, punctuation typed against the next word ends the wait, and the waiting
+        word is asked as a kept word with the converted word after it; the period stays as typed."""
         self.script(before_greeting)
+        self.type("tot ghbdtn.")
+        self.engine._last_word_input_at = LAST_WORD_INPUT_AT_SECONDS
+        self.engine._maybe_correct_after_pause(now=WAIT_PAIR_PAUSE_CHECK_SECONDS)
+        self.assertEqual(self.backend.text, "еще привет.")
+        self.assertIsNone(self.engine._context_waiting)
+
+    def test_a_waiting_word_the_model_still_declines_stays_at_a_pause(self) -> None:
+        self.script(lambda item: "wait" if item.original == "tot" else "convert")
         self.type("tot ghbdtn.")
         self.engine._last_word_input_at = LAST_WORD_INPUT_AT_SECONDS
         self.engine._maybe_correct_after_pause(now=WAIT_PAIR_PAUSE_CHECK_SECONDS)

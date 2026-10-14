@@ -30,6 +30,23 @@ All notable changes to KeySwitch are documented in this file.
   typed (the owner's log, 13.10.2026). The same held for a word whose early switch was undone. Now leaving such a word
   unfinished (the arrow keys, a click, a shortcut, another window) ends its protection; a layout the user picks
   still protects the next word whatever comes before it. The log names the protection's source (`current_word`).
+- A Russian word typed in the English layout whose last letter sits on a sign key (`х` on `[`, `ю` on `.`) is
+  converted in the middle of a sentence too. The boundary model cannot tell whether such a key ends the word as a
+  sign (`vbkkbjyf[` is `миллиона` and a bracket or `миллионах`), so the token waits for the next word, and only the
+  first words of a line were taken along when that word converted: `в 2 vbkkbjyf[ cdtnjds[` became
+  `в 2 vbkkbjyf[ световых`, and the same left `неверностью`, `дикую` and `трудах` in sentences the pairs are measured
+  on and `начинаю` in the owner's typing. Such a token was decided neither with the words before it nor at all, so
+  it is now asked about wherever it stands on its line, with the text before it, and taken along on the model's own
+  conversion only, not on a suggestion the detector confirms: the detector reads `it.` as no English word and `шею`
+  as a Russian one. When its other reading is no word, it is asked only if the orthotactic model reads its keys as
+  the other layout's language (`vehpbkrf[` is `мурзилках`; `repo,` and `UI,` stay), and a token the code guard keeps
+  whole (`-PHP,` before `значит`) is no such token. A word converted at a pause with a sign after it (`rjire/`
+  ending a message is `кошку.`) takes such tokens along as at a space, a word waiting for it among them. On the
+  development rows of the class both pairs restore 33 of 37 instead of 17. The log names a token left unasked for
+  its keys (`kept_word_not_asked`).
+- A word the user excluded, or one a rule of theirs keeps, is no longer converted with the word after it. When the
+  next word converted, the engine asked the model about such a word again, and an excluded `tot` before `ghbdtn`
+  became `еще привет`.
 - Seals, the release receipt and the engine reports are written indented, keys sorted, instead of on one line, so that
   they read in an editor. A file whose bytes something pins stays as it was: the installed weights (their SHA-256 is
   in the receipt and the installers, and indented they would outgrow their 8 MiB cap), the history files named by the
