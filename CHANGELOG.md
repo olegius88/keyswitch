@@ -21,6 +21,16 @@ All notable changes to KeySwitch are documented in this file.
   command whose log grows past 256 MiB. A GTK renderer that had lost its Vulkan device inside Xvfb wrote one warning
   into the X11 end-to-end phase's log for 25 minutes, 37 GB, and the run reading that log whole for its summary was
   killed for want of memory. GUI tests render with GTK's cairo renderer unless told otherwise.
+- The context model `context-v3-20be427844f6` (corpus v61) replaces `context-v3-83ddd9dc063a` with the recipe of the
+  corpus v60 pair, so that the seal pins the Windows modules that now call user32 and kernel32 with the stdcall
+  convention; the prefix model `prefix-v2-bf3dc28f8567` retrained byte-identical. On the same engine it decides
+  calibration v61 with 2 and 1 more right conversions per profile than the model of 0.55.0 and one false conversion
+  fewer (15 against 16: a name joined by a hyphen), development v61 with 2 and 1 more and as many false ones, and the
+  owner's field batteries and the authored batteries of abbreviations, of terms typed again and of words joined by
+  hyphens as the model of 0.55.0 does; the calibration sequences restore 243 of 244 without the early switch in each
+  profile (0.55.0: 242 and 243). On the sealed test v61, read once, it kept all 181 correctly typed sequences,
+  restored 179 of the 180 typed in the wrong layout without the early switch against 177 and 178 for the baseline
+  pair, and 11 with it, as many as the baseline pair, which corrupted one correct row.
 
 ## 0.55.0 — 2026-10-14
 

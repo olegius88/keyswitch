@@ -353,7 +353,7 @@
     "src/keyswitch/resources/lexicon-supplement-ru_RU.json": "4ba5ebf4772e7d5911163b84760691b977abc896816e86729373e18affbe1b63",
     "src/keyswitch/resources/models/boundary-v2.json": "c363d957cf622ee4dcee18466dd12e02a74cb072b655c12072de0dbd38ea5834",
     "src/keyswitch/resources/models/context-term-frequency.json": "4d3afe98dc9382bc6d6e541c613eecd9645f989cd51850e3218479aabbbd6db1",
-    "src/keyswitch/resources/models/context_policy_v1.json": "a7bd988e391059f37a180a16419f3634d2724b75c98ccf42cc083163f946dff7",
+    "src/keyswitch/resources/models/context_policy_v1.json": "5f93ab7e5c3e4bc1606d7a32b663eb0c1a8d037587109f60809fa31d1426adb9",
     "src/keyswitch/resources/models/layout_intent_v1.ksm": "d0b90ad59a48eb7c2aa8c89680a2bc0dd2290c1e9c717068af49087c165878bb",
     "src/keyswitch/resources/models/ortho_v1.json": "beec9eaafcedce6062e27f294a5f7ac4193f2c744c341ea7c303c99d4b1583b5",
     "src/keyswitch/resources/models/prefix_policy_v1.json": "6d2d2abc06d5e0f31f95e65751e37d49a1b9a0501026e006071ca9c87159e913",
@@ -489,8 +489,8 @@
     }
   },
   "runtime_regression": {
-    "previous_report": "model/prefix_v1/engine-history/a8f7c16fbbb8cdac35c5f90df025640d7390181bb24ae2722b1ecb7cffd5c146.json",
-    "previous_sha256": "a8f7c16fbbb8cdac35c5f90df025640d7390181bb24ae2722b1ecb7cffd5c146"
+    "previous_report": "model/prefix_v1/engine-history/bef8a63408458b2c3f5d7079c4e51ae5631258334c3ea8f7b750b87475bc6ef8.json",
+    "previous_sha256": "bef8a63408458b2c3f5d7079c4e51ae5631258334c3ea8f7b750b87475bc6ef8"
   },
   "schema_version": 1,
   "scope": "in-process physical keys/live layout/exact final text/two spaces; separate observed and simulated field contexts; not native OS proof",
