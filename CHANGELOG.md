@@ -40,8 +40,9 @@ All notable changes to KeySwitch are documented in this file.
   their Latin reading earlier in the text. Without that echo Russian letters stay with the model as before: fitted on
   them too, the head converted slang, truncations and brands written in Cyrillic (`пукты`, `иишку`, `гупшуп`) in the
   owner's typing, so a term typed in the Russian layout the first time in a text is still left to Pause, which now
-  reaches it past the spaces and signs after it. On the owner's field batteries the pair converts no word wrongly that
-  the 0.54.0 pair kept; the authored echo battery converts 20 of 20 instead of 18.
+  reaches it past the spaces and signs after it. On the owner's field batteries, on the same engine, the pair converts
+  2 more words right than the 0.54.0 pair and none wrongly that it kept; the authored echo battery converts 20 of 20
+  instead of 18.
 - A Russian word typed in the English layout whose last letter sits on a sign key (`х` on `[`, `ю` on `.`) is
   converted in the middle of a sentence too. The boundary model cannot tell whether such a key ends the word as a
   sign (`vbkkbjyf[` is `миллиона` and a bracket or `миллионах`), so the token waits for the next word, and only the
@@ -71,22 +72,28 @@ All notable changes to KeySwitch are documented in this file.
   in the receipt and the installers, and indented they would outgrow their 8 MiB cap), the history files named by the
   hash of their own bytes, and the frozen families' seals and reports, which CI compares byte for byte. The
   development histories and reports nothing hashes are rewritten indented once.
-- The context model `context-v3-0983883efdb4` (corpus v59) replaces `context-v3-8849f92656fd`: the frozen base of the
+- The context model `context-v3-83ddd9dc063a` (corpus v60) replaces `context-v3-8849f92656fd`: the frozen base of the
   pairs since 0.44.0 with three heads fitted onto it - for abbreviations after Latin-script text, for tokens no table
-  counts (`unknown|`) and for words joined by hyphens (`joined|`), which chooses its epoch on its own development frames
-  while the other heads are ranked without its weights - so that the seal pins the changed engine; the prefix model
-  `prefix-v2-bf3dc28f8567` retrained byte-identical. On the same engine it decides calibration v59 with 10 and 6 more
-  right conversions per profile than the model of 0.54.0 and as many false ones (15), development v59 with 111 and 103
-  more, the owner's field batteries with no word converted wrongly that the 0.54.0 model kept, a term typed again after
-  the same term typed right 20 times of 20 (0.54.0: 18) and a Russian word joined by a hyphen typed in the English layout
-  10 times of 10 (0.54.0: 7). It also converts two of three such terms quoted as typed by mistake (`"мысщву"` after
-  `vscode`), which 0.54.0 left once. On the sealed test v59, read once, it kept all 195 correctly typed sequences and
-  restored 193 of the 195 typed in the wrong layout without the early switch against 192 for the baseline pair, and 18
-  with it, as many as the baseline pair. The pairs of corpora v55-v58 were not installed: the corpus v55 pair's seal was
-  withdrawn before a release, test v56 restored one row fewer than the baseline pair, and on tests v57 and v58 the pairs
-  restored exactly the rows the baseline pair did (180 of 182, 196 of 197), short of the margin. The rows both pairs
-  lost were a word ending in a letter on a sign key in the middle of a sentence, an unknown name opening a message and
-  `Ку-ку!` typed in the English layout; the first and the last are now restored.
+  counts (`unknown|`) and for words joined by hyphens (`joined|`), which chooses its epoch on its own development
+  frames while the other heads are ranked without its weights - so that the seal pins the changed engine; the prefix
+  model `prefix-v2-bf3dc28f8567` retrained byte-identical. On the same engine it decides calibration v60 with 10 and 6
+  more right conversions per profile than the model of 0.54.0 and one more false (16 against 15: two spellings of the
+  Russian name `эль-халфы` read in the English layout, while `V-Belt` is no longer read in the Russian one),
+  development v60 with 121 and 115 more and as many false ones, the owner's field batteries with 2 more words right
+  and none wrong that the 0.54.0 model kept, a term typed again after the same term typed right 20 times of 20
+  (0.54.0: 18) and a Russian word joined by a hyphen typed in the English layout 10 times of 10 (0.54.0: 7). Of three
+  such terms quoted in a bug report as they were typed by mistake (`webjs набралось как цуиоы`), meant as typed, it
+  converts all three, where 0.54.0 left one, and of the authored abbreviations after Latin-script text it converts one
+  more Russian one (`deploy staging ЗП` becomes `PG` without Hunspell, at p=0.991) and restores one Latin one typed in
+  the Russian layout fewer (`Ask РК about the leave`). On the sealed test v60, read once, it kept all 185 correctly
+  typed sequences, restored all 185 typed in the wrong layout without the early switch against 182 and 183 for the
+  baseline pair, and 13 with it against 12; the baseline pair corrupted two and one correct rows. The pairs of corpora
+  v55-v59 were not installed: the corpus v55 pair's seal was withdrawn before a release, test v56 restored one row
+  fewer than the baseline pair, on tests v57 and v58 the pairs restored exactly the rows the baseline pair did (180 of
+  182, 196 of 197), short of the margin, and the corpus v59 pair, which passed test v59 (193 against 192), sealed
+  files the strict type check of CI failed. The rows both pairs lost on tests v57 and v58 were a word ending in a
+  letter on a sign key in the middle of a sentence, an unknown name opening a message and `Ку-ку!` typed in the
+  English layout; the first and the last are now restored.
 
 ## 0.54.0 — 2026-10-13
 

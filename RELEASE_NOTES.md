@@ -30,12 +30,14 @@
 
 ### Модель
 
-- Контекстная модель `context-v3-0983883efdb4` (корпус v59) закрепляет новый движок; модель префиксов прежняя, `prefix-v2-bf3dc28f8567`. Поверх весов модели 0.44.0 обучены три головы: для аббревиатур после латиницы, для незнакомых токенов и для слов через дефис. На калибровочных данных она делает на 10 и 6 верных исправлений больше модели 0.54.0 при том же числе ложных (15), а на журналах владельца не ошибается ни в одном слове, которое модель 0.54.0 решала верно. На запечатанном test v59 правильный текст сохранён во всех 195 строках, а без ранней смены восстановлено 193 строки из 195, набранных не в той раскладке, против 192 у базовой пары.
+- Контекстная модель `context-v3-83ddd9dc063a` (корпус v60) закрепляет новый движок; модель префиксов прежняя, `prefix-v2-bf3dc28f8567`. Поверх весов модели 0.44.0 обучены три головы: для аббревиатур после латиницы, для незнакомых токенов и для слов через дефис. На калибровочных данных она делает на 10 и 6 верных исправлений больше модели 0.54.0 и на одно ложное больше (16 против 15), а на журналах реального набора исправляет верно на 2 слова больше и не ошибается ни в одном слове, которое модель 0.54.0 решала верно. На запечатанном test v60 правильный текст сохранён во всех 185 строках, а без ранней смены восстановлены все 185 строк, набранных не в той раскладке, против 182–183 у базовой пары.
 
 ### Что осталось
 
 - Короткое техническое слово, впервые набранное в русской раскладке посреди русской фразы (`цуиоы` вместо `webjs`, `мгуоы` вместо `vuejs`, `реьч` вместо `htmx`), часто остаётся кириллицей: без того же слова раньше в тексте модель не отличает его от незнакомого русского слова, сленга или опечатки. Его исправляет `Pause`, теперь и после пробелов и знаков за словом.
 - Английское слово через дефис, набранное целиком в русской раскладке (`зку-щквук` вместо `pre-order`), исправляется только после дефиса: получается `зку-order`.
+- Термин, процитированный в сообщении об ошибке так, как он набрался (`webjs набралось как цуиоы`), переводится в `webjs`, если этот же термин уже набран выше. Вернуть набранное можно клавишей `Pause` сразу после исправления.
+- Два авторских примера аббревиатур решаются хуже, чем в 0.54.0: `Ask РК about the leave` (латинское `HR`, набранное в русской раскладке после английского текста) остаётся `РК`, а без словарей Hunspell `deploy staging ЗП` становится `deploy staging PG`. Слово исправляет или возвращает клавиша `Pause`.
 - `Pause` сразу после исправления на пробеле по-прежнему возвращает слово, даже если исправление было верным: по времени нажатия не отличить, отменяете вы ошибочное исправление или нажали по привычке.
 - `ЗК` заглавными в конце русской фразы (`почему ты не создал ЗК?`) остаётся кириллицей, а не становится `PR`: следующего слова, с которым модель решила бы его, нет. Его исправляет клавиша `Pause`.
 - `кз` в русской фразе (`говорит он кз домене`) может стать `rp`: в таблицах частот, которыми модель проверяет слова, нет разговорного русского, а `rp` там встречается. Вернуть слово можно клавишей `Pause`.
@@ -73,12 +75,14 @@ Exactly one Mac archive is needed: the Apple silicon build does not run on Intel
 
 ### Model
 
-- The context model `context-v3-0983883efdb4` (corpus v59) seals the new engine; the prefix model is still `prefix-v2-bf3dc28f8567`. Three heads are fitted onto the weights of the 0.44.0 model: for abbreviations after Latin-script text, for unknown tokens and for words joined by hyphens. On the calibration data it makes 10 and 6 more right conversions than the 0.54.0 model with as many false ones (15), and on the owner's logs it gets no word wrong that the 0.54.0 model got right. On the sealed test v59 it kept all 195 correctly typed rows and, without the early switch, restored 193 of the 195 typed in the wrong layout against 192 for the baseline pair.
+- The context model `context-v3-83ddd9dc063a` (corpus v60) seals the new engine; the prefix model is still `prefix-v2-bf3dc28f8567`. Three heads are fitted onto the weights of the 0.44.0 model: for abbreviations after Latin-script text, for unknown tokens and for words joined by hyphens. On the calibration data it makes 10 and 6 more right conversions than the 0.54.0 model and one more false one (16 against 15); on logs of real typing it converts 2 more words right and gets no word wrong that the 0.54.0 model got right. On the sealed test v60 it kept all 185 correctly typed rows and, without the early switch, restored all 185 typed in the wrong layout against 182–183 for the baseline pair.
 
 ### What remains
 
 - A short technical word typed in the Russian layout amid a Russian phrase for the first time in a text (`цуиоы` for `webjs`, `мгуоы` for `vuejs`, `реьч` for `htmx`) often stays Cyrillic: without the same word earlier in the text the model cannot tell it from an unknown Russian word, slang or a typo. `Pause` corrects it, now also past the spaces and signs after the word.
 - An English word joined by a hyphen and typed whole in the Russian layout (`зку-щквук` for `pre-order`) is converted only after the hyphen: it becomes `зку-order`.
+- A term quoted in a bug report the way it came out (`webjs набралось как цуиоы`) is converted to `webjs` when the same term was typed earlier in the text. `Pause` right after the correction brings back what was typed.
+- Two authored abbreviation examples are decided worse than in 0.54.0: `Ask РК about the leave` (the Latin `HR` typed in the Russian layout after English text) stays `РК`, and without Hunspell dictionaries `deploy staging ЗП` becomes `deploy staging PG`. `Pause` corrects the word or brings it back.
 - `Pause` right after a correction made at a space still converts the word back, even a right one: the moment of the press cannot tell an undo of a wrong correction from a press out of habit.
 - `ЗК` in capitals at the end of a Russian phrase (`почему ты не создал ЗК?`) stays Cyrillic instead of becoming `PR`: there is no next word for the model to decide it with. `Pause` corrects it.
 - `кз` in a Russian phrase (`говорит он кз домене`) may become `rp`: the frequency tables the model checks words with hold no conversational Russian, while `rp` occurs there. `Pause` brings the word back.
