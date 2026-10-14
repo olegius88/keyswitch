@@ -7,7 +7,7 @@
 [![Native packages](https://github.com/olegius88/keyswitch/actions/workflows/release.yml/badge.svg)](https://github.com/olegius88/keyswitch/actions/workflows/release.yml)
 [![License: GPL v3+](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
-KeySwitch — настольное приложение для Windows 10/11 x64 и Windows 11 на ARM,
+KeySwitch — настольное приложение для Windows 10/11 x64, 32-битной Windows 10 и Windows 11 на ARM,
 Ubuntu/Xubuntu X11 и macOS 13 и новее, которое автоматически исправляет слово, набранное в неверной
 раскладке. Это свободная альтернатива Punto Switcher, Caramba Switcher и
 EveryLang, и в отличие от них KeySwitch работает и в Linux. Распознавание идёт
@@ -138,9 +138,10 @@ Telegram. Токен бота и ID группы задаются в её инт
 
 Для Windows на ARM есть собственная сборка: `KeySwitch-Setup-0.55.0-arm64.exe` и
 `KeySwitch-0.55.0-windows-arm64.zip`. x64-установщик на таком компьютере тоже
-ставится, но программа тогда работает через эмуляцию. Автоматических обновлений
-у ARM64-сборки пока нет: новую версию скачивайте со страницы
-[выпусков](https://github.com/olegius88/keyswitch/releases).
+ставится, но программа тогда работает через эмуляцию. Для 32-битной Windows 10,
+на которой x64-сборка не запускается, есть сборка x86: `KeySwitch-Setup-0.55.0-x86.exe`
+и `KeySwitch-0.55.0-windows-x86.zip`. Каждая сборка обновляется сама установщиком
+своей архитектуры.
 
 После запуска KeySwitch появится в области уведомлений. Левый или правый щелчок
 по `EN/RU` либо флагу открывает меню. В нём пункт «Переключить на…» всегда
@@ -853,8 +854,7 @@ python3 tools/release.py --version X.Y.Z            # коммит, тег, push
   запущенное с более высоким уровнем целостности. Для такого окна KeySwitch
   также должен быть запущен с сопоставимыми правами.
 - Windows Setup EXE опубликованной версии 0.55.0 не подписан сертификатом издателя.
-- Сборки для macOS и Windows на ARM не обновляются автоматически (см.
-  [Установка на macOS](#установка-на-macos) и [Установка в Windows](#установка-в-windows)).
+- Сборки для macOS не обновляются автоматически (см. [Установка на macOS](#установка-на-macos)).
 - macOS: автоисправление орфографии (например, в TextEdit) может изменить слово на
   пробеле раньше KeySwitch; тогда KeySwitch не пишет поверх чужой правки и слово
   остаётся как есть. В таком приложении стоит выключить автоисправление.

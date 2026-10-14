@@ -2,7 +2,7 @@ param(
     [string]$OutputDirectory = "",
     [string]$ModelDirectory = "",
     [string]$ModelLicense = "",
-    # x64 or arm64; empty means the architecture of the Python that runs the build,
+    # x64, arm64 or x86; empty means the architecture of the Python that runs the build,
     # which is the architecture Nuitka compiles for.
     [string]$Architecture = ""
 )
@@ -1157,7 +1157,8 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') {
 }
 
 # The release names each Windows file after its architecture, and Windows on Arm
-# gets its own native build rather than the x64 one under emulation.
+# gets its own native build rather than the x64 one under emulation; 32-bit Windows,
+# which cannot run x64 code, gets an x86 build.
 $PythonPlatform = (& python -c "import sysconfig; print(sysconfig.get_platform())" | Out-String).Trim()
 if ($LASTEXITCODE -ne 0) {
     throw "Cannot read the build Python's platform"
@@ -1165,6 +1166,7 @@ if ($LASTEXITCODE -ne 0) {
 $PythonArchitecture = switch ($PythonPlatform) {
     "win-amd64" { "x64" }
     "win-arm64" { "arm64" }
+    "win32" { "x86" }
     default { throw "Unsupported Python platform for the Windows build: $PythonPlatform" }
 }
 if (-not $Architecture) {
@@ -1595,7 +1597,11 @@ if (($BundledEnglishHash -cne $ExpectedLanguageModelHashes.en_US) -or ($BundledR
     -Label "native executable"
 $PeOffset = [BitConverter]::ToInt32($ExecutableHeader, 0x3C)
 $PeMachine = [BitConverter]::ToUInt16($ExecutableHeader, $PeOffset + 4)
-$ExpectedPeMachine = if ($Architecture -ceq "arm64") { 0xAA64 } else { 0x8664 }
+$ExpectedPeMachine = switch ($Architecture) {
+    "arm64" { 0xAA64 }
+    "x86" { 0x014C }
+    default { 0x8664 }
+}
 if ($PeMachine -ne $ExpectedPeMachine) {
     throw ("KeySwitch.exe is built for PE machine 0x{0:X4}, not {1}" -f $PeMachine, $Architecture)
 }

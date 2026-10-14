@@ -17,6 +17,7 @@ from typing import Protocol, cast
 from .backend import ScreenAnchor
 from .constants.keyboard import ALT_MASK, CONTROL_MASK, LOCK_MASK, SHIFT_MASK, SUPER_MASK
 from .windows_backend import NativeInput, NativeKeyEvent, WindowsBackendError
+from .windows_calls import hook_prototype, stdcall_library
 from .constants.windows import (
     ASYNC_KEY_DOWN_BIT,
     GA_ROOT,
@@ -178,8 +179,9 @@ class CtypesWindowsAPI:
     def __init__(self) -> None:
         if not _running_on_windows():
             raise WindowsBackendError("Win32 API загружается только в Windows")
-        self.user32 = ctypes.CDLL("user32.dll", use_last_error=True)
-        self.kernel32 = ctypes.CDLL("kernel32.dll", use_last_error=True)
+        library = stdcall_library()
+        self.user32 = library("user32.dll", use_last_error=True)
+        self.kernel32 = library("kernel32.dll", use_last_error=True)
         self._thread_id = 0
         self._hook: int | None = None
         self._hook_callback: _HookCallback | None = None
@@ -189,12 +191,7 @@ class CtypesWindowsAPI:
     def _declare(self) -> None:
         user32 = self.user32
         kernel32 = self.kernel32
-        self.hook_callback_type = ctypes.CFUNCTYPE(
-            ctypes.c_ssize_t,
-            ctypes.c_int,
-            ctypes.c_size_t,
-            ctypes.c_ssize_t,
-        )
+        self.hook_callback_type = hook_prototype()
         user32.SetWindowsHookExW.argtypes = [
             ctypes.c_int,
             self.hook_callback_type,

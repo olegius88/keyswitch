@@ -100,10 +100,12 @@ RECEIPT_MIN_CALIBRATION_RECALL: Final = 0.977
 # false conversions in each profile (the pairs of corpora v55-v59 were not installed: the corpus v55 pair's seal was
 # withdrawn before a release, test v56 restored one row fewer than the baseline pair, tests v57 and v58 restored
 # exactly the rows the baseline pair did, below the margin, and the corpus v59 pair, which passed test v59, sealed
-# files that failed the strict type check).
-RECEIPT_CALIBRATION_REFERENCE_CORPUS: Final = "e8adb186cc27dbe7670bfa015d1760f7c7358f38a295a58f697466bbfab35deb"
-RECEIPT_CALIBRATION_REFERENCE_MODEL: Final = "context-v3-8849f92656fd"
-RECEIPT_CALIBRATION_REFERENCE_NET: Final[dict[str, int]] = {"portable": 13933, "reference_hunspell": 13968}
+# files that failed the strict type check). Corpus v61: the corpus v60 pair (context-v3-83ddd9dc063a, 0.55.0), scored by
+# tools/compare_context_candidates.py on every calibration frame of the corpus v61 recipe, converts 13 958 and 13 989
+# of the 14 395 conversion rows with 16 false conversions in each profile.
+RECEIPT_CALIBRATION_REFERENCE_CORPUS: Final = "545fce5cd2ce42081d7f8215a2d0c448b2b26248172ba0f211584c2eaf01e6ae"
+RECEIPT_CALIBRATION_REFERENCE_MODEL: Final = "context-v3-83ddd9dc063a"
+RECEIPT_CALIBRATION_REFERENCE_NET: Final[dict[str, int]] = {"portable": 13942, "reference_hunspell": 13973}
 # Serving thresholds are part of the contract: a lower threshold converts on weaker evidence.
 RECEIPT_MIN_CONVERSION_THRESHOLD: Final = 0.99
 RECEIPT_MIN_PREFIX_CONVERSION_THRESHOLD: Final = 0.985

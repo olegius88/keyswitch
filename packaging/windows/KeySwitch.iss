@@ -10,17 +10,24 @@
 #ifndef SetupIcon
   #error SetupIcon is required
 #endif
-; x64 (the default) or arm64. The x64 installer also installs on Windows 11 on Arm,
-; where the program runs under emulation; the arm64 one installs only there.
+; x64 (the default), arm64 or x86. The x64 installer also installs on Windows 11 on Arm,
+; where the program runs under emulation; the arm64 one installs only there. The x86 one,
+; for 32-bit Windows, installs wherever x86 code runs and in 32-bit mode: a 64-bit mode
+; that matched 32-bit Windows would make Setup stop there with an error.
 #ifndef Arch
   #define Arch "x64"
 #endif
 #if Arch == "arm64"
   #define ArchitecturesSupported "arm64"
+  #define ArchitecturesIn64BitMode "arm64"
 #elif Arch == "x64"
   #define ArchitecturesSupported "x64compatible"
+  #define ArchitecturesIn64BitMode "x64compatible"
+#elif Arch == "x86"
+  #define ArchitecturesSupported "x86compatible"
+  #define ArchitecturesIn64BitMode ""
 #else
-  #error Arch must be x64 or arm64
+  #error Arch must be x64, arm64 or x86
 #endif
 
 [Setup]
@@ -42,7 +49,7 @@ Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed={#ArchitecturesSupported}
-ArchitecturesInstallIn64BitMode={#ArchitecturesSupported}
+ArchitecturesInstallIn64BitMode={#ArchitecturesIn64BitMode}
 UninstallDisplayIcon={app}\KeySwitch.exe
 VersionInfoVersion={#MyAppVersion}.0
 VersionInfoCompany=Oleg Shevchuk

@@ -92,6 +92,8 @@ from keyswitch.constants.release import (
     DETECTOR_GATES_TIMEOUT_SECONDS,
     DEVELOPMENT_REPLAY_TIMEOUT_SECONDS,
     LOG_LINE_PREVIEW_CHARACTERS,
+    LOG_SEARCH_CHUNK_BYTES,
+    LOG_TAIL_READ_BYTES,
     MAX_DEFAULT_JOBS,
     MAX_MEMORY_PRESSURE_EVENTS,
     MAX_REPLAYS,
@@ -113,6 +115,8 @@ from keyswitch.constants.release import (
     PHASE_E2E_X11_MEMORY_MIB,
     PHASE_ENVIRONMENT_EXPECTED_SECONDS,
     PHASE_ENVIRONMENT_MEMORY_MIB,
+    PHASE_LOG_MAX_BYTES,
+    PHASE_LOG_POLL_SECONDS,
     PHASE_MODEL_DEVELOPMENT_REPLAY_EXPECTED_SECONDS,
     PHASE_MODEL_DEVELOPMENT_REPLAY_MEMORY_MIB,
     PHASE_MODEL_INPUTS_EXPECTED_SECONDS,
@@ -699,10 +703,30 @@ class PhaseLog:
         return self.path.read_bytes().decode("utf-8", "replace")
 
     def tail(self, lines: int = DEFAULT_LOG_TAIL_LINES) -> list[str]:
-        return [line.rstrip() for line in self.text().splitlines()[-lines:]]
+        """The last lines, read from the end of the log: a runaway command can write more than memory holds."""
+
+        with self.path.open("rb") as handle:
+            start = max(0, handle.seek(0, os.SEEK_END) - LOG_TAIL_READ_BYTES)
+            handle.seek(start)
+            read = handle.read().decode("utf-8", "replace").splitlines()
+        # A read from the middle of the log starts within a line.
+        whole = read[1:] if start else read
+        return [line.rstrip() for line in whole[-lines:]]
 
     def contains(self, marker: str) -> bool:
-        return marker in self.text()
+        """Whether the log holds the marker, read a chunk at a time with the overlap a marker can span."""
+
+        wanted = marker.encode("utf-8")
+        # A marker split between two chunks starts within the last len(wanted) - 1 bytes of the first.
+        overlap = max(0, len(wanted) - 1)
+        carried = b""
+        with self.path.open("rb") as handle:
+            while chunk := handle.read(LOG_SEARCH_CHUNK_BYTES):
+                window = carried + chunk
+                if wanted in window:
+                    return True
+                carried = window[max(0, len(window) - overlap):] if overlap else b""
+        return False
 
 
 class Context:
@@ -804,12 +828,7 @@ class Context:
             )
             self.register(phase, process)
             try:
-                returncode = process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                self._terminate(process)
-                raise PhaseFailure(
-                    f"{argv[0]} timed out after {timeout} seconds"
-                ) from None
+                returncode = self._wait(process, argv[0], timeout, [log.path, *([stdout_path] if stdout_path else [])])
             finally:
                 self.unregister(phase)
         finally:
@@ -822,6 +841,23 @@ class Context:
         if check and returncode != 0:
             raise PhaseFailure(f"{shlex.join(argv[:COMMAND_PREVIEW_ARGUMENT_COUNT])} exited with status {returncode}")
         return returncode
+
+    def _wait(self, process: subprocess.Popen[bytes], command: str, timeout: int, outputs: Sequence[Path]) -> int:
+        """Wait for a command; stop it at its timeout or when one of its outputs outgrows PHASE_LOG_MAX_BYTES."""
+
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                return process.wait(timeout=min(PHASE_LOG_POLL_SECONDS, max(0.0, deadline - time.monotonic())))
+            except subprocess.TimeoutExpired:
+                pass
+            grown = [path for path in outputs if path.stat().st_size > PHASE_LOG_MAX_BYTES]
+            if grown:
+                self._terminate(process)
+                raise PhaseFailure(f"{command} wrote more than {PHASE_LOG_MAX_BYTES} bytes to {grown[0].name}; stopped")
+            if time.monotonic() >= deadline:
+                self._terminate(process)
+                raise PhaseFailure(f"{command} timed out after {timeout} seconds")
 
     @staticmethod
     def _terminate(process: subprocess.Popen[bytes]) -> None:

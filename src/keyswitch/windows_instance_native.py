@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 
+from .windows_calls import stdcall_library
 from .windows_system import WindowsSystemError
 from .constants.windows import ERROR_ALREADY_EXISTS, SW_RESTORE
 
@@ -14,8 +15,9 @@ WINDOW_TITLE = "KeySwitch"
 
 class CtypesWindowsInstanceAPI:
     def __init__(self) -> None:
-        self.kernel32 = ctypes.CDLL("kernel32.dll", use_last_error=True)
-        self.user32 = ctypes.CDLL("user32.dll", use_last_error=True)
+        library = stdcall_library()
+        self.kernel32 = library("kernel32.dll", use_last_error=True)
+        self.user32 = library("user32.dll", use_last_error=True)
         self._handle: int | None = None
         self._declare()
 

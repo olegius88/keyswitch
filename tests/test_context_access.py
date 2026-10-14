@@ -312,9 +312,10 @@ class WindowsContextTests(unittest.TestCase):
 
     def test_win32_pid_binding(self) -> None:
         self.pid.stop()
-        with patch("keyswitch.windows_context.ctypes.CDLL") as dll:
+        with patch("keyswitch.windows_context.stdcall_library") as library:
             self.assertEqual(WindowsFieldReader._process_for_window(1), 0)
-            dll.return_value.GetWindowThreadProcessId.assert_called_once()
+            library.return_value.assert_called_once_with("user32.dll", use_last_error=True)
+            library.return_value.return_value.GetWindowThreadProcessId.assert_called_once()
 
 
 class AtspiContextTests(unittest.TestCase):

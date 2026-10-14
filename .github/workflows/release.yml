@@ -611,7 +611,8 @@ jobs:
 
   windows:
     name: Win32 tests and E2E (${{ matrix.architecture }})
-    # The tests and the E2E run natively on each architecture an installer is built for.
+    # The tests and the E2E run natively on each architecture an installer is built for;
+    # x86 runs under WOW64 on the x64 image, as no hosted runner has 32-bit Windows.
     strategy:
       fail-fast: false
       matrix:
@@ -620,6 +621,8 @@ jobs:
             architecture: x64
           - runner: windows-11-vs2026-arm
             architecture: arm64
+          - runner: windows-2025
+            architecture: x86
     runs-on: ${{ matrix.runner }}
 
     steps:
@@ -664,10 +667,13 @@ jobs:
           # pwsh reports only the last command's exit code; without this a
           # failing command earlier in the step would leave it green.
           $PSNativeCommandUseErrorActionPreference = $true
-          # The type check reads NumPy's stubs; the tests run without them.
-          $env:PYTHONPATH = "src;$env:RUNNER_TEMP\numpy-typing"
-          python -m mypy --config-file pyproject.toml --exclude "^tools/freeze_intent_development_corpus\.py$"
-          python -m mypy --config-file pyproject.toml --platform linux tools/freeze_intent_development_corpus.py
+          # The type check reads NumPy's stubs; the tests run without them. Its result does not
+          # depend on the interpreter's bitness, so the x86 job leaves it to the x64 one.
+          if ("${{ matrix.architecture }}" -ne "x86") {
+            $env:PYTHONPATH = "src;$env:RUNNER_TEMP\numpy-typing"
+            python -m mypy --config-file pyproject.toml --exclude "^tools/freeze_intent_development_corpus\.py$"
+            python -m mypy --config-file pyproject.toml --platform linux tools/freeze_intent_development_corpus.py
+          }
           $env:PYTHONPATH = "src"
           python -m coverage erase
           python -m coverage run --branch --source=src/keyswitch tests/test_intent_model.py -v
@@ -675,13 +681,13 @@ jobs:
           # Every other module in a process of its own, as many at a time as there are cores
           # (tools/run_test_modules.py); the two that drive the input backends take turns.
           python tools/run_test_modules.py --serial test_windows_backend.py --serial test_input_integrity.py `
-            test_windows_backend.py test_input_integrity.py test_input_sequence_matrix.py test_language_intent_regressions.py test_word_decision.py test_action_boundary.py "test_context*.py" test_boundary_model.py "test_prefix*.py" test_early_context.py test_input_delay.py `
+            test_windows_backend.py test_windows_calls.py test_input_integrity.py test_input_sequence_matrix.py test_language_intent_regressions.py test_word_decision.py test_action_boundary.py "test_context*.py" test_boundary_model.py "test_prefix*.py" test_early_context.py test_input_delay.py `
             "--" python -m coverage run --parallel-mode --branch --source=src/keyswitch -m unittest discover -s tests -v -p
           python -m coverage combine --append --quiet
-          python -m coverage report --fail-under=100 --include="*/intent_model.py,*/updates.py,*/windows_app.py,*/windows_backend.py,*/windows_instance.py,*/windows_system.py,*/windows_tray.py,*/windows_ui_model.py"
+          python -m coverage report --fail-under=100 --include="*/intent_model.py,*/updates.py,*/windows_app.py,*/windows_backend.py,*/windows_calls.py,*/windows_instance.py,*/windows_system.py,*/windows_tray.py,*/windows_ui_model.py"
 
       - name: Clear the sign-in shell windows that hold the foreground
-        if: ${{ matrix.architecture == 'arm64' }}
+        if: ${{ !cancelled() && matrix.architecture == 'arm64' }}
         shell: powershell
         run: |
           # The Windows 11 desktop image of the Arm runner opens a WWAHost window (the
@@ -712,6 +718,8 @@ jobs:
           Write-Output "Foreground after: $(Get-ForegroundName)"
 
       - name: Run bidirectional WH_KEYBOARD_LL, SendInput and Tk correction E2E
+        # The E2E reports its own result when a unit test before it failed.
+        if: ${{ !cancelled() }}
         timeout-minutes: 6
         shell: pwsh
         env:
@@ -732,7 +740,8 @@ jobs:
     # The installer does not wait for the tests: it builds on a runner of its own beside them,
     # and nothing is published before both have passed.
     # One native build per architecture: Windows on Arm gets its own installer
-    # instead of the x64 one under emulation.
+    # instead of the x64 one under emulation, and 32-bit Windows an x86 one, built
+    # by an x86 Python on the x64 image.
     strategy:
       fail-fast: false
       matrix:
@@ -741,6 +750,8 @@ jobs:
             architecture: x64
           - runner: windows-11-vs2026-arm
             architecture: arm64
+          - runner: windows-2025
+            architecture: x86
     runs-on: ${{ matrix.runner }}
 
     steps:
@@ -762,9 +773,10 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/nuitka-cache
-          key: nuitka-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/keyswitch/**', 'packaging/**', 'tools/install-build-tools.sh') }}
+          # x64 and x86 share the runner image, and runner.arch with it.
+          key: nuitka-${{ runner.os }}-${{ matrix.architecture }}-${{ hashFiles('src/keyswitch/**', 'packaging/**', 'tools/install-build-tools.sh') }}
           restore-keys: |
-            nuitka-${{ runner.os }}-${{ runner.arch }}-
+            nuitka-${{ runner.os }}-${{ matrix.architecture }}-
 
       - name: Install pinned runtime and build dependencies
         run: |

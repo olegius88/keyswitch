@@ -21,6 +21,7 @@ from .constants.text import FIELD_AFTER_CARET_MAX_CHARACTERS
 from .constants.timing import UIA_CONNECTION_TIMEOUT_MS, UIA_TRANSACTION_TIMEOUT_MS
 from .constants.units import MILLISECONDS_PER_SECOND
 from .constants.windows import UIA_EMBEDDED_OBJECT_CHARACTER, UIA_TEXT_PATTERN_ID
+from .windows_calls import stdcall_library
 
 
 # The type library the build pre-generates and the runtime opens must name the
@@ -146,9 +147,9 @@ class WindowsFieldReader:
 
     @staticmethod
     def _process_for_window(window: int) -> int:
-        # KeySwitch ships x64 only; like windows_native, use the x64 unified
-        # calling convention. CDLL is also available to cross-platform mocks.
-        user32 = ctypes.CDLL("user32.dll", use_last_error=True)
+        # User32 is __stdcall on 32-bit x86 Windows, the convention of WinDLL there;
+        # elsewhere the loader is CDLL, which the cross-platform mocks replace.
+        user32 = stdcall_library()("user32.dll", use_last_error=True)
         user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
         user32.GetWindowThreadProcessId.restype = ctypes.c_ulong
         pid = ctypes.c_ulong()

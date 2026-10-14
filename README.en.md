@@ -12,7 +12,7 @@ by default; it is not built into the KeySwitch input engine.
 [![Native packages](https://github.com/olegius88/keyswitch/actions/workflows/release.yml/badge.svg)](https://github.com/olegius88/keyswitch/actions/workflows/release.yml)
 [![License: GPL v3+](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
-KeySwitch is a desktop application for Windows 10/11 x64 and Windows 11 on Arm,
+KeySwitch is a desktop application for Windows 10/11 x64, 32-bit Windows 10 and Windows 11 on Arm,
 Ubuntu/Xubuntu X11 and macOS 13 or newer that automatically corrects words typed using the wrong
 keyboard layout. It is a free, open-source alternative to Punto Switcher,
 Caramba Switcher and EveryLang, and unlike them it also runs on Linux.
@@ -134,9 +134,9 @@ portable `KeySwitch-0.55.0-windows-x64.zip` archive.
 
 Windows on Arm has a build of its own: `KeySwitch-Setup-0.55.0-arm64.exe` and
 `KeySwitch-0.55.0-windows-arm64.zip`. The x64 installer installs there too, but the
-program then runs under emulation. The ARM64 build does not update itself yet:
-download a new version from the
-[releases page](https://github.com/olegius88/keyswitch/releases).
+program then runs under emulation. 32-bit Windows 10, which cannot run the x64 build,
+has an x86 one: `KeySwitch-Setup-0.55.0-x86.exe` and `KeySwitch-0.55.0-windows-x86.zip`.
+Each build updates itself with the installer of its own architecture.
 
 After launch, KeySwitch appears in the notification area. Left- or right-click
 the `EN/RU` or flag icon to open its menu. Its Switch to action always offers
@@ -837,8 +837,7 @@ See [release and recovery procedures](docs/verification.md).
   window running at a higher integrity level. KeySwitch needs a matching level
   for that target window.
 - The published Windows 0.55.0 Setup EXE is not signed with a publisher certificate.
-- The macOS and Windows on Arm builds do not update themselves (see
-  [Install on macOS](#install-on-macos) and [Install on Windows](#install-on-windows)).
+- The macOS builds do not update themselves (see [Install on macOS](#install-on-macos)).
 - macOS: the spelling autocorrection (in TextEdit, for example) can change a word
   at the space before KeySwitch does; KeySwitch then does not write over that
   edit and the word stays as it is. Turning autocorrection off in such an
