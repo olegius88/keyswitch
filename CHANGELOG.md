@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.56.0 — 2026-10-14
+
 - A build for 32-bit Windows 10, which cannot run the x64 one: `KeySwitch-Setup-<version>-x86.exe` and
   `KeySwitch-<version>-windows-x86.zip`. User32 and Kernel32 are now called with the `__stdcall` convention their
   functions and the keyboard hook procedure use on 32-bit x86 Windows (`ctypes.WinDLL` and `WINFUNCTYPE`); the cdecl
