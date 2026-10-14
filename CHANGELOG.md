@@ -30,6 +30,18 @@ All notable changes to KeySwitch are documented in this file.
   typed (the owner's log, 13.10.2026). The same held for a word whose early switch was undone. Now leaving such a word
   unfinished (the arrow keys, a click, a shortcut, another window) ends its protection; a layout the user picks
   still protects the next word whatever comes before it. The log names the protection's source (`current_word`).
+- A term typed in the Russian layout amid a Russian phrase is converted when the same text already holds it typed
+  right: `webjs не дает информацию ... дело в цуиоы` gives `webjs`. The context model saw only the two words next to
+  a token, and `цуиоы` stayed four times in one session in a chat input of VS Code, twice after `webjs` typed a few
+  seconds before. A token no table counts typed in the English layout after Russian text is decided by the same new
+  part of the model (`htpdt` in a Russian sentence is `резве`); a Latin name or term typed right stays. The context
+  model gains a head for such tokens (`unknown|`): four letters or more of one script, not in capitals, its Cyrillic
+  reading unused in Russian prose, after Russian text - Latin letters in either layout, Russian letters only after
+  their Latin reading earlier in the text. Without that echo Russian letters stay with the model as before: fitted on
+  them too, the head converted slang, truncations and brands written in Cyrillic (`пукты`, `иишку`, `гупшуп`) in the
+  owner's typing, so a term typed in the Russian layout the first time in a text is still left to Pause, which now
+  reaches it past the spaces and signs after it. On the owner's field batteries the pair converts no word wrongly that
+  the 0.54.0 pair kept; the authored echo battery converts 20 of 20 instead of 18.
 - A Russian word typed in the English layout whose last letter sits on a sign key (`х` on `[`, `ю` on `.`) is
   converted in the middle of a sentence too. The boundary model cannot tell whether such a key ends the word as a
   sign (`vbkkbjyf[` is `миллиона` and a bracket or `миллионах`), so the token waits for the next word, and only the
@@ -59,6 +71,22 @@ All notable changes to KeySwitch are documented in this file.
   in the receipt and the installers, and indented they would outgrow their 8 MiB cap), the history files named by the
   hash of their own bytes, and the frozen families' seals and reports, which CI compares byte for byte. The
   development histories and reports nothing hashes are rewritten indented once.
+- The context model `context-v3-0983883efdb4` (corpus v59) replaces `context-v3-8849f92656fd`: the frozen base of the
+  pairs since 0.44.0 with three heads fitted onto it - for abbreviations after Latin-script text, for tokens no table
+  counts (`unknown|`) and for words joined by hyphens (`joined|`), which chooses its epoch on its own development frames
+  while the other heads are ranked without its weights - so that the seal pins the changed engine; the prefix model
+  `prefix-v2-bf3dc28f8567` retrained byte-identical. On the same engine it decides calibration v59 with 10 and 6 more
+  right conversions per profile than the model of 0.54.0 and as many false ones (15), development v59 with 111 and 103
+  more, the owner's field batteries with no word converted wrongly that the 0.54.0 model kept, a term typed again after
+  the same term typed right 20 times of 20 (0.54.0: 18) and a Russian word joined by a hyphen typed in the English layout
+  10 times of 10 (0.54.0: 7). It also converts two of three such terms quoted as typed by mistake (`"мысщву"` after
+  `vscode`), which 0.54.0 left once. On the sealed test v59, read once, it kept all 195 correctly typed sequences and
+  restored 193 of the 195 typed in the wrong layout without the early switch against 192 for the baseline pair, and 18
+  with it, as many as the baseline pair. The pairs of corpora v55-v58 were not installed: the corpus v55 pair's seal was
+  withdrawn before a release, test v56 restored one row fewer than the baseline pair, and on tests v57 and v58 the pairs
+  restored exactly the rows the baseline pair did (180 of 182, 196 of 197), short of the margin. The rows both pairs
+  lost were a word ending in a letter on a sign key in the middle of a sentence, an unknown name opening a message and
+  `Ку-ку!` typed in the English layout; the first and the last are now restored.
 
 ## 0.54.0 — 2026-10-13
 
