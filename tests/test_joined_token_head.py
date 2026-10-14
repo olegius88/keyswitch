@@ -21,7 +21,6 @@ from keyswitch.constants.model_protocol import DEVELOPMENT, TRAIN  # noqa: E402
 from keyswitch.context_action_features import extract_action_features, joined_parts, joined_question, own_bucket  # noqa: E402
 from keyswitch.context_model import ContextEvidence, term_bucket  # noqa: E402
 from keyswitch.input_context import FieldContext  # noqa: E402
-import context_action_cuda as cuda  # noqa: E402
 import train_context_action_model as trainer  # noqa: E402
 from test_context_action_training import fixture  # noqa: E402
 
@@ -74,10 +73,16 @@ class JoinedTokenHeadTests(unittest.TestCase):
         self.assertIn("russian:most:0:least:0:direction:0", dropped)
         self.assertEqual(head(evidence("webjs", "цуиоы", 0, "только ")), set())
 
-    def test_the_trainer_and_the_gpu_path_route_the_class_to_the_head(self) -> None:
+    def test_the_trainer_routes_the_class_to_the_head(self) -> None:
         prefixes = frozenset({JOINED_FEATURE_PREFIX})
         self.assertTrue(trainer.head_question("Re-re", "Ку-ку", "Он ушёл. ", "", "space", "none", prefixes))
         self.assertFalse(trainer.head_question("Re-re", "Ку-ку", "Он ушёл. ", "", "space", "none", frozenset()))
+
+    def test_the_gpu_path_routes_the_class_to_the_head(self) -> None:
+        try:
+            import context_action_cuda as cuda
+        except ImportError:  # CuPy missing, as in CI: the GPU path does not load here
+            self.skipTest("CuPy is required to load the GPU path")
         self.assertTrue(cuda.heads_question("j,sxyj-nfr", "Он сказал ", "", "space"))
         self.assertFalse(cuda.heads_question("ghbdtn", "Он сказал ", "", "space"))
 
