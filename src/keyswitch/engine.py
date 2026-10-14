@@ -3022,7 +3022,8 @@ class KeySwitchEngine:
         # split off the converted word's end stays literal after the whole correction.
         closing = None if plan.boundary is None or plan.boundary.deferred else plan.boundary
         suffix = "".join(stroke.character for stroke in plan.trailing) + ("" if closing is None else closing.character)
-        ignored = {self.detector.token_key(item) for item in self.settings.get("exclusions.words", [])}
+        ignored_words: list[str] = self.settings.get("exclusions.words", [])
+        ignored = {self.detector.token_key(item) for item in ignored_words}
         start, taken, settled = plan, list[KeptWord](), plan
         for word in reversed(kept):
             previous = word.plan

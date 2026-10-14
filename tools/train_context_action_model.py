@@ -853,7 +853,7 @@ def unknown_token_curriculum(split: str, source_rows: Sequence[CorpusRow], refus
         # (typed as, layout, label, what stands earlier in the text): the term typed in the Russian layout converts once
         # it was typed right before (the head answers Russian letters only then); typed as meant it stays, alone, after
         # itself, and after its keys left in Cyrillic by an earlier miss.
-        frames = [(typed, 1, "convert", term), (term, 0, "keep", term if echo else "")]
+        frames: list[tuple[str, int, ContextAction, str]] = [(typed, 1, "convert", term), (term, 0, "keep", term if echo else "")]
         if echo:
             frames.append((term, 0, "keep", typed))
         for index, (shown, group, action, earlier_word) in enumerate(frames):
@@ -946,7 +946,8 @@ def joined_token_curriculum(split: str, source_rows: Sequence[CorpusRow], refuse
                 continue
             taken[token.casefold()] += 1
             kind = "repeat" if len({part.casefold() for part in token.split("-")}) == 1 else "words"
-            for index, (shown, layout, action) in enumerate(((token, group, "keep"), (keys, 1 - group, "convert"))):
+            framed: tuple[tuple[str, int, ContextAction], ...] = ((token, group, "keep"), (keys, 1 - group, "convert"))
+            for index, (shown, layout, action) in enumerate(framed):
                 frame = f"{identifier}:{index}"
                 trigger, boundary_text = _varied_boundary(frame)
                 field = FieldContext(applications[variant_choice(frame, "application", len(applications))], "public-training",
@@ -962,7 +963,7 @@ def joined_token_curriculum(split: str, source_rows: Sequence[CorpusRow], refuse
                         if count >= minimum and JOINED_REPEAT_MIN_LETTERS <= len(word) <= JOINED_REPEAT_MAX_LETTERS
                         and word.isalpha() and (_cyrillic(word) and not set(word) & UNKNOWN_HEAD_SIGN_KEY_LETTERS
                                                 if group else word.isascii())),
-                       key=lambda word, language=alphabet: hashlib.sha256(f"joined-repeat:{language}:{word}".encode()).hexdigest())
+                       key=partial(_repeat_order, alphabet))
         # The first `repeat_words` words in hash order, of both splits: each split frames its share of them.
         for word in words[:repeat_words if contexts[group] else 0]:
             identifier = f"joined-repeat:{alphabet}:{word}"
@@ -978,7 +979,8 @@ def joined_token_curriculum(split: str, source_rows: Sequence[CorpusRow], refuse
                 continue
             context = contexts[group][variant_choice(identifier, "context", len(contexts[group]))]
             before = (f"{context.rstrip()}. " if capital else context)[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:]
-            for index, (shown, layout, action) in enumerate(((token, group, "keep"), (keys, 1 - group, "convert"))):
+            pair: tuple[tuple[str, int, ContextAction], ...] = ((token, group, "keep"), (keys, 1 - group, "convert"))
+            for index, (shown, layout, action) in enumerate(pair):
                 frame = f"{identifier}:{index}"
                 trigger, boundary_text = _varied_boundary(frame)
                 field = FieldContext(applications[variant_choice(frame, "application", len(applications))], "public-training",
@@ -991,6 +993,12 @@ def joined_token_curriculum(split: str, source_rows: Sequence[CorpusRow], refuse
                   "scope": "words joined by hyphens in the text of this split's rows, and counted words of either language joined "
                            "to themselves, after the text before them: typed as written (keep) and their keys in the other "
                            "layout (convert) (joined_token_curriculum)."}
+
+
+def _repeat_order(alphabet: str, word: str) -> str:
+    """The order the joined-token curriculum draws repeated words of one language in: by hash."""
+
+    return hashlib.sha256(f"joined-repeat:{alphabet}:{word}".encode()).hexdigest()
 
 
 def term_counts_dropped(identifier: str, original: str) -> bool:

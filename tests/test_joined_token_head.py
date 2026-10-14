@@ -10,6 +10,7 @@ from __future__ import annotations
 import sys
 import unittest
 from dataclasses import replace
+from typing import cast
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
@@ -90,13 +91,13 @@ class JoinedTokenHeadTests(unittest.TestCase):
                                   ("xnj-nj", 0, "convert"), ("pre-order", 0, "keep"), ("зку-щквук", 1, "convert")})
         # `ну-ну` is held out; one occurrence of a token at most (per_token).
         tokens = {"ку-ку", "что-то", "pre-order"}
-        self.assertEqual(report["items"]["refused"], 1)
+        self.assertEqual(cast(dict[str, int], report["items"])["refused"], 1)
         self.assertEqual(report["tokens"], len(tokens))
         self.assertTrue(all(row.field.before.endswith(" ") or not row.field.before for row in rows))
         self.assertTrue(all(joined_question(row.original) for row in rows))
         capped, capped_report = trainer.joined_token_curriculum(
             DEVELOPMENT, [sentence, replace(sentence, identifier="j3", document="other")], frozenset(), JOINED)
-        self.assertEqual(capped_report["items"]["capped"], len(tokens))
+        self.assertEqual(cast(dict[str, int], capped_report["items"])["capped"], len(tokens))
         self.assertEqual(len(capped), len(rows))
         # A row whose text no layout types, and a token of two scripts, are no frames.
         unrepresentable = replace(sentence, identifier="j4", document="third", layout_representable=False)
@@ -131,7 +132,7 @@ class JoinedTokenHeadTests(unittest.TestCase):
         held_out = {**options, "held_out": [row.original.casefold() for row in synthetic]}
         refused = trainer.joined_token_curriculum(TRAIN, [russian, english], frozenset(), held_out)
         self.assertFalse([row for row in refused[0] if row.identifier.startswith("joined-repeat:")])
-        self.assertTrue(refused[1]["items"]["refused"])
+        self.assertTrue(cast(dict[str, int], refused[1]["items"])["refused"])
         # Without a context of its language a word is never framed.
         alone = trainer.joined_token_curriculum(TRAIN, [russian], frozenset(), options)[0]
         self.assertFalse([row for row in alone if row.identifier.startswith("joined-repeat:english:")])
