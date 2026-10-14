@@ -80,6 +80,9 @@ RELEASE_ASSETS: Final[tuple[str, ...]] = (
     # Windows on Arm gets a native build of its own.
     "KeySwitch-Setup-{version}-arm64.exe",
     "KeySwitch-{version}-windows-arm64.zip",
+    # 32-bit Windows runs no x64 code: it gets an x86 build.
+    "KeySwitch-Setup-{version}-x86.exe",
+    "KeySwitch-{version}-windows-x86.zip",
     # One archive per kind of Mac: a bundle built for Apple silicon does not run
     # on an Intel Mac, and neither is a substitute for the other.
     "KeySwitch-{version}-macos-arm64.zip",

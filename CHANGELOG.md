@@ -4,6 +4,20 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- A build for 32-bit Windows 10, which cannot run the x64 one: `KeySwitch-Setup-<version>-x86.exe` and
+  `KeySwitch-<version>-windows-x86.zip`. User32 and Kernel32 are now called with the `__stdcall` convention their
+  functions and the keyboard hook procedure use on 32-bit x86 Windows (`ctypes.WinDLL` and `WINFUNCTYPE`); the cdecl
+  bindings KeySwitch had were right only where Windows has one convention, on x64 and Arm64, where nothing changes.
+  The x86 installer installs wherever x86 code runs, in 32-bit mode. Its tests, the end-to-end check of the keyboard
+  hook and SendInput and the silent installation run in CI under WOW64 on the x64 image: no hosted runner has a 32-bit
+  Windows.
+- Each Windows build updates itself with the installer of its own architecture, chosen by the platform its Python was
+  built for rather than by the machine: the x86 build stays x86 under WOW64, and the Windows on Arm build now updates
+  itself, as does an x64 build running on an Arm PC, which did not before. An older build on Arm does not know of
+  these installers, so this version has to be installed there by hand once.
+- The technical log names the platform of the build at start (`build_platform` in `engine_initialized`): one version
+  ships a build per architecture.
+
 ## 0.55.0 — 2026-10-14
 
 - Pause converts the last word past the spaces and signs typed after it. A word stayed Pause's only until the next

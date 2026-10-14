@@ -8,6 +8,7 @@ import logging
 import platform
 import re
 import subprocess
+import sysconfig
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -36,7 +37,7 @@ GITHUB_API_VERSION = "2026-03-10"
 _VERSION_PATTERN = re.compile(r"(?:v)?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 _DIGEST_PATTERN = re.compile(r"sha256:([0-9a-f]{64})")
 _WINDOWS_INSTALLER_PATTERN = re.compile(
-    r"KeySwitch-Setup-(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)-x64\.exe"
+    r"KeySwitch-Setup-(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)-(?:x64|arm64|x86)\.exe"
 )
 
 
@@ -63,25 +64,47 @@ class SemanticVersion:
 
 class UpdateTarget(str, Enum):
     WINDOWS_X64 = "windows-x64"
+    WINDOWS_ARM64 = "windows-arm64"
+    WINDOWS_X86 = "windows-x86"
     UBUNTU_AMD64 = "ubuntu-amd64"
 
+    @property
+    def windows_installer(self) -> bool:
+        """KeySwitch downloads and runs this target's installer itself; APT updates the package."""
+
+        return self is not UpdateTarget.UBUNTU_AMD64
+
     def asset_name(self, version: SemanticVersion) -> str:
-        if self is UpdateTarget.WINDOWS_X64:
-            return f"KeySwitch-Setup-{version}-x64.exe"
-        return f"keyswitch_{version}_amd64.deb"
+        if self is UpdateTarget.UBUNTU_AMD64:
+            return f"keyswitch_{version}_amd64.deb"
+        return f"KeySwitch-Setup-{version}-{_WINDOWS_ARCHITECTURES[self]}.exe"
+
+
+_WINDOWS_ARCHITECTURES = {
+    UpdateTarget.WINDOWS_X64: "x64",
+    UpdateTarget.WINDOWS_ARM64: "arm64",
+    UpdateTarget.WINDOWS_X86: "x86",
+}
+# A Windows build updates with the installer of its own architecture, which build-windows.ps1 names after
+# the platform of the Python it was built with: an x86 build under WOW64 stays x86, an x64 one on an Arm
+# PC stays x64. The machine is not asked, so builds of two architectures never share an install folder.
+_WINDOWS_BUILD_TARGETS = {
+    "win-amd64": UpdateTarget.WINDOWS_X64,
+    "win-arm64": UpdateTarget.WINDOWS_ARM64,
+    "win32": UpdateTarget.WINDOWS_X86,
+}
 
 
 def detect_update_target(
     system: str | None = None,
     machine: str | None = None,
+    build_platform: str | None = None,
 ) -> UpdateTarget | None:
     operating_system = (system or platform.system()).casefold()
-    architecture = (machine or platform.machine()).casefold()
-    if architecture not in {"amd64", "x86_64"}:
-        return None
     if operating_system == "windows":
-        return UpdateTarget.WINDOWS_X64
-    if operating_system == "linux":
+        return _WINDOWS_BUILD_TARGETS.get(build_platform or sysconfig.get_platform())
+    architecture = (machine or platform.machine()).casefold()
+    if operating_system == "linux" and architecture in {"amd64", "x86_64"}:
         return UpdateTarget.UBUNTU_AMD64
     return None
 
@@ -525,7 +548,7 @@ class UpdateManager:
         if (
             automatic
             and install_automatically
-            and target is UpdateTarget.WINDOWS_X64
+            and target.windows_installer
         ):
             self._download_worker(release)
             return
@@ -543,7 +566,8 @@ class UpdateManager:
                 self._closed
                 or self._busy
                 or release is None
-                or self.target is not UpdateTarget.WINDOWS_X64
+                or self.target is None
+                or not self.target.windows_installer
             ):
                 return False
             self._busy = True

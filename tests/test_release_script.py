@@ -43,6 +43,8 @@ NOTES_TEXT = """# KeySwitch 0.9.1
 - KeySwitch-0.9.1-windows-x64.zip
 - KeySwitch-Setup-0.9.1-arm64.exe
 - KeySwitch-0.9.1-windows-arm64.zip
+- KeySwitch-Setup-0.9.1-x86.exe
+- KeySwitch-0.9.1-windows-x86.zip
 - KeySwitch-0.9.1-macos-arm64.zip
 - KeySwitch-0.9.1-macos-x86_64.zip
 """
@@ -202,7 +204,7 @@ class ReleaseNotesTests(unittest.TestCase):
         # GitHub shows the release text with every line break kept: a wrapped item reads as ragged lines.
         self.path.write_text(NOTES_TEXT + "\n- A change described\n  over two lines.\n\nA paragraph\nwrapped too.\n",
                              encoding="utf-8")
-        with self.assertRaisesRegex(driver.ReleaseError, "on lines 12, 15; GitHub"):
+        with self.assertRaisesRegex(driver.ReleaseError, "on lines 14, 17; GitHub"):
             driver.check_release_notes("0.9.1")
 
     def test_headings_items_tables_quotes_and_code_are_lines_of_their_own(self) -> None:
@@ -354,6 +356,8 @@ class GitHubTests(unittest.TestCase):
                     {"name": "KeySwitch-0.9.1-windows-x64.zip"},
                     {"name": "KeySwitch-Setup-0.9.1-arm64.exe"},
                     {"name": "KeySwitch-0.9.1-windows-arm64.zip"},
+                    {"name": "KeySwitch-Setup-0.9.1-x86.exe"},
+                    {"name": "KeySwitch-0.9.1-windows-x86.zip"},
                     {"name": "KeySwitch-0.9.1-macos-arm64.zip"},
                     {"name": "KeySwitch-0.9.1-macos-x86_64.zip"},
                     {"name": "SHA256SUMS"},

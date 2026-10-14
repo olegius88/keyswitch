@@ -31,6 +31,7 @@ from keyswitch.constants.models import (
     CURRENT_PREFIX_FEATURE_VERSION,
 )
 from keyswitch.constants.prefix import PREFIX_V1_FEATURE_VERSION
+from keyswitch import updates
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -501,6 +502,25 @@ class WindowsPackagingContractTests(unittest.TestCase):
         assert match is not None
         self.assertEqual(int(match.group(1)) * BYTES_PER_MEBIBYTE, MAX_CONTEXT_TERM_FREQUENCY_BYTES)
         self.assertLessEqual(TERM_FREQUENCY_PATH.stat().st_size, MAX_CONTEXT_TERM_FREQUENCY_BYTES)
+
+    def test_each_windows_build_is_named_and_updated_after_its_python_platform(self) -> None:
+        # The build names its files after the platform of the Python it runs on, and the updater asks
+        # for the installer of the build's own platform: the tables must agree, and the installer
+        # script and the executable check must know every architecture.
+        built = dict(re.findall(r'^\s+"(win[\w-]*)" \{ "(\w+)" \}$', self.script, re.MULTILINE))
+        updated = {
+            build_platform: updates._WINDOWS_ARCHITECTURES[target]
+            for build_platform, target in updates._WINDOWS_BUILD_TARGETS.items()
+        }
+        self.assertEqual(built, updated)
+        installer = (PROJECT_ROOT / "packaging/windows/KeySwitch.iss").read_text(encoding="utf-8")
+        for architecture in built.values():
+            with self.subTest(architecture=architecture):
+                self.assertIn(f'Arch == "{architecture}"', installer)
+                self.assertIn(f"KeySwitch-Setup-{{#MyAppVersion}}-{{#Arch}}", installer)
+        self.assertIn('#define ArchitecturesIn64BitMode ""', installer)
+        self.assertIn('"x86" { 0x014C }', self.script)
+        self.assertIn('"arm64" { 0xAA64 }', self.script)
 
     def test_every_native_package_enforces_the_same_bounded_kslm_envelope(
         self,

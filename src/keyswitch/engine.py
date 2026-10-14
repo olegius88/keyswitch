@@ -8,6 +8,7 @@ import json
 import logging
 import queue
 import re
+import sysconfig
 import threading
 import time
 import unicodedata
@@ -3387,6 +3388,9 @@ class KeySwitchEngine:
         self._technical_event(
             event,
             keyswitch_version=__version__,
+            # The platform the build's Python was made for (win-amd64, win-arm64, win32, ...): one
+            # version ships a build per architecture, and a log has to say which one it came from.
+            build_platform=sysconfig.get_platform(),
             backend=self.backend_label,
             intent_model=self.intent_model_status.as_dict(),
             context_model_status=self.context_policy.status,

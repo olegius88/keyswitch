@@ -156,12 +156,34 @@ class VersionAndValidationTests(unittest.TestCase):
             "KeySwitch-Setup-2.3.4-x64.exe",
         )
         self.assertEqual(
+            UpdateTarget.WINDOWS_ARM64.asset_name(version),
+            "KeySwitch-Setup-2.3.4-arm64.exe",
+        )
+        self.assertEqual(
+            UpdateTarget.WINDOWS_X86.asset_name(version),
+            "KeySwitch-Setup-2.3.4-x86.exe",
+        )
+        self.assertEqual(
             UpdateTarget.UBUNTU_AMD64.asset_name(version),
             "keyswitch_2.3.4_amd64.deb",
         )
-        self.assertIs(
-            detect_update_target("Windows", "AMD64"), UpdateTarget.WINDOWS_X64
-        )
+        self.assertTrue(all(target.windows_installer for target in UpdateTarget if target.value.startswith("windows-")))
+        self.assertFalse(UpdateTarget.UBUNTU_AMD64.windows_installer)
+        # A Windows build updates to its own architecture, whatever the machine runs it as.
+        for build_platform, target in (
+            ("win-amd64", UpdateTarget.WINDOWS_X64),
+            ("win-arm64", UpdateTarget.WINDOWS_ARM64),
+            ("win32", UpdateTarget.WINDOWS_X86),
+        ):
+            with self.subTest(build_platform=build_platform):
+                for machine in ("AMD64", "ARM64", "x86"):
+                    self.assertIs(detect_update_target("Windows", machine, build_platform), target)
+        self.assertIsNone(detect_update_target("Windows", "ARM", "win-arm32"))
+        with (
+            patch("keyswitch.updates.platform.system", return_value="Windows"),
+            patch("keyswitch.updates.sysconfig.get_platform", return_value="win32"),
+        ):
+            self.assertIs(detect_update_target(), UpdateTarget.WINDOWS_X86)
         self.assertIs(
             detect_update_target("Linux", "x86_64"), UpdateTarget.UBUNTU_AMD64
         )
@@ -353,9 +375,10 @@ class GitHubReleaseClientTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             earlier = directory / "KeySwitch-Setup-0.1.0-x64.exe"
+            earlier_x86 = directory / "KeySwitch-Setup-0.1.0-x86.exe"
             locked = directory / "KeySwitch-Setup-0.2.0-x64.exe"
             unrelated = directory / "notes.txt"
-            for path in (earlier, locked, unrelated):
+            for path in (earlier, earlier_x86, locked, unrelated):
                 path.write_bytes(b"old")
             original_unlink = Path.unlink
 
@@ -369,6 +392,7 @@ class GitHubReleaseClientTests(unittest.TestCase):
                 installed = client.download(release, directory, lambda _done, _total: None)
             self.assertEqual(installed.read_bytes(), content)
             self.assertFalse(earlier.exists())
+            self.assertFalse(earlier_x86.exists())
             self.assertTrue(locked.exists())
             self.assertTrue(unrelated.exists())
 
@@ -576,6 +600,15 @@ class UpdateManagerTests(unittest.TestCase):
         self.assertEqual(manual.snapshot.phase, UpdatePhase.INSTALLING)
         self.assertEqual(self.client.downloads, UPDATE_EXPECTED_DOWNLOAD_COUNT)
 
+    def test_the_arm64_and_x86_builds_install_their_own_updates(self) -> None:
+        for target in (UpdateTarget.WINDOWS_ARM64, UpdateTarget.WINDOWS_X86):
+            with self.subTest(target=target):
+                self.client.release = checked_release(target, version="1.0.0")
+                manager = self.manager(target=target, installer=self.installed.append)
+                self.assertTrue(manager.check(automatic=True, install_automatically=True))
+                self.assertEqual(manager.snapshot.phase, UpdatePhase.INSTALLING)
+                self.assertIs(self.client.latest_targets[-1], target)
+
     def test_busy_runner_and_client_errors(self) -> None:
         queued: list[Callable[[], None]] = []
         manager = self.manager(runner=queued.append)
@@ -739,6 +772,16 @@ class WindowsInstallerLaunchTests(unittest.TestCase):
             bad.write_bytes(b"installer")
             with self.assertRaises(UpdateError):
                 launch_windows_installer(bad, spawn=Mock())
+
+            for other in ("KeySwitch-Setup-1.2.3-arm64.exe", "KeySwitch-Setup-1.2.3-x86.exe"):
+                (root / other).write_bytes(b"installer")
+                launched: list[list[str]] = []
+                launch_windows_installer(root / other, spawn=launched.append)
+                self.assertEqual(launched[0][0], str(root / other))
+            wrong = root / "KeySwitch-Setup-1.2.3-arm32.exe"
+            wrong.write_bytes(b"installer")
+            with self.assertRaises(UpdateError):
+                launch_windows_installer(wrong, spawn=Mock())
 
             installer = root / "KeySwitch-Setup-1.2.3-x64.exe"
             installer.write_bytes(b"installer")

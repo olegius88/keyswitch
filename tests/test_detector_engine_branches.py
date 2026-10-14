@@ -7,6 +7,7 @@ from keyswitch.backend import KeyDisposition
 import json
 import logging
 import queue
+import sysconfig
 import tempfile
 import threading
 import time
@@ -917,6 +918,7 @@ class EngineBranchTests(unittest.TestCase):
         )
         self.assertEqual(initial_payload["event"], "engine_initialized")
         self.assertEqual(initial_payload["keyswitch_version"], "0.55.0")
+        self.assertEqual(initial_payload["build_platform"], sysconfig.get_platform())
         self.assertEqual(initial_payload["settings"]["overrides"], {"diagnostics.technical_logging": True})
 
     def test_start_stop_idempotence_and_backend_failure(self) -> None:
