@@ -7,6 +7,7 @@ import math
 import re
 import unicodedata
 from typing import TYPE_CHECKING, Final
+from .constants.training import TERM_FRAGMENT_MIN_ENDING_BUCKET
 from .constants.models import (
     ABBREVIATION_FEATURE_PREFIX,
     ABBREVIATION_NON_INITIAL_LETTERS,
@@ -459,11 +460,16 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         # occurs, the boundary and the case, and no copy of the shared features: with one it learned that a known Latin
         # word stays, and kept `vs` sent alone for `мы` (experiment E6).
         result.update(_brief_evidence(item))
-    if term_question(item.original, item.field.before):
+    if term_question(item.original, item.field.before) and not (item.source_known and not _tail_like(item.original)):
         # The class the term head answers: a term typed in the Russian layout, which the frozen model left at p 0.92-0.98
         # the first time a message held it (`сымю` for `csv.`, `сш` for `ci`). The head reads evidence of its own alone:
         # with a copy of the shared features it learned that two letters and a known Latin reading stay, and kept `зк`
-        # for `pr` after `принимай все` (experiment E6); the frozen model reads the context.
+        # for `pr` after `принимай все` (experiment E6); the frozen model reads the context. A word the profile's lexicon
+        # knows is a Russian word however rare in the tables, and stays with the frozen model: a word of four letters
+        # opening a correct Russian sentence, known to Hunspell, went to its Latin reading, a term of 58 counts (sealed
+        # test v62, the reference profile). A tail of Russian words the lexicon knows (`ев`, `ась`) stays the head's: the
+        # head learns to keep tails from such frames, and without them it stopped learning after its first epoch, as it
+        # did reading whether the lexicon knows the token (corpora v62 and v63).
         result.update(_term_evidence(item))
     return result
 
@@ -836,6 +842,13 @@ def russian_ending_bucket(token: str) -> str:
     if len(word) not in TERM_HEAD_ENDING_LETTERS:
         return "na"
     return str(min(_russian_endings().get(word, 0).bit_length(), TERM_HEAD_ENDING_BUCKET_MAX))
+
+
+def _tail_like(token: str) -> bool:
+    """Whether a token ends as many Russian words as a tail the term head keeps does (TERM_FRAGMENT_MIN_ENDING_BUCKET)."""
+
+    ending = russian_ending_bucket(token)
+    return ending != "na" and int(ending) >= TERM_FRAGMENT_MIN_ENDING_BUCKET
 
 
 @functools.cache

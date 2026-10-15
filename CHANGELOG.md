@@ -10,7 +10,8 @@ All notable changes to KeySwitch are documented in this file.
   text. A new head of the context model answers this class (a token of Russian letters whose Latin reading is a word
   Russian technical text uses fifty times or more, while Russian text uses its Cyrillic reading fewer than five times)
   from how often each reading occurs, how many Russian words end with the token, the script of the text before it, the
-  detector's score and how the word after it was given. The end of a Russian word typed as a token of its own to finish
+  detector's score and how the word after it was given; a token the lexicon knows as a Russian word stays with the
+  model as before, however rare in the tables. The end of a Russian word typed as a token of its own to finish
   a word begun earlier stays: `ев` ends 169 words of the table and `ась` 889, `зк` and `сш` one. Alone at the start of
   a message, a term of up to five letters waits for the next word or for a pause of a second and a half, as the model
   left `гш` and `йк` before; a longer one converts at the space. Of such short terms the model of 0.56.0 converted some

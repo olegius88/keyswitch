@@ -66,6 +66,12 @@ class TermHeadTests(unittest.TestCase):
         self.assertIn(f"ending:{tail}", head(evidence("ев", "td", "у них ")))
         self.assertEqual(russian_ending_bucket("сымю"), "na")
         self.assertEqual(head(evidence("привет", "ghbdtn", "Он сказал ")), set())
+        # A word the profile's lexicon knows stays with the frozen model (`шву`, a form of `шов`, whose keys spell `ide`), a
+        # tail of Russian words it knows stays the head's, to keep (`ев`).
+        self.assertTrue(term_question("шву", ""))
+        self.assertTrue(head(evidence("шву", "ide", "")))
+        self.assertEqual(head(replace(evidence("шву", "ide", ""), source_known=True)), set())
+        self.assertTrue(head(replace(evidence("ев", "td", "у них "), source_known=True)))
 
     def test_the_trainer_and_the_gpu_path_route_the_class_to_the_head(self) -> None:
         prefixes = frozenset({TERM_FEATURE_PREFIX})
