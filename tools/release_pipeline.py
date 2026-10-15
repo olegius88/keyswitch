@@ -114,6 +114,9 @@ from keyswitch.constants.release import (
     PHASE_E2E_X11_EXPECTED_SECONDS,
     PHASE_E2E_X11_MEMORY_MIB,
     PHASE_ENVIRONMENT_EXPECTED_SECONDS,
+    PHASE_FIELD_REGRESSION_EXPECTED_SECONDS,
+    PHASE_FIELD_REGRESSION_MEMORY_MIB,
+    PHASE_FIELD_REGRESSION_TIMEOUT_SECONDS,
     PHASE_ENVIRONMENT_MEMORY_MIB,
     PHASE_LOG_MAX_BYTES,
     PHASE_LOG_POLL_SECONDS,
@@ -2001,6 +2004,34 @@ def phase_detector_gates(ctx: Context, log: PhaseLog, state: PhaseState) -> None
     )
 
 
+FIELD_GATE_COUNTS: Final = re.compile(
+    r"field regression gate: rows=(?P<rows>\d+), excluded=(?P<excluded>\d+), released_right=(?P<released_right>\d+), "
+    r"candidate_right=(?P<candidate_right>\d+), fixed=(?P<fixed>\d+), broken=(?P<broken>\d+)")
+
+
+def phase_field_regression(ctx: Context, log: PhaseLog, state: PhaseState) -> None:
+    """The owner's own typing (tools/field_regression_gate.py): the field batteries replayed with the tree of the last
+    release and with this one; a word the last release got right that this tree gets wrong fails the phase. The gate
+    prints counts alone: the words stay in its private record."""
+
+    status = ctx.run_command(
+        state.name,
+        log,
+        ["python3", str(PROJECT_ROOT / "tools" / "field_regression_gate.py")],
+        env=python_env(),
+        timeout=ctx.timeout(PHASE_FIELD_REGRESSION_TIMEOUT_SECONDS),
+        check=False,
+    )
+    match = FIELD_GATE_COUNTS.search(log.text())
+    if match is not None:
+        state.facts.update({name: int(value) for name, value in match.groupdict().items()})
+    if status != 0 or match is None:
+        raise PhaseFailure(
+            f"the owner's typing: {match.group('broken')} words the last release got right come out wrong"
+            if match is not None and int(match.group("broken")) else
+            f"the field regression gate could not run (exit {status}); read the phase log")
+
+
 def require_markers(log: PhaseLog, state: PhaseState, markers: Sequence[str]) -> None:
     state.facts["markers"] = list(markers)
     for marker in markers:
@@ -2393,6 +2424,15 @@ PHASES: Final[tuple[PhaseSpec, ...]] = (
         "display",
     ),
     PhaseSpec(
+        "field-regression",
+        "The owner's typing against the last release",
+        phase_field_regression,
+        ("environment",),
+        PHASE_FIELD_REGRESSION_TIMEOUT_SECONDS,
+        PHASE_FIELD_REGRESSION_EXPECTED_SECONDS,
+        PHASE_FIELD_REGRESSION_MEMORY_MIB,
+    ),
+    PhaseSpec(
         "release-metadata",
         "Version, changelog and model documentation",
         phase_release_metadata,
@@ -2425,6 +2465,7 @@ PROFILES: Final[Mapping[str, tuple[str, ...]]] = {
         "build-deb",
         "verify-deb",
         "e2e-native",
+        "field-regression",
         "release-metadata",
     ),
     "release": tuple(spec.name for spec in PHASES),
@@ -2447,6 +2488,7 @@ CHECKLIST: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     ("X11 and tray end-to-end", ("e2e-x11", "e2e-tray")),
     ("Native Debian package verifier", ("build-deb", "verify-deb")),
     ("Packaged executable end-to-end", ("e2e-native",)),
+    ("No word of the owner's typing the last release got right breaks", ("field-regression",)),
     ("Version, changelog and model documentation", ("release-metadata",)),
 )
 

@@ -100,6 +100,32 @@ JOINED_REPEAT_MIN_LETTERS: Final = 2
 JOINED_REPEAT_MAX_LETTERS: Final = 4
 JOINED_REPEAT_SPLIT_MODULUS: Final = 5
 JOINED_REPEAT_CAPITAL_CHOICES: Final = 2
+# Term frames (train_context_action_model.term_curriculum): one term in TERM_SPLIT_MODULUS goes to DEVELOPMENT by hash, as
+# the unknown-token terms do. A term of at most TERM_CAPITALS_MAX_LETTERS letters may also stand in capitals, as acronyms
+# are written (`СЗГ` is `CPU`). The pieces of Russian words framed as kept are a word's last letters, as many as the term
+# head reads endings of (TERM_HEAD_ENDING_LETTERS), which an edit inside a word leaves as a token of its own (`ась`,
+# `ев`), of a word with at least TERM_FRAGMENT_MIN_REST letters before them.
+TERM_SPLIT_MODULUS: Final = 5
+TERM_CAPITALS_MAX_LETTERS: Final = 4
+TERM_FRAGMENT_MIN_REST: Final = 2
+# Only a tail that ends many words is framed as kept: its ending bucket (context_action_features.russian_ending_bucket)
+# at least this. The tail of a rare word (`ыр` of `сыр`) ends as few words as a term's keys, and kept frames of such
+# tails taught the head to keep `зк` and `вум` (experiment E5). From an ending bucket of three up, the class's tokens and
+# the tails of words are the same tokens (`ац`, `мь`, `дые`): the owner completed `моло` with `дые` after a click and
+# undid its conversion to `lst`, which a head without those tails repeated (experiment E8).
+TERM_FRAGMENT_MIN_ENDING_BUCKET: Final = 3
+# Every term of the term curriculum, and every kept tail, is also asked again as the engine asks a converted word once
+# the word after it went back (engine._revert_with_next_word): after one of the TERM_REVISIT_FOLLOWERS most frequent words
+# of Russian prose of at most TERM_REVISIT_FOLLOWER_MAX_LETTERS letters (`и`, `в`, `на`).
+TERM_REVISIT_FOLLOWERS: Final = 30
+TERM_REVISIT_FOLLOWER_MAX_LETTERS: Final = 3
+# The heads fitted onto a frozen base keep the latest epoch whose development balance - the worst profile's net benefit
+# and the pooled one - is within this many conversions of the best epoch's (train_context_action_model.settled_epoch).
+EPOCH_NET_BENEFIT_TOLERANCE: Final = 2
+# Short-message frames (train_context_action_model.brief_curriculum): one token in BRIEF_SPLIT_MODULUS goes to DEVELOPMENT
+# by hash; each stands alone ended by each of these boundaries.
+BRIEF_SPLIT_MODULUS: Final = 5
+BRIEF_BOUNDARIES: Final = (("space", " "), ("enter", "\n"), ("pause", ""))
 # Letters of a Latin abbreviation cited in capitals inside Russian prose whose Cyrillic reading is a
 # rare word (`WBC` is `ЦИС`, `IBF` is `ШИА`): three to five, as abbreviations are written. Two
 # letters stay with the deferral rules and the owner's own Cyrillic abbreviations (`ГА`).

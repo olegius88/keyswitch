@@ -1482,6 +1482,18 @@ class EngineBehaviourTests(unittest.TestCase):
         )
         self.assertEqual(evaluation["learning"], {"enabled": False})
 
+    def test_the_word_after_a_password_marker_reaches_the_log_as_stars(self) -> None:
+        # The owner's decision of 15.10.2026: the word typed right after «пароль» goes into the log as stars, in its
+        # own record and in every later one that names it.
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            for word in ("пароль", "тайна", "дальше"):
+                self.type_word(word, group=1)
+                self.press_space(1)
+        records = self.technical_events(logs.output)
+        self.assertFalse([record for record in records if "тайна" in json.dumps(record, ensure_ascii=False)])
+        originals = [record["original"] for record in records if record["event"] == "word_evaluation"]
+        self.assertEqual(originals, ["пароль", "*****", "дальше"])
+
     def test_word_evaluation_is_skipped_entirely_without_technical_logging(self) -> None:
         self.settings.set("diagnostics.technical_logging", False)
         with patch.object(self.engine, "_decide_word", wraps=self.engine._decide_word) as decide:

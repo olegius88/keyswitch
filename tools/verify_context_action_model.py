@@ -55,7 +55,15 @@ COUNTS = frozenset({"rows", "initially_correct", "initially_wrong", "preserved_c
 CALIBRATION = frozenset({"rows", "convert_rows", "converted_correctly", "false_conversions", "conversion_recall"})
 # The calibration of the frames outside the lone-word head's class (train_context_action_model.outside_lone_word).
 OUTSIDE_LONE_WORD = "outside_lone_word"
-SCOPE = "Sealed private-corpus test aggregates and current artifact/provenance verification; fresh-fit reproducibility, reviewed human-intent labels and native OS execution are not asserted."
+SCOPE = ("Sealed private-corpus test aggregates, the sealed developer-chat test's counts and current artifact/provenance "
+         "verification; fresh-fit reproducibility, reviewed human-intent labels and native OS execution are not asserted.")
+# The sealed developer-chat test (tools/evaluate_devchat_test.py), as the receipt publishes it: counts, never a message.
+DEVCHAT = "devchat_test"
+DEVCHAT_FIELDS = frozenset({"protocol", "bench", "messages_sha256", "seed", "messages", "access", "result_sha256", "pairs",
+                            "results", "discordance", "floors"})
+DEVCHAT_PAIR_FIELDS = frozenset({"model_version", "sha256"})
+DEVCHAT_COUNT_FIELDS = frozenset({"n", "ok", "errors"})
+DEVCHAT_DISCORDANCE_FIELDS = frozenset({"gains", "losses"})
 AUDITED_SEQUENCE_PROTOCOL_SHA256 = "59b9e6e9d4ca222fb732d9c59d9aac68b6081867fdbfe119f3aa7f7547636fab"
 PROTOCOL: dict[str, object] = {
     "version": CONTEXT_ACTION_SEQUENCE_PROTOCOL_VERSION,
@@ -82,7 +90,7 @@ FIELDS = frozenset({"schema_version", "feature_version", "model_version", "conve
                     "protocol", "scope", "quality_gates_passed",
                     "prefix_model_version", "prefix_feature_version", "prefix_conversion_threshold",
                     "prefix_artifact_sha256", "prefix_weights_sha256", "prefix_candidate_seal_sha256",
-                    "prefix_baseline_path", "prefix_baseline_sha256"})
+                    "prefix_baseline_path", "prefix_baseline_sha256", DEVCHAT})
 
 
 def canonical(value: object) -> bytes:
@@ -363,7 +371,63 @@ def validate_receipt(receipt: object, artifact: Path = ARTIFACT_PATH, root: Path
         raise ValueError("baseline, recipe or gate policy mismatch")
     validate_calibration(value["calibration"])
     validate_test(value["test"])
+    validate_devchat(value[DEVCHAT], value)
     return value
+
+
+def validate_devchat(value: object, receipt: Mapping[str, object]) -> None:
+    """The developer-chat test of the installed pair: its counts consistent, every floor recomputed from them and held,
+    the candidate the installed artifact and the baseline the receipt's."""
+
+    import devchat_floors
+
+    block = mapping(value, "developer-chat test", DEVCHAT_FIELDS)
+    for name in ("messages_sha256", "result_sha256", "access"):
+        sha(block[name])
+    pairs = mapping(block["pairs"], "developer-chat pairs", frozenset(devchat_floors.PAIRS))
+    entries = {name: mapping(pairs[name], "developer-chat pair", DEVCHAT_PAIR_FIELDS) for name in devchat_floors.PAIRS}
+    if (entries[devchat_floors.CANDIDATE]["sha256"] != receipt["artifact_sha256"]
+            or entries[devchat_floors.CANDIDATE]["model_version"] != receipt["model_version"]
+            or entries[devchat_floors.BASELINE]["sha256"] != receipt["baseline_sha256"]):
+        raise ValueError("the developer-chat test compared other pairs")
+    tables: dict[str, dict[str, dict[str, int]]] = {}
+    for name, raw in mapping(block["results"], "developer-chat results", frozenset(devchat_floors.PAIRS)).items():
+        table = mapping(raw, "developer-chat table")
+        tables[name] = {mode: {field: integer(count, field) for field, count in
+                               mapping(row, "developer-chat counts", DEVCHAT_COUNT_FIELDS).items()}
+                        for mode, row in table.items()}
+        if not set(devchat_floors.MODES) <= tables[name].keys() or any(row["ok"] + row["errors"] > row["n"]
+                                                                      for row in tables[name].values()):
+            raise ValueError("inconsistent developer-chat counts")
+    paired = {mode: {field: integer(count, field) for field, count in
+                     mapping(row, "developer-chat discordance", DEVCHAT_DISCORDANCE_FIELDS).items()}
+              for mode, row in mapping(block["discordance"], "developer-chat discordance",
+                                       frozenset(devchat_floors.MODES)).items()}
+    held = devchat_floors.floors(tables, paired)
+    claimed = mapping(block["floors"], "developer-chat floors", frozenset(devchat_floors.FLOORS))
+    if not all(held.values()) or any(claimed[name] is not expected for name, expected in held.items()):
+        raise ValueError("developer-chat floors failed or contradicted by counts")
+
+
+def devchat_block(artifact_sha256: str, ledger: Path) -> dict[str, object]:
+    """The receipt's block of the candidate's developer-chat test, from the immutable result in its ledger."""
+
+    for access in sorted(ledger.glob("*.access.json")):
+        identity = read_object(access)
+        pairs = mapping(identity.get("pairs"), "developer-chat pairs")
+        if mapping(pairs.get("candidate"), "developer-chat candidate").get("sha256") != artifact_sha256:
+            continue
+        path = access.with_name(access.name.replace(".access.json", ".result.json"))
+        result = read_object(path)
+        if "error" in result:
+            raise ValueError("the developer-chat test of this candidate failed to run")
+        return {"protocol": identity["protocol"], "bench": identity["bench"], "messages_sha256": identity["messages_sha256"],
+                "seed": identity["seed"], "messages": result["messages"], "access": result["access"],
+                "result_sha256": checksum(path),
+                "pairs": {name: {"model_version": mapping(entry, "pair")["model_version"], "sha256": mapping(entry, "pair")["sha256"]}
+                          for name, entry in pairs.items()},
+                "results": result["results"], "discordance": result["discordance"], "floors": result["floors"]}
+    raise ValueError("no developer-chat test of this candidate is recorded")
 
 
 def verify(root: Path = ROOT, receipt_path: Path = RECEIPT, artifact: Path = ARTIFACT_PATH,
@@ -510,7 +574,7 @@ def validate_full_report(report: Mapping[str, object], identity: Mapping[str, ob
 
 
 def export_receipt(artifact: Path, seal_path: Path, report_path: Path, corpus: Path, output: Path, *,
-                   prefix_artifact: Path, prefix_seal_path: Path) -> dict[str, object]:
+                   prefix_artifact: Path, prefix_seal_path: Path, devchat_ledger: Path | None = None) -> dict[str, object]:
     # The public packaging gate above has no evaluator/EditorBackend imports.
     import evaluate_context_action_sequences as evaluator
 
@@ -571,6 +635,7 @@ def export_receipt(artifact: Path, seal_path: Path, report_path: Path, corpus: P
         "selected_rows": selection["selected_rows"], "trimmed_rows": selection["trimmed_rows"],
         "unsupported_rows": len(unsupported), "profiles": public_profiles},
         "gate_policy": CONTEXT_ACTION_GATE_POLICY, "protocol": PROTOCOL, "scope": SCOPE, "quality_gates_passed": True,
+        DEVCHAT: devchat_block(checksum(artifact), devchat_ledger or evaluator.LEDGER_ROOT.parent / "devchat-test-ledger"),
     }
     validate_receipt(receipt, artifact, ROOT, prefix_artifact)
     # The receipt is read by people and hashed by nobody: it is written indented (freeze_context_action_corpus.readable).

@@ -13,11 +13,17 @@ and refuses to touch the test until they hold:
 3. strict typing (tools/typecheck.sh) and the named values (tools/check_named_values.py) pass;
 4. every test module the seal pins passes, with the installed pair and then with the candidate pair
    in its place (a scratch worktree of the committed tree): the install must not break them either,
-   and once the test is read a broken test module can only be fixed with a new pair.
+   and once the test is read a broken test module can only be fixed with a new pair;
+5. with the candidate pair in that tree, no word of the owner's own typing that the last release got right
+   comes out wrong (tools/field_regression_gate.py, the owner's decision of 15.10.2026): a pair that breaks
+   one would be refused by the release anyway, and its sealed test would be spent for nothing;
+6. the candidate's development result on the developer-chat messages is recorded and holds both floors
+   (tools/evaluate_devchat_test.py --split dev): the developer-chat test is read only for such a candidate.
 
-Then it reads the sealed test (once: an existing report is reused), installs the pair, exports and
-verifies the release receipt, refreshes the boundary and prefix engine replays and runs the public
-context and prefix gates - the order docs/model-training-cloud.md describes.
+Then it reads the sealed test (once: an existing report is reused) and, once that passed, the sealed
+developer-chat test (once, before the install: the released pair it is compared with is the installed one),
+installs the pair, exports and verifies the release receipt, refreshes the boundary and prefix engine replays
+and runs the public context and prefix gates - the order docs/model-training-cloud.md describes.
 
     PYTHONPATH=src:tools python3 tools/promote_context_action_pair.py \\
         --candidate <dir> --prefix-candidate <dir> --corpus <fit> --report <dir>/sequences-test.json
@@ -51,6 +57,9 @@ INSTALLED: Final = {
 }
 RECEIPT: Final = "model/context_v3/release-receipt.json"
 TEST_MODULE_PREFIX: Final = "tests/test_"
+# The developer-chat messages (tools/build_devchat_messages.py) are private; KEYSWITCH_DEVCHAT_DIRECTORY names another place.
+DEVCHAT_DIRECTORY: Final = ROOT / ".t/devchat/messages"
+DEVCHAT_DIRECTORY_VARIABLE: Final = "KEYSWITCH_DEVCHAT_DIRECTORY"
 
 # Relative to the directory a command runs in: the sources of that tree, never those of another.
 PYTHONPATH: Final = "src:tools"
@@ -133,12 +142,29 @@ def preflight(candidate: Path, prefix_candidate: Path, corpus: Path, runner: Run
         if runner(command) != 0:
             failures.append(name)
     # The same modules with the candidate pair installed, once everything else holds: the files to
-    # install exist and the tree is the commit.
+    # install exist and the tree is the commit. Then the owner's typing in that tree against the last release.
     if tests and not failures:
         with tree(candidate, prefix_candidate) as root:
             if runner(tests, root) != 0:
                 failures.append("tests the seal pins, with the candidate pair installed")
+            if runner([python, "tools/field_regression_gate.py", "--candidate-root", str(root)]) != 0:
+                failures.append("the owner's typing: a word the last release got right comes out wrong, or the field "
+                                "regression gate could not run (tools/field_regression_gate.py)")
+    if not development_gain(candidate / CONTEXT_ARTIFACT):
+        failures.append("no developer-chat development result of the candidate holds both floors "
+                        "(tools/evaluate_devchat_test.py --split dev)")
     return failures
+
+
+def development_gain(artifact: Path) -> bool:
+    """Whether the candidate's developer-chat development result is recorded and holds every floor."""
+    import evaluate_devchat_test as devchat
+    try:
+        record = json.loads((devchat.ledger_root() / f"{devchat.checksum(artifact)}.dev.json").read_bytes())
+    except (OSError, ValueError):
+        return False
+    floors = record.get("floors")
+    return isinstance(floors, dict) and bool(floors) and all(value is True for value in floors.values())
 
 
 def promote(candidate: Path, prefix_candidate: Path, corpus: Path, report: Path, runner: Runner = run) -> int:
@@ -153,6 +179,14 @@ def promote(candidate: Path, prefix_candidate: Path, corpus: Path, report: Path,
         if status != 0:
             print("the sealed test did not pass; nothing is installed", flush=True)
             return status
+    # The developer-chat test, while the released pair is still the installed one it is compared with.
+    devchat = Path(os.environ.get(DEVCHAT_DIRECTORY_VARIABLE, DEVCHAT_DIRECTORY))
+    status = runner([python, "tools/evaluate_devchat_test.py", "--split", "test", "--directory", str(devchat),
+                     "--candidate", str(candidate / CONTEXT_ARTIFACT), "--released", INSTALLED[CONTEXT_ARTIFACT],
+                     "--output", str(report.with_name("devchat-test.json"))])
+    if status != 0:
+        print("the sealed developer-chat test did not pass; nothing is installed", flush=True)
+        return status
     for source, target in installed_files(candidate, prefix_candidate):
         shutil.copyfile(source, ROOT / target)
     # The receipt is an immutable record: the one of the replaced pair goes first.

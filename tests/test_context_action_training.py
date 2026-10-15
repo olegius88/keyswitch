@@ -1531,6 +1531,24 @@ class PlannedEvidenceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             evidence(replace(planned, field=FieldContext("Telegram", "public-training", "", "...")), detector, None)
 
+    def test_a_revisit_frame_keeps_the_verdict_of_its_own_boundary_with_no_conversion(self) -> None:
+        # Asked again once its neighbour went back (engine._revert_with_next_word), a converted word keeps the baseline of
+        # its own boundary, read from the text before it, with no conversion: not the planned baseline of a waiting word.
+        detector = LanguageDetector({
+            0: LanguageModel("en_US", {"hello": FIXTURE_WORD_FREQUENCY, "kb": FIXTURE_WORD_FREQUENCY}, "fixture", enable_spellcheck=False),
+            1: LanguageModel("ru_RU", {"этого": FIXTURE_WORD_FREQUENCY, "привет": FIXTURE_WORD_FREQUENCY, "ли": PLANNED_EVIDENCE_DOMINANT_WORD_FREQUENCY}, "fixture", enable_spellcheck=False),
+        })
+        at_boundary = ActionRow("revisit:seed", "kb", 0, FieldContext("Telegram", "public-training", "привет ", ""), "space", "",
+                                "convert", "term", " ")
+        self.assertTrue(evidence(at_boundary, detector, None).baseline_convert)
+        revisit = replace(at_boundary, identifier="revisit:frame", field=FieldContext("Telegram", "public-training", "привет ", "и"),
+                          after_origin="planned_next_conversion", revisit=True)
+        item = evidence(revisit, detector, None)
+        self.assertFalse(item.baseline_convert)
+        self.assertEqual((item.after_origin, item.field.after), ("planned_next_conversion", "и"))
+        # The verdict is its own boundary's: the planned question reads the next word alone and refuses a sign there.
+        evidence(replace(revisit, field=FieldContext("Telegram", "public-training", "привет ", "...")), detector, None)
+
     def test_the_baseline_reads_the_keys_after_a_lone_letter_in_the_other_layout_as_the_engine_does(self) -> None:
         # The message-start rule (word_decision.opening_letter_decision) reads a lone letter as the Russian
         # word only when the Russian layout prints a space or a clause sign after it: `J.` is `Ою` there,

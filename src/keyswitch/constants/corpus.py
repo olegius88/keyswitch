@@ -210,3 +210,25 @@ TATOEBA_TEXT_COLUMN: Final = 2
 # Column of the author's user name in a Tatoeba `*_sentences_detailed.tsv` export.
 TATOEBA_AUTHOR_COLUMN: Final = 3
 MIXED_PREFIX_KINDS: Final = 2
+# The developer-chat test (tools/build_devchat_messages.py, tools/evaluate_devchat_test.py): ru.stackoverflow comments of
+# 2024-2026 cut into messages, split by question in this namespace (by the first DEVCHAT_SPLIT_HEX_DIGITS hex digits of
+# its hash), after the pinned 2023 dump whose exact messages are dropped. A message holding one of DEVCHAT_CODE_SIGNS, or
+# DEVCHAT_SIGN_RUN ASCII signs in a row that are not DEVCHAT_PROSE_SIGNS alone, is code and dropped too.
+DEVCHAT_NAMESPACE: Final = "keyswitch:devchat-2026-10-15:question"
+DEVCHAT_SPLIT_HEX_DIGITS: Final = 8
+DEVCHAT_DUMP_SHA256: Final = "e3f6eda2b3df7de1d3cc4a45ce2e69bb1e439b7736cd8d81e911129bd512dab9"
+DEVCHAT_CODE_SIGNS: Final = "\\{}|^$"
+DEVCHAT_PROSE_SIGNS: Final = ".,!?():-\"'"
+DEVCHAT_SIGN_RUN: Final = 3
+# A read draws in the order of this seed; a read of the test takes this many messages with Latin words (and
+# MIXED_EVALUATE_RUSSIAN_SHARE as many of Russian words alone); the development result reads them all. The content of
+# each split's messages is pinned.
+DEVCHAT_SEED: Final = "devchat-v1"
+DEVCHAT_TEST_COUNT: Final = 900
+DEVCHAT_DEV_CONTENT_SHA256: Final = "71f71b8335870991307afc8ad21c168e58b8e9c8293b2710088aff16a83ddb94"
+DEVCHAT_TEST_CONTENT_SHA256: Final = "14d77f874a11481489bec82fc39da6cbb11e1acc4fc9b5076f9674e37080adc0"
+# The floors (tools/devchat_floors.py, the owner's decisions of 15.10.2026): F1 asks the candidate to net at least this
+# much more than the baseline pair; F3 fails a mode where the candidate's losses against the released pair are this
+# unlikely by chance among the messages the two disagree on.
+DEVCHAT_MIN_NET_MARGIN: Final = 1
+DEVCHAT_SIGNIFICANCE: Final = 0.05

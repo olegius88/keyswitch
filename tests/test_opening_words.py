@@ -97,6 +97,24 @@ class ConvertedWordRevisitTests(ContextEngineTests):
         self.type("q сщву ", group=1)
         self.assertNotIn(("ns", "", "code"), model.questions)
 
+    def test_a_russian_letter_after_a_converted_term_asks_nothing(self) -> None:
+        # A Russian word of one letter after a term of the term head's class is what a Russian phrase holds around a
+        # term (`pr и`): asked again with `и` after it, the model took `pr` back with it (`принимай зк и`, the owner's
+        # typing). A word of no such class is still asked about: `кз` (`rp` is no term) went back with `в`.
+        model = self.script(lambda item: "convert" if item.original in {"зк", "кз", "b", "d"} and not item.field.after
+                            else "keep")
+        self.reset_editor(1)
+        self.type("зк ")
+        self.assertEqual((self.backend.text, self.backend.group), ("pr ", 0))
+        self.type("b ", group=0)
+        self.assertEqual(self.backend.text, "pr и ")
+        self.assertFalse([after for original, _before, after in model.questions if original == "зк" and after])
+        self.reset_editor(1)
+        self.type("кз ")
+        self.type("d ", group=0)
+        self.assertEqual(self.backend.text, "кз в ")
+        self.assertIn(("кз", "", "в"), model.questions)
+
     def test_a_next_word_in_the_same_language_asks_nothing(self) -> None:
         model = self.script(english_after)
         self.reset_editor(0)

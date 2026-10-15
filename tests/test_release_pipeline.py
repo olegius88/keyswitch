@@ -42,6 +42,7 @@ from fixture_values.release import (
     PIPELINE_TYPECHECK_PEAK_RSS_MIB,
 )
 from keyswitch.constants.file_formats import SHA256_HEX_CHARACTERS
+from keyswitch.constants.release import FIELD_GATE_ERROR_EXIT_CODE
 from keyswitch.constants.units import SECONDS_PER_HOUR
 
 
@@ -559,6 +560,45 @@ class CommandRunnerTests(unittest.TestCase):
         slow = [sys.executable, "-c", "import time\ntime.sleep(60)"]
         with self.assertRaisesRegex(pipeline.PhaseFailure, "timed out after 1 seconds"):
             self.context.run_command("slow", self.log, slow, timeout=1)
+
+
+class FieldRegressionPhaseTests(unittest.TestCase):
+    """The phase runs the field regression gate and reads its counts; the words stay in the gate's private record."""
+
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        self.context = pipeline.Context(root / "run", _options(), ())
+        self.log = pipeline.PhaseLog(root / "phase.log")
+        self.addCleanup(self.log.close)
+        self.state = pipeline.PhaseState(name="field-regression", title="The owner's typing against the last release")
+
+    def gate(self, printed: str, status: int) -> None:
+        def run(phase: str, log: pipeline.PhaseLog, argv: list[str], **options: object) -> int:
+            self.assertEqual(argv[1:], [str(pipeline.PROJECT_ROOT / "tools" / "field_regression_gate.py")])
+            self.assertIs(options["check"], False)
+            log.write(printed)
+            return status
+        with patch.object(self.context, "run_command", side_effect=run):
+            pipeline.phase_field_regression(self.context, self.log, self.state)
+
+    def test_a_gate_with_no_broken_word_passes_with_its_counts(self) -> None:
+        self.gate("field regression gate: rows=12, excluded=1, released_right=10, candidate_right=11, fixed=1, broken=0, "
+                  "verdicts_used=0 (against v0.0.0)", 0)
+        self.assertEqual(self.state.facts["broken"], 0)
+        self.assertEqual(self.state.facts["fixed"], 1)
+
+    def test_a_broken_word_fails_the_phase_with_the_count_alone(self) -> None:
+        with self.assertRaisesRegex(pipeline.PhaseFailure, "^the owner's typing: 2 words the last release got right"):
+            self.gate("field regression gate: rows=12, excluded=0, released_right=11, candidate_right=9, fixed=0, broken=2, "
+                      "verdicts_used=0 (against v0.0.0)", 1)
+        self.assertEqual(self.state.facts["broken"], len("ab"))
+
+    def test_a_gate_that_could_not_run_fails_the_phase(self) -> None:
+        with self.assertRaisesRegex(pipeline.PhaseFailure, "could not run"):
+            self.gate("field regression gate: could not run: GateError: no field manifest", FIELD_GATE_ERROR_EXIT_CODE)
+        self.assertEqual(self.state.facts, {})
 
 
 if __name__ == "__main__":

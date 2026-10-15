@@ -17,6 +17,7 @@ TOOLS = str(Path(__file__).resolve().parents[1] / "tools")
 if TOOLS not in sys.path:
     sys.path.insert(0, TOOLS)
 
+import devchat_floors
 import evaluate_context_action_sequences as evaluator
 import verify_context_action_model as verifier
 from keyswitch.context_model import ContextModel, FEATURE_VERSION as BASELINE_FEATURE_VERSION
@@ -124,6 +125,8 @@ class ContextActionReceiptTests(unittest.TestCase):
         runtime_patcher = patch.object(evaluator, "runtime_provenance", return_value=self.hashes)
         runtime_patcher.start()
         self.addCleanup(runtime_patcher.stop)
+        self.devchat = self.ledger.parent / "devchat-test-ledger"
+        self.write_devchat()
         profile = {"rows": SEAL_FIXTURE_PROFILE_ROWS, "convert_rows": SEAL_FIXTURE_PROFILE_CONVERT_ROWS,
                    "converted_correctly": SEAL_FIXTURE_PROFILE_CONVERTED_CORRECTLY, "false_conversions": 0,
                    "conversion_recall": SEAL_FIXTURE_CONVERSION_RECALL,
@@ -211,6 +214,30 @@ class ContextActionReceiptTests(unittest.TestCase):
             + fingerprint[:VERSION_HASH_CHARACTERS],
             "conversion_threshold": AUTHORED_ARTIFACT_CONVERSION_THRESHOLD}))
 
+    def write_devchat(self, *, candidate_ok: int = RECEIPT_IDENTIFIER_COUNT, candidate: str | None = None) -> None:
+        """The sealed developer-chat test of the fixture's artifact, as tools/evaluate_devchat_test.py records it."""
+        self.devchat.mkdir(exist_ok=True)
+        for old in self.devchat.iterdir():
+            old.unlink()
+        version = str(json.loads(self.artifact.read_bytes())["version"])
+        pairs = {"candidate": {"path": str(self.artifact), "sha256": candidate or verifier.checksum(self.artifact), "model_version": version},
+                 "released": {"path": "released.json", "sha256": hashlib.sha256(b"released").hexdigest(), "model_version": "context-v3-released"},
+                 "baseline": {"path": str(self.root / verifier.BASELINE), "sha256": verifier.checksum(self.root / verifier.BASELINE),
+                              "model_version": "context-v1-baseline"}}
+        def table(ok: int) -> dict[str, dict[str, int]]:
+            return {mode: {"n": RECEIPT_IDENTIFIER_COUNT, "ok": ok, "errors": 0} for mode in devchat_floors.MODES}
+        tables = {"candidate": table(candidate_ok), "released": table(RECEIPT_IDENTIFIER_COUNT),
+                  "baseline": table(RECEIPT_IDENTIFIER_COUNT - 1)}
+        discordance = {mode: {"gains": 0, "losses": RECEIPT_IDENTIFIER_COUNT - candidate_ok} for mode in devchat_floors.MODES}
+        key = hashlib.sha256(b"devchat-access").hexdigest()
+        identity = {"protocol": "devchat-messages-v1", "split": "test", "messages_sha256": hashlib.sha256(b"messages").hexdigest(),
+                    "seed": "devchat-v1", "russian_share": 0.0, "pairs": pairs, "bench": "fixture bench",
+                    "test_membership": {"messages": [self.secret], "questions": [self.secret]}}
+        (self.devchat / f"{key}.access.json").write_text(json.dumps(identity), encoding="utf-8")
+        result = {"split": "test", "access": key, "messages": RECEIPT_IDENTIFIER_COUNT, "pairs": pairs, "bench": "fixture bench",
+                  "results": tables, "discordance": discordance, "floors": devchat_floors.floors(tables, discordance)}
+        (self.devchat / f"{key}.result.json").write_text(json.dumps(result), encoding="utf-8")
+
     def save_report(self) -> None:
         raw = verifier.canonical(self.report)
         self.report_path.write_bytes(raw)
@@ -242,6 +269,45 @@ class ContextActionReceiptTests(unittest.TestCase):
         self.assertEqual(set(cast(dict[str, object], profiles["portable"]["early_off"])), {"counts", "gates"})
         self.assertEqual(cast(dict[str, object], receipt["protocol"])["source_protocol_sha256"],
                          hashlib.sha256(verifier.canonical(evaluator.PROTOCOL)).hexdigest())
+
+    def test_the_developer_chat_test_is_published_as_counts_and_its_floors_recomputed(self) -> None:
+        receipt = self.exported()
+        block = cast(dict[str, object], receipt[verifier.DEVCHAT])
+        self.assertEqual(set(block), verifier.DEVCHAT_FIELDS)
+        self.assertTrue(all(cast(dict[str, bool], block["floors"]).values()))
+        self.assertNotIn(self.secret, self.receipt_path.read_text())
+        # A floor claimed against the counts, counts that break a floor, or another candidate fail closed.
+        claimed = deepcopy(receipt)
+        cast(dict[str, dict[str, bool]], claimed[verifier.DEVCHAT])["floors"]["f1_better_than_baseline"] = False
+        with self.assertRaisesRegex(ValueError, "developer-chat floors"):
+            self.verify(claimed)
+        worse = deepcopy(receipt)
+        tables = cast(dict[str, dict[str, dict[str, dict[str, int]]]], worse[verifier.DEVCHAT])["results"]
+        tables["candidate"]["correct"]["ok"] -= 1
+        with self.assertRaisesRegex(ValueError, "developer-chat floors"):
+            self.verify(worse)
+        inconsistent = deepcopy(receipt)
+        tables = cast(dict[str, dict[str, dict[str, dict[str, int]]]], inconsistent[verifier.DEVCHAT])["results"]
+        tables["candidate"]["correct"]["errors"] = RECEIPT_IDENTIFIER_COUNT
+        with self.assertRaisesRegex(ValueError, "inconsistent developer-chat counts"):
+            self.verify(inconsistent)
+        other = deepcopy(receipt)
+        cast(dict[str, dict[str, dict[str, str]]], other[verifier.DEVCHAT])["pairs"]["candidate"]["sha256"] = "0" * SHA256_HEX_CHARACTERS
+        with self.assertRaisesRegex(ValueError, "other pairs"):
+            self.verify(other)
+        self.write_devchat(candidate="0" * SHA256_HEX_CHARACTERS)
+        self.receipt_path.unlink()
+        with self.assertRaisesRegex(ValueError, "no developer-chat test"):
+            self.exported()
+
+    def test_a_failed_developer_chat_test_cannot_be_exported(self) -> None:
+        self.write_devchat(candidate_ok=0)
+        with self.assertRaisesRegex(ValueError, "developer-chat floors"):
+            self.exported()
+        result = next(self.devchat.glob("*.result.json"))
+        result.write_text(json.dumps({"error": "KeyError"}), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "failed to run"):
+            self.exported()
 
     def test_every_top_level_field_and_every_gate_is_required(self) -> None:
         original = self.exported()

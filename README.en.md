@@ -382,6 +382,14 @@ Because it may
 contain typed words and application names, technical mode is disabled by
 default. Engine diagnostic events replace excluded-application text with
 `<redacted>`; this is not a general personal-data scrubber for all error messages.
+Words that look like a password go into the technical log as stars: the word
+typed right after «пароль», «пароля», «паролю», «паролем», «пароле», «password»
+or «passwd» (typed in either layout) and every token of eight characters or more
+with both letters and digits in it, in the word itself, its readings and
+replacements and the words around it; a word typed after such a marker stays
+masked in later records that name it again. A password shorter than eight
+characters, or of letters alone, typed without such a word before it, is logged
+as typed.
 The ordinary log uses 1 MiB per file and two backups; technical mode uses
 5 MiB and five backups (`keyswitch.log.1` … `.5`), up to six files in total.
 Enabling technical mode rotates a nonempty current file. Disabling it does
@@ -796,9 +804,15 @@ run proceeds, `summary.json` and `SUMMARY.md` appear at the end next to the
 phase logs, strict reports and the DEB. `quick` checks the environment, KSLM
 inputs, typing, coverage, detector and release metadata; `app` adds strict
 KSLM, X11/tray and native DEB tests; `release` adds KSLM/corpus replay.
-No profile directly runs contextual-model retraining, contextual engine replay
-or native AT-SPI E2E; CI runs these separately. The local pipeline is therefore
-not equivalent to all CI checks. `--replay-dir`
+`app` and `release` also check the owner's typing (`field-regression`, the
+[gate](tools/field_regression_gate.py)): the field batteries rebuilt from the
+owner's technical logs are replayed with the tree of the last release and with
+the tree under test, and a word the released version got right that the new one
+gets wrong stops the release. The batteries are private and stay out of git;
+without them the phase fails. The gate prints counts alone.
+No profile directly runs contextual-model retraining, the contextual models'
+sequence replay or native AT-SPI E2E; CI runs these separately. The local
+pipeline is therefore not equivalent to all CI checks. `--replay-dir`
 adopts replays that are still running or already finished, and
 `python3 tools/release_pipeline.py phases` prints the phases, memory budgets
 and dependencies.

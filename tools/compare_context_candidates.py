@@ -41,12 +41,14 @@ from keyswitch.constants.models import (
     ACTION_FEATURE_NGRAM_ORDERS,
     ACTION_FEATURE_WORD_MAX_CHARACTERS,
     ALONE_FEATURE_PREFIX,
+    BRIEF_FEATURE_PREFIX,
     CAPITALS_FEATURE_PREFIX,
     JOINED_FEATURE_PREFIX,
     KEPT_FEATURE_PREFIX,
     LATIN_ABBREVIATION_FEATURE_PREFIX,
     LETTER_FEATURE_PREFIX,
     START_FEATURE_PREFIX,
+    TERM_FEATURE_PREFIX,
     UNKNOWN_FEATURE_PREFIX,
 )
 from keyswitch.constants.model_protocol import CALIBRATION, DEVELOPMENT
@@ -59,7 +61,8 @@ HEAD_CLASSES: Final = (("abbreviation", ABBREVIATION_FEATURE_PREFIX), ("latin_ab
                        ("letter", LETTER_FEATURE_PREFIX),
                        ("alone", ALONE_FEATURE_PREFIX), ("start", START_FEATURE_PREFIX),
                        ("capitals", CAPITALS_FEATURE_PREFIX), ("kept", KEPT_FEATURE_PREFIX),
-                       ("unknown", UNKNOWN_FEATURE_PREFIX), ("joined", JOINED_FEATURE_PREFIX))
+                       ("unknown", UNKNOWN_FEATURE_PREFIX), ("joined", JOINED_FEATURE_PREFIX), ("term", TERM_FEATURE_PREFIX),
+                       ("brief", BRIEF_FEATURE_PREFIX))
 BASE_CLASS: Final = "base"
 ALL_FRAMES: Final = "all"
 CONVERT: Final = ACTIONS.index("convert")

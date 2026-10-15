@@ -65,8 +65,9 @@ class PromotionTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.directory.cleanup()
 
-    def checks(self, runner: Recorder, changed: list[str] | None = None) -> list[str]:
-        with patch("evaluate_context_action_sequences.validate_candidate_seal", return_value={}):
+    def checks(self, runner: Recorder, changed: list[str] | None = None, gain: bool = True) -> list[str]:
+        with (patch("evaluate_context_action_sequences.validate_candidate_seal", return_value={}),
+              patch.object(promotion, "development_gain", return_value=gain)):
             return promotion.preflight(self.candidate, self.prefix, self.corpus, runner, lambda: changed or [], scratch_tree)
 
     def test_the_tests_the_seal_pins_are_run_by_module(self) -> None:
@@ -74,7 +75,7 @@ class PromotionTests(unittest.TestCase):
         self.assertEqual(promotion.pinned_test_modules(seal), ["test_context_policy", "test_core"])
         runner = Recorder()
         self.assertEqual(self.checks(runner), [])
-        command = runner.commands[-1]
+        command = next(command for command in runner.commands if "tools/run_test_modules.py" in command)
         self.assertEqual(command[1:command.index("--")], ["tools/run_test_modules.py", "test_context_policy.py", "test_core.py"])
         # The same modules run in the repository and in a tree with the candidate pair installed.
         self.assertEqual([tree for ran, tree in zip(runner.commands, runner.trees) if ran == command], [promotion.ROOT, SCRATCH_TREE])
@@ -98,9 +99,31 @@ class PromotionTests(unittest.TestCase):
 
     def test_a_seal_the_corpus_refuses_and_a_missing_prefix_file_fail_the_checks(self) -> None:
         (self.prefix / promotion.PREFIX_SEAL).unlink()
-        with patch("evaluate_context_action_sequences.validate_candidate_seal", side_effect=ValueError("corpus mismatch")):
+        with (patch("evaluate_context_action_sequences.validate_candidate_seal", side_effect=ValueError("corpus mismatch")),
+              patch.object(promotion, "development_gain", return_value=True)):
             failures = promotion.preflight(self.candidate, self.prefix, self.corpus, Recorder(), lambda: [])
         self.assertEqual(failures, ["candidate seal: corpus mismatch", f"missing {self.prefix / promotion.PREFIX_SEAL}"])
+
+    def test_a_candidate_without_a_recorded_development_gain_reads_no_sealed_test(self) -> None:
+        runner = Recorder()
+        self.assertEqual(self.checks(runner, gain=False), [
+            "no developer-chat development result of the candidate holds both floors (tools/evaluate_devchat_test.py --split dev)"])
+        self.assertFalse(any("evaluate_context_action_sequences.py" in " ".join(command) for command in runner.commands))
+
+    def test_the_development_gain_is_read_from_the_record_of_the_candidates_artifact(self) -> None:
+        import evaluate_devchat_test as devchat
+        ledger = Path(self.directory.name) / "devchat-ledger"
+        ledger.mkdir()
+        artifact = self.candidate / promotion.CONTEXT_ARTIFACT
+        record = ledger / f"{devchat.checksum(artifact)}.dev.json"
+        with patch.object(devchat, "ledger_root", return_value=ledger):
+            self.assertFalse(promotion.development_gain(artifact))
+            record.write_text(json.dumps({"floors": {"f1_better_than_baseline": True, "f3_not_worse_than_released": False}}),
+                              encoding="utf-8")
+            self.assertFalse(promotion.development_gain(artifact))
+            record.write_text(json.dumps({"floors": {"f1_better_than_baseline": True, "f3_not_worse_than_released": True}}),
+                              encoding="utf-8")
+            self.assertTrue(promotion.development_gain(artifact))
 
     def test_a_failed_sealed_test_installs_nothing_and_a_read_report_is_not_read_again(self) -> None:
         report = self.corpus / "sequences-test.json"
@@ -108,6 +131,8 @@ class PromotionTests(unittest.TestCase):
         with patch("shutil.copyfile") as copy:
             self.assertNotEqual(promotion.promote(self.candidate, self.prefix, self.corpus, report, runner), 0)
         copy.assert_not_called()
+        # The developer-chat test is read only after the Tatoeba test passed.
+        self.assertFalse(any("evaluate_devchat_test.py" in " ".join(command) for command in runner.commands))
         report.write_text("{}", encoding="utf-8")
         runner = Recorder()
         with patch("shutil.copyfile") as copy, patch.object(Path, "unlink"):
@@ -115,9 +140,34 @@ class PromotionTests(unittest.TestCase):
         self.assertFalse(any("evaluate_context_action_sequences.py" in " ".join(command) for command in runner.commands))
         self.assertEqual(len(copy.call_args_list), len(promotion.INSTALLED))
         self.assertEqual([command[1] for command in runner.commands],
-                         ["tools/verify_context_action_model.py", "tools/verify_context_action_model.py",
-                          "tools/evaluate_boundary_engine.py", "tools/evaluate_prefix_engine.py",
-                          "tools/verify_context_model.py", "tools/verify_prefix_model.py"])
+                         ["tools/evaluate_devchat_test.py", "tools/verify_context_action_model.py",
+                          "tools/verify_context_action_model.py", "tools/evaluate_boundary_engine.py",
+                          "tools/evaluate_prefix_engine.py", "tools/verify_context_model.py", "tools/verify_prefix_model.py"])
+        devchat = runner.commands[0]
+        # Read against the pair still installed, before the install.
+        self.assertEqual(devchat[devchat.index("--released") + 1], promotion.INSTALLED[promotion.CONTEXT_ARTIFACT])
+        self.assertEqual(devchat[devchat.index("--split") + 1], "test")
+
+    def test_a_failed_developer_chat_test_installs_nothing(self) -> None:
+        report = self.corpus / "sequences-test.json"
+        report.write_text("{}", encoding="utf-8")
+        runner = Recorder("evaluate_devchat_test.py")
+        with patch("shutil.copyfile") as copy:
+            self.assertNotEqual(promotion.promote(self.candidate, self.prefix, self.corpus, report, runner), 0)
+        copy.assert_not_called()
+        self.assertEqual(len(runner.commands), 1)
+
+    def test_the_owners_typing_is_replayed_with_the_candidate_pair_installed_before_any_test_is_read(self) -> None:
+        runner = Recorder()
+        self.assertEqual(self.checks(runner), [])
+        gate = runner.commands[-1]
+        self.assertEqual(gate[1:], ["tools/field_regression_gate.py", "--candidate-root", str(SCRATCH_TREE)])
+        self.assertEqual(runner.trees[-1], promotion.ROOT)
+        runner = Recorder("field_regression_gate.py")
+        self.assertEqual(self.checks(runner), [
+            "the owner's typing: a word the last release got right comes out wrong, or the field regression gate could "
+            "not run (tools/field_regression_gate.py)"])
+        self.assertFalse(any("evaluate_context_action_sequences.py" in " ".join(command) for command in runner.commands))
 
     def test_a_test_module_the_installed_candidate_breaks_fails_the_checks(self) -> None:
         runner = Recorder(failing_trees=[SCRATCH_TREE])

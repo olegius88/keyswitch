@@ -9,6 +9,7 @@ installed models decide whether the word converts.
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 
 import test_input_sequence_matrix as sequences
@@ -52,6 +53,37 @@ class SignReplayTests(unittest.TestCase):
     def test_the_next_word_after_a_replayed_sign_is_a_word_of_its_own(self) -> None:
         # The correction ends the word: typing on does not reopen `привет,`.
         self.assertEqual(typed(0, "ghbdtn?rfr "), "привет,как ")
+
+    def test_a_space_typed_before_the_sign_comes_up_goes_with_the_correction(self) -> None:
+        # The correction made at a sign waits until its keys come up; fast typing presses the space first. The
+        # space was taken for a second boundary and the correction was dropped: `bcntr?` and a space 37 ms later
+        # stayed as typed, though the model converted the word (0.56.0 log, 15.10.2026). Letters typed on before
+        # the keys come up are typed again after it, and Pause right after takes the word back with its sign.
+        for keys, expected in (("ghbdtn?", "привет, "), ("ghbdtn!", "привет! "), ("ntrcn/", "текст. ")):
+            with self.subTest(keys=keys), sequences.session(0) as current:
+                current.physical(keys[:-1])
+                sign, space = current.key(keys[-1]), current.key(" ")
+                current.send(sign)
+                current.send(space)
+                current.send(replace(sign, pressed=False))
+                current.send(replace(space, pressed=False))
+                current.flush()
+                self.assertEqual(current.backend.text, expected)
+                current.command("Pause")
+                current.flush()
+                self.assertEqual(current.backend.text, keys + " ")
+        with sequences.session(0) as current:
+            current.physical("ghbdtn")
+            sign, space = current.key("?"), current.key(" ")
+            current.send(sign)
+            current.send(space)
+            current.physical("rfr")
+            current.send(replace(sign, pressed=False))
+            current.send(replace(space, pressed=False))
+            current.flush()
+            current.physical(" ")
+            current.flush()
+            self.assertEqual(current.backend.text, "привет, как ")
 
 
 class RussianLayoutSignTailTests(unittest.TestCase):
