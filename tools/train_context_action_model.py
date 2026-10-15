@@ -93,6 +93,7 @@ from keyswitch.constants.training import (
     TERM_COUNT_DROPOUT_MIN_LETTERS,
     TERM_FRAGMENT_MIN_ENDING_BUCKET,
     TERM_FRAGMENT_MIN_REST,
+    TERM_ALONE_WAIT_MAX_LETTERS,
     TERM_REVISIT_FOLLOWERS,
     TERM_REVISIT_FOLLOWER_MAX_LETTERS,
     TERM_SPLIT_MODULUS,
@@ -1030,12 +1031,15 @@ def term_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froze
       class, typed in the Russian layout after the left context of a Russian row of the split (convert), and once more in
       one variant chosen by hash: at the start of a message, ending in a sign (`.` or `,`, typed as `ю` or `б`), opening a
       sentence with a capital, or in capitals (a term of TERM_CAPITALS_MAX_LETTERS letters at most, as acronyms are
-      written). Alone at the start of a message and ended by a space, a term of up to KEPT_CONTEXT_WORD_MAX_CHARACTERS
-      letters waits for its next word, as the lone-word head leaves such a word (wait): the engine asks a waiting word
-      again at a pause, a suggestion never; labelled to convert there, the head only suggested `гш` and `йк`, which
-      stayed, and converted the tail `дые` (field batteries, experiment E9c). A longer one converts: the engine never
-      asks a waiting word that long with the kept word after it, and the wait lapsed once a Russian word followed
-      (`Куаукук добавьте` for `Referer добавьте`, development of ru.stackoverflow, experiment E8). Each term is also
+      written). Alone at the start of a message and ended by a space, a term of up to TERM_ALONE_WAIT_MAX_LETTERS
+      letters, or one that ends as many Russian words as a kept tail does, waits for its next word, as the lone-word
+      head leaves such a word (wait): the engine asks a waiting word again at a pause, a suggestion never, and labelled
+      to convert there the head only suggested `гш` and `йк`, which stayed, and converted the tail `дые` (field
+      batteries, experiments E9c and E9e). Any other converts: waiting, `тзь`, `сым` and `ШВУ` (`npm`, `csv`, `IDE`)
+      opening a message stayed where the frozen model had converted them (experiment E9d), and so did `ювшые`
+      (`.dist`) with two spaces after it; the head reads the letters with the boundary, so the two-letter wait does not
+      pull the longer ones, and every short term stands once more alone at a space (experiments E9f and E9g made `гш` a
+      suggestion: drawn by hash, too few short terms stood there). Each term is also
       asked again as the engine asks a converted word once the word after it went back to Russian (one of the
       TERM_REVISIT_FOLLOWERS most frequent short words of Russian prose after it, convert), with the baseline the engine
       gives that question (ActionRow.revisit): `зк` in `займись зк и тз` became `pr`, the layout followed, `и` came out
@@ -1115,13 +1119,22 @@ def term_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froze
                 counts["outside_class"] += 1
                 continue
             framed = frame(f"{family}:{index}", token, left, "convert")
-            if not left and framed.trigger == "space" and len(token) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS:
+            ending = russian_ending_bucket(token)
+            tail_like = ending != "na" and int(ending) >= TERM_FRAGMENT_MIN_ENDING_BUCKET
+            if not left and framed.trigger == "space" and (len(token) <= TERM_ALONE_WAIT_MAX_LETTERS or tail_like):
                 framed = replace(framed, action="wait")
             counts[f"{framed.action}:{kind}"] += 1
             rows.append(framed)
         if term_question(typed, context):
             counts["convert:revisit"] += 1
             rows.append(revisit(f"{family}:revisit", typed, context, "convert"))
+        if len(typed) <= TERM_ALONE_WAIT_MAX_LETTERS and term_question(typed, ""):
+            # Every short term once more alone at a space: drawn among the variants and boundaries by hash, too few of them
+            # stood there against the longer terms that convert, and `гш` came out a suggestion (experiments E9f, E9g).
+            counts["wait:alone"] += 1
+            field = FieldContext(applications[variant_choice(family, "alone-application", len(applications))],
+                                 "public-training", "", "", "unknown")
+            rows.append(ActionRow(f"{family}:alone", typed, 1, field, "space", "", "wait", "term", " ", weight))
     taken: Counter[str] = Counter()
     russian = sorted((row for row, group, _, _ in _monolingual_rows(source_rows) if group == 1),
                      key=lambda row: hashlib.sha256(f"term-piece:{row.identifier}".encode()).digest())
@@ -1145,8 +1158,9 @@ def term_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froze
                   "sample_weight": weight,
                   "scope": "terms of the Latin table typed in the Russian layout after Russian prose, at the start of a "
                            "message, with a sign after them, with a capital or in capitals, and asked again after a "
-                           "Russian word that went back (convert), and the tails of the split's Russian words that are "
-                           "such a token (keep), of this split's share (term_curriculum)."}
+                           "Russian word that went back (convert; alone at a space, a term of two letters or one ending "
+                           "many Russian words waits), and the tails of the split's Russian words that are such a token "
+                           "(keep), of this split's share (term_curriculum)."}
 
 
 def brief_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],

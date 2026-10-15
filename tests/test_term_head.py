@@ -16,8 +16,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from keyswitch.constants.models import TERM_FEATURE_PREFIX, TERM_HEAD_MIN_LATIN_BUCKET  # noqa: E402
 from keyswitch.constants.model_protocol import CALIBRATION, DEVELOPMENT, TRAIN  # noqa: E402
-from keyswitch.constants.models import KEPT_CONTEXT_WORD_MAX_CHARACTERS, TERM_HEAD_ENDING_LETTERS  # noqa: E402
-from keyswitch.constants.training import TERM_CAPITALS_MAX_LETTERS  # noqa: E402
+from keyswitch.constants.models import TERM_HEAD_ENDING_LETTERS  # noqa: E402
+from keyswitch.constants.training import (  # noqa: E402
+    TERM_ALONE_WAIT_MAX_LETTERS, TERM_CAPITALS_MAX_LETTERS, TERM_FRAGMENT_MIN_ENDING_BUCKET,
+)
 from keyswitch.context_action_features import extract_action_features, russian_ending_bucket, term_question  # noqa: E402
 from keyswitch.context_model import ContextEvidence, term_bucket  # noqa: E402
 from keyswitch.input_context import FieldContext  # noqa: E402
@@ -57,6 +59,8 @@ class TermHeadTests(unittest.TestCase):
         signed = head(evidence("сымю", "csv.", "отправь файл "))
         self.assertTrue({"bias", counts, "signed:1", "extension:0", "ending:na:letters:3", "before:ru", f"{counts}:before:ru",
                          "signed:1:before:ru"} <= signed)
+        # The letters with the boundary: alone at a space, two letters wait and more convert.
+        self.assertIn("before:none:boundary:space:letters:2", head(evidence("гш", "ui", "")))
         # No copy of the shared features: the frozen model reads the context, the head its own evidence alone.
         self.assertFalse(any(name.startswith(("source:", "target:", "before:char")) for name in signed))
         self.assertTrue({"signed:0", "extension:1", "before:none", "ending:na"} <= head(evidence("юучу", ".exe", "")))
@@ -104,13 +108,22 @@ class TermHeadTests(unittest.TestCase):
                 self.assertLessEqual(len(row.original), TERM_CAPITALS_MAX_LETTERS)
             if row.original[:1].isupper() and not row.original.isupper():
                 self.assertTrue(row.field.before.endswith(". "))
-        # Alone at the start of a message and ended by a space, a short term waits for its next word, as the lone-word
-        # head leaves such a word: the engine asks a waiting word again at a pause, a suggestion never. A longer one
-        # converts: the engine never asks a waiting word that long with the kept word after it.
+        # Alone at the start of a message and ended by a space, a term of two letters, or one that ends as many Russian
+        # words as a kept tail does, waits for its next word, as the lone-word head leaves such a word: the engine asks a
+        # waiting word again at a pause, a suggestion never. Any other converts at once.
         alone = [row for row in train + development if not row.field.before and row.trigger == "space"
                  and not row.identifier.endswith(":revisit")]
-        self.assertEqual({row.action for row in alone if len(row.original) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS}, {"wait"})
-        self.assertEqual({row.action for row in alone if len(row.original) > KEPT_CONTEXT_WORD_MAX_CHARACTERS}, {"convert"})
+
+        def waits(token: str) -> bool:
+            ending = russian_ending_bucket(token)
+            return len(token) <= TERM_ALONE_WAIT_MAX_LETTERS or (ending != "na" and int(ending) >= TERM_FRAGMENT_MIN_ENDING_BUCKET)
+
+        self.assertEqual({row.action for row in alone if waits(row.original)}, {"wait"})
+        self.assertEqual({row.action for row in alone if not waits(row.original)}, {"convert"})
+        # Every short term stands once more alone at a space, to wait.
+        short = [row for row in train + development if row.identifier.endswith(":alone")]
+        self.assertTrue(short)
+        self.assertTrue(all(len(row.original) <= TERM_ALONE_WAIT_MAX_LETTERS and row.action == "wait" for row in short))
         self.assertFalse([row for row in train + development if row.after_origin == "kept_next_word"])
         # Each term and each kept tail is also asked again as the engine asks a converted word whose next word went back:
         # a short Russian word after it, given as a planned conversion (a token of up to three letters) or as the field.

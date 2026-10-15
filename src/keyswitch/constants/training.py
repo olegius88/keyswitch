@@ -114,6 +114,13 @@ TERM_FRAGMENT_MIN_REST: Final = 2
 # the tails of words are the same tokens (`ац`, `мь`, `дые`): the owner completed `моло` with `дые` after a click and
 # undid its conversion to `lst`, which a head without those tails repeated (experiment E8).
 TERM_FRAGMENT_MIN_ENDING_BUCKET: Final = 3
+# Alone at the start of a message and ended by a space, a term of at most this many letters waits for its next word (a
+# pause settles a wait, never a suggestion), and so does one with an ending bucket of TERM_FRAGMENT_MIN_ENDING_BUCKET or
+# more, a token a kept tail may be: converting there, the head only suggested `гш` and `йк`, which stayed, and turned
+# the tail `дые` into `lst` (experiments E9c and E9e). Any other converts at once: waiting, `тзь`, `сым`, `ШВУ` and
+# `уккщк` (`npm`, `csv`, `IDE`, `error`) opening a message stayed where the frozen model had converted them (development
+# of ru.stackoverflow, experiment E9d), and `ювшые` (`.dist`) with two spaces after it (sealed-pair test of corpus v63).
+TERM_ALONE_WAIT_MAX_LETTERS: Final = 2
 # Every term of the term curriculum, and every kept tail, is also asked again as the engine asks a converted word once
 # the word after it went back (engine._revert_with_next_word): after one of the TERM_REVISIT_FOLLOWERS most frequent words
 # of Russian prose of at most TERM_REVISIT_FOLLOWER_MAX_LETTERS letters (`и`, `в`, `на`).

@@ -13,10 +13,9 @@ All notable changes to KeySwitch are documented in this file.
   detector's score and how the word after it was given; a token the lexicon knows as a Russian word stays with the
   model as before, however rare in the tables. The end of a Russian word typed as a token of its own to finish
   a word begun earlier stays: `ев` ends 169 words of the table and `ась` 889, `зк` and `сш` one. Alone at the start of
-  a message, a term of up to five letters waits for the next word or for a pause of a second and a half, as the model
-  left `гш` and `йк` before; a longer one converts at the space. Of such short terms the model of 0.56.0 converted some
-  at once (`тзь` for `npm`), and opening a message typed wholly in the other layout they now stay when the word after
-  them does not settle them (`тзь install`).
+  a message, a term of two letters, or one that may be such a tail, waits for the next word or for a pause of a second
+  and a half, as the model left `гш` and `йк` before; a longer one converts at the space (`тзь` for `npm`, `ювшые` for
+  `.dist`).
 - A short reply typed in the English layout as a whole message converts: `ytn` (`нет`) and `dct` (`все`), sent with
   Enter or left at a pause, were kept or left waiting for a next word that never came. A second new head answers a
   token of two or three Latin letters with no letter before or after it in the field, whose keys in the Russian layout

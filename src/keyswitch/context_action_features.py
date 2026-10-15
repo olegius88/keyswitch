@@ -805,7 +805,9 @@ def _term_evidence(item: ContextEvidence) -> dict[str, float]:
     with the dot of an extension (`юучу` is `.exe`), how many Russian words end with it (russian_ending_bucket) with the
     token's length, which script the text before it is in, the band of the detector's score delta (as the message-start
     head reads it), how the text after it was given (asked again with its converted neighbour after it, or not) and, for
-    a token alone in the field, whether a space or an end (Enter, a pause, a sign) ended it.
+    a token alone in the field, whether a space or an end (Enter, a pause, a sign) ended it, with its letters: a term of
+    two letters alone at a space waits, a longer one converts, and read without the letters the wait pulled the longer
+    ones and the convert the shorter (`гш` became a suggestion, experiment E9f).
     Without the endings the head could tell the tail of a Russian word an edit left (`ев`) from a term's keys (`зк`) by
     the length alone, and it kept short terms; the length is read with the ending only, for the same reason. Alone at a
     space the frozen model waits, and a wait stands until a pause of one and a half seconds settles it: the head
@@ -830,7 +832,8 @@ def _term_evidence(item: ContextEvidence) -> dict[str, float]:
     after = f"after:{item.after_origin}"
     names = ("bias", counts, signed, extension, before, ending, delta, boundary, after, f"{counts}:{before}", f"{signed}:{before}",
              f"{ending}:{letters}", f"{ending}:{before}", f"{ending}:{counts}", f"{ending}:{letters}:{counts}",
-             f"{delta}:{before}", f"{boundary}:{ending}:{letters}", f"{after}:{ending}", f"{after}:{counts}")
+             f"{delta}:{before}", f"{boundary}:{ending}:{letters}", f"{boundary}:{letters}", f"{after}:{ending}",
+             f"{after}:{counts}")
     return {f"{TERM_FEATURE_PREFIX}{name}": 1.0 for name in names}
 
 
