@@ -154,6 +154,13 @@ class ProtocolTests(unittest.TestCase):
                 self.assertRaisesRegex(devchat.Refusal, "Tatoeba"):
             self.evaluate(devchat.TEST)
 
+    def test_the_same_models_at_other_paths_are_the_same_pairs(self) -> None:
+        recorded = {"candidate": {"path": "/abs/candidate.json", "sha256": "a", "model_version": "context-v3-a"}}
+        self.assertTrue(devchat.same_models(recorded, {"candidate": {"path": "candidate.json", "sha256": "a",
+                                                                     "model_version": "context-v3-a"}}))
+        self.assertFalse(devchat.same_models(recorded, {"candidate": {"path": "/abs/candidate.json", "sha256": "b",
+                                                                      "model_version": "context-v3-a"}}))
+
     def test_reads_never_overlap_and_a_failure_is_recorded_by_kind(self) -> None:
         members = devchat.load_members(self.messages / "devchat-test.members.jsonl.gz")
         identity = {"pairs": {"candidate": {"sha256": "other"}}, "test_membership": devchat.membership(members)}

@@ -142,6 +142,17 @@ def tatoeba_passed(candidate: str) -> bool:
     return False
 
 
+def same_models(recorded: Mapping[str, Mapping[str, str]], pairs: Mapping[str, Mapping[str, str]]) -> bool:
+    """Whether two reads ran the same models: each pair's checksum and version, wherever its file lay. The paths alone
+    differed when the development record named the candidate by an absolute path and the promotion by a relative one,
+    and the test was refused for models that were the same."""
+
+    def models(value: Mapping[str, Mapping[str, str]]) -> dict[str, dict[str, str]]:
+        return {name: {key: item for key, item in pair.items() if key != "path"} for name, pair in value.items()}
+
+    return models(recorded) == models(pairs)
+
+
 def runtime(directory: Path) -> dict[str, str]:
     """What a read ran on: the runtime the sequence protocol pins, the bench, this tool, the builder and the messages."""
 
@@ -274,7 +285,7 @@ def evaluate(split: str, directory: Path, models: Mapping[str, Path], *, workers
         recorded = cast(dict[str, object], json.loads(development.read_bytes()))
         if not all(cast(dict[str, bool], recorded["floors"]).values()):
             raise Refusal("the candidate's development result holds no gain; the test is not read")
-        if recorded["runtime"] != pins or recorded["pairs"] != pairs:
+        if recorded["runtime"] != pins or not same_models(cast(Mapping[str, Mapping[str, str]], recorded["pairs"]), pairs):
             raise Refusal("the runtime or the pairs differ from the candidate's development result")
         if not tatoeba_passed(candidate):
             raise Refusal("the candidate passed no Tatoeba test; the dev-chat test is not read")
