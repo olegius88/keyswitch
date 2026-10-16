@@ -41,9 +41,11 @@ class FirstTermHeadTests(unittest.TestCase):
         for typed in ("йк", "зк", "сш", "ыйд", "ев"):
             self.assertTrue(first_question(typed, "", ""), typed)
         # Letters before or after it, a longer term, or a word Russian text uses: no member.
-        for typed, before, after in (("йк", "мой ", ""), ("йк", "", "код"), ("рвьш", "", ""), ("ты", "", "")):
+        for typed, before, after in (("йк", "мой ", ""), ("рвьш", "", ""), ("ты", "", "")):
             self.assertFalse(first_question(typed, before, after), (typed, before, after))
+        # Signs before it, or the word the engine asks it again with after it.
         self.assertTrue(first_question("йк", "1. ", ""))
+        self.assertTrue(first_question("йк", "", "истек"))
         # Whether a token may still be the tail of a Russian word: two letters from a higher ending bucket than three
         # (`йк` ends 11 words and may not, `ев` 169 and may, `дые` 7 and may); a longer token ends no word as a tail.
         self.assertEqual([alone_tail(token) for token in ("йк", "зк", "ев", "дые", "сымю")], [False, False, True, True, False])
@@ -52,7 +54,12 @@ class FirstTermHeadTests(unittest.TestCase):
         read = heads(evidence("йк", "qr"))
         counts = f"latin:{term_bucket('qr', 'latin')}:english:{term_bucket('qr', 'english')}"
         self.assertTrue({"bias", "tail:0", "tail:0:letters:2", "tail:0:boundary:space", "tail:0:boundary:space:letters:2",
-                         f"tail:0:{counts}", f"tail:0:boundary:space:{counts}"} <= read[FIRST_FEATURE_PREFIX])
+                         f"tail:0:{counts}", f"tail:0:boundary:space:{counts}", "tail:0:after:none",
+                         f"tail:0:after:none:{counts}"} <= read[FIRST_FEATURE_PREFIX])
+        # Asked again with the word after it, as the engine asks a converted term once a Russian word follows.
+        again = replace(evidence("йк", "qr"), field=FieldContext("Code", "test", "", "истек", "text", source="uia"),
+                        after_origin="planned_next_conversion")
+        self.assertIn("tail:0:after:planned_next_conversion:letters:2", heads(again)[FIRST_FEATURE_PREFIX])
         self.assertEqual(read[TERM_FEATURE_PREFIX], set())
         # Nobody read the field: the text before the token is unknown, and the term head answers.
         unread = heads(evidence("йк", "qr", role="unknown"))
@@ -87,11 +94,18 @@ class FirstTermHeadTests(unittest.TestCase):
         rows = train + development
         self.assertTrue(all(first_question(row.original, row.field.before, row.field.after) and row.field.role == "text"
                             and len(row.original) <= max(TERM_HEAD_ENDING_LETTERS) for row in rows))
-        self.assertEqual(Counter(row.original for row in rows).most_common(1)[0][1], len(("space", "pause")))
+        self.assertEqual(set(Counter(row.original for row in rows).values()), {len(("space", "pause", "next"))})
         for row in rows:
             tail = alone_tail(row.original)
-            expected = {"space": "wait" if tail else "convert", "pause": "keep" if tail else "convert"}[row.trigger]
+            kind = row.identifier.rsplit(":", 1)[1]
+            expected = {"space": "wait" if tail else "convert", "pause": "keep" if tail else "convert",
+                        "next": "keep" if tail else "convert"}[kind]
             self.assertEqual(row.action, expected, row.identifier)
+            # Asked again with a Russian word after it, as the engine asks it: a converted term with the baseline the
+            # engine gives the revisit, a token that waited with its planned one.
+            self.assertEqual((bool(row.field.after), row.revisit), (kind == "next", kind == "next" and not tail))
+            if kind == "next":
+                self.assertEqual(row.after_origin, "planned_next_conversion" if len(row.original) <= len("йку") else "field")
         self.assertTrue({True, False} <= {alone_tail(row.original) for row in rows})
         self.assertEqual(trainer.first_curriculum(TRAIN, [], frozenset(), trainer.NO_FIRST_CURRICULUM), ([], {"frames": 0, "scope": "not used"}))
         self.assertEqual(trainer.first_curriculum(CALIBRATION, [], frozenset(), FIRST)[0], [])

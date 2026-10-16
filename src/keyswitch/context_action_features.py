@@ -872,20 +872,24 @@ def _tail_like(token: str) -> bool:
 
 def first_question(original: str, before: str, after: str) -> bool:
     """A token of the term head's class (term_question) of up to three letters, the most a term's ending is read for
-    (TERM_HEAD_ENDING_LETTERS), with no letter before or after it in the field: the first-term head's class when a field
-    reader read the field (the role, which the trainer's and the GPU path's routing do not see, is checked where the
-    features are made). The question reads only the typed token and the text around it."""
+    (TERM_HEAD_ENDING_LETTERS), with no letter before it in the field: the first-term head's class when a field reader
+    read the field (the role, which the trainer's and the GPU path's routing do not see, is checked where the features
+    are made). The word after it is the one the engine asks it again with: a term converted there once a Russian word
+    followed, a token that waited once its next word was converted. The question reads only the typed token and the
+    text before it."""
 
     return (len(original) <= max(TERM_HEAD_ENDING_LETTERS) and term_question(original, before)
-            and not any(char.isalpha() for char in before) and not any(char.isalpha() for char in after))
+            and not any(char.isalpha() for char in before))
 
 
 def _first_evidence(item: ContextEvidence) -> dict[str, float]:
     """The first-term head's evidence, all read with whether the token may still be the tail of a Russian word
     (alone_tail), the one thing that decides there: its letters, the boundary that ended it (a space, or an end such as
-    a pause), how often Russian technical text and English prose use its Latin reading, and how many Russian words end
-    with it. In a field read empty nothing stands before a tail, but a field battery replays a stream that starts with
-    one into an empty field (`дые`, which the owner typed completing `моло`)."""
+    a pause), how often Russian technical text and English prose use its Latin reading, how many Russian words end
+    with it, and how the word after it was given (none, or the next word it is asked again with). In a field read empty
+    nothing stands before a tail, but a field battery replays a stream that starts with one into an empty field (`дые`,
+    which the owner typed completing `моло`). Asked again by the term head, a term converted there went back with the
+    Russian word after it on one corpus and stayed on another (`йк истек`, p 0.981 and 0.995, candidates v65 and v64f)."""
 
     from .context_model import term_bucket
 
@@ -895,8 +899,10 @@ def _first_evidence(item: ContextEvidence) -> dict[str, float]:
     boundary = f"boundary:{'space' if item.trigger == 'space' else 'end'}"
     counts = f"latin:{term_bucket(latin, 'latin')}:english:{term_bucket(latin, 'english')}"
     ending = f"ending:{russian_ending_bucket(item.original)}"
+    after = f"after:{item.after_origin}"
     names = ("bias", tail, f"{tail}:{letters}", f"{tail}:{boundary}", f"{tail}:{boundary}:{letters}", f"{tail}:{counts}",
-             f"{tail}:{boundary}:{counts}", f"{tail}:{ending}:{letters}")
+             f"{tail}:{boundary}:{counts}", f"{tail}:{ending}:{letters}", f"{tail}:{after}", f"{tail}:{after}:{letters}",
+             f"{tail}:{after}:{counts}")
     return {f"{FIRST_FEATURE_PREFIX}{name}": 1.0 for name in names}
 
 

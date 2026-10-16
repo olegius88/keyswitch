@@ -125,14 +125,8 @@ class TermHeadTests(unittest.TestCase):
         short = [row for row in train + development if row.identifier.endswith(":alone")]
         self.assertTrue(short)
         self.assertTrue(all(len(row.original) <= TERM_ALONE_WAIT_MAX_LETTERS and row.action == "wait" for row in short))
-        # A term of up to three letters converted at once alone in a field a reader read empty (the first-term head's) is
-        # asked again with a Russian word after it, as the engine asks it, and stays; a possible tail is not converted there.
-        again = [row for row in train + development if row.identifier.endswith(":alone-read-revisit")]
-        self.assertTrue(again)
-        self.assertTrue(all(len(row.original) <= max(TERM_HEAD_ENDING_LETTERS) and not alone_tail(row.original) for row in again))
-        self.assertTrue(all(row.revisit and row.action == "convert" and row.field.after and not row.field.before
-                            and row.field.role != "unknown" for row in again))
-        self.assertFalse([row for row in train + development if row.identifier.endswith(":alone-read")])
+        # Alone in a field a reader read empty a short term is the first-term head's: none of its frames is here.
+        self.assertFalse([row for row in train + development if ":alone-read" in row.identifier])
         self.assertFalse([row for row in train + development if row.after_origin == "kept_next_word"])
         # Each term and each kept tail is also asked again as the engine asks a converted word whose next word went back:
         # a short Russian word after it, given as a planned conversion (a token of up to three letters) or as the field.

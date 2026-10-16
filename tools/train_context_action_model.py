@@ -1040,8 +1040,7 @@ def term_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froze
       spaces after it; the head reads the letters with the boundary, so the two-letter wait does not pull the longer
       ones, and every short term stands once more alone at a space (experiments E9f and E9g made `гш` a suggestion:
       drawn by hash, too few short terms stood there). Alone in a field a reader read empty a term of up to three
-      letters is the first-term head's (first_curriculum); converted there at once, it is asked again here with a
-      Russian word after it, as the engine asks it, and stays. Each term is also
+      letters is the first-term head's (first_curriculum). Each term is also
       asked again as the engine asks a converted word once the word after it went back to Russian (one of the
       TERM_REVISIT_FOLLOWERS most frequent short words of Russian prose after it, convert), with the baseline the engine
       gives that question (ActionRow.revisit): `зк` in `займись зк и тз` became `pr`, the layout followed, `и` came out
@@ -1083,9 +1082,7 @@ def term_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froze
         return (token.casefold() in held_out or keys.casefold() in held_out
                 or bool(refused & (expanded_aliases(token) | expanded_aliases(keys))))
 
-    followers = [word for _count, word in sorted((-count, word) for word, count in _term_frequency()["russian"].items()
-                                                 if len(word) <= TERM_REVISIT_FOLLOWER_MAX_LETTERS and word.isalpha())
-                 ][:TERM_REVISIT_FOLLOWERS]
+    followers = revisit_followers()
 
     def revisit(identifier: str, typed: str, before: str, action: ContextAction, share: float = 1.0,
                 role: FieldRole = "unknown") -> ActionRow:
@@ -1139,12 +1136,6 @@ def term_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froze
                 # E9f, E9g).
                 counts["wait:alone"] += 1
                 rows.append(ActionRow(f"{family}:alone", typed, 1, field, "space", "", "wait", "term", " ", weight))
-            # A term converted at once alone in a field a reader read empty (first_curriculum) is asked again as the
-            # engine asks it once a Russian word follows, and stays: the engine took `qr` back with `истек` after it
-            # (candidate v64b).
-            if not alone_tail(typed):
-                counts["convert:alone-read-revisit"] += 1
-                rows.append(revisit(f"{family}:alone-read-revisit", typed, "", "convert", role="text"))
     taken: Counter[str] = Counter()
     russian = sorted((row for row, group, _, _ in _monolingual_rows(source_rows) if group == 1),
                      key=lambda row: hashlib.sha256(f"term-piece:{row.identifier}".encode()).digest())
@@ -1179,6 +1170,15 @@ def term_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froze
                            "share (term_curriculum)."}
 
 
+def revisit_followers() -> list[str]:
+    """The TERM_REVISIT_FOLLOWERS most frequent words of Russian prose of up to TERM_REVISIT_FOLLOWER_MAX_LETTERS letters:
+    the words after which a term is asked again (term_curriculum, first_curriculum)."""
+
+    return [word for _count, word in sorted((-count, word) for word, count in _term_frequency()["russian"].items()
+                                            if len(word) <= TERM_REVISIT_FOLLOWER_MAX_LETTERS and word.isalpha())
+            ][:TERM_REVISIT_FOLLOWERS]
+
+
 def first_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
                      options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
     """Terms of up to three letters alone in a field a field reader read empty (context_action_features.first_question).
@@ -1190,7 +1190,11 @@ def first_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froz
     ended by a space (convert) and by a pause (convert). A token that may still be the tail of a Russian word
     (alone_tail) waits at the space and is kept at the pause: nothing stands before a tail in a field read empty, but a
     field battery replays a stream that starts with one into an empty field (`дые`, which the owner typed completing
-    `моло`), and waiting there it went to `lst` at the pause (candidate v64c). Each term goes to DEVELOPMENT or TRAIN as
+    `моло`), and waiting there it went to `lst` at the pause (candidate v64c). Each is also asked again as the engine
+    asks it with the word after it: a term converted at once, once a Russian word followed (ActionRow.revisit: the
+    baseline the engine gives that question), stays converted (the term head, which asked it before, took `qr` back
+    with `истек` after it on corpus v65 and kept it on corpus v64); a token that waited, once its next word was
+    converted, keeps. Each term goes to DEVELOPMENT or TRAIN as
     the term curriculum draws it (TERM_SPLIT_MODULUS), and DEVELOPMENT chooses the head's own epoch. Tokens of this
     corpus's test, of every accessed test and of the recipe's `held_out` list (the class's tokens of the owner's typing)
     are refused.
@@ -1201,6 +1205,7 @@ def first_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froz
     weight = float(cast(float, options["sample_weight"]))
     held_out = frozenset(str(token).casefold() for token in cast(list[object], options.get("held_out", [])))
     applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+    followers = revisit_followers()
     rows: list[ActionRow] = []
     counts: Counter[str] = Counter()
     for term in sorted(_term_frequency()["latin"]):
@@ -1223,10 +1228,17 @@ def first_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froz
             counts[f"{action}:{trigger}"] += 1
             rows.append(ActionRow(f"first:{typed}:{trigger}", typed, 1, field, cast(CorrectionTrigger, trigger), "",
                                   cast(ContextAction, action), "first", boundary_text, weight))
+        follower = followers[variant_choice(f"first:{typed}", "follower", len(followers))]
+        origin: AfterOrigin = "planned_next_conversion" if len(typed) <= PLANNED_REVISIT_MAX_CHARACTERS else "field"
+        again: ContextAction = "keep" if tail else "convert"
+        counts[f"{again}:next"] += 1
+        rows.append(ActionRow(f"first:{typed}:next", typed, 1, replace(field, after=follower), "space", "", again, "first",
+                              " ", weight, after_origin=origin, revisit=not tail))
     return rows, {"frames": len(rows), "items": dict(sorted(counts.items())), "held_out": len(held_out), "sample_weight": weight,
                   "scope": "terms of up to three letters of the Latin table typed in the Russian layout alone in a field a "
-                           "reader read empty, ended by a space and by a pause (convert; a token that may still be the "
-                           "tail of a Russian word waits at the space and is kept at the pause) (first_curriculum)."}
+                           "reader read empty, ended by a space and by a pause, and asked again with the word after them "
+                           "(convert; a token that may still be the tail of a Russian word waits at the space and is kept "
+                           "at the pause and with the next word) (first_curriculum)."}
 
 
 def brief_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
