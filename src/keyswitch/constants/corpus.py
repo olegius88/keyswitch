@@ -225,8 +225,8 @@ DEVCHAT_SIGN_RUN: Final = 3
 # each split's messages is pinned.
 DEVCHAT_SEED: Final = "devchat-v1"
 DEVCHAT_TEST_COUNT: Final = 900
-DEVCHAT_DEV_CONTENT_SHA256: Final = "1208606acb3a9793204f1050d9b230d0014377ceac8db392038a289a6d9d6aae"
-DEVCHAT_TEST_CONTENT_SHA256: Final = "aa166acde9d44729cbe868e1743d9ee117a1d5bf05a230eac374c08a480bba3f"
+DEVCHAT_DEV_CONTENT_SHA256: Final = "b377987db979089f17afae4616c2f94936eb8429397713e901e410dfec047822"
+DEVCHAT_TEST_CONTENT_SHA256: Final = "69307f09b2397b652791d91890c8e4e1720dd875a6f47333c21e3c155eb0beba"
 # The floors (tools/devchat_floors.py, the owner's decisions of 15.10.2026): F1 asks the candidate to net at least this
 # much more than the baseline pair; F3 fails a mode where the candidate's losses against the released pair are this
 # unlikely by chance among the messages the two disagree on.
