@@ -24,8 +24,11 @@ and refuses to touch the test until they hold:
    (tests/test_quality_ratchet.py), and candidate v63e, which passed both sealed tests, could not be installed for
    netting 23 frames less.
 
-Then it reads the sealed test (once: an existing report is reused) and, once that passed, the sealed
-developer-chat test (once, before the install: the released pair it is compared with is the installed one),
+Then it reads the sealed test (once: an existing report is reused) and, once that passed and the candidate holds the
+release receipt's restoration floors there (more rows typed in the wrong layout restored than the frozen baseline pair,
+and the share of them; tests/test_quality_ratchet.py) - the corpus v64 pair passed the test's gates restoring exactly
+what the baseline pair did and was installed, and the quality ratchet refused it - the sealed developer-chat test
+(once, before the install: the released pair it is compared with is the installed one),
 installs the pair, exports and verifies the release receipt, refreshes the boundary and prefix engine replays
 and runs the public context and prefix gates - the order docs/model-training-cloud.md describes.
 
@@ -204,6 +207,10 @@ def promote(candidate: Path, prefix_candidate: Path, corpus: Path, report: Path,
         if status != 0:
             print("the sealed test did not pass; nothing is installed", flush=True)
             return status
+    if shortfall := restoration_shortfall(report):
+        print("the sealed test leaves the candidate short of the release receipt's restoration floors ("
+              + "; ".join(shortfall) + "); nothing is installed and the developer-chat test is not read", flush=True)
+        return 1
     # The developer-chat test, while the released pair is still the installed one it is compared with.
     devchat = Path(os.environ.get(DEVCHAT_DIRECTORY_VARIABLE, DEVCHAT_DIRECTORY))
     status = runner([python, "tools/evaluate_devchat_test.py", "--split", "test", "--directory", str(devchat),
@@ -230,6 +237,26 @@ def promote(candidate: Path, prefix_candidate: Path, corpus: Path, report: Path,
         if (status := runner(command)) != 0:
             return status
     return 0
+
+
+def restoration_shortfall(report: Path) -> list[str]:
+    """The profiles and settings modes in which the sealed test leaves the candidate short of the release receipt's
+    floors (tests/test_quality_ratchet.py): restoring more rows typed in the wrong layout than the frozen baseline pair by
+    RECEIPT_MIN_RESTORATION_MARGIN, and at least RECEIPT_MIN_RESTORED_SHARE of them."""
+    sys.path.insert(0, str(ROOT / "tests"))
+    from fixture_values.quality_floors import RECEIPT_MIN_RESTORATION_MARGIN, RECEIPT_MIN_RESTORED_SHARE
+
+    failures: list[str] = []
+    for name, profile in sorted(json.loads(report.read_bytes())["profiles"].items()):
+        for mode, counts in (("default", profile["counts"]), ("early_off", profile["early_off"]["counts"])):
+            candidate, baseline = counts["candidate"], counts["baseline"]
+            if candidate["exactly_restored"] - baseline["exactly_restored"] < RECEIPT_MIN_RESTORATION_MARGIN[mode]:
+                failures.append(f"{name} {mode}: {candidate['exactly_restored']} restored against the baseline pair's "
+                                f"{baseline['exactly_restored']}")
+            share = RECEIPT_MIN_RESTORED_SHARE.get(mode)
+            if share is not None and candidate["exactly_restored"] < share * candidate["initially_wrong"]:
+                failures.append(f"{name} {mode}: {candidate['exactly_restored']} of {candidate['initially_wrong']} restored")
+    return failures
 
 
 def main(argv: Sequence[str] | None = None) -> int:

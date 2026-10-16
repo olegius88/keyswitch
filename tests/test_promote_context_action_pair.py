@@ -42,6 +42,13 @@ def scratch_tree(candidate: Path, prefix_candidate: Path) -> Iterator[Path]:
     yield SCRATCH_TREE
 
 
+def sealed_report(baseline_restored: int) -> str:
+    """A sealed test report whose candidate restores the one row typed in the wrong layout in every profile and mode."""
+    sides = {"candidate": {"exactly_restored": 1, "initially_wrong": 1},
+             "baseline": {"exactly_restored": baseline_restored, "initially_wrong": 1}}
+    return json.dumps({"profiles": {name: {"counts": sides, "early_off": {"counts": sides}} for name in ("portable", "hunspell")}})
+
+
 def git(root: Path, *arguments: str) -> str:
     return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *arguments], cwd=root, check=True,
                           capture_output=True, text=True).stdout
@@ -173,7 +180,7 @@ class PromotionTests(unittest.TestCase):
         copy.assert_not_called()
         # The developer-chat test is read only after the Tatoeba test passed.
         self.assertFalse(any("evaluate_devchat_test.py" in " ".join(command) for command in runner.commands))
-        report.write_text("{}", encoding="utf-8")
+        report.write_text(sealed_report(0), encoding="utf-8")
         runner = Recorder()
         with patch("shutil.copyfile") as copy, patch.object(Path, "unlink"):
             self.assertEqual(promotion.promote(self.candidate, self.prefix, self.corpus, report, runner), 0)
@@ -188,9 +195,24 @@ class PromotionTests(unittest.TestCase):
         self.assertEqual(devchat[devchat.index("--released") + 1], promotion.INSTALLED[promotion.CONTEXT_ARTIFACT])
         self.assertEqual(devchat[devchat.index("--split") + 1], "test")
 
+    def test_a_candidate_restoring_no_more_than_the_baseline_pair_installs_nothing_and_reads_no_developer_chat_test(self) -> None:
+        report = self.corpus / "sequences-test.json"
+        report.write_text(sealed_report(1), encoding="utf-8")
+        runner = Recorder()
+        with patch("shutil.copyfile") as copy, patch("builtins.print"):
+            self.assertNotEqual(promotion.promote(self.candidate, self.prefix, self.corpus, report, runner), 0)
+        copy.assert_not_called()
+        self.assertEqual(runner.commands, [])
+        self.assertEqual(promotion.restoration_shortfall(report), ["hunspell early_off: 1 restored against the baseline pair's 1",
+                                                                   "portable early_off: 1 restored against the baseline pair's 1"])
+        # The share of the rows typed in the wrong layout counts too.
+        sides = {"candidate": {"exactly_restored": 0, "initially_wrong": 1}, "baseline": {"exactly_restored": 0, "initially_wrong": 1}}
+        report.write_text(json.dumps({"profiles": {"portable": {"counts": sides, "early_off": {"counts": sides}}}}), encoding="utf-8")
+        self.assertIn("portable early_off: 0 of 1 restored", promotion.restoration_shortfall(report))
+
     def test_a_failed_developer_chat_test_installs_nothing(self) -> None:
         report = self.corpus / "sequences-test.json"
-        report.write_text("{}", encoding="utf-8")
+        report.write_text(sealed_report(0), encoding="utf-8")
         runner = Recorder("evaluate_devchat_test.py")
         with patch("shutil.copyfile") as copy:
             self.assertNotEqual(promotion.promote(self.candidate, self.prefix, self.corpus, report, runner), 0)
