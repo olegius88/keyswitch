@@ -75,6 +75,7 @@ class PromotionTests(unittest.TestCase):
     def checks(self, runner: Recorder, changed: list[str] | None = None, gain: bool = True,
                shortfall: Sequence[str] = ()) -> list[str]:
         with (patch("evaluate_context_action_sequences.validate_candidate_seal", return_value={}),
+              patch("evaluate_context_action_sequences.validate_prefix_seal", return_value={}),
               patch.object(promotion, "development_gain", return_value=gain),
               patch.object(promotion, "calibration_shortfall", return_value=list(shortfall)) as calibration):
             failures = promotion.preflight(self.candidate, self.prefix, self.corpus, runner, lambda: changed or [], scratch_tree)
@@ -144,12 +145,20 @@ class PromotionTests(unittest.TestCase):
             self.assertEqual(sys.path[0], str(promotion.ROOT / "src"))
         promote.assert_not_called()
 
-    def test_a_seal_the_corpus_refuses_and_a_missing_prefix_file_fail_the_checks(self) -> None:
+    def test_a_seal_the_corpus_refuses_and_a_prefix_seal_this_tree_refuses_fail_the_checks(self) -> None:
         (self.prefix / promotion.PREFIX_SEAL).unlink()
         with (patch("evaluate_context_action_sequences.validate_candidate_seal", side_effect=ValueError("corpus mismatch")),
               patch.object(promotion, "development_gain", return_value=True)):
             failures = promotion.preflight(self.candidate, self.prefix, self.corpus, Recorder(), lambda: [])
-        self.assertEqual(failures, ["candidate seal: corpus mismatch", f"missing {self.prefix / promotion.PREFIX_SEAL}"])
+        self.assertEqual(failures[0], "candidate seal: corpus mismatch")
+        self.assertTrue(failures[1].startswith("prefix seal: "))
+        # A prefix seal whose pinned files changed since it was made (the context candidate's features, say).
+        with (patch("evaluate_context_action_sequences.validate_candidate_seal", return_value={}),
+              patch("evaluate_context_action_sequences.validate_prefix_seal",
+                    side_effect=ValueError("prefix provenance changed: src/keyswitch/context_action_features.py")),
+              patch.object(promotion, "development_gain", return_value=True)):
+            failures = promotion.preflight(self.candidate, self.prefix, self.corpus, Recorder(), lambda: [])
+        self.assertEqual(failures[0], "prefix seal: prefix provenance changed: src/keyswitch/context_action_features.py")
 
     def test_a_candidate_without_a_recorded_development_gain_reads_no_sealed_test(self) -> None:
         runner = Recorder()

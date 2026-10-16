@@ -9,7 +9,8 @@ be fitted again on a fresh corpus. This tool runs every check of the pinned file
 and refuses to touch the test until they hold:
 
 1. the tracked tree is committed (the seal's provenance is the committed tree);
-2. the candidate and its seal are valid for the corpus (evaluate_context_action_sequences);
+2. the candidate and its seal are valid for the corpus, and the prefix candidate and its seal for this tree
+   (evaluate_context_action_sequences);
 3. strict typing (tools/typecheck.sh) and the named values (tools/check_named_values.py) pass;
 4. every test module the seal pins passes, with the installed pair and then with the candidate pair
    in its place (a scratch worktree of the committed tree): the install must not break them either,
@@ -134,9 +135,12 @@ def preflight(candidate: Path, prefix_candidate: Path, corpus: Path, runner: Run
         evaluator.validate_candidate_seal(candidate / CONTEXT_ARTIFACT, seal_path, corpus)
     except (OSError, ValueError) as error:
         failures.append(f"candidate seal: {error}")
-    for path in (prefix_candidate / PREFIX_ARTIFACT, prefix_candidate / PREFIX_SEAL):
-        if not path.is_file():
-            failures.append(f"missing {path}")
+    try:
+        # The prefix seal pins files the context candidate's changes may touch (context_action_features): the pair
+        # of corpus v66 reached its sealed test with a prefix model sealed before such a change, and was refused there.
+        evaluator.validate_prefix_seal(prefix_candidate / PREFIX_ARTIFACT, prefix_candidate / PREFIX_SEAL, require_calibration=True)
+    except (OSError, ValueError) as error:
+        failures.append(f"prefix seal: {error}")
     python = sys.executable
     checks = [("strict typing", ["bash", "tools/typecheck.sh"]),
               ("named values", [python, "tools/check_named_values.py"])]
