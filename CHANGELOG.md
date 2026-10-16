@@ -51,8 +51,10 @@ All notable changes to KeySwitch are documented in this file.
   gate prints counts alone.
 - A model pair's sealed tests are read only once the pair nets, on the calibration frames of its corpus and in every
   profile, at least what the released pair nets there (`tools/promote_context_action_pair.py`, measured with
-  `tools/compare_context_candidates.py`): the quality ratchet refuses a lower one at install, when both sealed tests are
-  already spent.
+  `tools/compare_context_candidates.py`), and once the prefix candidate's seal holds for the tree: the quality ratchet
+  refuses a lower one at install, when both sealed tests are already spent. After the first sealed test the pair is
+  installed, and the developer-chat test read, only if it restored more rows typed in the wrong layout than the
+  baseline pair there, as the ratchet requires.
 - A second sealed test from developer chat: comments of ru.stackoverflow written in 2024-2026, after every source a
   model of KeySwitch was fitted on, split into development and test by their question and typed through the engine in
   four modes (every layout change made, one change to Russian or to English forgotten, the message started in the other
@@ -61,6 +63,17 @@ All notable changes to KeySwitch are documented in this file.
   lose to the released pair in none of the three modes that need a restoration more messages than chance explains,
   restore in the three together no fewer than the released pair, and corrupt no more messages than either. The receipt
   publishes the counts (`devchat_test`), and the quality ratchet recomputes the floors from them.
+- The context model `context-v3-754513f80498` (corpus v65) replaces `context-v3-20be427844f6` and adds the term,
+  short-message and first-term heads; the prefix model `prefix-v2-bf3dc28f8567` retrained byte-identical. On the same
+  engine it decides calibration v65 with 39 and 60 more right conversions per profile than the model of 0.56.0 (41 and
+  61 more lone pairs of letters the counts settle and one short reply more, one term and two and one unknown tokens
+  fewer) and development v65 with 35 and 36 more; on the owner's
+  field batteries it breaks no word the model of 0.56.0 got right and corrects 11 more; of the developer-chat
+  development messages it restores 105 more and 10 fewer with a change to English forgotten, and 20 more started in the
+  other layout. On the sealed test v65, read once, it kept all 182 correctly typed sequences (the baseline pair
+  corrupted one with the early switch), restored all 182 typed in the wrong layout without the early switch against 180
+  and 181 for the baseline pair, and 9 with it, as many as the baseline pair; on the sealed developer-chat test it
+  restored 15 messages more and 2 fewer with a change to English forgotten, and 3 more started in the other layout.
 
 ## 0.56.0 — 2026-10-14
 
