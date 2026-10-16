@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from keyswitch.constants.models import BRIEF_FEATURE_PREFIX, BRIEF_HEAD_LETTERS, BRIEF_RATIO_BOUND  # noqa: E402
 from keyswitch.constants.model_protocol import CALIBRATION, DEVELOPMENT, TRAIN  # noqa: E402
 from keyswitch.constants.training import BRIEF_BOUNDARIES  # noqa: E402
-from keyswitch.context_action_features import brief_question, extract_action_features  # noqa: E402
+from keyswitch.context_action_features import brief_question, brief_settled, extract_action_features  # noqa: E402
 from keyswitch.context_model import ContextEvidence  # noqa: E402
 from keyswitch.input_context import FieldContext  # noqa: E402
 import train_context_action_model as trainer  # noqa: E402
@@ -49,9 +49,15 @@ class BriefHeadTests(unittest.TestCase):
         # reading is seen. `ok` is the other way round.
         self.assertIn(f"ratio:{BRIEF_RATIO_BOUND}", reply)
         self.assertIn("seen:1:0", reply)
-        english = head("ok", "щл")
-        self.assertIn(f"ratio:{-BRIEF_RATIO_BOUND}", english)
-        self.assertIn("seen:0:1", english)
+        # The head answers only a token the counts settle as a Russian word's keys: `ok` is an English word, `ds` (`вы`)
+        # and `ij` (`шо`) are counted both ways, and a token the profile's lexicon knows stays with the frozen model.
+        for latin, cyrillic in (("ok", "щл"), ("ds", "вы"), ("ij", "шо")):
+            self.assertFalse(brief_settled(latin, cyrillic), latin)
+            self.assertEqual(head(latin, cyrillic), set())
+        self.assertTrue(brief_settled("gy", "пн"))
+        self.assertTrue(head("gy", "пн"))
+        item = ContextEvidence("ytn", "нет", 0, FieldContext("Telegram", "1"), "enter", source_known=True, boundary_text="\n")
+        self.assertFalse([name for name in extract_action_features(item) if name.startswith(BRIEF_FEATURE_PREFIX)])
         # The counts on their own are no evidence: the head learnt the tokens by heart from them.
         self.assertFalse([name for name in reply if name.startswith(("russian:", "english:", "latin:"))])
         self.assertIn("case:title", head("Ytn", "Нет"))
@@ -71,6 +77,9 @@ class BriefHeadTests(unittest.TestCase):
         self.assertFalse(families[TRAIN] & families[DEVELOPMENT])
         self.assertTrue(all(brief_question(row.original, row.field.before, "") and not row.field.before for row in train))
         self.assertTrue(all(len(row.original) in BRIEF_HEAD_LETTERS and row.group == 0 for row in train))
+        # Only tokens the counts settle as a Russian word's keys are framed.
+        self.assertTrue(all(brief_settled(row.original, trainer.translated(row.original, 0)) for row in train + development))
+        self.assertTrue(sum(cast(dict[str, int], value["tokens"]).get("unsettled", 0) for value in (report, development_report)))
         # Every token at every boundary, in two cases; `ytn` is held out.
         self.assertEqual({(row.trigger, row.boundary_text) for row in train}, set(BRIEF_BOUNDARIES))
         self.assertNotIn("ytn", families[TRAIN] | families[DEVELOPMENT])

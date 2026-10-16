@@ -13,16 +13,23 @@ All notable changes to KeySwitch are documented in this file.
   detector's score and how the word after it was given; a token the lexicon knows as a Russian word stays with the
   model as before, however rare in the tables. The end of a Russian word typed as a token of its own to finish
   a word begun earlier stays: `ев` ends 169 words of the table and `ась` 889, `зк` and `сш` one. Alone at the start of
-  a message, a term of two letters, or one that may be such a tail, waits for the next word or for a pause of a second
-  and a half, as the model left `гш` and `йк` before; a longer one converts at the space (`тзь` for `npm`, `ювшые` for
-  `.dist`).
+  a message in a field KeySwitch read and found empty, a term of up to three letters converts at once, at the space
+  (`йк ` for `qr`, `зк ` for `pr`), where 0.56.0, unless the early switch had already converted it, waited for a pause
+  of a second and a half; a third new head of the context model answers there. Two or three letters that end many
+  Russian words (`шь`, `уче`) may be the end of a word, and there they wait for the next word and stay as typed at a
+  pause, where 0.56.0 converted them (to `im`, `ext`). Where the field could not be read, the text before
+  the term is unknown: a term of two letters waits for the next word or for the pause, as before, and a longer one
+  converts at the space (`тзь` for `npm`, `ювшые` for `.dist`). A term converted at once stays when a Russian word
+  follows it: `йк истек` becomes `qr истек`.
 - A short reply typed in the English layout as a whole message converts: `ytn` (`нет`) and `dct` (`все`), sent with
   Enter or left at a pause, were kept or left waiting for a next word that never came. A second new head answers a
   token of two or three Latin letters with no letter before or after it in the field, whose keys in the Russian layout
   are Russian letters, from how much more often Russian prose uses the Cyrillic reading than English prose and Russian
-  technical text the Latin one, whether either occurs at all, the boundary and the case. Russian letters typed alone
-  stay with the model as before: a head that read them turned Russian words typed as meant into Latin (`чук`, `дес`).
-  `vs` sent alone becomes `мы`, the far more frequent reading.
+  technical text the Latin one, whether either occurs at all, the boundary and the case. It answers only a token whose
+  counts settle it: the Russian reading counted thirty times or more and at least five times as often as the Latin one,
+  which occurs fewer than thirty times and which the lexicon does not know. A token both readings count (`vs` and `мы`,
+  `ds` and `вы`, `lf` and `да`) stays with the model as before, and so do Russian letters typed alone: a head that read
+  them turned Russian words typed as meant into Latin (`чук`, `дес`).
 - A term converted into Latin letters amid Russian text is no longer taken back by the Russian one-letter word after it:
   the layout follows the conversion, so `и` comes out as `b` and is corrected, and the engine then asked the model about
   the term again with `и` after it and took both words back (`принимай зк и` from `принимай pr b`). A one-letter
@@ -39,8 +46,13 @@ All notable changes to KeySwitch are documented in this file.
 - Releases are held to the owner's own typing: the field batteries rebuilt from the technical logs are replayed with the
   tree of the last release and with the new one (`tools/field_regression_gate.py`, the `field-regression` phase of the
   release pipeline and a check before a model pair's sealed test is read), and a word the last release got right that
-  the new tree gets wrong stops the release. The batteries and the gate's records stay private; the gate prints counts
-  alone.
+  the new tree gets wrong stops the release. A token meant in both scripts (`ssh-агента`, `lid-режиме`) is taken out of
+  the comparison, as neither of its readings is what was meant. The batteries and the gate's records stay private; the
+  gate prints counts alone.
+- A model pair's sealed tests are read only once the pair nets, on the calibration frames of its corpus and in every
+  profile, at least what the released pair nets there (`tools/promote_context_action_pair.py`, measured with
+  `tools/compare_context_candidates.py`): the quality ratchet refuses a lower one at install, when both sealed tests are
+  already spent.
 - A second sealed test from developer chat: comments of ru.stackoverflow written in 2024-2026, after every source a
   model of KeySwitch was fitted on, split into development and test by their question and typed through the engine in
   four modes (every layout change made, one change to Russian or to English forgotten, the message started in the other

@@ -65,10 +65,50 @@ class PromotionTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.directory.cleanup()
 
-    def checks(self, runner: Recorder, changed: list[str] | None = None, gain: bool = True) -> list[str]:
+    def checks(self, runner: Recorder, changed: list[str] | None = None, gain: bool = True,
+               shortfall: Sequence[str] = ()) -> list[str]:
         with (patch("evaluate_context_action_sequences.validate_candidate_seal", return_value={}),
-              patch.object(promotion, "development_gain", return_value=gain)):
-            return promotion.preflight(self.candidate, self.prefix, self.corpus, runner, lambda: changed or [], scratch_tree)
+              patch.object(promotion, "development_gain", return_value=gain),
+              patch.object(promotion, "calibration_shortfall", return_value=list(shortfall)) as calibration):
+            failures = promotion.preflight(self.candidate, self.prefix, self.corpus, runner, lambda: changed or [], scratch_tree)
+        # The calibration is compared once every other check holds.
+        self.assertEqual(calibration.called, not [failure for failure in failures if "calibration" not in failure])
+        return failures
+
+    def test_a_candidate_netting_less_calibration_than_the_installed_pair_reads_no_sealed_test(self) -> None:
+        runner = Recorder()
+        self.assertEqual(self.checks(runner, shortfall=["hunspell"]), [
+            "the calibration nets less than the installed pair's in the hunspell profile "
+            "(tools/compare_context_candidates.py): the quality ratchet would refuse the install"])
+        self.assertFalse(any("evaluate_context_action_sequences.py" in " ".join(command) for command in runner.commands))
+        self.assertEqual(self.checks(Recorder(), gain=False), [
+            "no developer-chat development result of the candidate holds both floors (tools/evaluate_devchat_test.py --split dev)"])
+
+    def test_the_calibration_is_compared_with_the_installed_pair_on_the_corpus(self) -> None:
+        output = self.candidate / promotion.CALIBRATION_COMPARISON
+        commands: list[list[str]] = []
+
+        def comparing(nets: dict[str, tuple[int, int]], status: int = 0) -> promotion.Runner:
+            def runner(command: Sequence[str], cwd: Path = promotion.ROOT) -> int:
+                commands.append(list(command))
+                report = {profile: {name: {"by_class": {"all": {"net": net}}} for name, net in zip(("installed", "candidate"), pair)}
+                          for profile, pair in nets.items()}
+                output.write_text(json.dumps({"calibration": report, "development": {}}), encoding="utf-8")
+                return status
+            return runner
+
+        self.assertEqual(promotion.calibration_shortfall(self.candidate, self.corpus, comparing({"portable": (1, 1), "hunspell": (0, 1)})), [])
+        command = commands[-1]
+        self.assertEqual(command[1], "tools/compare_context_candidates.py")
+        self.assertIn(f"installed={promotion.ROOT / promotion.INSTALLED[promotion.CONTEXT_ARTIFACT]}", command)
+        self.assertIn(f"candidate={self.candidate / promotion.CONTEXT_ARTIFACT}", command)
+        self.assertEqual(command[command.index("--corpus") + 1], str(self.corpus))
+        self.assertEqual(promotion.calibration_shortfall(self.candidate, self.corpus, comparing({"portable": (1, 0), "hunspell": (1, 0)})),
+                         ["hunspell", "portable"])
+        # A comparison that did not run, or left no report, holds in no profile.
+        self.assertEqual(promotion.calibration_shortfall(self.candidate, self.corpus, comparing({}, status=1)), ["every"])
+        self.assertEqual(promotion.calibration_shortfall(self.candidate, self.corpus, Recorder()), ["every"])
+        self.assertFalse(output.exists())
 
     def test_the_tests_the_seal_pins_are_run_by_module(self) -> None:
         seal = json.loads((self.candidate / promotion.CONTEXT_SEAL).read_bytes())

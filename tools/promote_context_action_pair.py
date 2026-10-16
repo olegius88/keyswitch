@@ -18,7 +18,11 @@ and refuses to touch the test until they hold:
    comes out wrong (tools/field_regression_gate.py, the owner's decision of 15.10.2026): a pair that breaks
    one would be refused by the release anyway, and its sealed test would be spent for nothing;
 6. the candidate's development result on the developer-chat messages is recorded and holds both floors
-   (tools/evaluate_devchat_test.py --split dev): the developer-chat test is read only for such a candidate.
+   (tools/evaluate_devchat_test.py --split dev): the developer-chat test is read only for such a candidate;
+7. on the corpus's calibration frames the candidate nets, in every profile, at least what the installed pair nets
+   there (tools/compare_context_candidates.py): the quality ratchet measures the receipt against that very number
+   (tests/test_quality_ratchet.py), and candidate v63e, which passed both sealed tests, could not be installed for
+   netting 23 frames less.
 
 Then it reads the sealed test (once: an existing report is reused) and, once that passed, the sealed
 developer-chat test (once, before the install: the released pair it is compared with is the installed one),
@@ -56,6 +60,8 @@ INSTALLED: Final = {
     PREFIX_SEAL: "model/prefix_v2/candidate-seal.json",
 }
 RECEIPT: Final = "model/context_v3/release-receipt.json"
+# Where the comparison of the candidate's calibration with the installed pair's goes, in the candidate's directory.
+CALIBRATION_COMPARISON: Final = "calibration-comparison.json"
 TEST_MODULE_PREFIX: Final = "tests/test_"
 # The developer-chat messages (tools/build_devchat_messages.py) are private; KEYSWITCH_DEVCHAT_DIRECTORY names another place.
 DEVCHAT_DIRECTORY: Final = ROOT / ".t/devchat/messages"
@@ -153,7 +159,26 @@ def preflight(candidate: Path, prefix_candidate: Path, corpus: Path, runner: Run
     if not development_gain(candidate / CONTEXT_ARTIFACT):
         failures.append("no developer-chat development result of the candidate holds both floors "
                         "(tools/evaluate_devchat_test.py --split dev)")
+    if not failures:
+        failures.extend(f"the calibration nets less than the installed pair's in the {name} profile "
+                        "(tools/compare_context_candidates.py): the quality ratchet would refuse the install"
+                        for name in calibration_shortfall(candidate, corpus, runner))
     return failures
+
+
+def calibration_shortfall(candidate: Path, corpus: Path, runner: Runner = run) -> list[str]:
+    """The profiles in which the candidate nets less on the corpus's calibration frames than the installed pair, as
+    tools/compare_context_candidates.py scores both (every profile, when the comparison could not run)."""
+    output = candidate / CALIBRATION_COMPARISON
+    output.unlink(missing_ok=True)
+    command = [sys.executable, "tools/compare_context_candidates.py", "--corpus", str(corpus),
+               "--artifact", f"installed={ROOT / INSTALLED[CONTEXT_ARTIFACT]}",
+               "--artifact", f"candidate={candidate / CONTEXT_ARTIFACT}", "--output", str(output)]
+    if runner(command) != 0 or not output.is_file():
+        return ["every"]
+    profiles = json.loads(output.read_bytes())["calibration"]
+    return sorted(name for name, pairs in profiles.items()
+                  if pairs["candidate"]["by_class"]["all"]["net"] < pairs["installed"]["by_class"]["all"]["net"])
 
 
 def development_gain(artifact: Path) -> bool:

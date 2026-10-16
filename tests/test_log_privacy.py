@@ -40,6 +40,10 @@ class LogPrivacyTests(unittest.TestCase):
                                  "words": ["тайна", "дальше"], "count": 1})
         self.assertEqual(later, {"event": "correction_applied", "original": "*****", "application": "mail2024app",
                                  "words": ["*****", "дальше"], "count": 1})
+        # Words in lists are found at any depth: under a word key and under another key; a word key without text holds none.
+        listed = redactor.record({"original": ("ключ",), "steps": [{"word": "шифр"}], "replacement": None,
+                                  "context": {"words": {1: "пароль"}}})
+        self.assertEqual((listed["original"], listed["steps"], listed["replacement"]), (["****"], [{"word": "****"}], None))
         # Without a marker before it a word stays, and the remembered words are the last few only.
         self.assertEqual(redactor.record({"original": "слово", "context": {"words": {1: "обычное", 0: ""}}})["original"], "слово")
         for index in range(LOG_SECRET_REMEMBERED_WORDS):

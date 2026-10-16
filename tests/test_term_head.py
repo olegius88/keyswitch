@@ -18,9 +18,11 @@ from keyswitch.constants.models import TERM_FEATURE_PREFIX, TERM_HEAD_MIN_LATIN_
 from keyswitch.constants.model_protocol import CALIBRATION, DEVELOPMENT, TRAIN  # noqa: E402
 from keyswitch.constants.models import TERM_HEAD_ENDING_LETTERS  # noqa: E402
 from keyswitch.constants.training import (  # noqa: E402
-    TERM_ALONE_WAIT_MAX_LETTERS, TERM_CAPITALS_MAX_LETTERS, TERM_FRAGMENT_MIN_ENDING_BUCKET,
+    TERM_ALONE_WAIT_MAX_LETTERS, TERM_CAPITALS_MAX_LETTERS,
 )
-from keyswitch.context_action_features import extract_action_features, russian_ending_bucket, term_question  # noqa: E402
+from keyswitch.context_action_features import (  # noqa: E402
+    alone_tail, extract_action_features, russian_ending_bucket, term_question,
+)
 from keyswitch.context_model import ContextEvidence, term_bucket  # noqa: E402
 from keyswitch.input_context import FieldContext  # noqa: E402
 import train_context_action_model as trainer  # noqa: E402
@@ -61,6 +63,10 @@ class TermHeadTests(unittest.TestCase):
                          "signed:1:before:ru"} <= signed)
         # The letters with the boundary: alone at a space, two letters wait and more convert.
         self.assertIn("before:none:boundary:space:letters:2", head(evidence("гш", "ui", "")))
+        # Alone in a field a reader read empty a short term is the first-term head's, not this head's.
+        read = replace(evidence("йк", "qr", ""), field=FieldContext("Code", "test", "", "", "text", source="uia"))
+        self.assertEqual(head(read), set())
+        self.assertTrue(head(evidence("йк", "qr", "")))
         # No copy of the shared features: the frozen model reads the context, the head its own evidence alone.
         self.assertFalse(any(name.startswith(("source:", "target:", "before:char")) for name in signed))
         self.assertTrue({"signed:0", "extension:1", "before:none", "ending:na"} <= head(evidence("юучу", ".exe", "")))
@@ -108,22 +114,25 @@ class TermHeadTests(unittest.TestCase):
                 self.assertLessEqual(len(row.original), TERM_CAPITALS_MAX_LETTERS)
             if row.original[:1].isupper() and not row.original.isupper():
                 self.assertTrue(row.field.before.endswith(". "))
-        # Alone at the start of a message and ended by a space, a term of two letters, or one that ends as many Russian
-        # words as a kept tail does, waits for its next word, as the lone-word head leaves such a word: the engine asks a
-        # waiting word again at a pause, a suggestion never. Any other converts at once.
+        # Alone at the start of a message and ended by a space, in a field nobody read, a term of two letters waits for
+        # its next word, as the lone-word head leaves such a word: the engine asks a waiting word again at a pause, a
+        # suggestion never. Any other converts at once.
         alone = [row for row in train + development if not row.field.before and row.trigger == "space"
-                 and not row.identifier.endswith(":revisit")]
-
-        def waits(token: str) -> bool:
-            ending = russian_ending_bucket(token)
-            return len(token) <= TERM_ALONE_WAIT_MAX_LETTERS or (ending != "na" and int(ending) >= TERM_FRAGMENT_MIN_ENDING_BUCKET)
-
-        self.assertEqual({row.action for row in alone if waits(row.original)}, {"wait"})
-        self.assertEqual({row.action for row in alone if not waits(row.original)}, {"convert"})
+                 and row.field.role == "unknown" and not row.identifier.endswith(":revisit")]
+        self.assertEqual({row.action for row in alone if len(row.original) <= TERM_ALONE_WAIT_MAX_LETTERS}, {"wait"})
+        self.assertEqual({row.action for row in alone if len(row.original) > TERM_ALONE_WAIT_MAX_LETTERS}, {"convert"})
         # Every short term stands once more alone at a space, to wait.
         short = [row for row in train + development if row.identifier.endswith(":alone")]
         self.assertTrue(short)
         self.assertTrue(all(len(row.original) <= TERM_ALONE_WAIT_MAX_LETTERS and row.action == "wait" for row in short))
+        # A term of up to three letters converted at once alone in a field a reader read empty (the first-term head's) is
+        # asked again with a Russian word after it, as the engine asks it, and stays; a possible tail is not converted there.
+        again = [row for row in train + development if row.identifier.endswith(":alone-read-revisit")]
+        self.assertTrue(again)
+        self.assertTrue(all(len(row.original) <= max(TERM_HEAD_ENDING_LETTERS) and not alone_tail(row.original) for row in again))
+        self.assertTrue(all(row.revisit and row.action == "convert" and row.field.after and not row.field.before
+                            and row.field.role != "unknown" for row in again))
+        self.assertFalse([row for row in train + development if row.identifier.endswith(":alone-read")])
         self.assertFalse([row for row in train + development if row.after_origin == "kept_next_word"])
         # Each term and each kept tail is also asked again as the engine asks a converted word whose next word went back:
         # a short Russian word after it, given as a planned conversion (a token of up to three letters) or as the field.
@@ -136,13 +145,18 @@ class TermHeadTests(unittest.TestCase):
         self.assertEqual({row.action for row in revisits if row.identifier.startswith("term:")}, {"convert"})
         # Each with the baseline the engine gives it: its own boundary's verdict with no conversion (ActionRow.revisit).
         self.assertTrue(all(row.revisit for row in revisits))
-        self.assertFalse(any(row.revisit for row in train + development if not row.identifier.endswith(":revisit")))
+        self.assertFalse(any(row.revisit for row in train + development if not row.identifier.endswith("revisit")))
         # The piece is kept at most `per_piece` times, after its row's left context.
         pieces = [row for row in train if row.action == "keep" and not row.identifier.endswith(":revisit")]
         self.assertEqual([row.original for row in pieces], ["ев"] * TERM_FIXTURE_PER_PIECE)
         self.assertTrue(all(row.field.before == "Он принимал " for row in pieces))
         self.assertIn(len(pieces[0].original), TERM_HEAD_ENDING_LETTERS)
         self.assertEqual(report["pieces"], 1)
+        # A word opening its row gives no piece: alone in its field, a tail stands where a term does.
+        opening = trainer.term_curriculum(TRAIN, [replace(word, identifier="t0", document="first", before=""), *rows],
+                                          frozenset(), TERMS)
+        self.assertFalse([row for row in opening[0] if row.identifier.startswith("term-piece:t0:")])
+        self.assertEqual(cast(dict[str, int], opening[1]["items"])["skipped:row-start"], 1)
         # Held-out tokens and test aliases are refused in either reading.
         held = trainer.term_curriculum(TRAIN, rows, frozenset(), {**TERMS, "held_out": ["td"]})
         self.assertFalse([row for row in held[0] if row.action == "keep"])

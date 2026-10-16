@@ -115,12 +115,20 @@ TERM_FRAGMENT_MIN_REST: Final = 2
 # undid its conversion to `lst`, which a head without those tails repeated (experiment E8).
 TERM_FRAGMENT_MIN_ENDING_BUCKET: Final = 3
 # Alone at the start of a message and ended by a space, a term of at most this many letters waits for its next word (a
-# pause settles a wait, never a suggestion), and so does one with an ending bucket of TERM_FRAGMENT_MIN_ENDING_BUCKET or
-# more, a token a kept tail may be: converting there, the head only suggested `гш` and `йк`, which stayed, and turned
-# the tail `дые` into `lst` (experiments E9c and E9e). Any other converts at once: waiting, `тзь`, `сым`, `ШВУ` and
-# `уккщк` (`npm`, `csv`, `IDE`, `error`) opening a message stayed where the frozen model had converted them (development
-# of ru.stackoverflow, experiment E9d), and `ювшые` (`.dist`) with two spaces after it (sealed-pair test of corpus v63).
+# pause settles a wait, never a suggestion): converting there, the head only suggested `гш` and `йк`, which stayed
+# (experiment E9c). Any other converts at once: waiting, `тзь`, `сым`, `ШВУ` and `уккщк` (`npm`, `csv`, `IDE`,
+# `error`) opening a message stayed where the frozen model had converted them (development of ru.stackoverflow,
+# experiment E9d), and `ювшые` (`.dist`) with two spaces after it (sealed-pair test of corpus v63). Waiting for a token
+# a kept tail may be as well, in a field nobody read, turned `оуе`, `щге` and `еен` (`jet`, `out`, `tty`), which 0.56.0
+# converted, into suggestions (candidate v64): that wait holds in a field read empty only (TERM_SHORT_TAIL_MIN_ENDING_BUCKET).
 TERM_ALONE_WAIT_MAX_LETTERS: Final = 2
+# Alone in a field a reader read empty, a term opens a message and converts at once (`йк ` for `qr`, the owner's
+# requirement of 16.10.2026), unless it may still be a tail, a suggestion then: of three letters from TERM_FRAGMENT_MIN_ENDING_BUCKET, of
+# two letters from this bucket (context_action_features.alone_tail). Two-letter endings end more words by chance (the
+# median two-letter term ends eight words, a three-letter one three), and the bound is set by the owner's typing: `йк`
+# ends 11 words (bucket 4), the shortest two-letter tail the field batteries hold, `ев`, 169 (bucket 8); the batteries
+# replay a stream that starts with such a tail into an empty field (`ев сервера`, `шаю эту`, `дые`).
+TERM_SHORT_TAIL_MIN_ENDING_BUCKET: Final = 5
 # Every term of the term curriculum, and every kept tail, is also asked again as the engine asks a converted word once
 # the word after it went back (engine._revert_with_next_word): after one of the TERM_REVISIT_FOLLOWERS most frequent words
 # of Russian prose of at most TERM_REVISIT_FOLLOWER_MAX_LETTERS letters (`и`, `в`, `на`).

@@ -145,6 +145,19 @@ TERM_HEAD_ENDING_BUCKET_MAX: Final = 12
 BRIEF_FEATURE_PREFIX: Final = "brief|"
 BRIEF_HEAD_LETTERS: Final = (2, 3)
 BRIEF_RATIO_BOUND: Final = 8
+# The head answers only a token whose counts settle it as a Russian word typed in the English layout, as the
+# calibration's lone words are labelled (context_deferral.counted_reading): the Cyrillic reading counted at least
+# BRIEF_SETTLED_MIN_COUNT times and BRIEF_SETTLED_DOMINANCE times as often as the Latin one in English prose or Russian
+# technical text, which stays under BRIEF_SETTLED_OTHER_MAXIMUM and no lexicon of the profile knows. Answering every
+# token of the class, the head turned pairs both readings count (`ij`, `Jq`) into Russian and kept `ds` (`вы`) at
+# some boundaries, where the calibration takes the frozen model's answer (corpus v63, candidate v63e).
+BRIEF_SETTLED_MIN_COUNT: Final = 30
+BRIEF_SETTLED_OTHER_MAXIMUM: Final = 30
+BRIEF_SETTLED_DOMINANCE: Final = 5
+# A term of up to three letters alone in a field a field reader read empty has evidence of its own under this prefix: the
+# first-term head (context_action_features.first_question). There it opens a message and converts at once (`йк ` for
+# `qr`, the owner's requirement of 16.10.2026), unless it may still be the tail of a Russian word.
+FIRST_FEATURE_PREFIX: Final = "first|"
 # The "length" feature buckets every word length from here up together (schemas 2 and 3).
 ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: Final = 6
 # Short categorical field labels (role, trigger) truncated before they reach a feature name.
@@ -253,13 +266,13 @@ CONTEXT_FEATURE_NGRAM_ORDERS: Final = (1, 2, 3)
 # and version strings of at most these many characters, weights of at most this magnitude, and a
 # conversion threshold from this floor up to one.
 MAX_CONTEXT_MODEL_FEATURES: Final = 50000
-# An action model (schema 3) holds up to twelve feature spaces: the word decided at its boundary, the
+# An action model (schema 3) holds up to thirteen feature spaces: the word decided at its boundary, the
 # kept-neighbour question (KEPT_FEATURE_PREFIX), the capitals head (CAPITALS_FEATURE_PREFIX), the
 # lone-word head (ALONE_FEATURE_PREFIX), the message-start head (START_FEATURE_PREFIX), the
 # single-letter head (LETTER_FEATURE_PREFIX), the abbreviation heads (ABBREVIATION_FEATURE_PREFIX,
 # LATIN_ABBREVIATION_FEATURE_PREFIX), the unknown-token head (UNKNOWN_FEATURE_PREFIX), the joined-token head
-# (JOINED_FEATURE_PREFIX), the term head (TERM_FEATURE_PREFIX) and the short-message head (BRIEF_FEATURE_PREFIX), each
-# with its own budget in the recipe. Raised from 100 000 with the unknown-token head: the
+# (JOINED_FEATURE_PREFIX), the term heads (TERM_FEATURE_PREFIX, FIRST_FEATURE_PREFIX) and the short-message head
+# (BRIEF_FEATURE_PREFIX), each with its own budget in the recipe. Raised from 100 000 with the unknown-token head: the
 # 0.54.0 pair holds 98 498.
 MAX_CONTEXT_ACTION_MODEL_FEATURES: Final = 110000
 MAX_CONTEXT_FEATURE_NAME_CHARACTERS: Final = 512

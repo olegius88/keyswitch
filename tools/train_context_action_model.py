@@ -28,9 +28,9 @@ from typing import Final, cast
 from unittest.mock import patch
 
 from keyswitch.context_action_features import (
-    abbreviation_question, alone_question, attested_abbreviation, capitals_question, extract_action_features,
-    brief_question, joined_question, latin_abbreviation_question, letter_question, russian_ending_bucket, start_question,
-    term_question, unknown_question, unknown_shape,
+    abbreviation_question, alone_question, alone_tail, attested_abbreviation, capitals_question, extract_action_features,
+    brief_question, brief_settled, first_question, joined_question, latin_abbreviation_question, letter_question, russian_ending_bucket,
+    start_question, term_question, unknown_question, unknown_shape,
 )
 from keyswitch.context_model import (
     ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, _term_frequency, term_bucket,
@@ -38,7 +38,7 @@ from keyswitch.context_model import (
 from keyswitch.context_policy import evidence_for_decision
 from keyswitch.detector import LanguageDetector
 from keyswitch.identifier_lexicon import IdentifierLexicon
-from keyswitch.input_context import FieldContext
+from keyswitch.input_context import FieldContext, FieldRole
 from keyswitch.lexicon_supplement import supplement_words
 from keyswitch.intent_model import CorrectionTrigger, IntentModelStatus, LinearNgramModel
 from keyswitch.language_model import LanguageModel
@@ -71,7 +71,7 @@ from keyswitch.constants.file_formats import HEXADECIMAL_BASE, VERSION_HASH_CHAR
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
 from keyswitch.constants.models import (
     ABBREVIATION_FEATURE_PREFIX, ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS, ALONE_FEATURE_PREFIX, ALONE_HEAD_LETTERS,
-    BRIEF_FEATURE_PREFIX, BRIEF_HEAD_LETTERS,
+    BRIEF_FEATURE_PREFIX, BRIEF_HEAD_LETTERS, FIRST_FEATURE_PREFIX,
     CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION,
     CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, JOINED_FEATURE_PREFIX,
     KEPT_CONTEXT_WORD_MAX_CHARACTERS, KEPT_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX, LETTER_FEATURE_PREFIX,
@@ -923,7 +923,8 @@ def joined_token_curriculum(split: str, source_rows: Sequence[CorpusRow], refuse
     in either layout, are each joined to itself after the left context of a row of their language, some opening a
     sentence with a capital - typed as written (keep) and in the other layout (convert); one word in
     JOINED_REPEAT_SPLIT_MODULUS goes to DEVELOPMENT by hash, the rest to TRAIN. Items of this corpus's test, of every accessed test and of the recipe's `held_out` list (the
-    tokens of the authored battery that gates this head) are refused.
+    tokens of the authored battery that gates this head, and the general technical tokens of the owner's typing) are
+    refused.
     """
 
     item_modulus = int(cast(int, options["item_modulus"]))
@@ -1032,21 +1033,23 @@ def term_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froze
       one variant chosen by hash: at the start of a message, ending in a sign (`.` or `,`, typed as `ю` or `б`), opening a
       sentence with a capital, or in capitals (a term of TERM_CAPITALS_MAX_LETTERS letters at most, as acronyms are
       written). Alone at the start of a message and ended by a space, a term of up to TERM_ALONE_WAIT_MAX_LETTERS
-      letters, or one that ends as many Russian words as a kept tail does, waits for its next word, as the lone-word
-      head leaves such a word (wait): the engine asks a waiting word again at a pause, a suggestion never, and labelled
-      to convert there the head only suggested `гш` and `йк`, which stayed, and converted the tail `дые` (field
-      batteries, experiments E9c and E9e). Any other converts: waiting, `тзь`, `сым` and `ШВУ` (`npm`, `csv`, `IDE`)
-      opening a message stayed where the frozen model had converted them (experiment E9d), and so did `ювшые`
-      (`.dist`) with two spaces after it; the head reads the letters with the boundary, so the two-letter wait does not
-      pull the longer ones, and every short term stands once more alone at a space (experiments E9f and E9g made `гш` a
-      suggestion: drawn by hash, too few short terms stood there). Each term is also
+      letters waits for its next word, as the lone-word head leaves such a word (wait): the engine asks a waiting word
+      again at a pause, a suggestion never, and labelled to convert there the head only suggested `гш` and `йк`, which
+      stayed (experiment E9c). Any other converts: waiting, `тзь`, `сым` and `ШВУ` (`npm`, `csv`, `IDE`) opening a
+      message stayed where the frozen model had converted them (experiment E9d), and so did `ювшые` (`.dist`) with two
+      spaces after it; the head reads the letters with the boundary, so the two-letter wait does not pull the longer
+      ones, and every short term stands once more alone at a space (experiments E9f and E9g made `гш` a suggestion:
+      drawn by hash, too few short terms stood there). Alone in a field a reader read empty a term of up to three
+      letters is the first-term head's (first_curriculum); converted there at once, it is asked again here with a
+      Russian word after it, as the engine asks it, and stays. Each term is also
       asked again as the engine asks a converted word once the word after it went back to Russian (one of the
       TERM_REVISIT_FOLLOWERS most frequent short words of Russian prose after it, convert), with the baseline the engine
       gives that question (ActionRow.revisit): `зк` in `займись зк и тз` became `pr`, the layout followed, `и` came out
       as `b`, and asked again the frozen model leaned to keeping `зк`.
       One term in TERM_SPLIT_MODULUS goes to DEVELOPMENT by hash;
     - pieces kept: the last TERM_HEAD_ENDING_LETTERS letters of the Russian words of the split's own rows that are a token
-      of the class and end many words (an ending bucket of TERM_FRAGMENT_MIN_ENDING_BUCKET or more), at most
+      of the class and end many words (an ending bucket of TERM_FRAGMENT_MIN_ENDING_BUCKET or more), of words with a
+      word before them in their row (a tail alone in its field stands where a term does), at most
       `per_piece` occurrences of one piece, in an order by hash, each after its row's left context (keep) and asked
       again with a short Russian word after it (keep): an edit inside a word leaves its tail as a token of its own. Such
       a tail is rare beside a term typed in the wrong layout (in the owner's typing about one in thirteen tokens of the
@@ -1084,11 +1087,12 @@ def term_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froze
                                                  if len(word) <= TERM_REVISIT_FOLLOWER_MAX_LETTERS and word.isalpha())
                  ][:TERM_REVISIT_FOLLOWERS]
 
-    def revisit(identifier: str, typed: str, before: str, action: ContextAction, share: float = 1.0) -> ActionRow:
+    def revisit(identifier: str, typed: str, before: str, action: ContextAction, share: float = 1.0,
+                role: FieldRole = "unknown") -> ActionRow:
         """The token asked again as the engine asks a converted word whose next word went back to Russian."""
         follower = followers[variant_choice(identifier, "follower", len(followers))]
         field = FieldContext(applications[variant_choice(identifier, "application", len(applications))], "public-training",
-                             before[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:], follower, "unknown")
+                             before[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:], follower, role)
         origin: AfterOrigin = "planned_next_conversion" if len(typed) <= PLANNED_REVISIT_MAX_CHARACTERS else "field"
         return ActionRow(identifier, typed, 1, field, "space", "", action, "term", " ", weight * share, after_origin=origin,
                          revisit=True)
@@ -1119,26 +1123,38 @@ def term_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froze
                 counts["outside_class"] += 1
                 continue
             framed = frame(f"{family}:{index}", token, left, "convert")
-            ending = russian_ending_bucket(token)
-            tail_like = ending != "na" and int(ending) >= TERM_FRAGMENT_MIN_ENDING_BUCKET
-            if not left and framed.trigger == "space" and (len(token) <= TERM_ALONE_WAIT_MAX_LETTERS or tail_like):
+            if not left and framed.trigger == "space" and len(token) <= TERM_ALONE_WAIT_MAX_LETTERS:
                 framed = replace(framed, action="wait")
             counts[f"{framed.action}:{kind}"] += 1
             rows.append(framed)
         if term_question(typed, context):
             counts["convert:revisit"] += 1
             rows.append(revisit(f"{family}:revisit", typed, context, "convert"))
-        if len(typed) <= TERM_ALONE_WAIT_MAX_LETTERS and term_question(typed, ""):
-            # Every short term once more alone at a space: drawn among the variants and boundaries by hash, too few of them
-            # stood there against the longer terms that convert, and `гш` came out a suggestion (experiments E9f, E9g).
-            counts["wait:alone"] += 1
+        if len(typed) <= max(TERM_HEAD_ENDING_LETTERS) and term_question(typed, ""):
             field = FieldContext(applications[variant_choice(family, "alone-application", len(applications))],
                                  "public-training", "", "", "unknown")
-            rows.append(ActionRow(f"{family}:alone", typed, 1, field, "space", "", "wait", "term", " ", weight))
+            if len(typed) <= TERM_ALONE_WAIT_MAX_LETTERS:
+                # Every short term once more alone at a space: drawn among the variants and boundaries by hash, too few
+                # of them stood there against the longer terms that convert, and `гш` came out a suggestion (experiments
+                # E9f, E9g).
+                counts["wait:alone"] += 1
+                rows.append(ActionRow(f"{family}:alone", typed, 1, field, "space", "", "wait", "term", " ", weight))
+            # A term converted at once alone in a field a reader read empty (first_curriculum) is asked again as the
+            # engine asks it once a Russian word follows, and stays: the engine took `qr` back with `истек` after it
+            # (candidate v64b).
+            if not alone_tail(typed):
+                counts["convert:alone-read-revisit"] += 1
+                rows.append(revisit(f"{family}:alone-read-revisit", typed, "", "convert", role="text"))
     taken: Counter[str] = Counter()
     russian = sorted((row for row, group, _, _ in _monolingual_rows(source_rows) if group == 1),
                      key=lambda row: hashlib.sha256(f"term-piece:{row.identifier}".encode()).digest())
     for row in russian:
+        if not any(char.isalpha() for char in row.before):
+            # A tail with no word before it stands alone in its field, a term's place: framed kept there, the tails of
+            # words opening a row outweighed the wait of a lone short term in a field nobody read, and `зь`, `цу`
+            # (`pm`, `we`), which 0.56.0 left waiting, were kept (candidate v64c).
+            counts["skipped:row-start"] += 1
+            continue
         for size in TERM_HEAD_ENDING_LETTERS:
             piece = row.original[-size:]
             if (len(row.original) - size < TERM_FRAGMENT_MIN_REST or taken[piece.casefold()] >= per_piece
@@ -1158,9 +1174,59 @@ def term_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froze
                   "sample_weight": weight,
                   "scope": "terms of the Latin table typed in the Russian layout after Russian prose, at the start of a "
                            "message, with a sign after them, with a capital or in capitals, and asked again after a "
-                           "Russian word that went back (convert; alone at a space, a term of two letters or one ending "
-                           "many Russian words waits), and the tails of the split's Russian words that are such a token "
-                           "(keep), of this split's share (term_curriculum)."}
+                           "Russian word that went back (convert; alone at a space, a term of two letters waits), and the "
+                           "tails of the split's Russian words after a word that are such a token (keep), of this split's "
+                           "share (term_curriculum)."}
+
+
+def first_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                     options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """Terms of up to three letters alone in a field a field reader read empty (context_action_features.first_question).
+
+    There a term opens a message, and the owner asked for `йк ` (`qr`) to convert at once (16.10.2026), where the frozen
+    model waited for a pause. The term head, which chooses an early epoch for its other frames, stopped short of the
+    threshold there: `зк` and `йк` became suggestions at p 0.98, which no pause settles (candidates v64b to v64e). Every
+    term of the Latin table whose keys in the Russian layout are a token of the class stands alone in such a field,
+    ended by a space (convert) and by a pause (convert). A token that may still be the tail of a Russian word
+    (alone_tail) waits at the space and is kept at the pause: nothing stands before a tail in a field read empty, but a
+    field battery replays a stream that starts with one into an empty field (`дые`, which the owner typed completing
+    `моло`), and waiting there it went to `lst` at the pause (candidate v64c). Each term goes to DEVELOPMENT or TRAIN as
+    the term curriculum draws it (TERM_SPLIT_MODULUS), and DEVELOPMENT chooses the head's own epoch. Tokens of this
+    corpus's test, of every accessed test and of the recipe's `held_out` list (the class's tokens of the owner's typing)
+    are refused.
+    """
+
+    if not options.get("enabled") or split not in (TRAIN, DEVELOPMENT):
+        return [], {"frames": 0, "scope": "not used"}
+    weight = float(cast(float, options["sample_weight"]))
+    held_out = frozenset(str(token).casefold() for token in cast(list[object], options.get("held_out", [])))
+    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+    rows: list[ActionRow] = []
+    counts: Counter[str] = Counter()
+    for term in sorted(_term_frequency()["latin"]):
+        if not term.isascii() or not term.isalpha() or not term.islower():
+            continue
+        typed = translated(term, 0)
+        family = f"term:{typed}"
+        if not first_question(typed, "", ""):
+            continue
+        if (DEVELOPMENT if variant_choice(family, "split", TERM_SPLIT_MODULUS) == 0 else TRAIN) != split:
+            continue
+        if term.casefold() in held_out or typed.casefold() in held_out or refused & (expanded_aliases(term) | expanded_aliases(typed)):
+            counts["refused"] += 1
+            continue
+        tail = alone_tail(typed)
+        field = FieldContext(applications[variant_choice(f"first:{typed}", "application", len(applications))], "public-training",
+                             "", "", "text", source="reader")
+        for trigger, boundary_text, action in (("space", " ", "wait" if tail else "convert"),
+                                               ("pause", "", "keep" if tail else "convert")):
+            counts[f"{action}:{trigger}"] += 1
+            rows.append(ActionRow(f"first:{typed}:{trigger}", typed, 1, field, cast(CorrectionTrigger, trigger), "",
+                                  cast(ContextAction, action), "first", boundary_text, weight))
+    return rows, {"frames": len(rows), "items": dict(sorted(counts.items())), "held_out": len(held_out), "sample_weight": weight,
+                  "scope": "terms of up to three letters of the Latin table typed in the Russian layout alone in a field a "
+                           "reader read empty, ended by a space and by a pause (convert; a token that may still be the "
+                           "tail of a Russian word waits at the space and is kept at the pause) (first_curriculum)."}
 
 
 def brief_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
@@ -1174,7 +1240,10 @@ def brief_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froz
     and each word of English prose or Latin term of Russian technical text counted as often, typed as meant, stands
     alone at the start of a message, ended by every boundary of BRIEF_BOUNDARIES, in lower case and capitalised. A token
     that is both (`vs` and `мы`) is framed both ways: converted with the share of the Russian reading among the counts of
-    both readings, kept with the rest, so the head learns what a message of these keys most likely meant. One token in
+    both readings, kept with the rest, so the head learns what a message of these keys most likely meant. Only tokens
+    the counts settle as a Russian word are framed (context_action_features.brief_settled), the head's class: framed
+    all, the head turned pairs both readings count (`ij`, `Jq`) into Russian and kept `ds` (`вы`) at some boundaries,
+    where the calibration takes the frozen model's answer (candidate v63e). One token in
     BRIEF_SPLIT_MODULUS goes to DEVELOPMENT by hash, whose frames choose the head's own epoch. Tokens of this corpus's
     test, of every accessed test and of the recipe's `held_out` list (the class's tokens of the owner's typing) are
     refused.
@@ -1207,6 +1276,10 @@ def brief_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froz
         if latin in held_out or cyrillic in held_out or refused & (expanded_aliases(latin) | expanded_aliases(cyrillic)):
             counts["refused"] += 1
             continue
+        if not brief_settled(latin, cyrillic):
+            # The head answers no token the counts leave open (context_action_features.brief_settled).
+            counts["unsettled"] += 1
+            continue
         russian = table["russian"].get(cyrillic, 0)
         share = russian / (russian + max(table["english"].get(latin, 0), table["latin"].get(latin, 0)))
         counts["both" if 0 < share < 1 else "russian" if share else "latin"] += 1
@@ -1221,9 +1294,9 @@ def brief_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froz
                                               cast(ContextAction, action), "brief", boundary_text, weight * mass))
     return rows, {"frames": len(rows), "tokens": dict(sorted(counts.items())), "minimum_count": minimum,
                   "held_out": len(held_out), "sample_weight": weight,
-                  "scope": "tokens of two or three letters alone at the start of a message, typed in the English layout: the keys "
-                           "of a counted Russian word (convert) and a counted English word or Latin term as meant (keep), a "
-                           "token that is both framed both ways by the share of each reading's count (brief_curriculum)."}
+                  "scope": "tokens of two or three letters alone at the start of a message, typed in the English layout, that "
+                           "the counts settle as the keys of a Russian word (convert, a share of the Latin count kept) "
+                           "(brief_curriculum)."}
 
 
 def term_counts_dropped(identifier: str, original: str) -> bool:
@@ -2180,7 +2253,8 @@ def frozen_base(options: Mapping[str, object]) -> ContextModel | None:
 HEAD_PREFIXES: Final = {"capitals": CAPITALS_FEATURE_PREFIX, "alone": ALONE_FEATURE_PREFIX, "start": START_FEATURE_PREFIX,
                          "letter": LETTER_FEATURE_PREFIX, "abbreviation": ABBREVIATION_FEATURE_PREFIX,
                          "latin_abbreviation": LATIN_ABBREVIATION_FEATURE_PREFIX, "unknown": UNKNOWN_FEATURE_PREFIX,
-                         "joined": JOINED_FEATURE_PREFIX, "term": TERM_FEATURE_PREFIX, "brief": BRIEF_FEATURE_PREFIX}
+                         "joined": JOINED_FEATURE_PREFIX, "term": TERM_FEATURE_PREFIX, "brief": BRIEF_FEATURE_PREFIX,
+                         "first": FIRST_FEATURE_PREFIX}
 # A recipe without single-letter frames (the recipes before corpus v34).
 NO_LETTER_CURRICULUM: Final[dict[str, object]] = {"term_sentences": 0, "english_sentences": 0, "minimum_term_count": 0,
                                                   "sample_weight": 1.0}
@@ -2199,6 +2273,8 @@ NO_JOINED_TOKEN_CURRICULUM: Final[dict[str, object]] = {"item_modulus": 0, "per_
 NO_TERM_CURRICULUM: Final[dict[str, object]] = {"item_modulus": 0, "per_piece": 0, "held_out": [], "sample_weight": 1.0}
 # A recipe without short-message frames (the recipes before corpus v62).
 NO_BRIEF_CURRICULUM: Final[dict[str, object]] = {"minimum_count": 0, "held_out": [], "sample_weight": 1.0}
+# A recipe without first-term frames (the recipes before corpus v64).
+NO_FIRST_CURRICULUM: Final[dict[str, object]] = {"enabled": False, "held_out": [], "sample_weight": 1.0}
 # The heads whose own frames of DEVELOPMENT choose their epoch (fit), by feature prefix: the name their epoch goes by in
 # the seal, the recipe's key of their curriculum, the curriculum, and the options of a recipe without it.
 OWN_EPOCH_HEADS: Final[dict[str, tuple[str, str, Callable[[str, Sequence[CorpusRow], frozenset[str], Mapping[str, object]],
@@ -2206,6 +2282,7 @@ OWN_EPOCH_HEADS: Final[dict[str, tuple[str, str, Callable[[str, Sequence[CorpusR
     JOINED_FEATURE_PREFIX: ("joined", "joined_token_curriculum", joined_token_curriculum, NO_JOINED_TOKEN_CURRICULUM),
     TERM_FEATURE_PREFIX: ("term", "term_curriculum", term_curriculum, NO_TERM_CURRICULUM),
     BRIEF_FEATURE_PREFIX: ("brief", "brief_curriculum", brief_curriculum, NO_BRIEF_CURRICULUM),
+    FIRST_FEATURE_PREFIX: ("first", "first_curriculum", first_curriculum, NO_FIRST_CURRICULUM),
 }
 
 
@@ -2402,7 +2479,8 @@ def head_question(original: str, alternative: str, before: str, after: str, trig
             or (UNKNOWN_FEATURE_PREFIX in prefixes and unknown_question(original, before))
             or (JOINED_FEATURE_PREFIX in prefixes and joined_question(original))
             or (TERM_FEATURE_PREFIX in prefixes and term_question(original, before))
-            or (BRIEF_FEATURE_PREFIX in prefixes and brief_question(original, before, after)))
+            or (BRIEF_FEATURE_PREFIX in prefixes and brief_question(original, before, after))
+            or (FIRST_FEATURE_PREFIX in prefixes and first_question(original, before, after)))
 
 
 def carried_prefixes(model: ContextModel) -> frozenset[str]:
@@ -2740,11 +2818,13 @@ def tail_curricula(inputs: FitInputs) -> tuple[list[ActionRow], dict[str, object
         TRAIN, inputs.source_rows[TRAIN], inputs.refused, cast(dict[str, object], options.get("term_curriculum", NO_TERM_CURRICULUM)))
     brief, brief_report = brief_curriculum(
         TRAIN, inputs.source_rows[TRAIN], inputs.refused, cast(dict[str, object], options.get("brief_curriculum", NO_BRIEF_CURRICULUM)))
-    return [*kept, *counted, *letter, *abbreviation, *latin_abbreviation, *unknown, *joined, *term, *brief], {
+    first, first_report = first_curriculum(
+        TRAIN, inputs.source_rows[TRAIN], inputs.refused, cast(dict[str, object], options.get("first_curriculum", NO_FIRST_CURRICULUM)))
+    return [*kept, *counted, *letter, *abbreviation, *latin_abbreviation, *unknown, *joined, *term, *brief, *first], {
         "kept_neighbour_curriculum": kept_report, "counted_token_curriculum": counted_report, "letter_curriculum": letter_report,
         "abbreviation_curriculum": abbreviation_report, "latin_abbreviation_curriculum": latin_abbreviation_report,
         "unknown_token_curriculum": unknown_report, "joined_token_curriculum": joined_report, "term_curriculum": term_report,
-        "brief_curriculum": brief_report}
+        "brief_curriculum": brief_report, "first_curriculum": first_report}
 
 
 def prepared_frames(rows: Sequence[ActionRow], spans: SpanCurriculum, split: str) -> list[tuple[str, ActionRow | SpanFrame]]:
