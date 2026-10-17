@@ -50,6 +50,8 @@ from .language_model import LanguageModel, WordScore
 from .layouts import RU_KEYS, US_KEYS, LayoutPair
 from .lexicon_supplement import supplement_words
 from .learning import LearnedRule, LearningStore, RuleAction
+from .context_action_features import term_question
+from .log_privacy import LogRedactor
 from .intent_model import CorrectionTrigger, LinearNgramModel
 from .context_policy import (
     STRANDED_SHORT_WORD_REASON, ContextPolicy, ContextResult, caret_lag, shared_identifiers,
@@ -377,6 +379,7 @@ class KeySwitchEngine:
         self._last_baseline: DetectionDecision | None = None
         self._context_wait_sequence = 0
         self._sensitive_context_window: int | None = None
+        self._log_redactor = LogRedactor()
         self._typed_events = 0
         self._typed_presses = 0
         self._correction_sequence = 0
@@ -1111,8 +1114,17 @@ class KeySwitchEngine:
             if self._strokes:
                 self._commit_word(event)
                 return
-            self._log_pending_dropped("additional_boundary")
-            self._pending = None
+            if self._space_follows_pending_sign(event):
+                # The correction made at a sign waits until its keys come up, and a space pressed meanwhile stands
+                # after the sign on screen: the correction deletes and types it as its boundary. Taken for a second
+                # boundary, it dropped the correction: `bcntr?` and a space 37 ms later, the `?` key still down,
+                # stayed as typed though the model converted the word (0.56.0 log, 15.10.2026).
+                assert self._pending is not None
+                literal = self._pending.trailing + (() if self._pending.boundary is None else (self._pending.boundary,))
+                self._pending = replace(self._pending, trailing=literal, boundary=event, revisit=None)
+            else:
+                self._log_pending_dropped("additional_boundary")
+                self._pending = None
             self._learning_prompt_after = None
             # Nothing typed since the last boundary: remember layout-dependent
             # symbols so Pause converts just them (RU quote -> "@"). A space or a
@@ -2907,6 +2919,13 @@ class KeySwitchEngine:
         if not self.context_policy.stream.text.endswith(original + ("" if closing is None else closing.character)):
             return None
         baseline, field = applied.revisit
+        if (len(decision.replacement) == 1 and decision.replacement.isalpha() and not decision.replacement.isascii()
+                and term_question(applied.original, "" if field is None else field.before)):
+            # A term of the term head's class converted into Latin letters, and a Russian word of one letter after it:
+            # what a Russian phrase holds around a term (`pr и`), no sign that the term went back. Asked again with `и`
+            # after it, the model took `pr` back with it (`принимай зк и`, the owner's typing, 0.43.0). A word of no
+            # such class is still asked about: `кз в` went back to `кз`, and `rp` had been wrong.
+            return None
         # The question is how to read the word now that its neighbour went the other
         # way, not what the detector thinks of it alone: it is asked with no baseline
         # conversion, as the model was taught it (train_context_model: short_revisit),
@@ -3376,7 +3395,8 @@ class KeySwitchEngine:
         LOGGER.info(
             "TECHNICAL %s",
             json.dumps(
-                payload,
+                # Words that look like a password go into the log as stars (log_privacy).
+                self._log_redactor.record(payload),
                 ensure_ascii=False,
                 sort_keys=True,
                 separators=(",", ":"),
@@ -4134,6 +4154,17 @@ class KeySwitchEngine:
         self._early_switch_undone = False
         self._last_committed_stale = True
         self._reset_pause_correction()
+
+    def _space_follows_pending_sign(self, event: KeyEvent) -> bool:
+        """A plain space pressed while an automatic correction made at a sign, not at a space, waits for its keys to
+        come up. A correction at a space may wait for the next word (_start_context_wait), and one of another kind
+        (Pause, the early switch, a mention) reaches text of its own: those still give way to the second boundary."""
+
+        plan = self._pending
+        return (plan is not None and plan.mode == "boundary" and plan.automatic and not plan.kept_tail and not plan.head
+                and (plan.sign_replayed if plan.boundary is None
+                     else not plan.boundary.character.isspace() and not plan.boundary.deferred)
+                and event.pressed and event.character == " " and not (event.control or event.alt or event.super_key))
 
     @staticmethod
     def _late_text_key(event: KeyEvent) -> bool:

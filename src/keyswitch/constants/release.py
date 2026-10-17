@@ -141,3 +141,14 @@ PHASE_BUILD_DEB_MEMORY_MIB: Final[int] = 4000
 PHASE_VERIFY_DEB_MEMORY_MIB: Final[int] = 300
 PHASE_E2E_NATIVE_MEMORY_MIB: Final[int] = 600
 PHASE_RELEASE_METADATA_MEMORY_MIB: Final[int] = 200
+# The field regression gate (tools/field_regression_gate.py): replays of the owner's field batteries run this many at a
+# time, each under this timeout (the largest battery, 3205 streams, replays in under a minute and peaks at 410 MiB); a
+# gate that could not run exits with FIELD_GATE_ERROR_EXIT_CODE, one that found broken words with 1.
+FIELD_GATE_WORKERS: Final[int] = 6
+FIELD_GATE_REPLAY_TIMEOUT_SECONDS: Final[int] = 20 * SECONDS_PER_MINUTE
+FIELD_GATE_ERROR_EXIT_CODE: Final[int] = 2
+PHASE_FIELD_REGRESSION_TIMEOUT_SECONDS: Final[int] = SECONDS_PER_HOUR
+PHASE_FIELD_REGRESSION_EXPECTED_SECONDS: Final[int] = 180
+PHASE_FIELD_REGRESSION_MEMORY_MIB: Final[int] = 3000
+# The gate's records name the owner's words: only the owner reads them.
+FIELD_GATE_RECORD_FILE_MODE: Final[int] = 0o600

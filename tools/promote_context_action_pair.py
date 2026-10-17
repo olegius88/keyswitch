@@ -9,15 +9,29 @@ be fitted again on a fresh corpus. This tool runs every check of the pinned file
 and refuses to touch the test until they hold:
 
 1. the tracked tree is committed (the seal's provenance is the committed tree);
-2. the candidate and its seal are valid for the corpus (evaluate_context_action_sequences);
+2. the candidate and its seal are valid for the corpus, and the prefix candidate and its seal for this tree
+   (evaluate_context_action_sequences);
 3. strict typing (tools/typecheck.sh) and the named values (tools/check_named_values.py) pass;
 4. every test module the seal pins passes, with the installed pair and then with the candidate pair
    in its place (a scratch worktree of the committed tree): the install must not break them either,
-   and once the test is read a broken test module can only be fixed with a new pair.
+   and once the test is read a broken test module can only be fixed with a new pair;
+5. with the candidate pair in that tree, no word of the owner's own typing that the last release got right
+   comes out wrong (tools/field_regression_gate.py, the owner's decision of 15.10.2026): a pair that breaks
+   one would be refused by the release anyway, and its sealed test would be spent for nothing;
+6. the candidate's development result on the developer-chat messages is recorded and holds both floors
+   (tools/evaluate_devchat_test.py --split dev): the developer-chat test is read only for such a candidate;
+7. on the corpus's calibration frames the candidate nets, in every profile, at least what the installed pair nets
+   there (tools/compare_context_candidates.py): the quality ratchet measures the receipt against that very number
+   (tests/test_quality_ratchet.py), and candidate v63e, which passed both sealed tests, could not be installed for
+   netting 23 frames less.
 
-Then it reads the sealed test (once: an existing report is reused), installs the pair, exports and
-verifies the release receipt, refreshes the boundary and prefix engine replays and runs the public
-context and prefix gates - the order docs/model-training-cloud.md describes.
+Then it reads the sealed test (once: an existing report is reused) and, once that passed and the candidate holds the
+release receipt's restoration floors there (more rows typed in the wrong layout restored than the frozen baseline pair,
+and the share of them; tests/test_quality_ratchet.py) - the corpus v64 pair passed the test's gates restoring exactly
+what the baseline pair did and was installed, and the quality ratchet refused it - the sealed developer-chat test
+(once, before the install: the released pair it is compared with is the installed one),
+installs the pair, exports and verifies the release receipt, refreshes the boundary and prefix engine replays
+and runs the public context and prefix gates - the order docs/model-training-cloud.md describes.
 
     PYTHONPATH=src:tools python3 tools/promote_context_action_pair.py \\
         --candidate <dir> --prefix-candidate <dir> --corpus <fit> --report <dir>/sequences-test.json
@@ -50,7 +64,12 @@ INSTALLED: Final = {
     PREFIX_SEAL: "model/prefix_v2/candidate-seal.json",
 }
 RECEIPT: Final = "model/context_v3/release-receipt.json"
+# Where the comparison of the candidate's calibration with the installed pair's goes, in the candidate's directory.
+CALIBRATION_COMPARISON: Final = "calibration-comparison.json"
 TEST_MODULE_PREFIX: Final = "tests/test_"
+# The developer-chat messages (tools/build_devchat_messages.py) are private; KEYSWITCH_DEVCHAT_DIRECTORY names another place.
+DEVCHAT_DIRECTORY: Final = ROOT / ".t/devchat/messages"
+DEVCHAT_DIRECTORY_VARIABLE: Final = "KEYSWITCH_DEVCHAT_DIRECTORY"
 
 # Relative to the directory a command runs in: the sources of that tree, never those of another.
 PYTHONPATH: Final = "src:tools"
@@ -116,9 +135,12 @@ def preflight(candidate: Path, prefix_candidate: Path, corpus: Path, runner: Run
         evaluator.validate_candidate_seal(candidate / CONTEXT_ARTIFACT, seal_path, corpus)
     except (OSError, ValueError) as error:
         failures.append(f"candidate seal: {error}")
-    for path in (prefix_candidate / PREFIX_ARTIFACT, prefix_candidate / PREFIX_SEAL):
-        if not path.is_file():
-            failures.append(f"missing {path}")
+    try:
+        # The prefix seal pins files the context candidate's changes may touch (context_action_features): the pair
+        # of corpus v66 reached its sealed test with a prefix model sealed before such a change, and was refused there.
+        evaluator.validate_prefix_seal(prefix_candidate / PREFIX_ARTIFACT, prefix_candidate / PREFIX_SEAL, require_calibration=True)
+    except (OSError, ValueError) as error:
+        failures.append(f"prefix seal: {error}")
     python = sys.executable
     checks = [("strict typing", ["bash", "tools/typecheck.sh"]),
               ("named values", [python, "tools/check_named_values.py"])]
@@ -133,12 +155,48 @@ def preflight(candidate: Path, prefix_candidate: Path, corpus: Path, runner: Run
         if runner(command) != 0:
             failures.append(name)
     # The same modules with the candidate pair installed, once everything else holds: the files to
-    # install exist and the tree is the commit.
+    # install exist and the tree is the commit. Then the owner's typing in that tree against the last release.
     if tests and not failures:
         with tree(candidate, prefix_candidate) as root:
             if runner(tests, root) != 0:
                 failures.append("tests the seal pins, with the candidate pair installed")
+            if runner([python, "tools/field_regression_gate.py", "--candidate-root", str(root)]) != 0:
+                failures.append("the owner's typing: a word the last release got right comes out wrong, or the field "
+                                "regression gate could not run (tools/field_regression_gate.py)")
+    if not development_gain(candidate / CONTEXT_ARTIFACT):
+        failures.append("no developer-chat development result of the candidate holds both floors "
+                        "(tools/evaluate_devchat_test.py --split dev)")
+    if not failures:
+        failures.extend(f"the calibration nets less than the installed pair's in the {name} profile "
+                        "(tools/compare_context_candidates.py): the quality ratchet would refuse the install"
+                        for name in calibration_shortfall(candidate, corpus, runner))
     return failures
+
+
+def calibration_shortfall(candidate: Path, corpus: Path, runner: Runner = run) -> list[str]:
+    """The profiles in which the candidate nets less on the corpus's calibration frames than the installed pair, as
+    tools/compare_context_candidates.py scores both (every profile, when the comparison could not run)."""
+    output = candidate / CALIBRATION_COMPARISON
+    output.unlink(missing_ok=True)
+    command = [sys.executable, "tools/compare_context_candidates.py", "--corpus", str(corpus),
+               "--artifact", f"installed={ROOT / INSTALLED[CONTEXT_ARTIFACT]}",
+               "--artifact", f"candidate={candidate / CONTEXT_ARTIFACT}", "--output", str(output)]
+    if runner(command) != 0 or not output.is_file():
+        return ["every"]
+    profiles = json.loads(output.read_bytes())["calibration"]
+    return sorted(name for name, pairs in profiles.items()
+                  if pairs["candidate"]["by_class"]["all"]["net"] < pairs["installed"]["by_class"]["all"]["net"])
+
+
+def development_gain(artifact: Path) -> bool:
+    """Whether the candidate's developer-chat development result is recorded and holds every floor."""
+    import evaluate_devchat_test as devchat
+    try:
+        record = json.loads((devchat.ledger_root() / f"{devchat.checksum(artifact)}.dev.json").read_bytes())
+    except (OSError, ValueError):
+        return False
+    floors = record.get("floors")
+    return isinstance(floors, dict) and bool(floors) and all(value is True for value in floors.values())
 
 
 def promote(candidate: Path, prefix_candidate: Path, corpus: Path, report: Path, runner: Runner = run) -> int:
@@ -153,6 +211,18 @@ def promote(candidate: Path, prefix_candidate: Path, corpus: Path, report: Path,
         if status != 0:
             print("the sealed test did not pass; nothing is installed", flush=True)
             return status
+    if shortfall := restoration_shortfall(report):
+        print("the sealed test leaves the candidate short of the release receipt's restoration floors ("
+              + "; ".join(shortfall) + "); nothing is installed and the developer-chat test is not read", flush=True)
+        return 1
+    # The developer-chat test, while the released pair is still the installed one it is compared with.
+    devchat = Path(os.environ.get(DEVCHAT_DIRECTORY_VARIABLE, DEVCHAT_DIRECTORY))
+    status = runner([python, "tools/evaluate_devchat_test.py", "--split", "test", "--directory", str(devchat),
+                     "--candidate", str(candidate / CONTEXT_ARTIFACT), "--released", INSTALLED[CONTEXT_ARTIFACT],
+                     "--output", str(report.with_name("devchat-test.json"))])
+    if status != 0:
+        print("the sealed developer-chat test did not pass; nothing is installed", flush=True)
+        return status
     for source, target in installed_files(candidate, prefix_candidate):
         shutil.copyfile(source, ROOT / target)
     # The receipt is an immutable record: the one of the replaced pair goes first.
@@ -171,6 +241,26 @@ def promote(candidate: Path, prefix_candidate: Path, corpus: Path, report: Path,
         if (status := runner(command)) != 0:
             return status
     return 0
+
+
+def restoration_shortfall(report: Path) -> list[str]:
+    """The profiles and settings modes in which the sealed test leaves the candidate short of the release receipt's
+    floors (tests/test_quality_ratchet.py): restoring more rows typed in the wrong layout than the frozen baseline pair by
+    RECEIPT_MIN_RESTORATION_MARGIN, and at least RECEIPT_MIN_RESTORED_SHARE of them."""
+    sys.path.insert(0, str(ROOT / "tests"))
+    from fixture_values.quality_floors import RECEIPT_MIN_RESTORATION_MARGIN, RECEIPT_MIN_RESTORED_SHARE
+
+    failures: list[str] = []
+    for name, profile in sorted(json.loads(report.read_bytes())["profiles"].items()):
+        for mode, counts in (("default", profile["counts"]), ("early_off", profile["early_off"]["counts"])):
+            candidate, baseline = counts["candidate"], counts["baseline"]
+            if candidate["exactly_restored"] - baseline["exactly_restored"] < RECEIPT_MIN_RESTORATION_MARGIN[mode]:
+                failures.append(f"{name} {mode}: {candidate['exactly_restored']} restored against the baseline pair's "
+                                f"{baseline['exactly_restored']}")
+            share = RECEIPT_MIN_RESTORED_SHARE.get(mode)
+            if share is not None and candidate["exactly_restored"] < share * candidate["initially_wrong"]:
+                failures.append(f"{name} {mode}: {candidate['exactly_restored']} of {candidate['initially_wrong']} restored")
+    return failures
 
 
 def main(argv: Sequence[str] | None = None) -> int:

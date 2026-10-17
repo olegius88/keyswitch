@@ -4,6 +4,77 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- A term typed in the Russian layout converts the first time a message holds it: `зк` for `pr`, `ЗК,` for `PR?` at the
+  end of a question, `сш` in `npm ci`, `рвьш` for `hdmi`, `мгуоы` for `vuejs` and `сымю` for `csv.` stayed, as the
+  model left such a term at p 0.92-0.98, below its threshold, unless the same term had been typed right earlier in the
+  text. A new head of the context model answers this class (a token of Russian letters whose Latin reading is a word
+  Russian technical text uses fifty times or more, while Russian text uses its Cyrillic reading fewer than five times)
+  from how often each reading occurs, how many Russian words end with the token, the script of the text before it, the
+  detector's score and how the word after it was given; a token the lexicon knows as a Russian word stays with the
+  model as before, however rare in the tables. The end of a Russian word typed as a token of its own to finish
+  a word begun earlier stays: `ев` ends 169 words of the table and `ась` 889, `зк` and `сш` one. Alone at the start of
+  a message in a field KeySwitch read and found empty, a term of up to three letters converts at once, at the space
+  (`йк ` for `qr`, `зк ` for `pr`), where 0.56.0, unless the early switch had already converted it, waited for a pause
+  of a second and a half; a third new head of the context model answers there. Two or three letters that end many
+  Russian words (`шь`, `уче`) may be the end of a word, and there they wait for the next word and stay as typed at a
+  pause, where 0.56.0 converted them (to `im`, `ext`). Where the field could not be read, the text before
+  the term is unknown: a term of two letters waits for the next word or for the pause, as before, and a longer one
+  converts at the space (`тзь` for `npm`, `ювшые` for `.dist`). A term converted at once stays when a Russian word
+  follows it: `йк истек` becomes `qr истек`.
+- A short reply typed in the English layout as a whole message converts: `ytn` (`нет`) and `dct` (`все`), sent with
+  Enter or left at a pause, were kept or left waiting for a next word that never came. A second new head answers a
+  token of two or three Latin letters with no letter before or after it in the field, whose keys in the Russian layout
+  are Russian letters, from how much more often Russian prose uses the Cyrillic reading than English prose and Russian
+  technical text the Latin one, whether either occurs at all, the boundary and the case. It answers only a token whose
+  counts settle it: the Russian reading counted thirty times or more and at least five times as often as the Latin one,
+  which occurs fewer than thirty times and which the lexicon does not know. A token both readings count (`vs` and `мы`,
+  `ds` and `вы`, `lf` and `да`) stays with the model as before, and so do Russian letters typed alone: a head that read
+  them turned Russian words typed as meant into Latin (`чук`, `дес`).
+- A term converted into Latin letters amid Russian text is no longer taken back by the Russian one-letter word after it:
+  the layout follows the conversion, so `и` comes out as `b` and is corrected, and the engine then asked the model about
+  the term again with `и` after it and took both words back (`принимай зк и` from `принимай pr b`). A one-letter
+  Russian word after a term of the term head's class asks nothing now; any other word is still asked about again (`кз`,
+  converted to `rp`, goes back with `в`).
+- A correction made at a sign is no longer lost when a space is pressed before the sign's key comes up: the correction
+  waits for its keys to come up, and the space is now deleted and typed again with it, after the sign. Typed fast,
+  `bcntr?` and a space 37 ms later stayed as typed though the model converted the word to `истек,`, while the next word
+  was corrected (`bcntr? но`).
+- Words that look like a password go into the technical log as stars: the word typed right after «пароль», «пароля»,
+  «паролю», «паролем», «пароле», «password» or «passwd» (in either layout) and every token of eight characters or more
+  with both letters and digits in it, in the word itself, its readings and replacements and the words around it. A word
+  typed after such a marker stays masked in later records that name it again.
+- Releases are held to the owner's own typing: the field batteries rebuilt from the technical logs are replayed with the
+  tree of the last release and with the new one (`tools/field_regression_gate.py`, the `field-regression` phase of the
+  release pipeline and a check before a model pair's sealed test is read), and a word the last release got right that
+  the new tree gets wrong stops the release. A token meant in both scripts (`ssh-агента`, `lid-режиме`) is taken out of
+  the comparison, as neither of its readings is what was meant. The batteries and the gate's records stay private; the
+  gate prints counts alone.
+- A model pair's sealed tests are read only once the pair nets, on the calibration frames of its corpus and in every
+  profile, at least what the released pair nets there (`tools/promote_context_action_pair.py`, measured with
+  `tools/compare_context_candidates.py`), and once the prefix candidate's seal holds for the tree: the quality ratchet
+  refuses a lower one at install, when both sealed tests are already spent. After the first sealed test the pair is
+  installed, and the developer-chat test read, only if it restored more rows typed in the wrong layout than the
+  baseline pair there, as the ratchet requires.
+- A second sealed test from developer chat: comments of ru.stackoverflow written in 2024-2026, after every source a
+  model of KeySwitch was fitted on, split into development and test by their question and typed through the engine in
+  four modes (every layout change made, one change to Russian or to English forgotten, the message started in the other
+  layout). The test is read once per release candidate, after its Tatoeba test passed and its development result held
+  the floors (`tools/evaluate_devchat_test.py`): the candidate must net more restored messages than the baseline pair,
+  lose to the released pair in none of the three modes that need a restoration more messages than chance explains,
+  restore in the three together no fewer than the released pair, and corrupt no more messages than either. The receipt
+  publishes the counts (`devchat_test`), and the quality ratchet recomputes the floors from them.
+- The context model `context-v3-754513f80498` (corpus v65) replaces `context-v3-20be427844f6` and adds the term,
+  short-message and first-term heads; the prefix model `prefix-v2-bf3dc28f8567` retrained byte-identical. On the same
+  engine it decides calibration v65 with 39 and 60 more right conversions per profile than the model of 0.56.0 (41 and
+  61 more lone pairs of letters the counts settle and one short reply more, one term and two and one unknown tokens
+  fewer) and development v65 with 35 and 36 more; on the owner's
+  field batteries it breaks no word the model of 0.56.0 got right and corrects 11 more; of the developer-chat
+  development messages it restores 105 more and 10 fewer with a change to English forgotten, and 20 more started in the
+  other layout. On the sealed test v65, read once, it kept all 182 correctly typed sequences (the baseline pair
+  corrupted one with the early switch), restored all 182 typed in the wrong layout without the early switch against 180
+  and 181 for the baseline pair, and 9 with it, as many as the baseline pair; on the sealed developer-chat test it
+  restored 15 messages more and 2 fewer with a change to English forgotten, and 3 more started in the other layout.
+
 ## 0.56.0 — 2026-10-14
 
 - A build for 32-bit Windows 10, which cannot run the x64 one: `KeySwitch-Setup-<version>-x86.exe` and

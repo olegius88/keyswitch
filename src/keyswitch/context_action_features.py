@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import functools
 import math
 import re
 import unicodedata
 from typing import TYPE_CHECKING, Final
+from .constants.training import TERM_FRAGMENT_MIN_ENDING_BUCKET, TERM_SHORT_TAIL_MIN_ENDING_BUCKET
 from .constants.models import (
     ABBREVIATION_FEATURE_PREFIX,
     ABBREVIATION_NON_INITIAL_LETTERS,
@@ -30,6 +32,13 @@ from .constants.models import (
     ALONE_COUNT_RATIO_BOUND,
     ALONE_FEATURE_PREFIX,
     ALONE_HEAD_LETTERS,
+    BRIEF_FEATURE_PREFIX,
+    BRIEF_HEAD_LETTERS,
+    BRIEF_RATIO_BOUND,
+    BRIEF_SETTLED_DOMINANCE,
+    BRIEF_SETTLED_MIN_COUNT,
+    BRIEF_SETTLED_OTHER_MAXIMUM,
+    FIRST_FEATURE_PREFIX,
     CAPITALS_FEATURE_PREFIX,
     CAPITALS_HEAD_MAX_LETTERS,
     CAPITALS_HEAD_MIN_LETTERS,
@@ -44,6 +53,13 @@ from .constants.models import (
     START_DELTA_BANDS,
     START_FEATURE_PREFIX,
     START_HEAD_MIN_LETTERS,
+    TERM_FEATURE_PREFIX,
+    TERM_HEAD_ENDING_BUCKET_MAX,
+    TERM_HEAD_ENDING_LETTERS,
+    TERM_HEAD_LEADING_SIGN,
+    TERM_HEAD_MIN_LATIN_BUCKET,
+    TERM_HEAD_MIN_LETTERS,
+    TERM_HEAD_TRAILING_SIGNS,
     UNKNOWN_FEATURE_PREFIX,
     UNKNOWN_HEAD_MIN_CHARACTERS,
     UNKNOWN_HEAD_SIGN_KEY_LETTERS,
@@ -442,6 +458,34 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         # (sealed test v58, both pairs); the head reads the counts of its words.
         result.update({JOINED_FEATURE_PREFIX + name: value for name, value in features.items() if value})
         result.update(_joined_evidence(item))
+    if (brief_question(item.original, item.field.before, item.field.after) and not item.source_known
+            and brief_settled(item.original, item.alternative)):
+        # The class the short-message head answers: a short reply typed in the English layout, which the frozen model
+        # kept or left waiting for a next word that never came (`ytn` for `нет`). The head reads how often each reading
+        # occurs, the boundary and the case, and no copy of the shared features: with one it learned that a known Latin
+        # word stays, and kept `vs` sent alone for `мы` (experiment E6). It answers only a token whose counts settle it,
+        # one no lexicon of the profile knows as typed: a pair both readings count (`ij` and `шо`, `ds` and `вы`) stays
+        # with the frozen model, which turned no Russian reply into Latin (candidate v63e).
+        result.update(_brief_evidence(item))
+    known = item.source_known and not _tail_like(item.original)
+    if first_question(item.original, item.field.before, item.field.after) and item.field.role != "unknown" and not known:
+        # The class the first-term head answers: a term of up to three letters alone in a field a reader read empty,
+        # where it opens a message (`йк ` for `qr`: the owner's requirement of 16.10.2026 that it convert at once, where
+        # the frozen model waited for a pause). The term head, which chooses an early epoch for its other frames, stopped
+        # short of the threshold there: `зк` and `йк` became suggestions at p 0.98, which no pause settles (candidates
+        # v64b to v64e). A token that may still be the tail of a Russian word (alone_tail) waits, and a pause keeps it.
+        result.update(_first_evidence(item))
+    elif term_question(item.original, item.field.before) and not known:
+        # The class the term head answers: a term typed in the Russian layout, which the frozen model left at p 0.92-0.98
+        # the first time a message held it (`сымю` for `csv.`, `сш` for `ci`). The head reads evidence of its own alone:
+        # with a copy of the shared features it learned that two letters and a known Latin reading stay, and kept `зк`
+        # for `pr` after `принимай все` (experiment E6); the frozen model reads the context. A word the profile's lexicon
+        # knows is a Russian word however rare in the tables, and stays with the frozen model: a word of four letters
+        # opening a correct Russian sentence, known to Hunspell, went to its Latin reading, a term of 58 counts (sealed
+        # test v62, the reference profile). A tail of Russian words the lexicon knows (`ев`, `ась`) stays the head's: the
+        # head learns to keep tails from such frames, and without them it stopped learning after its first epoch, as it
+        # did reading whether the lexicon knows the token (corpora v62 and v63).
+        result.update(_term_evidence(item))
     return result
 
 
@@ -743,3 +787,203 @@ def _joined_evidence(item: ContextEvidence) -> dict[str, float]:
     counts = f"{names[0]}:{names[1]}"
     return {f"{JOINED_FEATURE_PREFIX}{name}:direction:{item.source_group}": 1.0
             for name in (*names, counts, repeat, f"{repeat}:{counts}")}
+
+
+def term_question(original: str, before: str) -> bool:
+    """A token of Russian letters whose Latin reading is Latin letters, a trailing sign (TERM_HEAD_TRAILING_SIGNS) and
+    the leading dot of an extension aside, that Russian technical text uses at least in bucket
+    TERM_HEAD_MIN_LATIN_BUCKET of the term table, while its Cyrillic reading occurs in no Russian text the tables count
+    (`сымю` is `csv.`, `сш` is `ci`, `рвьш` is `hdmi`): the term head's class. A token the unknown-token head answers
+    (a term typed right earlier in the text) is that head's, words joined by hyphens are the joined-token head's, and
+    an attested abbreviation is counted among Cyrillic words. The question reads only the typed token, the text before
+    it and the packaged term table, as the trainer and the GPU path route frames by them (head_question,
+    context_action_cuda.heads_question)."""
+
+    from .context_model import term_bucket
+    from .layouts import LayoutPair
+
+    if len(original) < TERM_HEAD_MIN_LETTERS or not all("а" <= char.casefold() <= "я" or char.casefold() == "ё"
+                                                         for char in original):
+        return False
+    latin_reading = LayoutPair().translate(original, "ru", "us")
+    core = latin_reading.rstrip(TERM_HEAD_TRAILING_SIGNS).removeprefix(TERM_HEAD_LEADING_SIGN)
+    if len(core) < TERM_HEAD_MIN_LETTERS or not (core.isascii() and core.isalpha()):
+        return False
+    latin = term_bucket(core, "latin")
+    return (int(latin) >= TERM_HEAD_MIN_LATIN_BUCKET and term_bucket(original, "cyrillic") == "0"
+            and term_bucket(original, "russian") == "0" and not unknown_question(original, before))
+
+
+def _term_evidence(item: ContextEvidence) -> dict[str, float]:
+    """The term head's evidence, all it reads (it has no copy of the shared features): how often Russian technical text
+    and English text use the Latin reading, whether it ends in a sign typed on a Russian letter's key (`сымю` is `csv.`) or opens
+    with the dot of an extension (`юучу` is `.exe`), how many Russian words end with it (russian_ending_bucket) with the
+    token's length, which script the text before it is in, the band of the detector's score delta (as the message-start
+    head reads it), how the text after it was given (asked again with its converted neighbour after it, or not) and, for
+    a token alone in the field, whether a space or an end (Enter, a pause, a sign) ended it, with its letters: a term of
+    two letters alone at a space waits, a longer one converts, and read without the letters the wait pulled the longer
+    ones and the convert the shorter (`гш` became a suggestion, experiment E9f). A term of up to three letters alone in a
+    field a reader read empty is the first-term head's (first_question), not this head's.
+    Without the endings the head could tell the tail of a Russian word an edit left (`ев`) from a term's keys (`зк`) by
+    the length alone, and it kept short terms; the length is read with the ending only, for the same reason. Alone at a
+    space the frozen model waits, and a wait stands until a pause of one and a half seconds settles it: the head
+    converts there by its own weights (`йк` for `qr`, the owner's typing of 15.10.2026). Asked again once the Russian
+    word after it went back to Russian, the term is the same term: `зк` became `pr` in `займись зк и тз`, the layout
+    followed, `и` came out as `b`, and asked again with `и` after it the frozen model leaned to keeping `зк`, and the
+    engine took both back.
+    """
+
+    from .context_model import term_bucket
+
+    latin = item.alternative
+    counts = f"latin:{term_bucket(latin, 'latin')}:english:{term_bucket(latin, 'english')}"
+    signed = f"signed:{int(latin.endswith(tuple(TERM_HEAD_TRAILING_SIGNS)))}"
+    extension = f"extension:{int(latin.startswith(TERM_HEAD_LEADING_SIGN))}"
+    letters = f"letters:{min(sum(char.isalpha() for char in latin), ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS)}"
+    before = f"before:{_dominant(item.field.before[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:].casefold())}"
+    ending = f"ending:{russian_ending_bucket(item.original)}"
+    band = max(-START_DELTA_BANDS, min(START_DELTA_BANDS, math.floor(item.score_delta / START_DELTA_BAND_WIDTH)))
+    delta = f"delta:{band}"
+    boundary = f"{before}:boundary:{'space' if item.trigger == 'space' else 'end'}"
+    after = f"after:{item.after_origin}"
+    names = ("bias", counts, signed, extension, before, ending, delta, boundary, after, f"{counts}:{before}", f"{signed}:{before}",
+             f"{ending}:{letters}", f"{ending}:{before}", f"{ending}:{counts}", f"{ending}:{letters}:{counts}",
+             f"{delta}:{before}", f"{boundary}:{ending}:{letters}", f"{boundary}:{letters}", f"{after}:{ending}",
+             f"{after}:{counts}")
+    return {f"{TERM_FEATURE_PREFIX}{name}": 1.0 for name in names}
+
+
+def russian_ending_bucket(token: str) -> str:
+    """How many words of Russian prose end with the token, as the binary order of magnitude of their number
+    (TERM_HEAD_ENDING_BUCKET_MAX at most); `na` for a token of another length than TERM_HEAD_ENDING_LETTERS."""
+
+    word = token.casefold()
+    if len(word) not in TERM_HEAD_ENDING_LETTERS:
+        return "na"
+    return str(min(_russian_endings().get(word, 0).bit_length(), TERM_HEAD_ENDING_BUCKET_MAX))
+
+
+def _tail_like(token: str) -> bool:
+    """Whether a token ends as many Russian words as a tail the term head keeps does (TERM_FRAGMENT_MIN_ENDING_BUCKET)."""
+
+    ending = russian_ending_bucket(token)
+    return ending != "na" and int(ending) >= TERM_FRAGMENT_MIN_ENDING_BUCKET
+
+
+def first_question(original: str, before: str, after: str) -> bool:
+    """A token of the term head's class (term_question) of up to three letters, the most a term's ending is read for
+    (TERM_HEAD_ENDING_LETTERS), with no letter before it in the field: the first-term head's class when a field reader
+    read the field (the role, which the trainer's and the GPU path's routing do not see, is checked where the features
+    are made). The word after it is the one the engine asks it again with: a term converted there once a Russian word
+    followed, a token that waited once its next word was converted. The question reads only the typed token and the
+    text before it."""
+
+    return (len(original) <= max(TERM_HEAD_ENDING_LETTERS) and term_question(original, before)
+            and not any(char.isalpha() for char in before))
+
+
+def _first_evidence(item: ContextEvidence) -> dict[str, float]:
+    """The first-term head's evidence, all read with whether the token may still be the tail of a Russian word
+    (alone_tail), the one thing that decides there: its letters, the boundary that ended it (a space, or an end such as
+    a pause), how often Russian technical text and English prose use its Latin reading, how many Russian words end
+    with it, and how the word after it was given (none, or the next word it is asked again with). In a field read empty
+    nothing stands before a tail, but a field battery replays a stream that starts with one into an empty field (`дые`,
+    which the owner typed completing `моло`). Asked again by the term head, a term converted there went back with the
+    Russian word after it on one corpus and stayed on another (`йк истек`, p 0.981 and 0.995, candidates v65 and v64f)."""
+
+    from .context_model import term_bucket
+
+    latin = item.alternative
+    tail = f"tail:{int(alone_tail(item.original))}"
+    letters = f"letters:{sum(char.isalpha() for char in item.original)}"
+    boundary = f"boundary:{'space' if item.trigger == 'space' else 'end'}"
+    counts = f"latin:{term_bucket(latin, 'latin')}:english:{term_bucket(latin, 'english')}"
+    ending = f"ending:{russian_ending_bucket(item.original)}"
+    after = f"after:{item.after_origin}"
+    names = ("bias", tail, f"{tail}:{letters}", f"{tail}:{boundary}", f"{tail}:{boundary}:{letters}", f"{tail}:{counts}",
+             f"{tail}:{boundary}:{counts}", f"{tail}:{ending}:{letters}", f"{tail}:{after}", f"{tail}:{after}:{letters}",
+             f"{tail}:{after}:{counts}")
+    return {f"{FIRST_FEATURE_PREFIX}{name}": 1.0 for name in names}
+
+
+def alone_tail(token: str) -> bool:
+    """Whether a token alone in a field a reader read empty may still be the tail of a Russian word: of three letters
+    from ending bucket TERM_FRAGMENT_MIN_ENDING_BUCKET, of two from TERM_SHORT_TAIL_MIN_ENDING_BUCKET (two-letter endings
+    end more words by chance). `дые` and `ев` may be, `йк` and `зк` may not."""
+
+    ending = russian_ending_bucket(token)
+    if ending == "na":
+        return False
+    return int(ending) >= (TERM_SHORT_TAIL_MIN_ENDING_BUCKET if len(token) == min(TERM_HEAD_ENDING_LETTERS)
+                           else TERM_FRAGMENT_MIN_ENDING_BUCKET)
+
+
+@functools.cache
+def _russian_endings() -> dict[str, int]:
+    """The endings of TERM_HEAD_ENDING_LETTERS letters of the words of Russian prose the term table counts, with how many
+    words end with each (a word longer than its ending); built once, on the first term the head is asked about."""
+
+    from .context_model import _term_frequency
+
+    endings: dict[str, int] = {}
+    for word in _term_frequency()["russian"]:
+        for size in TERM_HEAD_ENDING_LETTERS:
+            if len(word) > size:
+                endings[word[-size:]] = endings.get(word[-size:], 0) + 1
+    return endings
+
+
+def brief_question(original: str, before: str, after: str) -> bool:
+    """A token of BRIEF_HEAD_LETTERS Latin letters with no letter before or after it in the field, whose keys in the
+    Russian layout are Russian letters: a short message typed in the English layout, `ytn` for `нет`, `jr` for `ок`,
+    `tot` for `еще`. The message-start head starts at four letters, because at three it turned Russian words typed as
+    meant into Latin (`чук`, `дес`): this head answers Latin letters alone, and a Russian token stays with the frozen
+    model. The question reads only the typed token and the text around it, as the trainer and the GPU path route frames
+    by them (head_question, context_action_cuda.heads_question)."""
+
+    from .layouts import LayoutPair
+
+    if not (len(original) in BRIEF_HEAD_LETTERS and original.isascii() and original.isalpha()):
+        return False
+    cyrillic = LayoutPair().translate(original, "us", "ru")
+    return (cyrillic.isalpha() and not any(char.isascii() for char in cyrillic)
+            and not any(char.isalpha() for char in before) and not any(char.isalpha() for char in after))
+
+
+def brief_settled(latin: str, cyrillic: str) -> bool:
+    """Whether the counts settle a short Latin token as the keys of a Russian word: its Cyrillic reading counted in
+    Russian text at least BRIEF_SETTLED_MIN_COUNT times and BRIEF_SETTLED_DOMINANCE times as often as the token in
+    English prose or Russian technical text, where it occurs fewer than BRIEF_SETTLED_OTHER_MAXIMUM times (`ytn` and
+    `нет`, `gy` and `пн`), as context_deferral.counted_reading settles the calibration's lone words with the Latin count
+    of English prose added. `ds` (`вы`, 108 Latin counts), `ij` (`шо`, 84 against 29) are not settled."""
+
+    from .context_model import _term_frequency
+
+    table = _term_frequency()
+    latin, cyrillic = latin.casefold(), cyrillic.casefold()
+    russian = max(table["russian"].get(cyrillic, 0), table["cyrillic"].get(cyrillic, 0))
+    other = max(table["english"].get(latin, 0), table["latin"].get(latin, 0))
+    return (russian >= BRIEF_SETTLED_MIN_COUNT and other < BRIEF_SETTLED_OTHER_MAXIMUM
+            and russian >= BRIEF_SETTLED_DOMINANCE * other)
+
+
+def _brief_evidence(item: ContextEvidence) -> dict[str, float]:
+    """The short-message head's evidence: the binary order of magnitude by which how often Russian prose uses the
+    Cyrillic reading outnumbers how often English prose or Russian technical text uses the Latin one (BRIEF_RATIO_BOUND
+    at most either way), whether either reading occurs at all, the boundary that ended the token and its case. The
+    orders of each count on their own told few tokens apart, and the head learnt them by heart: its development loss
+    rose from the second epoch on, and it turned `ye` sent alone, which the frozen model converted to `ну`, into a
+    suggestion (experiment E9)."""
+
+    from .context_model import _term_frequency
+
+    table = _term_frequency()
+    latin, cyrillic = item.original.casefold(), item.alternative.casefold()
+    russian = table["russian"].get(cyrillic, 0).bit_length()
+    other = max(table["english"].get(latin, 0), table["latin"].get(latin, 0)).bit_length()
+    ratio = max(-BRIEF_RATIO_BOUND, min(BRIEF_RATIO_BOUND, russian - other))
+    seen = f"seen:{int(russian > 0)}:{int(other > 0)}"
+    case = "upper" if item.original.isupper() else "title" if item.original[:1].isupper() else "lower"
+    names = ("bias", f"ratio:{ratio}", seen, f"trigger:{item.trigger}", f"case:{case}", f"ratio:{ratio}:trigger:{item.trigger}",
+             f"ratio:{ratio}:case:{case}", f"{seen}:trigger:{item.trigger}")
+    return {f"{BRIEF_FEATURE_PREFIX}{name}": 1.0 for name in names}

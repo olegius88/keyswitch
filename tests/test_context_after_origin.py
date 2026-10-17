@@ -21,6 +21,7 @@ from keyswitch.constants.models import (
     START_DELTA_BAND_WIDTH,
     START_DELTA_BANDS,
     START_FEATURE_PREFIX,
+    TERM_FEATURE_PREFIX,
 )
 from keyswitch.context_model import ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, ContextPrediction, extract_context_features
 from keyswitch.context_policy import ContextPolicy, evidence_for_decision
@@ -158,7 +159,8 @@ class ContextAfterOriginTests(unittest.TestCase):
     def test_a_lone_two_letter_token_has_its_features_once_more_for_the_lone_word_head(self) -> None:
         lone = ContextEvidence("гш", "ui", 1, FieldContext("Telegram", "1", "", ""), trigger="enter", boundary_text="\n")
         features = extract_action_features(lone)
-        shared = {name: value for name, value in features.items() if not name.startswith(ALONE_FEATURE_PREFIX)}
+        # `ui` is a term typed in the Russian layout too: the term head's copy is its own.
+        shared = {name: value for name, value in features.items() if not name.startswith((ALONE_FEATURE_PREFIX, TERM_FEATURE_PREFIX))}
         own = {name.removeprefix(ALONE_FEATURE_PREFIX): value for name, value in features.items() if name.startswith(ALONE_FEATURE_PREFIX)}
         # The shared features once more, and the orders of magnitude of the two counts: `ui` is counted 4752
         # times (13 binary digits), `гш` never.
@@ -193,7 +195,8 @@ class ContextAfterOriginTests(unittest.TestCase):
     def test_a_word_alone_in_the_field_has_its_features_once_more_for_the_message_start_head(self) -> None:
         first = ContextEvidence("руддщ", "hello", 1, FieldContext("Telegram", "1", "", ""), trigger="space", boundary_text=" ")
         features = extract_action_features(first)
-        shared = {name: value for name, value in features.items() if not name.startswith(START_FEATURE_PREFIX)}
+        # `hello` is a term typed in the Russian layout too: the term head's copy is its own.
+        shared = {name: value for name, value in features.items() if not name.startswith((START_FEATURE_PREFIX, TERM_FEATURE_PREFIX))}
         own = {name.removeprefix(START_FEATURE_PREFIX): value for name, value in features.items() if name.startswith(START_FEATURE_PREFIX)}
         # The shared features once more, the orders of magnitude of the two prose counts (`hello` occurs 483
         # times in English prose, 9 binary digits; `руддщ` never in Russian) and the band of the score delta.

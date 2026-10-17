@@ -28,8 +28,9 @@ from typing import Final, cast
 from unittest.mock import patch
 
 from keyswitch.context_action_features import (
-    abbreviation_question, alone_question, attested_abbreviation, capitals_question, extract_action_features,
-    joined_question, latin_abbreviation_question, letter_question, start_question, unknown_question, unknown_shape,
+    abbreviation_question, alone_question, alone_tail, attested_abbreviation, capitals_question, extract_action_features,
+    brief_question, brief_settled, first_question, joined_question, latin_abbreviation_question, letter_question, russian_ending_bucket,
+    start_question, term_question, unknown_question, unknown_shape,
 )
 from keyswitch.context_model import (
     ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, _term_frequency, term_bucket,
@@ -37,7 +38,7 @@ from keyswitch.context_model import (
 from keyswitch.context_policy import evidence_for_decision
 from keyswitch.detector import LanguageDetector
 from keyswitch.identifier_lexicon import IdentifierLexicon
-from keyswitch.input_context import FieldContext
+from keyswitch.input_context import FieldContext, FieldRole
 from keyswitch.lexicon_supplement import supplement_words
 from keyswitch.intent_model import CorrectionTrigger, IntentModelStatus, LinearNgramModel
 from keyswitch.language_model import LanguageModel
@@ -70,11 +71,14 @@ from keyswitch.constants.file_formats import HEXADECIMAL_BASE, VERSION_HASH_CHAR
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
 from keyswitch.constants.models import (
     ABBREVIATION_FEATURE_PREFIX, ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS, ALONE_FEATURE_PREFIX, ALONE_HEAD_LETTERS,
+    BRIEF_FEATURE_PREFIX, BRIEF_HEAD_LETTERS, FIRST_FEATURE_PREFIX,
     CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION,
     CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, JOINED_FEATURE_PREFIX,
     KEPT_CONTEXT_WORD_MAX_CHARACTERS, KEPT_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX, LETTER_FEATURE_PREFIX,
-    PLANNED_CONTEXT_AFTER_MAX_CHARACTERS, PLANNED_CONTEXT_WORD_MAX_CHARACTERS, START_FEATURE_PREFIX, UNKNOWN_FEATURE_PREFIX,
-    UNKNOWN_HEAD_MIN_CHARACTERS, UNKNOWN_HEAD_SIGN_KEY_LETTERS,
+    PLANNED_CONTEXT_AFTER_MAX_CHARACTERS, PLANNED_CONTEXT_WORD_MAX_CHARACTERS, START_FEATURE_PREFIX, TERM_FEATURE_PREFIX,
+    TERM_HEAD_ENDING_LETTERS, TERM_HEAD_TRAILING_SIGNS, UNKNOWN_FEATURE_PREFIX, UNKNOWN_HEAD_MIN_CHARACTERS,
+    PLANNED_CONTEXT_WORD_MAX_CHARACTERS as PLANNED_REVISIT_MAX_CHARACTERS,
+    UNKNOWN_HEAD_SIGN_KEY_LETTERS,
 )
 from keyswitch.constants.training import (
     ABBREVIATION_SPLIT_MODULUS,
@@ -82,8 +86,17 @@ from keyswitch.constants.training import (
     JOINED_REPEAT_MAX_LETTERS,
     JOINED_REPEAT_MIN_LETTERS,
     JOINED_REPEAT_SPLIT_MODULUS,
+    BRIEF_BOUNDARIES,
+    BRIEF_SPLIT_MODULUS,
+    TERM_CAPITALS_MAX_LETTERS,
     TERM_COUNT_DROPOUT_FAMILIES,
     TERM_COUNT_DROPOUT_MIN_LETTERS,
+    TERM_FRAGMENT_MIN_ENDING_BUCKET,
+    TERM_FRAGMENT_MIN_REST,
+    TERM_ALONE_WAIT_MAX_LETTERS,
+    TERM_REVISIT_FOLLOWERS,
+    TERM_REVISIT_FOLLOWER_MAX_LETTERS,
+    TERM_SPLIT_MODULUS,
     UNKNOWN_TOKEN_MAX_CHARACTERS,
     UNKNOWN_TOKEN_SPLIT_MODULUS,
     CONTEXT_ACTION_BACKEND_AUTO,
@@ -98,6 +111,7 @@ from keyswitch.constants.training import (
     COMMAND_FAMILY_IDENTIFIER_PARTS,
     DETERMINISTIC_CHOICE_HEX_DIGITS,
     DETERMINISTIC_ROUNDING_DECIMALS,
+    EPOCH_NET_BENEFIT_TOLERANCE,
     FEATURE_MASS_TOLERANCE,
     FIELD_AFTER_SAMPLE_MODULUS,
     IDENTIFIER_DROPOUT_FAMILIES,
@@ -276,6 +290,9 @@ class ActionRow:
     sample_weight: float = 1.0
     after_origin: AfterOrigin = "none"
     parent_family: str = ""
+    # Asked again as the engine asks a converted word whose next word went back (engine._revert_with_next_word): the
+    # baseline is the word's own verdict at its boundary, from the text before it, with no conversion (evidence).
+    revisit: bool = False
 
     def __post_init__(self) -> None:
         if type(self.sample_weight) not in (int, float) or not math.isfinite(self.sample_weight) or self.sample_weight <= 0:
@@ -906,7 +923,8 @@ def joined_token_curriculum(split: str, source_rows: Sequence[CorpusRow], refuse
     in either layout, are each joined to itself after the left context of a row of their language, some opening a
     sentence with a capital - typed as written (keep) and in the other layout (convert); one word in
     JOINED_REPEAT_SPLIT_MODULUS goes to DEVELOPMENT by hash, the rest to TRAIN. Items of this corpus's test, of every accessed test and of the recipe's `held_out` list (the
-    tokens of the authored battery that gates this head) are refused.
+    tokens of the authored battery that gates this head, and the general technical tokens of the owner's typing) are
+    refused.
     """
 
     item_modulus = int(cast(int, options["item_modulus"]))
@@ -999,6 +1017,298 @@ def _repeat_order(alphabet: str, word: str) -> str:
     """The order the joined-token curriculum draws repeated words of one language in: by hash."""
 
     return hashlib.sha256(f"joined-repeat:{alphabet}:{word}".encode()).hexdigest()
+
+
+def term_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                    options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """Tokens of the term head's class (context_action_features.term_question): a term typed in the Russian layout.
+
+    The frozen model left a term Russian technical text uses, typed in the Russian layout the first time a message held
+    it, at p 0.92-0.98, below the conversion threshold: `сш` in `npm ci`, `зк` for `pr`, `рвьш` for `hdmi` stayed in the
+    owner's typing. Converting the whole class fixed nine such words of the owner's typing and 46 of 1 831 ru.stackoverflow
+    comments of 2024-2026 typed with their Latin words in the Russian layout, and turned four pieces of Russian words
+    into Latin letters (`ась`, `ев`). This curriculum frames:
+    - terms: one in `item_modulus` of the Latin terms of letters whose keys in the Russian layout are a token of the
+      class, typed in the Russian layout after the left context of a Russian row of the split (convert), and once more in
+      one variant chosen by hash: at the start of a message, ending in a sign (`.` or `,`, typed as `ю` or `б`), opening a
+      sentence with a capital, or in capitals (a term of TERM_CAPITALS_MAX_LETTERS letters at most, as acronyms are
+      written). Alone at the start of a message and ended by a space, a term of up to TERM_ALONE_WAIT_MAX_LETTERS
+      letters waits for its next word, as the lone-word head leaves such a word (wait): the engine asks a waiting word
+      again at a pause, a suggestion never, and labelled to convert there the head only suggested `гш` and `йк`, which
+      stayed (experiment E9c). Any other converts: waiting, `тзь`, `сым` and `ШВУ` (`npm`, `csv`, `IDE`) opening a
+      message stayed where the frozen model had converted them (experiment E9d), and so did `ювшые` (`.dist`) with two
+      spaces after it; the head reads the letters with the boundary, so the two-letter wait does not pull the longer
+      ones, and every short term stands once more alone at a space (experiments E9f and E9g made `гш` a suggestion:
+      drawn by hash, too few short terms stood there). Alone in a field a reader read empty a term of up to three
+      letters is the first-term head's (first_curriculum). Each term is also
+      asked again as the engine asks a converted word once the word after it went back to Russian (one of the
+      TERM_REVISIT_FOLLOWERS most frequent short words of Russian prose after it, convert), with the baseline the engine
+      gives that question (ActionRow.revisit): `зк` in `займись зк и тз` became `pr`, the layout followed, `и` came out
+      as `b`, and asked again the frozen model leaned to keeping `зк`.
+      One term in TERM_SPLIT_MODULUS goes to DEVELOPMENT by hash;
+    - pieces kept: the last TERM_HEAD_ENDING_LETTERS letters of the Russian words of the split's own rows that are a token
+      of the class and end many words (an ending bucket of TERM_FRAGMENT_MIN_ENDING_BUCKET or more), of words with a
+      word before them in their row (a tail alone in its field stands where a term does), at most
+      `per_piece` occurrences of one piece, in an order by hash, each after its row's left context (keep) and asked
+      again with a short Russian word after it (keep): an edit inside a word leaves its tail as a token of its own. Such
+      a tail is rare beside a term typed in the wrong layout (in the owner's typing about one in thirteen tokens of the
+      class), and a kept frame weighs `keep_importance` times its sample weight: the pieces weigh `piece_weight` of a
+      term's frame. At full weight the 95 two-letter pieces outweighed the 125 two-letter terms, and the head, which
+      then read no ending of Russian words, kept `зк` (`pr`) and `ьв` (`md`), which the frozen model converted (field
+      batteries, experiment E3).
+    Items of this corpus's test, of every accessed test and of the recipe's `held_out` list (the class's tokens of the
+    owner's typing, which measure this head) are refused.
+    """
+
+    item_modulus = int(cast(int, options["item_modulus"]))
+    contexts = natural_mixed_contexts(source_rows)[1]
+    if not item_modulus or not contexts or split not in (TRAIN, DEVELOPMENT):
+        return [], {"frames": 0, "scope": "not used"}
+    weight = float(cast(float, options["sample_weight"]))
+    piece_weight = float(cast(float, options.get("piece_weight", 1.0)))
+    per_piece = int(cast(int, options["per_piece"]))
+    held_out = frozenset(str(token).casefold() for token in cast(list[object], options.get("held_out", [])))
+    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+    rows: list[ActionRow] = []
+    counts: Counter[str] = Counter()
+
+    def frame(identifier: str, typed: str, before: str, action: ContextAction, share: float = 1.0) -> ActionRow:
+        trigger, boundary_text = _varied_boundary(identifier)
+        field = FieldContext(applications[variant_choice(identifier, "application", len(applications))], "public-training",
+                             before[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:], "", "unknown")
+        return ActionRow(identifier, typed, 1, field, trigger, "", action, "term", boundary_text, weight * share)
+
+    def refuse(token: str, keys: str) -> bool:
+        return (token.casefold() in held_out or keys.casefold() in held_out
+                or bool(refused & (expanded_aliases(token) | expanded_aliases(keys))))
+
+    followers = revisit_followers()
+
+    def revisit(identifier: str, typed: str, before: str, action: ContextAction, share: float = 1.0,
+                role: FieldRole = "unknown") -> ActionRow:
+        """The token asked again as the engine asks a converted word whose next word went back to Russian."""
+        follower = followers[variant_choice(identifier, "follower", len(followers))]
+        field = FieldContext(applications[variant_choice(identifier, "application", len(applications))], "public-training",
+                             before[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:], follower, role)
+        origin: AfterOrigin = "planned_next_conversion" if len(typed) <= PLANNED_REVISIT_MAX_CHARACTERS else "field"
+        return ActionRow(identifier, typed, 1, field, "space", "", action, "term", " ", weight * share, after_origin=origin,
+                         revisit=True)
+
+    for term in sorted(_term_frequency()["latin"]):
+        if not term.isascii() or not term.isalpha() or not term.islower():
+            continue
+        typed = translated(term, 0)
+        family = f"term:{typed}"
+        if variant_choice(family, "draw", item_modulus) or not term_question(typed, ""):
+            continue
+        if (DEVELOPMENT if variant_choice(family, "split", TERM_SPLIT_MODULUS) == 0 else TRAIN) != split:
+            continue
+        if refuse(term, typed):
+            counts["refused"] += 1
+            continue
+        context = contexts[variant_choice(family, "context", len(contexts))]
+        other = contexts[variant_choice(family, "other-context", len(contexts))]
+        variants = ["start", "signed", "capital", *(["upper"] if len(term) <= TERM_CAPITALS_MAX_LETTERS else [])]
+        variant = variants[variant_choice(family, "variant", len(variants))]
+        signs = translated(TERM_HEAD_TRAILING_SIGNS, 0)
+        shown = {"start": typed, "signed": typed + signs[variant_choice(family, "sign", len(signs))],
+                 "capital": typed[:1].upper() + typed[1:], "upper": typed.upper()}[variant]
+        before = {"start": "", "capital": f"{other.rstrip()}. "}.get(variant, other)
+        for index, (kind, token, left) in enumerate((("plain", typed, context), (variant, shown, before))):
+            if not term_question(token, left):
+                # A term written right earlier in the text is the unknown-token head's.
+                counts["outside_class"] += 1
+                continue
+            framed = frame(f"{family}:{index}", token, left, "convert")
+            if not left and framed.trigger == "space" and len(token) <= TERM_ALONE_WAIT_MAX_LETTERS:
+                framed = replace(framed, action="wait")
+            counts[f"{framed.action}:{kind}"] += 1
+            rows.append(framed)
+        if term_question(typed, context):
+            counts["convert:revisit"] += 1
+            rows.append(revisit(f"{family}:revisit", typed, context, "convert"))
+        if len(typed) <= max(TERM_HEAD_ENDING_LETTERS) and term_question(typed, ""):
+            field = FieldContext(applications[variant_choice(family, "alone-application", len(applications))],
+                                 "public-training", "", "", "unknown")
+            if len(typed) <= TERM_ALONE_WAIT_MAX_LETTERS:
+                # Every short term once more alone at a space: drawn among the variants and boundaries by hash, too few
+                # of them stood there against the longer terms that convert, and `гш` came out a suggestion (experiments
+                # E9f, E9g).
+                counts["wait:alone"] += 1
+                rows.append(ActionRow(f"{family}:alone", typed, 1, field, "space", "", "wait", "term", " ", weight))
+    taken: Counter[str] = Counter()
+    russian = sorted((row for row, group, _, _ in _monolingual_rows(source_rows) if group == 1),
+                     key=lambda row: hashlib.sha256(f"term-piece:{row.identifier}".encode()).digest())
+    for row in russian:
+        if not any(char.isalpha() for char in row.before):
+            # A tail with no word before it stands alone in its field, a term's place: framed kept there, the tails of
+            # words opening a row outweighed the wait of a lone short term in a field nobody read, and `зь`, `цу`
+            # (`pm`, `we`), which 0.56.0 left waiting, were kept (candidate v64c).
+            counts["skipped:row-start"] += 1
+            continue
+        for size in TERM_HEAD_ENDING_LETTERS:
+            piece = row.original[-size:]
+            if (len(row.original) - size < TERM_FRAGMENT_MIN_REST or taken[piece.casefold()] >= per_piece
+                    or not term_question(piece, row.before)
+                    or int(russian_ending_bucket(piece)) < TERM_FRAGMENT_MIN_ENDING_BUCKET):
+                continue
+            if refuse(piece, translated(piece, 1)):
+                counts["refused"] += 1
+                continue
+            taken[piece.casefold()] += 1
+            counts["keep:piece"] += 1
+            counts["keep:piece-revisit"] += 1
+            rows.append(frame(f"term-piece:{row.identifier}:{size}", piece, row.before, "keep", piece_weight))
+            rows.append(revisit(f"term-piece:{row.identifier}:{size}:revisit", piece, row.before, "keep", piece_weight))
+    return rows, {"frames": len(rows), "items": dict(sorted(counts.items())), "pieces": len(taken),
+                  "item_modulus": item_modulus, "per_piece": per_piece, "piece_weight": piece_weight, "held_out": len(held_out),
+                  "sample_weight": weight,
+                  "scope": "terms of the Latin table typed in the Russian layout after Russian prose, at the start of a "
+                           "message, with a sign after them, with a capital or in capitals, and asked again after a "
+                           "Russian word that went back (convert; alone at a space, a term of two letters waits), and the "
+                           "tails of the split's Russian words after a word that are such a token (keep), of this split's "
+                           "share (term_curriculum)."}
+
+
+def revisit_followers() -> list[str]:
+    """The TERM_REVISIT_FOLLOWERS most frequent words of Russian prose of up to TERM_REVISIT_FOLLOWER_MAX_LETTERS letters:
+    the words after which a term is asked again (term_curriculum, first_curriculum)."""
+
+    return [word for _count, word in sorted((-count, word) for word, count in _term_frequency()["russian"].items()
+                                            if len(word) <= TERM_REVISIT_FOLLOWER_MAX_LETTERS and word.isalpha())
+            ][:TERM_REVISIT_FOLLOWERS]
+
+
+def first_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                     options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """Terms of up to three letters alone in a field a field reader read empty (context_action_features.first_question).
+
+    There a term opens a message, and the owner asked for `йк ` (`qr`) to convert at once (16.10.2026), where the frozen
+    model waited for a pause. The term head, which chooses an early epoch for its other frames, stopped short of the
+    threshold there: `зк` and `йк` became suggestions at p 0.98, which no pause settles (candidates v64b to v64e). Every
+    term of the Latin table whose keys in the Russian layout are a token of the class stands alone in such a field,
+    ended by a space (convert) and by a pause (convert). A token that may still be the tail of a Russian word
+    (alone_tail) waits at the space and is kept at the pause: nothing stands before a tail in a field read empty, but a
+    field battery replays a stream that starts with one into an empty field (`дые`, which the owner typed completing
+    `моло`), and waiting there it went to `lst` at the pause (candidate v64c). Each is also asked again as the engine
+    asks it with the word after it: a term converted at once, once a Russian word followed (ActionRow.revisit: the
+    baseline the engine gives that question), stays converted (the term head, which asked it before, took `qr` back
+    with `истек` after it on corpus v65 and kept it on corpus v64); a token that waited, once its next word was
+    converted, keeps. Each term goes to DEVELOPMENT or TRAIN as
+    the term curriculum draws it (TERM_SPLIT_MODULUS), and DEVELOPMENT chooses the head's own epoch. Tokens of this
+    corpus's test, of every accessed test and of the recipe's `held_out` list (the class's tokens of the owner's typing)
+    are refused.
+    """
+
+    if not options.get("enabled") or split not in (TRAIN, DEVELOPMENT):
+        return [], {"frames": 0, "scope": "not used"}
+    weight = float(cast(float, options["sample_weight"]))
+    held_out = frozenset(str(token).casefold() for token in cast(list[object], options.get("held_out", [])))
+    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+    followers = revisit_followers()
+    rows: list[ActionRow] = []
+    counts: Counter[str] = Counter()
+    for term in sorted(_term_frequency()["latin"]):
+        if not term.isascii() or not term.isalpha() or not term.islower():
+            continue
+        typed = translated(term, 0)
+        family = f"term:{typed}"
+        if not first_question(typed, "", ""):
+            continue
+        if (DEVELOPMENT if variant_choice(family, "split", TERM_SPLIT_MODULUS) == 0 else TRAIN) != split:
+            continue
+        if term.casefold() in held_out or typed.casefold() in held_out or refused & (expanded_aliases(term) | expanded_aliases(typed)):
+            counts["refused"] += 1
+            continue
+        tail = alone_tail(typed)
+        field = FieldContext(applications[variant_choice(f"first:{typed}", "application", len(applications))], "public-training",
+                             "", "", "text", source="reader")
+        for trigger, boundary_text, action in (("space", " ", "wait" if tail else "convert"),
+                                               ("pause", "", "keep" if tail else "convert")):
+            counts[f"{action}:{trigger}"] += 1
+            rows.append(ActionRow(f"first:{typed}:{trigger}", typed, 1, field, cast(CorrectionTrigger, trigger), "",
+                                  cast(ContextAction, action), "first", boundary_text, weight))
+        follower = followers[variant_choice(f"first:{typed}", "follower", len(followers))]
+        origin: AfterOrigin = "planned_next_conversion" if len(typed) <= PLANNED_REVISIT_MAX_CHARACTERS else "field"
+        again: ContextAction = "keep" if tail else "convert"
+        counts[f"{again}:next"] += 1
+        rows.append(ActionRow(f"first:{typed}:next", typed, 1, replace(field, after=follower), "space", "", again, "first",
+                              " ", weight, after_origin=origin, revisit=not tail))
+    return rows, {"frames": len(rows), "items": dict(sorted(counts.items())), "held_out": len(held_out), "sample_weight": weight,
+                  "scope": "terms of up to three letters of the Latin table typed in the Russian layout alone in a field a "
+                           "reader read empty, ended by a space and by a pause, and asked again with the word after them "
+                           "(convert; a token that may still be the tail of a Russian word waits at the space and is kept "
+                           "at the pause and with the next word) (first_curriculum)."}
+
+
+def brief_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                     options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """Short messages typed in the English layout (context_action_features.brief_question): a token of
+    BRIEF_HEAD_LETTERS letters alone in the field.
+
+    Typed as a whole message in the English layout, `ytn` (`нет`), `jr` (`ок`), `dct` (`все`) and `tot` (`еще`) stayed:
+    the frozen model kept them or waited for a next word, and the lone-word head did not overcome that wait. Each word
+    of Russian prose of these lengths counted at least `minimum_count` times, typed with its keys in the English layout,
+    and each word of English prose or Latin term of Russian technical text counted as often, typed as meant, stands
+    alone at the start of a message, ended by every boundary of BRIEF_BOUNDARIES, in lower case and capitalised. A token
+    that is both (`vs` and `мы`) is framed both ways: converted with the share of the Russian reading among the counts of
+    both readings, kept with the rest, so the head learns what a message of these keys most likely meant. Only tokens
+    the counts settle as a Russian word are framed (context_action_features.brief_settled), the head's class: framed
+    all, the head turned pairs both readings count (`ij`, `Jq`) into Russian and kept `ds` (`вы`) at some boundaries,
+    where the calibration takes the frozen model's answer (candidate v63e). One token in
+    BRIEF_SPLIT_MODULUS goes to DEVELOPMENT by hash, whose frames choose the head's own epoch. Tokens of this corpus's
+    test, of every accessed test and of the recipe's `held_out` list (the class's tokens of the owner's typing) are
+    refused.
+    """
+
+    minimum = int(cast(int, options["minimum_count"]))
+    if not minimum or split not in (TRAIN, DEVELOPMENT):
+        return [], {"frames": 0, "scope": "not used"}
+    weight = float(cast(float, options["sample_weight"]))
+    held_out = frozenset(str(token).casefold() for token in cast(list[object], options.get("held_out", [])))
+    table = _term_frequency()
+    applications = ("Telegram", "Code", "chrome", "UnseenEditor")
+    tokens: dict[str, str] = {}
+    for word, count in table["russian"].items():
+        keys = translated(word, 1)
+        if count >= minimum and len(word) in BRIEF_HEAD_LETTERS and keys.isascii() and keys.isalpha():
+            tokens[keys.casefold()] = word
+    for alphabet in ("english", "latin"):
+        for word, count in table[alphabet].items():
+            if count >= minimum and len(word) in BRIEF_HEAD_LETTERS and word.isascii() and word.isalpha() and word.islower():
+                keys = translated(word, 0)
+                if keys.isalpha() and not keys.isascii():
+                    tokens.setdefault(word, keys)
+    rows: list[ActionRow] = []
+    counts: Counter[str] = Counter()
+    for latin, cyrillic in sorted(tokens.items()):
+        family = f"brief:{latin}"
+        if (DEVELOPMENT if variant_choice(family, "split", BRIEF_SPLIT_MODULUS) == 0 else TRAIN) != split:
+            continue
+        if latin in held_out or cyrillic in held_out or refused & (expanded_aliases(latin) | expanded_aliases(cyrillic)):
+            counts["refused"] += 1
+            continue
+        if not brief_settled(latin, cyrillic):
+            # The head answers no token the counts leave open (context_action_features.brief_settled).
+            counts["unsettled"] += 1
+            continue
+        russian = table["russian"].get(cyrillic, 0)
+        share = russian / (russian + max(table["english"].get(latin, 0), table["latin"].get(latin, 0)))
+        counts["both" if 0 < share < 1 else "russian" if share else "latin"] += 1
+        for index, (trigger, boundary_text) in enumerate(BRIEF_BOUNDARIES):
+            for case, shown in (("lower", latin), ("title", latin.capitalize())):
+                identifier = f"{family}:{index}:{case}"
+                field = FieldContext(applications[variant_choice(identifier, "application", len(applications))],
+                                     "public-training", "", "", "unknown")
+                for action, mass in (("convert", share), ("keep", 1.0 - share)):
+                    if mass:
+                        rows.append(ActionRow(f"{identifier}:{action}", shown, 0, field, cast(CorrectionTrigger, trigger), "",
+                                              cast(ContextAction, action), "brief", boundary_text, weight * mass))
+    return rows, {"frames": len(rows), "tokens": dict(sorted(counts.items())), "minimum_count": minimum,
+                  "held_out": len(held_out), "sample_weight": weight,
+                  "scope": "tokens of two or three letters alone at the start of a message, typed in the English layout, that "
+                           "the counts settle as the keys of a Russian word (convert, a share of the Latin count kept) "
+                           "(brief_curriculum)."}
 
 
 def term_counts_dropped(identifier: str, original: str) -> bool:
@@ -1862,7 +2172,7 @@ def evidence(row: ActionRow, detector: LanguageDetector, ortho: OrthoModel | Non
              *, identifiers: IdentifierLexicon | None = None) -> ContextEvidence:
     alternative = translated(row.original, row.group)
     previous, context_group = previous_context(row)
-    if row.after_origin == "planned_next_conversion":
+    if row.after_origin == "planned_next_conversion" and not row.revisit:
         # The engine re-decides a waiting word with its converted next word as the
         # only language context (KeySwitchEngine._planned_baseline); the planned
         # frame's baseline verdict is built the same way, never from the left context.
@@ -1875,6 +2185,11 @@ def evidence(row: ActionRow, detector: LanguageDetector, ortho: OrthoModel | Non
         previous_words=previous, context_group=context_group, trigger=row.trigger,
         following={1 - row.group: following_reading(row)},
     )
+    if row.revisit:
+        # A converted word asked again keeps the verdict of its own boundary with no conversion, and no curated rule
+        # answers (engine._revert_with_next_word): the term head learnt the planned question instead, and `зк` in
+        # `принимай зк и`, converted at once, went back with `и` (field batteries, experiment E9).
+        decision = replace(decision, should_convert=False)
     return evidence_for_decision(
         decision, alternative, 1 - row.group, detector, row.field, row.trigger,
         literal_tail=row.literal_tail, ortho=ortho, boundary_text=row.boundary_text,
@@ -1950,7 +2265,8 @@ def frozen_base(options: Mapping[str, object]) -> ContextModel | None:
 HEAD_PREFIXES: Final = {"capitals": CAPITALS_FEATURE_PREFIX, "alone": ALONE_FEATURE_PREFIX, "start": START_FEATURE_PREFIX,
                          "letter": LETTER_FEATURE_PREFIX, "abbreviation": ABBREVIATION_FEATURE_PREFIX,
                          "latin_abbreviation": LATIN_ABBREVIATION_FEATURE_PREFIX, "unknown": UNKNOWN_FEATURE_PREFIX,
-                         "joined": JOINED_FEATURE_PREFIX}
+                         "joined": JOINED_FEATURE_PREFIX, "term": TERM_FEATURE_PREFIX, "brief": BRIEF_FEATURE_PREFIX,
+                         "first": FIRST_FEATURE_PREFIX}
 # A recipe without single-letter frames (the recipes before corpus v34).
 NO_LETTER_CURRICULUM: Final[dict[str, object]] = {"term_sentences": 0, "english_sentences": 0, "minimum_term_count": 0,
                                                   "sample_weight": 1.0}
@@ -1965,6 +2281,21 @@ NO_UNKNOWN_TOKEN_CURRICULUM: Final[dict[str, object]] = {"item_modulus": 0, "ech
                                                          "held_out": [], "sample_weight": 1.0}
 # A recipe without joined-token frames (the recipes before corpus v59).
 NO_JOINED_TOKEN_CURRICULUM: Final[dict[str, object]] = {"item_modulus": 0, "per_token": 0, "held_out": [], "sample_weight": 1.0}
+# A recipe without term frames (the recipes before corpus v62).
+NO_TERM_CURRICULUM: Final[dict[str, object]] = {"item_modulus": 0, "per_piece": 0, "held_out": [], "sample_weight": 1.0}
+# A recipe without short-message frames (the recipes before corpus v62).
+NO_BRIEF_CURRICULUM: Final[dict[str, object]] = {"minimum_count": 0, "held_out": [], "sample_weight": 1.0}
+# A recipe without first-term frames (the recipes before corpus v64).
+NO_FIRST_CURRICULUM: Final[dict[str, object]] = {"enabled": False, "held_out": [], "sample_weight": 1.0}
+# The heads whose own frames of DEVELOPMENT choose their epoch (fit), by feature prefix: the name their epoch goes by in
+# the seal, the recipe's key of their curriculum, the curriculum, and the options of a recipe without it.
+OWN_EPOCH_HEADS: Final[dict[str, tuple[str, str, Callable[[str, Sequence[CorpusRow], frozenset[str], Mapping[str, object]],
+                                                          tuple[list[ActionRow], dict[str, object]]], dict[str, object]]]] = {
+    JOINED_FEATURE_PREFIX: ("joined", "joined_token_curriculum", joined_token_curriculum, NO_JOINED_TOKEN_CURRICULUM),
+    TERM_FEATURE_PREFIX: ("term", "term_curriculum", term_curriculum, NO_TERM_CURRICULUM),
+    BRIEF_FEATURE_PREFIX: ("brief", "brief_curriculum", brief_curriculum, NO_BRIEF_CURRICULUM),
+    FIRST_FEATURE_PREFIX: ("first", "first_curriculum", first_curriculum, NO_FIRST_CURRICULUM),
+}
 
 
 def frozen_heads(options: Mapping[str, object]) -> dict[str, int]:
@@ -2158,7 +2489,10 @@ def head_question(original: str, alternative: str, before: str, after: str, trig
             or (ALONE_FEATURE_PREFIX in prefixes and alone_question(original, alternative, before, after, trigger))
             or (START_FEATURE_PREFIX in prefixes and start_question(original, alternative, before, after))
             or (UNKNOWN_FEATURE_PREFIX in prefixes and unknown_question(original, before))
-            or (JOINED_FEATURE_PREFIX in prefixes and joined_question(original)))
+            or (JOINED_FEATURE_PREFIX in prefixes and joined_question(original))
+            or (TERM_FEATURE_PREFIX in prefixes and term_question(original, before))
+            or (BRIEF_FEATURE_PREFIX in prefixes and brief_question(original, before, after))
+            or (FIRST_FEATURE_PREFIX in prefixes and first_question(original, before, after)))
 
 
 def carried_prefixes(model: ContextModel) -> frozenset[str]:
@@ -2461,8 +2795,8 @@ def frame_chain(inputs: FitInputs, profile: str, split: str, rows: Sequence[Acti
             split, inputs.source_rows[split], inputs.refused,
             cast(dict[str, object], options.get("unknown_token_curriculum", NO_UNKNOWN_TOKEN_CURRICULUM)))
         result.extend(unknown)
-        # The joined-token head's curriculum is not framed here: its epoch is its own, chosen on that curriculum (fit),
-        # and the other heads' epoch is chosen without its weights.
+        # The joined-token, term and short-message heads' curricula are not framed here: their epochs are their own, each
+        # chosen on its curriculum (fit), and the other heads' epoch is chosen without their weights.
     evidence = alone_evidence(options)
     if evidence is not None:
         lone, reports["lone_word"] = lone_word_curriculum(split, inputs.refused, evidence, partial(base_action, inputs=inputs))
@@ -2492,10 +2826,17 @@ def tail_curricula(inputs: FitInputs) -> tuple[list[ActionRow], dict[str, object
     joined, joined_report = joined_token_curriculum(
         TRAIN, inputs.source_rows[TRAIN], inputs.refused,
         cast(dict[str, object], options.get("joined_token_curriculum", NO_JOINED_TOKEN_CURRICULUM)))
-    return [*kept, *counted, *letter, *abbreviation, *latin_abbreviation, *unknown, *joined], {
+    term, term_report = term_curriculum(
+        TRAIN, inputs.source_rows[TRAIN], inputs.refused, cast(dict[str, object], options.get("term_curriculum", NO_TERM_CURRICULUM)))
+    brief, brief_report = brief_curriculum(
+        TRAIN, inputs.source_rows[TRAIN], inputs.refused, cast(dict[str, object], options.get("brief_curriculum", NO_BRIEF_CURRICULUM)))
+    first, first_report = first_curriculum(
+        TRAIN, inputs.source_rows[TRAIN], inputs.refused, cast(dict[str, object], options.get("first_curriculum", NO_FIRST_CURRICULUM)))
+    return [*kept, *counted, *letter, *abbreviation, *latin_abbreviation, *unknown, *joined, *term, *brief, *first], {
         "kept_neighbour_curriculum": kept_report, "counted_token_curriculum": counted_report, "letter_curriculum": letter_report,
         "abbreviation_curriculum": abbreviation_report, "latin_abbreviation_curriculum": latin_abbreviation_report,
-        "unknown_token_curriculum": unknown_report, "joined_token_curriculum": joined_report}
+        "unknown_token_curriculum": unknown_report, "joined_token_curriculum": joined_report, "term_curriculum": term_report,
+        "brief_curriculum": brief_report, "first_curriculum": first_report}
 
 
 def prepared_frames(rows: Sequence[ActionRow], spans: SpanCurriculum, split: str) -> list[tuple[str, ActionRow | SpanFrame]]:
@@ -2570,20 +2911,22 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
                                        ACTIONS.index(row.action), row.sample_weight * (keep_importance if row.action == "keep" else 1.0))
                                       for row in kept_frames] for profile in profiles}
         print(f"features kept-development: {len(kept_frames)} per profile", flush=True)
-    # The joined-token head's own frames of DEVELOPMENT choose its epoch, as the kept-neighbour frames choose the
-    # kept-neighbour question's. Ranked with the other heads, its frames moved their shared epoch from 38 to 31-33, and
-    # the unknown-token head lost `htpdt` (`резве`) and `f` (`а`) in the owner's typing.
-    joined_development: dict[str, list[tuple[dict[str, float], int, float]]] = {}
-    if base is not None and JOINED_FEATURE_PREFIX in heads:
-        joined_importance = float(cast(float, options["keep_importance"]))
-        joined_frames = joined_token_curriculum(
-            DEVELOPMENT, inputs.source_rows[DEVELOPMENT], inputs.refused,
-            cast(dict[str, object], options.get("joined_token_curriculum", NO_JOINED_TOKEN_CURRICULUM)))[0]
-        joined_development = {profile: [(dict(sorted(frame_features(row, DEVELOPMENT, inputs.detectors[profile], inputs.ortho).items())),
-                                         ACTIONS.index(row.action),
-                                         row.sample_weight * (joined_importance if row.action == "keep" else 1.0))
-                                        for row in joined_frames] for profile in profiles}
-        print(f"features joined-development: {len(joined_frames)} per profile", flush=True)
+    # The joined-token and term heads' own frames of DEVELOPMENT choose their epochs (OWN_EPOCH_HEADS), as the
+    # kept-neighbour frames choose the kept-neighbour question's. Ranked with the other heads, the joined-token head's
+    # frames moved their shared epoch from 38 to 31-33, and the unknown-token head lost `htpdt` (`резве`) and `f` (`а`) in
+    # the owner's typing.
+    own_development: dict[str, dict[str, list[tuple[dict[str, float], int, float]]]] = {}
+    for prefix, (label, key, curriculum, absent) in OWN_EPOCH_HEADS.items():
+        if base is None or prefix not in heads:
+            continue
+        own_importance = float(cast(float, options["keep_importance"]))
+        own_frames = curriculum(DEVELOPMENT, inputs.source_rows[DEVELOPMENT], inputs.refused,
+                                cast(dict[str, object], options.get(key, absent)))[0]
+        own_development[prefix] = {
+            profile: [(dict(sorted(frame_features(row, DEVELOPMENT, inputs.detectors[profile], inputs.ortho).items())),
+                       ACTIONS.index(row.action), row.sample_weight * (own_importance if row.action == "keep" else 1.0))
+                      for row in own_frames] for profile in profiles}
+        print(f"features {label}-development: {len(own_frames)} per profile", flush=True)
     # The frames, curricula and lexicons are not needed any more; the epochs need the memory.
     splits = list(inputs.frames)
     del inputs
@@ -2624,15 +2967,21 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
     epochs = int(cast(int, options["epochs"]))
     best, best_epoch, best_loss = array("d"), 0, math.inf
     best_selection: EpochSelection | None = None
+    # Every qualifying epoch with its weights: the heads' epoch is chosen once all are known (settled_epoch).
+    qualifying: list[tuple[int, EpochSelection, array[float], float]] = []
     kept_best, kept_epoch, kept_loss = array("d"), 0, math.inf
     history: list[dict[str, object]] = []
     kept_check = {name: Packed.build(rows, names) for name, rows in kept_development.items()}
     kept_mass = sum(sum(data.importance) for data in kept_check.values())
-    joined_check = {name: Packed.build(rows, names) for name, rows in joined_development.items() if rows}
-    joined_mass = sum(sum(data.importance) for data in joined_check.values())
-    joined_slots = [index * len(ACTIONS) + action for index, name in enumerate(names)
-                    if name.startswith(JOINED_FEATURE_PREFIX) for action in range(len(ACTIONS))]
-    joined_best, joined_epoch, joined_loss = array("d"), 0, math.inf
+    own_checks = {prefix: checks for prefix, checks in
+                  ((prefix, {profile: Packed.build(rows, names) for profile, rows in development_rows.items() if rows})
+                   for prefix, development_rows in own_development.items()) if checks}
+    own_mass = {prefix: sum(sum(data.importance) for data in checks.values()) for prefix, checks in own_checks.items()}
+    own_slots = {prefix: [index * len(ACTIONS) + action for index, name in enumerate(names)
+                          if name.startswith(prefix) for action in range(len(ACTIONS))] for prefix in own_checks}
+    own_best = {prefix: array("d") for prefix in own_checks}
+    own_epoch = dict.fromkeys(own_checks, 0)
+    own_loss = dict.fromkeys(own_checks, math.inf)
     # The kernel releases the GIL: the next epoch trains in a thread while this one is scored.
     with ThreadPoolExecutor(max_workers=1) as following:
         kernel.epoch(train, weights, accumulators, rate)
@@ -2648,14 +2997,16 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
                     kept_best, kept_epoch, kept_loss = rounded, epoch + 1, loss
                 record["kept_development_loss"] = loss
                 print(f"epoch {epoch + 1}: kept_development_loss={loss:.9f}, best={kept_epoch}", flush=True)
-            if joined_check:
-                loss = sum(log_loss(kernel.predict(data, rounded), data) for data in joined_check.values()) / joined_mass
-                if loss < joined_loss:
-                    joined_best, joined_epoch, joined_loss = array("d", rounded), epoch + 1, loss
-                record["joined_development_loss"] = loss
-                print(f"epoch {epoch + 1}: joined_development_loss={loss:.9f}, best={joined_epoch}", flush=True)
-                # The other heads are ranked without the joined-token head: no frame holds the features of both.
-                for slot in joined_slots:
+            for prefix, checks in own_checks.items():
+                loss = sum(log_loss(kernel.predict(data, rounded), data) for data in checks.values()) / own_mass[prefix]
+                if loss < own_loss[prefix]:
+                    own_best[prefix], own_epoch[prefix], own_loss[prefix] = array("d", rounded), epoch + 1, loss
+                label = OWN_EPOCH_HEADS[prefix][0]
+                record[f"{label}_development_loss"] = loss
+                print(f"epoch {epoch + 1}: {label}_development_loss={loss:.9f}, best={own_epoch[prefix]}", flush=True)
+            # The other heads are ranked without the heads of their own epoch: no frame holds the features of two heads.
+            for slots in own_slots.values():
+                for slot in slots:
                     rounded[slot] = 0.0
             if base is not None and not heads:
                 history.append(record)
@@ -2669,12 +3020,15 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
                                       for name, data in development.items()},
                                      thresholds=development_thresholds(options), loss=loss,
                                      minimum_net_benefit=int(cast(dict[str, int], options["epoch_selection"])["minimum_net_benefit_per_profile"]))
-            if selection is not None and (best_selection is None or selection.rank > best_selection.rank):
-                best, best_epoch, best_loss, best_selection = rounded, epoch + 1, loss, selection
+            if selection is not None:
+                qualifying.append((epoch + 1, selection, rounded, loss))
             history.append({**record, "development_loss": loss, "selection": asdict(selection) if selection is not None else None})
-            print(f"epoch {epoch + 1}: development_loss={loss:.9f}, best={best_epoch}", flush=True)
+            leading = max(qualifying, key=lambda entry: (entry[1].rank, -entry[0]))[0] if qualifying else 0
+            print(f"epoch {epoch + 1}: development_loss={loss:.9f}, best={leading}", flush=True)
             if next_epoch is not None:
                 next_epoch.result()
+    if qualifying:
+        best_epoch, best_selection, best, best_loss = settled_epoch(qualifying)
     if (base is None or heads) and best_selection is None:
         raise ValueError("no epoch repaired more than it broke on development")
     if base is not None and not heads:
@@ -2685,8 +3039,10 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
         for index, name in enumerate(names):
             if name.startswith(KEPT_FEATURE_PREFIX):
                 best[index * len(ACTIONS):(index + 1) * len(ACTIONS)] = kept_best[index * len(ACTIONS):(index + 1) * len(ACTIONS)]
-            elif name.startswith(JOINED_FEATURE_PREFIX) and joined_epoch:
-                best[index * len(ACTIONS):(index + 1) * len(ACTIONS)] = joined_best[index * len(ACTIONS):(index + 1) * len(ACTIONS)]
+            else:
+                head = next((prefix for prefix in own_checks if name.startswith(prefix) and own_epoch[prefix]), None)
+                if head is not None:
+                    best[index * len(ACTIONS):(index + 1) * len(ACTIONS)] = own_best[head][index * len(ACTIONS):(index + 1) * len(ACTIONS)]
     gates = cast(dict[str, int | float | bool], options["gate_policy"])
     mapping = {name: list(best[index * len(ACTIONS):index * len(ACTIONS) + len(ACTIONS)]) for index, name in enumerate(names)}
     candidate = ContextModel({name: tuple(values) for name, values in mapping.items()},
@@ -2726,7 +3082,9 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
         "development": {"selected_epoch": best_epoch, "loss": best_loss, "history": history,
                         "selection": asdict(best_selection) if best_selection is not None else None,
                         **({"kept_selected_epoch": kept_epoch, "kept_loss": kept_loss} if base is not None and heads else {}),
-                        **({"joined_selected_epoch": joined_epoch, "joined_loss": joined_loss} if joined_epoch else {})},
+                        **{name: value for prefix in own_checks if own_epoch[prefix]
+                           for name, value in ((f"{OWN_EPOCH_HEADS[prefix][0]}_selected_epoch", own_epoch[prefix]),
+                                               (f"{OWN_EPOCH_HEADS[prefix][0]}_loss", own_loss[prefix]))}},
         "frozen_base": None if base is None else {
             "artifact": cast(dict[str, object], options["frozen_base"])["artifact"],
             "sha256": cast(dict[str, object], options["frozen_base"])["sha256"],
@@ -2759,6 +3117,23 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
     (output / SEAL).write_bytes(readable(seal))
     print(f"{seal['stage']}: {payload['version']}; threshold={threshold}; test not read", flush=True)
     return seal
+
+
+def settled_epoch(qualifying: Sequence[tuple[int, EpochSelection, array[float], float]],
+                  ) -> tuple[int, EpochSelection, array[float], float]:
+    """The epoch the heads keep: the latest whose development balance is within EPOCH_NET_BENEFIT_TOLERANCE of the best.
+
+    The development balance is flat over most epochs, and a difference of a row or two chose the epoch: on corpus v62
+    epoch 17 netted one conversion more than epoch 48 (37 674 against 37 673), and the unknown-token head of epoch 17
+    lost `htpdt` (`резве`) and `f` (`а`) in the owner's typing, which that of epoch 48 had kept. Within the tolerance
+    the difference is noise, and the latest epoch is the one that fitted the heads' curricula furthest."""
+
+    best = max(qualifying, key=lambda entry: (entry[1].rank, -entry[0]))[1]
+    near = [entry for entry in qualifying
+            if entry[1].minimum_net_benefit >= best.minimum_net_benefit - EPOCH_NET_BENEFIT_TOLERANCE
+            and entry[1].net_benefit >= best.net_benefit - EPOCH_NET_BENEFIT_TOLERANCE]
+    epoch, selection, weights, loss = max(near, key=lambda entry: entry[0])
+    return epoch, selection, weights, loss
 
 
 def feature_rows(path: Path) -> Iterable[tuple[dict[str, float], int, float]]:

@@ -2,77 +2,90 @@
   "abbreviation_curriculum": {
     "forms": {
       "convert": 41,
-      "keep": 1402,
-      "refused": 67
+      "keep": 1401,
+      "refused": 68
     },
-    "frames": 2886,
+    "frames": 2884,
     "frames_per_form": 2,
     "sample_weight": 1.0,
     "scope": "attested Cyrillic abbreviations of this split's share, typed as written after Russian prose, labelled by the term counts of both readings (abbreviation_curriculum)."
   },
-  "artifact_sha256": "5f93ab7e5c3e4bc1606d7a32b663eb0c1a8d037587109f60809fa31d1426adb9",
+  "artifact_sha256": "b5ba48a6bc465ff0e9a79fb92ad8778d3e7decf83a483285d1ca3e2bf965bdb2",
+  "brief_curriculum": {
+    "frames": 1920,
+    "held_out": 178,
+    "minimum_count": 50,
+    "sample_weight": 1.0,
+    "scope": "tokens of two or three letters alone at the start of a message, typed in the English layout, that the counts settle as the keys of a Russian word (convert, a share of the Latin count kept) (brief_curriculum).",
+    "tokens": {
+      "both": 31,
+      "refused": 156,
+      "russian": 258,
+      "unsettled": 735
+    }
+  },
   "calibration": {
     "admissible_thresholds": [
       0.99
     ],
     "by_profile": {
       "portable": {
-        "conversion_recall": 0.9697811740187565,
-        "convert_rows": 14395,
-        "converted_correctly": 13960,
-        "correct_classes": 42035,
-        "false_conversions": 15,
-        "rows": 42449
+        "conversion_recall": 0.9729334817701085,
+        "convert_rows": 14372,
+        "converted_correctly": 13983,
+        "correct_classes": 42029,
+        "false_conversions": 20,
+        "rows": 42401
       },
       "reference_hunspell": {
-        "conversion_recall": 0.9718652309829802,
-        "convert_rows": 14395,
-        "converted_correctly": 13990,
-        "correct_classes": 42077,
-        "false_conversions": 15,
-        "rows": 42449
+        "conversion_recall": 0.9764820484274979,
+        "convert_rows": 14372,
+        "converted_correctly": 14034,
+        "correct_classes": 42079,
+        "false_conversions": 20,
+        "rows": 42401
       }
     },
-    "conversion_recall": 0.9708232025008684,
-    "convert_rows": 28790,
-    "converted_correctly": 27950,
-    "false_conversions": 30,
-    "minimum_net_benefit": 13945,
-    "net_benefit": 27920,
-    "net_benefit_ceiling": 27920,
-    "net_benefit_floor": 27640,
+    "conversion_recall": 0.9747077650988032,
+    "convert_rows": 28744,
+    "converted_correctly": 28017,
+    "false_conversions": 40,
+    "minimum_net_benefit": 13963,
+    "net_benefit": 27977,
+    "net_benefit_ceiling": 27977,
+    "net_benefit_floor": 27697,
     "outside_lone_word": {
       "by_profile": {
         "portable": {
-          "conversion_recall": 0.977910187472751,
-          "convert_rows": 13762,
-          "converted_correctly": 13458,
-          "correct_classes": 38698,
-          "false_conversions": 15,
-          "rows": 38903
+          "conversion_recall": 0.9781345343600174,
+          "convert_rows": 13766,
+          "converted_correctly": 13465,
+          "correct_classes": 38709,
+          "false_conversions": 20,
+          "rows": 38909
         },
         "reference_hunspell": {
-          "conversion_recall": 0.980090103182677,
-          "convert_rows": 13762,
-          "converted_correctly": 13488,
-          "correct_classes": 38710,
-          "false_conversions": 15,
-          "rows": 38903
+          "conversion_recall": 0.9803864593927066,
+          "convert_rows": 13766,
+          "converted_correctly": 13496,
+          "correct_classes": 38724,
+          "false_conversions": 20,
+          "rows": 38909
         }
       },
-      "conversion_recall": 0.979000145327714,
-      "convert_rows": 27524,
-      "converted_correctly": 26946,
-      "false_conversions": 30,
-      "rows": 77806
+      "conversion_recall": 0.9792604968763621,
+      "convert_rows": 27532,
+      "converted_correctly": 26961,
+      "false_conversions": 40,
+      "rows": 77818
     },
-    "rows": 84898
+    "rows": 84802
   },
   "capital_citation_curriculum": {
     "candidates_by_length": {
-      "3": 1001,
-      "4": 4026,
-      "5": 8720
+      "3": 1000,
+      "4": 4023,
+      "5": 8713
     },
     "frames": 800,
     "lowercase_contrast": true,
@@ -349,7 +362,6 @@
         "анее/FYTT",
         "зоей/PJTQ",
         "кунс/REYC",
-        "лиру/KBHE",
         "лами/KFVB",
         "чете/XTNT",
         "атне/FNYT",
@@ -432,7 +444,8 @@
         "трал/NHFK",
         "фрог/AHJU",
         "маза/VFPF",
-        "кайл/RFQK"
+        "кайл/RFQK",
+        "кива/RBDF"
       ],
       "5": [
         "мацуо/VFWEJ",
@@ -610,1551 +623,1707 @@
     }
   },
   "conversion_threshold": 0.99,
-  "corpus_manifest_sha256": "545fce5cd2ce42081d7f8215a2d0c448b2b26248172ba0f211584c2eaf01e6ae",
+  "corpus_manifest_sha256": "e3c446a0020d365382343ffacbc288f7aba7d1f650f4bf0304b8d4dfeaea4ae3",
   "counted_token_curriculum": {
     "frames": 0,
     "scope": "not used"
   },
   "development": {
+    "brief_loss": 0.6565368898510257,
+    "brief_selected_epoch": 50,
+    "first_loss": 0.18734636474518998,
+    "first_selected_epoch": 50,
     "history": [
       {
-        "development_loss": 0.03002202904529214,
+        "brief_development_loss": 0.6652128467094668,
+        "development_loss": 0.029671202147337834,
         "epoch": 1,
-        "joined_development_loss": 0.00423434933706563,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.5299969994227924,
+        "joined_development_loss": 0.007425035453878096,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9793107033321204,
-              "convert_rows": 19237,
-              "converted_correctly": 18839,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9804573804573805,
+              "convert_rows": 19240,
+              "converted_correctly": 18864,
+              "false_conversions": 43,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9800904506939752,
-              "convert_rows": 19237,
-              "converted_correctly": 18854,
+              "conversion_recall": 0.981081081081081,
+              "convert_rows": 19240,
+              "converted_correctly": 18876,
               "false_conversions": 44,
-              "rows": 58359
+              "rows": 58354
             }
           },
-          "loss": 0.03002202904529214,
-          "minimum_net_benefit": 18795,
-          "minimum_recall": 0.9793107033321204,
-          "net_benefit": 37605,
-          "pooled_recall": 0.9797005770130478,
-          "threshold": 0.95
-        }
-      },
-      {
-        "development_loss": 0.029813388917038993,
-        "epoch": 2,
-        "joined_development_loss": 0.004457439321219101,
-        "kept_development_loss": 0.00031763069563389755,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9799864843790612,
-              "convert_rows": 19237,
-              "converted_correctly": 18852,
-              "false_conversions": 44,
-              "rows": 58359
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.980714248583459,
-              "convert_rows": 19237,
-              "converted_correctly": 18866,
-              "false_conversions": 44,
-              "rows": 58359
-            }
-          },
-          "loss": 0.029813388917038993,
-          "minimum_net_benefit": 18808,
-          "minimum_recall": 0.9799864843790612,
-          "net_benefit": 37630,
-          "pooled_recall": 0.9803503664812601,
-          "threshold": 0.95
-        }
-      },
-      {
-        "development_loss": 0.02972110147761437,
-        "epoch": 3,
-        "joined_development_loss": 0.003848470241839948,
-        "kept_development_loss": 0.00031763069563389755,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.980298383323803,
-              "convert_rows": 19237,
-              "converted_correctly": 18858,
-              "false_conversions": 44,
-              "rows": 58359
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9809741643707439,
-              "convert_rows": 19237,
-              "converted_correctly": 18871,
-              "false_conversions": 44,
-              "rows": 58359
-            }
-          },
-          "loss": 0.02972110147761437,
-          "minimum_net_benefit": 18814,
-          "minimum_recall": 0.980298383323803,
-          "net_benefit": 37641,
-          "pooled_recall": 0.9806362738472735,
-          "threshold": 0.95
-        }
-      },
-      {
-        "development_loss": 0.029662467978669567,
-        "epoch": 4,
-        "joined_development_loss": 0.0035408233702344917,
-        "kept_development_loss": 0.00031763069563389755,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.980506315953631,
-              "convert_rows": 19237,
-              "converted_correctly": 18862,
-              "false_conversions": 44,
-              "rows": 58359
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9811820970005718,
-              "convert_rows": 19237,
-              "converted_correctly": 18875,
-              "false_conversions": 44,
-              "rows": 58359
-            }
-          },
-          "loss": 0.029662467978669567,
-          "minimum_net_benefit": 18818,
-          "minimum_recall": 0.980506315953631,
-          "net_benefit": 37649,
-          "pooled_recall": 0.9808442064771015,
-          "threshold": 0.95
-        }
-      },
-      {
-        "development_loss": 0.029620104438754034,
-        "epoch": 5,
-        "joined_development_loss": 0.0033594372370959634,
-        "kept_development_loss": 0.00031763069563389755,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.980506315953631,
-              "convert_rows": 19237,
-              "converted_correctly": 18862,
-              "false_conversions": 44,
-              "rows": 58359
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9811820970005718,
-              "convert_rows": 19237,
-              "converted_correctly": 18875,
-              "false_conversions": 44,
-              "rows": 58359
-            }
-          },
-          "loss": 0.029620104438754034,
-          "minimum_net_benefit": 18818,
-          "minimum_recall": 0.980506315953631,
-          "net_benefit": 37649,
-          "pooled_recall": 0.9808442064771015,
-          "threshold": 0.95
-        }
-      },
-      {
-        "development_loss": 0.029588059243015455,
-        "epoch": 6,
-        "joined_development_loss": 0.0032216743335285723,
-        "kept_development_loss": 0.00031763069563389755,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.980662265426002,
-              "convert_rows": 19237,
-              "converted_correctly": 18865,
-              "false_conversions": 44,
-              "rows": 58359
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9813380464729428,
-              "convert_rows": 19237,
-              "converted_correctly": 18878,
-              "false_conversions": 44,
-              "rows": 58359
-            }
-          },
-          "loss": 0.029588059243015455,
+          "loss": 0.029671202147337834,
           "minimum_net_benefit": 18821,
-          "minimum_recall": 0.980662265426002,
-          "net_benefit": 37655,
-          "pooled_recall": 0.9810001559494723,
+          "minimum_recall": 0.9804573804573805,
+          "net_benefit": 37653,
+          "pooled_recall": 0.9807692307692307,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08315465724045418
       },
       {
-        "development_loss": 0.029563304898864596,
+        "brief_development_loss": 0.6628069600495493,
+        "development_loss": 0.02949623293773446,
+        "epoch": 2,
+        "first_development_loss": 0.3325752604909889,
+        "joined_development_loss": 0.006786532434754453,
+        "kept_development_loss": 0.0003083550244131802,
+        "selection": {
+          "by_profile": {
+            "portable": {
+              "conversion_recall": 0.9808212058212058,
+              "convert_rows": 19240,
+              "converted_correctly": 18871,
+              "false_conversions": 42,
+              "rows": 58354
+            },
+            "reference_hunspell": {
+              "conversion_recall": 0.9814968814968815,
+              "convert_rows": 19240,
+              "converted_correctly": 18884,
+              "false_conversions": 43,
+              "rows": 58354
+            }
+          },
+          "loss": 0.02949623293773446,
+          "minimum_net_benefit": 18829,
+          "minimum_recall": 0.9808212058212058,
+          "net_benefit": 37670,
+          "pooled_recall": 0.9811590436590436,
+          "threshold": 0.95
+        },
+        "term_development_loss": 0.07970855121370295
+      },
+      {
+        "brief_development_loss": 0.6624411955136073,
+        "development_loss": 0.029419902467118366,
+        "epoch": 3,
+        "first_development_loss": 0.2556884705003642,
+        "joined_development_loss": 0.006307816140970699,
+        "kept_development_loss": 0.0003083550244131802,
+        "selection": {
+          "by_profile": {
+            "portable": {
+              "conversion_recall": 0.981029106029106,
+              "convert_rows": 19240,
+              "converted_correctly": 18875,
+              "false_conversions": 42,
+              "rows": 58354
+            },
+            "reference_hunspell": {
+              "conversion_recall": 0.9816008316008316,
+              "convert_rows": 19240,
+              "converted_correctly": 18886,
+              "false_conversions": 43,
+              "rows": 58354
+            }
+          },
+          "loss": 0.029419902467118366,
+          "minimum_net_benefit": 18833,
+          "minimum_recall": 0.981029106029106,
+          "net_benefit": 37676,
+          "pooled_recall": 0.9813149688149688,
+          "threshold": 0.95
+        },
+        "term_development_loss": 0.07929050398642305
+      },
+      {
+        "brief_development_loss": 0.6621574201374689,
+        "development_loss": 0.029381336960636575,
+        "epoch": 4,
+        "first_development_loss": 0.2243496465453767,
+        "joined_development_loss": 0.006117095503063642,
+        "kept_development_loss": 0.0003083550244131802,
+        "selection": {
+          "by_profile": {
+            "portable": {
+              "conversion_recall": 0.9812370062370063,
+              "convert_rows": 19240,
+              "converted_correctly": 18879,
+              "false_conversions": 43,
+              "rows": 58354
+            },
+            "reference_hunspell": {
+              "conversion_recall": 0.9818087318087318,
+              "convert_rows": 19240,
+              "converted_correctly": 18890,
+              "false_conversions": 44,
+              "rows": 58354
+            }
+          },
+          "loss": 0.029381336960636575,
+          "minimum_net_benefit": 18836,
+          "minimum_recall": 0.9812370062370063,
+          "net_benefit": 37682,
+          "pooled_recall": 0.981522869022869,
+          "threshold": 0.95
+        },
+        "term_development_loss": 0.0792674701006802
+      },
+      {
+        "brief_development_loss": 0.6618649253840875,
+        "development_loss": 0.029357162203587184,
+        "epoch": 5,
+        "first_development_loss": 0.2093887129803493,
+        "joined_development_loss": 0.005970109462157913,
+        "kept_development_loss": 0.0003083550244131802,
+        "selection": {
+          "by_profile": {
+            "portable": {
+              "conversion_recall": 0.9813409563409563,
+              "convert_rows": 19240,
+              "converted_correctly": 18881,
+              "false_conversions": 43,
+              "rows": 58354
+            },
+            "reference_hunspell": {
+              "conversion_recall": 0.9819126819126819,
+              "convert_rows": 19240,
+              "converted_correctly": 18892,
+              "false_conversions": 44,
+              "rows": 58354
+            }
+          },
+          "loss": 0.029357162203587184,
+          "minimum_net_benefit": 18838,
+          "minimum_recall": 0.9813409563409563,
+          "net_benefit": 37686,
+          "pooled_recall": 0.9816268191268192,
+          "threshold": 0.95
+        },
+        "term_development_loss": 0.07929941005778852
+      },
+      {
+        "brief_development_loss": 0.6615964166363963,
+        "development_loss": 0.02934058437553054,
+        "epoch": 6,
+        "first_development_loss": 0.2010576637437047,
+        "joined_development_loss": 0.005850581641115835,
+        "kept_development_loss": 0.0003083550244131802,
+        "selection": {
+          "by_profile": {
+            "portable": {
+              "conversion_recall": 0.9813409563409563,
+              "convert_rows": 19240,
+              "converted_correctly": 18881,
+              "false_conversions": 44,
+              "rows": 58354
+            },
+            "reference_hunspell": {
+              "conversion_recall": 0.9819126819126819,
+              "convert_rows": 19240,
+              "converted_correctly": 18892,
+              "false_conversions": 45,
+              "rows": 58354
+            }
+          },
+          "loss": 0.02934058437553054,
+          "minimum_net_benefit": 18837,
+          "minimum_recall": 0.9813409563409563,
+          "net_benefit": 37684,
+          "pooled_recall": 0.9816268191268192,
+          "threshold": 0.95
+        },
+        "term_development_loss": 0.07934525286875463
+      },
+      {
+        "brief_development_loss": 0.661364293627982,
+        "development_loss": 0.029328735902671443,
         "epoch": 7,
-        "joined_development_loss": 0.003108468451473121,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.19598904319671567,
+        "joined_development_loss": 0.005751646843084841,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.980714248583459,
-              "convert_rows": 19237,
-              "converted_correctly": 18866,
+              "conversion_recall": 0.9813409563409563,
+              "convert_rows": 19240,
+              "converted_correctly": 18881,
               "false_conversions": 44,
-              "rows": 58359
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9813900296303998,
-              "convert_rows": 19237,
-              "converted_correctly": 18879,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9819126819126819,
+              "convert_rows": 19240,
+              "converted_correctly": 18892,
+              "false_conversions": 45,
+              "rows": 58354
             }
           },
-          "loss": 0.029563304898864596,
-          "minimum_net_benefit": 18822,
-          "minimum_recall": 0.980714248583459,
-          "net_benefit": 37657,
-          "pooled_recall": 0.9810521391069293,
+          "loss": 0.029328735902671443,
+          "minimum_net_benefit": 18837,
+          "minimum_recall": 0.9813409563409563,
+          "net_benefit": 37684,
+          "pooled_recall": 0.9816268191268192,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.07940906473202182
       },
       {
-        "development_loss": 0.029543869241373182,
+        "brief_development_loss": 0.6611669067638809,
+        "development_loss": 0.0293200551637416,
         "epoch": 8,
-        "joined_development_loss": 0.00301247974304109,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.19281941537295474,
+        "joined_development_loss": 0.005668340822907755,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.980714248583459,
-              "convert_rows": 19237,
-              "converted_correctly": 18866,
+              "conversion_recall": 0.9813929313929314,
+              "convert_rows": 19240,
+              "converted_correctly": 18882,
               "false_conversions": 44,
-              "rows": 58359
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9813900296303998,
-              "convert_rows": 19237,
-              "converted_correctly": 18879,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.981964656964657,
+              "convert_rows": 19240,
+              "converted_correctly": 18893,
+              "false_conversions": 45,
+              "rows": 58354
             }
           },
-          "loss": 0.029543869241373182,
-          "minimum_net_benefit": 18822,
-          "minimum_recall": 0.980714248583459,
-          "net_benefit": 37657,
-          "pooled_recall": 0.9810521391069293,
+          "loss": 0.0293200551637416,
+          "minimum_net_benefit": 18838,
+          "minimum_recall": 0.9813929313929314,
+          "net_benefit": 37686,
+          "pooled_recall": 0.9816787941787942,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.07949477433462124
       },
       {
-        "development_loss": 0.029528394445789346,
+        "brief_development_loss": 0.6609979794764937,
+        "development_loss": 0.029313588209711677,
         "epoch": 9,
-        "joined_development_loss": 0.0029295549348424006,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.19086879689804273,
+        "joined_development_loss": 0.0055971123846084245,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.980818214898373,
-              "convert_rows": 19237,
-              "converted_correctly": 18868,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9814968814968815,
+              "convert_rows": 19240,
+              "converted_correctly": 18884,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9814420127878567,
-              "convert_rows": 19237,
-              "converted_correctly": 18880,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9820686070686071,
+              "convert_rows": 19240,
+              "converted_correctly": 18895,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029528394445789346,
-          "minimum_net_benefit": 18824,
-          "minimum_recall": 0.980818214898373,
-          "net_benefit": 37660,
-          "pooled_recall": 0.9811301138431149,
+          "loss": 0.029313588209711677,
+          "minimum_net_benefit": 18839,
+          "minimum_recall": 0.9814968814968815,
+          "net_benefit": 37688,
+          "pooled_recall": 0.9817827442827443,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.07960092837489403
       },
       {
-        "development_loss": 0.029515938162481006,
+        "brief_development_loss": 0.6608507145071695,
+        "development_loss": 0.029308722800528278,
         "epoch": 10,
-        "joined_development_loss": 0.002856922532802147,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18971708707729146,
+        "joined_development_loss": 0.005535396007813783,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.980818214898373,
-              "convert_rows": 19237,
-              "converted_correctly": 18868,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9815488565488566,
+              "convert_rows": 19240,
+              "converted_correctly": 18885,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9814939959453137,
-              "convert_rows": 19237,
-              "converted_correctly": 18881,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9821205821205822,
+              "convert_rows": 19240,
+              "converted_correctly": 18896,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029515938162481006,
-          "minimum_net_benefit": 18824,
-          "minimum_recall": 0.980818214898373,
-          "net_benefit": 37661,
-          "pooled_recall": 0.9811561054218433,
+          "loss": 0.029308722800528278,
+          "minimum_net_benefit": 18840,
+          "minimum_recall": 0.9815488565488566,
+          "net_benefit": 37690,
+          "pooled_recall": 0.9818347193347193,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.07972335192432722
       },
       {
-        "development_loss": 0.029505832906824438,
+        "brief_development_loss": 0.6607191920561561,
+        "development_loss": 0.029305051533782916,
         "epoch": 11,
-        "joined_development_loss": 0.002792597944495282,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18907097570478398,
+        "joined_development_loss": 0.0054813053658978065,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.980818214898373,
-              "convert_rows": 19237,
-              "converted_correctly": 18868,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9815488565488566,
+              "convert_rows": 19240,
+              "converted_correctly": 18885,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9814939959453137,
-              "convert_rows": 19237,
-              "converted_correctly": 18881,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9821205821205822,
+              "convert_rows": 19240,
+              "converted_correctly": 18896,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029505832906824438,
-          "minimum_net_benefit": 18824,
-          "minimum_recall": 0.980818214898373,
-          "net_benefit": 37661,
-          "pooled_recall": 0.9811561054218433,
+          "loss": 0.029305051533782916,
+          "minimum_net_benefit": 18840,
+          "minimum_recall": 0.9815488565488566,
+          "net_benefit": 37690,
+          "pooled_recall": 0.9818347193347193,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.07985743450383889
       },
       {
-        "development_loss": 0.02949759243800301,
+        "brief_development_loss": 0.6605986868680006,
+        "development_loss": 0.02930229295789923,
         "epoch": 12,
-        "joined_development_loss": 0.002735104407500144,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18873314812290806,
+        "joined_development_loss": 0.005433427020466343,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9808701980558299,
-              "convert_rows": 19237,
-              "converted_correctly": 18869,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9816008316008316,
+              "convert_rows": 19240,
+              "converted_correctly": 18886,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9815459791027707,
-              "convert_rows": 19237,
-              "converted_correctly": 18882,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9821205821205822,
+              "convert_rows": 19240,
+              "converted_correctly": 18896,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.02949759243800301,
-          "minimum_net_benefit": 18825,
-          "minimum_recall": 0.9808701980558299,
-          "net_benefit": 37663,
-          "pooled_recall": 0.9812080885793003,
+          "loss": 0.02930229295789923,
+          "minimum_net_benefit": 18841,
+          "minimum_recall": 0.9816008316008316,
+          "net_benefit": 37691,
+          "pooled_recall": 0.9818607068607068,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.07999915863901476
       },
       {
-        "development_loss": 0.02949085288939644,
+        "brief_development_loss": 0.6604855975590627,
+        "development_loss": 0.029300245347847843,
         "epoch": 13,
-        "joined_development_loss": 0.002683313441468389,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18857986185748496,
+        "joined_development_loss": 0.0053906826202025,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9808701980558299,
-              "convert_rows": 19237,
-              "converted_correctly": 18869,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9816008316008316,
+              "convert_rows": 19240,
+              "converted_correctly": 18886,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9815459791027707,
-              "convert_rows": 19237,
-              "converted_correctly": 18882,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9821205821205822,
+              "convert_rows": 19240,
+              "converted_correctly": 18896,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.02949085288939644,
-          "minimum_net_benefit": 18825,
-          "minimum_recall": 0.9808701980558299,
-          "net_benefit": 37663,
-          "pooled_recall": 0.9812080885793003,
+          "loss": 0.029300245347847843,
+          "minimum_net_benefit": 18841,
+          "minimum_recall": 0.9816008316008316,
+          "net_benefit": 37691,
+          "pooled_recall": 0.9818607068607068,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08014537774079458
       },
       {
-        "development_loss": 0.02948533576897369,
+        "brief_development_loss": 0.6603772608556884,
+        "development_loss": 0.02929875940979193,
         "epoch": 14,
-        "joined_development_loss": 0.002636344567110981,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18853526110008856,
+        "joined_development_loss": 0.005352235567285335,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9808701980558299,
-              "convert_rows": 19237,
-              "converted_correctly": 18869,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9816528066528066,
+              "convert_rows": 19240,
+              "converted_correctly": 18887,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9815459791027707,
-              "convert_rows": 19237,
-              "converted_correctly": 18882,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9821725571725571,
+              "convert_rows": 19240,
+              "converted_correctly": 18897,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.02948533576897369,
-          "minimum_net_benefit": 18825,
-          "minimum_recall": 0.9808701980558299,
-          "net_benefit": 37663,
-          "pooled_recall": 0.9812080885793003,
+          "loss": 0.02929875940979193,
+          "minimum_net_benefit": 18842,
+          "minimum_recall": 0.9816528066528066,
+          "net_benefit": 37693,
+          "pooled_recall": 0.9819126819126819,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.0802937706721756
       },
       {
-        "development_loss": 0.029480824058950736,
+        "brief_development_loss": 0.6602717531058112,
+        "development_loss": 0.029297721753750464,
         "epoch": 15,
-        "joined_development_loss": 0.002593498695358174,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.1885521359262693,
+        "joined_development_loss": 0.005317426775824717,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9808701980558299,
-              "convert_rows": 19237,
-              "converted_correctly": 18869,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9816528066528066,
+              "convert_rows": 19240,
+              "converted_correctly": 18887,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9815459791027707,
-              "convert_rows": 19237,
-              "converted_correctly": 18882,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9821725571725571,
+              "convert_rows": 19240,
+              "converted_correctly": 18897,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029480824058950736,
-          "minimum_net_benefit": 18825,
-          "minimum_recall": 0.9808701980558299,
-          "net_benefit": 37663,
-          "pooled_recall": 0.9812080885793003,
+          "loss": 0.029297721753750464,
+          "minimum_net_benefit": 18842,
+          "minimum_recall": 0.9816528066528066,
+          "net_benefit": 37693,
+          "pooled_recall": 0.9819126819126819,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.0804426926199053
       },
       {
-        "development_loss": 0.029477146197513942,
+        "brief_development_loss": 0.6601677156916895,
+        "development_loss": 0.029297044490572792,
         "epoch": 16,
-        "joined_development_loss": 0.0025542122904621237,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18860048434297846,
+        "joined_development_loss": 0.005285729791678599,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9808701980558299,
-              "convert_rows": 19237,
-              "converted_correctly": 18869,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9815459791027707,
-              "convert_rows": 19237,
-              "converted_correctly": 18882,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029477146197513942,
-          "minimum_net_benefit": 18825,
-          "minimum_recall": 0.9808701980558299,
-          "net_benefit": 37663,
-          "pooled_recall": 0.9812080885793003,
+          "loss": 0.029297044490572792,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.0805910156676293
       },
       {
-        "development_loss": 0.029474164938516758,
+        "brief_development_loss": 0.6600642116533699,
+        "development_loss": 0.029296658391435946,
         "epoch": 17,
-        "joined_development_loss": 0.0025180250982163315,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18866112647981798,
+        "joined_development_loss": 0.00525671870096094,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9808701980558299,
-              "convert_rows": 19237,
-              "converted_correctly": 18869,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9815459791027707,
-              "convert_rows": 19237,
-              "converted_correctly": 18882,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029474164938516758,
-          "minimum_net_benefit": 18825,
-          "minimum_recall": 0.9808701980558299,
-          "net_benefit": 37663,
-          "pooled_recall": 0.9812080885793003,
+          "loss": 0.029296658391435946,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08073799158364696
       },
       {
-        "development_loss": 0.02947176935211635,
+        "brief_development_loss": 0.6599606138382716,
+        "development_loss": 0.02929650818722434,
         "epoch": 18,
-        "joined_development_loss": 0.0024845567968612274,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.1887219971959516,
+        "joined_development_loss": 0.0052300450502161455,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9808701980558299,
-              "convert_rows": 19237,
-              "converted_correctly": 18869,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9815459791027707,
-              "convert_rows": 19237,
-              "converted_correctly": 18882,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.02947176935211635,
-          "minimum_net_benefit": 18825,
-          "minimum_recall": 0.9808701980558299,
-          "net_benefit": 37663,
-          "pooled_recall": 0.9812080885793003,
+          "loss": 0.02929650818722434,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08088314403921688
       },
       {
-        "development_loss": 0.029469868943726028,
+        "brief_development_loss": 0.6598565196393471,
+        "development_loss": 0.029296549224013944,
         "epoch": 19,
-        "joined_development_loss": 0.002453489839234851,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18877581967732515,
+        "joined_development_loss": 0.005205420730542951,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9808701980558299,
-              "convert_rows": 19237,
-              "converted_correctly": 18869,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817047817047817,
+              "convert_rows": 19240,
+              "converted_correctly": 18888,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9815459791027707,
-              "convert_rows": 19237,
-              "converted_correctly": 18882,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822245322245322,
+              "convert_rows": 19240,
+              "converted_correctly": 18898,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029469868943726028,
-          "minimum_net_benefit": 18825,
-          "minimum_recall": 0.9808701980558299,
-          "net_benefit": 37663,
-          "pooled_recall": 0.9812080885793003,
+          "loss": 0.029296549224013944,
+          "minimum_net_benefit": 18843,
+          "minimum_recall": 0.9817047817047817,
+          "net_benefit": 37695,
+          "pooled_recall": 0.981964656964657,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.0810261880746787
       },
       {
-        "development_loss": 0.029468389254562893,
+        "brief_development_loss": 0.6597516874705546,
+        "development_loss": 0.02929674503721579,
         "epoch": 20,
-        "joined_development_loss": 0.002424556652828324,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18881854810900395,
+        "joined_development_loss": 0.005182605312048485,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9808701980558299,
-              "convert_rows": 19237,
-              "converted_correctly": 18869,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817047817047817,
+              "convert_rows": 19240,
+              "converted_correctly": 18888,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9815459791027707,
-              "convert_rows": 19237,
-              "converted_correctly": 18882,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822245322245322,
+              "convert_rows": 19240,
+              "converted_correctly": 18898,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029468389254562893,
-          "minimum_net_benefit": 18825,
-          "minimum_recall": 0.9808701980558299,
-          "net_benefit": 37663,
-          "pooled_recall": 0.9812080885793003,
+          "loss": 0.02929674503721579,
+          "minimum_net_benefit": 18843,
+          "minimum_recall": 0.9817047817047817,
+          "net_benefit": 37695,
+          "pooled_recall": 0.981964656964657,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.0811669710505472
       },
       {
-        "development_loss": 0.02946726853253473,
+        "brief_development_loss": 0.6596459898339785,
+        "development_loss": 0.02929706556790921,
         "epoch": 21,
-        "joined_development_loss": 0.002397529844533344,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18884829034583364,
+        "joined_development_loss": 0.005161396372825183,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9809221812132869,
-              "convert_rows": 19237,
-              "converted_correctly": 18870,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817047817047817,
+              "convert_rows": 19240,
+              "converted_correctly": 18888,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9815979622602277,
-              "convert_rows": 19237,
-              "converted_correctly": 18883,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822245322245322,
+              "convert_rows": 19240,
+              "converted_correctly": 18898,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.02946726853253473,
-          "minimum_net_benefit": 18826,
-          "minimum_recall": 0.9809221812132869,
-          "net_benefit": 37665,
-          "pooled_recall": 0.9812600717367573,
+          "loss": 0.02929706556790921,
+          "minimum_net_benefit": 18843,
+          "minimum_recall": 0.9817047817047817,
+          "net_benefit": 37695,
+          "pooled_recall": 0.981964656964657,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08130543060593952
       },
       {
-        "development_loss": 0.02946645519240859,
+        "brief_development_loss": 0.659539379607258,
+        "development_loss": 0.029297485855114585,
         "epoch": 22,
-        "joined_development_loss": 0.0023722147416724198,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18886455730471938,
+        "joined_development_loss": 0.005141622148829783,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9809221812132869,
-              "convert_rows": 19237,
-              "converted_correctly": 18870,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817047817047817,
+              "convert_rows": 19240,
+              "converted_correctly": 18888,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9815979622602277,
-              "convert_rows": 19237,
-              "converted_correctly": 18883,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822245322245322,
+              "convert_rows": 19240,
+              "converted_correctly": 18898,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.02946645519240859,
-          "minimum_net_benefit": 18826,
-          "minimum_recall": 0.9809221812132869,
-          "net_benefit": 37665,
-          "pooled_recall": 0.9812600717367573,
+          "loss": 0.029297485855114585,
+          "minimum_net_benefit": 18843,
+          "minimum_recall": 0.9817047817047817,
+          "net_benefit": 37695,
+          "pooled_recall": 0.981964656964657,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08144156473745906
       },
       {
-        "development_loss": 0.029465905867530045,
+        "brief_development_loss": 0.6594318655007093,
+        "development_loss": 0.02929798507027248,
         "epoch": 23,
-        "joined_development_loss": 0.0023484434805688937,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.1888677424805478,
+        "joined_development_loss": 0.0051231358368107145,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9809221812132869,
-              "convert_rows": 19237,
-              "converted_correctly": 18870,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9815979622602277,
-              "convert_rows": 19237,
-              "converted_correctly": 18883,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029465905867530045,
-          "minimum_net_benefit": 18826,
-          "minimum_recall": 0.9809221812132869,
-          "net_benefit": 37665,
-          "pooled_recall": 0.9812600717367573,
+          "loss": 0.02929798507027248,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08157541084898279
       },
       {
-        "development_loss": 0.029465583898911237,
+        "brief_development_loss": 0.659323494964787,
+        "development_loss": 0.02929854580416163,
         "epoch": 24,
-        "joined_development_loss": 0.002326070469342252,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.1888587644591374,
+        "joined_development_loss": 0.005105811100848184,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9809221812132869,
-              "convert_rows": 19237,
-              "converted_correctly": 18870,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9815979622602277,
-              "convert_rows": 19237,
-              "converted_correctly": 18883,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029465583898911237,
-          "minimum_net_benefit": 18826,
-          "minimum_recall": 0.9809221812132869,
-          "net_benefit": 37665,
-          "pooled_recall": 0.9812600717367573,
+          "loss": 0.02929854580416163,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08170703116092948
       },
       {
-        "development_loss": 0.029465458159031562,
+        "brief_development_loss": 0.6592143418612129,
+        "development_loss": 0.029299153529740298,
         "epoch": 25,
-        "joined_development_loss": 0.0023049686604760633,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18883882475232985,
+        "joined_development_loss": 0.00508953857317502,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9809221812132869,
-              "convert_rows": 19237,
-              "converted_correctly": 18870,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9815979622602277,
-              "convert_rows": 19237,
-              "converted_correctly": 18883,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029465458159031562,
-          "minimum_net_benefit": 18826,
-          "minimum_recall": 0.9809221812132869,
-          "net_benefit": 37665,
-          "pooled_recall": 0.9812600717367573,
+          "loss": 0.029299153529740298,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08183650274660842
       },
       {
-        "development_loss": 0.029465502123941962,
+        "brief_development_loss": 0.6591044979087655,
+        "development_loss": 0.02929979618853584,
         "epoch": 26,
-        "joined_development_loss": 0.0022850266283323123,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.1888092457416618,
+        "joined_development_loss": 0.005074222979604497,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9809221812132869,
-              "convert_rows": 19237,
-              "converted_correctly": 18870,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9815979622602277,
-              "convert_rows": 19237,
-              "converted_correctly": 18883,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029465502123941962,
-          "minimum_net_benefit": 18826,
-          "minimum_recall": 0.9809221812132869,
-          "net_benefit": 37665,
-          "pooled_recall": 0.9812600717367573,
+          "loss": 0.02929979618853584,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.081963910657265
       },
       {
-        "development_loss": 0.0294656931330822,
+        "brief_development_loss": 0.6589940665645384,
+        "development_loss": 0.02930046385566518,
         "epoch": 27,
-        "joined_development_loss": 0.002266146130562997,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.1887713654795115,
+        "joined_development_loss": 0.005059780928419037,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9809221812132869,
-              "convert_rows": 19237,
-              "converted_correctly": 18870,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9815979622602277,
-              "convert_rows": 19237,
-              "converted_correctly": 18883,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.0294656931330822,
-          "minimum_net_benefit": 18826,
-          "minimum_recall": 0.9809221812132869,
-          "net_benefit": 37665,
-          "pooled_recall": 0.9812600717367573,
+          "loss": 0.02930046385566518,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.0820893435990087
       },
       {
-        "development_loss": 0.02946601179364384,
+        "brief_development_loss": 0.6588831587742274,
+        "development_loss": 0.029301148458836135,
         "epoch": 28,
-        "joined_development_loss": 0.0022482402121460528,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.1887264709310725,
+        "joined_development_loss": 0.0050461390598281735,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9809221812132869,
-              "convert_rows": 19237,
-              "converted_correctly": 18870,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9815979622602277,
-              "convert_rows": 19237,
-              "converted_correctly": 18883,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.02946601179364384,
-          "minimum_net_benefit": 18826,
-          "minimum_recall": 0.9809221812132869,
-          "net_benefit": 37665,
-          "pooled_recall": 0.9812600717367573,
+          "loss": 0.029301148458836135,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08221289067517323
       },
       {
-        "development_loss": 0.02946644149443767,
+        "brief_development_loss": 0.6587718900359507,
+        "development_loss": 0.029301843529040937,
         "epoch": 29,
-        "joined_development_loss": 0.002231231545321754,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18867575868231112,
+        "joined_development_loss": 0.00503323245376417,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9810261475282008,
-              "convert_rows": 19237,
-              "converted_correctly": 18872,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9816499454176847,
-              "convert_rows": 19237,
-              "converted_correctly": 18884,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.02946644149443767,
-          "minimum_net_benefit": 18828,
-          "minimum_recall": 0.9810261475282008,
-          "net_benefit": 37668,
-          "pooled_recall": 0.9813380464729428,
+          "loss": 0.029301843529040937,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08233464001647366
       },
       {
-        "development_loss": 0.029466968002845647,
+        "brief_development_loss": 0.6586603778245991,
+        "development_loss": 0.02930254397345781,
         "epoch": 30,
-        "joined_development_loss": 0.0022150510992719505,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.1886203136061315,
+        "joined_development_loss": 0.0050210035396689,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9810261475282008,
-              "convert_rows": 19237,
-              "converted_correctly": 18872,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9816499454176847,
-              "convert_rows": 19237,
-              "converted_correctly": 18884,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029466968002845647,
-          "minimum_net_benefit": 18828,
-          "minimum_recall": 0.9810261475282008,
-          "net_benefit": 37668,
-          "pooled_recall": 0.9813380464729428,
+          "loss": 0.02930254397345781,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08245467737334533
       },
       {
-        "development_loss": 0.029467579130031438,
+        "brief_development_loss": 0.65854874024759,
+        "development_loss": 0.029303245870245947,
         "epoch": 31,
-        "joined_development_loss": 0.002199637031474914,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.1885611012646957,
+        "joined_development_loss": 0.005009400954918976,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9810261475282008,
-              "convert_rows": 19237,
-              "converted_correctly": 18872,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9816499454176847,
-              "convert_rows": 19237,
-              "converted_correctly": 18884,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029467579130031438,
-          "minimum_net_benefit": 18828,
-          "minimum_recall": 0.9810261475282008,
-          "net_benefit": 37668,
-          "pooled_recall": 0.9813380464729428,
+          "loss": 0.029303245870245947,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08257308573814715
       },
       {
-        "development_loss": 0.029468264447344163,
+        "brief_development_loss": 0.6584370944924928,
+        "development_loss": 0.029303946274348142,
         "epoch": 32,
-        "joined_development_loss": 0.0021849337661134062,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18849896670882388,
+        "joined_development_loss": 0.004998378734846499,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9810261475282008,
-              "convert_rows": 19237,
-              "converted_correctly": 18872,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9816499454176847,
-              "convert_rows": 19237,
-              "converted_correctly": 18884,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029468264447344163,
-          "minimum_net_benefit": 18828,
-          "minimum_recall": 0.9810261475282008,
-          "net_benefit": 37668,
-          "pooled_recall": 0.9813380464729428,
+          "loss": 0.029303946274348142,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08268994510777201
       },
       {
-        "development_loss": 0.02946901504458638,
+        "brief_development_loss": 0.6583255559691927,
+        "development_loss": 0.02930464304964388,
         "epoch": 33,
-        "joined_development_loss": 0.0021708911514476026,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18843464078728772,
+        "joined_development_loss": 0.004987895647908206,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9810261475282008,
-              "convert_rows": 19237,
-              "converted_correctly": 18872,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9816499454176847,
-              "convert_rows": 19237,
-              "converted_correctly": 18884,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.02946901504458638,
-          "minimum_net_benefit": 18828,
-          "minimum_recall": 0.9810261475282008,
-          "net_benefit": 37668,
-          "pooled_recall": 0.9813380464729428,
+          "loss": 0.02930464304964388,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08280533229701968
       },
       {
-        "development_loss": 0.029469823323519127,
+        "brief_development_loss": 0.6582142372835671,
+        "development_loss": 0.029305334711238494,
         "epoch": 34,
-        "joined_development_loss": 0.002157463858500425,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18836874797045072,
+        "joined_development_loss": 0.004977914447037287,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9810261475282008,
-              "convert_rows": 19237,
-              "converted_correctly": 18872,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9816499454176847,
-              "convert_rows": 19237,
-              "converted_correctly": 18884,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029469823323519127,
-          "minimum_net_benefit": 18828,
-          "minimum_recall": 0.9810261475282008,
-          "net_benefit": 37668,
-          "pooled_recall": 0.9813380464729428,
+          "loss": 0.029305334711238494,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08291932105259643
       },
       {
-        "development_loss": 0.029470682818342576,
+        "brief_development_loss": 0.6581032476610886,
+        "development_loss": 0.0293060202980694,
         "epoch": 35,
-        "joined_development_loss": 0.00214461074211626,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18830181642355015,
+        "joined_development_loss": 0.0049684015275729574,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9810261475282008,
-              "convert_rows": 19237,
-              "converted_correctly": 18872,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817047817047817,
+              "convert_rows": 19240,
+              "converted_correctly": 18888,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9816499454176847,
-              "convert_rows": 19237,
-              "converted_correctly": 18884,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822245322245322,
+              "convert_rows": 19240,
+              "converted_correctly": 18898,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029470682818342576,
-          "minimum_net_benefit": 18828,
-          "minimum_recall": 0.9810261475282008,
-          "net_benefit": 37668,
-          "pooled_recall": 0.9813380464729428,
+          "loss": 0.0293060202980694,
+          "minimum_net_benefit": 18843,
+          "minimum_recall": 0.9817047817047817,
+          "net_benefit": 37695,
+          "pooled_recall": 0.981964656964657,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08303198201924662
       },
       {
-        "development_loss": 0.029471588040094792,
+        "brief_development_loss": 0.6579926923085856,
+        "development_loss": 0.029306699253340826,
         "epoch": 36,
-        "joined_development_loss": 0.002132294402144846,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18823428868525013,
+        "joined_development_loss": 0.0049593263761699875,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9810261475282008,
-              "convert_rows": 19237,
-              "converted_correctly": 18872,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9816499454176847,
-              "convert_rows": 19237,
-              "converted_correctly": 18884,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029471588040094792,
-          "minimum_net_benefit": 18828,
-          "minimum_recall": 0.9810261475282008,
-          "net_benefit": 37668,
-          "pooled_recall": 0.9813380464729428,
+          "loss": 0.029306699253340826,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08314338272935577
       },
       {
-        "development_loss": 0.029472534341153055,
+        "brief_development_loss": 0.6578826717501072,
+        "development_loss": 0.02930737133345454,
         "epoch": 37,
-        "joined_development_loss": 0.0021204807313083807,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18816653210898937,
+        "joined_development_loss": 0.004950661269185055,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9810261475282008,
-              "convert_rows": 19237,
-              "converted_correctly": 18872,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9816499454176847,
-              "convert_rows": 19237,
-              "converted_correctly": 18884,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029472534341153055,
-          "minimum_net_benefit": 18828,
-          "minimum_recall": 0.9810261475282008,
-          "net_benefit": 37668,
-          "pooled_recall": 0.9813380464729428,
+          "loss": 0.02930737133345454,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.0832535876233178
       },
       {
-        "development_loss": 0.029473517795785057,
+        "brief_development_loss": 0.6577732817680718,
+        "development_loss": 0.02930803652762653,
         "epoch": 38,
-        "joined_development_loss": 0.002109138535050203,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18809884883091216,
+        "joined_development_loss": 0.004942380914672363,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9810261475282008,
-              "convert_rows": 19237,
-              "converted_correctly": 18872,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9816499454176847,
-              "convert_rows": 19237,
-              "converted_correctly": 18884,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029473517795785057,
-          "minimum_net_benefit": 18828,
-          "minimum_recall": 0.9810261475282008,
-          "net_benefit": 37668,
-          "pooled_recall": 0.9813380464729428,
+          "loss": 0.02930803652762653,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08336265789752145
       },
       {
-        "development_loss": 0.029474535096880892,
+        "brief_development_loss": 0.6576646125879636,
+        "development_loss": 0.029308694993301652,
         "epoch": 39,
-        "joined_development_loss": 0.0020982392671707218,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18803148489511098,
+        "joined_development_loss": 0.00493446218003185,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9810261475282008,
-              "convert_rows": 19237,
-              "converted_correctly": 18872,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9816499454176847,
-              "convert_rows": 19237,
-              "converted_correctly": 18884,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029474535096880892,
-          "minimum_net_benefit": 18828,
-          "minimum_recall": 0.9810261475282008,
-          "net_benefit": 37668,
-          "pooled_recall": 0.9813380464729428,
+          "loss": 0.029308694993301652,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08347065148589121
       },
       {
-        "development_loss": 0.029475583464441266,
+        "brief_development_loss": 0.6575567490540822,
+        "development_loss": 0.029309347003358473,
         "epoch": 40,
-        "joined_development_loss": 0.0020877567136705836,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.1879646387563104,
+        "joined_development_loss": 0.004926883895944463,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9810261475282008,
-              "convert_rows": 19237,
-              "converted_correctly": 18872,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9816499454176847,
-              "convert_rows": 19237,
-              "converted_correctly": 18884,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029475583464441266,
-          "minimum_net_benefit": 18828,
-          "minimum_recall": 0.9810261475282008,
-          "net_benefit": 37668,
-          "pooled_recall": 0.9813380464729428,
+          "loss": 0.029309347003358473,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08357762300610584
       },
       {
-        "development_loss": 0.029476660566392105,
+        "brief_development_loss": 0.6574497701091296,
+        "development_loss": 0.029309992908697294,
         "epoch": 41,
-        "joined_development_loss": 0.002077666739527991,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18789846821756462,
+        "joined_development_loss": 0.004919626571290587,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9810261475282008,
-              "convert_rows": 19237,
-              "converted_correctly": 18872,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9816499454176847,
-              "convert_rows": 19237,
-              "converted_correctly": 18884,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029476660566392105,
-          "minimum_net_benefit": 18828,
-          "minimum_recall": 0.9810261475282008,
-          "net_benefit": 37668,
-          "pooled_recall": 0.9813380464729428,
+          "loss": 0.029309992908697294,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08368362366901333
       },
       {
-        "development_loss": 0.029477764449284044,
+        "brief_development_loss": 0.6573437488822733,
+        "development_loss": 0.02931063310167548,
         "epoch": 42,
-        "joined_development_loss": 0.002067947143014859,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.1878330976055675,
+        "joined_development_loss": 0.0049126723113481355,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9810261475282008,
-              "convert_rows": 19237,
-              "converted_correctly": 18872,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9816499454176847,
-              "convert_rows": 19237,
-              "converted_correctly": 18884,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029477764449284044,
-          "minimum_net_benefit": 18828,
-          "minimum_recall": 0.9810261475282008,
-          "net_benefit": 37668,
-          "pooled_recall": 0.9813380464729428,
+          "loss": 0.02931063310167548,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08378870114072741
       },
       {
-        "development_loss": 0.029478893478647947,
+        "brief_development_loss": 0.6572387525568627,
+        "development_loss": 0.02931126799376993,
         "epoch": 43,
-        "joined_development_loss": 0.0020585773643635253,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.1877686223964344,
+        "joined_development_loss": 0.004906004570055874,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9810261475282008,
-              "convert_rows": 19237,
-              "converted_correctly": 18872,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9816499454176847,
-              "convert_rows": 19237,
-              "converted_correctly": 18884,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029478893478647947,
-          "minimum_net_benefit": 18828,
-          "minimum_recall": 0.9810261475282008,
-          "net_benefit": 37668,
-          "pooled_recall": 0.9813380464729428,
+          "loss": 0.02931126799376993,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08389289975508074
       },
       {
-        "development_loss": 0.029480046285555166,
+        "brief_development_loss": 0.6571348422873128,
+        "development_loss": 0.029311897995901733,
         "epoch": 44,
-        "joined_development_loss": 0.002049538453368436,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.1877051148297997,
+        "joined_development_loss": 0.004899608097820203,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9810261475282008,
-              "convert_rows": 19237,
-              "converted_correctly": 18872,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9816499454176847,
-              "convert_rows": 19237,
-              "converted_correctly": 18884,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029480046285555166,
-          "minimum_net_benefit": 18828,
-          "minimum_recall": 0.9810261475282008,
-          "net_benefit": 37668,
-          "pooled_recall": 0.9813380464729428,
+          "loss": 0.029311897995901733,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08399626039507355
       },
       {
-        "development_loss": 0.029481221724523478,
+        "brief_development_loss": 0.6570320734120318,
+        "development_loss": 0.029312523505422995,
         "epoch": 45,
-        "joined_development_loss": 0.0020408127980852887,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.187642627532176,
+        "joined_development_loss": 0.004893468727577494,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9810261475282008,
-              "convert_rows": 19237,
-              "converted_correctly": 18872,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9816499454176847,
-              "convert_rows": 19237,
-              "converted_correctly": 18884,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029481221724523478,
-          "minimum_net_benefit": 18828,
-          "minimum_recall": 0.9810261475282008,
-          "net_benefit": 37668,
-          "pooled_recall": 0.9813380464729428,
+          "loss": 0.029312523505422995,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08409882052009739
       },
       {
-        "development_loss": 0.02948241883325231,
+        "brief_development_loss": 0.6569304954564217,
+        "development_loss": 0.02931314489441489,
         "epoch": 46,
-        "joined_development_loss": 0.0020323840714881842,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18758119706073947,
+        "joined_development_loss": 0.004887573328968681,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9810261475282008,
-              "convert_rows": 19237,
-              "converted_correctly": 18872,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9816499454176847,
-              "convert_rows": 19237,
-              "converted_correctly": 18884,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.02948241883325231,
-          "minimum_net_benefit": 18828,
-          "minimum_recall": 0.9810261475282008,
-          "net_benefit": 37668,
-          "pooled_recall": 0.9813380464729428,
+          "loss": 0.02931314489441489,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.0842006145393309
       },
       {
-        "development_loss": 0.02948363680097657,
+        "brief_development_loss": 0.6568301523195775,
+        "development_loss": 0.029313762505467588,
         "epoch": 47,
-        "joined_development_loss": 0.0020242371116811816,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.187520846928805,
+        "joined_development_loss": 0.004881909704197503,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9810261475282008,
-              "convert_rows": 19237,
-              "converted_correctly": 18872,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9816499454176847,
-              "convert_rows": 19237,
-              "converted_correctly": 18884,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.02948363680097657,
-          "minimum_net_benefit": 18828,
-          "minimum_recall": 0.9810261475282008,
-          "net_benefit": 37668,
-          "pooled_recall": 0.9813380464729428,
+          "loss": 0.029313762505467588,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08430167364374062
       },
       {
-        "development_loss": 0.029484874940702795,
+        "brief_development_loss": 0.6567310823768913,
+        "development_loss": 0.02931437664516707,
         "epoch": 48,
-        "joined_development_loss": 0.002016357784206552,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18746158976770197,
+        "joined_development_loss": 0.0048764665185463555,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9811301138431149,
-              "convert_rows": 19237,
-              "converted_correctly": 18874,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9817567567567568,
+              "convert_rows": 19240,
+              "converted_correctly": 18889,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9817539117325986,
-              "convert_rows": 19237,
-              "converted_correctly": 18886,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9822765072765073,
+              "convert_rows": 19240,
+              "converted_correctly": 18899,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029484874940702795,
-          "minimum_net_benefit": 18830,
-          "minimum_recall": 0.9811301138431149,
-          "net_benefit": 37672,
-          "pooled_recall": 0.9814420127878567,
+          "loss": 0.02931437664516707,
+          "minimum_net_benefit": 18844,
+          "minimum_recall": 0.9817567567567568,
+          "net_benefit": 37697,
+          "pooled_recall": 0.982016632016632,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08440202618413292
       },
       {
-        "development_loss": 0.029486132666923077,
+        "brief_development_loss": 0.656633318841902,
+        "development_loss": 0.029314987584169137,
         "epoch": 49,
-        "joined_development_loss": 0.0020087329269612665,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.1874034299253661,
+        "joined_development_loss": 0.004871233183432169,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9811301138431149,
-              "convert_rows": 19237,
-              "converted_correctly": 18874,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9818087318087318,
+              "convert_rows": 19240,
+              "converted_correctly": 18890,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9817539117325986,
-              "convert_rows": 19237,
-              "converted_correctly": 18886,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9823284823284824,
+              "convert_rows": 19240,
+              "converted_correctly": 18900,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029486132666923077,
-          "minimum_net_benefit": 18830,
-          "minimum_recall": 0.9811301138431149,
-          "net_benefit": 37672,
-          "pooled_recall": 0.9814420127878567,
+          "loss": 0.029314987584169137,
+          "minimum_net_benefit": 18845,
+          "minimum_recall": 0.9818087318087318,
+          "net_benefit": 37699,
+          "pooled_recall": 0.9820686070686071,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08450169777860164
       },
       {
-        "development_loss": 0.029487409473720083,
+        "brief_development_loss": 0.6565368898510257,
+        "development_loss": 0.02931559555551624,
         "epoch": 50,
-        "joined_development_loss": 0.0020013502495871117,
-        "kept_development_loss": 0.00031763069563389755,
+        "first_development_loss": 0.18734636474518998,
+        "joined_development_loss": 0.004866199774161419,
+        "kept_development_loss": 0.0003083550244131802,
         "selection": {
           "by_profile": {
             "portable": {
-              "conversion_recall": 0.9811301138431149,
-              "convert_rows": 19237,
-              "converted_correctly": 18874,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9818087318087318,
+              "convert_rows": 19240,
+              "converted_correctly": 18890,
+              "false_conversions": 45,
+              "rows": 58354
             },
             "reference_hunspell": {
-              "conversion_recall": 0.9817539117325986,
-              "convert_rows": 19237,
-              "converted_correctly": 18886,
-              "false_conversions": 44,
-              "rows": 58359
+              "conversion_recall": 0.9823284823284824,
+              "convert_rows": 19240,
+              "converted_correctly": 18900,
+              "false_conversions": 46,
+              "rows": 58354
             }
           },
-          "loss": 0.029487409473720083,
-          "minimum_net_benefit": 18830,
-          "minimum_recall": 0.9811301138431149,
-          "net_benefit": 37672,
-          "pooled_recall": 0.9814420127878567,
+          "loss": 0.02931559555551624,
+          "minimum_net_benefit": 18845,
+          "minimum_recall": 0.9818087318087318,
+          "net_benefit": 37699,
+          "pooled_recall": 0.9820686070686071,
           "threshold": 0.95
-        }
+        },
+        "term_development_loss": 0.08460071159367638
       }
     ],
-    "joined_loss": 0.0020013502495871117,
+    "joined_loss": 0.004866199774161419,
     "joined_selected_epoch": 50,
-    "kept_loss": 0.00031763069563389755,
+    "kept_loss": 0.0003083550244131802,
     "kept_selected_epoch": 1,
-    "loss": 0.029484874940702795,
-    "selected_epoch": 48,
+    "loss": 0.02931559555551624,
+    "selected_epoch": 50,
     "selection": {
       "by_profile": {
         "portable": {
-          "conversion_recall": 0.9811301138431149,
-          "convert_rows": 19237,
-          "converted_correctly": 18874,
-          "false_conversions": 44,
-          "rows": 58359
+          "conversion_recall": 0.9818087318087318,
+          "convert_rows": 19240,
+          "converted_correctly": 18890,
+          "false_conversions": 45,
+          "rows": 58354
         },
         "reference_hunspell": {
-          "conversion_recall": 0.9817539117325986,
-          "convert_rows": 19237,
-          "converted_correctly": 18886,
-          "false_conversions": 44,
-          "rows": 58359
+          "conversion_recall": 0.9823284823284824,
+          "convert_rows": 19240,
+          "converted_correctly": 18900,
+          "false_conversions": 46,
+          "rows": 58354
         }
       },
-      "loss": 0.029484874940702795,
-      "minimum_net_benefit": 18830,
-      "minimum_recall": 0.9811301138431149,
-      "net_benefit": 37672,
-      "pooled_recall": 0.9814420127878567,
+      "loss": 0.02931559555551624,
+      "minimum_net_benefit": 18845,
+      "minimum_recall": 0.9818087318087318,
+      "net_benefit": 37699,
+      "pooled_recall": 0.9820686070686071,
       "threshold": 0.95
-    }
+    },
+    "term_loss": 0.0792674701006802,
+    "term_selected_epoch": 4
   },
   "english_capital_curriculum": {
     "candidates_by_length": {
       "2": 99,
-      "3": 1762,
-      "4": 6205,
-      "5": 12913
+      "3": 1760,
+      "4": 6199,
+      "5": 12893
     },
     "frames": 3996,
     "frames_per_word": 2,
@@ -3172,7 +3341,22 @@
       ]
     }
   },
-  "feature_count": 103496,
+  "feature_count": 104353,
+  "first_curriculum": {
+    "frames": 1419,
+    "held_out": 89,
+    "items": {
+      "convert:next": 441,
+      "convert:pause": 441,
+      "convert:space": 441,
+      "keep:next": 32,
+      "keep:pause": 32,
+      "refused": 83,
+      "wait:space": 32
+    },
+    "sample_weight": 1.0,
+    "scope": "terms of up to three letters of the Latin table typed in the Russian layout alone in a field a reader read empty, ended by a space and by a pause, and asked again with the word after them (convert; a token that may still be the tail of a Russian word waits at the space and is kept at the pause and with the next word) (first_curriculum)."
+  },
   "frozen_base": {
     "artifact": "model/context_v3/frozen-base.json",
     "conversion_threshold": 0.99,
@@ -3188,25 +3372,25 @@
     "sequence_net_restorations_at_least_baseline": true
   },
   "joined_token_curriculum": {
-    "frames": 5812,
-    "held_out": 4,
+    "frames": 5788,
+    "held_out": 11,
     "item_modulus": 1,
     "items": {
       "capped": 855,
-      "convert:repeat": 21,
+      "convert:repeat": 20,
       "convert:synthetic": 656,
-      "convert:words": 2229,
-      "keep:repeat": 21,
+      "convert:words": 2218,
+      "keep:repeat": 20,
       "keep:synthetic": 656,
-      "keep:words": 2229,
-      "refused": 70
+      "keep:words": 2218,
+      "refused": 75
     },
     "per_token": 4,
     "repeat_minimum_count": 5,
     "repeat_words": 400,
     "sample_weight": 1.0,
     "scope": "words joined by hyphens in the text of this split's rows, and counted words of either language joined to themselves, after the text before them: typed as written (keep) and their keys in the other layout (convert) (joined_token_curriculum).",
-    "tokens": 1291
+    "tokens": 1283
   },
   "kept_neighbour_curriculum": {
     "abbreviations": [
@@ -3713,11 +3897,11 @@
     ],
     "candidates": {
       "abbreviations": 795,
-      "contexts": 21289,
-      "misspelt": 62275,
-      "natural_0": 37312,
-      "natural_1": 36429,
-      "terms": 1750
+      "contexts": 21243,
+      "misspelt": 62158,
+      "natural_0": 37283,
+      "natural_1": 36357,
+      "terms": 1746
     },
     "counts": {
       "abbreviation": 1500,
@@ -3910,7 +4094,6 @@
       "днном",
       "метрл",
       "уотин",
-      "щерых",
       "кеееи",
       "оодна",
       "ориа",
@@ -4036,7 +4219,6 @@
       "каго",
       "еолк",
       "левв",
-      "ощтив",
       "учяли",
       "атттл",
       "мяи",
@@ -4227,7 +4409,9 @@
       "суф",
       "сакрф",
       "уортн",
-      "уотта"
+      "уотта",
+      "лиьсю",
+      "таома"
     ],
     "sample_weight": 1.0,
     "scope": "TRAIN only: kept_next_word frames, the question a waiting word is asked again with its kept next word (kept_neighbour_curriculum).",
@@ -4336,7 +4520,6 @@
       "tr",
       "fixed",
       "aepot",
-      "gd",
       "urls",
       "msk",
       "send",
@@ -5403,7 +5586,6 @@
       "tasks",
       "inner",
       "rgba",
-      "viber",
       "pod",
       "clock",
       "hard",
@@ -5565,30 +5747,32 @@
       "conda",
       "jet",
       "rust",
-      "ogg"
+      "ogg",
+      "home",
+      "page"
     ]
   },
   "latin_abbreviation_curriculum": {
     "forms": {
-      "convert": 1011,
+      "convert": 1010,
       "keep": 432,
-      "refused": 67
+      "refused": 68
     },
-    "frames": 2886,
+    "frames": 2884,
     "frames_per_form": 2,
     "sample_weight": 1.0,
     "scope": "attested Cyrillic abbreviations of this split's share, typed as written after English prose or Latin terms, labelled by the term counts of both readings (latin_abbreviation_curriculum)."
   },
   "letter_curriculum": {
     "candidates": {
-      "english_sentences": 47526,
-      "russian_sentences": 9202,
-      "terms": 3917
+      "english_sentences": 47495,
+      "russian_sentences": 9190,
+      "terms": 3911
     },
     "counts": {
       "english_letters": 52,
       "english_sentences": 1448,
-      "message_start": 491,
+      "message_start": 490,
       "term_sentences": 1500
     },
     "frames": 12000,
@@ -5598,19 +5782,19 @@
   "lexical_short_pair_curriculum": {
     "portable": {
       "counts": {
-        "input_anchors": 10123,
+        "input_anchors": 10107,
         "input_seeds": 138,
         "planned_convert": 134,
         "selected_families": 23,
         "selected_seeds": 138,
         "skipped_next_not_proposed": 4
       },
-      "input_mass": 210457.0,
+      "input_mass": 210442.0,
       "mass_by_origin_action": {
         "none:wait": 23.666666666666693,
         "planned_next_conversion:convert": 22.333333333333353
       },
-      "output_mass": 210503.0,
+      "output_mass": 210488.0,
       "pairs": 23,
       "pairs_by_direction": {
         "0": 10,
@@ -5645,19 +5829,19 @@
     },
     "reference_hunspell": {
       "counts": {
-        "input_anchors": 10123,
+        "input_anchors": 10107,
         "input_seeds": 138,
         "planned_convert": 133,
         "selected_families": 23,
         "selected_seeds": 138,
         "skipped_next_not_proposed": 5
       },
-      "input_mass": 210457.0,
+      "input_mass": 210442.0,
       "mass_by_origin_action": {
         "none:wait": 23.833333333333357,
         "planned_next_conversion:convert": 22.166666666666686
       },
-      "output_mass": 210503.0,
+      "output_mass": 210488.0,
       "pairs": 23,
       "pairs_by_direction": {
         "0": 10,
@@ -5695,14 +5879,14 @@
     "portable": {
       "calibration": {
         "counts": {
-          "convert": 627,
-          "keep": 628,
-          "pairs": 65,
-          "refused": 10,
+          "convert": 600,
+          "keep": 601,
+          "pairs": 64,
+          "refused": 11,
           "suggest": 2010,
           "wait": 245
         },
-        "frames": 3510,
+        "frames": 3456,
         "sample_weight": 1.0,
         "scope": "lone_word frames of this split: every pair of two Latin letters whose Russian keys are letters too, each reading alone in the field at a boundary other than a space (lone_word_curriculum), labelled by alone_labels with the frozen model's answer where the counts settle nothing."
       },
@@ -5721,14 +5905,14 @@
       },
       "train": {
         "counts": {
-          "convert": 4851,
-          "keep": 4828,
-          "pairs": 496,
-          "refused": 46,
+          "convert": 4824,
+          "keep": 4801,
+          "pairs": 495,
+          "refused": 47,
           "suggest": 15233,
           "wait": 1872
         },
-        "frames": 26784,
+        "frames": 26730,
         "sample_weight": 1.0,
         "scope": "lone_word frames of this split: every pair of two Latin letters whose Russian keys are letters too, each reading alone in the field at a boundary other than a space (lone_word_curriculum), labelled by alone_labels with the frozen model's answer where the counts settle nothing."
       }
@@ -5736,14 +5920,14 @@
     "reference_hunspell": {
       "calibration": {
         "counts": {
-          "convert": 627,
-          "keep": 628,
-          "pairs": 65,
-          "refused": 10,
+          "convert": 600,
+          "keep": 601,
+          "pairs": 64,
+          "refused": 11,
           "suggest": 2010,
           "wait": 245
         },
-        "frames": 3510,
+        "frames": 3456,
         "sample_weight": 1.0,
         "scope": "lone_word frames of this split: every pair of two Latin letters whose Russian keys are letters too, each reading alone in the field at a boundary other than a space (lone_word_curriculum), labelled by alone_labels with the frozen model's answer where the counts settle nothing."
       },
@@ -5762,14 +5946,14 @@
       },
       "train": {
         "counts": {
-          "convert": 4851,
-          "keep": 4828,
-          "pairs": 496,
-          "refused": 46,
+          "convert": 4824,
+          "keep": 4801,
+          "pairs": 495,
+          "refused": 47,
           "suggest": 15233,
           "wait": 1872
         },
-        "frames": 26784,
+        "frames": 26730,
         "sample_weight": 1.0,
         "scope": "lone_word frames of this split: every pair of two Latin letters whose Russian keys are letters too, each reading alone in the field at a boundary other than a space (lone_word_curriculum), labelled by alone_labels with the frozen model's answer where the counts settle nothing."
       }
@@ -5787,7 +5971,7 @@
         "skipped_missing_anchor": 44,
         "skipped_next_not_proposed": 332
       },
-      "input_mass": 210457.0,
+      "input_mass": 210442.0,
       "mass_by_origin_action": {
         "field:convert": 86.91666666666768,
         "field:keep": 94.99999999999955,
@@ -5797,7 +5981,7 @@
         "planned_next_conversion:convert": 16.083333333333105,
         "planned_next_conversion:keep": 56.30235507246119
       },
-      "output_mass": 210457.0,
+      "output_mass": 210442.0,
       "scope": "Old TRAIN annotations and first words of their existing right contexts; no new split or candidate context-model labels."
     },
     "reference_hunspell": {
@@ -5811,7 +5995,7 @@
         "skipped_missing_anchor": 44,
         "skipped_next_not_proposed": 332
       },
-      "input_mass": 210457.0,
+      "input_mass": 210442.0,
       "mass_by_origin_action": {
         "field:convert": 86.91666666666768,
         "field:keep": 94.99999999999955,
@@ -5821,34 +6005,34 @@
         "planned_next_conversion:convert": 16.083333333333105,
         "planned_next_conversion:keep": 56.30235507246119
       },
-      "output_mass": 210457.0,
+      "output_mass": 210442.0,
       "scope": "Old TRAIN annotations and first words of their existing right contexts; no new split or candidate context-model labels."
     }
   },
-  "model_version": "context-v3-20be427844f6",
+  "model_version": "context-v3-754513f80498",
   "natural_lookahead_curriculum": {
     "portable": {
       "calibration": {
         "counts": {
-          "input_anchors": 1315,
+          "input_anchors": 1313,
           "input_seeds": 10,
           "selected_families": 1,
           "selected_seeds": 3,
           "skipped_missing_anchor": 2,
           "skipped_next_not_proposed": 1
         },
-        "input_mass": 38617.0,
+        "input_mass": 38625.0,
         "mass_by_origin_action": {
           "none:convert": 3.0,
           "none:keep": 3.0,
           "none:wait": 4.0
         },
-        "output_mass": 38617.0,
+        "output_mass": 38625.0,
         "scope": "Natural short typing frames of one split paired with the first word of their own sentence's continuation; no cross-split anchors and no candidate context-model labels."
       },
       "development": {
         "counts": {
-          "input_anchors": 1462,
+          "input_anchors": 1460,
           "input_seeds": 11,
           "planned_convert": 2,
           "planned_keep": 3,
@@ -5869,48 +6053,48 @@
       },
       "train": {
         "counts": {
-          "input_anchors": 10123,
-          "input_seeds": 89,
+          "input_anchors": 10107,
+          "input_seeds": 91,
           "planned_convert": 4,
           "planned_keep": 17,
           "selected_families": 22,
           "selected_seeds": 61,
           "skipped_missing_anchor": 40
         },
-        "input_mass": 210457.0,
+        "input_mass": 210442.0,
         "mass_by_origin_action": {
           "none:convert": 27.0,
           "none:keep": 13.0,
-          "none:wait": 41.5,
+          "none:wait": 43.5,
           "planned_next_conversion:convert": 2.0,
           "planned_next_conversion:keep": 8.5
         },
-        "output_mass": 210457.0,
+        "output_mass": 210442.0,
         "scope": "Natural short typing frames of one split paired with the first word of their own sentence's continuation; no cross-split anchors and no candidate context-model labels."
       }
     },
     "reference_hunspell": {
       "calibration": {
         "counts": {
-          "input_anchors": 1315,
+          "input_anchors": 1313,
           "input_seeds": 10,
           "selected_families": 1,
           "selected_seeds": 3,
           "skipped_missing_anchor": 2,
           "skipped_next_not_proposed": 1
         },
-        "input_mass": 38617.0,
+        "input_mass": 38625.0,
         "mass_by_origin_action": {
           "none:convert": 3.0,
           "none:keep": 3.0,
           "none:wait": 4.0
         },
-        "output_mass": 38617.0,
+        "output_mass": 38625.0,
         "scope": "Natural short typing frames of one split paired with the first word of their own sentence's continuation; no cross-split anchors and no candidate context-model labels."
       },
       "development": {
         "counts": {
-          "input_anchors": 1462,
+          "input_anchors": 1460,
           "input_seeds": 11,
           "planned_convert": 2,
           "planned_keep": 3,
@@ -5931,39 +6115,39 @@
       },
       "train": {
         "counts": {
-          "input_anchors": 10123,
-          "input_seeds": 89,
+          "input_anchors": 10107,
+          "input_seeds": 91,
           "planned_convert": 4,
           "planned_keep": 17,
           "selected_families": 22,
           "selected_seeds": 61,
           "skipped_missing_anchor": 40
         },
-        "input_mass": 210457.0,
+        "input_mass": 210442.0,
         "mass_by_origin_action": {
           "none:convert": 27.0,
           "none:keep": 13.0,
-          "none:wait": 41.5,
+          "none:wait": 43.5,
           "planned_next_conversion:convert": 2.0,
           "planned_next_conversion:keep": 8.5
         },
-        "output_mass": 210457.0,
+        "output_mass": 210442.0,
         "scope": "Natural short typing frames of one split paired with the first word of their own sentence's continuation; no cross-split anchors and no candidate context-model labels."
       }
     }
   },
   "planned_mass_balance": {
     "portable": {
-      "input_mass": 210503.0,
+      "input_mass": 210488.0,
       "isolated_mass": {
         "0:1": 45.5,
         "0:2": 141.5,
-        "0:3": 49.5,
+        "0:3": 51.5,
         "1:1": 39.0,
         "1:2": 263.5,
-        "1:3": 44.1667
+        "1:3": 46.1667
       },
-      "output_mass": 210980.94764492754,
+      "output_mass": 210969.94764492754,
       "planned_mass_before": {
         "0:1": 6.6167,
         "0:2": 28.0,
@@ -5976,23 +6160,23 @@
       "scale": {
         "0:1": 6.8766,
         "0:2": 5.0536,
-        "0:3": 4.0408,
+        "0:3": 4.2041,
         "1:1": 7.453,
         "1:2": 9.7612,
-        "1:3": 1.6906
+        "1:3": 1.7671
       }
     },
     "reference_hunspell": {
-      "input_mass": 210503.0,
+      "input_mass": 210488.0,
       "isolated_mass": {
         "0:1": 45.5,
         "0:2": 141.5,
-        "0:3": 49.5,
+        "0:3": 51.5,
         "1:1": 39.0,
         "1:2": 263.5,
-        "1:3": 44.3333
+        "1:3": 46.3333
       },
-      "output_mass": 210981.28097826088,
+      "output_mass": 210970.28097826088,
       "planned_mass_before": {
         "0:1": 6.6167,
         "0:2": 28.0,
@@ -6005,10 +6189,10 @@
       "scale": {
         "0:1": 6.8766,
         "0:2": 5.0536,
-        "0:3": 4.0408,
+        "0:3": 4.2041,
         "1:1": 7.453,
         "1:2": 9.7612,
-        "1:3": 1.7079
+        "1:3": 1.7849
       }
     }
   },
@@ -6017,7 +6201,7 @@
     "model/context_v1/scenarios.json": "a29f3a7bc324a30ef244fee885555bab3d3547682df9942d233f0e1dd0963d12",
     "model/context_v3/baseline-context-v1.json": "121e32d42939a9be6c9e6837bb7c4a5939778fcbf0c12b248e168225dba15f47",
     "model/context_v3/frozen-base.json": "5129029cdda9ffc2c6e67d8212ea8a7ede710764089ebde53c00b0ddc30ff6ae",
-    "model/context_v3/recipe.json": "d9fef5a1495baa261c0106322a1595c12d19c91a1e3f678d8a4f6c746673ec4b",
+    "model/context_v3/recipe.json": "3a6deceacc9f60d217aee770b2a106631d2b003da27e5418c6334e1165753334",
     "model/intent_v1/config.json": "2026433380f1a418079c8cb60eafc64cc420fc256b3c074dbb7d6389f6b275fd",
     "model/intent_v1/sources/en_US.lm": "017a513a23bb37947a3a0e73e307066fa8ec0642075172cdcad6ea204cae68da",
     "model/intent_v1/sources/hunspell/en_US.aff": "70fe5778717d097ce2f3326baaa5c1e4d2206d81a5a81d3ea8e11c4770806dd5",
@@ -6026,7 +6210,7 @@
     "model/intent_v1/sources/hunspell/ru_RU.dic": "f6047416a0204adbecf3a451b874ec8a97ee37e2cbc714466ef04d8dbcc0d6fc",
     "model/intent_v1/sources/ru_RU.lm": "e57c14eec2b78e52a2125dce2b38044d8dfe480f3964b9d118614527195ceda9",
     "model/prefix_v2/baseline-prefix-v1.json": "d0e40f60c6af3728afe60e3c53055ff0a091441879159f2cbb78ce42b9103488",
-    "src/keyswitch/__init__.py": "2b619fbb7206ea343987bc6bc839074e49db19a2b63850b261790bd58222baac",
+    "src/keyswitch/__init__.py": "556306cfd61964163113fc2bb18f49564cf13fd8a57b0490539345508d05f1a5",
     "src/keyswitch/__main__.py": "1dcdb6d6ff34e04cdbc21446c00a5c5f61c3059429eac0f6f863291a7a314fbe",
     "src/keyswitch/app.py": "1956e72601c6c17119febd10cead0658812ad6c564ec2b478e602d7ed1c4513c",
     "src/keyswitch/app_quirks.py": "760763d3c50a85c19239a90e246d65e105e91ae918660445e8286d137836a214",
@@ -6037,26 +6221,26 @@
     "src/keyswitch/config.py": "d0b87730b60760229637047bdd944b3c03891307460200211619f5796da247c9",
     "src/keyswitch/constants/__init__.py": "d6a2b9a19534b25c0550dc593c3cb20a1c169efc7f554db06fbe3a08f581dca9",
     "src/keyswitch/constants/boundary.py": "b801b30b546ec262862959ddc5ab6d135e697a14abbe6003cf1e49eb71b1d5c1",
-    "src/keyswitch/constants/corpus.py": "ddfbf84c29cb23179d80280bcf394a08eaf84730a7889e44ee433ac4753fd766",
+    "src/keyswitch/constants/corpus.py": "9397046996a9bf9598a3395b1700b9a2f82eabad5c72047b9ce8fb53ecd95549",
     "src/keyswitch/constants/detection.py": "ec2591a4a2294d3685c98a3adee78272874a5593c2b86290d33a585d7362e2b2",
     "src/keyswitch/constants/environment_probe.py": "167af20f589fbd6c7e7867d8027669d8ebc488d4cd6e4e0d73ad73c22b1eeccf",
     "src/keyswitch/constants/file_formats.py": "0ad88d211f18b76d8fc1a715b790267cddb2d768020ce0182e81f56b032d13b8",
     "src/keyswitch/constants/geometry.py": "80644ee17d0306ae27c09ecec12a470c474fa38a1b74dbb5ac63ff3bd21664f2",
     "src/keyswitch/constants/keyboard.py": "9936d03c6ce68aa2d2a601d3b01aee2107208a0c5441d06627148365393107e7",
     "src/keyswitch/constants/learning_prompt.py": "2256a0a96a1b5a2e05dbb9a0fb76908b36a5bc405e878be0cc3b088019830a4a",
-    "src/keyswitch/constants/log_files.py": "bedf4c3f4d5b3e09e158d8d5aa45ee6e286140912829beee6502c96cb586e2b8",
+    "src/keyswitch/constants/log_files.py": "769aefe9b72348eb327d8c6e8468998fa1ea6c87fbd283696fa9b417e6b30278",
     "src/keyswitch/constants/macos.py": "a44d2c72db8dbbb9656a4d26caba32162d96fe0e8103c0c1f75de70edb00d0d0",
     "src/keyswitch/constants/model_protocol.py": "4ae41928817e0f15059b41490f3f6f6c3233b53952c02fc281c75be68a1ba6ca",
-    "src/keyswitch/constants/models.py": "4622f4ed2b6e57ca77b2ccaf4fad9596df7accb22644eec951aa2e8958cc4b01",
+    "src/keyswitch/constants/models.py": "e048088326fd7525be8f5118c3dd26319f66510e433fcaccdd4548c9a07d2551",
     "src/keyswitch/constants/ortho.py": "5570cc9e2bb40a2d2e3d3c279d6eeb4e1bc65cd221312f64bf5ecf6771aafbff",
     "src/keyswitch/constants/prefix.py": "50b6a05a8a48c1ce46f8bcae1eb0f30cd674f2296f6888addcef9dca74ef0a27",
-    "src/keyswitch/constants/release.py": "cd90705f51a493b60bec8fcc6f2fb3d893f97791c5f46bdfa01fd5b7ba4ac4d2",
+    "src/keyswitch/constants/release.py": "9c85a57b40c8ea916bab57bfaea45d8717b04bc80c86688276f2f6d7c14bae23",
     "src/keyswitch/constants/repository.py": "6adf3b494a0f853c40d44ad29ecb0671181450c346ce7d17066f100540b342b0",
     "src/keyswitch/constants/russian_text.py": "dced6e5eb9b5f6030ffd4d41b79e75b851f7edbb72485d90f1f87963486d4fd0",
     "src/keyswitch/constants/settings_defaults.py": "a89731219aac63d45b2e551f708f31b72af8a17f82c9d0c36d544a8ffd82458c",
     "src/keyswitch/constants/text.py": "732af9b5a7c50463351b1ad3806740bdfc872c0d2b0c2f2a88482e869c4c53d8",
     "src/keyswitch/constants/timing.py": "83b2aaea38a85c7ffad21c092706cb08a4831c2f24c7f79a4aa4ef645c93b910",
-    "src/keyswitch/constants/training.py": "f0dedcc99ba09b75d8ee92fa9b27fc9726d9ca370ef3952ff59282b2604aedb7",
+    "src/keyswitch/constants/training.py": "b8dfda46ce793f38f4f344320bf8fcfb4a141338e264b64aaf34bd2967ab2aba",
     "src/keyswitch/constants/tray_icon.py": "47eceb41d61e7a64c76b5a82367491359623e6c513c224a4981df96d2a114cde",
     "src/keyswitch/constants/tray_menu.py": "fa0cef93cd398c98db6b650a1b4b3d18ba56418471e69b0bf8a8d849c58eb7a9",
     "src/keyswitch/constants/ui_desktop.py": "6b762d9be82f27a1993cc4f7380de7d0bbc8da7cf98b1540e2c3508746b7dd45",
@@ -6066,14 +6250,14 @@
     "src/keyswitch/constants/windows.py": "93f191835aa258b46bfc0cc2e17ac7ced8b26778f9d843cda729eb5860894fe0",
     "src/keyswitch/constants/x11.py": "c504613e2851e25d9172067d6b1ebf958a895ca3b774fe9dc640d9cf1029da3d",
     "src/keyswitch/context_access.py": "5fe1215ef4cf5d51b974dcd53f58453ea2c01775a2618069536250b13b34e411",
-    "src/keyswitch/context_action_features.py": "6521b051bfada7ff94a35db9788918bbdd70a2ca900c4d38fc1fd773c2dcfecb",
+    "src/keyswitch/context_action_features.py": "8b8d422aca066c79f86a5d5caa381dd4aa06cd9b63a48148fd824cf2dd4ed378",
     "src/keyswitch/context_model.py": "1b1dca739c1239a281ad86adc9644ed6c669c8200650094b0793d8d6aba812c7",
     "src/keyswitch/context_policy.py": "537065d449d822ac218a68222f4f4d44f0749c764630a81c7362cab7616ccc24",
     "src/keyswitch/desktop_services.py": "20adbb01525f3ffbc08721c9c278188be85aa980d9fb5fb38b5e6e7fdd76cc4f",
     "src/keyswitch/desktop_ui.py": "442135220f1f50c6534621f2331397b703c5f599d0831b23144e6c2bd993331e",
     "src/keyswitch/detector.py": "5a78cd5961af57426b6cb42b3757b42baeacd7344a06557111a1067cb0cbb2c0",
     "src/keyswitch/early_switch.py": "3099fb815f239018f79c0c3a2b96b5db4390d47fee3a74ad701c636e7e5983ef",
-    "src/keyswitch/engine.py": "b23411a700c464dcd4ae18b36e990c93d380b128cbaad564e7604730f2eab0c1",
+    "src/keyswitch/engine.py": "32d3f81a956c0bdcab41f60712b1082574ff92d35e41717767ab3cb581593f73",
     "src/keyswitch/history.py": "165f09f7403a72019637a0ac4397845c9b15c847b9b64fb0f34552bbb2352fee",
     "src/keyswitch/identifier_lexicon.py": "80c1af6de67833ebc957355199e5ebab011282ddf6bbcc556d06bfef237c31bb",
     "src/keyswitch/indicator.py": "3b6833711292ec2f29bc2c3e427be873cc4f2ffde817c9deb0afa02fac979a19",
@@ -6086,6 +6270,7 @@
     "src/keyswitch/learning.py": "95d5ea9169958f5d579aca3220561e95b8371fe1365d82f61a37ab5d26895ad8",
     "src/keyswitch/learning_prompt.py": "fbf94df1f4c2486b2bf55f2b000b30f08a1862f5ef2373c9d6531d0b6fbba916",
     "src/keyswitch/lexicon_supplement.py": "ba8f400b2c1b3c538340e40ae069ad89867456e80bbdaf1daf9b34489857efaa",
+    "src/keyswitch/log_privacy.py": "629f5384b76a4e76170b53a8c1e9382537f6bdf6ca47800bcbeaaf5583ce4458",
     "src/keyswitch/logsetup.py": "55dc32f0d2fea08d6156f8bd434ba044abdef29ce890a6bdcde001af33aaa0ca",
     "src/keyswitch/macos_app.py": "128b0bdc46bf29bb4982281dfa676d4f3864cc4616afbb0275ecef3bd9f0e368",
     "src/keyswitch/macos_backend.py": "00e95d972dfd17744556197d652f5abc6c75072f379a9aba397e26148970af7d",
@@ -6136,26 +6321,26 @@
     "tests/test_action_epoch_selection.py": "5e785a4d98c623fc8015604da8b7e48855b7971a4c90c2df32dcac16bd149237",
     "tests/test_context_action_merge.py": "9659170e0eb907dc3e339c32acf87f249fb3b90b62b0b6fb716aaf7a2c9d48bb",
     "tests/test_context_action_spans.py": "c7777c3be7e412ff77458562f727864132d6c165274aaf65d1ab140dae8daa19",
-    "tests/test_context_action_training.py": "c4c700ffa4053bec0f8e6225525a71ec6986b547a2c21a73d7ca953a39aca516",
-    "tests/test_context_after_origin.py": "83889a105e6ab1b8dcb2f354d6fa58f87a8376fafbb5f1af2dea3cdb2a7ea0ae",
+    "tests/test_context_action_training.py": "62347829a88b2f640780e748a30292d003253781d31f7c6c96be542eb5976519",
+    "tests/test_context_after_origin.py": "fd66506e851ab841b0bba9a147706e41ed21f4cd8d27bcecf0d11d92409bb5ba",
     "tests/test_context_lookahead_curriculum.py": "3d96904b7485d483ae0444f4dccbe9fd946099a1c6b03d62ec28ba13376d5512",
     "tests/test_context_policy.py": "318a7b82e2bc51e748ee59eb0e0cba63918b37ab19ef2f854e0432796c487d8d",
     "tests/test_context_technical_corpus.py": "2f4598b0681666784282902baace8204d67c45df2778d69649aefba958637eb4",
     "tests/test_default_input_sequences.py": "b74a3a20c1394c35d1b9b288dca29576c048f269e42ded975d766e2d41fc69ec",
-    "tests/test_engine_behaviour.py": "6db458a531392b6f97d298c088721a6181cba73099158ae581e32dc90fe9c361",
+    "tests/test_engine_behaviour.py": "fc37e4a04bb109d4edcd691707ab9c656621326680f1a79231040ebf8e08c265",
     "tests/test_input_integrity.py": "7d9428b609af005a73f8b66c0ea45eeee3d37e47f0ab95a8242a39369ccb13c7",
     "tests/test_input_sequence_matrix.py": "c67638392c637a01c8e407c56b7dddc2973bb25f9cf4005c4fd6ba4b968132df",
     "tests/test_language_intent_regressions.py": "93f86cd74db645ff54f78b0cbc6479a149190801ffbb52cd7b5e2f2df14c1a57",
     "tests/test_windows_backend.py": "c1c3cf91ed83508a30597af341f11a3645bfedbdd17b89897980b1f330cceba6",
     "tests/test_x11_backend.py": "fe69b2398ad083eff85951b794fc1d72b067336cc22e4c6f8b9ffaad374f1e4b",
     "tools/action_epoch_selection.py": "5586ad18c9a9855e3fa3c8dbbd97230e70da58086a61ac394e24521c0c86740d",
-    "tools/context_action_cuda.py": "da553124a1752f8cd709b69be08652903412b37ee71c274a1d85656528be61d7",
+    "tools/context_action_cuda.py": "a749ab23ae76f34ec65aae29d59af691ddd68b8a74636639d62e6bb72f4b3154",
     "tools/context_action_kernels/core.cuh": "94aaa21381dae4204e4d997b8cf37a739ecb5ed5e8c388281725d98171d8395f",
     "tools/context_action_kernels/decide.cuh": "bc27411ce8c3fe27e189d78d3039934ff284261ec1cc5382de0d7664aab8ef63",
     "tools/context_action_kernels/evidence.cuh": "6fe66f6e14c8362a7a7744e94139b1b898b4e86bf8377751d8838fdc45152da7",
     "tools/context_action_kernels/features.cuh": "b0ca01dbb0c6ed28303fb088996b6957cd71e25ebf3314094bbdc02a81f4502e",
     "tools/context_action_kernels/featurizer.cu": "719baf94effd678cd4208d75bb5ae74074ae4db6a72e2bd23191f329dac896a0",
-    "tools/context_action_kernels/parity.json": "694e0989f05253e97c783ab0d95e1f418f1fb98e2288f253584fe20e5523c76d",
+    "tools/context_action_kernels/parity.json": "c7f56c48165e683731627f4cfa71580f2671caae5629983607d36c6f2ac05a01",
     "tools/context_action_kernels/rows.cuh": "e01df3ca91ea512996b993d55f585a3e8d73000763a71971163008b4a4eabb64",
     "tools/context_action_mass.c": "973386a4ba64f6a2830b0ade6c87159fdbf61ea2f52e73af01b380a0cf44282d",
     "tools/context_action_pipeline.py": "a3b3fe05e43a769097041768bad51039e71c1c670d95c7ee35a68c9f03134b3b",
@@ -6172,7 +6357,7 @@
     "tools/merge_context_action_corpora.py": "d98d1416e86f77e797439323e66c46fbbcd32fd1de635189f90143112a12680c",
     "tools/reconcile_context_action_corpus.py": "9b2e0790b88088be5f2e0f48fb5661fb11245ca2808eb4d01cd9724a864b924a",
     "tools/reference_lexicon.py": "43e5dee3fff5864b1ee4ab69b4b46869853faae2b665f5e2a0da7d93db31ab70",
-    "tools/train_context_action_model.py": "6f0c63f68f86a43211cb5f8fa0cf0af6f48f88ace8702bc012127748bf89583b",
+    "tools/train_context_action_model.py": "603afd32eab2f3ed9070073133b1932d2467d5c6f0aa31a779865ac832ceedf1",
     "tools/train_context_model.py": "0ac6e90502c9498f33ae684b09c06ebba69145524f81590ee6120b657f45c696",
     "tools/verify_context_model.py": "f6843810085ca49d7081ce254c6461102e1589eab33c21049e6b13df49f6a679"
   },
@@ -6185,6 +6370,191 @@
       "scope": "TRAIN, and DEVELOPMENT for the head's epoch (one form in ABBREVIATION_SPLIT_MODULUS by hash): every Cyrillic word of two to five letters of the term table in capitals whose Latin reading is letters too, typed as written after frames_per_form left contexts of Russian rows of the split; convert when the Latin reading is counted at least minimum_latin_count times and dominance times as often, keep otherwise (tools/train_context_action_model.abbreviation_curriculum)."
     },
     "acceptance_note": "A model is judged by what it nets: conversions it gets right minus conversions it gets wrong, in each deployment profile. The zero-false-conversion budget was removed on 17.09.2026 together with the class-wide runtime vetoes it depended on; the sealed test still requires no more corrupted text than the installed pair and a net result at least as good.",
+    "brief_curriculum": {
+      "held_out": [
+        "ad",
+        "adb",
+        "adg",
+        "ai",
+        "aj",
+        "api",
+        "as",
+        "ass",
+        "bb",
+        "bkb",
+        "ble",
+        "bn",
+        "bob",
+        "bot",
+        "bp",
+        "bq",
+        "by",
+        "cd",
+        "cfv",
+        "ck",
+        "clk",
+        "cod",
+        "cpu",
+        "dbl",
+        "dc",
+        "dct",
+        "dcz",
+        "des",
+        "dgc",
+        "ds",
+        "dsp",
+        "dtk",
+        "eaa",
+        "eae",
+        "eaw",
+        "eb",
+        "ede",
+        "en",
+        "er",
+        "ev",
+        "ext",
+        "fd",
+        "ff",
+        "fq",
+        "fuf",
+        "geg",
+        "gei",
+        "geu",
+        "gfh",
+        "ghb",
+        "ghj",
+        "ght",
+        "gi",
+        "git",
+        "gj",
+        "gjl",
+        "gju",
+        "gjx",
+        "gla",
+        "glm",
+        "got",
+        "gpt",
+        "gpu",
+        "gth",
+        "ha",
+        "he",
+        "hfp",
+        "ht",
+        "htd",
+        "ibk",
+        "jd",
+        "jn",
+        "jq",
+        "jr",
+        "jt",
+        "jxt",
+        "jy",
+        "kas",
+        "kb",
+        "key",
+        "kj",
+        "kjr",
+        "kkv",
+        "kr",
+        "kyj",
+        "kz",
+        "lbf",
+        "lf",
+        "li",
+        "lid",
+        "lj",
+        "ljr",
+        "lkf",
+        "lkx",
+        "lkz",
+        "log",
+        "ls",
+        "lst",
+        "ltd",
+        "ltk",
+        "mac",
+        "max",
+        "mc",
+        "ms",
+        "ne",
+        "nen",
+        "nfr",
+        "ng",
+        "nj",
+        "nlg",
+        "no",
+        "npm",
+        "ns",
+        "nt",
+        "ol",
+        "pe",
+        "pf",
+        "ph",
+        "pin",
+        "po",
+        "por",
+        "ps",
+        "ptr",
+        "pu",
+        "rf",
+        "rfr",
+        "rjl",
+        "rjr",
+        "rp",
+        "sam",
+        "sen",
+        "sk",
+        "sq",
+        "sql",
+        "ssh",
+        "sv",
+        "tcn",
+        "tg",
+        "th",
+        "tj",
+        "tod",
+        "tot",
+        "tpt",
+        "ty",
+        "uf",
+        "ui",
+        "uj",
+        "ukt",
+        "ult",
+        "unk",
+        "vfi",
+        "vjl",
+        "vjq",
+        "vjz",
+        "vs",
+        "vsi",
+        "vv",
+        "vvj",
+        "vyt",
+        "wa",
+        "war",
+        "web",
+        "wh",
+        "win",
+        "xc",
+        "xer",
+        "xj",
+        "xnj",
+        "xnm",
+        "xz",
+        "ye",
+        "yf",
+        "yj",
+        "ylt",
+        "yt",
+        "ytn",
+        "ytr",
+        "zg"
+      ],
+      "minimum_count": 50,
+      "sample_weight": 1.0,
+      "scope": "Every word of Russian prose of two or three letters counted fifty times or more whose keys in the English layout are Latin letters and whose counts settle it as a Russian word (the Cyrillic reading counted thirty times or more and five times as often as the keys in English prose or Russian technical text, which occur fewer than thirty times), typed with those keys, alone at the start of a message, ended by a space, Enter or a pause, in lower case and capitalised: converted with the share of the Russian reading among the counts of both readings and kept with the rest. One token in five goes to DEVELOPMENT, whose frames choose the head's own epoch. The class's tokens of the owner's typing, which measure the head, are held out."
+    },
     "capital_citation_curriculum": {
       "lowercase_contrast": true,
       "sample_weight": 1.0,
@@ -6252,6 +6622,102 @@
     "epochs": 50,
     "feature_revision": "learned-ortho-script-length-right-context-origin-identifier-lexicon-line-opening-and-term-frequency-and-capitals-v8",
     "feature_version": 3,
+    "first_curriculum": {
+      "enabled": true,
+      "held_out": [
+        "aaa",
+        "action",
+        "adb",
+        "ak",
+        "all",
+        "any",
+        "apk",
+        "app",
+        "arc",
+        "async",
+        "ci",
+        "code",
+        "comp",
+        "cpu",
+        "crm",
+        "csv",
+        "cuda",
+        "de",
+        "deploy",
+        "design",
+        "dev",
+        "diff",
+        "docs",
+        "eslint",
+        "ext",
+        "extra",
+        "fcm",
+        "geforce",
+        "git",
+        "github",
+        "got",
+        "gpt",
+        "gpu",
+        "gs",
+        "hdmi",
+        "htop",
+        "if",
+        "info",
+        "io",
+        "js",
+        "jsdoc",
+        "json",
+        "li",
+        "lint",
+        "login",
+        "lst",
+        "mac",
+        "macos",
+        "main",
+        "max",
+        "md",
+        "mongodb",
+        "mul",
+        "mysql",
+        "nestjs",
+        "nginx",
+        "npm",
+        "ol",
+        "ole",
+        "or",
+        "pause",
+        "phone",
+        "php",
+        "play",
+        "po",
+        "pr",
+        "pt",
+        "qemu",
+        "qr",
+        "raw",
+        "redis",
+        "root",
+        "slot",
+        "sql",
+        "ssh",
+        "td",
+        "ti",
+        "todo",
+        "too",
+        "twig",
+        "txt",
+        "typescript",
+        "ufw",
+        "ui",
+        "vbs",
+        "vscode",
+        "we",
+        "web",
+        "wp"
+      ],
+      "sample_weight": 1.0,
+      "scope": "TRAIN, and DEVELOPMENT for the head's epoch (the term curriculum's split of terms): every term of letters of the Latin table of up to three letters whose keys in the Russian layout are a token of the term head's class, typed in the Russian layout alone in a field a field reader read empty, ended by a space and by a pause and asked again as the engine asks it with the word after it (convert); a token that may still be the tail of a Russian word (two letters from ending bucket five, three letters from bucket three) waits at the space and is kept at the pause and with the next word. The class's tokens of the owner's typing, which measure the head, are held out (tools/train_context_action_model.first_curriculum)."
+    },
     "frozen_base": {
       "artifact": "model/context_v3/frozen-base.json",
       "carried": {
@@ -6264,17 +6730,26 @@
         }
       },
       "heads": {
+        "brief": {
+          "maximum_features": 1500
+        },
+        "first": {
+          "maximum_features": 300
+        },
         "joined": {
           "maximum_features": 2500
         },
         "latin_abbreviation": {
           "maximum_features": 1000
         },
+        "term": {
+          "maximum_features": 2500
+        },
         "unknown": {
           "maximum_features": 2500
         }
       },
-      "scope": "The corpus v37 model (context-v3-2ae75d2b9e38, 0.44.0) with every weight fixed: the word decided at its boundary, the kept-neighbour question and the capitals, lone-word, message-start, single-letter and abbreviation heads it carries. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone). The Latin-context abbreviation head is fitted onto it: a Cyrillic abbreviation in capitals that Russian technical text uses, after Latin text (context_action_features.latin_abbreviation_question), with how often each reading occurs in Russian and technical text and in English prose and how often the word before it does. Motivation: the owner's typing of 08.10.2026, where `/designv2 ТЗ` became `/designv2 NP`. The unknown-token head is fitted onto it too: a token of four or more letters (and digits) of one script, not all capitals, whose Cyrillic reading Russian prose does not use and whose typed reading no lexicon of its layout holds, after Russian text - Latin letters in either layout, Russian letters only when the text before already holds their Latin reading as a word (context_action_features.unknown_question) - with the shared features once more and, per layout, whether either reading occurs earlier in the text, whether a reading is one typo from a word, and the length. Motivation: the owner's typing of 13.10.2026 in a chat input of VS Code, where `цуиоы` stayed for `webjs` four times, twice after `webjs` typed right earlier, and the row test v56 lost: the last word of a short Russian message, a word no table counts, typed in the English layout. The joined-token head is fitted onto it too: a token one of whose readings is words joined by hyphens (context_action_features.joined_question), with how often the most and the least frequent word of each reading occurs in its language's prose and whether the token repeats one word; the shared features read no count of such a token. Motivation: sealed test v58, where `Re-re!` after a Russian sentence, meant as `Ку-ку!`, stayed with both pairs: no term table counts such a token.",
+      "scope": "The corpus v37 model (context-v3-2ae75d2b9e38, 0.44.0) with every weight fixed: the word decided at its boundary, the kept-neighbour question and the capitals, lone-word, message-start, single-letter and abbreviation heads it carries. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone). The Latin-context abbreviation head is fitted onto it: a Cyrillic abbreviation in capitals that Russian technical text uses, after Latin text (context_action_features.latin_abbreviation_question), with how often each reading occurs in Russian and technical text and in English prose and how often the word before it does. Motivation: the owner's typing of 08.10.2026, where `/designv2 ТЗ` became `/designv2 NP`. The unknown-token head is fitted onto it too: a token of four or more letters (and digits) of one script, not all capitals, whose Cyrillic reading Russian prose does not use and whose typed reading no lexicon of its layout holds, after Russian text - Latin letters in either layout, Russian letters only when the text before already holds their Latin reading as a word (context_action_features.unknown_question) - with the shared features once more and, per layout, whether either reading occurs earlier in the text, whether a reading is one typo from a word, and the length. Motivation: the owner's typing of 13.10.2026 in a chat input of VS Code, where `цуиоы` stayed for `webjs` four times, twice after `webjs` typed right earlier, and the row test v56 lost: the last word of a short Russian message, a word no table counts, typed in the English layout. The joined-token head is fitted onto it too: a token one of whose readings is words joined by hyphens (context_action_features.joined_question), with how often the most and the least frequent word of each reading occurs in its language's prose and whether the token repeats one word; the shared features read no count of such a token. Motivation: sealed test v58, where `Re-re!` after a Russian sentence, meant as `Ку-ку!`, stayed with both pairs: no term table counts such a token. The term head is fitted onto it too: a token of Russian letters whose Latin reading, a trailing sign and the leading dot of an extension aside, is a term Russian technical text uses fifty times or more while its Cyrillic reading occurs in no Russian text the tables count (context_action_features.term_question), with no copy of the shared features - the frozen model reads the context - but how often the Latin reading occurs in Russian technical text and in English prose, whether it ends in a sign or opens with a dot, its length, how many words of Russian prose end with it (the tail of a word an edit left ends hundreds, a term's keys hardly any) and the script of the text before it. Motivation: the owner's typing, where `сш` in `npm ci`, `зк` for `pr` and `рвьш` for `hdmi` stayed at p 0.92-0.98 the first time a message held them, and ru.stackoverflow comments of 2024-2026, where converting the class turned 46 of 1 831 messages typed with their Latin words in the Russian layout right and broke none typed as meant. The short-message head is fitted onto it too: a token of two or three Latin letters alone in the field whose keys in the Russian layout are Russian letters (context_action_features.brief_question), with no copy of the shared features either, but how often Russian prose uses the Cyrillic reading and English prose and Russian technical text the Latin one, their ratio, the boundary and the case. Motivation: whole messages typed in the English layout stayed - `ytn` for `нет` kept at p 0.94, `jr` for `ок`, `dct` for `все` and `tot` for `еще` kept or left waiting for a next word that never came - while three-letter Russian words typed as meant are no members, since a message-start head that read them turned `чук` and `дес` into Latin. The first-term head is fitted onto it too: a token of the term head's class of up to three letters alone in a field a field reader read empty (context_action_features.first_question), with whether it may still be the tail of a Russian word, its letters, the boundary, the counts of its Latin reading, its ending and how the word after it was given. Motivation: the owner's requirement of 16.10.2026 that `йк ` (`qr`) opening a message convert at once, where the frozen model waited for a pause; read by the term head, which chooses an early epoch for its other frames, such terms stopped at p 0.98, suggestions no pause settles.",
       "sha256": "5129029cdda9ffc2c6e67d8212ea8a7ede710764089ebde53c00b0ddc30ff6ae"
     },
     "gate_policy": {
@@ -6297,6 +6772,13 @@
     },
     "joined_token_curriculum": {
       "held_out": [
+        "multi-device",
+        "nano-gpt",
+        "node-telegram",
+        "sh-f",
+        "ssh-agent",
+        "ssh-f",
+        "z-ai",
         "ку-ку",
         "ля-ля",
         "му-му",
@@ -6307,7 +6789,7 @@
       "repeat_minimum_count": 5,
       "repeat_words": 400,
       "sample_weight": 1.0,
-      "scope": "Every token of words of one script joined by hyphens in the text of the split's rows, at most four occurrences of one token, and 400 words of each language that its prose counts five times or more, of two to four letters, each joined to itself (half of them opening a sentence with a capital), after the text before them: typed as written (keep) and their keys typed in the other layout (convert). Its DEVELOPMENT copy chooses the head's own epoch, and the other heads' shared epoch is chosen without the head's weights: ranked with them, its frames moved that epoch to where the unknown-token head lost a word of the owner's typing. The interjections of the authored battery that gates the head are held out."
+      "scope": "Every token of words of one script joined by hyphens in the text of the split's rows, at most four occurrences of one token, and 400 words of each language that its prose counts five times or more, of two to four letters, each joined to itself (half of them opening a sentence with a capital), after the text before them: typed as written (keep) and their keys typed in the other layout (convert). Its DEVELOPMENT copy chooses the head's own epoch, and the other heads' shared epoch is chosen without the head's weights: ranked with them, its frames moved that epoch to where the unknown-token head lost a word of the owner's typing. The interjections of the authored battery that gates the head and the general technical tokens of the owner's typing (`ssh-f`, `ssh-agent`) are held out."
     },
     "joint_acceptance": {
       "policy": "A context candidate is accepted only together with an explicit prefix candidate: the candidate pair is replayed against the frozen baseline context plus the frozen baseline prefix under unmodified application defaults (early switch, pause correction, manual-layout protection) and under the previous early-off control. Every sequence gate must hold in both modes and both lexical profiles. Installed context and prefix bytes are never read by the evaluation; the joint receipt records both evaluated artifacts so packaging installs exactly those bytes.",
@@ -6398,6 +6880,104 @@
       "train": 128
     },
     "span_policy": "fixed-hash families and same-split anchors; literal suffix and repeated-space variants; exact captured parent body and counterfactual full-prefix labels; one pre-class sample unit per retained family",
+    "term_curriculum": {
+      "held_out": [
+        "aaa",
+        "action",
+        "adb",
+        "ak",
+        "all",
+        "any",
+        "apk",
+        "app",
+        "arc",
+        "async",
+        "ci",
+        "code",
+        "comp",
+        "cpu",
+        "crm",
+        "csv",
+        "cuda",
+        "de",
+        "deploy",
+        "design",
+        "dev",
+        "diff",
+        "docs",
+        "eslint",
+        "ext",
+        "extra",
+        "fcm",
+        "geforce",
+        "git",
+        "github",
+        "got",
+        "gpt",
+        "gpu",
+        "gs",
+        "hdmi",
+        "htop",
+        "if",
+        "info",
+        "io",
+        "js",
+        "jsdoc",
+        "json",
+        "li",
+        "lint",
+        "login",
+        "lst",
+        "mac",
+        "macos",
+        "main",
+        "max",
+        "md",
+        "mongodb",
+        "mul",
+        "mysql",
+        "nestjs",
+        "nginx",
+        "npm",
+        "ol",
+        "ole",
+        "or",
+        "pause",
+        "phone",
+        "php",
+        "play",
+        "po",
+        "pr",
+        "pt",
+        "qemu",
+        "qr",
+        "raw",
+        "redis",
+        "root",
+        "slot",
+        "sql",
+        "ssh",
+        "td",
+        "ti",
+        "todo",
+        "too",
+        "twig",
+        "txt",
+        "typescript",
+        "ufw",
+        "ui",
+        "vbs",
+        "vscode",
+        "we",
+        "web",
+        "wp"
+      ],
+      "item_modulus": 1,
+      "per_piece": 4,
+      "piece_weight": 0.1,
+      "sample_weight": 1.0,
+      "scope": "Every term of letters of the Latin table whose keys in the Russian layout are a token of the term head's class, typed in the Russian layout after the left context of a Russian row of its split (convert), and once more at the start of a message, ending in a sign typed on a Russian letter's key, opening a sentence with a capital or in capitals (a term of four letters at most), one variant chosen by hash; and the last two or three letters of the split's Russian words that are a token of the class, at most four occurrences of one piece, after their row's left context (keep), each a tenth of a term's frame in weight, and only tails that end many words (the tail of a rare word ends as few as a term's keys): an edit inside a word leaves its tail as a token of its own (`ась`, `ев` in the owner's typing). Alone at the start of a message and ended by a space, a term of two letters waits for its next word, and every term of two letters stands there once more to wait; a term of up to three letters alone in a field a field reader read empty is the first-term head's. Each term is also asked again as the engine asks a converted word whose next word went back to Russian (convert). One term in five goes to DEVELOPMENT, whose frames choose the head's own epoch. The class's tokens of the owner's typing, which measure the head, are held out."
+    },
     "threshold_candidates": [
       0.95,
       0.975,
@@ -6625,7 +7205,7 @@
         "action_keep": 182,
         "focus_calls": 435,
         "frames": 424,
-        "input_rows": 5169,
+        "input_rows": 5165,
         "no_focus_call": 74,
         "repeated_space_before": 248,
         "retained_families": 32,
@@ -6641,7 +7221,7 @@
         "action_keep": 186,
         "focus_calls": 444,
         "frames": 437,
-        "input_rows": 5684,
+        "input_rows": 5677,
         "no_focus_call": 70,
         "repeated_space_before": 257,
         "retained_families": 32,
@@ -6657,7 +7237,7 @@
         "action_keep": 772,
         "focus_calls": 1807,
         "frames": 1773,
-        "input_rows": 43417,
+        "input_rows": 43354,
         "no_focus_call": 263,
         "repeated_space_before": 1042,
         "retained_families": 128,
@@ -6675,7 +7255,7 @@
         "action_keep": 182,
         "focus_calls": 428,
         "frames": 424,
-        "input_rows": 5169,
+        "input_rows": 5165,
         "no_focus_call": 74,
         "repeated_space_before": 248,
         "retained_families": 32,
@@ -6691,7 +7271,7 @@
         "action_keep": 186,
         "focus_calls": 437,
         "frames": 437,
-        "input_rows": 5684,
+        "input_rows": 5677,
         "no_focus_call": 70,
         "repeated_space_before": 257,
         "retained_families": 32,
@@ -6706,7 +7286,7 @@
         "action_keep": 772,
         "focus_calls": 1800,
         "frames": 1773,
-        "input_rows": 43417,
+        "input_rows": 43354,
         "no_focus_call": 263,
         "repeated_space_before": 1042,
         "retained_families": 128,
@@ -6720,18 +7300,42 @@
     }
   },
   "stage": "sealed-before-test",
+  "term_curriculum": {
+    "frames": 11143,
+    "held_out": 89,
+    "item_modulus": 1,
+    "items": {
+      "convert:capital": 1138,
+      "convert:plain": 3580,
+      "convert:revisit": 3580,
+      "convert:signed": 1102,
+      "convert:start": 1125,
+      "convert:upper": 210,
+      "keep:piece": 166,
+      "keep:piece-revisit": 166,
+      "refused": 592,
+      "skipped:row-start": 1109,
+      "wait:alone": 71,
+      "wait:start": 5
+    },
+    "per_piece": 4,
+    "piece_weight": 0.1,
+    "pieces": 58,
+    "sample_weight": 1.0,
+    "scope": "terms of the Latin table typed in the Russian layout after Russian prose, at the start of a message, with a sign after them, with a capital or in capitals, and asked again after a Russian word that went back (convert; alone at a space, a term of two letters waits), and the tails of the split's Russian words after a word that are such a token (keep), of this split's share (term_curriculum)."
+  },
   "test_accessed": false,
   "unknown_token_curriculum": {
     "echo_modulus": 3,
-    "frames": 19308,
+    "frames": 19301,
     "held_out": 186,
     "item_modulus": 2,
     "items": {
       "echo:convert": 8262,
-      "echo:keep": 5532,
-      "keep": 5514,
-      "outside_class": 33,
-      "refused": 182
+      "echo:keep": 5526,
+      "keep": 5513,
+      "outside_class": 32,
+      "refused": 185
     },
     "sample_weight": 1.0,
     "scope": "terms of the Latin table typed in the Russian layout after Russian prose (convert), some with the term typed right earlier in the text, and the class's Russian words of the split's rows with their keys earlier in the text (keep), of this split's share (unknown_token_curriculum)."

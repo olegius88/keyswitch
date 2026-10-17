@@ -94,6 +94,14 @@ class ReleaseReceiptFloorTests(unittest.TestCase):
         self.assertGreaterEqual(
             number(self.receipt, "prefix_conversion_threshold"), RECEIPT_MIN_PREFIX_CONVERSION_THRESHOLD)
 
+    def test_the_installed_pair_passed_the_developer_chat_test_against_the_pair_it_replaced(self) -> None:
+        # The sealed developer-chat test (tools/evaluate_devchat_test.py, the owner's decision of 15.10.2026): every
+        # floor held, against the released pair the install replaced - the one the calibration floor names too.
+        block = section(self.receipt, "devchat_test")
+        self.assertTrue(all(cast(dict[str, bool], block["floors"]).values()))
+        self.assertEqual(section(block, "pairs", "released")["model_version"], RECEIPT_CALIBRATION_REFERENCE_MODEL)
+        self.assertEqual(section(block, "pairs", "candidate")["sha256"], self.receipt["artifact_sha256"])
+
     def test_the_installed_pair_corrupts_nothing_and_executes_every_row(self) -> None:
         for name, profile in section(self.receipt, "test", "profiles").items():
             for mode, modal in mode_counts(cast(Section, profile)).items():

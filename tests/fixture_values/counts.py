@@ -742,3 +742,14 @@ LETTER_FIXTURE_ENGLISH_SENTENCES: Final = 4
 ABBREVIATION_FIXTURE_FRAMES_PER_FORM: Final = 2
 # The Latin-context abbreviation curriculum in its test: how often Russian technical text uses a form it keeps.
 LATIN_ABBREVIATION_FIXTURE_CYRILLIC_COUNT: Final = 20
+# The term curriculum in its test: one term in this many of the Latin table is drawn, and one piece of a Russian word
+# is framed at most this many times.
+TERM_FIXTURE_ITEM_MODULUS: Final = 40
+TERM_FIXTURE_PER_PIECE: Final = 2
+# The developer-chat test in its tests: messages of a synthetic table per mode, and losses against the released pair
+# that chance explains among no gains (four of them: P = 1/16 >= 0.05) and that it does not (five: P = 1/32).
+DEVCHAT_FIXTURE_MESSAGES: Final = 8
+DEVCHAT_FIXTURE_LOSSES_BY_CHANCE: Final = 4
+DEVCHAT_FIXTURE_LOSSES_BEYOND_CHANCE: Final = 5
+# The short-message curriculum in its test: how often a word must be counted to be framed.
+BRIEF_FIXTURE_MINIMUM_COUNT: Final = 50
