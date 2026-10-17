@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.57.0 — 2026-10-17
+
 - A term typed in the Russian layout converts the first time a message holds it: `зк` for `pr`, `ЗК,` for `PR?` at the
   end of a question, `сш` in `npm ci`, `рвьш` for `hdmi`, `мгуоы` for `vuejs` and `сымю` for `csv.` stayed, as the
   model left such a term at p 0.92-0.98, below its threshold, unless the same term had been typed right earlier in the
