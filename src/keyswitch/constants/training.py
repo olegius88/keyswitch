@@ -111,8 +111,8 @@ TERM_FRAGMENT_MIN_REST: Final = 2
 # Only a tail that ends many words is framed as kept: its ending bucket (context_action_features.russian_ending_bucket)
 # at least this. The tail of a rare word (`ыр` of `сыр`) ends as few words as a term's keys, and kept frames of such
 # tails taught the head to keep `зк` and `вум` (experiment E5). From an ending bucket of three up, the class's tokens and
-# the tails of words are the same tokens (`ац`, `мь`, `дые`): the owner completed `моло` with `дые` after a click and
-# undid its conversion to `lst`, which a head without those tails repeated (experiment E8).
+# the tails of words are the same tokens (`ац`, `мь`, `дые`): `дык` reopened with Backspace and finished as `дые` went to
+# `lst`, which Pause undid (a field log of 24.09.2026), and a head without those tails repeated it (experiment E8).
 TERM_FRAGMENT_MIN_ENDING_BUCKET: Final = 3
 # Alone at the start of a message and ended by a space, a term of at most this many letters waits for its next word (a
 # pause settles a wait, never a suggestion): converting there, the head only suggested `гш` and `йк`, which stayed
@@ -120,15 +120,15 @@ TERM_FRAGMENT_MIN_ENDING_BUCKET: Final = 3
 # `error`) opening a message stayed where the frozen model had converted them (development of ru.stackoverflow,
 # experiment E9d), and `ювшые` (`.dist`) with two spaces after it (sealed-pair test of corpus v63). Waiting for a token
 # a kept tail may be as well, in a field nobody read, turned `оуе`, `щге` and `еен` (`jet`, `out`, `tty`), which 0.56.0
-# converted, into suggestions (candidate v64): that wait holds in a field read empty only (TERM_SHORT_TAIL_MIN_ENDING_BUCKET).
+# converted, into suggestions (candidate v64).
 TERM_ALONE_WAIT_MAX_LETTERS: Final = 2
-# Alone in a field a reader read empty, a term opens a message and converts at once (`йк ` for `qr`, the owner's
-# requirement of 16.10.2026), unless it may still be a tail, a suggestion then: of three letters from TERM_FRAGMENT_MIN_ENDING_BUCKET, of
-# two letters from this bucket (context_action_features.alone_tail). Two-letter endings end more words by chance (the
-# median two-letter term ends eight words, a three-letter one three), and the bound is set by the owner's typing: `йк`
-# ends 11 words (bucket 4), the shortest two-letter tail the field batteries hold, `ев`, 169 (bucket 8); the batteries
-# replay a stream that starts with such a tail into an empty field (`ев сервера`, `шаю эту`, `дые`).
-TERM_SHORT_TAIL_MIN_ENDING_BUCKET: Final = 5
+# Alone in a field read empty and ended by a pause, a token that at least this many words of Russian prose begin with
+# (the binary order of their number, context_action_features.russian_start_bucket: 32 words) may be a word the owner
+# stopped in the middle of, and stays; ended by a space it is a term and converts. `уче` paused in `учеб` became `ext`
+# and the `б` after it a comma (a field log of 04.10.2026; candidate v67 without this bound). Two letters that many
+# words begin with the engine already decides at the boundary (PAUSE_WORD_START_MIN_WORDS: `фл` begins 344 words of the
+# lexicon and 121 of the table), and the bound is that one's: 32 words of the table is about 100 of the lexicon.
+FIRST_PAUSE_WORD_START_MIN_BUCKET: Final = 6
 # Every term of the term curriculum, and every kept tail, is also asked again as the engine asks a converted word once
 # the word after it went back (engine._revert_with_next_word): after one of the TERM_REVISIT_FOLLOWERS most frequent words
 # of Russian prose of at most TERM_REVISIT_FOLLOWER_MAX_LETTERS letters (`и`, `в`, `на`).
@@ -228,6 +228,11 @@ PREFIX_EVALUATION_TIMESTAMP_BASE: Final = 100
 PREFIX_EARLY_RESTORED_MIN_FRACTION: Final = 0.7
 # Leading hex digits of a digest that feed a deterministic training choice.
 DETERMINISTIC_CHOICE_HEX_DIGITS: Final = 8
+# Points each context of a pool takes on the ring a curriculum draws contexts from (ContextRing in
+# tools/train_context_action_model.py), and the digest digits of a point: with this many points no context draws far
+# more frames than another, and the points of a pool of tens of thousands of contexts do not collide.
+CONTEXT_RING_POINTS: Final = 16
+CONTEXT_RING_HEX_DIGITS: Final = 16
 # Absolute tolerance for feature-mass comparisons and budgets that must sum to one.
 FEATURE_MASS_TOLERANCE: Final = 1e-9
 # Decimal places fitted weights, feature masses and a reported development loss are rounded to

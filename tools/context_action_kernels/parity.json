@@ -1,7 +1,7 @@
 {
  "schema_version": 1,
  "sources": {
-  "src/keyswitch/context_action_features.py": "8b8d422aca066c79f86a5d5caa381dd4aa06cd9b63a48148fd824cf2dd4ed378",
+  "src/keyswitch/context_action_features.py": "43d0f89a8360c44cf94739dde3e60979d5b5c15036a73b77149fc796af43a01f",
   "src/keyswitch/context_model.py": "1b1dca739c1239a281ad86adc9644ed6c669c8200650094b0793d8d6aba812c7",
   "src/keyswitch/context_policy.py": "537065d449d822ac218a68222f4f4d44f0749c764630a81c7362cab7616ccc24",
   "src/keyswitch/detector.py": "5a78cd5961af57426b6cb42b3757b42baeacd7344a06557111a1067cb0cbb2c0",

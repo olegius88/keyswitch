@@ -7,7 +7,7 @@ import math
 import re
 import unicodedata
 from typing import TYPE_CHECKING, Final
-from .constants.training import TERM_FRAGMENT_MIN_ENDING_BUCKET, TERM_SHORT_TAIL_MIN_ENDING_BUCKET
+from .constants.training import TERM_FRAGMENT_MIN_ENDING_BUCKET
 from .constants.models import (
     ABBREVIATION_FEATURE_PREFIX,
     ABBREVIATION_NON_INITIAL_LETTERS,
@@ -473,7 +473,8 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         # where it opens a message (`йк ` for `qr`: the owner's requirement of 16.10.2026 that it convert at once, where
         # the frozen model waited for a pause). The term head, which chooses an early epoch for its other frames, stopped
         # short of the threshold there: `зк` and `йк` became suggestions at p 0.98, which no pause settles (candidates
-        # v64b to v64e). A token that may still be the tail of a Russian word (alone_tail) waits, and a pause keeps it.
+        # v64b to v64e). The tail of a Russian word is no token of this class: an edit that leaves one as a token leaves
+        # letters before it, or reopens the word and asks the whole of it.
         result.update(_first_evidence(item))
     elif term_question(item.original, item.field.before) and not known:
         # The class the term head answers: a term typed in the Russian layout, which the frozen model left at p 0.92-0.98
@@ -863,6 +864,16 @@ def russian_ending_bucket(token: str) -> str:
     return str(min(_russian_endings().get(word, 0).bit_length(), TERM_HEAD_ENDING_BUCKET_MAX))
 
 
+def russian_start_bucket(token: str) -> str:
+    """How many words of Russian prose begin with the token, as the binary order of magnitude of their number
+    (TERM_HEAD_ENDING_BUCKET_MAX at most); `na` for a token of another length than TERM_HEAD_ENDING_LETTERS."""
+
+    word = token.casefold()
+    if len(word) not in TERM_HEAD_ENDING_LETTERS:
+        return "na"
+    return str(min(_russian_starts().get(word, 0).bit_length(), TERM_HEAD_ENDING_BUCKET_MAX))
+
+
 def _tail_like(token: str) -> bool:
     """Whether a token ends as many Russian words as a tail the term head keeps does (TERM_FRAGMENT_MIN_ENDING_BUCKET)."""
 
@@ -883,39 +894,27 @@ def first_question(original: str, before: str, after: str) -> bool:
 
 
 def _first_evidence(item: ContextEvidence) -> dict[str, float]:
-    """The first-term head's evidence, all read with whether the token may still be the tail of a Russian word
-    (alone_tail), the one thing that decides there: its letters, the boundary that ended it (a space, or an end such as
-    a pause), how often Russian technical text and English prose use its Latin reading, how many Russian words end
-    with it, and how the word after it was given (none, or the next word it is asked again with). In a field read empty
-    nothing stands before a tail, but a field battery replays a stream that starts with one into an empty field (`дые`,
-    which the owner typed completing `моло`). Asked again by the term head, a term converted there went back with the
-    Russian word after it on one corpus and stayed on another (`йк истек`, p 0.981 and 0.995, candidates v65 and v64f)."""
+    """The first-term head's evidence, every piece read with the boundary that ended the token (a space, or an end such
+    as a pause): its letters, how often Russian technical text and English prose use its Latin reading, how many Russian
+    words end and begin with it, and how the word after it was given (none, or the next word it is asked again with).
+    Ended by a pause, a token many Russian words begin with may be a word stopped in the middle (`уче` of `учеб`), and
+    that answer must not reach the space: evidence shared by both took the pause's answer to the space too and left
+    `ци`, `пя` and `мц` suggestions there at p 0.95-0.985 (candidate v67b). Asked again by the term head, a term converted
+    there went back with the Russian word after it on one corpus and stayed on another (`йк истек`, p 0.981 and 0.995,
+    candidates v65 and v64f)."""
 
     from .context_model import term_bucket
 
     latin = item.alternative
-    tail = f"tail:{int(alone_tail(item.original))}"
     letters = f"letters:{sum(char.isalpha() for char in item.original)}"
     boundary = f"boundary:{'space' if item.trigger == 'space' else 'end'}"
     counts = f"latin:{term_bucket(latin, 'latin')}:english:{term_bucket(latin, 'english')}"
     ending = f"ending:{russian_ending_bucket(item.original)}"
+    start = f"start:{russian_start_bucket(item.original)}"
     after = f"after:{item.after_origin}"
-    names = ("bias", tail, f"{tail}:{letters}", f"{tail}:{boundary}", f"{tail}:{boundary}:{letters}", f"{tail}:{counts}",
-             f"{tail}:{boundary}:{counts}", f"{tail}:{ending}:{letters}", f"{tail}:{after}", f"{tail}:{after}:{letters}",
-             f"{tail}:{after}:{counts}")
-    return {f"{FIRST_FEATURE_PREFIX}{name}": 1.0 for name in names}
-
-
-def alone_tail(token: str) -> bool:
-    """Whether a token alone in a field a reader read empty may still be the tail of a Russian word: of three letters
-    from ending bucket TERM_FRAGMENT_MIN_ENDING_BUCKET, of two from TERM_SHORT_TAIL_MIN_ENDING_BUCKET (two-letter endings
-    end more words by chance). `дые` and `ев` may be, `йк` and `зк` may not."""
-
-    ending = russian_ending_bucket(token)
-    if ending == "na":
-        return False
-    return int(ending) >= (TERM_SHORT_TAIL_MIN_ENDING_BUCKET if len(token) == min(TERM_HEAD_ENDING_LETTERS)
-                           else TERM_FRAGMENT_MIN_ENDING_BUCKET)
+    names = ("", letters, counts, f"{ending}:{letters}", start, f"{start}:{letters}", after, f"{after}:{letters}",
+             f"{after}:{counts}")
+    return {f"{FIRST_FEATURE_PREFIX}{boundary}{':' if name else ''}{name}": 1.0 for name in names}
 
 
 @functools.cache
@@ -931,6 +930,21 @@ def _russian_endings() -> dict[str, int]:
             if len(word) > size:
                 endings[word[-size:]] = endings.get(word[-size:], 0) + 1
     return endings
+
+
+@functools.cache
+def _russian_starts() -> dict[str, int]:
+    """The beginnings of TERM_HEAD_ENDING_LETTERS letters of the words of Russian prose the term table counts, with how
+    many words begin with each (a word longer than its beginning); built once, on the first token asked about."""
+
+    from .context_model import _term_frequency
+
+    starts: dict[str, int] = {}
+    for word in _term_frequency()["russian"]:
+        for size in TERM_HEAD_ENDING_LETTERS:
+            if len(word) > size:
+                starts[word[:size]] = starts.get(word[:size], 0) + 1
+    return starts
 
 
 def brief_question(original: str, before: str, after: str) -> bool:

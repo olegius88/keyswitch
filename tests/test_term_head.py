@@ -21,7 +21,7 @@ from keyswitch.constants.training import (  # noqa: E402
     TERM_ALONE_WAIT_MAX_LETTERS, TERM_CAPITALS_MAX_LETTERS,
 )
 from keyswitch.context_action_features import (  # noqa: E402
-    alone_tail, extract_action_features, russian_ending_bucket, term_question,
+    extract_action_features, russian_ending_bucket, term_question,
 )
 from keyswitch.context_model import ContextEvidence, term_bucket  # noqa: E402
 from keyswitch.input_context import FieldContext  # noqa: E402

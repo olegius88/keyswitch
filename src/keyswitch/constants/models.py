@@ -134,7 +134,7 @@ TERM_HEAD_LEADING_SIGN: Final = "."
 # A token of this many letters may be the tail of a Russian word left by an edit inside it (`ев`, `ась`); the term head
 # reads how many words of Russian prose end with it, as the binary order of magnitude of their number, capped here. The
 # keys of a term end hardly any word (`зк` 1, `гш` 0, `вум` 1); the tails the owner's typing left end hundreds (`ев` 8,
-# `ась` 10).
+# `ась` 10). The first-term head reads, the same way, how many words begin with such a token (`уче` begins 77, bucket 7).
 TERM_HEAD_ENDING_LETTERS: Final = (2, 3)
 TERM_HEAD_ENDING_BUCKET_MAX: Final = 12
 # A token of this many Latin letters alone in the field whose other reading is Russian letters has evidence of its own

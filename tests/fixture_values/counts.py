@@ -753,3 +753,6 @@ DEVCHAT_FIXTURE_LOSSES_BY_CHANCE: Final = 4
 DEVCHAT_FIXTURE_LOSSES_BEYOND_CHANCE: Final = 5
 # The short-message curriculum in its test: how often a word must be counted to be framed.
 BRIEF_FIXTURE_MINIMUM_COUNT: Final = 50
+# The ring a curriculum draws contexts from, in its test: contexts of the pool and frames drawn from it.
+CONTEXT_RING_FIXTURE_CONTEXTS: Final = 400
+CONTEXT_RING_FIXTURE_FRAMES: Final = 2000
