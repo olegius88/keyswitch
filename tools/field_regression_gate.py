@@ -10,6 +10,13 @@ the released tree got right that the new tree gets wrong blocks the release unti
 the reading the log implies is wrong (the owner left garbage uncorrected in a prompt), a verdict says what the word
 should have been.
 
+A word the engine was asked about at a pause and the owner then typed on (the first letters of a word not yet
+finished: `Ф` of `AmoCRM_v2`) is a word of its own in a battery, marked as waiting: its target is its reading in the
+layout the owner finished the word in, and left as typed it is right too. At a pause the only error is a conversion
+into the layout the word was not finished in (the owner's decision of 19.10.2026); before, such a word took what the
+logging release left there, so a release that converted `сд` into `cl` at a pause was right where the owner finished
+`сделала`, and one that converted `Ф` into `A` early was wrong.
+
 Verdicts are append-only records in the private verdicts file, each with who gave it (`llm` or `owner`), when, a
 reason code and, for a new one, the reason in words. A word the owner labelled by hand (a Pause, a manual switch,
 retyping it) is the owner's: only an `owner` verdict may change it, and an `llm` verdict that would - another reading,
@@ -107,6 +114,8 @@ class Row:
     shown: str
     owner_labelled: bool
     version: str
+    # The word was asked about at a pause and typed on after it: left as typed it is right too.
+    waits: bool = False
 
 
 @dataclass
@@ -210,9 +219,11 @@ def read_rows(report: Path) -> dict[tuple[int, int], Row]:
     except (json.JSONDecodeError, KeyError, TypeError):
         raise GateError(f"{report.name} is no replay report with rows") from None
     rows: dict[tuple[int, int], Row] = {}
-    for stream, index, time, typed, other, intended, shown, owner, version in raw:
+    for entry in raw:
+        # A report of a replay script before waiting words had nine fields.
+        stream, index, time, typed, other, intended, shown, owner, version, *waits = entry
         row = Row(int(cast(int, stream)), int(cast(int, index)), str(time), str(typed), str(other), str(intended), str(shown),
-                  bool(owner), str(version))
+                  bool(owner), str(version), bool(waits and waits[0]))
         if (row.stream, row.index) in rows:
             raise GateError(f"{report.name} holds one word twice")
         rows[row.stream, row.index] = row
@@ -263,6 +274,12 @@ def owner_overruled(row: Row, verdict: Mapping[str, object]) -> bool:
     return goal != row.intended
 
 
+def reached(row: Row, goal: str) -> bool:
+    """Whether a tree left the word as it should end: its target, or as typed where the word waits (Row.waits)."""
+
+    return row.shown == goal or (row.waits and row.shown == row.typed)
+
+
 def compare(released: Mapping[str, Mapping[tuple[int, int], Row]], candidate: Mapping[str, Mapping[tuple[int, int], Row]],
             verdicts: Mapping[tuple[str, int, str], Mapping[str, object]], since: str = "") -> Comparison:
     """Every word of every battery as both trees typed it, against its target. A broken word notes whether it is the
@@ -290,13 +307,13 @@ def compare(released: Mapping[str, Mapping[tuple[int, int], Row]], candidate: Ma
                 result.excluded += 1
                 continue
             result.rows += 1
-            right = (old.shown == goal, new.shown == goal)
+            right = (reached(old, goal), reached(new, goal))
             result.released_right += right[0]
             result.candidate_right += right[1]
             word = {"battery": battery, "stream": old.stream, "index": old.index, "time": old.time, "typed": old.typed,
                     "target": goal, "released": old.shown, "candidate": new.shown, "owner_labelled": old.owner_labelled,
-                    "logged_by": old.version, "first_divergence": first}
-            if verdict is not None and ((old.shown == old.intended) != right[0] or (new.shown == new.intended) != right[1]):
+                    "logged_by": old.version, "first_divergence": first, "waits": old.waits}
+            if verdict is not None and (reached(old, old.intended) != right[0] or reached(new, new.intended) != right[1]):
                 result.verdicts_used.append({**word, "implied": old.intended,
                                              **{name: verdict.get(name) for name in ("verdict", "by", "date", "reason_code", "reason")}})
                 result.new_verdicts_used += str(verdict["date"]) >= since if since else 0
