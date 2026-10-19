@@ -107,10 +107,13 @@ RECEIPT_MIN_CALIBRATION_RECALL: Final = 0.977
 # 13 940 and 13 970 of the 14 372 conversion rows with 16 false conversions in each profile (the pairs of corpora v62 to
 # v64 were not installed: test v62 lost a correctly typed row in the reference profile, the corpus v63 pair, which
 # passed both sealed tests, netted 23 and 20 calibration frames less than this pair, and on test v64 the corpus v64
-# pair restored exactly the rows the baseline pair did, every row typed in the wrong layout).
-RECEIPT_CALIBRATION_REFERENCE_CORPUS: Final = "e3c446a0020d365382343ffacbc288f7aba7d1f650f4bf0304b8d4dfeaea4ae3"
-RECEIPT_CALIBRATION_REFERENCE_MODEL: Final = "context-v3-20be427844f6"
-RECEIPT_CALIBRATION_REFERENCE_NET: Final[dict[str, int]] = {"portable": 13924, "reference_hunspell": 13954}
+# pair restored exactly the rows the baseline pair did, every row typed in the wrong layout). Corpus v67: the corpus v65
+# pair (context-v3-754513f80498, 0.57.0), scored the same way on every calibration frame of the corpus v67 recipe,
+# converts 13 981 and 14 032 of the 14 372 conversion rows with 20 false conversions in each profile (the corpus v66
+# pair, the same weights, was not installed: on test v66 the baseline pair restored every row typed in the wrong layout).
+RECEIPT_CALIBRATION_REFERENCE_CORPUS: Final = "a605ed60bf1f7f31bbd600f5b352f74db7ad0785c76e339c1278712848790f7d"
+RECEIPT_CALIBRATION_REFERENCE_MODEL: Final = "context-v3-754513f80498"
+RECEIPT_CALIBRATION_REFERENCE_NET: Final[dict[str, int]] = {"portable": 13961, "reference_hunspell": 14012}
 # Serving thresholds are part of the contract: a lower threshold converts on weaker evidence.
 RECEIPT_MIN_CONVERSION_THRESHOLD: Final = 0.99
 RECEIPT_MIN_PREFIX_CONVERSION_THRESHOLD: Final = 0.985
