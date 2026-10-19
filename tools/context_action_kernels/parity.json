@@ -3,7 +3,7 @@
  "sources": {
   "src/keyswitch/context_action_features.py": "43d0f89a8360c44cf94739dde3e60979d5b5c15036a73b77149fc796af43a01f",
   "src/keyswitch/context_model.py": "1b1dca739c1239a281ad86adc9644ed6c669c8200650094b0793d8d6aba812c7",
-  "src/keyswitch/context_policy.py": "537065d449d822ac218a68222f4f4d44f0749c764630a81c7362cab7616ccc24",
+  "src/keyswitch/context_policy.py": "6122b9d91fa3979bbb46003b380dc23fc3627f36c2f9c6b3986cb5239ba743e1",
   "src/keyswitch/detector.py": "5a78cd5961af57426b6cb42b3757b42baeacd7344a06557111a1067cb0cbb2c0",
   "src/keyswitch/identifier_lexicon.py": "80c1af6de67833ebc957355199e5ebab011282ddf6bbcc556d06bfef237c31bb",
   "src/keyswitch/input_context.py": "bf67ae931f2d10e634cb554b72c5be6f14bee421abc24c39fcc04ca5da6edf72",
