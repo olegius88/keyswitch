@@ -756,3 +756,7 @@ BRIEF_FIXTURE_MINIMUM_COUNT: Final = 50
 # The ring a curriculum draws contexts from, in its test: contexts of the pool and frames drawn from it.
 CONTEXT_RING_FIXTURE_CONTEXTS: Final = 400
 CONTEXT_RING_FIXTURE_FRAMES: Final = 2000
+# Question numbers of the 2023 dump in the test of tools/select_capture_messages.py: one the developer-chat members name,
+# two they do not.
+CAPTURE_FIXTURE_LEFT_OUT_QUESTION: Final = 101
+CAPTURE_FIXTURE_QUESTIONS: Final = (202, 303)

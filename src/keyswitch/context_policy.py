@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, replace
 from typing import ClassVar, Final
 
-from .context_action_features import letter_question
+from .context_action_features import letter_question, variable_question
 from .context_model import AfterOrigin, ContextEvidence, ContextModel, ContextPrediction, one_typo_from_word, term_bucket
 from .identifier_lexicon import IdentifierLexicon
 from .detector import DetectionDecision, LanguageDetector, LanguageScorer
@@ -295,9 +295,12 @@ class ContextPolicy:
         # Russian prose the model turned `1С` into `1C`.
         # A model with the single-letter head has learned the letter right after a Latin word
         # (context_action_features.letter_question): there its verdict on a letter is an opinion, and
-        # `nats b redis` is `nats и redis` (the owner's typing, 0.32-0.41).
+        # `nats b redis` is `nats и redis` (the owner's typing, 0.32-0.41). One with the variable head has
+        # learned a letter of the Russian layout after a word of Cyrillic letters (variable_question): a Latin
+        # variable typed there (`ч` for `x`) or a letter meant as written (`да я про то ч`).
         action_model = self.model.feature_version == CONTEXT_ACTION_FEATURE_VERSION
-        learned = self.model.answers_letters and letter_question(baseline.original, alternative, field.before)
+        learned = ((self.model.answers_letters and letter_question(baseline.original, alternative, field.before))
+                   or (self.model.answers_variables and variable_question(baseline.original, alternative, field.before)))
         lone = (action_model and sum(char.isalpha() for char in baseline.original) == 1
                 and all(char.isalpha() or char.isdigit() for char in baseline.original) and not learned)
         slang = action_model and russian_slang(baseline.original, alternative, baseline.source_group, source.known)

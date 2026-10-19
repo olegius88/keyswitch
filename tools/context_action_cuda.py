@@ -87,7 +87,7 @@ from keyswitch.constants.training import (
 from keyswitch.constants.models import FNV1A64_OFFSET_BASIS, FNV1A64_PRIME
 from keyswitch.context_action_features import (
     abbreviation_question, alone_question, brief_question, capitals_question, joined_question, latin_abbreviation_question,
-    letter_question, start_question, term_question, unknown_question,
+    letter_question, start_question, term_question, unknown_question, variable_question,
 )
 from keyswitch.context_model import AfterOrigin, ContextEvidence, _term_frequency
 from keyswitch.detector import PROTECTED_TOKENS
@@ -611,15 +611,17 @@ def heads_question(original: str, before: str, after: str, trigger: str) -> bool
     """Whether a frame may have a head's second copy of its features or a head's own evidence, which the kernels do
     not make.
 
-    The lone-word, message-start, single-letter and abbreviation heads' classes also ask for the other reading to be
-    letters; every frame they could hold takes the CPU path, which decides that as the features do.
+    The lone-word, message-start, single-letter, abbreviation and variable heads' classes also ask for the other reading
+    to be letters, and the dotted-abbreviation head's for it to be letter groups joined by dots (a token typed with `/`);
+    every frame they could hold takes the CPU path, which decides that as the features do.
     """
 
     return (capitals_question(original, before) or alone_question(original, original, before, after, trigger)
             or start_question(original, original, before, after) or letter_question(original, original, before)
             or abbreviation_question(original, original, before) or latin_abbreviation_question(original, original, before)
             or unknown_question(original, before) or joined_question(original) or term_question(original, before)
-            or brief_question(original, before, after))
+            or brief_question(original, before, after) or variable_question(original, original, before)
+            or ("/" in original and original.isascii()))
 
 
 def opening_letter_followed(original: str, literal_tail: str, boundary_text: str) -> bool:

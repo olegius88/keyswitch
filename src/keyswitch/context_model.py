@@ -57,6 +57,7 @@ from .constants.models import (
     MAX_CONTEXT_MODEL_VERSION_CHARACTERS,
     MAX_CONTEXT_WEIGHT_MAGNITUDE,
     MIN_CONTEXT_CONVERSION_THRESHOLD,
+    VARIABLE_FEATURE_PREFIX,
 )
 
 # FEATURE_VERSION, MAX_ARTIFACT_BYTES and MAX_FEATURES keep the names this module has always
@@ -413,6 +414,9 @@ class ContextModel:
         # Whether the single-letter head has weights here: its class is the one place a verdict on a letter
         # is the model's own opinion (context_policy).
         self.answers_letters = any(name.startswith(LETTER_FEATURE_PREFIX) for name in self.weights)
+        # Whether the variable head has weights here: a letter after a word of Cyrillic letters is its class
+        # (context_action_features.variable_question).
+        self.answers_variables = any(name.startswith(VARIABLE_FEATURE_PREFIX) for name in self.weights)
 
     @classmethod
     def load(cls, path: Path = ARTIFACT_PATH) -> ContextModel:
