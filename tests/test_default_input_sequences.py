@@ -120,7 +120,9 @@ class _CaretReader:
         return FieldContext(application, "1", text[:caret], text[caret:], role="text", source="uia")
 
 
-class DefaultInputSequenceTests(unittest.TestCase):
+class DefaultSequenceHarness(unittest.TestCase):
+    """The engine with the packaged pair and the default settings, typed through an editor on a fake clock."""
+
     models: ClassVar[dict[int, LanguageModel]]
     intent: ClassVar[tuple[LinearNgramModel, IntentModelStatus]]
 
@@ -166,6 +168,8 @@ class DefaultInputSequenceTests(unittest.TestCase):
             (expected, "", [expected]),
         )
 
+
+class DefaultInputSequenceTests(DefaultSequenceHarness):
     def test_russian_chat_keeps_spelling_spaces_and_one_submission(self) -> None:
         for text in ("пришли гифку  позже. ", "этот флуд  закончился. ", "севодня  будет созвон. "):
             with self.subTest(text=text), self.session() as session:
@@ -233,6 +237,27 @@ class DefaultInputSequenceTests(unittest.TestCase):
             self.assertEqual((session.backend.text, session.backend.submissions), ("rj", []))
             session.type("т", 1)
             self.assertEqual(session.backend.text, "кот")
+
+    def test_a_word_finished_after_backspace_is_one_word(self) -> None:
+        """A word cut back with Backspace and finished is decided as the whole word, the field read or not:
+        `молоко` cut to `моло` and finished with `дые` stays `молодые`, `короче` finished as `корошь` stays. The tail
+        of a Russian word never stands alone in a field read empty: the edit that leaves it leaves letters before it
+        or reopens its word (test_first_term_head for the term that does stand there)."""
+        for typed, erased, ending in (("привет молоко ", "ко ", "дые "), ("короче ", "че ", "шь "),
+                                      ("ну там их ", "х ", "ев ")):
+            for read in (True, False):
+                with self.subTest(typed=typed, read=read), self.session() as session:
+                    if read:
+                        session.engine.context_policy.reader = _CaretReader(session.backend)
+                    else:
+                        session.engine.settings.set("detection.context_read_field", False)
+                    session.type(typed, 1)
+                    for _ in erased:
+                        session.tap(KeyEvent(True, BACKSPACE_KEYCODE, "BackSpace", "", ("", ""), 1, 0, 0))
+                    session.idle()
+                    session.type(ending, 1)
+                    session.idle(DEFAULT_SEQUENCE_EXTENDED_IDLE_SECONDS)
+                    self.assertEqual(session.backend.text, typed.removesuffix(erased) + ending)
 
     def test_wrong_layout_continues_with_actual_layout_after_early_switch(self) -> None:
         with self.session(group=0) as session:

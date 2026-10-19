@@ -1,7 +1,7 @@
 """The first-term head (context_action_features.first_question) and its curriculum.
 
-A term of up to three letters typed in the Russian layout alone in a field a reader read empty opens a message, and the
-owner asked for `йк ` (`qr`) to convert there at once (16.10.2026), where the frozen model waited for a pause.
+A term of up to three letters typed in the Russian layout alone in a field a reader read empty opens a message, and
+converts there at once (`йк ` for `qr`), where the frozen model waited for a pause.
 """
 
 from __future__ import annotations
@@ -16,11 +16,15 @@ from typing import cast
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from keyswitch.constants.models import FIRST_FEATURE_PREFIX, TERM_FEATURE_PREFIX, TERM_HEAD_ENDING_LETTERS  # noqa: E402
+from keyswitch.constants.training import FIRST_PAUSE_WORD_START_MIN_BUCKET  # noqa: E402
 from keyswitch.constants.model_protocol import CALIBRATION, DEVELOPMENT, TRAIN  # noqa: E402
-from keyswitch.context_action_features import alone_tail, extract_action_features, first_question  # noqa: E402
+from keyswitch import context_action_features as features  # noqa: E402
+from keyswitch.context_action_features import extract_action_features, first_question, russian_start_bucket  # noqa: E402
 from keyswitch.context_model import ContextEvidence, term_bucket  # noqa: E402
 from keyswitch.input_context import FieldContext  # noqa: E402
 import train_context_action_model as trainer  # noqa: E402
+from fixture_values.clock import DEFAULT_SEQUENCE_EXTENDED_IDLE_SECONDS  # noqa: E402
+from test_default_input_sequences import DefaultSequenceHarness, _CaretReader  # noqa: E402
 
 FIRST = {"enabled": True, "held_out": ["qr"], "sample_weight": 1.0}
 
@@ -46,30 +50,47 @@ class FirstTermHeadTests(unittest.TestCase):
         # Signs before it, or the word the engine asks it again with after it.
         self.assertTrue(first_question("йк", "1. ", ""))
         self.assertTrue(first_question("йк", "", "истек"))
-        # Whether a token may still be the tail of a Russian word: two letters from a higher ending bucket than three
-        # (`йк` ends 11 words and may not, `ев` 169 and may, `дые` 7 and may); a longer token ends no word as a tail.
-        self.assertEqual([alone_tail(token) for token in ("йк", "зк", "ев", "дые", "сымю")], [False, False, True, True, False])
+        # The tail of a Russian word is a member alone, and none with the letters an edit leaves before it.
+        self.assertTrue(first_question("дые", "", ""))
+        self.assertFalse(first_question("дые", "где то д", ""))
+        # The tables of Russian endings and beginnings the head reads are built once: built for every token, they read
+        # the whole Russian table for each frame and each word typed.
+        self.assertIs(features._russian_endings(), features._russian_endings())
+        self.assertIs(features._russian_starts(), features._russian_starts())
+        # How many Russian words begin with a token: `уче` begins 77 (bucket 7), the keys of `qr` none.
+        self.assertEqual([russian_start_bucket(token) for token in ("уче", "йк", "сымю")], ["7", "0", "na"])
 
     def test_the_head_answers_a_field_read_empty_and_the_term_head_the_rest(self) -> None:
         read = heads(evidence("йк", "qr"))
         counts = f"latin:{term_bucket('qr', 'latin')}:english:{term_bucket('qr', 'english')}"
-        self.assertTrue({"bias", "tail:0", "tail:0:letters:2", "tail:0:boundary:space", "tail:0:boundary:space:letters:2",
-                         f"tail:0:{counts}", f"tail:0:boundary:space:{counts}", "tail:0:after:none",
-                         f"tail:0:after:none:{counts}"} <= read[FIRST_FEATURE_PREFIX])
+        self.assertTrue({"boundary:space", "boundary:space:letters:2", f"boundary:space:{counts}", "boundary:space:start:0",
+                         "boundary:space:start:0:letters:2", "boundary:space:after:none",
+                         f"boundary:space:after:none:{counts}"} <= read[FIRST_FEATURE_PREFIX])
+        # Every piece is read with the boundary: what a pause teaches never reaches the space.
+        self.assertTrue(all(name.startswith("boundary:space") for name in read[FIRST_FEATURE_PREFIX]))
         # Asked again with the word after it, as the engine asks a converted term once a Russian word follows.
         again = replace(evidence("йк", "qr"), field=FieldContext("Code", "test", "", "истек", "text", source="uia"),
                         after_origin="planned_next_conversion")
-        self.assertIn("tail:0:after:planned_next_conversion:letters:2", heads(again)[FIRST_FEATURE_PREFIX])
+        self.assertIn("boundary:space:after:planned_next_conversion:letters:2", heads(again)[FIRST_FEATURE_PREFIX])
         self.assertEqual(read[TERM_FEATURE_PREFIX], set())
         # Nobody read the field: the text before the token is unknown, and the term head answers.
         unread = heads(evidence("йк", "qr", role="unknown"))
         self.assertEqual(unread[FIRST_FEATURE_PREFIX], set())
         self.assertTrue(unread[TERM_FEATURE_PREFIX])
-        # A token that may still be the tail of a Russian word, at a pause.
-        self.assertIn("tail:1:boundary:end", heads(evidence("ев", "td", trigger="pause"))[FIRST_FEATURE_PREFIX])
+        # The tail of a Russian word alone, at a pause: the same evidence as any term of the class.
+        self.assertIn("boundary:end:letters:2", heads(evidence("ев", "td", trigger="pause"))[FIRST_FEATURE_PREFIX])
         # A word the profile's lexicon knows stays with the frozen model.
         known = heads(replace(evidence("шву", "ide"), source_known=True))
         self.assertEqual(known, {FIRST_FEATURE_PREFIX: set(), TERM_FEATURE_PREFIX: set()})
+
+    def test_the_head_is_fitted_on_its_own_curriculum_alone(self) -> None:
+        # A frame of the class another curriculum framed leaves TRAIN (frame_chain); unread, it is the term head's.
+        field = FieldContext("Code", "test", "", "", "text", source="uia")
+        other = trainer.ActionRow("legacy-train:щт", "щт", 1, field, "space", "", "wait", "legacy", " ", 1.0)
+        self.assertTrue(trainer.outside_first_curriculum(other))
+        self.assertFalse(trainer.outside_first_curriculum(replace(other, identifier="first:щт:space")))
+        self.assertFalse(trainer.outside_first_curriculum(replace(other, field=replace(field, role="unknown"))))
+        self.assertFalse(trainer.outside_first_curriculum(replace(other, field=replace(field, before="мой "))))
 
     def test_the_trainer_and_the_gpu_path_route_the_class_to_the_head(self) -> None:
         prefixes = frozenset({FIRST_FEATURE_PREFIX})
@@ -96,24 +117,49 @@ class FirstTermHeadTests(unittest.TestCase):
                             and len(row.original) <= max(TERM_HEAD_ENDING_LETTERS) for row in rows))
         self.assertEqual(set(Counter(row.original for row in rows).values()), {len(("space", "pause", "next"))})
         for row in rows:
-            tail = alone_tail(row.original)
             kind = row.identifier.rsplit(":", 1)[1]
-            expected = {"space": "wait" if tail else "convert", "pause": "keep" if tail else "convert",
-                        "next": "keep" if tail else "convert"}[kind]
-            self.assertEqual(row.action, expected, row.identifier)
-            # Asked again with a Russian word after it, as the engine asks it: a converted term with the baseline the
-            # engine gives the revisit, a token that waited with its planned one.
-            self.assertEqual((bool(row.field.after), row.revisit), (kind == "next", kind == "next" and not tail))
+            # At the pause a token many Russian words begin with may be a word stopped in the middle: kept.
+            started = int(russian_start_bucket(row.original)) >= FIRST_PAUSE_WORD_START_MIN_BUCKET
+            self.assertEqual(row.action, "keep" if kind == "pause" and started else "convert", row.identifier)
+            # Asked again with a Russian word after it, as the engine asks a converted term: the baseline the engine
+            # gives the revisit.
+            self.assertEqual((bool(row.field.after), row.revisit), (kind == "next", kind == "next"))
             if kind == "next":
                 self.assertEqual(row.after_origin, "planned_next_conversion" if len(row.original) <= len("йку") else "field")
-        self.assertTrue({True, False} <= {alone_tail(row.original) for row in rows})
+        # The tails of Russian words among them (`ев`, `ые`) convert as every term of the class does, and some tokens
+        # are kept at the pause.
+        self.assertTrue({"ев", "ые"} & {row.original for row in rows})
+        self.assertEqual({row.action for row in rows if row.identifier.endswith(":pause")}, {"keep", "convert"})
         self.assertEqual(trainer.first_curriculum(TRAIN, [], frozenset(), trainer.NO_FIRST_CURRICULUM), ([], {"frames": 0, "scope": "not used"}))
         self.assertEqual(trainer.first_curriculum(CALIBRATION, [], frozenset(), FIRST)[0], [])
 
 
+class FirstTermEngineTests(DefaultSequenceHarness):
+    """The installed pair answers the class in the engine. Not a module the pair's seal pins: the pair it replaces
+    reads these tokens otherwise, and the seal's modules pass with both."""
+
+    def test_a_short_term_opening_a_message_in_a_field_read_empty_converts_at_its_space(self) -> None:
+        # `шь` and `уче`, which many Russian words end with, too: the tail of a Russian word never stands there alone.
+        for typed, meant in (("йк", "qr"), ("шь", "im"), ("уче", "ext")):
+            with self.subTest(typed=typed), self.session() as session:
+                session.engine.context_policy.reader = _CaretReader(session.backend)
+                session.type(typed + " ", 1, idle_after_words=False)
+                self.assertEqual(session.backend.text, meant + " ")
+
+    def test_a_pause_after_letters_many_russian_words_begin_with_is_a_pause_inside_a_word(self) -> None:
+        # `уче`, a pause, `ба` stays `учеба`: the pause in the middle of a word that opens a message is no boundary.
+        with self.session() as session:
+            session.engine.context_policy.reader = _CaretReader(session.backend)
+            session.type("уче", 1, idle_after_words=False)
+            session.idle(DEFAULT_SEQUENCE_EXTENDED_IDLE_SECONDS)
+            session.type("ба ", 1, idle_after_words=False)
+            self.assertEqual(session.backend.text, "учеба ")
+
+
 def load_tests(loader: unittest.TestLoader, tests: unittest.TestSuite, pattern: str | None) -> unittest.TestSuite:
-    return loader.loadTestsFromTestCase(FirstTermHeadTests)
+    return unittest.TestSuite(loader.loadTestsFromTestCase(case) for case in (FirstTermHeadTests, FirstTermEngineTests))
 
 
 if __name__ == "__main__":
     unittest.main()
+

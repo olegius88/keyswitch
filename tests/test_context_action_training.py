@@ -33,10 +33,13 @@ from keyswitch.context_action_features import (
 from keyswitch.short_words import TRUSTED_SINGLE_LETTER_WORDS
 from keyswitch.constants.model_protocol import CALIBRATION, DEVELOPMENT, TRAIN
 from keyswitch.context_model import ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, term_bucket
+from carry_context_heads import carried
 from train_context_action_model import (
     BLIND_IDENTIFIERS,
     ROOT,
+    canonical,
     ActionRow,
+    ContextRing,
     FeatureMass,
     action_rows,
     apply_runtime_support,
@@ -76,6 +79,9 @@ from train_context_action_model import (
     carried_prefixes,
     frozen_base,
     frozen_heads,
+    frozen_record,
+    labelling_base,
+    provenance,
     lone_word_curriculum,
     refused_aliases,
     warm_base,
@@ -92,8 +98,8 @@ from train_context_action_model import (
 )
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
 from keyswitch.constants.models import (
-    ALONE_FEATURE_PREFIX, CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_V1_CONVERSION_THRESHOLD, KEPT_FEATURE_PREFIX,
-    LETTER_FEATURE_PREFIX, START_FEATURE_PREFIX,
+    ALONE_FEATURE_PREFIX, CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_V1_CONVERSION_THRESHOLD, FIRST_FEATURE_PREFIX,
+    KEPT_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, START_FEATURE_PREFIX,
 )
 from keyswitch.detector import LanguageDetector
 from keyswitch.intent_model import CorrectionTrigger, LinearNgramModel
@@ -104,6 +110,8 @@ from context_optimizer import Packed
 from fixture_values.corpora import FIXTURE_WORD_FREQUENCY, PLANNED_EVIDENCE_DOMINANT_WORD_FREQUENCY
 from fixture_values.counts import (
     CAPITAL_CITATION_FIXTURE_WORDS_BY_LENGTH,
+    CONTEXT_RING_FIXTURE_CONTEXTS,
+    CONTEXT_RING_FIXTURE_FRAMES,
     COUNTED_TOKEN_FIXTURE_FRAMES_PER_WORD,
     ENGLISH_CAPITAL_FIXTURE_FRAMES_PER_WORD,
     ENGLISH_CAPITAL_FIXTURE_WORDS_BY_LENGTH,
@@ -604,6 +612,24 @@ class ActionTrainingTests(unittest.TestCase):
         self.assertEqual(natural_mixed_contexts([english, russian, mixed_only]), {0: ("the subspecies ",), 1: ("Австралийский подвид ",)})
         self.assertFalse([row for row in action_rows([english]) if ":mixed-natural" in row.identifier])
 
+    def test_a_frame_keeps_its_context_while_the_context_stays_in_the_pool(self) -> None:
+        # A corpus refresh adds and removes contexts of a pool. Drawn as `pool[sha256 % len(pool)]`, one context more or
+        # less dealt nearly every frame a new one (18.10.2026); on the ring only the frames of the removed context and
+        # the frames the new context takes move.
+        pool = tuple(sorted(f"контекст {index} " for index in range(CONTEXT_RING_FIXTURE_CONTEXTS)))
+        removed, added = pool[0], "новый контекст "
+        before, after = ContextRing(pool), ContextRing(tuple(sorted({*pool[1:], added})))
+        frames = [f"frame:{index}" for index in range(CONTEXT_RING_FIXTURE_FRAMES)]
+        old = {frame: before.choice(frame, "context") for frame in frames}
+        new = {frame: after.choice(frame, "context") for frame in frames}
+        moved = [frame for frame in frames if old[frame] != new[frame]]
+        self.assertTrue(moved)
+        self.assertTrue(all(old[frame] == removed or new[frame] == added for frame in moved))
+        self.assertEqual((len(before), len(ContextRing(()))), (CONTEXT_RING_FIXTURE_CONTEXTS, 0))
+        # A purpose draws apart from another, and a pool of (context, word) pairs gives its pairs.
+        self.assertNotEqual([before.choice(frame, "context") for frame in frames], [before.choice(frame, "other-context") for frame in frames])
+        self.assertEqual(ContextRing([("в тексте ", "слово")]).choice("frame", "context"), ("в тексте ", "слово"))
+
     def test_the_keys_of_a_latin_abbreviation_that_spell_one_russian_text_uses_are_never_framed_to_convert(self) -> None:
         # `TC` typed in the Russian layout is `ЕС`, which Russian technical text uses (attested_abbreviation): after
         # Russian prose those keys are the abbreviation as written. `QRT` reads `ЙКЕ`, which nothing uses.
@@ -958,6 +984,46 @@ class ActionTrainingTests(unittest.TestCase):
         convert = FROZEN_BASE_FIXTURE_PROBABILITIES[ACTIONS.index("convert")]
         self.assertAlmostEqual(log_loss(array("d", FROZEN_BASE_FIXTURE_PROBABILITIES), data),
                                -FROZEN_BASE_FIXTURE_IMPORTANCE * math.log(convert))
+
+    def test_a_shipped_pair_carries_its_heads_and_the_model_the_lone_word_head_was_fitted_onto_labels(self) -> None:
+        # A pair fitted onto the corpus v37 model is the frozen base of a fit that fits one of its heads again: the pair
+        # without that head's weights, and the lone-word frames still labelled by the model that head was fitted onto.
+        weights = {"bias": FROZEN_BASE_FIXTURE_WEIGHTS, ALONE_FEATURE_PREFIX + "bias": FROZEN_BASE_FIXTURE_WEIGHTS,
+                   FIRST_FEATURE_PREFIX + "bias": FROZEN_BASE_FIXTURE_WEIGHTS, FIRST_FEATURE_PREFIX + "end": FROZEN_BASE_FIXTURE_WEIGHTS}
+        with tempfile.TemporaryDirectory() as directory:
+
+            def save(name: str, payload: dict[str, object]) -> dict[str, object]:
+                path = Path(directory) / name
+                path.write_bytes(canonical(payload))
+                return {"artifact": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+            digest = hashlib.sha256(json.dumps(weights, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            pair = {"feature_version": CONTEXT_ACTION_FEATURE_VERSION, "actions": list(ACTIONS), "weights": weights,
+                    "weights_sha256": digest, "version": "context-v3-pair", "conversion_threshold": CONTEXT_V1_CONVERSION_THRESHOLD}
+            base = save("base.json", carried(pair, ["first"]))
+            labels = save("labels.json", carried(pair, ["first", "alone"]))
+            model = cast(ContextModel, frozen_base({"frozen_base": base}))
+            self.assertEqual(set(model.weights), {"bias", ALONE_FEATURE_PREFIX + "bias"})
+            self.assertEqual(carried_prefixes(model), {ALONE_FEATURE_PREFIX})
+            self.assertNotEqual(model.version, "context-v3-pair")
+            # The first-term head is fitted again onto it; the lone-word head is carried.
+            spec = {**base, "carried": {"alone": {}}, "heads": {"first": {"maximum_features": HEAD_FIXTURE_MAXIMUM_FEATURES}}}
+            self.assertEqual(frozen_heads({"frozen_base": spec}), {FIRST_FEATURE_PREFIX: HEAD_FIXTURE_MAXIMUM_FEATURES})
+            with self.assertRaisesRegex(ValueError, "name a head"):
+                carried(pair, [])
+            with self.assertRaisesRegex(ValueError, "no weights for a head"):
+                carried(pair, ["term"])
+            # Without `labels` the frozen base labels, and the seal records the base alone.
+            self.assertEqual(labelling_base({"frozen_base": spec}).weights, model.weights)
+            self.assertNotIn("labels", frozen_record({"frozen_base": spec}, model))
+            named = {"frozen_base": {**spec, "labels": labels}}
+            self.assertEqual(set(labelling_base(named).weights), {"bias"})
+            self.assertEqual(frozen_record(named, model)["labels"], {**labels, "model_version": labelling_base(named).version})
+            with self.assertRaisesRegex(ValueError, "labelling base artifact differs"):
+                labelling_base({"frozen_base": {**spec, "labels": {**labels, "sha256": "0" * len(str(labels["sha256"]))}}})
+        # The recipe's labelling model is pinned among the fit's inputs with its frozen base.
+        recipe_base = cast(dict[str, dict[str, str]], json.loads((ROOT / "model/context_v3/recipe.json").read_text())["frozen_base"])
+        self.assertLessEqual({recipe_base["artifact"], recipe_base["labels"]["artifact"]}, set(provenance()))
 
     def test_lone_two_letter_frames_are_labelled_by_the_term_counts_for_the_lone_word_head(self) -> None:
         evidence = {"maximum_features": HEAD_FIXTURE_MAXIMUM_FEATURES, "minimum_count": LONE_WORD_FIXTURE_MINIMUM_COUNT,

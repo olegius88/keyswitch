@@ -9,6 +9,7 @@ The engine evaluator must separately check the complete physical input stream.
 from __future__ import annotations
 
 import argparse
+from bisect import bisect_left
 import gc
 import gzip
 import hashlib
@@ -24,13 +25,13 @@ from dataclasses import asdict, dataclass, field, replace
 from functools import partial
 from itertools import product
 from pathlib import Path
-from typing import Final, cast
+from typing import Final, Generic, TypeVar, cast
 from unittest.mock import patch
 
 from keyswitch.context_action_features import (
-    abbreviation_question, alone_question, alone_tail, attested_abbreviation, capitals_question, extract_action_features,
+    abbreviation_question, alone_question, attested_abbreviation, capitals_question, extract_action_features,
     brief_question, brief_settled, first_question, joined_question, latin_abbreviation_question, letter_question, russian_ending_bucket,
-    start_question, term_question, unknown_question, unknown_shape,
+    russian_start_bucket, start_question, term_question, unknown_question, unknown_shape,
 )
 from keyswitch.context_model import (
     ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, _term_frequency, term_bucket,
@@ -88,6 +89,7 @@ from keyswitch.constants.training import (
     JOINED_REPEAT_SPLIT_MODULUS,
     BRIEF_BOUNDARIES,
     BRIEF_SPLIT_MODULUS,
+    FIRST_PAUSE_WORD_START_MIN_BUCKET,
     TERM_CAPITALS_MAX_LETTERS,
     TERM_COUNT_DROPOUT_FAMILIES,
     TERM_COUNT_DROPOUT_MIN_LETTERS,
@@ -109,6 +111,8 @@ from keyswitch.constants.training import (
     CAPITAL_CITATION_RUSSIAN_BUCKET,
     CITATION_SIGN_HEADS,
     COMMAND_FAMILY_IDENTIFIER_PARTS,
+    CONTEXT_RING_HEX_DIGITS,
+    CONTEXT_RING_POINTS,
     DETERMINISTIC_CHOICE_HEX_DIGITS,
     DETERMINISTIC_ROUNDING_DECIMALS,
     EPOCH_NET_BENEFIT_TOLERANCE,
@@ -274,6 +278,39 @@ def stranded_previous(before: str, group: int) -> str | None:
 
 def variant_choice(identifier: str, purpose: str, count: int) -> int:
     return int(hashlib.sha256((purpose + ":" + identifier).encode()).hexdigest()[:DETERMINISTIC_CHOICE_HEX_DIGITS], HEXADECIMAL_BASE) % count
+
+
+Context = TypeVar("Context")
+
+
+class ContextRing(Generic[Context]):
+    """A pool of contexts a curriculum draws from by consistent hashing: a frame keeps its context while it stays.
+
+    A pool built from the corpus rows gains and loses contexts at every corpus refresh. Drawn as
+    `pool[variant_choice(identifier, purpose, len(pool))]`, one context more or less dealt nearly every frame a new
+    one: the code of 0.57.0 fitted again on corpus v66 lost four hyphenated words of calibration to the pair it had
+    fitted on corpus v65, with no line of code changed (18.10.2026). Each context takes CONTEXT_RING_POINTS points
+    on a ring by the digest of its text, and a frame takes the context of the first point at or after the digest of
+    its identifier: a refresh moves only the frames whose context left the pool or whose arc a new context took.
+    """
+
+    def __init__(self, pool: Sequence[Context]) -> None:
+        self.pool = pool
+        ring = sorted((_ring_point(f"{index}:{context}"), position)
+                      for position, context in enumerate(pool) for index in range(CONTEXT_RING_POINTS))
+        self.points = [point for point, _ in ring]
+        self.owners = [position for _, position in ring]
+
+    def __len__(self) -> int:
+        return len(self.pool)
+
+    def choice(self, identifier: str, purpose: str) -> Context:
+        slot = bisect_left(self.points, _ring_point(purpose + ":" + identifier)) % len(self.points)
+        return self.pool[self.owners[slot]]
+
+
+def _ring_point(text: str) -> int:
+    return int(hashlib.sha256(text.encode()).hexdigest()[:CONTEXT_RING_HEX_DIGITS], HEXADECIMAL_BASE)
 
 
 @dataclass(frozen=True)
@@ -557,7 +594,7 @@ def capital_citation_curriculum(source_rows: Sequence[CorpusRow], refused: froze
     budgets = {int(length): int(count) for length, count in cast(dict[str, int], options["words_by_length"]).items()}
     weight = float(cast(float, options["sample_weight"]))
     contrast = options.get("lowercase_contrast") is True
-    contexts = natural_mixed_contexts(source_rows)[1]
+    contexts = ContextRing(natural_mixed_contexts(source_rows)[1])
     if not contexts or not any(budgets.values()):
         return [], {"words": 0, "words_by_length": {}, "scope": "not used"}
     if models is None:
@@ -585,7 +622,7 @@ def capital_citation_curriculum(source_rows: Sequence[CorpusRow], refused: froze
             identifier = "capital-citation:" + word
             trigger, boundary_text = _varied_boundary(identifier)
             field = FieldContext(applications[variant_choice(identifier, "application", len(applications))], "public-training",
-                                 contexts[variant_choice(identifier, "context", len(contexts))], "", "unknown")
+                                 contexts.choice(identifier, "context"), "", "unknown")
             rows.append(ActionRow(identifier, latin, 0, field, trigger, "", "keep", "mixed_language_insertion",
                                   boundary_text, weight))
             if contrast:
@@ -629,7 +666,8 @@ def english_capital_curriculum(source_rows: Sequence[CorpusRow], refused: frozen
     per_word = int(cast(int, options["frames_per_word"]))
     weight = float(cast(float, options["sample_weight"]))
     contrast = options.get("lowercase_contrast") is True
-    contexts, russian = natural_mixed_contexts(source_rows)[0], natural_mixed_contexts(source_rows)[1]
+    natural = natural_mixed_contexts(source_rows)
+    contexts, russian = ContextRing(natural[0]), ContextRing(natural[1])
     russian_contrast = options.get("russian_contrast") is True and bool(russian)
     if not contexts or not any(budgets.values()) or not per_word:
         return [], {"frames": 0, "scope": "not used"}
@@ -652,7 +690,7 @@ def english_capital_curriculum(source_rows: Sequence[CorpusRow], refused: frozen
                 identifier = f"english-capital:{word}:{index}"
                 trigger, boundary_text = _varied_boundary(identifier)
                 field = FieldContext(applications[variant_choice(identifier, "application", len(applications))],
-                                     "public-training", contexts[variant_choice(identifier, "context", len(contexts))],
+                                     "public-training", contexts.choice(identifier, "context"),
                                      "", "unknown")
                 rows.append(ActionRow(identifier, latin, 0, field, trigger, "", "keep", "english_capital",
                                       boundary_text, weight))
@@ -661,7 +699,7 @@ def english_capital_curriculum(source_rows: Sequence[CorpusRow], refused: frozen
                                           "english_capital_lower", boundary_text, weight))
                 if russian_contrast:
                     other = identifier + ":russian"
-                    rows.append(ActionRow(other, latin, 0, replace(field, before=russian[variant_choice(other, "context", len(russian))]),
+                    rows.append(ActionRow(other, latin, 0, replace(field, before=russian.choice(other, "context")),
                                           trigger, "", "convert", "english_capital_russian", boundary_text, weight))
     return rows, {"frames": len(rows), "sample_weight": weight, "frames_per_word": per_word,
                   "lowercase_contrast": contrast, "russian_contrast": russian_contrast,
@@ -702,7 +740,7 @@ def abbreviation_curriculum(split: str, source_rows: Sequence[CorpusRow], refuse
     """
 
     per_form = int(cast(int, options["frames_per_form"]))
-    contexts = natural_mixed_contexts(source_rows)[1]
+    contexts = ContextRing(natural_mixed_contexts(source_rows)[1])
     if not per_form or not contexts or split not in (TRAIN, DEVELOPMENT):
         return [], {"frames": 0, "scope": "not used"}
     weight = float(cast(float, options["sample_weight"]))
@@ -729,7 +767,7 @@ def abbreviation_curriculum(split: str, source_rows: Sequence[CorpusRow], refuse
             identifier = f"abbreviation:{form}:{index}"
             trigger, boundary_text = _varied_boundary(identifier)
             field = FieldContext(applications[variant_choice(identifier, "application", len(applications))], "public-training",
-                                 contexts[variant_choice(identifier, "context", len(contexts))], "", "unknown")
+                                 contexts.choice(identifier, "context"), "", "unknown")
             rows.append(ActionRow(identifier, form, 1, field, trigger, "", action, "abbreviation", boundary_text, weight))
     return rows, {"frames": len(rows), "forms": dict(sorted(counts.items())), "frames_per_form": per_form, "sample_weight": weight,
                   "scope": "attested Cyrillic abbreviations of this split's share, typed as written after Russian prose, labelled "
@@ -768,8 +806,8 @@ def latin_abbreviation_curriculum(split: str, source_rows: Sequence[CorpusRow], 
     """
 
     per_form = int(cast(int, options["frames_per_form"]))
-    english = natural_mixed_contexts(source_rows)[0]
-    terms = _counted_terms(refused, int(cast(int, options["minimum_term_count"]))) if per_form else []
+    english = ContextRing(natural_mixed_contexts(source_rows)[0])
+    terms = ContextRing(_counted_terms(refused, int(cast(int, options["minimum_term_count"]))) if per_form else [])
     if not per_form or not english or not terms or split not in (TRAIN, DEVELOPMENT):
         return [], {"frames": 0, "scope": "not used"}
     weight = float(cast(float, options["sample_weight"]))
@@ -794,11 +832,11 @@ def latin_abbreviation_curriculum(split: str, source_rows: Sequence[CorpusRow], 
             identifier = f"latin-abbreviation:{form}:{index}"
             trigger, boundary_text = _varied_boundary(identifier)
             if index % LAYOUT_GROUP_COUNT == 0:
-                before = english[variant_choice(identifier, "context", len(english))]
+                before = english.choice(identifier, "context")
             else:
-                words = [terms[variant_choice(identifier, "context", len(terms))]]
+                words = [terms.choice(identifier, "context")]
                 if variant_choice(identifier, "context-words", LAYOUT_GROUP_COUNT):
-                    words.insert(0, terms[variant_choice(identifier, "first-context", len(terms))])
+                    words.insert(0, terms.choice(identifier, "first-context"))
                 before = " ".join(words) + " "
             field = FieldContext(applications[variant_choice(identifier, "application", len(applications))], "public-training",
                                  before, "", "unknown")
@@ -832,7 +870,7 @@ def unknown_token_curriculum(split: str, source_rows: Sequence[CorpusRow], refus
     """
 
     item_modulus = int(cast(int, options["item_modulus"]))
-    contexts = natural_mixed_contexts(source_rows)[1]
+    contexts = ContextRing(natural_mixed_contexts(source_rows)[1])
     if not item_modulus or not contexts or split not in (TRAIN, DEVELOPMENT):
         return [], {"frames": 0, "scope": "not used"}
     weight = float(cast(float, options["sample_weight"]))
@@ -875,9 +913,9 @@ def unknown_token_curriculum(split: str, source_rows: Sequence[CorpusRow], refus
             frames.append((term, 0, "keep", typed))
         for index, (shown, group, action, earlier_word) in enumerate(frames):
             identifier = f"{family}:{index}"
-            before = contexts[variant_choice(identifier, "context", len(contexts))]
+            before = contexts.choice(identifier, "context")
             if earlier_word:
-                earlier = contexts[variant_choice(identifier, "earlier-context", len(contexts))].rstrip()
+                earlier = contexts.choice(identifier, "earlier-context").rstrip()
                 before = f"{earlier} {earlier_word}. {before}"
             if not unknown_question(shown, before):
                 # A long term earlier in a short text makes it Latin text: no frame of the class.
@@ -895,7 +933,7 @@ def unknown_token_curriculum(split: str, source_rows: Sequence[CorpusRow], refus
             counts["refused"] += 1
             continue
         identifier = f"unknown-echo:{row.identifier}"
-        earlier = contexts[variant_choice(identifier, "earlier-context", len(contexts))].rstrip()
+        earlier = contexts.choice(identifier, "earlier-context").rstrip()
         before = f"{earlier} {keys}. {row.before}"
         if not unknown_question(word, before):
             counts["outside_class"] += 1
@@ -974,7 +1012,7 @@ def joined_token_curriculum(split: str, source_rows: Sequence[CorpusRow], refuse
                 rows.append(ActionRow(frame, shown, layout, field, trigger, "", action, "joined_token", boundary_text, weight))
     repeat_words = int(cast(int, options.get("repeat_words", 0)))
     minimum = int(cast(int, options.get("repeat_minimum_count", 0)))
-    contexts = natural_mixed_contexts(source_rows)
+    contexts = {group: ContextRing(pool) for group, pool in natural_mixed_contexts(source_rows).items()}
     table = _term_frequency()
     for group, alphabet in ((1, "russian"), (0, "english")):
         words = sorted((word for word, count in table[alphabet].items()
@@ -995,7 +1033,7 @@ def joined_token_curriculum(split: str, source_rows: Sequence[CorpusRow], refuse
                     or refused & (expanded_aliases(token) | expanded_aliases(keys))):
                 counts["refused"] += 1
                 continue
-            context = contexts[group][variant_choice(identifier, "context", len(contexts[group]))]
+            context = contexts[group].choice(identifier, "context")
             before = (f"{context.rstrip()}. " if capital else context)[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:]
             pair: tuple[tuple[str, int, ContextAction], ...] = ((token, group, "keep"), (keys, 1 - group, "convert"))
             for index, (shown, layout, action) in enumerate(pair):
@@ -1061,7 +1099,7 @@ def term_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froze
     """
 
     item_modulus = int(cast(int, options["item_modulus"]))
-    contexts = natural_mixed_contexts(source_rows)[1]
+    contexts = ContextRing(natural_mixed_contexts(source_rows)[1])
     if not item_modulus or not contexts or split not in (TRAIN, DEVELOPMENT):
         return [], {"frames": 0, "scope": "not used"}
     weight = float(cast(float, options["sample_weight"]))
@@ -1106,8 +1144,8 @@ def term_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froze
         if refuse(term, typed):
             counts["refused"] += 1
             continue
-        context = contexts[variant_choice(family, "context", len(contexts))]
-        other = contexts[variant_choice(family, "other-context", len(contexts))]
+        context = contexts.choice(family, "context")
+        other = contexts.choice(family, "other-context")
         variants = ["start", "signed", "capital", *(["upper"] if len(term) <= TERM_CAPITALS_MAX_LETTERS else [])]
         variant = variants[variant_choice(family, "variant", len(variants))]
         signs = translated(TERM_HEAD_TRAILING_SIGNS, 0)
@@ -1183,21 +1221,23 @@ def first_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froz
                      options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
     """Terms of up to three letters alone in a field a field reader read empty (context_action_features.first_question).
 
-    There a term opens a message, and the owner asked for `йк ` (`qr`) to convert at once (16.10.2026), where the frozen
-    model waited for a pause. The term head, which chooses an early epoch for its other frames, stopped short of the
-    threshold there: `зк` and `йк` became suggestions at p 0.98, which no pause settles (candidates v64b to v64e). Every
-    term of the Latin table whose keys in the Russian layout are a token of the class stands alone in such a field,
-    ended by a space (convert) and by a pause (convert). A token that may still be the tail of a Russian word
-    (alone_tail) waits at the space and is kept at the pause: nothing stands before a tail in a field read empty, but a
-    field battery replays a stream that starts with one into an empty field (`дые`, which the owner typed completing
-    `моло`), and waiting there it went to `lst` at the pause (candidate v64c). Each is also asked again as the engine
-    asks it with the word after it: a term converted at once, once a Russian word followed (ActionRow.revisit: the
-    baseline the engine gives that question), stays converted (the term head, which asked it before, took `qr` back
-    with `истек` after it on corpus v65 and kept it on corpus v64); a token that waited, once its next word was
-    converted, keeps. Each term goes to DEVELOPMENT or TRAIN as
-    the term curriculum draws it (TERM_SPLIT_MODULUS), and DEVELOPMENT chooses the head's own epoch. Tokens of this
-    corpus's test, of every accessed test and of the recipe's `held_out` list (the class's tokens of the owner's typing)
-    are refused.
+    There a term opens a message, and `йк ` (`qr`) is to convert at once, where the frozen model waited for a pause. The
+    term head, which chooses an early epoch for its other frames, stopped short of the threshold there: `зк` and `йк`
+    became suggestions at p 0.98, which no pause settles (candidates v64b to v64e). Every term of the Latin table whose
+    keys in the Russian layout are a token of the class stands alone in such a field, ended by a space (convert) and by
+    a pause (convert, but keep for a token whose bucket of Russian words beginning with it reaches
+    FIRST_PAUSE_WORD_START_MIN_BUCKET: a word stopped in the middle, as `уче` of `учеб`, which became `ext` with its `б`
+    a comma, candidate v67). Each is also asked again as the engine asks it with the word after it: a term converted at
+    once, once a Russian word followed (ActionRow.revisit: the baseline the engine gives that question), stays converted
+    (the term head, which asked it before, took `qr` back with `истек` after it on corpus v65 and kept it on corpus
+    v64). Candidates v64c to v66 made a token that may still be the tail of a Russian word wait and keep instead (`дые`,
+    `ев`, `шаю`): the field batteries then began every stream in an empty field, also the streams a Backspace or a click
+    had cut in the middle of a message. A tail never stands alone in a field read empty: an edit that leaves one as a
+    token leaves letters before it, or reopens its word and asks the whole of it. The batteries now begin each stream in
+    the field their log shows, and the wait had cost the class 25 tokens a pause converted before (`шь`, `зь`). Each
+    term goes to DEVELOPMENT or TRAIN as the term curriculum draws it (TERM_SPLIT_MODULUS), and DEVELOPMENT chooses the
+    head's own epoch; the head is fitted on these frames alone (frame_chain). Tokens of this corpus's test, of every
+    accessed test and of the recipe's `held_out` list (the class's tokens of the field batteries) are refused.
     """
 
     if not options.get("enabled") or split not in (TRAIN, DEVELOPMENT):
@@ -1220,25 +1260,23 @@ def first_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froz
         if term.casefold() in held_out or typed.casefold() in held_out or refused & (expanded_aliases(term) | expanded_aliases(typed)):
             counts["refused"] += 1
             continue
-        tail = alone_tail(typed)
         field = FieldContext(applications[variant_choice(f"first:{typed}", "application", len(applications))], "public-training",
                              "", "", "text", source="reader")
-        for trigger, boundary_text, action in (("space", " ", "wait" if tail else "convert"),
-                                               ("pause", "", "keep" if tail else "convert")):
+        start = russian_start_bucket(typed)
+        stopped: ContextAction = "keep" if start != "na" and int(start) >= FIRST_PAUSE_WORD_START_MIN_BUCKET else "convert"
+        for trigger, boundary_text, action in (("space", " ", "convert"), ("pause", "", stopped)):
             counts[f"{action}:{trigger}"] += 1
             rows.append(ActionRow(f"first:{typed}:{trigger}", typed, 1, field, cast(CorrectionTrigger, trigger), "",
                                   cast(ContextAction, action), "first", boundary_text, weight))
         follower = followers[variant_choice(f"first:{typed}", "follower", len(followers))]
         origin: AfterOrigin = "planned_next_conversion" if len(typed) <= PLANNED_REVISIT_MAX_CHARACTERS else "field"
-        again: ContextAction = "keep" if tail else "convert"
-        counts[f"{again}:next"] += 1
-        rows.append(ActionRow(f"first:{typed}:next", typed, 1, replace(field, after=follower), "space", "", again, "first",
-                              " ", weight, after_origin=origin, revisit=not tail))
+        counts["convert:next"] += 1
+        rows.append(ActionRow(f"first:{typed}:next", typed, 1, replace(field, after=follower), "space", "", "convert", "first",
+                              " ", weight, after_origin=origin, revisit=True))
     return rows, {"frames": len(rows), "items": dict(sorted(counts.items())), "held_out": len(held_out), "sample_weight": weight,
                   "scope": "terms of up to three letters of the Latin table typed in the Russian layout alone in a field a "
                            "reader read empty, ended by a space and by a pause, and asked again with the word after them "
-                           "(convert; a token that may still be the tail of a Russian word waits at the space and is kept "
-                           "at the pause and with the next word) (first_curriculum)."}
+                           "(convert; one that many Russian words begin with is kept at the pause) (first_curriculum)."}
 
 
 def brief_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
@@ -1445,7 +1483,7 @@ def kept_neighbour_curriculum(source_rows: Sequence[CorpusRow], refused: frozens
             if (KEPT_NEIGHBOUR_MIN_LETTERS <= len(word) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS and word.isalpha()
                     and following.group().isalpha() and text[current.end():following.start()] == " "):
                 natural[group][text[:current.start()] + "|" + word] = (text[:current.start()], word, following.group())
-    russian = _russian_contexts(source_rows)
+    russian = ContextRing(_russian_contexts(source_rows))
     rows: list[ActionRow] = []
     counts: Counter[str] = Counter()
     for group in (0, 1):
@@ -1467,7 +1505,7 @@ def kept_neighbour_curriculum(source_rows: Sequence[CorpusRow], refused: frozens
                 if counts[purpose] >= budget:
                     break
                 identifier = f"kept-{purpose}:{word}:{index}"
-                before, following_word = russian[variant_choice(identifier, "context", len(russian))]
+                before, following_word = russian.choice(identifier, "context")
                 rows.append(frame(identifier, typed(word), 1, before, following_word, action, "kept_neighbour_" + purpose))
                 counts[purpose] += 1
         return chosen
@@ -1521,7 +1559,7 @@ def counted_token_curriculum(source_rows: Sequence[CorpusRow], refused: frozense
 
     budgets = {name: int(cast(int, options[name])) for name in ("term_frames", "abbreviation_frames")}
     per_word = int(cast(int, options["frames_per_word"]))
-    russian = _russian_contexts(source_rows)
+    russian = ContextRing(_russian_contexts(source_rows))
     if not any(budgets.values()) or not russian:
         return [], {"frames": 0, "scope": "not used"}
     weight = float(cast(float, options["sample_weight"]))
@@ -1548,7 +1586,7 @@ def counted_token_curriculum(source_rows: Sequence[CorpusRow], refused: frozense
             for index in range(min(per_word, budgets[purpose + "_frames"] - frames)):
                 identifier = f"counted-{purpose}:{word}:{index}"
                 trigger, boundary_text = _varied_boundary(identifier)
-                before, _ = russian[variant_choice(identifier, "context", len(russian))]
+                before, _ = russian.choice(identifier, "context")
                 field = FieldContext(applications[variant_choice(identifier, "application", len(applications))],
                                      "public-training", before, "", "unknown")
                 rows.append(ActionRow(identifier, typed(word), 1, field, trigger, "", action, "counted_" + purpose,
@@ -1593,7 +1631,7 @@ def letter_curriculum(source_rows: Sequence[CorpusRow], refused: frozenset[str],
     """
 
     budgets = {name: int(cast(int, options[name])) for name in ("term_sentences", "english_sentences")}
-    terms = _technical_terms(refused, int(cast(int, options["minimum_term_count"])))
+    terms = ContextRing(_technical_terms(refused, int(cast(int, options["minimum_term_count"]))))
     if not any(budgets.values()) or not terms:
         return [], {"frames": 0, "scope": "not used"}
     weight = float(cast(float, options["sample_weight"]))
@@ -1627,8 +1665,8 @@ def letter_curriculum(source_rows: Sequence[CorpusRow], refused: frozenset[str],
     for key in ranked(sentences[1], "term")[:budgets["term_sentences"]]:
         prose, word, after, _ = sentences[1][key]
         identifier = "letter-term:" + hashlib.sha256(key.encode()).hexdigest()
-        term = terms[variant_choice(identifier, "term", len(terms))]
-        other = terms[variant_choice(identifier, "next-term", len(terms))]
+        term = terms.choice(identifier, "term")
+        other = terms.choice(identifier, "next-term")
         start = variant_choice(identifier, "message-start", LETTER_CURRICULUM_MESSAGE_START_MODULUS) == 0
         before = term + " " if start else prose + term + " "
         keys = translated(word, 1)
@@ -2241,7 +2279,9 @@ def provenance() -> dict[str, str]:
     for key in ("frozen_base", "warm_base"):
         base = cast(dict[str, object], json.loads(RECIPE.read_bytes())).get(key)
         if isinstance(base, dict):
-            result[str(base["artifact"])] = checksum(ROOT / str(base["artifact"]))
+            for named in (base, base.get("labels")):
+                if isinstance(named, dict):
+                    result[str(named["artifact"])] = checksum(ROOT / str(named["artifact"]))
     return result
 
 
@@ -2335,9 +2375,9 @@ def alone_labels(rows: Sequence[ActionRow], evidence: Mapping[str, float] | None
     The term counts the model reads can still settle one: `гш` alone is `ui` (counted_reading). With
     the lone-word head such a frame at a boundary that ends it (alone_question) is labelled by the
     counts - convert for the weaker reading, keep for the stronger. One the counts do not settle takes
-    the frozen model's own answer (`decide`), so the head moves nothing it has no evidence for: `ye`
-    sent alone is `ну` as before, and `ой` (counted in Russian prose and `jq` in technical text) is
-    not turned into Latin. Without an answer it waits as before.
+    the labelling base's own answer (`decide`, labelling_base), so the head moves nothing it has no
+    evidence for: `ye` sent alone is `ну` as before, and `ой` (counted in Russian prose and `jq` in
+    technical text) is not turned into Latin. Without an answer it waits as before.
     """
 
     if evidence is None:
@@ -2404,19 +2444,19 @@ def lone_word_curriculum(split: str, refused: frozenset[str], evidence: Mapping[
     return rows, {"frames": len(rows), "counts": dict(sorted(counts.items())), "sample_weight": float(evidence["sample_weight"]),
                   "scope": "lone_word frames of this split: every pair of two Latin letters whose Russian keys are letters too, "
                            "each reading alone in the field at a boundary other than a space (lone_word_curriculum), "
-                           "labelled by alone_labels with the frozen model's answer where the counts settle nothing."}
+                           "labelled by alone_labels with the labelling base's answer where the counts settle nothing."}
 
 
 _BASE_ACTIONS: dict[str, ContextModel] = {}
 
 
 def base_action(row: ActionRow, inputs: FitInputs) -> ContextAction | None:
-    """The frozen base's own action on a frame, or None when the profiles' answers differ."""
+    """The labelling base's own action on a frame (labelling_base), or None when the profiles' answers differ."""
 
     spec = cast(dict[str, object], inputs.options["frozen_base"])
-    key = str(spec["sha256"])
+    key = str(cast(dict[str, object], spec.get("labels") or spec)["sha256"])
     if key not in _BASE_ACTIONS:
-        _BASE_ACTIONS[key] = cast(ContextModel, frozen_base(inputs.options))
+        _BASE_ACTIONS[key] = labelling_base(inputs.options)
     base = _BASE_ACTIONS[key]
     actions = {base.predict(evidence(row, inputs.detectors[profile], inputs.ortho)).action for profile in inputs.profiles}
     return actions.pop() if len(actions) == 1 else None
@@ -2438,18 +2478,52 @@ def warm_base(options: Mapping[str, object]) -> ContextModel | None:
     return _named_base(options, "warm_base")
 
 
-def _named_base(options: Mapping[str, object], key: str) -> ContextModel | None:
-    value = options.get(key)
-    if value is None:
-        return None
-    spec = cast(dict[str, object], value)
+def labelling_base(options: Mapping[str, object]) -> ContextModel:
+    """The model whose answers label the lone-word frames the counts leave open (alone_labels): the frozen base, or the
+    model the recipe names under `frozen_base.labels`.
+
+    The carried lone-word head was fitted onto the corpus v37 model with its frames labelled by that model's answers, in
+    every split, CALIBRATION too. A frozen base that carries more heads (a shipped pair) answers some of those frames
+    otherwise (its short-message head reads Latin letters alone), and labelled by it the calibration would change
+    with the base: the recipe keeps the model the head was fitted with as the one that labels.
+    """
+
+    spec = cast(dict[str, object], options["frozen_base"])
+    labels = spec.get("labels")
+    return _pinned_model(cast(dict[str, object], labels), "labelling base") if labels is not None else cast(ContextModel, frozen_base(options))
+
+
+def frozen_record(options: Mapping[str, object], base: ContextModel) -> dict[str, object]:
+    """The seal's record of the frozen base, and of the model that labels the lone-word frames when the recipe names one."""
+
+    spec = cast(dict[str, object], options["frozen_base"])
+    record: dict[str, object] = {"artifact": spec["artifact"], "sha256": spec["sha256"], "model_version": base.version,
+                                 "conversion_threshold": base.conversion_threshold}
+    labels = spec.get("labels")
+    if labels is not None:
+        record["labels"] = {**cast(dict[str, object], labels), "model_version": labelling_base(options).version}
+    return record
+
+
+def _pinned_model(spec: Mapping[str, object], label: str) -> ContextModel:
+    """The action model of the file a recipe names, whose bytes its SHA-256 pins."""
+
     path = ROOT / str(spec["artifact"])
-    label = key.replace("_", " ")
     if checksum(path) != spec["sha256"]:
         raise ValueError(f"{label} artifact differs from the recipe")
     model = ContextModel.load(path)
     if model.feature_version != CONTEXT_ACTION_FEATURE_VERSION:
         raise ValueError(f"a {label} is an action model")
+    return model
+
+
+def _named_base(options: Mapping[str, object], key: str) -> ContextModel | None:
+    value = options.get(key)
+    if value is None:
+        return None
+    spec = cast(dict[str, object], value)
+    label = key.replace("_", " ")
+    model = _pinned_model(spec, label)
     carried = carried_prefixes(model)
     if key == "warm_base" and carried:
         raise ValueError(f"a {label} is an action model without kept-neighbour weights or heads")
@@ -2774,6 +2848,14 @@ def frame_chain(inputs: FitInputs, profile: str, split: str, rows: Sequence[Acti
             models=inputs.lexicons[False])
         result, reports["balance"] = balance_planned_mass(result)
         result.extend(tail)
+        if cast(dict[str, object], options.get("first_curriculum", NO_FIRST_CURRICULUM)).get("enabled"):
+            # The first-term head is fitted on its own curriculum alone. Other curricula hold frames of its class with
+            # older answers (a short English word opening a message waited for its next word: `щт`, `еру`, `ше`): once
+            # the head's own frames were learnt they alone moved its weights, its loss on DEVELOPMENT grew from the
+            # first epoch, and the head chose it and left `йк` in Code (candidate v67).
+            kept = [row for row in result if not outside_first_curriculum(row)]
+            reports["first_class_elsewhere"] = len(result) - len(kept)
+            result = kept
     if split == DEVELOPMENT:
         # The corpus leaves words of one letter out, so DEVELOPMENT holds no frame of the single-letter head's
         # class: the head's epoch is chosen on the same curriculum drawn from DEVELOPMENT's own sentences.
@@ -2802,6 +2884,13 @@ def frame_chain(inputs: FitInputs, profile: str, split: str, rows: Sequence[Acti
         lone, reports["lone_word"] = lone_word_curriculum(split, inputs.refused, evidence, partial(base_action, inputs=inputs))
         result = [*alone_labels(result, evidence, partial(base_action, inputs=inputs)), *lone]
     return result, reports
+
+
+def outside_first_curriculum(row: ActionRow) -> bool:
+    """A frame of the first-term head's class (first_question, a field a reader read) another curriculum framed."""
+
+    return (not row.identifier.startswith("first:") and row.field.role != "unknown"
+            and first_question(row.original, row.field.before, row.field.after))
 
 
 def tail_curricula(inputs: FitInputs) -> tuple[list[ActionRow], dict[str, object]]:
@@ -3085,10 +3174,7 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
                         **{name: value for prefix in own_checks if own_epoch[prefix]
                            for name, value in ((f"{OWN_EPOCH_HEADS[prefix][0]}_selected_epoch", own_epoch[prefix]),
                                                (f"{OWN_EPOCH_HEADS[prefix][0]}_loss", own_loss[prefix]))}},
-        "frozen_base": None if base is None else {
-            "artifact": cast(dict[str, object], options["frozen_base"])["artifact"],
-            "sha256": cast(dict[str, object], options["frozen_base"])["sha256"],
-            "model_version": base.version, "conversion_threshold": base.conversion_threshold},
+        "frozen_base": None if base is None else frozen_record(options, base),
         "warm_base": None if warm is None else {
             "artifact": cast(dict[str, object], options["warm_base"])["artifact"],
             "sha256": cast(dict[str, object], options["warm_base"])["sha256"],
