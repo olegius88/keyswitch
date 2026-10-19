@@ -4,6 +4,33 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- A term of two or three letters typed in the Russian layout alone at the start of a message, in a field KeySwitch read
+  and found empty, now converts at the space also when many Russian words end with it: `шь` becomes `im`, `уче` `ext`,
+  `ев` `td`, which 0.57.0 kept as typed, as the end of a word being finished. Such an ending never stands alone in a
+  field read empty: an edit that leaves one leaves letters before it or reopens its word, and the whole word is decided
+  (`моло` finished with `дые` stays `молодые`). A pause after letters many Russian words begin with is a pause inside a
+  word, and they stay: `уче`, a pause, `ба` is `учеба`. Where the field could not be read nothing changes.
+- The field batteries that hold a release to the owner's own typing start each stream in the field its log shows: the
+  text before the first word, whether the field could be read, the edits since the word before, and a word judged at a
+  pause going on as the next one. They used to start every stream in an empty field that was read, which 60% of the
+  streams did not; the replay now agrees with the logs on 99% of the stream starts, and on the logs of 0.53.0-0.56.0 it
+  reproduces 13 words those releases really typed that the old replay did not, and misses 2 it did.
+- A model fit carries every head of the shipped pair it does not change byte for byte and fits the changed head alone
+  (tools/carry_context_heads.py); the lone-word frames stay labelled by the model that head was fitted onto, so the
+  calibration and development frames do not change. Contexts are drawn from the corpus pools by consistent hashing.
+  Fitted again from zero, a head moved with the contexts its curriculum drew and the rows of the corpus: the code of
+  0.57.0 fitted again on a corpus eleven training rows short lost four hyphenated words of calibration, and a change
+  under test lost words in heads it never touched.
+- The context model `context-v3-9033af7cb039` (corpus v67) is the model of 0.57.0 with its first-term head fitted again;
+  every other weight is the same, and the prefix model `prefix-v2-bf3dc28f8567` retrained byte-identical. On the same
+  engine it decides calibration v67 as the model of 0.57.0 does (no calibration frame is of the first-term class); on
+  the owner's field batteries it breaks no word and changes none; of the developer-chat development messages it
+  restores 15 more started in the other layout and loses none. On the sealed test v67, read once, it kept all 175
+  correctly typed sequences and restored all 174 typed in the wrong layout without the early switch, against 173 for
+  the baseline pair, and 12 with it, as many as the baseline pair; on the sealed developer-chat test it restored one
+  message more started in the other layout and lost none. The same weights did not pass test v66, where the baseline
+  pair restored every row typed in the wrong layout.
+
 ## 0.57.0 — 2026-10-17
 
 - A term typed in the Russian layout converts the first time a message holds it: `зк` for `pr`, `ЗК,` for `PR?` at the
