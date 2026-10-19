@@ -41,6 +41,9 @@ from keyswitch.constants.training import (
 
 ROOT = Path(__file__).resolve().parents[1]
 RECIPE = ROOT / "model/prefix_v2/recipe.json"
+# The installed candidate and its seal, where tools/promote_context_action_pair.py puts them.
+INSTALLED_ARTIFACT = ROOT / "src/keyswitch/resources/models/prefix_policy_v1.json"
+INSTALLED_SEAL = ROOT / "model/prefix_v2/candidate-seal.json"
 ACTION_COUNT = len(ACTIONS)
 
 
@@ -446,12 +449,37 @@ def fit(output: Path, recipe_path: Path = RECIPE) -> dict[str, object]:
     return seal
 
 
+def reuse_installed(output: Path, recipe_path: Path = RECIPE) -> dict[str, object] | None:
+    """The installed candidate and its seal as the output of a fit, when the seal pins the inputs of this tree as they
+    stand; None when they differ, and a fit is due.
+
+    The fit is deterministic: every pair cycle since corpus v66 fitted the installed candidate again byte for byte while
+    its inputs stood, for a quarter of an hour to half an hour each time. A seal whose provenance is the inputs now,
+    whose artifact is the installed one and whose calibration passed is the seal that fit would write.
+    """
+
+    if output.exists():
+        raise ValueError("refusing to overwrite a prefix experiment")
+    seal = cast(dict[str, object], json.loads(INSTALLED_SEAL.read_bytes()))
+    if (seal.get("provenance") != source_provenance(recipe_path) or seal.get("candidate_sha256") != checksum(INSTALLED_ARTIFACT)
+            or seal.get("calibration_passed") is not True):
+        return None
+    output.mkdir(parents=True)
+    (output / "prefix-candidate.json").write_bytes(INSTALLED_ARTIFACT.read_bytes())
+    (output / "seal.json").write_bytes(INSTALLED_SEAL.read_bytes())
+    (output / "recipe.json").write_bytes(recipe_path.read_bytes())
+    return seal
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--recipe", type=Path, default=RECIPE)
+    parser.add_argument("--reuse-installed", action="store_true",
+                        help="take the installed candidate and its seal when the seal pins this tree's inputs; fit otherwise")
     args = parser.parse_args(argv)
-    seal = fit(args.output, args.recipe)
+    reused = reuse_installed(args.output, args.recipe) if args.reuse_installed else None
+    seal = reused if reused is not None else fit(args.output, args.recipe)
     print(json.dumps({key: seal[key] for key in ("model_version", "calibration_passed", "promotion_accepted", "independent_test_evaluated")}, indent=REPORT_JSON_INDENT))
     return 0 if seal["calibration_passed"] else PREFIX_CALIBRATION_FAILED_EXIT_CODE
 

@@ -52,7 +52,9 @@ SOURCE_PATHS = (
     "tools/auxiliary_runtime_evidence.py", "tools/context_corpus.py",
     "tools/context_evidence.py", "tools/reference_lexicon.py", "tools/context_frames.py",
     "tools/prefix_corpus.py", "tools/prefix_v2_corpus.py",
-    "src/keyswitch/__init__.py", "src/keyswitch/backend.py",
+    # Not src/keyswitch/__init__.py: it declares the version alone (test_prefix_v2_training), and pinned, every release
+    # left the installed candidate's seal stale with no input of the fit changed.
+    "src/keyswitch/backend.py",
     "src/keyswitch/context_action_features.py", "src/keyswitch/context_model.py",
     "src/keyswitch/detector.py", "src/keyswitch/early_switch.py",
     "src/keyswitch/history.py", "src/keyswitch/input_context.py",
