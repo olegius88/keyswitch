@@ -1,0 +1,116 @@
+{
+ "schema_version": 1,
+ "columns": [
+  "count",
+  "original",
+  "alternative",
+  "source_group",
+  "trigger",
+  "baseline_convert",
+  "source_known",
+  "target_known",
+  "score_delta",
+  "literal_tail",
+  "boundary_text",
+  "after_origin",
+  "source_typo",
+  "target_typo",
+  "source_opening",
+  "target_opening",
+  "inside",
+  "before",
+  "after",
+  "role",
+  "label"
+ ],
+ "sources": [
+  {
+   "file": "so-variable-train.jsonl.xz",
+   "sha256": "ee4dd76263e4a415d0dda11a2269c933d641dd49e1ae3bbbbab896e3841b813a",
+   "rows": 8163,
+   "unique": 5844,
+   "weight": 1.0,
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "typing": "8 000 messages with a Latin letter after a Cyrillic word and 4 000 Russian ones with a letter that is no word there, four typing modes; the variable head's questions alone",
+   "recipe": {
+    "messages": "so-variable-train.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 8000,
+    "russian_share": 0.5,
+    "seed": "capture-variable-train",
+    "questions": "variable"
+   }
+  },
+  {
+   "file": "so-variable-dev.jsonl.xz",
+   "sha256": "587a761ede43cc1de8b9a005c4887905b4ecd4a67a1b16c5645f274e76f1c545",
+   "rows": 2153,
+   "unique": 1505,
+   "weight": 1.0,
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "typing": "the same, from the development questions",
+   "recipe": {
+    "messages": "so-variable-dev.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 2000,
+    "russian_share": 0.5,
+    "seed": "capture-variable-dev",
+    "questions": "variable"
+   }
+  },
+  {
+   "file": "so-dotted-train.jsonl.xz",
+   "sha256": "0519f5dfa9773a2329f4b131ba5f668784cc21ad28c0068d4ad7a1af462f06a8",
+   "rows": 2015,
+   "unique": 1042,
+   "weight": 1.0,
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "typing": "5 000 messages with a Latin token of short parts joined by a slash and 5 000 Russian ones with an abbreviation of parts joined by dots, four typing modes; the dotted-abbreviation head's questions alone",
+   "recipe": {
+    "messages": "so-dotted-train.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 5000,
+    "russian_share": 1.0,
+    "seed": "capture-dotted-train",
+    "questions": "dotted"
+   }
+  },
+  {
+   "file": "so-dotted-dev.jsonl.xz",
+   "sha256": "ce3e8a90fd78da5113db1a807eebf2aa3a549a74a66adcd158b1297ceb1d386b",
+   "rows": 438,
+   "unique": 228,
+   "weight": 1.0,
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "typing": "the same, from the development questions",
+   "recipe": {
+    "messages": "so-dotted-dev.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 1200,
+    "russian_share": 1.0,
+    "seed": "capture-dotted-dev",
+    "questions": "dotted"
+   }
+  }
+ ]
+}
