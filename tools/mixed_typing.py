@@ -102,10 +102,10 @@ CAPTURED_FIELDS: Final = (
 )
 
 # The classes a capture recipe may keep alone ("questions"), by the head that answers them: a file of one head's
-# questions stays the size of its class. Each reads the token, its other reading and the text before it.
-CAPTURED_QUESTIONS: Final[dict[str, Callable[[str, str, str], bool]]] = {
+# questions stays the size of its class. Each reads the token, its other reading, the text before it and the trigger.
+CAPTURED_QUESTIONS: Final[dict[str, Callable[[str, str, str, str], bool]]] = {
     "variable": variable_question,
-    "dotted": lambda original, alternative, _before: dotted_question(original, alternative),
+    "dotted": lambda original, alternative, _before, _trigger: dotted_question(original, alternative),
 }
 
 Job = tuple[int, str, str, int, str]
@@ -717,13 +717,13 @@ def capture(manifest: Path, messages: Path, model: Path, only: str | None, verif
         labels = set(cast(list[str], recipe["labels"])) if recipe.get("labels") else None
         # A recipe may keep the questions of one head's class alone.
         question = CAPTURED_QUESTIONS[str(recipe["questions"])] if recipe.get("questions") else None
-        before = len(CAPTURED_FIELDS)
+        before, trigger = len(CAPTURED_FIELDS), CAPTURED_FIELDS.index("trigger")
         seen: Counter[str] = Counter()
         with ProcessPoolExecutor(workers, initializer=_init, initargs=(str(model),)) as executor:
             for rows in executor.map(_capture, jobs, chunksize=MIXED_TYPING_CHUNK_JOBS):
                 for row in rows:
                     if (row[0] != row[1] and (labels is None or row[-1] in labels)
-                            and (question is None or question(str(row[0]), str(row[1]), str(row[before])))):
+                            and (question is None or question(str(row[0]), str(row[1]), str(row[before]), str(row[trigger])))):
                         seen[json.dumps(row, ensure_ascii=False, separators=(",", ":"))] += 1
         data = lzma.compress("".join(f"[{count},{row[1:]}\n" for row, count in sorted(seen.items())).encode(),
                              preset=MIXED_CAPTURE_XZ_PRESET)

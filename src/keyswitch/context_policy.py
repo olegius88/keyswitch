@@ -300,7 +300,8 @@ class ContextPolicy:
         # variable typed there (`ч` for `x`) or a letter meant as written (`да я про то ч`).
         action_model = self.model.feature_version == CONTEXT_ACTION_FEATURE_VERSION
         learned = ((self.model.answers_letters and letter_question(baseline.original, alternative, field.before))
-                   or (self.model.answers_variables and variable_question(baseline.original, alternative, field.before)))
+                   or (self.model.answers_variables
+                       and variable_question(baseline.original, alternative, field.before, trigger)))
         lone = (action_model and sum(char.isalpha() for char in baseline.original) == 1
                 and all(char.isalpha() or char.isdigit() for char in baseline.original) and not learned)
         slang = action_model and russian_slang(baseline.original, alternative, baseline.source_group, source.known)

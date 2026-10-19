@@ -69,16 +69,60 @@
    }
   },
   {
-   "file": "so-dotted-train.jsonl.xz",
-   "sha256": "0519f5dfa9773a2329f4b131ba5f668784cc21ad28c0068d4ad7a1af462f06a8",
-   "rows": 2015,
-   "unique": 1042,
+   "file": "so-dotted-latin-train.jsonl.xz",
+   "sha256": "c7ca96ba9925dae5e071b59650e168ab2317a0709d26aea9b7f9f3201457fb18",
+   "rows": 774,
+   "unique": 367,
    "weight": 1.0,
    "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
    "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
-   "typing": "5 000 messages with a Latin token of short parts joined by a slash and 5 000 Russian ones with an abbreviation of parts joined by dots, four typing modes; the dotted-abbreviation head's questions alone",
+   "typing": "every message with a Latin token of the dotted-abbreviation head's class (`n/a`, `I/O`, `usr/bin`, `src/app/`: 2 814), four typing modes; the dotted-abbreviation head's questions alone",
    "recipe": {
-    "messages": "so-dotted-train.jsonl.gz",
+    "messages": "so-dotted-latin-train.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 3000,
+    "russian_share": 1.0,
+    "seed": "capture-so-dotted-latin-train",
+    "questions": "dotted"
+   }
+  },
+  {
+   "file": "so-dotted-latin-dev.jsonl.xz",
+   "sha256": "2cc556b2cc32641cc507cf04e0d1fe30fc274c97d876d8d797ee8a954a5b6b86",
+   "rows": 228,
+   "unique": 101,
+   "weight": 1.0,
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "typing": "every message with a Latin token of the dotted-abbreviation head's class (717), four typing modes; the dotted-abbreviation head's questions alone",
+   "recipe": {
+    "messages": "so-dotted-latin-dev.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 1000,
+    "russian_share": 1.0,
+    "seed": "capture-so-dotted-latin-dev",
+    "questions": "dotted"
+   }
+  },
+  {
+   "file": "so-dotted-russian-train.jsonl.xz",
+   "sha256": "4f058836d0488f1114a8745678c38183ab9bbaa41bf2b644752a408b40bbbabd",
+   "rows": 2057,
+   "unique": 1102,
+   "weight": 1.0,
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "typing": "5 000 mixed and 5 000 Russian messages with a Russian abbreviation of two or more parts joined by dots and no Latin token of the class, four typing modes; the dotted-abbreviation head's questions alone",
+   "recipe": {
+    "messages": "so-dotted-russian-train.jsonl.gz",
     "kinds": [
      "comment",
      "title",
@@ -86,21 +130,21 @@
     ],
     "count": 5000,
     "russian_share": 1.0,
-    "seed": "capture-dotted-train",
+    "seed": "capture-so-dotted-russian-train",
     "questions": "dotted"
    }
   },
   {
-   "file": "so-dotted-dev.jsonl.xz",
-   "sha256": "ce3e8a90fd78da5113db1a807eebf2aa3a549a74a66adcd158b1297ceb1d386b",
-   "rows": 438,
-   "unique": 228,
+   "file": "so-dotted-russian-dev.jsonl.xz",
+   "sha256": "18ff6fabe781f055d63b9932dfe24834bc5603c8592abe4e4a046fc2e04abe47",
+   "rows": 494,
+   "unique": 271,
    "weight": 1.0,
    "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
    "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
-   "typing": "the same, from the development questions",
+   "typing": "1 200 mixed and 1 200 Russian messages with a Russian abbreviation of two or more parts joined by dots and no Latin token of the class, four typing modes; the dotted-abbreviation head's questions alone",
    "recipe": {
-    "messages": "so-dotted-dev.jsonl.gz",
+    "messages": "so-dotted-russian-dev.jsonl.gz",
     "kinds": [
      "comment",
      "title",
@@ -108,7 +152,7 @@
     ],
     "count": 1200,
     "russian_share": 1.0,
-    "seed": "capture-dotted-dev",
+    "seed": "capture-so-dotted-russian-dev",
     "questions": "dotted"
    }
   }

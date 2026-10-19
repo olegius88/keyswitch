@@ -19,6 +19,7 @@ import select_capture_messages as selection  # noqa: E402
 import train_context_action_model as trainer  # noqa: E402
 from train_context_model import CAPTURED_COLUMNS  # noqa: E402
 from fixture_values.counts import CAPTURE_FIXTURE_LEFT_OUT_QUESTION, CAPTURE_FIXTURE_QUESTIONS  # noqa: E402
+from fixture_values.clock import PAUSE_TRIGGER_OFFSET_SECONDS  # noqa: E402
 from keyswitch.constants.model_protocol import DEVELOPMENT, TRAIN  # noqa: E402
 from keyswitch.constants.models import (  # noqa: E402
     CONTEXT_ACTION_FEATURE_VERSION, DOTTED_FEATURE_PREFIX, KEPT_FEATURE_PREFIX, VARIABLE_FEATURE_PREFIX,
@@ -44,15 +45,19 @@ def prefixes(features: dict[str, float]) -> set[str]:
 
 class VariableClassTests(unittest.TestCase):
     def test_the_class_is_a_letter_of_the_russian_layout_after_a_word_of_cyrillic_letters(self) -> None:
-        for original, alternative, before in (("ч", "x", "для "), ("Т", "N", "время "), ("т", "n", "и ")):
+        for original, alternative, before, trigger in (("ч", "x", "для ", "space"), ("Т", "N", "время ", "punctuation"),
+                                                       ("т", "n", "и ", "space")):
             with self.subTest(original=original, before=before):
-                self.assertTrue(variable_question(original, alternative, before))
+                self.assertTrue(variable_question(original, alternative, before, trigger))
         # A Russian word of one letter, a word with a digit or Latin letters before it, no space before it, a letter
         # whose other reading is a sign, two letters, nothing before it.
         for original, alternative, before in (("и", "b", "для "), ("ч", "x", "2 "), ("ч", "x", "value "), ("ч", "x", "для"),
                                               ("б", ",", "если "), ("чт", "xn", "для "), ("ч", "x", "")):
             with self.subTest(original=original, before=before):
-                self.assertFalse(variable_question(original, alternative, before))
+                self.assertFalse(variable_question(original, alternative, before, "space"))
+        # At a pause the letter may open a word still being typed (`Ф` of `AmoCRM_v2`): no frame of the head's is one.
+        self.assertFalse(variable_question("Ф", "A", "для ", "pause"))
+        self.assertNotIn(VARIABLE_FEATURE_PREFIX, prefixes(extract_action_features(evidence("Ф", "A", 1, "для ", trigger="pause"))))
 
     def test_the_head_reads_the_letter_the_boundary_and_the_signs_of_code_before_it(self) -> None:
         plain = extract_action_features(evidence("ч", "x", 1, "для "))
@@ -77,20 +82,26 @@ class VariableClassTests(unittest.TestCase):
 
 class DottedClassTests(unittest.TestCase):
     def test_the_class_is_a_token_typed_with_a_slash_that_reads_as_letter_groups_joined_by_dots(self) -> None:
-        for original, alternative in (("n/r/", "т.к."), ("cv/", "см."), ("n/a", "т.ф"), ("l/,/", "д.б."), ("N/t/", "Т.е.")):
+        for original, alternative in (("n/r/", "т.к."), ("n/a", "т.ф"), ("l/,/", "д.б."), ("N/t/", "Т.е."), ("usr/bin", "гык.ишт")):
             with self.subTest(original=original):
                 self.assertTrue(dotted_question(original, alternative))
-        for original, alternative in (("src/main", "ыкс.ьфшт"), ("1/2", "1.2"), ("т.к.", "n/r/"), ("nr", "тк")):
+        # One group of letters is no member: `dev/` of a path (the owner's typing) reads `вум.` as `cv/` reads `см.`.
+        for original, alternative in (("src/main", "ыкс.ьфшт"), ("1/2", "1.2"), ("т.к.", "n/r/"), ("nr", "тк"), ("cv/", "см."),
+                                      ("dev/", "вум.")):
             with self.subTest(original=original):
                 self.assertFalse(dotted_question(original, alternative))
 
     def test_the_head_reads_the_reading_its_shape_and_the_words_around_it(self) -> None:
         features = extract_action_features(evidence("n/r/", "т.к.", 0, "IDisposable ", "это", "field"))
         self.assertEqual(prefixes(features), {DOTTED_FEATURE_PREFIX})
-        for name in ("reading:т.к.", "shape:1-1:1", "case:lower", "before:en", "after:field:ru",
-                     "reading:т.к.:before:en", "shape:1-1:1:after:field:ru"):
+        for name in ("reading:т.к.", "shape:1-1:1", "case:lower", "before:en", "after:field:ru", "reading:т.к.:before:en",
+                     "shape:1-1:1:after:field:ru", "russian:4", "latin:3", "russian:4:latin:3:before:en"):
             self.assertIn(DOTTED_FEATURE_PREFIX + name, features)
         self.assertIn(DOTTED_FEATURE_PREFIX + "before:start", extract_action_features(evidence("N/t/", "Т.е.", 0, "")))
+        # The parts of a path are no Russian words; a part that is no word at all is rarer than any.
+        path = extract_action_features(evidence("usr/bin", "гык.ишт", 0, "в "))
+        self.assertIn(DOTTED_FEATURE_PREFIX + "russian:0:latin:1", path)
+        self.assertIn(DOTTED_FEATURE_PREFIX + "latin:na", extract_action_features(evidence("l/,/", "д.б.", 0, "")))
 
 
 class VariableHeadEngineTests(ContextEngineTests):
@@ -106,6 +117,15 @@ class VariableHeadEngineTests(ContextEngineTests):
         self.reset_editor(1)
         self.type("подробнее ч ", group=1)
         self.assertEqual(self.backend.text, "подробнее x ")
+
+    def test_a_letter_left_at_a_pause_may_open_a_word_and_still_needs_a_rule(self) -> None:
+        # `Ф` of `AmoCRM_v2`, a pause after it: the head has no frame of a letter at a pause (the owner's typing, 14.10).
+        self.reset_editor(1)
+        self.type("для Ф", group=1)
+        last = self.engine._last_word_input_at
+        assert last is not None
+        self.engine._maybe_correct_after_pause(now=last + PAUSE_TRIGGER_OFFSET_SECONDS)
+        self.assertEqual(self.backend.text, "для Ф")
 
     def test_outside_the_heads_class_a_lone_letter_still_needs_a_rule(self) -> None:
         self.reset_editor(1)
@@ -155,20 +175,28 @@ class CapturedHeadCurriculumTests(unittest.TestCase):
         self.assertTrue(trainer.head_question("ч", "x", "для ", "равно", "space", "kept_next_word", heads))
         self.assertTrue(trainer.head_question("n/r/", "т.к.", "IDisposable ", "", "space", "none", heads))
         self.assertFalse(trainer.head_question("ч", "x", "для ", "", "space", "none", frozenset()))
+        self.assertFalse(trainer.head_question("ч", "x", "для ", "", "pause", "none", heads))
+        self.assertFalse(trainer.head_question("cv/", "см.", "", "", "space", "none", heads))
 
 
 class CaptureSelectionTests(unittest.TestCase):
     def test_a_capture_keeps_the_questions_of_one_heads_class(self) -> None:
-        self.assertTrue(mixed_typing.CAPTURED_QUESTIONS["variable"]("ч", "x", "для "))
-        self.assertFalse(mixed_typing.CAPTURED_QUESTIONS["variable"]("и", "b", "для "))
-        self.assertTrue(mixed_typing.CAPTURED_QUESTIONS["dotted"]("n/r/", "т.к.", ""))
+        self.assertTrue(mixed_typing.CAPTURED_QUESTIONS["variable"]("ч", "x", "для ", "space"))
+        self.assertFalse(mixed_typing.CAPTURED_QUESTIONS["variable"]("и", "b", "для ", "space"))
+        self.assertFalse(mixed_typing.CAPTURED_QUESTIONS["variable"]("ч", "x", "для ", "pause"))
+        self.assertTrue(mixed_typing.CAPTURED_QUESTIONS["dotted"]("n/r/", "т.к.", "", "space"))
 
     def test_messages_with_a_token_of_the_class_are_chosen_by_question(self) -> None:
         self.assertTrue(selection.variable_token("для", "x,"))
         self.assertTrue(selection.variable_token("для", "ч"))
         self.assertFalse(selection.variable_token("для", "и") or selection.variable_token("value", "x") or selection.variable_token("", "x"))
-        self.assertTrue(selection.dotted_token("", "(т.к.") and selection.dotted_token("", "n/a,"))
-        self.assertFalse(selection.dotted_token("", "все.") or selection.dotted_token("", "src/main"))
+        # The head's own predicate chooses: Russian tokens by their keys in the English layout, Latin ones as written.
+        for token in ("(т.к.", "n/a,", "д.б.", "usr/bin", "src/app/"):
+            with self.subTest(token=token):
+                self.assertTrue(selection.dotted_token("", token))
+        for token in ("все.", "src/main", "dev/", "1/2"):
+            with self.subTest(token=token):
+                self.assertFalse(selection.dotted_token("", token))
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             messages, members = root / "so-train.jsonl.gz", root / "devchat-dev.members.jsonl.gz"

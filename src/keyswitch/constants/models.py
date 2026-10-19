@@ -163,14 +163,19 @@ FIRST_FEATURE_PREFIX: Final = "first|"
 # Russian prose it is a Latin variable typed in the Russian layout (`т` for `n`, `ч` for `x`); in chat it is a letter
 # meant as written (`т.` of `и т. д.`, a word broken off).
 VARIABLE_FEATURE_PREFIX: Final = "variable|"
+# The boundaries the variable head answers at: a space or a sign ends the letter. At a pause the letter may be the first
+# of a word still being typed (`Ф` of `AmoCRM_v2`, the owner's typing of 14.10.2026), a question the head has no frame
+# of; there the frozen model and the lone-letter refusal decide, as they did before the head.
+VARIABLE_HEAD_TRIGGERS: Final = ("space", "punctuation")
 # Characters of the text before a one-letter variable the variable head reads for signs of code, and the signs.
 VARIABLE_CODE_CONTEXT_CHARACTERS: Final = 40
 VARIABLE_CODE_SIGNS: Final = "=<>+*/()[]{}_^%"
-# A token typed in the English layout whose Cyrillic reading is short groups of letters joined by dots has evidence of
-# its own under this prefix: the dotted-abbreviation head (context_action_features.dotted_question); `n/r/` is `т.к.`.
+# A token typed in the English layout whose Cyrillic reading is two or more short groups of letters joined by dots has
+# evidence of its own under this prefix: the dotted-abbreviation head (context_action_features.dotted_question); `n/r/`
+# is `т.к.`.
 DOTTED_FEATURE_PREFIX: Final = "dotted|"
-# Letters a part of a dotted abbreviation holds at most (`т.к.`, `д.б.`, `см.`, `др.`): a longer part is a word, and the
-# token one of a path (`src/main`).
+# Letters a part of a dotted abbreviation holds at most (`т.к.`, `д.б.`, `т.е.`): a longer part is a word, and the token
+# one of a path (`src/main`).
 DOTTED_PART_MAX_LETTERS: Final = 3
 # The "length" feature buckets every word length from here up together (schemas 2 and 3).
 ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: Final = 6

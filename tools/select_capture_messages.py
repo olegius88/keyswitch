@@ -10,8 +10,14 @@ messages of one question are typed for one split only:
 
 - variable: a one-letter token right after a word of Cyrillic letters only: a Latin letter (a variable in Russian
   prose: `от a до b`) or a Cyrillic letter that is no Russian word of one letter (`т.` of `и т. д.`, `п.` of a list);
-- dotted: a Russian abbreviation of parts joined by dots (`т.к.`, `т.е.`, `т.д.`, `д.б.`) or a Latin token of short
-  parts joined by `/` (`n/a`, `I/O`, `w/o`); a short word ending a sentence (`см.`, `все.`) stands in those messages too.
+- dotted: a token whose keys in the English layout are a question of the dotted-abbreviation head
+  (context_action_features.dotted_question, the predicate the engine asks): a Russian abbreviation of two or more parts
+  joined by dots (`т.к.`, `т.е.`, `д.б.`) or a Latin token of short parts joined by `/` (`n/a`, `I/O`, `usr/bin`,
+  `src/app/`). The predicate itself chooses, so the messages typed hold every kind of token the head is asked about,
+  the Latin ones it keeps among them (a selector of its own once left out `src/app/`, and the head never saw one kept).
+  The two sides have classes of their own, a message in one of them only: `dotted-latin` (a Latin token of the class:
+  every one of them can be typed, they are few) and `dotted-russian` (a Russian abbreviation and no Latin token of the
+  class: the abbreviations are few and repeat, a sample of them is typed).
 
     python3 tools/select_capture_messages.py --messages <so-train.jsonl.gz> --members <devchat-*.members.jsonl.gz> ... \\
         --class variable --development-share 0.2 --out <dir>
@@ -30,13 +36,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from keyswitch.constants.file_formats import HEXADECIMAL_BASE  # noqa: E402
-from keyswitch.constants.models import DOTTED_PART_MAX_LETTERS  # noqa: E402
 from keyswitch.constants.training import DETERMINISTIC_CHOICE_HEX_DIGITS  # noqa: E402
+from keyswitch.context_action_features import dotted_question  # noqa: E402
+from keyswitch.layouts import LayoutPair  # noqa: E402
 from keyswitch.short_words import TRUSTED_SINGLE_LETTER_WORDS  # noqa: E402
 
 TRAILING_SIGNS = ".,;:!?)"
-RUSSIAN_DOTTED = re.compile(rf"[а-яё]{{1,{DOTTED_PART_MAX_LETTERS}}}(?:\.[а-яё]{{1,{DOTTED_PART_MAX_LETTERS}}})+\.?", re.IGNORECASE)
-LATIN_SLASHED = re.compile(rf"[a-z]{{1,{DOTTED_PART_MAX_LETTERS}}}(?:/[a-z]{{1,{DOTTED_PART_MAX_LETTERS}}})+", re.IGNORECASE)
+LAYOUTS = LayoutPair()
+# The key of the Russian dot (and of its comma, with Shift) prints `/` (`?`) in the English layout; LayoutPair maps the
+# keys of letters and of the English `,` and `.` (`б`, `ю`).
+RUSSIAN_SIGN_KEYS = str.maketrans({".": "/", ",": "?"})
+ENGLISH_SIGN_KEYS = str.maketrans({"/": ".", "?": ","})
 
 
 def cyrillic(char: str) -> bool:
@@ -53,13 +63,27 @@ def variable_token(previous: str, token: str) -> bool:
 
 
 def dotted_token(previous: str, token: str) -> bool:
-    """A Russian abbreviation with dots, or a Latin token of short parts joined by `/`."""
+    """A token the dotted-abbreviation head is asked about once typed in the English layout: a Latin token as written,
+    with its Cyrillic reading; a Cyrillic one by its keys there (`т.к.` is `n/r/`)."""
 
     core = token.lstrip("(").rstrip(",;:)!?")
-    return RUSSIAN_DOTTED.fullmatch(core) is not None or LATIN_SLASHED.fullmatch(core) is not None
+    if core.isascii():
+        return dotted_question(core, LAYOUTS.translate(core, "us", "ru").translate(ENGLISH_SIGN_KEYS))
+    return dotted_question(LAYOUTS.translate(core.translate(RUSSIAN_SIGN_KEYS), "ru", "us"), core)
 
 
-CLASSES: dict[str, Callable[[str, str], bool]] = {"variable": variable_token, "dotted": dotted_token}
+def latin_dotted_token(previous: str, token: str) -> bool:
+    return token.isascii() and dotted_token(previous, token)
+
+
+def russian_dotted_token(previous: str, token: str) -> bool:
+    return not token.isascii() and dotted_token(previous, token)
+
+
+CLASSES: dict[str, Callable[[str, str], bool]] = {"variable": variable_token, "dotted": dotted_token,
+                                                  "dotted-latin": latin_dotted_token, "dotted-russian": russian_dotted_token}
+# A message of a class named here is no message of the class it names: it holds a token of that one too.
+EXCLUDED_BY: dict[str, str] = {"dotted-russian": "dotted-latin"}
 
 
 def holds(text: str, token_of_class: Callable[[str, str], bool]) -> bool:
@@ -83,6 +107,7 @@ def split_of(question: int, development_share: float) -> str:
 
 def select(messages: Path, members: Sequence[Path], name: str, development_share: float, out: Path) -> dict[str, object]:
     token_of_class = CLASSES[name]
+    other = CLASSES[EXCLUDED_BY[name]] if name in EXCLUDED_BY else None
     left_out = excluded_questions(members)
     out.mkdir(parents=True, exist_ok=True)
     counts: dict[str, int] = {"train": 0, "dev": 0, "left_out": 0}
@@ -92,7 +117,7 @@ def select(messages: Path, members: Sequence[Path], name: str, development_share
         with gzip.open(messages, "rt", encoding="utf-8") as source:
             for line in source:
                 row = json.loads(line)
-                if not holds(str(row["text"]), token_of_class):
+                if not holds(str(row["text"]), token_of_class) or (other is not None and holds(str(row["text"]), other)):
                     continue
                 if int(row["qid"]) in left_out:
                     counts["left_out"] += 1

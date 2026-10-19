@@ -620,7 +620,7 @@ def heads_question(original: str, before: str, after: str, trigger: str) -> bool
             or start_question(original, original, before, after) or letter_question(original, original, before)
             or abbreviation_question(original, original, before) or latin_abbreviation_question(original, original, before)
             or unknown_question(original, before) or joined_question(original) or term_question(original, before)
-            or brief_question(original, before, after) or variable_question(original, original, before)
+            or brief_question(original, before, after) or variable_question(original, original, before, trigger)
             or ("/" in original and original.isascii()))
 
 

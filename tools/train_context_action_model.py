@@ -2380,8 +2380,9 @@ def variable_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: f
     letters (variable_question), converted where a Latin variable was typed in the Russian layout (`ч` for `x`) and kept
     where the letter was meant as written (`т.` of `и т. д.`, chat of UD Taiga)."""
 
-    return captured_head_curriculum(split, options, lambda item: variable_question(item.original, item.alternative, item.field.before),
-                                    "variable")
+    return captured_head_curriculum(
+        split, options, lambda item: variable_question(item.original, item.alternative, item.field.before, item.trigger),
+        "variable")
 
 
 def dotted_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
@@ -2623,7 +2624,7 @@ def head_question(original: str, alternative: str, before: str, after: str, trig
     asks a question of a head or of the kept-neighbour question they name."""
 
     letter = LETTER_FEATURE_PREFIX in prefixes and letter_question(original, alternative, before)
-    variable = VARIABLE_FEATURE_PREFIX in prefixes and variable_question(original, alternative, before)
+    variable = VARIABLE_FEATURE_PREFIX in prefixes and variable_question(original, alternative, before, trigger)
     if origin == "kept_next_word":
         return KEPT_FEATURE_PREFIX in prefixes or letter or variable
     return (letter or (CAPITALS_FEATURE_PREFIX in prefixes and capitals_question(original, before))
