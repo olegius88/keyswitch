@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.58.0 — 2026-10-19
+
 - A term of two or three letters typed in the Russian layout alone at the start of a message, in a field KeySwitch read
   and found empty, now converts at the space also when many Russian words end with it: `шь` becomes `im`, `уче` `ext`,
   `ев` `td`, which 0.57.0 kept as typed, as the end of a word being finished. Such an ending never stands alone in a
