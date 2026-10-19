@@ -24,6 +24,10 @@ STRANDED_TERM_MAX_WORDS: Final = 3
 # prints a letter or `№` there makes the letter part of a token, an initial or a name: `J. Smith` read
 # in the Russian layout is `Ою Smith`, `C# rocks` is `С№ rocks`, and English opens with those.
 OPENING_LETTER_FOLLOWING_SIGNS: Final[frozenset[str]] = frozenset(",.?!:;)-")
+# The quotes a Latin token typed in the Russian layout may open with (the `Э` and `э` keys), and the signs one may stand
+# after its closing quote (`"legacy",`), for the word-shape refusal (context_policy.quoted_or_scoped).
+WORD_QUOTES: Final = "\"'"
+QUOTED_WORD_CLOSING_SIGNS: Final = ".,:;!?"
 # Fewest letters left of a word once the letters at its end that are signs in the other layout are
 # set aside (`руддщб` is `hello,`): `чё` without `ё` is a lone `ч`, and one letter is no word to judge.
 REPLAYED_SIGNS_MIN_STEM_LETTERS: Final = 2
