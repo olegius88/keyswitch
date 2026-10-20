@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections import defaultdict
 from array import array
 from dataclasses import replace
+import ast
 import gzip
 import hashlib
 import json
@@ -38,6 +39,7 @@ from train_prefix_v2_model import (
     fit,
     importance,
     recipe,
+    reuse_installed,
     sequence_metrics,
     artifact_payload,
     assess_prefix_epoch,
@@ -325,6 +327,39 @@ class PrefixV2TrainingTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "overwrite"):
                 fit(Path(temporary))
         provenance.assert_not_called()
+
+    def test_an_installed_candidate_whose_seal_pins_this_tree_is_reused(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            artifact, seal_path, recipe_path = root / "prefix.json", root / "seal.json", root / "recipe.json"
+            artifact.write_bytes(b"{}")
+            recipe_path.write_bytes(b"{}")
+            pins = {"fixture.py": hashlib.sha256(b"value = 1\n").hexdigest()}
+            seal = {"provenance": pins, "candidate_sha256": hashlib.sha256(b"{}").hexdigest(), "calibration_passed": True}
+            with (patch("train_prefix_v2_model.INSTALLED_ARTIFACT", artifact), patch("train_prefix_v2_model.INSTALLED_SEAL", seal_path),
+                  patch("train_prefix_v2_model.source_provenance", return_value=pins)):
+                changes: tuple[dict[str, object], ...] = ({"provenance": {}}, {"calibration_passed": False}, {"candidate_sha256": "0"})
+                for changed in changes:
+                    seal_path.write_text(json.dumps({**seal, **changed}), encoding="utf-8")
+                    self.assertIsNone(reuse_installed(root / "unused", recipe_path))
+                    self.assertFalse((root / "unused").exists())
+                seal_path.write_text(json.dumps(seal), encoding="utf-8")
+                self.assertEqual(reuse_installed(root / "reused", recipe_path), seal)
+                self.assertEqual((root / "reused/prefix-candidate.json").read_bytes(), artifact.read_bytes())
+                self.assertEqual((root / "reused/seal.json").read_bytes(), seal_path.read_bytes())
+                with self.assertRaisesRegex(ValueError, "overwrite"):
+                    reuse_installed(root / "reused", recipe_path)
+
+    def test_the_package_initialiser_declares_the_version_alone(self) -> None:
+        # The prefix fit does not pin src/keyswitch/__init__.py (prefix_v2_corpus.SOURCE_PATHS): every release changes
+        # the version there. Code added to it would run in every fit and must be pinned again.
+        tree = ast.parse((Path(__file__).resolve().parents[1] / "src/keyswitch/__init__.py").read_text(encoding="utf-8"))
+        docstring, version = tree.body
+        self.assertIsInstance(docstring, ast.Expr)
+        self.assertIsInstance(version, ast.Assign)
+        assert isinstance(version, ast.Assign)
+        self.assertEqual([ast.unparse(target) for target in version.targets], ["__version__"])
+        self.assertIsInstance(version.value, ast.Constant)
 
     def test_source_archive_preserves_exact_bytes_and_rejects_changed_input(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

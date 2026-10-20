@@ -38,6 +38,8 @@ from .constants.models import (
     BRIEF_SETTLED_DOMINANCE,
     BRIEF_SETTLED_MIN_COUNT,
     BRIEF_SETTLED_OTHER_MAXIMUM,
+    DOTTED_FEATURE_PREFIX,
+    DOTTED_PART_MAX_LETTERS,
     FIRST_FEATURE_PREFIX,
     CAPITALS_FEATURE_PREFIX,
     CAPITALS_HEAD_MAX_LETTERS,
@@ -54,6 +56,10 @@ from .constants.models import (
     START_FEATURE_PREFIX,
     START_HEAD_MIN_LETTERS,
     TERM_FEATURE_PREFIX,
+    VARIABLE_CODE_CONTEXT_CHARACTERS,
+    VARIABLE_CODE_SIGNS,
+    VARIABLE_FEATURE_PREFIX,
+    VARIABLE_HEAD_TRIGGERS,
     TERM_HEAD_ENDING_BUCKET_MAX,
     TERM_HEAD_ENDING_LETTERS,
     TERM_HEAD_LEADING_SIGN,
@@ -401,6 +407,9 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
             # at p=1.00 for `b` before `redis` in `nats b redis` (`nats и redis`, the owner's typing).
             kept.update({LETTER_FEATURE_PREFIX + name: value for name, value in list(kept.items())})
             kept.update(_letter_evidence(item, direction))
+        if variable_question(item.original, item.alternative, item.field.before, item.trigger):
+            # Nor a letter after a word of Cyrillic letters: the variable head answers there too.
+            kept.update(_variable_evidence(item))
         return kept
     result = {name: value for name, value in features.items() if value}
     if capitals_question(item.original, item.field.before):
@@ -467,6 +476,16 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         # one no lexicon of the profile knows as typed: a pair both readings count (`ij` and `шо`, `ds` and `вы`) stays
         # with the frozen model, which turned no Russian reply into Latin (candidate v63e).
         result.update(_brief_evidence(item))
+    if variable_question(item.original, item.alternative, item.field.before, item.trigger):
+        # The class the variable head answers: a letter of the Russian layout after a word of Cyrillic letters that is no
+        # Russian word of one letter. Every single-letter row of the corpus sits in quarantine, and the frozen model's
+        # verdict on such a letter is no opinion: it turned `ч` into `x` in the owner's chat and kept `т` for `n` in
+        # `результат n - 1`; the lone-letter refusal (context_policy) kept the conversions it got right too.
+        result.update(_variable_evidence(item))
+    if dotted_question(item.original, item.alternative):
+        # The class the dotted-abbreviation head answers: no frame of the corpus types `т.к.` in the English layout, and
+        # the frozen model kept `n/r/` at p=1.00 as a path would be kept (the developer-chat development set).
+        result.update(_dotted_evidence(item))
     known = item.source_known and not _tail_like(item.original)
     if first_question(item.original, item.field.before, item.field.after) and item.field.role != "unknown" and not known:
         # The class the first-term head answers: a term of up to three letters alone in a field a reader read empty,
@@ -915,6 +934,98 @@ def _first_evidence(item: ContextEvidence) -> dict[str, float]:
     names = ("", letters, counts, f"{ending}:{letters}", start, f"{start}:{letters}", after, f"{after}:{letters}",
              f"{after}:{counts}")
     return {f"{FIRST_FEATURE_PREFIX}{boundary}{':' if name else ''}{name}": 1.0 for name in names}
+
+
+def _cyrillic_letter(char: str) -> bool:
+    return "а" <= char.casefold() <= "я" or char.casefold() == "ё"
+
+
+def variable_question(original: str, alternative: str, before: str, trigger: str) -> bool:
+    """One letter typed in the Russian layout that is no Russian word of one letter (short_words.TRUSTED_SINGLE_LETTER_WORDS),
+    whose Latin reading is a letter too, right after a word of Cyrillic letters and a space, ended by a space or a sign
+    (VARIABLE_HEAD_TRIGGERS): a Latin variable typed in the Russian layout in technical prose (`т` for `n` in
+    `результат n - 1`, `ч` for `x`), or a letter meant as written (`т.` of `и т. д.`, a word broken off in chat). After a
+    word of Latin letters the single-letter head answers (letter_question); with no word before it, or at a pause, the
+    frozen model."""
+
+    from .short_words import TRUSTED_SINGLE_LETTER_WORDS
+
+    if (len(original) != 1 or not _cyrillic_letter(original) or len(alternative) != 1 or not alternative.isalpha()
+            or original.casefold() in TRUSTED_SINGLE_LETTER_WORDS or not before[-1:].isspace()
+            or trigger not in VARIABLE_HEAD_TRIGGERS):
+        return False
+    words = before.split()
+    return bool(words) and all(_cyrillic_letter(char) for char in words[-1])
+
+
+def _variable_evidence(item: ContextEvidence) -> dict[str, float]:
+    """The variable head's evidence: the letter and its case, the boundary (a space, or the sign that ended it), the word
+    before it and how often Russian prose uses that word, whether the text before holds signs of code
+    (VARIABLE_CODE_SIGNS), Latin letters or digits, and how the word after it was given; the letter and the boundary
+    are each read with the rest. In chat such a letter is meant as written (`да я про то ч`), in a question about code it
+    is a variable (`для ч = 0.3`)."""
+
+    from .context_model import term_bucket
+
+    tail = item.field.before[-VARIABLE_CODE_CONTEXT_CHARACTERS:]
+    previous = item.field.before.split()[-1].casefold()
+    following = (item.field.after.split() or [""])[0].casefold()
+    letter = f"letter:{item.original.casefold()}"
+    boundary = f"boundary:{item.trigger}:{item.boundary_text.strip() if item.trigger == 'punctuation' else ''}"
+    rest = (f"case:{'upper' if item.original.isupper() else 'lower'}", f"previous:{term_bucket(previous, 'russian')}",
+            f"code:{int(any(char in VARIABLE_CODE_SIGNS for char in tail))}",
+            f"latin:{int(any('a' <= char.casefold() <= 'z' for char in tail))}",
+            f"digit:{int(any(char.isdigit() for char in tail))}", f"after:{item.after_origin}:{_script(following)}")
+    names = ("bias", letter, boundary, f"word:{previous}", *rest, f"{letter}:{boundary}",
+             *(f"{head}:{name}" for head in (letter, boundary) for name in rest))
+    return {f"{VARIABLE_FEATURE_PREFIX}{name}": 1.0 for name in names}
+
+
+_DOTTED_READING: Final = re.compile(
+    rf"[а-яё]{{1,{DOTTED_PART_MAX_LETTERS}}}(?:\.[а-яё]{{1,{DOTTED_PART_MAX_LETTERS}}})+\.?", re.IGNORECASE)
+
+
+def dotted_question(original: str, alternative: str) -> bool:
+    """A token typed in the English layout with `/`, the key of the Russian dot, whose Cyrillic reading is two or more
+    groups of up to DOTTED_PART_MAX_LETTERS letters joined by dots: a Russian abbreviation typed in the wrong layout
+    (`n/r/` for `т.к.`, `l/,/` for `д.б.`), or a Latin token of short parts meant as typed (`n/a`, `I/O`, `usr/bin`). A
+    reading of one group (`cv/` for `см.`, `dev/` for `вум.`) is no member: a word with the key of a dot after it is as
+    often a part of a path as a short Russian word ending a sentence, and the frozen model decides it."""
+
+    return original.isascii() and "/" in original and _DOTTED_READING.fullmatch(alternative) is not None
+
+
+def _rarest_part(parts: list[str], alphabet: str) -> str:
+    """The term-table bucket (term_bucket) of the rarest part of a token in one table; a part that is no word at all
+    (`,` of `l/,/`, typed for `д.б.`) is rarer than any word: `na`."""
+
+    from .context_model import term_bucket
+
+    buckets = [term_bucket(part, alphabet) for part in parts if part]
+    return "na" if "na" in buckets else min(buckets, key=int)
+
+
+def _dotted_evidence(item: ContextEvidence) -> dict[str, float]:
+    """The dotted-abbreviation head's evidence: the Cyrillic reading itself (the abbreviations are few: `т.к.`, `т.е.`,
+    `т.д.`, `т.п.`, `д.б.`), the lengths of its parts and its final dot, its case, the script of the word before and
+    after it, and how often the parts occur as words: the rarest part of the reading in Russian prose and the rarest
+    part typed among the Latin words of Russian technical text (term_bucket). Each part of `т.к.` is a Russian word of
+    the table, no part of `гык.ишт` (`usr/bin`) is. The reading, its shape and the two counts are read with each of the
+    rest."""
+
+    reading = item.alternative.casefold()
+    words = item.field.before.split()
+    following = item.field.after.split()
+    shape = f"shape:{'-'.join(str(len(part)) for part in reading.split('.') if part)}:{int(reading.endswith('.'))}"
+    case = f"case:{'upper' if item.original[:1].isupper() else 'lower'}"
+    before = f"before:{_script(words[-1].casefold()) if words else 'start'}"
+    after = f"after:{item.after_origin}:{_script(following[0].casefold()) if following else 'none'}"
+    russian = _rarest_part(reading.split("."), "russian")
+    latin = _rarest_part(item.original.casefold().split("/"), "latin")
+    counts = f"russian:{russian}:latin:{latin}"
+    names = ("bias", f"reading:{reading}", shape, case, before, after, f"russian:{russian}", f"latin:{latin}", counts,
+             *(f"{head}:{name}" for head in (f"reading:{reading}", shape, counts) for name in (case, before, after)))
+    return {f"{DOTTED_FEATURE_PREFIX}{name}": 1.0 for name in names}
 
 
 @functools.cache

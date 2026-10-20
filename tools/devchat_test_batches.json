@@ -1,0 +1,9 @@
+{
+ "batches": [
+  {
+   "name": "devchat-test-2",
+   "content_sha256": "d43f75dc076b4ab908d2a6d39d75ef9e871da36ec987211e8383fe33444c8d2e",
+   "source": "ru.stackoverflow comments created 2024-01 .. 2026-10, pages 9-12 of each month in order of creation (the fetch of 15-17.10.2026 took pages 1-8), public Stack Exchange API, CC BY-SA 4.0; built 20.10.2026 by tools/build_devchat_messages.py with every text of the first build dropped; the test split alone"
+  }
+ ]
+}

@@ -5193,10 +5193,9 @@
     "model/prefix_v1/development.jsonl.gz": "0efb45e8d5d778118864f62a03dc3e8cd16517c579c94bb1edd69780f7cf5741",
     "model/prefix_v1/train.jsonl.gz": "b9e8bb2c1dfcb8b53f52e191ec45d6c6a580116b0e39ef044a81360afb8db466",
     "model/prefix_v2/recipe.json": "48dba36b792d033674e5fdbbb9dae8f1f7ce8609944e2dd260f1fbeda011ac28",
-    "src/keyswitch/__init__.py": "7acf30478fba3ed78a4d9dd4ca015473c6c55639bfa30e3c88bf7e5b7d81dcab",
     "src/keyswitch/backend.py": "8b8fda7b72d6546b94cc87ec7d95f36a4f122ba07861c73ca2428fbbd87fcfc7",
-    "src/keyswitch/context_action_features.py": "43d0f89a8360c44cf94739dde3e60979d5b5c15036a73b77149fc796af43a01f",
-    "src/keyswitch/context_model.py": "1b1dca739c1239a281ad86adc9644ed6c669c8200650094b0793d8d6aba812c7",
+    "src/keyswitch/context_action_features.py": "950903ff47635a928baeb5042f88e85775b7feb958b94a056c2496a1bc326ce5",
+    "src/keyswitch/context_model.py": "bcd8bc207f1c7580ac8205060cddeab14ba6f63d20348900679e270d6f4b46c8",
     "src/keyswitch/detector.py": "5a78cd5961af57426b6cb42b3757b42baeacd7344a06557111a1067cb0cbb2c0",
     "src/keyswitch/early_switch.py": "3099fb815f239018f79c0c3a2b96b5db4390d47fee3a74ad701c636e7e5983ef",
     "src/keyswitch/history.py": "165f09f7403a72019637a0ac4397845c9b15c847b9b64fb0f34552bbb2352fee",
@@ -5212,7 +5211,7 @@
     "src/keyswitch/spellcheck.py": "9fae0c0c892489d4cee56b0b169aae82413780596c9ddb8d97746624b73d4c89",
     "tests/test_action_epoch_selection.py": "5e785a4d98c623fc8015604da8b7e48855b7971a4c90c2df32dcac16bd149237",
     "tests/test_prefix_model.py": "43b5763b52482334ec762a22e448cfedcf98beaabf429dd814f53c2bb4749877",
-    "tests/test_prefix_v2_training.py": "0a55f724bcf468f7720ca3edc6f262803a7c64798aedebf0c7be3b1bdde2e908",
+    "tests/test_prefix_v2_training.py": "956c27363cd1c60a4db5a2e88c4ea7b6277c5e963fc2637a9c5e33683a46771f",
     "tools/action_epoch_selection.py": "5586ad18c9a9855e3fa3c8dbbd97230e70da58086a61ac394e24521c0c86740d",
     "tools/auxiliary_runtime_evidence.py": "f40818b5543bccab6122e0cc46522342ec4e714ae22de37391932a728b31f4d5",
     "tools/context_corpus.py": "fc0d5b566a9e191839b188f62a74a659760aa537ac951ea26e89d1d94ad90e61",
@@ -5221,9 +5220,9 @@
     "tools/context_optimizer.c": "f523aa5652a70a897c1251985dfdc78676471ef338bfd9d8efe44f74efeb4b0c",
     "tools/context_optimizer.py": "b98b08b314b2bd70591be5de1dfb8f05efbc90a79b7c25f0d02e1435b503f8e7",
     "tools/prefix_corpus.py": "f7e39e59a050f4c7a605e5ddde2665817f57057246c7925ce896b4767a30490e",
-    "tools/prefix_v2_corpus.py": "b724bbddcd75c04d12641b788222a16d3f21f3679b40a2aa6e2a287bce36ffa1",
+    "tools/prefix_v2_corpus.py": "77c580a9254dc9cf48607e6ee989e19f8bd78389d4fd0afb286fbc1c168f2eda",
     "tools/reference_lexicon.py": "43e5dee3fff5864b1ee4ab69b4b46869853faae2b665f5e2a0da7d93db31ab70",
-    "tools/train_prefix_v2_model.py": "9c028d494c5f8e7218563f8acd56b904193e62fed1cb85ddac16013de973b72c"
+    "tools/train_prefix_v2_model.py": "11fbee08778a5a615ba14f8d2b8b8653a09bb73182d6c6aa1e1ccd1635eef503"
   },
   "recipe": {
     "data_revision": "symmetric-existing-prefix-forms-family-budget-v1",

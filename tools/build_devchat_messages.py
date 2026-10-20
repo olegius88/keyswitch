@@ -14,6 +14,10 @@ Beside each split's messages a members file lists, per message, the SHA-256 of i
 read of the test draws and claims its messages from the members alone, before any text is opened. Test text is written,
 never printed; only counts are.
 
+A later batch of the test (evaluate_devchat_test.TEST_BATCHES) is built the same way from comments the earlier fetches
+did not take, with the members files of every earlier build named by `--earlier`: a message whose text an earlier
+build holds, in either split, is dropped (`dropped:earlier`), so no text a candidate was developed on reaches the test.
+
     python3 tools/build_devchat_messages.py --comments <dir> --dump <ru_stackoverflow.jsonl.zst> --out <dir>
 """
 
@@ -95,7 +99,8 @@ def messages_of(text: str) -> list[str]:
     return [" ".join(tokens) for tokens in post_messages(TAG.sub(" ", text))]
 
 
-def build(comments: Iterable[dict[str, object]], question_of: dict[int, int], known: set[str], out: Path) -> dict[str, int]:
+def build(comments: Iterable[dict[str, object]], question_of: dict[int, int], known: set[str], out: Path,
+          earlier: frozenset[str] = frozenset()) -> dict[str, int]:
     counts: Counter[str] = Counter()
     seen: set[str] = set()
     out.mkdir(parents=True, exist_ok=True)
@@ -111,7 +116,7 @@ def build(comments: Iterable[dict[str, object]], question_of: dict[int, int], kn
                 seen.add(text)
                 tokens = text.split()
                 reason = ("code" if any(code_like(token) for token in tokens) else "dump" if text_key(text) in known
-                          else "lookalike" if lookalike(tokens) else None)
+                          else "earlier" if text_key(text) in earlier else "lookalike" if lookalike(tokens) else None)
                 if reason is not None:
                     counts[f"dropped:{reason}"] += 1
                     continue
@@ -139,6 +144,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--comments", type=Path, required=True, help="the fetched comments-*.json.gz and posts/")
     parser.add_argument("--dump", type=Path, required=True, help="the pinned 2023 dump")
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--earlier", type=Path, action="append", default=[], help="a members file of an earlier build (repeatable)")
     arguments = parser.parse_args(argv)
     if hashlib.sha256(arguments.dump.read_bytes()).hexdigest() != DEVCHAT_DUMP_SHA256:
         print("the 2023 dump differs from the pinned one", flush=True)
@@ -148,13 +154,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                    json.loads((arguments.comments / "posts" / "question-of-post.json").read_text("utf-8")).items()}
     comments = [comment for path in sorted(arguments.comments.glob("comments-*.json.gz"))
                 for comment in json.loads(gzip.open(path).read())]
-    counts = build(comments, question_of, known, arguments.out)
+    earlier = frozenset(str(row["text"]) for path in arguments.earlier
+                        for row in map(json.loads, gzip.open(path, "rt", encoding="utf-8")))
+    counts = build(comments, question_of, known, arguments.out, earlier)
     receipt = {"namespace": DEVCHAT_NAMESPACE, "split": "by question", "counts": counts,
                "content_sha256": {path.name: content_checksum(path) for path in sorted(arguments.out.glob("devchat-*.jsonl.gz"))},
                "comments_sha256": {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
                                    for path in sorted(arguments.comments.glob("comments-*.json.gz"))},
                "posts_sha256": hashlib.sha256((arguments.comments / "posts" / "question-of-post.json").read_bytes()).hexdigest(),
-               "dump_sha256": DEVCHAT_DUMP_SHA256, "builder_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
+               "dump_sha256": DEVCHAT_DUMP_SHA256, "builder_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+               "earlier_members_sha256": {path.name: content_checksum(path) for path in arguments.earlier}}
     (arguments.out / "receipt.json").write_text(json.dumps(receipt, indent=1) + "\n", encoding="utf-8")
     print(json.dumps(counts), flush=True)
     return 0

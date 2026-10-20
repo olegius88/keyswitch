@@ -302,7 +302,7 @@ def compare(corpus: Path, artifacts: Mapping[str, Path], backend: str, jobs: int
     models = {name: ContextModel.load(path) for name, path in artifacts.items()}
     inputs = trainer.load_inputs(corpus, trainer.recipe())
     features = context_action_pipeline.build_features(inputs, context_action_pipeline.choose_backend(backend),
-                                                      context_action_pipeline.choose_jobs(jobs))
+                                                      context_action_pipeline.choose_jobs(jobs), (CALIBRATION, DEVELOPMENT))
     return {split: {profile: score_split(models, list(features.rows(profile, split)), show) for profile in inputs.profiles}
             for split in (CALIBRATION, DEVELOPMENT)}
 

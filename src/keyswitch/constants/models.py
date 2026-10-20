@@ -158,6 +158,25 @@ BRIEF_SETTLED_DOMINANCE: Final = 5
 # first-term head (context_action_features.first_question). There it opens a message and converts at once (`йк ` for
 # `qr`, the owner's requirement of 16.10.2026), unless it may still be the tail of a Russian word.
 FIRST_FEATURE_PREFIX: Final = "first|"
+# A letter of the Russian layout typed alone after a word of Cyrillic letters, that is no Russian word of one letter, has
+# evidence of its own under this prefix: the variable head (context_action_features.variable_question). In technical
+# Russian prose it is a Latin variable typed in the Russian layout (`т` for `n`, `ч` for `x`); in chat it is a letter
+# meant as written (`т.` of `и т. д.`, a word broken off).
+VARIABLE_FEATURE_PREFIX: Final = "variable|"
+# The boundaries the variable head answers at: a space or a sign ends the letter. At a pause the letter may be the first
+# of a word still being typed (`Ф` of `AmoCRM_v2`, the owner's typing of 14.10.2026), a question the head has no frame
+# of; there the frozen model and the lone-letter refusal decide, as they did before the head.
+VARIABLE_HEAD_TRIGGERS: Final = ("space", "punctuation")
+# Characters of the text before a one-letter variable the variable head reads for signs of code, and the signs.
+VARIABLE_CODE_CONTEXT_CHARACTERS: Final = 40
+VARIABLE_CODE_SIGNS: Final = "=<>+*/()[]{}_^%"
+# A token typed in the English layout whose Cyrillic reading is two or more short groups of letters joined by dots has
+# evidence of its own under this prefix: the dotted-abbreviation head (context_action_features.dotted_question); `n/r/`
+# is `т.к.`.
+DOTTED_FEATURE_PREFIX: Final = "dotted|"
+# Letters a part of a dotted abbreviation holds at most (`т.к.`, `д.б.`, `т.е.`): a longer part is a word, and the token
+# one of a path (`src/main`).
+DOTTED_PART_MAX_LETTERS: Final = 3
 # The "length" feature buckets every word length from here up together (schemas 2 and 3).
 ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: Final = 6
 # Short categorical field labels (role, trigger) truncated before they reach a feature name.
@@ -266,13 +285,14 @@ CONTEXT_FEATURE_NGRAM_ORDERS: Final = (1, 2, 3)
 # and version strings of at most these many characters, weights of at most this magnitude, and a
 # conversion threshold from this floor up to one.
 MAX_CONTEXT_MODEL_FEATURES: Final = 50000
-# An action model (schema 3) holds up to thirteen feature spaces: the word decided at its boundary, the
+# An action model (schema 3) holds up to fifteen feature spaces: the word decided at its boundary, the
 # kept-neighbour question (KEPT_FEATURE_PREFIX), the capitals head (CAPITALS_FEATURE_PREFIX), the
 # lone-word head (ALONE_FEATURE_PREFIX), the message-start head (START_FEATURE_PREFIX), the
 # single-letter head (LETTER_FEATURE_PREFIX), the abbreviation heads (ABBREVIATION_FEATURE_PREFIX,
 # LATIN_ABBREVIATION_FEATURE_PREFIX), the unknown-token head (UNKNOWN_FEATURE_PREFIX), the joined-token head
-# (JOINED_FEATURE_PREFIX), the term heads (TERM_FEATURE_PREFIX, FIRST_FEATURE_PREFIX) and the short-message head
-# (BRIEF_FEATURE_PREFIX), each with its own budget in the recipe. Raised from 100 000 with the unknown-token head: the
+# (JOINED_FEATURE_PREFIX), the term heads (TERM_FEATURE_PREFIX, FIRST_FEATURE_PREFIX), the short-message head
+# (BRIEF_FEATURE_PREFIX), the variable head (VARIABLE_FEATURE_PREFIX) and the dotted-abbreviation head
+# (DOTTED_FEATURE_PREFIX), each with its own budget in the recipe. Raised from 100 000 with the unknown-token head: the
 # 0.54.0 pair holds 98 498.
 MAX_CONTEXT_ACTION_MODEL_FEATURES: Final = 110000
 MAX_CONTEXT_FEATURE_NAME_CHARACTERS: Final = 512

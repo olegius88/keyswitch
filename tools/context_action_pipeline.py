@@ -758,12 +758,15 @@ def head_frame(frame: Frame, prefixes: frozenset[str]) -> bool:
 class Build:
     """Curricula and features of one fit on the chosen back end; `run` returns the FeatureSet."""
 
-    def __init__(self, inputs: trainer.FitInputs, backend: str, jobs: int) -> None:
+    def __init__(self, inputs: trainer.FitInputs, backend: str, jobs: int, splits: Sequence[str] | None = None) -> None:
         self.inputs = inputs
         self.backend = backend
         self.jobs = jobs
         self.profiles = inputs.profiles
-        self.keys = [(profile, split) for profile in self.profiles for split in inputs.frames]
+        # The splits featurised: every one for a fit; a comparison scores calibration and development alone, and
+        # without TRAIN none of its curricula is built (build_features).
+        self.splits = [split for split in inputs.frames if splits is None or split in splits]
+        self.keys = [(profile, split) for profile in self.profiles for split in self.splits]
         self.keep_importance = float(cast(float, inputs.options["keep_importance"]))
         self.started = time.monotonic()
         self.vocabulary = Vocabulary()
@@ -799,7 +802,12 @@ class Build:
         sources = state().captured_sources
         scheduler = self.scheduler
         try:
-            if self.frozen:
+            if TRAIN not in self.splits:
+                # No TRAIN frame is featurised: none of its curricula is built, the tail neither.
+                skipped: dict[str, object] = {"scope": "not built: TRAIN is not featurised"}
+                self.historical, self.capitals, self.english, self.tail = [], ([], skipped), ([], skipped), ([], skipped)
+                self.captured = {index: ([], skipped) for index in range(len(sources))}
+            elif self.frozen:
                 # Nothing but the tail is framed for TRAIN: the other TRAIN curricula are not built.
                 unused: dict[str, object] = {"scope": "not used: a frozen base keeps the word decided at its own boundary"}
                 self.historical, self.capitals, self.english = [], ([], unused), ([], unused)
@@ -810,7 +818,8 @@ class Build:
                     scheduler.add(CRITICAL, captured_task, index, partial(self.captured_done, index))
                 scheduler.add(CRITICAL, capitals_task, None, self.capitals_done)
                 scheduler.add(CRITICAL, english_task, None, self.english_done)
-            scheduler.add(CRITICAL, tail_task, None, self.tail_done)
+            if TRAIN in self.splits:
+                scheduler.add(CRITICAL, tail_task, None, self.tail_done)
             for key in self.keys:
                 if key[1] != TRAIN:
                     scheduler.add(CURRICULA, chain_task, (key[0], key[1], None, None), partial(self.chain_done, key))
@@ -822,7 +831,8 @@ class Build:
                 self.start_gpu()
             else:
                 for profile in self.profiles:
-                    for split, frames in self.inputs.frames.items():
+                    for split in self.splits:
+                        frames = self.inputs.frames[split]
                         if (self.frozen or self.heads is not None) and split == TRAIN:
                             continue
                         for start in range(0, len(frames), CONTEXT_ACTION_FRAMES_PER_TASK):
@@ -987,7 +997,7 @@ class Build:
         columns.check(key[1], frames)
         self.columns[key] = columns
         del self.entries[key], self.plans[key], self.fresh[key]
-        if all((key[0], split) in self.columns for split in self.inputs.frames):
+        if all((key[0], split) in self.columns for split in self.splits):
             self.stores[key[0]] = ProfileStore()
 
     # -- features on the GPU --
@@ -1065,9 +1075,11 @@ def check_engine_dictionaries(spelling: Mapping[int, LanguageModel]) -> None:
             raise RuntimeError("the engine's dictionaries differ from the reference lexicons; train with --backend cpu")
 
 
-def build_features(inputs: trainer.FitInputs, backend: str, jobs: int) -> FeatureSet:
+def build_features(inputs: trainer.FitInputs, backend: str, jobs: int, splits: Sequence[str] | None = None) -> FeatureSet:
+    """The features of every split, or of `splits` alone (a comparison: calibration and development, with no TRAIN
+    curriculum built and no TRAIN frame held in memory)."""
     with bound_process_state(inputs):
-        return Build(inputs, backend, jobs).run()
+        return Build(inputs, backend, jobs, splits).run()
 
 
 # ---- frames for the parity check ---------------------------------------------------------------------

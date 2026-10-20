@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 from typing import ClassVar, Final
 
-from .context_action_features import letter_question
+from .context_action_features import letter_question, variable_question
 from .context_model import AfterOrigin, ContextEvidence, ContextModel, ContextPrediction, one_typo_from_word, term_bucket
 from .identifier_lexicon import IdentifierLexicon
 from .detector import DetectionDecision, LanguageDetector, LanguageScorer
@@ -14,7 +15,7 @@ from .language_model import LanguageModel
 from .ortho_model import OrthoEvidence, OrthoModel, shape_of
 from .short_words import ISOLATED_SHORT_WORD_REASON, is_short_word_override, opens_sentences
 from .word_decision import NOT_A_WORD_REASON
-from .constants.detection import MINIMUM_SHAPED_TOKEN_CHARACTERS
+from .constants.detection import MINIMUM_SHAPED_TOKEN_CHARACTERS, QUOTED_WORD_CLOSING_SIGNS, WORD_QUOTES
 from .constants.models import CONTEXT_ACTION_FEATURE_VERSION, RUSSIAN_SLANG_MIN_TERM_BUCKET
 from .constants.text import FIELD_CARET_LAG_MAX_CHARACTERS
 
@@ -60,6 +61,24 @@ class ContextResult:
 
 
 INNER_MARKS: Final[str] = "-'’"
+
+
+def quoted_or_scoped(replacement: str, original: str) -> bool:
+    """A Latin reading that is a quoted word or parts joined by colons, the shapes of code and of a cited word.
+
+    A quote opens it (WORD_QUOTES) and may close it, with one sign after the closing quote (`"legacy",`); the parts
+    between dots, or between colons (`std::swap`, `x:Name`), are letters. A colon is a part's edge only when the token
+    was typed with a small letter: the `Ж` of a Russian word in capitals is a colon too (`ОЖОГ` is `J:JU`).
+    """
+
+    core = replacement
+    if core[:1] in WORD_QUOTES:
+        quote, core = core[0], core[1:]
+        if core[-1:] in QUOTED_WORD_CLOSING_SIGNS and core[:-1].endswith(quote):
+            core = core[:-1]
+        core = core.removesuffix(quote)
+    separators = r"\." if original.isupper() else r"::?|\."
+    return bool(core) and all(part.isalpha() for part in re.split(separators, core))
 
 
 def word_shaped(token: str) -> bool:
@@ -276,9 +295,13 @@ class ContextPolicy:
         # Russian prose the model turned `1С` into `1C`.
         # A model with the single-letter head has learned the letter right after a Latin word
         # (context_action_features.letter_question): there its verdict on a letter is an opinion, and
-        # `nats b redis` is `nats и redis` (the owner's typing, 0.32-0.41).
+        # `nats b redis` is `nats и redis` (the owner's typing, 0.32-0.41). One with the variable head has
+        # learned a letter of the Russian layout after a word of Cyrillic letters (variable_question): a Latin
+        # variable typed there (`ч` for `x`) or a letter meant as written (`да я про то ч`).
         action_model = self.model.feature_version == CONTEXT_ACTION_FEATURE_VERSION
-        learned = self.model.answers_letters and letter_question(baseline.original, alternative, field.before)
+        learned = ((self.model.answers_letters and letter_question(baseline.original, alternative, field.before))
+                   or (self.model.answers_variables
+                       and variable_question(baseline.original, alternative, field.before, trigger)))
         lone = (action_model and sum(char.isalpha() for char in baseline.original) == 1
                 and all(char.isalpha() or char.isdigit() for char in baseline.original) and not learned)
         slang = action_model and russian_slang(baseline.original, alternative, baseline.source_group, source.known)
@@ -371,15 +394,21 @@ class ContextPolicy:
         reading may keep. Until 04.10.2026 a dot inside was refused as well (`дюп`
         is ``l.g``), and on the owner's own typing that left every domain and
         address typed in the Russian layout as it was, with the model sure of each
-        at p=1.0; the model of 0.38.0 keeps `дюп` itself. The refusal is recorded
-        as a safety decision, not as the model's opinion.
+        at p=1.0; the model of 0.38.0 keeps `дюп` itself. A quoted token and parts
+        joined by colons are shapes too (quoted_or_scoped): `"Boot` typed in the
+        Russian layout is `ЭИщще`, `std::swap` is `ыевЖЖыцфз`, and the model converts
+        them, most at p=1.0, which this refusal overruled in 146 messages of the
+        developer-chat development set (19.10.2026); a sign after a word without a
+        quote stays refused, since `б` and `ю` end Russian words (`учеб` is `ext,`).
+        The refusal is recorded as a safety decision, not as the model's opinion.
         """
 
         decision = result.decision
         if not decision.should_convert or not decision.original.isalpha():
             return result
         body = decision.replacement.removeprefix(".")
-        if body.isalpha() or word_shaped(body) or all(part.isalpha() for part in body.split(".")):
+        if (body.isalpha() or word_shaped(body) or all(part.isalpha() for part in body.split("."))
+                or quoted_or_scoped(body, decision.original)):
             return result
         vetoed = replace(decision, should_convert=False, reason=NOT_A_WORD_REASON)
         return ContextResult(vetoed, result.prediction, result.field, policy_applied=result.policy_applied,

@@ -22,8 +22,8 @@ from keyswitch.context_model import (
 )
 from keyswitch.context_policy import ContextPolicy, ContextResult, evidence_for_decision
 from keyswitch.short_words import opens_sentences
-from keyswitch.detector import LanguageDetector, LanguageScorer
-from keyswitch.language_model import LanguageModel
+from keyswitch.detector import DetectionDecision, LanguageDetector, LanguageScorer
+from keyswitch.language_model import LanguageModel, WordScore
 from keyswitch.engine import KeySwitchEngine
 from keyswitch.learning import LearnedRule
 from keyswitch.input_context import CONTEXT_LIMIT, CONTEXT_TTL, FieldContext, InputContext
@@ -383,6 +383,18 @@ class ContextEngineTests(InputIntegrityTests):
         self.reset_editor(1)
         self.type("ыфьздуююсщь ")
         self.assertEqual(self.backend.text, "ыфьздуююсщь ")
+        # So is a quoted word and parts joined by colons, the shapes of a cited word and of code (quoted_or_scoped); a
+        # sign after a word with no quote stays refused (`б` ends Russian words), and so does the `Ж` of a Russian word in
+        # capitals.
+        score = WordScore(0.0, False, 0, 0.0)
+        for original, replacement, converts in (
+                ("ЭИщще", "\"Boot", True), ("ЭОщртЭ", "\"John\"", True), ("ЭдупфснЭб", "\"legacy\",", True),
+                ("ыевЖЖмусещк", "std::vector", True), ("чЖТфьу", "x:Name", True), ("Эпщюьщв", "\"go.mod", True),
+                ("учеб", "ext,", False), ("ОЖОГ", "J:JU", False), ("ЭдупфснЭбю", "\"legacy\",.", False),
+                ("ЭифырЖ", "\"bash:", False), ("Э", "\"", False)):
+            with self.subTest(original=original):
+                asked = DetectionDecision(True, original, replacement, 1, 0, 1.0, "test", score, score)
+                self.assertEqual(ContextPolicy._spelling_a_word(ContextResult(asked)).decision.should_convert, converts)
 
     def test_explicit_rules_exclusions_and_manual_layout_are_above_model(self) -> None:
         self.choose("convert")

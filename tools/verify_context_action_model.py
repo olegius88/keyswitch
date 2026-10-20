@@ -417,11 +417,18 @@ def devchat_block(artifact_sha256: str, ledger: Path) -> dict[str, object]:
         pairs = mapping(identity.get("pairs"), "developer-chat pairs")
         if mapping(pairs.get("candidate"), "developer-chat candidate").get("sha256") != artifact_sha256:
             continue
+        if not mapping(identity.get("test_membership"), "developer-chat membership").get("messages"):
+            # A claim that drew no message read no test (evaluate_devchat_test.read_anything).
+            continue
         path = access.with_name(access.name.replace(".access.json", ".result.json"))
         result = read_object(path)
         if "error" in result:
             raise ValueError("the developer-chat test of this candidate failed to run")
-        return {"protocol": identity["protocol"], "bench": identity["bench"], "messages_sha256": identity["messages_sha256"],
+        # A test of several batches (evaluate_devchat_test.TEST_BATCHES) is pinned by the SHA-256 of its batches' pins,
+        # in their order.
+        pins = identity["messages_sha256"]
+        messages = pins if isinstance(pins, str) else hashlib.sha256(json.dumps(pins).encode()).hexdigest()
+        return {"protocol": identity["protocol"], "bench": identity["bench"], "messages_sha256": messages,
                 "seed": identity["seed"], "messages": result["messages"], "access": result["access"],
                 "result_sha256": checksum(path),
                 "pairs": {name: {"model_version": mapping(entry, "pair")["model_version"], "sha256": mapping(entry, "pair")["sha256"]}

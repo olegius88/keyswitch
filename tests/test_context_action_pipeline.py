@@ -169,21 +169,22 @@ def unused(*arguments: object, **keywords: object) -> tuple[list[trainer.ActionR
 
 
 class BuildTest(unittest.TestCase):
-    def build(self, jobs: int, inputs: trainer.FitInputs | None = None) -> pipeline.FeatureSet:
+    def build(self, jobs: int, inputs: trainer.FitInputs | None = None, splits: Sequence[str] | None = None) -> pipeline.FeatureSet:
         inputs = inputs or fixture_inputs()
-        frozen = inputs.base is not None
+        untrained = splits is not None and TRAIN not in splits
+        frozen = inputs.base is not None or untrained
         with patch("train_context_action_model.historical_curriculum", unused if frozen else fake_historical), \
                 patch("train_context_action_model.captured_source_curriculum", unused if frozen else fake_captured), \
                 patch("train_context_action_model.capital_citation_curriculum", unused if frozen else fake_capitals), \
                 patch("train_context_action_model.english_capital_curriculum", unused if frozen else fake_english), \
-                patch("train_context_action_model.tail_curricula", fake_tail), \
+                patch("train_context_action_model.tail_curricula", unused if untrained else fake_tail), \
                 patch("train_context_action_model.frame_chain", fake_chain), \
                 patch("train_context_action_model.frame_evidence", fake_evidence), \
                 patch("context_action_pipeline.build_span_curriculum", fake_spans), \
                 patch("context_action_pipeline.extract_action_features", fake_features), \
                 patch("context_action_pipeline.CONTEXT_ACTION_FRAMES_PER_TASK", BACK_END_FIXTURE_FRAMES_PER_TASK), \
                 patch("context_action_pipeline.STATE", pipeline.State(inputs, BACK_END_FIXTURE_KEEP_IMPORTANCE, SOURCES)):
-            return pipeline.Build(inputs, CONTEXT_ACTION_BACKEND_CPU, jobs).run()
+            return pipeline.Build(inputs, CONTEXT_ACTION_BACKEND_CPU, jobs, splits).run()
 
     def test_one_and_several_processes_give_the_serial_frames_features_and_reports(self) -> None:
         expected = serial(fixture_inputs())
@@ -252,6 +253,19 @@ class BuildTest(unittest.TestCase):
                 self.assertEqual(built.tail, fake_tail(inputs)[1])
         self.assertEqual(trainer.frame_chain(inputs, PORTABLE, TRAIN, inputs.frames[TRAIN], fake_tail(inputs)[0]),
                          (fake_tail(inputs)[0], {}))
+
+    def test_a_comparison_featurises_calibration_and_development_alone(self) -> None:
+        # compare_context_candidates scores those two: no TRAIN curriculum is built and no TRAIN frame featurised.
+        expected = serial(fixture_inputs())
+        for jobs in (1, BACK_END_FIXTURE_JOBS):
+            with self.subTest(jobs=jobs):
+                built = self.build(jobs, splits=(CALIBRATION, DEVELOPMENT))
+                for key, rows in expected.items():
+                    if key[1] != TRAIN:
+                        self.assertEqual(exact(built.rows(*key)), exact(rows), key)
+                self.assertEqual({split for _profile, split in built.columns}, {CALIBRATION, DEVELOPMENT})
+                self.assertNotIn((PORTABLE, TRAIN), built.spans)
+                self.assertEqual(built.tail, {"scope": "not built: TRAIN is not featurised"})
 
     def test_development_holds_the_single_letter_frames_the_heads_epoch_is_chosen_on(self) -> None:
         from test_context_action_training import fixture

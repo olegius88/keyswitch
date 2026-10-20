@@ -29,8 +29,8 @@ LATER = "2026-10-15 10:00:01,000"
 
 
 def row(index: int, shown: str, *, typed: str = "ghbdtn", other: str = "привет", intended: str = "привет",
-        owner: bool = False, time: str = TIME, stream: int = 0) -> gate.Row:
-    return gate.Row(stream, index, time, typed, other, intended, shown, owner, "0.0.0")
+        owner: bool = False, time: str = TIME, stream: int = 0, waits: bool = False) -> gate.Row:
+    return gate.Row(stream, index, time, typed, other, intended, shown, owner, "0.0.0", waits)
 
 
 def verdict(name: str, typed: str = "ghbdtn", *, by: str = "llm", code: str = "garbage-in-prompt",
@@ -124,6 +124,20 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(result.new_verdicts_used, 1)
         self.assertEqual(gate.compare(released, released, verdicts).new_verdicts_used, 0)
 
+    def test_a_word_asked_about_at_a_pause_and_typed_on_is_right_as_typed_or_in_the_layout_it_was_finished_in(self) -> None:
+        # `Ф` of `AmoCRM_v2`: converted into the finished word's layout, or left; `сд` of `сделала` converted into `cl`.
+        released = {"pc": {(0, 0): row(0, "Ф", typed="Ф", other="A", intended="A", waits=True),
+                           (0, 1): row(1, "сд", typed="сд", other="cl", intended="сд", waits=True, time=LATER)}}
+        candidate = {"pc": {(0, 0): row(0, "A", typed="Ф", other="A", intended="A", waits=True),
+                            (0, 1): row(1, "cl", typed="сд", other="cl", intended="сд", waits=True, time=LATER)}}
+        result = gate.compare(released, candidate, {})
+        self.assertEqual((result.released_right, result.candidate_right, len(result.broken), len(result.fixed)),
+                         (len(released["pc"]), 1, 1, 0))
+        self.assertEqual((result.broken[0]["candidate"], result.broken[0]["waits"]), ("cl", True))
+        # A verdict against a waiting word is listed when it decides it.
+        verdicts = {("pc", 0, TIME): verdict(gate.KEEP, "Ф")}
+        self.assertEqual(gate.compare(candidate, candidate, verdicts).verdicts_used[0]["verdict"], gate.KEEP)
+
     def test_trees_that_typed_different_words_stop_the_gate(self) -> None:
         with self.assertRaisesRegex(gate.GateError, "different words"):
             gate.compare({"pc": {(0, 0): row(0, "x")}}, {"pc": {(0, 1): row(1, "x")}}, {})
@@ -143,6 +157,10 @@ class FilesTests(unittest.TestCase):
         report.write_text("{}", encoding="utf-8")
         with self.assertRaisesRegex(gate.GateError, "no replay report"):
             gate.read_rows(report)
+        # A word that waits carries a tenth field; a report of an older replay script has nine.
+        report.write_text(json.dumps({"rows": [[0, 0, TIME, "a", "ф", "a", "a", False, "0", True],
+                                               [0, 1, TIME, "a", "ф", "a", "a", False, "0"]]}), encoding="utf-8")
+        self.assertEqual([word.waits for word in gate.read_rows(report).values()], [True, False])
 
     def test_the_manifest_names_private_files_relative_to_the_repository(self) -> None:
         with self.assertRaisesRegex(gate.GateError, "not on this machine"):

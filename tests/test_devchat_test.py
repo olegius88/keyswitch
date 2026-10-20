@@ -91,6 +91,12 @@ class BuilderTests(unittest.TestCase):
             first = builder.content_checksum(out / f"devchat-{builder.split_of(1)}.messages.jsonl.gz")
             builder.build(comments, answer, known, out)
             self.assertEqual(builder.content_checksum(out / f"devchat-{builder.split_of(1)}.messages.jsonl.gz"), first)
+            # A later batch drops every text an earlier build holds.
+            earlier = frozenset(str(row["text"]) for split in (builder.DEVELOPMENT, builder.TEST)
+                                for row in map(json.loads, gzip.open(out / f"devchat-{split}.members.jsonl.gz", "rt", encoding="utf-8")))
+            self.assertEqual(builder.build(comments, answer, known, out / "later", earlier),
+                             {"dropped:code": counts["dropped:code"], "dropped:dump": counts["dropped:dump"],
+                              "dropped:earlier": len(earlier)})
 
 
 class ProtocolTests(unittest.TestCase):
@@ -111,8 +117,13 @@ class ProtocolTests(unittest.TestCase):
             self.models[name] = path
         pins = {split: devchat.content_checksum(self.messages / f"devchat-{split}.messages.jsonl.gz")
                 for split in (devchat.DEVELOPMENT, devchat.TEST)}
+        self.batches = self.root / "batches.json"
+        self.batches.write_text(json.dumps({"batches": []}), encoding="utf-8")
+        # A read takes every message with Latin words the fixture's test holds.
+        count = sum(member.mix == devchat.MIXED for member in devchat.load_members(self.messages / "devchat-test.members.jsonl.gz"))
         for patcher in (patch.dict(devchat.PINNED, pins), patch.object(devchat, "runtime", return_value={"src": "pins"}),
-                        patch.object(devchat, "tatoeba_passed", return_value=True)):
+                        patch.object(devchat, "tatoeba_passed", return_value=True), patch.object(devchat, "TEST_BATCHES", self.batches),
+                        patch.object(devchat, "DEVCHAT_TEST_COUNT", count)):
             patcher.start()
             self.addCleanup(patcher.stop)
 
@@ -153,6 +164,47 @@ class ProtocolTests(unittest.TestCase):
         with patch.object(devchat, "tatoeba_passed", return_value=False), \
                 self.assertRaisesRegex(devchat.Refusal, "Tatoeba"):
             self.evaluate(devchat.TEST)
+
+    def test_a_used_up_test_claims_nothing_and_a_later_batch_is_drawn_from(self) -> None:
+        with self.typed({"candidate": True, "released": True, "baseline": False}):
+            self.evaluate(devchat.DEVELOPMENT)
+        taken = devchat.load_members(self.messages / "devchat-test.members.jsonl.gz")
+        devchat.claim({"pairs": {"candidate": {"sha256": "earlier"}}, "test_membership": devchat.membership(taken)}, self.ledger)
+        claims = sorted(self.ledger.glob("*.access.json"))
+        with self.assertRaisesRegex(devchat.Refusal, "new batch"):
+            self.evaluate(devchat.TEST)
+        self.assertEqual(sorted(self.ledger.glob("*.access.json")), claims)
+        # A batch of fresh comments, built apart and pinned in the registry: the read draws from it.
+        later = self.root / "later"
+        builder.build([{"post_id": len(self.texts) + index, "body": f"{SECRET} later {index}"} for index in range(len(self.texts))],
+                      {}, set(), later)
+        for kind in ("messages", "members"):
+            (self.messages / f"devchat-test-2.{kind}.jsonl.gz").write_bytes((later / f"devchat-test.{kind}.jsonl.gz").read_bytes())
+        self.batches.write_text(json.dumps({"batches": [{"name": "devchat-test-2", "content_sha256": devchat.content_checksum(
+            self.messages / "devchat-test-2.messages.jsonl.gz")}]}), encoding="utf-8")
+        fresh = devchat.load_members(self.messages / "devchat-test-2.members.jsonl.gz")
+        with self.typed({"candidate": True, "released": True, "baseline": False}), \
+                patch.object(devchat, "DEVCHAT_TEST_COUNT", sum(member.mix == devchat.MIXED for member in fresh)):
+            result = self.evaluate(devchat.TEST)
+        self.assertEqual(result["messages"], len(fresh))
+        self.assertTrue(all(cast(dict[str, bool], result["floors"]).values()))
+        # A batch whose messages differ from its pin is refused.
+        self.batches.write_text(json.dumps({"batches": [{"name": "devchat-test-2", "content_sha256": "0" * len(devchat.PINNED[
+            devchat.TEST])}]}), encoding="utf-8")
+        with self.assertRaisesRegex(devchat.Refusal, "differ from the pinned"):
+            self.evaluate(devchat.TEST)
+
+    def test_an_earlier_claim_that_drew_no_message_is_no_read_of_its_candidate(self) -> None:
+        with self.typed({"candidate": True, "released": True, "baseline": False}):
+            self.evaluate(devchat.DEVELOPMENT)
+        candidate = devchat.checksum(self.models["candidate"])
+        empty = {"pairs": {"candidate": {"sha256": candidate}}, "test_membership": {"messages": [], "questions": []}}
+        key = devchat.claim(empty, self.ledger)
+        (self.ledger / f"{key}.result.json").write_text(json.dumps({"messages": 0, "error": "KeyError"}), encoding="utf-8")
+        with self.typed({"candidate": True, "released": True, "baseline": False}):
+            result = self.evaluate(devchat.TEST)
+        self.assertGreater(cast(int, result["messages"]), 0)
+        self.assertNotIn("error", result)
 
     def test_the_same_models_at_other_paths_are_the_same_pairs(self) -> None:
         recorded = {"candidate": {"path": "/abs/candidate.json", "sha256": "a", "model_version": "context-v3-a"}}
