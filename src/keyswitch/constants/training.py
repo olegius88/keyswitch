@@ -494,6 +494,9 @@ CONTEXT_ACTION_BACK_END_SOURCES: Final = (
     "tools/context_action_kernels/" + name for name in (
         "core.cuh", "decide.cuh", "rows.cuh", "evidence.cuh", "features.cuh", "featurizer.cu", "parity.json"))
 CONTEXT_ACTION_FRAMES_PER_TASK: Final = 2000
+# Frames the GPU/CPU parity check featurises at a time, their Python reference computed by the worker processes
+# (tools/context_action_cuda.check_parity): a chunk's reference stays in memory until it is compared.
+CONTEXT_ACTION_PARITY_CHUNK_FRAMES: Final = 64000
 CONTEXT_ACTION_TASKS_PER_WORKER: Final = 2
 CONTEXT_ACTION_SCHEDULER_POLL_SECONDS: Final = 0.05
 CONTEXT_ACTION_MEMO_ENTRIES: Final = 1 << 20

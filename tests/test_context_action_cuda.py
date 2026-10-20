@@ -77,8 +77,9 @@ class CudaParityTest(unittest.TestCase):
                                    OrthoModel.load(trainer.ROOT / "src/keyswitch/resources/models/ortho_v1.json"),
                                    {spelling: reference_models(spelling) for spelling in (False, True)},
                                    cast(list[str], options["profiles"]), frozenset())
+        # The Python reference in worker processes forked before CUDA starts, as the check runs on a corpus.
         with pipeline.bound_process_state(inputs):
-            result = context_action_cuda.check_parity({TRAIN: frames, DEVELOPMENT: frames}, inputs)
+            result = context_action_cuda.check_parity({TRAIN: frames, DEVELOPMENT: frames}, inputs, len((TRAIN, DEVELOPMENT)))
         self.assertEqual(result.mismatches, [])
         self.assertEqual(result.frames, len(frames) * len(inputs.profiles) * len((TRAIN, DEVELOPMENT)))
 

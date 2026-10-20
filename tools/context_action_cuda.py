@@ -30,6 +30,8 @@ import time
 import unicodedata
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from multiprocessing import get_context
+from multiprocessing.pool import Pool
 from pathlib import Path
 from typing import cast, get_args
 
@@ -77,10 +79,12 @@ from keyswitch.constants.training import (
     CONTEXT_ACTION_CUDA_TERM_TABLES,
     CONTEXT_ACTION_CUDA_TOKEN_CHARACTERS,
     CONTEXT_ACTION_CUDA_TRIGGER_CAPACITY,
+    CONTEXT_ACTION_FRAMES_PER_TASK,
     CONTEXT_ACTION_NAME_HASH_LENGTH_SHIFT,
     CONTEXT_ACTION_NAME_HASH_MULTIPLIER,
     CONTEXT_ACTION_NAME_HASH_SEED,
     CONTEXT_ACTION_NAME_HASH_SHIFT,
+    CONTEXT_ACTION_PARITY_CHUNK_FRAMES,
     CONTEXT_ACTION_REPORTED_DIFFERENCES,
     CONTEXT_OPTIMIZER_CACHE_DIGEST_CHARACTERS,
 )
@@ -851,6 +855,9 @@ class Featurizer:
         self.cache = CACHE / f"hunspell-{self._dictionaries_digest()}.json"
         self.hunspell_asked = 0
         self.cpu_frames = 0
+        # The positions of each profile's frames of the last split featurised that took the CPU path.
+        self.cpu_positions: dict[str, frozenset[int]] = {}
+        self._cpu_positions: frozenset[int] = frozenset()
         if self.cache.exists():
             stored = cast(dict[str, dict[str, bool]], json.loads(self.cache.read_text(encoding="utf-8")))
             self._add_answers({int(group): answers for group, answers in stored.items()})
@@ -898,8 +905,11 @@ class Featurizer:
                 chosen[position] = number
             selection[profile] = chosen
         items = Items(distinct, self.characters, self.translate, split)
-        return {profile: self._profile(items, chosen, spelling[profile], python_features[profile], distinct)
-                for profile, chosen in selection.items()}
+        result: dict[str, pipeline.Columns] = {}
+        for profile, picked in selection.items():
+            result[profile] = self._profile(items, picked, spelling[profile], python_features[profile], distinct)
+            self.cpu_positions[profile] = self._cpu_positions
+        return result
 
     def _profile(self, items: Items, chosen: Int64Array, spelling: bool, python_features: Callable[[Frame], dict[str, float]],
                  distinct: Sequence[Frame]) -> pipeline.Columns:
@@ -954,6 +964,7 @@ class Featurizer:
             row_ids, row_values = self._from_names(python_features(distinct[int(chosen[position])]))
             chunks.add(np.array([position], np.int64), np.array([len(row_ids)], np.int64), row_ids, row_values)
         self.cpu_frames += len(cpu)
+        self._cpu_positions = frozenset(cpu)
         ids, values, counts = chunks.ordered()
         rows_of = [distinct[int(number)] for number in chosen.tolist()]
         return pipeline.Columns.of(ids, values, counts, rows_of, self.keep_importance)
@@ -1051,26 +1062,78 @@ class ParityResult:
     mismatches: list[str]
 
 
-def check_parity(frames_by_split: Mapping[str, Sequence[Frame]], inputs: trainer.FitInputs) -> ParityResult:
-    """Featurise the frames on the GPU and with the trainer's Python, for every profile, and compare."""
+# What a parity worker reads: the fit's inputs and frames, inherited when the pool forks before CUDA starts here.
+_PARITY: dict[str, object] = {}
+
+
+def reference_features(task: tuple[str, str, int, int]) -> list[dict[str, float]]:
+    """The trainer's Python features of frames [first, last) of one split for one profile: the parity reference."""
+    profile, split, first, last = task
+    inputs = cast(trainer.FitInputs, _PARITY["inputs"])
+    frames = cast(Mapping[str, Sequence[Frame]], _PARITY["frames"])[split]
+    features = pipeline.python_features(inputs, profile, split)
+    return [features(frame) for frame in frames[first:last]]
+
+
+def reference(pool: Pool | None, profiles: Sequence[str], split: str, first: int,
+              last: int) -> Callable[[], dict[str, list[dict[str, float]]]]:
+    """The reference of frames [first, last) for every profile, under way in the pool: call the result to collect it."""
+    tasks = {profile: [(profile, split, start, min(start + CONTEXT_ACTION_FRAMES_PER_TASK, last))
+                       for start in range(first, last, CONTEXT_ACTION_FRAMES_PER_TASK)] for profile in profiles}
+    if pool is None:
+        done = {profile: [row for task in profile_tasks for row in reference_features(task)]
+                for profile, profile_tasks in tasks.items()}
+        return lambda: done
+    running = {profile: pool.map_async(reference_features, profile_tasks) for profile, profile_tasks in tasks.items()}
+    return lambda: {profile: [row for part in result.get() for row in part] for profile, result in running.items()}
+
+
+def check_parity(frames_by_split: Mapping[str, Sequence[Frame]], inputs: trainer.FitInputs, jobs: int = 1) -> ParityResult:
+    """Featurise the frames on the GPU and with the trainer's Python, for every profile, and compare.
+
+    The Python side is computed a chunk of CONTEXT_ACTION_PARITY_CHUNK_FRAMES at a time by `jobs` worker processes
+    forked before CUDA starts in this process (as the fit forks its pool), the next chunk's while this process
+    featurises and compares the current one. A frame the GPU leaves to the CPU path gets the trainer's Python features
+    there, as in a fit, so it holds nothing to compare: it is not featurised again. Serial, the reference and those
+    frames took half an hour of a check whose GPU side took minutes (20.10.2026)."""
     profiles = inputs.profiles
     lexicons = inputs.lexical_models
-    featurizer = Featurizer(lexicons[profiles[0]], pipeline.spelling_lexicons(inputs), inputs.intent, inputs.ortho,
-                            float(cast(float, inputs.options["keep_importance"])))
-    mismatches: list[str] = []
-    total = 0
-    for split, frames in frames_by_split.items():
-        python = {profile: pipeline.python_features(inputs, profile, split) for profile in profiles}
-        result = featurizer.featurize_split({profile: frames for profile in profiles}, split,
-                                            {profile: lexicons[profile][0].speller.available for profile in profiles}, python)
-        for profile in profiles:
-            for frame, (actual, _label, _importance) in zip(frames, result[profile].rows(featurizer.dictionary.names)):
-                expected = python[profile](frame)
-                if actual != expected or any(repr(actual[name]) != repr(value) for name, value in expected.items()):
-                    differing = sorted(set(actual.items()) ^ set(expected.items()))[:CONTEXT_ACTION_REPORTED_DIFFERENCES]
-                    mismatches.append(f"{profile}/{split} {pipeline.frame_identifier(frame)}: {differing}")
-            total += len(frames)
-    featurizer.save_cache()
+    _PARITY.update(inputs=inputs, frames=frames_by_split)
+    pool = get_context("fork").Pool(jobs) if jobs > 1 else None
+    try:
+        featurizer = Featurizer(lexicons[profiles[0]], pipeline.spelling_lexicons(inputs), inputs.intent, inputs.ortho,
+                                float(cast(float, inputs.options["keep_importance"])))
+        mismatches: list[str] = []
+        total = 0
+        for split, frames in frames_by_split.items():
+            starts = list(range(0, len(frames), CONTEXT_ACTION_PARITY_CHUNK_FRAMES))
+            ahead = reference(pool, profiles, split, 0, min(CONTEXT_ACTION_PARITY_CHUNK_FRAMES, len(frames))) if starts else None
+            for number, first in enumerate(starts):
+                chunk = frames[first:first + CONTEXT_ACTION_PARITY_CHUNK_FRAMES]
+                expected = cast(Callable[[], dict[str, list[dict[str, float]]]], ahead)()
+                if number + 1 < len(starts):
+                    following = starts[number + 1]
+                    ahead = reference(pool, profiles, split, following,
+                                      min(following + CONTEXT_ACTION_PARITY_CHUNK_FRAMES, len(frames)))
+                result = featurizer.featurize_split(
+                    {profile: chunk for profile in profiles}, split,
+                    {profile: lexicons[profile][0].speller.available for profile in profiles},
+                    {profile: lambda _frame: {} for profile in profiles})
+                for profile in profiles:
+                    cpu = featurizer.cpu_positions[profile]
+                    for position, (frame, (actual, _label, _importance), want) in enumerate(zip(
+                            chunk, result[profile].rows(featurizer.dictionary.names), expected[profile])):
+                        if position in cpu:
+                            continue
+                        if actual != want or any(repr(actual[name]) != repr(value) for name, value in want.items()):
+                            differing = sorted(set(actual.items()) ^ set(want.items()))[:CONTEXT_ACTION_REPORTED_DIFFERENCES]
+                            mismatches.append(f"{profile}/{split} {pipeline.frame_identifier(frame)}: {differing}")
+                    total += len(chunk)
+        featurizer.save_cache()
+    finally:
+        if pool is not None:
+            pool.close()
+            pool.join()
     return ParityResult(total, featurizer.cpu_frames, mismatches)
 
 
@@ -1080,11 +1143,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="compare the GPU with the Python features and, when every frame agrees, record the sources' hashes")
     parser.add_argument("--corpus", type=Path, required=True, help="a fitting corpus (its TEST split is never read)")
     parser.add_argument("--frames", type=int, default=None, help="at most this many frames per split")
+    parser.add_argument("--jobs", type=int, default=None, help="worker processes for the Python reference (default: per core and memory)")
     args = parser.parse_args(argv)
     inputs = trainer.load_inputs(args.corpus, trainer.recipe())
     with pipeline.bound_process_state(inputs):
-        frames = pipeline.parity_frames(inputs, args.frames)
-        result = check_parity(frames, inputs)
+        jobs = pipeline.choose_jobs(args.jobs)
+        frames = pipeline.parity_frames(inputs, args.frames, jobs)
+        result = check_parity(frames, inputs, jobs)
     print(f"parity: {result.frames} frames, {result.cpu_frames} on the CPU path, {len(result.mismatches)} differ", flush=True)
     for line in result.mismatches[:CONTEXT_ACTION_REPORTED_DIFFERENCES]:
         print("  " + line, flush=True)
