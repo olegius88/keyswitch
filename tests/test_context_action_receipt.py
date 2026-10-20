@@ -300,6 +300,18 @@ class ContextActionReceiptTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "no developer-chat test"):
             self.exported()
 
+    def test_a_claim_that_drew_no_message_is_passed_over_and_batches_are_pinned_as_one(self) -> None:
+        self.write_devchat()
+        access = next(self.devchat.glob("*.access.json"))
+        identity = json.loads(access.read_bytes())
+        batches = [hashlib.sha256(name).hexdigest() for name in (b"first", b"second")]
+        access.write_text(json.dumps({**identity, "messages_sha256": batches}), encoding="utf-8")
+        empty = {**identity, "test_membership": {"messages": [], "questions": []}}
+        (self.devchat / ("0" * SHA256_HEX_CHARACTERS + ".access.json")).write_text(json.dumps(empty), encoding="utf-8")
+        (self.devchat / ("0" * SHA256_HEX_CHARACTERS + ".result.json")).write_text(json.dumps({"error": "KeyError"}), encoding="utf-8")
+        block = cast(dict[str, object], self.exported()[verifier.DEVCHAT])
+        self.assertEqual(block["messages_sha256"], hashlib.sha256(json.dumps(batches).encode()).hexdigest())
+
     def test_a_failed_developer_chat_test_cannot_be_exported(self) -> None:
         self.write_devchat(candidate_ok=0)
         with self.assertRaisesRegex(ValueError, "developer-chat floors"):
