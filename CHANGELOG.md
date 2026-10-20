@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.59.0 — 2026-10-20
+
 - A single letter typed in the Russian layout right after a Russian word, where it stands for a Latin variable, now
   converts at the space or sign after it: `при ч равном нулю` becomes `при x равном нулю`, `результат т - 1` becomes
   `результат n - 1`. A letter meant as written stays: `да я про то ч`, `и т. д.`, `по оси Х`, `если б`, `в 2 ч дня`. A
