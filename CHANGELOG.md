@@ -4,6 +4,41 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- A single letter typed in the Russian layout right after a Russian word, where it stands for a Latin variable, now
+  converts at the space or sign after it: `при ч равном нулю` becomes `при x равном нулю`, `результат т - 1` becomes
+  `результат n - 1`. A letter meant as written stays: `да я про то ч`, `и т. д.`, `по оси Х`, `если б`, `в 2 ч дня`. A
+  model head of its own answers for this class, and KeySwitch lifts its rule that a lone letter converts only through a
+  curated rule there alone; a letter left at a pause, which may open a word still being typed, stays as it did.
+- A Russian abbreviation of two or more parts typed in the English layout converts: `n/r/` becomes `т.к.`, `n/t/`
+  `т.е.`, `l/,/` `д.б.`. Latin tokens of short parts stay as typed: `n/a`, `I/O`, `usr/bin`, `tcp/ip`, `src/app/`. A word
+  with a slash after it (`dev/` of a path, `cv/` for `см.`) is decided as before: it is as often a part of a path as a
+  short Russian word ending a sentence. The head that answers for the class reads the abbreviation itself, its shape,
+  the words around it and how often its parts occur as words.
+- A word in quotes and parts joined by colons typed in the Russian layout convert when the model asks for it: `"Boot`,
+  typed as `ЭИщще`, and `std::swap`, typed as `ыевЖЖыцфз`, were refused because their other reading holds signs, and the
+  refusal overruled the model there. A quote may now open the reading and close it with one sign after it, and parts may
+  join by colons when the token was typed with a small letter. A sign after a word without a quote is still refused.
+- The model fits faster: the prefix model is taken as installed when its seal pins the tree (it was fitted again,
+  byte-identical, on every cycle), and the comparison of two candidates featurises the calibration and development
+  frames alone.
+- The field batteries judge a word KeySwitch was asked about at a pause and that was then typed on by the word as
+  finished: its target is its reading in the layout the word was finished in, and left as typed it is right too. They
+  used to take what the logging release left at the pause, which counted an early correct conversion of the first
+  letter as a broken word and a conversion away from the finished word as right.
+- The developer-chat test grows by batches once one is used up (each read takes whole discussions out of it): a second
+  batch of ru.stackoverflow comments of 2024-2026 that the first fetch did not take, built by the same rules with every
+  text of the first build dropped. A read that would draw fewer messages than a read takes is refused before it claims
+  anything.
+- The context model `context-v3-1ba380ab2999` (corpus v69) is the model of 0.58.0 with the variable and the
+  dotted-abbreviation heads fitted onto it; every other weight is the same, and the prefix model is unchanged. On the
+  owner's field batteries it breaks no word; of the developer-chat development messages it restores 34 more with a change
+  to English forgotten, 23 more with a change to Russian forgotten and 2 more started in the other layout, and loses
+  none; on calibration v69 it nets one frame more in each profile. On the sealed test v69, read once, it kept all 182
+  correctly typed sequences and restored all 181 typed in the wrong layout without the early switch, against 179 for the
+  baseline pair, and 16 with it, as many as the baseline pair; on the sealed developer-chat test (1 125 messages of the
+  second batch) it restored 8 more messages with a change to English forgotten, 2 more with a change to Russian
+  forgotten and 1 more started in the other layout than 0.58.0, and lost none.
+
 ## 0.58.0 — 2026-10-19
 
 - A term of two or three letters typed in the Russian layout alone at the start of a message, in a field KeySwitch read
