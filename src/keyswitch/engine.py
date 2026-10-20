@@ -28,6 +28,9 @@ from .constants.settings_defaults import (
     CONFIDENCE_SETTING_MIN,
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_EARLY_SWITCH_MIN_LENGTH,
+    DEFAULT_FIELD_CATCH_UP,
+    FIELD_CATCH_UP_CHOICES,
+    FIELD_CATCH_UP_OFF,
     DEFAULT_MINIMUM_WORD_LENGTH,
     DEFAULT_PAUSE_DELAY_SECONDS,
     EARLY_SWITCH_MIN_LENGTH_SETTING_MAX,
@@ -54,7 +57,8 @@ from .context_action_features import term_question
 from .log_privacy import LogRedactor
 from .intent_model import CorrectionTrigger, LinearNgramModel
 from .context_policy import (
-    STRANDED_SHORT_WORD_REASON, ContextPolicy, ContextResult, caret_lag, shared_identifiers,
+    STRANDED_SHORT_WORD_REASON, ContextPolicy, ContextResult, caret_lag, ends_with_typed, shared_identifiers,
+    typed_short_of,
 )
 from .constants.models import (
     CONTEXT_ACTION_FEATURE_VERSION,
@@ -97,7 +101,7 @@ from .constants.detection import (
 from .constants.keyboard import LAYOUT_GROUP_COUNT, UNICODE_PACKET_KEY_NAME
 from .constants.file_formats import LEGACY_RULE_CONFIRMATIONS_REQUIRED
 from .constants.log_files import LOGGED_SCORE_DECIMALS
-from .constants.text import BASIC_MULTILINGUAL_PLANE_MAX_CODEPOINT, FIELD_PENDING_MAX_CHARACTERS
+from .constants.text import BASIC_MULTILINGUAL_PLANE_MAX_CODEPOINT
 from .constants.timing import (
     ACTION_TIMEOUT_SECONDS,
     CONTEXT_WAIT_SETTLE_MIN_SECONDS,
@@ -106,6 +110,7 @@ from .constants.timing import (
     ENGINE_LOOP_MIN_WAKE_SECONDS,
     ENGINE_SWITCH_GRACE_SECONDS,
     ENGINE_WORKER_JOIN_TIMEOUT_SECONDS,
+    FIELD_CATCH_UP_RETRY_SECONDS,
     INPUT_DELAY_LATE_MS,
     INPUT_DELAY_REPORT_INTERVAL_SECONDS,
     INPUT_DELAY_SLOW_CALLBACK_MS,
@@ -303,6 +308,15 @@ class LearningPrompt:
 
 
 @dataclass(frozen=True)
+class FieldWait:
+    """A correction waiting for its field to show the word it replaces (KeySwitchEngine._waits_for_field)."""
+
+    plan: CorrectionPlan
+    learning_prompt: LearningPrompt | None
+    deadline: float
+
+
+@dataclass(frozen=True)
 class _LayoutSelection:
     group: int
 
@@ -450,6 +464,7 @@ class KeySwitchEngine:
             for group, model in self.models.items()
         }
         self._pending: CorrectionPlan | None = None
+        self._field_wait: FieldWait | None = None
         self._pending_trigger_keycode = -1
         self._input_delay_due = time.monotonic() + INPUT_DELAY_REPORT_INTERVAL_SECONDS
         # The key an application quirk has just rewritten; pressing it again undoes that.
@@ -737,6 +752,7 @@ class KeySwitchEngine:
         self._expire_manual_correction()
         self._poll_current_group()
         self._maybe_correct_after_pause()
+        self._retry_field_wait()
         self._expire_learning_prompt()
         self._report_input_delay()
 
@@ -766,6 +782,8 @@ class KeySwitchEngine:
     def _loop_timeout(self) -> float:
         """Wake exactly when the pause delay elapses, at most every 0.5 s."""
 
+        if self._field_wait is not None:
+            return FIELD_CATCH_UP_RETRY_SECONDS
         last_input = self._last_word_input_at
         if not self._pause_correction_pending or last_input is None:
             return ENGINE_LOOP_MAX_WAKE_SECONDS
@@ -1382,11 +1400,8 @@ class KeySwitchEngine:
             head = field.before + field.after[:lag or 0]
             if lag is not None and head.endswith(shown):
                 return head[:len(head) - len(shown)], field.after[lag:]
-        for pending in range(1, min(FIELD_PENDING_MAX_CHARACTERS, len(typed) - 1) + 1):
-            shown = typed[:-pending]
-            if field.before.endswith(shown):
-                return field.before[:-len(shown)], field.after
-        return None
+        short = typed_short_of(field.before, field.after, typed)
+        return None if short is None else (field.before[:-len(short)], field.after)
 
     def _decide_prefix(self, baseline: EarlySwitchDecision, field: FieldContext | None) -> tuple[EarlySwitchDecision, float]:
         mode = str(self.settings.get("detection.context_policy", "assist"))
@@ -2389,6 +2404,14 @@ class KeySwitchEngine:
             return self._kept_inside_word(fragment, source_group, "same_layout" if same else "mixed_layout", point)
         pair, source_name, target_name = LayoutPair(), self._layout_name(source_group), self._layout_name(target)
         whole = pair.translate(head, target_name, source_name) + fragment + pair.translate(tail, target_name, source_name)
+        if not tail and not any(character.isalpha() for character in fragment) and not self._signs_are_letters(
+                whole, head + alternatives[target], source_group, target, len(fragment)):
+            # Signs typed right after a word's last letter end it: `,` after `привет` is a comma, `.` after `сдела`
+            # the `ю` of `сделаю`. Judged as the whole word, a Russian word read in Latin keys loses to its Russian
+            # reading whatever was typed after it, and `.` and `,` typed after a word just cut back with Backspace
+            # became `ю` and `б` (the owner's typing, 19-20.10.2026). The boundary model, which reads the signs at
+            # the end of every word typed, decides it on the whole word; a sign it does not read as a letter stays.
+            return self._kept_inside_word(fragment, source_group, "sign_after_word", point)
         # The model is told that the word is being edited in place: every other letter of
         # it is already in the other layout.
         decision = self._decide_word(
@@ -2407,6 +2430,20 @@ class KeySwitchEngine:
             self._context_result = None
             return replace(decision, should_convert=False, original=fragment, replacement=fragment)
         return replace(decision, original=fragment, replacement=alternatives[target])
+
+    def _signs_are_letters(self, original: str, alternative: str, source_group: int, target: int, signs: int) -> bool:
+        """Whether the boundary model reads the last `signs` keys of a word as its letters (`сдела.` is `сделаю`)
+        rather than signs after it (`привет,`); an abstention keeps them signs, as typed."""
+
+        model = self.boundary_model
+        if model is None or source_group not in self.models or target not in self.models:
+            return False
+        extract = model.extract if isinstance(model, BoundaryPolicy) else boundary_features
+        prediction = model.predict(tuple(
+            extract(original, alternative, length, self.models[source_group], self.models[target])
+            for length in range(signs + 1)
+        ))
+        return prediction.suffix_length == 0
 
     def _kept_inside_word(
         self, fragment: str, source_group: int, reason: str, point: InsertionPoint,
@@ -2900,6 +2937,7 @@ class KeySwitchEngine:
         once more with the converted next word after it, exactly as a waiting word
         is (_resolve_context_wait). If the model no longer converts it, one
         correction returns both: `vs code`. The engine only asks; the model decides.
+        Only a word that opened its text is asked again.
         """
 
         if (provisional is None or not decision.should_convert
@@ -2919,12 +2957,14 @@ class KeySwitchEngine:
         if not self.context_policy.stream.text.endswith(original + ("" if closing is None else closing.character)):
             return None
         baseline, field = applied.revisit
-        if (len(decision.replacement) == 1 and decision.replacement.isalpha() and not decision.replacement.isascii()
-                and term_question(applied.original, "" if field is None else field.before)):
-            # A term of the term head's class converted into Latin letters, and a Russian word of one letter after it:
-            # what a Russian phrase holds around a term (`pr и`), no sign that the term went back. Asked again with `и`
-            # after it, the model took `pr` back with it (`принимай зк и`, the owner's typing, 0.43.0). A word of no
-            # such class is still asked about: `кз в` went back to `кз`, and `rp` had been wrong.
+        if baseline.reason == STRANDED_SHORT_WORD_REASON or term_question(
+                applied.original, "" if field is None else field.before):
+            # A Russian word of one letter the rule set after an English term in a Russian phrase (`sendapi и`), or a
+            # term of the term head's class converted into Latin letters (`qemu`, `gpu`): the next word going the
+            # other way is what a Russian phrase holds around a term, no sign that the word went back. Asked again,
+            # the model took them back (`и botcorp` became `b botcorp`, `в dev` `d dev`, `qemu чтобы` `йуьг чтобы`,
+            # `gpu но` `пзг но`, `принимай зк и` with `pr`; the owner's typing, 0.43.0-0.59.0). A word of no such
+            # class is still asked about: `кз в` went back to `кз`, and `rp` had been wrong.
             return None
         # The question is how to read the word now that its neighbour went the other
         # way, not what the detector thinks of it alone: it is asked with no baseline
@@ -4226,6 +4266,63 @@ class KeySwitchEngine:
             return ""
         return "other_text"
 
+    def _field_catch_up_seconds(self) -> float:
+        """How long a correction may wait for its field (detection.field_catch_up); a value not offered is the default."""
+
+        value = str(self.settings.get("detection.field_catch_up", DEFAULT_FIELD_CATCH_UP))
+        if value not in FIELD_CATCH_UP_CHOICES:
+            value = DEFAULT_FIELD_CATCH_UP
+        return 0.0 if value == FIELD_CATCH_UP_OFF else int(value) / MILLISECONDS_PER_SECOND
+
+    def _waits_for_field(
+        self, plan: CorrectionPlan, learning_prompt: LearningPrompt | None, field: FieldContext, ahead: str,
+        waiting: FieldWait | None,
+    ) -> bool:
+        """Whether a correction waits for a field that has not shown its word yet, rather than give it up.
+
+        A browser or an Electron editor on Windows reports its text a moment after the keys: the word is there short
+        of its last letters or its boundary (_typed_in_field), and refused as a changed field, the correction was
+        lost (`ашкуащч` stayed for `firefox` in Antigravity, the owner's typing of 19.10.2026). It is tried again on
+        the engine's timer (_retry_field_wait) for as long as detection.field_catch_up allows, and made only once the
+        field shows the very word typed (_field_refusal); one that never does is given up as before.
+        """
+
+        typed = plan.original + "".join(stroke.character for stroke in plan.trailing)
+        closing = plan.boundary.character if plan.boundary is not None and not plan.boundary.deferred else ""
+        # Behind is missing, not shifted: the last letters, or the boundary after the whole word, are nowhere in the
+        # field yet; standing after the caret, they are a caret reported off (caret_lag), which waiting does not mend.
+        if typed_short_of(field.before, field.after, typed) is None and not (
+                closing and ends_with_typed(field.before, typed) and not field.after.startswith(closing)):
+            return False
+        now = time.monotonic()
+        if waiting is not None and waiting.plan is plan:
+            deadline = waiting.deadline
+        else:
+            catch_up = self._field_catch_up_seconds()
+            if catch_up <= 0:
+                return False
+            deadline = now + catch_up
+            self._technical_event("correction_awaiting_field", mode=plan.mode, application=plan.application,
+                                  catch_up_ms=round(catch_up * MILLISECONDS_PER_SECOND))
+        if now >= deadline:
+            self._technical_event("field_wait_expired", mode=plan.mode, application=plan.application)
+            return False
+        self._field_wait = FieldWait(plan, learning_prompt, deadline)
+        return True
+
+    def _retry_field_wait(self) -> None:
+        """A correction waiting for its field (_waits_for_field) is tried again once no key is held down; a correction
+        planned since then supersedes it, and it is given up as an unseen field always was."""
+
+        waiting = self._field_wait
+        if waiting is None or self._pressed or self._modifier_keycodes:
+            return
+        if self._pending is not None:
+            self._field_wait = None
+            self._technical_event("field_wait_dropped", mode=waiting.plan.mode, reason="correction_pending")
+            return
+        self._execute_correction(waiting.plan, waiting.learning_prompt)
+
     def _collect_late_input(self, plan: CorrectionPlan) -> tuple[KeyEvent, ...] | None:
         """Keys typed after the word but before its correction lands.
 
@@ -4725,6 +4822,7 @@ class KeySwitchEngine:
         learning_prompt: LearningPrompt | None,
     ) -> bool:
         requested = plan
+        waiting, self._field_wait = self._field_wait, None
         if plan.head:
             # The word decided; the mention head is rewritten with it, and the
             # rule the user may confirm still names the word alone.
@@ -4772,6 +4870,9 @@ class KeySwitchEngine:
                 # still the one typed: it stays tracked for a later letter or its boundary.
                 self._technical_event("early_switch_dropped", reason="field_behind",
                                       current_word_length=len(self._strokes))
+                return False
+            if (refusal == "other_text" and plan.mode != "early" and field is not None
+                    and self._waits_for_field(requested, learning_prompt, field, ahead, waiting)):
                 return False
             if refusal:
                 typed_after_boundary = bool(self._strokes)
@@ -5227,6 +5328,10 @@ class KeySwitchEngine:
 
     def _clear_word(self, action: str | None = None, *, reason: str = "") -> None:
         self.context_policy.stream.clear()
+        if self._field_wait is not None:
+            # A click, a caret move, Backspace or another window: the word may no longer stand where it was typed.
+            self._technical_event("field_wait_dropped", mode=self._field_wait.plan.mode, reason=reason or "word_cleared")
+            self._field_wait = None
         # After a click, a caret move or another window nothing is known to
         # stand before the next key.
         self._last_key_character = ""

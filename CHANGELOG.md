@@ -4,6 +4,25 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- A word converted at the space is no longer taken back when the next word goes the other way, if it was a term of
+  the term head's class converted into Latin letters or a Russian word of one letter the rule set after an English
+  term in a Russian phrase: `sendapi и botcorp` became `sendapi b botcorp`, `force push в dev` `force push d dev`,
+  `qemu чтобы` `йуьг чтобы` and `gpu но` `пзг но`. In the owner's typing since 01.10.2026 ten of the thirteen words
+  taken back were of these two kinds, and every one had been right. Any other converted word is still asked about
+  again: `кз`, which the model reads as `rp`, goes back to `кз` when a Russian word follows.
+- A sign typed right after the last letter of a word, with the layout of the other language, is a sign unless the
+  boundary model reads it as the word's letter. After a click or Backspace to the end of a Russian word in the English
+  layout, `,` `.` and `;` came out as `б`, `ю` and `ж` (`приветб`, `касаетсяю`), as the whole word was judged and a
+  Russian word read in Latin keys always lost to its Russian reading; `.` after `сдела` is still the `ю` of `сделаю`.
+- In a browser or an Electron editor, which reports its text a moment after the keys, a word whose last letters the
+  field does not show yet at its space is decided on its keys, and the correction waits for the field to show the
+  word (`ашкуащч` stayed for `firefox` in Antigravity, refused as a changed field). The new setting «Ждать отстающее
+  поле» (`detection.field_catch_up`) sets how long: off, 0.1, 0.3 (the default), 0.5 or 1 second. A correction is
+  made only once the field shows the very word typed; a click, Backspace, another window or the next correction ends
+  the wait.
+- The field batteries hold the owner's typing of 15–20.10.2026 (0.56.0–0.59.0, 9 614 words), and five words a
+  reverted conversion had left in Latin are labelled with the Russian word meant (`redis b nats` is `redis и nats`).
+
 ## 0.59.0 — 2026-10-20
 
 - A single letter typed in the Russian layout right after a Russian word, where it stands for a Latin variable, now

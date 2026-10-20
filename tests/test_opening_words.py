@@ -115,6 +115,26 @@ class ConvertedWordRevisitTests(ContextEngineTests):
         self.assertEqual(self.backend.text, "кз в ")
         self.assertIn(("кз", "", "в"), model.questions)
 
+    def test_a_term_converted_into_latin_is_not_asked_again_whatever_follows(self) -> None:
+        # `qemu чтобы`, `gpu но` (the owner's typing): a Russian word after a term is what a Russian phrase holds, and
+        # taken back with it, the term became `йуьг`, `пзг`. A word of no such class is still asked about after other
+        # words: `кз` (`rp` is no term) went back with `в`.
+        model = self.script(lambda item: "convert" if item.original in {"пзг", "кз", "yj", "d"} and not item.field.after
+                            else "keep")
+        self.reset_editor(1)
+        self.type("на ", group=1)
+        self.type("пзг ", group=1)
+        self.assertEqual(self.backend.text, "на gpu ")
+        self.type("yj ", group=0)
+        self.assertEqual(self.backend.text, "на gpu но ")
+        self.assertFalse([after for original, _before, after in model.questions if original == "пзг" and after])
+        self.reset_editor(1)
+        self.type("для ", group=1)
+        self.type("кз ", group=1)
+        self.type("d ", group=0)
+        self.assertEqual(self.backend.text, "для кз в ")
+        self.assertIn(("кз", "для ", "в"), model.questions)
+
     def test_a_next_word_in_the_same_language_asks_nothing(self) -> None:
         model = self.script(english_after)
         self.reset_editor(0)
@@ -188,6 +208,17 @@ class ShortWordModelTests(ContextEngineTests):
                 self.type(first, group=group)
                 self.type(second, group=self.backend.group)
                 self.assertEqual(self.backend.text, expected)
+
+    def test_a_russian_letter_between_english_terms_stays_when_the_next_term_converts(self) -> None:
+        # `все что касается sendapi и botcorp` (the owner's typing, 0.59.0): `и` after an English term in a Russian
+        # phrase, then the next term typed in the Russian layout; converting it took `и` back to `b`.
+        self.reset_editor(1)
+        self.type("все что касается ", group=1)
+        self.type("ыутвфзш ", group=1)
+        self.type("b ", group=0)
+        self.assertEqual(self.backend.text, "все что касается sendapi и ")
+        self.type("ищесщкз ", group=1)
+        self.assertEqual(self.backend.text, "все что касается sendapi и botcorp ")
 
     def test_ns_after_russian_text_converts(self) -> None:
         for before in ("привет ", "я думаю, что ", "мы решили, что "):

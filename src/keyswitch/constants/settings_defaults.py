@@ -14,6 +14,21 @@ DEFAULT_CONFIDENCE_THRESHOLD: Final = 2.0
 DEFAULT_PAUSE_DELAY_SECONDS: Final = 0.7
 # The pause delay schema 7 and older seeded the settings file with; such a file adopts the new default once.
 PREVIOUS_DEFAULT_PAUSE_DELAY_SECONDS: Final = 1.5
+# detection.field_catch_up: how long a correction may wait for an editor that shows a word a moment after its keys
+# (a browser or an Electron editor on Windows reports its text late), in milliseconds, or "off". A correction is made
+# only once the field shows the very word typed; one that never does is left as typed, as before the setting. The
+# owner's choice of 20.10.2026: a third of a second by default, a fixed choice or off.
+FIELD_CATCH_UP_OFF: Final = "off"
+FIELD_CATCH_UP_CHOICES: Final = (FIELD_CATCH_UP_OFF, "100", "300", "500", "1000")
+DEFAULT_FIELD_CATCH_UP: Final = "300"
+# What both settings windows show for each choice of detection.field_catch_up.
+FIELD_CATCH_UP_LABELS: Final = {FIELD_CATCH_UP_OFF: "Не ждать", "100": "0,1 с", "300": "0,3 с", "500": "0,5 с",
+                                "1000": "1 с"}
+# What both settings windows say of detection.field_catch_up.
+FIELD_CATCH_UP_TITLE: Final = "Ждать отстающее поле"
+FIELD_CATCH_UP_DESCRIPTION: Final = (
+    "Браузеры и редакторы на Electron показывают набранное с задержкой. Сколько ждать, пока поле покажет слово, "
+    "прежде чем отказаться от его исправления")
 # Default of detection.early_switch_min_length; every fallback to the setting uses it.
 DEFAULT_EARLY_SWITCH_MIN_LENGTH: Final = 4
 # Default of history.limit; every fallback to the setting uses it.
@@ -57,6 +72,7 @@ DEFAULT_SETTINGS: Final[dict[str, object]] = {
         "context_policy": "assist",
         "context_read_field": True,
         "hold_after_caret_move": True,
+        "field_catch_up": DEFAULT_FIELD_CATCH_UP,
         "protect_code": True,
         "intent_model_enabled": True,
         # Switching rules from the rule window act, and a double press of the
