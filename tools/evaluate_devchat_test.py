@@ -26,6 +26,13 @@ result is reported again instead. The development split is read freely; its resu
 held, on the same runtime, and after the candidate passed its Tatoeba test. Results hold counts only and go to files
 only their owner reads; no message is printed or written anywhere, and a failure names its kind alone.
 
+Every read takes whole discussions out of the test (a message's question goes with it), so the test is used up: on
+19.10.2026, after four reads, no message with Latin words was left, and the fifth read drew none. The test therefore
+grows by batches: later batches are built by the same builder from fresh comments of the same months that the earlier
+fetches did not take, each pinned in TEST_BATCHES by the SHA-256 of its messages, and a read draws from every batch.
+A read that would take fewer messages with Latin words than DEVCHAT_TEST_COUNT is refused before it claims anything (a
+new batch is needed), and an earlier claim that drew no message read no test: it is no read of its candidate.
+
     PYTHONPATH=src:tools:tests dbus-run-session -- python3 tools/evaluate_devchat_test.py --split dev|test \\
         --directory <messages directory> --candidate <context artifact> --released <artifact> --output <result.json>
 """
@@ -59,6 +66,9 @@ TEST: Final = "test"
 PINNED: Final = {DEVELOPMENT: DEVCHAT_DEV_CONTENT_SHA256, TEST: DEVCHAT_TEST_CONTENT_SHA256}
 MIXED: Final = "mixed"
 RUSSIAN: Final = "russian"
+# The test's later batches, by name: the files `<name>.messages.jsonl.gz` and `<name>.members.jsonl.gz` beside the first
+# one, each with the SHA-256 of its messages' content and where they came from.
+TEST_BATCHES: Final = ROOT / "tools/devchat_test_batches.json"
 INSTALLED: Final = ROOT / "src/keyswitch/resources/models/context_policy_v1.json"
 BASELINE_ARTIFACT: Final = ROOT / "model/context_v3/baseline-context-v1.json"
 BENCH: Final = "mixed_typing: the field read, a layout chosen by hand respected, the early switch off; four typing modes"
@@ -97,6 +107,37 @@ def load_members(path: Path) -> list[Member]:
                        str(row["mix"])) for row in map(json.loads, handle)]
 
 
+def split_files(split: str, directory: Path) -> list[tuple[Path, Path, str]]:
+    """A split's (messages, members, pinned content SHA-256) files: the development split is one file, the test its
+    first batch and every later batch TEST_BATCHES names."""
+
+    files = [(directory / f"devchat-{split}.messages.jsonl.gz", directory / f"devchat-{split}.members.jsonl.gz", PINNED[split])]
+    if split == TEST:
+        for batch in cast(list[dict[str, str]], json.loads(TEST_BATCHES.read_text("utf-8"))["batches"]):
+            name = batch["name"]
+            files.append((directory / f"{name}.messages.jsonl.gz", directory / f"{name}.members.jsonl.gz", batch["content_sha256"]))
+    return files
+
+
+def members_of(files: Sequence[tuple[Path, Path, str]]) -> list[Member]:
+    """The members of every file, a text a batch repeats counted once (in the first batch that holds it)."""
+
+    seen: set[str] = set()
+    members: list[Member] = []
+    for _messages, path, _pin in files:
+        for member in load_members(path):
+            if member.text not in seen:
+                seen.add(member.text)
+                members.append(member)
+    return members
+
+
+def read_anything(access: Mapping[str, object]) -> bool:
+    """Whether an earlier claim drew any message: one that drew none read no test."""
+
+    return bool(cast(Mapping[str, list[str]], access["test_membership"])["messages"])
+
+
 def draw(members: Sequence[Member], count: int | None, share: float,
          taken: tuple[set[str], set[str]] = (set(), set())) -> list[Member]:
     """`count` members with Latin words (all of them for None) and `share` as many of Russian words alone, in the seed's
@@ -113,16 +154,17 @@ def membership(chosen: Sequence[Member]) -> dict[str, list[str]]:
     return {"messages": sorted({member.text for member in chosen}), "questions": sorted({member.question for member in chosen})}
 
 
-def texts_of(path: Path, chosen: Sequence[Member]) -> list[str]:
+def texts_of(paths: Sequence[Path], chosen: Sequence[Member]) -> list[str]:
     """The texts of the chosen members, in their order: read only after the claim."""
 
     wanted = {member.text for member in chosen}
     found: dict[str, str] = {}
-    with gzip.open(path, "rt", encoding="utf-8") as handle:
-        for row in map(json.loads, handle):
-            key = hashlib.sha256(str(row["text"]).encode()).hexdigest()
-            if key in wanted:
-                found[key] = str(row["text"])
+    for path in paths:
+        with gzip.open(path, "rt", encoding="utf-8") as handle:
+            for row in map(json.loads, handle):
+                key = hashlib.sha256(str(row["text"]).encode()).hexdigest()
+                if key in wanted:
+                    found[key] = str(row["text"])
     if found.keys() != wanted:
         raise Refusal("the messages file lacks members the draw chose")
     return [found[member.text] for member in chosen]
@@ -160,6 +202,7 @@ def runtime(directory: Path) -> dict[str, str]:
     pins = dict(runtime_provenance())
     for name in ("tools/mixed_typing.py", "tools/evaluate_devchat_test.py", "tools/build_devchat_messages.py"):
         pins[name] = checksum(ROOT / name)
+    pins[TEST_BATCHES.relative_to(ROOT).as_posix()] = checksum(TEST_BATCHES)
     for path in sorted(directory.glob("devchat-*.jsonl.gz")):
         pins["messages/" + path.name] = content_checksum(path)
     return pins
@@ -240,7 +283,7 @@ def claim(identity: dict[str, object], root: Path) -> str:
     try:
         for path in sorted(root.glob("*.access.json")):
             prior = cast(dict[str, object], json.loads(path.read_bytes()))
-            if cast(dict[str, dict[str, str]], prior["pairs"])[CANDIDATE]["sha256"] == candidate:
+            if cast(dict[str, dict[str, str]], prior["pairs"])[CANDIDATE]["sha256"] == candidate and read_anything(prior):
                 raise Refusal("this candidate read the dev-chat test already")
             taken = cast(dict[str, list[str]], prior["test_membership"])
             if any(set(own[field]) & set(taken[field]) for field in ("messages", "questions")):
@@ -264,8 +307,8 @@ def consumed(root: Path) -> tuple[set[str], set[str]]:
 def evaluate(split: str, directory: Path, models: Mapping[str, Path], *, workers: int = MIXED_TYPING_DEFAULT_WORKERS,
              root: Path | None = None) -> dict[str, object]:
     ledger = root or ledger_root()
-    messages, members_path = directory / f"devchat-{split}.messages.jsonl.gz", directory / f"devchat-{split}.members.jsonl.gz"
-    if content_checksum(messages) != PINNED[split]:
+    files = split_files(split, directory)
+    if any(content_checksum(messages) != pin for messages, _members, pin in files):
         raise Refusal(f"the {split} messages differ from the pinned ones")
     pairs = {name: {"path": str(path), "sha256": checksum(path), "model_version": str(json.loads(path.read_bytes())["version"])}
              for name, path in models.items()}
@@ -275,7 +318,7 @@ def evaluate(split: str, directory: Path, models: Mapping[str, Path], *, workers
     if split == TEST:
         for path in sorted(ledger.glob("*.access.json")):
             prior = cast(dict[str, object], json.loads(path.read_bytes()))
-            if cast(dict[str, dict[str, str]], prior["pairs"])[CANDIDATE]["sha256"] == candidate:
+            if cast(dict[str, dict[str, str]], prior["pairs"])[CANDIDATE]["sha256"] == candidate and read_anything(prior):
                 recorded_result = path.with_name(path.name.replace(".access.json", ".result.json"))
                 if recorded_result.is_file():
                     return cast(dict[str, object], json.loads(recorded_result.read_bytes()))
@@ -289,15 +332,19 @@ def evaluate(split: str, directory: Path, models: Mapping[str, Path], *, workers
             raise Refusal("the runtime or the pairs differ from the candidate's development result")
         if not tatoeba_passed(candidate):
             raise Refusal("the candidate passed no Tatoeba test; the dev-chat test is not read")
-    chosen = draw(load_members(members_path), DEVCHAT_TEST_COUNT if split == TEST else None, MIXED_EVALUATE_RUSSIAN_SHARE,
+    chosen = draw(members_of(files), DEVCHAT_TEST_COUNT if split == TEST else None, MIXED_EVALUATE_RUSSIAN_SHARE,
                   consumed(ledger) if split == TEST else (set(), set()))
-    identity: dict[str, object] = {"protocol": "devchat-messages-v1", "split": split, "messages_sha256": PINNED[split],
+    if split == TEST and sum(member.mix == MIXED for member in chosen) < DEVCHAT_TEST_COUNT:
+        raise Refusal("the test holds fewer fresh messages than a read takes; a new batch is needed and no test was read")
+    batches = [pin for _messages, _members, pin in files]
+    identity: dict[str, object] = {"protocol": "devchat-messages-v1", "split": split,
+                                   "messages_sha256": batches[0] if len(batches) == 1 else batches,
                                    "seed": DEVCHAT_SEED, "russian_share": MIXED_EVALUATE_RUSSIAN_SHARE, "pairs": pairs,
                                    "bench": BENCH, "test_membership": membership(chosen)}
     key = claim(identity, ledger) if split == TEST else candidate
     result: dict[str, object] = {"split": split, "access": key, "messages": len(chosen), "pairs": pairs, "bench": BENCH}
     try:
-        texts = texts_of(messages, chosen)
+        texts = texts_of([messages for messages, _members, _pin in files], chosen)
         rows = {name: typed(path, texts, workers) for name, path in models.items()}
         tables = {name: counts(rows[name], chosen) for name in PAIRS}
         paired = discordance(rows[CANDIDATE], rows[RELEASED])
