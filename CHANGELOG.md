@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.60.0 — 2026-10-22
+
 - A word converted at the space is no longer taken back when the next word goes the other way, if it was a term of
   the term head's class converted into Latin letters or a Russian word of one letter the rule set after an English
   term in a Russian phrase: `sendapi и botcorp` became `sendapi b botcorp`, `force push в dev` `force push d dev`,
