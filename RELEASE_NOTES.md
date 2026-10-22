@@ -1,33 +1,33 @@
-# KeySwitch 0.59.0
+# KeySwitch 0.60.0
 
 ## Русский
 
-В этом выпуске KeySwitch переводит однобуквенную латинскую переменную, набранную в русской раскладке после русского слова (`при ч равном` → `при x равном`), и русские сокращения из нескольких частей, набранные в английской раскладке (`n/r/` → `т.к.`), а латинское слово в кавычках и код с двоеточиями (`ЭИщще` → `"Boot`) больше не остаются как набраны. Полный перечень — в [CHANGELOG.md](CHANGELOG.md).
+В этом выпуске исправлены три ошибки движка, найденные по журналам набора: «и»/«в» между английскими терминами больше не превращаются обратно в `b`/`d` (`sendapi и botcorp`), знак сразу после русского слова не становится буквой (`приветб`), а в браузерах и редакторах на Electron исправление ждёт, пока поле покажет слово (новая настройка «Ждать отстающее поле»). Модели слов и префиксов те же, что в 0.59.0. Полный перечень — в [CHANGELOG.md](CHANGELOG.md).
 
 ### Файлы выпуска
 
-- `KeySwitch-Setup-0.59.0-x64.exe` — установщик для Windows 10/11 x64. Он не подписан сертификатом издателя: SmartScreen покажет предупреждение.
-- `KeySwitch-0.59.0-windows-x64.zip` — переносимый архив для Windows x64.
-- `KeySwitch-Setup-0.59.0-arm64.exe` — установщик для Windows 11 на ARM. Тоже не подписан сертификатом издателя.
-- `KeySwitch-0.59.0-windows-arm64.zip` — переносимый архив для Windows на ARM.
-- `KeySwitch-Setup-0.59.0-x86.exe` — установщик для 32-битной Windows 10. Тоже не подписан сертификатом издателя.
-- `KeySwitch-0.59.0-windows-x86.zip` — переносимый архив для 32-битной Windows.
-- `keyswitch_0.59.0_amd64.deb` — Ubuntu/Xubuntu, сеанс X11. Если стоит 0.28.0 или новее, эта версия придёт через обычное обновление системы.
-- `KeySwitch-0.59.0-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее), macOS 13 и новее.
-- `KeySwitch-0.59.0-macos-x86_64.zip` — Mac на процессоре Intel, macOS 13 и новее.
+- `KeySwitch-Setup-0.60.0-x64.exe` — установщик для Windows 10/11 x64. Он не подписан сертификатом издателя: SmartScreen покажет предупреждение.
+- `KeySwitch-0.60.0-windows-x64.zip` — переносимый архив для Windows x64.
+- `KeySwitch-Setup-0.60.0-arm64.exe` — установщик для Windows 11 на ARM. Тоже не подписан сертификатом издателя.
+- `KeySwitch-0.60.0-windows-arm64.zip` — переносимый архив для Windows на ARM.
+- `KeySwitch-Setup-0.60.0-x86.exe` — установщик для 32-битной Windows 10. Тоже не подписан сертификатом издателя.
+- `KeySwitch-0.60.0-windows-x86.zip` — переносимый архив для 32-битной Windows.
+- `keyswitch_0.60.0_amd64.deb` — Ubuntu/Xubuntu, сеанс X11. Если стоит 0.28.0 или новее, эта версия придёт через обычное обновление системы.
+- `KeySwitch-0.60.0-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее), macOS 13 и новее.
+- `KeySwitch-0.60.0-macos-x86_64.zip` — Mac на процессоре Intel, macOS 13 и новее.
 - `SHA256SUMS` — контрольные суммы всех файлов; сверьте их перед установкой.
 
 Архив для Mac нужен ровно один: сборка для Apple Silicon не запускается на Intel и наоборот.
 
 ### Что изменилось
 
-- Однобуквенная латинская переменная, набранная в русской раскладке сразу после русского слова, переводится на пробеле или знаке после неё: `при ч равном нулю` становится `при x равном нулю`, `результат т - 1` — `результат n - 1`. Буква, написанная как задумано, остаётся: `да я про то ч`, `и т. д.`, `по оси Х`, `если б`, `в 2 ч дня`. Буква, оставленная на паузе, может начинать недописанное слово и по-прежнему остаётся как набрана.
-- Русское сокращение из двух и более частей, набранное в английской раскладке, переводится: `n/r/` становится `т.к.`, `n/t/` — `т.е.`, `l/,/` — `д.б.`. Латинские токены из коротких частей остаются как набраны: `n/a`, `I/O`, `usr/bin`, `tcp/ip`, `src/app/`.
-- Латинское слово в кавычках и код с двоеточиями, набранные в русской раскладке, переводятся, когда этого требует модель: `ЭИщще` становится `"Boot`, `ыевЖЖыцфз` — `std::swap`. Раньше правило, по которому замена должна быть словом, отменяло модель, потому что в таком прочтении есть знаки.
+- Слово, уже исправленное на пробеле, больше не возвращается обратно, когда следующее слово уходит в другую раскладку, если это английский термин или «и»/«в», поставленные правилом между английскими терминами: `sendapi и botcorp` становился `sendapi b botcorp`, `force push в dev` — `force push d dev`, `qemu чтобы` — `йуьг чтобы`, `gpu но` — `пзг но`. Слово, которое модель перевела по ошибке, по-прежнему возвращается: `кз` перед русским словом остаётся `кз`.
+- Знак, набранный сразу после последней буквы слова в раскладке другого языка, остаётся знаком, если это не буква слова. После щелчка или Backspace в конце русского слова при английской раскладке `,` `.` `;` превращались в `б` `ю` `ж` (`приветб`, `касаетсяю`); `.` после `сдела` по-прежнему даёт `сделаю`.
+- В браузерах и редакторах на Electron (VS Code, Antigravity, Firefox), которые показывают набранное с задержкой, слово, последние буквы которого поле ещё не показало, решается по нажатым клавишам, а исправление ждёт, пока поле покажет слово целиком: так оставалось `ашкуащч` вместо `firefox`. Сколько ждать, задаёт новая настройка «Ждать отстающее поле»: не ждать, 0,1, 0,3 (по умолчанию), 0,5 или 1 секунда. Исправление делается, только когда поле показывает ровно набранное слово.
 
 ### Модель
 
-- Контекстная модель `context-v3-1ba380ab2999` (корпус v69) — модель 0.58.0, поверх которой обучены две новые части: для переменной из одной буквы и для сокращений с точками; все остальные части перенесены без изменений, модель префиксов прежняя, `prefix-v2-bf3dc28f8567`. На журналах реального набора она не портит ни одного слова; на сообщениях разработчиков (часть для разработки) восстанавливает на 34, 23 и 2 сообщения больше в трёх видах ошибок раскладки и ни одного не теряет; на калибровочных данных — на один кадр больше в каждом профиле. На запечатанном тесте v69, прочитанном один раз, она сохранила все 182 правильно набранные строки и без ранней смены раскладки восстановила все 181 строку, набранную не в той раскладке, против 179 у базовой пары, а с ранней сменой — 16, столько же, сколько базовая; на запечатанном тесте сообщений разработчиков (1 125 сообщений новой части) восстановила на 11 сообщений больше, чем 0.58.0, и ни одного не потеряла.
+- Модели те же, что в 0.59.0: контекстная `context-v3-1ba380ab2999` и модель префиксов `prefix-v2-bf3dc28f8567`, заново запечатанные для нового движка без изменения единого веса. На журналах реального набора новый движок не портит ни одного слова и исправляет 16. На запечатанном тесте v71, прочитанном один раз, сохранены все 185 правильно набранных строк, а без ранней смены раскладки восстановлены все 185 строк, набранных не в той раскладке, против 184 у базовой пары; с ранней сменой — 19 против 18.
 
 ### Что осталось
 
@@ -47,32 +47,32 @@
 
 ## English
 
-This release makes KeySwitch convert a one-letter Latin variable typed in the Russian layout after a Russian word (`при ч равном` → `при x равном`) and Russian abbreviations of several parts typed in the English layout (`n/r/` → `т.к.`), and a Latin word in quotes or code joined by colons (`ЭИщще` → `"Boot`) no longer stays as typed. The full list is in [CHANGELOG.md](CHANGELOG.md).
+This release fixes three engine faults found in the typing logs: `и`/`в` between English terms no longer turn back into `b`/`d` (`sendapi и botcorp`), a sign typed right after a Russian word no longer becomes a letter (`приветб`), and in browsers and Electron editors a correction waits for the field to show the word (the new setting «Ждать отстающее поле»). The models are those of 0.59.0. The full list is in [CHANGELOG.md](CHANGELOG.md).
 
 ### Release files
 
-- `KeySwitch-Setup-0.59.0-x64.exe` — installer for Windows 10/11 x64. It is not signed with a publisher certificate, so SmartScreen shows a warning.
-- `KeySwitch-0.59.0-windows-x64.zip` — portable archive for Windows x64.
-- `KeySwitch-Setup-0.59.0-arm64.exe` — installer for Windows 11 on Arm. It is not signed with a publisher certificate either.
-- `KeySwitch-0.59.0-windows-arm64.zip` — portable archive for Windows on Arm.
-- `KeySwitch-Setup-0.59.0-x86.exe` — installer for 32-bit Windows 10. It is not signed with a publisher certificate either.
-- `KeySwitch-0.59.0-windows-x86.zip` — portable archive for 32-bit Windows.
-- `keyswitch_0.59.0_amd64.deb` — Ubuntu/Xubuntu on an X11 session. With 0.28.0 or newer installed, this version arrives through the ordinary system update.
-- `KeySwitch-0.59.0-macos-arm64.zip` — Mac with Apple silicon (M1 and later), macOS 13 or newer.
-- `KeySwitch-0.59.0-macos-x86_64.zip` — Mac with an Intel processor, macOS 13 or newer.
+- `KeySwitch-Setup-0.60.0-x64.exe` — installer for Windows 10/11 x64. It is not signed with a publisher certificate, so SmartScreen shows a warning.
+- `KeySwitch-0.60.0-windows-x64.zip` — portable archive for Windows x64.
+- `KeySwitch-Setup-0.60.0-arm64.exe` — installer for Windows 11 on Arm. It is not signed with a publisher certificate either.
+- `KeySwitch-0.60.0-windows-arm64.zip` — portable archive for Windows on Arm.
+- `KeySwitch-Setup-0.60.0-x86.exe` — installer for 32-bit Windows 10. It is not signed with a publisher certificate either.
+- `KeySwitch-0.60.0-windows-x86.zip` — portable archive for 32-bit Windows.
+- `keyswitch_0.60.0_amd64.deb` — Ubuntu/Xubuntu on an X11 session. With 0.28.0 or newer installed, this version arrives through the ordinary system update.
+- `KeySwitch-0.60.0-macos-arm64.zip` — Mac with Apple silicon (M1 and later), macOS 13 or newer.
+- `KeySwitch-0.60.0-macos-x86_64.zip` — Mac with an Intel processor, macOS 13 or newer.
 - `SHA256SUMS` — checksums of every file; verify them before installing.
 
 Exactly one Mac archive is needed: the Apple silicon build does not run on Intel and vice versa.
 
 ### Changed
 
-- A one-letter Latin variable typed in the Russian layout right after a Russian word converts at the space or sign after it: `при ч равном нулю` becomes `при x равном нулю`, `результат т - 1` becomes `результат n - 1`. A letter meant as written stays: `да я про то ч`, `и т. д.`, `по оси Х`, `если б`, `в 2 ч дня`. A letter left at a pause may open a word not yet finished and still stays as typed.
-- A Russian abbreviation of two or more parts typed in the English layout converts: `n/r/` becomes `т.к.`, `n/t/` `т.е.`, `l/,/` `д.б.`. Latin tokens of short parts stay as typed: `n/a`, `I/O`, `usr/bin`, `tcp/ip`, `src/app/`.
-- A Latin word in quotes and code joined by colons, typed in the Russian layout, convert when the model asks for it: `ЭИщще` becomes `"Boot`, `ыевЖЖыцфз` becomes `std::swap`. The rule that a replacement must be a word used to overrule the model there, as such a reading holds signs.
+- A word converted at the space is no longer taken back when the next word goes the other way, if it is an English term or an `и`/`в` the rule set between English terms: `sendapi и botcorp` became `sendapi b botcorp`, `force push в dev` became `force push d dev`, `qemu чтобы` became `йуьг чтобы`, `gpu но` became `пзг но`. A word the model converted by mistake still goes back: `кз` before a Russian word stays `кз`.
+- A sign typed right after a word's last letter in the other language's layout stays a sign unless it is the word's letter. After a click or Backspace at the end of a Russian word in the English layout, `,` `.` `;` came out as `б` `ю` `ж` (`приветб`, `касаетсяю`); `.` after `сдела` still gives `сделаю`.
+- In browsers and Electron editors (VS Code, Antigravity, Firefox), which show what was typed a moment late, a word whose last letters the field does not show yet is decided on its keys, and the correction waits for the field to show the whole word: `ашкуащч` stayed for `firefox`. The new setting «Ждать отстающее поле» sets how long: off, 0.1, 0.3 (the default), 0.5 or 1 second. The correction is made only once the field shows the very word typed.
 
 ### Model
 
-- The context model `context-v3-1ba380ab2999` (corpus v69) is the model of 0.58.0 with two new parts fitted onto it, for a one-letter variable and for abbreviations with dots; every other part is carried over unchanged, and the prefix model stays `prefix-v2-bf3dc28f8567`. On the logs of real typing it breaks no word; of the developer-chat development messages it restores 34, 23 and 2 more in three kinds of layout mistakes and loses none; on the calibration data it nets one frame more in each profile. On the sealed test v69, read once, it kept all 182 correctly typed sequences and restored all 181 typed in the wrong layout without the early switch, against 179 for the baseline pair, and 16 with it, as many as the baseline pair; on the sealed developer-chat test (1 125 messages of a new batch) it restored 11 messages more than 0.58.0 and lost none.
+- The models are those of 0.59.0, the context model `context-v3-1ba380ab2999` and the prefix model `prefix-v2-bf3dc28f8567`, sealed again for the new engine without a single weight changed. On the logs of real typing the new engine breaks no word and fixes 16. On the sealed test v71, read once, it kept all 185 correctly typed sequences and restored all 185 typed in the wrong layout without the early switch, against 184 for the baseline pair; with it, 19 against 18.
 
 ### What remains
 

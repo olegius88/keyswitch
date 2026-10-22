@@ -22,6 +22,13 @@ All notable changes to KeySwitch are documented in this file.
   the wait.
 - The field batteries hold the owner's typing of 15–20.10.2026 (0.56.0–0.59.0, 9 614 words), and five words a
   reverted conversion had left in Latin are labelled with the Russian word meant (`redis b nats` is `redis и nats`).
+- The GPU/CPU parity check of the context trainer takes 7 minutes instead of 32 on the same corpus, with the same
+  frames compared: the Python reference is computed by worker processes, the frames the GPU leaves to the CPU path are
+  not featurised a second time, and the curricula are built at once.
+- The pair is the pair of 0.59.0, `context-v3-1ba380ab2999` with the prefix model `prefix-v2-bf3dc28f8567`, sealed
+  again for this engine on corpus v71 with every weight carried (a frozen base with no head fitted); the artifact is
+  the same byte for byte. On the owner's field batteries the engine breaks no word and fixes 16; the calibration and
+  the developer-chat development messages are decided as before.
 
 ## 0.59.0 — 2026-10-20
 
