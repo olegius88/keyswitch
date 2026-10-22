@@ -19,6 +19,7 @@ from keyswitch.prefix_schema import VersionedPrefixModel
 from keyswitch.constants.file_formats import (
     FULL_REPORT_JSON_LIMIT_BYTES,
     HASH_CHUNK_BYTES,
+    MAX_CONTEXT_ACTION_MODEL_BYTES,
     METADATA_JSON_LIMIT_BYTES,
     MODEL_ARTIFACT_JSON_LIMIT_BYTES,
     VERSION_HASH_CHARACTERS,
@@ -335,7 +336,8 @@ def validate_receipt(receipt: object, artifact: Path = ARTIFACT_PATH, root: Path
     if actual == REJECTED_ARTIFACT or actual != value["artifact_sha256"]:
         raise ValueError("unaccepted or changed context artifact")
     model = ContextModel.load(artifact)
-    payload = read_object(artifact, MODEL_ARTIFACT_JSON_LIMIT_BYTES)
+    # The context artifact is read up to its own limit: written one feature to a line it outgrew the other artifacts'.
+    payload = read_object(artifact, MAX_CONTEXT_ACTION_MODEL_BYTES)
     if (type(value["conversion_threshold"]) not in (int, float)
             or model.feature_version != CONTEXT_ACTION_FEATURE_VERSION
             or model.version != "context-v3-" + sha(value["weights_sha256"])[:VERSION_HASH_CHARACTERS]
@@ -622,7 +624,7 @@ def export_receipt(artifact: Path, seal_path: Path, report_path: Path, corpus: P
         control = mapping(private.get("early_off"), "early-off control")
         public_profiles[profile] = {"counts": private["counts"], "gates": private["gates"],
                                     "early_off": {"counts": control["counts"], "gates": control["gates"]}}
-    payload = read_object(artifact, MODEL_ARTIFACT_JSON_LIMIT_BYTES)
+    payload = read_object(artifact, MAX_CONTEXT_ACTION_MODEL_BYTES)
     prefix_payload = read_object(prefix_artifact, MODEL_ARTIFACT_JSON_LIMIT_BYTES)
     prefix = VersionedPrefixModel.load(prefix_artifact)
     receipt: dict[str, object] = {

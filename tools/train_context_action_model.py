@@ -29,7 +29,7 @@ from typing import Final, Generic, TypeVar, cast
 from unittest.mock import patch
 
 from keyswitch.context_action_features import (
-    abbreviation_question, alone_question, attested_abbreviation, capitals_question, extract_action_features,
+    abbreviation_question, alnum_question, alone_question, attested_abbreviation, capitals_question, extract_action_features,
     brief_question, brief_settled, dotted_question, first_question, joined_question, latin_abbreviation_question, letter_question,
     russian_ending_bucket, russian_start_bucket, start_question, term_question, unknown_question, unknown_shape, variable_question,
 )
@@ -71,7 +71,8 @@ from train_context_model import CapturedSource
 from keyswitch.constants.file_formats import HEXADECIMAL_BASE, VERSION_HASH_CHARACTERS
 from keyswitch.constants.keyboard import LAYOUT_GROUP_COUNT
 from keyswitch.constants.models import (
-    ABBREVIATION_FEATURE_PREFIX, ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS, ALONE_FEATURE_PREFIX, ALONE_HEAD_LETTERS,
+    ABBREVIATION_FEATURE_PREFIX, ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS, ALNUM_FEATURE_PREFIX, ALONE_FEATURE_PREFIX,
+    ALONE_HEAD_LETTERS,
     BRIEF_FEATURE_PREFIX, BRIEF_HEAD_LETTERS, DOTTED_FEATURE_PREFIX, FIRST_FEATURE_PREFIX, VARIABLE_FEATURE_PREFIX,
     CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION,
     CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, JOINED_FEATURE_PREFIX,
@@ -159,6 +160,27 @@ def canonical(value: object) -> bytes:
 
 def checksum(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def artifact_bytes(payload: Mapping[str, object]) -> bytes:
+    """The artifact as a person opens it: keys sorted, and one feature with its weights to a line, so that a diff of two
+    artifacts names the features that changed (a head fitted onto a frozen base adds its lines alone). The seal's
+    artifact_sha256 is of these very bytes; the version is named after the canonical weights (weights_sha256), whatever
+    the layout."""
+
+    items = sorted(payload.items())
+    lines = ["{"]
+    for index, (key, value) in enumerate(items):
+        comma = "," if index < len(items) - 1 else ""
+        if key != "weights":
+            lines.append(f' {json.dumps(key)}: {json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))}{comma}')
+            continue
+        weights = sorted(cast(Mapping[str, object], value).items())
+        lines.append(' "weights": {')
+        lines.extend(f'  {json.dumps(name, ensure_ascii=False)}: {json.dumps(row, separators=(",", ":"))}'
+                     f'{"," if position < len(weights) - 1 else ""}' for position, (name, row) in enumerate(weights))
+        lines.append(" }" + comma)
+    return ("\n".join([*lines, "}"]) + "\n").encode()
 
 
 # The other-language text a legitimately inserted word follows, by the word's layout group:
@@ -2306,7 +2328,8 @@ HEAD_PREFIXES: Final = {"capitals": CAPITALS_FEATURE_PREFIX, "alone": ALONE_FEAT
                          "letter": LETTER_FEATURE_PREFIX, "abbreviation": ABBREVIATION_FEATURE_PREFIX,
                          "latin_abbreviation": LATIN_ABBREVIATION_FEATURE_PREFIX, "unknown": UNKNOWN_FEATURE_PREFIX,
                          "joined": JOINED_FEATURE_PREFIX, "term": TERM_FEATURE_PREFIX, "brief": BRIEF_FEATURE_PREFIX,
-                         "first": FIRST_FEATURE_PREFIX, "variable": VARIABLE_FEATURE_PREFIX, "dotted": DOTTED_FEATURE_PREFIX}
+                         "first": FIRST_FEATURE_PREFIX, "variable": VARIABLE_FEATURE_PREFIX, "dotted": DOTTED_FEATURE_PREFIX,
+                         "alnum": ALNUM_FEATURE_PREFIX}
 # A recipe without single-letter frames (the recipes before corpus v34).
 NO_LETTER_CURRICULUM: Final[dict[str, object]] = {"term_sentences": 0, "english_sentences": 0, "minimum_term_count": 0,
                                                   "sample_weight": 1.0}
@@ -2346,6 +2369,10 @@ def captured_head_curriculum(split: str, options: Mapping[str, object], question
     from train_context_model import captured_rows, captured_sources
 
     weight = float(cast(float, options["sample_weight"]))
+    # A recipe may weigh the converted frames apart (their mass against the kept frames', which weigh keep_importance
+    # times as much in the fit) and keep at most token_cap frames of one token with one answer.
+    convert_weight = float(cast(float, options.get("convert_weight", 1.0)))
+    token_cap = int(cast(int, options.get("token_cap", 0)))
     applications = ("Telegram", "Code", "chrome", "UnseenEditor")
     rows: list[ActionRow] = []
     counts: Counter[str] = Counter()
@@ -2370,8 +2397,25 @@ def captured_head_curriculum(split: str, options: Mapping[str, object], question
                                  item.field.before, item.field.after, item.field.role)
             counts[f"{name}:{action}"] += 1
             rows.append(ActionRow(identifier, item.original, item.source_group, field, cast(CorrectionTrigger, item.trigger),
-                                  item.literal_tail, action, category, item.boundary_text, weight, origin))
-    return rows, {"frames": len(rows), "by_file": dict(sorted(counts.items())), "sample_weight": weight}
+                                  item.literal_tail, action, category, item.boundary_text,
+                                  weight * (convert_weight if action == "convert" else 1.0), origin))
+    report: dict[str, object] = {"frames": len(rows), "by_file": dict(sorted(counts.items())), "sample_weight": weight}
+    if token_cap:
+        # At most token_cap frames of one token with one answer, in the order of their identifiers: `1с`, written
+        # 1 363 times in the 2023 dump, held more kept frames of the letters-and-digits head than all its Latin tokens
+        # of one letter held converted ones (candidate v72).
+        taken: Counter[tuple[str, str]] = Counter()
+        capped: list[ActionRow] = []
+        for row in sorted(rows, key=lambda row: row.identifier):
+            token = (row.original.casefold(), row.action)
+            taken[token] += 1
+            if taken[token] <= token_cap:
+                capped.append(row)
+        report.update({"frames": len(capped), "capped": len(rows) - len(capped), "token_cap": token_cap})
+        rows = capped
+    if convert_weight != 1.0:
+        report["convert_weight"] = convert_weight
+    return rows, report
 
 
 def variable_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
@@ -2394,6 +2438,16 @@ def dotted_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: fro
     return captured_head_curriculum(split, options, lambda item: dotted_question(item.original, item.alternative), "dotted")
 
 
+def alnum_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                     options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """The letters-and-digits head's frames (captured_head_curriculum): a token of Russian letters and digits after
+    Russian text whose keys are Latin letters and digits (alnum_question), converted where a Latin token was typed in the
+    Russian layout (`ч64` for `x64`) and kept where it was meant as typed (`1с`, `100мс`)."""
+
+    return captured_head_curriculum(split, options, lambda item: alnum_question(item.original, item.alternative, item.field.before),
+                                    "alnum")
+
+
 # The heads whose own frames of DEVELOPMENT choose their epoch (fit), by feature prefix: the name their epoch goes by in
 # the seal, the recipe's key of their curriculum, the curriculum, and the options of a recipe without it.
 OWN_EPOCH_HEADS: Final[dict[str, tuple[str, str, Callable[[str, Sequence[CorpusRow], frozenset[str], Mapping[str, object]],
@@ -2404,6 +2458,7 @@ OWN_EPOCH_HEADS: Final[dict[str, tuple[str, str, Callable[[str, Sequence[CorpusR
     FIRST_FEATURE_PREFIX: ("first", "first_curriculum", first_curriculum, NO_FIRST_CURRICULUM),
     VARIABLE_FEATURE_PREFIX: ("variable", "variable_curriculum", variable_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
     DOTTED_FEATURE_PREFIX: ("dotted", "dotted_curriculum", dotted_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
+    ALNUM_FEATURE_PREFIX: ("alnum", "alnum_curriculum", alnum_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
 }
 
 
@@ -2625,8 +2680,9 @@ def head_question(original: str, alternative: str, before: str, after: str, trig
 
     letter = LETTER_FEATURE_PREFIX in prefixes and letter_question(original, alternative, before)
     variable = VARIABLE_FEATURE_PREFIX in prefixes and variable_question(original, alternative, before, trigger)
+    alnum = ALNUM_FEATURE_PREFIX in prefixes and alnum_question(original, alternative, before)
     if origin == "kept_next_word":
-        return KEPT_FEATURE_PREFIX in prefixes or letter or variable
+        return KEPT_FEATURE_PREFIX in prefixes or letter or variable or alnum
     return (letter or (CAPITALS_FEATURE_PREFIX in prefixes and capitals_question(original, before))
             or (ABBREVIATION_FEATURE_PREFIX in prefixes and abbreviation_question(original, alternative, before))
             or (LATIN_ABBREVIATION_FEATURE_PREFIX in prefixes and latin_abbreviation_question(original, alternative, before))
@@ -2637,7 +2693,7 @@ def head_question(original: str, alternative: str, before: str, after: str, trig
             or (TERM_FEATURE_PREFIX in prefixes and term_question(original, before))
             or (BRIEF_FEATURE_PREFIX in prefixes and brief_question(original, before, after))
             or (FIRST_FEATURE_PREFIX in prefixes and first_question(original, before, after)) or variable
-            or (DOTTED_FEATURE_PREFIX in prefixes and dotted_question(original, alternative)))
+            or (DOTTED_FEATURE_PREFIX in prefixes and dotted_question(original, alternative)) or alnum)
 
 
 def carried_prefixes(model: ContextModel) -> frozenset[str]:
@@ -2996,12 +3052,15 @@ def tail_curricula(inputs: FitInputs) -> tuple[list[ActionRow], dict[str, object
         TRAIN, inputs.source_rows[TRAIN], inputs.refused, cast(dict[str, object], options.get("variable_curriculum", NO_CAPTURED_HEAD_CURRICULUM)))
     dotted, dotted_report = dotted_curriculum(
         TRAIN, inputs.source_rows[TRAIN], inputs.refused, cast(dict[str, object], options.get("dotted_curriculum", NO_CAPTURED_HEAD_CURRICULUM)))
-    return [*kept, *counted, *letter, *abbreviation, *latin_abbreviation, *unknown, *joined, *term, *brief, *first, *variable, *dotted], {
+    alnum, alnum_report = alnum_curriculum(
+        TRAIN, inputs.source_rows[TRAIN], inputs.refused, cast(dict[str, object], options.get("alnum_curriculum", NO_CAPTURED_HEAD_CURRICULUM)))
+    return [*kept, *counted, *letter, *abbreviation, *latin_abbreviation, *unknown, *joined, *term, *brief, *first, *variable, *dotted,
+            *alnum], {
         "kept_neighbour_curriculum": kept_report, "counted_token_curriculum": counted_report, "letter_curriculum": letter_report,
         "abbreviation_curriculum": abbreviation_report, "latin_abbreviation_curriculum": latin_abbreviation_report,
         "unknown_token_curriculum": unknown_report, "joined_token_curriculum": joined_report, "term_curriculum": term_report,
         "brief_curriculum": brief_report, "first_curriculum": first_report, "variable_curriculum": variable_report,
-        "dotted_curriculum": dotted_report}
+        "dotted_curriculum": dotted_report, "alnum_curriculum": alnum_report}
 
 
 def prepared_frames(rows: Sequence[ActionRow], spans: SpanCurriculum, split: str) -> list[tuple[str, ActionRow | SpanFrame]]:
@@ -3235,7 +3294,7 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
     payload = {"actions": list(ACTIONS), "feature_version": CONTEXT_ACTION_FEATURE_VERSION, "weights": mapping,
                "weights_sha256": weight_hash, "version": "context-v3-" + weight_hash[:VERSION_HASH_CHARACTERS],
                "conversion_threshold": threshold}
-    (output / ARTIFACT).write_bytes(canonical(payload))
+    (output / ARTIFACT).write_bytes(artifact_bytes(payload))
     ContextModel.load(output / ARTIFACT)
     if provenance() != before_provenance or checksum(corpus / "manifest.json") != corpus_hash:
         raise ValueError("training inputs changed while fitting; candidate cannot be sealed")

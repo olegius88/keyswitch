@@ -25,8 +25,12 @@ from .input_context import FieldContext
 from .language_model import LanguageModel, WordScore
 from .context_action_features import extract_action_features
 from .constants.boundary import BOUNDARY_MISSING_LETTERS as ALPHABET_LETTERS
-from .constants.file_formats import MAX_CONTEXT_MODEL_BYTES as MAX_ARTIFACT_BYTES, MAX_CONTEXT_TERM_FREQUENCY_BYTES
+from .constants.file_formats import (
+    MAX_CONTEXT_ACTION_MODEL_BYTES, MAX_CONTEXT_ALNUM_FREQUENCY_BYTES, MAX_CONTEXT_MODEL_BYTES as MAX_ARTIFACT_BYTES,
+    MAX_CONTEXT_TERM_FREQUENCY_BYTES,
+)
 from .constants.models import (
+    ALNUM_FEATURE_PREFIX,
     ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS,
     ACTION_FEATURE_APPLICATION_NAME_CHARACTERS,
     ACTION_FEATURE_APPLICATION_TOKEN_COUNT,
@@ -83,6 +87,11 @@ _TERM_EDGE_SIGNS: Final = ".,!?:;\"'()[]{}<>«»-"
 TERM_FREQUENCY_PATH: Final = Path(__file__).with_name("resources") / "models" / "context-term-frequency.json"
 TERM_ALPHABETS: Final = ("cyrillic", "english", "latin", "russian")
 _TERM_FREQUENCY: dict[str, dict[str, int]] | None = None
+# How often whole tokens of letters and digits occur inside Russian text, written in Latin letters (`latin`) or in
+# Cyrillic ones (`cyrillic`): the letters-and-digits head reads them, and nothing else does.
+ALNUM_FREQUENCY_PATH: Final = Path(__file__).with_name("resources") / "models" / "context-alnum-frequency.json"
+ALNUM_ALPHABETS: Final = ("cyrillic", "latin")
+_ALNUM_FREQUENCY: dict[str, dict[str, int]] | None = None
 
 
 @dataclass(frozen=True)
@@ -358,15 +367,18 @@ def extract_context_features(item: ContextEvidence, feature_version: int = FEATU
     return {name: value for name, value in features.items() if value}
 
 
-def load_term_frequency(path: Path) -> dict[str, dict[str, int]]:
-    """The table schema 7 reads, checked like the artifact: without it the model does not load."""
+def load_term_frequency(path: Path, alphabets: tuple[str, ...] = TERM_ALPHABETS,
+                        maximum: int | None = None) -> dict[str, dict[str, int]]:
+    """The table schema 7 reads (or another table of counts by alphabet, at most `maximum` bytes), checked like the
+    artifact: without it the model does not load."""
 
+    limit = MAX_CONTEXT_TERM_FREQUENCY_BYTES if maximum is None else maximum
     with path.open("rb") as handle:
-        raw = handle.read(MAX_CONTEXT_TERM_FREQUENCY_BYTES + 1)
-    if len(raw) > MAX_CONTEXT_TERM_FREQUENCY_BYTES:
+        raw = handle.read(limit + 1)
+    if len(raw) > limit:
         raise ValueError("term frequency table is too large")
     payload: object = json.loads(raw)
-    if not isinstance(payload, dict) or sorted(payload) != list(TERM_ALPHABETS):
+    if not isinstance(payload, dict) or sorted(payload) != list(alphabets):
         raise ValueError("invalid term frequency table")
     table: dict[str, dict[str, int]] = {}
     for alphabet, counts in payload.items():
@@ -381,6 +393,13 @@ def _term_frequency() -> dict[str, dict[str, int]]:
     if _TERM_FREQUENCY is None:
         _TERM_FREQUENCY = load_term_frequency(TERM_FREQUENCY_PATH)
     return _TERM_FREQUENCY
+
+
+def _alnum_frequency() -> dict[str, dict[str, int]]:
+    global _ALNUM_FREQUENCY
+    if _ALNUM_FREQUENCY is None:
+        _ALNUM_FREQUENCY = load_term_frequency(ALNUM_FREQUENCY_PATH, ALNUM_ALPHABETS, MAX_CONTEXT_ALNUM_FREQUENCY_BYTES)
+    return _ALNUM_FREQUENCY
 
 
 def term_bucket(text: str, alphabet: str) -> str:
@@ -417,14 +436,22 @@ class ContextModel:
         # Whether the variable head has weights here: a letter after a word of Cyrillic letters is its class
         # (context_action_features.variable_question).
         self.answers_variables = any(name.startswith(VARIABLE_FEATURE_PREFIX) for name in self.weights)
+        # Whether the letters-and-digits head has weights here: a token of letters and digits in both readings is its
+        # class (context_action_features.alnum_question).
+        self.answers_alnum = any(name.startswith(ALNUM_FEATURE_PREFIX) for name in self.weights)
 
     @classmethod
     def load(cls, path: Path = ARTIFACT_PATH) -> ContextModel:
         with path.open("rb") as handle:
-            raw = handle.read(MAX_ARTIFACT_BYTES + 1)
-        if len(raw) > MAX_ARTIFACT_BYTES:
+            raw = handle.read(MAX_CONTEXT_ACTION_MODEL_BYTES + 1)
+        if len(raw) > MAX_CONTEXT_ACTION_MODEL_BYTES:
             raise ValueError("context model is too large")
         payload: object = json.loads(raw)
+        # An action model (schema 3) is written one feature to a line and may be larger; every other schema keeps
+        # its limit.
+        if len(raw) > MAX_ARTIFACT_BYTES and (not isinstance(payload, dict)
+                                              or payload.get("feature_version") != CONTEXT_ACTION_FEATURE_VERSION):
+            raise ValueError("context model is too large")
         if not isinstance(payload, dict):
             raise ValueError("context model must be an object")
         feature_version = payload.get("feature_version")

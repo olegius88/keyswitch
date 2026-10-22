@@ -37,11 +37,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from keyswitch.constants.file_formats import HEXADECIMAL_BASE  # noqa: E402
 from keyswitch.constants.training import DETERMINISTIC_CHOICE_HEX_DIGITS  # noqa: E402
-from keyswitch.context_action_features import dotted_question  # noqa: E402
+from keyswitch.constants.models import ALNUM_HEAD_MAX_CHARACTERS  # noqa: E402
+from keyswitch.context_action_features import dotted_question, letters_and_digits  # noqa: E402
 from keyswitch.layouts import LayoutPair  # noqa: E402
 from keyswitch.short_words import TRUSTED_SINGLE_LETTER_WORDS  # noqa: E402
 
 TRAILING_SIGNS = ".,;:!?)"
+# Signs that stand around a token in prose and are no part of it: `(v2)`, `«1с»,`.
+ALNUM_EDGE_SIGNS = ".,;:!?()\"'«»"
 LAYOUTS = LayoutPair()
 # The key of the Russian dot (and of its comma, with Shift) prints `/` (`?`) in the English layout; LayoutPair maps the
 # keys of letters and of the English `,` and `.` (`б`, `ю`).
@@ -80,10 +83,29 @@ def russian_dotted_token(previous: str, token: str) -> bool:
     return not token.isascii() and dotted_token(previous, token)
 
 
+def alnum_token(previous: str, token: str) -> bool:
+    """A token the letters-and-digits head is asked about once typed in the Russian layout (alnum_question): letters
+    of one script and digits, whose keys in the other layout are letters and digits too (`v67`, `x86`, `1с`, `3д`), of at
+    most ALNUM_HEAD_MAX_CHARACTERS."""
+
+    core = token.strip(ALNUM_EDGE_SIGNS)
+    other = LAYOUTS.translate(core, "us", "ru") if core.isascii() else LAYOUTS.translate(core, "ru", "us")
+    return len(core) <= ALNUM_HEAD_MAX_CHARACTERS and letters_and_digits(core) and letters_and_digits(other)
+
+
+def latin_alnum_token(previous: str, token: str) -> bool:
+    return token.strip(ALNUM_EDGE_SIGNS).isascii() and alnum_token(previous, token)
+
+
+def russian_alnum_token(previous: str, token: str) -> bool:
+    return not token.strip(ALNUM_EDGE_SIGNS).isascii() and alnum_token(previous, token)
+
+
 CLASSES: dict[str, Callable[[str, str], bool]] = {"variable": variable_token, "dotted": dotted_token,
-                                                  "dotted-latin": latin_dotted_token, "dotted-russian": russian_dotted_token}
+                                                  "dotted-latin": latin_dotted_token, "dotted-russian": russian_dotted_token,
+                                                  "alnum-latin": latin_alnum_token, "alnum-russian": russian_alnum_token}
 # A message of a class named here is no message of the class it names: it holds a token of that one too.
-EXCLUDED_BY: dict[str, str] = {"dotted-russian": "dotted-latin"}
+EXCLUDED_BY: dict[str, str] = {"dotted-russian": "dotted-latin", "alnum-russian": "alnum-latin"}
 
 
 def holds(text: str, token_of_class: Callable[[str, str], bool]) -> bool:

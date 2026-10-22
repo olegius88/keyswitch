@@ -162,13 +162,18 @@ class SettingsStore:
         with self._lock:
             value: object = self._data
             for part in dotted_path.split("."):
-                mapping = _string_keyed_mapping(value)
-                if mapping is None or part not in mapping:
+                # The stored settings are JSON objects (string keys) merged onto the defaults: a lookup needs no
+                # copy of each mapping on the way. The engine reads settings on every key, and copying the section
+                # took a quarter of the time a typed message takes (cycle v72 capture profile).
+                if not isinstance(value, dict) or part not in value:
                     return default
-                value = mapping[part]
+                value = value[part]
             # The overload ties the result to the caller-provided default. The
             # persisted settings schema is seeded from DEFAULTS and merged by
             # path, so this cast is the single typed boundary for JSON data.
+            # A plain value is immutable; only a mapping or a list is copied.
+            if value is None or isinstance(value, (str, int, float)):
+                return value
             return copy.deepcopy(value)
 
     def set(self, dotted_path: str, value: object, *, persist: bool = True) -> None:

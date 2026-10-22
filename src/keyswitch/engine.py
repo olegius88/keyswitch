@@ -85,6 +85,7 @@ from .constants.detection import (
     EARLY_SWITCH_CONFIDENCE,
     ENGINE_EVENT_QUEUE_MAX_SIZE,
     JOINED_PART_MIN_LETTERS,
+    KEPT_WORD_PROSE_MIN_COUNT,
     KEPT_WORDS_TAKEN_ALONG,
     MAX_REMEMBERED_APPLICATION_CONTEXTS,
     MAX_WORD_STROKES as MAX_WORD_STROKES,
@@ -347,6 +348,13 @@ class Hotkey:
         aliases = {"pause": {"pause", "break"}, "backspace": {"backspace"}}
         matches_key = key_name in aliases.get(self.key, {self.key})
         return matches_key and actual == wanted
+
+
+@functools.cache
+def _parsed_hotkey(value: str) -> Hotkey:
+    """A hotkey of the settings, parsed once for its text: every key event asks for three of them."""
+
+    return Hotkey(value)
 
 
 class KeySwitchEngine:
@@ -1783,11 +1791,13 @@ class KeySwitchEngine:
                   and (alone := self._decide_with_kept_neighbour(waiting, strokes, boundary, decision, application))):
                 # The waiting word converts on its own; its kept neighbour stays as it was typed.
                 pass
-            elif waiting is not None and not head and (trailing or not decision.should_convert):
+            elif waiting is not None and not head and (trailing or signs or not decision.should_convert):
                 # A waiting word whose neighbour did not convert either may still be settled by a
                 # later word (`тщ ш`, then `огые`); one the model declined with a converted
                 # neighbour has had its answer. A neighbour with a sign split off its end ends
-                # the wait, and the waiting word is asked with it as a kept word (`tot ghbdtn,`).
+                # the wait, and the waiting word is asked with it as a kept word (`tot ghbdtn,`),
+                # as is one whose sign the model converted without (`Ша тщеб` is `If not,`: the
+                # waiting word was dropped, and the English sentence kept `Ша`).
                 kept = (*kept, KeptWord(waiting.plan, waiting.decision, waiting.field, waiting.window, waiting.deadline))
             if joint is None and not (trailing or head or signs):
                 joint = self._revert_with_next_word(provisional, strokes, boundary, decision, application)
@@ -3043,9 +3053,42 @@ class KeySwitchEngine:
         sign is a word itself, the boundary model's split stands.
         """
 
-        model = self.models[plan.target_group]
         whole = self._text_for_group(plan.strokes + plan.trailing, plan.target_group)
-        return model.score(whole).known and not model.score(plan.replacement).known
+        return self._known_reading(plan.target_group, whole) and not self.models[plan.target_group].score(plan.replacement).known
+
+    def _known_reading(self, group: int, text: str) -> bool:
+        """Whether a lexicon of the group holds the text, spelt with `ё` or with `е`: Russian writes `ё` as `е` as often
+        as not, and a lexicon may hold one spelling alone. The shipped one holds `ее` and not `её`, and `T\\`` opening a
+        sentence stayed for `Её` (the development sentences of the Tatoeba dump, 22.10.2026)."""
+
+        model = self.models[group]
+        return model.score(text).known or model.score(text.replace("ё", "е").replace("Ё", "Е")).known
+
+    def _word_of_its_language(self, group: int, text: str) -> bool:
+        """Whether the text is a word of the group's language: the lexicon holds it (_known_reading), or prose of that
+        language uses it at least KEPT_WORD_PROSE_MIN_COUNT times (the term tables): the shipped Russian lexicon holds no
+        `ой`, `ох` or `эх`."""
+
+        prose = "russian" if group == 1 else "english"
+        return (self._known_reading(group, text)
+                or _term_frequency()[prose].get(text.casefold(), 0) >= KEPT_WORD_PROSE_MIN_COUNT)
+
+    def _keys_lean_to_target_language(self, plan: CorrectionPlan, before: str) -> bool:
+        """Whether the orthotactic model reads a token's keys, signs at its end included, as the language of its other
+        layout more than as its own (a score above zero; _keys_of_target_language asks for the policy's licence). A
+        token shorter than the licence's minimum is read too, as the model supports it: `T\\`` (`Её`) scores +37, the
+        English `I.`, `A.`, `S.` from -10 to -31."""
+
+        ortho = self.context_policy.ortho
+        if ortho is None:
+            return False
+        script = "en" if plan.source_group == 0 else "ru"
+        keys = plan.original if script == "en" else plan.replacement
+        score = ortho.score(
+            OrthoEvidence(keys, shape_of(plan.original, not before.strip()), script),
+            known=lambda language, word: self.models[0 if language == "en" else 1].score(word).known,
+        )
+        return score.supported and score.total > 0
 
     def _take_along(
         self, kept: tuple[KeptWord, ...], plan: CorrectionPlan, first_characters: int, application: str,
@@ -3108,7 +3151,7 @@ class KeySwitchEngine:
             # A token that was not decided has no field of its own: the text before it is read now.
             field = word.field if word.field is not None else self.context_policy.stream.snapshot(
                 previous.original + previous.boundary.character + plan.original + suffix)
-            if not passed and not self.models[previous.target_group].score(previous.replacement).known:
+            if not passed and not self._word_of_its_language(previous.target_group, previous.replacement):
                 # Only a word whose other reading is a word is asked: a term typed as intended before
                 # a Russian word typed in the English layout (`htop gjrfpsdftn`) is no `рещз`, yet
                 # asked with `показывает` after it the model converts it. A token whose segmentation
@@ -3137,9 +3180,15 @@ class KeySwitchEngine:
                 # English word to it, `шею` a Russian one - and its confirmation of a suggestion
                 # (ContextPolicy.decide) does not take such a token along. The model's own conversion
                 # or a curated short word does.
-                if not again.decision.should_convert or word.segmentation_open and not (
+                # A suggestion of the model is confirmed for such a token by the orthotactic model instead, asked about
+                # the whole token: its keys read as the other layout's language (`T\`` is `Её`, `dc.` is `всю`) and
+                # not as the typed one's (`it.`, `ok.`). Unconfirmed, `Её платье` and `всю неделю` typed in the English
+                # layout kept their first word (the development sentences of the Tatoeba dump, 22.10.2026).
+                suggested = (word.segmentation_open and again.prediction is not None and again.prediction.action == "suggest"
+                             and self._keys_lean_to_target_language(previous, field.before))
+                if not suggested and (not again.decision.should_convert or word.segmentation_open and not (
                         again.decision_source == "short_word_override"
-                        or again.prediction is not None and again.prediction.action == "convert"):
+                        or again.prediction is not None and again.prediction.action == "convert")):
                     break
                 taken.append(word)
             plan = replace(
@@ -5269,7 +5318,7 @@ class KeySwitchEngine:
         return "defer" if event.key_name in self._action_keys else False
 
     def _matches_hotkey(self, name: str, event: KeyEvent) -> bool:
-        return Hotkey(str(self.settings.get(f"hotkeys.{name}", ""))).matches(event)
+        return _parsed_hotkey(str(self.settings.get(f"hotkeys.{name}", ""))).matches(event)
 
     def _configured_hotkeys(self) -> tuple[Hotkey, ...]:
         """Every hotkey of the settings, parsed once for the keyboard hook (see `consumes_key`)."""

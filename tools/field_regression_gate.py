@@ -72,10 +72,11 @@ OWNER: Final = "owner"
 AUTHORS: Final = frozenset({"llm", OWNER})
 # Why the reading the log implies was wrong. The review of 15.10.2026, before this gate, recorded no reason per word.
 # `mixed-script`: a token meant in both scripts (`ssh-агента`), whose two readings are both wrong, as the owner ruled for
-# `lid-режиме` and `mongo-сервиса` (16.10.2026).
+# `lid-режиме` and `mongo-сервиса` (16.10.2026). `remote-echo`: keys typed into a remote-control window and logged by
+# both machines; the log of the machine they landed on shows what the owner kept, the other one's label is no reading.
 REVIEW_BEFORE_GATE: Final = "review-2026-10-15"
 REASON_CODES: Final = frozenset({"garbage-in-prompt", "code-identifier", "retyped-elsewhere", "russian-typo", "mixed-script",
-                                 "owner-decision", REVIEW_BEFORE_GATE})
+                                 "remote-echo", "owner-decision", REVIEW_BEFORE_GATE})
 # Variables the replay script reads that would swap the tree's own models or settings for others: every `FIELD_*` one is
 # cleared, then the manifest's settings are set; no display reaches a replay.
 REPLAY_VARIABLE_PREFIX: Final = "FIELD_"

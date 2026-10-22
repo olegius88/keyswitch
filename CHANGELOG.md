@@ -4,6 +4,29 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- A token typed in Russian letters and digits whose keys are Latin letters and digits is decided by a part of the
+  model of its own when Russian text is known to write it one way or the other: `шзм6` becomes `ipv6`, `зь2` `pm2`,
+  `ч64` `x64`, `2аф` `2fa` and `ншш2` `yii2`, while `1с`, `3д`, `100мс` and `2фа` stay. The model used to read every
+  digit as one class: such a token stayed a suggestion, a token of one letter and digits was never converted, and a
+  Russian one could turn Latin. How often each spelling is written comes from a new table counted on the 2023
+  ru.stackoverflow dump (`context-alnum-frequency.json`); a token it does not count (`м67` for `v67`), one typed after
+  English text and one typed in Latin letters are decided as before.
+- The first word of a message typed wholly in the wrong layout converts with the words after it in four more cases:
+  a word whose last key is a letter of the other layout (`T\`` is `Её`, `dc.` is `всю`), a waiting word whose next word
+  converts with a sign split off (`Ша тщеб` is `If not,`), and a word the shipped lexicon lacks though Russian prose
+  uses it (`jq` is `ой`). On Tatoeba sentences typed starting in the wrong layout the pair now loses 3 first words in
+  6 000 to the old baseline pair, against 8.
+- The engine reads its settings without copying them on every key and parses each hotkey once: a typed word costs
+  about a fifth less time.
+- The context model file is written one feature to a line, so that a change of the model shows in a diff; such a model
+  may take up to 16 MiB.
+- The developer-chat test grows by a third batch (ru.stackoverflow comments of 2024–2026, pages 13–18 of each month).
+- The pair is `context-v3-e02b44de73db` with the prefix model `prefix-v2-bf3dc28f8567`: the pair of 0.60.0 with the
+  letters-and-digits part fitted onto it on corpus v73. On the recorded real typing it breaks no word and fixes two;
+  on sealed test v73, read once, it keeps all 191 correctly typed rows and restores all 190 rows typed in the wrong
+  layout with the early switch off against 189 for the baseline pair (20 and 20 with it); on the developer-chat test it
+  gains three messages and loses none.
+
 ## 0.60.0 — 2026-10-22
 
 - A word converted at the space is no longer taken back when the next word goes the other way, if it was a term of
