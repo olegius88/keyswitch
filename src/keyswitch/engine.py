@@ -349,6 +349,13 @@ class Hotkey:
         return matches_key and actual == wanted
 
 
+@functools.cache
+def _parsed_hotkey(value: str) -> Hotkey:
+    """A hotkey of the settings, parsed once for its text: every key event asks for three of them."""
+
+    return Hotkey(value)
+
+
 class KeySwitchEngine:
     def __init__(
         self,
@@ -5269,7 +5276,7 @@ class KeySwitchEngine:
         return "defer" if event.key_name in self._action_keys else False
 
     def _matches_hotkey(self, name: str, event: KeyEvent) -> bool:
-        return Hotkey(str(self.settings.get(f"hotkeys.{name}", ""))).matches(event)
+        return _parsed_hotkey(str(self.settings.get(f"hotkeys.{name}", ""))).matches(event)
 
     def _configured_hotkeys(self) -> tuple[Hotkey, ...]:
         """Every hotkey of the settings, parsed once for the keyboard hook (see `consumes_key`)."""
