@@ -120,6 +120,34 @@ class InsideWordTests(ContextEngineTests):
         self.pause()
         self.assertEqual(self.backend.text, "я говорю тебе это")
 
+    def test_a_sign_after_a_words_last_letter_is_a_sign(self) -> None:
+        """`,` typed right after `привет` is a comma, whatever the model says of `ghbdtn,` as a whole word: judged
+        that way, a Russian word read in Latin keys lost to its Russian reading, and a sign typed after a word cut
+        back with Backspace became `б`, `ю` or `ж` (the owner's typing, 19-20.10.2026)."""
+
+        self.script({"ghbdtn,": "convert", "ghbdtn.": "convert", "vj;tn;": "convert"})
+        for text, typed, expected in (("я написал привет", ", ", "я написал привет, "),
+                                      ("я написал привет", ". ", "я написал привет. "),
+                                      ("ну тогда может", "; ", "ну тогда может; ")):
+            with self.subTest(typed=typed):
+                self.click_into(text, len(text), 0)
+                self.type(typed)
+                self.assertEqual(self.backend.text, expected)
+
+    def test_without_a_boundary_model_a_sign_after_a_word_stays_a_sign(self) -> None:
+        self.script({"cltkf.": "convert"})
+        self.engine.boundary_model = None
+        self.click_into("я это сдела", len("я это сдела"), 0)
+        self.type(". ")
+        self.assertEqual(self.backend.text, "я это сдела. ")
+
+    def test_a_sign_that_finishes_a_word_is_its_letter(self) -> None:
+        # `.` after `сдела` is the `ю` of `сделаю`: the boundary model reads it as the word's letter.
+        self.script({"cltkf.": "convert"})
+        self.click_into("я это сдела", len("я это сдела"), 0)
+        self.type(". ")
+        self.assertEqual(self.backend.text, "я это сделаю ")
+
     def test_a_whole_word_the_model_keeps_leaves_the_fragment(self) -> None:
         self.script({})
         self.click_into("мы хотим сдлать это", len("мы хотим сд"), 0)

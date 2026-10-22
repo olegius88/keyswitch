@@ -3266,7 +3266,8 @@ def fit(corpus: Path, output: Path, *, backend: str = CONTEXT_ACTION_BACKEND_AUT
                                                    if "natural" in features.chains[profile, split]} for profile in profiles},
         "lexical_short_pair_curriculum": {profile: features.chains[profile, TRAIN]["lexical"] for profile in profiles
                                           if "lexical" in features.chains[profile, TRAIN]},
-        **({"lone_word_curriculum": {profile: {split: features.chains[profile, split]["lone_word"] for split in splits}
+        **({"lone_word_curriculum": {profile: {split: features.chains[profile, split]["lone_word"] for split in splits
+                                               if "lone_word" in features.chains[profile, split]}
                                      for profile in profiles}} if alone_evidence(options) is not None else {}),
         "captured_curriculum": features.captured,
         "capital_citation_curriculum": features.capitals,

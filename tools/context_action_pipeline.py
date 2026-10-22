@@ -1084,22 +1084,39 @@ def build_features(inputs: trainer.FitInputs, backend: str, jobs: int, splits: S
 
 # ---- frames for the parity check ---------------------------------------------------------------------
 
-def parity_frames(inputs: trainer.FitInputs, limit: int | None) -> dict[str, list[Frame]]:
+def parity_frames(inputs: trainer.FitInputs, limit: int | None, jobs: int = 1) -> dict[str, list[Frame]]:
     """Frames of every kind a fit featurises, from the corpus's TRAIN and DEVELOPMENT splits: natural frames,
     the curricula of the first profile, the historical, captured, capital and English-capital curricula,
-    the tail curricula and span frames."""
+    the tail curricula and span frames. The curricula and span frames are built by up to `jobs` worker processes at
+    once (forked here, as a fit's pool is, before CUDA starts): one after another they took four and a half minutes."""
     profile = inputs.profiles[0]
     current = state()
-    extra = [*historical_task(None),
-             *(row for index in range(len(current.captured_sources)) for row in captured_task(index)[0]),
-             *capitals_task(None)[0], *english_task(None)[0]]
-    tail = tail_task(None)[0]
+    captured = len(current.captured_sources)
+    curricula: list[Callable[[], tuple[list[trainer.ActionRow], dict[str, object]]]] = [
+        *(partial(captured_task, index) for index in range(captured)),
+        partial(capitals_task, None), partial(english_task, None), partial(tail_task, None)]
+    span_calls = [partial(spans_task, (profile, split)) for split in (TRAIN, DEVELOPMENT)]
+    if jobs > 1:
+        with get_context("fork").Pool(min(jobs, len(curricula) + len(span_calls) + 1)) as pool:
+            historical = pool.apply_async(historical_task, (None,))
+            running = [pool.apply_async(call) for call in curricula]
+            running_spans = [pool.apply_async(call) for call in span_calls]
+            historical_rows = historical.get()
+            built = [result.get() for result in running]
+            spans_by_split = [result.get() for result in running_spans]
+    else:
+        historical_rows = historical_task(None)
+        built = [call() for call in curricula]
+        spans_by_split = [call() for call in span_calls]
+    (capitals, _capitals_report), (english, _english_report), (tail, _tail_report) = built[captured:]
+    extra = [*historical_rows, *(row for rows, _report in built[:captured] for row in rows), *capitals, *english]
+    built_spans = dict(zip((TRAIN, DEVELOPMENT), spans_by_split))
     result: dict[str, list[Frame]] = {}
     for split in (TRAIN, DEVELOPMENT):
         natural = inputs.frames[split][:limit] if limit is not None else inputs.frames[split]
         rows, _report = trainer.frame_chain(inputs, profile, split, [*natural, *(extra if split == TRAIN else [])],
                                             tail if split == TRAIN else ())
-        spans = spans_task((profile, split))
+        spans = built_spans[split]
         frames: list[Frame] = [frame for _identifier, frame in trainer.prepared_frames(rows, spans, split)]
         result[split] = frames[:limit] if limit is not None else frames
     return result

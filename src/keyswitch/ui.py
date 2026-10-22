@@ -29,10 +29,15 @@ from .constants.settings_defaults import (
     CONFIDENCE_SETTING_STEP,
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_EARLY_SWITCH_MIN_LENGTH,
+    DEFAULT_FIELD_CATCH_UP,
     DEFAULT_MINIMUM_WORD_LENGTH,
     DEFAULT_PAUSE_DELAY_SECONDS,
     EARLY_SWITCH_MIN_LENGTH_SETTING_MAX,
     EARLY_SWITCH_MIN_LENGTH_SETTING_MIN,
+    FIELD_CATCH_UP_CHOICES,
+    FIELD_CATCH_UP_DESCRIPTION,
+    FIELD_CATCH_UP_LABELS,
+    FIELD_CATCH_UP_TITLE,
     MINIMUM_WORD_LENGTH_SETTING_MAX,
     MINIMUM_WORD_LENGTH_SETTING_MIN,
     PAUSE_DELAY_SETTING_MAX_SECONDS,
@@ -486,6 +491,16 @@ class MainWindow(Adw.ApplicationWindow):
         self._settings_controls["detection.context_policy"] = context_mode
         behavior.add(context_mode)
         behavior.add(self._switch_row("detection.context_read_field", "Читать контекст активного поля", "Читать текст рядом с курсором локально через доступность ОС; распознанные защищённые поля исключаются, не все приложения сообщают о них"))
+        catch_up_values = list(FIELD_CATCH_UP_CHOICES)
+        catch_up = Adw.ComboRow(title=FIELD_CATCH_UP_TITLE, subtitle=FIELD_CATCH_UP_DESCRIPTION)
+        catch_up.set_model(Gtk.StringList.new([FIELD_CATCH_UP_LABELS[value] for value in catch_up_values]))
+        current_catch_up = str(self.settings.get("detection.field_catch_up", DEFAULT_FIELD_CATCH_UP))
+        catch_up.set_selected(catch_up_values.index(
+            current_catch_up if current_catch_up in catch_up_values else DEFAULT_FIELD_CATCH_UP))
+        catch_up.connect("notify::selected", lambda row, _param: self.settings.set(
+            "detection.field_catch_up", catch_up_values[row.get_selected()]))
+        self._settings_controls["detection.field_catch_up"] = catch_up
+        behavior.add(catch_up)
         behavior.add(self._switch_row("detection.protect_code", "Защищать код и сокращения", "Не трогать URL, пути, слова с цифрами, ALL-CAPS и camelCase"))
         behavior.add(self._switch_row("detection.intent_model_enabled", "Базовая модель слов (KSLM)", "При отключении работают резервные эвристики. Контекстные модели слов и префиксов настраиваются отдельно"))
         behavior.add(

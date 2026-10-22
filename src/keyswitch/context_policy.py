@@ -17,7 +17,7 @@ from .short_words import ISOLATED_SHORT_WORD_REASON, is_short_word_override, ope
 from .word_decision import NOT_A_WORD_REASON
 from .constants.detection import MINIMUM_SHAPED_TOKEN_CHARACTERS, QUOTED_WORD_CLOSING_SIGNS, WORD_QUOTES
 from .constants.models import CONTEXT_ACTION_FEATURE_VERSION, RUSSIAN_SLANG_MIN_TERM_BUCKET
-from .constants.text import FIELD_CARET_LAG_MAX_CHARACTERS
+from .constants.text import FIELD_CARET_LAG_MAX_CHARACTERS, FIELD_PENDING_MAX_CHARACTERS
 
 # A curated one-letter Russian word typed in the English layout right after an English term inside
 # a Russian phrase (KeySwitchEngine._stranded_letter): an explicit rule like the message-start one.
@@ -140,6 +140,22 @@ def ends_with_typed(text: str, typed: str) -> bool:
         tail[:1].casefold() == typed[:1].casefold())
 
 
+def typed_short_of(before: str, after: str, typed: str) -> str | None:
+    """What a field shows of ``typed`` before its caret when it has not taken the last letters in yet, or None.
+
+    A browser or an Electron editor reports its text a moment after the key: up to FIELD_PENDING_MAX_CHARACTERS of
+    the last letters may be missing, and at least one letter is there. Missing, not shifted: letters standing right
+    after the caret are a caret reported short of them (caret_lag), and further off than it allows, a changed field.
+    The early switch reads a word so (engine._typed_in_field), and so does the decision at its boundary.
+    """
+
+    for pending in range(1, min(FIELD_PENDING_MAX_CHARACTERS, len(typed) - 1) + 1):
+        shown = typed[:-pending]
+        if before.endswith(shown) and not after.startswith(typed[-pending:]):
+            return shown
+    return None
+
+
 def caret_lag(before: str, after: str, typed: str, *, exact: bool = False) -> int | None:
     """How many characters a field reports its caret short of the end of ``typed``, or None.
 
@@ -255,6 +271,13 @@ class ContextPolicy:
                         field = replace(snapshot, before=before[:-len(anchor)])
                     elif anchor and ends_with_typed(before[:-1], anchor):
                         field = replace(snapshot, before=before[:-len(anchor) - 1])
+                    elif anchor and (shown := typed_short_of(before, snapshot.after, anchor)) is not None:
+                        # The editor has not shown the last letters yet: the word is the one typed and is decided on
+                        # its keys, and its correction waits for the field to show it (engine._waits_for_field).
+                        # Refused as a changed field, `ашкуащч` stayed for `firefox` in Antigravity (the owner's
+                        # typing, 19.10.2026), and a word in such an editor was never put to the model at its space.
+                        field = replace(snapshot, before=before[:-len(shown)])
+                        ignored_read = "field_behind"
                     else:
                         # The editor contradicts the observer: do not fall back
                         # to stale strokes and erase a different span of text.

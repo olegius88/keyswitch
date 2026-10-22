@@ -63,6 +63,8 @@ ENGINE_WORKER_JOIN_TIMEOUT_SECONDS: Final = 2.0
 # less than this even when a deadline is closer.
 ENGINE_LOOP_MAX_WAKE_SECONDS: Final = 0.5
 ENGINE_LOOP_MIN_WAKE_SECONDS: Final = 0.01
+# How often a correction waiting for a field that has not shown its word yet looks again (detection.field_catch_up).
+FIELD_CATCH_UP_RETRY_SECONDS: Final = 0.025
 # Typed field context older than this is dropped, and the engine waits as long for the neighbour of a
 # waiting word (input_context exports it as CONTEXT_TTL).
 FIELD_CONTEXT_TTL_SECONDS: Final = 45.0

@@ -12,6 +12,9 @@ from .constants.settings_defaults import (
     CONFIDENCE_SETTING_STEP,
     EARLY_SWITCH_MIN_LENGTH_SETTING_MAX,
     EARLY_SWITCH_MIN_LENGTH_SETTING_MIN,
+    FIELD_CATCH_UP_DESCRIPTION,
+    FIELD_CATCH_UP_LABELS,
+    FIELD_CATCH_UP_TITLE,
     HISTORY_LIMIT_SETTING_MAX,
     HISTORY_LIMIT_SETTING_MIN,
     HISTORY_LIMIT_SETTING_STEP,
@@ -92,6 +95,13 @@ AUTOCORRECTION_SETTINGS = (
         "Читать контекст активного поля",
         "Читать текст рядом с курсором локально через доступность ОС. Распознанные защищённые поля исключаются; не все приложения сообщают о них.",
         "bool",
+    ),
+    SettingSpec(
+        "detection.field_catch_up",
+        FIELD_CATCH_UP_TITLE,
+        FIELD_CATCH_UP_DESCRIPTION + ".",
+        "choice",
+        choices=tuple(FIELD_CATCH_UP_LABELS.items()),
     ),
     SettingSpec(
         "detection.hold_after_caret_move",
