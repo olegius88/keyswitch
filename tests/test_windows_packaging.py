@@ -21,11 +21,12 @@ from keyswitch.constants.file_formats import (
     KSLM_MAX_MANIFEST_BYTES,
     KSLM_MAX_PAYLOAD_BYTES,
     KSLM_SCHEMA_VERSION,
+    MAX_CONTEXT_ALNUM_FREQUENCY_BYTES,
     MAX_CONTEXT_TERM_FREQUENCY_BYTES,
     SHA256_HEX_CHARACTERS,
 )
 from keyswitch.constants.units import BYTES_PER_MEBIBYTE
-from keyswitch.context_model import TERM_FREQUENCY_PATH
+from keyswitch.context_model import ALNUM_FREQUENCY_PATH, TERM_FREQUENCY_PATH
 from keyswitch.constants.models import (
     CONTEXT_SUPPORTED_FEATURE_VERSIONS,
     CURRENT_PREFIX_FEATURE_VERSION,
@@ -502,6 +503,15 @@ class WindowsPackagingContractTests(unittest.TestCase):
         assert match is not None
         self.assertEqual(int(match.group(1)) * BYTES_PER_MEBIBYTE, MAX_CONTEXT_TERM_FREQUENCY_BYTES)
         self.assertLessEqual(TERM_FREQUENCY_PATH.stat().st_size, MAX_CONTEXT_TERM_FREQUENCY_BYTES)
+
+    def test_both_builds_ship_the_table_of_letters_and_digits_tokens_as_it_is(self) -> None:
+        # The letters-and-digits head reads it next to the artifact; each build compares the bundled bytes.
+        match = re.search(r"-MaximumBytes (\d+)MB -MinimumBytes 2 -Label \"bundled table of letters-and-digits tokens\"", self.script)
+        assert match is not None
+        self.assertEqual(int(match.group(1)) * BYTES_PER_MEBIBYTE, MAX_CONTEXT_ALNUM_FREQUENCY_BYTES)
+        self.assertLessEqual(ALNUM_FREQUENCY_PATH.stat().st_size, MAX_CONTEXT_ALNUM_FREQUENCY_BYTES)
+        self.assertIn("Native distribution contains a different table of letters-and-digits tokens", self.script)
+        self.assertIn('"$native_dist/keyswitch/resources/models/context-alnum-frequency.json"; then', self.deb_script)
 
     def test_each_windows_build_is_named_and_updated_after_its_python_platform(self) -> None:
         # The build names its files after the platform of the Python it runs on, and the updater asks

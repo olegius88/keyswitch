@@ -19,6 +19,8 @@ Commands:
   terms     --messages <dir> --out <context-term-frequency.json>
             how often plain words occur inside Russian text and in text of their own language
             (train splits only; the Taiga messages are needed too);
+  alnum     --messages <dir> [--members <devchat members file> ...] --out <context-alnum-frequency.json>
+            how often whole tokens of letters and digits occur in the SO training messages, by script;
   capture   --manifest <model/context_v1/captured/manifest.json> --messages <dir> --model <artifact>
             [--only NAME] [--verify]: the questions the engine asks the context model while each
             source's recipe is typed, labelled from what the person meant;
@@ -55,7 +57,7 @@ from unittest.mock import patch
 ROOT: Final = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "src"), str(ROOT / "tests")]
 
-from keyswitch.constants.file_formats import HEXADECIMAL_BASE  # noqa: E402
+from keyswitch.constants.file_formats import HEXADECIMAL_BASE, REPORT_JSON_INDENT  # noqa: E402
 from keyswitch.constants.models import ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS  # noqa: E402
 from keyswitch.constants.corpus import (  # noqa: E402
     MIXED_CAPTURE_XZ_PRESET, MIXED_EVALUATE_RUSSIAN_SHARE, MIXED_PREFIX_KINDS, TATOEBA_AUTHOR_COLUMN, TATOEBA_TEXT_COLUMN,
@@ -68,8 +70,8 @@ from keyswitch.constants.corpus import (  # noqa: E402
     MIXED_TYPO_NEIGHBOUR_SHIFT, MIXED_TYPO_PLACE_SHIFT, SPLIT_BUCKET_COUNT, TATOEBA_SENTENCE_MAX_TOKENS,
     TATOEBA_SENTENCE_MIN_TOKENS,
 )
-from keyswitch.constants.models import CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS  # noqa: E402
-from keyswitch.context_action_features import dotted_question, variable_question  # noqa: E402
+from keyswitch.constants.models import ALNUM_HEAD_MAX_CHARACTERS, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS  # noqa: E402
+from keyswitch.context_action_features import alnum_question, dotted_question, letters_and_digits, variable_question  # noqa: E402
 from keyswitch.context_model import ContextEvidence, ContextModel, ContextPrediction  # noqa: E402
 from keyswitch.input_context import CONTEXT_LIMIT, FieldContext  # noqa: E402
 from test_input_sequence_matrix import PhysicalSession  # noqa: E402
@@ -106,6 +108,7 @@ CAPTURED_FIELDS: Final = (
 CAPTURED_QUESTIONS: Final[dict[str, Callable[[str, str, str, str], bool]]] = {
     "variable": variable_question,
     "dotted": lambda original, alternative, _before, _trigger: dotted_question(original, alternative),
+    "alnum": lambda original, alternative, before, _trigger: alnum_question(original, alternative, before),
 }
 
 Job = tuple[int, str, str, int, str]
@@ -334,6 +337,30 @@ def build_terms(messages: Path, lexicon: Callable[[str], bool]) -> dict[str, dic
         return {word: count for word, count in counts.items() if count >= least}
     return {"latin": frequent(latin), "cyrillic": {word: count for word, count in frequent(cyrillic).items() if not lexicon(word)},
             "english": frequent(english), "russian": frequent(russian)}
+
+
+def build_alnum(messages: Path, members: Sequence[Path]) -> dict[str, dict[str, int]]:
+    """How often whole tokens of letters and digits occur in the SO training messages, casefolded, written in Latin
+    letters (`latin`) or in Cyrillic ones (`cyrillic`): tokens of at most ALNUM_HEAD_MAX_CHARACTERS whose letters are of
+    one script (`v2`, `x64`, `1с`, `100мс`), counted at least as often as the first bound of the term tables. The messages
+    of every question a developer-chat members file names are left out, as the capture leaves them out
+    (tools/select_capture_messages.py)."""
+
+    left_out: set[int] = set()
+    for path in members:
+        with gzip.open(path, "rt", encoding="utf-8") as handle:
+            left_out.update(int(json.loads(line)["question"]) for line in handle)
+    counts: dict[str, Counter[str]] = {"cyrillic": Counter(), "latin": Counter()}
+    for line in gzip.open(messages / "so-train.jsonl.gz", "rt", encoding="utf-8"):
+        row = json.loads(line)
+        if int(row["qid"]) in left_out:
+            continue
+        for token in row["text"].split():
+            core = token.strip(TERM_EDGE_SIGNS).casefold()
+            if len(core) <= ALNUM_HEAD_MAX_CHARACTERS and letters_and_digits(core):
+                counts["latin" if core.isascii() else "cyrillic"][core] += 1
+    least = CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS[0]
+    return {alphabet: {token: count for token, count in sorted(found.items()) if count >= least} for alphabet, found in counts.items()}
 
 
 # --- typing --------------------------------------------------------------------------------------
@@ -813,6 +840,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     terms = commands.add_parser("terms")
     terms.add_argument("--messages", type=Path, required=True)
     terms.add_argument("--out", type=Path, required=True)
+    alnum = commands.add_parser("alnum")
+    alnum.add_argument("--messages", type=Path, required=True)
+    alnum.add_argument("--members", type=Path, action="append", default=[], help="a developer-chat members file (repeatable)")
+    alnum.add_argument("--out", type=Path, required=True)
     grab = commands.add_parser("capture")
     grab.add_argument("--manifest", type=Path, required=True)
     grab.add_argument("--messages", type=Path, required=True)
@@ -856,6 +887,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         table = build_terms(args.messages, lambda word: russian.score(word).known)
         args.out.write_text(json.dumps(table, ensure_ascii=False), encoding="utf-8")
         result = {name: len(words) for name, words in table.items()}
+    elif args.command == "alnum":
+        table = build_alnum(args.messages, args.members)
+        # One token to a line, so that a new count shows in a diff.
+        args.out.write_text(json.dumps(table, ensure_ascii=False, sort_keys=True, indent=REPORT_JSON_INDENT) + "\n", encoding="utf-8")
+        result = {name: len(tokens) for name, tokens in table.items()}
     elif args.command == "capture":
         result = capture(args.manifest, args.messages, args.model, args.only, args.verify, args.workers)
     elif args.command == "sources":

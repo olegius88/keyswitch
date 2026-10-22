@@ -760,3 +760,7 @@ CONTEXT_RING_FIXTURE_FRAMES: Final = 2000
 # two they do not.
 CAPTURE_FIXTURE_LEFT_OUT_QUESTION: Final = 101
 CAPTURE_FIXTURE_QUESTIONS: Final = (202, 303)
+# The letters-and-digits head's curriculum in its test: the weight of a converted frame, and how often a token of the
+# class is written in the messages the table of whole tokens is counted on (the first bound of the term tables).
+ALNUM_FIXTURE_CONVERT_WEIGHT: Final = 3.0
+ALNUM_FIXTURE_TOKEN_COUNT: Final = 5

@@ -155,6 +155,94 @@
     "seed": "capture-so-dotted-russian-dev",
     "questions": "dotted"
    }
+  },
+  {
+   "file": "so-alnum-latin-train.jsonl.xz",
+   "sha256": "dab9c4c215c92ae33dc8ff8235d0e5e3dba1bb2958a2d6e9034311455c26a574",
+   "rows": 11373,
+   "unique": 10401,
+   "weight": 1.0,
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "typing": "20 000 messages with a Latin token of letters and digits whose keys in the Russian layout are letters and digits, four typing modes; the letters-and-digits head's questions alone",
+   "recipe": {
+    "messages": "so-alnum-latin-train.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 20000,
+    "russian_share": 0.0,
+    "seed": "capture-alnum-latin-train",
+    "questions": "alnum"
+   }
+  },
+  {
+   "file": "so-alnum-russian-train.jsonl.xz",
+   "sha256": "c69744b201bcd881990895718f2ff4c2889efa6e855831539be8fe497ef638a3",
+   "rows": 18627,
+   "unique": 7365,
+   "weight": 1.0,
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "typing": "up to 2 500 messages with Latin words and 2 500 Russian ones, each with a Cyrillic token of letters and digits whose keys in the English layout are letters and digits and no Latin one, four typing modes; the letters-and-digits head's questions alone",
+   "recipe": {
+    "messages": "so-alnum-russian-train.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 2500,
+    "russian_share": 1.0,
+    "seed": "capture-alnum-russian-train",
+    "questions": "alnum"
+   }
+  },
+  {
+   "file": "so-alnum-latin-dev.jsonl.xz",
+   "sha256": "096da511695344ae1156f916a34ccd5282a4cb0fcffd64d836884d90f8ba9e1f",
+   "rows": 2179,
+   "unique": 2070,
+   "weight": 1.0,
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "typing": "4 000 messages with a Latin token of letters and digits whose keys in the Russian layout are letters and digits, four typing modes; the letters-and-digits head's questions alone",
+   "recipe": {
+    "messages": "so-alnum-latin-dev.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 4000,
+    "russian_share": 0.0,
+    "seed": "capture-alnum-latin-dev",
+    "questions": "alnum"
+   }
+  },
+  {
+   "file": "so-alnum-russian-dev.jsonl.xz",
+   "sha256": "ada5848fa7753e3fa6faeced7a00f73be0e6fb3a04e032b8ba8b7850c60525c7",
+   "rows": 3854,
+   "unique": 1557,
+   "weight": 1.0,
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "typing": "up to 500 messages with Latin words and 500 Russian ones, each with a Cyrillic token of letters and digits whose keys in the English layout are letters and digits and no Latin one, four typing modes; the letters-and-digits head's questions alone",
+   "recipe": {
+    "messages": "so-alnum-russian-dev.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 500,
+    "russian_share": 1.0,
+    "seed": "capture-alnum-russian-dev",
+    "questions": "alnum"
+   }
   }
  ]
 }

@@ -438,6 +438,11 @@ if ! cmp -s "$project_dir/src/keyswitch/resources/models/context-term-frequency.
     printf 'Native distribution does not contain the exact term frequency table.\n' >&2
     exit 1
 fi
+if ! cmp -s "$project_dir/src/keyswitch/resources/models/context-alnum-frequency.json" \
+    "$native_dist/keyswitch/resources/models/context-alnum-frequency.json"; then
+    printf 'Native distribution does not contain the exact table of letters-and-digits tokens.\n' >&2
+    exit 1
+fi
 bundled_english_model="$native_dist/keyswitch/resources/models/en_US.lm"
 bundled_russian_model="$native_dist/keyswitch/resources/models/ru_RU.lm"
 if [[ ! -s "$bundled_intent_model" ]] \

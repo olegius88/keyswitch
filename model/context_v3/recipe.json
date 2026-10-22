@@ -149,10 +149,10 @@
   },
   "english_capital_curriculum": {
     "words_by_length": {
-      "2": 0,
-      "3": 0,
-      "4": 0,
-      "5": 0
+      "2": 107,
+      "3": 300,
+      "4": 300,
+      "5": 300
     },
     "frames_per_word": 2,
     "lowercase_contrast": true,
@@ -197,8 +197,12 @@
         "sample_weight": 1.0
       }
     },
-    "heads": {},
-    "scope": "The pair context-v3-1ba380ab2999 of 0.59.0, every weight fixed and no head fitted: a reseal of the shipped pair for engine changes that change no model (20.10.2026). Its kept-neighbour question and every head are carried, so the fit moves no weight, and the artifact is the shipped one byte for byte; a fit that refitted the variable and dotted-abbreviation heads on a new corpus moved them (their kept-neighbour frames come from the corpus), a model change no reseal may make. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone) and the answers of the corpus v37 model (labels). The pair of 0.59.0: the pair of 0.58.0 with the variable and dotted-abbreviation heads fitted onto it on corpus v69 (model/context_v3/frozen-base-9033af7cb039.json, sha256 872a502bde9b)."
+    "heads": {
+      "alnum": {
+        "maximum_features": 1500
+      }
+    },
+    "scope": "The pair context-v3-1ba380ab2999 of 0.60.0 (and 0.59.0), every weight fixed: its kept-neighbour question and every head are carried as shipped, and the letters-and-digits head alone is fitted (a head fitted again from zero moves with the contexts its curriculum draws and the rows of the corpus, whatever the change under test: the variable and dotted-abbreviation heads refitted on corpus v71 moved). The lone-word head's frames are labelled with the counts it was fitted with (carried.alone) and the answers of the corpus v37 model (labels). The letters-and-digits head: a token typed in Russian letters and digits, of at most eight characters, whose keys are Latin letters and digits, after Russian text or none, that Russian text is known to write as a whole token one way or the other (context_action_features.alnum_question; after English text, for a token typed in Latin letters and for a token the table counts in neither script, the frozen model decides), with how often Russian text writes the token as typed and its Latin reading as whole tokens (src/keyswitch/resources/models/context-alnum-frequency.json, counted on the SO training messages), the order of magnitude by which how often Russian text uses the letters of its Cyrillic reading outnumbers how often English prose or Russian technical text uses those of its Latin one, the shape of its runs of letters and digits, the case of its letters, the script of the text and of the word before it, signs of code and digits there, the boundary and how the word after it was given. Motivation: the shared features read every digit as one class; `м67` typed for `v67` in Russian prose stayed a suggestion (the owner's typing, 19.10.2026), `x64` typed in the Russian layout stayed `ч64`, every token of one letter and digits stayed by the lone-letter refusal, and a Russian token such as `100мс` became Latin (ru.stackoverflow messages of 2023). The refusal is lifted for this class when the model has the head. The pair of 0.60.0: the pair of 0.58.0 with the variable and dotted-abbreviation heads fitted onto it on corpus v69 (model/context_v3/frozen-base-9033af7cb039.json, sha256 872a502bde9b), resealed whole on corpus v71 for engine changes."
   },
   "letter_curriculum": {
     "term_sentences": 1500,
@@ -872,5 +876,45 @@
     },
     "sample_weight": 1.0,
     "scope": "TRAIN, and DEVELOPMENT for the head's epoch: the questions about a token of the dotted-abbreviation head's class the engine asked while ru.stackoverflow messages of 2023 were typed the four ways a person types them, the messages chosen by the head's own predicate (every message with a Latin token of the class, a sample of those with a Russian abbreviation and no such token) and split by question with every question of the developer-chat messages left out (tools/select_capture_messages.py, tools/train_context_action_model.dotted_curriculum)."
+  },
+  "alnum_curriculum": {
+    "captured": {
+      "train": [
+        [
+          "model/context_v3/captured/manifest.json",
+          "so-alnum-latin-train.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest.json",
+          "so-alnum-russian-train.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "taiga-typing-keep.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "taiga-chat-typing-keep.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "tatoeba-chat-typing.jsonl.xz"
+        ]
+      ],
+      "development": [
+        [
+          "model/context_v3/captured/manifest.json",
+          "so-alnum-latin-dev.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest.json",
+          "so-alnum-russian-dev.jsonl.xz"
+        ]
+      ]
+    },
+    "sample_weight": 1.0,
+    "scope": "TRAIN, and DEVELOPMENT for the head's epoch: the questions about a token of the letters-and-digits head's class (a token typed in Russian letters and digits after Russian text or none, whose keys are Latin letters and digits, counted as typed or in its Latin reading by context-alnum-frequency.json) the engine asked while ru.stackoverflow messages of 2023 were typed the four ways a person types them, the messages chosen by the token (20 000 with a Latin token of letters and digits, 2 500 with Latin words and 2 500 Russian ones with a Cyrillic token and no Latin one) and split by question with every question of the developer-chat messages left out (tools/select_capture_messages.py), and for TRAIN the class's questions of the captured Taiga sentences typed right and of Tatoeba chat typed in the other layout (tools/train_context_action_model.alnum_curriculum). At most token_cap frames of one token with one answer (`1с` held 593 kept frames), and a converted frame weighs convert_weight: 2.3 = keep_importance x kept frames / converted frames of TRAIN after the cap (4 x 3 306 / 5 656), so both answers weigh the same in the fit. Candidate v72, fitted without the cap and the weight on every token of letters and digits in either layout, kept about -5.5 logits towards `keep` on every token typed in Russian letters and lost `2аф` for `2fa`, `шзм6` for `ipv6` and Latin tokens after English text (corpus v72 calibration). Candidate v72b, fitted on every such token, kept model names absent from the table that the frozen model had converted (`В7000` for `D7000`, `К2В2` for `R2D2`; calibration -9): a token the table does not count stays with the frozen model.",
+    "token_cap": 16,
+    "convert_weight": 2.3
   }
 }

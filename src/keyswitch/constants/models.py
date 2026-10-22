@@ -177,6 +177,20 @@ DOTTED_FEATURE_PREFIX: Final = "dotted|"
 # Letters a part of a dotted abbreviation holds at most (`т.к.`, `д.б.`, `т.е.`): a longer part is a word, and the token
 # one of a path (`src/main`).
 DOTTED_PART_MAX_LETTERS: Final = 3
+# A token of letters and digits, both readings of it, has evidence of its own under this prefix: the letters-and-digits
+# head (context_action_features.alnum_question). In Russian technical text it is a Latin token typed in the Russian
+# layout (`м67` for `v67`, `зь2` for `pm2`) or one meant as typed (`v2`, `x86`, `1с`, `3д`).
+ALNUM_FEATURE_PREFIX: Final = "alnum|"
+# Characters such a token holds at most: a longer one is a word with a number (`python3`, `sqlite3`), which the frozen
+# model reads by its letters.
+ALNUM_HEAD_MAX_CHARACTERS: Final = 8
+# The head reads the token's shape as its runs of letters and digits, each run's length up to ALNUM_RUN_LENGTH_MAX (`м67`
+# is one letter and two digits); a token of more than ALNUM_SHAPE_MAX_RUNS runs has one shape for all.
+ALNUM_RUN_LENGTH_MAX: Final = 3
+ALNUM_SHAPE_MAX_RUNS: Final = 3
+# The binary order of magnitude by which how often the letters of one reading occur outnumbers how often those of the
+# other do, read up to this many either way.
+ALNUM_RATIO_BOUND: Final = 8
 # The "length" feature buckets every word length from here up together (schemas 2 and 3).
 ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: Final = 6
 # Short categorical field labels (role, trigger) truncated before they reach a feature name.
@@ -285,15 +299,15 @@ CONTEXT_FEATURE_NGRAM_ORDERS: Final = (1, 2, 3)
 # and version strings of at most these many characters, weights of at most this magnitude, and a
 # conversion threshold from this floor up to one.
 MAX_CONTEXT_MODEL_FEATURES: Final = 50000
-# An action model (schema 3) holds up to fifteen feature spaces: the word decided at its boundary, the
+# An action model (schema 3) holds up to sixteen feature spaces: the word decided at its boundary, the
 # kept-neighbour question (KEPT_FEATURE_PREFIX), the capitals head (CAPITALS_FEATURE_PREFIX), the
 # lone-word head (ALONE_FEATURE_PREFIX), the message-start head (START_FEATURE_PREFIX), the
 # single-letter head (LETTER_FEATURE_PREFIX), the abbreviation heads (ABBREVIATION_FEATURE_PREFIX,
 # LATIN_ABBREVIATION_FEATURE_PREFIX), the unknown-token head (UNKNOWN_FEATURE_PREFIX), the joined-token head
 # (JOINED_FEATURE_PREFIX), the term heads (TERM_FEATURE_PREFIX, FIRST_FEATURE_PREFIX), the short-message head
-# (BRIEF_FEATURE_PREFIX), the variable head (VARIABLE_FEATURE_PREFIX) and the dotted-abbreviation head
-# (DOTTED_FEATURE_PREFIX), each with its own budget in the recipe. Raised from 100 000 with the unknown-token head: the
-# 0.54.0 pair holds 98 498.
+# (BRIEF_FEATURE_PREFIX), the variable head (VARIABLE_FEATURE_PREFIX), the dotted-abbreviation head
+# (DOTTED_FEATURE_PREFIX) and the letters-and-digits head (ALNUM_FEATURE_PREFIX), each with its own budget in the
+# recipe. Raised from 100 000 with the unknown-token head: the 0.54.0 pair holds 98 498.
 MAX_CONTEXT_ACTION_MODEL_FEATURES: Final = 110000
 MAX_CONTEXT_FEATURE_NAME_CHARACTERS: Final = 512
 MAX_CONTEXT_MODEL_VERSION_CHARACTERS: Final = 80

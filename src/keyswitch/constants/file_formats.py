@@ -35,10 +35,16 @@ LEGACY_RULE_CONFIRMATIONS_REQUIRED: Final = 2
 LEXICON_SUPPLEMENT_MAX_BYTES: Final = 8 * BYTES_PER_MEBIBYTE
 # Largest prefix model artifact loaded.
 MAX_PREFIX_MODEL_BYTES: Final = 2 * BYTES_PER_MEBIBYTE
-# Largest context model artifact loaded (context_model.py exports it as MAX_ARTIFACT_BYTES).
+# Largest context model artifact loaded (context_model.py exports it as MAX_ARTIFACT_BYTES); the feature-2 history
+# (tools/verify_context_v2_history.py) holds this value.
 MAX_CONTEXT_MODEL_BYTES: Final = 8 * BYTES_PER_MEBIBYTE
+# Largest action model (schema 3) artifact loaded: written one feature to a line (train_context_action_model.artifact_bytes),
+# the 0.61.0 pair takes about 8.6 MB.
+MAX_CONTEXT_ACTION_MODEL_BYTES: Final = 16 * BYTES_PER_MEBIBYTE
 # Largest term frequency table the context model reads with feature schema 7.
 MAX_CONTEXT_TERM_FREQUENCY_BYTES: Final = 8 * BYTES_PER_MEBIBYTE
+# Largest table of tokens of letters and digits the letters-and-digits head reads.
+MAX_CONTEXT_ALNUM_FREQUENCY_BYTES: Final = 2 * BYTES_PER_MEBIBYTE
 # Indentation of every diagnostics report printed or copied for a person to read.
 DIAGNOSTICS_JSON_INDENT: Final = 2
 # Read size when a file is streamed through SHA-256 (and copied while hashed).

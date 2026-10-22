@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, replace
 from typing import ClassVar, Final
 
-from .context_action_features import letter_question, variable_question
+from .context_action_features import alnum_question, letter_question, variable_question
 from .context_model import AfterOrigin, ContextEvidence, ContextModel, ContextPrediction, one_typo_from_word, term_bucket
 from .identifier_lexicon import IdentifierLexicon
 from .detector import DetectionDecision, LanguageDetector, LanguageScorer
@@ -320,11 +320,14 @@ class ContextPolicy:
         # (context_action_features.letter_question): there its verdict on a letter is an opinion, and
         # `nats b redis` is `nats и redis` (the owner's typing, 0.32-0.41). One with the variable head has
         # learned a letter of the Russian layout after a word of Cyrillic letters (variable_question): a Latin
-        # variable typed there (`ч` for `x`) or a letter meant as written (`да я про то ч`).
+        # variable typed there (`ч` for `x`) or a letter meant as written (`да я про то ч`). One with the
+        # letters-and-digits head has learned a token of Russian letters and digits whose keys are Latin letters and
+        # digits, after Russian text (alnum_question): `м67` for `v67` and `ч64` for `x64`, and `1с` or `3д` meant as typed.
         action_model = self.model.feature_version == CONTEXT_ACTION_FEATURE_VERSION
         learned = ((self.model.answers_letters and letter_question(baseline.original, alternative, field.before))
                    or (self.model.answers_variables
-                       and variable_question(baseline.original, alternative, field.before, trigger)))
+                       and variable_question(baseline.original, alternative, field.before, trigger))
+                   or (self.model.answers_alnum and alnum_question(baseline.original, alternative, field.before)))
         lone = (action_model and sum(char.isalpha() for char in baseline.original) == 1
                 and all(char.isalpha() or char.isdigit() for char in baseline.original) and not learned)
         slang = action_model and russian_slang(baseline.original, alternative, baseline.source_group, source.known)

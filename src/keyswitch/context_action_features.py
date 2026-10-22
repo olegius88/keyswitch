@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import bisect
 import functools
+import itertools
 import math
 import re
 import unicodedata
@@ -11,6 +13,11 @@ from .constants.training import TERM_FRAGMENT_MIN_ENDING_BUCKET
 from .constants.models import (
     ABBREVIATION_FEATURE_PREFIX,
     ABBREVIATION_NON_INITIAL_LETTERS,
+    ALNUM_FEATURE_PREFIX,
+    ALNUM_HEAD_MAX_CHARACTERS,
+    ALNUM_RATIO_BOUND,
+    ALNUM_RUN_LENGTH_MAX,
+    ALNUM_SHAPE_MAX_RUNS,
     ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS,
     ACTION_FEATURE_APPLICATION_NAME_CHARACTERS,
     ACTION_FEATURE_APPLICATION_TOKEN_COUNT,
@@ -38,6 +45,7 @@ from .constants.models import (
     BRIEF_SETTLED_DOMINANCE,
     BRIEF_SETTLED_MIN_COUNT,
     BRIEF_SETTLED_OTHER_MAXIMUM,
+    CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS,
     DOTTED_FEATURE_PREFIX,
     DOTTED_PART_MAX_LETTERS,
     FIRST_FEATURE_PREFIX,
@@ -410,6 +418,10 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         if variable_question(item.original, item.alternative, item.field.before, item.trigger):
             # Nor a letter after a word of Cyrillic letters: the variable head answers there too.
             kept.update(_variable_evidence(item))
+        if alnum_question(item.original, item.alternative, item.field.before):
+            # Nor a token of letters and digits: asked again with `как` kept after it, the question kept `м67` at p=1.00
+            # where `v67` was meant (the owner's typing, 19.10.2026).
+            kept.update(_alnum_evidence(item))
         return kept
     result = {name: value for name, value in features.items() if value}
     if capitals_question(item.original, item.field.before):
@@ -486,6 +498,11 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         # The class the dotted-abbreviation head answers: no frame of the corpus types `т.к.` in the English layout, and
         # the frozen model kept `n/r/` at p=1.00 as a path would be kept (the developer-chat development set).
         result.update(_dotted_evidence(item))
+    if alnum_question(item.original, item.alternative, item.field.before):
+        # The class the letters-and-digits head answers: the shared features read every digit as one class, and the frozen
+        # model left `м67` for `v67` a suggestion, kept `x64` typed in the Russian layout as `ч64` and turned `100мс` into
+        # `100vc`; its conversions of a token of one letter the lone-letter refusal kept as well (context_policy).
+        result.update(_alnum_evidence(item))
     known = item.source_known and not _tail_like(item.original)
     if first_question(item.original, item.field.before, item.field.after) and item.field.role != "unknown" and not known:
         # The class the first-term head answers: a term of up to three letters alone in a field a reader read empty,
@@ -1026,6 +1043,98 @@ def _dotted_evidence(item: ContextEvidence) -> dict[str, float]:
     names = ("bias", f"reading:{reading}", shape, case, before, after, f"russian:{russian}", f"latin:{latin}", counts,
              *(f"{head}:{name}" for head in (f"reading:{reading}", shape, counts) for name in (case, before, after)))
     return {f"{DOTTED_FEATURE_PREFIX}{name}": 1.0 for name in names}
+
+
+def letters_and_digits(token: str) -> bool:
+    """Letters and ASCII digits alone, at least one of each, the letters all Latin or all Cyrillic."""
+
+    letters = [char for char in token if char.isalpha()]
+    return (bool(letters) and any(char.isascii() and char.isdigit() for char in token)
+            and all(char.isalpha() or (char.isascii() and char.isdigit()) for char in token)
+            and (all(char.isascii() for char in letters) or all(_cyrillic_letter(char) for char in letters)))
+
+
+def alnum_question(original: str, alternative: str, before: str) -> bool:
+    """A token typed in Russian letters and digits, of at most ALNUM_HEAD_MAX_CHARACTERS, whose keys in the English layout
+    are Latin letters and digits, that Russian text is known to write as a whole token one way or the other
+    (context-alnum-frequency.json counts it as typed or its Latin reading), after text that is Russian or none: a Latin
+    token typed in the Russian layout in Russian text (`шзм6` for `ipv6`, `зь2` for `pm2`, `ч64` for `x64`, `2аф` for
+    `2fa`), or a Russian one meant as typed (`1с`, `3д`, `100мс`): the letters-and-digits head's class. A reading with a
+    sign is none (`2х` reads `2[`), nor a token with a sign inside (`-v2`, `5ю2`): the frozen model decides those, and the
+    lone-letter refusal (context_policy) a token of one letter. After English text the frozen model decides too, and for
+    a token typed in Latin letters, whose typed questions label `1c` of Russian prose a conversion to `1с`. A token the
+    table counts in neither script is the frozen model's as well: fitted on the 2023 dump, where such shapes are Russian
+    (`2х`, `ГОСТ2012`), the head kept model names typed in the Russian layout in Russian sentences that the frozen model
+    had converted (`В7000` for `D7000`, `К2В2` for `R2D2`, `220ф` for `220a`; corpus v72, candidates v72 and v72b). The
+    question reads only the token, its other reading, the text before it and the packaged table, as the trainer and the
+    GPU path route frames by them."""
+
+    from .context_model import _alnum_frequency
+
+    if not (len(original) <= ALNUM_HEAD_MAX_CHARACTERS and not original.isascii() and letters_and_digits(original)
+            and alternative.isascii() and letters_and_digits(alternative)
+            and _dominant(before[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:].casefold()) != "en"):
+        return False
+    tokens = _alnum_frequency()
+    return bool(tokens["cyrillic"].get(original.casefold()) or tokens["latin"].get(alternative.casefold()))
+
+
+def _alnum_shape(token: str) -> str:
+    """The runs of letters (`L`) and digits (`D`) of a token, each with its length up to ALNUM_RUN_LENGTH_MAX: `м67` is
+    `L1D2`, `ц4и` `L1D1L1`, `100мс` `D3L2`; a token of more than ALNUM_SHAPE_MAX_RUNS runs is `many`."""
+
+    runs = [(kind, len(list(group))) for kind, group in itertools.groupby(token, key=lambda char: "D" if char.isdigit() else "L")]
+    if len(runs) > ALNUM_SHAPE_MAX_RUNS:
+        return "many"
+    return "".join(f"{kind}{min(size, ALNUM_RUN_LENGTH_MAX)}" for kind, size in runs)
+
+
+def _ratio(cyrillic: int, latin: int) -> int:
+    """The binary order of magnitude by which a Cyrillic count outnumbers a Latin one, ALNUM_RATIO_BOUND at most either way."""
+
+    return max(-ALNUM_RATIO_BOUND, min(ALNUM_RATIO_BOUND, cyrillic.bit_length() - latin.bit_length()))
+
+
+def _alnum_evidence(item: ContextEvidence) -> dict[str, float]:
+    """The letters-and-digits head's evidence: how often Russian text writes the token as typed and its Latin reading
+    as whole tokens (context-alnum-frequency.json: `1с` 1 363 times and `1c` 134, `ipv6` 351 and `шзм6` never), each as a
+    bucket of the term tables' bounds, with the binary order of magnitude by which one outnumbers the other
+    (ALNUM_RATIO_BOUND at most either way); the same order for the longest run of letters of each reading in the term
+    tables (Russian text for the Cyrillic run, English prose or Russian technical text for the Latin one) and whether
+    either occurs; its shape (runs of letters and digits), the case of its letters, the script of the text and of the word
+    before it, whether that text holds signs of code (VARIABLE_CODE_SIGNS) or digits, the boundary and how the word after
+    it was given; the shape and both orders are read with the rest. The shared features read every digit as one class:
+    `1С` became `1C` in Russian prose and `2фа` `2af`, while `м67` for `v67` stayed a suggestion and `x64` typed in the
+    Russian layout stayed `ч64` (the owner's typing, ru.stackoverflow messages of 2023)."""
+
+    from .context_model import _alnum_frequency, _term_frequency
+
+    table, tokens = _term_frequency(), _alnum_frequency()
+    cyrillic, latin = item.original.casefold(), item.alternative.casefold()
+    typed, other = tokens["cyrillic"].get(cyrillic, 0), tokens["latin"].get(latin, 0)
+    token = (f"token:{bisect.bisect_right(CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, typed)}:"
+             f"{bisect.bisect_right(CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, other)}")
+    whole = f"whole:{_ratio(typed, other)}"
+    cyrillic_letters = max(re.findall("[а-яё]+", cyrillic), key=len)
+    latin_letters = max(re.findall("[a-z]+", latin), key=len)
+    russian = max(table["russian"].get(cyrillic_letters, 0), table["cyrillic"].get(cyrillic_letters, 0))
+    english = max(table["english"].get(latin_letters, 0), table["latin"].get(latin_letters, 0))
+    ratio = f"ratio:{_ratio(russian, english)}"
+    seen = f"seen:{int(russian > 0)}:{int(english > 0)}"
+    shape = f"shape:{_alnum_shape(item.original)}"
+    letters = [char for char in item.original if char.isalpha()]
+    case = f"case:{'upper' if all(char.isupper() for char in letters) else 'lower' if not any(char.isupper() for char in letters) else 'mixed'}"
+    tail = item.field.before[-VARIABLE_CODE_CONTEXT_CHARACTERS:]
+    words = item.field.before.split()
+    following = (item.field.after.split() or [""])[0].casefold()
+    before = f"before:{_dominant(tail.casefold())}:{_script(words[-1].casefold()) if words else 'start'}"
+    code = f"code:{int(any(char in VARIABLE_CODE_SIGNS for char in tail))}:digit:{int(any(char.isdigit() for char in tail))}"
+    boundary = f"boundary:{item.trigger}:{item.boundary_text.strip() if item.trigger == 'punctuation' else ''}"
+    after = f"after:{item.after_origin}:{_script(following)}"
+    rest = (case, before, code, boundary, after)
+    names = ("bias", token, whole, shape, ratio, seen, *rest, f"{shape}:{whole}", f"{shape}:{ratio}", f"{whole}:{ratio}",
+             f"{ratio}:{seen}", *(f"{head}:{name}" for head in (shape, whole, ratio) for name in rest))
+    return {f"{ALNUM_FEATURE_PREFIX}{name}": 1.0 for name in names}
 
 
 @functools.cache
