@@ -15,6 +15,10 @@ MAX_WORD_STROKES: Final = 256
 # words of a message have nothing before them to tell their layout by (`hey here` typed in the
 # Russian layout is `рун руку`, two Russian words, until `ерун` shows it was `they`).
 KEPT_WORDS_TAKEN_ALONG: Final = 2
+# A kept word is asked again only when its other reading is a word: one the lexicon holds, or one prose of its language
+# uses at least this many times. The shipped Russian lexicon holds no `ой`, `ох` or `эх` (Russian prose: 1 298, 838 and
+# 584 times), and `jq я разве` stayed for `ой я разве`.
+KEPT_WORD_PROSE_MIN_COUNT: Final = 500
 # Most Latin words an English term inside a Russian phrase may span before a lone Russian letter
 # typed in the English layout is read as that letter (`в git diff d` is `в git diff в`).
 STRANDED_TERM_MAX_WORDS: Final = 3
