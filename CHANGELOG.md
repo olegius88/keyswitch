@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.61.0 — 2026-10-22
+
 - A token typed in Russian letters and digits whose keys are Latin letters and digits is decided by a part of the
   model of its own when Russian text is known to write it one way or the other: `шзм6` becomes `ipv6`, `зь2` `pm2`,
   `ч64` `x64`, `2аф` `2fa` and `ншш2` `yii2`, while `1с`, `3д`, `100мс` and `2фа` stay. The model used to read every

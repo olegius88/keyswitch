@@ -277,7 +277,7 @@
     "model/prefix_v1/candidate.json": "d6396beecbeee08a6d9165f1aea0b9316a3a75b5f986e464b99a5a1ba738ac7a",
     "model/prefix_v1/corpus.json": "1b037e3ce0ae5a282a1cf21c318aa1ff26dc4c142ffc4db9a58dc037e90f21ff",
     "model/prefix_v1/seal.json": "f002c1104db744049816e9415f21878a38308c681ba011b9b68ab15bf789d2c8",
-    "src/keyswitch/__init__.py": "c8fcb0328461b9c13776a1e810a553335adf21c3543f24ada93abba55ba4236f",
+    "src/keyswitch/__init__.py": "3f539b5743a0065c7d543e85264dcc4245281e23b367f2588833a8cf2c39e218",
     "src/keyswitch/__main__.py": "1dcdb6d6ff34e04cdbc21446c00a5c5f61c3059429eac0f6f863291a7a314fbe",
     "src/keyswitch/app.py": "1956e72601c6c17119febd10cead0658812ad6c564ec2b478e602d7ed1c4513c",
     "src/keyswitch/app_quirks.py": "760763d3c50a85c19239a90e246d65e105e91ae918660445e8286d137836a214",
@@ -491,8 +491,8 @@
     }
   },
   "runtime_regression": {
-    "previous_report": "model/prefix_v1/engine-history/2f1a0227b0a53bacd098fc73ff61942377916fe22b744a33487bdb977775b59f.json",
-    "previous_sha256": "2f1a0227b0a53bacd098fc73ff61942377916fe22b744a33487bdb977775b59f"
+    "previous_report": "model/prefix_v1/engine-history/6fbfa5d38767bcce1c64de4e36b1b6935280a82151fd187e4976b408ece74026.json",
+    "previous_sha256": "6fbfa5d38767bcce1c64de4e36b1b6935280a82151fd187e4976b408ece74026"
   },
   "schema_version": 1,
   "scope": "in-process physical keys/live layout/exact final text/two spaces; separate observed and simulated field contexts; not native OS proof",
