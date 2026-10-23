@@ -1,7 +1,8 @@
 r"""The first word of a message typed in the wrong layout is settled by the words after it: a word whose last key is a
 letter of the other layout (`T\`` is `Её`, `dc.` is `всю`), a waiting word whose neighbour converts with a sign split
-off (`Ша тщеб` is `If not,`), and an interjection the shipped lexicon does not hold (`jq` is `ой`). The development
-sentences of the Tatoeba dump (22.10.2026) lost these to the frozen baseline pair."""
+off, at its space (`Ша тщеб` is `If not,`) or at the pause that ends the message (`tot rjire/` is `еще кошку.`), and an
+interjection the shipped lexicon does not hold (`jq` is `ой`). The development sentences of the Tatoeba dump (22-23.10.2026)
+lost these to the frozen baseline pair."""
 
 from __future__ import annotations
 
@@ -38,6 +39,17 @@ class FirstWordSignTests(DefaultSequenceHarness):
 
     def test_a_waiting_first_word_converts_with_a_neighbour_whose_sign_was_split_off(self) -> None:
         self.assertEqual(self.typed("Telegram", 1, (("If ", 0), ("not, ", 0), ("you ", 0))), "If not, you ")
+
+    def test_a_waiting_first_word_converts_with_a_last_word_whose_sign_splits_off_at_the_closing_pause(self) -> None:
+        # The message ends with the sign and a pause, no space: the waiting word was left as typed (`tot кошку.`).
+        for group, steps, expected in ((0, (("еще ", 1), ("кошку.", 1)), "еще кошку."), (1, (("If ", 0), ("not.", 0)), "If not."),
+                                       (0, (("ой ", 1), ("правда.", 1)), "ой правда.")):
+            with self.subTest(expected=expected), self.session(group, "Telegram") as session:
+                session.engine.settings.set("detection.early_switch", False, persist=False)
+                for text, typed_group in steps:
+                    session.type(text, typed_group, idle_after_words=False)
+                session.idle()
+                self.assertEqual(session.backend.text, expected)
 
     def test_a_kept_word_is_asked_when_prose_uses_its_other_reading(self) -> None:
         # The shipped lexicon holds no `ой`; Russian prose uses it 1 298 times.

@@ -24,6 +24,7 @@ messages of one question are typed for one split only:
   messages. Tatoeba messages (`--prefix tatoeba-chat`) are taken only among the sentences the captured training questions
   were already typed from (`--only-ids`, model/context_v1/captured/tatoeba-authors.tsv.xz), which no corpus split holds
   (freeze_context_action_holdout.captured_tatoeba_identifiers).
+- slippable: a message with two words of Russian letters in a row, for the slip typing mode (tools/mixed_typing.py).
 
     python3 tools/select_capture_messages.py --messages <so-train.jsonl.gz> --members <devchat-*.members.jsonl.gz> ... \\
         --class variable --development-share 0.2 --out <dir>
@@ -112,8 +113,16 @@ def opening_short(text: str) -> bool:
     return bool(tokens) and tokens[0].isalpha() and len(tokens[0]) <= OPENING_SHORT_MAX_LETTERS
 
 
+def slippable(text: str) -> bool:
+    """Two words of Russian letters in a row: the slip typing mode types the second with the English layout on."""
+    tokens = text.split()
+    return any(all(cyrillic(char) for char in first if char.isalpha()) and any(cyrillic(char) for char in first)
+               and any(cyrillic(char) for char in second) and not any("a" <= char.lower() <= "z" for char in second)
+               for first, second in zip(tokens, tokens[1:]))
+
+
 # Classes of a whole message rather than of one of its tokens.
-MESSAGE_CLASSES: dict[str, Callable[[str], bool]] = {"opening-short": opening_short}
+MESSAGE_CLASSES: dict[str, Callable[[str], bool]] = {"opening-short": opening_short, "slippable": slippable}
 CLASSES: dict[str, Callable[[str, str], bool]] = {"variable": variable_token, "dotted": dotted_token,
                                                   "dotted-latin": latin_dotted_token, "dotted-russian": russian_dotted_token,
                                                   "alnum-latin": latin_alnum_token, "alnum-russian": russian_alnum_token}

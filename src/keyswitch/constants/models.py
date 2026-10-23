@@ -217,6 +217,24 @@ SHORT_HEAD_MAX_LATIN_BUCKET: Final = 1
 # The binary order of magnitude of a count is read up to this, and the difference of two up to SHORT_RATIO_BOUND.
 SHORT_MAGNITUDE_MAX: Final = 16
 SHORT_RATIO_BOUND: Final = 8
+# A token of Latin letters after a line of Russian text, whose Latin reading English prose and Russian technical text use
+# at most in this bucket of the counts (CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS) and whose Cyrillic reading Russian prose
+# uses, has evidence of its own under this prefix: the slip head (context_action_features.slip_question). A word of
+# Russian prose typed with the English layout on stayed a suggestion near the threshold: `cgtie` for `спешу` after `я `
+# at p=0.9885, `htity` for `решен`, and `pfdsk` for `завыл` was kept (Tatoeba development sentences, 23.10.2026).
+SLIP_FEATURE_PREFIX: Final = "slip|"
+# Shorter tokens are left out: the Latin tokens of two or three letters typed as meant after Russian text are
+# abbreviations whose keys happen to spell Russian prose (`dbg`, `ck`, `pf`, the captured typing of ru.stackoverflow), and
+# among the class's captured questions they were the only ones kept.
+SLIP_HEAD_MIN_LETTERS: Final = 4
+SLIP_HEAD_MAX_LATIN_BUCKET: Final = 1
+# The detector's probability is read in this many bands, the orthotactic margin in bands this wide, up to
+# SLIP_ORTHO_BANDS either way, and how often Russian prose uses the word before the token in steps of this many binary
+# orders of magnitude.
+SLIP_PROBABILITY_BANDS: Final = 10
+SLIP_ORTHO_BAND_WIDTH: Final = 5.0
+SLIP_ORTHO_BANDS: Final = 4
+SLIP_BEFORE_MAGNITUDE_STEP: Final = 4
 # The "length" feature buckets every word length from here up together (schemas 2 and 3).
 ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: Final = 6
 # Short categorical field labels (role, trigger) truncated before they reach a feature name.

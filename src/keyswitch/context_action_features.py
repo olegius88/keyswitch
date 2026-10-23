@@ -68,6 +68,13 @@ from .constants.models import (
     START_HEAD_MIN_LETTERS,
     SHORT_FEATURE_PREFIX,
     SHORT_HEAD_LETTERS,
+    SLIP_BEFORE_MAGNITUDE_STEP,
+    SLIP_FEATURE_PREFIX,
+    SLIP_HEAD_MAX_LATIN_BUCKET,
+    SLIP_HEAD_MIN_LETTERS,
+    SLIP_ORTHO_BAND_WIDTH,
+    SLIP_ORTHO_BANDS,
+    SLIP_PROBABILITY_BANDS,
     SHORT_HEAD_MAX_LATIN_BUCKET,
     SHORT_HEAD_MIN_RUSSIAN_BUCKET,
     SHORT_MAGNITUDE_MAX,
@@ -521,6 +528,12 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         # reading's way: `тыв` (a typo of `ты`) after `tot ` became `nsd` at p=1.00, and `еще тыв` became `tot nsd` (the
         # owner's typing, 22.10.2026).
         result.update(_hypothesis_evidence(item))
+    elif slip_question(item.original, item.field.before) and not item.source_known and not item.source_identifier:
+        # The class the slip head answers: a word of Russian prose typed with the English layout on after a line of Russian
+        # text, whose Latin reading no lexicon, identifier index or table of Latin text supports. The frozen model left such
+        # a word a suggestion just under the threshold, which no pause settles (`я cgtie` for `я спешу`), or kept it
+        # (`волк pfdsk` for `волк завыл`): its keep weights for unknown Latin tokens after Russian prose pulled them down.
+        result.update(_slip_evidence(item))
     elif short_question(item.original, item.field.before) and not item.source_known:
         # The class the short-token head answers: a token of two or three Russian letters after Russian text that no table
         # of Russian text counted, whose Latin reading the English lexicon knows. The frozen model turned `кз` after
@@ -1396,3 +1409,71 @@ def _short_evidence(item: ContextEvidence) -> dict[str, float]:
              after, f"delta:{band}", f"{ratio}:{known}", f"{ratio}:{letters}", f"{ratio}:{boundary}",
              f"web:{magnitudes['web']}:latin:{magnitudes['latin']}", f"{seen}:{known}")
     return {f"{SHORT_FEATURE_PREFIX}{name}": 1.0 for name in names}
+
+
+def slip_question(original: str, before: str) -> bool:
+    """A token of at least SLIP_HEAD_MIN_LETTERS Latin letters after a line with more Cyrillic letters than Latin ones,
+    whose Latin reading English prose and Russian technical text use at most in bucket SLIP_HEAD_MAX_LATIN_BUCKET and
+    whose Cyrillic reading Russian prose uses: the slip head's class (a word the lexicon knows or the identifier index
+    holds is left out where the features are made). It is a word of Russian prose typed with the English layout on, the
+    layout having slipped with no language boundary (`cgtie` for `спешу` after `я `); a term Russian technical text
+    writes in Latin letters (`gtk`, `env`) stays with the frozen model. The question reads only the typed token, the text
+    before it and the packaged term table, as the trainer and the GPU path route frames by them (head_question,
+    context_action_cuda.heads_question)."""
+
+    from .context_model import _term_frequency, term_bucket
+    from .layouts import LayoutPair
+
+    if not (len(original) >= SLIP_HEAD_MIN_LETTERS and original.isascii() and original.isalpha()):
+        return False
+    line = before.rsplit("\n", 1)[-1]
+    if _dominant(line[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:].casefold()) != "ru":
+        return False
+    cyrillic = LayoutPair().translate(original, "us", "ru").casefold()
+    return (all(_cyrillic_letter(char) for char in cyrillic) and _term_frequency()["russian"].get(cyrillic, 0) > 0
+            and int(term_bucket(original, "latin")) <= SLIP_HEAD_MAX_LATIN_BUCKET
+            and int(term_bucket(original, "english")) <= SLIP_HEAD_MAX_LATIN_BUCKET)
+
+
+def _slip_evidence(item: ContextEvidence) -> dict[str, float]:
+    """The slip head's evidence, all it reads (no copy of the shared features, which hold the frozen model's keep weights
+    for unknown Latin tokens after Russian prose): by how many binary orders of magnitude Russian prose uses the Cyrillic
+    reading more than English prose or Russian technical text use the Latin one, and the commonest word one edit from each
+    more than the other's (nearest_count); whether the Russian lexicon knows the Cyrillic reading; the detector's verdict
+    and the band of its probability; the band of the orthotactic margin; how often Russian prose uses the word before the
+    token (`я` against a technical word); the token's letters and case, the band of the score delta and how the text after
+    it was given. Nothing of the boundary: the same word asked at a pause and at its space gets the same answer."""
+
+    from .context_model import _term_frequency
+
+    table = _term_frequency()
+    latin, cyrillic = item.original.casefold(), item.alternative.casefold()
+    russian = table["russian"].get(cyrillic, 0)
+    english = max(table["english"].get(latin, 0), table["latin"].get(latin, 0))
+    russian_near = max(russian, nearest_count(cyrillic, "russian"))
+    english_near = max(english, nearest_count(latin, "english"))
+
+    def ratio(first: int, second: int) -> int:
+        difference = _magnitude(first, HYPOTHESIS_MAGNITUDE_MAX) - _magnitude(second, HYPOTHESIS_MAGNITUDE_MAX)
+        return max(-HYPOTHESIS_RATIO_BOUND, min(HYPOTHESIS_RATIO_BOUND, difference))
+
+    probability = ("na" if item.model_probability is None
+                   else str(min(SLIP_PROBABILITY_BANDS - 1, max(0, math.floor(item.model_probability * SLIP_PROBABILITY_BANDS)))))
+    margin = ("na" if item.ortho_score is None or item.ortho_threshold is None
+              else str(max(-SLIP_ORTHO_BANDS, min(SLIP_ORTHO_BANDS,
+                                                  math.floor((item.ortho_score - item.ortho_threshold) / SLIP_ORTHO_BAND_WIDTH)))))
+    words = _WORDS.findall(item.field.before.rsplit("\n", 1)[-1])
+    previous = _magnitude(table["russian"].get(words[-1].casefold(), 0), HYPOTHESIS_MAGNITUDE_MAX) if words else 0
+    word = f"word:{ratio(russian, english)}"
+    near = f"near:{ratio(russian_near, english_near)}"
+    known = f"known:{int(item.target_known)}"
+    detector = f"detector:{int(item.baseline_convert)}:{probability}"
+    ortho = f"ortho:{margin}"
+    before = f"before:{previous // SLIP_BEFORE_MAGNITUDE_STEP}"
+    letters = f"letters:{min(len(item.original), ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS)}"
+    band = max(-START_DELTA_BANDS, min(START_DELTA_BANDS, math.floor(item.score_delta / START_DELTA_BAND_WIDTH)))
+    case = "case:" + ("upper" if item.original.isupper() else "title" if item.original[:1].isupper() else "lower")
+    names = ("bias", word, near, known, detector, ortho, before, letters, f"delta:{band}", case, f"after:{item.after_origin}",
+             f"{word}:{near}", f"{word}:{known}", f"{near}:{detector}", f"{word}:{before}", f"{near}:{letters}",
+             f"{ortho}:{known}")
+    return {f"{SLIP_FEATURE_PREFIX}{name}": 1.0 for name in names}

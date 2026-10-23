@@ -10,6 +10,9 @@ language changes; the engine sees that as a manual layout change, as in the prog
                it and selects the next layout as usual): the Russian run comes out in Latin;
   forget_en    one change from Russian to English is forgotten;
   start_wrong  the message starts in the other layout;
+  slip         (a recipe asks for it) a word of Russian prose right after another is typed with the English layout on,
+               which slipped there with no switch by hand and no language boundary, as the sealed protocol types its
+               wrong rows; every key after it goes into whatever layout is on then;
   insert       letters removed from inside a word are typed back after a click, in the other layout.
 
 Commands:
@@ -77,13 +80,14 @@ from keyswitch.constants.models import (  # noqa: E402
     ALNUM_HEAD_MAX_CHARACTERS, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, SHORT_HEAD_LETTERS,
 )
 from keyswitch.context_action_features import (  # noqa: E402
-    alnum_question, dotted_question, letters_and_digits, short_question, variable_question,
+    alnum_question, dotted_question, letters_and_digits, short_question, slip_question, variable_question,
 )
 from keyswitch.context_model import ContextEvidence, ContextModel, ContextPrediction  # noqa: E402
 from keyswitch.input_context import CONTEXT_LIMIT, FieldContext  # noqa: E402
 from test_input_sequence_matrix import PhysicalSession  # noqa: E402
 
 TYPING_MODES: Final = ("correct", "forget_ru", "forget_en", "start_wrong")
+SLIP_MODE: Final = "slip"
 EDIT_MODE: Final = "insert"
 CYRILLIC: Final = "а-яёА-ЯЁ"
 LATIN: Final = "a-zA-Z"
@@ -125,10 +129,13 @@ CAPTURED_QUESTIONS: Final[dict[str, Callable[[Mapping[str, object]], bool]]] = {
     "alnum": lambda row: alnum_question(str(row["original"]), str(row["alternative"]), str(row["before"])),
     "hypothesis": lambda row: row.get("before_origin") == "planned_previous_reading",
     "short": lambda row: row.get("before_origin", "field") == "field" and short_question(str(row["original"]), str(row["before"])),
+    "slip": lambda row: row.get("before_origin", "field") == "field" and slip_question(str(row["original"]), str(row["before"])),
 }
 
 Job = tuple[int, str, str, int, str]
-Step = tuple[str, int, int | None]
+# A token, its intended layout, the layout selected before it (None: no change), and whether that change slipped in
+# unseen rather than by hand.
+Step = tuple[str, int, int | None, bool]
 
 
 def _draw(text: str, digits: int = MIXED_DRAW_HEX_DIGITS) -> int:
@@ -425,6 +432,15 @@ def plan(tokens: Sequence[str], mode: str, choice: int) -> tuple[int, list[Step]
         return None
     intended = [group if group >= 0 else first for group in intended]
     transitions = [index for index in range(1, len(tokens)) if intended[index] != intended[index - 1]]
+    if mode == SLIP_MODE:
+        slips = [index for index in range(1, len(tokens)) if intended[index - 1] == intended[index] == 1
+                 and script(tokens[index]) == 1 and any(char.isalpha() for char in tokens[index])]
+        if not slips:
+            return None
+        slip = slips[choice % len(slips)]
+        return first, [(token, intended[index], 1 - intended[index] if index == slip
+                         else intended[index] if index in transitions else None, index == slip)
+                       for index, token in enumerate(tokens)]
     options = ([index for index in transitions if intended[index] == 1] if mode == "forget_ru"
                else [index for index in transitions if intended[index] == 0] if mode == "forget_en"
                else [0] if mode == "start_wrong" else [-1])
@@ -432,7 +448,7 @@ def plan(tokens: Sequence[str], mode: str, choice: int) -> tuple[int, list[Step]
         return None
     forgotten = options[choice % len(options)]
     start = (1 - first) if mode == "start_wrong" else first
-    return start, [(token, intended[index], intended[index] if index in transitions and index != forgotten else None)
+    return start, [(token, intended[index], intended[index] if index in transitions and index != forgotten else None, False)
                    for index, token in enumerate(tokens)]
 
 
@@ -587,13 +603,20 @@ def _type_message(job: Job, spy_factory: Callable[[list[tuple[str, int, int]]], 
     typed_tokens: list[tuple[str, int, int]] = []
     stack, current = _session(start, spy_factory(typed_tokens) if spy_factory else None)
     with stack:
+        if mode == SLIP_MODE:
+            # As the sealed protocol types its wrong rows with the early switch off: a layout the engine did not select is
+            # no switch by hand that protects the next word, or the slipped word is never asked about; and the word is
+            # asked at its boundary, not converted while its letters are typed.
+            current.settings.set("detection.respect_manual_layout", False)
+            current.settings.set("detection.early_switch", False)
         current.engine.context_policy.reader = Reader(current.backend)
         if prefix:
             current.backend.text, current.backend.caret = prefix, len(prefix)
-        for token, intended, selected in steps:
+        for token, intended, selected, slipped in steps:
             if selected is not None and current.backend.group != selected:
                 current.backend.group = selected
-                current.engine._observe_group(selected, source="hotkey")
+                if not slipped:
+                    current.engine._observe_group(selected, source="hotkey")
             keys = keys_for(token, intended)
             if keys is None:
                 return None
@@ -750,7 +773,7 @@ def jobs_for(messages: Path, recipe: Recipe, code_path: Path | None) -> list[Job
     # A recipe may type in some modes only: English sentences typed wholly in the other layout
     # teach the first word asked again once the next one is converted.
     modes = (EDIT_MODE,) if recipe.get("edit") else tuple(cast(list[str], recipe.get("modes", list(TYPING_MODES))))
-    if not set(modes) <= {EDIT_MODE, *TYPING_MODES}:
+    if not set(modes) <= {EDIT_MODE, SLIP_MODE, *TYPING_MODES}:
         raise ValueError(f"unknown typing modes: {modes}")
     jobs: list[Job] = []
     for index, text in enumerate(everyone):

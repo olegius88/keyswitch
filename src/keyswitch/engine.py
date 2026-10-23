@@ -3932,8 +3932,10 @@ class KeySwitchEngine:
             if not head:
                 # As at a space (_commit_word): a word with a sign split off its end takes the words
                 # before it along, a waiting one among them (`tot ghbdtn,`), and the sign stays as
-                # typed after them. `lbre. rjire/` at the end of a message was left `lbre. кошку.`.
-                if waiting is not None and trailing:
+                # typed after them. `lbre. rjire/` at the end of a message was left `lbre. кошку.`, and
+                # with the sign alone split off, `я cgtie ljvjq/` was left `я cgtie домой.` (Tatoeba
+                # development sentences typed as the sealed protocol types them, 23.10.2026).
+                if waiting is not None and (trailing or signs):
                     kept = (*kept, KeptWord(waiting.plan, waiting.decision, waiting.field, waiting.window, waiting.deadline))
                 taken = self._take_along(kept, self._with_signs(replace(
                     self._plan_from_decision(strokes, None, application, decision, "pause"), trailing=trailing), signs),

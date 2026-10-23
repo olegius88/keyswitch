@@ -31,7 +31,8 @@ from unittest.mock import patch
 from keyswitch.context_action_features import (
     abbreviation_question, alnum_question, alone_question, attested_abbreviation, capitals_question, extract_action_features,
     brief_question, brief_settled, dotted_question, first_question, hypothesis_question, joined_question,
-    latin_abbreviation_question, letter_question, russian_ending_bucket, russian_start_bucket, short_question, start_question,
+    latin_abbreviation_question, letter_question, russian_ending_bucket, russian_start_bucket, short_question, slip_question,
+    start_question,
     term_question, unknown_question, unknown_shape, variable_question,
 )
 from keyswitch.context_model import (
@@ -75,7 +76,7 @@ from keyswitch.constants.models import (
     ABBREVIATION_FEATURE_PREFIX, ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS, ALNUM_FEATURE_PREFIX, ALONE_FEATURE_PREFIX,
     ALONE_HEAD_LETTERS,
     BRIEF_FEATURE_PREFIX, BRIEF_HEAD_LETTERS, DOTTED_FEATURE_PREFIX, FIRST_FEATURE_PREFIX, VARIABLE_FEATURE_PREFIX,
-    HYPOTHESIS_FEATURE_PREFIX, SHORT_FEATURE_PREFIX,
+    HYPOTHESIS_FEATURE_PREFIX, SHORT_FEATURE_PREFIX, SLIP_FEATURE_PREFIX,
     CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION,
     CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, JOINED_FEATURE_PREFIX,
     KEPT_CONTEXT_WORD_MAX_CHARACTERS, KEPT_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX, LETTER_FEATURE_PREFIX,
@@ -2276,6 +2277,7 @@ def provenance() -> dict[str, str]:
         "tools/context_deferral.py",
         "tools/train_context_model.py", "model/context_v1/captured/manifest.json", "model/context_v3/captured/manifest.json",
         "model/context_v3/captured/manifest-hypothesis.json", "model/context_v3/captured/manifest-short.json",
+        "model/context_v3/captured/manifest-slip.json",
         "tests/test_context_action_training.py", "tests/test_default_input_sequences.py",
         "tools/context_technical_corpus.py", "tools/merge_context_action_corpora.py",
         "tests/test_context_technical_corpus.py", "tests/test_context_action_merge.py",
@@ -2339,7 +2341,8 @@ HEAD_PREFIXES: Final = {"capitals": CAPITALS_FEATURE_PREFIX, "alone": ALONE_FEAT
                          "latin_abbreviation": LATIN_ABBREVIATION_FEATURE_PREFIX, "unknown": UNKNOWN_FEATURE_PREFIX,
                          "joined": JOINED_FEATURE_PREFIX, "term": TERM_FEATURE_PREFIX, "brief": BRIEF_FEATURE_PREFIX,
                          "first": FIRST_FEATURE_PREFIX, "variable": VARIABLE_FEATURE_PREFIX, "dotted": DOTTED_FEATURE_PREFIX,
-                         "alnum": ALNUM_FEATURE_PREFIX, "hypothesis": HYPOTHESIS_FEATURE_PREFIX, "short": SHORT_FEATURE_PREFIX}
+                         "alnum": ALNUM_FEATURE_PREFIX, "hypothesis": HYPOTHESIS_FEATURE_PREFIX, "short": SHORT_FEATURE_PREFIX,
+                         "slip": SLIP_FEATURE_PREFIX}
 # A recipe without single-letter frames (the recipes before corpus v34).
 NO_LETTER_CURRICULUM: Final[dict[str, object]] = {"term_sentences": 0, "english_sentences": 0, "minimum_term_count": 0,
                                                   "sample_weight": 1.0}
@@ -2488,6 +2491,19 @@ def short_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froz
         and item.original.casefold() not in held, "short")
 
 
+def slip_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                    options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """The slip head's frames (captured_head_curriculum): a token of Latin letters after a line of Russian text whose
+    Cyrillic reading Russian prose uses and whose Latin reading English and technical text hardly use (slip_question),
+    converted where a word of Russian prose was typed with the English layout on (the slip typing mode,
+    tools/mixed_typing.py) and kept where a Latin token was typed as meant. A token the recipe holds out gives no frame."""
+
+    held = frozenset(str(token).casefold() for token in cast(list[str], options.get("held_out", [])))
+    return captured_head_curriculum(
+        split, options, lambda item: item.before_origin == "field" and slip_question(item.original, item.field.before)
+        and item.original.casefold() not in held, "slip")
+
+
 # The heads whose own frames of DEVELOPMENT choose their epoch (fit), by feature prefix: the name their epoch goes by in
 # the seal, the recipe's key of their curriculum, the curriculum, and the options of a recipe without it.
 OWN_EPOCH_HEADS: Final[dict[str, tuple[str, str, Callable[[str, Sequence[CorpusRow], frozenset[str], Mapping[str, object]],
@@ -2501,6 +2517,7 @@ OWN_EPOCH_HEADS: Final[dict[str, tuple[str, str, Callable[[str, Sequence[CorpusR
     ALNUM_FEATURE_PREFIX: ("alnum", "alnum_curriculum", alnum_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
     HYPOTHESIS_FEATURE_PREFIX: ("hypothesis", "hypothesis_curriculum", hypothesis_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
     SHORT_FEATURE_PREFIX: ("short", "short_curriculum", short_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
+    SLIP_FEATURE_PREFIX: ("slip", "slip_curriculum", slip_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
 }
 
 
@@ -2739,7 +2756,8 @@ def head_question(original: str, alternative: str, before: str, after: str, trig
             or (BRIEF_FEATURE_PREFIX in prefixes and brief_question(original, before, after))
             or (FIRST_FEATURE_PREFIX in prefixes and first_question(original, before, after)) or variable
             or (DOTTED_FEATURE_PREFIX in prefixes and dotted_question(original, alternative)) or alnum
-            or (SHORT_FEATURE_PREFIX in prefixes and before_origin == "field" and short_question(original, before)))
+            or (SHORT_FEATURE_PREFIX in prefixes and before_origin == "field" and short_question(original, before))
+            or (SLIP_FEATURE_PREFIX in prefixes and before_origin == "field" and slip_question(original, before)))
 
 
 def carried_prefixes(model: ContextModel) -> frozenset[str]:
@@ -3105,14 +3123,16 @@ def tail_curricula(inputs: FitInputs) -> tuple[list[ActionRow], dict[str, object
         cast(dict[str, object], options.get("hypothesis_curriculum", NO_CAPTURED_HEAD_CURRICULUM)))
     short, short_report = short_curriculum(
         TRAIN, inputs.source_rows[TRAIN], inputs.refused, cast(dict[str, object], options.get("short_curriculum", NO_CAPTURED_HEAD_CURRICULUM)))
+    slip, slip_report = slip_curriculum(
+        TRAIN, inputs.source_rows[TRAIN], inputs.refused, cast(dict[str, object], options.get("slip_curriculum", NO_CAPTURED_HEAD_CURRICULUM)))
     return [*kept, *counted, *letter, *abbreviation, *latin_abbreviation, *unknown, *joined, *term, *brief, *first, *variable, *dotted,
-            *alnum, *hypothesis, *short], {
+            *alnum, *hypothesis, *short, *slip], {
         "kept_neighbour_curriculum": kept_report, "counted_token_curriculum": counted_report, "letter_curriculum": letter_report,
         "abbreviation_curriculum": abbreviation_report, "latin_abbreviation_curriculum": latin_abbreviation_report,
         "unknown_token_curriculum": unknown_report, "joined_token_curriculum": joined_report, "term_curriculum": term_report,
         "brief_curriculum": brief_report, "first_curriculum": first_report, "variable_curriculum": variable_report,
         "dotted_curriculum": dotted_report, "alnum_curriculum": alnum_report, "hypothesis_curriculum": hypothesis_report,
-        "short_curriculum": short_report}
+        "short_curriculum": short_report, "slip_curriculum": slip_report}
 
 
 def prepared_frames(rows: Sequence[ActionRow], spans: SpanCurriculum, split: str) -> list[tuple[str, ActionRow | SpanFrame]]:

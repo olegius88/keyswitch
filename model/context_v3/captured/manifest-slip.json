@@ -1,0 +1,177 @@
+{
+ "schema_version": 2,
+ "columns": [
+  "count",
+  "original",
+  "alternative",
+  "source_group",
+  "trigger",
+  "baseline_convert",
+  "source_known",
+  "target_known",
+  "score_delta",
+  "literal_tail",
+  "boundary_text",
+  "after_origin",
+  "before_origin",
+  "source_typo",
+  "target_typo",
+  "source_opening",
+  "target_opening",
+  "inside",
+  "before",
+  "after",
+  "role",
+  "label"
+ ],
+ "sources": [
+  {
+   "file": "tatoeba-chat-slip-train.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR; messages above them: Tatoeba sentences)",
+   "origin": "Tatoeba sentence exports rus/eng of 2026-09-26, only sentences listed in model/context_v1/captured/tatoeba-authors.tsv.xz",
+   "typing": "12000 Russian chat-style sentences with two Russian words in a row, one of them after another typed with the English layout on (slip), 30 % under a previous message; the slip head's questions alone",
+   "recipe": {
+    "messages": "tatoeba-chat-slippable-train.jsonl.gz",
+    "kinds": [
+     "tatoeba_chat"
+    ],
+    "count": 12000,
+    "russian_share": 1.0,
+    "seed": "capture-slip-tatoeba-chat-train",
+    "modes": [
+     "slip"
+    ],
+    "questions": "slip",
+    "prefix_rate": 0.3
+   },
+   "sha256": "aa85d3f0efecdb69c2850611292c1c5d23eb12ef14a2620f4881581cd1124e56",
+   "rows": 7575,
+   "unique": 7246
+  },
+  {
+   "file": "tatoeba-slip-train.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR; messages above them: Tatoeba sentences)",
+   "origin": "Tatoeba sentence exports rus/eng of 2026-09-26, only sentences listed in model/context_v1/captured/tatoeba-authors.tsv.xz",
+   "typing": "12000 Russian sentences as written, typed as the chat file; the slip head's questions alone",
+   "recipe": {
+    "messages": "tatoeba-slippable-train.jsonl.gz",
+    "kinds": [
+     "tatoeba"
+    ],
+    "count": 12000,
+    "russian_share": 1.0,
+    "seed": "capture-slip-tatoeba-train",
+    "modes": [
+     "slip"
+    ],
+    "questions": "slip",
+    "prefix_rate": 0.3
+   },
+   "sha256": "4204ccadcf053611bfda44dc4be5bfa0c7c0eb6dc815ef20566a74c97586bbde",
+   "rows": 7697,
+   "unique": 7407
+  },
+  {
+   "file": "so-slip-train.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "8000 messages with Latin words and 8000 Russian ones with two Russian words in a row, typed with a slip and as meant; the slip head's questions alone",
+   "recipe": {
+    "messages": "so-slippable-train.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 8000,
+    "russian_share": 1.0,
+    "seed": "capture-slip-so-train",
+    "modes": [
+     "slip",
+     "correct"
+    ],
+    "questions": "slip"
+   },
+   "sha256": "c6b8f147c9a1ba31f867ab2cbf37e08c2fb69be02379a4e6fb8a8a8bb5a38d4b",
+   "rows": 10234,
+   "unique": 10015
+  },
+  {
+   "file": "tatoeba-chat-slip-dev.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR; messages above them: Tatoeba sentences)",
+   "origin": "Tatoeba sentence exports rus/eng of 2026-09-26, only sentences listed in model/context_v1/captured/tatoeba-authors.tsv.xz",
+   "typing": "2500 Russian chat-style sentences with two Russian words in a row, one of them after another typed with the English layout on (slip), 30 % under a previous message; the slip head's questions alone",
+   "recipe": {
+    "messages": "tatoeba-chat-slippable-dev.jsonl.gz",
+    "kinds": [
+     "tatoeba_chat"
+    ],
+    "count": 2500,
+    "russian_share": 1.0,
+    "seed": "capture-slip-tatoeba-chat-dev",
+    "modes": [
+     "slip"
+    ],
+    "questions": "slip",
+    "prefix_rate": 0.3
+   },
+   "sha256": "83679e3cc93b4ddbee45d090bdccce4d3d15656441ea5b015b2252b46921d8ff",
+   "rows": 1623,
+   "unique": 1597
+  },
+  {
+   "file": "tatoeba-slip-dev.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR; messages above them: Tatoeba sentences)",
+   "origin": "Tatoeba sentence exports rus/eng of 2026-09-26, only sentences listed in model/context_v1/captured/tatoeba-authors.tsv.xz",
+   "typing": "2500 Russian sentences as written, typed as the chat file; the slip head's questions alone",
+   "recipe": {
+    "messages": "tatoeba-slippable-dev.jsonl.gz",
+    "kinds": [
+     "tatoeba"
+    ],
+    "count": 2500,
+    "russian_share": 1.0,
+    "seed": "capture-slip-tatoeba-dev",
+    "modes": [
+     "slip"
+    ],
+    "questions": "slip",
+    "prefix_rate": 0.3
+   },
+   "sha256": "fcdbf6ff96f9f4ad01d47e944928fa7a20c36e3feb4a35a35721470abe852f1d",
+   "rows": 1580,
+   "unique": 1551
+  },
+  {
+   "file": "so-slip-dev.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "2000 messages with Latin words and 2000 Russian ones with two Russian words in a row, typed with a slip and as meant; the slip head's questions alone",
+   "recipe": {
+    "messages": "so-slippable-dev.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 2000,
+    "russian_share": 1.0,
+    "seed": "capture-slip-so-dev",
+    "modes": [
+     "slip",
+     "correct"
+    ],
+    "questions": "slip"
+   },
+   "sha256": "a74a050818ca5a3997895fc74ac88024fa93467d62f398bee219a0ebad4ef0ea",
+   "rows": 2579,
+   "unique": 2543
+  }
+ ]
+}

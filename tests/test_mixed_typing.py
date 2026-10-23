@@ -28,7 +28,7 @@ def selections(mode: str) -> tuple[int, list[int | None]]:
     planned = tool.plan(TOKENS, mode, 0)
     assert planned is not None
     start, steps = planned
-    return start, [selected for _token, _intended, selected in steps]
+    return start, [selected for _token, _intended, selected, _slipped in steps]
 
 
 class PlanTests(unittest.TestCase):
