@@ -897,8 +897,14 @@ class Featurizer:
         temporary.replace(self.cache)
 
     def featurize_split(self, entries: Mapping[str, Sequence[Frame]], split: str, spelling: Mapping[str, bool],
-                        python_features: Mapping[str, Callable[[Frame], dict[str, float]]]) -> dict[str, pipeline.Columns]:
-        """The features of each profile's frames, in its order; a frame both profiles hold is encoded once."""
+                        python_features: Mapping[str, Callable[[Frame], dict[str, float]]],
+                        batch_features: Mapping[str, Callable[[list[Frame]], list[dict[str, float]]]] | None = None,
+                        ) -> dict[str, pipeline.Columns]:
+        """The features of each profile's frames, in its order; a frame both profiles hold is encoded once.
+
+        The frames the GPU leaves to the CPU path get the trainer's Python features: from `batch_features`, which a fit
+        hands to its worker processes, or else one by one from `python_features` in this process. One by one they held
+        this process, and with it the fit's scheduler, for minutes a split (23.10.2026)."""
         distinct: list[Frame] = []
         found: dict[Frame, int] = {}
         selection: dict[str, Int64Array] = {}
@@ -914,12 +920,14 @@ class Featurizer:
         items = Items(distinct, self.characters, self.translate, split)
         result: dict[str, pipeline.Columns] = {}
         for profile, picked in selection.items():
-            result[profile] = self._profile(items, picked, spelling[profile], python_features[profile], distinct)
+            result[profile] = self._profile(items, picked, spelling[profile], python_features[profile], distinct,
+                                            None if batch_features is None else batch_features[profile])
             self.cpu_positions[profile] = self._cpu_positions
         return result
 
     def _profile(self, items: Items, chosen: Int64Array, spelling: bool, python_features: Callable[[Frame], dict[str, float]],
-                 distinct: Sequence[Frame]) -> pipeline.Columns:
+                 distinct: Sequence[Frame], batch_features: Callable[[list[Frame]], list[dict[str, float]]] | None = None,
+                 ) -> pipeline.Columns:
         count = len(chosen)
         fits = items.fits[chosen]
         taken = np.flatnonzero(fits)            # positions of this profile's frames the GPU takes
@@ -967,8 +975,11 @@ class Featurizer:
             if len(again):
                 queue.append(again)
             cp.get_default_memory_pool().free_all_blocks()
-        for position in sorted(cpu):
-            row_ids, row_values = self._from_names(python_features(distinct[int(chosen[position])]))
+        positions = sorted(cpu)
+        frames = [distinct[int(chosen[position])] for position in positions]
+        computed = batch_features(frames) if batch_features is not None else [python_features(frame) for frame in frames]
+        for position, features in zip(positions, computed, strict=True):
+            row_ids, row_values = self._from_names(features)
             chunks.add(np.array([position], np.int64), np.array([len(row_ids)], np.int64), row_ids, row_values)
         self.cpu_frames += len(cpu)
         self._cpu_positions = frozenset(cpu)

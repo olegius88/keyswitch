@@ -220,6 +220,12 @@ class Executor:
             return Done(function(argument))
         return self.pool.apply_async(function, (argument,))
 
+    def map(self, function: Callable[[A], R], arguments: Sequence[A]) -> list[R]:
+        """Every result in order, waiting for them in this process; the pool's other tasks keep running."""
+        if self.pool is None:
+            return [function(argument) for argument in arguments]
+        return self.pool.map(function, arguments, chunksize=1)
+
     def close(self, failed: bool = False) -> None:
         """Wait for the workers; after a failure, stop them at once."""
         if self.pool is not None:
@@ -455,7 +461,7 @@ def spans_task(key: Key) -> SpanCurriculum:
 class FeatureTask:
     profile: str
     split: str
-    source: str          # where the frames come from: "natural", "extra" or "fresh"
+    source: str          # where the frames come from: "natural", "extra", "fresh", or "cpu" (left to it by the GPU)
     start: int
     frames: list[Frame] | None   # None: the natural frames of the split this worker inherited
 
@@ -1026,7 +1032,8 @@ class Build:
         inputs = self.inputs
         result = featurizer.featurize_split({profile: self.entries[profile, split] for profile in self.profiles}, split,
                                             {profile: inputs.lexical_models[profile][0].speller.available for profile in self.profiles},
-                                            {profile: python_features(inputs, profile, split) for profile in self.profiles})
+                                            {profile: python_features(inputs, profile, split) for profile in self.profiles},
+                                            {profile: partial(self.worker_features, profile, split) for profile in self.profiles})
         for profile, columns in result.items():
             frames = self.entries[profile, split]
             columns.check(split, frames)
@@ -1038,6 +1045,19 @@ class Build:
                 task = FeatureTask(profile, split, "check", start, [frames[number] for number in numbers])
                 self.scheduler.add(AHEAD, features_task, task, partial(self.spot_checked, (profile, split), numbers))
         self.note(f"{split}: features on the GPU")
+
+    def worker_features(self, profile: str, split: str, frames: list[Frame]) -> list[dict[str, float]]:
+        """The trainer's Python features of frames the GPU leaves to the CPU path, computed by the worker processes
+        (features_task, as for the frames featurised on the CPU back end), in order."""
+        tasks = [FeatureTask(profile, split, "cpu", start, frames[start:start + CONTEXT_ACTION_FRAMES_PER_TASK])
+                 for start in range(0, len(frames), CONTEXT_ACTION_FRAMES_PER_TASK)]
+        result: list[dict[str, float]] = []
+        for chunk in self.executor.map(features_task, tasks):
+            position = 0
+            for count in chunk.counts:
+                result.append({chunk.names[chunk.ids[entry]]: chunk.values[entry] for entry in range(position, position + count)})
+                position += count
+        return result
 
     def spot_checked(self, key: Key, numbers: list[int], chunk: FeatureChunk) -> None:
         self.spot_checks.append((key, numbers, chunk))
