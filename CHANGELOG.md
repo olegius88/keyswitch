@@ -4,6 +4,31 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.62.0 — 2026-10-23
+
+- A word that follows a short first word and is no word as typed, though one typo from a common word of its language,
+  no longer turns the pair into the other layout: `еще тыв` (a typo of `ты`) became `tot nsd`. The engine now tells the
+  model when the text before a word is its guess about the other reading of the word before, and a part of the model of
+  its own answers that question from how common each reading and the nearest word to each are.
+- A short Russian token that Russian text writes often and whose Latin reading is rare stays as typed after Russian
+  text: `кз` in `говорит он кз домене` became `rp`, a word the English lexicon knows. How often such tokens are written
+  comes from a new table counted on ten Russian corpora of the Leipzig Corpora Collection (`context-short-frequency.json`,
+  CC BY).
+- A Russian word typed with the English layout on in the middle of a Russian message, the layout having slipped with no
+  change of language, is converted where the model used to leave it a suggestion: `я cgtie` becomes `я спешу`,
+  `вопрос htity` `вопрос решен`, `волк pfdsk` `волк завыл`. A Latin word typed as meant after Russian text and paused in
+  the middle is left alone, as before.
+- At the pause that ends a message, a waiting first word converts with the last word when that word's sign is split off,
+  as at a space: `tot rjire/` was left `tot кошку.` and is now `еще кошку.`; likewise `If not.` and `ой правда.`.
+- Training on the GPU hands the frames the GPU leaves to the CPU to the worker processes: a fit takes about a quarter
+  less time, its model byte for byte the same. An action model may hold up to 150 000 features.
+- The pair is `context-v3-b876e862bbfe` with the prefix model `prefix-v2-bf3dc28f8567`: the pair of 0.61.0 with three
+  parts fitted onto it on corpus v75. On the recorded real typing it breaks no word and fixes four; on sealed test v75,
+  read once, it keeps all 189 correctly typed rows and restores all 189 rows typed in the wrong layout with the early
+  switch off against 188 for the baseline pair (11 and 11 with it); on the developer-chat test it gains and loses
+  nothing. The pair of corpus v74, with the first two parts, was not installed: on test v74 it restored one row fewer
+  than the baseline pair, the slipped layout above.
+
 ## 0.61.0 — 2026-10-22
 
 - A token typed in Russian letters and digits whose keys are Latin letters and digits is decided by a part of the
