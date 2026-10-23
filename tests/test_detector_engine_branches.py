@@ -917,7 +917,7 @@ class EngineBranchTests(unittest.TestCase):
             initialized.records[0].getMessage().removeprefix("TECHNICAL ")
         )
         self.assertEqual(initial_payload["event"], "engine_initialized")
-        self.assertEqual(initial_payload["keyswitch_version"], "0.61.0")
+        self.assertEqual(initial_payload["keyswitch_version"], "0.62.0")
         self.assertEqual(initial_payload["build_platform"], sysconfig.get_platform())
         self.assertEqual(initial_payload["settings"]["overrides"], {"diagnostics.technical_logging": True})
 
