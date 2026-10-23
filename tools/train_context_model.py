@@ -707,7 +707,7 @@ def captured_sources(manifest: Path = CAPTURED) -> list[CapturedSource]:
     """The captured question files with their weights, each checked against its pinned SHA-256."""
 
     payload = json.loads(manifest.read_text(encoding="utf-8"))
-    columns = CAPTURED_SCHEMAS.get(payload.get("schema_version")) if isinstance(payload, dict) else None
+    columns = CAPTURED_SCHEMAS.get(cast(int, payload.get("schema_version"))) if isinstance(payload, dict) else None
     if columns is None or tuple(payload.get("columns", ())) != columns:
         raise ValueError("invalid captured question manifest")
     sources: list[CapturedSource] = []

@@ -693,12 +693,12 @@ def recipe_messages(messages: Path, recipe: Recipe) -> list[tuple[str, int]]:
     typo_rate = float(cast(float, recipe.get("typo_rate", 0.0)))
     # A recipe may add kinds of typo and type them into shorter words: a letter pressed beside its neighbour in a word of
     # two letters is the typo of `ты` in `еще тыв`.
-    kinds = tuple(cast(list[str], recipe.get("typo_kinds", list(TYPO_KINDS))))
+    typo_kinds = tuple(cast(list[str], recipe.get("typo_kinds", list(TYPO_KINDS))))
     least = int(cast(int, recipe.get("typo_min_letters", MIXED_TYPO_MIN_LETTERS)))
-    if not set(kinds) <= {*TYPO_KINDS, "extra"} or least < 1:
-        raise ValueError(f"unknown typo kinds or length: {kinds}, {least}")
+    if not set(typo_kinds) <= {*TYPO_KINDS, "extra"} or least < 1:
+        raise ValueError(f"unknown typo kinds or length: {typo_kinds}, {least}")
     if typo_rate:
-        chosen = [(with_typos(text, typo_rate, f"{seed}:typo:{text}", kinds, least), qid) for text, qid in chosen]
+        chosen = [(with_typos(text, typo_rate, f"{seed}:typo:{text}", typo_kinds, least), qid) for text, qid in chosen]
     return chosen
 
 

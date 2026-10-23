@@ -34,17 +34,21 @@ from keyswitch.context_action_features import (  # noqa: E402
     extract_action_features, hypothesis_question, nearest_count, short_question,
 )
 from keyswitch.context_model import (  # noqa: E402
-    SHORT_ALPHABETS, SHORT_FREQUENCY_PATH, ContextEvidence, ContextModel, _short_frequency, _term_frequency,
+    AfterOrigin, SHORT_ALPHABETS, SHORT_FREQUENCY_PATH, ContextEvidence, ContextModel, _short_frequency, _term_frequency,
 )
 from keyswitch.input_context import FieldContext  # noqa: E402
-from keyswitch.detector import DetectionDecision  # noqa: E402
+from keyswitch.detector import DetectionDecision, LanguageDetector  # noqa: E402
+from keyswitch.word_decision import automatic_word_decision  # noqa: E402
 from test_context_training_captured import captured_line, captured_question  # noqa: E402
 from test_default_input_sequences import DefaultSequenceHarness  # noqa: E402
 from test_variable_and_dotted_heads import evidence, prefixes  # noqa: E402
 
 
-def hypothesis(original: str, alternative: str, group: int, before: str, **changes: object) -> ContextEvidence:
-    return replace(evidence(original, alternative, group, before), before_origin="planned_previous_reading", **changes)
+def hypothesis(original: str, alternative: str, group: int, before: str, *, target_identifier: bool = False,
+               after_origin: AfterOrigin = "none", field: FieldContext | None = None) -> ContextEvidence:
+    item = evidence(original, alternative, group, before)
+    return replace(item, before_origin="planned_previous_reading", target_identifier=target_identifier,
+                   after_origin=after_origin, field=field or item.field)
 
 
 class HypothesisClassTests(unittest.TestCase):
@@ -171,8 +175,7 @@ class HypothesisEngineTests(DefaultSequenceHarness):
         self.assertEqual([item.before_origin for item in seen], ["planned_previous_reading"])
 
 
-def _detector():  # type: ignore[no-untyped-def]
-    from keyswitch.detector import LanguageDetector
+def _detector() -> LanguageDetector:
     from keyswitch.language_model import LanguageModel
     from keyswitch.lexicon_supplement import supplement_words
 
@@ -272,17 +275,10 @@ class CapturedSchemaTwoTests(unittest.TestCase):
     def test_a_hypothesis_frame_gives_the_detector_the_reading_alone(self) -> None:
         row = trainer.ActionRow("hypothesis:x", "тыв", 1, FieldContext("Telegram", "captured", "tot ", "", "text"), "space", "",
                                 "keep", "hypothesis", " ", before_origin="planned_previous_reading")
-        captured: list[dict[int, str]] = []
-
-        def decision(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
-            captured.append(dict(kwargs["previous_words"]))  # type: ignore[call-overload]
-            return automatic(*args, **kwargs)
-
-        automatic = trainer.automatic_word_decision
-        with patch.object(trainer, "automatic_word_decision", decision):
+        with patch.object(trainer, "automatic_word_decision", wraps=automatic_word_decision) as decision:
             item = trainer.evidence(row, _detector(), None)
             trainer.evidence(replace(row, before_origin="field"), _detector(), None)
-        self.assertEqual(captured, [{0: "tot"}, {0: "tot", 1: "еще"}])
+        self.assertEqual([call.kwargs["previous_words"] for call in decision.call_args_list], [{0: "tot"}, {0: "tot", 1: "еще"}])
         self.assertEqual(item.before_origin, "planned_previous_reading")
 
 
