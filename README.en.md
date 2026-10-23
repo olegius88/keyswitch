@@ -850,6 +850,11 @@ See [release and recovery procedures](docs/verification.md).
 - On Windows, UIPI prevents a regular process from injecting input into a
   window running at a higher integrity level. KeySwitch needs a matching level
   for that target window.
+- Typing through TeamViewer and other remote-access programs is corrected by
+  KeySwitch on the computer the user types on; on the controlled computer such
+  input does not count as typing (the setting «Ввод от других программ»).
+- The 32-bit Windows build is tested, keystrokes included, on 64-bit Windows,
+  where 32-bit programs run through WOW64: CI has no machine with 32-bit Windows.
 - The published Windows 0.61.0 Setup EXE is not signed with a publisher certificate.
 - The macOS builds do not update themselves (see [Install on macOS](#install-on-macos)).
 - macOS: the spelling autocorrection (in TextEdit, for example) can change a word
