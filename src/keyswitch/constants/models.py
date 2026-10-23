@@ -191,6 +191,50 @@ ALNUM_SHAPE_MAX_RUNS: Final = 3
 # The binary order of magnitude by which how often the letters of one reading occur outnumbers how often those of the
 # other do, read up to this many either way.
 ALNUM_RATIO_BOUND: Final = 8
+# The question about the next word of a waiting word asked with that word's other reading before it (engine
+# _decide_after_waiting_word, ContextEvidence.before_origin) has evidence of its own under this prefix: the hypothesis
+# head (context_action_features.hypothesis_question). `тыв` after `tot ` (`еще тыв`, a typo of `ты`) read as the keys of
+# `nsd`, a command name, and the pair became `tot nsd`.
+HYPOTHESIS_FEATURE_PREFIX: Final = "hypo|"
+# How often the commonest word one edit from a reading occurs is read as its binary order of magnitude, up to this; their
+# difference between the readings up to HYPOTHESIS_RATIO_BOUND either way.
+HYPOTHESIS_MAGNITUDE_MAX: Final = 18
+# The messages its frames are captured from open with a word of at most this many letters, a word the engine may wait on
+# (tools/select_capture_messages.py opening-short).
+OPENING_SHORT_MAX_LETTERS: Final = 3
+HYPOTHESIS_RATIO_BOUND: Final = 8
+# A token of two or three Russian letters after Russian text, whose Latin reading is letters too and which no other head
+# answers, has evidence of its own under this prefix: the short-token head (context_action_features.short_question).
+# `кз` after `говорит он ` became `rp`, a word the English lexicon knows and no Russian table counted.
+SHORT_FEATURE_PREFIX: Final = "short|"
+SHORT_HEAD_LETTERS: Final = (2, 3)
+# Its class is the token Russian text uses at least in this bucket of the counts (CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS:
+# fifty times, in web and news text, prose or technical text) while its Latin reading stays under the same bucket in
+# English prose and Russian technical text: fitted on every such token, the head kept `ьк` (`mr`), `ин` (`by`) and `сс`
+# (`cc`), which the frozen model converted as the owner meant (candidate v74 e2, the field gate).
+SHORT_HEAD_MIN_RUSSIAN_BUCKET: Final = 2
+SHORT_HEAD_MAX_LATIN_BUCKET: Final = 1
+# The binary order of magnitude of a count is read up to this, and the difference of two up to SHORT_RATIO_BOUND.
+SHORT_MAGNITUDE_MAX: Final = 16
+SHORT_RATIO_BOUND: Final = 8
+# A token of Latin letters after a line of Russian text, whose Latin reading English prose and Russian technical text use
+# at most in this bucket of the counts (CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS) and whose Cyrillic reading Russian prose
+# uses, has evidence of its own under this prefix: the slip head (context_action_features.slip_question). A word of
+# Russian prose typed with the English layout on stayed a suggestion near the threshold: `cgtie` for `спешу` after `я `
+# at p=0.9885, `htity` for `решен`, and `pfdsk` for `завыл` was kept (Tatoeba development sentences, 23.10.2026).
+SLIP_FEATURE_PREFIX: Final = "slip|"
+# Shorter tokens are left out: the Latin tokens of two or three letters typed as meant after Russian text are
+# abbreviations whose keys happen to spell Russian prose (`dbg`, `ck`, `pf`, the captured typing of ru.stackoverflow), and
+# among the class's captured questions they were the only ones kept.
+SLIP_HEAD_MIN_LETTERS: Final = 4
+SLIP_HEAD_MAX_LATIN_BUCKET: Final = 1
+# The detector's probability is read in this many bands, the orthotactic margin in bands this wide, up to
+# SLIP_ORTHO_BANDS either way, and how often Russian prose uses the word before the token in steps of this many binary
+# orders of magnitude.
+SLIP_PROBABILITY_BANDS: Final = 10
+SLIP_ORTHO_BAND_WIDTH: Final = 5.0
+SLIP_ORTHO_BANDS: Final = 4
+SLIP_BEFORE_MAGNITUDE_STEP: Final = 4
 # The "length" feature buckets every word length from here up together (schemas 2 and 3).
 ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: Final = 6
 # Short categorical field labels (role, trigger) truncated before they reach a feature name.
@@ -306,9 +350,12 @@ MAX_CONTEXT_MODEL_FEATURES: Final = 50000
 # LATIN_ABBREVIATION_FEATURE_PREFIX), the unknown-token head (UNKNOWN_FEATURE_PREFIX), the joined-token head
 # (JOINED_FEATURE_PREFIX), the term heads (TERM_FEATURE_PREFIX, FIRST_FEATURE_PREFIX), the short-message head
 # (BRIEF_FEATURE_PREFIX), the variable head (VARIABLE_FEATURE_PREFIX), the dotted-abbreviation head
-# (DOTTED_FEATURE_PREFIX) and the letters-and-digits head (ALNUM_FEATURE_PREFIX), each with its own budget in the
-# recipe. Raised from 100 000 with the unknown-token head: the 0.54.0 pair holds 98 498.
-MAX_CONTEXT_ACTION_MODEL_FEATURES: Final = 110000
+# (DOTTED_FEATURE_PREFIX), the letters-and-digits head (ALNUM_FEATURE_PREFIX), the hypothesis head
+# (HYPOTHESIS_FEATURE_PREFIX) and the short-token head (SHORT_FEATURE_PREFIX), each with its own budget in the recipe.
+# Raised from 100 000 with the unknown-token head (the 0.54.0 pair holds 98 498), and from 110 000 with the hypothesis
+# and short-token heads: the 0.61.0 pair holds 107 808, about 8.6 MB written one feature to a line, and
+# MAX_CONTEXT_ACTION_MODEL_BYTES bounds the file.
+MAX_CONTEXT_ACTION_MODEL_FEATURES: Final = 150000
 MAX_CONTEXT_FEATURE_NAME_CHARACTERS: Final = 512
 MAX_CONTEXT_MODEL_VERSION_CHARACTERS: Final = 80
 MAX_CONTEXT_WEIGHT_MAGNITUDE: Final = 1000

@@ -182,8 +182,8 @@
     "scope": "TRAIN only: the word decided at its own boundary (after_origin none). Russian abbreviations the term table counts in Russian technical text at least minimum_abbreviation_count times and abbreviation_dominance times as often as their Latin keys (`тз`, not `зк`), no lexicon word, typed as intended after the left context of a Russian row, keep; Latin terms counted at least minimum_term_count times whose Cyrillic reading is nothing, typed in the Russian layout in the same place, convert; three frames for every such term and abbreviation (the budgets cover both classes whole: a candidate that framed 800 of the 1752 terms and all 802 abbreviations kept `тз` but missed `тзь` for `npm`), the boundaries of the capital citations. Motivation: the corpus v27 candidate converted `тз` to `np` (p=0.993), `2фа`, `кз` and `ви` in the owner's typing while the token's count pulled the other way without a frame to learn from (tools/train_context_action_model.counted_token_curriculum). Not used while a frozen base is named: its frames moved the shared frequency features, and the `ша` before `hello` stayed `ша` (corpus v27 and v28 candidates)."
   },
   "frozen_base": {
-    "artifact": "model/context_v3/frozen-base-1ba380ab2999.json",
-    "sha256": "fd019255ea85779cb366e5f1d87ec61bd9993cc8f35d40ac7a3b2c9c5153d788",
+    "artifact": "model/context_v3/frozen-base-e02b44de73db.json",
+    "sha256": "24d9738382c060aa2b315ce9a388824868730f2b810e26a7ee4bfd204a94c877",
     "labels": {
       "artifact": "model/context_v3/frozen-base.json",
       "sha256": "5129029cdda9ffc2c6e67d8212ea8a7ede710764089ebde53c00b0ddc30ff6ae"
@@ -198,11 +198,17 @@
       }
     },
     "heads": {
-      "alnum": {
+      "hypothesis": {
+        "maximum_features": 1500
+      },
+      "short": {
+        "maximum_features": 800
+      },
+      "slip": {
         "maximum_features": 1500
       }
     },
-    "scope": "The pair context-v3-1ba380ab2999 of 0.60.0 (and 0.59.0), every weight fixed: its kept-neighbour question and every head are carried as shipped, and the letters-and-digits head alone is fitted (a head fitted again from zero moves with the contexts its curriculum draws and the rows of the corpus, whatever the change under test: the variable and dotted-abbreviation heads refitted on corpus v71 moved). The lone-word head's frames are labelled with the counts it was fitted with (carried.alone) and the answers of the corpus v37 model (labels). The letters-and-digits head: a token typed in Russian letters and digits, of at most eight characters, whose keys are Latin letters and digits, after Russian text or none, that Russian text is known to write as a whole token one way or the other (context_action_features.alnum_question; after English text, for a token typed in Latin letters and for a token the table counts in neither script, the frozen model decides), with how often Russian text writes the token as typed and its Latin reading as whole tokens (src/keyswitch/resources/models/context-alnum-frequency.json, counted on the SO training messages), the order of magnitude by which how often Russian text uses the letters of its Cyrillic reading outnumbers how often English prose or Russian technical text uses those of its Latin one, the shape of its runs of letters and digits, the case of its letters, the script of the text and of the word before it, signs of code and digits there, the boundary and how the word after it was given. Motivation: the shared features read every digit as one class; `м67` typed for `v67` in Russian prose stayed a suggestion (the owner's typing, 19.10.2026), `x64` typed in the Russian layout stayed `ч64`, every token of one letter and digits stayed by the lone-letter refusal, and a Russian token such as `100мс` became Latin (ru.stackoverflow messages of 2023). The refusal is lifted for this class when the model has the head. The pair of 0.60.0: the pair of 0.58.0 with the variable and dotted-abbreviation heads fitted onto it on corpus v69 (model/context_v3/frozen-base-9033af7cb039.json, sha256 872a502bde9b), resealed whole on corpus v71 for engine changes."
+    "scope": "The pair context-v3-e02b44de73db of 0.61.0, every weight fixed: its kept-neighbour question and every head, the letters-and-digits head of corpus v73 among them, are carried as shipped, and the hypothesis, short-token and slip heads alone are fitted. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone) and the answers of the corpus v37 model (labels). The hypothesis head: the question the engine asks about the next word of a waiting word with that word's other reading before it (engine._decide_after_waiting_word, which marks it: ContextEvidence.before_origin planned_previous_reading; context_action_features.hypothesis_question), read with no copy of the shared features: by how many binary orders of magnitude the prose of each reading's language uses the token as typed more than the other reading, and the commonest word one edit from each (nearest_count), whether either reading is a known identifier, how much commoner the waiting word as typed is than the reading put before the token, the token's letters, the band of the score delta and the boundary. Motivation: `еще тыв` (a typo of `ты`) became `tot nsd`: asked after `tot `, the frozen model converted `тыв` to `nsd`, a command name, at p=1.00, reading the reading as typed English text (the owner's typing, 22.10.2026). The short-token head: a token of two or three Russian letters, not all capitals, whose keys are Latin letters, after Russian text, outside the term head's class and unknown to the lexicon (context_action_features.short_question), read with no letter: how often Russian web and news text writes it (src/keyswitch/resources/models/context-short-frequency.json, the word lists of ten Russian corpora of the Leipzig Corpora Collection, CC BY), Russian prose and technical text write it, Russian technical text and English prose use its Latin reading, whether the English lexicon and the identifier index hold that reading, its letters, the boundary, how the text after it was given and the band of the score delta. Motivation: `кз` after `говорит он ` became `rp` at p=0.997 (the owner's typing, 22.10.2026), and `дз` and `ср` became `lp` and `ch` in Russian phrases: no Russian table counted them, and the English lexicon knows their Latin readings. The slip head: a token of at least two Latin letters after a line of Russian text, whose Latin reading English prose and Russian technical text use fewer than fifty times and whose Cyrillic reading Russian prose uses, unknown to the English lexicon and the identifier index (context_action_features.slip_question), read with no copy of the shared features and nothing of the boundary: how much more Russian prose uses the Cyrillic reading than English or technical text the Latin one, and the commonest word one edit from each, whether the Russian lexicon knows the Cyrillic reading, the detector's verdict and probability band, the orthotactic margin band, how often Russian prose uses the word before the token, its letters and case, the score delta band and how the text after it was given. Motivation: sealed test v74 (read once) was lost by one row of the shape a word of Russian prose typed with the English layout on after a Russian word, which the frozen model left a suggestion just under the threshold (`я cgtie` for `я спешу`, Tatoeba development sentences: 20 of 8 714 two-word sentences the frozen baseline pair restored, the same 20 for the pair of 0.61.0)."
   },
   "letter_curriculum": {
     "term_sentences": 1500,
@@ -916,5 +922,150 @@
     "scope": "TRAIN, and DEVELOPMENT for the head's epoch: the questions about a token of the letters-and-digits head's class (a token typed in Russian letters and digits after Russian text or none, whose keys are Latin letters and digits, counted as typed or in its Latin reading by context-alnum-frequency.json) the engine asked while ru.stackoverflow messages of 2023 were typed the four ways a person types them, the messages chosen by the token (20 000 with a Latin token of letters and digits, 2 500 with Latin words and 2 500 Russian ones with a Cyrillic token and no Latin one) and split by question with every question of the developer-chat messages left out (tools/select_capture_messages.py), and for TRAIN the class's questions of the captured Taiga sentences typed right and of Tatoeba chat typed in the other layout (tools/train_context_action_model.alnum_curriculum). At most token_cap frames of one token with one answer (`1с` held 593 kept frames), and a converted frame weighs convert_weight: 2.3 = keep_importance x kept frames / converted frames of TRAIN after the cap (4 x 3 306 / 5 656), so both answers weigh the same in the fit. Candidate v72, fitted without the cap and the weight on every token of letters and digits in either layout, kept about -5.5 logits towards `keep` on every token typed in Russian letters and lost `2аф` for `2fa`, `шзм6` for `ipv6` and Latin tokens after English text (corpus v72 calibration). Candidate v72b, fitted on every such token, kept model names absent from the table that the frozen model had converted (`В7000` for `D7000`, `К2В2` for `R2D2`; calibration -9): a token the table does not count stays with the frozen model.",
     "token_cap": 16,
     "convert_weight": 2.3
+  },
+  "hypothesis_curriculum": {
+    "captured": {
+      "train": [
+        [
+          "model/context_v3/captured/manifest-hypothesis.json",
+          "tatoeba-chat-hypothesis-train.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-hypothesis.json",
+          "so-hypothesis-train.jsonl.xz"
+        ]
+      ],
+      "development": [
+        [
+          "model/context_v3/captured/manifest-hypothesis.json",
+          "tatoeba-chat-hypothesis-dev.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-hypothesis.json",
+          "so-hypothesis-dev.jsonl.xz"
+        ]
+      ]
+    },
+    "held_out": [
+      "nsd",
+      "тыв"
+    ],
+    "sample_weight": 1.0,
+    "scope": "TRAIN, and DEVELOPMENT for the head's epoch: the questions the engine asked about the next word of a waiting word with that word's other reading before it, while messages opening with a word of at most three letters were typed as meant and wholly in the other layout, a fifth of their words with a typo (a letter missed, two swapped, one doubled, the key beside it instead or as well, words of two letters included): Tatoeba chat sentences among those the captured training questions were already typed from (no corpus split holds them) and ru.stackoverflow messages of 2023 with every question of the developer-chat messages left out, split by sentence and by question (tools/select_capture_messages.py opening-short, model/context_v3/captured/manifest-hypothesis.json, schema 2). The owner's tokens give no frame (held_out).",
+    "token_cap": 16,
+    "convert_weight": 3.0
+  },
+  "short_curriculum": {
+    "captured": {
+      "train": [
+        [
+          "model/context_v1/captured/manifest.json",
+          "so-typing.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "so-typing-previous-line.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "so-typing-typos.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "tatoeba-chat-typing.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "tatoeba-chat-typos.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "taiga-typing-keep.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "taiga-chat-typing-keep.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "tatoeba-chat-en-wrong-ru-line.jsonl.xz"
+        ]
+      ],
+      "development": [
+        [
+          "model/context_v3/captured/manifest-short.json",
+          "so-short-dev.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-short.json",
+          "taiga-short-dev.jsonl.xz"
+        ]
+      ]
+    },
+    "held_out": [
+      "дз",
+      "кз",
+      "ср"
+    ],
+    "sample_weight": 1.0,
+    "scope": "TRAIN, and DEVELOPMENT for the head's epoch: the questions about a token of the short-token head's class the engine asked while the train parts of ru.stackoverflow 2023, Tatoeba chat and UD Taiga were typed (the captured questions of model/context_v1/captured: Russian tokens typed as meant, kept; English words and Latin terms typed in the Russian layout after a Russian line, converted), and for DEVELOPMENT the development parts of ru.stackoverflow 2023 typed the four ways and of UD Taiga chat typed as meant (model/context_v3/captured/manifest-short.json, schema 2). The owner's `кз` and the tokens the frozen model turned Latin in the battery of Russian chat abbreviations (`дз`, `ср`) give no frame (held_out).",
+    "token_cap": 16,
+    "convert_weight": 3.0
+  },
+  "slip_curriculum": {
+    "captured": {
+      "train": [
+        [
+          "model/context_v3/captured/manifest-slip.json",
+          "tatoeba-chat-slip-train.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-slip.json",
+          "tatoeba-slip-train.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-slip.json",
+          "so-slip-train.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "so-typing.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "so-typing-previous-line.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "so-typing-typos.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "tatoeba-chat-typing.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "tatoeba-chat-typos.jsonl.xz"
+        ]
+      ],
+      "development": [
+        [
+          "model/context_v3/captured/manifest-slip.json",
+          "tatoeba-chat-slip-dev.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-slip.json",
+          "tatoeba-slip-dev.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-slip.json",
+          "so-slip-dev.jsonl.xz"
+        ]
+      ]
+    },
+    "held_out": [],
+    "sample_weight": 1.0,
+    "token_cap": 16,
+    "scope": "TRAIN, and DEVELOPMENT for the head's epoch: the questions about a token of the slip head's class the engine asked while Russian sentences of Tatoeba (chat style and as written, only those behind the captured training questions) and ru.stackoverflow messages of 2023 (every developer-chat question left out) were typed with one word of Russian prose after another typed with the English layout on, the layout having slipped with no switch by hand (tools/mixed_typing.py slip, the manual-layout protection and the early switch off as in the sealed protocol's early_off mode; model/context_v3/captured/manifest-slip.json, schema 2), and for TRAIN the class's questions of the captured typing of model/context_v1/captured (Latin tokens typed as meant after Russian text)."
   }
 }

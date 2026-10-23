@@ -667,3 +667,8 @@ BACK_END_FIXTURE_FEATURE_VALUE: Final = 0.375
 # unsure of, the other layout nearly as likely, and one it is sure of.
 DOUBTFUL_KEEP_FIXTURE_PROBABILITIES: Final = (0.55, 0.45)
 SURE_KEEP_FIXTURE_PROBABILITIES: Final = (0.8, 0.2)
+
+# The slip head's tests: a detector probability in the ninth of ten bands, and an orthotactic score and threshold whose
+# margin falls in the second band below zero.
+SLIP_FIXTURE_PROBABILITY: Final = 0.97
+SLIP_FIXTURE_ORTHO: Final = (20.0, 26.0)

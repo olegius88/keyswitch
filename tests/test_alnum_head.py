@@ -30,7 +30,7 @@ from keyswitch.context_model import (  # noqa: E402
     ACTIONS, ALNUM_ALPHABETS, ALNUM_FREQUENCY_PATH, ContextAction, ContextEvidence, ContextModel, _alnum_frequency,
 )
 from test_context_policy import ContextEngineTests  # noqa: E402
-from test_context_training_captured import captured_line  # noqa: E402
+from test_context_training_captured import captured_line, captured_question  # noqa: E402
 from test_early_switch_settling import ScriptedActionModel  # noqa: E402
 from test_variable_and_dotted_heads import evidence, prefixes  # noqa: E402
 
@@ -172,9 +172,9 @@ class AlnumCurriculumTests(unittest.TestCase):
 
 class AlnumCaptureSelectionTests(unittest.TestCase):
     def test_a_capture_keeps_the_questions_of_the_class(self) -> None:
-        self.assertTrue(mixed_typing.CAPTURED_QUESTIONS["alnum"]("ч64", "x64", "под ", "space"))
-        self.assertFalse(mixed_typing.CAPTURED_QUESTIONS["alnum"]("2х", "2[", "в ", "space"))
-        self.assertFalse(mixed_typing.CAPTURED_QUESTIONS["alnum"]("x64", "ч64", "под ", "space"))
+        self.assertTrue(mixed_typing.CAPTURED_QUESTIONS["alnum"](captured_question("ч64", "x64", "под ", "space")))
+        self.assertFalse(mixed_typing.CAPTURED_QUESTIONS["alnum"](captured_question("2х", "2[", "в ", "space")))
+        self.assertFalse(mixed_typing.CAPTURED_QUESTIONS["alnum"](captured_question("x64", "ч64", "под ", "space")))
 
     def test_the_table_of_whole_tokens_counts_the_training_messages_but_the_developer_chat_questions(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

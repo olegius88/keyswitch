@@ -27,7 +27,7 @@ from .context_action_features import extract_action_features
 from .constants.boundary import BOUNDARY_MISSING_LETTERS as ALPHABET_LETTERS
 from .constants.file_formats import (
     MAX_CONTEXT_ACTION_MODEL_BYTES, MAX_CONTEXT_ALNUM_FREQUENCY_BYTES, MAX_CONTEXT_MODEL_BYTES as MAX_ARTIFACT_BYTES,
-    MAX_CONTEXT_TERM_FREQUENCY_BYTES,
+    MAX_CONTEXT_SHORT_FREQUENCY_BYTES, MAX_CONTEXT_TERM_FREQUENCY_BYTES,
 )
 from .constants.models import (
     ALNUM_FEATURE_PREFIX,
@@ -61,6 +61,7 @@ from .constants.models import (
     MAX_CONTEXT_MODEL_VERSION_CHARACTERS,
     MAX_CONTEXT_WEIGHT_MAGNITUDE,
     MIN_CONTEXT_CONVERSION_THRESHOLD,
+    SHORT_FEATURE_PREFIX,
     VARIABLE_FEATURE_PREFIX,
 )
 
@@ -68,12 +69,15 @@ from .constants.models import (
 # exported (the historical context-v2 comparison reads them); their values live in the constants.
 __all__ = [
     "ACTIONS", "ARTIFACT_PATH", "FEATURE_VERSION", "MAX_ARTIFACT_BYTES", "MAX_FEATURES",
-    "AfterOrigin", "ContextAction", "ContextEvidence", "ContextModel", "ContextPrediction",
+    "AfterOrigin", "BeforeOrigin", "ContextAction", "ContextEvidence", "ContextModel", "ContextPrediction",
     "TECHNICAL_MARKS", "extract_context_features", "one_typo_from_word", "softmax",
 ]
 
 ContextAction = Literal["keep", "convert", "wait", "suggest"]
 AfterOrigin = Literal["none", "field", "planned_next_conversion", "kept_next_word"]
+# How the text before a word was given: as the field holds it, or ending in the other reading of a waiting word the engine
+# asks the next word after (engine._decide_after_waiting_word): a hypothesis, not text that was typed.
+BeforeOrigin = Literal["field", "planned_previous_reading"]
 ACTIONS: Final[tuple[ContextAction, ...]] = ("keep", "convert", "wait", "suggest")
 ARTIFACT_PATH = Path(__file__).parent / "resources" / "models" / "context_policy_v1.json"
 _WORDS = re.compile(r"[^\W\d_]+(?:['’\-][^\W\d_]+)*", re.UNICODE)
@@ -92,6 +96,11 @@ _TERM_FREQUENCY: dict[str, dict[str, int]] | None = None
 ALNUM_FREQUENCY_PATH: Final = Path(__file__).with_name("resources") / "models" / "context-alnum-frequency.json"
 ALNUM_ALPHABETS: Final = ("cyrillic", "latin")
 _ALNUM_FREQUENCY: dict[str, dict[str, int]] | None = None
+# How often tokens of two or three Russian letters occur in Russian web and news text (the Leipzig Corpora Collection,
+# tools/mixed_typing.py short), casefolded: the short-token head reads them, and nothing else does.
+SHORT_FREQUENCY_PATH: Final = Path(__file__).with_name("resources") / "models" / "context-short-frequency.json"
+SHORT_ALPHABETS: Final = ("cyrillic",)
+_SHORT_FREQUENCY: dict[str, dict[str, int]] | None = None
 
 
 @dataclass(frozen=True)
@@ -114,6 +123,7 @@ class ContextEvidence:
     ortho_threshold: float | None = None
     boundary_text: str = ""
     after_origin: AfterOrigin = "none"
+    before_origin: BeforeOrigin = "field"
     source_identifier: bool = False
     target_identifier: bool = False
     # Whether the reading is no word itself but one typo away from one (`one_typo_from_word`).
@@ -402,6 +412,13 @@ def _alnum_frequency() -> dict[str, dict[str, int]]:
     return _ALNUM_FREQUENCY
 
 
+def _short_frequency() -> dict[str, dict[str, int]]:
+    global _SHORT_FREQUENCY
+    if _SHORT_FREQUENCY is None:
+        _SHORT_FREQUENCY = load_term_frequency(SHORT_FREQUENCY_PATH, SHORT_ALPHABETS, MAX_CONTEXT_SHORT_FREQUENCY_BYTES)
+    return _SHORT_FREQUENCY
+
+
 def term_bucket(text: str, alphabet: str) -> str:
     """The bucket of how often a plain word occurs in the text one table counts; `na` for anything else."""
 
@@ -492,6 +509,10 @@ class ContextModel:
         if (isinstance(threshold, bool) or not isinstance(threshold, (int, float))
                 or not MIN_CONTEXT_CONVERSION_THRESHOLD <= threshold <= 1.0):
             raise ValueError("unsafe context threshold")
+        if any(name.startswith(SHORT_FEATURE_PREFIX) for name in weights):
+            # The short-token head asks its table about many a short word typed after Russian text: it is read here,
+            # before the keyboard hook starts, as the term table is.
+            _short_frequency()
         return cls(weights, version, float(threshold), feature_version=feature_version)
 
     @classmethod

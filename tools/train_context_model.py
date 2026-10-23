@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import NamedTuple, cast
 
 from keyswitch.constants.file_formats import HEXADECIMAL_BASE, REPORT_JSON_INDENT, VERSION_HASH_CHARACTERS
+from keyswitch.constants.corpus import CAPTURED_SCHEMA_LEFT_ORIGIN_VERSION, CAPTURED_SCHEMA_VERSION
 from keyswitch.constants.models import CONTEXT_LINE_FEATURE_VERSION, CONTEXT_V1_CONVERSION_THRESHOLD
 from keyswitch.constants.training import (
     # Keeps its name here: tests shorten the training by patching this module's EPOCHS.
@@ -76,6 +77,12 @@ CAPTURED_COLUMNS = (
     "score_delta", "literal_tail", "boundary_text", "after_origin", "source_typo", "target_typo",
     "source_opening", "target_opening", "inside", "before", "after", "role", "label",
 )
+# The columns of a manifest of schema 2: how the text before the word was given as well (ContextEvidence.before_origin),
+# which a question asked with a waiting word's other reading before it says (engine._decide_after_waiting_word).
+CAPTURED_COLUMNS_V2 = (*CAPTURED_COLUMNS[:CAPTURED_COLUMNS.index("after_origin") + 1], "before_origin",
+                       *CAPTURED_COLUMNS[CAPTURED_COLUMNS.index("after_origin") + 1:])
+CAPTURED_SCHEMAS: dict[int, tuple[str, ...]] = {CAPTURED_SCHEMA_VERSION: CAPTURED_COLUMNS,
+                                                CAPTURED_SCHEMA_LEFT_ORIGIN_VERSION: CAPTURED_COLUMNS_V2}
 REPORT = ROOT / "model/context_v1/report.json"
 NAMESPACE = "keyswitch:context-v1:candidate3"
 # Rows carry no application name: the model must answer the same way in every
@@ -692,13 +699,16 @@ class CapturedSource(NamedTuple):
     # text (UD Taiga) adds only `keep`: counted, it would lower the importance of every `keep`
     # and push the whole model towards converting (English words and technical tokens included).
     balanced: bool = True
+    # The columns of its rows, by the schema of its manifest (CAPTURED_SCHEMAS).
+    columns: tuple[str, ...] = CAPTURED_COLUMNS
 
 
 def captured_sources(manifest: Path = CAPTURED) -> list[CapturedSource]:
     """The captured question files with their weights, each checked against its pinned SHA-256."""
 
     payload = json.loads(manifest.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict) or payload.get("schema_version") != 1 or tuple(payload.get("columns", ())) != CAPTURED_COLUMNS:
+    columns = CAPTURED_SCHEMAS.get(cast(int, payload.get("schema_version"))) if isinstance(payload, dict) else None
+    if columns is None or tuple(payload.get("columns", ())) != columns:
         raise ValueError("invalid captured question manifest")
     sources: list[CapturedSource] = []
     for source in payload.get("sources", []):
@@ -709,7 +719,7 @@ def captured_sources(manifest: Path = CAPTURED) -> list[CapturedSource]:
         balanced = source.get("balance", True)
         if not math.isfinite(weight) or weight <= 0 or not isinstance(balanced, bool):
             raise ValueError(f"invalid weight or balance for {path.name}")
-        sources.append(CapturedSource(path, weight, balanced))
+        sources.append(CapturedSource(path, weight, balanced, columns))
     return sources
 
 
@@ -721,13 +731,13 @@ def signatures(original: str, alternative: str) -> set[str]:
     return {plain, core}
 
 
-def captured_rows(path: Path) -> Iterator[tuple[ContextEvidence, int, int]]:
+def captured_rows(path: Path, columns: tuple[str, ...] = CAPTURED_COLUMNS) -> Iterator[tuple[ContextEvidence, int, int]]:
     """Each distinct captured question once: its evidence, label index and how often it was asked."""
 
     with lzma.open(path, "rt", encoding="utf-8") as handle:
         for line in handle:
             values = json.loads(line)
-            row = dict(zip(CAPTURED_COLUMNS, values, strict=True))
+            row = dict(zip(columns, values, strict=True))
             # No application name, as in every scenario row: the model does not read it.
             field = FieldContext("", "captured", str(row.pop("before")), str(row.pop("after")), row.pop("role"))
             count, label = int(row.pop("count")), ACTIONS.index(row.pop("label"))
@@ -763,7 +773,7 @@ def train(rows: list[Row], captured: Sequence[CapturedSource] = (),
         for features, label in base:
             yield features, label, 1.0, 1, True
         for source in captured:
-            for evidence, label, count in captured_rows(source.path):
+            for evidence, label, count in captured_rows(source.path, source.columns):
                 # A question about a development or held-out family would teach what those
                 # families measure (`швы` for `ids` is a development family).
                 if not signatures(evidence.original, evidence.alternative) & reserved:

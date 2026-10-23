@@ -33,6 +33,14 @@ def captured_line(count: int, original: str, alternative: str, group: int, label
     return json.dumps([values[name] for name in trainer.CAPTURED_COLUMNS], ensure_ascii=False) + "\n"
 
 
+def captured_question(original: str, alternative: str, before: str, trigger: str = "space",
+                      before_origin: str = "field") -> dict[str, object]:
+    """A captured row by its fields, as a capture recipe's class reads it (mixed_typing.CAPTURED_QUESTIONS)."""
+
+    return {"original": original, "alternative": alternative, "before": before, "trigger": trigger,
+            "before_origin": before_origin}
+
+
 class CapturedQuestionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()

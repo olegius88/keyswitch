@@ -7,7 +7,9 @@ from dataclasses import dataclass, replace
 from typing import ClassVar, Final
 
 from .context_action_features import alnum_question, letter_question, variable_question
-from .context_model import AfterOrigin, ContextEvidence, ContextModel, ContextPrediction, one_typo_from_word, term_bucket
+from .context_model import (
+    AfterOrigin, BeforeOrigin, ContextEvidence, ContextModel, ContextPrediction, one_typo_from_word, term_bucket,
+)
 from .identifier_lexicon import IdentifierLexicon
 from .detector import DetectionDecision, LanguageDetector, LanguageScorer
 from .input_context import FieldContext, FieldReader, InputContext
@@ -182,7 +184,7 @@ def evidence_for_decision(
     detector: LanguageDetector, field: FieldContext, trigger: str,
     *, literal_tail: str = "", boundary_text: str = "", ortho: OrthoModel | None = None,
     after_origin: AfterOrigin = "none", identifiers: IdentifierLexicon | None = None,
-    inside: bool = False,
+    inside: bool = False, before_origin: BeforeOrigin = "field",
 ) -> ContextEvidence:
     """Build the same lexical and optional orthotactic evidence for any caller."""
 
@@ -210,7 +212,7 @@ def evidence_for_decision(
         target_typo=_one_typo_from_word(alternative, detector.models[target_group]),
         source_opening=opens_sentences(baseline.original, baseline.source_group),
         target_opening=opens_sentences(alternative, target_group),
-        inside=inside,
+        inside=inside, before_origin=before_origin,
     )
 
 
@@ -242,7 +244,7 @@ class ContextPolicy:
         *, after: str = "", read_field: bool = False,
         field_override: FieldContext | None = None,
         literal_tail: str = "", boundary_text: str = "",
-        after_origin: AfterOrigin = "none", inside: bool = False,
+        after_origin: AfterOrigin = "none", inside: bool = False, before_origin: BeforeOrigin = "field",
     ) -> ContextResult:
         if mode not in {"assist", "shadow"} or self.model is None:
             return ContextResult(baseline, fallback_reason="mode_disabled" if mode not in {"assist", "shadow"} else "model_unavailable")
@@ -296,7 +298,7 @@ class ContextPolicy:
             baseline, alternative, target_group, detector, field, trigger,
             literal_tail=literal_tail, boundary_text=boundary_text,
             ortho=self.ortho if self.model.feature_version == CONTEXT_ACTION_FEATURE_VERSION else None,
-            after_origin=after_origin, inside=inside,
+            after_origin=after_origin, inside=inside, before_origin=before_origin,
         )
         source, target = evidence.source_score, evidence.target_score
         assert source is not None and target is not None

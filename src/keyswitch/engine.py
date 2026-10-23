@@ -2919,8 +2919,12 @@ class KeySwitchEngine:
         """The next word's decision after the waiting word's other reading.
 
         The detector gets that reading as its previous word and the model gets it
-        in front of the caret, exactly as they would after a word typed in that
-        layout. Nothing is decided here that the model does not decide.
+        in front of the caret, as they would after a word typed in that layout, and
+        the model is told that the reading is the engine's hypothesis, not text that
+        was typed (before_origin): read as typed text, a reading of English letters
+        before a word that is no word of either layout turned it into its Latin
+        reading, `тыв` after `tot ` into `nsd` (`еще тыв`, the owner's typing). Nothing
+        is decided here that the model does not decide.
         """
 
         previous = waiting.plan
@@ -2932,6 +2936,7 @@ class KeySwitchEngine:
             baseline, alternative, group, self.detector,
             "pause" if boundary is None else self._trigger_for_boundary(boundary), "assist",
             field_override=replace(waiting.field, before=waiting.field.before + reading + boundary_character),
+            before_origin="planned_previous_reading",
         )
         return result.decision if result.decision.should_convert else None
 
@@ -3927,8 +3932,10 @@ class KeySwitchEngine:
             if not head:
                 # As at a space (_commit_word): a word with a sign split off its end takes the words
                 # before it along, a waiting one among them (`tot ghbdtn,`), and the sign stays as
-                # typed after them. `lbre. rjire/` at the end of a message was left `lbre. кошку.`.
-                if waiting is not None and trailing:
+                # typed after them. `lbre. rjire/` at the end of a message was left `lbre. кошку.`, and
+                # with the sign alone split off, `я cgtie ljvjq/` was left `я cgtie домой.` (Tatoeba
+                # development sentences typed as the sealed protocol types them, 23.10.2026).
+                if waiting is not None and (trailing or signs):
                     kept = (*kept, KeptWord(waiting.plan, waiting.decision, waiting.field, waiting.window, waiting.deadline))
                 taken = self._take_along(kept, self._with_signs(replace(
                     self._plan_from_decision(strokes, None, application, decision, "pause"), trailing=trailing), signs),

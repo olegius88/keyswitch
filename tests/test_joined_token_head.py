@@ -84,7 +84,8 @@ class JoinedTokenHeadTests(unittest.TestCase):
         except ImportError:  # CuPy missing, as in CI: the GPU path does not load here
             self.skipTest("CuPy is required to load the GPU path")
         self.assertTrue(cuda.heads_question("j,sxyj-nfr", "Он сказал ", "", "space"))
-        self.assertFalse(cuda.heads_question("ghbdtn", "Он сказал ", "", "space"))
+        # A plain word typed in the other layout after English text (after Russian text it is the slip head's).
+        self.assertFalse(cuda.heads_question("ghbdtn", "He said ", "", "space"))
 
     def test_the_curriculum_frames_each_occurrence_once_in_both_layouts(self) -> None:
         sentence = replace(fixture("j1", "ушёл", 1), before="Он ", after=". Ку-ку! Ну-ну, что-то и pre-order")
