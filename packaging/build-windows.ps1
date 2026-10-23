@@ -1558,6 +1558,16 @@ if ((Get-BytesSha256 -Bytes $BundledContextBytes) -cne $ActiveContext.artifact_s
 if ((Get-BytesSha256 -Bytes $BundledAlnumBytes) -cne (Get-BytesSha256 -Bytes $ProjectAlnumBytes)) {
     throw "Native distribution contains a different table of letters-and-digits tokens"
 }
+# The short-token head reads this table next to the artifact.
+[byte[]]$BundledShortBytes = Read-BoundedFileBytes `
+    -Path (Join-Path $NativeDistribution "keyswitch\resources\models\context-short-frequency.json") `
+    -MaximumBytes 2MB -MinimumBytes 2 -Label "bundled table of short Russian tokens"
+[byte[]]$ProjectShortBytes = Read-BoundedFileBytes `
+    -Path (Join-Path $ProjectDirectory "src\keyswitch\resources\models\context-short-frequency.json") `
+    -MaximumBytes 2MB -MinimumBytes 2 -Label "table of short Russian tokens"
+if ((Get-BytesSha256 -Bytes $BundledShortBytes) -cne (Get-BytesSha256 -Bytes $ProjectShortBytes)) {
+    throw "Native distribution contains a different table of short Russian tokens"
+}
 if ($ActiveContext.feature_version -eq 7) {
     # Feature schema 7 reads this table next to the artifact; the model does not load without it.
     [byte[]]$BundledTermFrequencyBytes = Read-BoundedFileBytes `

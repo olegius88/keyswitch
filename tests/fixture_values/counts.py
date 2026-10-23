@@ -764,3 +764,9 @@ CAPTURE_FIXTURE_QUESTIONS: Final = (202, 303)
 # class is written in the messages the table of whole tokens is counted on (the first bound of the term tables).
 ALNUM_FIXTURE_CONVERT_WEIGHT: Final = 3.0
 ALNUM_FIXTURE_TOKEN_COUNT: Final = 5
+
+# The short-token head's tests: word counts of a word list (each of the two larger at least the table's floor, the
+# smallest under it), how many seeds a typo is drawn with, and the shortest word a recipe types a typo into.
+SHORT_FIXTURE_COUNTS: Final = (3, 9, 1)
+SHORT_FIXTURE_TYPO_DRAWS: Final = 64
+SHORT_FIXTURE_TYPO_MIN_LETTERS: Final = 2

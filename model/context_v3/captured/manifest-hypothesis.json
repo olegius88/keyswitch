@@ -1,0 +1,159 @@
+{
+ "schema_version": 2,
+ "columns": [
+  "count",
+  "original",
+  "alternative",
+  "source_group",
+  "trigger",
+  "baseline_convert",
+  "source_known",
+  "target_known",
+  "score_delta",
+  "literal_tail",
+  "boundary_text",
+  "after_origin",
+  "before_origin",
+  "source_typo",
+  "target_typo",
+  "source_opening",
+  "target_opening",
+  "inside",
+  "before",
+  "after",
+  "role",
+  "label"
+ ],
+ "sources": [
+  {
+   "file": "tatoeba-chat-hypothesis-train.jsonl.xz",
+   "weight": 1.0,
+   "recipe": {
+    "messages": "tatoeba-chat-opening-short-train.jsonl.gz",
+    "kinds": [
+     "tatoeba_chat"
+    ],
+    "count": 15000,
+    "russian_share": 1.0,
+    "seed": "capture-hypothesis-tatoeba-train",
+    "typo_rate": 0.2,
+    "typo_kinds": [
+     "missed",
+     "swapped",
+     "doubled",
+     "neighbour",
+     "extra"
+    ],
+    "typo_min_letters": 2,
+    "questions": "hypothesis",
+    "prefix_rate": 0.3,
+    "modes": [
+     "correct",
+     "start_wrong"
+    ]
+   },
+   "sha256": "ac68801aca460fb706e231e108cc2ff5315791cec9a6247f7d48d3f66bb8244a",
+   "rows": 13343,
+   "unique": 6881,
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR; messages above them: Tatoeba sentences)",
+   "origin": "Tatoeba sentence exports rus/eng of 2026-09-26, only sentences listed in model/context_v1/captured/tatoeba-authors.tsv.xz",
+   "typing": "15 000 English and 15 000 Russian chat-style sentences opening with a word of at most three letters, typed as meant and wholly in the other layout, 30 % under a previous message, a typo in 20 % of words (two-letter words and the key beside a letter pressed as well included); the hypothesis head's questions alone"
+  },
+  {
+   "file": "so-hypothesis-train.jsonl.xz",
+   "weight": 1.0,
+   "recipe": {
+    "messages": "so-opening-short-train.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 8000,
+    "russian_share": 1.0,
+    "seed": "capture-hypothesis-so-train",
+    "typo_rate": 0.2,
+    "typo_kinds": [
+     "missed",
+     "swapped",
+     "doubled",
+     "neighbour",
+     "extra"
+    ],
+    "typo_min_letters": 2,
+    "questions": "hypothesis"
+   },
+   "sha256": "327c1f24d796ea6ee9f6a82eaef7d46f8a417aa97cd5bb67b5b0e8cdba3356e1",
+   "rows": 19866,
+   "unique": 6858,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "8 000 messages with Latin words and 8 000 Russian ones opening with a word of at most three letters, four typing modes, a typo in 20 % of words; the hypothesis head's questions alone"
+  },
+  {
+   "file": "tatoeba-chat-hypothesis-dev.jsonl.xz",
+   "weight": 1.0,
+   "recipe": {
+    "messages": "tatoeba-chat-opening-short-dev.jsonl.gz",
+    "kinds": [
+     "tatoeba_chat"
+    ],
+    "count": 3000,
+    "russian_share": 1.0,
+    "seed": "capture-hypothesis-tatoeba-dev",
+    "typo_rate": 0.2,
+    "typo_kinds": [
+     "missed",
+     "swapped",
+     "doubled",
+     "neighbour",
+     "extra"
+    ],
+    "typo_min_letters": 2,
+    "questions": "hypothesis",
+    "prefix_rate": 0.3,
+    "modes": [
+     "correct",
+     "start_wrong"
+    ]
+   },
+   "sha256": "5060204f16a9ce26c9bb0652cb35cd9d3645f7d446e0f6bf7754c4fbc1f8f18d",
+   "rows": 2616,
+   "unique": 1732,
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR; messages above them: Tatoeba sentences)",
+   "origin": "Tatoeba sentence exports rus/eng of 2026-09-26, only sentences listed in model/context_v1/captured/tatoeba-authors.tsv.xz",
+   "typing": "3 000 English and 3 000 Russian such sentences of the development part, as the train file"
+  },
+  {
+   "file": "so-hypothesis-dev.jsonl.xz",
+   "weight": 1.0,
+   "recipe": {
+    "messages": "so-opening-short-dev.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 2000,
+    "russian_share": 1.0,
+    "seed": "capture-hypothesis-so-dev",
+    "typo_rate": 0.2,
+    "typo_kinds": [
+     "missed",
+     "swapped",
+     "doubled",
+     "neighbour",
+     "extra"
+    ],
+    "typo_min_letters": 2,
+    "questions": "hypothesis"
+   },
+   "sha256": "6e49027824608db1fb74bc155a5b160272c407f492cedc3bc59db83350f0e5c3",
+   "rows": 4896,
+   "unique": 2023,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "2 000 and 2 000 such messages of the development part, as the train file"
+  }
+ ]
+}

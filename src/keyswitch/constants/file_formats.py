@@ -45,6 +45,8 @@ MAX_CONTEXT_ACTION_MODEL_BYTES: Final = 16 * BYTES_PER_MEBIBYTE
 MAX_CONTEXT_TERM_FREQUENCY_BYTES: Final = 8 * BYTES_PER_MEBIBYTE
 # Largest table of tokens of letters and digits the letters-and-digits head reads.
 MAX_CONTEXT_ALNUM_FREQUENCY_BYTES: Final = 2 * BYTES_PER_MEBIBYTE
+# Largest table of short Russian tokens counted in web and news text that the short-token head reads.
+MAX_CONTEXT_SHORT_FREQUENCY_BYTES: Final = 2 * BYTES_PER_MEBIBYTE
 # Indentation of every diagnostics report printed or copied for a person to read.
 DIAGNOSTICS_JSON_INDENT: Final = 2
 # Read size when a file is streamed through SHA-256 (and copied while hashed).

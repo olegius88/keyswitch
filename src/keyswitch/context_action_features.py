@@ -49,6 +49,9 @@ from .constants.models import (
     DOTTED_FEATURE_PREFIX,
     DOTTED_PART_MAX_LETTERS,
     FIRST_FEATURE_PREFIX,
+    HYPOTHESIS_FEATURE_PREFIX,
+    HYPOTHESIS_MAGNITUDE_MAX,
+    HYPOTHESIS_RATIO_BOUND,
     CAPITALS_FEATURE_PREFIX,
     CAPITALS_HEAD_MAX_LETTERS,
     CAPITALS_HEAD_MIN_LETTERS,
@@ -63,6 +66,12 @@ from .constants.models import (
     START_DELTA_BANDS,
     START_FEATURE_PREFIX,
     START_HEAD_MIN_LETTERS,
+    SHORT_FEATURE_PREFIX,
+    SHORT_HEAD_LETTERS,
+    SHORT_HEAD_MAX_LATIN_BUCKET,
+    SHORT_HEAD_MIN_RUSSIAN_BUCKET,
+    SHORT_MAGNITUDE_MAX,
+    SHORT_RATIO_BOUND,
     TERM_FEATURE_PREFIX,
     VARIABLE_CODE_CONTEXT_CHARACTERS,
     VARIABLE_CODE_SIGNS,
@@ -284,6 +293,9 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
     origin = item.after_origin
     if origin not in ("none", "field", "planned_next_conversion", "kept_next_word"):
         raise ValueError("invalid right-context origin")
+    if item.before_origin not in ("field", "planned_previous_reading") or (
+            item.before_origin == "planned_previous_reading" and origin not in ("none", "field")):
+        raise ValueError("invalid left-context origin")
     if origin == "kept_next_word" and (
         not 0 < len(item.original) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS
         or item.trigger != "space" or item.boundary_text != " "
@@ -503,6 +515,18 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         # model left `м67` for `v67` a suggestion, kept `x64` typed in the Russian layout as `ч64` and turned `100мс` into
         # `100vc`; its conversions of a token of one letter the lone-letter refusal kept as well (context_policy).
         result.update(_alnum_evidence(item))
+    if hypothesis_question(item):
+        # The class the hypothesis head answers: the next word of a waiting word asked with that word's other reading
+        # before it. The frozen model read the reading as typed text, and a word that is no word of either layout went the
+        # reading's way: `тыв` (a typo of `ты`) after `tot ` became `nsd` at p=1.00, and `еще тыв` became `tot nsd` (the
+        # owner's typing, 22.10.2026).
+        result.update(_hypothesis_evidence(item))
+    elif short_question(item.original, item.field.before) and not item.source_known:
+        # The class the short-token head answers: a token of two or three Russian letters after Russian text that no table
+        # of Russian text counted, whose Latin reading the English lexicon knows. The frozen model turned `кз` after
+        # `говорит он ` into `rp` at p=0.997 (the owner's typing, 22.10.2026), and `дз` and `ср` into `lp` and `ch` in
+        # Russian phrases; the head reads how often Russian web and news text writes the token.
+        result.update(_short_evidence(item))
     known = item.source_known and not _tail_like(item.original)
     if first_question(item.original, item.field.before, item.field.after) and item.field.role != "unknown" and not known:
         # The class the first-term head answers: a term of up to three letters alone in a field a reader read empty,
@@ -1221,3 +1245,154 @@ def _brief_evidence(item: ContextEvidence) -> dict[str, float]:
     names = ("bias", f"ratio:{ratio}", seen, f"trigger:{item.trigger}", f"case:{case}", f"ratio:{ratio}:trigger:{item.trigger}",
              f"ratio:{ratio}:case:{case}", f"{seen}:trigger:{item.trigger}")
     return {f"{BRIEF_FEATURE_PREFIX}{name}": 1.0 for name in names}
+
+
+_RUSSIAN_LETTERS: Final = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя"
+_ENGLISH_LETTERS: Final = "abcdefghijklmnopqrstuvwxyz"
+# Signs stripped off both ends of a reading before it is looked up, as the term tables were counted.
+_EDGE_SIGNS: Final = ".,!?:;\"'()[]{}<>«»-"
+
+
+def _magnitude(count: int, bound: int) -> int:
+    return min(count.bit_length(), bound)
+
+
+def nearest_count(word: str, language: str) -> int:
+    """How often the commonest word one edit from `word` occurs in the prose of its language (the term table's `russian`
+    or `english`): a letter missed, one extra, one wrong, or two neighbours swapped; 0 for a word of anything but letters.
+    `тыв` is `ты` with a letter extra, which Russian prose uses 99 523 times. The words a word of three letters or more is
+    one typo from are read for the readings of the hypothesis question only: almost every short string has some neighbour,
+    and how common the commonest is tells a typo of a common word from a string of keys."""
+
+    from .context_model import _term_frequency
+
+    table = _term_frequency()[language]
+    letters = _RUSSIAN_LETTERS if language == "russian" else _ENGLISH_LETTERS
+    word = word.strip(_EDGE_SIGNS).casefold()
+    if not word or not all(char in letters for char in word):
+        return 0
+    best = 0
+    for index in range(len(word) + 1):
+        head, tail = word[:index], word[index:]
+        candidates = [head + letter + tail for letter in letters]
+        if tail:
+            candidates.append(head + tail[1:])
+            candidates += [head + letter + tail[1:] for letter in letters if letter != tail[0]]
+            swapped = tail[1:][:1] + tail[:1]
+            if len(swapped) > 1 and swapped != tail[:len(swapped)]:
+                candidates.append(head + swapped + tail[len(swapped):])
+        best = max(best, max(table.get(candidate, 0) for candidate in candidates))
+    return best
+
+
+def _prose_count(word: str, language: str) -> int:
+    from .context_model import _term_frequency
+
+    return _term_frequency()[language].get(word.strip(_EDGE_SIGNS).casefold(), 0)
+
+
+def hypothesis_question(item: ContextEvidence) -> bool:
+    """The question the engine asks about the next word of a waiting word with that word's other reading before it
+    (engine._decide_after_waiting_word): the hypothesis head's class. Only the question says so (before_origin); the same
+    text before a word is typed when the layout was switched by hand after a word of the other script, and that word is
+    the frozen model's."""
+
+    return item.before_origin == "planned_previous_reading"
+
+
+def _hypothesis_evidence(item: ContextEvidence) -> dict[str, float]:
+    """The hypothesis head's evidence, all it reads (no copy of the shared features, which read the reading before the
+    word as typed text: `before:script:en` and the identifier `nsd` turned `тыв` after `tot ` into `nsd`): by how many
+    binary orders of magnitude the prose of each reading's language uses the word as typed more than the other reading,
+    and the commonest word one edit from each (nearest_count) more than the other's; whether either reading is a known
+    identifier; by how much the waiting word as typed is commoner in its language than the reading put before the word
+    (`еще` against `tot`); the token's letters, the band of the detector's score delta and the boundary."""
+
+    from .layouts import LayoutPair
+
+    typed_language, other_language = ("russian", "english") if item.source_group == 1 else ("english", "russian")
+    typed_count = _prose_count(item.original, typed_language)
+    other_count = _prose_count(item.alternative, other_language)
+    typed_near = max(typed_count, nearest_count(item.original, typed_language))
+    other_near = max(other_count, nearest_count(item.alternative, other_language))
+    words = _WORDS.findall(item.field.before)
+    reading = words[-1] if words else ""
+    waiting = LayoutPair().translate(reading, "us", "ru") if item.source_group == 1 else LayoutPair().translate(reading, "ru", "us")
+
+    def ratio(first: int, second: int) -> int:
+        difference = _magnitude(first, HYPOTHESIS_MAGNITUDE_MAX) - _magnitude(second, HYPOTHESIS_MAGNITUDE_MAX)
+        return max(-HYPOTHESIS_RATIO_BOUND, min(HYPOTHESIS_RATIO_BOUND, difference))
+
+    word = f"word:{ratio(typed_count, other_count)}"
+    near = f"near:{ratio(typed_near, other_near)}"
+    seen = f"seen:{int(typed_count > 0)}:{int(other_count > 0)}"
+    identifier = f"identifier:{int(item.source_identifier)}:{int(item.target_identifier)}"
+    held = f"waiting:{ratio(_prose_count(waiting, typed_language), _prose_count(reading, other_language))}"
+    letters = f"letters:{min(sum(char.isalpha() for char in item.original), ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS)}"
+    band = max(-START_DELTA_BANDS, min(START_DELTA_BANDS, math.floor(item.score_delta / START_DELTA_BAND_WIDTH)))
+    boundary = f"boundary:{'space' if item.trigger == 'space' else 'end'}"
+    names = ("bias", word, near, seen, identifier, held, letters, f"delta:{band}", boundary, f"{word}:{near}",
+             f"{near}:{identifier}", f"{near}:{held}", f"{near}:{letters}", f"{seen}:{identifier}")
+    return {f"{HYPOTHESIS_FEATURE_PREFIX}{name}:direction:{item.source_group}": 1.0 for name in names}
+
+
+def short_question(original: str, before: str) -> bool:
+    """A token of SHORT_HEAD_LETTERS Russian letters, not all capitals, whose keys are Latin letters, after text with more
+    Cyrillic letters than Latin ones, that Russian text uses at least in bucket SHORT_HEAD_MIN_RUSSIAN_BUCKET (web and news
+    text, prose or technical text) while English prose and Russian technical text use its Latin reading at most in bucket
+    SHORT_HEAD_MAX_LATIN_BUCKET: the short-token head's class (the lexicon's own words are left out where the features
+    are made). `кз` (68 in web and news text, `rp` 23 in technical text) and `дз` are; `ьк` (`mr`), `ин` (`by`), `сс`
+    (`cc`) and `ср` (`ch`), whose Latin readings are common, are the frozen model's, which converted them as meant, and so
+    is a token Russian text hardly uses (`ге`, `сщ`). Capitals are the abbreviation head's, a word of one letter the
+    letter heads', a term of Russian technical text the term head's. The question reads only the typed token, the text
+    before it and the packaged tables, as the trainer and the GPU path route frames by them (head_question,
+    context_action_cuda.heads_question)."""
+
+    from .context_model import _short_frequency, _term_frequency
+    from .layouts import LayoutPair
+
+    if not (len(original) in SHORT_HEAD_LETTERS and all(_cyrillic_letter(char) for char in original) and not original.isupper()):
+        return False
+    latin = LayoutPair().translate(original, "ru", "us")
+    if not (latin.isascii() and latin.isalpha()
+            and _dominant(before[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:].casefold()) == "ru"):
+        return False
+    table, cyrillic = _term_frequency(), original.casefold()
+    russian = max(_short_frequency()["cyrillic"].get(cyrillic, 0), table["russian"].get(cyrillic, 0),
+                  table["cyrillic"].get(cyrillic, 0))
+    other = max(table["latin"].get(latin.casefold(), 0), table["english"].get(latin.casefold(), 0))
+    return (bisect.bisect_right(CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, russian) >= SHORT_HEAD_MIN_RUSSIAN_BUCKET
+            and bisect.bisect_right(CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, other) <= SHORT_HEAD_MAX_LATIN_BUCKET
+            and not term_question(original, before))
+
+
+def _short_evidence(item: ContextEvidence) -> dict[str, float]:
+    """The short-token head's evidence, all it reads: the binary order of magnitude of how often Russian web and news
+    text writes the token (a table of its own, context-short-frequency.json), Russian prose and technical text write it,
+    Russian technical text writes its Latin reading and English prose uses it, and by how much the larger Russian count
+    outnumbers the larger Latin one; whether the English lexicon knows the Latin reading and the identifier index holds it
+    (`rp` is a word to it); the token's letters, the boundary, how the text after it was given and the band of the
+    detector's score delta. No letter of its own: an abbreviation head reading the letters learned the corpus's tokens by
+    heart and turned `ТЗ` into `NP`."""
+
+    from .context_model import _short_frequency, _term_frequency
+
+    table = _term_frequency()
+    cyrillic, latin = item.original.casefold(), item.alternative.casefold()
+    web = _short_frequency()["cyrillic"].get(cyrillic, 0)
+    russian = max(table["russian"].get(cyrillic, 0), table["cyrillic"].get(cyrillic, 0))
+    technical, english = table["latin"].get(latin, 0), table["english"].get(latin, 0)
+    magnitudes = {name: _magnitude(count, SHORT_MAGNITUDE_MAX)
+                  for name, count in (("web", web), ("russian", russian), ("latin", technical), ("english", english))}
+    difference = max(magnitudes["web"], magnitudes["russian"]) - max(magnitudes["latin"], magnitudes["english"])
+    ratio = f"ratio:{max(-SHORT_RATIO_BOUND, min(SHORT_RATIO_BOUND, difference))}"
+    known = f"known:{int(item.target_known)}:identifier:{int(item.target_identifier)}"
+    letters = f"letters:{len(item.original)}"
+    seen = "seen:" + ":".join(str(int(count > 0)) for count in (web, russian, technical, english))
+    band = max(-START_DELTA_BANDS, min(START_DELTA_BANDS, math.floor(item.score_delta / START_DELTA_BAND_WIDTH)))
+    boundary = f"boundary:{'space' if item.trigger == 'space' else 'end'}"
+    after = f"after:{item.after_origin}"
+    names = ("bias", *(f"{name}:{value}" for name, value in magnitudes.items()), ratio, seen, known, letters, boundary,
+             after, f"delta:{band}", f"{ratio}:{known}", f"{ratio}:{letters}", f"{ratio}:{boundary}",
+             f"web:{magnitudes['web']}:latin:{magnitudes['latin']}", f"{seen}:{known}")
+    return {f"{SHORT_FEATURE_PREFIX}{name}": 1.0 for name in names}

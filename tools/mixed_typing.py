@@ -21,6 +21,9 @@ Commands:
             (train splits only; the Taiga messages are needed too);
   alnum     --messages <dir> [--members <devchat members file> ...] --out <context-alnum-frequency.json>
             how often whole tokens of letters and digits occur in the SO training messages, by script;
+  short     --leipzig <dir> --out <context-short-frequency.json>
+            how often tokens of two or three Russian letters occur in the Leipzig Corpora Collection's
+            Russian corpora whose word lists are unpacked under the directory (x-<corpus>/<corpus>/*-words.txt);
   capture   --manifest <model/context_v1/captured/manifest.json> --messages <dir> --model <artifact>
             [--only NAME] [--verify]: the questions the engine asks the context model while each
             source's recipe is typed, labelled from what the person meant;
@@ -46,7 +49,7 @@ import re
 import subprocess
 import sys
 from collections import Counter
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import AbstractContextManager, ExitStack
 from dataclasses import replace
@@ -60,18 +63,22 @@ sys.path[:0] = [str(ROOT / "src"), str(ROOT / "tests")]
 from keyswitch.constants.file_formats import HEXADECIMAL_BASE, REPORT_JSON_INDENT  # noqa: E402
 from keyswitch.constants.models import ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS  # noqa: E402
 from keyswitch.constants.corpus import (  # noqa: E402
-    MIXED_CAPTURE_XZ_PRESET, MIXED_EVALUATE_RUSSIAN_SHARE, MIXED_PREFIX_KINDS, TATOEBA_AUTHOR_COLUMN, TATOEBA_TEXT_COLUMN,
+    CAPTURED_SCHEMA_LEFT_ORIGIN_VERSION, CAPTURED_SCHEMA_VERSION, MIXED_CAPTURE_XZ_PRESET, MIXED_EVALUATE_RUSSIAN_SHARE, MIXED_PREFIX_KINDS, TATOEBA_AUTHOR_COLUMN, TATOEBA_TEXT_COLUMN,
     MIXED_CODE_LINE_MAX_CHARACTERS, MIXED_CODE_LINE_MIN_CHARACTERS, MIXED_DEVELOPMENT_SPLIT_BUCKETS,
     MIXED_DRAW_HEX_DIGITS, MIXED_DRAW_RESOLUTION, MIXED_EDIT_CLOCK_START_SECONDS, MIXED_EDIT_KEY_INTERVAL_SECONDS,
     MIXED_EDIT_LENGTH_SHIFT, MIXED_EDIT_MAX_REMOVED_LETTERS, MIXED_EDIT_PAUSE_SECONDS, MIXED_EDIT_PLACE_SHIFT,
     MIXED_EDIT_TWO_LETTERS_FROM, MIXED_EDIT_WORD_MIN_LETTERS, MIXED_MESSAGE_MAX_TOKENS, MIXED_MESSAGE_MIN_TOKENS,
     MIXED_PREFIX_CODE_LINES, MIXED_SPLIT_HEX_DIGITS, MIXED_TEST_SPLIT_BUCKETS, MIXED_TYPING_CHUNK_JOBS,
     MIXED_TYPING_DEFAULT_WORKERS, MIXED_TYPO_HEX_DIGITS, MIXED_TYPO_MIN_LETTERS,
-    MIXED_TYPO_NEIGHBOUR_SHIFT, MIXED_TYPO_PLACE_SHIFT, SPLIT_BUCKET_COUNT, TATOEBA_SENTENCE_MAX_TOKENS,
+    MIXED_TYPO_NEIGHBOUR_SHIFT, MIXED_TYPO_PLACE_SHIFT, SPLIT_BUCKET_COUNT, TATOEBA_SENTENCE_MAX_TOKENS, LEIPZIG_WORDS_COLUMNS,
     TATOEBA_SENTENCE_MIN_TOKENS,
 )
-from keyswitch.constants.models import ALNUM_HEAD_MAX_CHARACTERS, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS  # noqa: E402
-from keyswitch.context_action_features import alnum_question, dotted_question, letters_and_digits, variable_question  # noqa: E402
+from keyswitch.constants.models import (  # noqa: E402
+    ALNUM_HEAD_MAX_CHARACTERS, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, SHORT_HEAD_LETTERS,
+)
+from keyswitch.context_action_features import (  # noqa: E402
+    alnum_question, dotted_question, letters_and_digits, short_question, variable_question,
+)
 from keyswitch.context_model import ContextEvidence, ContextModel, ContextPrediction  # noqa: E402
 from keyswitch.input_context import CONTEXT_LIMIT, FieldContext  # noqa: E402
 from test_input_sequence_matrix import PhysicalSession  # noqa: E402
@@ -102,13 +109,22 @@ CAPTURED_FIELDS: Final = (
     "score_delta", "literal_tail", "boundary_text", "after_origin", "source_typo", "target_typo",
     "source_opening", "target_opening", "inside",
 )
+# A manifest of schema 2 records how the text before the word was given too (ContextEvidence.before_origin).
+CAPTURED_FIELDS_BY_SCHEMA: Final[dict[int, tuple[str, ...]]] = {
+    CAPTURED_SCHEMA_VERSION: CAPTURED_FIELDS,
+    CAPTURED_SCHEMA_LEFT_ORIGIN_VERSION: (*CAPTURED_FIELDS[:CAPTURED_FIELDS.index("after_origin") + 1], "before_origin",
+                                          *CAPTURED_FIELDS[CAPTURED_FIELDS.index("after_origin") + 1:]),
+}
 
 # The classes a capture recipe may keep alone ("questions"), by the head that answers them: a file of one head's
-# questions stays the size of its class. Each reads the token, its other reading, the text before it and the trigger.
-CAPTURED_QUESTIONS: Final[dict[str, Callable[[str, str, str, str], bool]]] = {
-    "variable": variable_question,
-    "dotted": lambda original, alternative, _before, _trigger: dotted_question(original, alternative),
-    "alnum": lambda original, alternative, before, _trigger: alnum_question(original, alternative, before),
+# questions stays the size of its class. Each reads a captured row by its fields: the token, its other reading, the text
+# before it, the trigger and, in a manifest of schema 2, how that text was given.
+CAPTURED_QUESTIONS: Final[dict[str, Callable[[Mapping[str, object]], bool]]] = {
+    "variable": lambda row: variable_question(str(row["original"]), str(row["alternative"]), str(row["before"]), str(row["trigger"])),
+    "dotted": lambda row: dotted_question(str(row["original"]), str(row["alternative"])),
+    "alnum": lambda row: alnum_question(str(row["original"]), str(row["alternative"]), str(row["before"])),
+    "hypothesis": lambda row: row.get("before_origin") == "planned_previous_reading",
+    "short": lambda row: row.get("before_origin", "field") == "field" and short_question(str(row["original"]), str(row["before"])),
 }
 
 Job = tuple[int, str, str, int, str]
@@ -363,6 +379,28 @@ def build_alnum(messages: Path, members: Sequence[Path]) -> dict[str, dict[str, 
     return {alphabet: {token: count for token, count in sorted(found.items()) if count >= least} for alphabet, found in counts.items()}
 
 
+def build_short(leipzig: Path) -> dict[str, dict[str, int]]:
+    """How often tokens of SHORT_HEAD_LETTERS Russian letters occur in Russian web and news text, casefolded: the word
+    lists (`<id> TAB <word> TAB <count>`) of the Leipzig Corpora Collection's Russian corpora unpacked under the directory,
+    summed, each token counted at least as often as the first bound of the term tables. The short-token head reads it
+    (context_action_features.short_question): an abbreviation or a word of chat Russian that tables of technical text do
+    not count is written there (`кз`, `дз`, `ср`), the keys of a Latin term mostly not."""
+
+    counts: Counter[str] = Counter()
+    for path in sorted(leipzig.glob("x-*/*/*-words.txt")):
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) < LEIPZIG_WORDS_COLUMNS:
+                    continue
+                _identifier, written, count = parts[:LEIPZIG_WORDS_COLUMNS]
+                word = written.casefold()
+                if len(word) in SHORT_HEAD_LETTERS and all("а" <= char <= "я" or char == "ё" for char in word):
+                    counts[word] += int(count)
+    least = CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS[0]
+    return {"cyrillic": {token: count for token, count in sorted(counts.items()) if count >= least}}
+
+
 # --- typing --------------------------------------------------------------------------------------
 
 def script(token: str) -> int | None:
@@ -409,31 +447,36 @@ def _neighbours(char: str) -> str:
     return ""
 
 
-def typo(token: str, seed: str) -> str:
-    """One typo among a token's letters: a letter missed, two swapped, one pressed twice, or the key next to it."""
+TYPO_KINDS: Final = ("missed", "swapped", "doubled", "neighbour")
+
+
+def typo(token: str, seed: str, kinds: Sequence[str] = TYPO_KINDS, least: int = MIXED_TYPO_MIN_LETTERS) -> str:
+    """One typo among a token's letters of at least `least`: a letter missed, two swapped, one pressed twice, the key next
+    to it, or (`extra`, where a recipe asks for it) the key next to it pressed as well (`ты` typed `тыв`)."""
 
     positions = [index for index, char in enumerate(token) if char.isalpha()]
-    if len(positions) < MIXED_TYPO_MIN_LETTERS:
+    if len(positions) < least:
         return token
     digest = _draw(seed, MIXED_TYPO_HEX_DIGITS)
-    kinds = ("missed", "swapped", "doubled", "neighbour")
     kind = kinds[digest % len(kinds)]
     at = positions[(digest >> MIXED_TYPO_PLACE_SHIFT) % len(positions)]
-    if kind == "missed" and len(positions) > MIXED_TYPO_MIN_LETTERS:
+    if kind == "missed" and len(positions) > max(least, MIXED_TYPO_MIN_LETTERS):
         return token[:at] + token[at + 1:]
     if kind == "swapped" and at + 1 < len(token) and token[at + 1].isalpha():
         return token[:at] + token[at + 1] + token[at] + token[at + 1:][1:]
     if kind == "doubled":
         return token[:at + 1] + token[at] + token[at + 1:]
     near = _neighbours(token[at])
+    if near and kind == "extra":
+        return token[:at + 1] + near[(digest >> MIXED_TYPO_NEIGHBOUR_SHIFT) % len(near)] + token[at + 1:]
     if near:
         return token[:at] + near[(digest >> MIXED_TYPO_NEIGHBOUR_SHIFT) % len(near)] + token[at + 1:]
     return token[:at + 1] + token[at] + token[at + 1:]
 
 
-def with_typos(text: str, rate: float, seed: str) -> str:
+def with_typos(text: str, rate: float, seed: str, kinds: Sequence[str] = TYPO_KINDS, least: int = MIXED_TYPO_MIN_LETTERS) -> str:
     largest = HEXADECIMAL_BASE ** MIXED_DRAW_HEX_DIGITS - 1
-    return " ".join(typo(token, f"{seed}:{index}:t") if _draw(f"{seed}:{index}") / largest < rate else token
+    return " ".join(typo(token, f"{seed}:{index}:t", kinds, least) if _draw(f"{seed}:{index}") / largest < rate else token
                     for index, token in enumerate(text.split()))
 
 
@@ -463,7 +506,8 @@ class Reader:
         return FieldContext(application, "1", text[-CONTEXT_LIMIT:], "", role="text", source="native")
 
 
-def _init(model_path: str) -> None:
+def _init(model_path: str, fields: tuple[str, ...] = CAPTURED_FIELDS) -> None:
+    _state["fields"] = fields
     from keyswitch.language_model import LanguageModel
     import test_input_sequence_matrix as sequences
     payload = json.loads(Path(model_path).read_text(encoding="utf-8"))
@@ -591,7 +635,8 @@ def _edit_message(job: Job, spy: Spy | None) -> str | None:
 
 
 def _row(item: ContextEvidence, label: str) -> list[object]:
-    return [*(getattr(item, name) for name in CAPTURED_FIELDS), item.field.before, item.field.after, item.field.role, label]
+    fields = cast(tuple[str, ...], _state.get("fields", CAPTURED_FIELDS))
+    return [*(getattr(item, name) for name in fields), item.field.before, item.field.after, item.field.role, label]
 
 
 def _capture(job: Job) -> list[list[object]]:
@@ -646,8 +691,14 @@ def recipe_messages(messages: Path, recipe: Recipe) -> list[tuple[str, int]]:
     chosen = ([(text, qid) for _d, text, mix, qid in pool if mix == "mixed"][:count]
               + [(text, qid) for _d, text, mix, qid in pool if mix == "russian"][:int(count * float(cast(float, recipe["russian_share"])))])
     typo_rate = float(cast(float, recipe.get("typo_rate", 0.0)))
+    # A recipe may add kinds of typo and type them into shorter words: a letter pressed beside its neighbour in a word of
+    # two letters is the typo of `ты` in `еще тыв`.
+    kinds = tuple(cast(list[str], recipe.get("typo_kinds", list(TYPO_KINDS))))
+    least = int(cast(int, recipe.get("typo_min_letters", MIXED_TYPO_MIN_LETTERS)))
+    if not set(kinds) <= {*TYPO_KINDS, "extra"} or least < 1:
+        raise ValueError(f"unknown typo kinds or length: {kinds}, {least}")
     if typo_rate:
-        chosen = [(with_typos(text, typo_rate, f"{seed}:typo:{text}"), qid) for text, qid in chosen]
+        chosen = [(with_typos(text, typo_rate, f"{seed}:typo:{text}", kinds, least), qid) for text, qid in chosen]
     return chosen
 
 
@@ -733,6 +784,8 @@ def recipe_sources(messages: Path, recipe: Recipe, code_path: Path | None) -> tu
 
 def capture(manifest: Path, messages: Path, model: Path, only: str | None, verify: bool, workers: int) -> dict[str, object]:
     payload = json.loads(manifest.read_text(encoding="utf-8"))
+    fields = CAPTURED_FIELDS_BY_SCHEMA[int(payload["schema_version"])]
+    names = (*fields, "before", "after", "role", "label")
     results: dict[str, object] = {}
     for source in payload["sources"]:
         if only and source["file"] != only:
@@ -744,13 +797,12 @@ def capture(manifest: Path, messages: Path, model: Path, only: str | None, verif
         labels = set(cast(list[str], recipe["labels"])) if recipe.get("labels") else None
         # A recipe may keep the questions of one head's class alone.
         question = CAPTURED_QUESTIONS[str(recipe["questions"])] if recipe.get("questions") else None
-        before, trigger = len(CAPTURED_FIELDS), CAPTURED_FIELDS.index("trigger")
         seen: Counter[str] = Counter()
-        with ProcessPoolExecutor(workers, initializer=_init, initargs=(str(model),)) as executor:
+        with ProcessPoolExecutor(workers, initializer=_init, initargs=(str(model), fields)) as executor:
             for rows in executor.map(_capture, jobs, chunksize=MIXED_TYPING_CHUNK_JOBS):
                 for row in rows:
                     if (row[0] != row[1] and (labels is None or row[-1] in labels)
-                            and (question is None or question(str(row[0]), str(row[1]), str(row[before]), str(row[trigger])))):
+                            and (question is None or question(dict(zip(names, row, strict=True))))):
                         seen[json.dumps(row, ensure_ascii=False, separators=(",", ":"))] += 1
         data = lzma.compress("".join(f"[{count},{row[1:]}\n" for row, count in sorted(seen.items())).encode(),
                              preset=MIXED_CAPTURE_XZ_PRESET)
@@ -844,6 +896,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     alnum.add_argument("--messages", type=Path, required=True)
     alnum.add_argument("--members", type=Path, action="append", default=[], help="a developer-chat members file (repeatable)")
     alnum.add_argument("--out", type=Path, required=True)
+    short = commands.add_parser("short")
+    short.add_argument("--leipzig", type=Path, required=True)
+    short.add_argument("--out", type=Path, required=True)
     grab = commands.add_parser("capture")
     grab.add_argument("--manifest", type=Path, required=True)
     grab.add_argument("--messages", type=Path, required=True)
@@ -890,6 +945,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.command == "alnum":
         table = build_alnum(args.messages, args.members)
         # One token to a line, so that a new count shows in a diff.
+        args.out.write_text(json.dumps(table, ensure_ascii=False, sort_keys=True, indent=REPORT_JSON_INDENT) + "\n", encoding="utf-8")
+        result = {name: len(tokens) for name, tokens in table.items()}
+    elif args.command == "short":
+        table = build_short(args.leipzig)
         args.out.write_text(json.dumps(table, ensure_ascii=False, sort_keys=True, indent=REPORT_JSON_INDENT) + "\n", encoding="utf-8")
         result = {name: len(tokens) for name, tokens in table.items()}
     elif args.command == "capture":

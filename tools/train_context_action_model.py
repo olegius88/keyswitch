@@ -30,11 +30,12 @@ from unittest.mock import patch
 
 from keyswitch.context_action_features import (
     abbreviation_question, alnum_question, alone_question, attested_abbreviation, capitals_question, extract_action_features,
-    brief_question, brief_settled, dotted_question, first_question, joined_question, latin_abbreviation_question, letter_question,
-    russian_ending_bucket, russian_start_bucket, start_question, term_question, unknown_question, unknown_shape, variable_question,
+    brief_question, brief_settled, dotted_question, first_question, hypothesis_question, joined_question,
+    latin_abbreviation_question, letter_question, russian_ending_bucket, russian_start_bucket, short_question, start_question,
+    term_question, unknown_question, unknown_shape, variable_question,
 )
 from keyswitch.context_model import (
-    ACTIONS, AfterOrigin, ContextAction, ContextEvidence, ContextModel, _term_frequency, term_bucket,
+    ACTIONS, AfterOrigin, BeforeOrigin, ContextAction, ContextEvidence, ContextModel, _term_frequency, term_bucket,
 )
 from keyswitch.context_policy import evidence_for_decision
 from keyswitch.detector import LanguageDetector
@@ -74,6 +75,7 @@ from keyswitch.constants.models import (
     ABBREVIATION_FEATURE_PREFIX, ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS, ALNUM_FEATURE_PREFIX, ALONE_FEATURE_PREFIX,
     ALONE_HEAD_LETTERS,
     BRIEF_FEATURE_PREFIX, BRIEF_HEAD_LETTERS, DOTTED_FEATURE_PREFIX, FIRST_FEATURE_PREFIX, VARIABLE_FEATURE_PREFIX,
+    HYPOTHESIS_FEATURE_PREFIX, SHORT_FEATURE_PREFIX,
     CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION,
     CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, JOINED_FEATURE_PREFIX,
     KEPT_CONTEXT_WORD_MAX_CHARACTERS, KEPT_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX, LETTER_FEATURE_PREFIX,
@@ -352,6 +354,9 @@ class ActionRow:
     # Asked again as the engine asks a converted word whose next word went back (engine._revert_with_next_word): the
     # baseline is the word's own verdict at its boundary, from the text before it, with no conversion (evidence).
     revisit: bool = False
+    # The next word of a waiting word asked with that word's other reading before it (engine._decide_after_waiting_word):
+    # the detector reads that reading alone as the word before it (evidence), and the hypothesis head answers.
+    before_origin: str = "field"
 
     def __post_init__(self) -> None:
         if type(self.sample_weight) not in (int, float) or not math.isfinite(self.sample_weight) or self.sample_weight <= 0:
@@ -1854,7 +1859,7 @@ def captured_source_curriculum(source: CapturedSource, options: Mapping[str, obj
         return [], {"excluded": True}
     ranked: dict[ContextAction, list[tuple[bytes, ContextEvidence]]] = {"keep": [], "convert": []}
     skipped_short = 0
-    for item, label, _count in captured_rows(source.path):
+    for item, label, _count in captured_rows(source.path, source.columns):
         action = ACTIONS[label]
         if action not in ranked:
             continue
@@ -2240,6 +2245,10 @@ def evidence(row: ActionRow, detector: LanguageDetector, ortho: OrthoModel | Non
         if match is None:
             raise ValueError("planned frame without a next word")
         previous, context_group = {1 - row.group: match.group()}, 1 - row.group
+    if row.before_origin == "planned_previous_reading" and context_group is not None:
+        # The engine gives the detector the waiting word's other reading alone, in its layout (KeySwitchEngine.
+        # _planned_baseline), not both readings of the word before.
+        previous = {context_group: previous[context_group]}
     decision = automatic_word_decision(
         detector, row.original, {1 - row.group: alternative}, row.group,
         previous_words=previous, context_group=context_group, trigger=row.trigger,
@@ -2253,7 +2262,7 @@ def evidence(row: ActionRow, detector: LanguageDetector, ortho: OrthoModel | Non
     return evidence_for_decision(
         decision, alternative, 1 - row.group, detector, row.field, row.trigger,
         literal_tail=row.literal_tail, ortho=ortho, boundary_text=row.boundary_text,
-        after_origin=row.after_origin, identifiers=identifiers,
+        after_origin=row.after_origin, identifiers=identifiers, before_origin=cast(BeforeOrigin, row.before_origin),
     )
 
 
@@ -2266,6 +2275,7 @@ def provenance() -> dict[str, str]:
         "tools/context_lookahead_curriculum.py", "tests/test_context_lookahead_curriculum.py",
         "tools/context_deferral.py",
         "tools/train_context_model.py", "model/context_v1/captured/manifest.json", "model/context_v3/captured/manifest.json",
+        "model/context_v3/captured/manifest-hypothesis.json", "model/context_v3/captured/manifest-short.json",
         "tests/test_context_action_training.py", "tests/test_default_input_sequences.py",
         "tools/context_technical_corpus.py", "tools/merge_context_action_corpora.py",
         "tests/test_context_technical_corpus.py", "tests/test_context_action_merge.py",
@@ -2329,7 +2339,7 @@ HEAD_PREFIXES: Final = {"capitals": CAPITALS_FEATURE_PREFIX, "alone": ALONE_FEAT
                          "latin_abbreviation": LATIN_ABBREVIATION_FEATURE_PREFIX, "unknown": UNKNOWN_FEATURE_PREFIX,
                          "joined": JOINED_FEATURE_PREFIX, "term": TERM_FEATURE_PREFIX, "brief": BRIEF_FEATURE_PREFIX,
                          "first": FIRST_FEATURE_PREFIX, "variable": VARIABLE_FEATURE_PREFIX, "dotted": DOTTED_FEATURE_PREFIX,
-                         "alnum": ALNUM_FEATURE_PREFIX}
+                         "alnum": ALNUM_FEATURE_PREFIX, "hypothesis": HYPOTHESIS_FEATURE_PREFIX, "short": SHORT_FEATURE_PREFIX}
 # A recipe without single-letter frames (the recipes before corpus v34).
 NO_LETTER_CURRICULUM: Final[dict[str, object]] = {"term_sentences": 0, "english_sentences": 0, "minimum_term_count": 0,
                                                   "sample_weight": 1.0}
@@ -2378,7 +2388,7 @@ def captured_head_curriculum(split: str, options: Mapping[str, object], question
     counts: Counter[str] = Counter()
     for manifest, name in named:
         source = next(item for item in captured_sources(ROOT / manifest) if item.path.name == name)
-        for item, label, _count in captured_rows(source.path):
+        for item, label, _count in captured_rows(source.path, source.columns):
             action = ACTIONS[label]
             if action not in ("keep", "convert") or not question(item):
                 continue
@@ -2389,16 +2399,20 @@ def captured_head_curriculum(split: str, options: Mapping[str, object], question
                 # As in captured_source_curriculum: the engine plans a next word only once one was typed.
                 counts["skipped_planned_without_word"] += 1
                 continue
+            # The left context's origin joins the key only where it is a hypothesis, so that the frames of the heads fitted
+            # before it keep their identifiers.
+            hypothesis = [item.before_origin] if item.before_origin != "field" else []
             key = hashlib.sha256(canonical([category, name, item.original, item.source_group, item.trigger, item.literal_tail,
                                             item.boundary_text, origin, item.field.before, item.field.after,
-                                            item.field.role])).hexdigest()
+                                            item.field.role, *hypothesis])).hexdigest()
             identifier = f"{category}:{key}"
             field = FieldContext(applications[variant_choice(identifier, "application", len(applications))], "captured",
                                  item.field.before, item.field.after, item.field.role)
             counts[f"{name}:{action}"] += 1
             rows.append(ActionRow(identifier, item.original, item.source_group, field, cast(CorrectionTrigger, item.trigger),
                                   item.literal_tail, action, category, item.boundary_text,
-                                  weight * (convert_weight if action == "convert" else 1.0), origin))
+                                  weight * (convert_weight if action == "convert" else 1.0), origin,
+                                  before_origin=item.before_origin))
     report: dict[str, object] = {"frames": len(rows), "by_file": dict(sorted(counts.items())), "sample_weight": weight}
     if token_cap:
         # At most token_cap frames of one token with one answer, in the order of their identifiers: `1с`, written
@@ -2448,6 +2462,32 @@ def alnum_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: froz
                                     "alnum")
 
 
+def hypothesis_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                          options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """The hypothesis head's frames (captured_head_curriculum): the next word of a waiting word asked with that word's other
+    reading before it (hypothesis_question), converted where the message was typed in the wrong layout from its start
+    (`тщеб` after `If `, `If not,`) and kept where the word was typed as meant, a typo of a common word included (`тыв`
+    after `tot `, `еще тыв`). A token the recipe holds out (`held_out`) gives no frame."""
+
+    held = frozenset(str(token).casefold() for token in cast(list[str], options.get("held_out", [])))
+    return captured_head_curriculum(
+        split, options, lambda item: hypothesis_question(item) and item.original.casefold() not in held
+        and item.alternative.casefold() not in held, "hypothesis")
+
+
+def short_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                     options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """The short-token head's frames (captured_head_curriculum): a token of two or three Russian letters after Russian text
+    whose keys are Latin letters (short_question), kept where Russian text wrote it (`тз`, `дп`, `кп`) and converted where a
+    Latin term was typed in the Russian layout. A token the recipe holds out (`held_out`: `кз` and the battery's) gives no
+    frame."""
+
+    held = frozenset(str(token).casefold() for token in cast(list[str], options.get("held_out", [])))
+    return captured_head_curriculum(
+        split, options, lambda item: item.before_origin == "field" and short_question(item.original, item.field.before)
+        and item.original.casefold() not in held, "short")
+
+
 # The heads whose own frames of DEVELOPMENT choose their epoch (fit), by feature prefix: the name their epoch goes by in
 # the seal, the recipe's key of their curriculum, the curriculum, and the options of a recipe without it.
 OWN_EPOCH_HEADS: Final[dict[str, tuple[str, str, Callable[[str, Sequence[CorpusRow], frozenset[str], Mapping[str, object]],
@@ -2459,6 +2499,8 @@ OWN_EPOCH_HEADS: Final[dict[str, tuple[str, str, Callable[[str, Sequence[CorpusR
     VARIABLE_FEATURE_PREFIX: ("variable", "variable_curriculum", variable_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
     DOTTED_FEATURE_PREFIX: ("dotted", "dotted_curriculum", dotted_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
     ALNUM_FEATURE_PREFIX: ("alnum", "alnum_curriculum", alnum_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
+    HYPOTHESIS_FEATURE_PREFIX: ("hypothesis", "hypothesis_curriculum", hypothesis_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
+    SHORT_FEATURE_PREFIX: ("short", "short_curriculum", short_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
 }
 
 
@@ -2674,9 +2716,12 @@ def trainable_prefixes(options: Mapping[str, object]) -> frozenset[str] | None:
 
 
 def head_question(original: str, alternative: str, before: str, after: str, trigger: str, origin: str,
-                  prefixes: frozenset[str]) -> bool:
+                  prefixes: frozenset[str], before_origin: str = "field") -> bool:
     """Whether the features of a frame (extract_action_features) hold one of these prefixes: the frame
     asks a question of a head or of the kept-neighbour question they name."""
+
+    if HYPOTHESIS_FEATURE_PREFIX in prefixes and before_origin == "planned_previous_reading" and origin != "kept_next_word":
+        return True
 
     letter = LETTER_FEATURE_PREFIX in prefixes and letter_question(original, alternative, before)
     variable = VARIABLE_FEATURE_PREFIX in prefixes and variable_question(original, alternative, before, trigger)
@@ -2693,7 +2738,8 @@ def head_question(original: str, alternative: str, before: str, after: str, trig
             or (TERM_FEATURE_PREFIX in prefixes and term_question(original, before))
             or (BRIEF_FEATURE_PREFIX in prefixes and brief_question(original, before, after))
             or (FIRST_FEATURE_PREFIX in prefixes and first_question(original, before, after)) or variable
-            or (DOTTED_FEATURE_PREFIX in prefixes and dotted_question(original, alternative)) or alnum)
+            or (DOTTED_FEATURE_PREFIX in prefixes and dotted_question(original, alternative)) or alnum
+            or (SHORT_FEATURE_PREFIX in prefixes and before_origin == "field" and short_question(original, before)))
 
 
 def carried_prefixes(model: ContextModel) -> frozenset[str]:
@@ -3054,13 +3100,19 @@ def tail_curricula(inputs: FitInputs) -> tuple[list[ActionRow], dict[str, object
         TRAIN, inputs.source_rows[TRAIN], inputs.refused, cast(dict[str, object], options.get("dotted_curriculum", NO_CAPTURED_HEAD_CURRICULUM)))
     alnum, alnum_report = alnum_curriculum(
         TRAIN, inputs.source_rows[TRAIN], inputs.refused, cast(dict[str, object], options.get("alnum_curriculum", NO_CAPTURED_HEAD_CURRICULUM)))
+    hypothesis, hypothesis_report = hypothesis_curriculum(
+        TRAIN, inputs.source_rows[TRAIN], inputs.refused,
+        cast(dict[str, object], options.get("hypothesis_curriculum", NO_CAPTURED_HEAD_CURRICULUM)))
+    short, short_report = short_curriculum(
+        TRAIN, inputs.source_rows[TRAIN], inputs.refused, cast(dict[str, object], options.get("short_curriculum", NO_CAPTURED_HEAD_CURRICULUM)))
     return [*kept, *counted, *letter, *abbreviation, *latin_abbreviation, *unknown, *joined, *term, *brief, *first, *variable, *dotted,
-            *alnum], {
+            *alnum, *hypothesis, *short], {
         "kept_neighbour_curriculum": kept_report, "counted_token_curriculum": counted_report, "letter_curriculum": letter_report,
         "abbreviation_curriculum": abbreviation_report, "latin_abbreviation_curriculum": latin_abbreviation_report,
         "unknown_token_curriculum": unknown_report, "joined_token_curriculum": joined_report, "term_curriculum": term_report,
         "brief_curriculum": brief_report, "first_curriculum": first_report, "variable_curriculum": variable_report,
-        "dotted_curriculum": dotted_report, "alnum_curriculum": alnum_report}
+        "dotted_curriculum": dotted_report, "alnum_curriculum": alnum_report, "hypothesis_curriculum": hypothesis_report,
+        "short_curriculum": short_report}
 
 
 def prepared_frames(rows: Sequence[ActionRow], spans: SpanCurriculum, split: str) -> list[tuple[str, ActionRow | SpanFrame]]:

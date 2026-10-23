@@ -186,6 +186,8 @@ MIXED_TYPO_HEX_DIGITS: Final = 12
 MIXED_TYPO_PLACE_SHIFT: Final = 4
 MIXED_TYPO_NEIGHBOUR_SHIFT: Final = 16
 MIXED_TYPO_MIN_LETTERS: Final = 3
+# A line of a Leipzig Corpora Collection word list: an id, the word and how often the corpus holds it, tab-separated.
+LEIPZIG_WORDS_COLUMNS: Final = 3
 # A mid-word edit, as the insert package makes it: a word of at least four letters loses one letter,
 # or two if it has five or more, at a place drawn from the given bits; the letters are typed back one
 # key at a time, then the pause that corrects them.
@@ -204,6 +206,10 @@ MIXED_TYPING_CHUNK_JOBS: Final = 8
 # preset of the captured question files.
 MIXED_EVALUATE_RUSSIAN_SHARE: Final = 0.25
 MIXED_CAPTURE_XZ_PRESET: Final = 9
+# The schemas of a captured question manifest: the first one's rows, and the second one's, which say how the text before
+# the word was given too (ContextEvidence.before_origin).
+CAPTURED_SCHEMA_VERSION: Final = 1
+CAPTURED_SCHEMA_LEFT_ORIGIN_VERSION: Final = 2
 # The text column of a Tatoeba sentence export (id, language, text), and the two kinds of previous
 # line a typed message is put under: a line of code or another message.
 TATOEBA_TEXT_COLUMN: Final = 2

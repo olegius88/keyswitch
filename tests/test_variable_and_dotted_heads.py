@@ -28,7 +28,7 @@ from keyswitch.context_action_features import dotted_question, extract_action_fe
 from keyswitch.context_model import ACTIONS, AfterOrigin, ContextEvidence, ContextModel  # noqa: E402
 from keyswitch.input_context import FieldContext  # noqa: E402
 from test_context_policy import ContextEngineTests  # noqa: E402
-from test_context_training_captured import captured_line  # noqa: E402
+from test_context_training_captured import captured_line, captured_question  # noqa: E402
 from test_early_switch_settling import ScriptedActionModel  # noqa: E402
 from test_stranded_letters import letters  # noqa: E402
 
@@ -181,10 +181,10 @@ class CapturedHeadCurriculumTests(unittest.TestCase):
 
 class CaptureSelectionTests(unittest.TestCase):
     def test_a_capture_keeps_the_questions_of_one_heads_class(self) -> None:
-        self.assertTrue(mixed_typing.CAPTURED_QUESTIONS["variable"]("ч", "x", "для ", "space"))
-        self.assertFalse(mixed_typing.CAPTURED_QUESTIONS["variable"]("и", "b", "для ", "space"))
-        self.assertFalse(mixed_typing.CAPTURED_QUESTIONS["variable"]("ч", "x", "для ", "pause"))
-        self.assertTrue(mixed_typing.CAPTURED_QUESTIONS["dotted"]("n/r/", "т.к.", "", "space"))
+        self.assertTrue(mixed_typing.CAPTURED_QUESTIONS["variable"](captured_question("ч", "x", "для ", "space")))
+        self.assertFalse(mixed_typing.CAPTURED_QUESTIONS["variable"](captured_question("и", "b", "для ", "space")))
+        self.assertFalse(mixed_typing.CAPTURED_QUESTIONS["variable"](captured_question("ч", "x", "для ", "pause")))
+        self.assertTrue(mixed_typing.CAPTURED_QUESTIONS["dotted"](captured_question("n/r/", "т.к.", "", "space")))
 
     def test_messages_with_a_token_of_the_class_are_chosen_by_question(self) -> None:
         self.assertTrue(selection.variable_token("для", "x,"))

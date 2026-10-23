@@ -19,6 +19,12 @@ messages of one question are typed for one split only:
   every one of them can be typed, they are few) and `dotted-russian` (a Russian abbreviation and no Latin token of the
   class: the abbreviations are few and repeat, a sample of them is typed).
 
+- opening-short: a message whose first token is a word of at most three letters, the words the engine waits on before
+  it decides them with the next word (`еще`, `не`, `If`): the questions the hypothesis head answers come from such
+  messages. Tatoeba messages (`--prefix tatoeba-chat`) are taken only among the sentences the captured training questions
+  were already typed from (`--only-ids`, model/context_v1/captured/tatoeba-authors.tsv.xz), which no corpus split holds
+  (freeze_context_action_holdout.captured_tatoeba_identifiers).
+
     python3 tools/select_capture_messages.py --messages <so-train.jsonl.gz> --members <devchat-*.members.jsonl.gz> ... \\
         --class variable --development-share 0.2 --out <dir>
 """
@@ -37,7 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from keyswitch.constants.file_formats import HEXADECIMAL_BASE  # noqa: E402
 from keyswitch.constants.training import DETERMINISTIC_CHOICE_HEX_DIGITS  # noqa: E402
-from keyswitch.constants.models import ALNUM_HEAD_MAX_CHARACTERS  # noqa: E402
+from keyswitch.constants.models import ALNUM_HEAD_MAX_CHARACTERS, OPENING_SHORT_MAX_LETTERS  # noqa: E402
 from keyswitch.context_action_features import dotted_question, letters_and_digits  # noqa: E402
 from keyswitch.layouts import LayoutPair  # noqa: E402
 from keyswitch.short_words import TRUSTED_SINGLE_LETTER_WORDS  # noqa: E402
@@ -101,6 +107,13 @@ def russian_alnum_token(previous: str, token: str) -> bool:
     return not token.strip(ALNUM_EDGE_SIGNS).isascii() and alnum_token(previous, token)
 
 
+def opening_short(text: str) -> bool:
+    tokens = text.split()
+    return bool(tokens) and tokens[0].isalpha() and len(tokens[0]) <= OPENING_SHORT_MAX_LETTERS
+
+
+# Classes of a whole message rather than of one of its tokens.
+MESSAGE_CLASSES: dict[str, Callable[[str], bool]] = {"opening-short": opening_short}
 CLASSES: dict[str, Callable[[str, str], bool]] = {"variable": variable_token, "dotted": dotted_token,
                                                   "dotted-latin": latin_dotted_token, "dotted-russian": russian_dotted_token,
                                                   "alnum-latin": latin_alnum_token, "alnum-russian": russian_alnum_token}
@@ -127,19 +140,37 @@ def split_of(question: int, development_share: float) -> str:
     return "dev" if draw < development_share else "train"
 
 
-def select(messages: Path, members: Sequence[Path], name: str, development_share: float, out: Path) -> dict[str, object]:
-    token_of_class = CLASSES[name]
+def listed_ids(path: Path | None) -> frozenset[int] | None:
+    """The sentence ids a Tatoeba authors file names (`<id> TAB <author>` lines), or None without one."""
+
+    if path is None:
+        return None
+    import lzma
+
+    with lzma.open(path, "rt", encoding="utf-8") as stream:
+        return frozenset(int(line.split("\t", 1)[0]) for line in stream if line[:1].isdigit())
+
+
+def select(messages: Path, members: Sequence[Path], name: str, development_share: float, out: Path,
+           prefix: str = "so", only: Path | None = None) -> dict[str, object]:
+    message_of_class = MESSAGE_CLASSES.get(name)
+    token_of_class = CLASSES.get(name)
     other = CLASSES[EXCLUDED_BY[name]] if name in EXCLUDED_BY else None
     left_out = excluded_questions(members)
+    allowed = listed_ids(only)
     out.mkdir(parents=True, exist_ok=True)
     counts: dict[str, int] = {"train": 0, "dev": 0, "left_out": 0}
-    paths = {split: out / f"so-{name}-{split}.jsonl.gz" for split in ("train", "dev")}
+    paths = {split: out / f"{prefix}-{name}-{split}.jsonl.gz" for split in ("train", "dev")}
     handles = {split: gzip.open(path, "wt", encoding="utf-8") for split, path in paths.items()}
     try:
         with gzip.open(messages, "rt", encoding="utf-8") as source:
             for line in source:
                 row = json.loads(line)
-                if not holds(str(row["text"]), token_of_class) or (other is not None and holds(str(row["text"]), other)):
+                text = str(row["text"])
+                if (message_of_class is not None and not message_of_class(text)) or (
+                        token_of_class is not None and not holds(text, token_of_class)) or (other is not None and holds(text, other)):
+                    continue
+                if allowed is not None and int(row["qid"]) not in allowed:
                     continue
                 if int(row["qid"]) in left_out:
                     counts["left_out"] += 1
@@ -158,11 +189,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--messages", type=Path, required=True)
     parser.add_argument("--members", type=Path, action="append", default=[], help="a developer-chat members file (repeatable)")
-    parser.add_argument("--class", dest="name", choices=sorted(CLASSES), required=True)
+    parser.add_argument("--class", dest="name", choices=sorted({*CLASSES, *MESSAGE_CLASSES}), required=True)
     parser.add_argument("--development-share", type=float, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--prefix", default="so", help="the name the written files start with")
+    parser.add_argument("--only-ids", type=Path, help="a Tatoeba authors file (.tsv.xz): only the sentences it names")
     args = parser.parse_args(argv)
-    print(json.dumps(select(args.messages, args.members, args.name, args.development_share, args.out), indent=1))
+    print(json.dumps(select(args.messages, args.members, args.name, args.development_share, args.out, args.prefix,
+                            args.only_ids), indent=1))
     return 0
 
 

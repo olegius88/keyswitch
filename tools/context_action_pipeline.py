@@ -748,10 +748,10 @@ def head_frame(frame: Frame, prefixes: frozenset[str]) -> bool:
     """Whether a frame asks a question of one of the heads (or the kept-neighbour question) these prefixes name."""
     if isinstance(frame, trainer.ActionRow):
         return trainer.head_question(frame.original, trainer.translated(frame.original, frame.group), frame.field.before,
-                                     frame.field.after, frame.trigger, frame.after_origin, prefixes)
+                                     frame.field.after, frame.trigger, frame.after_origin, prefixes, frame.before_origin)
     item = frame.evidence
     return trainer.head_question(item.original, item.alternative, item.field.before, item.field.after, item.trigger,
-                                 item.after_origin, prefixes)
+                                 item.after_origin, prefixes, item.before_origin)
 
 
 

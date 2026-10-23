@@ -2919,8 +2919,12 @@ class KeySwitchEngine:
         """The next word's decision after the waiting word's other reading.
 
         The detector gets that reading as its previous word and the model gets it
-        in front of the caret, exactly as they would after a word typed in that
-        layout. Nothing is decided here that the model does not decide.
+        in front of the caret, as they would after a word typed in that layout, and
+        the model is told that the reading is the engine's hypothesis, not text that
+        was typed (before_origin): read as typed text, a reading of English letters
+        before a word that is no word of either layout turned it into its Latin
+        reading, `тыв` after `tot ` into `nsd` (`еще тыв`, the owner's typing). Nothing
+        is decided here that the model does not decide.
         """
 
         previous = waiting.plan
@@ -2932,6 +2936,7 @@ class KeySwitchEngine:
             baseline, alternative, group, self.detector,
             "pause" if boundary is None else self._trigger_for_boundary(boundary), "assist",
             field_override=replace(waiting.field, before=waiting.field.before + reading + boundary_character),
+            before_origin="planned_previous_reading",
         )
         return result.decision if result.decision.should_convert else None
 

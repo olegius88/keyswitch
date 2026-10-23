@@ -1,0 +1,77 @@
+{
+ "schema_version": 2,
+ "columns": [
+  "count",
+  "original",
+  "alternative",
+  "source_group",
+  "trigger",
+  "baseline_convert",
+  "source_known",
+  "target_known",
+  "score_delta",
+  "literal_tail",
+  "boundary_text",
+  "after_origin",
+  "before_origin",
+  "source_typo",
+  "target_typo",
+  "source_opening",
+  "target_opening",
+  "inside",
+  "before",
+  "after",
+  "role",
+  "label"
+ ],
+ "sources": [
+  {
+   "file": "so-short-dev.jsonl.xz",
+   "weight": 1.0,
+   "recipe": {
+    "messages": "so-dev.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 12000,
+    "russian_share": 1.0,
+    "seed": "capture-short-so-dev",
+    "prefix_rate": 0.4,
+    "questions": "short"
+   },
+   "sha256": "179f637bbda35c20d20d66e6ae20dadfac6f1c0a4c582700369dd3712e612070",
+   "rows": 111195,
+   "unique": 43538,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "12 000 messages with Latin words and 12 000 Russian ones of the development split, four typing modes, 40 % under a previous line; the short-token head's questions alone"
+  },
+  {
+   "file": "taiga-short-dev.jsonl.xz",
+   "weight": 1.0,
+   "balance": false,
+   "recipe": {
+    "messages": "taiga-chat-dev.jsonl.gz",
+    "kinds": [
+     "taiga_chat"
+    ],
+    "count": 2000,
+    "russian_share": 10.0,
+    "seed": "capture-short-taiga-chat-dev",
+    "prefix_rate": 0.6,
+    "labels": [
+     "keep"
+    ],
+    "questions": "short"
+   },
+   "sha256": "07fd849b15330d6c10b36327a8ad11e749818157b2b218d65faddf9f20184dfc",
+   "rows": 2492,
+   "unique": 1286,
+   "license": "CC BY-SA 4.0 (UD Russian-Taiga: CC BY-SA 4.0)",
+   "origin": "UD Russian-Taiga r2.18 (d1e48cd2), development part",
+   "typing": "chat style: lowercase, no final sign; only `keep` answers; the short-token head's questions alone"
+  }
+ ]
+}

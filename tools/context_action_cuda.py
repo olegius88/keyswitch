@@ -91,7 +91,8 @@ from keyswitch.constants.training import (
 from keyswitch.constants.models import FNV1A64_OFFSET_BASIS, FNV1A64_PRIME
 from keyswitch.context_action_features import (
     abbreviation_question, alnum_question, alone_question, brief_question, capitals_question, joined_question,
-    latin_abbreviation_question, letter_question, start_question, term_question, unknown_question, variable_question,
+    latin_abbreviation_question, letter_question, short_question, start_question, term_question, unknown_question,
+    variable_question,
 )
 from keyswitch.context_model import AfterOrigin, ContextEvidence, _term_frequency
 from keyswitch.detector import PROTECTED_TOKENS
@@ -611,14 +612,15 @@ RECORD = np.dtype([("source", "f8", SCORE_COUNT), ("target", "f8", SCORE_COUNT),
                    ("flags", "i8"), ("source_group", "i8"), ("after_origin", "i8")])
 
 
-def heads_question(original: str, before: str, after: str, trigger: str) -> bool:
+def heads_question(original: str, before: str, after: str, trigger: str, before_origin: str = "field") -> bool:
     """Whether a frame may have a head's second copy of its features or a head's own evidence, which the kernels do
     not make.
 
     The lone-word, message-start, single-letter, abbreviation and variable heads' classes also ask for the other reading
     to be letters, the dotted-abbreviation head's for it to be letter groups joined by dots (a token typed with `/`), and
     the letters-and-digits head's for it to be letters and digits; every frame they could hold takes the CPU path, which
-    decides that as the features do.
+    decides that as the features do. A question asked with a hypothesis before the word (before_origin) is the
+    hypothesis head's, whose baseline the kernels do not build either.
     """
 
     return (capitals_question(original, before) or alone_question(original, original, before, after, trigger)
@@ -627,7 +629,8 @@ def heads_question(original: str, before: str, after: str, trigger: str) -> bool
             or unknown_question(original, before) or joined_question(original) or term_question(original, before)
             or brief_question(original, before, after) or variable_question(original, original, before, trigger)
             or ("/" in original and original.isascii())
-            or alnum_question(original, "".join(_RU_TO_US.get(char, char) for char in original), before))
+            or alnum_question(original, "".join(_RU_TO_US.get(char, char) for char in original), before)
+            or before_origin != "field" or short_question(original, before))
 
 
 def opening_letter_followed(original: str, literal_tail: str, boundary_text: str) -> bool:
@@ -750,7 +753,8 @@ class Items:
                 fits[number] = (row.trigger in trigger_index and row.after_origin in origin_index
                                 and row.after_origin != "kept_next_word" and not row.revisit
                                 and not (split == TRAIN and trainer.term_counts_dropped(row.identifier, row.original))
-                                and not heads_question(row.original, row.field.before, row.field.after, row.trigger)
+                                and not heads_question(row.original, row.field.before, row.field.after, row.trigger,
+                                                       row.before_origin)
                                 and not opening_letter_followed(row.original, row.literal_tail, row.boundary_text)
                                 and row.group in range(LAYOUT_GROUP_COUNT))
                 dropped[number] = split == TRAIN and trainer.identifier_evidence_dropped(row.identifier)
@@ -762,7 +766,8 @@ class Items:
                           evidence.trigger, evidence.literal_tail, evidence.boundary_text)
                 self.span_records[number] = record_of(evidence)
                 span_alternatives.append((number, evidence.alternative))
-                fits[number] = not heads_question(evidence.original, field.before, field.after, evidence.trigger)
+                fits[number] = not heads_question(evidence.original, field.before, field.after, evidence.trigger,
+                                                  evidence.before_origin)
             for column, value in enumerate(values):
                 strings[column].append(value)
         host_columns = [encode(texts) for texts in strings]
