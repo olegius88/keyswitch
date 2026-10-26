@@ -159,7 +159,7 @@ a newer version exists, the per-user installer runs silently; KeySwitch exits
 and starts minimized again after installation. Automatic checking and
 installation can be disabled independently.
 
-To run from source on Windows:
+To run from source on Windows, with Python 3.11 or newer:
 
 ```powershell
 py -m venv .venv

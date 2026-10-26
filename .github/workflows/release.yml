@@ -641,7 +641,7 @@ jobs:
           # pwsh reports only the last command's exit code; without this a
           # failing command earlier in the step would leave it green.
           $PSNativeCommandUseErrorActionPreference = $true
-          python -m pip install coverage==7.16.2 mypy==2.4.0 Nuitka==4.3 ordered-set==4.1.0 pystray==0.19.5 Pillow==12.3.0 comtypes==1.4.17
+          python -m pip install coverage==7.16.2 mypy==2.4.0 Nuitka==4.3 ordered-set==4.1.0 pystray==0.19.5 Pillow==13.0.0 comtypes==1.4.17
           python -m pip install --no-deps PyGObject-stubs==2.17.0
           # NumPy's stubs for the trainer's back ends, from 2.2.6 (tools/install-typing-tools.sh says why).
           # Only its .pyi files are read, so the x64 wheel serves the ARM64 runner too.
@@ -783,7 +783,7 @@ jobs:
           # pwsh reports only the last command's exit code; without this a
           # failing command earlier in the step would leave it green.
           $PSNativeCommandUseErrorActionPreference = $true
-          python -m pip install Nuitka==4.3 ordered-set==4.1.0 pystray==0.19.5 Pillow==12.3.0 comtypes==1.4.17
+          python -m pip install Nuitka==4.3 ordered-set==4.1.0 pystray==0.19.5 Pillow==13.0.0 comtypes==1.4.17
 
       - name: Build and self-diagnose native ZIP and Inno Setup installer
         shell: pwsh

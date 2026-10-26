@@ -4,6 +4,13 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- Update Pillow, which the Windows builds use to draw the tray and application icons, from 12.3.0 to 13.0.0: the
+  security advisories published against Pillow 12.3.0 and older (memory errors and endless loops in the readers and
+  writers of image formats such as JPEG, TIFF, PDF and GIF, among them GHSA-8g5g-8vmr-9782 and GHSA-332p-7hrc-92wf) are
+  fixed in 13.0.0. KeySwitch draws its icons with Pillow and opens no image files with it, but the library is packed
+  into the Windows installers and archives. The icons come out pixel for pixel the same. Running KeySwitch from source on
+  Windows (`pip install -e ".[windows]"`) now needs Python 3.11 or newer, the oldest one Pillow 13.0.0 supports.
+
 ## 0.62.0 — 2026-10-23
 
 - A word that follows a short first word and is no word as typed, though one typo from a common word of its language,

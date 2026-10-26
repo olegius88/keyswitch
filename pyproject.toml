@@ -17,7 +17,7 @@ keyswitch = "keyswitch.launcher:main"
 [project.optional-dependencies]
 windows = [
     "comtypes==1.4.17",
-    "Pillow==12.3.0",
+    "Pillow==13.0.0",
     "pystray==0.19.5",
 ]
 typing = [
