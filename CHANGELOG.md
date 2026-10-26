@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.63.0 — 2026-10-26
+
 - A Latin variable of one letter typed in the Russian layout after a Russian word is asked about again when an operator
   sign follows it, and converted when the model is sure: typed in the Russian layout, `пусть y = x` was left
   `пусть н = ч` and `берём n + 1` was left `берём т + 1`. The letter was decided at its own space, where a variable and
