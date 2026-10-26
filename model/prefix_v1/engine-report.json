@@ -277,7 +277,7 @@
     "model/prefix_v1/candidate.json": "d6396beecbeee08a6d9165f1aea0b9316a3a75b5f986e464b99a5a1ba738ac7a",
     "model/prefix_v1/corpus.json": "1b037e3ce0ae5a282a1cf21c318aa1ff26dc4c142ffc4db9a58dc037e90f21ff",
     "model/prefix_v1/seal.json": "f002c1104db744049816e9415f21878a38308c681ba011b9b68ab15bf789d2c8",
-    "src/keyswitch/__init__.py": "f5a98ced317a7107760a9296c916add038bec457aff3f790be199a721029bd3f",
+    "src/keyswitch/__init__.py": "bdebbd06da21127ddfda893528836972c95a68a3e8a7936b8e756ddde537a028",
     "src/keyswitch/__main__.py": "1dcdb6d6ff34e04cdbc21446c00a5c5f61c3059429eac0f6f863291a7a314fbe",
     "src/keyswitch/app.py": "1956e72601c6c17119febd10cead0658812ad6c564ec2b478e602d7ed1c4513c",
     "src/keyswitch/app_quirks.py": "760763d3c50a85c19239a90e246d65e105e91ae918660445e8286d137836a214",
