@@ -79,6 +79,10 @@ from .constants.models import (
     SHORT_HEAD_MIN_RUSSIAN_BUCKET,
     SHORT_MAGNITUDE_MAX,
     SHORT_RATIO_BOUND,
+    SIGN_DASH,
+    SIGN_FEATURE_PREFIX,
+    SIGN_OPERATOR_SIGNS,
+    SIGN_TOKEN_MAX_CHARACTERS,
     TERM_FEATURE_PREFIX,
     VARIABLE_CODE_CONTEXT_CHARACTERS,
     VARIABLE_CODE_SIGNS,
@@ -437,6 +441,10 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         if variable_question(item.original, item.alternative, item.field.before, item.trigger):
             # Nor a letter after a word of Cyrillic letters: the variable head answers there too.
             kept.update(_variable_evidence(item))
+        if sign_question(item.original, item.alternative, item.field.before, item.field.after, item.trigger, origin):
+            # And a sign after such a letter is evidence the variable head reads as no script at all: asked with `=` after
+            # it, `ч` of `для ч = 0` was kept at p=0.95 (the sign head).
+            kept.update(_sign_evidence(item))
         if alnum_question(item.original, item.alternative, item.field.before):
             # Nor a token of letters and digits: asked again with `как` kept after it, the question kept `м67` at p=1.00
             # where `v67` was meant (the owner's typing, 19.10.2026).
@@ -1033,6 +1041,62 @@ def _variable_evidence(item: ContextEvidence) -> dict[str, float]:
     names = ("bias", letter, boundary, f"word:{previous}", *rest, f"{letter}:{boundary}",
              *(f"{head}:{name}" for head in (letter, boundary) for name in rest))
     return {f"{VARIABLE_FEATURE_PREFIX}{name}": 1.0 for name in names}
+
+
+def sign_question(original: str, alternative: str, before: str, after: str, trigger: str, origin: str) -> bool:
+    """A letter of the variable head's class (variable_question) asked once more with the token after it given as kept
+    text (after_origin kept_next_word), that token holding no letter and no dash alone (sign_token_asked): a sign, signs or
+    digits (`ч =`, `м +`, `ч 2`). The engine asks a kept letter so when a token that reads alike in both layouts follows it
+    (_decide_letter_before_sign), and a waiting one before any token kept as typed (_decide_with_kept_neighbour). In a
+    question about code the letter is a Latin variable; before a number in Russian prose it is meant as written (`ГОСТ Р
+    54960`). The question reads only the letter, the text around it and the origin, as the trainer and the GPU path route
+    frames by them."""
+
+    return (origin == "kept_next_word" and sign_token_asked((after.split() or [""])[0])
+            and variable_question(original, alternative, before, trigger))
+
+
+def sign_token_asked(token: str) -> bool:
+    """Whether a letter is asked again with this token after it: one holding no letter that is no dash alone (SIGN_DASH)."""
+
+    return bool(token.strip(SIGN_DASH)) and not any(char.isalpha() for char in token)
+
+
+def _sign_token(after: str) -> str:
+    token = (after.split() or [""])[0]
+    if token.isdigit():
+        return "digits"
+    return token if len(token) <= SIGN_TOKEN_MAX_CHARACTERS else "other"
+
+
+def _sign_kind(after: str) -> str:
+    token = (after.split() or [""])[0]
+    if token.isdigit():
+        return "digits"
+    return "operator" if all(char in SIGN_OPERATOR_SIGNS for char in token) else "other"
+
+
+def _sign_evidence(item: ContextEvidence) -> dict[str, float]:
+    """The sign head's evidence, all it reads beside the kept-neighbour question's: the token after the letter itself (up
+    to SIGN_TOKEN_MAX_CHARACTERS signs, or digits, or longer) and its kind (an operator, digits, other), the letter, its
+    case, how often Russian prose uses the
+    word before it, and whether the text before holds signs of code (VARIABLE_CODE_SIGNS), Latin letters or digits, each
+    also read with the token and with its kind; the letter alone, as the two Russian `м +` of the Leipzig sentences (`50 кв
+    м + балкон`) outweighed every `м` before a formula sign once read with the sign (candidate v76 e3). The variable head
+    reads every such token as the same script: `=` after `для ч` went the way of the dash in `е - все то, что`."""
+
+    from .context_model import term_bucket
+
+    tail = item.field.before[-VARIABLE_CODE_CONTEXT_CHARACTERS:]
+    previous = item.field.before.split()[-1].casefold()
+    token, kind = f"token:{_sign_token(item.field.after)}", f"kind:{_sign_kind(item.field.after)}"
+    letter = f"letter:{item.original.casefold()}"
+    rest = (f"case:{'upper' if item.original.isupper() else 'lower'}",
+            f"previous:{term_bucket(previous, 'russian')}", f"code:{int(any(char in VARIABLE_CODE_SIGNS for char in tail))}",
+            f"latin:{int(any('a' <= char.casefold() <= 'z' for char in tail))}",
+            f"digit:{int(any(char.isdigit() for char in tail))}")
+    names = ("bias", token, kind, letter, *rest, *(f"{head}:{name}" for head in (token, kind) for name in rest))
+    return {f"{SIGN_FEATURE_PREFIX}{name}": 1.0 for name in names}
 
 
 _DOTTED_READING: Final = re.compile(

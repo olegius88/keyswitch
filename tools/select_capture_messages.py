@@ -25,6 +25,8 @@ messages of one question are typed for one split only:
   were already typed from (`--only-ids`, model/context_v1/captured/tatoeba-authors.tsv.xz), which no corpus split holds
   (freeze_context_action_holdout.captured_tatoeba_identifiers).
 - slippable: a message with two words of Russian letters in a row, for the slip typing mode (tools/mixed_typing.py).
+- formula: a message with a one-letter token of the variable class followed by a token of signs or digits that reads
+  alike in both layouts and is no dash alone (`если x = 0`, `ГОСТ Р 54960`), for the sign head's question.
 
     python3 tools/select_capture_messages.py --messages <so-train.jsonl.gz> --members <devchat-*.members.jsonl.gz> ... \\
         --class variable --development-share 0.2 --out <dir>
@@ -43,9 +45,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from keyswitch.constants.file_formats import HEXADECIMAL_BASE  # noqa: E402
+from keyswitch.constants.keyboard import LAYOUT_ALIKE_SIGNS  # noqa: E402
 from keyswitch.constants.training import DETERMINISTIC_CHOICE_HEX_DIGITS  # noqa: E402
 from keyswitch.constants.models import ALNUM_HEAD_MAX_CHARACTERS, OPENING_SHORT_MAX_LETTERS  # noqa: E402
-from keyswitch.context_action_features import dotted_question, letters_and_digits  # noqa: E402
+from keyswitch.context_action_features import dotted_question, letters_and_digits, sign_token_asked  # noqa: E402
 from keyswitch.layouts import LayoutPair  # noqa: E402
 from keyswitch.short_words import TRUSTED_SINGLE_LETTER_WORDS  # noqa: E402
 
@@ -121,8 +124,27 @@ def slippable(text: str) -> bool:
                for first, second in zip(tokens, tokens[1:]))
 
 
+def reads_alike(token: str) -> bool:
+    """A token of signs or digits the Russian layout types as the English one does (`+`, `=`, `==`, `2`); not a backslash,
+    the markdown escape of the dump (`\\-`), which nobody types."""
+
+    return bool(token) and all(char.isdigit() or char in LAYOUT_ALIKE_SIGNS for char in token)
+
+
+def formula(text: str) -> bool:
+    """A one-letter token of the variable class (variable_token, nothing after the letter) followed by a token that reads
+    alike in both layouts and is no dash alone: the engine asks the letter again at that token
+    (engine._decide_letter_before_sign), the sign head's question. A Latin letter there is a variable before a formula sign
+    (`если x = 0`), a Cyrillic one a letter meant as written before a number (`ГОСТ Р 54960`)."""
+
+    tokens = text.split()
+    return any(len(token) == 1 and variable_token(previous, token) and reads_alike(following) and sign_token_asked(following)
+               for previous, token, following in zip(["", *tokens], tokens, tokens[1:]))
+
+
 # Classes of a whole message rather than of one of its tokens.
-MESSAGE_CLASSES: dict[str, Callable[[str], bool]] = {"opening-short": opening_short, "slippable": slippable}
+MESSAGE_CLASSES: dict[str, Callable[[str], bool]] = {"opening-short": opening_short, "slippable": slippable,
+                                                     "formula": formula}
 CLASSES: dict[str, Callable[[str, str], bool]] = {"variable": variable_token, "dotted": dotted_token,
                                                   "dotted-latin": latin_dotted_token, "dotted-russian": russian_dotted_token,
                                                   "alnum-latin": latin_alnum_token, "alnum-russian": russian_alnum_token}

@@ -53,7 +53,7 @@ from .language_model import LanguageModel, WordScore
 from .layouts import RU_KEYS, US_KEYS, LayoutPair
 from .lexicon_supplement import supplement_words
 from .learning import LearnedRule, LearningStore, RuleAction
-from .context_action_features import term_question
+from .context_action_features import sign_token_asked, term_question, variable_question
 from .log_privacy import LogRedactor
 from .intent_model import CorrectionTrigger, LinearNgramModel
 from .context_policy import (
@@ -1791,6 +1791,10 @@ class KeySwitchEngine:
                   and (alone := self._decide_with_kept_neighbour(waiting, strokes, boundary, decision, application))):
                 # The waiting word converts on its own; its kept neighbour stays as it was typed.
                 pass
+            elif (waiting is None and not (head or trailing or signs or switched) and not decision.should_convert
+                  and (alone := self._decide_letter_before_sign(kept, strokes, boundary, decision, application))):
+                # The kept letter converts with the sign after it; nothing before it is taken along any more.
+                kept = ()
             elif waiting is not None and not head and (trailing or signs or not decision.should_convert):
                 # A waiting word whose neighbour did not convert either may still be settled by a
                 # later word (`тщ ш`, then `огые`); one the model declined with a converted
@@ -2870,12 +2874,82 @@ class KeySwitchEngine:
         self._technical_event("context_wait_resolved", wait_id=waiting.diagnostic_id,
                               previous_characters=len(previous.original), next_characters=len(decision.original),
                               next_word_kept=True)
+        return self._word_before_kept(previous, strokes, boundary, group, alternative, decision.original,
+                                      result.decision.confidence, application)
+
+    def _word_before_kept(
+        self, previous: CorrectionPlan, strokes: tuple[KeyEvent, ...], boundary: KeyEvent, group: int, alternative: str,
+        following: str, confidence: float, application: str,
+    ) -> CorrectionPlan:
+        """The correction of a word converted alone before the token after it, which stays as typed.
+
+        A token the other layout types the same (`+`, `=`, `2`) is no text of either language: typed again in the target
+        layout it is what it was, so the correction covers it as well, and the layout follows the converted word. With
+        the token kept in its own layout (kept_tail), `м + ` became `v + ` and the next letter of the formula came out
+        Russian again: `v + ы`, and a lone letter there is refused. A word is typed again in its own layout, which stays.
+        """
+
+        assert previous.boundary is not None
+        alike = (self._text_for_group(strokes, group) == following and not any(char.isalpha() for char in following))
         return CorrectionPlan(
             previous.strokes + (previous.boundary,) + strokes, boundary, previous.source_group, group,
-            original, alternative + previous.boundary.character + decision.original,
-            result.decision.confidence, application, True, "context_word", self._context_field_id(),
-            kept_tail=len(strokes),
+            previous.original + previous.boundary.character + following,
+            alternative + previous.boundary.character + following,
+            confidence, application, True, "context_word", self._context_field_id(),
+            kept_tail=0 if alike else len(strokes),
         )
+
+    def _decide_letter_before_sign(
+        self, kept: tuple[KeptWord, ...], strokes: tuple[KeyEvent, ...], boundary: KeyEvent,
+        decision: DetectionDecision, application: str,
+    ) -> CorrectionPlan | None:
+        """A letter kept at its space, asked once more when a token the other layout types the same follows it.
+
+        `м` after `прохождения ` is kept: a Russian letter there is as likely meant as written (`да я про то ч`), and
+        the model kept it at p=0.94. A sign after it is evidence the word itself never had: `м + ` is the formula
+        `v + ` typed in the Russian layout (the owner's typing, 19.10.2026, which he corrected with Pause). The letter
+        is asked with the sign after it, the question a waiting letter is asked before its kept neighbour
+        (_decide_with_kept_neighbour), and only a letter of the class the variable and sign heads answer
+        (context_action_features.sign_question): a one-letter word of the Russian layout after a Cyrillic word, no
+        Russian word of one letter, before a token that is no dash alone (a dash tells a minus from the dash of a
+        sentence only by what follows it). The model decides; a conversion takes the sign along (_word_before_kept).
+        """
+
+        if not kept:
+            return None
+        word = kept[-1]
+        previous = word.plan
+        model = self.context_policy.model
+        if (
+            model is None or model.feature_version != CONTEXT_ACTION_FEATURE_VERSION
+            or word.baseline is None or word.field is None or word.segmentation_open
+            or previous.boundary is None or previous.boundary.character != " "
+            or boundary.character != " " or boundary.deferred
+            or not decision.original or any(char.isspace() for char in decision.original)
+            or not sign_token_asked(decision.original)
+            or self._text_for_group(strokes, previous.target_group) != decision.original
+            or not variable_question(previous.original, self._text_for_group(previous.strokes, previous.target_group),
+                                     word.field.before, "space")
+            or time.monotonic() > word.deadline or word.window != (self._focus_window or 0)
+            or previous.application != application or previous.source_group != decision.source_group
+            or any(stroke.group != previous.source_group for stroke in (*previous.strokes, *strokes))
+            or not self.context_policy.stream.text.endswith(
+                previous.original + previous.boundary.character + decision.original + boundary.character)
+        ):
+            return None
+        group = previous.target_group
+        alternative = self._text_for_group(previous.strokes, group)
+        result = self.context_policy.decide(
+            word.baseline, alternative, group, self.detector, "space", "assist",
+            after=decision.original, field_override=word.field,
+            boundary_text=previous.boundary.character, after_origin="kept_next_word",
+        )
+        self._technical_event("kept_letter_asked", previous_characters=len(previous.original),
+                              next_characters=len(decision.original), converted=result.decision.should_convert)
+        if not result.decision.should_convert:
+            return None
+        return self._word_before_kept(previous, strokes, boundary, group, alternative, decision.original,
+                                      result.decision.confidence, application)
 
     def _provisional_after_pause(
         self, paused: ProvisionalWord | None, strokes: tuple[KeyEvent, ...], source_group: int, boundary: KeyEvent,

@@ -26,3 +26,6 @@ POINTER_EVENT_GROUP: Final = -1
 # Key name of a key event that carries a character instead of a key position (VK_PACKET on
 # Windows, sent with KEYEVENTF_UNICODE by remote control and on-screen keyboards).
 UNICODE_PACKET_KEY_NAME: Final = "Packet"
+# The signs the Russian layout types on the same keys as the US one, Shift included; with the digits they read alike
+# in both layouts (`<`, `>`, `/`, `^` type `Б`, `Ю`, `.`, `:` there).
+LAYOUT_ALIKE_SIGNS: Final = "-=!%*()_+"

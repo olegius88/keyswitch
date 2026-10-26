@@ -235,6 +235,22 @@ SLIP_PROBABILITY_BANDS: Final = 10
 SLIP_ORTHO_BAND_WIDTH: Final = 5.0
 SLIP_ORTHO_BANDS: Final = 4
 SLIP_BEFORE_MAGNITUDE_STEP: Final = 4
+# A letter of the variable head's class kept at its space and asked once more with the token after it, when that token
+# holds no letter, has evidence of its own under this prefix: the sign head (context_action_features.sign_question). A
+# Latin variable typed in the Russian layout before a formula sign stayed: `м` in `прохождения м + ` was kept at p=0.94
+# and never asked again, and `ч` waiting before `=` was kept at p=0.95 (the owner's typing, 19.10.2026): the variable head
+# reads every sign, dash and digit after the letter as one script.
+SIGN_FEATURE_PREFIX: Final = "sign|"
+# The head reads a token of signs after the letter as itself up to this many characters (`=`, `+`, `==`, `+=`), one of
+# digits as digits, and anything longer as one kind.
+SIGN_TOKEN_MAX_CHARACTERS: Final = 2
+# A token of dashes alone is no question of the head: after a letter in Russian prose it is the dash of a sentence
+# (`серия М - это`, `буква е - пятая`), in a formula a minus (`n - 1`), and only the token after it tells them apart. Fitted
+# with it, candidate v76 e2 turned 3 of 10 such Russian letters of the Leipzig development sentences into Latin ones.
+SIGN_DASH: Final = "-"
+# The signs of an operator (`=`, `+`, `==`, `+=`, `*`, `%`): read as one kind beside the token itself, so that a sign the
+# captured messages hold rarely (`+`, 63 converted frames) takes the evidence of the common one (`=`, 781).
+SIGN_OPERATOR_SIGNS: Final = "=+*%-"
 # The "length" feature buckets every word length from here up together (schemas 2 and 3).
 ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: Final = 6
 # Short categorical field labels (role, trigger) truncated before they reach a feature name.
@@ -351,7 +367,8 @@ MAX_CONTEXT_MODEL_FEATURES: Final = 50000
 # (JOINED_FEATURE_PREFIX), the term heads (TERM_FEATURE_PREFIX, FIRST_FEATURE_PREFIX), the short-message head
 # (BRIEF_FEATURE_PREFIX), the variable head (VARIABLE_FEATURE_PREFIX), the dotted-abbreviation head
 # (DOTTED_FEATURE_PREFIX), the letters-and-digits head (ALNUM_FEATURE_PREFIX), the hypothesis head
-# (HYPOTHESIS_FEATURE_PREFIX) and the short-token head (SHORT_FEATURE_PREFIX), each with its own budget in the recipe.
+# (HYPOTHESIS_FEATURE_PREFIX), the short-token head (SHORT_FEATURE_PREFIX), the slip head (SLIP_FEATURE_PREFIX) and the
+# sign head (SIGN_FEATURE_PREFIX), each with its own budget in the recipe.
 # Raised from 100 000 with the unknown-token head (the 0.54.0 pair holds 98 498), and from 110 000 with the hypothesis
 # and short-token heads: the 0.61.0 pair holds 107 808, about 8.6 MB written one feature to a line, and
 # MAX_CONTEXT_ACTION_MODEL_BYTES bounds the file.
