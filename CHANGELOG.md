@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.62.1 — 2026-10-26
+
 - Update Pillow, which the Windows builds use to draw the tray and application icons, from 12.3.0 to 13.0.0: the
   security advisories published against Pillow 12.3.0 and older (memory errors and endless loops in the readers and
   writers of image formats such as JPEG, TIFF, PDF and GIF, among them GHSA-8g5g-8vmr-9782 and GHSA-332p-7hrc-92wf) are
