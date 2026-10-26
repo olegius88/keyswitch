@@ -9,6 +9,11 @@
    "name": "devchat-test-3",
    "content_sha256": "75cc346c2bc61fc9757fa46a52803f9f1ee0de7d876cf5dcb3d4327a0120cf5a",
    "source": "ru.stackoverflow comments created 2024-01 .. 2026-10, pages 13-18 of each month in order of creation (the fetches of 15-17.10.2026 and 20.10.2026 took pages 1-12), public Stack Exchange API, CC BY-SA 4.0; built 22.10.2026 by tools/build_devchat_messages.py with every text of the first two builds dropped; the test split alone"
+  },
+  {
+   "name": "devchat-test-4",
+   "content_sha256": "07af3c5384f05c872f7e9261c6632edbf50230b23b8af932aa6c2e08d9a3192f",
+   "source": "ru.stackoverflow comments created 2024-01 .. 2026-10, pages 19-25 of each month in order of creation (the fetches of 15-17.10.2026, 20.10.2026 and 22.10.2026 took pages 1-18; from 2025-06 no month holds more than 18 pages), public Stack Exchange API, CC BY-SA 4.0; built 26.10.2026 by tools/build_devchat_messages.py with every text of the first three builds dropped; the test split alone"
   }
  ]
 }

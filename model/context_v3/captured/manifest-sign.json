@@ -1,0 +1,115 @@
+{
+ "schema_version": 2,
+ "columns": [
+  "count",
+  "original",
+  "alternative",
+  "source_group",
+  "trigger",
+  "baseline_convert",
+  "source_known",
+  "target_known",
+  "score_delta",
+  "literal_tail",
+  "boundary_text",
+  "after_origin",
+  "before_origin",
+  "source_typo",
+  "target_typo",
+  "source_opening",
+  "target_opening",
+  "inside",
+  "before",
+  "after",
+  "role",
+  "label"
+ ],
+ "sources": [
+  {
+   "file": "so-formula-train.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "messages with a Latin letter after a Cyrillic word before a sign or a number, and Russian ones with a Cyrillic letter there, four typing modes; the sign head's questions alone",
+   "recipe": {
+    "messages": "so-formula-train.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 6000,
+    "russian_share": 1.0,
+    "seed": "capture-sign-so-train",
+    "questions": "sign"
+   },
+   "sha256": "ca71f37ff1586d5601bf071c809de82646dd29843a2c2c7009c3cd764de4cc7f",
+   "rows": 1056,
+   "unique": 1009
+  },
+  {
+   "file": "leipzig-formula-train.jsonl.xz",
+   "weight": 1.0,
+   "balance": false,
+   "license": "CC BY (Leipzig Corpora Collection downloads, .t/sources-2026-10-23/leipzig/LICENSE-RECEIPT.md)",
+   "origin": "Leipzig Corpora Collection, ten Russian 1M corpora (news 2018-2024, web 2002, ru web 2019, wikipedia 2021)",
+   "typing": "Russian sentences with a Cyrillic letter of the variable class before a sign or a number (`ГОСТ Р 54960`, `витамин Е 60`), four typing modes; the sign head's questions alone",
+   "recipe": {
+    "messages": "leipzig-formula-train.jsonl.gz",
+    "kinds": [
+     "prose"
+    ],
+    "count": 1000,
+    "russian_share": 1.0,
+    "seed": "capture-sign-leipzig-train",
+    "questions": "sign"
+   },
+   "sha256": "4edbc76eb0cd6b9be5de2a8836d750d518d2f430bcc940b9e3b5678faac93ec6",
+   "rows": 206,
+   "unique": 97
+  },
+  {
+   "file": "so-formula-dev.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "messages with a Latin letter after a Cyrillic word before a sign or a number, and Russian ones with a Cyrillic letter there, four typing modes; the sign head's questions alone",
+   "recipe": {
+    "messages": "so-formula-dev.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 6000,
+    "russian_share": 1.0,
+    "seed": "capture-sign-so-dev",
+    "questions": "sign"
+   },
+   "sha256": "772cdcd759b9ebe9f0355da97fcf7700b5130831b3b9b1f8ad200f4ec1fafbd3",
+   "rows": 241,
+   "unique": 234
+  },
+  {
+   "file": "leipzig-formula-dev.jsonl.xz",
+   "weight": 1.0,
+   "balance": false,
+   "license": "CC BY (Leipzig Corpora Collection downloads, .t/sources-2026-10-23/leipzig/LICENSE-RECEIPT.md)",
+   "origin": "Leipzig Corpora Collection, ten Russian 1M corpora (news 2018-2024, web 2002, ru web 2019, wikipedia 2021)",
+   "typing": "Russian sentences with a Cyrillic letter of the variable class before a sign or a number (`ГОСТ Р 54960`, `витамин Е 60`), four typing modes; the sign head's questions alone",
+   "recipe": {
+    "messages": "leipzig-formula-dev.jsonl.gz",
+    "kinds": [
+     "prose"
+    ],
+    "count": 1000,
+    "russian_share": 1.0,
+    "seed": "capture-sign-leipzig-dev",
+    "questions": "sign"
+   },
+   "sha256": "069e9c17fa7669a0d02f0ecfa10074fb9cac391882834efa2cac3db1a197bcc8",
+   "rows": 48,
+   "unique": 22
+  }
+ ]
+}

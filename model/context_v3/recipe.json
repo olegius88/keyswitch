@@ -182,8 +182,8 @@
     "scope": "TRAIN only: the word decided at its own boundary (after_origin none). Russian abbreviations the term table counts in Russian technical text at least minimum_abbreviation_count times and abbreviation_dominance times as often as their Latin keys (`тз`, not `зк`), no lexicon word, typed as intended after the left context of a Russian row, keep; Latin terms counted at least minimum_term_count times whose Cyrillic reading is nothing, typed in the Russian layout in the same place, convert; three frames for every such term and abbreviation (the budgets cover both classes whole: a candidate that framed 800 of the 1752 terms and all 802 abbreviations kept `тз` but missed `тзь` for `npm`), the boundaries of the capital citations. Motivation: the corpus v27 candidate converted `тз` to `np` (p=0.993), `2фа`, `кз` and `ви` in the owner's typing while the token's count pulled the other way without a frame to learn from (tools/train_context_action_model.counted_token_curriculum). Not used while a frozen base is named: its frames moved the shared frequency features, and the `ша` before `hello` stayed `ша` (corpus v27 and v28 candidates)."
   },
   "frozen_base": {
-    "artifact": "model/context_v3/frozen-base-e02b44de73db.json",
-    "sha256": "24d9738382c060aa2b315ce9a388824868730f2b810e26a7ee4bfd204a94c877",
+    "artifact": "model/context_v3/frozen-base-b876e862bbfe.json",
+    "sha256": "5533419dc6b6046889bedaeeb27e577f76449a3c2c1d2b4b9fd2e514eeb23b5d",
     "labels": {
       "artifact": "model/context_v3/frozen-base.json",
       "sha256": "5129029cdda9ffc2c6e67d8212ea8a7ede710764089ebde53c00b0ddc30ff6ae"
@@ -198,17 +198,11 @@
       }
     },
     "heads": {
-      "hypothesis": {
-        "maximum_features": 1500
-      },
-      "short": {
+      "sign": {
         "maximum_features": 800
-      },
-      "slip": {
-        "maximum_features": 1500
       }
     },
-    "scope": "The pair context-v3-e02b44de73db of 0.61.0, every weight fixed: its kept-neighbour question and every head, the letters-and-digits head of corpus v73 among them, are carried as shipped, and the hypothesis, short-token and slip heads alone are fitted. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone) and the answers of the corpus v37 model (labels). The hypothesis head: the question the engine asks about the next word of a waiting word with that word's other reading before it (engine._decide_after_waiting_word, which marks it: ContextEvidence.before_origin planned_previous_reading; context_action_features.hypothesis_question), read with no copy of the shared features: by how many binary orders of magnitude the prose of each reading's language uses the token as typed more than the other reading, and the commonest word one edit from each (nearest_count), whether either reading is a known identifier, how much commoner the waiting word as typed is than the reading put before the token, the token's letters, the band of the score delta and the boundary. Motivation: `еще тыв` (a typo of `ты`) became `tot nsd`: asked after `tot `, the frozen model converted `тыв` to `nsd`, a command name, at p=1.00, reading the reading as typed English text (the owner's typing, 22.10.2026). The short-token head: a token of two or three Russian letters, not all capitals, whose keys are Latin letters, after Russian text, outside the term head's class and unknown to the lexicon (context_action_features.short_question), read with no letter: how often Russian web and news text writes it (src/keyswitch/resources/models/context-short-frequency.json, the word lists of ten Russian corpora of the Leipzig Corpora Collection, CC BY), Russian prose and technical text write it, Russian technical text and English prose use its Latin reading, whether the English lexicon and the identifier index hold that reading, its letters, the boundary, how the text after it was given and the band of the score delta. Motivation: `кз` after `говорит он ` became `rp` at p=0.997 (the owner's typing, 22.10.2026), and `дз` and `ср` became `lp` and `ch` in Russian phrases: no Russian table counted them, and the English lexicon knows their Latin readings. The slip head: a token of at least two Latin letters after a line of Russian text, whose Latin reading English prose and Russian technical text use fewer than fifty times and whose Cyrillic reading Russian prose uses, unknown to the English lexicon and the identifier index (context_action_features.slip_question), read with no copy of the shared features and nothing of the boundary: how much more Russian prose uses the Cyrillic reading than English or technical text the Latin one, and the commonest word one edit from each, whether the Russian lexicon knows the Cyrillic reading, the detector's verdict and probability band, the orthotactic margin band, how often Russian prose uses the word before the token, its letters and case, the score delta band and how the text after it was given. Motivation: sealed test v74 (read once) was lost by one row of the shape a word of Russian prose typed with the English layout on after a Russian word, which the frozen model left a suggestion just under the threshold (`я cgtie` for `я спешу`, Tatoeba development sentences: 20 of 8 714 two-word sentences the frozen baseline pair restored, the same 20 for the pair of 0.61.0)."
+    "scope": "The pair context-v3-b876e862bbfe of 0.62.0, every weight fixed: its kept-neighbour question and every head, the hypothesis, short-token and slip heads of corpus v75 among them, are carried as shipped, and the sign head alone is fitted. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone) and the answers of the corpus v37 model (labels). The sign head: a letter of the variable head's class (a one-letter word of the Russian layout after a Cyrillic word, no Russian word of one letter, whose key is a Latin letter) asked once more with the token after it given as kept text, that token holding no letter (context_action_features.sign_question): the engine asks a letter kept at its space when a token of signs or digits the two layouts type alike follows it (engine._decide_letter_before_sign), and a waiting letter before its kept neighbour (_decide_with_kept_neighbour). It reads, beside the kept-neighbour question's features, the token itself (up to two signs, digits, or longer), the letter and its case, how often Russian prose uses the word before it and whether the text before holds signs of code, Latin letters or digits, each also with the token. Motivation: `м` in `прохождения м + ` (`v + s`) was kept at p=0.94 and never asked again, and asked with `=` after it a waiting `ч` of `для ч = 0` was kept at p=0.95: the variable head reads every sign, dash and digit after the letter as one script (the owner's typing, 19.10.2026, corrected with Pause)."
   },
   "letter_curriculum": {
     "term_sentences": 1500,
@@ -1067,5 +1061,32 @@
     "sample_weight": 1.0,
     "token_cap": 16,
     "scope": "TRAIN, and DEVELOPMENT for the head's epoch: the questions about a token of the slip head's class the engine asked while Russian sentences of Tatoeba (chat style and as written, only those behind the captured training questions) and ru.stackoverflow messages of 2023 (every developer-chat question left out) were typed with one word of Russian prose after another typed with the English layout on, the layout having slipped with no switch by hand (tools/mixed_typing.py slip, the manual-layout protection and the early switch off as in the sealed protocol's early_off mode; model/context_v3/captured/manifest-slip.json, schema 2), and for TRAIN the class's questions of the captured typing of model/context_v1/captured (Latin tokens typed as meant after Russian text)."
+  },
+  "sign_curriculum": {
+    "captured": {
+      "train": [
+        [
+          "model/context_v3/captured/manifest-sign.json",
+          "so-formula-train.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-sign.json",
+          "leipzig-formula-train.jsonl.xz"
+        ]
+      ],
+      "development": [
+        [
+          "model/context_v3/captured/manifest-sign.json",
+          "so-formula-dev.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-sign.json",
+          "leipzig-formula-dev.jsonl.xz"
+        ]
+      ]
+    },
+    "sample_weight": 1.0,
+    "scope": "TRAIN, and DEVELOPMENT for the head's epoch: the questions about a letter of the sign head's class the engine asked while ru.stackoverflow messages of 2023 with a one-letter token of the variable class before a token of signs or digits (every developer-chat question left out; tools/select_capture_messages.py formula) and Russian sentences of the Leipzig corpora with a Cyrillic letter there were typed the four ways a person types them (tools/mixed_typing.py capture; model/context_v3/captured/manifest-sign.json, schema 2), by question and sentence into TRAIN and DEVELOPMENT.",
+    "convert_weight": 3.0
   }
 }

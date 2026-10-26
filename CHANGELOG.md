@@ -4,6 +4,24 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- A Latin variable of one letter typed in the Russian layout after a Russian word is asked about again when an operator
+  sign follows it, and converted when the model is sure: typed in the Russian layout, `пусть y = x` was left
+  `пусть н = ч` and `берём n + 1` was left `берём т + 1`. The letter was decided at its own space, where a variable and
+  a letter of chat (`да я про то ч`) look alike, and was never asked again. The engine now asks the model about it once
+  more when the next token is a sign or a number that both layouts type alike (`=`, `+`, `==`, `+=`, `2`), and a part of
+  the model of its own answers from that token, the letter and the text before it. A converted letter takes the sign
+  along and the layout follows it, so the rest of the formula is typed in it. A dash alone is no such sign: after a
+  letter it is a minus as often as the dash of a Russian sentence (`серия М - это`), and only what follows tells them
+  apart. Russian letters before a number or a sign stay as typed (`ГОСТ Р 54960`, `витамин Е 60`, `50 кв м + балкон`).
+- The sealed developer-chat test grows by a fourth batch of ru.stackoverflow comments written in 2024-2026, built with
+  every text of the earlier batches dropped (`tools/devchat_test_batches.json`).
+- The pair is `context-v3-b5ed6848d4ce` (artifact SHA-256
+  `a35af45f0978f7a99c6c492dc8755259d5a208f205bf2c5cdc81c7e881cc5bf3`) with the prefix model `prefix-v2-bf3dc28f8567`:
+  the pair of 0.62.0 with the new part fitted onto it. On the recorded real typing it breaks no word; on sealed test v76,
+  read once, it keeps all 180 correctly typed rows and restores 176 and 177 of the 179 rows typed in the wrong layout
+  with the early switch off, against 173 and 174 for the baseline pair (17 and 17 with it, where the baseline pair spoils
+  one correct row); on the developer-chat test it gains and loses nothing.
+
 ## 0.62.1 — 2026-10-26
 
 - Update Pillow, which the Windows builds use to draw the tray and application icons, from 12.3.0 to 13.0.0: the

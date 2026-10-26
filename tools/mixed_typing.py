@@ -80,7 +80,7 @@ from keyswitch.constants.models import (  # noqa: E402
     ALNUM_HEAD_MAX_CHARACTERS, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, SHORT_HEAD_LETTERS,
 )
 from keyswitch.context_action_features import (  # noqa: E402
-    alnum_question, dotted_question, letters_and_digits, short_question, slip_question, variable_question,
+    alnum_question, dotted_question, letters_and_digits, short_question, sign_question, slip_question, variable_question,
 )
 from keyswitch.context_model import ContextEvidence, ContextModel, ContextPrediction  # noqa: E402
 from keyswitch.input_context import CONTEXT_LIMIT, FieldContext  # noqa: E402
@@ -130,6 +130,8 @@ CAPTURED_QUESTIONS: Final[dict[str, Callable[[Mapping[str, object]], bool]]] = {
     "hypothesis": lambda row: row.get("before_origin") == "planned_previous_reading",
     "short": lambda row: row.get("before_origin", "field") == "field" and short_question(str(row["original"]), str(row["before"])),
     "slip": lambda row: row.get("before_origin", "field") == "field" and slip_question(str(row["original"]), str(row["before"])),
+    "sign": lambda row: sign_question(str(row["original"]), str(row["alternative"]), str(row["before"]), str(row["after"]),
+                                      str(row["trigger"]), str(row["after_origin"])),
 }
 
 Job = tuple[int, str, str, int, str]
