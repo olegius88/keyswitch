@@ -149,10 +149,10 @@
   },
   "english_capital_curriculum": {
     "words_by_length": {
-      "2": 107,
-      "3": 300,
-      "4": 300,
-      "5": 300
+      "2": 0,
+      "3": 0,
+      "4": 0,
+      "5": 0
     },
     "frames_per_word": 2,
     "lowercase_contrast": true,
@@ -182,8 +182,8 @@
     "scope": "TRAIN only: the word decided at its own boundary (after_origin none). Russian abbreviations the term table counts in Russian technical text at least minimum_abbreviation_count times and abbreviation_dominance times as often as their Latin keys (`тз`, not `зк`), no lexicon word, typed as intended after the left context of a Russian row, keep; Latin terms counted at least minimum_term_count times whose Cyrillic reading is nothing, typed in the Russian layout in the same place, convert; three frames for every such term and abbreviation (the budgets cover both classes whole: a candidate that framed 800 of the 1752 terms and all 802 abbreviations kept `тз` but missed `тзь` for `npm`), the boundaries of the capital citations. Motivation: the corpus v27 candidate converted `тз` to `np` (p=0.993), `2фа`, `кз` and `ви` in the owner's typing while the token's count pulled the other way without a frame to learn from (tools/train_context_action_model.counted_token_curriculum). Not used while a frozen base is named: its frames moved the shared frequency features, and the `ша` before `hello` stayed `ша` (corpus v27 and v28 candidates)."
   },
   "frozen_base": {
-    "artifact": "model/context_v3/frozen-base-b876e862bbfe.json",
-    "sha256": "5533419dc6b6046889bedaeeb27e577f76449a3c2c1d2b4b9fd2e514eeb23b5d",
+    "artifact": "model/context_v3/frozen-base-b5ed6848d4ce.json",
+    "sha256": "a35af45f0978f7a99c6c492dc8755259d5a208f205bf2c5cdc81c7e881cc5bf3",
     "labels": {
       "artifact": "model/context_v3/frozen-base.json",
       "sha256": "5129029cdda9ffc2c6e67d8212ea8a7ede710764089ebde53c00b0ddc30ff6ae"
@@ -197,12 +197,8 @@
         "sample_weight": 1.0
       }
     },
-    "heads": {
-      "sign": {
-        "maximum_features": 800
-      }
-    },
-    "scope": "The pair context-v3-b876e862bbfe of 0.62.0, every weight fixed: its kept-neighbour question and every head, the hypothesis, short-token and slip heads of corpus v75 among them, are carried as shipped, and the sign head alone is fitted. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone) and the answers of the corpus v37 model (labels). The sign head: a letter of the variable head's class (a one-letter word of the Russian layout after a Cyrillic word, no Russian word of one letter, whose key is a Latin letter) asked once more with the token after it given as kept text, that token holding no letter (context_action_features.sign_question): the engine asks a letter kept at its space when a token of signs or digits the two layouts type alike follows it (engine._decide_letter_before_sign), and a waiting letter before its kept neighbour (_decide_with_kept_neighbour). It reads, beside the kept-neighbour question's features, the token itself (up to two signs, digits, or longer), the letter and its case, how often Russian prose uses the word before it and whether the text before holds signs of code, Latin letters or digits, each also with the token. Motivation: `м` in `прохождения м + ` (`v + s`) was kept at p=0.94 and never asked again, and asked with `=` after it a waiting `ч` of `для ч = 0` was kept at p=0.95: the variable head reads every sign, dash and digit after the letter as one script (the owner's typing, 19.10.2026, corrected with Pause)."
+    "heads": {},
+    "scope": "The pair context-v3-b5ed6848d4ce of 0.63.0, every weight fixed and no head fitted: a reseal of the shipped pair for engine changes that change no model (28.10.2026: the Wayland input, the Windows keyboard hook's short calls, keys that pass the hook, the log of input no hook got). Its kept-neighbour question and every head, the sign head of corpus v76 among them, are carried, so the fit moves no weight, and the artifact is the shipped one byte for byte. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone) and the answers of the corpus v37 model (labels). The pair of 0.63.0: the pair of 0.62.0 with the sign head fitted onto it on corpus v76 (model/context_v3/frozen-base-b876e862bbfe.json, sha256 5533419dc6b6)."
   },
   "letter_curriculum": {
     "term_sentences": 1500,
