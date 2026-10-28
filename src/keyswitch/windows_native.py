@@ -11,15 +11,17 @@ import ctypes
 import ntpath
 import sys
 import threading
+from collections import deque
 from collections.abc import Callable
 from typing import Protocol, cast
 
 from .backend import ScreenAnchor
 from .constants.keyboard import ALT_MASK, CONTROL_MASK, LOCK_MASK, SHIFT_MASK, SUPER_MASK
 from .windows_backend import NativeInput, NativeKeyEvent, WindowsBackendError
-from .windows_calls import hook_prototype, stdcall_library
+from .windows_calls import hook_prototype, keep_gil_in_short_calls, stdcall_library
 from .constants.windows import (
     ASYNC_KEY_DOWN_BIT,
+    HOOK_INPUT_TIMES_KEPT,
     GA_ROOT,
     GWL_EXSTYLE,
     HC_ACTION,
@@ -84,6 +86,20 @@ class KBDLLHOOKSTRUCT(ctypes.Structure):
 
 class POINT(ctypes.Structure):
     _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]  # type: ignore[mutable-override]
+
+
+class MSLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [  # type: ignore[mutable-override]
+        ("pt", POINT),
+        ("mouseData", ctypes.c_ulong),
+        ("flags", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
+        ("dwExtraInfo", ctypes.c_size_t),
+    ]
+
+
+class LASTINPUTINFO(ctypes.Structure):
+    _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_ulong)]  # type: ignore[mutable-override]
 
 
 class RECT(ctypes.Structure):
@@ -186,6 +202,8 @@ class CtypesWindowsAPI:
         self._hook: int | None = None
         self._hook_callback: _HookCallback | None = None
         self._lock = threading.Lock()
+        # The time of every key and pointer event the hooks got, newest last (hook_input_times).
+        self._input_times: deque[int] = deque(maxlen=HOOK_INPUT_TIMES_KEPT)
         self._declare()
 
     def _declare(self) -> None:
@@ -322,6 +340,8 @@ class CtypesWindowsAPI:
         kernel32.GetCurrentProcessId.restype = ctypes.c_ulong
         kernel32.GetTickCount.argtypes = []
         kernel32.GetTickCount.restype = ctypes.c_uint32
+        user32.GetLastInputInfo.argtypes = [ctypes.POINTER(LASTINPUTINFO)]
+        user32.GetLastInputInfo.restype = ctypes.c_int
         kernel32.GetLastError.argtypes = []
         kernel32.GetLastError.restype = ctypes.c_ulong
         kernel32.OpenProcess.argtypes = [
@@ -339,6 +359,9 @@ class CtypesWindowsAPI:
         kernel32.QueryFullProcessImageNameW.restype = ctypes.c_int
         kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
         kernel32.CloseHandle.restype = ctypes.c_int
+        # Asked at every key inside the hook: they keep the GIL rather than wait for it again.
+        keep_gil_in_short_calls(user32, "user32.dll")
+        keep_gil_in_short_calls(kernel32, "kernel32.dll")
 
     def _error(self, message: str) -> WindowsBackendError:
         code = int(self.kernel32.GetLastError())
@@ -399,6 +422,16 @@ class CtypesWindowsAPI:
 
     def tick_count(self) -> int:
         return int(self.kernel32.GetTickCount())
+
+    def last_input_time(self) -> int:
+        info = LASTINPUTINFO(ctypes.sizeof(LASTINPUTINFO), 0)
+        if not self.user32.GetLastInputInfo(ctypes.byref(info)):
+            raise self._error("GetLastInputInfo завершился ошибкой")
+        return int(info.dwTime)
+
+    def hook_input_times(self) -> tuple[int, ...]:
+        # A copy is made in one step under the interpreter lock: the hook thread cannot append meanwhile.
+        return tuple(self._input_times.copy())
 
     def keep_window_inactive(self, window: int) -> bool:
         """Mark a popup so that showing or clicking it never takes the foreground.
@@ -616,6 +649,8 @@ class CtypesWindowsAPI:
         def mouse_callback(code: int, message: int, data: int) -> int:
             # A button press invalidates the caret position; a scroll does not.
             # Observe only: never suppress the user's pointer action.
+            if code == HC_ACTION:
+                self._input_times.append(int(ctypes.cast(data, ctypes.POINTER(MSLLHOOKSTRUCT)).contents.time))
             if code == HC_ACTION and message in POINTER_INVALIDATING_MESSAGES:
                 listener(NativeKeyEvent(True, 0, 0, False, False, 0))
             return int(self.user32.CallNextHookEx(None, code, message, data))
@@ -631,6 +666,7 @@ class CtypesWindowsAPI:
                     data,
                     ctypes.POINTER(KBDLLHOOKSTRUCT),
                 ).contents
+                self._input_times.append(int(native.time))
                 injected = bool(native.flags & LLKHF_INJECTED)
                 extra = int(native.dwExtraInfo or 0)
                 consumed = listener(
@@ -654,8 +690,10 @@ class CtypesWindowsAPI:
                     return 1
             return int(self.user32.CallNextHookEx(None, code, message, data))
 
-        # Windows removes a low-level hook, without a word, whose callback answers too late, and
-        # a thread of normal priority waits behind every busy thread of the same priority.
+        # Every key of the system waits for the callback's answer. Microsoft documents that a hook
+        # answering too late is removed without a word; Windows 11 build 26200 waited 11 s and kept
+        # it (VM, 27.10.2026). A thread of normal priority waits behind every busy thread of the
+        # same priority.
         self.kernel32.SetThreadPriority(self.kernel32.GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL)
         callback_object = self.hook_callback_type(callback)
         self._hook_callback = cast(_HookCallback, callback_object)
@@ -691,6 +729,8 @@ class CtypesWindowsAPI:
         with self._lock:
             self._hook = int(hook)
             self._thread_id = int(self.kernel32.GetCurrentThreadId())
+        # The moment the hooks start counts as an event they got: input made before it was never theirs to get.
+        self._input_times.append(int(self.kernel32.GetTickCount()))
         ready()
         message = MSG()
         try:

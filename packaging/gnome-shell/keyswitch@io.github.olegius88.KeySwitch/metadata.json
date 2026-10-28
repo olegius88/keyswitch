@@ -1,0 +1,8 @@
+{
+  "uuid": "keyswitch@io.github.olegius88.KeySwitch",
+  "name": "KeySwitch Wayland Bridge",
+  "description": "Keyboard layout and active window bridge for KeySwitch on GNOME Wayland",
+  "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
+  "session-modes": ["user", "ubuntu"],
+  "url": "https://github.com/olegius88/keyswitch"
+}

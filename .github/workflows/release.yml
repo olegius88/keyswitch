@@ -62,6 +62,7 @@ jobs:
             hunspell-ru \
             libglib2.0-bin \
             libhunspell-1.7-0 \
+            libwayland-client0 \
             libx11-6 \
             libxkbcommon0 \
             libxtst6 \
@@ -178,6 +179,7 @@ jobs:
             hunspell-ru \
             libglib2.0-bin \
             libhunspell-1.7-0 \
+            libwayland-client0 \
             libx11-6 \
             libxkbcommon0 \
             libxtst6 \
@@ -347,6 +349,7 @@ jobs:
             hunspell-ru \
             libglib2.0-bin \
             libhunspell-1.7-0 \
+            libwayland-client0 \
             libx11-6 \
             libxkbcommon0 \
             libxtst6 \
@@ -441,6 +444,7 @@ jobs:
             hunspell-ru \
             libglib2.0-bin \
             libhunspell-1.7-0 \
+            libwayland-client0 \
             libx11-6 \
             libxkbcommon0 \
             libxtst6 \
@@ -535,6 +539,7 @@ jobs:
             hunspell-ru \
             libglib2.0-bin \
             libhunspell-1.7-0 \
+            libwayland-client0 \
             libx11-6 \
             libxkbcommon0 \
             libxtst6 \
@@ -671,7 +676,8 @@ jobs:
           # depend on the interpreter's bitness, so the x86 job leaves it to the x64 one.
           if ("${{ matrix.architecture }}" -ne "x86") {
             $env:PYTHONPATH = "src;$env:RUNNER_TEMP\numpy-typing"
-            python -m mypy --config-file pyproject.toml --exclude "^tools/freeze_intent_development_corpus\.py$"
+            # The Wayland input modules exist on Linux only: pyproject.toml says how they are read here.
+            python -m mypy --config-file pyproject.toml --exclude "^(tools/freeze_intent_development_corpus|src/keyswitch/wayland_(native|helper)|tests/(test_wayland_helper|e2e_wayland))\.py$"
             python -m mypy --config-file pyproject.toml --platform linux tools/freeze_intent_development_corpus.py
           }
           $env:PYTHONPATH = "src"

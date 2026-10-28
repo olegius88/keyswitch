@@ -391,6 +391,7 @@ python3 -m nuitka \
     --include-data-files="$frozen_english_model=keyswitch/resources/models/en_US.lm" \
     --include-data-files="$frozen_russian_model=keyswitch/resources/models/ru_RU.lm" \
     --nofollow-import-to='keyswitch.windows_*' \
+    --nofollow-import-to='keyswitch.macos_*' \
     --nofollow-import-to=tests \
     --noinclude-dlls='libbz2.so*' \
     --noinclude-dlls='libcrypto.so*' \
@@ -398,6 +399,7 @@ python3 -m nuitka \
     --noinclude-dlls='libffi.so*' \
     --noinclude-dlls='liblzma.so*' \
     --noinclude-dlls='libssl.so*' \
+    --noinclude-dlls='libwayland-*.so*' \
     --noinclude-dlls='libzstd.so*' \
     --no-progressbar \
     --report="$native_output/compilation-report.xml" \
@@ -485,15 +487,22 @@ if ! grep -Fq 'BEGIN PGP PUBLIC KEY BLOCK' "$apt_keyring" \
     exit 1
 fi
 
+gnome_ext_uuid="keyswitch@io.github.olegius88.KeySwitch"
+gnome_ext_src="$project_dir/packaging/gnome-shell/$gnome_ext_uuid"
+gnome_ext_dst="$package_root/usr/share/gnome-shell/extensions/$gnome_ext_uuid"
+
 install -d \
     "$package_root/DEBIAN" \
     "$package_root$(dirname "$apt_sources_path")" \
     "$package_root$(dirname "$apt_keyring_path")" \
     "$package_root/usr/bin" \
     "$package_root/usr/lib/keyswitch" \
+    "$package_root/usr/lib/modules-load.d" \
+    "$package_root/usr/lib/udev/rules.d" \
     "$package_root/usr/share/applications" \
     "$package_root/usr/share/doc/keyswitch" \
     "$package_root/usr/share/doc/keyswitch/licenses" \
+    "$gnome_ext_dst" \
     "$package_root/usr/share/icons/hicolor/scalable/apps" \
     "$package_root/usr/share/lintian/overrides" \
     "$package_root/usr/share/man/man1"
@@ -503,6 +512,16 @@ sed \
     -e "s/@ARCHITECTURE@/$architecture/g" \
     "$project_dir/packaging/debian/control.in" \
     > "$package_root/DEBIAN/control"
+install -m 0755 "$project_dir/packaging/debian/postinst" \
+    "$package_root/DEBIAN/postinst"
+install -m 0644 "$project_dir/packaging/udev/60-keyswitch.rules" \
+    "$package_root/usr/lib/udev/rules.d/60-keyswitch.rules"
+install -m 0644 "$project_dir/packaging/udev/keyswitch.modules-load.conf" \
+    "$package_root/usr/lib/modules-load.d/keyswitch.conf"
+install -m 0644 "$gnome_ext_src/metadata.json" \
+    "$gnome_ext_dst/metadata.json"
+install -m 0644 "$gnome_ext_src/extension.js" \
+    "$gnome_ext_dst/extension.js"
 install -m 0644 "$project_dir/packaging/debian/copyright" \
     "$package_root/usr/share/doc/keyswitch/copyright"
 install -m 0644 "$project_dir/packaging/debian/lintian-overrides" \
@@ -573,8 +592,13 @@ chmod 0644 \
     "$package_root/DEBIAN/conffiles" \
     "$package_root$apt_sources_path" \
     "$package_root$apt_keyring_path" \
+    "$package_root/usr/lib/udev/rules.d/60-keyswitch.rules" \
+    "$package_root/usr/lib/modules-load.d/keyswitch.conf" \
+    "$gnome_ext_dst/metadata.json" \
+    "$gnome_ext_dst/extension.js" \
     "$package_root/usr/share/doc/keyswitch/changelog.gz" \
     "$package_root/usr/share/man/man1/keyswitch.1.gz"
+chmod 0755 "$package_root/DEBIAN/postinst"
 find "$package_root" -exec touch --date="@$SOURCE_DATE_EPOCH" {} +
 dpkg-deb --root-owner-group --build "$package_root" "$package_path"
 

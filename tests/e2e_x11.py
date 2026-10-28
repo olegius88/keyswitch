@@ -22,6 +22,7 @@ from keyswitch.learning import InvalidRule
 from keyswitch.learning_prompt import LearningPromptWindow, RuleEditorWindow
 from keyswitch.rule_editor import RuleDraft, build_rule, draft_from_prompt
 from keyswitch.x11_backend import KeyEvent, X11Backend, _Libraries
+from keyswitch.constants.units import MICROSECONDS_PER_MILLISECOND
 from keyswitch.constants.x11 import BACKSPACE_KEYSYM
 from fixture_values.clock import (
     E2E_INTER_CASE_DELAY_MS,
@@ -29,7 +30,6 @@ from fixture_values.clock import (
     E2E_VERIFY_GRACE_MS,
     E2E_VERIFY_POLL_MS,
     E2E_VERIFY_SETTLE_DELAY_MS,
-    MICROSECONDS_PER_MILLISECOND,
     SESSION_BUS_CALL_TIMEOUT_MS,
     X11_E2E_CONTEXT_RESOLUTION_VERIFY_DELAY_MS,
     X11_E2E_EARLY_SWITCH_SETUP_DELAY_MS,

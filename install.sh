@@ -30,7 +30,7 @@ try:
     import dbus  # noqa: F401
 except Exception as error:
     missing.append(f"python3-dbus: {error}")
-for library in ("X11", "Xtst", "xkbcommon"):
+for library in ("X11", "Xtst", "xkbcommon", "wayland-client"):
     if not ctypes.util.find_library(library):
         missing.append(f"lib{library}")
 if not ctypes.util.find_library("hunspell-1.7") and not ctypes.util.find_library("hunspell"):
@@ -60,7 +60,7 @@ if missing:
     print(
         "Установите: sudo apt install python3-gi python3-dbus "
         "at-spi2-core gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-atspi-2.0 "
-        "libx11-6 libxtst6 libxkbcommon0 "
+        "libwayland-client0 libx11-6 libxtst6 libxkbcommon0 "
         "libhunspell-1.7-0 hunspell-en-us hunspell-ru onboard-data",
         file=sys.stderr,
     )
@@ -98,6 +98,14 @@ for icon in "$project_dir"/src/keyswitch/resources/keyswitch*.svg; do
     install -m 0644 "$icon" "$icon_dir/$(basename "$icon")"
 done
 
+gnome_ext_uuid="keyswitch@io.github.olegius88.KeySwitch"
+gnome_ext_dir="$user_data_home/gnome-shell/extensions/$gnome_ext_uuid"
+install -d "$gnome_ext_dir"
+install -m 0644 "$project_dir/packaging/gnome-shell/$gnome_ext_uuid/metadata.json" \
+    "$gnome_ext_dir/metadata.json"
+install -m 0644 "$project_dir/packaging/gnome-shell/$gnome_ext_uuid/extension.js" \
+    "$gnome_ext_dir/extension.js"
+
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$desktop_dir" >/dev/null 2>&1 || true
 fi
@@ -107,3 +115,13 @@ fi
 
 printf 'KeySwitch установлен. Запуск: %s\n' "$launcher"
 printf 'Также приложение доступно в меню рабочего стола.\n'
+
+# On Wayland the keyboard is taken through /dev/uinput and the keyboards themselves: the udev rule
+# of the package gives them to the user of the session, and installing it needs root.
+if [[ ! -e /usr/lib/udev/rules.d/60-keyswitch.rules && ! -e /etc/udev/rules.d/60-keyswitch.rules ]]; then
+    printf '\nДля сеанса Wayland нужно правило udev (один раз, с правами администратора):\n'
+    printf '  sudo install -m 0644 %s/packaging/udev/60-keyswitch.rules /etc/udev/rules.d/\n' "$project_dir"
+    printf '  sudo install -m 0644 %s/packaging/udev/keyswitch.modules-load.conf /etc/modules-load.d/keyswitch.conf\n' "$project_dir"
+    printf '  sudo modprobe uinput && sudo udevadm control --reload-rules && sudo udevadm trigger\n'
+    printf 'В GNOME расширение KeySwitch заработает после повторного входа в сеанс.\n'
+fi

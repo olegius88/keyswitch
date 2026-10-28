@@ -12,7 +12,7 @@ from typing import Protocol
 
 from .backend import BackendProbe, FocusInfo, KeyEvent, KeyDisposition, LayoutSwitchUnconfirmed, ScreenAnchor
 from .constants.units import MILLISECONDS_PER_SECOND
-from .input_delay import InputDelay, InputDelayReport
+from .input_delay import HookGap, InputDelay, InputDelayReport
 from .constants.keyboard import (
     ALT_MASK,
     COMPLETED_ACTION_EVENT_COUNT,
@@ -23,6 +23,7 @@ from .constants.keyboard import (
     UNICODE_PACKET_KEY_NAME,
 )
 from .constants.timing import (
+    HOOK_SILENCE_MS,
     KEYBOARD_LISTENER_START_TIMEOUT_SECONDS,
     KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS,
     LAYOUT_SWITCH_POLL_SECONDS,
@@ -174,6 +175,14 @@ class WindowsAPI(Protocol):
         """GetTickCount: milliseconds since boot, the clock of a hook's key time."""
         ...
 
+    def last_input_time(self) -> int:
+        """GetLastInputInfo: the time of the newest key or pointer event of the session, on the clock of tick_count."""
+        ...
+
+    def hook_input_times(self) -> tuple[int, ...]:
+        """The times of the recent key and pointer events the hooks got, newest last, and of the hooks' start."""
+        ...
+
     def run_keyboard_hook(
         self,
         listener: Callable[[NativeKeyEvent], bool],
@@ -256,6 +265,12 @@ def key_name(virtual_key: int) -> str:
     return f"VK_{virtual_key:02X}"
 
 
+def _later(time: int, than: int) -> bool:
+    """A key time after another on the 32-bit tick clock, which wraps after 49.7 days."""
+
+    return 0 < (time - than) & DWORD_MASK <= DWORD_MASK >> 1
+
+
 class WindowsBackend:
     """Observe global Win32 keyboard events and inject physical corrections."""
 
@@ -292,6 +307,9 @@ class WindowsBackend:
         self._last_typed: tuple[int, int] = (0, 0)
         self._inject_lock = threading.Lock()
         self._input_delay = InputDelay()
+        # An input time the hooks have not got yet, and the last one reported as passed them (take_unseen_input).
+        self._unseen_input: int | None = None
+        self._unseen_reported: int | None = None
 
     @property
     def running(self) -> bool:
@@ -538,6 +556,36 @@ class WindowsBackend:
 
         return self._input_delay.take()
 
+    def take_unseen_input(self) -> int | None:
+        """How long ago input the hooks never got was made, once that is certain; None otherwise.
+
+        A program in front that reads the keyboard as raw input and has a keyboard hook of its own keeps every
+        keyboard hook of the system silent, its own too, while GetLastInputInfo moves on with each key (Windows 10
+        19045 and 11 26200, 28.10.2026; raw input alone silences nothing): KeySwitch sees none of what is typed there. An input time no hook got is certain to have passed them once they got a
+        later event, since they get events in order, or once HOOK_SILENCE_MS went by without one.
+        """
+
+        seen = self._api.hook_input_times()
+        last = self._api.last_input_time()
+        waiting = self._unseen_input
+        if waiting is not None and waiting not in seen:
+            waited = (self._api.tick_count() - waiting) & DWORD_MASK
+            if (seen and _later(seen[-1], waiting)) or waited >= HOOK_SILENCE_MS:
+                self._unseen_input = None
+                self._unseen_reported = waiting
+                return waited
+            return None
+        reported = self._unseen_reported
+        self._unseen_input = last if (
+            seen and last not in seen and _later(last, seen[-1]) and (reported is None or _later(last, reported))
+        ) else None
+        return None
+
+    def take_hook_gap(self) -> HookGap | None:
+        """A key the hook reached or answered so late that keys behind it may have passed the hook (HOOK_GAP_MS)."""
+
+        return self._input_delay.take_gap()
+
     def _handle_native(self, native: NativeKeyEvent) -> bool:
         if native.virtual_key == 0 or native.injected or native.replayed:
             return self._answer_native(native)
@@ -546,6 +594,9 @@ class WindowsBackend:
         # controls) was pressed at no time the hook can know: only its answer is timed.
         started = time.perf_counter()
         late = (self._api.tick_count() - native.timestamp) & DWORD_MASK
+        if not native.foreign and late <= DWORD_MASK >> 1:
+            # Noted before the key goes on: the engine must not act on the word as this key reaches it.
+            self._input_delay.note_wait(late)
         try:
             return self._answer_native(native)
         finally:

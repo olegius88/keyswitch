@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import ClassVar, Final
 
@@ -142,6 +143,22 @@ def ends_with_typed(text: str, typed: str) -> bool:
         tail[:1].casefold() == typed[:1].casefold())
 
 
+def shown_ahead(before: str, typed: str, ahead: str) -> int:
+    """How many characters typed after ``typed`` a field already shows past it, from two on; 0 if none.
+
+    ``ahead`` is the boundary and the keys the engine has queued behind it: the window takes a key
+    in as soon as the hook lets it through, while the engine decides on the word a moment later. One
+    character after the word is the boundary (ends_with_typed on ``before[:-1]``); more, and every
+    such word was refused as typed into a changed field: `e 'njuj ` typed at 40 ms a key into a
+    GTK window of KDE Plasma kept its `e` in five of ten runs (27.10.2026).
+    """
+
+    for shown in range(len(ahead), 1, -1):
+        if before.endswith(ahead[:shown]) and ends_with_typed(before[:-shown], typed):
+            return shown
+    return 0
+
+
 def typed_short_of(before: str, after: str, typed: str) -> str | None:
     """What a field shows of ``typed`` before its caret when it has not taken the last letters in yet, or None.
 
@@ -245,6 +262,7 @@ class ContextPolicy:
         field_override: FieldContext | None = None,
         literal_tail: str = "", boundary_text: str = "",
         after_origin: AfterOrigin = "none", inside: bool = False, before_origin: BeforeOrigin = "field",
+        typed_ahead: Callable[[], str] | None = None,
     ) -> ContextResult:
         if mode not in {"assist", "shadow"} or self.model is None:
             return ContextResult(baseline, fallback_reason="mode_disabled" if mode not in {"assist", "shadow"} else "model_unavailable")
@@ -273,6 +291,10 @@ class ContextPolicy:
                         field = replace(snapshot, before=before[:-len(anchor)])
                     elif anchor and ends_with_typed(before[:-1], anchor):
                         field = replace(snapshot, before=before[:-len(anchor) - 1])
+                    elif anchor and typed_ahead is not None and (
+                            ahead := shown_ahead(before, anchor, boundary_text + typed_ahead())):
+                        # Asked after the read: every key the field shows was queued before the window got it.
+                        field = replace(snapshot, before=before[:-len(anchor) - ahead])
                     elif anchor and (shown := typed_short_of(before, snapshot.after, anchor)) is not None:
                         # The editor has not shown the last letters yet: the word is the one typed and is decided on
                         # its keys, and its correction waits for the field to show it (engine._waits_for_field).

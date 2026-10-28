@@ -934,7 +934,8 @@ class WindowsPackagingContractTests(unittest.TestCase):
                 workflow,
             )
             self.assertIn(
-                'python -m mypy --config-file pyproject.toml --exclude "^tools/freeze_intent_development_corpus\\.py$"',
+                'python -m mypy --config-file pyproject.toml --exclude "^(tools/freeze_intent_development_corpus|'
+                'src/keyswitch/wayland_(native|helper)|tests/(test_wayland_helper|e2e_wayland))\\.py$"',
                 workflow,
             )
             self.assertIn(

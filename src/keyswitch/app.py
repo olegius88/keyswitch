@@ -37,6 +37,8 @@ from .system import APP_ID, AutostartManager
 from .tray import StatusNotifierItem
 from .ui import MainWindow, RESOURCE_DIR
 from .updates import UpdateManager, UpdatePhase, UpdateSnapshot
+from .wayland_backend import WaylandBackend
+from .wayland_desktop import wayland_session_active
 from .x11_backend import X11Backend
 from .constants.updates import UPDATE_CHECK_INITIAL_DELAY_SECONDS, UPDATE_CHECK_INTERVAL_SECONDS
 
@@ -81,7 +83,16 @@ class KeySwitchApplication(Adw.Application):
         follow_settings(self.settings)
         self.autostart = AutostartManager()
         self.history = HistoryStore(limit=history_limit(self.settings.get("history.limit", DEFAULT_HISTORY_LIMIT)))
-        self.engine = KeySwitchEngine(self.settings, self.history)
+        backend_label = (
+            "Wayland evdev + uinput"
+            if wayland_session_active()
+            else "X11 RECORD + XTEST"
+        )
+        self.engine = KeySwitchEngine(
+            self.settings,
+            self.history,
+            backend_label=backend_label,
+        )
         self.updates = UpdateManager(__version__, data_dir() / "updates")
         self.window: _WindowController | None = None
         self.tray: _TrayController | None = None
@@ -465,8 +476,11 @@ class KeySwitchApplication(Adw.Application):
 
 
 def diagnose() -> int:
-    backend = X11Backend()
+    backend: WaylandBackend | X11Backend = (
+        WaylandBackend() if wayland_session_active() else X11Backend()
+    )
     probe = backend.probe()
+    backend.close()
     from .intent_model import LinearNgramModel
     from .context_model import ContextModel
     from .prefix_schema import prefix_diagnostics
@@ -492,16 +506,24 @@ def diagnose() -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="keyswitch", description="Автоматическое исправление раскладки Ubuntu X11")
+    parser = argparse.ArgumentParser(
+        prog="keyswitch",
+        description="Автоматическое исправление раскладки для Ubuntu (X11 и Wayland)",
+    )
     parser.add_argument("--hidden", action="store_true", help="не показывать окно при запуске")
-    parser.add_argument("--diagnose", action="store_true", help="проверить X11 backend и завершиться")
+    parser.add_argument("--diagnose", action="store_true", help="проверить backend ввода и завершиться")
     parser.add_argument("--no-engine", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--wayland-input-helper", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--version", action="version", version=f"KeySwitch {__version__}")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     arguments = build_parser().parse_args(argv)
+    if arguments.wayland_input_helper is not None:
+        from .wayland_native import run_wayland_input_helper
+
+        return run_wayland_input_helper(arguments.wayland_input_helper)
     GLib.set_prgname("keyswitch")
     GLib.set_application_name("KeySwitch")
     configure_logging()

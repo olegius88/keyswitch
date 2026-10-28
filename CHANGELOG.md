@@ -4,6 +4,43 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- Wayland: KeySwitch now corrects layouts in GNOME Shell, KDE Plasma 6 and sway sessions, where a program sees
+  no keys of other windows. A separate input process takes the keyboards at the kernel level (`EVIOCGRAB`) and passes
+  every key on through a virtual keyboard (`/dev/uinput`), which also types the corrections; Enter and Tab are held back
+  until the word is corrected, as on Windows. The layout and the active window come from the desktop: a GNOME Shell
+  extension installed with the package (it takes effect after the next login), the `org.kde.keyboard` service and a
+  KWin script, or sway's IPC. The package installs a udev rule that gives the user of the active session access to
+  `/dev/uinput` and to keyboards and mice; the grab is released on the lock screen. If the main process hangs, keys go
+  through after 0.25 seconds and none is lost; an input process that crashes is started again. A password field is
+  left alone in GNOME also when it is the Shell's own prompt or an application field AT-SPI does not answer for in time.
+  Verified end to end in a VM with GNOME 50, Plasma 6.6 and sway 1.11, from source and from the package.
+- A word decided a moment after the keys that follow it reached the window is no longer refused as typed into a changed
+  field: with field reading on, `e 'njuj ` typed fast kept its `e`. The text the field shows after the word is accepted
+  when it is the keys typed after it.
+- The rule prompt of a double Pause goes under the caret when there is no room above it and stays on the monitor.
+- Windows: the keyboard hook answers each key in a few milliseconds also while the computer is busy. Its short system
+  calls (the window in front, its layout, the character of a key) no longer give up Python's interpreter lock and wait
+  for it again after each call; with the decision of a word running at the same time, every such wait held the key, and
+  with it every key of the system, up to tens of milliseconds, and the whole answer up to a second and more on a loaded
+  machine. A hook that keeps the keys that long loses some of them: Windows 11 then passes keys typed meanwhile to the
+  window without the hook, and KeySwitch decided words it had not seen in full. In a Windows 11 VM with every core busy
+  the slowest answer fell from up to 1.8 seconds to under 30 milliseconds. The first line of the log names the system's
+  build.
+- Windows: when the processor is so busy that the keyboard hook gets a key 0.28 seconds or more after it was pressed,
+  KeySwitch lets go of the word being typed instead of correcting it. Windows 10 and 11 pass every key that waits about
+  0.3 seconds for the hook to the window without it, so the word on the screen is no longer the one KeySwitch saw, and a
+  correction would delete the wrong letters. In a Windows 11 VM with every core busy each of the 23 keys that passed the
+  hook followed such a late key. The log records it as `hook_gap`.
+- Windows: the log names, once per program, a program that keeps the keys typed into it away from KeySwitch
+  (`input_unseen`). A program in front that reads the keyboard as raw input and has a keyboard hook of its own makes
+  Windows call no keyboard hook at all, so KeySwitch neither corrects nor answers its hotkeys there; the text is left
+  as typed. Reading raw input alone does not do it.
+  KeySwitch notices it when the system's last input time moves on with no key or pointer event reaching its hooks.
+- The log tells an early switch that gives way to the space typed right after it (`early_switch_dropped`) from a
+  correction that is given up, and names the kind of key that kept the keys typed after a word from being typed again
+  (`unsafe_key`: a space, a modifier, Backspace, an arrow key, a shortcut). Such early switches had read as lost
+  corrections, though the word was corrected at its space a moment later.
+
 ## 0.63.0 — 2026-10-26
 
 - A Latin variable of one letter typed in the Russian layout after a Russian word is asked about again when an operator

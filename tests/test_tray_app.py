@@ -52,6 +52,7 @@ from fixture_values.counts import (
     TRAY_APP_PRESENT_CALLS_AFTER_REACTIVATE,
 )
 from fixture_values.keys import A_KEYCODE
+from fixture_values.wayland import WL_FIXTURE_HELPER_ARG_FD, WL_FIXTURE_HELPER_EXIT_CODE
 from fixture_values.platform import (
     CANCELLED_INITIAL_UPDATE_SOURCE_ID,
     CANCELLED_PERIODIC_UPDATE_SOURCE_ID,
@@ -1087,9 +1088,23 @@ class ApplicationEntrypointTests(unittest.TestCase):
         with (
             patch("keyswitch.launcher._running_on_windows", return_value=False),
             patch("keyswitch.app.main", return_value=FAKE_LINUX_MAIN_EXIT_CODE) as linux_main,
+            patch.object(sys, "argv", ["keyswitch", "--version"]),
         ):
-            self.assertEqual(launcher_module.main(["--version"]), FAKE_LINUX_MAIN_EXIT_CODE)
-        linux_main.assert_called_once_with(["--version"])
+            self.assertEqual(launcher_module.main(), FAKE_LINUX_MAIN_EXIT_CODE)
+        linux_main.assert_called_once_with(None)
+
+        with (
+            patch("keyswitch.launcher._running_on_windows", return_value=False),
+            patch(
+                "keyswitch.wayland_native.run_wayland_input_helper",
+                return_value=WL_FIXTURE_HELPER_EXIT_CODE,
+            ) as run_helper,
+        ):
+            self.assertEqual(
+                launcher_module.main(["--wayland-input-helper", str(WL_FIXTURE_HELPER_ARG_FD)]),
+                WL_FIXTURE_HELPER_EXIT_CODE,
+            )
+        run_helper.assert_called_once_with(WL_FIXTURE_HELPER_ARG_FD)
 
         from keyswitch import windows_app
 
@@ -1157,6 +1172,40 @@ class ApplicationEntrypointTests(unittest.TestCase):
         ):
             self.assertEqual(app_module.main(["--hidden", "--no-engine"]), FAKE_APPLICATION_RUN_EXIT_CODE)
         application_class.assert_called_once_with(hidden=True, no_engine=True)
+
+        with patch(
+            "keyswitch.wayland_native.run_wayland_input_helper",
+            return_value=WL_FIXTURE_HELPER_EXIT_CODE,
+        ) as app_helper:
+            self.assertEqual(
+                app_module.main(["--wayland-input-helper", str(WL_FIXTURE_HELPER_ARG_FD)]),
+                WL_FIXTURE_HELPER_EXIT_CODE,
+            )
+        app_helper.assert_called_once_with(WL_FIXTURE_HELPER_ARG_FD)
+
+        wl_probe = BackendProbe(True, "wayland", "GNOME", "evdev (EVIOCGRAB)", "uinput", "us,ru", 0)
+        wl_backend = Mock()
+        wl_backend.probe.return_value = wl_probe
+        wl_out = io.StringIO()
+        with (
+            patch("keyswitch.app.wayland_session_active", return_value=True),
+            patch("keyswitch.app.WaylandBackend", return_value=wl_backend),
+            contextlib.redirect_stdout(wl_out),
+        ):
+            self.assertEqual(app_module.diagnose(), 0)
+        wl_backend.close.assert_called_once_with()
+        self.assertEqual(json.loads(wl_out.getvalue())["session_type"], "wayland")
+
+        with (
+            patch("keyswitch.app.wayland_session_active", return_value=True),
+            patch("keyswitch.app.SettingsStore", return_value=FakeSettings()),
+            patch("keyswitch.app.AutostartManager", return_value=FakeAutostart()),
+            patch("keyswitch.app.HistoryStore", return_value=FakeHistory()),
+            patch("keyswitch.app.KeySwitchEngine", return_value=FakeEngine()) as engine_cls,
+            patch.object(app_module, "APP_ID", "io.github.olegius88.KeySwitchWaylandAppTest"),
+        ):
+            KeySwitchApplication(hidden=True, no_engine=True)
+        self.assertEqual(engine_cls.call_args.kwargs["backend_label"], "Wayland evdev + uinput")
 
 
 if __name__ == "__main__":

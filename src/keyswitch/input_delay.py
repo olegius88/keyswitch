@@ -9,6 +9,10 @@ takes the counts once a minute and logs them when a key was late.
 Keys other programs inject (TeamViewer types every character it receives as one) carry no time
 the user pressed them at; only how long the hook took over them is counted, so that on a
 computer controlled from another one the log still says whether KeySwitch held its input up.
+
+A key the hook reached HOOK_GAP_MS late, or answered that slowly, also leaves a gap: Windows gives
+the keys that waited behind it that long to the window without the hook (see HOOK_GAP_MS), and
+the engine no longer knows what stands after the word it tracks.
 """
 
 from __future__ import annotations
@@ -16,7 +20,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass, replace
 
-from .constants.timing import INPUT_DELAY_LATE_MS, INPUT_DELAY_SLOW_CALLBACK_MS, INPUT_DELAY_UNSTAMPED_MS
+from .constants.timing import HOOK_GAP_MS, INPUT_DELAY_LATE_MS, INPUT_DELAY_SLOW_CALLBACK_MS, INPUT_DELAY_UNSTAMPED_MS
 
 
 @dataclass(frozen=True)
@@ -39,12 +43,31 @@ class InputDelayReport:
         return bool(self.late_keys or self.slow_callbacks)
 
 
+@dataclass(frozen=True)
+class HookGap:
+    """The key after which keys may have passed the hook: how late the hook ran for it and how long it took."""
+
+    late_ms: int
+    callback_ms: int
+
+
 class InputDelay:
     """Counts the hook thread adds to and the engine's worker takes."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._report = InputDelayReport(0, 0, 0, 0, 0)
+        self._gap: HookGap | None = None
+
+    def note_wait(self, late_ms: int) -> None:
+        """A typed key the hook has just reached: a gap is known before the key goes on to the engine."""
+
+        if HOOK_GAP_MS <= late_ms < INPUT_DELAY_UNSTAMPED_MS:
+            self._note_gap(HookGap(late_ms, 0))
+
+    def _note_gap(self, gap: HookGap) -> None:
+        with self._lock:
+            self._gap = gap
 
     def record(self, late_ms: int, callback_ms: int) -> None:
         """A typed key: how long after its key time the hook ran, and how long the answer took."""
@@ -61,6 +84,9 @@ class InputDelay:
                 worst_callback_ms=max(report.worst_callback_ms, callback_ms),
                 unstamped_keys=report.unstamped_keys + (not stamped),
             )
+        # A key already late enough was noted as the hook reached it (note_wait).
+        if stamped and late_ms < HOOK_GAP_MS <= late_ms + callback_ms:
+            self._note_gap(HookGap(late_ms, callback_ms))
 
     def record_foreign(self, callback_ms: int) -> None:
         """A key another program injected: how long the answer took."""
@@ -73,6 +99,8 @@ class InputDelay:
                 worst_callback_ms=max(report.worst_callback_ms, callback_ms),
                 foreign_keys=report.foreign_keys + 1,
             )
+        if callback_ms >= HOOK_GAP_MS:
+            self._note_gap(HookGap(0, callback_ms))
 
     def take(self) -> InputDelayReport:
         """The counts since the last take, and a fresh start."""
@@ -80,3 +108,10 @@ class InputDelay:
         with self._lock:
             report, self._report = self._report, InputDelayReport(0, 0, 0, 0, 0)
         return report
+
+    def take_gap(self) -> HookGap | None:
+        """The last gap since the previous call, if any."""
+
+        with self._lock:
+            gap, self._gap = self._gap, None
+        return gap

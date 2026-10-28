@@ -1,0 +1,13 @@
+# Unprivileged local-seat access to uinput and physical keyboards/pointers for KeySwitch.
+# Sorts before 73-seat-late.rules so systemd-logind grants ACLs only to the active seat user.
+KERNEL=="uinput", SUBSYSTEM=="misc", ENV{ID_SEAT}=="", ENV{ID_SEAT}="seat0"
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
+
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", ENV{ID_SEAT}=="", ENV{ID_SEAT}="seat0"
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", TAG+="uaccess"
+
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_MOUSE}=="1", ENV{ID_SEAT}=="", ENV{ID_SEAT}="seat0"
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_MOUSE}=="1", TAG+="uaccess"
+
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_TOUCHPAD}=="1", ENV{ID_SEAT}=="", ENV{ID_SEAT}="seat0"
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_TOUCHPAD}=="1", TAG+="uaccess"

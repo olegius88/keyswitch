@@ -208,6 +208,9 @@ class FakeWindowsAPI:
         self.window_owners: dict[int, int] = {WINDOWS_FAKE_HWND: FAKE_FOREGROUND_PROCESS_ID}
         self.process_id = WINDOWS_OWN_PROCESS_ID
         self.ticks = 0
+        # GetLastInputInfo and the event times the hooks got (take_unseen_input).
+        self.last_input = 0
+        self.input_times: list[int] = []
         self.inactive_windows: list[int] = []
         # Keys the keyboard has already let go of; every other key reads as down.
         self.released_keys: set[int] = set()
@@ -264,6 +267,12 @@ class FakeWindowsAPI:
 
     def tick_count(self) -> int:
         return self.ticks
+
+    def last_input_time(self) -> int:
+        return self.last_input
+
+    def hook_input_times(self) -> tuple[int, ...]:
+        return tuple(self.input_times)
 
     def keep_window_inactive(self, window: int) -> bool:
         self.inactive_windows.append(window)

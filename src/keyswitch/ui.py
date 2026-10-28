@@ -225,6 +225,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._application_choices: list[ApplicationChoice] | None = None
         self._application_rows: list[Adw.ActionRow] = []
         self._app_picker_dialog: Adw.Dialog | None = None
+        self._is_wayland = False
         self.set_default_size(GTK_WINDOW_DEFAULT_WIDTH_PIXELS, GTK_WINDOW_DEFAULT_HEIGHT_PIXELS)
         self.set_size_request(GTK_WINDOW_MIN_WIDTH_PIXELS, GTK_WINDOW_MIN_HEIGHT_PIXELS)
         self.add_css_class("keyswitch-window")
@@ -1013,16 +1014,39 @@ class MainWindow(Adw.ApplicationWindow):
         )
         about = Adw.PreferencesGroup(title="KeySwitch")
         about.add(Adw.ActionRow(title="Версия", subtitle=__version__))
-        about.add(Adw.ActionRow(title="Назначение", subtitle="Автоматическое исправление раскладки для Ubuntu X11"))
+        about.add(
+            Adw.ActionRow(
+                title="Назначение",
+                subtitle="Автоматическое исправление раскладки для Ubuntu (X11 и Wayland)",
+            )
+        )
         page.append(about)
 
         probe = self.engine.backend.probe()
+        self._is_wayland = probe.session_type == "wayland"
         diagnostics = Adw.PreferencesGroup(title="Диагностика backend")
-        diagnostics.add(Adw.ActionRow(title="Сеанс", subtitle=f"{probe.session_type} · DISPLAY {probe.display or '—'}"))
-        diagnostics.add(Adw.ActionRow(title="XRecord", subtitle=probe.record_version if probe.available else probe.error))
-        diagnostics.add(Adw.ActionRow(title="XTEST", subtitle=probe.xtest_version))
-        diagnostics.add(Adw.ActionRow(title="XKB", subtitle=probe.xkb_version))
-        diagnostics.add(Adw.ActionRow(title="XKB-группа", subtitle=str(probe.current_group + 1) if probe.current_group >= 0 else "—"))
+        if self._is_wayland:
+            diagnostics.add(Adw.ActionRow(title="Сеанс", subtitle=f"{probe.session_type} · {probe.display or '—'}"))
+            diagnostics.add(
+                Adw.ActionRow(
+                    title="Перехват ввода",
+                    subtitle=probe.record_version if probe.available else probe.error,
+                )
+            )
+            diagnostics.add(Adw.ActionRow(title="Синтез ввода", subtitle=probe.xtest_version))
+            diagnostics.add(Adw.ActionRow(title="Раскладки", subtitle=probe.xkb_version))
+            diagnostics.add(
+                Adw.ActionRow(
+                    title="Активная группа",
+                    subtitle=str(probe.current_group + 1) if probe.current_group >= 0 else "—",
+                )
+            )
+        else:
+            diagnostics.add(Adw.ActionRow(title="Сеанс", subtitle=f"{probe.session_type} · DISPLAY {probe.display or '—'}"))
+            diagnostics.add(Adw.ActionRow(title="XRecord", subtitle=probe.record_version if probe.available else probe.error))
+            diagnostics.add(Adw.ActionRow(title="XTEST", subtitle=probe.xtest_version))
+            diagnostics.add(Adw.ActionRow(title="XKB", subtitle=probe.xkb_version))
+            diagnostics.add(Adw.ActionRow(title="XKB-группа", subtitle=str(probe.current_group + 1) if probe.current_group >= 0 else "—"))
         diagnostics.add(Adw.ActionRow(title="Операционная система", subtitle=self._os_description()))
         page.append(diagnostics)
 
@@ -1112,7 +1136,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.hero_action.set_label(snapshot.current_word or snapshot.last_action)
         self.stat_corrections.set_label(str(snapshot.correction_count))
         self.stat_layout.set_label("EN" if snapshot.current_group == 0 else "RU" if snapshot.current_group == 1 else "—")
-        self.stat_backend.set_label("X11" if snapshot.running else "—")
+        backend_name = "Wayland" if self._is_wayland else "X11"
+        self.stat_backend.set_label(backend_name if snapshot.running else "—")
         self.language_active_label.set_label("EN · группа 1" if snapshot.current_group == 0 else "RU · группа 2" if snapshot.current_group == 1 else "—")
         if snapshot.last_error:
             self.hero_subtitle.set_label(snapshot.last_error)
@@ -1460,16 +1485,28 @@ class MainWindow(Adw.ApplicationWindow):
             self.toast("Настройки сброшены; перезапустите окно для обновления всех полей")
 
     def _copy_diagnostics(self, probe: BackendProbe) -> None:
-        text = "\n".join(
-            (
-                f"KeySwitch {__version__}",
-                f"OS: {self._os_description()}",
-                f"Session: {probe.session_type}",
+        if probe.session_type == "wayland":
+            backend_lines = (
+                f"Desktop: {probe.display}",
+                f"Capture: {probe.record_version}",
+                f"Injection: {probe.xtest_version}",
+                f"Layouts: {probe.xkb_version}",
+                f"Active group: {probe.current_group}",
+            )
+        else:
+            backend_lines = (
                 f"DISPLAY: {probe.display}",
                 f"XRecord: {probe.record_version}",
                 f"XTEST: {probe.xtest_version}",
                 f"XKB: {probe.xkb_version}",
                 f"XKB group: {probe.current_group}",
+            )
+        text = "\n".join(
+            (
+                f"KeySwitch {__version__}",
+                f"OS: {self._os_description()}",
+                f"Session: {probe.session_type}",
+                *backend_lines,
                 f"Intent model: {self.engine.intent_model_status.summary}",
                 f"Context model: {self.engine.context_policy.status}",
                 f"Context mode: {self.settings.get('detection.context_policy', 'assist')}",

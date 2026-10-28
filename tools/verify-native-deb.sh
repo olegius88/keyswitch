@@ -160,6 +160,10 @@ if grep -Eq '(^|[,[:space:]])python3([[:space:],:]|$)' <<<"$depends"; then
     printf 'Native package unexpectedly depends on the Python interpreter.\n' >&2
     exit 1
 fi
+if ! grep -Eq '(^|[,[:space:]])libwayland-client0([[:space:],:]|$)' <<<"$depends"; then
+    printf 'Native package is missing the libwayland-client0 runtime dependency.\n' >&2
+    exit 1
+fi
 
 dpkg-deb --extract "$package" "$staging"
 binary="$staging/usr/lib/keyswitch/keyswitch-bin"
@@ -196,6 +200,17 @@ grep -q '/usr/lib/keyswitch/keyswitch-bin' "$launcher"
 control_root="$staging/control"
 mkdir -p "$control_root"
 dpkg-deb --control "$package" "$control_root"
+test -x "$control_root/postinst"
+cmp -s "$project_dir/packaging/debian/postinst" "$control_root/postinst"
+cmp -s "$project_dir/packaging/udev/60-keyswitch.rules" \
+    "$staging/usr/lib/udev/rules.d/60-keyswitch.rules"
+cmp -s "$project_dir/packaging/udev/keyswitch.modules-load.conf" \
+    "$staging/usr/lib/modules-load.d/keyswitch.conf"
+gnome_ext_uuid="keyswitch@io.github.olegius88.KeySwitch"
+cmp -s "$project_dir/packaging/gnome-shell/$gnome_ext_uuid/metadata.json" \
+    "$staging/usr/share/gnome-shell/extensions/$gnome_ext_uuid/metadata.json"
+cmp -s "$project_dir/packaging/gnome-shell/$gnome_ext_uuid/extension.js" \
+    "$staging/usr/share/gnome-shell/extensions/$gnome_ext_uuid/extension.js"
 apt_sources_path="/etc/apt/sources.list.d/$(basename "$expected_apt_sources")"
 apt_keyring_path="$(sed -nE 's/^Signed-By:[[:space:]]+([^[:space:]]+)$/\1/p' \
     "$expected_apt_sources")"

@@ -59,3 +59,10 @@ enable_error_code = [
     "truthy-iterable",
     "unused-awaitable",
 ]
+
+[[tool.mypy.overrides]]
+# The input of a Wayland session (evdev, uinput, poll()) exists on Linux only. The Windows check leaves
+# these modules out of its files and reads them where they are imported without reporting their errors;
+# the Linux check lists and checks them in full.
+module = ["keyswitch.wayland_native", "keyswitch.wayland_helper"]
+follow_imports = "silent"

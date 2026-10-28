@@ -1,16 +1,25 @@
 .TH KEYSWITCH 1 "October 2026" "KeySwitch 0.63.0" "User Commands"
 .SH NAME
-keyswitch \- automatic keyboard layout correction for Ubuntu X11
+keyswitch \- automatic keyboard layout correction for Ubuntu (X11 and Wayland)
 .SH SYNOPSIS
 .B keyswitch
 .RI [ options ]
 .SH DESCRIPTION
 .B KeySwitch
-observes keyboard events in the current X11 session, detects words entered in
-the wrong English or Russian layout, changes the XKB group and replaces the
-mistyped word.
+observes keyboard events in the current X11 or Wayland session, detects words
+entered in the wrong English or Russian layout, changes the layout and replaces
+the mistyped word.
 .PP
-By default, KeySwitch also checks the current word after 1.5 seconds without
+In a Wayland session (GNOME Shell, KDE Plasma 6 or sway) a separate input
+process grabs the keyboards at the kernel level and passes every key on through
+a virtual keyboard on
+.IR /dev/uinput .
+The udev rule of the package gives the user of the active session access to it
+and to the keyboards. GNOME Shell uses the extension
+.I keyswitch@io.github.olegius88.KeySwitch
+from the package; it becomes available after the next login.
+.PP
+By default, KeySwitch also checks the current word after 0.7 seconds without
 typing, before a separator is entered. Idle correction can be disabled
 independently in the application settings.
 .PP
@@ -149,9 +158,11 @@ in from the situation: the letters as typed, the condition (the word contains
 them, starts with them or matches them), case sensitivity and the action
 (convert the word or keep it). A rule is stored only by OK in that window;
 Escape dismisses the offer. A single Pause and the undo hotkey teach nothing.
-Enter answering the offer does not also submit a message. Ordinary X11
-Enter/Tab events cannot be delayed by XRecord, so correct the word using
-Space, idle correction or Pause before submitting or changing fields.
+Enter answering the offer does not also submit a message. In a Wayland session
+Enter/Tab are held back until the word is corrected and then delivered once.
+Ordinary X11 Enter/Tab events cannot be delayed by XRecord, so on X11 correct
+the word using Space, idle correction or Pause before submitting or changing
+fields.
 .PP
 Pause/Break converts the unfinished word, the layout-dependent symbols typed
 right after a word boundary (for example a Russian quote meant as "@"), or the
@@ -168,7 +179,8 @@ makes the decision, without applying the completed-word model to partial input.
 Start without presenting the main window.
 .TP
 .B \-\-diagnose
-Probe the X11 RECORD, XTEST and XKB backend, print JSON and exit.
+Probe the input backend of the session (X11 RECORD, XTEST and XKB, or the
+Wayland input process and the desktop), print JSON and exit.
 .TP
 .B \-\-version
 Print the installed KeySwitch version and exit.
@@ -225,7 +237,12 @@ Frozen Russian lexical and character n-gram source used by the runtime scorer.
 X11 display used for global input observation and correction.
 .TP
 .B XDG_SESSION_TYPE
-Must identify an X11 session for the global backend.
+Together with
+.BR WAYLAND_DISPLAY ,
+selects the X11 or the Wayland backend.
+.TP
+.B SWAYSOCK
+The sway IPC socket used for the layout and the active window under sway.
 .TP
 .BR XDG_CONFIG_HOME , " XDG_DATA_HOME"
 Override the Linux base directories for configuration and user data.
