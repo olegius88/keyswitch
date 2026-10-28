@@ -98,548 +98,51 @@
     "rows": 84792
   },
   "capital_citation_curriculum": {
-    "candidates_by_length": {
-      "3": 999,
-      "4": 4018,
-      "5": 8684
-    },
-    "frames": 800,
-    "lowercase_contrast": true,
-    "sample_weight": 1.0,
-    "scope": "TRAIN only: keep frames of Latin capitals after Russian prose whose Cyrillic reading is a rare lexicon word (capital_citation_curriculum).",
-    "words": 400,
-    "words_by_length": {
-      "3": [
-        "щаз/OFP",
-        "гев/UTD",
-        "фиш/ABI",
-        "уиз/EBP",
-        "нке/YRT",
-        "шаз/IFP",
-        "миу/VBE",
-        "ила/BKF",
-        "аим/FBV",
-        "кйо/RQJ",
-        "асл/FCK",
-        "раг/HFU",
-        "ние/YBT",
-        "мип/VBG",
-        "туо/NEJ",
-        "аод/FJL",
-        "ган/UFY",
-        "ноа/YJF",
-        "нго/YUJ",
-        "уфе/EAT",
-        "ьфу/MAE",
-        "лие/KBT",
-        "сур/CEH",
-        "алс/FKC",
-        "сиз/CBP",
-        "ишо/BIJ",
-        "маи/VFB",
-        "ася/FCZ",
-        "ены/TYS",
-        "цеп/WTG",
-        "орр/JHH",
-        "мур/VEH",
-        "фда/ALF",
-        "соя/CJZ",
-        "оуз/JEP",
-        "гее/UTT",
-        "сиг/CBU",
-        "нзт/YPN",
-        "аке/FRT",
-        "веи/DTB",
-        "яра/ZHF",
-        "мщу/VOE",
-        "нин/YBY",
-        "тод/NJL",
-        "снл/CYK",
-        "пру/GHE",
-        "лещ/KTO",
-        "ейд/TQL",
-        "рие/HBT",
-        "иет/BTN",
-        "тес/NTC",
-        "куй/REQ",
-        "дку/LRE",
-        "нор/YJH",
-        "чол/XJK",
-        "мсс/VCC",
-        "ния/YBZ",
-        "алл/FKK",
-        "рым/HSV",
-        "ало/FKJ",
-        "оии/JBB",
-        "дрн/LHY",
-        "йан/QFY",
-        "чее/XTT",
-        "мтв/VND",
-        "енг/TYU",
-        "язв/ZPD",
-        "гуо/UEJ",
-        "пдг/GLU",
-        "апу/FGE",
-        "ерл/THK",
-        "кия/RBZ",
-        "уок/EJR",
-        "сср/CCH",
-        "ниц/YBW",
-        "муу/VEE",
-        "урк/EHR",
-        "неф/YTA",
-        "шау/IFE",
-        "щие/OBT",
-        "иру/BHE",
-        "чой/XJQ",
-        "нлп/YKG",
-        "лам/KFV",
-        "уфу/EAE",
-        "гао/UFJ",
-        "лды/KLS",
-        "ией/BTQ",
-        "оас/JFC",
-        "вен/DTY",
-        "рнл/HYK",
-        "нно/YYJ",
-        "кип/RBG",
-        "гсм/UCV",
-        "нпа/YGF",
-        "дтс/LNC",
-        "лал/KFK",
-        "яге/ZUT",
-        "киу/RBE",
-        "тьс/NMC",
-        "аты/FNS",
-        "фез/ATP",
-        "деп/LTG",
-        "чсс/XCC",
-        "ивл/BDK",
-        "грр/UHH",
-        "нса/YCF",
-        "яка/ZRF",
-        "гйо/UQJ",
-        "зой/PJQ",
-        "кту/RNE",
-        "яир/ZBH",
-        "пси/GCB",
-        "фил/ABK",
-        "тив/NBD",
-        "тер/NTH",
-        "тоф/NJA",
-        "ква/RDF",
-        "язи/ZPB",
-        "онд/JYL",
-        "ика/BRF",
-        "ату/FNE",
-        "аус/FEC",
-        "илл/BKK",
-        "тна/NYF",
-        "аип/FBG",
-        "рян/HZY",
-        "чул/XEK",
-        "яну/ZYE",
-        "лиу/KBE",
-        "мов/VJD",
-        "емс/TVC",
-        "ные/YST",
-        "чоп/XJG",
-        "рни/HYB",
-        "оул/JEK",
-        "вуп/DEG",
-        "имс/BVC",
-        "шшш/III",
-        "цнм/WYV",
-        "дач/LFX",
-        "онп/JYG",
-        "саз/CFP",
-        "аср/FCH",
-        "дии/LBB",
-        "цао/WFJ",
-        "тат/NFN",
-        "даз/LFP",
-        "йте/QNT",
-        "чок/XJR",
-        "тдт/NLN",
-        "вуу/DEE",
-        "лре/KHT",
-        "ерь/THM",
-        "илк/BKR",
-        "мым/VSV",
-        "мые/VST",
-        "мец/VTW",
-        "аси/FCB",
-        "зав/PFD",
-        "саи/CFB",
-        "фру/AHE",
-        "чао/XFJ",
-        "йип/QBG",
-        "тее/NTT",
-        "айл/FQK",
-        "кеы/RTS",
-        "чун/XEY",
-        "нир/YBH",
-        "оти/JNB",
-        "зул/PEK",
-        "двд/LDL",
-        "зно/PYJ",
-        "гаф/UFA",
-        "киф/RBA",
-        "мсз/VCP",
-        "ери/THB",
-        "фыг/ASU",
-        "чед/XTL",
-        "йон/QJY",
-        "чиз/XBP",
-        "шен/ITY",
-        "ков/RJD",
-        "вий/DBQ",
-        "гпв/UGD",
-        "йой/QJQ",
-        "фук/AER",
-        "орд/JHL",
-        "уть/ENM",
-        "кед/RTL",
-        "оцу/JWE",
-        "ций/WBQ",
-        "фок/AJR",
-        "теч/NTX",
-        "ипи/BGB",
-        "зто/PNJ",
-        "шаф/IFA",
-        "ашу/FIE",
-        "йня/QYZ",
-        "кут/REN"
-      ],
-      "4": [
-        "тигс/NBUC",
-        "рафф/HFAA",
-        "афиш/FABI",
-        "дмеи/LVTB",
-        "ктоо/RNJJ",
-        "олле/JKKT",
-        "зену/PTYE",
-        "снуп/CYEG",
-        "раде/HFLT",
-        "язве/ZPDT",
-        "серл/CTHK",
-        "дорс/LJHC",
-        "топы/NJGS",
-        "ворм/DJHV",
-        "чаку/XFRE",
-        "цинь/WBYM",
-        "шьем/IMTV",
-        "преп/GHTG",
-        "момо/VJVJ",
-        "отар/JNFH",
-        "филм/ABKV",
-        "пеги/GTUB",
-        "майе/VFQT",
-        "роус/HJEC",
-        "фейт/ATQN",
-        "чанс/XFYC",
-        "омой/JVJQ",
-        "зита/PBNF",
-        "окои/JRJB",
-        "фитц/ABNW",
-        "писи/GBCB",
-        "ауру/FEHE",
-        "ламу/KFVE",
-        "ноам/YJFV",
-        "оули/JEKB",
-        "усек/ECTR",
-        "ритц/HBNW",
-        "литт/KBNN",
-        "леей/KTTQ",
-        "рдов/HLJD",
-        "тары/NFHS",
-        "пири/GBHB",
-        "молт/VJKN",
-        "яйки/ZQRB",
-        "ваау/DFFE",
-        "йелп/QTKG",
-        "септ/CTGN",
-        "чинк/XBYR",
-        "аигу/FBUE",
-        "криг/RHBU",
-        "алеф/FKTA",
-        "подь/GJLM",
-        "срут/CHEN",
-        "олла/JKKF",
-        "оулу/JEKE",
-        "лано/KFYJ",
-        "гуда/UELF",
-        "кань/RFYM",
-        "ушна/EIYF",
-        "крул/RHEK",
-        "лиор/KBJH",
-        "заде/PFLT",
-        "пинк/GBYR",
-        "анее/FYTT",
-        "зоей/PJTQ",
-        "кунс/REYC",
-        "лами/KFVB",
-        "чете/XTNT",
-        "атне/FNYT",
-        "мучи/VEXB",
-        "серк/CTHR",
-        "шпиц/IGBW",
-        "йори/QJHB",
-        "йопт/QJGN",
-        "сика/CBRF",
-        "онни/JYYB",
-        "ицзе/BWPT",
-        "тейт/NTQN",
-        "йеле/QTKT",
-        "гира/UBHF",
-        "краг/RHFU",
-        "чочо/XJXJ",
-        "пенс/GTYC",
-        "викс/DBRC",
-        "моша/VJIF",
-        "муай/VEFQ",
-        "ксев/RCTD",
-        "лурд/KEHL",
-        "чизу/XBPE",
-        "нефа/YTAF",
-        "дини/LBYB",
-        "ирма/BHVF",
-        "киша/RBIF",
-        "нилс/YBKC",
-        "чами/XFVB",
-        "алая/FKFZ",
-        "рощу/HJOE",
-        "ареф/FHTA",
-        "мени/VTYB",
-        "гуфи/UEAB",
-        "псов/GCJD",
-        "лила/KBKF",
-        "емое/TVJT",
-        "веяи/DTZB",
-        "нный/YYSQ",
-        "динь/LBYM",
-        "анет/FYTN",
-        "угуу/EUEE",
-        "йеля/QTKZ",
-        "муги/VEUB",
-        "роми/HJVB",
-        "нарф/YFHA",
-        "аиша/FBIF",
-        "тетч/NTNX",
-        "ланн/KFYY",
-        "шлиц/IKBW",
-        "уорд/EJHL",
-        "тыяа/NSZF",
-        "ченс/XTYC",
-        "смыв/CVSD",
-        "чану/XFYE",
-        "гнут/UYEN",
-        "низы/YBPS",
-        "фаня/AFYZ",
-        "уфук/EAER",
-        "урра/EHHF",
-        "круа/RHEF",
-        "гаем/UFTV",
-        "омия/JVBZ",
-        "моор/VJJH",
-        "агры/FUHS",
-        "йетс/QTNC",
-        "тикл/NBRK",
-        "ивар/BDFH",
-        "чипу/XBGE",
-        "шуль/IEKM",
-        "одра/JLHF",
-        "упер/EGTH",
-        "кипе/RBGT",
-        "рида/HBLF",
-        "дозе/LJPT",
-        "чикс/XBRC",
-        "мейз/VTQP",
-        "кика/RBRF",
-        "фолк/AJKR",
-        "трал/NHFK",
-        "фрог/AHJU",
-        "маза/VFPF",
-        "кайл/RFQK",
-        "кива/RBDF"
-      ],
-      "5": [
-        "мацуо/VFWEJ",
-        "гинки/UBYRB",
-        "таешь/NFTIM",
-        "генка/UTYRF",
-        "читос/XBNJC",
-        "аврил/FDHBK",
-        "лизал/KBPFK",
-        "марне/VFHYT",
-        "пинту/GBYNE",
-        "айрин/FQHBY",
-        "нейла/YTQKF",
-        "алтон/FKNJY",
-        "толин/NJKBY",
-        "рамиш/HFVBI",
-        "йосси/QJCCB",
-        "йодой/QJLJQ",
-        "ашему/FITVE",
-        "витта/DBNNF",
-        "вайда/DFQLF",
-        "стейс/CNTQC",
-        "гилом/UBKJV",
-        "лотсо/KJNCJ",
-        "кирок/RBHJR",
-        "палма/GFKVF",
-        "марас/VFHFC",
-        "зонду/PJYLE",
-        "клопа/RKJGF",
-        "сачин/CFXBY",
-        "рольф/HJKMA",
-        "дамар/LFVFH",
-        "очной/JXYJQ",
-        "анкой/FYRJQ",
-        "микке/VBRRT",
-        "удушу/ELEIE",
-        "тенли/NTYKB",
-        "спеси/CGTCB",
-        "опоил/JGJBK",
-        "морре/VJHHT",
-        "квана/RDFYF",
-        "альдо/FKMLJ",
-        "пулен/GEKTY",
-        "фатма/AFNVF",
-        "солгу/CJKUE",
-        "ширан/IBHFY",
-        "пайда/GFQLF",
-        "кайто/RFQNJ",
-        "отите/JNBNT",
-        "ронит/HJYBN",
-        "лаваш/KFDFI",
-        "манно/VFYYJ"
-      ]
-    }
+    "scope": "not used: a frozen base keeps the word decided at its own boundary"
   },
   "captured_curriculum": {
     "so-inside.jsonl.xz": {
-      "excluded": true
+      "scope": "not used: a frozen base keeps the word decided at its own boundary"
     },
     "so-typing-previous-line.jsonl.xz": {
-      "available": {
-        "convert": 19871,
-        "keep": 101192
-      },
-      "chosen": {},
-      "skipped_short": 16951,
-      "unknown_keep_available": 8547,
-      "unknown_keep_chosen": 0,
-      "weight": 0.25
+      "scope": "not used: a frozen base keeps the word decided at its own boundary"
     },
     "so-typing-typos.jsonl.xz": {
-      "available": {
-        "convert": 20375,
-        "keep": 101414
-      },
-      "chosen": {},
-      "skipped_short": 16531,
-      "unknown_keep_available": 17680,
-      "unknown_keep_chosen": 0,
-      "weight": 0.25
+      "scope": "not used: a frozen base keeps the word decided at its own boundary"
     },
     "so-typing.jsonl.xz": {
-      "available": {
-        "convert": 17394,
-        "keep": 97845
-      },
-      "chosen": {},
-      "skipped_short": 15849,
-      "unknown_keep_available": 8717,
-      "unknown_keep_chosen": 0,
-      "weight": 0.25
+      "scope": "not used: a frozen base keeps the word decided at its own boundary"
     },
     "taiga-chat-typing-keep.jsonl.xz": {
-      "available": {
-        "convert": 0,
-        "keep": 203148
-      },
-      "chosen": {},
-      "skipped_short": 26796,
-      "unknown_keep_available": 19741,
-      "unknown_keep_chosen": 0,
-      "weight": 0.75
+      "scope": "not used: a frozen base keeps the word decided at its own boundary"
     },
     "taiga-typing-keep.jsonl.xz": {
-      "available": {
-        "convert": 0,
-        "keep": 203069
-      },
-      "chosen": {},
-      "skipped_short": 27244,
-      "unknown_keep_available": 19697,
-      "unknown_keep_chosen": 0,
-      "weight": 0.75
+      "scope": "not used: a frozen base keeps the word decided at its own boundary"
     },
     "tatoeba-chat-en-wrong-ru-line.jsonl.xz": {
-      "available": {
-        "convert": 27150,
-        "keep": 105901
-      },
-      "chosen": {},
-      "skipped_short": 9624,
-      "unknown_keep_available": 2485,
-      "unknown_keep_chosen": 0,
-      "weight": 1.5
+      "scope": "not used: a frozen base keeps the word decided at its own boundary"
     },
     "tatoeba-chat-en-wrong.jsonl.xz": {
-      "available": {
-        "convert": 21425,
-        "keep": 154209
-      },
-      "chosen": {},
-      "skipped_short": 8174,
-      "unknown_keep_available": 3808,
-      "unknown_keep_chosen": 0,
-      "weight": 1.5
+      "scope": "not used: a frozen base keeps the word decided at its own boundary"
     },
     "tatoeba-chat-inside.jsonl.xz": {
-      "excluded": true
+      "scope": "not used: a frozen base keeps the word decided at its own boundary"
     },
     "tatoeba-chat-typing.jsonl.xz": {
-      "available": {
-        "convert": 26574,
-        "keep": 174680
-      },
-      "chosen": {},
-      "skipped_short": 17920,
-      "unknown_keep_available": 5528,
-      "unknown_keep_chosen": 0,
-      "weight": 0.35
+      "scope": "not used: a frozen base keeps the word decided at its own boundary"
     },
     "tatoeba-chat-typos.jsonl.xz": {
-      "available": {
-        "convert": 28636,
-        "keep": 177518
-      },
-      "chosen": {},
-      "skipped_short": 17993,
-      "unknown_keep_available": 21244,
-      "unknown_keep_chosen": 0,
-      "weight": 0.35
+      "scope": "not used: a frozen base keeps the word decided at its own boundary"
     },
     "tatoeba-inside.jsonl.xz": {
-      "excluded": true
+      "scope": "not used: a frozen base keeps the word decided at its own boundary"
     },
     "tatoeba-typing.jsonl.xz": {
-      "available": {
-        "convert": 26867,
-        "keep": 174475
-      },
-      "chosen": {},
-      "skipped_short": 18161,
-      "unknown_keep_available": 5170,
-      "unknown_keep_chosen": 0,
-      "weight": 0.35
+      "scope": "not used: a frozen base keeps the word decided at its own boundary"
     }
   },
   "conversion_threshold": 0.99,
-  "corpus_manifest_sha256": "1193f3b0eecd3020429d4a56850689640055d2b42169c3321e1099e975b69457",
+  "corpus_manifest_sha256": "a166543697d24825686708d1ca760e6a57b1f4bab1656703866f73170d5b1a84",
   "counted_token_curriculum": {
     "frames": 0,
     "scope": "not used"
@@ -647,1536 +150,209 @@
   "development": {
     "history": [
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 1,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.44997392761706695
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 2,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.3699247181450538
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 3,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.37528506364932307
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 4,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.3841933403875039
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 5,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.3924091314128399
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 6,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.399763638602346
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 7,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.4063961576589522
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 8,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.41244226523392213
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 9,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.41800614810407444
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 10,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.4231661497445587
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 11,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.4279821232332809
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 12,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.43250084047395104
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 13,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.43675965056961313
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 14,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.4407889467190711
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 15,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.4446138598060845
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 16,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.4482554513078641
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 17,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.4517315770340734
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 18,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.455057524046889
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 19,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.4582464930469947
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 20,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.4613099706965713
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 21,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.4642580188251642
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 22,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.46709950438316017
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 23,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.4698422844467442
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 24,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.4724933569669137
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 25,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.4750589817792055
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 26,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.47754478341585355
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 27,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.4799558343182215
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 28,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.4822967268453789
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 29,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.48457163160743083
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 30,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.4867843490687293
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 31,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.4889383517249374
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 32,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.49103682300060325
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 33,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.49308268632239965
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 34,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.4950786353896292
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 35,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.49702715684580107
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 36,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.4989305515188195
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 37,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.5007909524442031
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 38,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.5026103413841994
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 39,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.5043905628438207
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 40,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.5061333367606641
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 41,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.5078402695803242
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 42,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.5095128638958675
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 43,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.5111525275345788
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 44,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.5127605818778596
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 45,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.5143382683485818
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 46,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.5158867549188597
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 47,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.5174071424950917
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 48,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.5189004686306655
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 49,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.5203677137746875
+        "kept_development_loss": 0.00030815280098405926
       },
       {
-        "development_loss": 0.029736648614409566,
         "epoch": 50,
-        "kept_development_loss": 0.0003081556001405533,
-        "selection": {
-          "by_profile": {
-            "portable": {
-              "conversion_recall": 0.9830376190228419,
-              "convert_rows": 19219,
-              "converted_correctly": 18893,
-              "false_conversions": 52,
-              "rows": 58309
-            },
-            "reference_hunspell": {
-              "conversion_recall": 0.9836620011447006,
-              "convert_rows": 19219,
-              "converted_correctly": 18905,
-              "false_conversions": 51,
-              "rows": 58309
-            }
-          },
-          "loss": 0.029736648614409566,
-          "minimum_net_benefit": 18841,
-          "minimum_recall": 0.9830376190228419,
-          "net_benefit": 37695,
-          "pooled_recall": 0.9833498100837713,
-          "threshold": 0.95
-        },
-        "sign_development_loss": 0.5218098048509298
+        "kept_development_loss": 0.00030815280098405926
       }
     ],
-    "kept_loss": 0.0003081556001405533,
-    "kept_selected_epoch": 1,
-    "loss": 0.029736648614409566,
-    "selected_epoch": 50,
-    "selection": {
-      "by_profile": {
-        "portable": {
-          "conversion_recall": 0.9830376190228419,
-          "convert_rows": 19219,
-          "converted_correctly": 18893,
-          "false_conversions": 52,
-          "rows": 58309
-        },
-        "reference_hunspell": {
-          "conversion_recall": 0.9836620011447006,
-          "convert_rows": 19219,
-          "converted_correctly": 18905,
-          "false_conversions": 51,
-          "rows": 58309
-        }
-      },
-      "loss": 0.029736648614409566,
-      "minimum_net_benefit": 18841,
-      "minimum_recall": 0.9830376190228419,
-      "net_benefit": 37695,
-      "pooled_recall": 0.9833498100837713,
-      "threshold": 0.95
-    },
-    "sign_loss": 0.3699247181450538,
-    "sign_selected_epoch": 2
+    "loss": 0.00030815280098405926,
+    "selected_epoch": 1,
+    "selection": null
   },
   "dotted_curriculum": {
     "by_file": {
@@ -2188,1027 +364,7 @@
     "sample_weight": 1.0
   },
   "english_capital_curriculum": {
-    "candidates_by_length": {
-      "2": 99,
-      "3": 1759,
-      "4": 6191,
-      "5": 12825
-    },
-    "frames": 3996,
-    "frames_per_word": 2,
-    "lowercase_contrast": true,
-    "russian_contrast": false,
-    "sample_weight": 1.0,
-    "scope": "TRAIN only: keep frames of the keys of common Russian words typed in Latin capitals after English prose (english_capital_curriculum).",
-    "words_by_length": {
-      "2": [
-        "на/YF",
-        "по/GJ",
-        "из/BP",
-        "не/YT",
-        "от/JN",
-        "до/LJ",
-        "за/PF",
-        "он/JY",
-        "но/YJ",
-        "во/DJ",
-        "км/RV",
-        "со/CJ",
-        "то/NJ",
-        "им/BV",
-        "см/CV",
-        "де/LT",
-        "ни/YB",
-        "др/LH",
-        "ее/TT",
-        "ли/KB",
-        "ей/TQ",
-        "рф/HA",
-        "св/CD",
-        "ул/EK",
-        "мы/VS",
-        "кг/RU",
-        "те/NT",
-        "га/UF",
-        "ст/CN",
-        "ко/RJ",
-        "ан/FY",
-        "да/LF",
-        "кв/RD",
-        "ум/EV",
-        "вы/DS",
-        "ао/FJ",
-        "мг/VU",
-        "та/NF",
-        "ты/NS",
-        "ту/NE",
-        "го/UJ",
-        "ка/RF",
-        "нм/YV",
-        "си/CB",
-        "ос/JC",
-        "мл/VK",
-        "ук/ER",
-        "ль/KM",
-        "па/GF",
-        "шт/IN",
-        "ев/TD",
-        "пл/GK",
-        "се/CT",
-        "фр/AH",
-        "кн/RY",
-        "ми/VB",
-        "ад/FL",
-        "рт/HN",
-        "ро/HJ",
-        "вт/DN",
-        "ля/KZ",
-        "гц/UW",
-        "ре/HT",
-        "гл/UK",
-        "ед/TL",
-        "ну/YE",
-        "чк/XR",
-        "гр/UH",
-        "яд/ZL",
-        "ом/JV",
-        "мн/VY",
-        "мс/VC",
-        "ио/BJ",
-        "су/CE",
-        "ай/FQ",
-        "пи/GB",
-        "пе/GT",
-        "кл/RK",
-        "ша/IF",
-        "фу/AE",
-        "ив/BD",
-        "ил/BK",
-        "ар/FH",
-        "ку/RE",
-        "шу/IE",
-        "уз/EP",
-        "оп/JG",
-        "аг/FU",
-        "ас/FC",
-        "ау/FE",
-        "ор/JH",
-        "аз/FP",
-        "уч/EX",
-        "фе/AT",
-        "фи/AB",
-        "кр/RH",
-        "ик/BR",
-        "фа/AF",
-        "ям/ZV"
-      ],
-      "3": [
-        "что/XNJ",
-        "для/LKZ",
-        "его/TUJ",
-        "как/RFR",
-        "при/GHB",
-        "или/BKB",
-        "под/GJL",
-        "год/UJL",
-        "лет/KTN",
-        "где/ULT",
-        "так/NFR",
-        "том/NJV",
-        "сша/CIF",
-        "ааа/FFF",
-        "аай/FFQ",
-        "авл/FDK",
-        "авм/FDV",
-        "аво/FDJ",
-        "авп/FDG",
-        "аву/FDE",
-        "авы/FDS",
-        "агу/FUE",
-        "аде/FLT",
-        "аду/FLE",
-        "аег/FTU",
-        "аза/FPF",
-        "азр/FPH",
-        "азт/FPN",
-        "азы/FPS",
-        "аид/FBL",
-        "аим/FBV",
-        "аип/FBG",
-        "аир/FBH",
-        "айе/FQT",
-        "айз/FQP",
-        "айи/FQB",
-        "айл/FQK",
-        "айс/FQC",
-        "айт/FQN",
-        "айщ/FQO",
-        "айя/FQZ",
-        "аке/FRT",
-        "ако/FRJ",
-        "алв/FKD",
-        "алл/FKK",
-        "ало/FKJ",
-        "алс/FKC",
-        "алу/FKE",
-        "амо/FVJ",
-        "ане/FYT",
-        "анн/FYY",
-        "ану/FYE",
-        "анц/FYW",
-        "аны/FYS",
-        "ань/FYM",
-        "аня/FYZ",
-        "аод/FJL",
-        "аои/FJB",
-        "аой/FJQ",
-        "аон/FJY",
-        "аос/FJC",
-        "апв/FGD",
-        "апу/FGE",
-        "ара/FHF",
-        "арл/FHK",
-        "арр/FHH",
-        "ару/FHE",
-        "арч/FHX",
-        "ары/FHS",
-        "арь/FHM",
-        "аса/FCF",
-        "асе/FCT",
-        "аси/FCB",
-        "асл/FCK",
-        "аср/FCH",
-        "асс/FCC",
-        "асу/FCE",
-        "асы/FCS",
-        "ась/FCM",
-        "ася/FCZ",
-        "ату/FNE",
-        "аты/FNS",
-        "ать/FNM",
-        "аус/FEC",
-        "аут/FEN",
-        "ауу/FEE",
-        "ауф/FEA",
-        "ауч/FEX",
-        "афк/FAR",
-        "афт/FAN",
-        "аца/FWF",
-        "ача/FXF",
-        "аче/FXT",
-        "ачи/FXB",
-        "аша/FIF",
-        "аше/FIT",
-        "аши/FIB",
-        "ашк/FIR",
-        "ашу/FIE",
-        "ащи/FOB",
-        "аян/FZY",
-        "ваг/DFU",
-        "ваз/DFP",
-        "ваи/DFB",
-        "вао/DFJ",
-        "вар/DFH",
-        "вау/DFE",
-        "вву/DDE",
-        "вед/DTL",
-        "вез/DTP",
-        "веи/DTB",
-        "вей/DTQ",
-        "веп/DTG",
-        "вея/DTZ",
-        "виа/DBF",
-        "вив/DBD",
-        "виг/DBU",
-        "виз/DBP",
-        "вии/DBB",
-        "вий/DBQ",
-        "вил/DBK",
-        "вип/DBG",
-        "вис/DBC",
-        "вка/DRF",
-        "вмс/DVC",
-        "внм/DYV",
-        "внп/DYG",
-        "внс/DYC",
-        "воа/DJF",
-        "вог/DJU",
-        "вое/DJT",
-        "вой/DJQ",
-        "вол/DJK",
-        "воу/DJE",
-        "воя/DJZ",
-        "впп/DGG",
-        "впч/DGX",
-        "ври/DHB",
-        "врн/DHY",
-        "вру/DHE",
-        "всм/DCV",
-        "всу/DCE",
-        "втц/DNW",
-        "вуа/DEF",
-        "вуд/DEL",
-        "вук/DER",
-        "вун/DEY",
-        "вуп/DEG",
-        "вуу/DEE",
-        "вуф/DEA",
-        "вущ/DEO",
-        "вфс/DAC",
-        "вчд/DXL",
-        "вше/DIT",
-        "вши/DIB",
-        "выл/DSK",
-        "вяз/DZP",
-        "гав/UFD",
-        "гад/UFL",
-        "гае/UFT",
-        "гао/UFJ",
-        "гап/UFG",
-        "гас/UFC",
-        "гаф/UFA",
-        "гги/UUB",
-        "гдг/ULU",
-        "гев/UTD",
-        "гее/UTT",
-        "гез/UTP",
-        "геи/UTB",
-        "гем/UTV",
-        "гея/UTZ",
-        "гид/UBL",
-        "гиз/UBP",
-        "гии/UBB",
-        "гий/UBQ",
-        "гик/UBR",
-        "гио/UBJ",
-        "гит/UBN",
-        "гйо/UQJ",
-        "гмм/UVV",
-        "гмо/UVJ",
-        "гни/UYB",
-        "гнк/UYR",
-        "гну/UYE",
-        "гоа/UJF",
-        "гои/UJB",
-        "гок/UJR",
-        "гон/UJY",
-        "гоп/UJG",
-        "гоу/UJE",
-        "гош/UJI",
-        "гоя/UJZ",
-        "гпв/UGD",
-        "грр/UHH",
-        "гсм/UCV",
-        "гср/UCH",
-        "гта/UNF",
-        "гуд/UEL",
-        "гук/UER",
-        "гул/UEK",
-        "гуо/UEJ",
-        "гур/UEH",
-        "гут/UEN",
-        "гуч/UEX",
-        "гуя/UEZ",
-        "гче/UXT",
-        "гым/USV",
-        "гын/USY",
-        "даа/LFF",
-        "даз/LFP",
-        "даи/LFB",
-        "дао/LFJ",
-        "даф/LFA",
-        "даш/LFI",
-        "дая/LFZ",
-        "двд/LDL",
-        "двс/LDC",
-        "дев/LTD",
-        "дез/LTP",
-        "деи/LTB",
-        "дек/LTR",
-        "део/LTJ",
-        "деп/LTG",
-        "дец/LTW",
-        "дзи/LPB",
-        "див/LBD",
-        "дид/LBL",
-        "дии/LBB",
-        "дим/LBV",
-        "диу/LBE",
-        "диш/LBI",
-        "дия/LBZ",
-        "дка/LRF",
-        "дке/LRT",
-        "дки/LRB",
-        "дку/LRE",
-        "дла/LKF",
-        "дмз/LVP",
-        "дмй/LVQ",
-        "дмт/LVN",
-        "днл/LYK",
-        "днм/LYV",
-        "днс/LYC",
-        "дог/LJU",
-        "дод/LJL",
-        "дои/LJB",
-        "дол/LJK",
-        "доя/LJZ",
-        "дри/LHB",
-        "дрн/LHY",
-        "дсв/LCD",
-        "дсп/LCG",
-        "дти/LNB",
-        "дтс/LNC",
-        "дуа/LEF",
-        "дуг/LEU",
-        "дуи/LEB",
-        "дуй/LEQ",
-        "дук/LER",
-        "дул/LEK",
-        "дум/LEV",
-        "дуо/LEJ",
-        "дур/LEH",
-        "дус/LEC",
-        "дут/LEN",
-        "дуя/LEZ",
-        "дык/LSR",
-        "дыр/LSH",
-        "дял/LZK",
-        "еве/TDT",
-        "евр/TDH",
-        "еву/TDE",
-        "еде/TLT",
-        "едс/TLC",
-        "едш/TLI",
-        "едь/TLM",
-        "еее/TTT",
-        "ейд/TQL",
-        "ейл/TQK",
-        "ейс/TQC",
-        "ейт/TQN",
-        "ейц/TQW",
-        "екс/TRC",
-        "ела/TKF",
-        "ело/TKJ",
-        "елс/TKC",
-        "ема/TVF",
-        "емл/TVK",
-        "емп/TVG",
-        "емс/TVC",
-        "емы/TVS",
-        "емь/TVM",
-        "ена/TYF",
-        "енг/TYU",
-        "ено/TYJ",
-        "ент/TYN",
-        "ены/TYS",
-        "ень/TYM",
-        "епт/TGN"
-      ],
-      "4": [
-        "года/UJLF",
-        "году/UJLE",
-        "реки/HTRB",
-        "стал/CNFK",
-        "того/NJUJ",
-        "ссср/CCCH",
-        "аааа/FFFF",
-        "ааай/FFFQ",
-        "ааау/FFFE",
-        "аада/FFLF",
-        "ааду/FFLE",
-        "аалу/FFKE",
-        "аанг/FFYU",
-        "аани/FFYB",
-        "авиа/FDBF",
-        "авив/FDBD",
-        "авия/FDBZ",
-        "авни/FDYB",
-        "авой/FDJQ",
-        "авша/FDIF",
-        "агаа/FUFF",
-        "агги/FUUB",
-        "агни/FUYB",
-        "агон/FUJY",
-        "агос/FUJC",
-        "агры/FUHS",
-        "агуа/FUEF",
-        "адал/FLFK",
-        "адан/FLFY",
-        "адар/FLFH",
-        "адас/FLFC",
-        "адди/FLLB",
-        "адем/FLTV",
-        "аден/FLTY",
-        "адил/FLBK",
-        "адин/FLBY",
-        "адио/FLBJ",
-        "адой/FLJQ",
-        "адом/FLJV",
-        "адье/FLMT",
-        "азаи/FPFB",
-        "азал/FPFK",
-        "азам/FPFV",
-        "азан/FPFY",
-        "азар/FPFH",
-        "азве/FPDT",
-        "азем/FPTV",
-        "азиз/FPBP",
-        "азим/FPBV",
-        "азра/FPHF",
-        "азру/FPHE",
-        "азум/FPEV",
-        "азыя/FPSZ",
-        "аигу/FBUE",
-        "аиде/FBLT",
-        "аиду/FBLE",
-        "аиды/FBLS",
-        "аима/FBVF",
-        "аира/FBHF",
-        "аиша/FBIF",
-        "аише/FBIT",
-        "аиши/FBIB",
-        "аишу/FBIE",
-        "айвз/FQDP",
-        "айви/FQDB",
-        "айво/FQDJ",
-        "айвс/FQDC",
-        "айвы/FQDS",
-        "айга/FQUF",
-        "айгу/FQUE",
-        "айда/FQLF",
-        "айди/FQLB",
-        "айду/FQLE",
-        "айды/FQLS",
-        "айет/FQTN",
-        "айзу/FQPE",
-        "айка/FQRF",
-        "айко/FQRJ",
-        "айку/FQRE",
-        "айла/FQKF",
-        "айлз/FQKP",
-        "айли/FQKB",
-        "айлс/FQKC",
-        "айлу/FQKE",
-        "айль/FQKM",
-        "айна/FQYF",
-        "айне/FQYT",
-        "айоу/FQJE",
-        "айпи/FQGB",
-        "айра/FQHF",
-        "айре/FQHT",
-        "айри/FQHB",
-        "айро/FQHJ",
-        "айру/FQHE",
-        "айры/FQHS",
-        "айса/FQCF",
-        "айти/FQNB",
-        "айше/FQIT",
-        "айшу/FQIE",
-        "акаи/FRFB",
-        "акаш/FRFI",
-        "акер/FRTH",
-        "акие/FRBT",
-        "аким/FRBV",
-        "акио/FRBJ",
-        "акка/FRRF",
-        "аккг/FRRU",
-        "акме/FRVT",
-        "акне/FRYT",
-        "аков/FRJD",
-        "акое/FRJT",
-        "акой/FRJQ",
-        "акон/FRJY",
-        "акра/FRHF",
-        "акры/FRHS",
-        "аксу/FRCE",
-        "актг/FRNU",
-        "алай/FKFQ",
-        "алак/FKFR",
-        "алар/FKFH",
-        "алая/FKFZ",
-        "алва/FKDF",
-        "алви/FKDB",
-        "алво/FKDJ",
-        "алда/FKLF",
-        "алдо/FKLJ",
-        "алее/FKTT",
-        "алем/FKTV",
-        "алеф/FKTA",
-        "алии/FKBB",
-        "алик/FKBR",
-        "алим/FKBV",
-        "алин/FKBY",
-        "алис/FKBC",
-        "алит/FKBN",
-        "алия/FKBZ",
-        "алле/FKKT",
-        "алли/FKKB",
-        "алло/FKKJ",
-        "алое/FKJT",
-        "алой/FKJQ",
-        "алом/FKJV",
-        "алон/FKJY",
-        "алуф/FKEA",
-        "алфи/FKAB",
-        "алые/FKST",
-        "алый/FKSQ",
-        "алым/FKSV",
-        "альт/FKMN",
-        "амад/FVFL",
-        "аман/FVFY",
-        "амар/FVFH",
-        "амат/FVFN",
-        "амая/FVFZ",
-        "амен/FVTY",
-        "амер/FVTH",
-        "амир/FVBH",
-        "амит/FVBN",
-        "амиш/FVBI",
-        "амма/FVVF",
-        "аммм/FVVV",
-        "амое/FVJT",
-        "амок/FVJR",
-        "амол/FVJK",
-        "амор/FVJH",
-        "амос/FVJC",
-        "амые/FVST",
-        "амый/FVSQ",
-        "анди/FYLB",
-        "анды/FYLS",
-        "анее/FYTT",
-        "аней/FYTQ",
-        "анет/FYTN",
-        "анил/FYBK",
-        "ания/FYBZ",
-        "анке/FYRT",
-        "анки/FYRB",
-        "анко/FYRJ",
-        "анку/FYRE",
-        "анни/FYYB",
-        "аной/FYJQ",
-        "анты/FYNS",
-        "анук/FYER",
-        "анус/FYEC",
-        "ануш/FYEI",
-        "анфе/FYAT",
-        "анцс/FYWC",
-        "анчо/FYXJ",
-        "анши/FYIB",
-        "аный/FYSQ",
-        "анья/FYMZ",
-        "аняя/FYZZ",
-        "аовс/FJDC",
-        "аоки/FJRB",
-        "аоос/FJJC",
-        "аоши/FJIB",
-        "апач/FGFX",
-        "апед/FGTL",
-        "апис/FGBC",
-        "апка/FGRF",
-        "апон/FGJY",
-        "апоп/FGJG",
-        "аппи/FGGB",
-        "араз/FHFP",
-        "араи/FHFB",
-        "арак/FHFR",
-        "арам/FHFV",
-        "араш/FHFI",
-        "арви/FHDB",
-        "арво/FHDJ",
-        "арго/FHUJ",
-        "ардо/FHLJ",
-        "арев/FHTD",
-        "арек/FHTR",
-        "арен/FHTY",
-        "ареф/FHTA",
-        "арий/FHBQ",
-        "арик/FHBR",
-        "арке/FHRT",
-        "арку/FHRE",
-        "арла/FHKF",
-        "арле/FHKT",
-        "арли/FHKB",
-        "арло/FHKJ",
-        "армс/FHVC",
-        "арна/FHYF",
-        "арни/FHYB",
-        "арну/FHYE",
-        "арой/FHJQ",
-        "арон/FHJY",
-        "арри/FHHB",
-        "аррр/FHHH",
-        "арси/FHCB",
-        "арта/FHNF",
-        "арто/FHNJ",
-        "арун/FHEY",
-        "аруо/FHEJ",
-        "аруп/FHEG",
-        "арус/FHEC",
-        "арфе/FHAT",
-        "арфу/FHAE",
-        "арфы/FHAS",
-        "арчи/FHXB",
-        "арье/FHMT",
-        "арьи/FHMB",
-        "арья/FHMZ",
-        "асаи/FCFB",
-        "асаф/FCFA",
-        "асгс/FCUC",
-        "асдс/FCLC",
-        "асен/FCTY",
-        "асии/FCBB",
-        "асир/FCBH",
-        "асия/FCBZ",
-        "аска/FCRF",
-        "асов/FCJD",
-        "асом/FCJV",
-        "аста/FCNF",
-        "асто/FCNJ",
-        "асту/FCNE",
-        "асть/FCNM",
-        "асяо/FCZJ",
-        "атар/FNFH",
-        "атас/FNFC",
-        "атем/FNTV",
-        "атиф/FNBA",
-        "атия/FNBZ",
-        "атли/FNKB",
-        "атне/FNYT",
-        "атос/FNJC",
-        "атти/FNNB",
-        "аттл/FNNK",
-        "атук/FNER",
-        "ауда/FELF",
-        "ауди/FELB",
-        "аура/FEHF",
-        "ауре/FEHT",
-        "аури/FEHB",
-        "ауру/FEHE",
-        "ауры/FEHS",
-        "аута/FENF",
-        "аутг/FENU",
-        "ауте/FENT",
-        "ауто/FENJ",
-        "аууу/FEEE",
-        "афер/FATH",
-        "афиш/FABI",
-        "афод/FAJL",
-        "афро/FAHJ",
-        "ачем/FXTV",
-        "ачун/FXEY",
-        "ашад/FIFL",
-        "ашей/FITQ",
-        "ашем/FITV",
-        "ашер/FITH",
-        "ашкн/FIRY",
-        "ашок/FIJR",
-        "ашур/FIEH",
-        "аявг/FZDU",
-        "аяко/FZRJ"
-      ],
-      "5": [
-        "время/DHTVZ",
-        "после/GJCKT",
-        "войны/DJQYS",
-        "ааааа/FFFFF",
-        "аааай/FFFFQ",
-        "ааичи/FFBXB",
-        "аайян/FFQZY",
-        "аанга/FFYUF",
-        "авада/FDFLF",
-        "авайи/FDFQB",
-        "аванс/FDFYC",
-        "авгур/FDUEH",
-        "авель/FDTKM",
-        "авеля/FDTKZ",
-        "авери/FDTHB",
-        "авиас/FDBFC",
-        "авива/FDBDF",
-        "авиве/FDBDT",
-        "авилу/FDBKE",
-        "авилы/FDBKS",
-        "авион/FDBJY",
-        "авнер/FDYTH",
-        "авось/FDJCM",
-        "аврал/FDHFK",
-        "аврам/FDHFV",
-        "аврил/FDHBK",
-        "автра/FDNHF",
-        "агааа/FUFFF",
-        "агава/FUFDF",
-        "агавы/FUFDS",
-        "агась/FUFCM",
-        "агате/FUFNT",
-        "агату/FUFNE",
-        "агаша/FUFIF",
-        "агаши/FUFIB",
-        "аглая/FUKFZ",
-        "агнар/FUYFH",
-        "агнес/FUYTC",
-        "агнон/FUYJY",
-        "агнца/FUYWF",
-        "агнцы/FUYWS",
-        "агоса/FUJCF",
-        "агосу/FUJCE",
-        "адала/FLFKF",
-        "адаме/FLFVT",
-        "адами/FLFVB",
-        "адаму/FLFVE",
-        "адарш/FLFHI",
-        "адась/FLFCM",
-        "адася/FLFCZ",
-        "адати/FLFNB",
-        "адато/FLFNJ",
-        "адачи/FLFXB",
-        "адвил/FLDBK",
-        "адеиа/FLTBF",
-        "аделе/FLTKT",
-        "адели/FLTKB",
-        "аделу/FLTKE",
-        "адена/FLTYF",
-        "адене/FLTYT",
-        "адиль/FLBKM",
-        "адина/FLBYF",
-        "адиос/FLBJC",
-        "адира/FLBHF",
-        "адись/FLBCM",
-        "админ/FLVBY",
-        "адова/FLJDF",
-        "адово/FLJDJ",
-        "адога/FLJUF",
-        "адонг/FLJYU",
-        "адоне/FLJYT",
-        "адора/FLJHF",
-        "адорн/FLJHY",
-        "адрик/FLHBR",
-        "адски/FLCRB",
-        "адскл/FLCRK",
-        "адсон/FLCJY",
-        "адьос/FLMJC",
-        "азари/FPFHB",
-        "азарт/FPFHN",
-        "азиат/FPBFN",
-        "азиза/FPBPF",
-        "азимо/FPBVJ",
-        "азоте/FPJNT",
-        "азофа/FPJAF",
-        "азуса/FPECF",
-        "аидой/FBLJQ",
-        "аидом/FBLJV",
-        "аиста/FBCNF",
-        "аишей/FBITQ",
-        "айаго/FQFUJ",
-        "айала/FQFKF",
-        "айана/FQFYF",
-        "айвар/FQDFH",
-        "айвен/FQDTY",
-        "айвор/FQDJH",
-        "айгер/FQUTH",
-        "айгор/FQUJH",
-        "айдан/FQLFY",
-        "айден/FQLTY",
-        "айдзу/FQLPE",
-        "айдол/FQLJK",
-        "айдын/FQLSY",
-        "айерс/FQTHC",
-        "айзек/FQPTR",
-        "айзен/FQPTY",
-        "айзир/FQPBH",
-        "айзли/FQPKB",
-        "айзон/FQPJY",
-        "айком/FQRJV",
-        "айкон/FQRJY",
-        "айлер/FQKTH",
-        "айлин/FQKBY",
-        "айлой/FQKJQ",
-        "айман/FQVFY",
-        "аймон/FQVJY",
-        "айнар/FQYFH",
-        "айнер/FQYTH",
-        "айноа/FQYJF",
-        "айное/FQYJT",
-        "айнои/FQYJB",
-        "айноя/FQYJZ",
-        "айове/FQJDT",
-        "айову/FQJDE",
-        "айовы/FQJDS",
-        "айола/FQJKF",
-        "айолг/FQJKU",
-        "айота/FQJNF",
-        "айоус/FQJEC",
-        "айоуы/FQJES",
-        "айпад/FQGFL",
-        "айпод/FQGJL",
-        "айрен/FQHTY",
-        "айрес/FQHTC",
-        "айрин/FQHBY",
-        "айрис/FQHBC",
-        "айрой/FQHJQ",
-        "айрон/FQHJY",
-        "айсис/FQCBC",
-        "айсли/FQCKB",
-        "айтен/FQNTY",
-        "айфел/FQATK",
-        "айфон/FQAJY",
-        "айяла/FQZKF",
-        "акаги/FRFUB",
-        "акама/FRFVF",
-        "акане/FRFYT",
-        "акари/FRFHB",
-        "акаша/FRFIF",
-        "акела/FRTKF",
-        "акеми/FRTVB",
-        "акеты/FRTNS",
-        "акива/FRBDF",
-        "акико/FRBRJ",
-        "акими/FRBVB",
-        "акино/FRBYJ",
-        "акиру/FRBHE",
-        "акиры/FRBHS",
-        "акита/FRBNF",
-        "аките/FRBNT",
-        "акиты/FRBNS",
-        "аккос/FRRJC",
-        "аккоу/FRRJE",
-        "акова/FRJDF",
-        "аково/FRJDJ",
-        "аковы/FRJDS",
-        "акого/FRJUJ",
-        "акрил/FRHBK",
-        "акрим/FRHBV",
-        "акрой/FRHJQ",
-        "акрон/FRHJY",
-        "аксел/FRCTK",
-        "аксли/FRCKB",
-        "аксом/FRCJV",
-        "аксос/FRCJC",
-        "актам/FRNFV",
-        "акуле/FREKT",
-        "акуна/FREYF",
-        "акшай/FRIFQ",
-        "алака/FKFRF",
-        "алаку/FKFRE",
-        "аламо/FKFVJ",
-        "алане/FKFYT",
-        "алани/FKFYB",
-        "алану/FKFYE",
-        "аланы/FKFYS",
-        "алвин/FKDBY",
-        "алден/FKLTY",
-        "алдин/FKLBY",
-        "алдос/FKLJC",
-        "алека/FKTRF",
-        "алеке/FKTRT",
-        "алеко/FKTRJ",
-        "алеку/FKTRE",
-        "алену/FKTYE",
-        "алери/FKTHB",
-        "алерт/FKTHN",
-        "алетт/FKTNN",
-        "алеша/FKTIF",
-        "ализа/FKBPF",
-        "ализе/FKBPT",
-        "алика/FKBRF",
-        "аликс/FKBRC",
-        "алима/FKBVF",
-        "алина/FKBYF",
-        "алине/FKBYT",
-        "алину/FKBYE",
-        "алины/FKBYS",
-        "алисе/FKBCT",
-        "алита/FKBNF",
-        "алито/FKBNJ",
-        "аличе/FKBXT",
-        "алиша/FKBIF",
-        "алише/FKBIT",
-        "алиши/FKBIB",
-        "алишу/FKBIE",
-        "алкаш/FKRFI",
-        "алкеш/FKRTI",
-        "аллан/FKKFY",
-        "аллей/FKKTQ",
-        "аллин/FKKBY",
-        "алого/FKJUJ",
-        "алоис/FKJBC",
-        "алона/FKJYF",
-        "алони/FKJYB",
-        "алсид/FKCBL",
-        "алтан/FKNFY",
-        "алтей/FKNTQ",
-        "алтея/FKNTZ",
-        "алтон/FKNJY",
-        "алтос/FKNJC",
-        "алыми/FKSVB",
-        "альва/FKMDF",
-        "альгу/FKMUE",
-        "альда/FKMLF",
-        "альдо/FKMLJ",
-        "альма/FKMVF",
-        "альме/FKMVT",
-        "альму/FKMVE",
-        "альмы/FKMVS",
-        "альпе/FKMGT",
-        "альте/FKMNT",
-        "альто/FKMNJ",
-        "альты/FKMNS",
-        "альфе/FKMAT",
-        "альфи/FKMAB",
-        "альфы/FKMAS",
-        "амада/FVFLF",
-        "амади/FVFLB",
-        "амадо/FVFLJ",
-        "амаду/FVFLE",
-        "амайа/FVFQF",
-        "амайя/FVFQZ",
-        "амаль/FVFKM",
-        "амама/FVFVF",
-        "амана/FVFYF",
-        "амане/FVFYT",
-        "амано/FVFYJ",
-        "амара/FVFHF",
-        "амаре/FVFHT",
-        "амари/FVFHB",
-        "амаро/FVFHJ",
-        "амару/FVFHE",
-        "амары/FVFHS",
-        "амати/FVFNB",
-        "амато/FVFNJ",
-        "амачи/FVFXB",
-        "амеде/FVTLT",
-        "амеди/FVTLB",
-        "амень/FVTYM",
-        "амера/FVTHF",
-        "амиго/FVBUJ",
-        "амида/FVBLF",
-        "амико/FVBRJ",
-        "амины/FVBYS",
-        "аминь/FVBYM",
-        "амира/FVBHF",
-        "амиро/FVBHJ",
-        "амиру/FVBHE",
-        "амита/FVBNF",
-        "амиши/FVBIB",
-        "амман/FVVFY",
-        "аммар/FVVFH",
-        "амнио/FVYBJ",
-        "амнон/FVYJY",
-        "аморе/FVJHT",
-        "амори/FVJHB",
-        "амоса/FVJCF",
-        "ампер/FVGTH",
-        "ампир/FVGBH",
-        "ампул/FVGEK",
-        "амтор/FVNJH",
-        "амтяа/FVNZF",
-        "амфор/FVAJH",
-        "амьен/FVMTY",
-        "анаан/FYFFY",
-        "анады/FYFLS",
-        "анаис/FYFBC",
-        "анака/FYFRF",
-        "анала/FYFKF"
-      ]
-    }
+    "scope": "not used: a frozen base keeps the word decided at its own boundary"
   },
   "feature_count": 109017,
   "first_curriculum": {
@@ -3225,15 +381,15 @@
     "scope": "terms of up to three letters of the Latin table typed in the Russian layout alone in a field a reader read empty, ended by a space and by a pause, and asked again with the word after them (convert; one that many Russian words begin with is kept at the pause) (first_curriculum)."
   },
   "frozen_base": {
-    "artifact": "model/context_v3/frozen-base-b876e862bbfe.json",
+    "artifact": "model/context_v3/frozen-base-b5ed6848d4ce.json",
     "conversion_threshold": 0.99,
     "labels": {
       "artifact": "model/context_v3/frozen-base.json",
       "model_version": "context-v3-2ae75d2b9e38",
       "sha256": "5129029cdda9ffc2c6e67d8212ea8a7ede710764089ebde53c00b0ddc30ff6ae"
     },
-    "model_version": "context-v3-b876e862bbfe",
-    "sha256": "5533419dc6b6046889bedaeeb27e577f76449a3c2c1d2b4b9fd2e514eeb23b5d"
+    "model_version": "context-v3-b5ed6848d4ce",
+    "sha256": "a35af45f0978f7a99c6c492dc8755259d5a208f205bf2c5cdc81c7e881cc5bf3"
   },
   "gate_policy": {
     "minimum_calibration_conversion_recall": 0.0,
@@ -3782,10 +938,10 @@
     ],
     "candidates": {
       "abbreviations": 794,
-      "contexts": 21147,
-      "misspelt": 61898,
+      "contexts": 21136,
+      "misspelt": 61863,
       "natural_0": 37249,
-      "natural_1": 36281,
+      "natural_1": 36272,
       "terms": 1746
     },
     "counts": {
@@ -5651,115 +2807,20 @@
   "letter_curriculum": {
     "candidates": {
       "english_sentences": 47445,
-      "russian_sentences": 9166,
+      "russian_sentences": 9163,
       "terms": 3907
     },
     "counts": {
       "english_letters": 52,
       "english_sentences": 1448,
-      "message_start": 490,
+      "message_start": 491,
       "term_sentences": 1500
     },
     "frames": 12000,
     "sample_weight": 1.0,
     "scope": "TRAIN only: a word of one letter after a counted technical term in Russian sentences and in place of a word of English ones, at its boundary and beside its next word (letter_curriculum)."
   },
-  "lexical_short_pair_curriculum": {
-    "portable": {
-      "counts": {
-        "input_anchors": 10079,
-        "input_seeds": 138,
-        "planned_convert": 134,
-        "selected_families": 23,
-        "selected_seeds": 138,
-        "skipped_next_not_proposed": 4
-      },
-      "input_mass": 210434.0,
-      "mass_by_origin_action": {
-        "none:wait": 23.666666666666693,
-        "planned_next_conversion:convert": 22.333333333333353
-      },
-      "output_mass": 210480.0,
-      "pairs": 23,
-      "pairs_by_direction": {
-        "0": 10,
-        "1": 13
-      },
-      "scope": "TRAIN only: three-letter words of the pinned lexicons and the shipped identifier index whose other reading is a real word or command too, standing alone with the deferred label and with planned variants labelled convert; words of this corpus's test and of every accessed test are refused by their aliases.",
-      "words": [
-        "eat/уфе",
-        "gel/пуд",
-        "hen/рут",
-        "her/рук",
-        "itt/шее",
-        "ker/лук",
-        "lei/душ",
-        "lng/дтп",
-        "rey/кун",
-        "tot/еще",
-        "вас/dfc",
-        "вес/dtc",
-        "еда/tlf",
-        "иды/bls",
-        "квт/rdn",
-        "миф/vba",
-        "оды/jls",
-        "пер/gth",
-        "при/ghb",
-        "раз/hfp",
-        "сек/ctr",
-        "фей/atq",
-        "чем/xtv"
-      ]
-    },
-    "reference_hunspell": {
-      "counts": {
-        "input_anchors": 10079,
-        "input_seeds": 138,
-        "planned_convert": 133,
-        "selected_families": 23,
-        "selected_seeds": 138,
-        "skipped_next_not_proposed": 5
-      },
-      "input_mass": 210434.0,
-      "mass_by_origin_action": {
-        "none:wait": 23.833333333333357,
-        "planned_next_conversion:convert": 22.166666666666686
-      },
-      "output_mass": 210480.0,
-      "pairs": 23,
-      "pairs_by_direction": {
-        "0": 10,
-        "1": 13
-      },
-      "scope": "TRAIN only: three-letter words of the pinned lexicons and the shipped identifier index whose other reading is a real word or command too, standing alone with the deferred label and with planned variants labelled convert; words of this corpus's test and of every accessed test are refused by their aliases.",
-      "words": [
-        "eat/уфе",
-        "gel/пуд",
-        "hen/рут",
-        "her/рук",
-        "itt/шее",
-        "ker/лук",
-        "lei/душ",
-        "lng/дтп",
-        "rey/кун",
-        "tot/еще",
-        "вас/dfc",
-        "вес/dtc",
-        "еда/tlf",
-        "иды/bls",
-        "квт/rdn",
-        "миф/vba",
-        "оды/jls",
-        "пер/gth",
-        "при/ghb",
-        "раз/hfp",
-        "сек/ctr",
-        "фей/atq",
-        "чем/xtv"
-      ]
-    }
-  },
+  "lexical_short_pair_curriculum": {},
   "lone_word_curriculum": {
     "portable": {
       "calibration": {
@@ -5787,19 +2848,6 @@
         "frames": 2970,
         "sample_weight": 1.0,
         "scope": "lone_word frames of this split: every pair of two Latin letters whose Russian keys are letters too, each reading alone in the field at a boundary other than a space (lone_word_curriculum), labelled by alone_labels with the labelling base's answer where the counts settle nothing."
-      },
-      "train": {
-        "counts": {
-          "convert": 4824,
-          "keep": 4801,
-          "pairs": 495,
-          "refused": 47,
-          "suggest": 15233,
-          "wait": 1872
-        },
-        "frames": 26730,
-        "sample_weight": 1.0,
-        "scope": "lone_word frames of this split: every pair of two Latin letters whose Russian keys are letters too, each reading alone in the field at a boundary other than a space (lone_word_curriculum), labelled by alone_labels with the labelling base's answer where the counts settle nothing."
       }
     },
     "reference_hunspell": {
@@ -5828,72 +2876,10 @@
         "frames": 2970,
         "sample_weight": 1.0,
         "scope": "lone_word frames of this split: every pair of two Latin letters whose Russian keys are letters too, each reading alone in the field at a boundary other than a space (lone_word_curriculum), labelled by alone_labels with the labelling base's answer where the counts settle nothing."
-      },
-      "train": {
-        "counts": {
-          "convert": 4824,
-          "keep": 4801,
-          "pairs": 495,
-          "refused": 47,
-          "suggest": 15233,
-          "wait": 1872
-        },
-        "frames": 26730,
-        "sample_weight": 1.0,
-        "scope": "lone_word frames of this split: every pair of two Latin letters whose Russian keys are letters too, each reading alone in the field at a boundary other than a space (lone_word_curriculum), labelled by alone_labels with the labelling base's answer where the counts settle nothing."
       }
     }
   },
-  "lookahead_curriculum": {
-    "portable": {
-      "counts": {
-        "input_anchors": 30,
-        "input_seeds": 14052,
-        "planned_convert": 1140,
-        "planned_keep": 3226,
-        "selected_families": 64,
-        "selected_seeds": 4742,
-        "skipped_missing_anchor": 44,
-        "skipped_next_not_proposed": 332
-      },
-      "input_mass": 210434.0,
-      "mass_by_origin_action": {
-        "field:convert": 86.91666666666768,
-        "field:keep": 94.99999999999955,
-        "none:convert": 200.50000000000333,
-        "none:keep": 142.69764492752975,
-        "none:wait": 83.50000000000006,
-        "planned_next_conversion:convert": 16.083333333333105,
-        "planned_next_conversion:keep": 56.30235507246119
-      },
-      "output_mass": 210434.0,
-      "scope": "Old TRAIN annotations and first words of their existing right contexts; no new split or candidate context-model labels."
-    },
-    "reference_hunspell": {
-      "counts": {
-        "input_anchors": 30,
-        "input_seeds": 14052,
-        "planned_convert": 1140,
-        "planned_keep": 3226,
-        "selected_families": 64,
-        "selected_seeds": 4742,
-        "skipped_missing_anchor": 44,
-        "skipped_next_not_proposed": 332
-      },
-      "input_mass": 210434.0,
-      "mass_by_origin_action": {
-        "field:convert": 86.91666666666768,
-        "field:keep": 94.99999999999955,
-        "none:convert": 200.50000000000333,
-        "none:keep": 142.69764492752975,
-        "none:wait": 83.50000000000006,
-        "planned_next_conversion:convert": 16.083333333333105,
-        "planned_next_conversion:keep": 56.30235507246119
-      },
-      "output_mass": 210434.0,
-      "scope": "Old TRAIN annotations and first words of their existing right contexts; no new split or candidate context-model labels."
-    }
-  },
+  "lookahead_curriculum": {},
   "model_version": "context-v3-b5ed6848d4ce",
   "natural_lookahead_curriculum": {
     "portable": {
@@ -5925,7 +2911,7 @@
           "selected_seeds": 9,
           "skipped_missing_anchor": 4
         },
-        "input_mass": 38571.0,
+        "input_mass": 38573.0,
         "mass_by_origin_action": {
           "none:convert": 2.5,
           "none:keep": 1.5,
@@ -5933,28 +2919,7 @@
           "planned_next_conversion:convert": 1.0,
           "planned_next_conversion:keep": 1.5
         },
-        "output_mass": 38571.0,
-        "scope": "Natural short typing frames of one split paired with the first word of their own sentence's continuation; no cross-split anchors and no candidate context-model labels."
-      },
-      "train": {
-        "counts": {
-          "input_anchors": 10079,
-          "input_seeds": 91,
-          "planned_convert": 4,
-          "planned_keep": 17,
-          "selected_families": 22,
-          "selected_seeds": 61,
-          "skipped_missing_anchor": 40
-        },
-        "input_mass": 210434.0,
-        "mass_by_origin_action": {
-          "none:convert": 27.0,
-          "none:keep": 13.0,
-          "none:wait": 43.5,
-          "planned_next_conversion:convert": 2.0,
-          "planned_next_conversion:keep": 8.5
-        },
-        "output_mass": 210434.0,
+        "output_mass": 38573.0,
         "scope": "Natural short typing frames of one split paired with the first word of their own sentence's continuation; no cross-split anchors and no candidate context-model labels."
       }
     },
@@ -5987,7 +2952,7 @@
           "selected_seeds": 9,
           "skipped_missing_anchor": 4
         },
-        "input_mass": 38571.0,
+        "input_mass": 38573.0,
         "mass_by_origin_action": {
           "none:convert": 2.5,
           "none:keep": 1.5,
@@ -5995,92 +2960,12 @@
           "planned_next_conversion:convert": 1.0,
           "planned_next_conversion:keep": 1.5
         },
-        "output_mass": 38571.0,
-        "scope": "Natural short typing frames of one split paired with the first word of their own sentence's continuation; no cross-split anchors and no candidate context-model labels."
-      },
-      "train": {
-        "counts": {
-          "input_anchors": 10079,
-          "input_seeds": 91,
-          "planned_convert": 4,
-          "planned_keep": 17,
-          "selected_families": 22,
-          "selected_seeds": 61,
-          "skipped_missing_anchor": 40
-        },
-        "input_mass": 210434.0,
-        "mass_by_origin_action": {
-          "none:convert": 27.0,
-          "none:keep": 13.0,
-          "none:wait": 43.5,
-          "planned_next_conversion:convert": 2.0,
-          "planned_next_conversion:keep": 8.5
-        },
-        "output_mass": 210434.0,
+        "output_mass": 38573.0,
         "scope": "Natural short typing frames of one split paired with the first word of their own sentence's continuation; no cross-split anchors and no candidate context-model labels."
       }
     }
   },
-  "planned_mass_balance": {
-    "portable": {
-      "input_mass": 210480.0,
-      "isolated_mass": {
-        "0:1": 45.5,
-        "0:2": 141.5,
-        "0:3": 51.5,
-        "1:1": 39.0,
-        "1:2": 263.5,
-        "1:3": 46.1667
-      },
-      "output_mass": 210961.94764492754,
-      "planned_mass_before": {
-        "0:1": 6.6167,
-        "0:2": 28.0,
-        "0:3": 12.25,
-        "1:1": 5.2328,
-        "1:2": 26.9946,
-        "1:3": 26.125
-      },
-      "policy": "planned frames per (direction, focus length) carry the total mass of the isolated deferred frames of the same class",
-      "scale": {
-        "0:1": 6.8766,
-        "0:2": 5.0536,
-        "0:3": 4.2041,
-        "1:1": 7.453,
-        "1:2": 9.7612,
-        "1:3": 1.7671
-      }
-    },
-    "reference_hunspell": {
-      "input_mass": 210480.0,
-      "isolated_mass": {
-        "0:1": 45.5,
-        "0:2": 141.5,
-        "0:3": 51.5,
-        "1:1": 39.0,
-        "1:2": 263.5,
-        "1:3": 46.3333
-      },
-      "output_mass": 210962.28097826088,
-      "planned_mass_before": {
-        "0:1": 6.6167,
-        "0:2": 28.0,
-        "0:3": 12.25,
-        "1:1": 5.2328,
-        "1:2": 26.9946,
-        "1:3": 25.9583
-      },
-      "policy": "planned frames per (direction, focus length) carry the total mass of the isolated deferred frames of the same class",
-      "scale": {
-        "0:1": 6.8766,
-        "0:2": 5.0536,
-        "0:3": 4.2041,
-        "1:1": 7.453,
-        "1:2": 9.7612,
-        "1:3": 1.7849
-      }
-    }
-  },
+  "planned_mass_balance": {},
   "provenance": {
     "model/context_v1/captured/manifest.json": "e6356fa512203a7dddcacecd1fa935c562f6291fc3150c63964bb37adf63a91a",
     "model/context_v1/scenarios.json": "a29f3a7bc324a30ef244fee885555bab3d3547682df9942d233f0e1dd0963d12",
@@ -6090,9 +2975,9 @@
     "model/context_v3/captured/manifest-sign.json": "e75e6ffc983e5c0bff1b1e4971426f1ad3be7c463da4ce8778dfbe0e7b2abac8",
     "model/context_v3/captured/manifest-slip.json": "30f9ebad868f2454beb16689e4f5dcf92b237cd70b2817f99ae503d287ce7bc8",
     "model/context_v3/captured/manifest.json": "a42b05c124f6c4091cf0c4871abbd0a7386e297c86c587adf3e05f82c68e395c",
-    "model/context_v3/frozen-base-b876e862bbfe.json": "5533419dc6b6046889bedaeeb27e577f76449a3c2c1d2b4b9fd2e514eeb23b5d",
+    "model/context_v3/frozen-base-b5ed6848d4ce.json": "a35af45f0978f7a99c6c492dc8755259d5a208f205bf2c5cdc81c7e881cc5bf3",
     "model/context_v3/frozen-base.json": "5129029cdda9ffc2c6e67d8212ea8a7ede710764089ebde53c00b0ddc30ff6ae",
-    "model/context_v3/recipe.json": "86de464e2098a152349ed47082dcdeb8af73c3269eac46c43a9c6d474b16d6e3",
+    "model/context_v3/recipe.json": "fa052325644f68fcb3ba166d84957b9942d4e3619f10b93ed05b15cd57174130",
     "model/intent_v1/config.json": "2026433380f1a418079c8cb60eafc64cc420fc256b3c074dbb7d6389f6b275fd",
     "model/intent_v1/sources/en_US.lm": "017a513a23bb37947a3a0e73e307066fa8ec0642075172cdcad6ea204cae68da",
     "model/intent_v1/sources/hunspell/en_US.aff": "70fe5778717d097ce2f3326baaa5c1e4d2206d81a5a81d3ea8e11c4770806dd5",
@@ -6101,9 +2986,9 @@
     "model/intent_v1/sources/hunspell/ru_RU.dic": "f6047416a0204adbecf3a451b874ec8a97ee37e2cbc714466ef04d8dbcc0d6fc",
     "model/intent_v1/sources/ru_RU.lm": "e57c14eec2b78e52a2125dce2b38044d8dfe480f3964b9d118614527195ceda9",
     "model/prefix_v2/baseline-prefix-v1.json": "d0e40f60c6af3728afe60e3c53055ff0a091441879159f2cbb78ce42b9103488",
-    "src/keyswitch/__init__.py": "f5a98ced317a7107760a9296c916add038bec457aff3f790be199a721029bd3f",
+    "src/keyswitch/__init__.py": "f3c95e3dd385fbcd49674e5d027a0380a6a12944028888a0e6b7a73d00c8675f",
     "src/keyswitch/__main__.py": "1dcdb6d6ff34e04cdbc21446c00a5c5f61c3059429eac0f6f863291a7a314fbe",
-    "src/keyswitch/app.py": "1956e72601c6c17119febd10cead0658812ad6c564ec2b478e602d7ed1c4513c",
+    "src/keyswitch/app.py": "3d8b7da59f7403dcd79e09d76be5809f8541df3162d51d272a298329f0057507",
     "src/keyswitch/app_quirks.py": "760763d3c50a85c19239a90e246d65e105e91ae918660445e8286d137836a214",
     "src/keyswitch/atspi_context.py": "842c01c541dfc1bfc64e97937e9a4a2dbf63da2b8a9601555a732da206932cf2",
     "src/keyswitch/backend.py": "8b8fda7b72d6546b94cc87ec7d95f36a4f122ba07861c73ca2428fbbd87fcfc7",
@@ -6118,7 +3003,7 @@
     "src/keyswitch/constants/file_formats.py": "858b9b03f4919c95f198eedc97b3aec293943bb88a2631877f4bbab7aea1613c",
     "src/keyswitch/constants/geometry.py": "80644ee17d0306ae27c09ecec12a470c474fa38a1b74dbb5ac63ff3bd21664f2",
     "src/keyswitch/constants/keyboard.py": "16951348de32ba04f4f3e0645af75f79b23eb80292ac4e5e9a2f141ca8c2bfa5",
-    "src/keyswitch/constants/learning_prompt.py": "2256a0a96a1b5a2e05dbb9a0fb76908b36a5bc405e878be0cc3b088019830a4a",
+    "src/keyswitch/constants/learning_prompt.py": "668dbd68965db65b3c125b752cc49f07340e9b4e6eda012d312cb4ea14f203df",
     "src/keyswitch/constants/log_files.py": "769aefe9b72348eb327d8c6e8468998fa1ea6c87fbd283696fa9b417e6b30278",
     "src/keyswitch/constants/macos.py": "a44d2c72db8dbbb9656a4d26caba32162d96fe0e8103c0c1f75de70edb00d0d0",
     "src/keyswitch/constants/model_protocol.py": "4ae41928817e0f15059b41490f3f6f6c3233b53952c02fc281c75be68a1ba6ca",
@@ -6130,39 +3015,40 @@
     "src/keyswitch/constants/russian_text.py": "dced6e5eb9b5f6030ffd4d41b79e75b851f7edbb72485d90f1f87963486d4fd0",
     "src/keyswitch/constants/settings_defaults.py": "3d813a5f7de666ce3e1677584a7a17b1620a5da7c3f626549431acbfb2c11912",
     "src/keyswitch/constants/text.py": "732af9b5a7c50463351b1ad3806740bdfc872c0d2b0c2f2a88482e869c4c53d8",
-    "src/keyswitch/constants/timing.py": "c5902fd63430fedc299828df3d5610212a7e8f699dab1a07426c9606c708d434",
+    "src/keyswitch/constants/timing.py": "8ee521b8326d992cc2ad103ec60b28bc9830de9e9f41b214fd2ff5960755413d",
     "src/keyswitch/constants/training.py": "5b651a00b20d815d2699b9f879b8a98c8933e9c56e6737938bf06662b5d6f95f",
     "src/keyswitch/constants/tray_icon.py": "47eceb41d61e7a64c76b5a82367491359623e6c513c224a4981df96d2a114cde",
     "src/keyswitch/constants/tray_menu.py": "fa0cef93cd398c98db6b650a1b4b3d18ba56418471e69b0bf8a8d849c58eb7a9",
     "src/keyswitch/constants/ui_desktop.py": "6b762d9be82f27a1993cc4f7380de7d0bbc8da7cf98b1540e2c3508746b7dd45",
     "src/keyswitch/constants/ui_gtk.py": "a8d708e4383903d52997f1f642e2992097f6e88c3222bf5a568b868d3eadf04c",
-    "src/keyswitch/constants/units.py": "b666a96e2d3a2821604a15c724ffc3cdf228d8215559a584a0da124d0c3f4a9d",
+    "src/keyswitch/constants/units.py": "d65a6606466016936472c4e98bd7c844e19a67604e5f38055936f9bf5283873b",
     "src/keyswitch/constants/updates.py": "23be029670bf2ea46cfed4fd451443030d94a91d19ed195c2740e6f246fe0864",
-    "src/keyswitch/constants/windows.py": "93f191835aa258b46bfc0cc2e17ac7ced8b26778f9d843cda729eb5860894fe0",
+    "src/keyswitch/constants/wayland.py": "70690054ec436b2d9b47937fddc1ccacd364a96fa8cd179b35c1a30f27f94786",
+    "src/keyswitch/constants/windows.py": "6c9f2e518db9522b394c1b2cfc10e78765c7ae4b427220bb61e17e9551e36c85",
     "src/keyswitch/constants/x11.py": "c504613e2851e25d9172067d6b1ebf958a895ca3b774fe9dc640d9cf1029da3d",
-    "src/keyswitch/context_access.py": "5fe1215ef4cf5d51b974dcd53f58453ea2c01775a2618069536250b13b34e411",
+    "src/keyswitch/context_access.py": "259edc0014a547fcdcc194a4b4929a55b512448796028fe0b13acbd50963590d",
     "src/keyswitch/context_action_features.py": "37acf9582704d9b9320b828b68ea3b357e724c5b0b1066363ee519bd8873e5dc",
     "src/keyswitch/context_model.py": "a19e2184fbdad2627bb3171a39df8d99cb30698bf345431afd39e338f9c9a056",
-    "src/keyswitch/context_policy.py": "3cc95848a399f8139557afd69453f38f4bde127fd267101c279edaf596f173bb",
+    "src/keyswitch/context_policy.py": "dbb2172067f3f2f37c5a179b195c79ad2b0a7d48cc3e234203804c2f0c718de0",
     "src/keyswitch/desktop_services.py": "20adbb01525f3ffbc08721c9c278188be85aa980d9fb5fb38b5e6e7fdd76cc4f",
     "src/keyswitch/desktop_ui.py": "442135220f1f50c6534621f2331397b703c5f599d0831b23144e6c2bd993331e",
     "src/keyswitch/detector.py": "5a78cd5961af57426b6cb42b3757b42baeacd7344a06557111a1067cb0cbb2c0",
     "src/keyswitch/early_switch.py": "3099fb815f239018f79c0c3a2b96b5db4390d47fee3a74ad701c636e7e5983ef",
-    "src/keyswitch/engine.py": "642cd1e706f6ed8c460211a15eba1aaaf1325282d3961b3c913870288e74d68c",
+    "src/keyswitch/engine.py": "f28054f979d576f6130923205542341e4c349b7da3c4856eff437bd24b7b53b4",
     "src/keyswitch/history.py": "165f09f7403a72019637a0ac4397845c9b15c847b9b64fb0f34552bbb2352fee",
     "src/keyswitch/identifier_lexicon.py": "80c1af6de67833ebc957355199e5ebab011282ddf6bbcc556d06bfef237c31bb",
     "src/keyswitch/indicator.py": "3b6833711292ec2f29bc2c3e427be873cc4f2ffde817c9deb0afa02fac979a19",
     "src/keyswitch/input_context.py": "bf67ae931f2d10e634cb554b72c5be6f14bee421abc24c39fcc04ca5da6edf72",
-    "src/keyswitch/input_delay.py": "8adb9f1f5ba1321cf0bf844f271b5093a5bfcb3ce54e003975fa7d7dafe168f7",
+    "src/keyswitch/input_delay.py": "784397383b54834d31dc0414861c9447b20a4b2e9feda244b55a17c025354867",
     "src/keyswitch/intent_model.py": "c64764c8d347ef382c61213f8b0d5c5328cd9288395577e3a055c745ecb2302f",
     "src/keyswitch/language_model.py": "5af2e9aa744b80f75a79b603513e61c7c4bdb3bfa076c7d3810d3888a14ac844",
-    "src/keyswitch/launcher.py": "01ac7ea7b0d965de826a4e18bc9bcfdf8d77d8b6d276d6c4a241c180d017741e",
+    "src/keyswitch/launcher.py": "ec7482d485cb60a72cc8a26b1d6b8d5f7f529b5b884c7fed6365d8f1f7c86df1",
     "src/keyswitch/layouts.py": "374e8913fe51c72370ae8f775875847e47c2a1db7c8deaa2fc919944dd45597c",
     "src/keyswitch/learning.py": "95d5ea9169958f5d579aca3220561e95b8371fe1365d82f61a37ab5d26895ad8",
-    "src/keyswitch/learning_prompt.py": "fbf94df1f4c2486b2bf55f2b000b30f08a1862f5ef2373c9d6531d0b6fbba916",
+    "src/keyswitch/learning_prompt.py": "bc85e56c28f759353c28a6e8d107ff77ca12d795a2b83ab727fa3687ffce1736",
     "src/keyswitch/lexicon_supplement.py": "ba8f400b2c1b3c538340e40ae069ad89867456e80bbdaf1daf9b34489857efaa",
     "src/keyswitch/log_privacy.py": "629f5384b76a4e76170b53a8c1e9382537f6bdf6ca47800bcbeaaf5583ce4458",
-    "src/keyswitch/logsetup.py": "55dc32f0d2fea08d6156f8bd434ba044abdef29ce890a6bdcde001af33aaa0ca",
+    "src/keyswitch/logsetup.py": "9dae61ee42998d17036968402be53b3027ea587cb4109c9f1869c896a978ce4c",
     "src/keyswitch/macos_app.py": "128b0bdc46bf29bb4982281dfa676d4f3864cc4616afbb0275ecef3bd9f0e368",
     "src/keyswitch/macos_backend.py": "00e95d972dfd17744556197d652f5abc6c75072f379a9aba397e26148970af7d",
     "src/keyswitch/macos_context.py": "9ee2212dd09aecaa2368a7a628c2c8f436d198f42734cb60325afede5d950c46",
@@ -6193,16 +3079,20 @@
     "src/keyswitch/system_model.py": "f76f25240fb22242c32a3f4069b8843da3cbeb0c540f47e09f98883f41c6050c",
     "src/keyswitch/tray.py": "b0fc5786ff3d0eebce06e559ba392a765c61c7a9fad15014c991f541df40add8",
     "src/keyswitch/tray_model.py": "9ada0e8961009066a15544d27e9900a5ac6dfffaaf1c3f1facadc39f6e82359a",
-    "src/keyswitch/ui.py": "e79314bb0a55f9121b9857cd24c7d15edde32b343f301f9fba5f3638c7d31eb4",
+    "src/keyswitch/ui.py": "9a8e5c61ee613310f4d34d680dcdf8400cbe01c296d70131197c500644590f6b",
     "src/keyswitch/updates.py": "663da5a9546f621cac5318d69b7c3f65debc3379d5815ea353789298f8b6f15a",
     "src/keyswitch/value_provenance.py": "230c324cf6678b3de745c521d527278bdbb4cbdd7a64673e0cf23e1663f8747a",
+    "src/keyswitch/wayland_backend.py": "73b3458515953d4be5cb60f49fd087953678a241d4b644d6fd6ecda74bcfef13",
+    "src/keyswitch/wayland_desktop.py": "a509c412bdc429a5e8c5f7f2444c9823f3f2716c31ccde1df5a4bc1f96ca1c4d",
+    "src/keyswitch/wayland_helper.py": "cd975b146481ba1d4e891ed3fcd77c1703a72674a73f289fbdabb7aca8d53125",
+    "src/keyswitch/wayland_native.py": "e35a699b1139bed5dccc83ef6218d559ccc4e1f805c887a589a46a1ccca7b98d",
     "src/keyswitch/windows_app.py": "c7b7e6e062be165d7a454c770751f06c7eb04fc58e200180b610525ebd4d4e5b",
-    "src/keyswitch/windows_backend.py": "ffd8b325672432cf976d82e3c54ab8784579932a0c2527ffc46e0e3bb27bdc70",
-    "src/keyswitch/windows_calls.py": "88cedfa24a6ab8c572421b3f1fe4d27d3972e4360d464d496b47740dd1bc1030",
+    "src/keyswitch/windows_backend.py": "4bb9bd1b424c73455948cf4740df5d128afc8cd04cca68e4b212f35706faab1f",
+    "src/keyswitch/windows_calls.py": "8807cbfa5b83cc26947540d174855115a75949e54e9c67897ee24628f0a7aa81",
     "src/keyswitch/windows_context.py": "7ae2c1aa5476cd1c101c9bb47c28a4b8a2669bd18f7c35023b5dbf95f819c7d6",
     "src/keyswitch/windows_instance.py": "b61f62e508ea6b7390482836d04a6e3080504c84fea2a96b95e237eaf65215e9",
     "src/keyswitch/windows_instance_native.py": "2dba8c279460c5257d3d602b4f9a74bdbafb2f03e8ab00a5ffb048b26a9d9136",
-    "src/keyswitch/windows_native.py": "4c5358c9198e79d6f37a12b2e904eba1057620ebff92e9c4cdef3aed6f24c82e",
+    "src/keyswitch/windows_native.py": "625405ec74bdec3786761affacff884a8e7334f6b05e34ed83bc6b3ce0953410",
     "src/keyswitch/windows_registry.py": "81078d45d39fc9162de272e7dc162bdb0513b356a84734c7cb5d6c1d6e99faff",
     "src/keyswitch/windows_system.py": "6306ab4966b70e8bbeb86ef82d1f09eb3232624eb53d119bcd02f394792027e7",
     "src/keyswitch/windows_tray.py": "b0a63e743af7df88f58733ec56c7ccf3b76eb8ce88a400412a2fe6597fdbb0c9",
@@ -6220,11 +3110,11 @@
     "tests/test_context_policy.py": "5f4cb55eb593ba8da1912e3beffa31c2875f3f6fdfbcbf03f0a512f468913a98",
     "tests/test_context_technical_corpus.py": "2f4598b0681666784282902baace8204d67c45df2778d69649aefba958637eb4",
     "tests/test_default_input_sequences.py": "78d9d293c32552082145342eb0dadd190caaad8db62c62f9805616b013d8bcc8",
-    "tests/test_engine_behaviour.py": "fc37e4a04bb109d4edcd691707ab9c656621326680f1a79231040ebf8e08c265",
+    "tests/test_engine_behaviour.py": "7fa89b973550857c2d9c15d7a91a8f4b56754cfbf3874d5fdb3a503b8716396b",
     "tests/test_input_integrity.py": "7d9428b609af005a73f8b66c0ea45eeee3d37e47f0ab95a8242a39369ccb13c7",
     "tests/test_input_sequence_matrix.py": "c67638392c637a01c8e407c56b7dddc2973bb25f9cf4005c4fd6ba4b968132df",
     "tests/test_language_intent_regressions.py": "93f86cd74db645ff54f78b0cbc6479a149190801ffbb52cd7b5e2f2df14c1a57",
-    "tests/test_windows_backend.py": "c1c3cf91ed83508a30597af341f11a3645bfedbdd17b89897980b1f330cceba6",
+    "tests/test_windows_backend.py": "4b40be818bb8babfbf07bbe3427e04fbf2ff81c405055f38ab0d660fc6f4f32b",
     "tests/test_x11_backend.py": "fe69b2398ad083eff85951b794fc1d72b067336cc22e4c6f8b9ffaad374f1e4b",
     "tools/action_epoch_selection.py": "5586ad18c9a9855e3fa3c8dbbd97230e70da58086a61ac394e24521c0c86740d",
     "tools/context_action_cuda.py": "b2f59cc2093912282499f99ebabea65930b654e8822d5230af5f5ac2e4f1ff51",
@@ -6233,7 +3123,7 @@
     "tools/context_action_kernels/evidence.cuh": "6fe66f6e14c8362a7a7744e94139b1b898b4e86bf8377751d8838fdc45152da7",
     "tools/context_action_kernels/features.cuh": "b0ca01dbb0c6ed28303fb088996b6957cd71e25ebf3314094bbdc02a81f4502e",
     "tools/context_action_kernels/featurizer.cu": "719baf94effd678cd4208d75bb5ae74074ae4db6a72e2bd23191f329dac896a0",
-    "tools/context_action_kernels/parity.json": "0c76807e1f04a2335f898b365ab7979b3077e53bc7f0ae3f8e97197adfb62b35",
+    "tools/context_action_kernels/parity.json": "dde967d35aa0b29a409dffe8cf93b96ceef17587c7014b3d959069f30a5c6cd5",
     "tools/context_action_kernels/rows.cuh": "e01df3ca91ea512996b993d55f585a3e8d73000763a71971163008b4a4eabb64",
     "tools/context_action_mass.c": "973386a4ba64f6a2830b0ade6c87159fdbf61ea2f52e73af01b380a0cf44282d",
     "tools/context_action_pipeline.py": "cd340e14399167864ede774d015ce188c7468e19edfb87beafbdac4f5db87aa6",
@@ -6557,10 +3447,10 @@
       "sample_weight": 1.0,
       "scope": "TRAIN only: the keys of the Russian lexicon's commonest words of two to five letters (all 107 two-letter ones the keys spell in Latin letters), typed in the Latin layout in capitals, after the left context of an English TRAIN row whose words are all Latin, chosen by hash, two contexts a word - keep, and the same keys in lower case in the same frame - convert (without that pair the first corpus v29 candidates left 31 more of the owner's Russian words typed in the Latin layout as typed: `yt`, `yf`, `rfr`, `xnj`). Motivation: test v28 holds two Latin capitals inside an English sentence whose keys spell `из`, and the corpus v26 pair turned them into `ИЗ` (p=0.997, reference lexicons, early switch off): Latin capitals had been framed after Russian prose only (tools/train_context_action_model.english_capital_curriculum).",
       "words_by_length": {
-        "2": 107,
-        "3": 300,
-        "4": 300,
-        "5": 300
+        "2": 0,
+        "3": 0,
+        "4": 0,
+        "5": 0
       }
     },
     "epoch_selection": {
@@ -6678,7 +3568,7 @@
       "scope": "TRAIN, and DEVELOPMENT for the head's epoch (the term curriculum's split of terms): every term of letters of the Latin table of up to three letters whose keys in the Russian layout are a token of the term head's class, typed in the Russian layout alone in a field a field reader read empty, ended by a space (convert), by a pause (convert, unless the binary order of magnitude of the number of Russian words that begin with it reaches FIRST_PAUSE_WORD_START_MIN_BUCKET - a word stopped in the middle, `уче` of `учеб` - kept) and asked again as the engine asks it with the word after it (convert). The head is fitted on these frames alone: frames of its class other curricula framed leave TRAIN (outside_first_curriculum). The class's tokens of the owner's typing, which measure the head, are held out (tools/train_context_action_model.first_curriculum)."
     },
     "frozen_base": {
-      "artifact": "model/context_v3/frozen-base-b876e862bbfe.json",
+      "artifact": "model/context_v3/frozen-base-b5ed6848d4ce.json",
       "carried": {
         "alone": {
           "dominance": 5,
@@ -6688,17 +3578,13 @@
           "sample_weight": 1.0
         }
       },
-      "heads": {
-        "sign": {
-          "maximum_features": 800
-        }
-      },
+      "heads": {},
       "labels": {
         "artifact": "model/context_v3/frozen-base.json",
         "sha256": "5129029cdda9ffc2c6e67d8212ea8a7ede710764089ebde53c00b0ddc30ff6ae"
       },
-      "scope": "The pair context-v3-b876e862bbfe of 0.62.0, every weight fixed: its kept-neighbour question and every head, the hypothesis, short-token and slip heads of corpus v75 among them, are carried as shipped, and the sign head alone is fitted. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone) and the answers of the corpus v37 model (labels). The sign head: a letter of the variable head's class (a one-letter word of the Russian layout after a Cyrillic word, no Russian word of one letter, whose key is a Latin letter) asked once more with the token after it given as kept text, that token holding no letter (context_action_features.sign_question): the engine asks a letter kept at its space when a token of signs or digits the two layouts type alike follows it (engine._decide_letter_before_sign), and a waiting letter before its kept neighbour (_decide_with_kept_neighbour). It reads, beside the kept-neighbour question's features, the token itself (up to two signs, digits, or longer), the letter and its case, how often Russian prose uses the word before it and whether the text before holds signs of code, Latin letters or digits, each also with the token. Motivation: `м` in `прохождения м + ` (`v + s`) was kept at p=0.94 and never asked again, and asked with `=` after it a waiting `ч` of `для ч = 0` was kept at p=0.95: the variable head reads every sign, dash and digit after the letter as one script (the owner's typing, 19.10.2026, corrected with Pause).",
-      "sha256": "5533419dc6b6046889bedaeeb27e577f76449a3c2c1d2b4b9fd2e514eeb23b5d"
+      "scope": "The pair context-v3-b5ed6848d4ce of 0.63.0, every weight fixed and no head fitted: a reseal of the shipped pair for engine changes that change no model (28.10.2026: the Wayland input, the Windows keyboard hook's short calls, keys that pass the hook, the log of input no hook got). Its kept-neighbour question and every head, the sign head of corpus v76 among them, are carried, so the fit moves no weight, and the artifact is the shipped one byte for byte. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone) and the answers of the corpus v37 model (labels). The pair of 0.63.0: the pair of 0.62.0 with the sign head fitted onto it on corpus v76 (model/context_v3/frozen-base-b876e862bbfe.json, sha256 5533419dc6b6).",
+      "sha256": "a35af45f0978f7a99c6c492dc8755259d5a208f205bf2c5cdc81c7e881cc5bf3"
     },
     "gate_policy": {
       "minimum_calibration_conversion_recall": 0.0,
@@ -7409,7 +4295,7 @@
         "action_keep": 186,
         "focus_calls": 444,
         "frames": 437,
-        "input_rows": 5665,
+        "input_rows": 5663,
         "no_focus_call": 70,
         "repeated_space_before": 257,
         "retained_families": 32,
@@ -7419,22 +4305,6 @@
         "sequences": 384,
         "skipped_nonparent_body": 7,
         "tail_nonempty": 120
-      },
-      "train": {
-        "action_convert": 1001,
-        "action_keep": 764,
-        "focus_calls": 1799,
-        "frames": 1765,
-        "input_rows": 43229,
-        "no_focus_call": 267,
-        "repeated_space_before": 1036,
-        "retained_families": 128,
-        "selected_families": 128,
-        "selected_group_0": 64,
-        "selected_group_1": 64,
-        "sequences": 1536,
-        "skipped_nonparent_body": 34,
-        "tail_nonempty": 498
       }
     },
     "reference_hunspell": {
@@ -7459,7 +4329,7 @@
         "action_keep": 186,
         "focus_calls": 437,
         "frames": 437,
-        "input_rows": 5665,
+        "input_rows": 5663,
         "no_focus_call": 70,
         "repeated_space_before": 257,
         "retained_families": 32,
@@ -7468,22 +4338,6 @@
         "selected_group_1": 16,
         "sequences": 384,
         "tail_nonempty": 120
-      },
-      "train": {
-        "action_convert": 1001,
-        "action_keep": 764,
-        "focus_calls": 1792,
-        "frames": 1765,
-        "input_rows": 43229,
-        "no_focus_call": 267,
-        "repeated_space_before": 1036,
-        "retained_families": 128,
-        "selected_families": 128,
-        "selected_group_0": 64,
-        "selected_group_1": 64,
-        "sequences": 1536,
-        "skipped_nonparent_body": 27,
-        "tail_nonempty": 498
       }
     }
   },
@@ -7502,7 +4356,7 @@
       "keep:piece": 163,
       "keep:piece-revisit": 163,
       "refused": 595,
-      "skipped:row-start": 1099,
+      "skipped:row-start": 1098,
       "wait:alone": 71,
       "wait:start": 5
     },

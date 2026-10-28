@@ -125,8 +125,11 @@ RECEIPT_MIN_CALIBRATION_RECALL: Final = 0.977
 # with 18 false conversions in each profile (the corpus v74 pair with the hypothesis and short-token heads was not
 # installed: on test v74 it restored one row fewer than the baseline pair, which restored every one). Corpus v76: the pair
 # of 0.62.0 (context-v3-b876e862bbfe), scored the same way on every calibration frame of the corpus v76 recipe, converts
+# 13 984 and 14 035 of the 14 371 conversion rows with 18 false conversions in each profile. Corpus v77: the pair of
+# 0.63.0 sealed again for the engine of 28.10.2026, its artifact the same byte for byte, against the pair its model
+# replaced, 0.62.0's (context-v3-b876e862bbfe), scored the same way on every calibration frame of the corpus v77 recipe:
 # 13 984 and 14 035 of the 14 371 conversion rows with 18 false conversions in each profile.
-RECEIPT_CALIBRATION_REFERENCE_CORPUS: Final = "1193f3b0eecd3020429d4a56850689640055d2b42169c3321e1099e975b69457"
+RECEIPT_CALIBRATION_REFERENCE_CORPUS: Final = "a166543697d24825686708d1ca760e6a57b1f4bab1656703866f73170d5b1a84"
 RECEIPT_CALIBRATION_REFERENCE_MODEL: Final = "context-v3-b876e862bbfe"
 RECEIPT_CALIBRATION_REFERENCE_NET: Final[dict[str, int]] = {"portable": 13966, "reference_hunspell": 14017}
 # Serving thresholds are part of the contract: a lower threshold converts on weaker evidence.
