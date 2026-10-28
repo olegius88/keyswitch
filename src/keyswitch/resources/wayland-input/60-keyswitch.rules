@@ -1,5 +1,7 @@
-# Unprivileged local-seat access to uinput and physical keyboards/pointers for KeySwitch.
-# Sorts before 73-seat-late.rules so systemd-logind grants ACLs only to the active seat user.
+# Unprivileged local-seat access to uinput and physical keyboards/pointers for KeySwitch on Wayland.
+# Installed only by an administrator's `sudo keyswitch --enable-wayland-input` into /etc/udev/rules.d and removed by
+# `--disable-wayland-input`: it lets every program of the active session's user read every key and type keys of its own,
+# as any program can on X11. Sorts before 73-seat-late.rules so systemd-logind grants ACLs only to the active seat user.
 KERNEL=="uinput", SUBSYSTEM=="misc", ENV{ID_SEAT}=="", ENV{ID_SEAT}="seat0"
 KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
 

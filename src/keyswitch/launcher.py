@@ -25,6 +25,15 @@ def main(argv: list[str] | None = None) -> int:
                 from .wayland_native import run_wayland_input_helper
 
                 return run_wayland_input_helper(int(raw_fd))
+            # Run with sudo: no display, no GTK.
+            case ["--enable-wayland-input"]:
+                from .wayland_access import enable_wayland_input
+
+                return enable_wayland_input()
+            case ["--disable-wayland-input"]:
+                from .wayland_access import disable_wayland_input
+
+                return disable_wayland_input()
             case _:
                 from .app import main as platform_main
     return platform_main(argv)

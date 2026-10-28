@@ -421,7 +421,7 @@ def verify_unprivileged_uaccess() -> None:
             f"User belongs to 'input' group ({sorted(group_names)}); uaccess ACLs would not be proven"
         )
     if not os.access("/dev/uinput", os.R_OK | os.W_OK):
-        raise RuntimeError("Unprivileged user lacks R/W ACL on /dev/uinput (60-keyswitch.rules missing)")
+        raise RuntimeError("Unprivileged user lacks R/W ACL on /dev/uinput: run sudo keyswitch --enable-wayland-input first")
     print("UNPRIVILEGED_UACCESS_OK")
 
 

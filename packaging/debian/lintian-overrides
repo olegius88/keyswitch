@@ -12,8 +12,3 @@ keyswitch binary: shared-library-lacks-prerequisites [usr/lib/keyswitch/_interpq
 # for it alone, are what let APT keep an installed copy up to date. Both files
 # are conffiles, so disabling or deleting them survives later upgrades.
 keyswitch binary: package-installs-apt-sources [etc/apt/sources.list.d/keyswitch.sources]
-
-# The udev rule gives the user of the active session access to every keyboard,
-# mouse and /dev/uinput (uaccess), which KeySwitch needs on Wayland: it serves a
-# class of devices, not hardware AppStream could name by modalias.
-keyswitch binary: appstream-metadata-missing-modalias-provide usr/lib/udev/rules.d/60-keyswitch.rules

@@ -497,8 +497,6 @@ install -d \
     "$package_root$(dirname "$apt_keyring_path")" \
     "$package_root/usr/bin" \
     "$package_root/usr/lib/keyswitch" \
-    "$package_root/usr/lib/modules-load.d" \
-    "$package_root/usr/lib/udev/rules.d" \
     "$package_root/usr/share/applications" \
     "$package_root/usr/share/doc/keyswitch" \
     "$package_root/usr/share/doc/keyswitch/licenses" \
@@ -512,12 +510,8 @@ sed \
     -e "s/@ARCHITECTURE@/$architecture/g" \
     "$project_dir/packaging/debian/control.in" \
     > "$package_root/DEBIAN/control"
-install -m 0755 "$project_dir/packaging/debian/postinst" \
-    "$package_root/DEBIAN/postinst"
-install -m 0644 "$project_dir/packaging/udev/60-keyswitch.rules" \
-    "$package_root/usr/lib/udev/rules.d/60-keyswitch.rules"
-install -m 0644 "$project_dir/packaging/udev/keyswitch.modules-load.conf" \
-    "$package_root/usr/lib/modules-load.d/keyswitch.conf"
+# The Wayland input rule is not installed: it lets every program of the session read and type keys, so an
+# administrator enables it with `sudo keyswitch --enable-wayland-input` (resources/wayland-input in the bundle).
 install -m 0644 "$gnome_ext_src/metadata.json" \
     "$gnome_ext_dst/metadata.json"
 install -m 0644 "$gnome_ext_src/extension.js" \
@@ -592,13 +586,10 @@ chmod 0644 \
     "$package_root/DEBIAN/conffiles" \
     "$package_root$apt_sources_path" \
     "$package_root$apt_keyring_path" \
-    "$package_root/usr/lib/udev/rules.d/60-keyswitch.rules" \
-    "$package_root/usr/lib/modules-load.d/keyswitch.conf" \
     "$gnome_ext_dst/metadata.json" \
     "$gnome_ext_dst/extension.js" \
     "$package_root/usr/share/doc/keyswitch/changelog.gz" \
     "$package_root/usr/share/man/man1/keyswitch.1.gz"
-chmod 0755 "$package_root/DEBIAN/postinst"
 find "$package_root" -exec touch --date="@$SOURCE_DATE_EPOCH" {} +
 dpkg-deb --root-owner-group --build "$package_root" "$package_path"
 

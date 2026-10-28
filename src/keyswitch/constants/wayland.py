@@ -208,3 +208,7 @@ SWAY_IPC_EVENT_INPUT: Final = 0x80000015
 # Bounded window handle table for UUID-identified compositor windows (KWin 6).
 KDE_WINDOW_ID_CACHE_LIMIT: Final = 512
 KDE_WINDOW_ID_START: Final = 1000
+
+# The rule and the module list an administrator's `keyswitch --enable-wayland-input` installs: readable by all, as udev
+# and modules-load.d expect.
+WAYLAND_ACCESS_FILE_MODE: Final = 0o644

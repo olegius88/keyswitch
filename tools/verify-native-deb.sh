@@ -200,12 +200,14 @@ grep -q '/usr/lib/keyswitch/keyswitch-bin' "$launcher"
 control_root="$staging/control"
 mkdir -p "$control_root"
 dpkg-deb --control "$package" "$control_root"
-test -x "$control_root/postinst"
-cmp -s "$project_dir/packaging/debian/postinst" "$control_root/postinst"
-cmp -s "$project_dir/packaging/udev/60-keyswitch.rules" \
-    "$staging/usr/lib/udev/rules.d/60-keyswitch.rules"
-cmp -s "$project_dir/packaging/udev/keyswitch.modules-load.conf" \
-    "$staging/usr/lib/modules-load.d/keyswitch.conf"
+# The Wayland input rule ships in the bundle for `keyswitch --enable-wayland-input`; nothing enables it on install.
+test ! -e "$control_root/postinst"
+test ! -e "$staging/usr/lib/udev/rules.d/60-keyswitch.rules"
+test ! -e "$staging/usr/lib/modules-load.d/keyswitch.conf"
+cmp -s "$project_dir/src/keyswitch/resources/wayland-input/60-keyswitch.rules" \
+    "$staging/usr/lib/keyswitch/keyswitch/resources/wayland-input/60-keyswitch.rules"
+cmp -s "$project_dir/src/keyswitch/resources/wayland-input/keyswitch.modules-load.conf" \
+    "$staging/usr/lib/keyswitch/keyswitch/resources/wayland-input/keyswitch.modules-load.conf"
 gnome_ext_uuid="keyswitch@io.github.olegius88.KeySwitch"
 cmp -s "$project_dir/packaging/gnome-shell/$gnome_ext_uuid/metadata.json" \
     "$staging/usr/share/gnome-shell/extensions/$gnome_ext_uuid/metadata.json"

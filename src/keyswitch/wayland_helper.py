@@ -87,6 +87,7 @@ from .constants.wayland import (
     WAYLAND_UINPUT_PRODUCT_ID,
     WAYLAND_UINPUT_VENDOR_ID,
 )
+from .wayland_access import ACCESS_HINT
 
 FRAME_HEADER = struct.Struct("!BI")
 U8_STRUCT = struct.Struct("!B")
@@ -730,10 +731,7 @@ class WaylandInputHelper:
                 self._close_pointer(fd)
 
         if initial and denied_keyboard and not self._keyboards:
-            raise PermissionError(
-                "Нет доступа к клавиатурам /dev/input/event*: проверьте правила udev "
-                "пакета keyswitch или перезайдите в сеанс"
-            )
+            raise PermissionError(f"Нет доступа к клавиатурам /dev/input/event*: {ACCESS_HINT}")
 
     def _grab_keyboard_safely(self, fd: int) -> bool:
         try:

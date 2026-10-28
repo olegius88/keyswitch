@@ -338,14 +338,24 @@ corrections. The desktop reports the layout and the active window:
 Other compositors (Hyprland, labwc, Wayfire and others) give a program no way
 to switch the layout, and KeySwitch does not start there; the diagnostics say so.
 
-A source installation (`./install.sh`) prints the commands that install the
-rule by hand. The package installs the udev rule `60-keyswitch.rules`: the user of the active
-session gets access to `/dev/uinput` and to keyboards and mice (the `uaccess`
-tag, as for sound and cameras), with no `input` group and no root service; the
-installation applies the rule at once. This is the access any program has on
-X11: any program of the session can read the keyboard. The grab is released
-on the lock screen and when another session takes the seat (`LockedHint` and
-`Active` of systemd-logind).
+KeySwitch does not take access to the keyboards itself, and the package does
+not grant it: an administrator enables it once.
+
+```bash
+sudo keyswitch --enable-wayland-input
+```
+
+The command installs the udev rule `/etc/udev/rules.d/60-keyswitch.rules` and
+applies it at once: the user of the active session gets read and write access
+to `/dev/uinput`, keyboards, mice and touchpads (the `uaccess` tag), with no
+`input` group and no root service. Mice are there so that a click resets the
+word being typed. **This means any program of that user can read every key,
+passwords included, and type keys of its own** — as any program can on X11 and
+Windows. To take it back: `sudo keyswitch --disable-wayland-input` removes the
+rule and the access to the devices at once. A source installation
+(`./install.sh`) uses the same command with the launcher path the installer
+prints. KeySwitch lets the keyboards go on the lock screen and when another
+session takes the seat (`LockedHint` and `Active` of systemd-logind).
 
 If the main KeySwitch process hangs, the input process waits at most 0.25
 seconds for its answer, then lets keys through on its own and reports them so

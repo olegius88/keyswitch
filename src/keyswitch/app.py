@@ -514,6 +514,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--diagnose", action="store_true", help="проверить backend ввода и завершиться")
     parser.add_argument("--no-engine", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--wayland-input-helper", type=int, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--enable-wayland-input", action="store_true",
+                        help="включить доступ к клавиатурам в сеансе Wayland (с правами администратора)")
+    parser.add_argument("--disable-wayland-input", action="store_true",
+                        help="выключить доступ к клавиатурам в сеансе Wayland (с правами администратора)")
     parser.add_argument("--version", action="version", version=f"KeySwitch {__version__}")
     return parser
 
@@ -524,6 +528,14 @@ def main(argv: list[str] | None = None) -> int:
         from .wayland_native import run_wayland_input_helper
 
         return run_wayland_input_helper(arguments.wayland_input_helper)
+    if arguments.enable_wayland_input:
+        from .wayland_access import enable_wayland_input
+
+        return enable_wayland_input()
+    if arguments.disable_wayland_input:
+        from .wayland_access import disable_wayland_input
+
+        return disable_wayland_input()
     GLib.set_prgname("keyswitch")
     GLib.set_application_name("KeySwitch")
     configure_logging()

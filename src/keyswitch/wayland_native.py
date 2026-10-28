@@ -145,6 +145,7 @@ from .wayland_helper import (
     WaylandInputHelper,
     classify_input_device,
 )
+from .wayland_access import ACCESS_HINT
 
 LOGGER = logging.getLogger(__name__)
 
@@ -2343,10 +2344,7 @@ class NativeWaylandAPI:
                 "(sudo modprobe uinput)"
             )
         if not os.access(UINPUT_PATH, os.R_OK | os.W_OK):
-            return (
-                "Нет прав доступа к /dev/uinput: проверьте правила udev пакета keyswitch "
-                "(60-keyswitch.rules) или перезайдите в сеанс"
-            )
+            return f"Нет прав доступа к /dev/uinput: {ACCESS_HINT}"
         os_probe = LinuxHelperOS()
         keyboards = [
             info
@@ -2354,10 +2352,7 @@ class NativeWaylandAPI:
             if classify_input_device(info) == "keyboard"
         ]
         if keyboards and not any(os.access(info.path, os.R_OK) for info in keyboards):
-            return (
-                "Нет прав чтения клавиатур /dev/input/event*: проверьте правила udev "
-                "пакета keyswitch или перезайдите в сеанс"
-            )
+            return f"Нет прав чтения клавиатур /dev/input/event*: {ACCESS_HINT}"
         return ""
 
     def layout_names(self) -> tuple[str, ...]:

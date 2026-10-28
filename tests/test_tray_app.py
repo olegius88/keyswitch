@@ -59,6 +59,8 @@ from fixture_values.platform import (
     DISABLED_INITIAL_UPDATE_SOURCE_ID,
     FAKE_APPLICATION_RUN_EXIT_CODE,
     FAKE_DIAGNOSE_EXIT_CODE,
+    FAKE_DISABLE_WAYLAND_INPUT_EXIT_CODE,
+    FAKE_ENABLE_WAYLAND_INPUT_EXIT_CODE,
     FAKE_LAUNCHER_EXIT_CODE,
     FAKE_LINUX_MAIN_EXIT_CODE,
     FAKE_WINDOWS_MAIN_EXIT_CODE,
@@ -1106,6 +1108,19 @@ class ApplicationEntrypointTests(unittest.TestCase):
             )
         run_helper.assert_called_once_with(WL_FIXTURE_HELPER_ARG_FD)
 
+        # The Wayland access commands run under sudo, without GTK or a display.
+        with (
+            patch("keyswitch.launcher._running_on_windows", return_value=False),
+            patch("keyswitch.wayland_access.enable_wayland_input",
+                  return_value=FAKE_ENABLE_WAYLAND_INPUT_EXIT_CODE) as enable,
+            patch("keyswitch.wayland_access.disable_wayland_input",
+                  return_value=FAKE_DISABLE_WAYLAND_INPUT_EXIT_CODE) as disable,
+        ):
+            self.assertEqual(launcher_module.main(["--enable-wayland-input"]), FAKE_ENABLE_WAYLAND_INPUT_EXIT_CODE)
+            self.assertEqual(launcher_module.main(["--disable-wayland-input"]), FAKE_DISABLE_WAYLAND_INPUT_EXIT_CODE)
+        enable.assert_called_once_with()
+        disable.assert_called_once_with()
+
         from keyswitch import windows_app
 
         with (
@@ -1182,6 +1197,17 @@ class ApplicationEntrypointTests(unittest.TestCase):
                 WL_FIXTURE_HELPER_EXIT_CODE,
             )
         app_helper.assert_called_once_with(WL_FIXTURE_HELPER_ARG_FD)
+
+        with (
+            patch("keyswitch.wayland_access.enable_wayland_input",
+                  return_value=FAKE_ENABLE_WAYLAND_INPUT_EXIT_CODE) as app_enable,
+            patch("keyswitch.wayland_access.disable_wayland_input",
+                  return_value=FAKE_DISABLE_WAYLAND_INPUT_EXIT_CODE) as app_disable,
+        ):
+            self.assertEqual(app_module.main(["--enable-wayland-input"]), FAKE_ENABLE_WAYLAND_INPUT_EXIT_CODE)
+            self.assertEqual(app_module.main(["--disable-wayland-input"]), FAKE_DISABLE_WAYLAND_INPUT_EXIT_CODE)
+        app_enable.assert_called_once_with()
+        app_disable.assert_called_once_with()
 
         wl_probe = BackendProbe(True, "wayland", "GNOME", "evdev (EVIOCGRAB)", "uinput", "us,ru", 0)
         wl_backend = Mock()

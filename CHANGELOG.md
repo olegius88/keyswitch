@@ -9,8 +9,11 @@ All notable changes to KeySwitch are documented in this file.
   every key on through a virtual keyboard (`/dev/uinput`), which also types the corrections; Enter and Tab are held back
   until the word is corrected, as on Windows. The layout and the active window come from the desktop: a GNOME Shell
   extension installed with the package (it takes effect after the next login), the `org.kde.keyboard` service and a
-  KWin script, or sway's IPC. The package installs a udev rule that gives the user of the active session access to
-  `/dev/uinput` and to keyboards and mice; the grab is released on the lock screen. If the main process hangs, keys go
+  KWin script, or sway's IPC. The access to the keyboards is not granted on installation: an administrator enables it
+  once with `sudo keyswitch --enable-wayland-input`, which installs a udev rule giving the user of the active session
+  read and write access to `/dev/uinput`, keyboards, mice and touchpads. Any program of that user can then read every
+  key, passwords included, and type keys of its own, as on X11 and Windows; `sudo keyswitch --disable-wayland-input`
+  takes the access away at once. The grab is released on the lock screen. If the main process hangs, keys go
   through after 0.25 seconds and none is lost; an input process that crashes is started again. A password field is
   left alone in GNOME also when it is the Shell's own prompt or an application field AT-SPI does not answer for in time.
   Verified end to end in a VM with GNOME 50, Plasma 6.6 and sway 1.11, from source and from the package.

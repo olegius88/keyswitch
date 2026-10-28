@@ -14,8 +14,13 @@ In a Wayland session (GNOME Shell, KDE Plasma 6 or sway) a separate input
 process grabs the keyboards at the kernel level and passes every key on through
 a virtual keyboard on
 .IR /dev/uinput .
-The udev rule of the package gives the user of the active session access to it
-and to the keyboards. GNOME Shell uses the extension
+The access to it and to the keyboards is not granted on installation: an
+administrator enables it once with
+.B sudo keyswitch \-\-enable\-wayland\-input
+and takes it back with
+.BR "sudo keyswitch \-\-disable\-wayland\-input" .
+While it is enabled, every program of the active session's user can read every
+key and type keys of its own, as on X11. GNOME Shell uses the extension
 .I keyswitch@io.github.olegius88.KeySwitch
 from the package; it becomes available after the next login.
 .PP

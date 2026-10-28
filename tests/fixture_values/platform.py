@@ -100,3 +100,8 @@ X11_XTEST_VERSION_COMPONENT: Final = 2
 X11_RECORD_VERSION_MINOR: Final = 13
 # A non-keyboard, non-button event type, arbitrary and unrecognised.
 X11_UNRECOGNIZED_EVENT_TYPE: Final = 12
+# Fake exit codes of the Wayland input access commands (keyswitch.wayland_access), distinct from each other.
+FAKE_ENABLE_WAYLAND_INPUT_EXIT_CODE: Final = 21
+FAKE_DISABLE_WAYLAND_INPUT_EXIT_CODE: Final = 22
+# A user id other than root's, for the refusal of the access commands without sudo.
+FAKE_USER_ID: Final = 1000

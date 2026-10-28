@@ -94,6 +94,7 @@ from keyswitch.constants.wayland import (
     WAYLAND_UINPUT_VENDOR_ID,
 )
 from keyswitch.constants.timing import KEYBOARD_LISTENER_START_TIMEOUT_SECONDS, WAYLAND_UINPUT_BURST_PAUSE_SECONDS
+from keyswitch.wayland_access import ENABLE_COMMAND
 from keyswitch.wayland_helper import (
     CMD_BATCH_HEADER_STRUCT,
     CMD_BATCH_ITEM_STRUCT,
@@ -420,7 +421,7 @@ class WaylandInputHelperStateMachineTests(unittest.TestCase):
         self.assertEqual(WaylandInputHelper(channel, os_api).run(), 1)
         msg_type, payload = channel.drain_frames()[0]
         self.assertEqual(msg_type, HELPER_MSG_ERROR)
-        self.assertIn("udev", payload.decode("utf-8"))
+        self.assertIn(ENABLE_COMMAND, payload.decode("utf-8"))
 
         channel2 = FakeByteChannel()
         os_api2 = FakeHelperOS()
