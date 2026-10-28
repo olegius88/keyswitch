@@ -40,6 +40,13 @@ All notable changes to KeySwitch are documented in this file.
   correction that is given up, and names the kind of key that kept the keys typed after a word from being typed again
   (`unsafe_key`: a space, a modifier, Backspace, an arrow key, a shortcut). Such early switches had read as lost
   corrections, though the word was corrected at its space a moment later.
+- The pair is `context-v3-b5ed6848d4ce` (artifact SHA-256
+  `a35af45f0978f7a99c6c492dc8755259d5a208f205bf2c5cdc81c7e881cc5bf3`) with the prefix model `prefix-v2-bf3dc28f8567`,
+  the pair of 0.63.0 byte for byte, sealed again for the changed engine. On the recorded real typing the new engine
+  breaks no word; on sealed test v77, read once, it keeps all 189 correctly typed rows and restores 185 and 185 of the
+  188 rows typed in the wrong layout with the early switch off, against 183 and 184 for the baseline pair, and spoils
+  no correct row (the baseline pair two and one with the early switch on); on the developer-chat test it gains and
+  loses nothing.
 
 ## 0.63.0 — 2026-10-26
 
