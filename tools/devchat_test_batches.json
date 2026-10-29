@@ -14,6 +14,11 @@
    "name": "devchat-test-4",
    "content_sha256": "07af3c5384f05c872f7e9261c6632edbf50230b23b8af932aa6c2e08d9a3192f",
    "source": "ru.stackoverflow comments created 2024-01 .. 2026-10, pages 19-25 of each month in order of creation (the fetches of 15-17.10.2026, 20.10.2026 and 22.10.2026 took pages 1-18; from 2025-06 no month holds more than 18 pages), public Stack Exchange API, CC BY-SA 4.0; built 26.10.2026 by tools/build_devchat_messages.py with every text of the first three builds dropped; the test split alone"
+  },
+  {
+   "name": "devchat-test-5",
+   "content_sha256": "83bf02003e6d1caa080f261145ae57cb6d1a6b9aa8e632c598c61c6340f8542b",
+   "source": "ru.stackoverflow comments created 2024-01 .. 2025-01 after the last one each month's pages 1-25 held (the fetches of 15-17.10.2026, 20.10.2026, 22.10.2026 and 26.10.2026 took the first 2 500 comments of those months, and they hold more), pages 1-12 in order of creation, public Stack Exchange API, CC BY-SA 4.0; built 29.10.2026 by tools/build_devchat_messages.py with every text of the first four builds dropped; the test split alone"
   }
  ]
 }
