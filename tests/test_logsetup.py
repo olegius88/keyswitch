@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import platform
 import tempfile
 import unittest
 from logging.handlers import RotatingFileHandler
@@ -179,6 +180,7 @@ class LogFormatTests(unittest.TestCase):
             finally:
                 root.handlers, root.level = previous, level
             self.assertIn(f"KeySwitch {__version__} запущен", banner)
+            self.assertIn(f"({platform.platform()})", banner)
             self.assertIn(str(directory / "keyswitch.log"), banner)
             self.assertIn(logsetup.rotation_summary(True), banner)
             self.assertIn("режим диагностики", banner)

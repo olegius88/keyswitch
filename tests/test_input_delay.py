@@ -15,6 +15,8 @@ from unittest.mock import patch
 from keyswitch import context_model, context_policy, ortho_model
 from keyswitch.backend import KeyEvent
 from keyswitch.constants.timing import (
+    HOOK_GAP_MS,
+    HOOK_SILENCE_MS,
     INPUT_DELAY_LATE_MS,
     INPUT_DELAY_REPORT_INTERVAL_SECONDS,
     INPUT_DELAY_SLOW_CALLBACK_MS,
@@ -24,7 +26,7 @@ from keyswitch.constants.units import MILLISECONDS_PER_SECOND
 from keyswitch.constants.windows import DWORD_MASK, VK_RETURN
 from keyswitch.context_model import ContextModel
 from keyswitch.context_policy import ContextPolicy
-from keyswitch.input_delay import InputDelay, InputDelayReport
+from keyswitch.input_delay import HookGap, InputDelay, InputDelayReport
 from keyswitch.windows_backend import NativeKeyEvent, WindowsBackend
 import test_input_sequence_matrix as sequences
 from fixture_values.clock import HOOK_KEY_TIME_MS
@@ -132,6 +134,176 @@ class InputDelayTests(unittest.TestCase):
                                        "late_threshold_ms": INPUT_DELAY_LATE_MS,
                                        "slow_threshold_ms": INPUT_DELAY_SLOW_CALLBACK_MS,
                                        "unstamped_threshold_ms": INPUT_DELAY_UNSTAMPED_MS}])
+
+
+class HookGapTests(unittest.TestCase):
+    """Keys that passed the Windows hook: a key the hook reached or answered HOOK_GAP_MS late ends the tracked text.
+
+    Under CPU load the hook's thread waited 1.5 to 3.8 s for the processor, and Windows gave each key that waited
+    about 300 ms behind it to the window without the hook (VM, 28.10.2026); all 23 such keys lay within the wait of a
+    key the hook reached that late.
+    """
+
+    def test_a_late_or_slow_key_leaves_one_gap_until_it_is_taken(self) -> None:
+        delay = InputDelay()
+        delay.note_wait(HOOK_GAP_MS - 1)
+        delay.record(HOOK_GAP_MS - 1, 0)
+        self.assertIsNone(delay.take_gap())
+        # Late as the hook reaches it: noted then, and not once more when its answer is counted.
+        delay.note_wait(HOOK_GAP_MS)
+        self.assertEqual(delay.take_gap(), HookGap(HOOK_GAP_MS, 0))
+        delay.record(HOOK_GAP_MS, 1)
+        self.assertIsNone(delay.take_gap())
+        # On time but answered slowly enough to keep the keys behind it as long.
+        delay.record(HOOK_GAP_MS - 1, 1)
+        self.assertEqual(delay.take_gap(), HookGap(HOOK_GAP_MS - 1, 1))
+        self.assertIsNone(delay.take_gap())
+        # A key with a time of its own says nothing about a wait.
+        delay.note_wait(INPUT_DELAY_UNSTAMPED_MS)
+        delay.record(INPUT_DELAY_UNSTAMPED_MS, HOOK_GAP_MS)
+        self.assertIsNone(delay.take_gap())
+
+    def test_another_programs_key_leaves_a_gap_by_its_answer(self) -> None:
+        delay = InputDelay()
+        delay.record_foreign(HOOK_GAP_MS - 1)
+        self.assertIsNone(delay.take_gap())
+        delay.record_foreign(HOOK_GAP_MS)
+        self.assertEqual(delay.take_gap(), HookGap(0, HOOK_GAP_MS))
+
+    def test_the_windows_hook_notes_the_gap_before_the_key_goes_on(self) -> None:
+        api = FakeWindowsAPI()
+        backend = WindowsBackend(api)
+        key = NativeKeyEvent(True, VK_RETURN, SCAN_CODE_ENTER, False, False, HOOK_KEY_TIME_MS)
+        api.ticks = HOOK_KEY_TIME_MS + HOOK_GAP_MS
+        seen: list[HookGap | None] = []
+        backend._listener = lambda event: seen.append(backend._input_delay._gap)
+        backend._handle_native(key)
+        self.assertEqual(seen, [HookGap(HOOK_GAP_MS, 0)])
+        self.assertEqual(backend.take_hook_gap(), HookGap(HOOK_GAP_MS, 0))
+        # A key time ahead of the clock, and another program's key, are not waits the hook can know.
+        backend._handle_native(replace(key, pressed=False, timestamp=api.ticks + 1))
+        backend._handle_native(replace(key, timestamp=0, foreign=True))
+        self.assertIsNone(backend.take_hook_gap())
+
+    def test_the_engine_lets_go_of_the_word_after_a_gap(self) -> None:
+        with sequences.session(0) as current:
+            current.settings.set("diagnostics.technical_logging", True)
+            gaps = [HookGap(HOOK_GAP_MS, 0)]
+            current.physical("ghb")
+            current.backend.take_hook_gap = lambda: gaps.pop() if gaps else None  # type: ignore[attr-defined]
+            with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+                current.physical("dtn ")
+                self.assertEqual(current.engine.snapshot.last_action, "Клавиши прошли мимо KeySwitch")
+                # The rest of the token is left alone; the next word is the engine's again.
+                current.physical("ghbdtn ")
+            self.assertEqual(current.backend.text, "ghbdtn привет ")
+            gap = next(event for event in technical_events(logs.output) if event["event"] == "hook_gap")
+            self.assertEqual((gap["late_ms"], gap["callback_ms"], gap["threshold_ms"]), (HOOK_GAP_MS, 0, HOOK_GAP_MS))
+
+    def test_a_correction_is_not_made_over_a_gap(self) -> None:
+        with sequences.session(0) as current:
+            current.settings.set("diagnostics.technical_logging", True)
+            current.physical("ghbdtn")
+            space = current.key(" ")
+            current.send(space)
+            # The space comes up on time, and the gap arrives as the correction is about to be made.
+            gaps: list[HookGap | None] = [HookGap(0, HOOK_GAP_MS), None]
+            current.backend.take_hook_gap = lambda: gaps.pop() if gaps else None  # type: ignore[attr-defined]
+            with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+                current.send(replace(space, pressed=False))
+            self.assertEqual(gaps, [])
+            self.assertEqual(current.backend.text, "ghbdtn ")
+            aborted = next(event for event in technical_events(logs.output) if event["event"] == "correction_aborted")
+            self.assertEqual(aborted["reason"], "hook_gap")
+
+
+class UnseenInputTests(unittest.TestCase):
+    """Input that reached a program without any hook of KeySwitch is noticed and its program logged once.
+
+    A program in front that reads the keyboard as raw input and has a keyboard hook of its own keeps every keyboard
+    hook silent, while GetLastInputInfo moves on with each key (Windows 10 and 11, 28.10.2026).
+    """
+
+    def test_an_input_time_no_hook_got_is_certain_after_a_later_event_or_a_long_silence(self) -> None:
+        api = FakeWindowsAPI()
+        backend = WindowsBackend(api)
+        # No hook event yet: an input before the hooks came says nothing.
+        api.last_input = HOOK_KEY_TIME_MS
+        self.assertIsNone(backend.take_unseen_input())
+        # Every input the hooks got.
+        api.input_times = [HOOK_KEY_TIME_MS]
+        self.assertIsNone(backend.take_unseen_input())
+        # A key the hooks have not got yet: perhaps late, so nothing is said until a later event comes.
+        api.last_input = HOOK_KEY_TIME_MS + 1
+        api.ticks = api.last_input
+        self.assertIsNone(backend.take_unseen_input())
+        self.assertIsNone(backend.take_unseen_input())
+        # It came late after all: nothing passed the hooks.
+        api.input_times.append(api.last_input)
+        self.assertIsNone(backend.take_unseen_input())
+        # A key the hooks never get, and a pointer move they get after it.
+        api.last_input = HOOK_KEY_TIME_MS + HOOK_GAP_MS
+        self.assertIsNone(backend.take_unseen_input())
+        api.input_times.append(api.last_input + 1)
+        api.ticks = api.last_input + HOOK_GAP_MS
+        self.assertEqual(backend.take_unseen_input(), HOOK_GAP_MS)
+        # Keys in a silent program and nothing else: certain once HOOK_SILENCE_MS went by.
+        api.last_input = api.ticks
+        self.assertIsNone(backend.take_unseen_input())
+        api.ticks += HOOK_SILENCE_MS - 1
+        self.assertIsNone(backend.take_unseen_input())
+        api.ticks += 1
+        self.assertEqual(backend.take_unseen_input(), HOOK_SILENCE_MS)
+        # The same input is reported once, however long the silence lasts.
+        api.ticks += HOOK_SILENCE_MS
+        self.assertIsNone(backend.take_unseen_input())
+        self.assertIsNone(backend.take_unseen_input())
+        # The next key typed into the silent program is new input.
+        api.last_input = api.ticks
+        self.assertIsNone(backend.take_unseen_input())
+        api.ticks += HOOK_SILENCE_MS
+        self.assertEqual(backend.take_unseen_input(), HOOK_SILENCE_MS)
+
+    def test_the_tick_clock_wraps_and_a_hook_restart_forgets_nothing_it_needs(self) -> None:
+        api = FakeWindowsAPI()
+        backend = WindowsBackend(api)
+        api.input_times = [DWORD_MASK]
+        api.last_input = 0
+        self.assertIsNone(backend.take_unseen_input())
+        # The event times are gone (a new hook): only the silence decides.
+        api.input_times = []
+        api.ticks = HOOK_SILENCE_MS
+        self.assertEqual(backend.take_unseen_input(), HOOK_SILENCE_MS)
+        # An input time older than the newest event got is no input the hooks missed after it.
+        api.input_times = [HOOK_KEY_TIME_MS]
+        api.last_input = HOOK_KEY_TIME_MS - 1
+        self.assertIsNone(backend.take_unseen_input())
+        self.assertIsNone(backend._unseen_input)
+
+    def test_the_engine_lets_go_of_the_text_and_names_each_program_once(self) -> None:
+        with sequences.session(0) as current:
+            current.settings.set("diagnostics.technical_logging", True)
+            engine = current.engine
+            # A backend that cannot tell says nothing.
+            engine._report_unseen_input()
+            unseen = [None, HOOK_GAP_MS, HOOK_SILENCE_MS, HOOK_SILENCE_MS]
+            current.backend.take_unseen_input = lambda: unseen.pop(0)  # type: ignore[attr-defined]
+            current.physical("ghb")
+            application = ["game"]
+            current.backend.active_application = lambda: application[0]  # type: ignore[method-assign]
+            with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+                engine._report_unseen_input()
+                self.assertEqual(engine._strokes[-1].character, "b")
+                engine._report_unseen_input()
+                self.assertEqual(engine._strokes, [])
+                self.assertTrue(engine._untracked_token)
+                engine._report_unseen_input()
+                application[0] = "other"
+                engine._report_unseen_input()
+            reported = [(event["application"], event["unseen_ms"]) for event in technical_events(logs.output)
+                        if event["event"] == "input_unseen"]
+            self.assertEqual(reported, [("game", HOOK_GAP_MS), ("other", HOOK_SILENCE_MS)])
+            self.assertEqual(unseen, [])
 
 
 class FirstWordTests(unittest.TestCase):

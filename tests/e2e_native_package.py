@@ -25,6 +25,7 @@ from keyswitch.history import HistoryStore
 from keyswitch.learning import LearningStore
 from keyswitch.tray import ITEM_INTERFACE, MENU_INTERFACE, MENU_PATH, OBJECT_PATH
 from keyswitch.x11_backend import XkbStateRec, _Libraries
+from keyswitch.constants.units import MICROSECONDS_PER_MILLISECOND
 from keyswitch.constants.x11 import BACKSPACE_KEYSYM, XKB_USE_CORE_KBD
 from fixture_values.clock import (
     E2E_INTER_CASE_DELAY_MS,
@@ -33,7 +34,6 @@ from fixture_values.clock import (
     E2E_VERIFY_POLL_MS,
     E2E_VERIFY_SETTLE_DELAY_MS,
     GDBUS_CALL_TIMEOUT_SECONDS,
-    MICROSECONDS_PER_MILLISECOND,
     NATIVE_PACKAGE_E2E_APPLICATION_POLL_MS,
     NATIVE_PACKAGE_E2E_FORCED_SHUTDOWN_TIMEOUT_SECONDS,
     NATIVE_PACKAGE_E2E_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS,

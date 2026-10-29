@@ -20,10 +20,18 @@ class _WindowProcess(Protocol):
     def window_process_id(self, window: int) -> int: ...
 
 
+@runtime_checkable
+class _PasswordFocus(Protocol):
+    def window_is_password(self, window: int) -> bool: ...
+
+
 class PlatformFieldReader:
     def __init__(self, backend: object = None) -> None:
         self._reader: _ManagedReader | None = None
         self._process = backend.window_process_id if isinstance(backend, _WindowProcess) else None
+        # A compositor that knows the keyboard is in a password field it draws itself (GNOME Shell's
+        # prompts, which AT-SPI does not read) says so before any accessibility read.
+        self._password = backend.window_is_password if isinstance(backend, _PasswordFocus) else None
         self.status = "not_requested"
         self._failure_stage: str | None = None
         self._failure_type: str | None = None
@@ -81,6 +89,8 @@ class PlatformFieldReader:
     def read(self, application: str, window: int) -> FieldContext | None:
         if not application or not window:
             return None
+        if self._password is not None and self._password(window):
+            return FieldContext(application, f"{window}:compositor", role="password", sensitive=True, source="compositor")
         stage = "initialization"
         try:
             if self.status == "unavailable":

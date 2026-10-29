@@ -231,6 +231,7 @@ CI_APT_PACKAGES: Final[tuple[str, ...]] = (
     "hunspell-ru",
     "libglib2.0-bin",
     "libhunspell-1.7-0",
+    "libwayland-client0",
     "libx11-6",
     "libxkbcommon0",
     "libxtst6",

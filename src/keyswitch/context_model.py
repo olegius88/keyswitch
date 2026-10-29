@@ -61,6 +61,7 @@ from .constants.models import (
     MAX_CONTEXT_MODEL_VERSION_CHARACTERS,
     MAX_CONTEXT_WEIGHT_MAGNITUDE,
     MIN_CONTEXT_CONVERSION_THRESHOLD,
+    RESUME_FEATURE_PREFIX,
     SHORT_FEATURE_PREFIX,
     VARIABLE_FEATURE_PREFIX,
 )
@@ -456,6 +457,10 @@ class ContextModel:
         # Whether the letters-and-digits head has weights here: a token of letters and digits in both readings is its
         # class (context_action_features.alnum_question).
         self.answers_alnum = any(name.startswith(ALNUM_FEATURE_PREFIX) for name in self.weights)
+        # Whether the resume head has weights here: a short word right after Latin text, asked again once its next word is
+        # planned for conversion, is its class (context_action_features.resume_question), and the engine takes such a word
+        # along in the middle of a line on its verdict (engine._take_along).
+        self.answers_resume = any(name.startswith(RESUME_FEATURE_PREFIX) for name in self.weights)
 
     @classmethod
     def load(cls, path: Path = ARTIFACT_PATH) -> ContextModel:

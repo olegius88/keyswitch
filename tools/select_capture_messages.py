@@ -24,6 +24,10 @@ messages of one question are typed for one split only:
   messages. Tatoeba messages (`--prefix tatoeba-chat`) are taken only among the sentences the captured training questions
   were already typed from (`--only-ids`, model/context_v1/captured/tatoeba-authors.tsv.xz), which no corpus split holds
   (freeze_context_action_holdout.captured_tatoeba_identifiers).
+- resume: a message with a word of at most three letters (after at most one leading sign of RESUME_LEADING_SIGNS) right
+  after Latin text and before a Cyrillic word: `seek() , а там`, `TSet - я использовал`, `для x в списке`. Typed with the
+  change back to Russian forgotten, the Russian words after the Latin text come out in the English layout, and the engine
+  asks the short word again once the next word is planned for conversion: the resume head's question.
 - slippable: a message with two words of Russian letters in a row, for the slip typing mode (tools/mixed_typing.py).
 - formula: a message with a one-letter token of the variable class followed by a token of signs or digits that reads
   alike in both layouts and is no dash alone (`если x = 0`, `ГОСТ Р 54960`), for the sign head's question.
@@ -47,7 +51,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from keyswitch.constants.file_formats import HEXADECIMAL_BASE  # noqa: E402
 from keyswitch.constants.keyboard import LAYOUT_ALIKE_SIGNS  # noqa: E402
 from keyswitch.constants.training import DETERMINISTIC_CHOICE_HEX_DIGITS  # noqa: E402
-from keyswitch.constants.models import ALNUM_HEAD_MAX_CHARACTERS, OPENING_SHORT_MAX_LETTERS  # noqa: E402
+from keyswitch.constants.models import ALNUM_HEAD_MAX_CHARACTERS, OPENING_SHORT_MAX_LETTERS, RESUME_LEADING_SIGNS  # noqa: E402
 from keyswitch.context_action_features import dotted_question, letters_and_digits, sign_token_asked  # noqa: E402
 from keyswitch.layouts import LayoutPair  # noqa: E402
 from keyswitch.short_words import TRUSTED_SINGLE_LETTER_WORDS  # noqa: E402
@@ -116,6 +120,17 @@ def opening_short(text: str) -> bool:
     return bool(tokens) and tokens[0].isalpha() and len(tokens[0]) <= OPENING_SHORT_MAX_LETTERS
 
 
+def resumes(text: str) -> bool:
+    tokens = text.split()
+    for index, token in enumerate(tokens[1:-1], 1):
+        word = token[1:] if token[:1] in RESUME_LEADING_SIGNS else token
+        if word.isalpha() and len(word) <= OPENING_SHORT_MAX_LETTERS and any(cyrillic(char) for char in tokens[index + 1]):
+            letters = [char for char in " ".join(tokens[:index]) if char.isalpha()]
+            if letters and letters[-1].isascii():
+                return True
+    return False
+
+
 def slippable(text: str) -> bool:
     """Two words of Russian letters in a row: the slip typing mode types the second with the English layout on."""
     tokens = text.split()
@@ -144,7 +159,7 @@ def formula(text: str) -> bool:
 
 # Classes of a whole message rather than of one of its tokens.
 MESSAGE_CLASSES: dict[str, Callable[[str], bool]] = {"opening-short": opening_short, "slippable": slippable,
-                                                     "formula": formula}
+                                                     "formula": formula, "resume": resumes}
 CLASSES: dict[str, Callable[[str, str], bool]] = {"variable": variable_token, "dotted": dotted_token,
                                                   "dotted-latin": latin_dotted_token, "dotted-russian": russian_dotted_token,
                                                   "alnum-latin": latin_alnum_token, "alnum-russian": russian_alnum_token}

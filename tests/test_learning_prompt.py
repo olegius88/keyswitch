@@ -40,6 +40,12 @@ from fixture_values.keys import (
     LEARNING_PROMPT_FIXTURE_WINDOW_ID,
     RETURN_KEYCODE,
 )
+from fixture_values.wayland import (
+    WL_FIXTURE_PROCESS_ID,
+    WL_FIXTURE_SECOND_PROCESS_ID,
+    WL_FIXTURE_WINDOW_X_PIXELS,
+    WL_FIXTURE_WINDOW_Y_PIXELS,
+)
 from fixture_values.ui import (
     LEARNING_PROMPT_CARET_ONLY_ANCHOR_X,
     LEARNING_PROMPT_CARET_ONLY_ANCHOR_Y,
@@ -243,6 +249,84 @@ class AccessibilityAnchorTests(unittest.TestCase):
         ):
             self.assertIsNone(focused_caret_anchor())
 
+    def test_wayland_pid_filter_and_window_origin_fallbacks(self) -> None:
+        origin = (WL_FIXTURE_WINDOW_X_PIXELS, WL_FIXTURE_WINDOW_Y_PIXELS)
+        zero_rect = SimpleNamespace(x=0, y=0, width=0, height=0)
+
+        focused_node = Mock()
+        focused_node.get_state_set.return_value.contains.return_value = True
+        text = Mock()
+        focused_node.get_text_iface.return_value = text
+        text.get_caret_offset.return_value = 1
+
+        other_app = Mock()
+        other_app.get_process_id.return_value = WL_FIXTURE_SECOND_PROCESS_ID
+        target_app = Mock()
+        target_app.get_process_id.return_value = WL_FIXTURE_PROCESS_ID
+        target_app.get_state_set.return_value.contains.return_value = False
+        target_app.get_text_iface.return_value = None
+        target_app.get_child_count.return_value = 1
+        target_app.get_child_at_index.return_value = focused_node
+
+        desktop = Mock()
+        desktop.get_child_count.return_value = LEARNING_PROMPT_CHILD_COUNT_WITH_NULL_SLOT + 1
+        desktop.get_child_at_index.side_effect = lambda idx: (None, other_app, target_app)[idx]
+
+        with (
+            patch.object(prompt_module, "_accessibility_bus_available", return_value=True),
+            patch.object(Atspi, "get_desktop_count", return_value=1),
+            patch.object(Atspi, "get_desktop", return_value=desktop),
+        ):
+            # Screen extents failing without window_origin returns None.
+            text.get_character_extents.side_effect = RuntimeError("screen coords unsupported")
+            self.assertIsNone(focused_caret_anchor(window_pid=WL_FIXTURE_PROCESS_ID))
+
+            # Zero screen extents fall back to CoordType.WINDOW character extents.
+            def window_char_extents(_idx: int, coord: Atspi.CoordType) -> object:
+                return zero_rect if coord == Atspi.CoordType.SCREEN else CHILD_RECT
+
+            text.get_character_extents.side_effect = window_char_extents
+            self.assertEqual(
+                focused_caret_anchor(window_pid=WL_FIXTURE_PROCESS_ID, window_origin=origin),
+                ScreenAnchor(
+                    origin[0] + CHILD_RECT.x + CHILD_RECT.width,
+                    origin[1] + CHILD_RECT.y + CHILD_RECT.height,
+                ),
+            )
+            text.get_caret_offset.return_value = 0
+            self.assertEqual(
+                focused_caret_anchor(window_pid=WL_FIXTURE_PROCESS_ID, window_origin=origin),
+                ScreenAnchor(
+                    origin[0] + CHILD_RECT.x,
+                    origin[1] + CHILD_RECT.y + CHILD_RECT.height,
+                ),
+            )
+
+            # Both character extents failing/zero falls back to component extents.
+            text.get_character_extents.side_effect = [RuntimeError("no screen"), RuntimeError("no win")]
+            focused_node.get_component_iface.return_value = None
+            self.assertIsNone(
+                focused_caret_anchor(window_pid=WL_FIXTURE_PROCESS_ID, window_origin=origin)
+            )
+
+            comp = Mock()
+            focused_node.get_component_iface.return_value = comp
+            text.get_character_extents.return_value = zero_rect
+            text.get_character_extents.side_effect = None
+            comp.get_extents.return_value = zero_rect
+            self.assertIsNone(
+                focused_caret_anchor(window_pid=WL_FIXTURE_PROCESS_ID, window_origin=origin)
+            )
+
+            comp.get_extents.return_value = FOCUSED_RECT
+            self.assertEqual(
+                focused_caret_anchor(window_pid=WL_FIXTURE_PROCESS_ID, window_origin=origin),
+                ScreenAnchor(
+                    origin[0] + FOCUSED_RECT.x + FOCUSED_RECT.width // CENTERING_DIVISOR,
+                    origin[1] + FOCUSED_RECT.y,
+                ),
+            )
+
 
 @unittest.skipUnless(DISPLAY_AVAILABLE, "GTK display is required")
 class LearningPromptWindowTests(unittest.TestCase):
@@ -353,6 +437,67 @@ class LearningPromptWindowTests(unittest.TestCase):
                 FIRST_SCREEN_ANCHOR.y - LEARNING_PROMPT_FIXTURE_WINDOW_HEIGHT_PIXELS - LEARNING_PROMPT_ANCHOR_GAP_PIXELS,
             )],
         )
+
+        # Wayland surface (Gdk.Surface without X11Surface) passes window=0, and _WindowAnchorHints supplies pid/origin.
+        class WaylandHintBackend(FakePromptBackend):
+            def window_process_id(self, _window: int) -> int:
+                return WL_FIXTURE_PROCESS_ID
+
+            def window_origin(self, _window: int) -> tuple[int, int] | None:
+                return (WL_FIXTURE_WINDOW_X_PIXELS, WL_FIXTURE_WINDOW_Y_PIXELS)
+
+        hint_backend = WaylandHintBackend()
+        wayland_win = LearningPromptWindow(self.application, hint_backend, self.confirm, self.dismiss)
+        try:
+            with (
+                patch.object(prompt_module, "focused_caret_anchor", return_value=CARET_ONLY_ANCHOR) as caret_call,
+                patch.object(GLib, "idle_add"),
+                patch.object(wayland_win, "present"),
+                patch.object(wayland_win, "grab_focus"),
+            ):
+                wayland_win.show_prompt(self.prompt)
+            caret_call.assert_called_once_with(
+                window_pid=WL_FIXTURE_PROCESS_ID,
+                window_origin=(WL_FIXTURE_WINDOW_X_PIXELS, WL_FIXTURE_WINDOW_Y_PIXELS),
+            )
+            wl_surface = Mock(spec=Gdk.Surface)
+            with (
+                patch.object(wayland_win, "get_surface", return_value=wl_surface),
+                patch.object(wayland_win, "get_width", return_value=LEARNING_PROMPT_GTK_WIDTH_PIXELS),
+                patch.object(wayland_win, "get_height", return_value=LEARNING_PROMPT_FIXTURE_WINDOW_HEIGHT_PIXELS),
+            ):
+                self.assertFalse(wayland_win._position_above_anchor())
+            self.assertEqual(hint_backend.positions[0][0], 0)
+        finally:
+            wayland_win.destroy()
+
+    def test_a_prompt_with_no_room_above_the_caret_goes_under_it_and_stays_on_the_monitor(self) -> None:
+        monitor = Mock(spec=Gdk.Monitor)
+        monitor.get_geometry.return_value = SimpleNamespace(
+            x=0, y=0, width=LEARNING_PROMPT_GTK_WIDTH_PIXELS, height=LEARNING_PROMPT_FIXTURE_WINDOW_HEIGHT_PIXELS,
+        )
+        monitors = Mock()
+        monitors.get_n_items.return_value = 1
+        monitors.get_item.return_value = monitor
+        display = Mock()
+        display.get_monitors.return_value = monitors
+        top = ScreenAnchor(LEARNING_PROMPT_GTK_WIDTH_PIXELS - 1, 1, FIRST_SCREEN_ANCHOR.window)
+        self.window.anchor = top
+        with (
+            patch.object(self.window, "get_surface", return_value=Mock(spec=Gdk.Surface)),
+            patch.object(self.window, "get_display", return_value=display),
+            patch.object(self.window, "get_width", return_value=LEARNING_PROMPT_GTK_WIDTH_PIXELS),
+            patch.object(self.window, "get_height", return_value=LEARNING_PROMPT_FIXTURE_WINDOW_HEIGHT_PIXELS),
+        ):
+            self.assertFalse(self.window._position_above_anchor())
+            # Off every monitor: placed as asked.
+            self.window.anchor = ScreenAnchor(-1, -1, FIRST_SCREEN_ANCHOR.window)
+            self.assertFalse(self.window._position_above_anchor())
+        self.assertEqual(self.backend.positions, [
+            (0, 0, 1 + LEARNING_PROMPT_ANCHOR_GAP_PIXELS),
+            (0, -1 - LEARNING_PROMPT_GTK_WIDTH_PIXELS // CENTERING_DIVISOR,
+             -1 - LEARNING_PROMPT_FIXTURE_WINDOW_HEIGHT_PIXELS - LEARNING_PROMPT_ANCHOR_GAP_PIXELS),
+        ])
 
     def test_keyboard_and_close_paths(self) -> None:
         controller = Mock()

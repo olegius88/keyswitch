@@ -13,7 +13,8 @@ by default; it is not built into the KeySwitch input engine.
 [![License: GPL v3+](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
 KeySwitch is a desktop application for Windows 10/11 x64, 32-bit Windows 10 and Windows 11 on Arm,
-Ubuntu/Xubuntu X11 and macOS 13 or newer that automatically corrects words typed using the wrong
+Ubuntu/Xubuntu (X11 and Wayland: GNOME, KDE Plasma 6, sway) and macOS 13 or newer that automatically
+corrects words typed using the wrong
 keyboard layout. It is a free, open-source alternative to Punto Switcher,
 Caramba Switcher and EveryLang, and unlike them it also runs on Linux.
 Recognition runs entirely locally, typed text is never sent anywhere, and the
@@ -30,8 +31,9 @@ of the release in [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
 ## Features
 
-- global input observation through `WH_KEYBOARD_LL` on Windows and XRecord in
-  regular Linux X11 applications;
+- global input observation through `WH_KEYBOARD_LL` on Windows, XRecord in
+  regular Linux X11 applications, and a kernel-level keyboard grab in a Wayland
+  session (see [Wayland](#wayland));
 - automatic English and Russian word detection after a typing pause (0.7
   seconds by default, configurable), as well as after Space or
   unambiguous punctuation; idle correction can be disabled independently in
@@ -118,9 +120,9 @@ submits `привет` when settings and safety guards permit correction.
 While a rule offer is shown, Enter only opens the rule window and does not reach
 the application.
 Shift/Ctrl/Alt shortcuts are not intercepted. A correction failure or a focus
-change cancels submission and is reported in diagnostics. On X11 these actions
-have already reached the application, so use Space, idle correction or Pause
-before submitting or changing fields.
+change cancels submission and is reported in diagnostics. A Wayland session
+works the same way. On X11 these actions have already reached the application,
+so use Space, idle correction or Pause before submitting or changing fields.
 See the [EN/RU input maturity matrix](docs/input-maturity.md) for regression
 scenarios and platform limitations.
 
@@ -316,6 +318,50 @@ To uninstall while preserving settings and history:
 ./uninstall.sh
 ```
 
+## Wayland
+
+In a Wayland session no program sees the keys of other windows, so KeySwitch
+takes the keyboard at the kernel level. A separate process (`keyswitch
+--wayland-input-helper`) grabs the keyboards (`EVIOCGRAB`) and passes every key
+on through its own virtual keyboard on `/dev/uinput`, which also types the
+corrections. The desktop reports the layout and the active window:
+
+- **GNOME Shell 45–51** (verified on GNOME 50): the `keyswitch@io.github.olegius88.KeySwitch`
+  extension from the package. KeySwitch enables it; GNOME discovers a new
+  extension only at login, so log out and back in once after the first
+  installation. The extension also reports a password field, in an
+  application window and in the Shell's own dialogs (password prompts), so
+  that KeySwitch leaves it alone;
+- **KDE Plasma 6**: the `org.kde.keyboard` layout service and a KWin script;
+- **sway**: its IPC (`SWAYSOCK`).
+
+Other compositors (Hyprland, labwc, Wayfire and others) give a program no way
+to switch the layout, and KeySwitch does not start there; the diagnostics say so.
+
+KeySwitch does not take access to the keyboards itself, and the package does
+not grant it: an administrator enables it once.
+
+```bash
+sudo keyswitch --enable-wayland-input
+```
+
+The command installs the udev rule `/etc/udev/rules.d/60-keyswitch.rules` and
+applies it at once: the user of the active session gets read and write access
+to `/dev/uinput`, keyboards, mice and touchpads (the `uaccess` tag), with no
+`input` group and no root service. Mice are there so that a click resets the
+word being typed. **This means any program of that user can read every key,
+passwords included, and type keys of its own** — as any program can on X11 and
+Windows. To take it back: `sudo keyswitch --disable-wayland-input` removes the
+rule and the access to the devices at once. A source installation
+(`./install.sh`) uses the same command with the launcher path the installer
+prints. KeySwitch lets the keyboards go on the lock screen and when another
+session takes the seat (`LockedHint` and `Active` of systemd-logind).
+
+If the main KeySwitch process hangs, the input process waits at most 0.25
+seconds for its answer, then lets keys through on its own and reports them so
+that none is lost; an input process that crashes is started again, and the
+kernel releases its grab.
+
 ## System dependencies
 
 The required components may already be present on a standard current Ubuntu
@@ -324,7 +370,7 @@ installation. If the installer reports missing dependencies, install them with:
 ```bash
 sudo apt install at-spi2-core python3-gi python3-dbus gir1.2-gtk-4.0 gir1.2-adw-1 \
   gir1.2-atspi-2.0 \
-  libx11-6 libxtst6 libxkbcommon0 libhunspell-1.7-0 \
+  libwayland-client0 libx11-6 libxtst6 libxkbcommon0 libhunspell-1.7-0 \
   hunspell-en-us hunspell-ru onboard-data
 ```
 
@@ -840,9 +886,10 @@ See [release and recovery procedures](docs/verification.md).
 
 ## Limitations
 
-- The Linux backend is designed for X11. In a native Wayland session, KeySwitch
-  reports an explicit diagnostic error instead of pretending that global
-  correction is available.
+- On Wayland, GNOME Shell, KDE Plasma 6 and sway are supported (see [Wayland](#wayland));
+  KeySwitch does not start in other compositors. It does not work on Wayland
+  together with programs that grab the keyboard themselves (keyd, kanata,
+  xremap, input-remapper): only one program can grab a keyboard.
 - The default automatic language models target the EN/RU layout pair.
 - Applications with custom input handling and remote desktops may process
   synthetic events differently; these applications can be added to the

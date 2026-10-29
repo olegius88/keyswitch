@@ -1,0 +1,91 @@
+{
+ "schema_version": 2,
+ "columns": [
+  "count",
+  "original",
+  "alternative",
+  "source_group",
+  "trigger",
+  "baseline_convert",
+  "source_known",
+  "target_known",
+  "score_delta",
+  "literal_tail",
+  "boundary_text",
+  "after_origin",
+  "before_origin",
+  "source_typo",
+  "target_typo",
+  "source_opening",
+  "target_opening",
+  "inside",
+  "before",
+  "after",
+  "role",
+  "label"
+ ],
+ "sources": [
+  {
+   "file": "so-resume-train.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "messages with a word of at most three letters right after Latin text and before a Russian word, four typing modes, a typo in 20 % of words; the resume head's questions alone",
+   "recipe": {
+    "messages": "so-resume-train.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 60000,
+    "russian_share": 0.0,
+    "seed": "capture-resume-so-train",
+    "typo_rate": 0.2,
+    "typo_kinds": [
+     "missed",
+     "swapped",
+     "doubled",
+     "neighbour",
+     "extra"
+    ],
+    "typo_min_letters": 2,
+    "questions": "resume"
+   },
+   "sha256": "9d6ff1cb154a2729a460fc28ee7d2ccbebc72cd3a941c18dd866aea120d42b79",
+   "rows": 3019,
+   "unique": 2882
+  },
+  {
+   "file": "so-resume-dev.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "messages with a word of at most three letters right after Latin text and before a Russian word, four typing modes, a typo in 20 % of words; the resume head's questions alone",
+   "recipe": {
+    "messages": "so-resume-dev.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 15000,
+    "russian_share": 0.0,
+    "seed": "capture-resume-so-dev",
+    "typo_rate": 0.2,
+    "typo_kinds": [
+     "missed",
+     "swapped",
+     "doubled",
+     "neighbour",
+     "extra"
+    ],
+    "typo_min_letters": 2,
+    "questions": "resume"
+   },
+   "sha256": "471b8b9ff7c1aae90c5ac1b57e34e0ea65ec313997022401510521ccb0749163",
+   "rows": 688,
+   "unique": 671
+  }
+ ]
+}

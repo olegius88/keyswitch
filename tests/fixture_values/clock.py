@@ -39,8 +39,6 @@ E2E_VERIFY_SETTLE_DELAY_MS: Final = 900
 # time has passed: timers and injections lag on a loaded runner, a wrong result stays wrong.
 E2E_VERIFY_GRACE_MS: Final = 4000
 E2E_VERIFY_POLL_MS: Final = 100
-# GLib.get_monotonic_time() counts microseconds.
-MICROSECONDS_PER_MILLISECOND: Final = 1000
 E2E_LEARNING_CONFIRMATION_VERIFY_DELAY_MS: Final = 500
 TRAY_MENU_E2E_READ_LINE_TIMEOUT_SECONDS: Final = 5
 TRAY_MENU_E2E_EVENT_WAIT_TIMEOUT_SECONDS: Final = 2

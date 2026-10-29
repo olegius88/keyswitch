@@ -19,5 +19,21 @@ def main(argv: list[str] | None = None) -> int:
     elif _running_on_macos():
         from .macos_app import main as platform_main
     else:
-        from .app import main as platform_main
+        args = sys.argv[1:] if argv is None else argv
+        match args:
+            case ["--wayland-input-helper", raw_fd] if raw_fd.isdigit():
+                from .wayland_native import run_wayland_input_helper
+
+                return run_wayland_input_helper(int(raw_fd))
+            # Run with sudo: no display, no GTK.
+            case ["--enable-wayland-input"]:
+                from .wayland_access import enable_wayland_input
+
+                return enable_wayland_input()
+            case ["--disable-wayland-input"]:
+                from .wayland_access import disable_wayland_input
+
+                return disable_wayland_input()
+            case _:
+                from .app import main as platform_main
     return platform_main(argv)

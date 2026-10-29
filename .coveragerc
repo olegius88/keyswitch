@@ -10,6 +10,7 @@ omit =
     src/keyswitch/windows_registry.py
     src/keyswitch/windows_tray_native.py
     src/keyswitch/windows_ui.py
+    src/keyswitch/wayland_native.py
     src/keyswitch/desktop_ui.py
 
 [report]

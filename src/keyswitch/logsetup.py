@@ -10,6 +10,7 @@ file so the log that is later attached to a report contains that session only.
 from __future__ import annotations
 
 import logging
+import platform
 import sys
 from collections.abc import Callable
 from logging.handlers import RotatingFileHandler
@@ -173,9 +174,11 @@ def configure_logging(settings: SettingsStore | None = None) -> RotatingFileHand
     handler.setFormatter(log_formatter())
     install_handler(handler)
     LOGGER.info(
-        "KeySwitch %s запущен на %s: журнал %s, ротация %s%s",
+        "KeySwitch %s запущен на %s (%s): журнал %s, ротация %s%s",
         __version__,
         sys.platform,
+        # The build of the system: on Windows it decides how the keyboard hook is treated.
+        platform.platform(),
         log_path(),
         rotation_summary(technical),
         ", режим диагностики" if technical else "",

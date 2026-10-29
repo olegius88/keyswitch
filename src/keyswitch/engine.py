@@ -53,7 +53,7 @@ from .language_model import LanguageModel, WordScore
 from .layouts import RU_KEYS, US_KEYS, LayoutPair
 from .lexicon_supplement import supplement_words
 from .learning import LearnedRule, LearningStore, RuleAction
-from .context_action_features import sign_token_asked, term_question, variable_question
+from .context_action_features import resume_question, sign_token_asked, term_question, variable_question
 from .log_privacy import LogRedactor
 from .intent_model import CorrectionTrigger, LinearNgramModel
 from .context_policy import (
@@ -112,6 +112,8 @@ from .constants.timing import (
     ENGINE_SWITCH_GRACE_SECONDS,
     ENGINE_WORKER_JOIN_TIMEOUT_SECONDS,
     FIELD_CATCH_UP_RETRY_SECONDS,
+    HOOK_GAP_MS,
+    HOOK_SILENCE_MS,
     INPUT_DELAY_LATE_MS,
     INPUT_DELAY_REPORT_INTERVAL_SECONDS,
     INPUT_DELAY_SLOW_CALLBACK_MS,
@@ -162,6 +164,12 @@ def _word_starts(model: LanguageModel) -> Counter[str]:
 def _default_backend(group_count: int) -> InputBackend:
     """Load the Linux backend only when no platform backend was supplied."""
 
+    from .wayland_desktop import wayland_session_active
+
+    if wayland_session_active():
+        from .wayland_backend import WaylandBackend
+
+        return WaylandBackend(group_count=group_count)
     from .x11_backend import X11Backend
 
     return X11Backend(group_count=group_count)
@@ -406,6 +414,10 @@ class KeySwitchEngine:
         self._typed_presses = 0
         self._correction_sequence = 0
         self._input_overflow = threading.Event()
+        # What kept the keys typed after a word from being typed again (_collect_late_input), for the log.
+        self._late_refusal = ""
+        # The programs input reached without any hook of KeySwitch, each logged once (_report_unseen_input).
+        self._unseen_applications: set[str] = set()
         self._untracked_token = False
         # Read from the keyboard hook without a lock: see `consumes_key`.
         self._prompt_key_deadline = 0.0
@@ -763,6 +775,33 @@ class KeySwitchEngine:
         self._retry_field_wait()
         self._expire_learning_prompt()
         self._report_input_delay()
+        self._report_unseen_input()
+
+    def _report_unseen_input(self) -> None:
+        """Let go of the text when input reached a program without any hook of KeySwitch, and log the program once.
+
+        A program in front that reads the keyboard as raw input and has a keyboard hook of its own keeps every
+        keyboard hook of the system silent (Windows 10 and 11, 28.10.2026): KeySwitch sees nothing typed there, and
+        the log did not say so. The
+        programs are logged to learn which do it before anything is built for them (the owner's decision, 28.10.2026).
+        A backend that cannot tell has no take_unseen_input.
+        """
+
+        take = getattr(self.backend, "take_unseen_input", None)
+        unseen = None if take is None else take()
+        if unseen is None:
+            return
+        self._clear_word(reason="input_unseen")
+        self._untracked_token = True
+        self.context_policy.stream.clear()
+        application = self.backend.active_application()
+        if application in self._unseen_applications:
+            return
+        self._unseen_applications.add(application)
+        self._technical_event(
+            "input_unseen", application=application, application_excluded=self._application_excluded(application),
+            unseen_ms=unseen, silence_threshold_ms=HOOK_SILENCE_MS,
+        )
 
     def _report_input_delay(self) -> None:
         """Log how late the keyboard hook saw keys, once a minute and only when one was late.
@@ -864,6 +903,26 @@ class KeySwitchEngine:
             last_error="",
         )
 
+    def _take_hook_gap(self) -> bool:
+        """Let go of the text when keys may have passed the Windows hook; say whether they may have.
+
+        Under CPU load the hook's thread waited 1.5 to 3.8 s for the processor (VM, 28.10.2026), and Windows
+        meanwhile gave every key that waited about 300 ms behind it to the window without the hook: the engine saw
+        `ghbd` of `ghbdtn`, and a correction made of that deletes the wrong letters. Each key that passed the hook
+        in those runs lay within the wait of a key the hook reached HOOK_GAP_MS late (take_hook_gap). What follows
+        is left alone as after an overflowing queue.
+        """
+
+        take = getattr(self.backend, "take_hook_gap", None)
+        gap = None if take is None else take()
+        if gap is None:
+            return False
+        self._technical_event("hook_gap", late_ms=gap.late_ms, callback_ms=gap.callback_ms, threshold_ms=HOOK_GAP_MS)
+        self._clear_word("Клавиши прошли мимо KeySwitch", reason="hook_gap")
+        self._untracked_token = True
+        self.context_policy.stream.clear()
+        return True
+
     def _handle(self, event: KeyEvent) -> None:
         self._expire_manual_correction()
         if self._input_overflow.is_set():
@@ -872,6 +931,7 @@ class KeySwitchEngine:
             self._clear_word("Очередь ввода переполнена", reason="input_overflow")
             self._untracked_token = True
             self.context_policy.stream.clear()
+        self._take_hook_gap()
         if event.pressed:
             self._track_focus()
         if event.key_name == "Pointer":
@@ -2691,6 +2751,8 @@ class KeySwitchEngine:
             str(self.settings.get("detection.context_policy", "assist")),
             read_field=field_override is None and bool(self.settings.get("detection.context_read_field", False)),
             literal_tail=literal_tail, boundary_text=boundary_text, field_override=field_override, inside=inside,
+            # The keys typed after the word: the window may show them already (context_policy.shown_ahead).
+            typed_ahead=lambda: self._typed_after(original),
         )
         self._context_result = result
         if result.fallback_reason == "field_changed" and result.field is not None:
@@ -3187,7 +3249,13 @@ class KeySwitchEngine:
         on its line was decided with them, and asked again it reads to the model like
         a first word. A Russian word typed as intended before a term typed in the other
         layout was converted then: `склонируй репо пшерги` would become
-        `склонируй htgj github`. A token whose segmentation the boundary model left open
+        `склонируй htgj github`. A short word right after Latin text, which a model with the
+        resume head answers (context_action_features.resume_question), is taken along on its
+        conversion wherever it stands on its line: a person who forgot to switch back to
+        Russian after a term resumes Russian text there, and with Hunspell, which knows `f`
+        and `z` as English words, `seek() , f там` and `TSet - z использовал` kept their
+        first Russian word while the rest converted (the developer-chat development set,
+        29.10.2026). A token whose segmentation the boundary model left open
         (KeptWord.segmentation_open) was decided neither with the words before it nor at
         all, and is taken along wherever it stands on its line, on the model's own
         conversion and with the text before it read now: Russian words ending in a letter
@@ -3207,6 +3275,7 @@ class KeySwitchEngine:
         ignored_words: list[str] = self.settings.get("exclusions.words", [])
         ignored = {self.detector.token_key(item) for item in ignored_words}
         start, taken, settled = plan, list[KeptWord](), plan
+        resumed: list[KeptWord] = []
         for word in reversed(kept):
             previous = word.plan
             # A sign that reads the same in either layout (`-` in `Ytn - ult`) is passed as it
@@ -3270,6 +3339,12 @@ class KeySwitchEngine:
                         or again.prediction is not None and again.prediction.action == "convert")):
                     break
                 taken.append(word)
+                model = self.context_policy.model
+                if (model is not None and model.answers_resume and again.prediction is not None
+                        and again.prediction.action == "convert"
+                        and resume_question(previous.original, previous.replacement, field.before, next_replacement,
+                                            self._neighbour_origin(previous.replacement))):
+                    resumed.append(word)
             plan = replace(
                 plan, strokes=previous.strokes + (previous.boundary,) + plan.strokes, boundary=closing,
                 original=previous.original + previous.boundary.character + plan.original,
@@ -3284,7 +3359,7 @@ class KeySwitchEngine:
         plan, farthest = settled, taken[-1]
         before = (farthest.field.before if farthest.field is not None
                   else self.context_policy.stream.text[:-len(plan.original + suffix)])
-        if (not all(word.segmentation_open for word in taken)
+        if (not all(word.segmentation_open or word in resumed for word in taken)
                 and any(char.isalpha() for char in before.rsplit("\n", 1)[-1])):
             self._technical_event("kept_words_left", words=len(taken), reason="words_before_on_line")
             return start
@@ -4337,6 +4412,28 @@ class KeySwitchEngine:
                 and event.pressed and event.character == " " and not (event.control or event.alt or event.super_key))
 
     @staticmethod
+    def _late_key_kind(event: KeyEvent) -> str:
+        """The kind of a key that keeps the keys typed after a word from being typed again; never its character.
+
+        The log said only that one was there, and the one correction the owner lost this way in October could
+        not be told apart from a space typed early (notebook, 10.10.2026: Pause found nothing to convert after it).
+        """
+
+        if event.key_name in MODIFIER_KEYS:
+            return "modifier"
+        if event.control or event.alt or event.super_key:
+            return "shortcut"
+        if event.key_name == "BackSpace":
+            return "backspace"
+        if event.key_name in NAVIGATION_KEYS:
+            return "navigation"
+        if event.character == " ":
+            return "space"
+        if event.character and event.character.isprintable():
+            return "composed"
+        return "other_key"
+
+    @staticmethod
     def _late_text_key(event: KeyEvent) -> bool:
         return (
             event.pressed
@@ -4348,6 +4445,13 @@ class KeySwitchEngine:
             and event.key_name != "BackSpace"
             and not (event.control or event.alt or event.super_key)
         )
+
+    def _typed_after(self, original: str) -> str:
+        """The text typed after ``original``: the keys queued, and the word begun since if ``original`` is
+        not the word in progress (a decision put off to a later key: the next word's letters are taken)."""
+
+        typed = tuple(self._strokes)
+        return self._typed_ahead(typed if "".join(stroke.character for stroke in typed) == original else ())
 
     def _typed_ahead(self, typed: Sequence[KeyEvent]) -> str:
         """The text typed after the given strokes that the field may already show.
@@ -4474,15 +4578,15 @@ class KeySwitchEngine:
                 break
         late = list(rollover)
         kept: list[KeyEvent | _LayoutSelection | None] = []
-        usable = all(self._late_text_key(stroke) for stroke in rollover)
+        refusal = next((self._late_key_kind(stroke) for stroke in rollover if not self._late_text_key(stroke)), "")
         for item in queued:
             if not isinstance(item, KeyEvent):
-                usable = False
+                refusal = refusal or ("menu_layout" if item is not None else "stop")
                 kept.append(item)
             elif item.synthetic:
                 kept.append(item)
             elif item.key_name in MODIFIER_KEYS:
-                usable = False
+                refusal = refusal or "modifier"
                 kept.append(item)
             elif not item.pressed or self._matches_hotkey("convert_last", item):
                 # A key-up types nothing, and neither does a second press of the
@@ -4491,7 +4595,9 @@ class KeySwitchEngine:
             elif self._late_text_key(item) and self._safe_text_stroke(item):
                 late.append(item)
             else:
-                usable = False
+                refusal = refusal or self._late_key_kind(item)
+        self._late_refusal = refusal
+        usable = not refusal
         if not usable or not late:
             for item in queued:
                 self._events.put_nowait(item)
@@ -4980,6 +5086,9 @@ class KeySwitchEngine:
             self._clear_word(reason="input_overflow")
             self._technical_event("correction_aborted", mode=plan.mode, reason="input_overflow")
             return False
+        if self._take_hook_gap():
+            self._technical_event("correction_aborted", mode=plan.mode, reason="hook_gap")
+            return False
         if any(not self._safe_text_stroke(stroke) for stroke in (*plan.strokes, *plan.trailing)):
             self._clear_word(reason="unrepresentable_text")
             self._technical_event(
@@ -5040,10 +5149,19 @@ class KeySwitchEngine:
                 rolled = "".join(stroke.character for stroke in self._strokes if id(stroke) not in planned)
                 late = self._collect_late_input(plan)
                 if late is None:
-                    self._technical_event(
-                        "correction_aborted", correction_id=correction_id,
-                        mode=plan.mode, reason="unsafe_input_after_word",
-                    )
+                    if plan.mode == "early":
+                        # The keys stay queued with the word, and its boundary decides it: each of the 14 early
+                        # switches the owner's logs showed given up this way (01-26.10.2026) was followed by the
+                        # correction at its space within 0.2 s. Logged as a correction lost, they read as 14 losses.
+                        self._technical_event(
+                            "early_switch_dropped", reason="unsafe_input_after_word", unsafe_key=self._late_refusal,
+                            current_word_length=len(self._strokes),
+                        )
+                    else:
+                        self._technical_event(
+                            "correction_aborted", correction_id=correction_id,
+                            mode=plan.mode, reason="unsafe_input_after_word", unsafe_key=self._late_refusal,
+                        )
                     self._last_committed_stale = True
                     return False
                 if plan.kept_tail:
@@ -5373,9 +5491,10 @@ class KeySwitchEngine:
         """Whether KeySwitch answers this key itself and the window must not.
 
         Called from the keyboard hook while the system waits for the answer,
-        so it only reads plain attributes: taking the engine lock here could
-        hold the hook past the low-level timeout, and Windows then removes the
-        hook without telling anyone.
+        so it only reads plain attributes: taking the engine lock here would
+        hold every key of the system for as long as the worker keeps the lock
+        (and past the low-level timeout, after which Microsoft documents that
+        Windows removes the hook without telling anyone).
         """
 
         if not event.pressed or event.synthetic:

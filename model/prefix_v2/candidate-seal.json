@@ -50,7 +50,7 @@
       "path": "/mnt/data2/_projects/puntoswitcher/build/context-optimizer/a940ea8195170445/context.so",
       "sha256": "d55ed3e18546918c23a07e4d6896b90769cc30cbaa8d38c2b9ec59a033012b44"
     },
-    "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.43",
+    "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
     "python": "3.14.4 (main, Aug 20 2026, 10:41:58) [GCC 15.2.0]"
   },
   "epoch": 120,
@@ -5194,8 +5194,8 @@
     "model/prefix_v1/train.jsonl.gz": "b9e8bb2c1dfcb8b53f52e191ec45d6c6a580116b0e39ef044a81360afb8db466",
     "model/prefix_v2/recipe.json": "48dba36b792d033674e5fdbbb9dae8f1f7ce8609944e2dd260f1fbeda011ac28",
     "src/keyswitch/backend.py": "8b8fda7b72d6546b94cc87ec7d95f36a4f122ba07861c73ca2428fbbd87fcfc7",
-    "src/keyswitch/context_action_features.py": "37acf9582704d9b9320b828b68ea3b357e724c5b0b1066363ee519bd8873e5dc",
-    "src/keyswitch/context_model.py": "a19e2184fbdad2627bb3171a39df8d99cb30698bf345431afd39e338f9c9a056",
+    "src/keyswitch/context_action_features.py": "b61208f26903bcc3fb5ade55608c7b69ff75a383a7ba555877c71c6246c0ef6e",
+    "src/keyswitch/context_model.py": "b8cf15f2b89177a0b926be41407d9c4b1a74fd8bd26030b7b0629493a5bf0564",
     "src/keyswitch/detector.py": "5a78cd5961af57426b6cb42b3757b42baeacd7344a06557111a1067cb0cbb2c0",
     "src/keyswitch/early_switch.py": "3099fb815f239018f79c0c3a2b96b5db4390d47fee3a74ad701c636e7e5983ef",
     "src/keyswitch/history.py": "165f09f7403a72019637a0ac4397845c9b15c847b9b64fb0f34552bbb2352fee",

@@ -15,6 +15,9 @@ PRIMARY_LANGID_MASK: Final = 0x03FF
 # The low 32 bits of an HKL, for display; HKL is pointer-sized but only the low word carries the
 # language id and the high word the layout id.
 DWORD_MASK: Final = 0xFFFFFFFF
+# The key and pointer event times the hook thread keeps for the check of input it never got (take_unseen_input):
+# about four seconds of a mouse reporting a thousand times a second, eight checks of the engine's timer.
+HOOK_INPUT_TIMES_KEPT: Final = 4096
 VK_BACK: Final = 0x08
 VK_TAB: Final = 0x09
 VK_RETURN: Final = 0x0D

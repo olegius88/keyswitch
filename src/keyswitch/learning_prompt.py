@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable, Iterable
-from typing import Protocol, cast
+from typing import Protocol, cast, runtime_checkable
 
 import dbus
 import gi
@@ -42,6 +42,7 @@ from .constants.learning_prompt import (
     LEARNING_PROMPT_GTK_MARGIN_Y_PIXELS,
     LEARNING_PROMPT_GTK_SPACING_PIXELS,
     LEARNING_PROMPT_GTK_WIDTH_PIXELS,
+    LEARNING_PROMPT_WINDOW_TITLE,
     MAX_CARET_SEARCH_CHILDREN,
     MAX_CARET_SEARCH_NODES,
 )
@@ -58,13 +59,68 @@ class PromptBackend(Protocol):
     def restore_window(self, window: int | None) -> bool: ...
 
 
+@runtime_checkable
+class _WindowAnchorHints(Protocol):
+    def window_process_id(self, window: int) -> int: ...
+
+    def window_origin(self, window: int) -> tuple[int, int] | None: ...
+
+
 class AccessibilityBusProbe(Protocol):
     def name_has_owner(self, name: str) -> bool: ...
 
     def list_activatable_names(self) -> Iterable[object]: ...
 
 
-def focused_caret_anchor() -> ScreenAnchor | None:
+def _caret_anchor_for_node(
+    accessible: Atspi.Accessible,
+    text: Atspi.Text,
+    window_origin: tuple[int, int] | None,
+) -> ScreenAnchor | None:
+    caret = max(0, int(text.get_caret_offset()))
+    char_index = max(0, caret - 1)
+    try:
+        rectangle = text.get_character_extents(char_index, Atspi.CoordType.SCREEN)
+    except Exception:
+        rectangle = None
+    if rectangle is not None and (
+        window_origin is None
+        or rectangle.x
+        or rectangle.y
+        or rectangle.width
+        or rectangle.height
+    ):
+        x = int(rectangle.x + (rectangle.width if caret else 0))
+        return ScreenAnchor(x, int(rectangle.y + rectangle.height))
+    if window_origin is None:
+        return None
+    origin_x, origin_y = window_origin
+    try:
+        win_rect = text.get_character_extents(char_index, Atspi.CoordType.WINDOW)
+    except Exception:
+        win_rect = None
+    if win_rect is not None and (
+        win_rect.x or win_rect.y or win_rect.width or win_rect.height
+    ):
+        x = int(origin_x + win_rect.x + (win_rect.width if caret else 0))
+        return ScreenAnchor(x, int(origin_y + win_rect.y + win_rect.height))
+    component = cast(Atspi.Component | None, accessible.get_component_iface())
+    if component is None:
+        return None
+    comp_rect = component.get_extents(Atspi.CoordType.WINDOW)
+    if comp_rect.width <= 0 and comp_rect.height <= 0:
+        return None
+    return ScreenAnchor(
+        int(origin_x + comp_rect.x + comp_rect.width // CENTERING_DIVISOR),
+        int(origin_y + comp_rect.y),
+    )
+
+
+def focused_caret_anchor(
+    *,
+    window_pid: int = 0,
+    window_origin: tuple[int, int] | None = None,
+) -> ScreenAnchor | None:
     """Return the focused accessible text caret in screen coordinates."""
 
     if not _accessibility_bus_available():
@@ -73,7 +129,15 @@ def focused_caret_anchor() -> ScreenAnchor | None:
         if Atspi.get_desktop_count() <= 0:
             return None
         desktop = Atspi.get_desktop(0)
-        pending = [desktop]
+        pending: list[Atspi.Accessible] = []
+        if window_pid > 0:
+            top_count = min(MAX_CARET_SEARCH_CHILDREN, int(desktop.get_child_count()))
+            for index in range(top_count - 1, -1, -1):
+                app = cast(Atspi.Accessible | None, desktop.get_child_at_index(index))
+                if app is not None and int(app.get_process_id()) == window_pid:
+                    pending.append(app)
+        else:
+            pending.append(desktop)
         visited = 0
         while pending and visited < MAX_CARET_SEARCH_NODES:
             accessible = pending.pop()
@@ -81,12 +145,7 @@ def focused_caret_anchor() -> ScreenAnchor | None:
             state = accessible.get_state_set()
             text = accessible.get_text_iface()
             if state.contains(Atspi.StateType.FOCUSED) and text is not None:
-                caret = max(0, int(text.get_caret_offset()))
-                rectangle = text.get_character_extents(
-                    max(0, caret - 1), Atspi.CoordType.SCREEN
-                )
-                x = int(rectangle.x + (rectangle.width if caret else 0))
-                return ScreenAnchor(x, int(rectangle.y + rectangle.height))
+                return _caret_anchor_for_node(accessible, text, window_origin)
             child_count = min(MAX_CARET_SEARCH_CHILDREN, int(accessible.get_child_count()))
             for index in range(child_count - 1, -1, -1):
                 child = accessible.get_child_at_index(index)
@@ -130,7 +189,7 @@ class LearningPromptWindow(Gtk.Window):
         self.dismiss = dismiss
         self.prompt: LearningPrompt | None = None
         self.anchor: ScreenAnchor | None = None
-        self.set_title("Обучение KeySwitch")
+        self.set_title(LEARNING_PROMPT_WINDOW_TITLE)
         self.set_decorated(False)
         self.set_resizable(False)
         self.set_modal(False)
@@ -165,7 +224,14 @@ class LearningPromptWindow(Gtk.Window):
 
     def show_prompt(self, prompt: LearningPrompt) -> None:
         fallback = self.backend.input_anchor()
-        caret = focused_caret_anchor()
+        window_id = fallback.window if fallback is not None and fallback.window is not None else 0
+        if isinstance(self.backend, _WindowAnchorHints) and window_id:
+            caret = focused_caret_anchor(
+                window_pid=self.backend.window_process_id(window_id),
+                window_origin=self.backend.window_origin(window_id),
+            )
+        else:
+            caret = focused_caret_anchor()
         self.anchor = (
             ScreenAnchor(caret.x, caret.y, fallback.window if fallback else None)
             if caret is not None
@@ -190,12 +256,31 @@ class LearningPromptWindow(Gtk.Window):
         surface = self.get_surface()
         if anchor is None or surface is None:
             return GLib.SOURCE_REMOVE
-        x11_surface = cast(GdkX11.X11Surface, surface)
-        window = int(GdkX11.X11Surface.get_xid(x11_surface))
-        x = anchor.x - self.get_width() // CENTERING_DIVISOR
-        y = anchor.y - self.get_height() - LEARNING_PROMPT_ANCHOR_GAP_PIXELS
+        raw_surface: object = surface
+        if isinstance(raw_surface, GdkX11.X11Surface) or not isinstance(raw_surface, Gdk.Surface):
+            window = int(GdkX11.X11Surface.get_xid(cast(GdkX11.X11Surface, raw_surface)))
+        else:
+            window = 0
+        width, height = self.get_width(), self.get_height()
+        x = anchor.x - width // CENTERING_DIVISOR
+        y = anchor.y - height - LEARNING_PROMPT_ANCHOR_GAP_PIXELS
+        area = self._monitor_at(anchor.x, anchor.y)
+        if area is not None:
+            # A caret at the top of the screen: the prompt goes under it, and stays on the monitor.
+            # An X11 window manager keeps a window on screen; sway and KWin let it hang off the edge.
+            if y < area.y:
+                y = anchor.y + LEARNING_PROMPT_ANCHOR_GAP_PIXELS
+            x = max(area.x, min(x, area.x + area.width - width))
         self.backend.position_window(window, x, y)
         return GLib.SOURCE_REMOVE
+
+    def _monitor_at(self, x: int, y: int) -> Gdk.Rectangle | None:
+        monitors = self.get_display().get_monitors()
+        for index in range(monitors.get_n_items()):
+            area = cast(Gdk.Monitor, monitors.get_item(index)).get_geometry()
+            if area.x <= x < area.x + area.width and area.y <= y < area.y + area.height:
+                return area
+        return None
 
     def _on_key_pressed(
         self,

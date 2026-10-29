@@ -880,6 +880,67 @@ class MainWindowInteractionTests(unittest.TestCase):
         self.assertFalse(failed_engine.backend.probe().available)
         second.destroy()
 
+        wayland_engine = FakeEngine(self.root, backend_available=True)
+        wayland_engine.backend.probe_value = BackendProbe(
+            True,
+            "wayland",
+            "GNOME",
+            "evdev (EVIOCGRAB)",
+            "uinput",
+            "us,ru",
+            0,
+        )
+        with (
+            patch("keyswitch.ui.AutostartManager", return_value=self.autostart),
+            patch("keyswitch.ui.installed_application_choices", return_value=[]),
+        ):
+            wl_win = MainWindow(
+                self.application,
+                self.settings,
+                self.history,
+                wayland_engine,
+                self.updates,
+                lambda: True,
+            )
+        try:
+            wl_win._apply_engine_snapshot(EngineSnapshot(running=True, enabled=True, current_group=0))
+            self.assertEqual(wl_win.stat_backend.get_label(), "Wayland")
+            clipboard = Mock()
+            display = Mock()
+            display.get_clipboard.return_value = clipboard
+            with patch("keyswitch.ui.Gdk.Display.get_default", return_value=display):
+                wl_win._copy_diagnostics(wayland_engine.backend.probe())
+            copied = clipboard.set.call_args.args[0]
+            self.assertIn("Desktop: GNOME", copied)
+            self.assertIn("Capture: evdev (EVIOCGRAB)", copied)
+        finally:
+            wl_win.destroy()
+
+        wayland_failed = FakeEngine(self.root, backend_available=False)
+        wayland_failed.backend.probe_value = BackendProbe(
+            False,
+            "wayland",
+            "",
+            "—",
+            "—",
+            "—",
+            -1,
+            "Нет доступа к /dev/uinput",
+        )
+        with (
+            patch("keyswitch.ui.AutostartManager", return_value=self.autostart),
+            patch("keyswitch.ui.installed_application_choices", return_value=[]),
+        ):
+            wl_fail_win = MainWindow(
+                self.application,
+                self.settings,
+                self.history,
+                wayland_failed,
+                self.updates,
+                lambda: True,
+            )
+        wl_fail_win.destroy()
+
     def test_the_rules_group_lists_opens_and_removes_rules(self) -> None:
         opened: list[RuleDraft] = []
         rule = self.engine.learning.add_rule(LearnedRule("tot", 0, 1, "keep", "prefix"))

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import ClassVar, Final
 
-from .context_action_features import alnum_question, letter_question, variable_question
+from .context_action_features import alnum_question, letter_question, resume_question, variable_question
 from .context_model import (
     AfterOrigin, BeforeOrigin, ContextEvidence, ContextModel, ContextPrediction, one_typo_from_word, term_bucket,
 )
@@ -142,6 +143,22 @@ def ends_with_typed(text: str, typed: str) -> bool:
         tail[:1].casefold() == typed[:1].casefold())
 
 
+def shown_ahead(before: str, typed: str, ahead: str) -> int:
+    """How many characters typed after ``typed`` a field already shows past it, from two on; 0 if none.
+
+    ``ahead`` is the boundary and the keys the engine has queued behind it: the window takes a key
+    in as soon as the hook lets it through, while the engine decides on the word a moment later. One
+    character after the word is the boundary (ends_with_typed on ``before[:-1]``); more, and every
+    such word was refused as typed into a changed field: `e 'njuj ` typed at 40 ms a key into a
+    GTK window of KDE Plasma kept its `e` in five of ten runs (27.10.2026).
+    """
+
+    for shown in range(len(ahead), 1, -1):
+        if before.endswith(ahead[:shown]) and ends_with_typed(before[:-shown], typed):
+            return shown
+    return 0
+
+
 def typed_short_of(before: str, after: str, typed: str) -> str | None:
     """What a field shows of ``typed`` before its caret when it has not taken the last letters in yet, or None.
 
@@ -245,6 +262,7 @@ class ContextPolicy:
         field_override: FieldContext | None = None,
         literal_tail: str = "", boundary_text: str = "",
         after_origin: AfterOrigin = "none", inside: bool = False, before_origin: BeforeOrigin = "field",
+        typed_ahead: Callable[[], str] | None = None,
     ) -> ContextResult:
         if mode not in {"assist", "shadow"} or self.model is None:
             return ContextResult(baseline, fallback_reason="mode_disabled" if mode not in {"assist", "shadow"} else "model_unavailable")
@@ -273,6 +291,10 @@ class ContextPolicy:
                         field = replace(snapshot, before=before[:-len(anchor)])
                     elif anchor and ends_with_typed(before[:-1], anchor):
                         field = replace(snapshot, before=before[:-len(anchor) - 1])
+                    elif anchor and typed_ahead is not None and (
+                            ahead := shown_ahead(before, anchor, boundary_text + typed_ahead())):
+                        # Asked after the read: every key the field shows was queued before the window got it.
+                        field = replace(snapshot, before=before[:-len(anchor) - ahead])
                     elif anchor and (shown := typed_short_of(before, snapshot.after, anchor)) is not None:
                         # The editor has not shown the last letters yet: the word is the one typed and is decided on
                         # its keys, and its correction waits for the field to show it (engine._waits_for_field).
@@ -325,11 +347,15 @@ class ContextPolicy:
         # variable typed there (`ч` for `x`) or a letter meant as written (`да я про то ч`). One with the
         # letters-and-digits head has learned a token of Russian letters and digits whose keys are Latin letters and
         # digits, after Russian text (alnum_question): `м67` for `v67` and `ч64` for `x64`, and `1с` or `3д` meant as typed.
+        # One with the resume head has learned a short word right after Latin text asked again once its next word is
+        # planned for conversion (resume_question): `а` typed `f` in `seek() , f там`, and a Latin `x` before Russian text.
         action_model = self.model.feature_version == CONTEXT_ACTION_FEATURE_VERSION
         learned = ((self.model.answers_letters and letter_question(baseline.original, alternative, field.before))
                    or (self.model.answers_variables
                        and variable_question(baseline.original, alternative, field.before, trigger))
-                   or (self.model.answers_alnum and alnum_question(baseline.original, alternative, field.before)))
+                   or (self.model.answers_alnum and alnum_question(baseline.original, alternative, field.before))
+                   or (self.model.answers_resume
+                       and resume_question(baseline.original, alternative, field.before, field.after, after_origin)))
         lone = (action_model and sum(char.isalpha() for char in baseline.original) == 1
                 and all(char.isalpha() or char.isdigit() for char in baseline.original) and not learned)
         slang = action_model and russian_slang(baseline.original, alternative, baseline.source_group, source.known)

@@ -15,6 +15,8 @@ LEARNING_PROMPT_HINT_FONT_SIZE_POINTS: Final = 9
 LEARNING_PROMPT_MINIMUM_WIDTH_PIXELS: Final = 390
 # The learning prompt floats this many pixels above the caret.
 LEARNING_PROMPT_ANCHOR_GAP_PIXELS: Final = 12
+# Title of the GTK learning prompt: a Wayland compositor finds the window to place by it.
+LEARNING_PROMPT_WINDOW_TITLE: Final = "Обучение KeySwitch"
 # The desktop learning prompt keeps this far inside the virtual screen.
 LEARNING_PROMPT_SCREEN_MARGIN_PIXELS: Final = 8
 # Bounded traversal of the accessibility tree while looking for the focused caret: a total node

@@ -28,7 +28,7 @@ from keyswitch.constants.settings_defaults import (
     PAUSE_DELAY_SETTING_MAX_SECONDS,
     PAUSE_DELAY_SETTING_MIN_SECONDS,
 )
-from keyswitch.engine import KeySwitchEngine, CorrectionPlan, LearningPrompt
+from keyswitch.engine import KeySwitchEngine, CorrectionPlan, LearningPrompt, _LayoutSelection
 from keyswitch.constants.timing import (
     DOUBLE_CONVERT_PRESS_WINDOW_SECONDS,
     ENGINE_SWITCH_GRACE_SECONDS,
@@ -948,7 +948,7 @@ class EngineBehaviourTests(unittest.TestCase):
         applied = next(
             e for e in self.technical_events(logs.output) if e["event"] == "correction_aborted"
         )
-        self.assertEqual(applied["reason"], "unsafe_input_after_word")
+        self.assertEqual((applied["reason"], applied["unsafe_key"]), ("unsafe_input_after_word", "other_key"))
 
         # A failed injection reports the late keys it was given.
         self.backend.group = 0
@@ -966,6 +966,53 @@ class EngineBehaviourTests(unittest.TestCase):
             e for e in self.technical_events(logs.output) if e["event"] == "correction_failed"
         )
         self.assertEqual(failed["late_keys"], 1)
+
+    def test_the_log_names_the_kind_of_key_that_kept_late_input_back(self) -> None:
+        letter = letter_event("d", SECOND_WORD_KEYCODE_BASE, 0, self.pair)
+        cases = (
+            (plain_key("Shift_L", SECOND_WORD_KEYCODE_BASE, 0), "modifier"),
+            (replace(letter, state=CONTROL_MASK), "shortcut"),
+            (plain_key("BackSpace", BACKSPACE_KEYCODE, 0), "backspace"),
+            (plain_key("Left", SYNTHETIC_LEFT_ARROW_KEYCODE, 0), "navigation"),
+            (boundary_event(True), "space"),
+            (replace(letter, character="\u0301", characters=("\u0301", "\u0301")), "composed"),
+            (KeyEvent(True, RETURN_KEYCODE, "Return", "\r", ("\r", "\r"), 0, 0, RETURN_KEYCODE), "other_key"),
+        )
+        for event, kind in cases:
+            with self.subTest(kind=kind):
+                self.assertEqual(KeySwitchEngine._late_key_kind(event), kind)
+        # Not keys at all: a layout chosen from the menu, and the worker's stop.
+        self.settings.set("detection.respect_manual_layout", False)
+        for item, kind in ((_LayoutSelection(1), "menu_layout"), (None, "stop")):
+            with self.subTest(kind=kind):
+                self.backend.group = 0
+                self.engine._strokes = []
+                self.type_word("ghbdtn")
+                self.engine._handle(boundary_event(True, group=0))
+                self.engine._events.put_nowait(item)
+                with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+                    self.engine._handle(boundary_event(False, group=0))
+                aborted = next(e for e in self.technical_events(logs.output) if e["event"] == "correction_aborted")
+                self.assertEqual(aborted["unsafe_key"], kind)
+                self.assertIs(self.engine._events.get_nowait(), item)
+
+    def test_an_early_switch_given_up_for_a_queued_space_is_no_lost_correction(self) -> None:
+        # The owner's logs: 14 such early switches, each followed by the correction at its space.
+        self.settings.set("detection.early_switch", True)
+        self.type_word("ghb")
+        self.engine._handle(letter_event("d", FOURTH_LETTER_KEYCODE, 0, self.pair))
+        assert self.engine._pending is not None
+        self.assertEqual(self.engine._pending.mode, "early")
+        space = boundary_event(True, group=0)
+        self.engine._events.put_nowait(space)
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._handle(replace(letter_event("d", FOURTH_LETTER_KEYCODE, 0, self.pair), pressed=False))
+        events = self.technical_events(logs.output)
+        dropped = next(e for e in events if e["event"] == "early_switch_dropped")
+        self.assertEqual((dropped["reason"], dropped["unsafe_key"]), ("unsafe_input_after_word", "space"))
+        self.assertNotIn("correction_aborted", [e["event"] for e in events])
+        self.assertIs(self.engine._events.get_nowait(), space)
+        self.assertEqual("".join(stroke.character for stroke in self.engine._strokes), "ghbd")
 
     def test_layout_dependent_symbols_only_are_remembered(self) -> None:
         dot = KeyEvent(True, FOURTH_WORD_KEYCODE_BASE, "period", ".", (".", "."), 0, 0, 1)

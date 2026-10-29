@@ -4,6 +4,61 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- Wayland: KeySwitch now corrects layouts in GNOME Shell, KDE Plasma 6 and sway sessions, where a program sees
+  no keys of other windows. A separate input process takes the keyboards at the kernel level (`EVIOCGRAB`) and passes
+  every key on through a virtual keyboard (`/dev/uinput`), which also types the corrections; Enter and Tab are held back
+  until the word is corrected, as on Windows. The layout and the active window come from the desktop: a GNOME Shell
+  extension installed with the package (it takes effect after the next login), the `org.kde.keyboard` service and a
+  KWin script, or sway's IPC. The access to the keyboards is not granted on installation: an administrator enables it
+  once with `sudo keyswitch --enable-wayland-input`, which installs a udev rule giving the user of the active session
+  read and write access to `/dev/uinput`, keyboards, mice and touchpads. Any program of that user can then read every
+  key, passwords included, and type keys of its own, as on X11 and Windows; `sudo keyswitch --disable-wayland-input`
+  takes the access away at once. The grab is released on the lock screen. If the main process hangs, keys go
+  through after 0.25 seconds and none is lost; an input process that crashes is started again. A password field is
+  left alone in GNOME also when it is the Shell's own prompt or an application field AT-SPI does not answer for in time.
+  Verified end to end in a VM with GNOME 50, Plasma 6.6 and sway 1.11, from source and from the package.
+- A word decided a moment after the keys that follow it reached the window is no longer refused as typed into a changed
+  field: with field reading on, `e 'njuj ` typed fast kept its `e`. The text the field shows after the word is accepted
+  when it is the keys typed after it.
+- The rule prompt of a double Pause goes under the caret when there is no room above it and stays on the monitor.
+- Windows: the keyboard hook answers each key in a few milliseconds also while the computer is busy. Its short system
+  calls (the window in front, its layout, the character of a key) no longer give up Python's interpreter lock and wait
+  for it again after each call; with the decision of a word running at the same time, every such wait held the key, and
+  with it every key of the system, up to tens of milliseconds, and the whole answer up to a second and more on a loaded
+  machine. A hook that keeps the keys that long loses some of them: Windows 11 then passes keys typed meanwhile to the
+  window without the hook, and KeySwitch decided words it had not seen in full. In a Windows 11 VM with every core busy
+  the slowest answer fell from up to 1.8 seconds to under 30 milliseconds. The first line of the log names the system's
+  build.
+- Windows: when the processor is so busy that the keyboard hook gets a key 0.28 seconds or more after it was pressed,
+  KeySwitch lets go of the word being typed instead of correcting it. Windows 10 and 11 pass every key that waits about
+  0.3 seconds for the hook to the window without it, so the word on the screen is no longer the one KeySwitch saw, and a
+  correction would delete the wrong letters. In a Windows 11 VM with every core busy each of the 23 keys that passed the
+  hook followed such a late key. The log records it as `hook_gap`.
+- Windows: the log names, once per program, a program that keeps the keys typed into it away from KeySwitch
+  (`input_unseen`). A program in front that reads the keyboard as raw input and has a keyboard hook of its own makes
+  Windows call no keyboard hook at all, so KeySwitch neither corrects nor answers its hotkeys there; the text is left
+  as typed. Reading raw input alone does not do it.
+  KeySwitch notices it when the system's last input time moves on with no key or pointer event reaching its hooks.
+- The log tells an early switch that gives way to the space typed right after it (`early_switch_dropped`) from a
+  correction that is given up, and names the kind of key that kept the keys typed after a word from being typed again
+  (`unsafe_key`: a space, a modifier, Backspace, an arrow key, a shortcut). Such early switches had read as lost
+  corrections, though the word was corrected at its space a moment later.
+- A short Russian word right after Latin text is corrected with the rest of the Russian text after it when the change
+  back to Russian was forgotten: `seek() , f там` became `seek() , а там` only where Hunspell is missing, and `TSet - z
+  использовал`, `(b наверное` kept their first word wherever it is installed. Hunspell knows `f` and `z` as English
+  words, the word was kept at its space, and a word kept in the middle of a line was not taken along when the words
+  after it converted. A new part of the model, the resume head, answers that question once the next word converts, and
+  the engine takes such a word along also in the middle of a line when the model converts it; every other kept word is
+  still taken along only at the start of a line.
+- The pair is `context-v3-b380007b5e3e` (artifact SHA-256
+  `9171b93828a9af029c22370a8d5e1e99ea15084d2ce77eb1feb87f40741d21ce`) with the prefix model `prefix-v2-bf3dc28f8567`:
+  the pair of 0.63.0 with the resume head fitted onto it. On the recorded real typing it breaks no word and fixes one;
+  on sealed test v79, read once, it restores 176 and 176 of the 178 rows typed in the wrong layout with the early
+  switch off, against 173 and 174 for the baseline pair, and spoils no correct row (the baseline pair two); on the
+  developer-chat test it restores 12 more messages typed with the change back to Russian forgotten and loses none.
+  In training, every part of the model with an epoch of its own now reads the frames captured for it; the part for a
+  letter before an operator sign, added in 0.63.0, had been fitted on the frames other parts held.
+
 ## 0.63.0 — 2026-10-26
 
 - A Latin variable of one letter typed in the Russian layout after a Russian word is asked about again when an operator
