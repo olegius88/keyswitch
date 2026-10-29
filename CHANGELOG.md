@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.64.0 — 2026-10-29
+
 - Wayland: KeySwitch now corrects layouts in GNOME Shell, KDE Plasma 6 and sway sessions, where a program sees
   no keys of other windows. A separate input process takes the keyboards at the kernel level (`EVIOCGRAB`) and passes
   every key on through a virtual keyboard (`/dev/uinput`), which also types the corrections; Enter and Tab are held back
