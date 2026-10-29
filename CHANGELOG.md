@@ -43,13 +43,21 @@ All notable changes to KeySwitch are documented in this file.
   correction that is given up, and names the kind of key that kept the keys typed after a word from being typed again
   (`unsafe_key`: a space, a modifier, Backspace, an arrow key, a shortcut). Such early switches had read as lost
   corrections, though the word was corrected at its space a moment later.
-- The pair is `context-v3-b5ed6848d4ce` (artifact SHA-256
-  `a35af45f0978f7a99c6c492dc8755259d5a208f205bf2c5cdc81c7e881cc5bf3`) with the prefix model `prefix-v2-bf3dc28f8567`,
-  the pair of 0.63.0 byte for byte, sealed again for the changed engine. On the recorded real typing the new engine
-  breaks no word; on sealed test v77, read once, it keeps all 189 correctly typed rows and restores 185 and 185 of the
-  188 rows typed in the wrong layout with the early switch off, against 183 and 184 for the baseline pair, and spoils
-  no correct row (the baseline pair two and one with the early switch on); on the developer-chat test it gains and
-  loses nothing.
+- A short Russian word right after Latin text is corrected with the rest of the Russian text after it when the change
+  back to Russian was forgotten: `seek() , f там` became `seek() , а там` only where Hunspell is missing, and `TSet - z
+  использовал`, `(b наверное` kept their first word wherever it is installed. Hunspell knows `f` and `z` as English
+  words, the word was kept at its space, and a word kept in the middle of a line was not taken along when the words
+  after it converted. A new part of the model, the resume head, answers that question once the next word converts, and
+  the engine takes such a word along also in the middle of a line when the model converts it; every other kept word is
+  still taken along only at the start of a line.
+- The pair is `context-v3-b380007b5e3e` (artifact SHA-256
+  `9171b93828a9af029c22370a8d5e1e99ea15084d2ce77eb1feb87f40741d21ce`) with the prefix model `prefix-v2-bf3dc28f8567`:
+  the pair of 0.63.0 with the resume head fitted onto it. On the recorded real typing it breaks no word and fixes one;
+  on sealed test v79, read once, it restores 176 and 176 of the 178 rows typed in the wrong layout with the early
+  switch off, against 173 and 174 for the baseline pair, and spoils no correct row (the baseline pair two); on the
+  developer-chat test it restores 12 more messages typed with the change back to Russian forgotten and loses none.
+  In training, every part of the model with an epoch of its own now reads the frames captured for it; the part for a
+  letter before an operator sign, added in 0.63.0, had been fitted on the frames other parts held.
 
 ## 0.63.0 — 2026-10-26
 
