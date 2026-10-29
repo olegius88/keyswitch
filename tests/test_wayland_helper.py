@@ -730,6 +730,9 @@ class HelperClientProtocolTests(unittest.TestCase):
         unasked: list[HelperKey] = []
 
         client_ref: list[HelperClient] = []
+        # The rest follows once the client has started: sent with the ready message, its caps-lock update could be read
+        # before start() returned the state the ready message gave (a CI run of 29.10.2026).
+        started = threading.Event()
 
         def on_key(key: HelperKey) -> bool:
             if key.pressed and key.keycode == EVDEV_KEY_A:
@@ -747,6 +750,7 @@ class HelperClientProtocolTests(unittest.TestCase):
             try:
                 child_reader = FrameReader()
                 child_sock.sendall(pack_frame(HELPER_MSG_READY, U8_STRUCT.pack(1)))
+                started.wait(KEYBOARD_LISTENER_START_TIMEOUT_SECONDS)
                 child_sock.sendall(
                     pack_frame(HELPER_MSG_KEY, MSG_KEY_STRUCT.pack(1, 1, EVDEV_KEY_A, 1, HELPER_KEY_NEEDS_VERDICT))
                     + pack_frame(
@@ -811,6 +815,7 @@ class HelperClientProtocolTests(unittest.TestCase):
         client_ref.append(client)
         self.assertTrue(client.start())
         self.assertTrue(client.caps_lock)
+        started.set()
         self.assertEqual(client.emit_batch(()), 0)
         self.assertTrue(key_handled.wait(KEYBOARD_LISTENER_START_TIMEOUT_SECONDS))
         self.assertEqual(reentrant_results, [(True, WL_FIXTURE_EMIT_COUNT_TWO)])
