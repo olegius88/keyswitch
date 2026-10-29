@@ -60,8 +60,11 @@ from .constants.models import (
     KEPT_FEATURE_PREFIX,
     LATIN_ABBREVIATION_FEATURE_PREFIX,
     LETTER_FEATURE_PREFIX,
+    OPENING_SHORT_MAX_LETTERS,
     PLANNED_CONTEXT_AFTER_MAX_CHARACTERS,
     PLANNED_CONTEXT_WORD_MAX_CHARACTERS,
+    RESUME_FEATURE_PREFIX,
+    RESUME_LEADING_SIGNS,
     START_DELTA_BAND_WIDTH,
     START_DELTA_BANDS,
     START_FEATURE_PREFIX,
@@ -457,6 +460,11 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         # `BP` in English prose read `ИЗ` at p=0.997, and the frames that kept it moved the weights
         # the Latin keys of `не` and `что` share (`yt`, `xnj` stayed as typed).
         result.update({CAPITALS_FEATURE_PREFIX + name: value for name, value in list(result.items())})
+    if resume_question(item.original, item.alternative, item.field.before, item.field.after, origin):
+        # A short word right after Latin text asked again once its next word is planned for conversion: no head answered
+        # it, and with Hunspell, which knows `f` and `z` as English words, the frozen model kept `а` in `seek() , f там`
+        # and `я` in `TSet - z использовал` (the resume head).
+        result.update(_resume_evidence(item, direction, features))
     if alone_question(item.original, item.alternative, item.field.before, item.field.after, item.trigger):
         # The class the lone-word head answers, in the same way: every corpus frame of it was deferred,
         # so the frozen model waits on `гш` alone and never converts it to `ui`. The head also reads how
@@ -703,6 +711,56 @@ def _start_evidence(item: ContextEvidence, direction: str) -> dict[str, float]:
     names = (f"count:english:{magnitudes[0]}", f"count:russian:{magnitudes[1]}", f"count:ratio:{ratio}",
              f"count:{magnitudes[0]}:{magnitudes[1]}", f"delta:{band}")
     return {f"{START_FEATURE_PREFIX}{name}:direction:{direction}": 1.0 for name in names}
+
+
+def resume_question(original: str, alternative: str, before: str, after: str, origin: str) -> bool:
+    """A short word right after Latin text asked again once the word after it is planned for conversion (after_origin
+    planned_next_conversion): the nearest letter before it is Latin, a word follows it, and in either reading it has at
+    most OPENING_SHORT_MAX_LETTERS letters once one leading sign of RESUME_LEADING_SIGNS is set aside (`f`/`а` in
+    `seek() , f там`, `ds`/`вы` in `Shift+Tab ds`, `(b`/`(и`). That is where a person who forgot to switch back to Russian
+    after a Latin token resumes Russian text, and where a Latin token is followed by Russian text typed in the English
+    layout. A word of one letter right after a Latin word and a space is the single-letter head's (letter_question). The
+    question reads only the token, the text around it and the origin, as the trainer and the GPU path route frames by
+    them."""
+
+    letters = [char for char in before[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:] if char.isalpha()]
+    return (origin == "planned_next_conversion" and bool(letters) and letters[-1].isascii()
+            and any(char.isalpha() for char in after) and _resume_word(original) != "" and _resume_word(alternative) != ""
+            and not letter_question(original, alternative, before))
+
+
+def _resume_word(token: str) -> str:
+    """The letters of a short word without its one leading sign, or "" when it is no such word."""
+
+    word = token[1:] if token[:1] in RESUME_LEADING_SIGNS else token
+    return word if word.isalpha() and len(word) <= OPENING_SHORT_MAX_LETTERS else ""
+
+
+def _resume_evidence(item: ContextEvidence, direction: str, features: dict[str, float]) -> dict[str, float]:
+    """The resume head's evidence: the shared features once more under its own names, so that it weighs the lexicons'
+    and Hunspell's verdicts in its class apart (Hunspell knows `f`, and the detector's score delta, which converted `f`
+    without it, is gone), and evidence of its own: how often the Latin word before it occurs in English prose and among
+    the Latin words of Russian technical text, how often the next word as planned occurs, the signs between the Latin
+    word and it, whether Hunspell knows each reading, the leading sign, the number of letters and their case."""
+
+    from .context_model import _term_frequency
+
+    table = _term_frequency()
+    before = item.field.before[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:]
+    last = max(index for index, char in enumerate(before) if char.isalpha())
+    gap = "".join(sorted(set(before[last + 1:]) - {" "})) or "space"
+    previous = re.findall(r"[A-Za-z]+", before)[-1]
+    word = _resume_word(item.original)
+    case = "upper" if word.isupper() and len(word) > 1 else "title" if word[:1].isupper() else "lower"
+    sign = item.original[:1] if item.original[:1] in RESUME_LEADING_SIGNS else "none"
+    spelled = (int(bool(item.source_score and item.source_score.spell_known)),
+               int(bool(item.target_score and item.target_score.spell_known)))
+    names = ("bias", f"gap:{gap}", f"spell:{spelled[0]}:{spelled[1]}", f"sign:{sign}", f"letters:{len(word)}",
+             f"case:{case}", f"letters:{len(word)}:spell:{spelled[0]}:{spelled[1]}",
+             *_neighbour_names("previous_word", previous, table),
+             *_neighbour_names("next_word", (item.field.after.split() or [""])[0], table))
+    return {**{RESUME_FEATURE_PREFIX + name: value for name, value in features.items() if value},
+            **{f"{RESUME_FEATURE_PREFIX}{name}:direction:{direction}": 1.0 for name in names}}
 
 
 def letter_question(original: str, alternative: str, before: str) -> bool:

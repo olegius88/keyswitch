@@ -53,7 +53,7 @@ from .language_model import LanguageModel, WordScore
 from .layouts import RU_KEYS, US_KEYS, LayoutPair
 from .lexicon_supplement import supplement_words
 from .learning import LearnedRule, LearningStore, RuleAction
-from .context_action_features import sign_token_asked, term_question, variable_question
+from .context_action_features import resume_question, sign_token_asked, term_question, variable_question
 from .log_privacy import LogRedactor
 from .intent_model import CorrectionTrigger, LinearNgramModel
 from .context_policy import (
@@ -3249,7 +3249,13 @@ class KeySwitchEngine:
         on its line was decided with them, and asked again it reads to the model like
         a first word. A Russian word typed as intended before a term typed in the other
         layout was converted then: `склонируй репо пшерги` would become
-        `склонируй htgj github`. A token whose segmentation the boundary model left open
+        `склонируй htgj github`. A short word right after Latin text, which a model with the
+        resume head answers (context_action_features.resume_question), is taken along on its
+        conversion wherever it stands on its line: a person who forgot to switch back to
+        Russian after a term resumes Russian text there, and with Hunspell, which knows `f`
+        and `z` as English words, `seek() , f там` and `TSet - z использовал` kept their
+        first Russian word while the rest converted (the developer-chat development set,
+        29.10.2026). A token whose segmentation the boundary model left open
         (KeptWord.segmentation_open) was decided neither with the words before it nor at
         all, and is taken along wherever it stands on its line, on the model's own
         conversion and with the text before it read now: Russian words ending in a letter
@@ -3269,6 +3275,7 @@ class KeySwitchEngine:
         ignored_words: list[str] = self.settings.get("exclusions.words", [])
         ignored = {self.detector.token_key(item) for item in ignored_words}
         start, taken, settled = plan, list[KeptWord](), plan
+        resumed: list[KeptWord] = []
         for word in reversed(kept):
             previous = word.plan
             # A sign that reads the same in either layout (`-` in `Ytn - ult`) is passed as it
@@ -3332,6 +3339,12 @@ class KeySwitchEngine:
                         or again.prediction is not None and again.prediction.action == "convert")):
                     break
                 taken.append(word)
+                model = self.context_policy.model
+                if (model is not None and model.answers_resume and again.prediction is not None
+                        and again.prediction.action == "convert"
+                        and resume_question(previous.original, previous.replacement, field.before, next_replacement,
+                                            self._neighbour_origin(previous.replacement))):
+                    resumed.append(word)
             plan = replace(
                 plan, strokes=previous.strokes + (previous.boundary,) + plan.strokes, boundary=closing,
                 original=previous.original + previous.boundary.character + plan.original,
@@ -3346,7 +3359,7 @@ class KeySwitchEngine:
         plan, farthest = settled, taken[-1]
         before = (farthest.field.before if farthest.field is not None
                   else self.context_policy.stream.text[:-len(plan.original + suffix)])
-        if (not all(word.segmentation_open for word in taken)
+        if (not all(word.segmentation_open or word in resumed for word in taken)
                 and any(char.isalpha() for char in before.rsplit("\n", 1)[-1])):
             self._technical_event("kept_words_left", words=len(taken), reason="words_before_on_line")
             return start

@@ -251,6 +251,15 @@ SIGN_DASH: Final = "-"
 # The signs of an operator (`=`, `+`, `==`, `+=`, `*`, `%`): read as one kind beside the token itself, so that a sign the
 # captured messages hold rarely (`+`, 63 converted frames) takes the evidence of the common one (`=`, 781).
 SIGN_OPERATOR_SIGNS: Final = "=+*%-"
+# A short word right after Latin text, asked again once its next word is planned for conversion, has evidence of its own
+# under this prefix: the resume head (context_action_features.resume_question). No head answered the question, and with
+# Hunspell, which knows `f` and `z` as English words, the frozen model kept `а` typed `f` in `seek() , f там` at p=0.92
+# and `я` typed `z` in `TSet - z использовал` at 0.99 where the person forgot to switch back to Russian (the
+# developer-chat development set, 14 such messages, all converted without Hunspell): the class behind the tie of sealed
+# test v78 in that profile alone (29.10.2026).
+RESUME_FEATURE_PREFIX: Final = "resume|"
+# The one sign a short word may open with in either reading: a quotation mark or a parenthesis (`(и наверное`).
+RESUME_LEADING_SIGNS: Final = "\"«("
 # The "length" feature buckets every word length from here up together (schemas 2 and 3).
 ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: Final = 6
 # Short categorical field labels (role, trigger) truncated before they reach a feature name.
@@ -367,8 +376,8 @@ MAX_CONTEXT_MODEL_FEATURES: Final = 50000
 # (JOINED_FEATURE_PREFIX), the term heads (TERM_FEATURE_PREFIX, FIRST_FEATURE_PREFIX), the short-message head
 # (BRIEF_FEATURE_PREFIX), the variable head (VARIABLE_FEATURE_PREFIX), the dotted-abbreviation head
 # (DOTTED_FEATURE_PREFIX), the letters-and-digits head (ALNUM_FEATURE_PREFIX), the hypothesis head
-# (HYPOTHESIS_FEATURE_PREFIX), the short-token head (SHORT_FEATURE_PREFIX), the slip head (SLIP_FEATURE_PREFIX) and the
-# sign head (SIGN_FEATURE_PREFIX), each with its own budget in the recipe.
+# (HYPOTHESIS_FEATURE_PREFIX), the short-token head (SHORT_FEATURE_PREFIX), the slip head (SLIP_FEATURE_PREFIX), the
+# sign head (SIGN_FEATURE_PREFIX) and the resume head (RESUME_FEATURE_PREFIX), each with its own budget in the recipe.
 # Raised from 100 000 with the unknown-token head (the 0.54.0 pair holds 98 498), and from 110 000 with the hypothesis
 # and short-token heads: the 0.61.0 pair holds 107 808, about 8.6 MB written one feature to a line, and
 # MAX_CONTEXT_ACTION_MODEL_BYTES bounds the file.
