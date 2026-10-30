@@ -10,7 +10,7 @@
     "model/intent_v1/sources/hunspell/ru_RU.aff": "38ce7d4af78e211e9bafe4bf7e3d6a2c420591136cb738ec6648f8fdf6524cd7",
     "model/intent_v1/sources/hunspell/ru_RU.dic": "f6047416a0204adbecf3a451b874ec8a97ee37e2cbc714466ef04d8dbcc0d6fc",
     "model/intent_v1/sources/ru_RU.lm": "e57c14eec2b78e52a2125dce2b38044d8dfe480f3964b9d118614527195ceda9",
-    "src/keyswitch/__init__.py": "22209b5f8a5c4cbf745cda986586805c550cfe0c1082ab2caec9101b5066edc4",
+    "src/keyswitch/__init__.py": "be13fc5a1a6171179d11d9c4afb8f659074c45f5b9a55476588da2c64529c3e4",
     "src/keyswitch/__main__.py": "1dcdb6d6ff34e04cdbc21446c00a5c5f61c3059429eac0f6f863291a7a314fbe",
     "src/keyswitch/app.py": "2817bd6d43fefafb02a9f08c4338c05604bd3f22cc7567ce12e0e5523fad8704",
     "src/keyswitch/app_quirks.py": "760763d3c50a85c19239a90e246d65e105e91ae918660445e8286d137836a214",

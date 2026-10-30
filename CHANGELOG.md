@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.64.1 — 2026-10-30
+
 - Windows: KeySwitch no longer forgets the word being typed when the system reports input its keyboard and mouse hooks
   did not get. 0.64.0 let go of the word, the text before it and the last correction each time, and on a laptop such
   input came often while typing, in every program: words in the middle of a sentence were left uncorrected, Pause
