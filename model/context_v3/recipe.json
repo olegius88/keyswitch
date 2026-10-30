@@ -149,10 +149,10 @@
   },
   "english_capital_curriculum": {
     "words_by_length": {
-      "2": 107,
-      "3": 300,
-      "4": 300,
-      "5": 300
+      "2": 0,
+      "3": 0,
+      "4": 0,
+      "5": 0
     },
     "frames_per_word": 2,
     "lowercase_contrast": true,
@@ -182,8 +182,8 @@
     "scope": "TRAIN only: the word decided at its own boundary (after_origin none). Russian abbreviations the term table counts in Russian technical text at least minimum_abbreviation_count times and abbreviation_dominance times as often as their Latin keys (`тз`, not `зк`), no lexicon word, typed as intended after the left context of a Russian row, keep; Latin terms counted at least minimum_term_count times whose Cyrillic reading is nothing, typed in the Russian layout in the same place, convert; three frames for every such term and abbreviation (the budgets cover both classes whole: a candidate that framed 800 of the 1752 terms and all 802 abbreviations kept `тз` but missed `тзь` for `npm`), the boundaries of the capital citations. Motivation: the corpus v27 candidate converted `тз` to `np` (p=0.993), `2фа`, `кз` and `ви` in the owner's typing while the token's count pulled the other way without a frame to learn from (tools/train_context_action_model.counted_token_curriculum). Not used while a frozen base is named: its frames moved the shared frequency features, and the `ша` before `hello` stayed `ша` (corpus v27 and v28 candidates)."
   },
   "frozen_base": {
-    "artifact": "model/context_v3/frozen-base-b5ed6848d4ce.json",
-    "sha256": "a35af45f0978f7a99c6c492dc8755259d5a208f205bf2c5cdc81c7e881cc5bf3",
+    "artifact": "model/context_v3/frozen-base-b380007b5e3e.json",
+    "sha256": "9171b93828a9af029c22370a8d5e1e99ea15084d2ce77eb1feb87f40741d21ce",
     "labels": {
       "artifact": "model/context_v3/frozen-base.json",
       "sha256": "5129029cdda9ffc2c6e67d8212ea8a7ede710764089ebde53c00b0ddc30ff6ae"
@@ -197,12 +197,8 @@
         "sample_weight": 1.0
       }
     },
-    "heads": {
-      "resume": {
-        "maximum_features": 3000
-      }
-    },
-    "scope": "The pair context-v3-b5ed6848d4ce of 0.63.0, every weight fixed: its kept-neighbour question and every head, the sign head of corpus v76 among them, are carried as shipped, and the resume head alone is fitted. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone) and the answers of the corpus v37 model (labels). The resume head: a word of at most three letters (after at most one leading quotation mark or parenthesis) right after Latin text, asked again once the word after it is planned for conversion, a word of one letter right after a Latin word and a space being the single-letter head's (context_action_features.resume_question). It reads the shared features once more under its own names, and evidence of its own: how often the Latin word before it and the next word as planned occur, the signs between them, whether Hunspell knows each reading, the leading sign, the number of letters and their case. Motivation: no head answered this question, and with Hunspell, which knows `f` and `z` as English words, the frozen model kept `а` typed `f` in `seek() , f там` (p=0.92) and `я` typed `z` in `TSet - z использовал` (0.99) where the person forgot to switch back to Russian: 14 messages of the developer-chat development set the pair converts without Hunspell, the class behind the tie of sealed test v78 in that profile alone (29.10.2026). The pair of 0.63.0: the pair of 0.62.0 with the sign head fitted onto it on corpus v76 (model/context_v3/frozen-base-b876e862bbfe.json, sha256 5533419dc6b6)."
+    "heads": {},
+    "scope": "The pair context-v3-b380007b5e3e of 0.64.0, every weight fixed and no head fitted: a reseal of the shipped pair for an engine change that changes no model (30.10.2026: input no hook of KeySwitch got is logged and nothing else). Its kept-neighbour question and every head, the resume head of corpus v79 among them, are carried, so the fit moves no weight, and the artifact is the shipped one byte for byte. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone) and the answers of the corpus v37 model (labels). The pair of 0.64.0: the pair of 0.63.0 with the resume head fitted onto it on corpus v79 (model/context_v3/frozen-base-b5ed6848d4ce.json, sha256 a35af45f0978)."
   },
   "letter_curriculum": {
     "term_sentences": 1500,

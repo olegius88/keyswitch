@@ -125,6 +125,12 @@ HOOK_GAP_MS: Final = 280
 # CPU load, while a program in front that reads the keyboard as raw input and has a keyboard hook of its own keeps
 # every keyboard hook silent for good.
 HOOK_SILENCE_MS: Final = 10_000
+# Input the hooks did not get is taken as kept away from them only when GetLastInputInfo moved on this many times with no
+# hook event between: keys typed into a program that silences the hooks move it at every press and release. A single
+# such input followed by events the hooks got is no program keeping keys away: in the laptop's log of 0.64.0
+# (29-30.10.2026) inputs no hook got came in 14 programs, Explorer, Task Manager and KeySwitch's own window among them,
+# in the middle of words the hook saw typed, and in none on the desktop computer.
+UNSEEN_INPUT_MIN_TIMES: Final = 3
 # How long the Wayland input helper waits for the main process to answer a physical key before
 # typing it itself, so a hung process can never freeze the keyboard: it then reports every key it
 # types until the process answers again. At 50 ms the answer was late while the engine's worker held

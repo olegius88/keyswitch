@@ -306,7 +306,7 @@
     "src/keyswitch/constants/russian_text.py": "dced6e5eb9b5f6030ffd4d41b79e75b851f7edbb72485d90f1f87963486d4fd0",
     "src/keyswitch/constants/settings_defaults.py": "3d813a5f7de666ce3e1677584a7a17b1620a5da7c3f626549431acbfb2c11912",
     "src/keyswitch/constants/text.py": "732af9b5a7c50463351b1ad3806740bdfc872c0d2b0c2f2a88482e869c4c53d8",
-    "src/keyswitch/constants/timing.py": "8ee521b8326d992cc2ad103ec60b28bc9830de9e9f41b214fd2ff5960755413d",
+    "src/keyswitch/constants/timing.py": "cf76fadd300a0fa1c77e661040e33b66baeffbd570c61d9aeb4848a2c53e0220",
     "src/keyswitch/constants/training.py": "5b651a00b20d815d2699b9f879b8a98c8933e9c56e6737938bf06662b5d6f95f",
     "src/keyswitch/constants/tray_icon.py": "47eceb41d61e7a64c76b5a82367491359623e6c513c224a4981df96d2a114cde",
     "src/keyswitch/constants/tray_menu.py": "fa0cef93cd398c98db6b650a1b4b3d18ba56418471e69b0bf8a8d849c58eb7a9",
@@ -325,7 +325,7 @@
     "src/keyswitch/desktop_ui.py": "442135220f1f50c6534621f2331397b703c5f599d0831b23144e6c2bd993331e",
     "src/keyswitch/detector.py": "5a78cd5961af57426b6cb42b3757b42baeacd7344a06557111a1067cb0cbb2c0",
     "src/keyswitch/early_switch.py": "3099fb815f239018f79c0c3a2b96b5db4390d47fee3a74ad701c636e7e5983ef",
-    "src/keyswitch/engine.py": "e3d7ad878657f7955144343f306874ca23cf74815feb61419bdfc20555aea798",
+    "src/keyswitch/engine.py": "427512b3557740b05d5150ecbe686cfe0e6ebca3dfcc44945d654e38ebdabdcd",
     "src/keyswitch/history.py": "165f09f7403a72019637a0ac4397845c9b15c847b9b64fb0f34552bbb2352fee",
     "src/keyswitch/identifier_lexicon.py": "80c1af6de67833ebc957355199e5ebab011282ddf6bbcc556d06bfef237c31bb",
     "src/keyswitch/indicator.py": "3b6833711292ec2f29bc2c3e427be873cc4f2ffde817c9deb0afa02fac979a19",
@@ -380,7 +380,7 @@
     "src/keyswitch/wayland_helper.py": "87a5e7eee0817ac8c631e0fd5bf1dbff3aafba721883730aa3595f8460aea629",
     "src/keyswitch/wayland_native.py": "807ba831031fac4e46c2014c479e0c1109493adf677c9c7edb9945e56460c40f",
     "src/keyswitch/windows_app.py": "c7b7e6e062be165d7a454c770751f06c7eb04fc58e200180b610525ebd4d4e5b",
-    "src/keyswitch/windows_backend.py": "4bb9bd1b424c73455948cf4740df5d128afc8cd04cca68e4b212f35706faab1f",
+    "src/keyswitch/windows_backend.py": "e480a48a6d9d2b94fcb64d45b5222012bb6ef2a435764cd9c0ed008263a862ae",
     "src/keyswitch/windows_calls.py": "8807cbfa5b83cc26947540d174855115a75949e54e9c67897ee24628f0a7aa81",
     "src/keyswitch/windows_context.py": "7ae2c1aa5476cd1c101c9bb47c28a4b8a2669bd18f7c35023b5dbf95f819c7d6",
     "src/keyswitch/windows_instance.py": "b61f62e508ea6b7390482836d04a6e3080504c84fea2a96b95e237eaf65215e9",
@@ -498,8 +498,8 @@
     }
   },
   "runtime_regression": {
-    "previous_report": "model/prefix_v1/engine-history/445f4867fc68deaae51d8ff52531364ab1476e4eb10eae5a28c517c1012c7f41.json",
-    "previous_sha256": "445f4867fc68deaae51d8ff52531364ab1476e4eb10eae5a28c517c1012c7f41"
+    "previous_report": "model/prefix_v1/engine-history/190aa44f3ddbeace76f8f6bfb81053f614f5970ffdc6cd7fce8137c1848307c3.json",
+    "previous_sha256": "190aa44f3ddbeace76f8f6bfb81053f614f5970ffdc6cd7fce8137c1848307c3"
   },
   "schema_version": 1,
   "scope": "in-process physical keys/live layout/exact final text/two spaces; separate observed and simulated field contexts; not native OS proof",

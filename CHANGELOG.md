@@ -4,6 +4,19 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- Windows: KeySwitch no longer forgets the word being typed when the system reports input its keyboard and mouse hooks
+  did not get. 0.64.0 let go of the word, the text before it and the last correction each time, and on a laptop such
+  input came often while typing, in every program: words in the middle of a sentence were left uncorrected, Pause
+  found no word to convert and only switched the layout, and the word after it was then left as typed. The log still
+  names, once, a program whose input reaches no hook, and only when the system's last input time moved on several times
+  with no event reaching the hooks, as it does when keys typed into such a program pass them; a single input between
+  keys the hooks got is no longer taken for one.
+- The pair is `context-v3-b380007b5e3e` (artifact SHA-256
+  `9171b93828a9af029c22370a8d5e1e99ea15084d2ce77eb1feb87f40741d21ce`) with the prefix model `prefix-v2-bf3dc28f8567`,
+  the pair of 0.64.0 byte for byte, sealed again for the changed engine. On the recorded real typing the new engine
+  breaks no word; on sealed test v80, read once, it restores all 174 rows typed in the wrong layout with the early switch
+  off in both profiles, against 173 for the baseline pair, and spoils no correct row (the baseline pair one).
+
 ## 0.64.0 — 2026-10-29
 
 - Wayland: KeySwitch now corrects layouts in GNOME Shell, KDE Plasma 6 and sway sessions, where a program sees

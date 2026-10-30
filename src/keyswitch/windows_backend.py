@@ -28,6 +28,7 @@ from .constants.timing import (
     KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS,
     LAYOUT_SWITCH_POLL_SECONDS,
     MODIFIER_RECHECK_GAP_MS,
+    UNSEEN_INPUT_MIN_TIMES,
     WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS,
 )
 from .constants.windows import (
@@ -307,8 +308,10 @@ class WindowsBackend:
         self._last_typed: tuple[int, int] = (0, 0)
         self._inject_lock = threading.Lock()
         self._input_delay = InputDelay()
-        # An input time the hooks have not got yet, and the last one reported as passed them (take_unseen_input).
+        # An input time the hooks have not got yet, the input times seen since it with no hook event between, and the last
+        # one reported as passed them (take_unseen_input).
         self._unseen_input: int | None = None
+        self._unseen_times: set[int] = set()
         self._unseen_reported: int | None = None
 
     @property
@@ -561,17 +564,24 @@ class WindowsBackend:
 
         A program in front that reads the keyboard as raw input and has a keyboard hook of its own keeps every
         keyboard hook of the system silent, its own too, while GetLastInputInfo moves on with each key (Windows 10
-        19045 and 11 26200, 28.10.2026; raw input alone silences nothing): KeySwitch sees none of what is typed there. An input time no hook got is certain to have passed them once they got a
-        later event, since they get events in order, or once HOOK_SILENCE_MS went by without one.
+        19045 and 11 26200, 28.10.2026; raw input alone silences nothing): KeySwitch sees none of what is typed there.
+        An input time no hook got is certain to have passed them once they got a later event, since they get events in
+        order, or once HOOK_SILENCE_MS went by without one, and it counts only when GetLastInputInfo moved on
+        UNSEEN_INPUT_MIN_TIMES times meanwhile: a lone input the hooks did not get between keys they got is no program
+        keeping keys away (the laptop's log of 0.64.0).
         """
 
         seen = self._api.hook_input_times()
         last = self._api.last_input_time()
         waiting = self._unseen_input
         if waiting is not None and waiting not in seen:
+            if last not in seen and (not seen or _later(last, seen[-1])):
+                self._unseen_times.add(last)
             waited = (self._api.tick_count() - waiting) & DWORD_MASK
             if (seen and _later(seen[-1], waiting)) or waited >= HOOK_SILENCE_MS:
                 self._unseen_input = None
+                if len(self._unseen_times) < UNSEEN_INPUT_MIN_TIMES:
+                    return None
                 self._unseen_reported = waiting
                 return waited
             return None
@@ -579,6 +589,7 @@ class WindowsBackend:
         self._unseen_input = last if (
             seen and last not in seen and _later(last, seen[-1]) and (reported is None or _later(last, reported))
         ) else None
+        self._unseen_times = {last}
         return None
 
     def take_hook_gap(self) -> HookGap | None:

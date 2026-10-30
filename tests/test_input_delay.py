@@ -21,6 +21,7 @@ from keyswitch.constants.timing import (
     INPUT_DELAY_REPORT_INTERVAL_SECONDS,
     INPUT_DELAY_SLOW_CALLBACK_MS,
     INPUT_DELAY_UNSTAMPED_MS,
+    UNSEEN_INPUT_MIN_TIMES,
 )
 from keyswitch.constants.units import MILLISECONDS_PER_SECOND
 from keyswitch.constants.windows import DWORD_MASK, VK_RETURN
@@ -241,15 +242,28 @@ class UnseenInputTests(unittest.TestCase):
         # It came late after all: nothing passed the hooks.
         api.input_times.append(api.last_input)
         self.assertIsNone(backend.take_unseen_input())
-        # A key the hooks never get, and a pointer move they get after it.
+        # One input the hooks never get between keys they get is no program keeping keys away.
         api.last_input = HOOK_KEY_TIME_MS + HOOK_GAP_MS
         self.assertIsNone(backend.take_unseen_input())
         api.input_times.append(api.last_input + 1)
-        api.ticks = api.last_input + HOOK_GAP_MS
-        self.assertEqual(backend.take_unseen_input(), HOOK_GAP_MS)
+        api.last_input += 1
+        self.assertIsNone(backend.take_unseen_input())
+        # Keys the hooks never get, and a pointer move they get after them.
+        first = api.last_input + HOOK_GAP_MS
+        for step in range(UNSEEN_INPUT_MIN_TIMES):
+            api.last_input += HOOK_GAP_MS
+            api.ticks = api.last_input
+            self.assertIsNone(backend.take_unseen_input())
+        api.input_times.append(api.last_input + 1)
+        api.ticks = api.input_times[-1]
+        self.assertEqual(backend.take_unseen_input(), api.ticks - first)
         # Keys in a silent program and nothing else: certain once HOOK_SILENCE_MS went by.
+        api.ticks = api.input_times[-1] + 1
         api.last_input = api.ticks
         self.assertIsNone(backend.take_unseen_input())
+        for step in range(UNSEEN_INPUT_MIN_TIMES - 1):
+            api.last_input += 1
+            self.assertIsNone(backend.take_unseen_input())
         api.ticks += HOOK_SILENCE_MS - 1
         self.assertIsNone(backend.take_unseen_input())
         api.ticks += 1
@@ -258,11 +272,11 @@ class UnseenInputTests(unittest.TestCase):
         api.ticks += HOOK_SILENCE_MS
         self.assertIsNone(backend.take_unseen_input())
         self.assertIsNone(backend.take_unseen_input())
-        # The next key typed into the silent program is new input.
+        # A lone input in a long silence is reported no more than one between keys the hooks got.
         api.last_input = api.ticks
         self.assertIsNone(backend.take_unseen_input())
         api.ticks += HOOK_SILENCE_MS
-        self.assertEqual(backend.take_unseen_input(), HOOK_SILENCE_MS)
+        self.assertIsNone(backend.take_unseen_input())
 
     def test_the_tick_clock_wraps_and_a_hook_restart_forgets_nothing_it_needs(self) -> None:
         api = FakeWindowsAPI()
@@ -270,8 +284,11 @@ class UnseenInputTests(unittest.TestCase):
         api.input_times = [DWORD_MASK]
         api.last_input = 0
         self.assertIsNone(backend.take_unseen_input())
-        # The event times are gone (a new hook): only the silence decides.
+        # The event times are gone (a new hook): only the silence decides, over inputs that kept coming.
         api.input_times = []
+        for step in range(UNSEEN_INPUT_MIN_TIMES - 1):
+            api.last_input += 1
+            self.assertIsNone(backend.take_unseen_input())
         api.ticks = HOOK_SILENCE_MS
         self.assertEqual(backend.take_unseen_input(), HOOK_SILENCE_MS)
         # An input time older than the newest event got is no input the hooks missed after it.
@@ -280,7 +297,7 @@ class UnseenInputTests(unittest.TestCase):
         self.assertIsNone(backend.take_unseen_input())
         self.assertIsNone(backend._unseen_input)
 
-    def test_the_engine_lets_go_of_the_text_and_names_each_program_once(self) -> None:
+    def test_the_engine_names_each_program_once_and_keeps_the_text(self) -> None:
         with sequences.session(0) as current:
             current.settings.set("diagnostics.technical_logging", True)
             engine = current.engine
@@ -295,8 +312,9 @@ class UnseenInputTests(unittest.TestCase):
                 engine._report_unseen_input()
                 self.assertEqual(engine._strokes[-1].character, "b")
                 engine._report_unseen_input()
-                self.assertEqual(engine._strokes, [])
-                self.assertTrue(engine._untracked_token)
+                # Logging is all it does: the word, its context and the last correction stay (0.64.0 dropped them).
+                self.assertEqual("".join(stroke.character for stroke in engine._strokes), "ghb")
+                self.assertFalse(engine._untracked_token)
                 engine._report_unseen_input()
                 application[0] = "other"
                 engine._report_unseen_input()

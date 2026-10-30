@@ -778,22 +778,21 @@ class KeySwitchEngine:
         self._report_unseen_input()
 
     def _report_unseen_input(self) -> None:
-        """Let go of the text when input reached a program without any hook of KeySwitch, and log the program once.
+        """Log, once per program, input that reached a program without any hook of KeySwitch.
 
         A program in front that reads the keyboard as raw input and has a keyboard hook of its own keeps every
         keyboard hook of the system silent (Windows 10 and 11, 28.10.2026): KeySwitch sees nothing typed there, and
-        the log did not say so. The
-        programs are logged to learn which do it before anything is built for them (the owner's decision, 28.10.2026).
-        A backend that cannot tell has no take_unseen_input.
+        the log did not say so. The programs are logged to learn which do it before anything is built for them, and
+        nothing else is done. Letting go of the text as well dropped words the hook saw typed in 0.64.0: on a laptop
+        input no hook got came in the middle of words in 14 programs, and each time the word, the text before it and
+        the last correction were forgotten, so Pause found no word to convert. A backend that cannot tell has no
+        take_unseen_input.
         """
 
         take = getattr(self.backend, "take_unseen_input", None)
         unseen = None if take is None else take()
         if unseen is None:
             return
-        self._clear_word(reason="input_unseen")
-        self._untracked_token = True
-        self.context_policy.stream.clear()
         application = self.backend.active_application()
         if application in self._unseen_applications:
             return
