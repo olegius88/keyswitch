@@ -5,52 +5,52 @@
   "calibration": {
     "by_profile": {
       "portable": {
-        "conversion_recall": 0.9730670192776115,
-        "convert_rows": 14369,
-        "converted_correctly": 13982,
-        "false_conversions": 18,
-        "rows": 42392
+        "conversion_recall": 0.973065144766147,
+        "convert_rows": 14368,
+        "converted_correctly": 13981,
+        "false_conversions": 19,
+        "rows": 42390
       },
       "reference_hunspell": {
-        "conversion_recall": 0.9766163268146705,
-        "convert_rows": 14369,
-        "converted_correctly": 14033,
-        "false_conversions": 18,
-        "rows": 42392
+        "conversion_recall": 0.9767538975501113,
+        "convert_rows": 14368,
+        "converted_correctly": 14034,
+        "false_conversions": 19,
+        "rows": 42390
       }
     },
-    "conversion_recall": 0.974841673046141,
-    "convert_rows": 28738,
+    "conversion_recall": 0.9749095211581291,
+    "convert_rows": 28736,
     "converted_correctly": 28015,
-    "false_conversions": 36,
+    "false_conversions": 38,
     "outside_lone_word": {
       "by_profile": {
         "portable": {
-          "conversion_recall": 0.9782750853738283,
-          "convert_rows": 13763,
-          "converted_correctly": 13464,
-          "false_conversions": 18,
-          "rows": 38900
+          "conversion_recall": 0.9782735067577387,
+          "convert_rows": 13762,
+          "converted_correctly": 13463,
+          "false_conversions": 19,
+          "rows": 38898
         },
         "reference_hunspell": {
-          "conversion_recall": 0.9805275012715251,
-          "convert_rows": 13763,
-          "converted_correctly": 13495,
-          "false_conversions": 18,
-          "rows": 38900
+          "conversion_recall": 0.9806714140386572,
+          "convert_rows": 13762,
+          "converted_correctly": 13496,
+          "false_conversions": 19,
+          "rows": 38898
         }
       },
-      "conversion_recall": 0.9794012933226768,
-      "convert_rows": 27526,
+      "conversion_recall": 0.9794724603981979,
+      "convert_rows": 27524,
       "converted_correctly": 26959,
-      "false_conversions": 36,
-      "rows": 77800
+      "false_conversions": 38,
+      "rows": 77796
     },
-    "rows": 84784
+    "rows": 84780
   },
-  "candidate_seal_sha256": "e17ecbf4a0e4a9297d014a2cf3ef1422347c5aa4bd5b79cde44364207fa99e0d",
+  "candidate_seal_sha256": "1f7c3750516bb1b94772ccaf1944277b3a248824eaf2f71b5e30517831ee3392",
   "conversion_threshold": 0.99,
-  "corpus_manifest_sha256": "5d2d2c9337497c65e2b2a02398d2b8f16633ce7730017ed36cce4414ec238ef6",
+  "corpus_manifest_sha256": "bb7b4e3b95788343a661cd9d20b87c9f4ee88cd61989cec3301af9902087e6e5",
   "devchat_test": {
     "access": "feaf610d6b4cb90e524953712c0ccb57e9de31e74b3f95400fe2c547bc31f1ec",
     "bench": "mixed_typing: the field read, a layout chosen by hand respected, the early switch off; four typing modes",
@@ -256,7 +256,7 @@
     "seed": "devchat-v1"
   },
   "feature_version": 3,
-  "full_test_report_sha256": "6cc303d462876b95b229603fc0a15fbb7a7e36f89a91d7d0b2f04a25680261a4",
+  "full_test_report_sha256": "89707da03982b3cefcb3a5331d081d79de7d21f40aee7d23e5ab84364dfac17b",
   "gate_policy": {
     "minimum_calibration_conversion_recall": 0.0,
     "minimum_calibration_net_benefit": 1,
@@ -312,9 +312,9 @@
     "model/context_v3/captured/manifest-sign.json": "e75e6ffc983e5c0bff1b1e4971426f1ad3be7c463da4ce8778dfbe0e7b2abac8",
     "model/context_v3/captured/manifest-slip.json": "30f9ebad868f2454beb16689e4f5dcf92b237cd70b2817f99ae503d287ce7bc8",
     "model/context_v3/captured/manifest.json": "a42b05c124f6c4091cf0c4871abbd0a7386e297c86c587adf3e05f82c68e395c",
-    "model/context_v3/frozen-base-b5ed6848d4ce.json": "a35af45f0978f7a99c6c492dc8755259d5a208f205bf2c5cdc81c7e881cc5bf3",
+    "model/context_v3/frozen-base-b380007b5e3e.json": "9171b93828a9af029c22370a8d5e1e99ea15084d2ce77eb1feb87f40741d21ce",
     "model/context_v3/frozen-base.json": "5129029cdda9ffc2c6e67d8212ea8a7ede710764089ebde53c00b0ddc30ff6ae",
-    "model/context_v3/recipe.json": "40b8d26c9bcec6e82d044465eff1854d12b107790532abae45ff6756d7a5ee1e",
+    "model/context_v3/recipe.json": "c526b9f29e045f3f41752c9f5bf48afb223a1661428f6e9a4c565128e6618f01",
     "model/intent_v1/config.json": "2026433380f1a418079c8cb60eafc64cc420fc256b3c074dbb7d6389f6b275fd",
     "model/intent_v1/sources/en_US.lm": "017a513a23bb37947a3a0e73e307066fa8ec0642075172cdcad6ea204cae68da",
     "model/intent_v1/sources/hunspell/en_US.aff": "70fe5778717d097ce2f3326baaa5c1e4d2206d81a5a81d3ea8e11c4770806dd5",
@@ -351,7 +351,7 @@
     "src/keyswitch/constants/russian_text.py": "dced6e5eb9b5f6030ffd4d41b79e75b851f7edbb72485d90f1f87963486d4fd0",
     "src/keyswitch/constants/settings_defaults.py": "3d813a5f7de666ce3e1677584a7a17b1620a5da7c3f626549431acbfb2c11912",
     "src/keyswitch/constants/text.py": "732af9b5a7c50463351b1ad3806740bdfc872c0d2b0c2f2a88482e869c4c53d8",
-    "src/keyswitch/constants/timing.py": "8ee521b8326d992cc2ad103ec60b28bc9830de9e9f41b214fd2ff5960755413d",
+    "src/keyswitch/constants/timing.py": "cf76fadd300a0fa1c77e661040e33b66baeffbd570c61d9aeb4848a2c53e0220",
     "src/keyswitch/constants/training.py": "5b651a00b20d815d2699b9f879b8a98c8933e9c56e6737938bf06662b5d6f95f",
     "src/keyswitch/constants/tray_icon.py": "47eceb41d61e7a64c76b5a82367491359623e6c513c224a4981df96d2a114cde",
     "src/keyswitch/constants/tray_menu.py": "fa0cef93cd398c98db6b650a1b4b3d18ba56418471e69b0bf8a8d849c58eb7a9",
@@ -370,7 +370,7 @@
     "src/keyswitch/desktop_ui.py": "442135220f1f50c6534621f2331397b703c5f599d0831b23144e6c2bd993331e",
     "src/keyswitch/detector.py": "5a78cd5961af57426b6cb42b3757b42baeacd7344a06557111a1067cb0cbb2c0",
     "src/keyswitch/early_switch.py": "3099fb815f239018f79c0c3a2b96b5db4390d47fee3a74ad701c636e7e5983ef",
-    "src/keyswitch/engine.py": "e3d7ad878657f7955144343f306874ca23cf74815feb61419bdfc20555aea798",
+    "src/keyswitch/engine.py": "427512b3557740b05d5150ecbe686cfe0e6ebca3dfcc44945d654e38ebdabdcd",
     "src/keyswitch/history.py": "165f09f7403a72019637a0ac4397845c9b15c847b9b64fb0f34552bbb2352fee",
     "src/keyswitch/identifier_lexicon.py": "80c1af6de67833ebc957355199e5ebab011282ddf6bbcc556d06bfef237c31bb",
     "src/keyswitch/indicator.py": "3b6833711292ec2f29bc2c3e427be873cc4f2ffde817c9deb0afa02fac979a19",
@@ -424,7 +424,7 @@
     "src/keyswitch/wayland_helper.py": "87a5e7eee0817ac8c631e0fd5bf1dbff3aafba721883730aa3595f8460aea629",
     "src/keyswitch/wayland_native.py": "807ba831031fac4e46c2014c479e0c1109493adf677c9c7edb9945e56460c40f",
     "src/keyswitch/windows_app.py": "c7b7e6e062be165d7a454c770751f06c7eb04fc58e200180b610525ebd4d4e5b",
-    "src/keyswitch/windows_backend.py": "4bb9bd1b424c73455948cf4740df5d128afc8cd04cca68e4b212f35706faab1f",
+    "src/keyswitch/windows_backend.py": "e480a48a6d9d2b94fcb64d45b5222012bb6ef2a435764cd9c0ed008263a862ae",
     "src/keyswitch/windows_calls.py": "8807cbfa5b83cc26947540d174855115a75949e54e9c67897ee24628f0a7aa81",
     "src/keyswitch/windows_context.py": "7ae2c1aa5476cd1c101c9bb47c28a4b8a2669bd18f7c35023b5dbf95f819c7d6",
     "src/keyswitch/windows_instance.py": "b61f62e508ea6b7390482836d04a6e3080504c84fea2a96b95e237eaf65215e9",
@@ -483,72 +483,72 @@
   },
   "quality_gates_passed": true,
   "recipe_path": "model/context_v3/recipe.json",
-  "recipe_sha256": "40b8d26c9bcec6e82d044465eff1854d12b107790532abae45ff6756d7a5ee1e",
+  "recipe_sha256": "c526b9f29e045f3f41752c9f5bf48afb223a1661428f6e9a4c565128e6618f01",
   "schema_version": 1,
   "scope": "Sealed private-corpus test aggregates, the sealed developer-chat test's counts and current artifact/provenance verification; fresh-fit reproducibility, reviewed human-intent labels and native OS execution are not asserted.",
   "test": {
     "documents": {
-      "0": 55,
-      "1": 123,
+      "0": 53,
+      "1": 121,
       "None": 2
     },
     "profiles": {
       "portable": {
         "counts": {
           "baseline": {
-            "correct_text_corruptions": 2,
+            "correct_text_corruptions": 1,
             "correction_layout_mismatches": 0,
-            "exactly_restored": 13,
+            "exactly_restored": 21,
             "execution_errors": 0,
-            "final_layout_mismatches": 69,
-            "initially_correct": 180,
-            "initially_wrong": 178,
-            "injections": 137,
+            "final_layout_mismatches": 57,
+            "initially_correct": 176,
+            "initially_wrong": 174,
+            "injections": 151,
             "length_mismatches": 0,
-            "preserved_correct": 178,
-            "rows": 358
+            "preserved_correct": 175,
+            "rows": 350
           },
           "candidate": {
             "correct_text_corruptions": 0,
             "correction_layout_mismatches": 0,
-            "exactly_restored": 14,
+            "exactly_restored": 21,
             "execution_errors": 0,
-            "final_layout_mismatches": 69,
-            "initially_correct": 180,
-            "initially_wrong": 178,
-            "injections": 109,
+            "final_layout_mismatches": 57,
+            "initially_correct": 176,
+            "initially_wrong": 174,
+            "injections": 117,
             "length_mismatches": 0,
-            "preserved_correct": 180,
-            "rows": 358
+            "preserved_correct": 176,
+            "rows": 350
           }
         },
         "early_off": {
           "counts": {
             "baseline": {
-              "correct_text_corruptions": 2,
+              "correct_text_corruptions": 1,
               "correction_layout_mismatches": 0,
               "exactly_restored": 173,
               "execution_errors": 0,
               "final_layout_mismatches": 0,
-              "initially_correct": 180,
-              "initially_wrong": 178,
-              "injections": 186,
+              "initially_correct": 176,
+              "initially_wrong": 174,
+              "injections": 178,
               "length_mismatches": 0,
-              "preserved_correct": 178,
-              "rows": 358
+              "preserved_correct": 175,
+              "rows": 350
             },
             "candidate": {
               "correct_text_corruptions": 0,
               "correction_layout_mismatches": 0,
-              "exactly_restored": 176,
+              "exactly_restored": 174,
               "execution_errors": 0,
               "final_layout_mismatches": 0,
-              "initially_correct": 180,
-              "initially_wrong": 178,
-              "injections": 178,
+              "initially_correct": 176,
+              "initially_wrong": 174,
+              "injections": 174,
               "length_mismatches": 0,
-              "preserved_correct": 180,
-              "rows": 358
+              "preserved_correct": 176,
+              "rows": 350
             }
           },
           "gates": {
@@ -574,59 +574,59 @@
       "reference_hunspell": {
         "counts": {
           "baseline": {
-            "correct_text_corruptions": 2,
+            "correct_text_corruptions": 1,
             "correction_layout_mismatches": 0,
-            "exactly_restored": 13,
+            "exactly_restored": 21,
             "execution_errors": 0,
-            "final_layout_mismatches": 69,
-            "initially_correct": 180,
-            "initially_wrong": 178,
-            "injections": 137,
+            "final_layout_mismatches": 57,
+            "initially_correct": 176,
+            "initially_wrong": 174,
+            "injections": 149,
             "length_mismatches": 0,
-            "preserved_correct": 178,
-            "rows": 358
+            "preserved_correct": 175,
+            "rows": 350
           },
           "candidate": {
             "correct_text_corruptions": 0,
             "correction_layout_mismatches": 0,
-            "exactly_restored": 14,
+            "exactly_restored": 21,
             "execution_errors": 0,
-            "final_layout_mismatches": 69,
-            "initially_correct": 180,
-            "initially_wrong": 178,
-            "injections": 109,
+            "final_layout_mismatches": 57,
+            "initially_correct": 176,
+            "initially_wrong": 174,
+            "injections": 117,
             "length_mismatches": 0,
-            "preserved_correct": 180,
-            "rows": 358
+            "preserved_correct": 176,
+            "rows": 350
           }
         },
         "early_off": {
           "counts": {
             "baseline": {
-              "correct_text_corruptions": 2,
+              "correct_text_corruptions": 1,
               "correction_layout_mismatches": 0,
-              "exactly_restored": 174,
+              "exactly_restored": 173,
               "execution_errors": 0,
               "final_layout_mismatches": 0,
-              "initially_correct": 180,
-              "initially_wrong": 178,
-              "injections": 186,
+              "initially_correct": 176,
+              "initially_wrong": 174,
+              "injections": 178,
               "length_mismatches": 0,
-              "preserved_correct": 178,
-              "rows": 358
+              "preserved_correct": 175,
+              "rows": 350
             },
             "candidate": {
               "correct_text_corruptions": 0,
               "correction_layout_mismatches": 0,
-              "exactly_restored": 176,
+              "exactly_restored": 174,
               "execution_errors": 0,
               "final_layout_mismatches": 0,
-              "initially_correct": 180,
-              "initially_wrong": 178,
-              "injections": 178,
+              "initially_correct": 176,
+              "initially_wrong": 174,
+              "injections": 174,
               "length_mismatches": 0,
-              "preserved_correct": 180,
-              "rows": 358
+              "preserved_correct": 176,
+              "rows": 350
             }
           },
           "gates": {
@@ -650,8 +650,8 @@
         }
       }
     },
-    "selected_rows": 189,
-    "trimmed_rows": 12,
+    "selected_rows": 185,
+    "trimmed_rows": 14,
     "unsupported_rows": 9
   },
   "weights_sha256": "b380007b5e3ed820c85c00e6492d6b613f7b5c4ffa7a3e4a59f874d6fd655ff0"
