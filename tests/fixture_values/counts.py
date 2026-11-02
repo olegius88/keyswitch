@@ -242,8 +242,6 @@ HISTORY_LIMIT_FIXTURE: Final = 2
 CORE_INJECTIONS_AFTER_SECOND_CORRECTION: Final = 2
 CORE_INJECTIONS_AFTER_LEARNED_RULE_APPLIES: Final = 4
 CORE_REPEATED_MANUAL_CONVERSIONS: Final = 2
-# Index of the boundary event within an (strokes, target_group, boundary) injection tuple.
-INJECTION_BOUNDARY_INDEX: Final = 2
 # End offset of a one-character lookahead slice (`index + 1 : index + LOOKAHEAD_SLICE_END_OFFSET`).
 LOOKAHEAD_SLICE_END_OFFSET: Final = 2
 DETECTOR_OVERSIZED_MINIMUM_LENGTH: Final = 20

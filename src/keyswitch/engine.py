@@ -12,7 +12,6 @@ import sysconfig
 import threading
 import time
 import unicodedata
-from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, replace
 from typing import Final
@@ -53,7 +52,9 @@ from .language_model import LanguageModel, WordScore
 from .layouts import RU_KEYS, US_KEYS, LayoutPair
 from .lexicon_supplement import supplement_words
 from .learning import LearnedRule, LearningStore, RuleAction
-from .context_action_features import resume_question, sign_token_asked, term_question, variable_question
+from .context_action_features import (
+    cyrletter_question, digit_dot_question, resume_question, sign_token_asked, term_question, variable_question,
+)
 from .log_privacy import LogRedactor
 from .intent_model import CorrectionTrigger, LinearNgramModel
 from .context_policy import (
@@ -78,7 +79,7 @@ from .prefix_model import PrefixInput, PrefixModel
 from .prefix_schema import VersionedPrefixModel
 from .settings_diagnostics import setting_change, settings_snapshot
 from .short_words import (
-    ISOLATED_SHORT_WORD_REASON, SINGLE_LETTER_CONFIDENCE, TRUSTED_SINGLE_LETTER_WORDS, is_short_word_override,
+    ISOLATED_SHORT_WORD_REASON, SINGLE_LETTER_CONFIDENCE, TRUSTED_SINGLE_LETTER_WORDS, is_short_word_override, word_starts,
 )
 from .word_decision import automatic_word_decision
 from .constants.detection import (
@@ -153,14 +154,6 @@ class _FocusChange:
     ignore_layout: bool
 
 
-@functools.lru_cache(maxsize=LAYOUT_GROUP_COUNT)
-def _word_starts(model: LanguageModel) -> Counter[str]:
-    """How many words of a lexicon begin with each PAUSE_WORD_START_LETTERS letters, counted once per model."""
-
-    starts = (word[:PAUSE_WORD_START_LETTERS] for word in model.frequencies if len(word) > PAUSE_WORD_START_LETTERS)
-    return Counter(starts)
-
-
 def _default_backend(group_count: int) -> InputBackend:
     """Load the Linux backend only when no platform backend was supplied."""
 
@@ -187,7 +180,7 @@ class CorrectionPlan:
     application: str
     automatic: bool = True
     # boundary | pause | manual | undo | early | symbols | late_stroke
-    # | mention_shown | mention_hidden | context_phrase | context_word
+    # | mention_shown | mention_hidden | context_phrase | context_word | sign
     mode: str = "boundary"
     context_field: str = ""
     # Literal punctuation before `boundary`, not replayed in the new layout.
@@ -3254,7 +3247,10 @@ class KeySwitchEngine:
         Russian after a term resumes Russian text there, and with Hunspell, which knows `f`
         and `z` as English words, `seek() , f там` and `TSet - z использовал` kept their
         first Russian word while the rest converted (the developer-chat development set,
-        29.10.2026). A token whose segmentation the boundary model left open
+        29.10.2026). So is a Latin letter whose Cyrillic reading is a Russian word of one
+        letter after Russian text, which a model with the Cyrillic-letter head answers
+        (context_action_features.cyrletter_question): `d` stayed in `разрабатывал и d документ`
+        while `документ` converted (the owner's typing, 30.10.2026). A token whose segmentation the boundary model left open
         (KeptWord.segmentation_open) was decided neither with the words before it nor at
         all, and is taken along wherever it stands on its line, on the model's own
         conversion and with the text before it read now: Russian words ending in a letter
@@ -3339,10 +3335,12 @@ class KeySwitchEngine:
                     break
                 taken.append(word)
                 model = self.context_policy.model
-                if (model is not None and model.answers_resume and again.prediction is not None
-                        and again.prediction.action == "convert"
-                        and resume_question(previous.original, previous.replacement, field.before, next_replacement,
-                                            self._neighbour_origin(previous.replacement))):
+                if (model is not None and again.prediction is not None and again.prediction.action == "convert"
+                        and ((model.answers_resume
+                              and resume_question(previous.original, previous.replacement, field.before, next_replacement,
+                                                  self._neighbour_origin(previous.replacement)))
+                             or (model.answers_cyrletter
+                                 and cyrletter_question(previous.original, previous.replacement, field.before, "space")))):
                     resumed.append(word)
             plan = replace(
                 plan, strokes=previous.strokes + (previous.boundary,) + plan.strokes, boundary=closing,
@@ -3581,6 +3579,17 @@ class KeySwitchEngine:
         decision: DetectionDecision,
         mode: str = "boundary",
     ) -> CorrectionPlan:
+        if (mode == "boundary" and boundary is not None and boundary.character.isspace() and not boundary.deferred
+                and digit_dot_question(decision.original, decision.replacement, "space")):
+            # Digits with the Russian letter on the key of the English dot (`2ю` for `2.`): the person writes
+            # Russian and pressed the English key for the sign, so the layout stays where it is (target_group is the
+            # source one) and the keys are typed again in the other layout as literals, which the backends type in their
+            # own layout before restoring the current one, as the "@" of a mention (_execute_correction). Retyped in the
+            # English layout as a conversion, the next Russian word would come out in Latin letters.
+            return CorrectionPlan(
+                strokes, boundary, decision.source_group, decision.source_group, decision.original, decision.replacement,
+                decision.confidence, application, True, "sign", self._context_field_id(),
+            )
         return CorrectionPlan(
             strokes,
             boundary,
@@ -4623,7 +4632,7 @@ class KeySwitchEngine:
 
         if len(original) != PAUSE_WORD_START_LETTERS or not original.isalpha() or group not in self.models:
             return False
-        if _word_starts(self.models[group])[original.casefold()] < PAUSE_WORD_START_MIN_WORDS:
+        if word_starts(self.models[group])[original.casefold()] < PAUSE_WORD_START_MIN_WORDS:
             return False
         prose = {"us": "english", "ru": "russian"}.get(self._layout_name(target))
         return prose is not None and (
@@ -4910,13 +4919,27 @@ class KeySwitchEngine:
             self._note_unconfirmed_switch(error)
             self._update(last_error=str(error), last_action="Раскладка не переключена")
             return
+        # The layout the engine switched to holds no word from correction (_note_engine_switch): Pause with nothing to
+        # convert was pressed to fix a word the engine had lost track of, after a click, a Backspace or another window,
+        # not to keep the next word as typed. Held, the next word stayed as typed where the person went on in the
+        # layout this left on: `djghjc` for `вопрос`, `cltkfq` for `сделай` (8 of the 9 such words of the owner's field
+        # batteries were meant converted, 02.11.2026). A layout the person picks themselves still holds the next word,
+        # and so does this one when the Pause takes the layout back to where an automatic correction of the last
+        # UNDO_AVAILABLE_WINDOW_SECONDS came from: the person erased that correction (Backspace, the editor's undo) and
+        # types the word again as it was. `гупшуп` became `uegieg`, was undone in the editor, and Pause 2.2 s later
+        # brought the Russian layout back for it (the owner's typing, 28.09.2026); every such Pause of the batteries
+        # came before a word meant as typed.
+        previous = self._last_correction
+        undone = (previous is not None and previous.automatic and previous.source_group == target
+                  and time.monotonic() - getattr(self, "_last_correction_time", 0.0) <= UNDO_AVAILABLE_WINDOW_SECONDS)
         self._note_engine_switch(target)
         self._convert_outcome = "switch"
-        protects = bool(self.settings.get("detection.respect_manual_layout", True))
-        self._manual_layout_group = target if protects else None
-        self._manual_layout_observed_at = time.monotonic()
-        self._manual_layout_source = "convert_last"
-        self._manual_layout_word = False
+        protects = undone and bool(self.settings.get("detection.respect_manual_layout", True))
+        if protects:
+            self._manual_layout_group = target
+            self._manual_layout_observed_at = time.monotonic()
+            self._manual_layout_source = "correction_undone"
+            self._manual_layout_word = False
         self._technical_event(
             "layout_switched_without_word",
             trigger_keycode=trigger_keycode,
@@ -5163,7 +5186,17 @@ class KeySwitchEngine:
                         )
                     self._last_committed_stale = True
                     return False
-                if plan.kept_tail:
+                if plan.mode == "sign":
+                    # Every key of the token, the signs after it and its boundary go out as literals of the layout the
+                    # sign belongs to; nothing is converted, and the backend restores the current layout after them.
+                    meant = next(group for group in self.models if group != plan.source_group)
+                    literal = tuple(replace(stroke, group=meant, character=stroke.character_for(meant))
+                                    for stroke in (*plan.strokes, *plan.trailing,
+                                                   *(() if plan.boundary is None else (plan.boundary,))))
+                    held = self.backend.inject_correction(
+                        (), plan.source_group, None, plan.source_group, late=late, trailing=literal,
+                    )
+                elif plan.kept_tail:
                     held = self.backend.inject_correction(
                         plan.strokes, plan.target_group, plan.boundary, plan.source_group,
                         late=late, trailing=plan.trailing, kept_tail=plan.kept_tail,
@@ -5333,7 +5366,8 @@ class KeySwitchEngine:
             False,
             trailing=plan.trailing,
         )
-        self._last_committed_stale = bool(context_reset_reason)
+        # A sign plan typed no key in another layout: Pause has nothing of it to convert back.
+        self._last_committed_stale = bool(context_reset_reason) or plan.mode == "sign"
         self._provisional = (
             ProvisionalWord(plan, self._focus_window or 0, time.monotonic() + CONTEXT_TTL)
             if plan.revisit is not None and plan.boundary is not None and not context_reset_reason else None

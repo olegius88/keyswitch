@@ -34,7 +34,11 @@ from keyswitch.constants.release import APT_GZIP_COMPRESSION_LEVEL, APT_INDEX_FI
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 SOURCES_STANZA_PATH = PROJECT_DIR / "packaging" / "debian" / "keyswitch.sources"
 PUBLIC_KEY_PATH = PROJECT_DIR / "packaging" / "keyswitch-archive-keyring.asc"
-LANDING_TEMPLATE_PATH = PROJECT_DIR / "packaging" / "apt-index.html"
+# The product page served at the repository URL: index.html is filled in, every other file is copied as it is.
+SITE_DIRECTORY = PROJECT_DIR / "packaging" / "site"
+LANDING_TEMPLATE_PATH = SITE_DIRECTORY / "index.html"
+PYPROJECT_PATH = PROJECT_DIR / "pyproject.toml"
+VERSION_PATTERN = re.compile(r'^version = "([^"]+)"$', re.MULTILINE)
 PACKAGE_NAME = "keyswitch"
 ORIGIN = "KeySwitch"
 LABEL = "KeySwitch"
@@ -188,11 +192,21 @@ def _release_stanza(
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
+def _project_version() -> str:
+    """The version being released, whose files the page offers for download."""
+
+    match = VERSION_PATTERN.search(PYPROJECT_PATH.read_text(encoding="utf-8"))
+    if match is None:
+        raise SystemExit(f"{PYPROJECT_PATH} names no version")
+    return match.group(1)
+
+
 def _landing_page(sources: RepositorySources) -> str:
     """Render the page a person sees when opening the repository URL."""
 
     page = LANDING_TEMPLATE_PATH.read_text(encoding="utf-8")
     for placeholder, value in (
+        ("@VERSION@", _project_version()),
         ("@URI@", sources.uri),
         ("@SUITE@", sources.suite),
         ("@COMPONENT@", sources.component),
@@ -291,6 +305,11 @@ def build(
     release_path.write_bytes(release)
     _sign(release_path, passphrase_file)
     shutil.copyfile(PUBLIC_KEY_PATH, repository / KEYRING_FILE_NAME)
+    for asset in sorted(SITE_DIRECTORY.rglob("*")):
+        if asset.is_file() and asset != LANDING_TEMPLATE_PATH:
+            target = repository / asset.relative_to(SITE_DIRECTORY)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(asset, target)
     (repository / LANDING_FILE_NAME).write_text(
         _landing_page(sources), encoding="utf-8"
     )

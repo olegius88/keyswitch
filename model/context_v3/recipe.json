@@ -149,10 +149,10 @@
   },
   "english_capital_curriculum": {
     "words_by_length": {
-      "2": 0,
-      "3": 0,
-      "4": 0,
-      "5": 0
+      "2": 107,
+      "3": 300,
+      "4": 300,
+      "5": 300
     },
     "frames_per_word": 2,
     "lowercase_contrast": true,
@@ -197,8 +197,18 @@
         "sample_weight": 1.0
       }
     },
-    "heads": {},
-    "scope": "The pair context-v3-b380007b5e3e of 0.64.0, every weight fixed and no head fitted: a reseal of the shipped pair for an engine change that changes no model (30.10.2026: input no hook of KeySwitch got is logged and nothing else). Its kept-neighbour question and every head, the resume head of corpus v79 among them, are carried, so the fit moves no weight, and the artifact is the shipped one byte for byte. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone) and the answers of the corpus v37 model (labels). The pair of 0.64.0: the pair of 0.63.0 with the resume head fitted onto it on corpus v79 (model/context_v3/frozen-base-b5ed6848d4ce.json, sha256 a35af45f0978)."
+    "heads": {
+      "cyrletter": {
+        "maximum_features": 3000
+      },
+      "dash": {
+        "maximum_features": 1500
+      },
+      "digitdot": {
+        "maximum_features": 1500
+      }
+    },
+    "scope": "The pair context-v3-b380007b5e3e of 0.64.0 and 0.64.1, every weight fixed: its kept-neighbour question and every head, the resume head of corpus v79 among them, are carried as shipped, and the Cyrillic-letter, dash and digit-dot heads are fitted. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone) and the answers of the corpus v37 model (labels). The Cyrillic-letter head: a Latin letter whose Cyrillic reading is a Russian word of one letter (а, и, с, в, к, у, о, я), the nearest letter before it Cyrillic, at a space or a sign, asked at its own boundary and again beside its next word (context_action_features.cyrletter_question); it reads the shared features once more and evidence of its own (the letter and its case, the word before it as such and how often it occurs, the boundary, the word after it and how it was given, signs of code, Latin letters and digits before it, Hunspell on each reading). Motivation: every one-letter row of the corpus sits in quarantine, so the frozen model had no opinion on such a letter and a lone letter is refused: `в` typed `d` in `разрабатывал и d документ` stayed (17 such letters of the owner's field batteries, 31.10.2026). The dash head: one or two leading dashes and letters of one script, digits after them allowed, in either reading (dash_question): the frozen model read the leading sign and turned `-v` after `git` into `-м` at p=0.9995, and left `-цфеср` where `-watch` was meant. The digit-dot head: digits with `ю` or `б` typed in the Russian layout, digits after them allowed (digit_dot_question): the dot or comma of the English layout pressed in Russian text (`2ю` for `2.`), a lone letter to the policy, which the engine now replaces in its own layout, leaving the Russian one on. The pair of 0.64.0: the pair of 0.63.0 with the resume head fitted onto it on corpus v79 (model/context_v3/frozen-base-b5ed6848d4ce.json, sha256 a35af45f0978)."
   },
   "letter_curriculum": {
     "term_sentences": 1500,
@@ -1103,5 +1113,105 @@
     "sample_weight": 1.0,
     "convert_weight": 0.75,
     "scope": "TRAIN, and DEVELOPMENT for the head's epoch: the questions about a short word right after Latin text the engine asked again once its next word was planned for conversion, while ru.stackoverflow messages of 2023 with such a word before a Russian word (every developer-chat question left out; tools/select_capture_messages.py resume) were typed the four ways a person types them (tools/mixed_typing.py capture; model/context_v3/captured/manifest-resume.json, schema 2), by question into TRAIN and DEVELOPMENT. A converted frame weighs convert_weight: 0.75 = keep_importance x kept frames / converted frames of TRAIN (4 x 475 / 2 544), so both answers weigh the same in the fit."
+  },
+  "cyrletter_curriculum": {
+    "captured": {
+      "train": [
+        [
+          "model/context_v3/captured/manifest-cyrletter.json",
+          "tatoeba-chat-cyrletter-train.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-cyrletter.json",
+          "tatoeba-cyrletter-train.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-cyrletter.json",
+          "so-cyrletter-russian-train.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-cyrletter.json",
+          "so-cyrletter-latin-train.jsonl.xz"
+        ]
+      ],
+      "development": [
+        [
+          "model/context_v3/captured/manifest-cyrletter.json",
+          "tatoeba-chat-cyrletter-dev.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-cyrletter.json",
+          "tatoeba-cyrletter-dev.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-cyrletter.json",
+          "so-cyrletter-russian-dev.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-cyrletter.json",
+          "so-cyrletter-latin-dev.jsonl.xz"
+        ]
+      ]
+    },
+    "sample_weight": 1.0,
+    "token_cap": 1500,
+    "convert_weight": 10.0,
+    "scope": "TRAIN, and DEVELOPMENT for the head's epoch: the questions about a Latin letter whose Cyrillic reading is a Russian word of one letter, after Russian text, the engine asked while Russian sentences of Tatoeba (as written and in chat style, 30 % under a previous message; only sentences the captured training questions were already typed from) and ru.stackoverflow messages of 2023 with such a word right after another Russian word were typed with the English layout coming on at that word (the slip_letter typing mode, and slip_letter_back, where the Russian layout is selected again before the next word), and ru.stackoverflow messages with a Latin letter of the class right after a Russian word (`язык C`, `витамин D`) were typed as meant with the word after a change by hand not held from correction (the unprotected typing mode; every developer-chat question left out; tools/select_capture_messages.py cyrletter-russian and cyrletter-latin; tools/mixed_typing.py capture; model/context_v3/captured/manifest-cyrletter.json, schema 2), by question and sentence into TRAIN and DEVELOPMENT. At most token_cap frames of one letter with one answer: `c` kept (the C language) and `d` converted would otherwise fill a third of each side. A converted frame weighs convert_weight: 3.4 = keep_importance x kept frames / converted frames of TRAIN after the cap (4 x 8 046 / 9 467), so both answers weigh the same in the fit."
+  },
+  "dash_curriculum": {
+    "captured": {
+      "train": [
+        [
+          "model/context_v3/captured/manifest-dash.json",
+          "so-dash-train.jsonl.xz"
+        ]
+      ],
+      "development": [
+        [
+          "model/context_v3/captured/manifest-dash.json",
+          "so-dash-dev.jsonl.xz"
+        ]
+      ]
+    },
+    "sample_weight": 1.0,
+    "token_cap": 600,
+    "convert_weight": 17.3,
+    "scope": "TRAIN, and DEVELOPMENT for the head's epoch: the questions about a command-line flag the engine asked while ru.stackoverflow messages of 2023 with such a flag (`-v`, `--force`; every developer-chat question left out; tools/select_capture_messages.py dash) were typed as meant with the word after a change by hand not held from correction (unprotected), with the change to English forgotten (forget_en) and starting in the other layout (start_wrong) (tools/mixed_typing.py capture; model/context_v3/captured/manifest-dash.json, schema 2), by question into TRAIN and DEVELOPMENT; at most token_cap frames of one flag with one answer. A converted frame weighs convert_weight = keep_importance x kept frames / converted frames of TRAIN, so both answers weigh the same."
+  },
+  "digitdot_curriculum": {
+    "captured": {
+      "train": [
+        [
+          "model/context_v3/captured/manifest-digitdot.json",
+          "so-digitdot-train.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-digitdot.json",
+          "leipzig-digitdot-train.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-digitdot.json",
+          "leipzig-digitdot-letter-train.jsonl.xz"
+        ]
+      ],
+      "development": [
+        [
+          "model/context_v3/captured/manifest-digitdot.json",
+          "so-digitdot-dev.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-digitdot.json",
+          "leipzig-digitdot-dev.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-digitdot.json",
+          "leipzig-digitdot-letter-dev.jsonl.xz"
+        ]
+      ]
+    },
+    "sample_weight": 1.0,
+    "token_cap": 600,
+    "convert_weight": 1.0,
+    "scope": "TRAIN, and DEVELOPMENT for the head's epoch: the questions about digits with `ю` or `б` typed in the Russian layout the engine asked while ru.stackoverflow messages of 2023 and Russian sentences of the Leipzig corpora with digits and a dot or a comma after a Russian word were typed with that sign on the key of the English layout (us_signs), and Leipzig sentences with digits and `б` after a Russian word (`класс 5б`) were typed as meant (tools/select_capture_messages.py digitdot and digitdot-letter; tools/mixed_typing.py capture; model/context_v3/captured/manifest-digitdot.json, schema 2), by question and sentence into TRAIN and DEVELOPMENT; at most token_cap frames of one token with one answer. A converted frame weighs convert_weight = keep_importance x kept frames / converted frames of TRAIN, so both answers weigh the same."
   }
 }

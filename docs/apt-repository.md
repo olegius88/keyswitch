@@ -11,7 +11,7 @@
 | --- | --- |
 | `packaging/debian/keyswitch.sources` | Единственное место, где записаны адрес, suite, компонент, архитектура и путь к ключу. Ставится как conffile в `/etc/apt/sources.list.d/keyswitch.sources` |
 | `packaging/keyswitch-archive-keyring.asc` | Открытый ключ репозитория; ставится conffile'ом по пути из поля `Signed-By` (`/etc/apt/keyrings/`) |
-| `packaging/apt-index.html` | Шаблон страницы, которую видит человек, открывший адрес репозитория |
+| `packaging/site/` | Страница продукта, которую видит человек, открывший адрес репозитория: `index.html` — шаблон (адрес, suite, компонент, архитектура, путь к ключу и версия выпуска подставляются при сборке), остальные файлы (`img/`) копируются как есть |
 | `tools/apt_repository.py` | `build` — сборка и подпись репозитория, `verify` — проверка готового дерева |
 | `tools/make-apt-signing-key.sh` | Создание ключа подписи и подсказка, какие секреты завести |
 | `.github/workflows/release.yml`, задание `apt-repository` | Публикация репозитория на Pages до создания выпуска |

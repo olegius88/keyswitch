@@ -70,7 +70,6 @@ from fixture_values.counts import (
     CORE_INJECTIONS_AFTER_SECOND_CORRECTION,
     CORE_REPEATED_MANUAL_CONVERSIONS,
     HISTORY_LIMIT_FIXTURE,
-    INJECTION_BOUNDARY_INDEX,
     NON_DEFAULT_MINIMUM_WORD_LENGTH,
 )
 from fixture_values.keys import (
@@ -873,7 +872,9 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(len(self.backend.injections), 1)
         self.assertEqual(self.backend.injections[0][1], 0)
 
-    def test_short_if_converts_after_pause_without_manual_intent(self) -> None:
+    def test_short_if_waits_at_a_pause_without_manual_intent(self) -> None:
+        # At a pause `ша` is as likely the start of `шаблоне` as `if` typed in the other layout (field logs,
+        # 29.10.2026): the curated rule no longer converts it there; the model and the next word decide.
         self.engine._update(current_group=1)
         with patch("keyswitch.engine.time.monotonic", return_value=CORE_SECOND_PAUSE_START_SECONDS):
             for index, character in enumerate("ша", start=SYNTHETIC_KEYCODE_BASE):
@@ -883,9 +884,7 @@ class EngineTests(unittest.TestCase):
 
         self.engine._maybe_correct_after_pause(now=CORE_SECOND_PAUSE_CHECK_SECONDS)
 
-        self.assertEqual(len(self.backend.injections), 1)
-        self.assertEqual(self.backend.injections[0][1], 0)
-        self.assertIsNone(self.backend.injections[0][INJECTION_BOUNDARY_INDEX])
+        self.assertEqual(self.backend.injections, [])
 
     def test_repeated_manual_conversions_teach_nothing_until_a_rule_is_added(self) -> None:
         """Only OK in the rule window teaches; repeating the fix does not."""

@@ -1,0 +1,171 @@
+{
+ "schema_version": 2,
+ "columns": [
+  "count",
+  "original",
+  "alternative",
+  "source_group",
+  "trigger",
+  "baseline_convert",
+  "source_known",
+  "target_known",
+  "score_delta",
+  "literal_tail",
+  "boundary_text",
+  "after_origin",
+  "before_origin",
+  "source_typo",
+  "target_typo",
+  "source_opening",
+  "target_opening",
+  "inside",
+  "before",
+  "after",
+  "role",
+  "label"
+ ],
+ "sources": [
+  {
+   "file": "so-digitdot-train.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "4000 messages with Latin words and 4000 Russian ones with digits and a dot or a comma after a Russian word, typed with the dot and the comma of a number on the keys of the English layout (us_signs); the digit-dot head's questions alone",
+   "recipe": {
+    "messages": "so-digitdot-train.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 4000,
+    "russian_share": 1.0,
+    "seed": "capture-digitdot-so-train",
+    "modes": [
+     "us_signs"
+    ],
+    "questions": "digitdot"
+   },
+   "sha256": "ba798689d11283a5faa1284251c721a76ed16733a6298f70f3a9cc400ccf8dc9",
+   "rows": 15864,
+   "unique": 15545
+  },
+  {
+   "file": "leipzig-digitdot-train.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY 4.0 (Leipzig Corpora Collection, .t/sources-2026-10-23/leipzig/LICENSE-RECEIPT.md)",
+   "origin": "Leipzig Corpora Collection, Russian news 2019-2024 and web 2019 (1M sentences each)",
+   "typing": "6000 Russian sentences with digits and a dot or a comma after a Russian word, typed as the ru.stackoverflow file; the digit-dot head's questions alone",
+   "recipe": {
+    "messages": "leipzig-digitdot-train.jsonl.gz",
+    "kinds": [
+     "prose"
+    ],
+    "count": 6000,
+    "russian_share": 1.0,
+    "seed": "capture-digitdot-leipzig-train",
+    "modes": [
+     "us_signs"
+    ],
+    "questions": "digitdot"
+   },
+   "sha256": "e976870d478c72cf872a22ae908a2513fd9b5e2e6ffdb8f890906f3c17b148f1",
+   "rows": 8902,
+   "unique": 8820
+  },
+  {
+   "file": "leipzig-digitdot-letter-train.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY 4.0 (Leipzig Corpora Collection, .t/sources-2026-10-23/leipzig/LICENSE-RECEIPT.md)",
+   "origin": "Leipzig Corpora Collection, Russian news 2019-2024 and web 2019 (1M sentences each)",
+   "typing": "up to 3000 Russian sentences with digits and `б` after a Russian word (`класс 5б`), typed as meant; the digit-dot head's questions alone",
+   "recipe": {
+    "messages": "leipzig-digitdot-letter-train.jsonl.gz",
+    "kinds": [
+     "prose"
+    ],
+    "count": 3000,
+    "russian_share": 1.0,
+    "seed": "capture-digitdot-letter-leipzig-train",
+    "modes": [
+     "correct"
+    ],
+    "questions": "digitdot"
+   },
+   "sha256": "fcaac4e2422e8eb3954b91f99c31d78aa0d6eb5209552a4b12b08d47cc119258",
+   "rows": 48,
+   "unique": 48
+  },
+  {
+   "file": "so-digitdot-dev.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "1000 messages with Latin words and 1000 Russian ones with digits and a dot or a comma after a Russian word, typed with the dot and the comma of a number on the keys of the English layout (us_signs); the digit-dot head's questions alone",
+   "recipe": {
+    "messages": "so-digitdot-dev.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 1000,
+    "russian_share": 1.0,
+    "seed": "capture-digitdot-so-dev",
+    "modes": [
+     "us_signs"
+    ],
+    "questions": "digitdot"
+   },
+   "sha256": "a466da64c8559b8d2d195619e3d47979dba97ca6d85b018f3a9be9ebb0d368ba",
+   "rows": 4110,
+   "unique": 4049
+  },
+  {
+   "file": "leipzig-digitdot-dev.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY 4.0 (Leipzig Corpora Collection, .t/sources-2026-10-23/leipzig/LICENSE-RECEIPT.md)",
+   "origin": "Leipzig Corpora Collection, Russian news 2019-2024 and web 2019 (1M sentences each)",
+   "typing": "1500 Russian sentences with digits and a dot or a comma after a Russian word, typed as the ru.stackoverflow file; the digit-dot head's questions alone",
+   "recipe": {
+    "messages": "leipzig-digitdot-dev.jsonl.gz",
+    "kinds": [
+     "prose"
+    ],
+    "count": 1500,
+    "russian_share": 1.0,
+    "seed": "capture-digitdot-leipzig-dev",
+    "modes": [
+     "us_signs"
+    ],
+    "questions": "digitdot"
+   },
+   "sha256": "8968b55f5dac30b9a272bac031fa6a51ca8b75c1191536278f741ca512c74319",
+   "rows": 2285,
+   "unique": 2278
+  },
+  {
+   "file": "leipzig-digitdot-letter-dev.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY 4.0 (Leipzig Corpora Collection, .t/sources-2026-10-23/leipzig/LICENSE-RECEIPT.md)",
+   "origin": "Leipzig Corpora Collection, Russian news 2019-2024 and web 2019 (1M sentences each)",
+   "typing": "up to 750 Russian sentences with digits and `б` after a Russian word (`класс 5б`), typed as meant; the digit-dot head's questions alone",
+   "recipe": {
+    "messages": "leipzig-digitdot-letter-dev.jsonl.gz",
+    "kinds": [
+     "prose"
+    ],
+    "count": 750,
+    "russian_share": 1.0,
+    "seed": "capture-digitdot-letter-leipzig-dev",
+    "modes": [
+     "correct"
+    ],
+    "questions": "digitdot"
+   },
+   "sha256": "5d343a7624d207f1bb0db1bf6d514bbf28820e394e6f8cdf95eb24c0b7c26b4d",
+   "rows": 16,
+   "unique": 16
+  }
+ ]
+}

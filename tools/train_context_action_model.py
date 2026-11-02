@@ -30,7 +30,8 @@ from unittest.mock import patch
 
 from keyswitch.context_action_features import (
     abbreviation_question, alnum_question, alone_question, attested_abbreviation, capitals_question, extract_action_features,
-    brief_question, brief_settled, dotted_question, first_question, hypothesis_question, joined_question,
+    brief_question, brief_settled, cyrletter_question, dash_question, digit_dot_question, dotted_question,
+    kept_context_reachable, first_question, hypothesis_question, joined_question,
     latin_abbreviation_question, letter_question, resume_question, russian_ending_bucket, russian_start_bucket, short_question,
     sign_question, slip_question,
     start_question,
@@ -78,7 +79,8 @@ from keyswitch.constants.models import (
     ALONE_HEAD_LETTERS,
     BRIEF_FEATURE_PREFIX, BRIEF_HEAD_LETTERS, DOTTED_FEATURE_PREFIX, FIRST_FEATURE_PREFIX, VARIABLE_FEATURE_PREFIX,
     HYPOTHESIS_FEATURE_PREFIX, RESUME_FEATURE_PREFIX, SHORT_FEATURE_PREFIX, SIGN_FEATURE_PREFIX, SLIP_FEATURE_PREFIX,
-    CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION,
+    CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION, CYRLETTER_FEATURE_PREFIX, DASH_FEATURE_PREFIX,
+    DIGIT_DOT_FEATURE_PREFIX,
     CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, JOINED_FEATURE_PREFIX,
     KEPT_CONTEXT_WORD_MAX_CHARACTERS, KEPT_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX, LETTER_FEATURE_PREFIX,
     PLANNED_CONTEXT_AFTER_MAX_CHARACTERS, PLANNED_CONTEXT_WORD_MAX_CHARACTERS, START_FEATURE_PREFIX, TERM_FEATURE_PREFIX,
@@ -2279,7 +2281,8 @@ def provenance() -> dict[str, str]:
         "tools/train_context_model.py", "model/context_v1/captured/manifest.json", "model/context_v3/captured/manifest.json",
         "model/context_v3/captured/manifest-hypothesis.json", "model/context_v3/captured/manifest-short.json",
         "model/context_v3/captured/manifest-slip.json", "model/context_v3/captured/manifest-sign.json",
-        "model/context_v3/captured/manifest-resume.json",
+        "model/context_v3/captured/manifest-resume.json", "model/context_v3/captured/manifest-cyrletter.json",
+        "model/context_v3/captured/manifest-dash.json", "model/context_v3/captured/manifest-digitdot.json",
         "tests/test_context_action_training.py", "tests/test_default_input_sequences.py",
         "tools/context_technical_corpus.py", "tools/merge_context_action_corpora.py",
         "tests/test_context_technical_corpus.py", "tests/test_context_action_merge.py",
@@ -2344,7 +2347,9 @@ HEAD_PREFIXES: Final = {"capitals": CAPITALS_FEATURE_PREFIX, "alone": ALONE_FEAT
                          "joined": JOINED_FEATURE_PREFIX, "term": TERM_FEATURE_PREFIX, "brief": BRIEF_FEATURE_PREFIX,
                          "first": FIRST_FEATURE_PREFIX, "variable": VARIABLE_FEATURE_PREFIX, "dotted": DOTTED_FEATURE_PREFIX,
                          "alnum": ALNUM_FEATURE_PREFIX, "hypothesis": HYPOTHESIS_FEATURE_PREFIX, "short": SHORT_FEATURE_PREFIX,
-                         "slip": SLIP_FEATURE_PREFIX, "sign": SIGN_FEATURE_PREFIX, "resume": RESUME_FEATURE_PREFIX}
+                         "slip": SLIP_FEATURE_PREFIX, "sign": SIGN_FEATURE_PREFIX, "resume": RESUME_FEATURE_PREFIX,
+                         "cyrletter": CYRLETTER_FEATURE_PREFIX, "dash": DASH_FEATURE_PREFIX,
+                         "digitdot": DIGIT_DOT_FEATURE_PREFIX}
 # A recipe without single-letter frames (the recipes before corpus v34).
 NO_LETTER_CURRICULUM: Final[dict[str, object]] = {"term_sentences": 0, "english_sentences": 0, "minimum_term_count": 0,
                                                   "sample_weight": 1.0}
@@ -2400,6 +2405,12 @@ def captured_head_curriculum(split: str, options: Mapping[str, object], question
             origin = item.after_origin
             if origin == "planned_next_conversion" and len(item.original) > PLANNED_CONTEXT_WORD_MAX_CHARACTERS:
                 origin = "field"
+            if origin == "kept_next_word" and not kept_context_reachable(item.original, item.trigger, item.boundary_text,
+                                                                         item.field.after):
+                # A next word kept as typed that the engine passes no further (a path of a hundred characters after
+                # `-p1`): no such question is asked.
+                counts["skipped_unreachable_kept"] += 1
+                continue
             if origin == "planned_next_conversion" and WORDS.match(item.field.after.lstrip()) is None:
                 # As in captured_source_curriculum: the engine plans a next word only once one was typed.
                 counts["skipped_planned_without_word"] += 1
@@ -2529,6 +2540,38 @@ def resume_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: fro
                                                      item.after_origin), "resume")
 
 
+def cyrletter_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                         options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """The Cyrillic-letter head's frames (captured_head_curriculum): a Latin letter whose Cyrillic reading is a Russian word
+    of one letter, after Russian text (cyrletter_question), at its own boundary and beside its next word, converted where a
+    word of Russian prose was typed in the English layout (`и d документ` for `и в документ`) and kept where a Latin letter
+    was meant as written after Russian text (`язык C`, `витамин D`)."""
+
+    return captured_head_curriculum(
+        split, options, lambda item: cyrletter_question(item.original, item.alternative, item.field.before, item.trigger),
+        "cyrletter")
+
+
+def dash_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                    options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """The dash head's frames (captured_head_curriculum): a command-line flag in either layout (dash_question), kept where
+    it was typed as meant after a command (`git -v`, `npm i --save`) and converted where it was typed with the Russian
+    layout on (`-м` for `-v`)."""
+
+    return captured_head_curriculum(
+        split, options, lambda item: dash_question(item.original, item.alternative, item.trigger), "dash")
+
+
+def digit_dot_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                         options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """The digit-dot head's frames (captured_head_curriculum): digits with `ю` typed in the Russian layout
+    (digit_dot_question), converted where the dot of the English layout was pressed in Russian text (the us_signs typing
+    mode, tools/mixed_typing.py)."""
+
+    return captured_head_curriculum(
+        split, options, lambda item: digit_dot_question(item.original, item.alternative, item.trigger), "digitdot")
+
+
 # The heads whose own frames of DEVELOPMENT choose their epoch (fit), by feature prefix: the name their epoch goes by in
 # the seal, the recipe's key of their curriculum, the curriculum, and the options of a recipe without it.
 OWN_EPOCH_HEADS: Final[dict[str, tuple[str, str, Callable[[str, Sequence[CorpusRow], frozenset[str], Mapping[str, object]],
@@ -2545,6 +2588,9 @@ OWN_EPOCH_HEADS: Final[dict[str, tuple[str, str, Callable[[str, Sequence[CorpusR
     SLIP_FEATURE_PREFIX: ("slip", "slip_curriculum", slip_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
     SIGN_FEATURE_PREFIX: ("sign", "sign_curriculum", sign_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
     RESUME_FEATURE_PREFIX: ("resume", "resume_curriculum", resume_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
+    CYRLETTER_FEATURE_PREFIX: ("cyrletter", "cyrletter_curriculum", cyrletter_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
+    DASH_FEATURE_PREFIX: ("dash", "dash_curriculum", dash_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
+    DIGIT_DOT_FEATURE_PREFIX: ("digitdot", "digitdot_curriculum", digit_dot_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
 }
 
 
@@ -2770,9 +2816,11 @@ def head_question(original: str, alternative: str, before: str, after: str, trig
     letter = LETTER_FEATURE_PREFIX in prefixes and letter_question(original, alternative, before)
     variable = VARIABLE_FEATURE_PREFIX in prefixes and variable_question(original, alternative, before, trigger)
     alnum = ALNUM_FEATURE_PREFIX in prefixes and alnum_question(original, alternative, before)
+    cyrletter = CYRLETTER_FEATURE_PREFIX in prefixes and cyrletter_question(original, alternative, before, trigger)
+    digit_dot = DIGIT_DOT_FEATURE_PREFIX in prefixes and digit_dot_question(original, alternative, trigger)
     if origin == "kept_next_word":
         sign = SIGN_FEATURE_PREFIX in prefixes and sign_question(original, alternative, before, after, trigger, origin)
-        return KEPT_FEATURE_PREFIX in prefixes or letter or variable or alnum or sign
+        return KEPT_FEATURE_PREFIX in prefixes or letter or variable or alnum or sign or cyrletter or digit_dot
     return (letter or (CAPITALS_FEATURE_PREFIX in prefixes and capitals_question(original, before))
             or (ABBREVIATION_FEATURE_PREFIX in prefixes and abbreviation_question(original, alternative, before))
             or (LATIN_ABBREVIATION_FEATURE_PREFIX in prefixes and latin_abbreviation_question(original, alternative, before))
@@ -2786,7 +2834,9 @@ def head_question(original: str, alternative: str, before: str, after: str, trig
             or (DOTTED_FEATURE_PREFIX in prefixes and dotted_question(original, alternative)) or alnum
             or (SHORT_FEATURE_PREFIX in prefixes and before_origin == "field" and short_question(original, before))
             or (SLIP_FEATURE_PREFIX in prefixes and before_origin == "field" and slip_question(original, before))
-            or (RESUME_FEATURE_PREFIX in prefixes and resume_question(original, alternative, before, after, origin)))
+            or (RESUME_FEATURE_PREFIX in prefixes and resume_question(original, alternative, before, after, origin))
+            or cyrletter or (DASH_FEATURE_PREFIX in prefixes and dash_question(original, alternative, trigger))
+            or digit_dot)
 
 
 def carried_prefixes(model: ContextModel) -> frozenset[str]:
@@ -3159,6 +3209,15 @@ def tail_curricula(inputs: FitInputs) -> tuple[list[ActionRow], dict[str, object
     resume, resume_report = resume_curriculum(
         TRAIN, inputs.source_rows[TRAIN], inputs.refused,
         cast(dict[str, object], options.get("resume_curriculum", NO_CAPTURED_HEAD_CURRICULUM)))
+    cyrletter, cyrletter_report = cyrletter_curriculum(
+        TRAIN, inputs.source_rows[TRAIN], inputs.refused,
+        cast(dict[str, object], options.get("cyrletter_curriculum", NO_CAPTURED_HEAD_CURRICULUM)))
+    dash, dash_report = dash_curriculum(
+        TRAIN, inputs.source_rows[TRAIN], inputs.refused,
+        cast(dict[str, object], options.get("dash_curriculum", NO_CAPTURED_HEAD_CURRICULUM)))
+    digitdot, digitdot_report = digit_dot_curriculum(
+        TRAIN, inputs.source_rows[TRAIN], inputs.refused,
+        cast(dict[str, object], options.get("digitdot_curriculum", NO_CAPTURED_HEAD_CURRICULUM)))
     reports: dict[str, object] = {
         "kept_neighbour_curriculum": kept_report, "counted_token_curriculum": counted_report, "letter_curriculum": letter_report,
         "abbreviation_curriculum": abbreviation_report, "latin_abbreviation_curriculum": latin_abbreviation_report,
@@ -3166,14 +3225,15 @@ def tail_curricula(inputs: FitInputs) -> tuple[list[ActionRow], dict[str, object
         "brief_curriculum": brief_report, "first_curriculum": first_report, "variable_curriculum": variable_report,
         "dotted_curriculum": dotted_report, "alnum_curriculum": alnum_report, "hypothesis_curriculum": hypothesis_report,
         "short_curriculum": short_report, "slip_curriculum": slip_report, "sign_curriculum": sign_report,
-        "resume_curriculum": resume_report}
+        "resume_curriculum": resume_report, "cyrletter_curriculum": cyrletter_report, "dash_curriculum": dash_report,
+        "digitdot_curriculum": digitdot_report}
     # A head whose own frames choose its epoch takes its TRAIN frames from here too. The sign head was left out, and its
     # captured TRAIN files were never read: it was fitted on 138 frames other curricula held (corpus v76).
     missing = sorted({key for _label, key, _curriculum, _absent in OWN_EPOCH_HEADS.values()} - set(reports))
     if missing:
         raise ValueError(f"no TRAIN frames are framed for {missing}")
     return [*kept, *counted, *letter, *abbreviation, *latin_abbreviation, *unknown, *joined, *term, *brief, *first, *variable, *dotted,
-            *alnum, *hypothesis, *short, *slip, *sign, *resume], reports
+            *alnum, *hypothesis, *short, *slip, *sign, *resume, *cyrletter, *dash, *digitdot], reports
 
 
 def prepared_frames(rows: Sequence[ActionRow], spans: SpanCurriculum, split: str) -> list[tuple[str, ActionRow | SpanFrame]]:

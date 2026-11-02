@@ -18,6 +18,9 @@ RESET_BUTTON_FONT_SIZE_POINTS: Final = 8
 DESCRIPTION_INDENT_PIXELS: Final = 24
 DESCRIPTION_MARGIN_PIXELS: Final = 12
 DESCRIPTION_MINIMUM_WRAP_PIXELS: Final = 120
+# A setting's title beside its control wraps down to this width: the pause delay's title shares a narrow column
+# with its number box.
+SETTING_TITLE_MINIMUM_WRAP_PIXELS: Final = 48
 DESCRIPTION_INITIAL_WRAP_PIXELS: Final = 260
 PAGE_PADDING_X_PIXELS: Final = 30
 # Horizontal page padding applies on both sides.

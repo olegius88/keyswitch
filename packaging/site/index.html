@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KeySwitch — исправление раскладки EN/RU для Windows, Linux и macOS</title>
+<meta name="description" content="KeySwitch исправляет слова, набранные в неверной раскладке: ghbdtn → привет. Свободная программа для Windows, Ubuntu и macOS; распознавание идёт на вашем компьютере.">
+<link rel="icon" href="img/keyswitch.svg" type="image/svg+xml">
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7fb; --surface: #ffffff; --text: #1b2036; --muted: #5b6380; --line: #e2e5f0;
+  --accent: #4f5bd5; --accent-2: #7c5cff; --accent-text: #ffffff; --code: #eef0f8; --hero: #1b2340;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #11141f; --surface: #191d2b; --text: #e7e9f3; --muted: #a2a8c3; --line: #2a3045;
+    --accent: #7d86ff; --accent-2: #9b82ff; --accent-text: #0d1020; --code: #222740; --hero: #0b0e19;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: var(--accent); }
+code, pre { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+code { background: var(--code); padding: 0.05em 0.35em; border-radius: 4px; font-size: 0.93em; overflow-wrap: anywhere; }
+pre { background: var(--code); padding: 1rem; border-radius: 10px; overflow-x: auto; font-size: 0.88rem; line-height: 1.5; }
+pre code { background: none; padding: 0; overflow-wrap: normal; }
+.wrap { max-width: 68rem; margin: 0 auto; padding: 0 1.25rem; }
+header.top { position: sticky; top: 0; z-index: 2; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+header.top .wrap { display: flex; align-items: center; gap: 1.25rem; height: 3.5rem; }
+.brand { display: flex; align-items: center; gap: 0.55rem; font-weight: 700; color: var(--text); text-decoration: none; font-size: 1.1rem; }
+.brand img { width: 1.9rem; height: 1.9rem; }
+nav { margin-left: auto; display: flex; gap: 1.1rem; flex-wrap: wrap; font-size: 0.95rem; }
+nav a { color: var(--muted); text-decoration: none; }
+nav a:hover { color: var(--text); }
+.hero { background: radial-gradient(1200px 500px at 80% -10%, #3b3fa0 0%, transparent 60%), linear-gradient(160deg, var(--hero), #232a5c); color: #fff; }
+.hero .wrap { display: grid; grid-template-columns: 1.15fr 1fr; gap: 2.5rem; align-items: center; padding-top: 4rem; padding-bottom: 4rem; }
+.hero h1 { font-size: clamp(2.2rem, 5vw, 3.4rem); line-height: 1.1; margin: 0 0 1rem; }
+.hero p.lead { font-size: 1.2rem; color: #d6daf5; margin: 0 0 1.6rem; max-width: 34rem; }
+.buttons { display: flex; flex-wrap: wrap; gap: 0.7rem; }
+.button { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1.2rem; border-radius: 10px; font-weight: 600; text-decoration: none; border: 1px solid transparent; }
+.button.primary { background: linear-gradient(135deg, #7c5cff, #3b82f6); color: #fff; }
+.button.ghost { border-color: rgba(255, 255, 255, 0.35); color: #fff; }
+.button:hover { filter: brightness(1.08); }
+.hero code { background: rgba(255, 255, 255, 0.16); color: #fff; }
+.meta { margin-top: 1.1rem; font-size: 0.9rem; color: #b9bfe4; }
+.demo { background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 16px; padding: 1.4rem; }
+.demo .label { font-size: 0.85rem; color: #b9bfe4; margin-bottom: 0.6rem; }
+.field { position: relative; height: 3.4rem; background: #fff; color: #1b2036; border-radius: 10px; font: 1.35rem/3.4rem ui-monospace, Consolas, monospace; padding: 0 1rem; overflow: hidden; }
+.field span { position: absolute; left: 1rem; top: 0; white-space: nowrap; }
+.field .typed { color: #b3261e; animation: typed 6s infinite; }
+.field .fixed { color: #1b2036; opacity: 0; animation: fixed 6s infinite; }
+@keyframes typed { 0%, 42% { opacity: 1; } 50%, 100% { opacity: 0; } }
+@keyframes fixed { 0%, 46% { opacity: 0; } 54%, 96% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .field .typed { display: none; } .field .fixed { opacity: 1; animation: none; } }
+.layouts { display: flex; gap: 0.5rem; margin-top: 0.9rem; font-size: 0.85rem; color: #d6daf5; flex-wrap: wrap; }
+.layouts b { background: rgba(255, 255, 255, 0.14); border-radius: 6px; padding: 0.1rem 0.5rem; font-weight: 600; }
+section { padding: 3.5rem 0; }
+section h2 { font-size: 1.8rem; margin: 0 0 0.6rem; }
+section p.sub { color: var(--muted); margin: 0 0 2rem; max-width: 46rem; }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 1.2rem 1.25rem; }
+.card h3 { margin: 0 0 0.4rem; font-size: 1.05rem; }
+.card p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+.shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr)); gap: 1rem; }
+.shots a { display: block; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: var(--surface); text-decoration: none; color: var(--muted); }
+.shots img { display: block; width: 100%; height: auto; }
+.shots span { display: block; padding: 0.55rem 0.8rem; font-size: 0.9rem; }
+.platforms { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; align-items: start; }
+.platform h3 { margin-top: 0; }
+.platform ul { padding-left: 1.1rem; margin: 0.4rem 0 0.8rem; }
+.platform li { margin: 0.25rem 0; }
+.note { font-size: 0.9rem; color: var(--muted); }
+.linux { margin-top: 1rem; }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+footer { border-top: 1px solid var(--line); padding: 2rem 0 3rem; color: var(--muted); font-size: 0.92rem; }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 1.2rem; justify-content: space-between; }
+@media (max-width: 860px) {
+  .hero .wrap, .split { grid-template-columns: minmax(0, 1fr); }
+  .grid, .platforms { grid-template-columns: minmax(0, 1fr); }
+  nav { display: none; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="img/keyswitch.svg" alt="">KeySwitch</a>
+    <nav>
+      <a href="#features">Возможности</a>
+      <a href="#screenshots">Скриншоты</a>
+      <a href="#install">Установка</a>
+      <a href="#privacy">Конфиденциальность</a>
+      <a href="#english">English</a>
+      <a href="https://github.com/olegius88/keyswitch">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<div class="hero" id="top">
+  <div class="wrap">
+    <div>
+      <h1>Набирайте, не глядя на раскладку</h1>
+      <p class="lead">KeySwitch исправляет слова, набранные в неверной раскладке: <code>ghbdtn</code> становится «привет», <code>руддщ</code> — «hello». Работает в Windows, Ubuntu и macOS; распознавание идёт на вашем компьютере.</p>
+      <div class="buttons">
+        <a class="button primary" href="https://github.com/olegius88/keyswitch/releases/download/v@VERSION@/KeySwitch-Setup-@VERSION@-x64.exe">Скачать для Windows</a>
+        <a class="button ghost" href="#install">Все платформы</a>
+        <a class="button ghost" href="https://github.com/olegius88/keyswitch">Исходный код</a>
+      </div>
+      <div class="meta">Версия @VERSION@ · свободная программа, GPL-3.0-or-later · <a href="https://github.com/olegius88/keyswitch/blob/main/CHANGELOG.md" style="color:inherit">что нового</a></div>
+    </div>
+    <div class="demo" aria-label="Пример исправления">
+      <div class="label">Набрано в английской раскладке — исправлено после паузы</div>
+      <div class="field"><span class="typed">ghbdtn? rfr ltkf</span><span class="fixed">привет, как дела</span></div>
+      <div class="layouts"><b>EN</b><span>→</span><b>RU</b><span>раскладка переключается вместе с исправлением</span></div>
+    </div>
+  </div>
+</div>
+
+<main>
+<section id="features">
+  <div class="wrap">
+    <h2>Что умеет</h2>
+    <p class="sub">Решение «оставить, исправить или подождать следующее слово» принимают небольшие обученные модели, которые учитывают соседние слова. Программа не дообучается на вашем наборе и не отправляет его в сеть.</p>
+    <div class="grid">
+      <div class="card"><h3>После пробела, знака или паузы</h3><p>Слово исправляется, как только оно закончено: пробелом, знаком препинания или паузой в наборе (0,7 с, настраивается).</p></div>
+      <div class="card"><h3>Ранняя смена раскладки</h3><p>Если начало слова уже ясно, раскладка меняется до его конца: <code>ghbd</code> → «прив», дальше вы печатаете по-русски.</p></div>
+      <div class="card"><h3>Учитывает контекст</h3><p>Короткие и неоднозначные слова решаются по соседям; при сомнении программа ждёт следующее слово.</p></div>
+      <div class="card"><h3>Клавиша Pause</h3><p>Преобразует последнее слово вручную, а повторное нажатие возвращает его обратно. Клавишу можно назначить другую.</p></div>
+      <div class="card"><h3>Отмена и пауза</h3><p><code>Ctrl+Alt+Z</code> отменяет последнее исправление в течение 10 секунд, <code>Ctrl+Alt+P</code> приостанавливает работу.</p></div>
+      <div class="card"><h3>Исключения и правила</h3><p>Программы и слова, которые не трогать; правила для отдельных слов — по двойному нажатию Pause.</p></div>
+      <div class="card"><h3>Регистр и знаки</h3><p><code>Ghbdtn</code> → «Привет»; запятые, точки и кавычки в словах другой раскладки исправляются вместе со словом.</p></div>
+      <div class="card"><h3>Индикатор EN/RU</h3><p>Буквы или флаги в области уведомлений, меню по щелчку, светлая и тёмная тема, уведомления и звук.</p></div>
+      <div class="card"><h3>Обновления</h3><p>В Windows новая версия ставится сама после проверки SHA-256, в Ubuntu приходит через APT. Всё отключается в настройках.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="screenshots" style="background: var(--surface); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);">
+  <div class="wrap">
+    <h2>Скриншоты</h2>
+    <p class="sub">Окно настроек в Windows 11. В macOS окно то же, в Ubuntu — нативное окно GTK.</p>
+    <div class="shots">
+      <a href="img/windows-overview.png"><img src="img/windows-overview.png" alt="Обзор: исправление ghbdtn в привет в тестовом поле" loading="lazy" width="1080" height="752"><span>Обзор и тестовое поле</span></a>
+      <a href="img/windows-auto.png"><img src="img/windows-auto.png" alt="Настройки автокоррекции" loading="lazy" width="1080" height="752"><span>Автокоррекция</span></a>
+      <a href="img/windows-hotkeys.png"><img src="img/windows-hotkeys.png" alt="Горячие клавиши" loading="lazy" width="1080" height="752"><span>Горячие клавиши</span></a>
+      <a href="img/windows-appearance.png"><img src="img/windows-appearance.png" alt="Внешний вид и система" loading="lazy" width="1080" height="752"><span>Внешний вид и система</span></a>
+      <a href="img/windows-about.png"><img src="img/windows-about.png" alt="О программе" loading="lazy" width="1080" height="752"><span>О программе</span></a>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <h2>Установка</h2>
+    <p class="sub">Версия @VERSION@. Все файлы и их контрольные суммы (<code>SHA256SUMS</code>) — на <a href="https://github.com/olegius88/keyswitch/releases/tag/v@VERSION@">странице выпуска</a>.</p>
+    <div class="platforms">
+      <div class="card platform">
+        <h3>Windows</h3>
+        <p>Установка для текущего пользователя, без прав администратора.</p>
+        <ul>
+          <li><a href="https://github.com/olegius88/keyswitch/releases/download/v@VERSION@/KeySwitch-Setup-@VERSION@-x64.exe">Установщик x64</a> — Windows 10/11</li>
+          <li><a href="https://github.com/olegius88/keyswitch/releases/download/v@VERSION@/KeySwitch-Setup-@VERSION@-arm64.exe">Установщик ARM64</a> — Windows 11 на ARM</li>
+          <li><a href="https://github.com/olegius88/keyswitch/releases/download/v@VERSION@/KeySwitch-Setup-@VERSION@-x86.exe">Установщик x86</a> — 32-битная Windows 10</li>
+        </ul>
+        <p class="note">Без установки: архивы <a href="https://github.com/olegius88/keyswitch/releases/download/v@VERSION@/KeySwitch-@VERSION@-windows-x64.zip">x64</a>, <a href="https://github.com/olegius88/keyswitch/releases/download/v@VERSION@/KeySwitch-@VERSION@-windows-arm64.zip">ARM64</a>, <a href="https://github.com/olegius88/keyswitch/releases/download/v@VERSION@/KeySwitch-@VERSION@-windows-x86.zip">x86</a> — распакуйте и запустите <code>KeySwitch.exe</code>. Файлы пока не подписаны, поэтому SmartScreen может предупредить: «Подробнее» → «Выполнить в любом случае».</p>
+      </div>
+      <div class="card platform">
+        <h3>macOS 13 и новее</h3>
+        <p>Подписано Developer ID и нотаризовано Apple.</p>
+        <ul>
+          <li><a href="https://github.com/olegius88/keyswitch/releases/download/v@VERSION@/KeySwitch-@VERSION@-macos-arm64.zip">Apple Silicon</a> (M1 и новее)</li>
+          <li><a href="https://github.com/olegius88/keyswitch/releases/download/v@VERSION@/KeySwitch-@VERSION@-macos-x86_64.zip">Intel</a></li>
+        </ul>
+        <p class="note">Перенесите <code>KeySwitch.app</code> в «Программы». При первом запуске программа попросит разрешение «Универсальный доступ» — без него она не видит клавиатуру. Новые версии скачиваются отсюда же.</p>
+      </div>
+      <div class="card platform">
+        <h3>Ubuntu</h3>
+        <p>X11 и Wayland (GNOME, KDE Plasma 6, sway), amd64.</p>
+        <ul>
+          <li><a href="https://github.com/olegius88/keyswitch/releases/download/v@VERSION@/keyswitch_@VERSION@_amd64.deb">Пакет .deb</a>: <code>sudo apt install ./keyswitch_@VERSION@_amd64.deb</code></li>
+        </ul>
+        <p class="note">Пакет сам подключает этот подписанный репозиторий APT, и новые версии приходят вместе с обновлениями системы. В сеансе Wayland доступ к клавиатурам включается один раз командой <code>sudo keyswitch --enable-wayland-input</code>.</p>
+      </div>
+    </div>
+
+    <div class="card linux">
+      <h3>Репозиторий APT</h3>
+      <p>Здесь лежат подписанные пакеты KeySwitch для Ubuntu: <code>@SUITE@ @COMPONENT@</code>, архитектура <code>@ARCHITECTURE@</code>. Команды ниже ставят KeySwitch сразу из репозитория, без ручной загрузки <code>.deb</code>:</p>
+<pre><code>sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL @URI@@KEYRING_FILE@ | sudo tee @KEYRING_PATH@ &gt;/dev/null
+sudo tee /etc/apt/sources.list.d/keyswitch.sources &lt;&lt;'EOF'
+Types: deb
+URIs: @URI@
+Suites: @SUITE@
+Components: @COMPONENT@
+Architectures: @ARCHITECTURE@
+Signed-By: @KEYRING_PATH@
+EOF
+sudo apt update &amp;&amp; sudo apt install keyswitch</code></pre>
+      <p class="note">Чтобы перестать получать обновления отсюда, добавьте <code>Enabled: no</code> в <code>/etc/apt/sources.list.d/keyswitch.sources</code> или удалите этот файл.</p>
+    </div>
+  </div>
+</section>
+
+<section id="privacy" style="background: var(--surface); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);">
+  <div class="wrap split">
+    <div>
+      <h2>Конфиденциальность</h2>
+      <p>Нажатия клавиш, слова и решения моделей обрабатываются на том компьютере, где запущен KeySwitch. Набранный текст, правила, история и журнал никуда не отправляются. В памяти находятся текущее слово и до 512 символов недавнего текста поля; в историю попадают только пары вида <code>ghbdtn → привет</code>.</p>
+      <p>Единственные сетевые запросы — проверка новых версий на GitHub (её можно выключить) и, в Ubuntu, обращения APT к этому репозиторию.</p>
+    </div>
+    <div>
+      <h2>Свободная программа</h2>
+      <p>KeySwitch распространяется на условиях <a href="https://github.com/olegius88/keyswitch/blob/main/LICENSE">GNU GPL 3.0 или более поздней версии</a>. Исходный код, модели, правила их обучения и проверки открыты.</p>
+      <p><a href="https://github.com/olegius88/keyswitch">Репозиторий</a> · <a href="https://github.com/olegius88/keyswitch/blob/main/CHANGELOG.md">Список изменений</a> · <a href="https://github.com/olegius88/keyswitch/wiki">Вики для разработчиков</a> · <a href="https://github.com/olegius88/keyswitch/issues">Сообщить о проблеме</a></p>
+    </div>
+  </div>
+</section>
+
+<section id="english">
+  <div class="wrap">
+    <h2>English</h2>
+    <p>KeySwitch fixes words typed in the wrong keyboard layout between English and Russian (<code>ghbdtn</code> → «привет», <code>руддщ</code> → “hello”) and switches the system layout with them, on Windows, Ubuntu (X11 and Wayland) and macOS. Small trained models decide every word on your computer; nothing you type leaves it. Free software under GPL-3.0-or-later.</p>
+    <p>Download version @VERSION@ above or from the <a href="https://github.com/olegius88/keyswitch/releases/tag/v@VERSION@">release page</a>. This address is also the signed APT repository for Ubuntu (suite <code>@SUITE@</code>, component <code>@COMPONENT@</code>, architecture <code>@ARCHITECTURE@</code>): an installed package registers it itself, and the commands in the APT section install straight from here. To stop taking updates from it, add <code>Enabled: no</code> to <code>/etc/apt/sources.list.d/keyswitch.sources</code> or delete the file.</p>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>KeySwitch @VERSION@ · GPL-3.0-or-later</span>
+    <span><a href="https://github.com/olegius88/keyswitch">Source code and releases</a></span>
+  </div>
+</footer>
+</body>
+</html>

@@ -46,6 +46,15 @@ from .constants.models import (
     BRIEF_SETTLED_MIN_COUNT,
     BRIEF_SETTLED_OTHER_MAXIMUM,
     CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS,
+    CYRLETTER_FEATURE_PREFIX,
+    CYRLETTER_HEAD_TRIGGERS,
+    DASH_FEATURE_PREFIX,
+    DASH_HEAD_MAX_DASHES,
+    DASH_HEAD_TRIGGERS,
+    DIGIT_DOT_FEATURE_PREFIX,
+    DIGIT_DOT_HEAD_TRIGGERS,
+    DIGIT_DOT_SIGN_LETTERS,
+    DIGIT_DOT_SIGNS,
     DOTTED_FEATURE_PREFIX,
     DOTTED_PART_MAX_LETTERS,
     FIRST_FEATURE_PREFIX,
@@ -299,6 +308,15 @@ def _frequency_features(features: dict[str, float], item: ContextEvidence, direc
     features[f"{frequency}:{latin_bucket}:{cyrillic_bucket}:{context}:direction:{direction}"] = 1.0
 
 
+def kept_context_reachable(original: str, trigger: str, boundary_text: str, after: str) -> bool:
+    """Whether a word can be asked again beside a next word kept as typed: a short word ended by a space, and a next word
+    of at most PLANNED_CONTEXT_AFTER_MAX_CHARACTERS with no space in it."""
+
+    return (0 < len(original) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS and trigger == "space" and boundary_text == " "
+            and bool(after) and len(after) <= PLANNED_CONTEXT_AFTER_MAX_CHARACTERS
+            and not any(char.isspace() for char in after))
+
+
 def extract_action_features(item: ContextEvidence) -> dict[str, float]:
     """Describe each reading separately; no token-specific conversion rules."""
 
@@ -310,12 +328,8 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
     if item.before_origin not in ("field", "planned_previous_reading") or (
             item.before_origin == "planned_previous_reading" and origin not in ("none", "field")):
         raise ValueError("invalid left-context origin")
-    if origin == "kept_next_word" and (
-        not 0 < len(item.original) <= KEPT_CONTEXT_WORD_MAX_CHARACTERS
-        or item.trigger != "space" or item.boundary_text != " "
-        or not item.field.after or len(item.field.after) > PLANNED_CONTEXT_AFTER_MAX_CHARACTERS
-        or any(char.isspace() for char in item.field.after)
-    ):
+    if origin == "kept_next_word" and not kept_context_reachable(item.original, item.trigger, item.boundary_text,
+                                                                 item.field.after):
         raise ValueError("unreachable kept right context")
     if origin == "planned_next_conversion" and (
         not 0 < len(item.original) <= PLANNED_CONTEXT_WORD_MAX_CHARACTERS
@@ -452,6 +466,13 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
             # Nor a token of letters and digits: asked again with `как` kept after it, the question kept `м67` at p=1.00
             # where `v67` was meant (the owner's typing, 19.10.2026).
             kept.update(_alnum_evidence(item))
+        if cyrletter_question(item.original, item.alternative, item.field.before, item.trigger):
+            # Nor a Latin letter meant as a Russian word of one letter after Russian text, waiting before a word typed in
+            # the Russian layout (`d когда`): the Cyrillic-letter head answers it beside every next word.
+            kept.update(_cyrletter_evidence(item, direction, kept))
+        if digit_dot_question(item.original, item.alternative, item.trigger):
+            # Nor digits with `ю` or `б` waiting before a word kept as typed (`2ю потом`): the digit-dot head answers there too.
+            kept.update(_digit_dot_evidence(item, direction, kept))
         return kept
     result = {name: value for name, value in features.items() if value}
     if capitals_question(item.original, item.field.before):
@@ -460,6 +481,19 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         # `BP` in English prose read `ИЗ` at p=0.997, and the frames that kept it moved the weights
         # the Latin keys of `не` and `что` share (`yt`, `xnj` stayed as typed).
         result.update({CAPITALS_FEATURE_PREFIX + name: value for name, value in list(result.items())})
+    if cyrletter_question(item.original, item.alternative, item.field.before, item.trigger):
+        # A Latin letter whose Cyrillic reading is a Russian word of one letter, after Russian text: every one-letter row of
+        # the corpus sits in quarantine, and the frozen model's verdict on `d` in `разрабатывал и d документ` was no opinion
+        # (convert at p=0.998 in the owner's field, keep at 0.93 on public text). The Cyrillic-letter head answers it.
+        result.update(_cyrletter_evidence(item, direction, features))
+    if digit_dot_question(item.original, item.alternative, item.trigger):
+        # Digits with `ю` or `б` typed in the Russian layout: a lone letter to the frozen model, which waited on `2ю` at
+        # p=0.999 where `2.` was meant (the owner's typing). The digit-dot head answers it.
+        result.update(_digit_dot_evidence(item, direction, features))
+    if dash_question(item.original, item.alternative, item.trigger):
+        # A command-line flag in either layout: the frozen model read its leading sign, and `-v` after `git` became `-м` at
+        # p=0.9995 (the owner's typing). The dash head answers it.
+        result.update(_dash_evidence(item, direction, features))
     if resume_question(item.original, item.alternative, item.field.before, item.field.after, origin):
         # A short word right after Latin text asked again once its next word is planned for conversion: no head answered
         # it, and with Hunspell, which knows `f` and `z` as English words, the frozen model kept `а` in `seek() , f там`
@@ -1099,6 +1133,153 @@ def _variable_evidence(item: ContextEvidence) -> dict[str, float]:
     names = ("bias", letter, boundary, f"word:{previous}", *rest, f"{letter}:{boundary}",
              *(f"{head}:{name}" for head in (letter, boundary) for name in rest))
     return {f"{VARIABLE_FEATURE_PREFIX}{name}": 1.0 for name in names}
+
+
+def cyrletter_question(original: str, alternative: str, before: str, trigger: str) -> bool:
+    """One Latin letter whose Cyrillic reading is a Russian word of one letter (short_words.TRUSTED_SINGLE_LETTER_WORDS,
+    either case), the nearest letter before it Cyrillic, ended by a space or a sign (CYRLETTER_HEAD_TRIGGERS): `в` typed
+    `d` in `разрабатывал и d документ` and `и` typed `b` in `посмотри b добавь`, where the English layout came on in the
+    middle of Russian text, and a Latin letter meant as written after Russian text (`язык C`, `витамин D`, `функция f`).
+    The mirror of the variable head's class. Any origin of the next word: the engine asks the letter at its own boundary,
+    again beside its next word once that is planned for conversion, and beside a next word kept as typed. With no letter
+    before it the message-start rule speaks; after Latin text the single-letter and resume heads answer."""
+
+    from .short_words import TRUSTED_SINGLE_LETTER_WORDS
+
+    if (len(original) != 1 or not original.isascii() or not original.isalpha() or len(alternative) != 1
+            or alternative.casefold() not in TRUSTED_SINGLE_LETTER_WORDS or trigger not in CYRLETTER_HEAD_TRIGGERS):
+        return False
+    letters = [char for char in before[-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS:] if char.isalpha()]
+    return bool(letters) and _cyrillic_letter(letters[-1])
+
+
+def _cyrletter_evidence(item: ContextEvidence, direction: str, features: dict[str, float]) -> dict[str, float]:
+    """The Cyrillic-letter head's evidence: the features it is asked with once more under its own names, so that it weighs
+    the lexicons' and Hunspell's verdicts in its class apart, and evidence of its own: the letter and its case, the
+    boundary (a space, or the sign that ended it), how often the word before it and the word after it occur, how the word
+    after it was given, whether the text before holds signs of code (VARIABLE_CODE_SIGNS), Latin letters or digits, and
+    whether Hunspell knows each reading; the letter, its case and the next word's origin are each read with the rest. In
+    Russian prose the letter is a word of it typed in the English layout (`и d документ`); in technical prose a Latin
+    letter is meant as written (`язык C`, `от a до b`)."""
+
+    from .context_model import _term_frequency
+
+    table = _term_frequency()
+    previous = (item.field.before.split() or [""])[-1]
+    # Signs of code, Latin letters and digits in the word right before it: a Latin letter is named right after them
+    # (`x = 2 C`), and a digit two words back said nothing of `если d` (`в 2 1 если d документ`, the owner's typing).
+    tail = previous
+    following = (item.field.after.split() or [""])[0]
+    letter = f"letter:{item.original.casefold()}"
+    case = f"case:{'upper' if item.original.isupper() else 'lower'}"
+    after = f"after:{item.after_origin}:{_script(following.casefold())}"
+    spelled = (int(bool(item.source_score and item.source_score.spell_known)),
+               int(bool(item.target_score and item.target_score.spell_known)))
+    rest = (f"boundary:{item.trigger}:{item.boundary_text.strip() if item.trigger == 'punctuation' else ''}",
+            f"code:{int(any(char in VARIABLE_CODE_SIGNS for char in tail))}",
+            f"latin:{int(any('a' <= char.casefold() <= 'z' for char in tail))}",
+            f"digit:{int(any(char.isdigit() for char in tail))}", f"spell:{spelled[0]}:{spelled[1]}",
+            *_neighbour_names("previous_word", previous, table), *_neighbour_names("next_word", following, table))
+    # The word before it as such: after `и` or `что` a Russian word of one letter comes often, after `язык` or `функция` a
+    # Latin letter named by it (candidate v81 e1, which read only how often that word occurs, left three in four of its
+    # converted development frames a suggestion at the letter's own space).
+    word = f"word:{''.join(char for char in previous if char.isalpha()).casefold() or 'none'}"
+    names = ("bias", letter, case, after, word, *rest, f"{letter}:{case}", f"{letter}:{after}", f"{letter}:{word}",
+             *(f"{head}:{name}" for head in (letter, case, after) for name in rest))
+    return {**{CYRLETTER_FEATURE_PREFIX + name: value for name, value in features.items() if value},
+            **{f"{CYRLETTER_FEATURE_PREFIX}{name}:direction:{direction}": 1.0 for name in names}}
+
+
+def digit_dot_question(original: str, alternative: str, trigger: str) -> bool:
+    """Digits, then `ю` typed in the Russian layout (DIGIT_DOT_SIGN_LETTERS), digits after it allowed, whose other reading
+    has the dot there (DIGIT_DOT_SIGNS), at a space (DIGIT_DOT_HEAD_TRIGGERS): `2ю` for `2.` and `5ю2` for `5.2` where a
+    person used to the English layout pressed its dot key in Russian text."""
+
+    if trigger not in DIGIT_DOT_HEAD_TRIGGERS or len(original) != len(alternative):
+        return False
+    head = _leading_digits(original)
+    rest = original[head + 1:]
+    return (0 < head < len(original) and original[head] in DIGIT_DOT_SIGN_LETTERS and alternative[head] in DIGIT_DOT_SIGNS
+            and alternative[:head] == original[:head] and alternative[head + 1:] == rest and (rest == "" or rest.isdigit()))
+
+
+def _leading_digits(token: str) -> int:
+    return next((index for index, char in enumerate(token) if not char.isdigit()), len(token))
+
+
+def _digit_dot_evidence(item: ContextEvidence, direction: str, features: dict[str, float]) -> dict[str, float]:
+    """The digit-dot head's evidence: the features it is asked with once more under its own names, and evidence of its
+    own: the sign letter, how many digits stand before it and whether digits follow it, how often the word before it
+    occurs, the script of the word after it and how it was given, and whether the text before holds signs of code or Latin
+    letters; the sign letter is read with the rest. `пункт 2ю` and `версии 5ю2` are a dot."""
+
+    from .context_model import _term_frequency
+
+    table = _term_frequency()
+    head = _leading_digits(item.original)
+    sign = f"sign:{item.original[head]}"
+    previous = (item.field.before.split() or [""])[-1]
+    following = (item.field.after.split() or [""])[0]
+    tail = item.field.before[-VARIABLE_CODE_CONTEXT_CHARACTERS:]
+    rest = (f"digits:{min(head, OPENING_SHORT_MAX_LETTERS)}", f"after_digits:{int(head + 1 < len(item.original))}",
+            f"after:{item.after_origin}:{_script(following.casefold())}",
+            f"code:{int(any(char in VARIABLE_CODE_SIGNS for char in tail))}",
+            f"latin:{int(any('a' <= char.casefold() <= 'z' for char in tail))}",
+            *_neighbour_names("previous_word", previous, table))
+    names = ("bias", sign, *rest, *(f"{sign}:{name}" for name in rest))
+    return {**{DIGIT_DOT_FEATURE_PREFIX + name: value for name, value in features.items() if value},
+            **{f"{DIGIT_DOT_FEATURE_PREFIX}{name}:direction:{direction}": 1.0 for name in names}}
+
+
+def dash_question(original: str, alternative: str, trigger: str) -> bool:
+    """One or two leading dashes (DASH_HEAD_MAX_DASHES) and letters of one script, digits after them allowed, in either
+    reading, at a space, a sign or the end of a line (DASH_HEAD_TRIGGERS): a command-line flag typed in either layout, `-v`
+    meant as typed after `git` and `-м` typed for it with the Russian layout on, `--force`, `-v2`, `-цфеср` for `-watch`."""
+
+    return trigger in DASH_HEAD_TRIGGERS and _dash_shape(original) and _dash_shape(alternative)
+
+
+def _dash_shape(token: str) -> bool:
+    dashes = len(token) - len(token.lstrip("-"))
+    letters = _letters_of_flag(token[dashes:])
+    return (1 <= dashes <= DASH_HEAD_MAX_DASHES and letters.isalpha()
+            and (letters.isascii() or all(_cyrillic_letter(char) for char in letters)))
+
+
+def _letters_of_flag(rest: str) -> str:
+    """The letters of a flag without the digits after them (`v` of `v2`)."""
+
+    end = len(rest)
+    while end and rest[end - 1].isdigit():
+        end -= 1
+    return rest[:end]
+
+
+def _dash_evidence(item: ContextEvidence, direction: str, features: dict[str, float]) -> dict[str, float]:
+    """The dash head's evidence: the features it is asked with once more under its own names, and evidence of its own: the
+    number of dashes and of letters, their case, whether digits follow them, how often the letters occur as a Latin word in
+    English prose and among the Latin words of Russian technical text and as a Cyrillic one in Russian prose, how often the
+    word before the flag occurs, and whether the text before holds signs of code (VARIABLE_CODE_SIGNS). A flag follows a
+    command (`git -v`, `npm i --save`); a Russian word after a dash is rarely typed so."""
+
+    from .context_model import _term_frequency
+
+    table = _term_frequency()
+    dashes = len(item.original) - len(item.original.lstrip("-"))
+    letters = _letters_of_flag(item.original[dashes:])
+    other = _letters_of_flag(item.alternative[dashes:])
+    latin, cyrillic = (letters, other) if letters.isascii() else (other, letters)
+    case = "upper" if letters.isupper() else "title" if letters[:1].isupper() else "lower"
+    previous = (item.field.before.split() or [""])[-1]
+    tail = item.field.before[-VARIABLE_CODE_CONTEXT_CHARACTERS:]
+    rest = (f"dashes:{dashes}", f"letters:{min(len(letters), OPENING_SHORT_MAX_LETTERS + 1)}", f"case:{case}",
+            f"digits:{int(len(letters) < len(item.original) - dashes)}",
+            f"code:{int(any(char in VARIABLE_CODE_SIGNS for char in tail))}",
+            *_neighbour_names("letters", latin, table), *_neighbour_names("reading", cyrillic, table),
+            *_neighbour_names("previous_word", previous, table))
+    names = ("bias", *rest, *(f"dashes:{dashes}:{name}" for name in rest))
+    return {**{DASH_FEATURE_PREFIX + name: value for name, value in features.items() if value},
+            **{f"{DASH_FEATURE_PREFIX}{name}:direction:{direction}": 1.0 for name in names}}
 
 
 def sign_question(original: str, alternative: str, before: str, after: str, trigger: str, origin: str) -> bool:

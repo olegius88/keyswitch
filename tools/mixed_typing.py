@@ -13,6 +13,16 @@ language changes; the engine sees that as a manual layout change, as in the prog
   slip         (a recipe asks for it) a word of Russian prose right after another is typed with the English layout on,
                which slipped there with no switch by hand and no language boundary, as the sealed protocol types its
                wrong rows; every key after it goes into whatever layout is on then;
+  slip_letter  (a recipe asks for it) as slip, with the English layout coming on at a Russian word of one letter
+               (short_words.TRUSTED_SINGLE_LETTER_WORDS) right after another Russian word: `и d документ`;
+  slip_letter_back  (a recipe asks for it) as slip_letter, with the Russian layout selected by hand again before the
+               next word, which is typed as meant: `и d когда`, the letter asked again beside a word kept as typed;
+  unprotected  (a recipe asks for it) as correct, with the word after a change by hand not held from correction
+               (detection.respect_manual_layout off), so that a Latin letter typed as meant after Russian text
+               (`язык C`) is asked about as one that came with a layout the person did not select;
+  us_signs     (a recipe asks for it) as correct, with the dot and the comma of a token with digits in Russian text
+               typed on the keys of the English layout, where a person used to it presses them: the Russian layout
+               prints `ю` and `б` there (`2ю` for `2.`, `5ю2` for `5.2`);
   insert       letters removed from inside a word are typed back after a click, in the other layout.
 
 Commands:
@@ -80,15 +90,22 @@ from keyswitch.constants.models import (  # noqa: E402
     ALNUM_HEAD_MAX_CHARACTERS, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, SHORT_HEAD_LETTERS,
 )
 from keyswitch.context_action_features import (  # noqa: E402
-    alnum_question, dotted_question, letters_and_digits, resume_question, short_question, sign_question, slip_question,
-    variable_question,
+    alnum_question, cyrletter_question, dash_question, digit_dot_question, dotted_question, letters_and_digits, resume_question, short_question, sign_question,
+    slip_question, variable_question,
 )
 from keyswitch.context_model import ContextEvidence, ContextModel, ContextPrediction  # noqa: E402
 from keyswitch.input_context import CONTEXT_LIMIT, FieldContext  # noqa: E402
+from keyswitch.short_words import TRUSTED_SINGLE_LETTER_WORDS  # noqa: E402
 from test_input_sequence_matrix import PhysicalSession  # noqa: E402
 
 TYPING_MODES: Final = ("correct", "forget_ru", "forget_en", "start_wrong")
 SLIP_MODE: Final = "slip"
+LETTER_SLIP_MODE: Final = "slip_letter"
+LETTER_SLIP_BACK_MODE: Final = "slip_letter_back"
+UNPROTECTED_MODE: Final = "unprotected"
+US_SIGNS_MODE: Final = "us_signs"
+# The keys of the English layout a person used to it presses for these signs whatever layout is on.
+US_SIGN_KEYS: Final = {".": ".", ",": ","}
 EDIT_MODE: Final = "insert"
 CYRILLIC: Final = "а-яёА-ЯЁ"
 LATIN: Final = "a-zA-Z"
@@ -135,6 +152,10 @@ CAPTURED_QUESTIONS: Final[dict[str, Callable[[Mapping[str, object]], bool]]] = {
                                       str(row["trigger"]), str(row["after_origin"])),
     "resume": lambda row: resume_question(str(row["original"]), str(row["alternative"]), str(row["before"]),
                                           str(row["after"]), str(row["after_origin"])),
+    "cyrletter": lambda row: cyrletter_question(str(row["original"]), str(row["alternative"]), str(row["before"]),
+                                                str(row["trigger"])),
+    "dash": lambda row: dash_question(str(row["original"]), str(row["alternative"]), str(row["trigger"])),
+    "digitdot": lambda row: digit_dot_question(str(row["original"]), str(row["alternative"]), str(row["trigger"])),
 }
 
 Job = tuple[int, str, str, int, str]
@@ -437,14 +458,17 @@ def plan(tokens: Sequence[str], mode: str, choice: int) -> tuple[int, list[Step]
         return None
     intended = [group if group >= 0 else first for group in intended]
     transitions = [index for index in range(1, len(tokens)) if intended[index] != intended[index - 1]]
-    if mode == SLIP_MODE:
+    if mode in (SLIP_MODE, LETTER_SLIP_MODE, LETTER_SLIP_BACK_MODE):
         slips = [index for index in range(1, len(tokens)) if intended[index - 1] == intended[index] == 1
-                 and script(tokens[index]) == 1 and any(char.isalpha() for char in tokens[index])]
+                 and script(tokens[index]) == 1 and any(char.isalpha() for char in tokens[index])
+                 and (mode == SLIP_MODE or tokens[index].casefold() in TRUSTED_SINGLE_LETTER_WORDS)
+                 and (mode != LETTER_SLIP_BACK_MODE or index + 1 < len(tokens))]
         if not slips:
             return None
         slip = slips[choice % len(slips)]
+        back = slip + 1 if mode == LETTER_SLIP_BACK_MODE else -1
         return first, [(token, intended[index], 1 - intended[index] if index == slip
-                         else intended[index] if index in transitions else None, index == slip)
+                         else intended[index] if index in transitions or index == back else None, index == slip)
                        for index, token in enumerate(tokens)]
     options = ([index for index in transitions if intended[index] == 1] if mode == "forget_ru"
                else [index for index in transitions if intended[index] == 0] if mode == "forget_en"
@@ -608,12 +632,14 @@ def _type_message(job: Job, spy_factory: Callable[[list[tuple[str, int, int]]], 
     typed_tokens: list[tuple[str, int, int]] = []
     stack, current = _session(start, spy_factory(typed_tokens) if spy_factory else None)
     with stack:
-        if mode == SLIP_MODE:
+        if mode in (SLIP_MODE, LETTER_SLIP_MODE, LETTER_SLIP_BACK_MODE):
             # As the sealed protocol types its wrong rows with the early switch off: a layout the engine did not select is
             # no switch by hand that protects the next word, or the slipped word is never asked about; and the word is
             # asked at its boundary, not converted while its letters are typed.
             current.settings.set("detection.respect_manual_layout", False)
             current.settings.set("detection.early_switch", False)
+        elif mode == UNPROTECTED_MODE:
+            current.settings.set("detection.respect_manual_layout", False)
         current.engine.context_policy.reader = Reader(current.backend)
         if prefix:
             current.backend.text, current.backend.caret = prefix, len(prefix)
@@ -625,8 +651,13 @@ def _type_message(job: Job, spy_factory: Callable[[list[tuple[str, int, int]]], 
             keys = keys_for(token, intended)
             if keys is None:
                 return None
+            meant = intended
+            if mode == US_SIGNS_MODE and intended == 1 and any(char.isdigit() for char in token):
+                signed = "".join(US_SIGN_KEYS.get(char, key) for char, key in zip(token, keys))
+                # The sign typed on the key of the English layout means that key's reading there: `2ю` is meant `2.`.
+                meant, keys = (1 - intended if signed != keys else intended), signed
             group = current.backend.group
-            typed_tokens.append(("".join(current.key(key).character for key in keys).casefold(), group, intended))
+            typed_tokens.append(("".join(current.key(key).character for key in keys).casefold(), group, meant))
             current.physical(keys + " ")
             current.flush()
         return current.backend.text
@@ -778,7 +809,8 @@ def jobs_for(messages: Path, recipe: Recipe, code_path: Path | None) -> list[Job
     # A recipe may type in some modes only: English sentences typed wholly in the other layout
     # teach the first word asked again once the next one is converted.
     modes = (EDIT_MODE,) if recipe.get("edit") else tuple(cast(list[str], recipe.get("modes", list(TYPING_MODES))))
-    if not set(modes) <= {EDIT_MODE, SLIP_MODE, *TYPING_MODES}:
+    if not set(modes) <= {EDIT_MODE, SLIP_MODE, LETTER_SLIP_MODE, LETTER_SLIP_BACK_MODE, UNPROTECTED_MODE, US_SIGNS_MODE,
+                          *TYPING_MODES}:
         raise ValueError(f"unknown typing modes: {modes}")
     jobs: list[Job] = []
     for index, text in enumerate(everyone):

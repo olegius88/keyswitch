@@ -260,6 +260,38 @@ SIGN_OPERATOR_SIGNS: Final = "=+*%-"
 RESUME_FEATURE_PREFIX: Final = "resume|"
 # The one sign a short word may open with in either reading: a quotation mark or a parenthesis (`(и наверное`).
 RESUME_LEADING_SIGNS: Final = "\"«("
+# A Latin letter whose Cyrillic reading is a Russian word of one letter, typed after Russian text, has evidence of its own
+# under this prefix: the Cyrillic-letter head (context_action_features.cyrletter_question), the mirror of the variable
+# head. Every one-letter row of the corpus sits in quarantine, so the frozen model had no opinion on it: `в` typed `d` in
+# `разрабатывал и d документ` was converted at p=0.998 and refused as a lone letter at its space and again beside its
+# converted next word, and on public text the same shape read keep at 0.93 (the owner's typing: 17 such letters of the
+# field batteries stayed Latin, 31.10.2026).
+CYRLETTER_FEATURE_PREFIX: Final = "cyrletter|"
+# The boundaries the Cyrillic-letter head answers at: a space or a sign ends the letter. At a pause the letter may be the
+# first of a Latin word still being typed after Russian text (`d` of `docker`), a question the head has no frame of.
+CYRLETTER_HEAD_TRIGGERS: Final = ("space", "punctuation")
+# A token of one or two leading dashes and letters of one script, digits after them allowed, has evidence of its own
+# under this prefix: the dash head (context_action_features.dash_question), a command-line flag typed in either layout.
+# No head answered it, and the frozen model read the leading sign: `-v` typed after `git` became `-м` at p=0.9995, while
+# `-цфеср` typed with the Russian layout on stayed where `-watch` was meant (the owner's typing, 31.10.2026).
+DASH_FEATURE_PREFIX: Final = "dash|"
+# The most leading dashes a flag of the dash head's class has (`--force`).
+DASH_HEAD_MAX_DASHES: Final = 2
+# The boundaries the dash head answers at. At a pause the flag may still be being typed (`--for` of `--force`).
+DASH_HEAD_TRIGGERS: Final = ("space", "punctuation", "enter")
+# Digits with `ю` typed in the Russian layout, digits after it allowed, have evidence of their own under this prefix: the
+# digit-dot head (context_action_features.digit_dot_question). A person used to the English layout presses its dot key in
+# Russian text too, and the Russian layout prints `ю` there: `2ю` for `2.`, `5ю2` for `5.2` (the owner's typing, five such
+# tokens of the field batteries stayed). The engine replaces the sign and leaves the Russian layout on
+# (engine._plan_from_decision). The comma's key prints `б`, and digits with `б` are written as meant too (`класс 5б`): fitted
+# with them, candidate v81 e3 left every token of the class a suggestion, so they stay out of the class.
+DIGIT_DOT_FEATURE_PREFIX: Final = "digitdot|"
+# The boundary the digit-dot head answers at: the space after the token, the one boundary the sign is typed back before
+# in the layout it belongs to.
+DIGIT_DOT_HEAD_TRIGGERS: Final = ("space",)
+# The letter of the Russian layout on the key of the English dot, and that sign.
+DIGIT_DOT_SIGN_LETTERS: Final = "ю"
+DIGIT_DOT_SIGNS: Final = "."
 # The "length" feature buckets every word length from here up together (schemas 2 and 3).
 ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: Final = 6
 # Short categorical field labels (role, trigger) truncated before they reach a feature name.
@@ -377,7 +409,9 @@ MAX_CONTEXT_MODEL_FEATURES: Final = 50000
 # (BRIEF_FEATURE_PREFIX), the variable head (VARIABLE_FEATURE_PREFIX), the dotted-abbreviation head
 # (DOTTED_FEATURE_PREFIX), the letters-and-digits head (ALNUM_FEATURE_PREFIX), the hypothesis head
 # (HYPOTHESIS_FEATURE_PREFIX), the short-token head (SHORT_FEATURE_PREFIX), the slip head (SLIP_FEATURE_PREFIX), the
-# sign head (SIGN_FEATURE_PREFIX) and the resume head (RESUME_FEATURE_PREFIX), each with its own budget in the recipe.
+# sign head (SIGN_FEATURE_PREFIX), the resume head (RESUME_FEATURE_PREFIX), the Cyrillic-letter head
+# (CYRLETTER_FEATURE_PREFIX), the dash head (DASH_FEATURE_PREFIX) and the digit-dot head (DIGIT_DOT_FEATURE_PREFIX),
+# each with its own budget in the recipe.
 # Raised from 100 000 with the unknown-token head (the 0.54.0 pair holds 98 498), and from 110 000 with the hypothesis
 # and short-token heads: the 0.61.0 pair holds 107 808, about 8.6 MB written one feature to a line, and
 # MAX_CONTEXT_ACTION_MODEL_BYTES bounds the file.

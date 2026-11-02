@@ -118,6 +118,7 @@ from .constants.ui_desktop import (
     DESCRIPTION_INITIAL_WRAP_PIXELS,
     DESCRIPTION_MARGIN_PIXELS,
     DESCRIPTION_MINIMUM_WRAP_PIXELS,
+    SETTING_TITLE_MINIMUM_WRAP_PIXELS,
     DESKTOP_SIDEBAR_WIDTH_PIXELS,
     DIAGNOSTICS_TEXT_HEIGHT_ROWS,
     EXCLUSIONS_CATALOG_COLUMN_SPAN,
@@ -838,11 +839,12 @@ class DesktopApplication:
         reserve: int,
         *,
         minimum: int = DESCRIPTION_MINIMUM_WRAP_PIXELS,
+        beside: tk.Misc | None = None,
     ) -> None:
-        """Wrap long copy to the real width instead of a fixed pixel guess."""
+        """Wrap long copy to the real width instead of a fixed pixel guess, less the width of a widget beside it."""
 
         def resize(event: tk.Event[tk.Misc]) -> None:
-            target = max(minimum, event.width - reserve)
+            target = max(minimum, event.width - reserve - (beside.winfo_reqwidth() if beside is not None else 0))
             # A dead band keeps the wrap width from oscillating by a pixel.
             if abs(int(str(label.cget("wraplength"))) - target) >= WRAP_WIDTH_DEAD_BAND_PIXELS:
                 label.configure(wraplength=target)
@@ -1367,7 +1369,7 @@ class DesktopApplication:
             parent,
             "about",
             f"KeySwitch {__version__}",
-            "Локальное приложение автоматического исправления раскладки для Windows и Linux.",
+            "Локальное приложение автоматического исправления раскладки для Windows, Linux и macOS.",
         )
         details = self._section(page, "Диагностика Win32 backend", PAGE_FIRST_SECTION_ROW)
         self.diagnostics_text = tk.Text(details, height=DIAGNOSTICS_TEXT_HEIGHT_ROWS, wrap="word", borderwidth=0)
@@ -1437,10 +1439,15 @@ class DesktopApplication:
             modified_style = "Modified.TCheckbutton"
             indent = DESCRIPTION_INDENT_PIXELS
         else:
-            label = ttk.Label(body, text=spec.title, style="CardTitle.TLabel")
+            label = ttk.Label(body, text=spec.title, style="CardTitle.TLabel",
+                              wraplength=DESCRIPTION_INITIAL_WRAP_PIXELS, justify="left")
             label.grid(row=0, column=0, sticky="w")
             control = self._setting_control(body, spec)
             control.grid(row=0, column=1, sticky="e", padx=(SETTING_CONTROL_PADDING_LEFT_PIXELS, 0))
+            # A title wraps beside its control instead of being cut: «Контекстный ИИ-помощник» and
+            # «Пауза, секунд» lost their last letters in a narrow window.
+            self._follow_width(label, body, SETTING_CONTROL_PADDING_LEFT_PIXELS + DESCRIPTION_MARGIN_PIXELS,
+                               minimum=SETTING_TITLE_MINIMUM_WRAP_PIXELS, beside=control)
             normal_style = "CardTitle.TLabel"
             modified_style = "Modified.CardTitle.TLabel"
             indent = 0

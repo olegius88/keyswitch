@@ -20,6 +20,7 @@ Caramba Switcher and EveryLang, and unlike them it also runs on Linux.
 Recognition runs entirely locally, typed text is never sent anywhere, and the
 layouts come from the active EN/RU system pair.
 
+[Website](https://olegius88.github.io/keyswitch/) ·
 [Documentation map](docs/README.md) ·
 [Input troubleshooting](docs/troubleshooting.md) ·
 [Verification, builds and releases](docs/verification.md) (guides in Russian)
@@ -109,9 +110,9 @@ baseline detector. Optional reading of existing field text through OS
 accessibility is off by default. Quality is not established for real chats.
 The expanded [context-v2 corpus](model/context_v2/README.md) exposed limitations
 of both its baseline and candidate; the candidate failed its quality conditions
-and **is not deployed**. Contextual weights have changed since 0.15.0; the
-[context-v1 report](model/context_v1/report.json) identifies the current artifact.
-[Context-v3](model/context_v3/README.md) remains experimental and is not installed.
+and **is not deployed**. Since 0.37.0 the application ships a
+[context-v3](model/context_v3/README.md) pair: a model for finished words and a prefix model;
+the [release receipt](model/context_v3/release-receipt.json) records the pair installed now.
 See [settings, training, privacy and limits](docs/context-assistant.md).
 
 On Windows, Enter/Tab is intercepted before delivery: the word is corrected
