@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from multiprocessing import get_context
 from multiprocessing.pool import Pool
 from pathlib import Path
-from typing import cast, get_args
+from typing import Final, cast, get_args
 
 import context_action_pipeline as pipeline  # sets up the accelerator site before numpy and CuPy load
 import cupy as cp
@@ -91,7 +91,7 @@ from keyswitch.constants.training import (
 from keyswitch.constants.models import FNV1A64_OFFSET_BASIS, FNV1A64_PRIME
 from keyswitch.context_action_features import (
     abbreviation_question, alnum_question, alone_question, brief_question, capitals_question, cyrletter_question,
-    dash_question, digit_dot_question, joined_question, latin_abbreviation_question, letter_question, resume_question, short_question, slip_question,
+    dash_question, digit_dot_question, joined_question, quote_question, latin_abbreviation_question, letter_question, resume_question, short_question, slip_question,
     start_question, term_question, unknown_question, variable_question,
 )
 from keyswitch.context_model import AfterOrigin, ContextEvidence, _term_frequency
@@ -612,6 +612,10 @@ RECORD = np.dtype([("source", "f8", SCORE_COUNT), ("target", "f8", SCORE_COUNT),
                    ("flags", "i8"), ("source_group", "i8"), ("after_origin", "i8")])
 
 
+# The sign of a token of the quote head's class as the other layout prints its key (the layout tables hold letters only).
+_QUOTE_SIGN_READING: Final = {"@": '"', '"': "@"}
+
+
 def heads_question(original: str, before: str, after: str, trigger: str, before_origin: str = "field",
                    after_origin: str = "none") -> bool:
     """Whether a frame may have a head's second copy of its features or a head's own evidence, which the kernels do
@@ -639,7 +643,9 @@ def heads_question(original: str, before: str, after: str, trigger: str, before_
             or cyrletter_question(original, "".join(_US_TO_RU.get(char, char) for char in original), before, trigger)
             or dash_question(original, "".join((_US_TO_RU if original.isascii() else _RU_TO_US).get(char, char)
                                                for char in original), trigger)
-            or digit_dot_question(original, "".join(_RU_TO_US.get(char, char) for char in original), trigger))
+            or digit_dot_question(original, "".join(_RU_TO_US.get(char, char) for char in original), trigger)
+            or quote_question(original, _QUOTE_SIGN_READING.get(original[:1], original[:1]) + "".join(
+                (_US_TO_RU if original[1:].isascii() else _RU_TO_US).get(char, char) for char in original[1:]), trigger))
 
 
 def opening_letter_followed(original: str, literal_tail: str, boundary_text: str) -> bool:

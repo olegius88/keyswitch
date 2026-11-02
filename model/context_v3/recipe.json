@@ -206,9 +206,15 @@
       },
       "digitdot": {
         "maximum_features": 1500
+      },
+      "quote": {
+        "maximum_features": 1500
+      },
+      "knownreply": {
+        "maximum_features": 200
       }
     },
-    "scope": "The pair context-v3-b380007b5e3e of 0.64.0 and 0.64.1, every weight fixed: its kept-neighbour question and every head, the resume head of corpus v79 among them, are carried as shipped, and the Cyrillic-letter, dash and digit-dot heads are fitted. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone) and the answers of the corpus v37 model (labels). The Cyrillic-letter head: a Latin letter whose Cyrillic reading is a Russian word of one letter (а, и, с, в, к, у, о, я), the nearest letter before it Cyrillic, at a space or a sign, asked at its own boundary and again beside its next word (context_action_features.cyrletter_question); it reads the shared features once more and evidence of its own (the letter and its case, the word before it as such and how often it occurs, the boundary, the word after it and how it was given, signs of code, Latin letters and digits before it, Hunspell on each reading). Motivation: every one-letter row of the corpus sits in quarantine, so the frozen model had no opinion on such a letter and a lone letter is refused: `в` typed `d` in `разрабатывал и d документ` stayed (17 such letters of the owner's field batteries, 31.10.2026). The dash head: one or two leading dashes and letters of one script, digits after them allowed, in either reading (dash_question): the frozen model read the leading sign and turned `-v` after `git` into `-м` at p=0.9995, and left `-цфеср` where `-watch` was meant. The digit-dot head: digits with `ю` or `б` typed in the Russian layout, digits after them allowed (digit_dot_question): the dot or comma of the English layout pressed in Russian text (`2ю` for `2.`), a lone letter to the policy, which the engine now replaces in its own layout, leaving the Russian one on. The pair of 0.64.0: the pair of 0.63.0 with the resume head fitted onto it on corpus v79 (model/context_v3/frozen-base-b5ed6848d4ce.json, sha256 a35af45f0978)."
+    "scope": "The pair context-v3-b380007b5e3e of 0.64.0 and 0.64.1, every weight fixed: its kept-neighbour question and every head, the resume head of corpus v79 among them, are carried as shipped, and the Cyrillic-letter, dash, digit-dot, quote and known-reply heads are fitted. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone) and the answers of the corpus v37 model (labels). The Cyrillic-letter head: a Latin letter whose Cyrillic reading is a Russian word of one letter (а, и, с, в, к, у, о, я), the nearest letter before it Cyrillic, at a space or a sign, asked at its own boundary and again beside its next word (context_action_features.cyrletter_question); it reads the shared features once more and evidence of its own (the letter and its case, the word before it as such and how often it occurs, the boundary, the word after it and how it was given, signs of code, Latin letters and digits before it, Hunspell on each reading). Motivation: every one-letter row of the corpus sits in quarantine, so the frozen model had no opinion on such a letter and a lone letter is refused: `в` typed `d` in `разрабатывал и d документ` stayed (17 such letters of the owner's field batteries, 31.10.2026). The dash head: one or two leading dashes and letters of one script, digits after them allowed, in either reading (dash_question): the frozen model read the leading sign and turned `-v` after `git` into `-м` at p=0.9995, and left `-цфеср` where `-watch` was meant. The digit-dot head: digits with `ю` or `б` typed in the Russian layout, digits after them allowed (digit_dot_question): the dot or comma of the English layout pressed in Russian text (`2ю` for `2.`), a lone letter to the policy, which the engine now replaces in its own layout, leaving the Russian one on. The pair of 0.64.0: the pair of 0.63.0 with the resume head fitted onto it on corpus v79 (model/context_v3/frozen-base-b5ed6848d4ce.json, sha256 a35af45f0978). The quote head: `@` and Latin letters whose other reading is a quotation mark and Cyrillic letters, or the other way round (quote_question): a Russian message begun in the other layout with a quotation mark opens with `@Z` for `\"Я`, which the frozen model left while the baseline pair converts it (the Tatoeba development sentences behind the tie of sealed test v81 in the portable profile). The known-reply head: a short message typed in the English layout whose Russian reading is counted far more often than its keys (known_reply_question), `jr` sent alone for `ок`, which the frozen model left for a suggestion where the English lexicon knows `Jr`; its frames are the short-message curriculum's of that class."
   },
   "letter_curriculum": {
     "term_sentences": 1500,
@@ -1213,5 +1219,41 @@
     "token_cap": 600,
     "convert_weight": 1.0,
     "scope": "TRAIN, and DEVELOPMENT for the head's epoch: the questions about digits with `ю` or `б` typed in the Russian layout the engine asked while ru.stackoverflow messages of 2023 and Russian sentences of the Leipzig corpora with digits and a dot or a comma after a Russian word were typed with that sign on the key of the English layout (us_signs), and Leipzig sentences with digits and `б` after a Russian word (`класс 5б`) were typed as meant (tools/select_capture_messages.py digitdot and digitdot-letter; tools/mixed_typing.py capture; model/context_v3/captured/manifest-digitdot.json, schema 2), by question and sentence into TRAIN and DEVELOPMENT; at most token_cap frames of one token with one answer. A converted frame weighs convert_weight = keep_importance x kept frames / converted frames of TRAIN, so both answers weigh the same."
+  },
+  "quote_curriculum": {
+    "captured": {
+      "train": [
+        [
+          "model/context_v3/captured/manifest-quote.json",
+          "tatoeba-quote-train.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-quote.json",
+          "so-quote-train.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-quote.json",
+          "code-at-train.jsonl.xz"
+        ]
+      ],
+      "development": [
+        [
+          "model/context_v3/captured/manifest-quote.json",
+          "tatoeba-quote-dev.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-quote.json",
+          "so-quote-dev.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-quote.json",
+          "code-at-dev.jsonl.xz"
+        ]
+      ]
+    },
+    "sample_weight": 1.0,
+    "token_cap": 600,
+    "convert_weight": 1.41,
+    "scope": "TRAIN, and DEVELOPMENT for the head's epoch: the questions about `@` and letters whose other reading is a quotation mark and letters the engine asked while Tatoeba sentences and ru.stackoverflow messages of 2023 opening with a quotation mark and a Russian word were typed in the other layout from their start and as meant, and code lines of the dump opening with `@` and Latin letters (`@media`, `@property`) were typed as meant (every developer-chat question left out; tools/select_capture_messages.py quote-opener; tools/mixed_typing.py capture; model/context_v3/captured/manifest-quote.json, schema 2), by question and sentence into TRAIN and DEVELOPMENT; at most token_cap frames of one token with one answer. A converted frame weighs convert_weight = keep_importance x kept frames / converted frames of TRAIN (4 x 1 098 / 3 110), so both answers weigh the same."
   }
 }

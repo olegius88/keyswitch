@@ -30,7 +30,8 @@ from unittest.mock import patch
 
 from keyswitch.context_action_features import (
     abbreviation_question, alnum_question, alone_question, attested_abbreviation, capitals_question, extract_action_features,
-    brief_question, brief_settled, cyrletter_question, dash_question, digit_dot_question, dotted_question,
+    brief_question, brief_settled, cyrletter_question, dash_question, digit_dot_question, dotted_question, quote_question,
+    known_reply_question,
     kept_context_reachable, first_question, hypothesis_question, joined_question,
     latin_abbreviation_question, letter_question, resume_question, russian_ending_bucket, russian_start_bucket, short_question,
     sign_question, slip_question,
@@ -80,7 +81,7 @@ from keyswitch.constants.models import (
     BRIEF_FEATURE_PREFIX, BRIEF_HEAD_LETTERS, DOTTED_FEATURE_PREFIX, FIRST_FEATURE_PREFIX, VARIABLE_FEATURE_PREFIX,
     HYPOTHESIS_FEATURE_PREFIX, RESUME_FEATURE_PREFIX, SHORT_FEATURE_PREFIX, SIGN_FEATURE_PREFIX, SLIP_FEATURE_PREFIX,
     CAPITALS_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION, CYRLETTER_FEATURE_PREFIX, DASH_FEATURE_PREFIX,
-    DIGIT_DOT_FEATURE_PREFIX,
+    DIGIT_DOT_FEATURE_PREFIX, QUOTE_FEATURE_PREFIX, KNOWN_REPLY_FEATURE_PREFIX,
     CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, JOINED_FEATURE_PREFIX,
     KEPT_CONTEXT_WORD_MAX_CHARACTERS, KEPT_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX, LETTER_FEATURE_PREFIX,
     PLANNED_CONTEXT_AFTER_MAX_CHARACTERS, PLANNED_CONTEXT_WORD_MAX_CHARACTERS, START_FEATURE_PREFIX, TERM_FEATURE_PREFIX,
@@ -2283,6 +2284,7 @@ def provenance() -> dict[str, str]:
         "model/context_v3/captured/manifest-slip.json", "model/context_v3/captured/manifest-sign.json",
         "model/context_v3/captured/manifest-resume.json", "model/context_v3/captured/manifest-cyrletter.json",
         "model/context_v3/captured/manifest-dash.json", "model/context_v3/captured/manifest-digitdot.json",
+        "model/context_v3/captured/manifest-quote.json",
         "tests/test_context_action_training.py", "tests/test_default_input_sequences.py",
         "tools/context_technical_corpus.py", "tools/merge_context_action_corpora.py",
         "tests/test_context_technical_corpus.py", "tests/test_context_action_merge.py",
@@ -2349,7 +2351,8 @@ HEAD_PREFIXES: Final = {"capitals": CAPITALS_FEATURE_PREFIX, "alone": ALONE_FEAT
                          "alnum": ALNUM_FEATURE_PREFIX, "hypothesis": HYPOTHESIS_FEATURE_PREFIX, "short": SHORT_FEATURE_PREFIX,
                          "slip": SLIP_FEATURE_PREFIX, "sign": SIGN_FEATURE_PREFIX, "resume": RESUME_FEATURE_PREFIX,
                          "cyrletter": CYRLETTER_FEATURE_PREFIX, "dash": DASH_FEATURE_PREFIX,
-                         "digitdot": DIGIT_DOT_FEATURE_PREFIX}
+                         "digitdot": DIGIT_DOT_FEATURE_PREFIX, "quote": QUOTE_FEATURE_PREFIX,
+                         "knownreply": KNOWN_REPLY_FEATURE_PREFIX}
 # A recipe without single-letter frames (the recipes before corpus v34).
 NO_LETTER_CURRICULUM: Final[dict[str, object]] = {"term_sentences": 0, "english_sentences": 0, "minimum_term_count": 0,
                                                   "sample_weight": 1.0}
@@ -2572,6 +2575,27 @@ def digit_dot_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: 
         split, options, lambda item: digit_dot_question(item.original, item.alternative, item.trigger), "digitdot")
 
 
+def quote_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                     options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """The quote head's frames (captured_head_curriculum): `@` and letters whose other reading is a quotation mark and
+    letters (quote_question), converted where a Russian message opening with a quotation mark was begun in the other
+    layout (`@Z` for `"Я`) and kept where `@` opened a decorator, a CSS rule or a mention, or `"Я` was typed as meant."""
+
+    return captured_head_curriculum(
+        split, options, lambda item: quote_question(item.original, item.alternative, item.trigger), "quote")
+
+
+def known_reply_curriculum(split: str, source_rows: Sequence[CorpusRow], refused: frozenset[str],
+                           options: Mapping[str, object]) -> tuple[list[ActionRow], dict[str, object]]:
+    """The known-reply head's frames: the short-message frames (brief_curriculum, the same options) of its class
+    (known_reply_question), the Russian reading counted far more often than the keys. Its TRAIN frames are the
+    short-message curriculum's own, framed once."""
+
+    rows, report = brief_curriculum(split, source_rows, refused, options)
+    rows = [row for row in rows if known_reply_question(row.original, translated(row.original, 0), "", "")]
+    return rows, {**report, "frames": len(rows)}
+
+
 # The heads whose own frames of DEVELOPMENT choose their epoch (fit), by feature prefix: the name their epoch goes by in
 # the seal, the recipe's key of their curriculum, the curriculum, and the options of a recipe without it.
 OWN_EPOCH_HEADS: Final[dict[str, tuple[str, str, Callable[[str, Sequence[CorpusRow], frozenset[str], Mapping[str, object]],
@@ -2591,6 +2615,8 @@ OWN_EPOCH_HEADS: Final[dict[str, tuple[str, str, Callable[[str, Sequence[CorpusR
     CYRLETTER_FEATURE_PREFIX: ("cyrletter", "cyrletter_curriculum", cyrletter_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
     DASH_FEATURE_PREFIX: ("dash", "dash_curriculum", dash_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
     DIGIT_DOT_FEATURE_PREFIX: ("digitdot", "digitdot_curriculum", digit_dot_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
+    QUOTE_FEATURE_PREFIX: ("quote", "quote_curriculum", quote_curriculum, NO_CAPTURED_HEAD_CURRICULUM),
+    KNOWN_REPLY_FEATURE_PREFIX: ("knownreply", "brief_curriculum", known_reply_curriculum, NO_BRIEF_CURRICULUM),
 }
 
 
@@ -2836,7 +2862,8 @@ def head_question(original: str, alternative: str, before: str, after: str, trig
             or (SLIP_FEATURE_PREFIX in prefixes and before_origin == "field" and slip_question(original, before))
             or (RESUME_FEATURE_PREFIX in prefixes and resume_question(original, alternative, before, after, origin))
             or cyrletter or (DASH_FEATURE_PREFIX in prefixes and dash_question(original, alternative, trigger))
-            or digit_dot)
+            or digit_dot or (QUOTE_FEATURE_PREFIX in prefixes and quote_question(original, alternative, trigger))
+            or (KNOWN_REPLY_FEATURE_PREFIX in prefixes and known_reply_question(original, alternative, before, after)))
 
 
 def carried_prefixes(model: ContextModel) -> frozenset[str]:
@@ -3218,6 +3245,9 @@ def tail_curricula(inputs: FitInputs) -> tuple[list[ActionRow], dict[str, object
     digitdot, digitdot_report = digit_dot_curriculum(
         TRAIN, inputs.source_rows[TRAIN], inputs.refused,
         cast(dict[str, object], options.get("digitdot_curriculum", NO_CAPTURED_HEAD_CURRICULUM)))
+    quote, quote_report = quote_curriculum(
+        TRAIN, inputs.source_rows[TRAIN], inputs.refused,
+        cast(dict[str, object], options.get("quote_curriculum", NO_CAPTURED_HEAD_CURRICULUM)))
     reports: dict[str, object] = {
         "kept_neighbour_curriculum": kept_report, "counted_token_curriculum": counted_report, "letter_curriculum": letter_report,
         "abbreviation_curriculum": abbreviation_report, "latin_abbreviation_curriculum": latin_abbreviation_report,
@@ -3226,14 +3256,14 @@ def tail_curricula(inputs: FitInputs) -> tuple[list[ActionRow], dict[str, object
         "dotted_curriculum": dotted_report, "alnum_curriculum": alnum_report, "hypothesis_curriculum": hypothesis_report,
         "short_curriculum": short_report, "slip_curriculum": slip_report, "sign_curriculum": sign_report,
         "resume_curriculum": resume_report, "cyrletter_curriculum": cyrletter_report, "dash_curriculum": dash_report,
-        "digitdot_curriculum": digitdot_report}
+        "digitdot_curriculum": digitdot_report, "quote_curriculum": quote_report}
     # A head whose own frames choose its epoch takes its TRAIN frames from here too. The sign head was left out, and its
     # captured TRAIN files were never read: it was fitted on 138 frames other curricula held (corpus v76).
     missing = sorted({key for _label, key, _curriculum, _absent in OWN_EPOCH_HEADS.values()} - set(reports))
     if missing:
         raise ValueError(f"no TRAIN frames are framed for {missing}")
     return [*kept, *counted, *letter, *abbreviation, *latin_abbreviation, *unknown, *joined, *term, *brief, *first, *variable, *dotted,
-            *alnum, *hypothesis, *short, *slip, *sign, *resume, *cyrletter, *dash, *digitdot], reports
+            *alnum, *hypothesis, *short, *slip, *sign, *resume, *cyrletter, *dash, *digitdot, *quote], reports
 
 
 def prepared_frames(rows: Sequence[ActionRow], spans: SpanCurriculum, split: str) -> list[tuple[str, ActionRow | SpanFrame]]:

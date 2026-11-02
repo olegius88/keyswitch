@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from keyswitch.constants.models import BRIEF_FEATURE_PREFIX, BRIEF_HEAD_LETTERS, BRIEF_RATIO_BOUND  # noqa: E402
 from keyswitch.constants.model_protocol import CALIBRATION, DEVELOPMENT, TRAIN  # noqa: E402
 from keyswitch.constants.training import BRIEF_BOUNDARIES  # noqa: E402
-from keyswitch.context_action_features import brief_question, brief_settled, extract_action_features  # noqa: E402
+from keyswitch.context_action_features import brief_dominant, brief_question, brief_settled, extract_action_features  # noqa: E402
 from keyswitch.context_model import ContextEvidence  # noqa: E402
 from keyswitch.input_context import FieldContext  # noqa: E402
 import train_context_action_model as trainer  # noqa: E402
@@ -56,8 +56,14 @@ class BriefHeadTests(unittest.TestCase):
             self.assertEqual(head(latin, cyrillic), set())
         self.assertTrue(brief_settled("gy", "пн"))
         self.assertTrue(head("gy", "пн"))
-        item = ContextEvidence("ytn", "нет", 0, FieldContext("Telegram", "1"), "enter", source_known=True, boundary_text="\n")
-        self.assertFalse([name for name in extract_action_features(item) if name.startswith(BRIEF_FEATURE_PREFIX)])
+        # A token a lexicon of the profile knows is answered only where its Russian reading outnumbers it by far: `jr`
+        # (`Jr`) for `ок`, not `ha` for `рф`.
+        for latin, cyrillic, answered in (("ha", "рф", False), ("jr", "ок", True)):
+            self.assertEqual(brief_dominant(latin, cyrillic), answered, latin)
+            item = ContextEvidence(latin, cyrillic, 0, FieldContext("Telegram", "1"), "enter", source_known=True,
+                                   boundary_text="\n")
+            features = [name for name in extract_action_features(item) if name.startswith(BRIEF_FEATURE_PREFIX)]
+            self.assertEqual(bool(features), answered, latin)
         # The counts on their own are no evidence: the head learnt the tokens by heart from them.
         self.assertFalse([name for name in reply if name.startswith(("russian:", "english:", "latin:"))])
         self.assertIn("case:title", head("Ytn", "Нет"))

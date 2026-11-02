@@ -40,6 +40,8 @@ messages of one question are typed for one split only:
   word, for the us_signs typing mode, which types its sign on the key of the English layout (`2ю`, `5ю2`): the digit-dot
   head's question the person meant converted. digitdot-letter: digits and `б` after a Russian word (`5б`, `11б`), a class
   or a building as written: the question meant kept.
+- quote-opener: a message whose first token is a quotation mark and a Russian word (`"Я сейчас не могу"`), for the
+  quote head: typed in the other layout from its start it opens with `@Z`, typed as meant it opens with `"Я`.
 - cyrletter-russian: a message with a Russian word of one letter (short_words.TRUSTED_SINGLE_LETTER_WORDS) right after
   another Russian word, for the slip_letter typing mode, which types it with the English layout on: the Cyrillic-letter
   head's question the person meant converted.
@@ -187,6 +189,13 @@ def letter_slippable(text: str) -> bool:
                and not any("a" <= char.lower() <= "z" for char in previous) for previous, token in zip(tokens, tokens[1:]))
 
 
+def quote_opener(text: str) -> bool:
+    """The first token a quotation mark and a Russian word."""
+
+    tokens = text.split()
+    return bool(tokens) and tokens[0][:1] == '"' and len(tokens[0]) > 1 and cyrillic(tokens[0][1])
+
+
 def slippable(text: str) -> bool:
     """Two words of Russian letters in a row: the slip typing mode types the second with the English layout on."""
     tokens = text.split()
@@ -216,7 +225,7 @@ def formula(text: str) -> bool:
 # Classes of a whole message rather than of one of its tokens.
 MESSAGE_CLASSES: dict[str, Callable[[str], bool]] = {"opening-short": opening_short, "slippable": slippable,
                                                      "formula": formula, "resume": resumes,
-                                                     "cyrletter-russian": letter_slippable}
+                                                     "cyrletter-russian": letter_slippable, "quote-opener": quote_opener}
 CLASSES: dict[str, Callable[[str, str], bool]] = {"variable": variable_token, "dotted": dotted_token,
                                                   "dotted-latin": latin_dotted_token, "dotted-russian": russian_dotted_token,
                                                   "alnum-latin": latin_alnum_token, "alnum-russian": russian_alnum_token,

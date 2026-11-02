@@ -41,6 +41,8 @@ from .constants.models import (
     ALONE_HEAD_LETTERS,
     BRIEF_FEATURE_PREFIX,
     BRIEF_HEAD_LETTERS,
+    BRIEF_KNOWN_DOMINANCE,
+    BRIEF_KNOWN_MIN_COUNT,
     BRIEF_RATIO_BOUND,
     BRIEF_SETTLED_DOMINANCE,
     BRIEF_SETTLED_MIN_COUNT,
@@ -55,6 +57,10 @@ from .constants.models import (
     DIGIT_DOT_HEAD_TRIGGERS,
     DIGIT_DOT_SIGN_LETTERS,
     DIGIT_DOT_SIGNS,
+    QUOTE_FEATURE_PREFIX,
+    KNOWN_REPLY_FEATURE_PREFIX,
+    QUOTE_HEAD_SIGNS,
+    QUOTE_HEAD_TRIGGERS,
     DOTTED_FEATURE_PREFIX,
     DOTTED_PART_MAX_LETTERS,
     FIRST_FEATURE_PREFIX,
@@ -490,6 +496,10 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         # Digits with `ю` or `б` typed in the Russian layout: a lone letter to the frozen model, which waited on `2ю` at
         # p=0.999 where `2.` was meant (the owner's typing). The digit-dot head answers it.
         result.update(_digit_dot_evidence(item, direction, features))
+    if quote_question(item.original, item.alternative, item.trigger):
+        # `@` and Latin letters whose other reading is a quotation mark and Cyrillic letters: the frozen model left `@Z` where
+        # `"Я` opened a Russian message begun in the other layout. The quote head answers it.
+        result.update(_quote_evidence(item, direction, features))
     if dash_question(item.original, item.alternative, item.trigger):
         # A command-line flag in either layout: the frozen model read its leading sign, and `-v` after `git` became `-м` at
         # p=0.9995 (the owner's typing). The dash head answers it.
@@ -548,15 +558,21 @@ def extract_action_features(item: ContextEvidence) -> dict[str, float]:
         # (sealed test v58, both pairs); the head reads the counts of its words.
         result.update({JOINED_FEATURE_PREFIX + name: value for name, value in features.items() if value})
         result.update(_joined_evidence(item))
-    if (brief_question(item.original, item.field.before, item.field.after) and not item.source_known
-            and brief_settled(item.original, item.alternative)):
+    if (brief_question(item.original, item.field.before, item.field.after)
+            and (brief_dominant(item.original, item.alternative) if item.source_known
+                 else brief_settled(item.original, item.alternative))):
         # The class the short-message head answers: a short reply typed in the English layout, which the frozen model
         # kept or left waiting for a next word that never came (`ytn` for `нет`). The head reads how often each reading
         # occurs, the boundary and the case, and no copy of the shared features: with one it learned that a known Latin
-        # word stays, and kept `vs` sent alone for `мы` (experiment E6). It answers only a token whose counts settle it,
-        # one no lexicon of the profile knows as typed: a pair both readings count (`ij` and `шо`, `ds` and `вы`) stays
-        # with the frozen model, which turned no Russian reply into Latin (candidate v63e).
+        # word stays, and kept `vs` sent alone for `мы` (experiment E6). It answers only a token whose counts settle it:
+        # a pair both readings count (`ij` and `шо`, `ds` and `вы`) stays with the frozen model, which turned no Russian
+        # reply into Latin (candidate v63e), and so does a token a lexicon of the profile knows as typed, unless its
+        # Russian reading outnumbers it by far (`jr` and `ок`, brief_dominant).
         result.update(_brief_evidence(item))
+    if known_reply_question(item.original, item.alternative, item.field.before, item.field.after):
+        # A short message whose Russian reading outnumbers its keys by far: the frozen model suggested a look at `jr`
+        # sent alone in Telegram for `ок`, the short-message head answering it or not. The known-reply head answers it.
+        result.update(_known_reply_evidence(item))
     if variable_question(item.original, item.alternative, item.field.before, item.trigger):
         # The class the variable head answers: a letter of the Russian layout after a word of Cyrillic letters that is no
         # Russian word of one letter. Every single-letter row of the corpus sits in quarantine, and the frozen model's
@@ -1231,6 +1247,48 @@ def _digit_dot_evidence(item: ContextEvidence, direction: str, features: dict[st
             **{f"{DIGIT_DOT_FEATURE_PREFIX}{name}:direction:{direction}": 1.0 for name in names}}
 
 
+def quote_question(original: str, alternative: str, trigger: str) -> bool:
+    """A token of one sign of QUOTE_HEAD_SIGNS and letters of one script whose other reading is the other sign and letters, at
+    a space or a sign (QUOTE_HEAD_TRIGGERS): `@Z` typed for `"Я` where a Russian message was begun in the English layout with
+    a quotation mark, and `@media`, `@property`, a mention or `"Я` meant as typed."""
+
+    if (trigger not in QUOTE_HEAD_TRIGGERS or not original or len(original) != len(alternative)
+            or original[0] not in QUOTE_HEAD_SIGNS or alternative[0] not in QUOTE_HEAD_SIGNS or original[0] == alternative[0]):
+        return False
+    return all(_one_script_letters(part[1:]) for part in (original, alternative))
+
+
+def _one_script_letters(text: str) -> bool:
+    return text.isalpha() and (text.isascii() or all(_cyrillic_letter(char) for char in text))
+
+
+def _quote_evidence(item: ContextEvidence, direction: str, features: dict[str, float]) -> dict[str, float]:
+    """The quote head's evidence: the features it is asked with once more under its own names, and evidence of its own: the
+    sign typed, the number of letters and their case, how often the letters occur as a Latin word in English prose and
+    among the Latin words of Russian technical text and as a Cyrillic one in Russian prose, whether text stands before it,
+    how the word after it was given and its script, and whether the text before holds signs of code; the sign is read
+    with the rest. `@Z сейчас` opens a Russian sentence; `@media (max-width` and `@property` open code."""
+
+    from .context_model import _term_frequency
+
+    table = _term_frequency()
+    word = item.original[1:]
+    other = item.alternative[1:]
+    latin, cyrillic = (word, other) if word.isascii() else (other, word)
+    case = "upper" if word.isupper() and len(word) > 1 else "title" if word[:1].isupper() else "lower"
+    following = (item.field.after.split() or [""])[0]
+    tail = item.field.before[-VARIABLE_CODE_CONTEXT_CHARACTERS:]
+    sign = f"sign:{item.original[0]}"
+    rest = (f"letters:{min(len(word), OPENING_SHORT_MAX_LETTERS + 1)}", f"case:{case}",
+            f"start:{int(not any(char.isalpha() for char in item.field.before))}",
+            f"after:{item.after_origin}:{_script(following.casefold())}",
+            f"code:{int(any(char in VARIABLE_CODE_SIGNS for char in tail))}",
+            *_neighbour_names("letters", latin, table), *_neighbour_names("reading", cyrillic, table))
+    names = ("bias", sign, *rest, *(f"{sign}:{name}" for name in rest))
+    return {**{QUOTE_FEATURE_PREFIX + name: value for name, value in features.items() if value},
+            **{f"{QUOTE_FEATURE_PREFIX}{name}:direction:{direction}": 1.0 for name in names}}
+
+
 def dash_question(original: str, alternative: str, trigger: str) -> bool:
     """One or two leading dashes (DASH_HEAD_MAX_DASHES) and letters of one script, digits after them allowed, in either
     reading, at a space, a sign or the end of a line (DASH_HEAD_TRIGGERS): a command-line flag typed in either layout, `-v`
@@ -1539,6 +1597,44 @@ def brief_settled(latin: str, cyrillic: str) -> bool:
     other = max(table["english"].get(latin, 0), table["latin"].get(latin, 0))
     return (russian >= BRIEF_SETTLED_MIN_COUNT and other < BRIEF_SETTLED_OTHER_MAXIMUM
             and russian >= BRIEF_SETTLED_DOMINANCE * other)
+
+
+def brief_dominant(latin: str, cyrillic: str) -> bool:
+    """Whether the counts settle a short Latin token a lexicon knows as the keys of a Russian word all the same: its
+    Cyrillic reading counted in Russian text at least BRIEF_KNOWN_MIN_COUNT times and BRIEF_KNOWN_DOMINANCE times as often
+    as the token in English prose or Russian technical text. The English lexicon knows `jr` (`Jr`), which English prose
+    uses 13 times and Russian text `ок` 7 180 times; `ha` (28 against 273) stays a word."""
+
+    from .context_model import _term_frequency
+
+    table = _term_frequency()
+    latin, cyrillic = latin.casefold(), cyrillic.casefold()
+    russian = max(table["russian"].get(cyrillic, 0), table["cyrillic"].get(cyrillic, 0))
+    other = max(table["english"].get(latin, 0), table["latin"].get(latin, 0))
+    return (russian >= BRIEF_KNOWN_MIN_COUNT and russian >= BRIEF_KNOWN_DOMINANCE * other
+            and other < BRIEF_SETTLED_OTHER_MAXIMUM)
+
+
+def known_reply_question(original: str, alternative: str, before: str, after: str) -> bool:
+    """A short message typed in the English layout (brief_question) whose Russian reading outnumbers its keys by far
+    (brief_dominant): `ytn` for `нет`, and `jr` for `ок`, which the English lexicon knows as `Jr`. The question reads only
+    the typed token and the text around it, as the trainer and the GPU path route frames by them."""
+
+    return brief_question(original, before, after) and brief_dominant(original, alternative)
+
+
+def _known_reply_evidence(item: ContextEvidence) -> dict[str, float]:
+    """The known-reply head's evidence: whether a lexicon of the profile knows the token as typed, the boundary that
+    ended it, its case and the application, the first read with each of the others. No count: every token of the class
+    is counted far more often in its Russian reading, and the frozen model's lone-word head, which reads the
+    application, suggested such a token sent alone where the lexicon knew it."""
+
+    application = re.findall(r"[a-z0-9]+", item.field.application.casefold()[:ACTION_FEATURE_APPLICATION_NAME_CHARACTERS])
+    known = f"known:{int(item.source_known)}"
+    case = "upper" if item.original.isupper() else "title" if item.original[:1].isupper() else "lower"
+    rest = (f"trigger:{item.trigger}", f"case:{case}", f"app:{application[0] if application else 'none'}")
+    names = ("bias", known, *rest, *(f"{known}:{name}" for name in rest))
+    return {f"{KNOWN_REPLY_FEATURE_PREFIX}{name}": 1.0 for name in names}
 
 
 def _brief_evidence(item: ContextEvidence) -> dict[str, float]:

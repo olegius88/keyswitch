@@ -378,9 +378,10 @@ class KeptWordModelTests(ContextEngineTests):
         return self.backend.text
 
     def test_the_next_word_tells_the_first_one(self) -> None:
-        # `где` is `ult`, an English token, until `будет` follows it; `here` is `руку` until `they`.
-        self.assertEqual(self.typed(0, "ult", ",eltn"), "где будет ")
+        # `here` is `руку` until `they` follows it. `ult`, which Hunspell knows (`ult.`), no longer waits for `будет`: the
+        # short-message head answers it at its own space, as `где` outnumbers it by far (brief_dominant).
         self.assertEqual(self.typed(1, "руку", "ерун"), "here they ")
+        self.assertEqual(self.typed(0, "ult"), "где ")
 
     def test_a_token_the_boundary_model_could_not_split_is_decided_with_the_next_word(self) -> None:
         self.assertEqual(self.typed(0, "dc`", "njn"), "всё тот ")

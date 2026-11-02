@@ -90,7 +90,7 @@ from keyswitch.constants.models import (  # noqa: E402
     ALNUM_HEAD_MAX_CHARACTERS, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, SHORT_HEAD_LETTERS,
 )
 from keyswitch.context_action_features import (  # noqa: E402
-    alnum_question, cyrletter_question, dash_question, digit_dot_question, dotted_question, letters_and_digits, resume_question, short_question, sign_question,
+    alnum_question, cyrletter_question, dash_question, digit_dot_question, dotted_question, quote_question, letters_and_digits, resume_question, short_question, sign_question,
     slip_question, variable_question,
 )
 from keyswitch.context_model import ContextEvidence, ContextModel, ContextPrediction  # noqa: E402
@@ -156,6 +156,7 @@ CAPTURED_QUESTIONS: Final[dict[str, Callable[[Mapping[str, object]], bool]]] = {
                                                 str(row["trigger"])),
     "dash": lambda row: dash_question(str(row["original"]), str(row["alternative"]), str(row["trigger"])),
     "digitdot": lambda row: digit_dot_question(str(row["original"]), str(row["alternative"]), str(row["trigger"])),
+    "quote": lambda row: quote_question(str(row["original"]), str(row["alternative"]), str(row["trigger"])),
 }
 
 Job = tuple[int, str, str, int, str]

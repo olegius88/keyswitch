@@ -253,6 +253,9 @@ class WaitingContextWord:
     # The detector's verdict on the word at its own boundary: the baseline the model saw there,
     # and the one it is asked with again beside a kept next word.
     baseline: DetectionDecision | None = None
+    # The word was converted at its boundary and waits only in case the next word decides it again (_start_context_wait's
+    # fallback): nothing is left to convert when no next word comes.
+    converted: bool = False
 
 
 # The baseline reason of the question a converted word is asked again (_revert_with_next_word).
@@ -1120,6 +1123,8 @@ class KeySwitchEngine:
                 self._technical_event("action_deferred", key_name=event.key_name)
                 if self._strokes and not self._untracked_token:
                     self._commit_word(event)
+                else:
+                    self._settle_context_wait_at_action(event)
                 return
             # These events have already reached the application. Enter may
             # submit a chat and Tab may focus another field; neither can be
@@ -3418,7 +3423,7 @@ class KeySwitchEngine:
             # window, a caret move, Backspace, a changed field.
             self._context_waiting = WaitingContextWord(
                 plan, decision, result.field, self._focus_window or 0, time.monotonic() + CONTEXT_TTL,
-                self._context_wait_sequence, settles, self._last_baseline,
+                self._context_wait_sequence, settles, self._last_baseline, fallback,
             )
             # The pause that settles this wait (_settle_context_wait_after_pause) is
             # counted from its boundary. The commit has just cleared the word timer,
@@ -3908,6 +3913,39 @@ class KeySwitchEngine:
         self._log_context_wait("context_wait_settled", waiting, "pause")
         self._learning_prompt_after = None
         self._execute_correction(replace(waiting.plan, confidence=result.decision.confidence), None)
+
+    def _settle_context_wait_at_action(self, event: KeyEvent) -> None:
+        """Enter or Tab arrived while a word waits for its next word: no next word is coming.
+
+        The word is asked once more with the action's trigger, the question it would have been asked had the action
+        followed it without the space, and a conversion is made before the action goes through (_maybe_execute_pending).
+        The action used to end the wait in silence: `jr`, a space and Enter sent `jr` alone in Telegram where `ок` was
+        meant, while `jr` and Enter at once was asked at Enter (the laptop, 02.11.2026). A suggestion is asked again too:
+        a pause brings no new context, but the end of the message is the action's own question. A word already
+        converted at its boundary has nothing left to convert.
+        """
+
+        waiting = self._context_waiting
+        if (waiting is None or waiting.converted or self._pending is not None or self._last_committed_stale
+                or waiting.window != (self._focus_window or 0)
+                or self.settings.get("detection.context_policy", "assist") != "assist"
+                or not bool(self.settings.get("enabled", True)) or not self._boundary_enabled(event)):
+            return
+        application = self.backend.active_application()
+        if waiting.plan.application != application or self._application_excluded(application):
+            return
+        trigger = self._trigger_for_boundary(event)
+        result = self.context_policy.decide(
+            waiting.decision, waiting.plan.replacement, waiting.plan.target_group, self.detector,
+            trigger, str(self.settings.get("detection.context_policy", "assist")), field_override=waiting.field,
+        )
+        self._context_waiting = None
+        if not result.decision.should_convert:
+            self._log_context_wait("context_wait_cancelled", waiting, "action_kept_the_word")
+            return
+        self._log_context_wait("context_wait_settled", waiting, trigger)
+        self._learning_prompt_after = None
+        self._pending = replace(waiting.plan, confidence=result.decision.confidence)
 
     def _maybe_correct_after_pause(self, *, now: float | None = None) -> None:
         self._settle_context_wait_after_pause(time.monotonic() if now is None else now)
