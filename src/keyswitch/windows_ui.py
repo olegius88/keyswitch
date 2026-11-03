@@ -11,12 +11,14 @@ import winsound
 from pathlib import Path
 
 from .desktop_services import ApplicationCatalog, AutostartManager, PromptBackend
+from .desktop_theme import dark_from_apps_use_light_theme
 from .desktop_ui import DesktopApplication, PAGE_NAMES as PAGE_NAMES, run_application
 
 # The name the Windows end-to-end test has always used for the window.
 WindowsApplication = DesktopApplication
 from .tray_model import TrayActions, TrayController
 from .windows_backend import WindowsBackend
+from .windows_registry import NativeWindowsRegistry
 from .windows_system import (
     WindowsApplicationCatalog,
     WindowsAutostartManager,
@@ -51,6 +53,9 @@ class WindowsServices:
 
     def beep(self) -> None:
         winsound.MessageBeep(winsound.MB_OK)
+
+    def system_dark_theme(self) -> bool:
+        return dark_from_apps_use_light_theme(NativeWindowsRegistry().read_apps_use_light_theme())
 
 
 def run_windows_application(

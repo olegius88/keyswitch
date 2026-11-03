@@ -6,6 +6,7 @@ import functools
 import itertools
 import json
 import logging
+import math
 import queue
 import re
 import sysconfig
@@ -17,7 +18,7 @@ from dataclasses import asdict, dataclass, replace
 from typing import Final
 
 from . import __version__
-from .backend import InputBackend, KeyEvent, KeyDisposition, LayoutSwitchUnconfirmed
+from .backend import InputBackend, KeyEvent, KeyDisposition, LayoutSwitchUnconfirmed, erasing_injection
 from .app_quirks import mention_head
 from .boundary_model import BoundaryModel, MAX_SUFFIX, features as boundary_features
 from .boundary_policy import BoundaryPolicy
@@ -39,6 +40,7 @@ from .constants.settings_defaults import (
     PAUSE_DELAY_SETTING_MAX_SECONDS,
     PAUSE_DELAY_SETTING_MIN_SECONDS,
 )
+from .constants.settings_defaults import SELECTION_HOTKEYS
 from .detector import DetectionDecision, LanguageDetector
 from .early_switch import (
     EarlySwitchDecision,
@@ -56,6 +58,10 @@ from .context_action_features import (
     cyrletter_question, digit_dot_question, resume_question, sign_token_asked, term_question, variable_question,
 )
 from .log_privacy import LogRedactor
+from .selection_commands import (
+    COMMAND_TITLES as SELECTION_COMMAND_TITLES, COMMANDS as SELECTION_COMMANDS, PendingSelection, SelectedText,
+    SelectionBackend, SelectionCommand, SelectionPlan, SelectionRefused, checked_selection, plan_selection,
+)
 from .intent_model import CorrectionTrigger, LinearNgramModel
 from .context_policy import (
     STRANDED_SHORT_WORD_REASON, ContextPolicy, ContextResult, caret_lag, ends_with_typed, shared_identifiers,
@@ -82,7 +88,12 @@ from .short_words import (
     ISOLATED_SHORT_WORD_REASON, SINGLE_LETTER_CONFIDENCE, TRUSTED_SINGLE_LETTER_WORDS, is_short_word_override, word_starts,
 )
 from .word_decision import automatic_word_decision
+from .typo_correction import KeyTemplates, TypoCorrector, corrected_keys, known_elsewhere
+from .constants.typo import TYPO_ENGLISH_LOCALE
+from .personal_words import PersonalWords
 from .constants.detection import (
+    DOUBLE_CAPITALS,
+    DOUBLE_CAPITALS_MIN_LETTERS,
     EARLY_SWITCH_CONFIDENCE,
     ENGINE_EVENT_QUEUE_MAX_SIZE,
     JOINED_PART_MIN_LETTERS,
@@ -100,7 +111,7 @@ from .constants.detection import (
     TRUSTED_SHORT_WORD_MAX_LENGTH,
     UNSCORED_CORRECTION_CONFIDENCE,
 )
-from .constants.keyboard import LAYOUT_GROUP_COUNT, UNICODE_PACKET_KEY_NAME
+from .constants.keyboard import LAYOUT_GROUP_COUNT, SHIFT_MASK, UNICODE_PACKET_KEY_NAME
 from .constants.file_formats import LEGACY_RULE_CONFIRMATIONS_REQUIRED
 from .constants.log_files import LOGGED_SCORE_DECIMALS
 from .constants.text import BASIC_MULTILINGUAL_PLANE_MAX_CODEPOINT
@@ -180,7 +191,7 @@ class CorrectionPlan:
     application: str
     automatic: bool = True
     # boundary | pause | manual | undo | early | symbols | late_stroke
-    # | mention_shown | mention_hidden | context_phrase | context_word | sign
+    # | mention_shown | mention_hidden | context_phrase | context_word | sign | case | typo
     mode: str = "boundary"
     context_field: str = ""
     # Literal punctuation before `boundary`, not replayed in the new layout.
@@ -204,6 +215,20 @@ class CorrectionPlan:
     # before its next word, which is typed again as it was (_decide_with_kept_neighbour). The
     # layout stays `source_group`.
     kept_tail: int = 0
+    # The keys on screen that `strokes` replace when they are other keys: a typo correction
+    # (mode "typo", _typo_plan) types the corrected word over the keys typed, and its undo types
+    # those back. Empty: `strokes` are the keys on screen, as for every other correction.
+    replaced_strokes: tuple[KeyEvent, ...] = ()
+    # The keys of the text this plan replaces, when they are not `strokes`: a case fix types the keys
+    # of the word with one letter's Shift changed (_fix_double_capitals), and undo types these back.
+    # Empty when the plan replaces `strokes` themselves, as every conversion does.
+    replaced: tuple[KeyEvent, ...] = ()
+
+    @property
+    def case_fix(self) -> bool:
+        """The plan changes the case of letters in their own layout: a case fix, or its undo."""
+
+        return bool(self.replaced)
 
 
 @dataclass(frozen=True)
@@ -505,8 +530,12 @@ class KeySwitchEngine:
         self._convert_released = False
         # What that press did: the plan it scheduled or "switch" for a layout toggle.
         self._convert_outcome: CorrectionPlan | str | None = None
+        # A selection hotkey waiting for its keys to come up (_advance_selection_command).
+        self._selection_pending: PendingSelection | None = None
         # Set while the rule window is open: its fields are not text to correct.
         self._input_suspended = False
+        # Set while the test field of the settings window has the keyboard (set_test_field_focused).
+        self._test_field_focused = False
         # Input other programs inject (remote control, macros) counts as typing
         # only with detection.injected_input; read by the hook, so cached here.
         self._injected_input = bool(settings.get("detection.injected_input", False))
@@ -514,6 +543,17 @@ class KeySwitchEngine:
         self._learning_prompt: LearningPrompt | None = None
         self._learning_prompt_deadline: float | None = None
         self._contexts: dict[str, LanguageContext] = {}
+        # Typo correction (_typo_plan): the corrector, loaded here while the setting is on so the first word does
+        # not wait for its lists; the key of each letter seen; the user's own words, stored beside the history and
+        # only while the history is kept; the word judged at its boundary that waits to be left as typed.
+        self._typo: TypoCorrector | None = None
+        self._typo_corrector()
+        self._typo_keys = KeyTemplates()
+        self._personal = PersonalWords(
+            history.path.with_name("personal-words.json"),
+            persist=lambda: bool(self.settings.get("general.keep_history", True)),
+        )
+        self._personal_pending = ""
         self._snapshot = EngineSnapshot(
             enabled=bool(settings.get("enabled", True)),
             correction_count=len(history.read()),
@@ -632,6 +672,22 @@ class KeySwitchEngine:
             return
         self._input_suspended = opened
         self._technical_event("rule_editor_" + ("focused" if opened else "left"))
+
+    def set_test_field_focused(self, focused: bool) -> None:
+        """The test field of the settings window gained or lost the keyboard.
+
+        The windows of KeySwitch itself are not where the user types (FocusInfo.own): moving to
+        the settings window or the learning prompt is no move to another program, and Windows
+        keeps a layout per window, so a layout seen there says nothing of the text and is ignored.
+        The test field is the exception: it is there to try KeySwitch as in any other program,
+        and a layout picked by hand while it has the keyboard must protect the next word there
+        too. Only the window knows which of its controls has the keyboard, so it reports it here.
+        """
+
+        if focused == self._test_field_focused:
+            return
+        self._test_field_focused = focused
+        self._technical_event("test_field_" + ("focused" if focused else "left"))
 
     def dismiss_learning_prompt(
         self, prompt: LearningPrompt | None = None, *, reason: str = "dismissed"
@@ -990,11 +1046,15 @@ class KeySwitchEngine:
                 and self.settings.get("detection.context_policy", "assist") != "off"
                 and not self._application_excluded(application)
             )
+            if self._sensitive_context_window is None and not self._application_excluded(application):
+                # Each press shows the key of its letters: a typo correction types a letter not in the word with it.
+                self._typo_keys.observe(event)
             stream = self.context_policy.stream
             stream.focus(application, self._focus_window or 0)
             self._log_input_edit(event, application)
             if context_enabled:
-                if not any(self._matches_hotkey(name, event) for name in ("toggle", "convert_last", "undo")):
+                if not any(self._matches_hotkey(name, event)
+                           for name in ("toggle", "convert_last", "undo", *SELECTION_HOTKEYS)):
                     stream.observe(event)
             else:
                 stream.clear()
@@ -1048,12 +1108,18 @@ class KeySwitchEngine:
                 self._schedule_manual_conversion(event.keycode)
             return
         if self._matches_hotkey("undo", event):
-            self._schedule_undo(event.keycode)
+            self._schedule_undo_hotkey(event.keycode)
+            return
+        selection_hotkey = self._selection_hotkey(event)
+        if selection_hotkey is not None:
+            self._schedule_selection_command(selection_hotkey)
             return
         if event.control or event.alt or event.super_key:
             self._clear_word(reason="modifier_shortcut")
             return
         if event.key_name == "BackSpace":
+            if not self._strokes:
+                self._personal_word_settled(False)
             reopenable = self._reopenable_committed_word()
             self._last_committed_stale = True
             self._log_pending_dropped("backspace")
@@ -1704,6 +1770,112 @@ class KeySwitchEngine:
             self._technical_event("history_write_failed", error=type(error).__name__)
             self._update(last_error=f"История не записана: {error}")
 
+    # -- Typo correction (typo_correction.py): one slip in a finished word, undone in the word's own injection --
+
+    def _typo_corrector(self) -> TypoCorrector | None:
+        """The corrector while detection.correct_typos is on; its lists load once per process, on first use."""
+
+        if not bool(self.settings.get("detection.correct_typos", True)):
+            return None
+        if self._typo is None:
+            self._typo = TypoCorrector.packaged([self.models[group].locale for group in sorted(self.models)])
+        return self._typo
+
+    def _typo_plan(self, base: CorrectionPlan, keys: tuple[KeyEvent, ...]) -> CorrectionPlan | None:
+        """`base` with the slip in its word undone, or None.
+
+        `base` is the word's final plan: kept as typed (both layouts the same) or converted, and the reading of `keys`,
+        the keys typed, in its target layout is the word judged. The plan keeps the layouts of `base`, so a word typed
+        in the wrong layout and misspelt (`yhjvfkmyj`) is `нормально` after one injection, not two. A capital opens
+        the word only at the start of a message or a sentence: one in the middle of a sentence is a name. A word whose
+        correction the user took back (_schedule_undo) is left as typed from then on.
+        """
+
+        corrector = self._typo_corrector()
+        group = base.target_group
+        if corrector is None or (self.models[group].locale == TYPO_ENGLISH_LOCALE
+                                 and not bool(self.settings.get("detection.correct_typos_english", False))):
+            # English slips are corrected only on request (constants.typo.TYPO_ENGLISH_LOCALE).
+            return None
+        word = self._text_for_group(keys, group)
+        self._personal_pending = ""
+        if word in self._personal or (
+                bool(self.settings.get("detection.learning", True)) and self.learning.keeps(group, word)):
+            # The word is the user's own (personal_words), or a rule of theirs keeps it as it is.
+            return None
+        readings = {self.models[other].locale: self._text_for_group(keys, other) for other in self.models if other != group}
+        # The observed text says where a sentence begins; with the context off nothing does, and a capital is left.
+        observed = (bool(self.settings.get("detection.context_aware", True))
+                    and self.settings.get("detection.context_policy", "assist") != "off")
+        before = self.context_policy.stream.before_word(base.original).rstrip()
+        ignored: list[str] = self.settings.get("exclusions.words", [])
+        excluded = {self.detector.token_key(item) for item in ignored}
+        lexicons = [model.frequencies for model in self.models.values()]
+        judgement = corrector.judge(
+            word, self.models[group].locale, readings,
+            capital_allowed=observed and (not before or before[-1] in SENTENCE_END_SIGNS),
+            known=lambda text: known_elsewhere(text, lexicons=lexicons, terms=_term_frequency(),
+                                               identifiers=shared_identifiers(), excluded=excluded),
+        )
+        choice = judgement.choice
+        if judgement.reason in ("no_candidate", "rare", "ambiguous", "corrected"):
+            # No list knows the word: left as typed, it counts towards the user's own (_personal_word_settled).
+            self._personal_pending = word
+        if choice is None:
+            return None
+        reason: str = judgement.reason
+        strokes = corrected_keys(keys, group, choice, self._typo_keys) if reason == "corrected" else None
+        if reason == "corrected" and strokes is None:
+            reason = "no_key"
+        elif strokes is not None and len(strokes) != len(keys) and erasing_injection(self.backend) is None:
+            # This backend erases as many characters as it types: a letter left out or typed in excess stays.
+            strokes, reason = None, "backend_erases_typed_length"
+        # Lengths, the slip and orders of magnitude only: the words are the user's text.
+        fields: dict[str, object] = {
+            "letters": len(word), "operation": choice.edit.operation, "candidates": judgement.candidates,
+            "count_order": judgement.count_order, "source_group": base.source_group, "target_group": group,
+        }
+        if strokes is None:
+            self._technical_event("typo_correction_declined", reason=reason, **fields)
+            return None
+        self._personal_pending = ""
+        self._technical_event(
+            "typo_correction_planned", position=choice.edit.position,
+            margin=round(choice.margin, LOGGED_SCORE_DECIMALS) if math.isfinite(choice.margin) else None, **fields)
+        converted = base.source_group != group
+        return replace(
+            base, strokes=strokes, replaced_strokes=keys, replacement=choice.word, mode="typo", revisit=None,
+            automatic=True, confidence=base.confidence if converted else 1 / (1 + math.exp(-choice.margin)),
+        )
+
+    def _personal_word_settled(self, kept: bool) -> None:
+        """The word judged at its boundary (_typo_plan) was left as typed, or the user went back to it.
+
+        Typing on into the next word, or Enter or Tab delivered after it, leaves it; Backspace into it, Pause, undo, a
+        click or the caret moved away go back to it, or may.
+        """
+
+        word, self._personal_pending = self._personal_pending, ""
+        if word and kept and self._personal.keep(word):
+            self._technical_event("personal_word_added", reason="left_as_typed", letters=len(word))
+
+    def clear_personal_words(self) -> None:
+        """Forget the user's own words (personal_words)."""
+
+        self._personal.clear()
+        self._technical_event("personal_words_cleared")
+
+    def _typo_correction_reversible(self) -> bool:
+        """Whether the last correction is a typo correction that undo can still take back (_schedule_undo)."""
+
+        previous = self._last_correction
+        committed = self._last_committed
+        return (previous is not None and previous.mode == "typo" and not self._strokes and not self._symbol_strokes
+                and not self._last_committed_stale and committed is not None
+                and (committed.strokes, committed.trailing, committed.boundary)
+                == (previous.strokes, previous.trailing, previous.boundary)
+                and time.monotonic() - self._last_correction_time <= UNDO_AVAILABLE_WINDOW_SECONDS)
+
     def _commit_word(self, boundary: KeyEvent) -> None:
         if not self._strokes:
             return
@@ -1878,6 +2050,10 @@ class KeySwitchEngine:
                     joint = (taken, neighbour)
             if trailing or head:
                 self._log_context_wait("context_wait_cancelled", waiting, "literal_tail" if trailing else "literal_head")
+            # A typo is corrected only in a plain word typed as one, after the early switch has let go (_typo_plan).
+            plain = not (head or trailing or signs or mention or shown is not None or inside is not None
+                         or early_switch_origin is not None
+                         or (self._insertion is not None and self._insertion.inside_word))
             if joint is not None:
                 self._pending, decision = self._replay_sign_with_word(joint[0], opened), joint[1]
                 self._learning_prompt_after = None
@@ -1910,8 +2086,13 @@ class KeySwitchEngine:
                 # exactly as it did while the letter waited for context. A short
                 # word the model converts at the start of a message is the same
                 # case: `z ctujlyz` typed in one go must still end as `я сегодня`.
+                waits = False
                 if decision.reason == ISOLATED_SHORT_WORD_REASON or self._opening_conversion(inside, original):
-                    self._start_context_wait(plan, decision, boundary, trailing, head, fallback=True)
+                    waits = self._start_context_wait(plan, decision, boundary, trailing, head, fallback=True)
+                if (plain and not waits and not self._pending.sign_replayed
+                        and (typo := self._typo_plan(self._pending, self._pending.strokes)) is not None):
+                    # Converted and misspelt: the corrected keys go in the same injection (`yhjvfkmyj` is `нормально`).
+                    self._pending = typo
             else:
                 if alone is not None:
                     self._log_pending_dropped("superseded_by_boundary")
@@ -1920,12 +2101,27 @@ class KeySwitchEngine:
                     self._pending_trigger_keycode = boundary.keycode
                 self._remember_context(application, source_group, typed[:head] + strokes + signs)
                 waits = False if signs else self._start_context_wait(plan, decision, boundary, trailing, head)
+                typo = None if waits or alone is not None or not plain else self._typo_plan(CorrectionPlan(
+                    strokes, None if boundary.deferred else boundary, source_group, source_group, original, original,
+                    0.0, application, True, context_field=self._context_field_id()), strokes)
+                if typo is not None:
+                    # Kept as typed and misspelt: the word is settled in its own language, so no later word takes
+                    # it along or back (it is no kept word and no provisional one).
+                    self._pending = typo
+                    self._learning_prompt_after = None
+                    self._pending_trigger_keycode = boundary.keycode
                 if inside is None and not trailing and not head and not signs:
                     field = self._context_result.field if self._context_result is not None else None
+                    if (not waits and alone is None and self._pending is None and early_switch_origin is None
+                            and not mention and shown is None):
+                        # The word stays in its layout for good: only now may its case be fixed. A word
+                        # still waiting for its neighbour, or going with another correction, may yet be
+                        # converted, and a conversion types the keys as they were typed.
+                        plan = self._fix_double_capitals(plan, boundary)
                     # A word waiting for its neighbour joins the kept words only if the wait fails.
-                    self._keep_for_next_word(kept, None if waits else KeptWord(
+                    self._keep_for_next_word(kept, None if waits or typo is not None else KeptWord(
                         plan, self._last_baseline, field, self._focus_window or 0, time.monotonic() + CONTEXT_TTL), boundary)
-                    if not waits and alone is None:
+                    if not waits and alone is None and typo is None:
                         self._provisional = self._provisional_after_pause(paused, strokes, source_group, boundary)
                 elif inside is None and trailing and not head and not signs and self._sign_reads_as_letter(plan):
                     # The boundary model split a sign off the end of the word and the word
@@ -2005,6 +2201,92 @@ class KeySwitchEngine:
                 else None
             ),
         )
+
+    def _fix_double_capitals(self, plan: CorrectionPlan, boundary: KeyEvent) -> CorrectionPlan:
+        """Schedule the case fix of a word typed with two capitals at its start; return the word as it will stand.
+
+        `ПРивет` and `HEllo` are Shift held down one letter too long. A word kept in its layout gets its second
+        letter lowercase at its boundary when all of it has that shape: at least DOUBLE_CAPITALS_MIN_LETTERS
+        letters, two capitals, then lowercase letters only. An abbreviation (`ПК`, `IT`, `URLs`), a word in
+        capitals, a CamelCase name and a token with digits or signs have other shapes and are never touched.
+
+        The lexicon decides the rest. It holds words without their case, so a word it knows is known in
+        lowercase, with a capital first and in capitals, and the shape typed is none of these; only a
+        case-aware dictionary - Hunspell, where the system has one - can know a word so written (`HBase`,
+        `XEmacs`), and such a word stays. The fixed word must be one the frequency lexicon of its layout
+        holds, not one Hunspell alone accepts: that lexicon is the same on every system, and Hunspell knows
+        `glib`, which would make `GLib` a `Glib`. Terms of this shape (`VMware`, `OAuth`, `JUnit`, `MBps`)
+        are no words of the lexicon and stay as typed. So does a word the user excluded or one a rule of
+        theirs names, and a word typed under Caps Lock, where its capitals were not Shift held too long.
+        """
+
+        word, group = plan.original, plan.source_group
+        capitals, rest = word[:DOUBLE_CAPITALS], word[DOUBLE_CAPITALS:]
+        model = self.models.get(group)
+        if (model is None or not bool(self.settings.get("detection.fix_double_capitals", True))
+                or len(word) < DOUBLE_CAPITALS_MIN_LETTERS or len(word) != len(plan.strokes) or not word.isalpha()
+                or not (capitals.isupper() and rest.islower())):
+            return plan
+        fixed = capitals[0] + capitals[1:].lower() + rest
+        ignored: list[str] = self.settings.get("exclusions.words", [])
+        lowered = self._unshifted(plan.strokes[1:DOUBLE_CAPITALS], group)
+        reason = (
+            # The early switch or a pause converted the word while it was typed: its keys are another
+            # layout's, and a conversion's keys are typed back as they were.
+            "converted_while_typed" if any(stroke.group != group for stroke in plan.strokes)
+            # Letters typed into a word: the word is longer than the keys the engine holds.
+            else "inside_word" if self._insertion is not None and self._insertion.inside_word
+            else "user_exclusion" if self.detector.token_key(word) in {self.detector.token_key(item) for item in ignored}
+            else "user_rule" if self._forced_target_group(group, word) is not None or self._rejected_targets(group, word)
+            else "caps_lock" if any(stroke.caps_lock for stroke in plan.strokes)
+            else "known_as_typed" if model.speller.check(word)
+            else "fixed_word_unknown" if not model.score(fixed).exact
+            else "key_unknown" if lowered is None
+            else ""
+        )
+        if reason or lowered is None:
+            self._technical_event(
+                "double_capitals_kept", reason=reason, source_group=group, letters=len(word),
+                application=plan.application,
+            )
+            return plan
+        strokes = (plan.strokes[0], *lowered, *plan.strokes[DOUBLE_CAPITALS:])
+        # Enter and Tab are held back until the fix is typed and are delivered after it, as after a conversion.
+        self._pending = CorrectionPlan(
+            strokes, None if boundary.deferred else boundary, group, group, word, fixed,
+            UNSCORED_CORRECTION_CONFIDENCE, plan.application, True, "case", replaced=plan.strokes,
+        )
+        self._learning_prompt_after = None
+        self._pending_trigger_keycode = boundary.keycode
+        self._technical_event(
+            "double_capitals_scheduled", source_group=group, letters=len(word), boundary=boundary.key_name,
+            application=plan.application,
+        )
+        # The next word may take this one along into its own conversion (_take_along): it takes the keys now on
+        # screen, which the observed text shows once the fix is typed.
+        return replace(plan, strokes=strokes, original=fixed, replacement=self._text_for_group(strokes, plan.target_group))
+
+    def _unshifted(self, strokes: Sequence[KeyEvent], group: int) -> tuple[KeyEvent, ...] | None:
+        """`strokes`, capital letters of `group` typed with Shift, as their keys typed without it; None if unknown.
+
+        Every backend types a stroke again from its key and its Shift, and the engine reads the stroke's text
+        from `characters`, so both change. In the other layout a key is then the unshifted one of its pair:
+        `Б` is `<` in the English layout, and `б` is `,`.
+        """
+
+        pair = LayoutPair()
+        result: list[KeyEvent] = []
+        for stroke in strokes:
+            names = [self._layout_name(index) for index in range(len(stroke.characters))]
+            letter = stroke.character_for(group).lower()
+            if not stroke.shift or len(letter) != 1 or not set(names) <= {"us", "ru"}:
+                return None
+            result.append(replace(
+                stroke, character=letter,
+                characters=tuple(pair.translate(letter, names[group], name) for name in names),
+                state=stroke.state & ~SHIFT_MASK,
+            ))
+        return tuple(result)
 
     @staticmethod
     def _is_layout_letter(event: KeyEvent) -> bool:
@@ -2330,6 +2612,7 @@ class KeySwitchEngine:
     def _begin_word(self, event: KeyEvent) -> None:
         if self._strokes:
             return
+        self._personal_word_settled(True)
         if self._position_unknown:
             self._insertion = self._read_insertion(event)
         self._position_unknown = False
@@ -4328,6 +4611,12 @@ class KeySwitchEngine:
             )
             self._update(last_action="Замена ожидает отпускания клавиш")
             return
+        if not (self._strokes or self._symbol_strokes):
+            self._personal_word_settled(False)
+        if self._typo_correction_reversible():
+            # Pause right after a typo correction puts the word back as typed, as undo does; the next press converts.
+            self._schedule_undo(trigger_keycode)
+            return
         mode = "manual"
         trailing: tuple[KeyEvent, ...] = ()
         if self._strokes:
@@ -4743,7 +5032,9 @@ class KeySwitchEngine:
         reasons about: the engine's own decision, or the user's first conversion.
         """
 
-        if self._correction_origin is None or self._reversal_of_last_correction(plan) is None:
+        # An undo always puts back the last correction, also past the spaces typed after it, where its keys
+        # after the word are more than the correction's (_undo_past_spaces): the chain goes on.
+        if self._correction_origin is None or (plan.mode != "undo" and self._reversal_of_last_correction(plan) is None):
             self._correction_origin = plan
         self._last_correction = plan
         self._last_correction_time = time.monotonic()
@@ -5027,6 +5318,7 @@ class KeySwitchEngine:
         )
 
     def _schedule_undo(self, trigger_keycode: int) -> None:
+        self._personal_word_settled(False)
         if self._pending is not None and self._pending.mode == "early":
             self._log_pending_dropped("replaced_by_undo")
             self._pending = None
@@ -5055,10 +5347,79 @@ class KeySwitchEngine:
             self._technical_event("undo_unavailable", reason="text_changed_or_expired")
             self._update(last_action="Последнее исправление уже нельзя отменить")
             return
-        self._log_pending_dropped("replaced_by_undo")
-        self._pending = CorrectionPlan(
-            previous.strokes,
-            previous.boundary,
+        self._queue_undo(self._undo_of(previous, previous.boundary, previous.trailing), trigger_keycode)
+
+    def _schedule_undo_hotkey(self, trigger_keycode: int) -> None:
+        """The undo hotkey: the last correction back, also past the spaces typed after it.
+
+        A wrong correction is noticed when it is seen, and by then a space or more often stands after
+        it. The hotkey reaches the correction across those spaces, puts the word back as it was typed and
+        keeps the spaces, as Pause reaches the last word past them (_pause_reaches_past, which also bounds
+        how many). Any other key typed after the correction still leaves nothing to undo: a letter, Backspace,
+        an arrow key or a click leave text the correction did not, and Tab and Enter may have moved to
+        another field or sent the text (they end the reach of Pause too).
+
+        There are two paths for one reason. `_schedule_undo` undoes a correction only while the text ends
+        exactly as the correction left it, and a frozen historical test calls it directly and pins that
+        behaviour: tests/test_input_integrity.py, test_undo_is_unavailable_after_edit_or_pointer_move, where
+        a space typed after the correction leaves nothing to undo. The bytes of that file are part of sealed
+        evidence and cannot change. What the hotkey does is the product's, so the hotkey comes here, and
+        everything other than the spaces is left to `_schedule_undo`.
+        """
+
+        reach = self._undo_past_spaces()
+        if reach is None:
+            self._schedule_undo(trigger_keycode)
+            return
+        plan, spaces = reach
+        self._technical_event("undo_past_spaces", spaces=spaces, application=plan.application,
+                              application_excluded=self._application_excluded(plan.application))
+        self._queue_undo(plan, trigger_keycode)
+
+    def _undo_past_spaces(self) -> tuple[CorrectionPlan, int] | None:
+        """The undo of the last correction together with the spaces typed after it, and how many there are.
+
+        None unless the text before the caret is the correction's text followed by plain spaces alone: the
+        word, the signs and the boundary the correction typed, then spaces (_extend_last_committed adds each
+        to the last committed word as it is typed, and anything else makes that word stale).
+        """
+
+        previous, committed = self._last_correction, self._last_committed
+        if (previous is None or committed is None or self._pending is not None or self._last_committed_stale
+                or self._strokes or self._symbol_strokes or committed.strokes != previous.strokes
+                or time.monotonic() - self._last_correction_time > UNDO_AVAILABLE_WINDOW_SECONDS):
+            return None
+        corrected = (*previous.trailing, *(() if previous.boundary is None else (previous.boundary,)))
+        typed = (*committed.trailing, *(() if committed.boundary is None else (committed.boundary,)))
+        after = typed[len(corrected):]
+        if (typed[:len(corrected)] != corrected or not after
+                or not all(key.character == " " and set(key.characters) == {" "} for key in after)):
+            return None
+        return self._undo_of(previous, committed.boundary, committed.trailing), len(after)
+
+    @staticmethod
+    def _undo_of(
+        previous: CorrectionPlan, boundary: KeyEvent | None, trailing: tuple[KeyEvent, ...],
+    ) -> CorrectionPlan:
+        """The plan that puts `previous` back, deleting and typing again `trailing` and `boundary` after the word.
+
+        A case fix and a typo correction typed keys other than the ones typed (CorrectionPlan.replaced,
+        CorrectionPlan.replaced_strokes): undo types those back, and undoing the undo types the fix again.
+        """
+
+        replaced: tuple[KeyEvent, ...] = ()
+        replaced_strokes: tuple[KeyEvent, ...] = ()
+        if previous.replaced_strokes:
+            # A typo correction typed other keys than the user's, and maybe not as many (CorrectionPlan.replaced_strokes):
+            # undo types the user's keys back over the corrected word, and undoing the undo types the correction again.
+            strokes, replaced_strokes = previous.replaced_strokes, previous.strokes
+        else:
+            strokes = previous.replaced or previous.strokes
+            if previous.replaced:
+                replaced = previous.strokes
+        return CorrectionPlan(
+            strokes,
+            boundary,
             previous.target_group,
             previous.source_group,
             previous.replacement,
@@ -5067,8 +5428,22 @@ class KeySwitchEngine:
             previous.application,
             False,
             "undo",
-            trailing=previous.trailing,
+            trailing=trailing,
+            replaced=replaced,
+            replaced_strokes=replaced_strokes,
         )
+
+    def _queue_undo(self, plan: CorrectionPlan, trigger_keycode: int) -> None:
+        """Run the undo `plan` once the hotkey's keys are up."""
+
+        self._log_pending_dropped("replaced_by_undo")
+        self._pending = plan
+        if plan.mode == "undo" and plan.replaced_strokes:
+            # A typo correction typed other keys than the user's: its undo types those back (_undo_of), and the word is
+            # the user's own from now on (personal_words).
+            word = self._text_for_group(plan.strokes, plan.source_group)
+            self._personal.add(word)
+            self._technical_event("personal_word_added", reason="correction_undone", letters=len(word))
         # Undo puts the text back and teaches nothing; a rule that keeps the
         # word comes only from the rule window.
         self._learning_prompt_after = None
@@ -5076,6 +5451,9 @@ class KeySwitchEngine:
         self._manual_release_deadline = time.monotonic() + MANUAL_RELEASE_TIMEOUT_SECONDS
 
     def _maybe_execute_pending(self, event: KeyEvent) -> None:
+        if self._selection_pending is not None:
+            self._advance_selection_command()
+            return
         if self._deferred_action is not None and not self._pressed and not self._modifier_keycodes:
             plan, self._pending = self._pending, None
             self._learning_prompt_after = None
@@ -5234,6 +5612,15 @@ class KeySwitchEngine:
                     held = self.backend.inject_correction(
                         (), plan.source_group, None, plan.source_group, late=late, trailing=literal,
                     )
+                elif plan.replaced_strokes and len(plan.replaced_strokes) != len(plan.strokes):
+                    # A typo correction (or its undo) types more or fewer keys than the word on screen has.
+                    inject = erasing_injection(self.backend)
+                    if inject is None:
+                        raise RuntimeError("Бэкенд не умеет стирать другое число символов; замена отменена")
+                    held = inject(
+                        plan.strokes, plan.target_group, plan.boundary, plan.source_group,
+                        late=late, trailing=plan.trailing, erased=len(plan.replaced_strokes),
+                    )
                 elif plan.kept_tail:
                     held = self.backend.inject_correction(
                         plan.strokes, plan.target_group, plan.boundary, plan.source_group,
@@ -5313,7 +5700,8 @@ class KeySwitchEngine:
             target_group=plan.target_group,
             previous_group=previous_group,
             layout_switched=plan.source_group != plan.target_group,
-            deleted_characters=len(plan.strokes) + len(plan.trailing) + (0 if plan.boundary is None else 1) + len(late),
+            deleted_characters=(len(plan.replaced_strokes or plan.strokes) + len(plan.trailing)
+                                + (0 if plan.boundary is None else 1) + len(late)),
             literal_characters=len(plan.trailing),
             replayed_strokes=len(plan.strokes),
             boundary_replayed=plan.boundary is not None,
@@ -5505,6 +5893,7 @@ class KeySwitchEngine:
                 "Замена отменена: не получено отпускание клавиш · проверьте текст",
                 reason="manual_release_timeout",
             )
+        self._expire_selection_command()
 
     def _field_reader_status(self) -> str:
         reader = self.context_policy.reader
@@ -5591,6 +5980,142 @@ class KeySwitchEngine:
     def _matches_hotkey(self, name: str, event: KeyEvent) -> bool:
         return _parsed_hotkey(str(self.settings.get(f"hotkeys.{name}", ""))).matches(event)
 
+    def _selection_hotkey(self, event: KeyEvent) -> str | None:
+        """The selection hotkey (hotkeys.selection_*) this press is, if any."""
+
+        return next((name for name in SELECTION_HOTKEYS if self._matches_hotkey(name, event)), None)
+
+    def _schedule_selection_command(self, name: str) -> None:
+        """A selection hotkey: its command runs once every key is up, as a Pause conversion waits for them.
+
+        Text typed while a modifier of the hotkey is still held would come out as shortcuts (Ctrl+C under a held Alt is
+        Ctrl+Alt+C). The selection is not the word being typed, so that word and whatever waits for it are let go
+        first: a correction of it typed after the selection changed would land in the wrong place.
+        """
+
+        command = SELECTION_COMMANDS[name]
+        self._clear_word(reason="selection_command")
+        self._selection_pending = PendingSelection(command, time.monotonic() + MANUAL_RELEASE_TIMEOUT_SECONDS)
+        self._technical_event("selection_command_scheduled", command=command)
+
+    def _advance_selection_command(self) -> None:
+        pending = self._selection_pending
+        if pending is None or self._pressed or self._modifier_keycodes:
+            return
+        self._selection_pending = None
+        self._run_selection_command(pending.command)
+
+    def _expire_selection_command(self) -> None:
+        """A selection hotkey whose keys were not seen to come up in time changes nothing.
+
+        As with _expire_manual_correction, a timeout is no proof that the keys are up, so nothing is typed.
+        """
+
+        pending = self._selection_pending
+        if pending is None or time.monotonic() < pending.deadline:
+            return
+        self._selection_pending = None
+        self._log_selection(pending.command, "refused", time.monotonic(), reason="release_timeout",
+                            pressed_keycodes=sorted(self._pressed), modifier_keycodes=sorted(self._modifier_keycodes))
+        self._update(last_action=str(SelectionRefused("release_timeout")))
+
+    def _selection_refusal(self, application: str, own_window: bool) -> SelectionRefused | None:
+        """Why a selection hotkey may not touch the focused field: the checks every correction passes."""
+
+        if not bool(self.settings.get("enabled", True)):
+            return SelectionRefused("disabled")
+        if own_window:
+            # KeySwitch's own window answers accessibility requests on the thread that would be waiting for this one.
+            return SelectionRefused("own_window")
+        if self._sensitive_context_window is not None and self._sensitive_context_window == self._focus_window:
+            return SelectionRefused("sensitive_field")
+        if self._application_excluded(application):
+            return SelectionRefused("excluded_application")
+        if not isinstance(self.backend, SelectionBackend):
+            return SelectionRefused("unsupported")
+        return None
+
+    def _run_selection_command(self, command: SelectionCommand) -> None:
+        """Read the selection, change it and type the result over it; the log gets lengths, never the text."""
+
+        started = time.monotonic()
+        application = self.backend.active_application()
+        focus = self.backend.focused_window()
+        refusal = self._selection_refusal(application, focus is not None and focus.own)
+        backend = self.backend
+        if refusal is not None or not isinstance(backend, SelectionBackend):
+            refusal = refusal or SelectionRefused("unsupported")
+            self._log_selection(command, "refused", started, reason=refusal.reason, application=application)
+            self._update(last_action=str(refusal))
+            return
+        selected: SelectedText | None = None
+        plan = SelectionPlan("")
+        reselected = False
+        try:
+            backend.hold_input()
+            try:
+                selected = backend.read_selection(application, 0 if focus is None else focus.window)
+                text = checked_selection(selected.text)
+                plan = plan_selection(command, text, backend.current_group(), self._layout_names())
+                if plan.changes(text):
+                    reselected = backend.replace_selection(selected, plan.replacement, plan.target_group)
+            finally:
+                backend.release_input()
+        except SelectionRefused as error:
+            self._log_selection(command, "refused", started, reason=error.reason, application=application,
+                                **self._selection_lengths(selected, plan))
+            self._update(last_action=str(error))
+            return
+        except Exception as error:
+            # The type names the failure for the log; the message, which names the step, goes to the status line.
+            self._note_unconfirmed_switch(error)
+            self._clear_word(reason="selection_failed")
+            self._log_selection(command, "failed", started, error=type(error).__name__, application=application,
+                                **self._selection_lengths(selected, plan))
+            self._update(last_error=str(error), last_action="Ошибка замены выделения · проверьте текст в приложении")
+            return
+        changed = plan.changes(selected.text)
+        if changed:
+            # The text around the caret is no longer what the engine saw typed.
+            self._clear_word(reason="selection_replaced")
+        if changed and plan.target_group is not None:
+            # As Pause with no word to convert: the layout is the user's explicit choice and protects the next word.
+            self._note_engine_switch(plan.target_group)
+            protects = bool(self.settings.get("detection.respect_manual_layout", True))
+            self._manual_layout_group = plan.target_group if protects else None
+            self._manual_layout_observed_at = time.monotonic()
+            self._manual_layout_source = "selection_layout"
+            self._manual_layout_word = False
+            self._update(current_group=plan.target_group)
+        self._log_selection(command, "applied" if changed else "unchanged", started, application=application,
+                            reselected=reselected, **self._selection_lengths(selected, plan))
+        self._update(
+            last_action=SELECTION_COMMAND_TITLES[command] if changed else "Выделение не изменилось", last_error="")
+
+    def _layout_names(self) -> list[str]:
+        names: list[str] = self.settings.get("detection.layouts", ["us", "ru"])
+        return [str(name) for name in names[:len(self.models)]]
+
+    @staticmethod
+    def _selection_lengths(selected: SelectedText | None, plan: SelectionPlan) -> dict[str, object]:
+        """The selection as the log may describe it: where it was read, how long it was and what it became."""
+
+        if selected is None:
+            return {}
+        return {
+            "source": selected.source,
+            "selected_characters": len(selected.text),
+            "replacement_characters": len(plan.replacement),
+            "source_group": plan.source_group,
+            "target_group": plan.target_group,
+        }
+
+    def _log_selection(self, command: SelectionCommand, outcome: str, started: float, **fields: object) -> None:
+        self._technical_event(
+            "selection_command", command=command, outcome=outcome,
+            elapsed_ms=round((time.monotonic() - started) * MILLISECONDS_PER_SECOND), **fields,
+        )
+
     def _configured_hotkeys(self) -> tuple[Hotkey, ...]:
         """Every hotkey of the settings, parsed once for the keyboard hook (see `consumes_key`)."""
 
@@ -5647,6 +6172,7 @@ class KeySwitchEngine:
         return "".join(stroke.character_for(group) for stroke in strokes)
 
     def _clear_word(self, action: str | None = None, *, reason: str = "") -> None:
+        self._personal_word_settled(reason == "action_completed")
         self.context_policy.stream.clear()
         if self._field_wait is not None:
             # A click, a caret move, Backspace or another window: the word may no longer stand where it was typed.
@@ -5725,7 +6251,7 @@ class KeySwitchEngine:
         focus = self.backend.focused_window()
         if focus is None or not focus.window:
             return _FocusChange(False, False)
-        if focus.own:
+        if focus.own and not self._test_field_focused:
             return _FocusChange(False, focus.isolated_layout)
         previous = self._focus_window
         self._focus_window = focus.window
@@ -5780,6 +6306,7 @@ class KeySwitchEngine:
             # Windows keeps a layout per window: the settings window or the
             # learning prompt of KeySwitch itself says nothing about the
             # layout the user types in, so it neither protects nor updates.
+            # Its test field is typed in as any program is (set_test_field_focused).
             # Every poll repeats the observation; the log needs it once.
             if not self._own_layout_ignored:
                 self._own_layout_ignored = True

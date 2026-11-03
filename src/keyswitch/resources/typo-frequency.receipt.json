@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "tool": "tools/build_typo_frequency.py",
+  "parameters": {
+    "stored_min_count": 5,
+    "occurrence_min_count": 1,
+    "min_letters": 5,
+    "count_log_scale": 8,
+    "occurrence_false_positive_rate": 0.01,
+    "zlib_level": 9,
+    "vocabulary_min_count": 20
+  },
+  "vocabulary": {
+    "attribution": "ru.stackoverflow.com posts and their code, training split, CC BY-SA 4.0",
+    "messages": {
+      "file": "so-train.jsonl.gz",
+      "sha256": "b22ec01e8e62931f35b171814b68a2192014abb097ed0feffa4eb42d7109b9cd"
+    },
+    "code": {
+      "file": "code-train.txt.gz",
+      "sha256": "8ae3f9d850fb712b78d00aaed1a04d22037a6dd8405909fed0bb4472ea587066"
+    },
+    "forms_counted": {
+      "en_US": 154154,
+      "ru_RU": 326082
+    }
+  },
+  "locales": {
+    "ru_RU": {
+      "source": {
+        "repository": "https://github.com/hermitdave/FrequencyWords",
+        "commit": "525f9b560de45753a5ea01069454e72e9aa541c6",
+        "path": "content/2018/ru/ru_full.txt",
+        "sha256": "32dfd94138aea2667ec455dcc8512029e39bd4b8ea70b09410d569b69d511a30",
+        "license": "CC BY-SA 4.0 (content), MIT (code), per the repository README at the commit",
+        "attribution": "Hermit Dave, FrequencyWords, from OpenSubtitles 2018 (OPUS, http://opus.nlpl.eu/OpenSubtitles2018.php)"
+      },
+      "selection": {
+        "list_entries": 1423050,
+        "letter_forms": 1050622,
+        "stored": 342104,
+        "seen_items": 688682,
+        "vocabulary_forms": 5358
+      },
+      "seen": {
+        "bits": 6601058,
+        "hashes": 7,
+        "items": 688682,
+        "false_positive_rate": 0.010039211684401767
+      },
+      "sections_sha256": {
+        "forms": "18084119f3144c29f66f9a1c52faa648981f0169a9e9222761f8d6dc801f7c8e",
+        "weights": "a14ceae385f4feb753b1db79b9729e9de67ef8d3ba1020e03a778878679cb4fa",
+        "seen": "a5073ccd8bae6d07e45bf74667135b4868bd87ef527158c1ee1c22d713f705b6"
+      },
+      "file": {
+        "path": "src/keyswitch/resources/typo-frequency-ru_RU.bin",
+        "bytes": 1952819,
+        "sha256": "dc67444c75604e459d92fc3c2fcc81d8533906269303f1b75820e22790e0cfc5"
+      }
+    },
+    "en_US": {
+      "source": {
+        "repository": "https://github.com/hermitdave/FrequencyWords",
+        "commit": "525f9b560de45753a5ea01069454e72e9aa541c6",
+        "path": "content/2018/en/en_full.txt",
+        "sha256": "7fea67ab954e2c01df6c608c9826e594cf36f8823b3243554f88245fb75dc506",
+        "license": "CC BY-SA 4.0 (content), MIT (code), per the repository README at the commit",
+        "attribution": "Hermit Dave, FrequencyWords, from OpenSubtitles 2018 (OPUS, http://opus.nlpl.eu/OpenSubtitles2018.php)"
+      },
+      "selection": {
+        "list_entries": 1656996,
+        "letter_forms": 1026874,
+        "stored": 286420,
+        "seen_items": 713304,
+        "vocabulary_forms": 5219
+      },
+      "seen": {
+        "bits": 6837061,
+        "hashes": 7,
+        "items": 713304,
+        "false_positive_rate": 0.010039214035450777
+      },
+      "sections_sha256": {
+        "forms": "19eec6bf73c45fd3b582175d3a6e83a89acfaf79f81df4380f2e5da39a39da93",
+        "weights": "73a800c809abff5374ba20fdd857c69d23972988af3b06f18a9dcb2a94783ffa",
+        "seen": "db62f6a282f51b8e66e09750cfe9874bd09c687ca4f452c52216ad86314bdc8d"
+      },
+      "file": {
+        "path": "src/keyswitch/resources/typo-frequency-en_US.bin",
+        "bytes": 1858281,
+        "sha256": "b7ed4014cfaca0d32fa8b0901e63100a98750825d845b73d8af224c276816e9b"
+      }
+    }
+  }
+}

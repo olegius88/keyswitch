@@ -39,6 +39,47 @@ EARLY_SWITCH_DEFAULT_SCHEMA_VERSION: Final = 7
 # Settings files written by schema 7 or older carry the old pause delay as its seeded default; loading
 # them adopts the shorter one once.
 PAUSE_DELAY_DEFAULT_SCHEMA_VERSION: Final = 8
+# The hotkeys that act on the selected text, by their names under `hotkeys`: the engine, both settings windows and
+# the tests read the names from here. A settings file written before they existed gains them from the defaults when it
+# is merged over them (config._deep_merge), so they need no schema step of their own.
+HOTKEY_SELECTION_LAYOUT: Final = "selection_layout"
+HOTKEY_SELECTION_CASE: Final = "selection_case"
+HOTKEY_SELECTION_TRANSLITERATE: Final = "selection_transliterate"
+SELECTION_HOTKEYS: Final = (HOTKEY_SELECTION_LAYOUT, HOTKEY_SELECTION_CASE, HOTKEY_SELECTION_TRANSLITERATE)
+# Their defaults are the ones Punto Switcher has for the same commands (its hotkey table: "Сменить раскладку
+# выделенного текста | Shift + Break", "Сменить регистр выделенного текста | Alt + Break", "Транслитерировать
+# выделенный текст | Alt + Scroll Lock", https://yandex.ru/support2/punto-win/ru/settings/hotkeys), so a user coming
+# from it finds them where the hands expect; none of them is taken by another hotkey here.
+DEFAULT_SELECTION_LAYOUT_HOTKEY: Final = "Shift+Pause"
+DEFAULT_SELECTION_CASE_HOTKEY: Final = "Alt+Pause"
+DEFAULT_SELECTION_TRANSLITERATE_HOTKEY: Final = "Alt+Scroll_Lock"
+# A Mac keyboard has neither Pause nor Scroll Lock, and the macOS backend names no such key. There the selection hotkeys
+# default to Control+Option with a letter, the modifiers of the shipped toggle and undo hotkeys; none of these is on
+# Apple's list of Mac keyboard shortcuts (https://support.apple.com/en-us/102650). config.default_settings puts them in
+# place of the others on macOS.
+MACOS_SELECTION_HOTKEY_DEFAULTS: Final = {
+    HOTKEY_SELECTION_LAYOUT: "Ctrl+Alt+L",
+    HOTKEY_SELECTION_CASE: "Ctrl+Alt+U",
+    HOTKEY_SELECTION_TRANSLITERATE: "Ctrl+Alt+T",
+}
+# What both settings windows call the selection hotkeys and say of them.
+SELECTION_HOTKEY_TITLES: Final = {
+    HOTKEY_SELECTION_LAYOUT: "Сменить раскладку выделенного текста",
+    HOTKEY_SELECTION_CASE: "Сменить регистр выделенного текста",
+    HOTKEY_SELECTION_TRANSLITERATE: "Транслитерировать выделенный текст",
+}
+SELECTION_HOTKEY_DESCRIPTIONS: Final = {
+    HOTKEY_SELECTION_LAYOUT: (
+        "Выделенный текст, набранный не в той раскладке, перепечатывается в другой (ghbdtn → привет) и раскладка "
+        "переключается на неё. В выделении из двух алфавитов перепечатываются слова того, которого меньше "
+        "(привет vbh → привет мир)"),
+    HOTKEY_SELECTION_CASE: (
+        "По кругу: строчные → ПРОПИСНЫЕ → Каждое Слово С Прописной → строчные. Текст, набранный с включённым "
+        "Caps Lock (пРИВЕТ), исправляется сразу"),
+    HOTKEY_SELECTION_TRANSLITERATE: (
+        "Кириллица латиницей по таблице ICAO Doc 9303 (Щука → Shchuka) и латиница кириллицей "
+        "(Privet → Привет). Мягкий знак эта таблица не передаёт"),
+}
 # The shipped settings; the persisted file is seeded from it and merged over it.
 DEFAULT_SETTINGS: Final[dict[str, object]] = {
     "schema_version": PAUSE_DELAY_DEFAULT_SCHEMA_VERSION,
@@ -67,6 +108,9 @@ DEFAULT_SETTINGS: Final[dict[str, object]] = {
         "correct_on_tab": True,
         "correct_on_punctuation": True,
         "respect_manual_layout": True,
+        # A word kept in its layout and typed with two capitals at its start (`ПРивет`, `HEllo`) gets
+        # its second letter lowercase when the lexicon knows the word so written (engine._fix_double_capitals).
+        "fix_double_capitals": True,
         "aggressive": True,
         "context_aware": True,
         "context_policy": "assist",
@@ -75,6 +119,12 @@ DEFAULT_SETTINGS: Final[dict[str, object]] = {
         "field_catch_up": DEFAULT_FIELD_CATCH_UP,
         "protect_code": True,
         "intent_model_enabled": True,
+        # Typo correction at a word's boundary (typo_correction): one slip in a word nothing knows, undone when one
+        # frequent word is far more likely than any other.
+        "correct_typos": True,
+        # English words are corrected too only when the user asks for it: in technical text and code an unknown English
+        # word is more often an identifier than a slip (constants.typo.TYPO_ENGLISH_LOCALE).
+        "correct_typos_english": False,
         # Switching rules from the rule window act, and a double press of the
         # conversion hotkey offers one.
         "learning": True,
@@ -87,6 +137,9 @@ DEFAULT_SETTINGS: Final[dict[str, object]] = {
         "toggle": "Ctrl+Alt+P",
         "convert_last": "Pause",
         "undo": "Ctrl+Alt+Z",
+        HOTKEY_SELECTION_LAYOUT: DEFAULT_SELECTION_LAYOUT_HOTKEY,
+        HOTKEY_SELECTION_CASE: DEFAULT_SELECTION_CASE_HOTKEY,
+        HOTKEY_SELECTION_TRANSLITERATE: DEFAULT_SELECTION_TRANSLITERATE_HOTKEY,
     },
     "applications": {
         # Per-application input conventions; see keyswitch.app_quirks.

@@ -20,8 +20,8 @@ from typing import Final
 
 from .backend import ScreenAnchor
 from .constants.keyboard import ALT_MASK, CONTROL_MASK, LOCK_MASK, SHIFT_MASK
-from .macos_objc import frontmost_application
-from .macos_backend import NativeInput, NativeKeyEvent, modifier_pressed
+from .macos_objc import appkit, frontmost_application, objc_class, send, string, text_of
+from .macos_backend import NativeInput, NativeKeyEvent, PasteboardContents, modifier_pressed
 from .constants.macos import (
     AX_SUCCESS,
     AX_VALUE_TYPE_CF_RANGE,
@@ -30,6 +30,8 @@ from .constants.macos import (
     CF_STRING_ENCODING_UTF8,
     CF_STRING_MAX_BYTES,
     EVENT_FLAG_ALPHA_SHIFT,
+    EVENT_FLAG_COMMAND,
+    EVENT_FLAG_DEVICE_LEFT_COMMAND,
     EVENT_FLAG_DEVICE_LEFT_SHIFT,
     EVENT_FLAG_SHIFT,
     EVENT_FLAGS_CHANGED,
@@ -58,6 +60,7 @@ from .constants.macos import (
     WINDOW_LIST_ON_SCREEN_ONLY,
 )
 from .constants.timing import (
+    SELECTION_CLIPBOARD_TIMEOUT_SECONDS,
     EVENT_TAP_RUN_LOOP_SLICE_SECONDS,
     MACOS_LAYOUT_SWITCH_WAIT_SECONDS,
     MACOS_MAIN_THREAD_WAIT_SECONDS,
@@ -224,6 +227,13 @@ _services.AXValueGetValue.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c
 _services.AXValueGetValue.restype = ctypes.c_bool
 _services.AXUIElementGetPid.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int32)]
 _services.AXUIElementGetPid.restype = ctypes.c_int32
+# AXUIElementSetAttributeValue(AXUIElement, CFString, CFTypeRef) -> AXError and
+# AXUIElementIsAttributeSettable(AXUIElement, CFString, UnsafeMutablePointer<DarwinBoolean>) -> AXError, as Apple's
+# reference for ApplicationServices declares them.
+_services.AXUIElementSetAttributeValue.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+_services.AXUIElementSetAttributeValue.restype = ctypes.c_int32
+_services.AXUIElementIsAttributeSettable.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_bool)]
+_services.AXUIElementIsAttributeSettable.restype = ctypes.c_int32
 
 _cf.CFGetTypeID.argtypes = [ctypes.c_void_p]
 _cf.CFGetTypeID.restype = ctypes.c_ulong
@@ -413,6 +423,9 @@ class CtypesMacAPI:
                 if item.shift:
                     _cg.CGEventSetFlags(
                         event, _cg.CGEventGetFlags(event) | EVENT_FLAG_SHIFT | EVENT_FLAG_DEVICE_LEFT_SHIFT)
+                if item.command:
+                    _cg.CGEventSetFlags(
+                        event, _cg.CGEventGetFlags(event) | EVENT_FLAG_COMMAND | EVENT_FLAG_DEVICE_LEFT_COMMAND)
                 _cg.CGEventSetIntegerValueField(
                     event, EVENT_SOURCE_USER_DATA_FIELD,
                     EVENT_MARK_REPLAYED if item.replayed else EVENT_MARK_INJECTED)
@@ -421,6 +434,25 @@ class CtypesMacAPI:
                 _cf.CFRelease(event)
             posted += 1
         return posted
+
+    # The pasteboard of the selection hotkeys' paste ----------------------
+    #
+    # NSPasteboard is reached through the Objective-C runtime (macos_objc), on the main thread like the input sources,
+    # inside an autorelease pool: the convenience objects it hands out would otherwise leak on the engine's thread.
+
+    def pasteboard_change_count(self) -> int:
+        return _MAIN_THREAD.call(_pasteboard_change_count, -1, SELECTION_CLIPBOARD_TIMEOUT_SECONDS)
+
+    def read_pasteboard(self, limit_bytes: int) -> PasteboardContents:
+        return _MAIN_THREAD.call(
+            lambda: _read_pasteboard(limit_bytes), PasteboardContents((), complete=False),
+            SELECTION_CLIPBOARD_TIMEOUT_SECONDS)
+
+    def write_pasteboard(self, contents: PasteboardContents) -> bool:
+        return _MAIN_THREAD.call(lambda: _write_pasteboard(contents), False, SELECTION_CLIPBOARD_TIMEOUT_SECONDS)
+
+    def put_text(self, text: str) -> int | None:
+        return _MAIN_THREAD.call(lambda: _put_text(text), None, SELECTION_CLIPBOARD_TIMEOUT_SECONDS)
 
     # The focused window ------------------------------------------------
 
@@ -607,6 +639,89 @@ class CtypesMacAPI:
         return None if listener(native) else event
 
 
+def _general_pasteboard() -> int:
+    return send(objc_class("NSPasteboard"), "generalPasteboard")
+
+
+def _pasteboard_change_count() -> int:
+    return send(_general_pasteboard(), "changeCount", restype=ctypes.c_long)
+
+
+def _array(array: int) -> list[int]:
+    """The objects of an NSArray (none for nil)."""
+
+    count = send(array, "count", restype=ctypes.c_ulong) if array else 0
+    return [send(array, "objectAtIndex:", index, argtypes=(ctypes.c_ulong,)) for index in range(count)]
+
+
+def _autorelease_pool() -> int:
+    return send(send(objc_class("NSAutoreleasePool"), "alloc"), "init")
+
+
+def _read_pasteboard(limit_bytes: int) -> PasteboardContents:
+    """Every item of the pasteboard with the bytes of each of its types; incomplete when a type gives no data or the
+    whole is over ``limit_bytes``."""
+
+    pool = _autorelease_pool()
+    try:
+        items: list[tuple[tuple[str, bytes], ...]] = []
+        total = 0
+        for item in _array(send(_general_pasteboard(), "pasteboardItems")):
+            kinds: list[tuple[str, bytes]] = []
+            for kind in _array(send(item, "types")):
+                data = send(item, "dataForType:", kind, argtypes=(ctypes.c_void_p,))
+                size = send(data, "length", restype=ctypes.c_ulong) if data else 0
+                total += size
+                if not data or total > limit_bytes:
+                    return PasteboardContents(tuple(items), complete=False)
+                kinds.append((text_of(kind), ctypes.string_at(send(data, "bytes"), size)))
+            items.append(tuple(kinds))
+        return PasteboardContents(tuple(items))
+    finally:
+        send(pool, "drain")
+
+
+def _write_pasteboard(contents: PasteboardContents) -> bool:
+    """Make ``contents`` the pasteboard's only data again, item by item and type by type."""
+
+    pool = _autorelease_pool()
+    try:
+        board = _general_pasteboard()
+        send(board, "clearContents", restype=ctypes.c_long)
+        if not contents.items:
+            return True
+        objects = send(objc_class("NSMutableArray"), "array")
+        for kinds in contents.items:
+            item = send(send(objc_class("NSPasteboardItem"), "alloc"), "init")
+            for kind, data in kinds:
+                bytes_object = send(objc_class("NSData"), "dataWithBytes:length:", data, len(data),
+                                    argtypes=(ctypes.c_char_p, ctypes.c_ulong))
+                send(item, "setData:forType:", bytes_object, string(kind),
+                     restype=ctypes.c_bool, argtypes=(ctypes.c_void_p, ctypes.c_void_p))
+            send(objects, "addObject:", item, argtypes=(ctypes.c_void_p,))
+            # The array keeps the item; the reference alloc gave is ours to give up.
+            send(item, "release")
+        return bool(send(board, "writeObjects:", objects, restype=ctypes.c_bool, argtypes=(ctypes.c_void_p,)))
+    finally:
+        send(pool, "drain")
+
+
+# NSPasteboardTypeString, read from AppKit rather than spelled out.
+_PASTEBOARD_STRING_TYPE = ctypes.c_void_p.in_dll(appkit, "NSPasteboardTypeString")
+
+
+def _put_text(text: str) -> int | None:
+    pool = _autorelease_pool()
+    try:
+        board = _general_pasteboard()
+        send(board, "clearContents", restype=ctypes.c_long)
+        written = send(board, "setString:forType:", string(text), _PASTEBOARD_STRING_TYPE,
+                       restype=ctypes.c_bool, argtypes=(ctypes.c_void_p, ctypes.c_void_p))
+        return _pasteboard_change_count() if written else None
+    finally:
+        send(pool, "drain")
+
+
 class _CFRange(ctypes.Structure):
     _fields_ = [  # type: ignore[mutable-override]
         ("location", ctypes.c_long), ("length", ctypes.c_long),
@@ -674,6 +789,26 @@ class CtypesAccessibilityAPI:
             return int(span.location), int(span.length)
         finally:
             _cf.CFRelease(value)
+
+    def attribute_settable(self, element: int, name: str) -> bool:
+        key = self._name(name)
+        if not element or not key:
+            return False
+        settable = ctypes.c_bool(False)
+        status = _services.AXUIElementIsAttributeSettable(element, key, ctypes.byref(settable))
+        return status == AX_SUCCESS and bool(settable.value)
+
+    def set_string_attribute(self, element: int, name: str, value: str) -> bool:
+        key = self._name(name)
+        if not element or not key:
+            return False
+        text = _cf.CFStringCreateWithCString(None, value.encode("utf-8"), CF_STRING_ENCODING_UTF8)
+        if not text:
+            return False
+        try:
+            return bool(_services.AXUIElementSetAttributeValue(element, key, text) == AX_SUCCESS)
+        finally:
+            _cf.CFRelease(text)
 
     def release(self, element: int) -> None:
         if element:

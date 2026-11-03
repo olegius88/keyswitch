@@ -41,6 +41,12 @@ JOINED_PART_MIN_LETTERS: Final = 2
 # Most keys between the last word and the caret through which Pause still converts that word: its boundary and
 # the spaces and signs typed the same in every layout after it (`цуиоы - `), each typed again as it was.
 PAUSE_TRAILING_MAX_KEYS: Final = 8
+# The shortest word the double-capitals fix (detection.fix_double_capitals) changes: two capitals and at
+# least two lowercase letters after them. With three letters the lowercase tail is one letter, and that is
+# how plural abbreviations are written (`IDs`, `PCs`, `VMs`): no typing slip to fix.
+DOUBLE_CAPITALS_MIN_LETTERS: Final = 4
+# The capitals at the start of a word that the fix looks for; it lowers every one of them but the first.
+DOUBLE_CAPITALS: Final = 2
 # A fragment of this many letters that a pause leaves is the start of a word being typed, not a word,
 # when at least PAUSE_WORD_START_MIN_WORDS words of its own language's lexicon begin with it and its other
 # reading is no word of the other language's prose: `иг` in `первую иг` (226 Russian words) and `фл` of

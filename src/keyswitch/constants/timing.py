@@ -168,3 +168,13 @@ WAYLAND_KEYMAP_WAIT_SECONDS: Final = 1.5
 WAYLAND_REPEAT_DEFAULT_DELAY_MS: Final = 600
 # D-Bus method call timeout for desktop compositor queries and layout changes.
 WAYLAND_DBUS_CALL_TIMEOUT_MS: Final = 1000
+# The selection hotkeys copy the selection with Ctrl+C where UI Automation cannot read it: the clipboard has this long
+# to change, to open for reading and to take the user's own data back. A copy that has not arrived by then is taken
+# for no selection, and the clipboard is left as it was.
+SELECTION_CLIPBOARD_TIMEOUT_SECONDS: Final = 1.0
+# Step at which the clipboard is looked at again while it has not changed or another program holds it open.
+SELECTION_CLIPBOARD_POLL_SECONDS: Final = 0.02
+# Where a macOS field does not let the accessibility tree write its selection, the result is pasted with Cmd+V. The
+# program reads the pasteboard when it handles the keys, at a moment nobody announces: the user's own pasteboard comes
+# back this long after them. Restored sooner, a slow program would paste the user's data instead of the result.
+MACOS_PASTE_RESTORE_DELAY_SECONDS: Final = 0.5

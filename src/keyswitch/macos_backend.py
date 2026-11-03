@@ -23,9 +23,13 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from .backend import BackendProbe, FocusInfo, KeyDisposition, KeyEvent, LayoutSwitchUnconfirmed, ScreenAnchor
+from .constants.text import CLIPBOARD_SNAPSHOT_MAX_BYTES
+from .constants.timing import MACOS_PASTE_RESTORE_DELAY_SECONDS
+from .macos_context import CARET_AFTER, SELECTION_KEPT, MacSelectionAccess, selection_after
+from .selection_commands import SelectedText, SelectionRefused, caret_steps
 from .constants.keyboard import (
     ALT_MASK,
     COMPLETED_ACTION_EVENT_COUNT,
@@ -51,6 +55,7 @@ from .constants.macos import (
     MAC_SCRIPT_PROBE_KEYCODE,
     MAC_SHIFT_KEYS,
     MAC_SUPER_KEYS,
+    MAC_VK_ANSI_V,
     MAC_VK_BACKSPACE,
     MAC_VK_CAPS_LOCK,
     MAC_VK_COMMAND,
@@ -166,6 +171,35 @@ class NativeInput:
     # The key goes out with the Shift flag on it. A Shift posted on its own does not reach the
     # letters after it: `Ghbdtn` was retyped as `привет` (02.10.2026).
     shift: bool = False
+    # The same for Command: Cmd+V of a selection hotkey's paste.
+    command: bool = False
+
+
+@dataclass(frozen=True)
+class PasteboardContents:
+    """The pasteboard as a selection hotkey found it: each item's types and their bytes, in order.
+
+    ``complete`` is False when a type gives no data (a promise its owner does not keep) or the pasteboard holds more
+    than the hotkeys keep: such a pasteboard is not borrowed.
+    """
+
+    items: tuple[tuple[tuple[str, bytes], ...], ...]
+    complete: bool = True
+
+
+@runtime_checkable
+class MacPasteboardAPI(Protocol):
+    """The pasteboard calls of the selection hotkeys' paste (macos_native.CtypesMacAPI)."""
+
+    def pasteboard_change_count(self) -> int: ...
+
+    def read_pasteboard(self, limit_bytes: int) -> PasteboardContents: ...
+
+    def write_pasteboard(self, contents: PasteboardContents) -> bool: ...
+
+    def put_text(self, text: str) -> int | None:
+        """Put ``text`` on the pasteboard as its only content; its change count then, or None if it did not take it."""
+        ...
 
 
 class MacAPI(Protocol):
@@ -313,6 +347,8 @@ class MacBackend:
         self._action_prior_keys: set[int] = set()
         self._inject_lock = threading.Lock()
         self._tap_revivals = 0
+        # The accessibility side of the selection hotkeys, made on first use (read_selection).
+        self._selection_access: MacSelectionAccess | None = None
 
     @property
     def running(self) -> bool:
@@ -650,6 +686,7 @@ class MacBackend:
         late: Sequence[KeyEvent] = (),
         trailing: Sequence[KeyEvent] = (),
         kept_tail: int = 0,
+        erased: int | None = None,
     ) -> int:
         """Replace the word and return how many held keys were typed again.
 
@@ -663,7 +700,8 @@ class MacBackend:
         """
 
         try:
-            return self._inject_correction(strokes, target_group, boundary, source_group, late, trailing, kept_tail)
+            return self._inject_correction(strokes, target_group, boundary, source_group, late, trailing, kept_tail,
+                                           erased)
         finally:
             self.release_input()
 
@@ -672,6 +710,7 @@ class MacBackend:
         boundary: KeyEvent | None, source_group: int | None,
         late: Sequence[KeyEvent], trailing: Sequence[KeyEvent],
         kept_tail: int = 0,
+        erased: int | None = None,
     ) -> int:
         if not 0 <= target_group < len(self.sources):
             raise MacBackendError(f"Неизвестная группа раскладки {target_group}")
@@ -689,7 +728,7 @@ class MacBackend:
         if kept_tail < 0 or (kept_tail and (kept_tail >= len(stroke_list) or source_group is None)):
             raise MacBackendError("Некорректная граница сохраняемого слова; замена отменена")
         final_group = rendered_source_group if kept_tail else target_group
-        delete_count = len(stroke_list) + len(literal) + len(late_list)
+        delete_count = (len(stroke_list) if erased is None else erased) + len(literal) + len(late_list)
         delete_inputs = tuple(
             NativeInput(pressed, MAC_VK_BACKSPACE)
             for _ in range(delete_count)
@@ -779,6 +818,82 @@ class MacBackend:
         if shifted:
             result.append(NativeInput(False, MAC_VK_SHIFT, replayed=replayed))
         return tuple(result)
+
+    def _selection(self) -> MacSelectionAccess:
+        if self._selection_access is None:
+            self._selection_access = MacSelectionAccess()
+        return self._selection_access
+
+    def read_selection(self, application: str, window: int) -> SelectedText:
+        """The text selected in the focused field, through the accessibility tree (MacSelectionAccess)."""
+
+        del application, window
+        return self._selection().read()
+
+    def replace_selection(self, selected: SelectedText, replacement: str, final_group: int | None) -> bool:
+        """Write ``replacement`` over the selection through the accessibility tree, then select it back.
+
+        A field that keeps the replacement selected needs nothing more; one that leaves the caret right after it gets
+        Shift+Left as many times as the result has characters. The layout moves to ``final_group`` afterwards.
+        """
+
+        steps = caret_steps(replacement)
+        with self._inject_lock:
+            if self._holding and (
+                self._pointer_epoch != self._hold_pointer_epoch
+                or self._api.focused_window() != self._hold_window
+            ):
+                raise SelectionRefused("focus_changed")
+            access = self._selection()
+            try:
+                where = access.replace(selected.text, replacement)
+            except SelectionRefused as refusal:
+                if refusal.reason != "not_settable":
+                    raise
+                where = self._pasted(access, selected.text, replacement)
+            reselected = where == SELECTION_KEPT
+            if where == CARET_AFTER and steps is not None:
+                self._post_exact((
+                    NativeInput(True, MAC_VK_SHIFT),
+                    *(NativeInput(pressed, MAC_VK_LEFT_ARROW, shift=True)
+                      for _ in range(steps) for pressed in (True, False)),
+                    NativeInput(False, MAC_VK_SHIFT),
+                ))
+                reselected = True
+            if final_group is not None:
+                self._switch_group(final_group)
+        return reselected
+
+    def _pasted(self, access: MacSelectionAccess, selected: str, replacement: str) -> str:
+        """Paste ``replacement`` over the selection with Cmd+V where the field does not let it be written, and give the
+        pasteboard back what it held.
+
+        A pasteboard that cannot be put back as it was is not borrowed at all. The user's pasteboard is restored
+        MACOS_PASTE_RESTORE_DELAY_SECONDS after the keys, and only while it still holds the replacement: anything
+        copied meanwhile is the user's. One that could not be put back is an error the status line reports.
+        """
+
+        api = self._api
+        if not isinstance(api, MacPasteboardAPI):
+            raise SelectionRefused("not_settable")
+        saved = api.read_pasteboard(CLIPBOARD_SNAPSHOT_MAX_BYTES)
+        if not saved.complete:
+            raise SelectionRefused("clipboard_unrestorable")
+        before = access.selected_range(selected)
+        ours = api.put_text(replacement)
+        try:
+            if ours is None:
+                raise MacBackendError("macOS не положила текст в буфер обмена")
+            self._post_exact((
+                NativeInput(True, MAC_VK_COMMAND), NativeInput(True, MAC_VK_ANSI_V, command=True),
+                NativeInput(False, MAC_VK_ANSI_V, command=True), NativeInput(False, MAC_VK_COMMAND),
+            ))
+            time.sleep(MACOS_PASTE_RESTORE_DELAY_SECONDS)
+        finally:
+            restored = (ours is not None and api.pasteboard_change_count() != ours) or api.write_pasteboard(saved)
+        if not restored:
+            raise MacBackendError("Буфер обмена не удалось вернуть: в нём остался вставленный текст")
+        return selection_after(before, access.caret_range(), replacement)
 
     def _switch_group(self, group: int) -> None:
         if self.current_group() == group:

@@ -86,6 +86,9 @@ from .constants.wayland import (
 )
 from .input_delay import InputDelay, InputDelayReport
 from .russian_text import SECONDS, quantity
+from .selection_commands import (
+    KeyChoice, SelectedText, SelectionRefused, SelectionSource, caret_steps, typing_runs,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -324,6 +327,8 @@ class WaylandBackend:
         self._last_typed: tuple[int, int] = (0, 0)
         self._inject_lock = threading.Lock()
         self._input_delay = InputDelay()
+        # The reader of the selection hotkeys, made on first use (read_selection).
+        self._selection_source: SelectionSource | None = None
 
     @property
     def running(self) -> bool:
@@ -788,10 +793,11 @@ class WaylandBackend:
         late: Sequence[KeyEvent] = (),
         trailing: Sequence[KeyEvent] = (),
         kept_tail: int = 0,
+        erased: int | None = None,
     ) -> int:
         try:
             return self._inject_correction(
-                strokes, target_group, boundary, source_group, late, trailing, kept_tail
+                strokes, target_group, boundary, source_group, late, trailing, kept_tail, erased
             )
         finally:
             self.release_input()
@@ -805,6 +811,7 @@ class WaylandBackend:
         late: Sequence[KeyEvent],
         trailing: Sequence[KeyEvent],
         kept_tail: int = 0,
+        erased: int | None = None,
     ) -> int:
         if not 0 <= target_group < len(self.layouts):
             raise WaylandBackendError(f"Неизвестная группа раскладки {target_group}")
@@ -826,7 +833,7 @@ class WaylandBackend:
             raise WaylandBackendError("Некорректная граница сохраняемого слова; замена отменена")
 
         final_group = rendered_source_group if kept_tail else target_group
-        delete_count = len(stroke_list) + len(literal) + len(late_list)
+        delete_count = (len(stroke_list) if erased is None else erased) + len(literal) + len(late_list)
         delete_inputs = tuple(
             NativeInput(pressed, EVDEV_KEY_BACKSPACE)
             for _ in range(delete_count)
@@ -921,6 +928,97 @@ class WaylandBackend:
         if failure is not None:
             raise failure
         return held_count
+
+    def read_selection(self, application: str, window: int) -> SelectedText:
+        """The text selected in the focused field, through AT-SPI; never in a field the compositor says is a password
+        field (GNOME Shell draws its own prompts, which AT-SPI does not read)."""
+
+        if window and self._api.window_is_password(window):
+            raise SelectionRefused("sensitive_field")
+        if self._selection_source is None:
+            from .atspi_context import AtspiSelectionReader
+
+            self._selection_source = AtspiSelectionReader(self.window_process_id)
+        return self._selection_source.read_selection(application, window)
+
+    def _typing_tables(self) -> list[dict[str, KeyChoice]]:
+        """For each layout group, the key that types each character with Caps Lock as it is now: plain before
+        shifted, the lowest code first (the main keys come before the keypad)."""
+
+        lock = LOCK_MASK if self._api.caps_lock_enabled() else 0
+        tables: list[dict[str, KeyChoice]] = []
+        for layout_index in self.layouts:
+            table: dict[str, KeyChoice] = {}
+            for code in range(1, WAYLAND_UINPUT_MAX_KEYCODE + 1):
+                for shifted in (False, True):
+                    character = self._api.translate_key(code, lock | (SHIFT_MASK if shifted else 0), layout_index)
+                    if character:
+                        table.setdefault(character, (code, shifted))
+            tables.append(table)
+        return tables
+
+    def replace_selection(self, selected: SelectedText, replacement: str, final_group: int | None) -> bool:
+        """Write ``replacement`` over the selection, then leave the layout in ``final_group``.
+
+        A field with AT-SPI's EditableText takes the text from the reader itself, any character included
+        (AtspiFieldReader.write_selection). Otherwise it is typed through the input helper: keys, not characters, reach
+        the compositor, so each run of one script is typed in its layout group, and the layout changes only after the
+        keys before had time to arrive (_switch_group_after_typing). A character no key of either layout types then
+        leaves the selection as it is, with nothing typed: Wayland lets no program but the focused one put text on the
+        clipboard. The layout ends in ``final_group`` or where it was.
+        """
+
+        with self._inject_lock:
+            self._check_hold()
+            written = None if self._selection_source is None else self._selection_source.write_selection(
+                selected, replacement)
+            if written is not None:
+                if final_group is not None:
+                    self._switch_group(final_group)
+                return written
+        original_group = self.current_group()
+        runs = typing_runs(replacement, self._typing_tables(), original_group)
+        steps = caret_steps(replacement)
+        reselect = () if steps is None else (
+            NativeInput(True, EVDEV_KEY_LEFTSHIFT),
+            *(NativeInput(pressed, EVDEV_KEY_LEFT) for _ in range(steps) for pressed in (True, False)),
+            NativeInput(False, EVDEV_KEY_LEFTSHIFT),
+        )
+        known_seq: int | None = self._hold_known_seq if self._holding else self._known_seq
+        with self._inject_lock:
+            self._check_hold()
+            for index, (group, keys) in enumerate(runs):
+                if index:
+                    self._switch_group_after_typing(group)
+                else:
+                    self._switch_group(group)
+                # The first batch goes only if no key reached the program unasked since the hold began.
+                self._deliver_inputs(tuple(item for key in keys for item in self._key_inputs(key)), known_seq=known_seq)
+                known_seq = None
+            self._deliver_inputs(reselect)
+            final = original_group if final_group is None else final_group
+            if 0 <= final < len(self.layouts):
+                self._switch_group_after_typing(final)
+        return steps is not None
+
+    def _check_hold(self) -> None:
+        """Refuse to change a selection after a key reached the program unasked or the focus moved during the hold."""
+
+        if self._hold_broken:
+            raise WaylandBackendError(INPUT_AHEAD_ERROR)
+        if self._holding and (
+            self._pointer_epoch != self._hold_pointer_epoch
+            or self._api.focused_window() != self._hold_window
+        ):
+            raise SelectionRefused("focus_changed")
+
+    @staticmethod
+    def _key_inputs(key: KeyChoice) -> tuple[NativeInput, ...]:
+        code, shifted = key
+        tap = (NativeInput(True, code), NativeInput(False, code))
+        if not shifted:
+            return tap
+        return (NativeInput(True, EVDEV_KEY_LEFTSHIFT), *tap, NativeInput(False, EVDEV_KEY_LEFTSHIFT))
 
     def _stroke_inputs(
         self, stroke: KeyEvent, *, synthetic: bool = True, group: int | None = None

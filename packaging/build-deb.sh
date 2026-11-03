@@ -450,6 +450,14 @@ if ! cmp -s "$project_dir/src/keyswitch/resources/models/context-short-frequency
     printf 'Native distribution does not contain the exact table of short Russian tokens.\n' >&2
     exit 1
 fi
+# The typo correction reads its counted word lists from the resources; without them it is off.
+for typo_locale in en_US ru_RU; do
+    if ! cmp -s "$project_dir/src/keyswitch/resources/typo-frequency-$typo_locale.bin" \
+        "$native_dist/keyswitch/resources/typo-frequency-$typo_locale.bin"; then
+        printf 'Native distribution does not contain the exact typo frequency list %s.\n' "$typo_locale" >&2
+        exit 1
+    fi
+done
 bundled_english_model="$native_dist/keyswitch/resources/models/en_US.lm"
 bundled_russian_model="$native_dist/keyswitch/resources/models/ru_RU.lm"
 if [[ ! -s "$bundled_intent_model" ]] \

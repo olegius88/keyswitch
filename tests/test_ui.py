@@ -124,10 +124,14 @@ class FakeEngine:
         )
         self.snapshot = EngineSnapshot()
         self.callbacks: list[Callable[[EngineSnapshot], None]] = []
+        self.test_field_focus: list[bool] = []
 
     def subscribe(self, callback: Callable[[EngineSnapshot], None]) -> None:
         self.callbacks.append(callback)
         callback(self.snapshot)
+
+    def set_test_field_focused(self, focused: bool) -> None:
+        self.test_field_focus.append(focused)
 
 
 class FakeAutostart:
@@ -358,6 +362,11 @@ class MainWindowInteractionTests(unittest.TestCase):
         self.assertTrue(manual_layout.get_active())
         manual_layout.set_active(False)
         self.assertFalse(self.settings.get("detection.respect_manual_layout"))
+        double_capitals = self.window._settings_controls["detection.fix_double_capitals"]
+        assert isinstance(double_capitals, Adw.SwitchRow)
+        self.assertTrue(double_capitals.get_active())
+        double_capitals.set_active(False)
+        self.assertFalse(self.settings.get("detection.fix_double_capitals"))
         technical_logging = self.window._settings_controls[
             "diagnostics.technical_logging"
         ]
@@ -447,6 +456,19 @@ class MainWindowInteractionTests(unittest.TestCase):
             hotkey.emit("activate")
             focus.emit("leave")
         self.assertEqual(save_hotkey.call_count, GTK_EXPECTED_SAVE_HOTKEY_CALLS)
+
+        # The test field tells the engine when it has the keyboard: there a layout picked by hand counts.
+        test_controllers = self.window.test_entry.observe_controllers()
+        test_focus = next(
+            test_controllers.get_item(index)
+            for index in range(test_controllers.get_n_items())
+            if isinstance(test_controllers.get_item(index), Gtk.EventControllerFocus)
+        )
+        assert isinstance(test_focus, Gtk.EventControllerFocus)
+        reported = len(self.engine.test_field_focus)
+        test_focus.emit("enter")
+        test_focus.emit("leave")
+        self.assertEqual(self.engine.test_field_focus[reported:], [True, False])
 
         with (
             patch.object(self.window, "_confirm_clear_learning") as clear_learning,

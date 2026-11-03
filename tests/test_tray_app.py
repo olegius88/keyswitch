@@ -14,6 +14,7 @@ import tempfile
 import unittest
 import warnings
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TypeVar, cast, overload
@@ -985,6 +986,19 @@ class ApplicationGlueTests(unittest.TestCase):
         self.settings.values["general.sound"] = False
         self.application.window = None
         self.application._announce_correction(plan)
+
+    def test_a_case_fix_is_announced_as_one(self) -> None:
+        typed = KeyEvent(True, A_KEYCODE, "a", "A", ("A", "Ф"), 0, 0, 1)
+        fixed = KeyEvent(True, A_KEYCODE, "a", "a", ("a", "ф"), 0, 0, 1)
+        plan = CorrectionPlan((fixed,), None, 0, 0, "A", "a", TRAY_SAMPLE_CORRECTION_CONFIDENCE, "Editor",
+                              mode="case", replaced=(typed,))
+        self.settings.values["general.notifications"] = True
+        self.settings.values["general.sound"] = False
+        self.application.window = None
+        with patch("keyswitch.app.Gio.Notification.new") as new, patch.object(self.application, "send_notification"):
+            self.application._announce_correction(plan)
+            self.application._announce_correction(replace(plan, replaced=()))
+        self.assertEqual(new.call_args_list, [call("Регистр исправлен"), call("Раскладка исправлена")])
 
     def test_learning_prompt_is_marshaled_created_reused_and_hidden(self) -> None:
         prompt = LearningPrompt(0, 1, "hello", "руддщ", "Editor")

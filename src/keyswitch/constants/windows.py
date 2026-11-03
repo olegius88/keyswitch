@@ -68,12 +68,56 @@ VK_0: Final = 0x30
 VK_9: Final = 0x39
 VK_A: Final = 0x41
 VK_Z: Final = 0x5A
+# Scroll Lock, whose name a hotkey can use (Punto Switcher transliterates the selection with Alt+Scroll Lock).
+VK_SCROLL: Final = 0x91
 # UI Automation TextPattern id. GetCurrentPattern answers S_OK with a null pointer when the element
 # does not support it: a field without text is an ordinary answer.
 UIA_TEXT_PATTERN_ID: Final = 10014
 # What a browser's text range reports in place of an embedded object, and as the whole text of an
 # empty input (Edge, 27.09.2026): a placeholder, never typed text.
 UIA_EMBEDDED_OBJECT_CHARACTER: Final = "￼"
+# UIA_IsReadOnlyAttributeId (VT_BOOL), asked of a selection before a selection hotkey types over it: text that
+# says it is read-only is left alone (Text Attribute Identifiers, UIAutomationClient.h).
+UIA_IS_READ_ONLY_ATTRIBUTE_ID: Final = 40015
+# UIA_EditControlTypeId (Control Type Identifiers, UIAutomationClient.h): a focused element of this type is a field the
+# user types into, which lets the selection hotkeys copy its selection where it has no text pattern.
+UIA_EDIT_CONTROL_TYPE_ID: Final = 50004
+# The window classes of the console host and of Windows Terminal (CONSOLE_WINDOW_CLASS in
+# src/interactivity/win32/window.cpp and XAML_HOSTING_WINDOW_CLASS_NAME in src/cascadia/WindowsTerminal/
+# IslandWindow.cpp of microsoft/terminal). Typing does not replace text selected in a console, and Ctrl+C there
+# stops the running program when nothing is selected, so the selection hotkeys stay out of them.
+CONSOLE_WINDOW_CLASSES: Final = frozenset(("ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS"))
+# "The maximum length for lpszClassName is 256" (WNDCLASSW): GetClassNameW needs no longer buffer than this and its
+# terminating zero.
+WINDOW_CLASS_NAME_MAX_CHARACTERS: Final = 256
+# Clipboard formats (Standard Clipboard Formats, winuser.h). CF_UNICODETEXT is what a selection copies as.
+CF_UNICODETEXT: Final = 13
+CF_BITMAP: Final = 2
+CF_METAFILEPICT: Final = 3
+CF_PALETTE: Final = 9
+CF_DIB: Final = 8
+CF_ENHMETAFILE: Final = 14
+CF_DIBV5: Final = 17
+CF_OWNERDISPLAY: Final = 0x0080
+CF_DSPBITMAP: Final = 0x0082
+CF_DSPMETAFILEPICT: Final = 0x0083
+CF_DSPENHMETAFILE: Final = 0x008E
+CF_PRIVATEFIRST: Final = 0x0200
+CF_PRIVATELAST: Final = 0x02FF
+# Formats whose data is a GDI object or a handle the owner frees, not a block of memory: their bytes cannot be kept and
+# put back. A bitmap and its palette come back by themselves from a DIB kept beside them (Synthesized Clipboard
+# Formats); anything else of this kind makes the clipboard one the selection hotkeys do not borrow.
+CLIPBOARD_HANDLE_FORMATS: Final = frozenset((
+    CF_BITMAP, CF_METAFILEPICT, CF_PALETTE, CF_ENHMETAFILE, CF_OWNERDISPLAY, CF_DSPBITMAP, CF_DSPMETAFILEPICT,
+    CF_DSPENHMETAFILE,
+))
+CLIPBOARD_FORMATS_SYNTHESIZED_FROM_DIB: Final = frozenset((CF_BITMAP, CF_PALETTE))
+CLIPBOARD_DIB_FORMATS: Final = frozenset((CF_DIB, CF_DIBV5))
+# The registered format whose DWORD zero keeps a clipboard item out of the clipboard history: the user's own data put
+# back after a copy is no new item (Cloud Clipboard and Clipboard History Formats).
+CLIPBOARD_HISTORY_FORMAT_NAME: Final = "CanIncludeInClipboardHistory"
+# GlobalAlloc flag the clipboard requires of the memory SetClipboardData takes.
+GMEM_MOVEABLE: Final = 0x0002
 ERROR_ALREADY_EXISTS: Final = 183
 SW_RESTORE: Final = 9
 WH_KEYBOARD_LL: Final = 13

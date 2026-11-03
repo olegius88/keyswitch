@@ -29,6 +29,10 @@ NounForms = tuple[str, str, str]
 # Accusative: "через 1 секунду", "через 2 секунды", "через 5 секунд".
 SECONDS: Final[NounForms] = ("секунду", "секунды", "секунд")
 HOURS: Final[NounForms] = ("час", "часа", "часов")
+# Nominative, which the accusative of an inanimate noun repeats: "предел — 1000 символов".
+CHARACTERS: Final[NounForms] = ("символ", "символа", "символов")
+# Nominative: "1 буква", "2 буквы", "5 букв".
+LETTERS: Final[NounForms] = ("буква", "буквы", "букв")
 
 
 def russian_number(value: float) -> str:

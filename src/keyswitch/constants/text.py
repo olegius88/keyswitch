@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Final
 
+from .units import BYTES_PER_MEBIBYTE
+
 # Bounded traversal width: at most this many children are enumerated at any one level of the
 # accessibility tree, whether under the desktop root or under a node being searched for the focused
 # field.
@@ -45,3 +47,14 @@ ASCII_CONTROL_CHARACTER_LIMIT: Final = 0x20
 ASCII_DELETE_CODEPOINT: Final = 0x7F
 # Longest word handed to Hunspell; a longer token is not a dictionary word and is refused.
 HUNSPELL_MAX_CHECK_CHARACTERS: Final = 128
+# The longest selection a selection hotkey changes (layout, case, transliteration). The replacement is typed key by
+# key, so the bound keeps one press of the hotkey within a moment of typing, and it bounds the read too: UI
+# Automation, AT-SPI and the clipboard hand over no more than one character past it.
+SELECTION_COMMAND_MAX_CHARACTERS: Final = 1000
+# A word counts as typed with Caps Lock on (`пРИВЕТ`: small first letter, capitals after it) only with at least this
+# many capitals after the first letter: shorter words of that shape are names written that way (`iOS`, `eSIM`), and
+# the case command takes them through its plain cycle.
+CAPS_LOCK_WORD_MIN_CAPITALS: Final = 4
+# The most bytes of the user's clipboard (the Windows clipboard, the macOS pasteboard) a selection hotkey keeps to put
+# back after borrowing it; a bigger clipboard is not borrowed.
+CLIPBOARD_SNAPSHOT_MAX_BYTES: Final = 64 * BYTES_PER_MEBIBYTE

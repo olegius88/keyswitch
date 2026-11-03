@@ -11,9 +11,22 @@ RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 STARTUP_APPROVED_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
 APP_PATHS_KEY = r"Software\Microsoft\Windows\CurrentVersion\App Paths"
 UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall"
+# The user's light or dark mode for apps, where the darkdetect library reads it (desktop_theme reads the value).
+PERSONALIZE_KEY = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+APPS_USE_LIGHT_THEME_VALUE = "AppsUseLightTheme"
 
 
 class NativeWindowsRegistry:
+    def read_apps_use_light_theme(self) -> int | None:
+        """The app mode of the user, or None when Windows keeps none or it cannot be read."""
+
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, PERSONALIZE_KEY) as key:
+                value, _value_type = winreg.QueryValueEx(key, APPS_USE_LIGHT_THEME_VALUE)
+        except OSError:
+            return None
+        return value if isinstance(value, int) else None
+
     def read_autostart(self, name: str) -> str | None:
         try:
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:

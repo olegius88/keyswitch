@@ -43,6 +43,9 @@ from .constants.settings_defaults import (
     PAUSE_DELAY_SETTING_MAX_SECONDS,
     PAUSE_DELAY_SETTING_MIN_SECONDS,
     PAUSE_DELAY_SETTING_STEP_SECONDS,
+    SELECTION_HOTKEY_DESCRIPTIONS,
+    SELECTION_HOTKEY_TITLES,
+    SELECTION_HOTKEYS,
 )
 from .context_policy import ContextPolicy
 from .engine import EngineSnapshot
@@ -55,6 +58,9 @@ from .system import AutostartManager
 from .backend import BackendProbe
 from .updates import UpdateController, UpdatePhase, UpdateSnapshot
 from .russian_text import HOURS, SECONDS, quantity
+from .typo_correction import (
+    CORRECT_TYPOS_DESCRIPTION, CORRECT_TYPOS_ENGLISH_DESCRIPTION, CORRECT_TYPOS_ENGLISH_TITLE, CORRECT_TYPOS_TITLE,
+)
 from .constants.models import PREFIX_MAX_CHARACTERS, PREFIX_MIN_CHARACTERS
 from .constants.timing import (
     APPLICATION_CAPTURE_DELAY_MS,
@@ -158,6 +164,8 @@ class _UiEngine(Protocol):
     def intent_model_status(self) -> IntentModelStatus: ...
 
     def subscribe(self, callback: Callable[[EngineSnapshot], None]) -> None: ...
+
+    def set_test_field_focused(self, focused: bool) -> None: ...
 
 
 def installed_application_choices() -> list[ApplicationChoice]:
@@ -420,6 +428,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.test_entry.set_hexpand(True)
         self.test_entry.set_width_chars(TEST_ENTRY_WIDTH_CHARACTERS)
         self.test_entry.set_valign(Gtk.Align.CENTER)
+        # The field is typed in as any other program is: the engine is told when it has the keyboard,
+        # since a layout picked by hand elsewhere in this window says nothing of the text
+        # (KeySwitchEngine.set_test_field_focused).
+        test_focus = Gtk.EventControllerFocus()
+        test_focus.connect("enter", lambda _controller: self.engine.set_test_field_focused(True))
+        test_focus.connect("leave", lambda _controller: self.engine.set_test_field_focused(False))
+        self.test_entry.add_controller(test_focus)
         test_row.add_suffix(self.test_entry)
         check_group.add(test_row)
         page.append(check_group)
@@ -458,6 +473,15 @@ class MainWindow(Adw.ApplicationWindow):
                 "detection.respect_manual_layout",
                 "Доверять ручной смене раскладки",
                 "Не исправлять первое завершённое слово после переключения раскладки пользователем",
+            )
+        )
+        behavior.add(
+            self._switch_row(
+                "detection.fix_double_capitals",
+                "Исправлять ДВе заглавные",
+                "Слово, набранное с двумя заглавными в начале (ПРивет, HEllo), становится обычным (Привет, Hello), "
+                "если словарь его раскладки знает такое слово. Аббревиатуры, слова из одних заглавных, короткие "
+                "слова и слова из исключений не меняются",
             )
         )
         minimum = Adw.SpinRow.new_with_range(MINIMUM_WORD_LENGTH_SETTING_MIN, MINIMUM_WORD_LENGTH_SETTING_MAX, 1)
@@ -502,6 +526,9 @@ class MainWindow(Adw.ApplicationWindow):
             "detection.field_catch_up", catch_up_values[row.get_selected()]))
         self._settings_controls["detection.field_catch_up"] = catch_up
         behavior.add(catch_up)
+        behavior.add(self._switch_row("detection.correct_typos", CORRECT_TYPOS_TITLE, CORRECT_TYPOS_DESCRIPTION))
+        behavior.add(self._switch_row(
+            "detection.correct_typos_english", CORRECT_TYPOS_ENGLISH_TITLE, CORRECT_TYPOS_ENGLISH_DESCRIPTION))
         behavior.add(self._switch_row("detection.protect_code", "Защищать код и сокращения", "Не трогать URL, пути, слова с цифрами, ALL-CAPS и camelCase"))
         behavior.add(self._switch_row("detection.intent_model_enabled", "Базовая модель слов (KSLM)", "При отключении работают резервные эвристики. Контекстные модели слов и префиксов настраиваются отдельно"))
         behavior.add(
@@ -685,9 +712,13 @@ class MainWindow(Adw.ApplicationWindow):
         group.add(self._hotkey_row(
             "hotkeys.undo",
             "Отменить исправление",
-            "Возвращает последнее исправленное слово; доступно "
+            "Возвращает последнее исправленное слово таким, каким его набрали, и после пробелов за ним; "
+            "после любой другой клавиши отменять уже нечего. Доступно "
             f"{quantity(UNDO_AVAILABLE_WINDOW_SECONDS, SECONDS)} после исправления",
         ))
+        for name in SELECTION_HOTKEYS:
+            group.add(self._hotkey_row(
+                f"hotkeys.{name}", SELECTION_HOTKEY_TITLES[name], SELECTION_HOTKEY_DESCRIPTIONS[name]))
         page.append(group)
         syntax = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=GTK_STANDARD_SPACING_PIXELS)
         syntax.add_css_class("privacy-card")

@@ -7,14 +7,16 @@ import json
 from typing import cast
 
 from .config import SettingsData, SettingsStore
-from .constants.settings_defaults import DEFAULT_SETTINGS
 from .constants.text import LOGGED_SETTING_VALUE_MAX_CHARACTERS
 
 
 _MISSING = object()
-_DEFAULTS_SHA256 = hashlib.sha256(
-    json.dumps(DEFAULT_SETTINGS, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-).hexdigest()
+
+
+def _defaults_sha256(defaults: SettingsData) -> str:
+    return hashlib.sha256(
+        json.dumps(defaults, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
 _LOGGABLE_STRING_TRUNCATED_CHARACTERS = LOGGED_SETTING_VALUE_MAX_CHARACTERS - len("...")
 
 
@@ -46,12 +48,13 @@ def _overrides(defaults: SettingsData, current: SettingsData, prefix: str = "") 
 
 
 def settings_snapshot(settings: SettingsStore) -> dict[str, object]:
-    """One atomic snapshot; omitted known paths use the shipped defaults."""
+    """One atomic snapshot; omitted known paths use the shipped defaults of this platform."""
+    defaults = settings.defaults()
     return {
         "format": "overrides-v1",
-        "defaults_schema": DEFAULT_SETTINGS["schema_version"],
-        "defaults_sha256": _DEFAULTS_SHA256,
-        "overrides": _overrides(DEFAULT_SETTINGS, settings.snapshot()),
+        "defaults_schema": defaults["schema_version"],
+        "defaults_sha256": _defaults_sha256(defaults),
+        "overrides": _overrides(defaults, settings.snapshot()),
     }
 
 

@@ -126,6 +126,17 @@ def beep() -> None:
     appkit.NSBeep()
 
 
+def interface_style() -> str:
+    """The global AppleInterfaceStyle default: `Dark` in the dark appearance, empty when it is not set.
+
+    The settings window is drawn by Tk, which follows no system appearance itself; this is the value the
+    darkdetect library reads for it, through NSUserDefaults rather than a `defaults` process.
+    """
+
+    defaults = send(objc_class("NSUserDefaults"), "standardUserDefaults")
+    return text_of(send(defaults, "stringForKey:", string("AppleInterfaceStyle"), argtypes=(ctypes.c_void_p,)))
+
+
 def open_path(path: str) -> bool:
     """Show a file or a folder in the Finder."""
 
