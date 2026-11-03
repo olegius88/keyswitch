@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.65.0 — 2026-11-03
+
 - Typo correction: a Russian word of five letters and more with one slip in it (two letters swapped, a letter left
   out or typed in excess, a neighbouring key hit) is corrected at its boundary when a single correction clearly wins: `нромально` becomes
   `нормально`. The word lists are counted (OpenSubtitles and ru.stackoverflow), and a word either layout knows is left
