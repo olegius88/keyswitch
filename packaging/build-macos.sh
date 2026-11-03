@@ -102,6 +102,8 @@ run_signing env PYTHONPATH="${nuitka_path:+$nuitka_path:}$project_dir/src" \
     --include-package-data=keyswitch \
     --include-data-files="$frozen_english_model=keyswitch/resources/models/en_US.lm" \
     --include-data-files="$frozen_russian_model=keyswitch/resources/models/ru_RU.lm" \
+    --include-data-files="$project_dir/src/keyswitch/resources/typo-frequency-en_US.bin=keyswitch/resources/typo-frequency-en_US.bin" \
+    --include-data-files="$project_dir/src/keyswitch/resources/typo-frequency-ru_RU.bin=keyswitch/resources/typo-frequency-ru_RU.bin" \
     --nofollow-import-to='keyswitch.windows_*' \
     --nofollow-import-to='keyswitch.app' \
     --nofollow-import-to='keyswitch.ui' \
@@ -145,6 +147,16 @@ if [[ -n "$newer_than_promised" ]]; then
     printf 'The bundle needs a newer macOS than %s:\n%s' "$minimum_macos" "$newer_than_promised" >&2
     exit 1
 fi
+
+# The typo correction reads its counted word lists from the resources; without them it is off.
+for typo_locale in en_US ru_RU; do
+    packaged_list="$(find "$bundle" -path "*/keyswitch/resources/typo-frequency-$typo_locale.bin" -print -quit)"
+    if [[ -z "$packaged_list" ]] \
+        || ! cmp -s "$project_dir/src/keyswitch/resources/typo-frequency-$typo_locale.bin" "$packaged_list"; then
+        printf 'The bundle does not contain the exact typo frequency list %s.\n' "$typo_locale" >&2
+        exit 1
+    fi
+done
 
 if [[ -n "$sign_identity" ]]; then
     keychain_arguments=()

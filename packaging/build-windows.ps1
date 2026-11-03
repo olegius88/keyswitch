@@ -1492,6 +1492,9 @@ $NuitkaArguments = @(
     "--include-package-data=keyswitch",
     "--include-data-files=$(Join-Path $ModelDirectory 'en_US.lm')=keyswitch/resources/models/en_US.lm",
     "--include-data-files=$(Join-Path $ModelDirectory 'ru_RU.lm')=keyswitch/resources/models/ru_RU.lm",
+    # The typo lists are .bin files, which --include-package-data leaves out; the post-build check compares them.
+    "--include-data-files=$(Join-Path $ProjectDirectory 'src\keyswitch\resources\typo-frequency-en_US.bin')=keyswitch/resources/typo-frequency-en_US.bin",
+    "--include-data-files=$(Join-Path $ProjectDirectory 'src\keyswitch\resources\typo-frequency-ru_RU.bin')=keyswitch/resources/typo-frequency-ru_RU.bin",
     "--nofollow-import-to=keyswitch.app",
     "--nofollow-import-to=keyswitch.ui",
     "--nofollow-import-to=keyswitch.tray",

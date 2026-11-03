@@ -390,6 +390,8 @@ python3 -m nuitka \
     --include-package-data=keyswitch \
     --include-data-files="$frozen_english_model=keyswitch/resources/models/en_US.lm" \
     --include-data-files="$frozen_russian_model=keyswitch/resources/models/ru_RU.lm" \
+    --include-data-files="$project_dir/src/keyswitch/resources/typo-frequency-en_US.bin=keyswitch/resources/typo-frequency-en_US.bin" \
+    --include-data-files="$project_dir/src/keyswitch/resources/typo-frequency-ru_RU.bin=keyswitch/resources/typo-frequency-ru_RU.bin" \
     --nofollow-import-to='keyswitch.windows_*' \
     --nofollow-import-to='keyswitch.macos_*' \
     --nofollow-import-to=tests \

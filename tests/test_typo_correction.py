@@ -697,11 +697,20 @@ class BackendErasureTests(unittest.TestCase):
 
 
 class PackagingTests(unittest.TestCase):
-    def test_both_builds_ship_the_typo_lists_as_they_are(self) -> None:
-        # Without its lists the correction is off: each build compares the bundled bytes with the project's.
+    def test_every_build_takes_the_typo_lists_and_ships_them_as_they_are(self) -> None:
+        # Without its lists the correction is off: each build names the lists itself (--include-package-data leaves
+        # the .bin files out) and compares the bundled bytes with the project's.
         root = Path(__file__).resolve().parents[1]
         script = (root / "packaging/build-windows.ps1").read_text(encoding="utf-8")
         deb_script = (root / "packaging/build-deb.sh").read_text(encoding="utf-8")
+        macos_script = (root / "packaging/build-macos.sh").read_text(encoding="utf-8")
+        for locale in TYPO_ALPHABETS:
+            include = re.compile(rf"--include-data-files=[^\n=]*typo-frequency-{locale}\.bin'?\)?"
+                                 rf"=keyswitch/resources/typo-frequency-{locale}\.bin")
+            for name, text in (("windows", script), ("deb", deb_script), ("macos", macos_script)):
+                with self.subTest(build=name, locale=locale):
+                    self.assertIsNotNone(include.search(text))
+        self.assertIn("The bundle does not contain the exact typo frequency list", macos_script)
         match = re.search(r"-MaximumBytes (\d+)MB -MinimumBytes \d+ -Label \"bundled typo frequency list", script)
         assert match is not None
         self.assertEqual(int(match.group(1)) * BYTES_PER_MEBIBYTE, TYPO_FREQUENCY_MAX_BYTES)
