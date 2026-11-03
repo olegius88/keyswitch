@@ -11,6 +11,12 @@ All notable changes to KeySwitch are documented in this file.
 - Windows: the settings window and the tray icon appear right after start, while the language models load in the
   background. Until they are loaded the window and its diagnostics say «Загрузка языковых моделей…», and switching
   starts as soon as they are.
+- The pair is `context-v3-48a863e75bb6` (artifact SHA-256
+  `9a3486e87873a3e74fc6d27f80111deff945d0986ba6eb8dd55c632cef7b5ace`) with the prefix model `prefix-v2-bf3dc28f8567`,
+  the pair of 0.65.0 byte for byte, sealed again for the changed engine. On the recorded real typing the new engine
+  decides every word as 0.65.0 does; on sealed test v85, read once, it restores 746 and 747 of 751 rows typed in the
+  wrong layout with the early switch off, against 739 and 743 for the baseline pair, and spoils no correct row (the
+  baseline pair one in each profile).
 
 ## 0.65.0 — 2026-11-03
 
