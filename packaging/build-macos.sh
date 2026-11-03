@@ -87,10 +87,14 @@ fi
 # "ui-element" keeps KeySwitch out of the dock while still letting it open the
 # settings window, which is what a keyboard helper should look like. Nuitka signs
 # what it builds, so the build runs again when only the timestamp was missing.
+# No docstrings and KeySwitch as bytecode, not compiled to C: the executable is 11 MB smaller and the engine builds
+# no slower (Python 3.14's own specialising interpreter; deb and a Nuitka benchmark, 03.11.2026).
 run_signing env PYTHONPATH="${nuitka_path:+$nuitka_path:}$project_dir/src" \
 "$python_bin" -m nuitka \
     --mode=app-dist \
     --lto=no \
+    --python-flag=no_docstrings \
+    --noinclude-custom-mode=keyswitch:bytecode \
     --output-dir="$native_output" \
     --output-filename="$binary_name" \
     --macos-app-name="$app_name" \

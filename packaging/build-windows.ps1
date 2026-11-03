@@ -1459,6 +1459,13 @@ $NuitkaArguments = @(
     "-m", "nuitka",
     "--mode=standalone",
     "--lto=no",
+    # No docstrings in the program: nothing reads them, and the executable is 1.5 MB smaller (deb, 03.11.2026).
+    "--python-flag=no_docstrings",
+    # KeySwitch as bytecode, not compiled to C: the executable is 11 MB smaller and the engine builds no slower (Python 3.14's own specialising interpreter; deb and a Nuitka benchmark, 03.11.2026); the pure-Python libraries the same way.
+    "--noinclude-custom-mode=keyswitch:bytecode",
+    "--noinclude-custom-mode=PIL:bytecode",
+    "--noinclude-custom-mode=pystray:bytecode",
+    "--noinclude-custom-mode=comtypes:bytecode",
     "--msvc=latest",
     "--assume-yes-for-downloads",
     "--enable-plugin=tk-inter",
@@ -1487,7 +1494,12 @@ $NuitkaArguments = @(
     "--include-module=pystray._util",
     "--include-module=pystray._util.win32",
     "--include-module=pystray._win32",
-    "--include-package=PIL",
+    # Pillow draws the tray icon (windows_tray_native) and pystray hands it to Windows as an ICO file: the ICO plugin
+    # and the PNG and BMP ones it writes with, not the other image formats and their libraries (_avif.pyd alone was
+    # 7.5 MB). Pillow imports each format plugin under a guard, so a plugin left out is a format it cannot open.
+    "--include-module=PIL.IcoImagePlugin",
+    "--include-module=PIL.PngImagePlugin",
+    "--include-module=PIL.BmpImagePlugin",
     # Includes the in-package KSLM; the post-build SHA-256 check verifies it.
     "--include-package-data=keyswitch",
     "--include-data-files=$(Join-Path $ModelDirectory 'en_US.lm')=keyswitch/resources/models/en_US.lm",
@@ -1508,6 +1520,21 @@ $NuitkaArguments = @(
     "--report=$(Join-Path $NativeOutput 'compilation-report.xml')",
     $EntryPoint
 )
+# The format plugins and image modules the tray never uses (Pillow 13.0.0's PIL._plugins and the modules that bring
+# their own libraries: colour management, image maths, morphology, Tk and Qt images).
+$PillowLeftOut = @(
+    "AvifImagePlugin", "BlpImagePlugin", "BufrStubImagePlugin", "CurImagePlugin", "DcxImagePlugin", "DdsImagePlugin",
+    "EpsImagePlugin", "FitsImagePlugin", "FliImagePlugin", "FpxImagePlugin", "FtexImagePlugin", "GbrImagePlugin",
+    "GifImagePlugin", "GribStubImagePlugin", "Hdf5StubImagePlugin", "IcnsImagePlugin", "ImImagePlugin",
+    "ImtImagePlugin", "IptcImagePlugin", "JpegImagePlugin", "Jpeg2KImagePlugin", "McIdasImagePlugin", "MicImagePlugin",
+    "MpegImagePlugin", "MpoImagePlugin", "MspImagePlugin", "PalmImagePlugin", "PcdImagePlugin", "PcxImagePlugin",
+    "PdfImagePlugin", "PixarImagePlugin", "PpmImagePlugin", "PsdImagePlugin", "QoiImagePlugin", "SgiImagePlugin",
+    "SpiderImagePlugin", "SunImagePlugin", "TgaImagePlugin", "TiffImagePlugin", "WebPImagePlugin", "WmfImagePlugin",
+    "XbmImagePlugin", "XpmImagePlugin", "XVThumbImagePlugin",
+    "ImageCms", "ImageMath", "ImageMorph", "ImageTk", "ImageQt", "ImageShow", "ImageGrab"
+)
+$NuitkaArguments = $NuitkaArguments[0..($NuitkaArguments.Count - 2)] + `
+    ($PillowLeftOut | ForEach-Object { "--nofollow-import-to=PIL.$_" }) + @($EntryPoint)
 Invoke-NativeCommand `
     -Command "python" `
     -Arguments $NuitkaArguments `

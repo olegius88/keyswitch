@@ -380,11 +380,15 @@ if patch --batch --forward --dry-run --strip=1 --directory="$pygobject_site" \
 fi
 
 # Package data includes KSLM; explicit inputs add the frozen EN/RU scorers.
+# No docstrings and KeySwitch as bytecode, not compiled to C: the executable is 11 MB smaller and the engine builds
+# no slower (Python 3.14's own specialising interpreter; deb and a Nuitka benchmark, 03.11.2026).
 # Post-build byte comparisons verify all three model files.
 PYTHONPATH="$pygobject_site:$nuitka_root:$project_dir/src" \
 python3 -m nuitka \
     --mode=standalone \
     --lto=no \
+    --python-flag=no_docstrings \
+    --noinclude-custom-mode=keyswitch:bytecode \
     --output-dir="$native_output" \
     --output-filename=keyswitch-bin \
     --include-package-data=keyswitch \
