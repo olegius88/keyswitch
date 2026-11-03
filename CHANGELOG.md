@@ -4,6 +4,20 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- KeySwitch takes about 120 MB less memory: the letter-sequence tables of the spelling model, about a million entries,
+  are kept in two compact arrays instead of a million separate objects, and on Linux the memory freed while the models
+  load is handed back to the system. After start the engine holds about 300 MB instead of 420 MB (measured on Linux),
+  and every decision is the same as before.
+- Windows: the settings window and the tray icon appear right after start, while the language models load in the
+  background. Until they are loaded the window and its diagnostics say «Загрузка языковых моделей…», and switching
+  starts as soon as they are.
+- The pair is `context-v3-48a863e75bb6` (artifact SHA-256
+  `9a3486e87873a3e74fc6d27f80111deff945d0986ba6eb8dd55c632cef7b5ace`) with the prefix model `prefix-v2-bf3dc28f8567`,
+  the pair of 0.65.0 byte for byte, sealed again for the changed engine. On the recorded real typing the new engine
+  decides every word as 0.65.0 does; on sealed test v85, read once, it restores 746 and 747 of 751 rows typed in the
+  wrong layout with the early switch off, against 739 and 743 for the baseline pair, and spoils no correct row (the
+  baseline pair one in each profile).
+
 ## 0.65.0 — 2026-11-03
 
 - Typo correction: a Russian word of five letters and more with one slip in it (two letters swapped, a letter left

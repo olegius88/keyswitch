@@ -47,6 +47,10 @@ class ServiceTests(unittest.TestCase):
         self.assertIn("CGEvent", MacServices().backend_label)
         self.assertEqual(MacServices().backend_label, BACKEND_LABEL)
 
+    def test_the_engine_is_built_on_the_main_thread(self) -> None:
+        # The layout calls of macOS belong to the main thread: the window waits for the engine there.
+        self.assertFalse(MacServices().background_engine)
+
     def test_autostart_and_the_program_list_are_the_macos_ones(self) -> None:
         services = MacServices()
         self.assertIsInstance(services.autostart(), MacAutostartManager)

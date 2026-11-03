@@ -36,6 +36,11 @@ class WindowsServices:
     def backend_label(self) -> str:
         return BACKEND_LABEL
 
+    @property
+    def background_engine(self) -> bool:
+        # The tray icon and the window come up at once; the engine follows when its models are loaded.
+        return True
+
     def backend(self) -> PromptBackend:
         return WindowsBackend()
 

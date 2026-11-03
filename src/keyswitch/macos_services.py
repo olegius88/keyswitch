@@ -29,6 +29,11 @@ class MacServices:
     def backend_label(self) -> str:
         return BACKEND_LABEL
 
+    @property
+    def background_engine(self) -> bool:
+        # Not yet tried on a Mac: the layout calls of macOS belong to the main thread, and the engine is built there.
+        return False
+
     def backend(self) -> PromptBackend:
         if self._backend is None:
             self._backend = MacBackend()

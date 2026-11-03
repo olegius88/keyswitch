@@ -362,18 +362,22 @@ class FirstWordTests(unittest.TestCase):
         self.assertIn(missing.name, reason)
 
     def test_the_first_word_parses_nothing_and_binds_no_dictionaries(self) -> None:
-        # A fresh start: no table read, no orthotactic model bound to its dictionaries.
+        # A fresh start: no table read; the orthotactic model asks the engine's own language models whether a word is
+        # known, so no dictionary is loaded for it, neither at start-up nor on the first word.
         with patch.object(context_model, "_TERM_FREQUENCY", None), patch.object(context_policy, "_SHARED_IDENTIFIERS", None), \
                 patch.object(ContextPolicy, "_shared_ortho", None), \
                 patch.object(ortho_model, "_engine_dictionaries", wraps=ortho_model._engine_dictionaries) as dictionaries, \
                 sequences.session(0) as current:
             model = current.engine.context_policy.model
             assert model is not None
-            self.assertEqual(dictionaries.call_count, 1)
+            ortho = current.engine.context_policy.ortho
+            assert ortho is not None
+            self.assertIsNotNone(ortho._known)
+            self.assertEqual(dictionaries.call_count, 0)
             with patch("json.loads", side_effect=AssertionError) as parse, \
                     patch.object(model, "predict", wraps=model.predict) as predict:
                 current.physical("ghbdtn ")
-            self.assertEqual((current.backend.text, parse.call_count, dictionaries.call_count), ("привет ", 0, 1))
+            self.assertEqual((current.backend.text, parse.call_count, dictionaries.call_count), ("привет ", 0, 0))
             self.assertTrue(predict.called)
 
 
