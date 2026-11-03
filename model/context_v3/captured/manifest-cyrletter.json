@@ -1,0 +1,231 @@
+{
+ "schema_version": 2,
+ "columns": [
+  "count",
+  "original",
+  "alternative",
+  "source_group",
+  "trigger",
+  "baseline_convert",
+  "source_known",
+  "target_known",
+  "score_delta",
+  "literal_tail",
+  "boundary_text",
+  "after_origin",
+  "before_origin",
+  "source_typo",
+  "target_typo",
+  "source_opening",
+  "target_opening",
+  "inside",
+  "before",
+  "after",
+  "role",
+  "label"
+ ],
+ "sources": [
+  {
+   "file": "tatoeba-chat-cyrletter-train.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR; messages above them: Tatoeba sentences)",
+   "origin": "Tatoeba sentence exports rus/eng of 2026-09-26, only sentences listed in model/context_v1/captured/tatoeba-authors.tsv.xz",
+   "typing": "6000 Russian chat-style sentences with a Russian word of one letter right after another Russian word, the English layout coming on at that letter (slip_letter), 30 % under a previous message; the Cyrillic-letter head's questions alone",
+   "recipe": {
+    "messages": "tatoeba-chat-cyrletter-russian-train.jsonl.gz",
+    "kinds": [
+     "tatoeba_chat"
+    ],
+    "count": 6000,
+    "russian_share": 1.0,
+    "seed": "capture-cyrletter-tatoeba-chat-train",
+    "modes": [
+     "slip_letter",
+     "slip_letter_back"
+    ],
+    "questions": "cyrletter",
+    "prefix_rate": 0.3
+   },
+   "sha256": "4e177f2db09beb2221ee15e78bb38bfd8cc675bbd97ee364154ada559a7f0076",
+   "rows": 12600,
+   "unique": 6135
+  },
+  {
+   "file": "tatoeba-cyrletter-train.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR; messages above them: Tatoeba sentences)",
+   "origin": "Tatoeba sentence exports rus/eng of 2026-09-26, only sentences listed in model/context_v1/captured/tatoeba-authors.tsv.xz",
+   "typing": "6000 Russian as written sentences with a Russian word of one letter right after another Russian word, the English layout coming on at that letter (slip_letter), 30 % under a previous message; the Cyrillic-letter head's questions alone",
+   "recipe": {
+    "messages": "tatoeba-cyrletter-russian-train.jsonl.gz",
+    "kinds": [
+     "tatoeba"
+    ],
+    "count": 6000,
+    "russian_share": 1.0,
+    "seed": "capture-cyrletter-tatoeba-train",
+    "modes": [
+     "slip_letter",
+     "slip_letter_back"
+    ],
+    "questions": "cyrletter",
+    "prefix_rate": 0.3
+   },
+   "sha256": "67794f9e8001ff354b1ffa18a89ab52e83a04045616cb4a420e96c13a1ad7b10",
+   "rows": 12633,
+   "unique": 6195
+  },
+  {
+   "file": "so-cyrletter-russian-train.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "3000 messages with Latin words and 3000 Russian ones with a Russian word of one letter right after another Russian word, the English layout coming on at that letter (slip_letter); the Cyrillic-letter head's questions alone",
+   "recipe": {
+    "messages": "so-cyrletter-russian-train.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 3000,
+    "russian_share": 1.0,
+    "seed": "capture-cyrletter-so-russian-train",
+    "modes": [
+     "slip_letter",
+     "slip_letter_back"
+    ],
+    "questions": "cyrletter"
+   },
+   "sha256": "53edb652ca32985bc681077fe4404b58be375d0b8fa5f64c37c718eb19bed651",
+   "rows": 13333,
+   "unique": 7047
+  },
+  {
+   "file": "so-cyrletter-latin-train.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "up to 16000 messages with a Latin letter whose Cyrillic reading is a Russian word of one letter right after a Russian word (`язык C`), typed as meant with the word after a change by hand not held from correction (unprotected); the Cyrillic-letter head's questions alone",
+   "recipe": {
+    "messages": "so-cyrletter-latin-train.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 16000,
+    "russian_share": 0.0,
+    "seed": "capture-cyrletter-so-latin-train",
+    "modes": [
+     "unprotected"
+    ],
+    "questions": "cyrletter"
+   },
+   "sha256": "dfaadaaac7cb8e74b4074fdf9dfd0a04e99407bb60b484960148128b7412ee24",
+   "rows": 16556,
+   "unique": 16057
+  },
+  {
+   "file": "tatoeba-chat-cyrletter-dev.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR; messages above them: Tatoeba sentences)",
+   "origin": "Tatoeba sentence exports rus/eng of 2026-09-26, only sentences listed in model/context_v1/captured/tatoeba-authors.tsv.xz",
+   "typing": "1500 Russian chat-style sentences with a Russian word of one letter right after another Russian word, the English layout coming on at that letter (slip_letter), 30 % under a previous message; the Cyrillic-letter head's questions alone",
+   "recipe": {
+    "messages": "tatoeba-chat-cyrletter-russian-dev.jsonl.gz",
+    "kinds": [
+     "tatoeba_chat"
+    ],
+    "count": 1500,
+    "russian_share": 1.0,
+    "seed": "capture-cyrletter-tatoeba-chat-dev",
+    "modes": [
+     "slip_letter",
+     "slip_letter_back"
+    ],
+    "questions": "cyrletter",
+    "prefix_rate": 0.3
+   },
+   "sha256": "bba59df1a7a8590f59523f2f3c30948b979fd6d8bec52028af82ff30b09a75ae",
+   "rows": 3140,
+   "unique": 1585
+  },
+  {
+   "file": "tatoeba-cyrletter-dev.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR; messages above them: Tatoeba sentences)",
+   "origin": "Tatoeba sentence exports rus/eng of 2026-09-26, only sentences listed in model/context_v1/captured/tatoeba-authors.tsv.xz",
+   "typing": "1500 Russian as written sentences with a Russian word of one letter right after another Russian word, the English layout coming on at that letter (slip_letter), 30 % under a previous message; the Cyrillic-letter head's questions alone",
+   "recipe": {
+    "messages": "tatoeba-cyrletter-russian-dev.jsonl.gz",
+    "kinds": [
+     "tatoeba"
+    ],
+    "count": 1500,
+    "russian_share": 1.0,
+    "seed": "capture-cyrletter-tatoeba-dev",
+    "modes": [
+     "slip_letter",
+     "slip_letter_back"
+    ],
+    "questions": "cyrletter",
+    "prefix_rate": 0.3
+   },
+   "sha256": "26a34819c67273b4c2542111e5bb1c8389bf827b144707a7a7a9cf0a22293006",
+   "rows": 3148,
+   "unique": 1591
+  },
+  {
+   "file": "so-cyrletter-russian-dev.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "750 messages with Latin words and 750 Russian ones with a Russian word of one letter right after another Russian word, the English layout coming on at that letter (slip_letter); the Cyrillic-letter head's questions alone",
+   "recipe": {
+    "messages": "so-cyrletter-russian-dev.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 750,
+    "russian_share": 1.0,
+    "seed": "capture-cyrletter-so-russian-dev",
+    "modes": [
+     "slip_letter",
+     "slip_letter_back"
+    ],
+    "questions": "cyrletter"
+   },
+   "sha256": "d7641e88a596d40e43714503421c0fc98ce96510c8a7d3a70db57783eec5062d",
+   "rows": 3329,
+   "unique": 1784
+  },
+  {
+   "file": "so-cyrletter-latin-dev.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "up to 4000 messages with a Latin letter whose Cyrillic reading is a Russian word of one letter right after a Russian word (`язык C`), typed as meant with the word after a change by hand not held from correction (unprotected); the Cyrillic-letter head's questions alone",
+   "recipe": {
+    "messages": "so-cyrletter-latin-dev.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 4000,
+    "russian_share": 0.0,
+    "seed": "capture-cyrletter-so-latin-dev",
+    "modes": [
+     "unprotected"
+    ],
+    "questions": "cyrletter"
+   },
+   "sha256": "3399ace308d20dfbce5b54938d89d025ef0790097e173fb9fb21b870f3d07088",
+   "rows": 4125,
+   "unique": 4051
+  }
+ ]
+}

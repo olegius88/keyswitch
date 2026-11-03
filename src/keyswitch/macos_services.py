@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .desktop_services import ApplicationCatalog, AutostartManager, PromptBackend
+from .desktop_theme import dark_from_interface_style
 from .macos_backend import MacBackend
 from .macos_system import MacApplicationCatalog, MacAutostartManager, MacSystemError
 from .tray_model import TrayActions, TrayController
@@ -54,3 +55,8 @@ class MacServices:
         from .macos_objc import beep
 
         beep()
+
+    def system_dark_theme(self) -> bool:
+        from .macos_objc import interface_style
+
+        return dark_from_interface_style(interface_style())

@@ -31,6 +31,20 @@ messages of one question are typed for one split only:
 - slippable: a message with two words of Russian letters in a row, for the slip typing mode (tools/mixed_typing.py).
 - formula: a message with a one-letter token of the variable class followed by a token of signs or digits that reads
   alike in both layouts and is no dash alone (`если x = 0`, `ГОСТ Р 54960`), for the sign head's question.
+- cyrletter-latin: a Latin letter whose Cyrillic reading is a Russian word of one letter (`f` is `а`, `d` is `в`, `C` is
+  `С`) right after a word of Cyrillic letters: `язык C`, `витамин D`, `функция f`. Typed as meant (the unprotected typing
+  mode, tools/mixed_typing.py), the letter is a question of the Cyrillic-letter head the person meant as written.
+- dash: a token of one or two leading dashes and letters of one script, digits after them allowed: a command-line flag
+  (`-v`, `-rf`, `--force`, `-v2`), the dash head's question in either layout.
+- digitdot: a token of digits with a dot or a comma after or between them (`2.`, `5.2`, `3,5`) right after a Russian
+  word, for the us_signs typing mode, which types its sign on the key of the English layout (`2ю`, `5ю2`): the digit-dot
+  head's question the person meant converted. digitdot-letter: digits and `б` after a Russian word (`5б`, `11б`), a class
+  or a building as written: the question meant kept.
+- quote-opener: a message whose first token is a quotation mark and a Russian word (`"Я сейчас не могу"`), for the
+  quote head: typed in the other layout from its start it opens with `@Z`, typed as meant it opens with `"Я`.
+- cyrletter-russian: a message with a Russian word of one letter (short_words.TRUSTED_SINGLE_LETTER_WORDS) right after
+  another Russian word, for the slip_letter typing mode, which types it with the English layout on: the Cyrillic-letter
+  head's question the person meant converted.
 
     python3 tools/select_capture_messages.py --messages <so-train.jsonl.gz> --members <devchat-*.members.jsonl.gz> ... \\
         --class variable --development-share 0.2 --out <dir>
@@ -77,6 +91,41 @@ def variable_token(previous: str, token: str) -> bool:
     if len(core) != 1 or not core.isalpha() or not previous or not all(cyrillic(char) for char in previous):
         return False
     return core.isascii() or (cyrillic(core) and core.casefold() not in TRUSTED_SINGLE_LETTER_WORDS)
+
+
+def cyrletter_latin_token(previous: str, token: str) -> bool:
+    """A Latin letter alone after a word of Cyrillic letters whose Cyrillic reading is a Russian word of one letter."""
+
+    core = token.rstrip(TRAILING_SIGNS)
+    return (variable_token(previous, token) and core.isascii()
+            and LAYOUTS.translate(core, "us", "ru").casefold() in TRUSTED_SINGLE_LETTER_WORDS)
+
+
+DASH_TOKEN = re.compile(r"^-{1,2}(?:[A-Za-z]+|[а-яёА-ЯЁ]+)[0-9]*$")
+DIGIT_DOT_TOKEN = re.compile(r"^[0-9]+[.,][0-9]*$")
+DIGIT_LETTER_TOKEN = re.compile(r"^[0-9]+б$")
+
+
+def dash_token(previous: str, token: str) -> bool:
+    """One or two leading dashes and letters of one script, digits after them allowed (`-v`, `--force`, `-v2`)."""
+
+    return DASH_TOKEN.match(token.rstrip(TRAILING_SIGNS)) is not None
+
+
+def russian_word(text: str) -> bool:
+    return any(cyrillic(char) for char in text) and not any("a" <= char.lower() <= "z" for char in text)
+
+
+def digit_dot_token(previous: str, token: str) -> bool:
+    """Digits with a dot or a comma after or between them right after a Russian word (`версии 5.2`, `пункт 2.`)."""
+
+    return russian_word(previous) and DIGIT_DOT_TOKEN.match(token) is not None
+
+
+def digit_letter_token(previous: str, token: str) -> bool:
+    """Digits and `б` right after a Russian word (`класс 5б`, `дом 11б`): written as meant."""
+
+    return russian_word(previous) and DIGIT_LETTER_TOKEN.match(token.rstrip(TRAILING_SIGNS).casefold()) is not None
 
 
 def dotted_token(previous: str, token: str) -> bool:
@@ -131,6 +180,22 @@ def resumes(text: str) -> bool:
     return False
 
 
+def letter_slippable(text: str) -> bool:
+    """A Russian word of one letter right after another Russian word: the slip_letter typing mode types it with the
+    English layout on."""
+
+    tokens = text.split()
+    return any(token.casefold() in TRUSTED_SINGLE_LETTER_WORDS and any(cyrillic(char) for char in previous)
+               and not any("a" <= char.lower() <= "z" for char in previous) for previous, token in zip(tokens, tokens[1:]))
+
+
+def quote_opener(text: str) -> bool:
+    """The first token a quotation mark and a Russian word."""
+
+    tokens = text.split()
+    return bool(tokens) and tokens[0][:1] == '"' and len(tokens[0]) > 1 and cyrillic(tokens[0][1])
+
+
 def slippable(text: str) -> bool:
     """Two words of Russian letters in a row: the slip typing mode types the second with the English layout on."""
     tokens = text.split()
@@ -159,10 +224,13 @@ def formula(text: str) -> bool:
 
 # Classes of a whole message rather than of one of its tokens.
 MESSAGE_CLASSES: dict[str, Callable[[str], bool]] = {"opening-short": opening_short, "slippable": slippable,
-                                                     "formula": formula, "resume": resumes}
+                                                     "formula": formula, "resume": resumes,
+                                                     "cyrletter-russian": letter_slippable, "quote-opener": quote_opener}
 CLASSES: dict[str, Callable[[str, str], bool]] = {"variable": variable_token, "dotted": dotted_token,
                                                   "dotted-latin": latin_dotted_token, "dotted-russian": russian_dotted_token,
-                                                  "alnum-latin": latin_alnum_token, "alnum-russian": russian_alnum_token}
+                                                  "alnum-latin": latin_alnum_token, "alnum-russian": russian_alnum_token,
+                                                  "cyrletter-latin": cyrletter_latin_token, "dash": dash_token,
+                                                  "digitdot": digit_dot_token, "digitdot-letter": digit_letter_token}
 # A message of a class named here is no message of the class it names: it holds a token of that one too.
 EXCLUDED_BY: dict[str, str] = {"dotted-russian": "dotted-latin", "alnum-russian": "alnum-latin"}
 

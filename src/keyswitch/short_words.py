@@ -7,13 +7,17 @@ exact lexicon hits with a large corpus-frequency advantage.
 
 from __future__ import annotations
 
+import functools
 import math
+from collections import Counter
 from dataclasses import replace
 from collections.abc import Collection, Mapping, Set
 from typing import Final
 
 from .constants.detection import (
     HEURISTIC_UNLIKELY_SOURCE_NGRAM_MAX,
+    PAUSE_WORD_START_LETTERS,
+    PAUSE_WORD_START_MIN_WORDS,
     NATURAL_SOURCE_MAX_LENGTH as NATURAL_SOURCE_MAX_LENGTH,
     SINGLE_LETTER_CONFIDENCE as SINGLE_LETTER_CONFIDENCE,
     TRUSTED_SHORT_WORD_CONTEXT_RATIO as TRUSTED_SHORT_WORD_CONTEXT_RATIO,
@@ -21,6 +25,7 @@ from .constants.detection import (
     TRUSTED_SHORT_WORD_MINIMUM_FREQUENCY as TRUSTED_SHORT_WORD_MINIMUM_FREQUENCY,
     TRUSTED_SHORT_WORD_MINIMUM_RATIO as TRUSTED_SHORT_WORD_MINIMUM_RATIO,
 )
+from .constants.keyboard import LAYOUT_GROUP_COUNT
 from .detector import DetectionDecision, LanguageDetector
 from .language_model import LanguageModel
 
@@ -131,6 +136,23 @@ ISOLATED_SHORT_WORD_REASON: Final[str] = (
 SHORT_WORD_REASONS: Final[frozenset[str]] = frozenset(
     {"частотное короткое слово из безопасного списка", CONTEXT_SHORT_WORD_REASON, ISOLATED_SHORT_WORD_REASON}
 )
+
+
+@functools.lru_cache(maxsize=LAYOUT_GROUP_COUNT)
+def word_starts(model: LanguageModel) -> Counter[str]:
+    """How many words of a lexicon begin with each PAUSE_WORD_START_LETTERS letters, counted once per model."""
+
+    return Counter(word[:PAUSE_WORD_START_LETTERS] for word in model.frequencies if len(word) > PAUSE_WORD_START_LETTERS)
+
+
+def begins_words(model: LanguageModel, token: str) -> bool:
+    """Whether PAUSE_WORD_START_LETTERS letters begin at least PAUSE_WORD_START_MIN_WORDS words of the lexicon: at a
+    pause in typing they are as likely the start of a word still being typed as a word. A lone letter is not asked:
+    typed and left at a pause it was meant converted ten times against twice in the owner's typing (field batteries,
+    30.10.2026), and the next key is often a click, after which no boundary decides it."""
+
+    return (token.isalpha() and len(token) == PAUSE_WORD_START_LETTERS
+            and word_starts(model)[token.casefold()] >= PAUSE_WORD_START_MIN_WORDS)
 
 
 def is_short_word_override(decision: DetectionDecision) -> bool:

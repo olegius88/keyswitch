@@ -17,10 +17,16 @@ from collections.abc import Sequence
 from typing import Final, Protocol, cast
 
 from .input_context import CONTEXT_LIMIT, FieldContext, FieldRole
-from .constants.text import FIELD_AFTER_CARET_MAX_CHARACTERS
+from .constants.text import FIELD_AFTER_CARET_MAX_CHARACTERS, SELECTION_COMMAND_MAX_CHARACTERS
 from .constants.timing import UIA_CONNECTION_TIMEOUT_MS, UIA_TRANSACTION_TIMEOUT_MS
 from .constants.units import MILLISECONDS_PER_SECOND
-from .constants.windows import UIA_EMBEDDED_OBJECT_CHARACTER, UIA_TEXT_PATTERN_ID
+from .constants.windows import (
+    UIA_EDIT_CONTROL_TYPE_ID,
+    UIA_EMBEDDED_OBJECT_CHARACTER,
+    UIA_IS_READ_ONLY_ATTRIBUTE_ID,
+    UIA_TEXT_PATTERN_ID,
+)
+from .selection_commands import SOURCE_UIA, SelectedText, SelectionRefused
 from .windows_calls import stdcall_library
 
 
@@ -36,6 +42,7 @@ class _Range(Protocol):
     def MoveEndpointByUnit(self, endpoint: int, unit: int, count: int) -> int: ...
     def MoveEndpointByRange(self, endpoint: int, other: _Range, other_endpoint: int) -> None: ...
     def GetText(self, maximum: int) -> str: ...
+    def GetAttributeValue(self, attribute: int) -> object: ...
 
 
 class _Ranges(Protocol):
@@ -58,6 +65,8 @@ class _Element(Protocol):
     @property
     def CurrentProcessId(self) -> int: ...
     @property
+    def CurrentControlType(self) -> int: ...
+    @property
     def CurrentIsPassword(self) -> bool: ...
     @property
     def CurrentAutomationId(self) -> str: ...
@@ -68,6 +77,8 @@ class _Element(Protocol):
 class _Automation(Protocol):
     ConnectionTimeout: int
     TransactionTimeout: int
+    @property
+    def ReservedMixedAttributeValue(self) -> object: ...
     def GetFocusedElement(self) -> _Element: ...
 
 
@@ -206,6 +217,50 @@ class WindowsFieldReader:
             return FieldContext(application, field_id, source="uia")
         role: FieldRole = "search" if "search" in element.CurrentAutomationId.casefold() else "text"
         return FieldContext(application, field_id, prefix, suffix, role, source="uia").bounded()
+
+    def read_selection(self, window: int) -> SelectedText | None:
+        """The text selected in the focused field of ``window``.
+
+        None where UI Automation cannot say (no text pattern, another process in focus): the clipboard is asked then.
+        SelectionRefused where it can and the selection is not one to type over: a password field, no selection or
+        several, text that says it is read-only, or an embedded object (a picture in a rich editor) that typing would
+        delete. One character past the hotkeys' bound is read, so that a longer selection is told apart.
+        """
+
+        element = self.automation.GetFocusedElement()
+        if element.CurrentProcessId != self._process_for_window(window):
+            return None
+        if element.CurrentIsPassword:
+            raise SelectionRefused("sensitive_field")
+        supported = element.GetCurrentPattern(UIA_TEXT_PATTERN_ID)
+        if not supported:
+            return None
+        ranges = supported.QueryInterface(self.text_interface).GetSelection()
+        if ranges.Length > 1:
+            raise SelectionRefused("multiple_selection")
+        if ranges.Length != 1:
+            raise SelectionRefused("no_selection")
+        selection = ranges.GetElement(0)
+        if selection.CompareEndpoints(0, selection, 1) == 0:
+            raise SelectionRefused("no_selection")
+        # VT_BOOL comes back as a bool. A selection partly read-only answers with the mixed-attribute token
+        # (IUIAutomation::ReservedMixedAttributeValue), and a provider without the attribute with another token.
+        read_only = selection.GetAttributeValue(UIA_IS_READ_ONLY_ATTRIBUTE_ID)
+        if read_only is True or read_only == self.automation.ReservedMixedAttributeValue:
+            raise SelectionRefused("read_only")
+        text = selection.GetText(SELECTION_COMMAND_MAX_CHARACTERS + 1)
+        if UIA_EMBEDDED_OBJECT_CHARACTER in text:
+            raise SelectionRefused("untypeable")
+        return SelectedText(text, SOURCE_UIA)
+
+    def focused_editable(self, window: int) -> bool:
+        """Whether the focused element of ``window`` is an edit field, which may still have no text pattern."""
+
+        element = self.automation.GetFocusedElement()
+        return (
+            element.CurrentProcessId == self._process_for_window(window)
+            and element.CurrentControlType == UIA_EDIT_CONTROL_TYPE_ID
+        )
 
 
 def _type_library(client: _ComClient) -> _TypeLibrary:

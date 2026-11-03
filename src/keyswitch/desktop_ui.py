@@ -42,6 +42,7 @@ from .logsetup import (
     rotation_summary,
 )
 from .desktop_services import DesktopServices, PromptBackend
+from .desktop_theme import dark_theme
 from .rule_editor import (
     ACTION_LABELS,
     ACTION_TITLE,
@@ -72,6 +73,7 @@ from .windows_ui_model import (
     AUTOCORRECTION_SETTINGS,
     DIAGNOSTIC_SETTINGS,
     HOTKEY_SETTINGS,
+    MANUAL_SWITCH_SETTINGS,
     SYSTEM_SETTINGS,
     TRIGGER_SETTINGS,
     UPDATE_SETTINGS,
@@ -118,6 +120,7 @@ from .constants.ui_desktop import (
     DESCRIPTION_INITIAL_WRAP_PIXELS,
     DESCRIPTION_MARGIN_PIXELS,
     DESCRIPTION_MINIMUM_WRAP_PIXELS,
+    SETTING_TITLE_MINIMUM_WRAP_PIXELS,
     DESKTOP_SIDEBAR_WIDTH_PIXELS,
     DIAGNOSTICS_TEXT_HEIGHT_ROWS,
     EXCLUSIONS_CATALOG_COLUMN_SPAN,
@@ -628,6 +631,8 @@ class DesktopApplication:
         self._navigation_hover = "#293957"
         self._content_background = "#ffffff"
         self._modified_accent = "#4f7cff"
+        # Whether the window is drawn dark now; None until the theme is first applied.
+        self._dark_theme: bool | None = None
         self._boolean_variables: dict[str, tk.BooleanVar] = {}
         self._string_variables: dict[str, tk.StringVar] = {}
         self._choice_labels: dict[str, dict[str, str]] = {}
@@ -838,11 +843,12 @@ class DesktopApplication:
         reserve: int,
         *,
         minimum: int = DESCRIPTION_MINIMUM_WRAP_PIXELS,
+        beside: tk.Misc | None = None,
     ) -> None:
-        """Wrap long copy to the real width instead of a fixed pixel guess."""
+        """Wrap long copy to the real width instead of a fixed pixel guess, less the width of a widget beside it."""
 
         def resize(event: tk.Event[tk.Misc]) -> None:
-            target = max(minimum, event.width - reserve)
+            target = max(minimum, event.width - reserve - (beside.winfo_reqwidth() if beside is not None else 0))
             # A dead band keeps the wrap width from oscillating by a pixel.
             if abs(int(str(label.cget("wraplength"))) - target) >= WRAP_WIDTH_DEAD_BAND_PIXELS:
                 label.configure(wraplength=target)
@@ -953,6 +959,11 @@ class DesktopApplication:
         ).grid(row=0, column=0, sticky="w")
         self.test_entry = ttk.Entry(test, font=("Segoe UI", TEST_ENTRY_FONT_SIZE_POINTS))
         self.test_entry.grid(row=1, column=0, sticky="ew", pady=(TEST_ENTRY_PADDING_TOP_PIXELS, TEST_ENTRY_PADDING_BOTTOM_PIXELS))
+        # The field is typed in as any other program is, and the engine has to be told when it has the
+        # keyboard: the rest of this window is no place text is typed, and a layout picked while the rest
+        # of it is in front is ignored (KeySwitchEngine.set_test_field_focused).
+        self.test_entry.bind("<FocusIn>", lambda _event: self.engine.set_test_field_focused(True), add=True)
+        self.test_entry.bind("<FocusOut>", lambda _event: self.engine.set_test_field_focused(False), add=True)
         ttk.Label(
             test,
             text="Поле обрабатывается тем же глобальным Win32 backend, что и другие приложения.",
@@ -1006,17 +1017,13 @@ class DesktopApplication:
             row=LAYOUTS_REFRESH_BUTTON_ROW, column=0, sticky="w"
         )
         behavior = self._section(page, "Ручное переключение", LAYOUTS_MANUAL_SWITCH_SECTION_ROW)
-        manual_spec = next(
-            spec
-            for spec in AUTOCORRECTION_SETTINGS
-            if spec.path == "detection.respect_manual_layout"
-        )
-        self._add_setting(behavior, manual_spec, 0)
+        for row, spec in enumerate(MANUAL_SWITCH_SETTINGS):
+            self._add_setting(behavior, spec, row)
         ttk.Label(
             behavior,
             text="Когда вы сами меняете язык перед вводом, первое завершённое слово остаётся в выбранной раскладке. Следующие слова снова анализируются автоматически.",
             wraplength=CONTENT_TEXT_WRAP_WIDTH_PIXELS,
-        ).grid(row=1, column=0, columnspan=MANUAL_SWITCH_NOTE_COLUMN_SPAN, sticky="w", pady=(MANUAL_SWITCH_NOTE_PADDING_TOP_PIXELS, 0))
+        ).grid(row=len(MANUAL_SWITCH_SETTINGS), column=0, columnspan=MANUAL_SWITCH_NOTE_COLUMN_SPAN, sticky="w", pady=(MANUAL_SWITCH_NOTE_PADDING_TOP_PIXELS, 0))
 
     def _build_hotkeys(self, parent: ttk.Frame) -> None:
         page = self._new_page(
@@ -1367,7 +1374,7 @@ class DesktopApplication:
             parent,
             "about",
             f"KeySwitch {__version__}",
-            "Локальное приложение автоматического исправления раскладки для Windows и Linux.",
+            "Локальное приложение автоматического исправления раскладки для Windows, Linux и macOS.",
         )
         details = self._section(page, "Диагностика Win32 backend", PAGE_FIRST_SECTION_ROW)
         self.diagnostics_text = tk.Text(details, height=DIAGNOSTICS_TEXT_HEIGHT_ROWS, wrap="word", borderwidth=0)
@@ -1437,10 +1444,15 @@ class DesktopApplication:
             modified_style = "Modified.TCheckbutton"
             indent = DESCRIPTION_INDENT_PIXELS
         else:
-            label = ttk.Label(body, text=spec.title, style="CardTitle.TLabel")
+            label = ttk.Label(body, text=spec.title, style="CardTitle.TLabel",
+                              wraplength=DESCRIPTION_INITIAL_WRAP_PIXELS, justify="left")
             label.grid(row=0, column=0, sticky="w")
             control = self._setting_control(body, spec)
             control.grid(row=0, column=1, sticky="e", padx=(SETTING_CONTROL_PADDING_LEFT_PIXELS, 0))
+            # A title wraps beside its control instead of being cut: «Контекстный ИИ-помощник» and
+            # «Пауза, секунд» lost their last letters in a narrow window.
+            self._follow_width(label, body, SETTING_CONTROL_PADDING_LEFT_PIXELS + DESCRIPTION_MARGIN_PIXELS,
+                               minimum=SETTING_TITLE_MINIMUM_WRAP_PIXELS, beside=control)
             normal_style = "CardTitle.TLabel"
             modified_style = "Modified.CardTitle.TLabel"
             indent = 0
@@ -1636,6 +1648,9 @@ class DesktopApplication:
             )
 
     def present(self) -> None:
+        # Tk is not told when the system switches between light and dark, so a window that follows the
+        # system asks again each time it is shown.
+        self._apply_theme(str(self.settings.get("appearance.theme", "system")), when_changed=True)
         self.root.deiconify()
         self.root.lift()
         self.root.focus_force()
@@ -1744,7 +1759,10 @@ class DesktopApplication:
 
     def _announce_correction(self, plan: CorrectionPlan) -> None:
         if bool(self.settings.get("general.notifications", True)) and self.tray is not None:
-            self.tray.notify("Раскладка исправлена", f"{plan.original}  →  {plan.replacement}")
+            self.tray.notify(
+                "Регистр исправлен" if plan.case_fix else "Раскладка исправлена",
+                f"{plan.original}  →  {plan.replacement}",
+            )
         if bool(self.settings.get("general.sound", False)):
             self.services.beep()
 
@@ -2238,11 +2256,16 @@ class DesktopApplication:
         self.root.clipboard_clear()
         self.root.clipboard_append(self._diagnostics())
 
-    def _apply_theme(self, theme: str) -> None:
+    def _apply_theme(self, theme: str, *, when_changed: bool = False) -> None:
+        # "system" asks the system each time (DesktopServices.system_dark_theme); an answer it cannot
+        # give draws the window light.
+        dark = dark_theme(theme, self.services.system_dark_theme)
+        if when_changed and dark == self._dark_theme:
+            return
+        self._dark_theme = dark
         style = ttk.Style(self.root)
         available = style.theme_names()
         style.theme_use("vista" if "vista" in available else "clam")
-        dark = theme == "dark"
         background = "#181a1f" if dark else "#f4f6f9"
         content = "#20232a" if dark else "#ffffff"
         sidebar = "#111318" if dark else "#18233a"

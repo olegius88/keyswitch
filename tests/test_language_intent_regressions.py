@@ -37,6 +37,8 @@ class LanguageIntentRegressions(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             settings = SettingsStore(root / "settings.json")
+            # These sequences pin the layout decision; the typo correction has tests of its own.
+            settings.set("detection.correct_typos", False)
             settings.set("detection.context_policy", "assist")
             settings.set("detection.context_aware", True)
             settings.set("detection.early_switch", False)

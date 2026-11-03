@@ -503,6 +503,8 @@ def replay(plan: SequencePlan, model: ContextModel, models: dict[int, LanguageMo
     with tempfile.TemporaryDirectory(prefix="keyswitch-context-sequence-") as temporary:
         directory = Path(temporary)
         settings = SettingsStore(directory / "settings.json")
+        # The sequences measure the layout decision; tools/evaluate_typo_correction.py measures typos.
+        settings.set("detection.correct_typos", False)
         # The protocol's own pause, whatever the shipped default is (SEQUENCE_PROTOCOL_PAUSE_DELAY_SECONDS).
         settings.set("detection.pause_delay_seconds", SEQUENCE_PROTOCOL_PAUSE_DELAY_SECONDS)
         if mode == "default":

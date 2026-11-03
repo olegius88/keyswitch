@@ -1,0 +1,83 @@
+{
+ "schema_version": 2,
+ "columns": [
+  "count",
+  "original",
+  "alternative",
+  "source_group",
+  "trigger",
+  "baseline_convert",
+  "source_known",
+  "target_known",
+  "score_delta",
+  "literal_tail",
+  "boundary_text",
+  "after_origin",
+  "before_origin",
+  "source_typo",
+  "target_typo",
+  "source_opening",
+  "target_opening",
+  "inside",
+  "before",
+  "after",
+  "role",
+  "label"
+ ],
+ "sources": [
+  {
+   "file": "so-dash-train.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "up to 12000 messages with a command-line flag (one or two dashes and letters), typed as meant with the word after a change by hand not held from correction (unprotected), with the change to English forgotten (forget_en) and starting in the other layout (start_wrong); the dash head's questions alone",
+   "recipe": {
+    "messages": "so-dash-train.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 12000,
+    "russian_share": 0.0,
+    "seed": "capture-dash-so-train",
+    "modes": [
+     "unprotected",
+     "forget_en",
+     "start_wrong"
+    ],
+    "questions": "dash"
+   },
+   "sha256": "737de5a277a896005729820f2036f81b6a6a46bc02e2bf92e949cd54215c15fe",
+   "rows": 35461,
+   "unique": 17308
+  },
+  {
+   "file": "so-dash-dev.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "up to 3000 messages with a command-line flag (one or two dashes and letters), typed as meant with the word after a change by hand not held from correction (unprotected), with the change to English forgotten (forget_en) and starting in the other layout (start_wrong); the dash head's questions alone",
+   "recipe": {
+    "messages": "so-dash-dev.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 3000,
+    "russian_share": 0.0,
+    "seed": "capture-dash-so-dev",
+    "modes": [
+     "unprotected",
+     "forget_en",
+     "start_wrong"
+    ],
+    "questions": "dash"
+   },
+   "sha256": "f447de18b6656c1692c31fcb55dce3b1c1de874dea9ad5f006abb636c8f6cb01",
+   "rows": 9139,
+   "unique": 4523
+  }
+ ]
+}

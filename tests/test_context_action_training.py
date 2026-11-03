@@ -1056,6 +1056,10 @@ class ActionTrainingTests(unittest.TestCase):
         self.assertEqual([row.action for row in alone_labels(rows, evidence)],
                          ["convert", "keep", "convert", "keep", "wait", "wait", "wait", "wait", "wait", "wait", "wait"])
         self.assertEqual(alone_labels(rows, None), rows)
+        # A Latin word of the lexicon sent alone is the keys of a Russian word that outnumbers it by far: the English
+        # lexicon knows `Jr`, counted 13 times against 7 180 for `ок`.
+        self.assertEqual([row.action for row in alone_labels([lone("jr", 0, "enter"), lone("ок", 1)], evidence)],
+                         ["convert", "keep"])
         # What the counts leave open takes the frozen model's answer, where it has one.
         answers: dict[str, ContextAction | None] = {"ns": "convert", "ты": None}
         self.assertEqual([row.action for row in alone_labels(unsettled, evidence, lambda row: answers.get(row.original))],

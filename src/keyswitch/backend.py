@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 from .constants.keyboard import (
     ALT_MASK,
     CONTROL_MASK,
@@ -96,7 +97,9 @@ class FocusInfo:
 
     ``window`` is the platform identity (an HWND or an X window id). ``own``
     marks windows of KeySwitch itself (settings, the learning prompt), which
-    never count as the user moving to another window. ``isolated_layout``
+    never count as the user moving to another window, except while the test
+    field of the settings window has the keyboard: the window reports that to
+    the engine (KeySwitchEngine.set_test_field_focused). ``isolated_layout``
     says that the window carries a keyboard layout of its own that the user
     did not choose (Windows keeps one per window), so a layout change seen
     while it is focused must be ignored; on X11 the layout is global.
@@ -146,3 +149,31 @@ class InputBackend(Protocol):
         trailing: Sequence[KeyEvent] = (),
         kept_tail: int = 0,
     ) -> int: ...
+
+
+class ErasingInjection(Protocol):
+    """`inject_correction` of a backend that can also erase another number of characters than it types.
+
+    A typo correction types more or fewer keys than the word on screen has (`клвиатура` is `клавиатура`); `erased`
+    says how many characters the word occupies. The platform backends (X11, Windows, macOS, Wayland) take it; a
+    backend that does not is offered only corrections of the word's own length (erasing_injection).
+    """
+
+    def __call__(
+        self,
+        strokes: Iterable[KeyEvent],
+        target_group: int,
+        boundary: KeyEvent | None,
+        source_group: int | None = None,
+        late: Sequence[KeyEvent] = (),
+        trailing: Sequence[KeyEvent] = (),
+        kept_tail: int = 0,
+        erased: int | None = None,
+    ) -> int: ...
+
+
+def erasing_injection(backend: InputBackend) -> ErasingInjection | None:
+    """The backend's injection when it can erase a given number of characters (ErasingInjection), else None."""
+
+    inject = backend.inject_correction
+    return cast(ErasingInjection, inject) if "erased" in inspect.signature(inject).parameters else None

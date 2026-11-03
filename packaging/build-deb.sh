@@ -390,6 +390,8 @@ python3 -m nuitka \
     --include-package-data=keyswitch \
     --include-data-files="$frozen_english_model=keyswitch/resources/models/en_US.lm" \
     --include-data-files="$frozen_russian_model=keyswitch/resources/models/ru_RU.lm" \
+    --include-data-files="$project_dir/src/keyswitch/resources/typo-frequency-en_US.bin=keyswitch/resources/typo-frequency-en_US.bin" \
+    --include-data-files="$project_dir/src/keyswitch/resources/typo-frequency-ru_RU.bin=keyswitch/resources/typo-frequency-ru_RU.bin" \
     --nofollow-import-to='keyswitch.windows_*' \
     --nofollow-import-to='keyswitch.macos_*' \
     --nofollow-import-to=tests \
@@ -450,6 +452,14 @@ if ! cmp -s "$project_dir/src/keyswitch/resources/models/context-short-frequency
     printf 'Native distribution does not contain the exact table of short Russian tokens.\n' >&2
     exit 1
 fi
+# The typo correction reads its counted word lists from the resources; without them it is off.
+for typo_locale in en_US ru_RU; do
+    if ! cmp -s "$project_dir/src/keyswitch/resources/typo-frequency-$typo_locale.bin" \
+        "$native_dist/keyswitch/resources/typo-frequency-$typo_locale.bin"; then
+        printf 'Native distribution does not contain the exact typo frequency list %s.\n' "$typo_locale" >&2
+        exit 1
+    fi
+done
 bundled_english_model="$native_dist/keyswitch/resources/models/en_US.lm"
 bundled_russian_model="$native_dist/keyswitch/resources/models/ru_RU.lm"
 if [[ ! -s "$bundled_intent_model" ]] \

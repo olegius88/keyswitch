@@ -369,7 +369,7 @@ class KeySwitchApplication(Adw.Application):
 
     def _announce_correction(self, plan: CorrectionPlan) -> bool:
         if bool(self.settings.get("general.notifications", True)):
-            notification = Gio.Notification.new("Раскладка исправлена")
+            notification = Gio.Notification.new("Регистр исправлен" if plan.case_fix else "Раскладка исправлена")
             notification.set_body(f"{plan.original}  →  {plan.replacement}")
             notification.set_icon(Gio.ThemedIcon.new("keyswitch"))
             self.send_notification(None, notification)

@@ -23,6 +23,9 @@ from .constants.settings_defaults import (
     PAUSE_DELAY_SETTING_MAX_SECONDS,
     PAUSE_DELAY_SETTING_MIN_SECONDS,
     PAUSE_DELAY_SETTING_STEP_SECONDS,
+    SELECTION_HOTKEY_DESCRIPTIONS,
+    SELECTION_HOTKEY_TITLES,
+    SELECTION_HOTKEYS,
 )
 from .constants.models import PREFIX_MAX_CHARACTERS, PREFIX_MIN_CHARACTERS
 from .constants.timing import UNDO_AVAILABLE_WINDOW_SECONDS
@@ -30,6 +33,9 @@ from .constants.ui_desktop import SETTING_SPEC_DEFAULT_MAXIMUM
 from .constants.units import SECONDS_PER_HOUR
 from .constants.updates import UPDATE_CHECK_INTERVAL_SECONDS
 from .russian_text import HOURS, SECONDS, quantity
+from .typo_correction import (
+    CORRECT_TYPOS_DESCRIPTION, CORRECT_TYPOS_ENGLISH_DESCRIPTION, CORRECT_TYPOS_ENGLISH_TITLE, CORRECT_TYPOS_TITLE,
+)
 
 
 ControlKind = Literal["bool", "choice", "int", "float", "text"]
@@ -72,9 +78,11 @@ AUTOCORRECTION_SETTINGS = (
         step=CONFIDENCE_SETTING_STEP,
     ),
     SettingSpec(
-        "detection.respect_manual_layout",
-        "Учитывать ручную смену языка",
-        "Не исправлять первое слово после выбранной пользователем раскладки.",
+        "detection.fix_double_capitals",
+        "Исправлять ДВе заглавные",
+        "Слово, набранное с двумя заглавными в начале (ПРивет, HEllo), становится обычным (Привет, Hello), если "
+        "словарь его раскладки знает такое слово. Аббревиатуры, слова из одних заглавных, короткие слова и слова "
+        "из исключений не меняются. Отменяется горячей клавишей «Отменить исправление».",
         "bool",
     ),
     SettingSpec(
@@ -118,6 +126,8 @@ AUTOCORRECTION_SETTINGS = (
         "Оставлять технические токены и адреса без автокоррекции.",
         "bool",
     ),
+    SettingSpec("detection.correct_typos", CORRECT_TYPOS_TITLE, CORRECT_TYPOS_DESCRIPTION + ".", "bool"),
+    SettingSpec("detection.correct_typos_english", CORRECT_TYPOS_ENGLISH_TITLE, CORRECT_TYPOS_ENGLISH_DESCRIPTION + ".", "bool"),
     SettingSpec(
         "detection.intent_model_enabled",
         "Базовая модель слов (KSLM)",
@@ -160,6 +170,18 @@ AUTOCORRECTION_SETTINGS = (
         "(TeamViewer, AnyDesk), макросы, экранная клавиатура. Выключено по умолчанию: такой "
         "ввод уже проверен на компьютере, где его набирают, а ожидание его отпусканий "
         "задерживало Enter.",
+        "bool",
+    ),
+)
+
+
+# Shown on the layouts page only, under «Ручное переключение», with what it does explained there: the
+# autocorrection page listed it as well, and the same switch in two places read as two different settings.
+MANUAL_SWITCH_SETTINGS = (
+    SettingSpec(
+        "detection.respect_manual_layout",
+        "Учитывать ручную смену языка",
+        "Не исправлять первое слово после выбранной пользователем раскладки.",
         "bool",
     ),
 )
@@ -225,9 +247,14 @@ HOTKEY_SETTINGS = (
     SettingSpec(
         "hotkeys.undo",
         "Отменить исправление",
-        "Вернуть последнее автоматическое исправление. Доступно "
+        "Вернуть последнее исправление: слово станет таким, каким его набрали. Работает и после пробелов, "
+        "набранных за исправленным словом; после любой другой клавиши отменять уже нечего. Доступно "
         f"{quantity(UNDO_AVAILABLE_WINDOW_SECONDS, SECONDS)} после исправления.",
         "text",
+    ),
+    *(
+        SettingSpec(f"hotkeys.{name}", SELECTION_HOTKEY_TITLES[name], SELECTION_HOTKEY_DESCRIPTIONS[name] + ".", "text")
+        for name in SELECTION_HOTKEYS
     ),
 )
 
@@ -335,6 +362,7 @@ APPLICATION_SETTINGS = tuple(
 
 ALL_SETTING_SPECS = (
     *AUTOCORRECTION_SETTINGS,
+    *MANUAL_SWITCH_SETTINGS,
     *TRIGGER_SETTINGS,
     *HOTKEY_SETTINGS,
     *SYSTEM_SETTINGS,

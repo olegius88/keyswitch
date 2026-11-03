@@ -1,0 +1,175 @@
+{
+ "schema_version": 2,
+ "columns": [
+  "count",
+  "original",
+  "alternative",
+  "source_group",
+  "trigger",
+  "baseline_convert",
+  "source_known",
+  "target_known",
+  "score_delta",
+  "literal_tail",
+  "boundary_text",
+  "after_origin",
+  "before_origin",
+  "source_typo",
+  "target_typo",
+  "source_opening",
+  "target_opening",
+  "inside",
+  "before",
+  "after",
+  "role",
+  "label"
+ ],
+ "sources": [
+  {
+   "file": "tatoeba-quote-train.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR; messages above them: Tatoeba sentences)",
+   "origin": "Tatoeba sentence exports rus/eng of 2026-09-26, only sentences listed in model/context_v1/captured/tatoeba-authors.tsv.xz",
+   "typing": "up to 600 Russian sentences opening with a quotation mark and a Russian word, typed in the other layout from their start and as meant; the quote head's questions alone",
+   "recipe": {
+    "messages": "tatoeba-quote-opener-train.jsonl.gz",
+    "kinds": [
+     "tatoeba"
+    ],
+    "count": 600,
+    "russian_share": 1.0,
+    "seed": "capture-quote-tatoeba-train",
+    "modes": [
+     "start_wrong",
+     "correct"
+    ],
+    "questions": "quote"
+   },
+   "sha256": "1d94ebdc8c09142a39428fa754a8012e83048cca0ef3d77db59e326e1101070a",
+   "rows": 544,
+   "unique": 245
+  },
+  {
+   "file": "so-quote-train.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "4000 messages with Latin words and 4000 Russian ones opening with a quotation mark and a Russian word, typed in the other layout from their start and as meant; the quote head's questions alone",
+   "recipe": {
+    "messages": "so-quote-opener-train.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 4000,
+    "russian_share": 1.0,
+    "seed": "capture-quote-so-train",
+    "modes": [
+     "start_wrong",
+     "correct"
+    ],
+    "questions": "quote"
+   },
+   "sha256": "f2f76b23bc99c0df35675acd415c3f4199bd384b68bffc6f5616235ffa07e191",
+   "rows": 6072,
+   "unique": 2865
+  },
+  {
+   "file": "code-at-train.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "up to 8000 code lines opening with `@` and Latin letters (`@media`, `@property`), typed as meant; the quote head's questions alone",
+   "recipe": {
+    "messages": "code-at-train.jsonl.gz",
+    "kinds": [
+     "code"
+    ],
+    "count": 8000,
+    "russian_share": 0.0,
+    "seed": "capture-quote-code-train",
+    "modes": [
+     "correct"
+    ],
+    "questions": "quote"
+   },
+   "sha256": "b84f912d1d55d94de48176fdace7a1b2d177a8924d1a2b58595e83ec975c50b0",
+   "rows": 6539,
+   "unique": 1098
+  },
+  {
+   "file": "tatoeba-quote-dev.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR; messages above them: Tatoeba sentences)",
+   "origin": "Tatoeba sentence exports rus/eng of 2026-09-26, only sentences listed in model/context_v1/captured/tatoeba-authors.tsv.xz",
+   "typing": "up to 150 Russian sentences opening with a quotation mark and a Russian word, typed in the other layout from their start and as meant; the quote head's questions alone",
+   "recipe": {
+    "messages": "tatoeba-quote-opener-dev.jsonl.gz",
+    "kinds": [
+     "tatoeba"
+    ],
+    "count": 150,
+    "russian_share": 1.0,
+    "seed": "capture-quote-tatoeba-dev",
+    "modes": [
+     "start_wrong",
+     "correct"
+    ],
+    "questions": "quote"
+   },
+   "sha256": "c9596d76494a0618a7a9b190853d35bd8c9106cede6d370bee0bea4c4611ffd7",
+   "rows": 131,
+   "unique": 79
+  },
+  {
+   "file": "so-quote-dev.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "1000 messages with Latin words and 1000 Russian ones opening with a quotation mark and a Russian word, typed in the other layout from their start and as meant; the quote head's questions alone",
+   "recipe": {
+    "messages": "so-quote-opener-dev.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 1000,
+    "russian_share": 1.0,
+    "seed": "capture-quote-so-dev",
+    "modes": [
+     "start_wrong",
+     "correct"
+    ],
+    "questions": "quote"
+   },
+   "sha256": "6db382774d5967ed404dedadcdf39a7982e320b75a39678cf7efd7577f9d420c",
+   "rows": 1427,
+   "unique": 877
+  },
+  {
+   "file": "code-at-dev.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "up to 2000 code lines opening with `@` and Latin letters (`@media`, `@property`), typed as meant; the quote head's questions alone",
+   "recipe": {
+    "messages": "code-at-dev.jsonl.gz",
+    "kinds": [
+     "code"
+    ],
+    "count": 2000,
+    "russian_share": 0.0,
+    "seed": "capture-quote-code-dev",
+    "modes": [
+     "correct"
+    ],
+    "questions": "quote"
+   },
+   "sha256": "9cde6dba6dea5ccfe31588f78968035a61fdb6e26176f40847f95d6d272b6178",
+   "rows": 1630,
+   "unique": 388
+  }
+ ]
+}

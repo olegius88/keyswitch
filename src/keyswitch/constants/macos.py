@@ -10,6 +10,8 @@ from .units import BYTES_PER_MEBIBYTE
 # the layout, which is what the engine's key codes mean.
 MAC_VK_ANSI_Z: Final = 0x06
 MAC_VK_ANSI_Q: Final = 0x0C
+# kVK_ANSI_V, the key Cmd+V pastes with.
+MAC_VK_ANSI_V: Final = 0x09
 MAC_VK_PERIOD: Final = 0x2F
 MAC_VK_KEYPAD_ENTER: Final = 0x4C
 MAC_VK_RETURN: Final = 0x24

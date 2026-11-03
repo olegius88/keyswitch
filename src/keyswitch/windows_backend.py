@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+import struct
 import sys
 import threading
 import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
-from typing import Protocol
+from typing import Protocol, TypeVar, runtime_checkable
 
 from .backend import BackendProbe, FocusInfo, KeyEvent, KeyDisposition, LayoutSwitchUnconfirmed, ScreenAnchor
 from .constants.units import MILLISECONDS_PER_SECOND
@@ -22,23 +23,31 @@ from .constants.keyboard import (
     SUPER_MASK,
     UNICODE_PACKET_KEY_NAME,
 )
+from .constants.text import CLIPBOARD_SNAPSHOT_MAX_BYTES, SELECTION_COMMAND_MAX_CHARACTERS
 from .constants.timing import (
     HOOK_SILENCE_MS,
     KEYBOARD_LISTENER_START_TIMEOUT_SECONDS,
     KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS,
     LAYOUT_SWITCH_POLL_SECONDS,
     MODIFIER_RECHECK_GAP_MS,
+    SELECTION_CLIPBOARD_POLL_SECONDS,
+    SELECTION_CLIPBOARD_TIMEOUT_SECONDS,
+    SELECTION_PASTE_CONFIRM_SECONDS,
     UNSEEN_INPUT_MIN_TIMES,
+    WINDOWS_LAYOUT_SETTLE_SECONDS,
     WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS,
 )
 from .constants.windows import (
     ALT_KEYS,
+    CF_UNICODETEXT,
+    CONSOLE_WINDOW_CLASSES,
     CONTROL_KEYS,
     DWORD_MASK,
     LANG_ENGLISH,
     LANG_RUSSIAN,
     LOWORD_MASK,
     MODIFIER_KEYS,
+    SLOW_INPUT_FIELD_CLASSES,
     PRIMARY_LANGID_MASK,
     SHIFT_KEYS,
     SUPER_KEYS,
@@ -56,6 +65,7 @@ from .constants.windows import (
     VK_INSERT,
     VK_LCONTROL,
     VK_LEFT,
+    VK_MENU_MASK,
     VK_LMENU,
     VK_LSHIFT,
     VK_LWIN,
@@ -81,13 +91,16 @@ from .constants.windows import (
     VK_RMENU,
     VK_RSHIFT,
     VK_RWIN,
+    VK_SCROLL,
     VK_SHIFT as VK_SHIFT,
     VK_SPACE,
     VK_TAB,
     VK_UP,
+    VK_V,
     VK_Z,
 )
 from .russian_text import SECONDS, quantity
+from .selection_commands import SOURCE_CLIPBOARD, SOURCE_UIA, SelectedText, SelectionRefused, caret_steps
 
 LOGGER = logging.getLogger(__name__)
 
@@ -201,6 +214,7 @@ KEY_NAMES = {
     VK_CONTROL: "Control_L",
     VK_MENU: "Alt_L",
     VK_PAUSE: "Pause",
+    VK_SCROLL: "Scroll_Lock",
     VK_CAPITAL: "Caps_Lock",
     VK_ESCAPE: "Escape",
     VK_SPACE: "space",
@@ -235,6 +249,69 @@ KEY_NAMES = {
     VK_OEM_7: "apostrophe",
     VK_PACKET: UNICODE_PACKET_KEY_NAME,
 }
+
+
+@dataclass(frozen=True)
+class ClipboardContents:
+    """The clipboard as a selection hotkey found it: each format and its bytes, in the order they were offered.
+
+    ``complete`` is False when something on it cannot be kept as bytes and put back (a metafile, a private handle, a
+    format that would not render) or it holds more than the hotkeys keep: such a clipboard is not borrowed.
+    """
+
+    formats: tuple[tuple[int, bytes], ...]
+    complete: bool = True
+
+
+@runtime_checkable
+class WindowsSelectionAPI(Protocol):
+    """What the selection hotkeys need of Windows besides typing: the window class and the clipboard.
+
+    Each clipboard call opens the clipboard once and closes it again; None (False for the write) says another
+    program has it open, and the backend asks again until its deadline.
+    """
+
+    def window_class(self, window: int) -> str: ...
+
+    def text_caret(self, window: int) -> bool:
+        """Whether the thread of ``window`` shows a text caret: GetGUIThreadInfo's hwndCaret, with a rcCaret that is
+        not empty."""
+        ...
+
+    def clipboard_sequence(self) -> int: ...
+
+    def read_clipboard(self, limit_bytes: int) -> ClipboardContents | None: ...
+
+    def clipboard_text(self, limit_characters: int) -> str | None: ...
+
+    def write_clipboard(self, contents: ClipboardContents) -> bool: ...
+
+
+class _SelectionReader(Protocol):
+    def read_selection(self, window: int) -> SelectedText | None: ...
+
+    def focused_editable(self, window: int) -> bool: ...
+
+
+def _uia_selection_reader() -> _SelectionReader:
+    """UI Automation, built on the engine worker that asks it (COM objects belong to their thread)."""
+
+    from .windows_context import WindowsFieldReader
+
+    return WindowsFieldReader()
+
+
+_Answer = TypeVar("_Answer")
+
+
+def _clipboard_call(call: Callable[[], _Answer | None], deadline: float) -> _Answer | None:
+    """Ask the clipboard until it answers or ``deadline`` passes: another program may hold it open for a moment."""
+
+    while True:
+        answer = call()
+        if answer is not None or time.monotonic() >= deadline:
+            return answer
+        time.sleep(SELECTION_CLIPBOARD_POLL_SECONDS)
 
 
 def primary_language(layout: int) -> int:
@@ -299,6 +376,9 @@ class WindowsBackend:
         self._holding = False
         self._held: list[NativeKeyEvent] = []
         self._caps_lock = False
+        # Runs a short job off the hook's thread (_mask_menu): SendInput there would wait for the hook it is in.
+        self._start_job: Callable[[Callable[[], None]], None] = (
+            lambda job: threading.Thread(target=job, daemon=True).start())
         self._pointer_epoch = 0
         self._hold_pointer_epoch = 0
         self._hold_window = 0
@@ -313,6 +393,9 @@ class WindowsBackend:
         self._unseen_input: int | None = None
         self._unseen_times: set[int] = set()
         self._unseen_reported: int | None = None
+        # UI Automation for the selection hotkeys, made on first use by the factory (read_selection).
+        self._selection_reader: _SelectionReader | None = None
+        self._selection_reader_factory: Callable[[], _SelectionReader] = _uia_selection_reader
 
     @property
     def running(self) -> bool:
@@ -477,6 +560,25 @@ class WindowsBackend:
         self._consumed_keys.add(event.keycode)
         return decision
 
+    def _mask_menu(self) -> None:
+        """Press the mask key (VK_MENU_MASK) while Alt or Win is held under a hotkey key the window does not get.
+
+        Seeing Alt go down and up with no key between, a window opens its menu bar on the release (Win opens the
+        Start menu): after Alt+Pause, Notepad of Windows 11 took the result of the selection hotkey into its menu
+        and left the text as it was (Windows 11 VM, 03.11.2026); with a window whose menu has access keys, the
+        characters typed would have chosen menu items. The key goes off the hook's thread, before the release.
+        """
+
+        mask = (NativeInput(True, virtual_key=VK_MENU_MASK), NativeInput(False, virtual_key=VK_MENU_MASK))
+        self._start_job(lambda: self._send_mask(mask))
+
+    def _send_mask(self, mask: tuple[NativeInput, ...]) -> None:
+        try:
+            self._api.send_inputs(mask)
+        except Exception:
+            # The menu may open on the release; nothing else depends on the mask.
+            LOGGER.info("Клавиша-маска для Alt не отправлена", exc_info=True)
+
     def hold_input(self) -> None:
         """Keep the user's keys back until the next correction has landed."""
 
@@ -624,6 +726,9 @@ class WindowsBackend:
             if self._listener is not None:
                 self._listener(KeyEvent(True, 0, "Pointer", "", ("", ""), -1, 0, native.timestamp))
             return False
+        if native.injected and native.virtual_key == VK_MENU_MASK:
+            # KeySwitch's own mask key (_mask_menu) is no key of the user's.
+            return False
         if not native.injected and not native.replayed:
             with self._hold_lock:
                 prior_release = not native.pressed and native.virtual_key in self._action_prior_keys
@@ -662,6 +767,8 @@ class WindowsBackend:
         )
         repeated_answer = not event.synthetic and event.pressed and event.keycode in self._consumed_keys
         consumed = self._consumes(event)
+        if consumed and event.pressed and not event.synthetic and self._pressed & (ALT_KEYS | SUPER_KEYS):
+            self._mask_menu()
         if consumed == "defer":
             self.hold_input()
             self._deferred_action = native
@@ -738,6 +845,7 @@ class WindowsBackend:
         late: Sequence[KeyEvent] = (),
         trailing: Sequence[KeyEvent] = (),
         kept_tail: int = 0,
+        erased: int | None = None,
     ) -> int:
         """Replace the word and return how many held keys were typed again.
 
@@ -751,7 +859,8 @@ class WindowsBackend:
         """
 
         try:
-            return self._inject_correction(strokes, target_group, boundary, source_group, late, trailing, kept_tail)
+            return self._inject_correction(strokes, target_group, boundary, source_group, late, trailing, kept_tail,
+                                           erased)
         finally:
             self.release_input()
 
@@ -761,6 +870,7 @@ class WindowsBackend:
         late: Sequence[KeyEvent],
         trailing: Sequence[KeyEvent],
         kept_tail: int = 0,
+        erased: int | None = None,
     ) -> int:
         if not 0 <= target_group < len(self.layouts):
             raise WindowsBackendError(f"Неизвестная группа раскладки {target_group}")
@@ -780,7 +890,7 @@ class WindowsBackend:
             raise WindowsBackendError("Некорректная граница сохраняемого слова; замена отменена")
         final_group = rendered_source_group if kept_tail else target_group
         delete_count = (
-            len(stroke_list) + len(literal) + len(late_list)
+            (len(stroke_list) if erased is None else erased) + len(literal) + len(late_list)
         )
         delete_inputs = tuple(
             NativeInput(pressed, virtual_key=VK_BACK)
@@ -819,14 +929,20 @@ class WindowsBackend:
                 # replacement travel in one SendInput call: Windows keeps the
                 # events of a single call together, but lets the user's keys
                 # slip in between separate calls.
-                self._switch_group(target_group)
+                switched = self._switch_group(target_group)
                 if self._holding and (
                     self._pointer_epoch != self._hold_pointer_epoch
                     or (self._api.focused_control() or self._api.foreground_window()) != self._hold_window
                 ):
                     raise WindowsBackendError("Место ввода изменилось до замены; текст не изменён")
+                if switched:
+                    # The keys of the new layout wait for the window's text service (WINDOWS_LAYOUT_SETTLE_SECONDS);
+                    # the user's keys are held meanwhile (hold_input).
+                    self._send_exact(delete_inputs)
+                    late_deleted = True
+                    time.sleep(WINDOWS_LAYOUT_SETTLE_SECONDS)
                 self._send_exact(
-                    delete_inputs
+                    (() if switched else delete_inputs)
                     + replay_inputs
                     + (() if preserve_boundary_layout or kept_tail else boundary_inputs)
                 )
@@ -834,9 +950,11 @@ class WindowsBackend:
                 if kept_tail:
                     # The kept word is typed in its own layout, and the text goes on there.
                     self._switch_group(final_group)
+                    time.sleep(WINDOWS_LAYOUT_SETTLE_SECONDS)
                     self._send_exact(kept_inputs + boundary_inputs)
                 elif preserve_boundary_layout:
                     self._switch_group(literal_group)
+                    time.sleep(WINDOWS_LAYOUT_SETTLE_SECONDS)
                     self._send_exact(boundary_inputs)
                     self._switch_group(target_group)
                 # A partial send is not an all-or-nothing failure; retrying
@@ -887,15 +1005,204 @@ class WindowsBackend:
                 "приложение запущено с правами администратора"
             )
 
-    def _switch_group(self, group: int) -> None:
+    def read_selection(self, application: str, window: int) -> SelectedText:
+        """The selected text: through UI Automation where the field offers it, through the clipboard where it does not.
+
+        A console keeps out of both: typing there goes to the command line rather than over the selection.
+        """
+
+        del application
+        foreground = self._api.foreground_window()
+        api = self._api
+        clipboard = api if isinstance(api, WindowsSelectionAPI) else None
+        if clipboard is not None and clipboard.window_class(foreground) in CONSOLE_WINDOW_CLASSES:
+            raise SelectionRefused("terminal")
+        field = window or foreground
+        reader = self._uia_reader()
+        selected = self._uia_selection(reader, field)
+        if selected is not None:
+            return selected
+        if clipboard is None:
+            raise SelectionRefused("unsupported")
+        # Copying a selection that is not in a field would type the result into whatever has the keys: a web page
+        # takes letters for its own shortcuts. A text caret, or an edit field UI Automation names, says it is a field.
+        if not (clipboard.text_caret(foreground) or self._uia_editable(reader, field)):
+            raise SelectionRefused("no_caret")
+        return self._copied_selection(clipboard)
+
+    def _uia_reader(self) -> _SelectionReader | None:
+        reader = self._selection_reader
+        if reader is None:
+            try:
+                reader = self._selection_reader_factory()
+            except Exception:
+                # Without UI Automation (no comtypes, a refused COM call) the clipboard is the way left.
+                LOGGER.info("UI Automation недоступна для чтения выделения, выделение копируется")
+                return None
+            self._selection_reader = reader
+        return reader
+
+    @staticmethod
+    def _uia_selection(reader: _SelectionReader | None, window: int) -> SelectedText | None:
+        if reader is None:
+            return None
+        try:
+            return reader.read_selection(window)
+        except SelectionRefused:
+            raise
+        except Exception:
+            # A provider that fails tells no more than one that is missing; its message may hold field text.
+            return None
+
+    @staticmethod
+    def _uia_editable(reader: _SelectionReader | None, window: int) -> bool:
+        try:
+            return reader is not None and reader.focused_editable(window)
+        except Exception:
+            return False
+
+    def _copied_selection(self, clipboard: WindowsSelectionAPI) -> SelectedText:
+        """Copy the selection with Ctrl+Insert and give the clipboard back what it held.
+
+        Ctrl+Insert is the copy of Windows besides Ctrl+C ("Ctrl+C (or Ctrl+Insert): Copy the selected item", Keyboard
+        shortcuts in Windows, Microsoft Support), and unlike Ctrl+C it is no interrupt: in a terminal program the
+        console classes do not catch (mintty, PuTTY, a remote session) Ctrl+C with nothing selected stops the running
+        program. The user's clipboard is kept before the copy, and the copy is waited for by the clipboard's sequence
+        number: no change in time means nothing was selected (or the program does not copy with Ctrl+Insert), and the
+        clipboard is then untouched. A clipboard that cannot be put back as it was is not borrowed at all. One that
+        could not be put back after the copy is an error the status line reports, since the user's data is no longer
+        on it.
+        """
+
+        deadline = time.monotonic() + SELECTION_CLIPBOARD_TIMEOUT_SECONDS
+        saved = _clipboard_call(lambda: clipboard.read_clipboard(CLIPBOARD_SNAPSHOT_MAX_BYTES), deadline)
+        if saved is None:
+            raise SelectionRefused("clipboard_busy")
+        if not saved.complete:
+            raise SelectionRefused("clipboard_unrestorable")
+        before = clipboard.clipboard_sequence()
+        # Insert is an extended key: without the flag it is the keypad's 0, which types a digit under Num Lock.
+        self._send_exact((
+            NativeInput(True, virtual_key=VK_CONTROL), NativeInput(True, virtual_key=VK_INSERT, extended=True),
+            NativeInput(False, virtual_key=VK_INSERT, extended=True), NativeInput(False, virtual_key=VK_CONTROL),
+        ))
+        while clipboard.clipboard_sequence() == before:
+            if time.monotonic() >= deadline:
+                raise SelectionRefused("no_selection")
+            time.sleep(SELECTION_CLIPBOARD_POLL_SECONDS)
+        text: str | None = None
+        try:
+            text = _clipboard_call(lambda: clipboard.clipboard_text(SELECTION_COMMAND_MAX_CHARACTERS + 1), deadline)
+        finally:
+            restored = _clipboard_call(
+                lambda: True if clipboard.write_clipboard(saved) else None,
+                time.monotonic() + SELECTION_CLIPBOARD_TIMEOUT_SECONDS,
+            )
+        if restored is None:
+            raise WindowsBackendError("Буфер обмена не удалось вернуть: в нём осталось скопированное выделение")
+        if text is None:
+            raise SelectionRefused("clipboard_busy")
+        return SelectedText(text, SOURCE_CLIPBOARD)
+
+    def replace_selection(self, selected: SelectedText, replacement: str, final_group: int | None) -> bool:
+        """Type ``replacement`` over the selection as Unicode characters, then select it again where that is exact.
+
+        Characters typed with KEYEVENTF_UNICODE need no layout, so every character the selection may hold is typed as
+        it is; the layout moves to ``final_group`` afterwards. Shift+Left selects the result back, so that another
+        press of a selection hotkey acts on it. A field that loses characters typed in a row (SLOW_INPUT_FIELD_CLASSES)
+        gets the result pasted instead, where UI Automation can show it selected (_pasted_selection).
+        """
+
+        api = self._api
+        clipboard = api if isinstance(api, WindowsSelectionAPI) else None
+        field = api.focused_control() or api.foreground_window()
+        typed = tuple(
+            NativeInput(pressed, scan_code=unit, unicode=True)
+            for (unit,) in struct.iter_unpack("<H", replacement.encode("utf-16-le"))
+            for pressed in (True, False)
+        )
+        steps = caret_steps(replacement)
+        reselect: tuple[NativeInput, ...] = () if steps is None else (
+            NativeInput(True, virtual_key=VK_SHIFT),
+            *(NativeInput(pressed, virtual_key=VK_LEFT, extended=True)
+              for _ in range(steps) for pressed in (True, False)),
+            NativeInput(False, virtual_key=VK_SHIFT),
+        )
+        with self._inject_lock:
+            if self._holding and (
+                self._pointer_epoch != self._hold_pointer_epoch
+                or (self._api.focused_control() or self._api.foreground_window()) != self._hold_window
+            ):
+                raise SelectionRefused("focus_changed")
+            if (clipboard is not None and steps is not None and selected.source == SOURCE_UIA
+                    and clipboard.window_class(field) in SLOW_INPUT_FIELD_CLASSES):
+                reselected = self._pasted_selection(clipboard, field, replacement, reselect)
+            else:
+                # One SendInput call keeps the events together: the user's keys cannot land among them.
+                self._send_exact(typed + reselect)
+                reselected = steps is not None
+            if final_group is not None:
+                self._switch_group(final_group)
+        return reselected
+
+    def _pasted_selection(
+        self, clipboard: WindowsSelectionAPI, field: int, replacement: str, reselect: tuple[NativeInput, ...],
+    ) -> bool:
+        """Paste ``replacement`` with Ctrl+V and select it back, then give the clipboard back what it held.
+
+        The field takes the text when it handles Ctrl+V, at a moment nobody announces: the user's clipboard comes back
+        once UI Automation shows the result selected, or after SELECTION_PASTE_CONFIRM_SECONDS, and only while it still
+        holds the replacement (anything copied meanwhile is the user's). The replacement and the restored data are
+        both kept out of the clipboard history (write_clipboard). A clipboard that cannot be put back as it was is not
+        borrowed at all, and one that could not be put back is an error the status line reports. Says whether the
+        result was seen selected.
+        """
+
+        deadline = time.monotonic() + SELECTION_CLIPBOARD_TIMEOUT_SECONDS
+        saved = _clipboard_call(lambda: clipboard.read_clipboard(CLIPBOARD_SNAPSHOT_MAX_BYTES), deadline)
+        if saved is None:
+            raise SelectionRefused("clipboard_busy")
+        if not saved.complete:
+            raise SelectionRefused("clipboard_unrestorable")
+        ours = ClipboardContents(((CF_UNICODETEXT, (replacement + "\0").encode("utf-16-le")),))
+        if _clipboard_call(lambda: True if clipboard.write_clipboard(ours) else None, deadline) is None:
+            raise SelectionRefused("clipboard_busy")
+        sequence = clipboard.clipboard_sequence()
+        shown = False
+        try:
+            self._send_exact((
+                NativeInput(True, virtual_key=VK_CONTROL), NativeInput(True, virtual_key=VK_V),
+                NativeInput(False, virtual_key=VK_V), NativeInput(False, virtual_key=VK_CONTROL),
+            ) + reselect)
+            reader = self._uia_reader()
+            confirm = time.monotonic() + SELECTION_PASTE_CONFIRM_SECONDS
+            while not shown and time.monotonic() < confirm:
+                time.sleep(SELECTION_CLIPBOARD_POLL_SECONDS)
+                try:
+                    result = self._uia_selection(reader, field)
+                except SelectionRefused:
+                    result = None
+                shown = result is not None and result.text == replacement
+        finally:
+            restored = clipboard.clipboard_sequence() != sequence or _clipboard_call(
+                lambda: True if clipboard.write_clipboard(saved) else None,
+                time.monotonic() + SELECTION_CLIPBOARD_TIMEOUT_SECONDS,
+            ) is not None
+        if not restored:
+            raise WindowsBackendError("Буфер обмена не удалось вернуть: в нём остался вставленный текст")
+        return shown
+
+    def _switch_group(self, group: int) -> bool:
+        """Switch the window's layout to ``group`` and wait for it to say so; whether the layout changed."""
+
         layout = self.layouts[group]
         if self._group_for_layout(self._api.foreground_layout()) == group:
-            return
+            return False
         if not self._api.request_layout(layout):
             raise WindowsBackendError("Окно отклонило запрос смены раскладки")
         deadline = time.monotonic() + WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
             if self._group_for_layout(self._api.foreground_layout()) == group:
-                return
+                return True
             time.sleep(LAYOUT_SWITCH_POLL_SECONDS)
         raise WindowsLayoutSwitchUnconfirmed("Приложение не подтвердило смену раскладки", group)

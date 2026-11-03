@@ -1492,6 +1492,9 @@ $NuitkaArguments = @(
     "--include-package-data=keyswitch",
     "--include-data-files=$(Join-Path $ModelDirectory 'en_US.lm')=keyswitch/resources/models/en_US.lm",
     "--include-data-files=$(Join-Path $ModelDirectory 'ru_RU.lm')=keyswitch/resources/models/ru_RU.lm",
+    # The typo lists are .bin files, which --include-package-data leaves out; the post-build check compares them.
+    "--include-data-files=$(Join-Path $ProjectDirectory 'src\keyswitch\resources\typo-frequency-en_US.bin')=keyswitch/resources/typo-frequency-en_US.bin",
+    "--include-data-files=$(Join-Path $ProjectDirectory 'src\keyswitch\resources\typo-frequency-ru_RU.bin')=keyswitch/resources/typo-frequency-ru_RU.bin",
     "--nofollow-import-to=keyswitch.app",
     "--nofollow-import-to=keyswitch.ui",
     "--nofollow-import-to=keyswitch.tray",
@@ -1567,6 +1570,18 @@ if ((Get-BytesSha256 -Bytes $BundledAlnumBytes) -cne (Get-BytesSha256 -Bytes $Pr
     -MaximumBytes 2MB -MinimumBytes 2 -Label "table of short Russian tokens"
 if ((Get-BytesSha256 -Bytes $BundledShortBytes) -cne (Get-BytesSha256 -Bytes $ProjectShortBytes)) {
     throw "Native distribution contains a different table of short Russian tokens"
+}
+# The typo correction reads its counted word lists from the resources; without them it is off.
+foreach ($TypoLocale in @("en_US", "ru_RU")) {
+    [byte[]]$BundledTypoBytes = Read-BoundedFileBytes `
+        -Path (Join-Path $NativeDistribution "keyswitch\resources\typo-frequency-$TypoLocale.bin") `
+        -MaximumBytes 8MB -MinimumBytes 2 -Label "bundled typo frequency list $TypoLocale"
+    [byte[]]$ProjectTypoBytes = Read-BoundedFileBytes `
+        -Path (Join-Path $ProjectDirectory "src\keyswitch\resources\typo-frequency-$TypoLocale.bin") `
+        -MaximumBytes 8MB -MinimumBytes 2 -Label "typo frequency list $TypoLocale"
+    if ((Get-BytesSha256 -Bytes $BundledTypoBytes) -cne (Get-BytesSha256 -Bytes $ProjectTypoBytes)) {
+        throw "Native distribution contains a different typo frequency list $TypoLocale"
+    }
 }
 if ($ActiveContext.feature_version -eq 7) {
     # Feature schema 7 reads this table next to the artifact; the model does not load without it.

@@ -395,7 +395,7 @@ def run_gate(manifest: Manifest, candidate_root: Path, tag: str, *, root: Path =
         "released": {"tag": tag, "commit": commit, "date": since}, "candidate": str(candidate_root),
         "counts": comparison.counts(), "batteries": {name: checksum(path) for name, path in manifest.batteries.items()},
         "verdicts_sha256": checksum(manifest.verdicts), "replay_sha256": checksum(manifest.replay),
-        "interpreter": sys.version, "environment": manifest.environment, "settings": "the defaults of each tree",
+        "interpreter": sys.version, "environment": manifest.environment, "settings": "the defaults of each tree, typo correction off (the replay script sets it)",
         "broken": comparison.broken, "fixed": comparison.fixed, "verdicts_used": comparison.verdicts_used,
         "needs_owner": comparison.needs_owner})
     return comparison, record

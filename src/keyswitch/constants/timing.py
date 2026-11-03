@@ -19,6 +19,11 @@ LAYOUT_SWITCH_TIMEOUT_SECONDS: Final = 0.5
 WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS: Final = 1.5
 # Step at which a native backend polls for the layout it asked the operating system to switch to.
 LAYOUT_SWITCH_POLL_SECONDS: Final = 0.01
+# Pause between a Windows layout switch the window has confirmed and the keys typed in the new layout. Notepad of
+# Windows 11 confirms the layout before its text service has it and loses keys sent at once: `клавиатура ` typed
+# right after the switch came out as `кла`, and whole after a Backspace burst and 30 ms, or after 100 ms (Windows 11
+# VM, 03.11.2026). The deletion needs no layout and goes before the pause.
+WINDOWS_LAYOUT_SETTLE_SECONDS: Final = 0.05
 # A modifier the Windows hook saw go down is checked against the keyboard when the next key comes
 # this many milliseconds later or in another window: its release may have gone where the hook does
 # not reach (a UAC prompt, the Ctrl+Alt+Del screen, an elevated window).
@@ -168,3 +173,16 @@ WAYLAND_KEYMAP_WAIT_SECONDS: Final = 1.5
 WAYLAND_REPEAT_DEFAULT_DELAY_MS: Final = 600
 # D-Bus method call timeout for desktop compositor queries and layout changes.
 WAYLAND_DBUS_CALL_TIMEOUT_MS: Final = 1000
+# The selection hotkeys copy the selection with Ctrl+C where UI Automation cannot read it: the clipboard has this long
+# to change, to open for reading and to take the user's own data back. A copy that has not arrived by then is taken
+# for no selection, and the clipboard is left as it was.
+SELECTION_CLIPBOARD_TIMEOUT_SECONDS: Final = 1.0
+# Step at which the clipboard is looked at again while it has not changed or another program holds it open.
+SELECTION_CLIPBOARD_POLL_SECONDS: Final = 0.02
+# A selection hotkey's result pasted on Windows (SLOW_INPUT_FIELD_CLASSES): the field takes the text when it handles
+# Ctrl+V, and the user's clipboard comes back once UI Automation shows the result selected, or after this long.
+SELECTION_PASTE_CONFIRM_SECONDS: Final = 1.0
+# Where a macOS field does not let the accessibility tree write its selection, the result is pasted with Cmd+V. The
+# program reads the pasteboard when it handles the keys, at a moment nobody announces: the user's own pasteboard comes
+# back this long after them. Restored sooner, a slow program would paste the user's data instead of the result.
+MACOS_PASTE_RESTORE_DELAY_SECONDS: Final = 0.5

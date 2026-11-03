@@ -1,9 +1,9 @@
 {
  "schema_version": 1,
  "sources": {
-  "src/keyswitch/context_action_features.py": "b61208f26903bcc3fb5ade55608c7b69ff75a383a7ba555877c71c6246c0ef6e",
-  "src/keyswitch/context_model.py": "b8cf15f2b89177a0b926be41407d9c4b1a74fd8bd26030b7b0629493a5bf0564",
-  "src/keyswitch/context_policy.py": "c695cfc28bbc11b4dbb1ee92c65a173842a80c24b033da3bf7af22891a3ac39e",
+  "src/keyswitch/context_action_features.py": "19ea9e5b499cff911da13d646b6641a370434acf0cd014b3d6c4ba580f5fca78",
+  "src/keyswitch/context_model.py": "9d738e860f91e30a1bc88325d85a731220e11d970bee0f8b0593d0567abf3c00",
+  "src/keyswitch/context_policy.py": "b165cd9b0c1c814f46f8f74e23d9948ae82a511a53070d0bfecc72cbdfd783ee",
   "src/keyswitch/detector.py": "5a78cd5961af57426b6cb42b3757b42baeacd7344a06557111a1067cb0cbb2c0",
   "src/keyswitch/identifier_lexicon.py": "80c1af6de67833ebc957355199e5ebab011282ddf6bbcc556d06bfef237c31bb",
   "src/keyswitch/input_context.py": "bf67ae931f2d10e634cb554b72c5be6f14bee421abc24c39fcc04ca5da6edf72",
@@ -11,7 +11,7 @@
   "src/keyswitch/language_model.py": "5af2e9aa744b80f75a79b603513e61c7c4bdb3bfa076c7d3810d3888a14ac844",
   "src/keyswitch/layouts.py": "374e8913fe51c72370ae8f775875847e47c2a1db7c8deaa2fc919944dd45597c",
   "src/keyswitch/ortho_model.py": "8f7ae78442aad29e7d763457c1e5cf323ba02399db0157b51ac46e7729f89442",
-  "src/keyswitch/short_words.py": "1f477e1a5947602548438e1e1d09271dd54da623a98b43b56615fbd679467ef3",
+  "src/keyswitch/short_words.py": "47ed379a8e752682f6ca08f4d332e709f64c8b3e9da217bdcae49f144cfbb29d",
   "src/keyswitch/word_decision.py": "a9ff2ef5d6c504c17da33a6740ab59b408cfee5e781733afc4949cc12794ae0f",
   "tools/context_physical_keys.py": "a24a1635e1ac8f8d511c9cd9c1e4784aa1edf2604852ae261dc8424a40903f16",
   "tools/train_context_action_model.py:ActionRow": "5e3e5084deb6bfafd8f43830901f6db33f343f4a5804f657f1083801d7b49b60",

@@ -38,3 +38,9 @@ MAX_WINDOW_ANCESTOR_DEPTH: Final = 16
 CARDINAL_PROPERTY_FORMAT_BITS: Final = 32
 BACKSPACE_KEYSYM: Final = 0xFF08
 SHIFT_L_KEYSYM: Final = 0xFFE1
+# XK_Left, the arrow Shift selects a replaced selection back with.
+LEFT_KEYSYM: Final = 0xFF51
+# "Min-keycode is never less than 8, and max-keycode is never greater than 255" (X Window System Protocol, X11R7.7,
+# Connection Setup): the keys a selection hotkey looks among for each character it types.
+X11_MIN_KEYCODE: Final = 8
+X11_MAX_KEYCODE: Final = 255

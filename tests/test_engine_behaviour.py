@@ -423,6 +423,8 @@ class EngineBehaviourTests(unittest.TestCase):
         self.assertEqual(len(self.backend.injections), 1)
         self.assertEqual(self.backend.group, 0)
         self.assertEqual(self.engine.snapshot.current_group, 0)
+        # The Pause took the layout back to where the fresh automatic correction came from: the person undid it, and
+        # the next word is held as after a layout picked by hand.
         self.assertEqual(self.engine._manual_layout_group, 0)
         self.assertIn(layout_label(0), self.engine.snapshot.last_action)
         switched = next(
@@ -438,6 +440,26 @@ class EngineBehaviourTests(unittest.TestCase):
             self.press_pause()
         self.assertEqual(self.engine.snapshot.last_error, "boom")
         self.assertEqual(self.engine.snapshot.last_action, "Раскладка не переключена")
+
+    def test_pause_with_nothing_to_convert_and_no_fresh_correction_holds_no_word(self) -> None:
+        # No automatic correction to undo: the Pause was pressed to fix a word the engine lost, and the model decides
+        # the next word (`djghjc` typed on for `вопрос`, the owner's typing).
+        self.type_word("hello")
+        self.press_space(0)
+        self.assertEqual(len(self.backend.injections), 0)
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._handle(plain_key("Left", SYNTHETIC_LEFT_ARROW_KEYCODE, 0))
+            self.engine._handle(plain_key("Left", SYNTHETIC_LEFT_ARROW_KEYCODE, 0, pressed=False))
+            self.press_pause()
+        self.assertEqual(self.backend.group, 1)
+        self.assertIsNone(self.engine._manual_layout_group)
+        self.assertFalse(self.engine._word_protected(self.engine.snapshot.current_group))
+        switched = next(
+            event
+            for event in self.technical_events(logs.output)
+            if event["event"] == "layout_switched_without_word"
+        )
+        self.assertFalse(switched["protects_next_word"])
 
     def test_backspace_over_the_boundary_reopens_the_word_and_navigation_makes_it_stale(self) -> None:
         # Pause on the reopened word reverses the correction; with learning on

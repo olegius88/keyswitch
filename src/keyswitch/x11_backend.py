@@ -41,6 +41,7 @@ from .constants.timing import (
 from .constants.x11 import (
     BACKSPACE_KEYSYM,
     CARDINAL_PROPERTY_FORMAT_BITS,
+    LEFT_KEYSYM,
     MAX_TRACKED_OWN_WINDOWS,
     MAX_WINDOW_ANCESTOR_DEPTH,
     MAX_XKB_GROUPS,
@@ -49,6 +50,8 @@ from .constants.x11 import (
     X11_CURRENT_TIME,
     X11_KEY_PRESS,
     X11_KEY_RELEASE,
+    X11_MAX_KEYCODE,
+    X11_MIN_KEYCODE,
     X11_REVERT_TO_PARENT,
     X11_WHEEL_BUTTONS,
     XA_CARDINAL,
@@ -63,6 +66,7 @@ from .constants.x11 import (
     XRECORD_START_OF_DATA,
 )
 from .russian_text import SECONDS, quantity
+from .selection_commands import KeyChoice, SelectedText, SelectionSource, caret_steps, typing_runs
 
 
 LOGGER = logging.getLogger(__name__)
@@ -351,6 +355,8 @@ class X11Backend:
         self._expected_lock = threading.Lock()
         self._inject_lock = threading.Lock()
         self._xkb_version = "—"
+        # The reader of the selection hotkeys, made on first use (read_selection).
+        self._selection_source: SelectionSource | None = None
 
     @property
     def running(self) -> bool:
@@ -812,6 +818,7 @@ class X11Backend:
         late: Sequence[KeyEvent] = (),
         trailing: Sequence[KeyEvent] = (),
         kept_tail: int = 0,
+        erased: int | None = None,
     ) -> int:
         """Replace the word; the last ``kept_tail`` strokes, the boundary and the late keys stay in the source layout."""
 
@@ -847,7 +854,7 @@ class X11Backend:
                 target.append((False, shift_keycode))
 
         delete_count = (
-            len(stroke_list) + len(literal) + len(late_list)
+            (len(stroke_list) if erased is None else erased) + len(literal) + len(late_list)
         )
         for _ in range(delete_count):
             tap(sequence, backspace_keycode)
@@ -967,6 +974,99 @@ class X11Backend:
                 self._libraries.xtst.XTestGrabControl(self._control, 0)
                 self._libraries.x11.XFlush(self._control)
         return 0
+
+    def read_selection(self, application: str, window: int) -> SelectedText:
+        """The text selected in the focused field, read through AT-SPI (atspi_context.AtspiSelectionReader)."""
+
+        if self._selection_source is None:
+            from .atspi_context import AtspiSelectionReader
+
+            self._selection_source = AtspiSelectionReader(self.window_process_id)
+        return self._selection_source.read_selection(application, window)
+
+    def _typing_tables(self) -> list[dict[str, KeyChoice]]:
+        """For each layout group, the key that types each character without Caps Lock: plain before shifted, the
+        lowest keycode first (the main keys come before the keypad)."""
+
+        tables: list[dict[str, KeyChoice]] = [{} for _group in range(self.group_count)]
+        for keycode in range(X11_MIN_KEYCODE, X11_MAX_KEYCODE + 1):
+            for group, table in enumerate(tables):
+                for shifted in (False, True):
+                    character = self._character_for_keycode(keycode, group, SHIFT_MASK if shifted else 0)
+                    if character:
+                        table.setdefault(character, (keycode, shifted))
+        return tables
+
+    def replace_selection(self, selected: SelectedText, replacement: str, final_group: int | None) -> bool:
+        """Write ``replacement`` over the selection, then leave the layout group in ``final_group``.
+
+        A field with AT-SPI's EditableText takes the text from the reader itself, any character included
+        (AtspiFieldReader.write_selection). Otherwise it is typed: XTest types keys, not characters, so each character
+        goes on the key and in the group that type it, and a run of one script is typed in one group
+        (selection_commands.typing_runs). A character no key of either group types (an emoji, a typographic dash) then
+        leaves the selection as it is, with nothing typed: a paste would need the clipboard, whose owner on X11 has to
+        answer every program that asks for it. Typed text is selected back with Shift+Left, and the group is left in
+        ``final_group`` or where it was.
+        """
+
+        if not self._control:
+            raise X11Error("X11 backend не запущен")
+        written = None if self._selection_source is None else self._selection_source.write_selection(
+            selected, replacement)
+        if written is not None:
+            if final_group is not None:
+                self.switch_group(final_group)
+            return written
+        keyboard_state = XkbStateRec()
+        if self._libraries.x11.XkbGetState(self._control, XKB_USE_CORE_KBD, ctypes.byref(keyboard_state)) != 0:
+            raise X11Error("Не удалось прочитать состояние клавиатуры перед заменой выделения")
+        caps_lock = bool(keyboard_state.locked_mods & LOCK_MASK)
+        original_group = int(keyboard_state.group)
+        shift_keycode = int(self._libraries.x11.XKeysymToKeycode(self._control, SHIFT_L_KEYSYM))
+        left_keycode = int(self._libraries.x11.XKeysymToKeycode(self._control, LEFT_KEYSYM))
+        if not shift_keycode or not left_keycode:
+            raise X11Error("X-сервер не вернул keycode для Shift/Left")
+        runs: list[tuple[int, list[tuple[bool, int]]]] = []
+        characters = iter(replacement)
+        for group, keys in typing_runs(replacement, self._typing_tables(), original_group):
+            events: list[tuple[bool, int]] = []
+            for (keycode, shifted), character in zip(keys, characters):
+                # Caps Lock turns a letter over, and Shift turns it back.
+                if shifted ^ (character.isalpha() and caps_lock):
+                    events.append((True, shift_keycode))
+                events.extend(((True, keycode), (False, keycode)))
+                if shifted ^ (character.isalpha() and caps_lock):
+                    events.append((False, shift_keycode))
+            runs.append((group, events))
+        steps = caret_steps(replacement)
+        reselect = [] if steps is None else [
+            (True, shift_keycode), *((pressed, left_keycode) for _ in range(steps) for pressed in (True, False)),
+            (False, shift_keycode),
+        ]
+        expected = [event for _group, events in runs for event in events] + reselect
+        with self._inject_lock:
+            with self._expected_lock:
+                self._expected.extend(expected)
+                self._expected_deadline = time.monotonic() + max(
+                    MIN_INJECTION_DEADLINE_SECONDS, len(expected) * INJECTION_SECONDS_PER_EVENT
+                )
+            self._libraries.xtst.XTestGrabControl(self._control, 1)
+            try:
+                for group, events in [*runs, (original_group if final_group is None else final_group, reselect)]:
+                    if not self._libraries.x11.XkbLockGroup(self._control, XKB_USE_CORE_KBD, group):
+                        raise X11Error(f"Не удалось включить XKB-группу {group}")
+                    for pressed, keycode in events:
+                        if not self._libraries.xtst.XTestFakeKeyEvent(self._control, keycode, int(pressed), 0):
+                            raise X11Error(f"XTest отклонил keycode {keycode}")
+                self._libraries.x11.XSync(self._control, 0)
+            except Exception:
+                with self._expected_lock:
+                    self._expected.clear()
+                raise
+            finally:
+                self._libraries.xtst.XTestGrabControl(self._control, 0)
+                self._libraries.x11.XFlush(self._control)
+        return steps is not None
 
     def active_application(self) -> str:
         if not self._control:

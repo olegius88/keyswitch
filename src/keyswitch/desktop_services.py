@@ -3,7 +3,7 @@
 The window itself is the same everywhere: the same pages, the same settings, the
 same wording. Only a handful of things differ - which keyboard backend to build,
 where autostart is kept, how the installed programs are listed, how a folder is
-opened and what the alert sound is - and they are named here so each platform
+opened, what the alert sound is and whether the system is dark - and they are named here so each platform
 can supply its own without the window knowing which one it got.
 """
 
@@ -69,3 +69,7 @@ class DesktopServices(Protocol):
     def open_directory(self, path: Path) -> None: ...
 
     def beep(self) -> None: ...
+
+    def system_dark_theme(self) -> bool:
+        """Whether the system asks applications to be dark; asked again each time the window opens."""
+        ...

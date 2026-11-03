@@ -7,7 +7,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import ClassVar, Final
 
-from .context_action_features import alnum_question, letter_question, resume_question, variable_question
+from .context_action_features import (
+    alnum_question, cyrletter_question, digit_dot_question, letter_question, resume_question, variable_question,
+)
 from .context_model import (
     AfterOrigin, BeforeOrigin, ContextEvidence, ContextModel, ContextPrediction, one_typo_from_word, term_bucket,
 )
@@ -16,7 +18,7 @@ from .detector import DetectionDecision, LanguageDetector, LanguageScorer
 from .input_context import FieldContext, FieldReader, InputContext
 from .language_model import LanguageModel
 from .ortho_model import OrthoEvidence, OrthoModel, shape_of
-from .short_words import ISOLATED_SHORT_WORD_REASON, is_short_word_override, opens_sentences
+from .short_words import ISOLATED_SHORT_WORD_REASON, begins_words, is_short_word_override, opens_sentences
 from .word_decision import NOT_A_WORD_REASON
 from .constants.detection import MINIMUM_SHAPED_TOKEN_CHARACTERS, QUOTED_WORD_CLOSING_SIGNS, WORD_QUOTES
 from .constants.models import CONTEXT_ACTION_FEATURE_VERSION, RUSSIAN_SLANG_MIN_TERM_BUCKET
@@ -29,6 +31,8 @@ STRANDED_SHORT_WORD_REASON: Final = "однобуквенное слово из 
 LONE_LETTER_REASON: Final = "одиночную букву переводят только правила из безопасного списка"
 # A Russian abbreviation or slang word the action model would convert into Latin keys nobody uses.
 RUSSIAN_SLANG_REASON: Final = "русское сокращение или сленг: латинское прочтение не встречается"
+# A curated short word at a pause in typing whose letters begin many words of their own language (ContextPolicy.decide).
+PAUSE_WORD_START_REASON: Final = "на паузе это может быть начало слова: правило коротких слов ждёт его границы"
 # A word the action model only suggests converting while the detector converts it (ContextPolicy.decide).
 SUGGESTION_CONFIRMED_REASON: Final = "контекстная модель предлагает другую раскладку, детектор её подтверждает"
 
@@ -325,6 +329,14 @@ class ContextPolicy:
         source, target = evidence.source_score, evidence.target_score
         assert source is not None and target is not None
         prediction = self.model.predict(evidence)
+        if (prediction.action == "keep" and after_origin == "none" and self.model.answers_cyrletter
+                and cyrletter_question(baseline.original, alternative, field.before, trigger)):
+            # The Cyrillic-letter head keeping a letter at its own space waits for the word after it instead, and is asked
+            # again beside it: there it answers well (577 of 592 converted development frames of candidate v81 e1 beside a
+            # converted next word, against 898 of 4 324 at the letter's own space), and before it a keep is a guess. Kept
+            # outright, `d` before `кабинете` and after `если` stayed where `в` was meant and 0.64.1, waiting, converted it
+            # (the owner's typing). The text is the same either way until the next word comes.
+            prediction = replace(prediction, action="wait")
         if mode == "shadow":
             return ContextResult(baseline, prediction, field, fallback_reason="shadow_mode", withheld_after_characters=withheld)
         # The model's verdict stands whatever its support flag says. The flag only
@@ -349,13 +361,29 @@ class ContextPolicy:
         # digits, after Russian text (alnum_question): `м67` for `v67` and `ч64` for `x64`, and `1с` or `3д` meant as typed.
         # One with the resume head has learned a short word right after Latin text asked again once its next word is
         # planned for conversion (resume_question): `а` typed `f` in `seek() , f там`, and a Latin `x` before Russian text.
+        # One with the Cyrillic-letter head has learned a Latin letter whose Cyrillic reading is a Russian word of one letter,
+        # after Russian text (cyrletter_question): `в` typed `d` in `разрабатывал и d документ`, and `C` meant in `язык C`.
+        # One with the digit-dot head has learned digits with `ю` typed in the Russian layout (digit_dot_question): `2ю` for
+        # `2.`.
         action_model = self.model.feature_version == CONTEXT_ACTION_FEATURE_VERSION
+        source_model = detector.models.get(baseline.source_group)
+        if (trigger == "pause" and is_short_word_override(baseline) and isinstance(source_model, LanguageModel)
+                and begins_words(source_model, baseline.original)):
+            # A curated rule speaks for a word, and at a pause in typing two letters that begin a hundred words and
+            # more of their own language are as likely the start of one: `ша` of `шаблоне` became `if` while the owner
+            # thought mid-word (field logs, 29.10.2026), and in every battery `ша` at a pause went on into a longer
+            # word. The rule waits for the word's boundary, where it applies as before; the model's own verdict at the
+            # pause stands.
+            baseline = replace(baseline, should_convert=False, reason=PAUSE_WORD_START_REASON)
         learned = ((self.model.answers_letters and letter_question(baseline.original, alternative, field.before))
                    or (self.model.answers_variables
                        and variable_question(baseline.original, alternative, field.before, trigger))
                    or (self.model.answers_alnum and alnum_question(baseline.original, alternative, field.before))
                    or (self.model.answers_resume
-                       and resume_question(baseline.original, alternative, field.before, field.after, after_origin)))
+                       and resume_question(baseline.original, alternative, field.before, field.after, after_origin))
+                   or (self.model.answers_cyrletter
+                       and cyrletter_question(baseline.original, alternative, field.before, trigger))
+                   or (self.model.answers_digit_dot and digit_dot_question(baseline.original, alternative, trigger)))
         lone = (action_model and sum(char.isalpha() for char in baseline.original) == 1
                 and all(char.isalpha() or char.isdigit() for char in baseline.original) and not learned)
         slang = action_model and russian_slang(baseline.original, alternative, baseline.source_group, source.known)

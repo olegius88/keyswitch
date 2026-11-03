@@ -930,24 +930,29 @@ class WindowsBackendInjectionTests(unittest.TestCase):
         )
         self.assertEqual(backend.inject_correction((stroke,), 1, boundary, source_group=0), 0)
 
-        # The layout switches first, then deletion and replacement travel in
-        # one SendInput call so the user's keys cannot slip in between.
+        # The layout switches first; the deletion needs no layout and goes at once, and the keys of the new layout
+        # follow once the window's text service has it (WINDOWS_LAYOUT_SETTLE_SECONDS). The user's keys are held
+        # by the hook meanwhile, so none slips in between.
         self.assertEqual(
-            api.sent[0],
-            (
-                NativeInput(True, virtual_key=VK_BACK),
-                NativeInput(False, virtual_key=VK_BACK),
-                NativeInput(True, virtual_key=VK_BACK),
-                NativeInput(False, virtual_key=VK_BACK),
-                NativeInput(True, virtual_key=VK_SHIFT),
-                NativeInput(True, scan_code=SCAN_CODE_A),
-                NativeInput(False, scan_code=SCAN_CODE_A),
-                NativeInput(False, virtual_key=VK_SHIFT),
-            ),
+            api.sent[:WINDOWS_EXPECTED_SEND_BATCHES],
+            [
+                (
+                    NativeInput(True, virtual_key=VK_BACK),
+                    NativeInput(False, virtual_key=VK_BACK),
+                    NativeInput(True, virtual_key=VK_BACK),
+                    NativeInput(False, virtual_key=VK_BACK),
+                ),
+                (
+                    NativeInput(True, virtual_key=VK_SHIFT),
+                    NativeInput(True, scan_code=SCAN_CODE_A),
+                    NativeInput(False, scan_code=SCAN_CODE_A),
+                    NativeInput(False, virtual_key=VK_SHIFT),
+                ),
+            ],
         )
         # The boundary keeps its own layout: typed after a switch back.
-        self.assertEqual(api.sent[1][0].scan_code, SCAN_CODE_SEMICOLON)
-        self.assertEqual(len(api.sent), WINDOWS_EXPECTED_SEND_BATCHES)
+        self.assertEqual(api.sent[WINDOWS_EXPECTED_SEND_BATCHES][0].scan_code, SCAN_CODE_SEMICOLON)
+        self.assertEqual(len(api.sent), WINDOWS_EXPECTED_SEND_BATCHES + 1)
         self.assertEqual(
             api.requests,
             [RUSSIAN_HKL, ENGLISH_HKL, RUSSIAN_HKL],
@@ -961,9 +966,10 @@ class WindowsBackendInjectionTests(unittest.TestCase):
         self.assertEqual(api.sent, [])
         backend.inject_correction((key_event(),), 1, boundary)
         self.assertEqual(api.requests, [RUSSIAN_HKL])
-        self.assertEqual(len(api.sent), 1)
+        # The deletion, then the keys typed in the layout switched to.
+        self.assertEqual(len(api.sent), WINDOWS_EXPECTED_SEND_BATCHES)
         self.assertEqual(
-            [item.scan_code for item in api.sent[0] if item.scan_code],
+            [item.scan_code for batch in api.sent for item in batch if item.scan_code],
             [SCAN_CODE_A, SCAN_CODE_A, SCAN_CODE_A, SCAN_CODE_A],
         )
 
@@ -1047,7 +1053,8 @@ class WindowsBackendInjectionTests(unittest.TestCase):
         held = backend.inject_correction((key_event(),), 1, None, source_group=0, late=(late,))
         self.assertEqual(held, WINDOWS_EXPECTED_HELD_COUNT)
         self.assertEqual(api.requests, [RUSSIAN_HKL])
-        batch, late_sent, *held_batches = api.sent
+        deletion, typed, late_sent, *held_batches = api.sent
+        batch = deletion + typed
         held_sent = tuple(item for batch in held_batches for item in batch)
         # Two characters to delete: the word and the late key after it.
         self.assertEqual(

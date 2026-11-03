@@ -185,6 +185,29 @@ class BuildTest(unittest.TestCase):
             self.assertIn(sources.keyring_path, page)
             self.assertIsNone(apt_repository.PLACEHOLDER_PATTERN.search(page))
 
+    def test_the_page_offers_the_released_files_and_carries_its_images(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repository, _sources = self._build(Path(raw))
+            version = apt_repository._project_version()
+            page = (repository / apt_repository.LANDING_FILE_NAME).read_text(encoding="utf-8")
+            self.assertIn(f"releases/download/v{version}/KeySwitch-Setup-{version}-x64.exe", page)
+            self.assertIn(f"releases/download/v{version}/keyswitch_{version}_amd64.deb", page)
+            assets = [path for path in apt_repository.SITE_DIRECTORY.rglob("*")
+                      if path.is_file() and path != apt_repository.LANDING_TEMPLATE_PATH]
+            self.assertTrue(assets)
+            for asset in assets:
+                published = repository / asset.relative_to(apt_repository.SITE_DIRECTORY)
+                self.assertEqual(published.read_bytes(), asset.read_bytes())
+                self.assertIn(f'"{asset.relative_to(apt_repository.SITE_DIRECTORY).as_posix()}"', page)
+
+    def test_a_project_without_a_version_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            pyproject = Path(raw) / "pyproject.toml"
+            pyproject.write_text("[project]\nname = \"keyswitch\"\n", encoding="utf-8")
+            with patch.object(apt_repository, "PYPROJECT_PATH", pyproject), self.assertRaises(SystemExit) as raised:
+                apt_repository._project_version()
+            self.assertIn("names no version", str(raised.exception))
+
     def test_refuses_a_package_built_for_another_architecture(self) -> None:
         def wrong_architecture(command: list[str], **overrides: str) -> str:
             if command[-1] == "Architecture":

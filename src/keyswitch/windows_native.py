@@ -16,11 +16,21 @@ from collections.abc import Callable
 from typing import Protocol, cast
 
 from .backend import ScreenAnchor
+from .constants.macos import UTF16_CODE_UNIT_BYTES
 from .constants.keyboard import ALT_MASK, CONTROL_MASK, LOCK_MASK, SHIFT_MASK, SUPER_MASK
-from .windows_backend import NativeInput, NativeKeyEvent, WindowsBackendError
+from .windows_backend import ClipboardContents, NativeInput, NativeKeyEvent, WindowsBackendError
 from .windows_calls import hook_prototype, keep_gil_in_short_calls, stdcall_library
 from .constants.windows import (
     ASYNC_KEY_DOWN_BIT,
+    CF_PRIVATEFIRST,
+    CF_PRIVATELAST,
+    CF_UNICODETEXT,
+    CLIPBOARD_DIB_FORMATS,
+    CLIPBOARD_FORMATS_SYNTHESIZED_FROM_DIB,
+    CLIPBOARD_HANDLE_FORMATS,
+    CLIPBOARD_HISTORY_FORMAT_NAME,
+    GMEM_MOVEABLE,
+    WINDOW_CLASS_NAME_MAX_CHARACTERS,
     HOOK_INPUT_TIMES_KEPT,
     GA_ROOT,
     GWL_EXSTYLE,
@@ -205,6 +215,7 @@ class CtypesWindowsAPI:
         # The time of every key and pointer event the hooks got, newest last (hook_input_times).
         self._input_times: deque[int] = deque(maxlen=HOOK_INPUT_TIMES_KEPT)
         self._declare()
+        self._declare_selection()
 
     def _declare(self) -> None:
         user32 = self.user32
@@ -362,6 +373,164 @@ class CtypesWindowsAPI:
         # Asked at every key inside the hook: they keep the GIL rather than wait for it again.
         keep_gil_in_short_calls(user32, "user32.dll")
         keep_gil_in_short_calls(kernel32, "kernel32.dll")
+
+    def _declare_selection(self) -> None:
+        """The calls of the selection hotkeys (WindowsSelectionAPI): the window class and the clipboard."""
+
+        user32 = self.user32
+        kernel32 = self.kernel32
+        user32.GetClassNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+        user32.GetClassNameW.restype = ctypes.c_int
+        user32.GetClipboardSequenceNumber.argtypes = []
+        user32.GetClipboardSequenceNumber.restype = ctypes.c_ulong
+        user32.OpenClipboard.argtypes = [ctypes.c_void_p]
+        user32.OpenClipboard.restype = ctypes.c_int
+        user32.CloseClipboard.argtypes = []
+        user32.CloseClipboard.restype = ctypes.c_int
+        user32.EmptyClipboard.argtypes = []
+        user32.EmptyClipboard.restype = ctypes.c_int
+        user32.EnumClipboardFormats.argtypes = [ctypes.c_uint]
+        user32.EnumClipboardFormats.restype = ctypes.c_uint
+        user32.GetClipboardData.argtypes = [ctypes.c_uint]
+        user32.GetClipboardData.restype = ctypes.c_void_p
+        user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+        user32.SetClipboardData.restype = ctypes.c_void_p
+        user32.RegisterClipboardFormatW.argtypes = [ctypes.c_wchar_p]
+        user32.RegisterClipboardFormatW.restype = ctypes.c_uint
+        user32.CreateWindowExW.argtypes = [
+            ctypes.c_ulong, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_ulong,
+            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ]
+        user32.CreateWindowExW.restype = ctypes.c_void_p
+        user32.DestroyWindow.argtypes = [ctypes.c_void_p]
+        user32.DestroyWindow.restype = ctypes.c_int
+        kernel32.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
+        kernel32.GlobalAlloc.restype = ctypes.c_void_p
+        kernel32.GlobalFree.argtypes = [ctypes.c_void_p]
+        kernel32.GlobalFree.restype = ctypes.c_void_p
+        kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+        kernel32.GlobalLock.restype = ctypes.c_void_p
+        kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+        kernel32.GlobalUnlock.restype = ctypes.c_int
+        kernel32.GlobalSize.argtypes = [ctypes.c_void_p]
+        kernel32.GlobalSize.restype = ctypes.c_size_t
+
+    def window_class(self, window: int) -> str:
+        buffer = ctypes.create_unicode_buffer(WINDOW_CLASS_NAME_MAX_CHARACTERS + 1)
+        written = int(self.user32.GetClassNameW(window, buffer, len(buffer))) if window else 0
+        return buffer.value[:written]
+
+    def text_caret(self, window: int) -> bool:
+        thread_id = int(self.user32.GetWindowThreadProcessId(ctypes.c_void_p(window), None)) if window else 0
+        info = GUITHREADINFO()
+        info.cbSize = ctypes.sizeof(GUITHREADINFO)
+        if not thread_id or not self.user32.GetGUIThreadInfo(thread_id, ctypes.byref(info)):
+            return False
+        return bool(info.hwndCaret) and info.rcCaret.bottom > info.rcCaret.top
+
+    def clipboard_sequence(self) -> int:
+        return int(self.user32.GetClipboardSequenceNumber())
+
+    def _global_bytes(self, handle: int, limit: int) -> bytes | None:
+        """The first ``limit`` bytes of a clipboard memory block, or None if it cannot be locked."""
+
+        size = min(int(self.kernel32.GlobalSize(handle)), limit)
+        pointer = self.kernel32.GlobalLock(handle)
+        if not pointer:
+            return None
+        try:
+            return ctypes.string_at(pointer, size)
+        finally:
+            self.kernel32.GlobalUnlock(handle)
+
+    def read_clipboard(self, limit_bytes: int) -> ClipboardContents | None:
+        """Every format on the clipboard as bytes; incomplete when one of them cannot be kept that way.
+
+        Opened with no window: reading needs none, and only a window that empties the clipboard becomes its owner.
+        """
+
+        if not self.user32.OpenClipboard(None):
+            return None
+        try:
+            present: list[int] = []
+            item = int(self.user32.EnumClipboardFormats(0))
+            while item:
+                present.append(item)
+                item = int(self.user32.EnumClipboardFormats(item))
+            with_dib = any(item in CLIPBOARD_DIB_FORMATS for item in present)
+            kept: list[tuple[int, bytes]] = []
+            total = 0
+            for item in present:
+                if with_dib and item in CLIPBOARD_FORMATS_SYNTHESIZED_FROM_DIB:
+                    continue
+                if item in CLIPBOARD_HANDLE_FORMATS or CF_PRIVATEFIRST <= item <= CF_PRIVATELAST:
+                    return ClipboardContents(tuple(kept), complete=False)
+                handle = self.user32.GetClipboardData(item)
+                size = int(self.kernel32.GlobalSize(handle)) if handle else 0
+                total += size
+                data = self._global_bytes(handle, size) if handle and total <= limit_bytes else None
+                if data is None:
+                    return ClipboardContents(tuple(kept), complete=False)
+                kept.append((item, data))
+            return ClipboardContents(tuple(kept))
+        finally:
+            self.user32.CloseClipboard()
+
+    def clipboard_text(self, limit_characters: int) -> str | None:
+        if not self.user32.OpenClipboard(None):
+            return None
+        try:
+            handle = self.user32.GetClipboardData(CF_UNICODETEXT)
+            if not handle:
+                return ""
+            # One unit more than the characters asked for, for the terminating zero.
+            data = self._global_bytes(handle, UTF16_CODE_UNIT_BYTES * (limit_characters + 1))
+            if data is None:
+                return ""
+            return data.decode("utf-16-le", "replace").split("\0", 1)[0]
+        finally:
+            self.user32.CloseClipboard()
+
+    def write_clipboard(self, contents: ClipboardContents) -> bool:
+        """Put ``contents`` back as the clipboard's only data, kept out of the clipboard history.
+
+        SetClipboardData fails for a clipboard opened without a window ("If an application calls OpenClipboard with
+        hwnd set to NULL, EmptyClipboard sets the clipboard owner to NULL; this causes SetClipboardData to fail",
+        OpenClipboard on Microsoft Learn), so a hidden window of this thread owns it for the call. The window is
+        destroyed at once: it would not answer the messages a clipboard owner is sent, and nothing here is rendered
+        late, so no owner is needed afterwards.
+        """
+
+        window = self.user32.CreateWindowExW(0, "STATIC", None, 0, 0, 0, 0, 0, None, None, None, None)
+        if not window:
+            raise self._error("Не удалось создать окно для буфера обмена")
+        try:
+            if not self.user32.OpenClipboard(window):
+                return False
+            try:
+                self.user32.EmptyClipboard()
+                history = int(self.user32.RegisterClipboardFormatW(CLIPBOARD_HISTORY_FORMAT_NAME))
+                items = list(contents.formats)
+                # An empty clipboard is put back empty, without even this marker.
+                if items and history and all(item != history for item, _data in items):
+                    items.append((history, bytes(ctypes.sizeof(ctypes.c_ulong))))
+                for item, data in items:
+                    handle = self.kernel32.GlobalAlloc(GMEM_MOVEABLE, max(len(data), 1))
+                    if not handle:
+                        continue
+                    pointer = self.kernel32.GlobalLock(handle)
+                    if pointer:
+                        ctypes.memmove(pointer, data, len(data))
+                        self.kernel32.GlobalUnlock(handle)
+                    # The system owns the block once it is set; one it refused is still ours to free.
+                    if not pointer or not self.user32.SetClipboardData(item, handle):
+                        self.kernel32.GlobalFree(handle)
+                return True
+            finally:
+                self.user32.CloseClipboard()
+        finally:
+            self.user32.DestroyWindow(window)
 
     def _error(self, message: str) -> WindowsBackendError:
         code = int(self.kernel32.GetLastError())

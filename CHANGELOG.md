@@ -4,6 +4,50 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- Typo correction: a Russian word of five letters and more with one slip in it (two letters swapped, a letter left
+  out or typed in excess, a neighbouring key hit) is corrected at its boundary when a single correction clearly wins: `нромально` becomes
+  `нормально`. The word lists are counted (OpenSubtitles and ru.stackoverflow), and a word either layout knows is left
+  alone. It is on by default; English words are corrected only with the setting turned on. `Ctrl+Alt+Z` takes a
+  correction back, and a word left as typed twice, or whose correction was taken back, is the user's own from then on;
+  that personal dictionary stores salted hashes, never the words. A word typed right after switching the layout by
+  hand keeps that layout and still gets its slip fixed.
+- Two capitals at the start of a word are fixed: `ПРивет` becomes `Привет`, `HEllo` becomes `Hello`. Abbreviations,
+  words in capitals, CamelCase names and words typed under Caps Lock are left as typed. On by default.
+- Commands on the selected text, as in Punto Switcher: `Shift+Pause` types the selection in the other layout and
+  switches to it (in a selection in two alphabets only the words of the rarer one), `Alt+Pause` changes its case in a
+  cycle, `Alt+Scroll Lock` transliterates Cyrillic (ICAO Doc 9303) and back; on macOS `Control+Option+L`, `U` and `T`.
+  The result is selected again, so a command can be repeated, and the clipboard is given back as it was.
+- The system theme follows the dark mode of Windows and macOS.
+- `Ctrl+Alt+Z` takes the last correction back also after spaces typed after it.
+- Settings window: a layout switched by hand in the test field protects the word as elsewhere, and the manual-layout
+  setting is shown once.
+- Windows: in Notepad of Windows 11, which loses characters typed over a selection, the result of a selection command
+  is pasted and the clipboard given back; the keys of a correction wait 50 ms after a layout switch, as the field's text
+  service takes the new layout; a key KeySwitch keeps from the window while Alt or Win is held (`Alt+Pause`) is
+  followed by a key that types nothing, so the window opens no menu bar and no Start menu on the release.
+- A Russian word of one letter typed in the English layout after Russian text is corrected: `и d документ` becomes
+  `и в документ`. When the model is sure at the letter's space the letter is converted there; otherwise it waits for
+  the next word and is decided beside it. A Latin letter named after Russian text stays (`язык C`, `витамин D`).
+- A command-line flag is decided as a flag: `git -v` no longer becomes `git -м`, and `-цфеср` typed with the Russian
+  layout on becomes `-watch`.
+- Digits with `ю` typed in the Russian layout become digits with a dot: `пункт 2ю` becomes `пункт 2.`, `версии 5ю2`
+  becomes `версии 5.2`. Only the sign is replaced and the Russian layout stays on. `5б` is left as written.
+- A Russian message begun with a quotation mark in the English layout is corrected from its first word: `@Z сейчас не
+  могу` becomes `"Я сейчас не могу`. `@media`, `@property` and a mention are left as written.
+- A short reply typed in the English layout and sent with Enter is corrected before it is sent: `jr` becomes `ок` in
+  Telegram, also when a space was typed before Enter. `ok`, `ha`, `no` stay as written.
+- Pause with nothing to convert switches the layout and no longer holds the next word from correction.
+- A short word at a pause in typing waits for the word's end where its two letters begin many words of their own
+  language: `ша` of `шаблоне` no longer becomes `if` while the word is still being typed.
+- Settings window: a setting's title wraps beside its control instead of being cut; About names macOS as well.
+- The product page is published on GitHub Pages together with the APT repository.
+- The pair is `context-v3-48a863e75bb6` (artifact SHA-256
+  `9a3486e87873a3e74fc6d27f80111deff945d0986ba6eb8dd55c632cef7b5ace`) with the prefix model `prefix-v2-bf3dc28f8567`:
+  five new parts of the model on the pair of 0.64. On the recorded real typing it fixes 24 words and breaks none against
+  0.64.1. The sealed test is larger from this release: up to 512 documents per language (protocol version 4). On sealed
+  test v84, read once, it restores 720 and 721 of 727 rows typed in the wrong layout with the early switch off, against
+  713 and 716 for the baseline pair, and spoils no correct row.
+
 ## 0.64.1 — 2026-10-30
 
 - Windows: KeySwitch no longer forgets the word being typed when the system reports input its keyboard and mouse hooks

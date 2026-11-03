@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 from keyswitch.config import SettingsStore
-from keyswitch.constants.settings_defaults import DEFAULT_MINIMUM_WORD_LENGTH, DEFAULT_SETTINGS
+from keyswitch.constants.settings_defaults import DEFAULT_MINIMUM_WORD_LENGTH, DEFAULT_SETTINGS, SELECTION_HOTKEYS
 from keyswitch.settings_diagnostics import (
     _LOGGABLE_STRING_TRUNCATED_CHARACTERS,
     setting_change,
@@ -83,6 +83,7 @@ class SettingsDiagnosticsTests(unittest.TestCase):
         self.assertEqual(settings_snapshot(self.store)["overrides"], {
             "hotkeys.toggle": {"missing": True}, "hotkeys.convert_last": {"missing": True},
             "hotkeys.undo": {"missing": True},
+            **{f"hotkeys.{name}": {"missing": True} for name in SELECTION_HOTKEYS},
         })
         self.store.set("hotkeys", None, persist=False)
         self.assertEqual(settings_snapshot(self.store)["overrides"], {"hotkeys": None})

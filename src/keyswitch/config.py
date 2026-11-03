@@ -16,6 +16,7 @@ from .constants.settings_defaults import (
     DEFAULT_PAUSE_DELAY_SECONDS,
     DEFAULT_SETTINGS,
     EARLY_SWITCH_DEFAULT_SCHEMA_VERSION,
+    MACOS_SELECTION_HOTKEY_DEFAULTS,
     PAUSE_DELAY_DEFAULT_SCHEMA_VERSION,
     PREVIOUS_DEFAULT_PAUSE_DELAY_SECONDS,
 )
@@ -71,6 +72,17 @@ def _running_on_windows() -> bool:
     return sys.platform == "win32"
 
 
+def default_settings(platform: str | None = None) -> SettingsData:
+    """The shipped settings of ``platform`` (the running one by default): DEFAULT_SETTINGS everywhere, but on macOS the
+    selection hotkeys use keys a Mac keyboard has (MACOS_SELECTION_HOTKEY_DEFAULTS)."""
+
+    defaults = copy.deepcopy(DEFAULT_SETTINGS)
+    hotkeys = defaults.get("hotkeys")
+    if (sys.platform if platform is None else platform) == "darwin" and isinstance(hotkeys, dict):
+        hotkeys.update(MACOS_SELECTION_HOTKEY_DEFAULTS)
+    return defaults
+
+
 def set_aside_unreadable(path: Path) -> Path | None:
     """Move a user file that could not be read out of the way of the next save.
 
@@ -95,7 +107,8 @@ class SettingsStore:
         self.path = path or config_dir() / "config.json"
         self._lock = threading.RLock()
         self._callbacks: list[SettingCallback] = []
-        self._data: SettingsData = copy.deepcopy(DEFAULT_SETTINGS)
+        self._defaults = default_settings()
+        self._data: SettingsData = copy.deepcopy(self._defaults)
         # Where an unreadable settings file was moved by the last load, if anywhere.
         self.unreadable: Path | None = None
         self.load()
@@ -113,10 +126,10 @@ class SettingsStore:
             if loaded_mapping is None:
                 # Keep safe defaults, and keep the user's file: the next change
                 # of any setting would otherwise save the defaults over it.
-                self._data = copy.deepcopy(DEFAULT_SETTINGS)
+                self._data = copy.deepcopy(self._defaults)
                 self.unreadable = set_aside_unreadable(self.path)
                 return
-            self._data = _deep_merge(DEFAULT_SETTINGS, loaded_mapping)
+            self._data = _deep_merge(self._defaults, loaded_mapping)
             self._adopt_new_defaults(loaded_mapping)
 
     def _adopt_new_defaults(self, loaded: SettingsData) -> None:
@@ -198,7 +211,7 @@ class SettingsStore:
     def default(self, dotted_path: str, fallback: object = None) -> object:
         """Return the shipped value for a path without touching stored data."""
 
-        value: object = DEFAULT_SETTINGS
+        value: object = self._defaults
         for part in dotted_path.split("."):
             mapping = _string_keyed_mapping(value)
             if mapping is None or part not in mapping:
@@ -231,13 +244,18 @@ class SettingsStore:
 
         return unsubscribe
 
+    def defaults(self) -> SettingsData:
+        """The shipped settings of this platform (default_settings), as a copy."""
+
+        return copy.deepcopy(self._defaults)
+
     def snapshot(self) -> SettingsData:
         with self._lock:
             return copy.deepcopy(self._data)
 
     def reset(self) -> None:
         with self._lock:
-            self._data = copy.deepcopy(DEFAULT_SETTINGS)
+            self._data = copy.deepcopy(self._defaults)
             self.save()
             callbacks = tuple(self._callbacks)
         for callback in callbacks:

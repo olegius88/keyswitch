@@ -53,6 +53,8 @@ from .constants.models import (
     CONTEXT_TYPO_FEATURE_VERSION,
     CONTEXT_TYPO_MIN_CHARACTERS,
     CONTEXT_V1_CONVERSION_THRESHOLD,
+    CYRLETTER_FEATURE_PREFIX,
+    DIGIT_DOT_FEATURE_PREFIX,
     KEPT_FEATURE_PREFIX,
     LETTER_FEATURE_PREFIX,
     MAX_CONTEXT_ACTION_MODEL_FEATURES,
@@ -461,6 +463,13 @@ class ContextModel:
         # planned for conversion, is its class (context_action_features.resume_question), and the engine takes such a word
         # along in the middle of a line on its verdict (engine._take_along).
         self.answers_resume = any(name.startswith(RESUME_FEATURE_PREFIX) for name in self.weights)
+        # Whether the Cyrillic-letter head has weights here: a Latin letter whose Cyrillic reading is a Russian word of one
+        # letter, after Russian text, is its class (context_action_features.cyrletter_question), and the engine takes such a
+        # letter along in the middle of a line on its verdict (engine._take_along).
+        self.answers_cyrletter = any(name.startswith(CYRLETTER_FEATURE_PREFIX) for name in self.weights)
+        # Whether the digit-dot head has weights here: digits with `ю` or `б` typed in the Russian layout are its class
+        # (context_action_features.digit_dot_question), and the engine replaces the sign in that layout.
+        self.answers_digit_dot = any(name.startswith(DIGIT_DOT_FEATURE_PREFIX) for name in self.weights)
 
     @classmethod
     def load(cls, path: Path = ARTIFACT_PATH) -> ContextModel:
@@ -535,12 +544,16 @@ class ContextModel:
             text = ACTION_FEATURE_CHARACTER_TEXT_FIELD_INDEX
             # The kept-neighbour question names its letters under its own prefix, and the single-letter head
             # once more under its own: the kept-neighbour frames hold no word of one letter, so only the head
-            # knows the letters of `b` before a kept `redis`.
-            return all(any(
-                name in self.weights for name in features
-                if (bare := name.removeprefix(LETTER_FEATURE_PREFIX).removeprefix(KEPT_FEATURE_PREFIX)).startswith(label + ":char:")
-                and any(char.isalpha() for char in bare.split(":", text)[text])
-            ) for label in ("source", "target"))
+            # knows the letters of `b` before a kept `redis`. In the digit-dot head's class a reading with no letter has
+            # none to know: `2.`, the other reading of `2ю`, left the head's every conversion a suggestion (candidate v81
+            # e5). Elsewhere a reading with no letter stays unsupported: let through, `,` and `.` typed as meant became
+            # `б` and `ю` (candidate v81 e6).
+            signs_only = any(name.startswith(DIGIT_DOT_FEATURE_PREFIX) for name in features)
+            lettered = {label: [name for name in features
+                                if (bare := name.removeprefix(LETTER_FEATURE_PREFIX).removeprefix(KEPT_FEATURE_PREFIX))
+                                .startswith(label + ":char:") and any(char.isalpha() for char in bare.split(":", text)[text])]
+                        for label in ("source", "target")}
+            return all((signs_only and not names) or any(name in self.weights for name in names) for names in lettered.values())
         return any(
             name in self.weights
             for name in features

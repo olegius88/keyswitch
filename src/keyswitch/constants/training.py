@@ -181,11 +181,14 @@ SIMULATED_CLOCK_START_SECONDS: Final = 1000.0
 # minimum_sequence_documents_per_group).
 MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP: Final = 32
 # Hash-ranked documents taken per document group in the sequence test (PROTOCOL
-# document_cap_per_group).
-SEQUENCE_DOCUMENT_CAP_PER_GROUP: Final = 128
+# document_cap_per_group). 128 up to protocol version 3: the frozen baseline pair restored 98-100% of
+# the ~180 rows that gave, so a test told a better pair from an equal one only when the baseline
+# happened to miss a row (test v81: both pairs restored all 179). From version 4 a group holds up
+# to 512 documents, drawn from a holdout of HOLDOUT_MAX_DOCUMENTS_PER_SOURCE documents per source.
+SEQUENCE_DOCUMENT_CAP_PER_GROUP: Final = 512
 # Version of the context-action sequence protocol: the evaluator's PROTOCOL (hashed into
 # AUDITED_SEQUENCE_PROTOCOL_SHA256) and the verifier's public summary of it carry the same number.
-CONTEXT_ACTION_SEQUENCE_PROTOCOL_VERSION: Final = 3
+CONTEXT_ACTION_SEQUENCE_PROTOCOL_VERSION: Final = 4
 # physical_key_period_ms of the verifier's public protocol summary. It is the 100 ms key period of
 # protocol version 2; version 3 types with SIMULATED_KEY_DOWN_SECONDS + SIMULATED_KEY_UP_SECONDS.
 CONTEXT_ACTION_PROTOCOL_PHYSICAL_KEY_PERIOD_MS: Final = 100

@@ -25,6 +25,7 @@ from keyswitch.constants.training import (
     ACTION_DEFERRED_WORD_MAX_CHARACTERS,
     ACTION_SHORT_WORD_MAX_CHARACTERS,
 )
+from keyswitch.context_action_features import brief_dominant
 from keyswitch.context_model import _term_frequency
 from keyswitch.context_policy import shared_identifiers
 from keyswitch.identifier_lexicon import IdentifierLexicon
@@ -78,7 +79,11 @@ def counted_reading(original: str, alternate: str, group: int, *,
     stays under `other_maximum` and which no lexicon knows: then the other reading is the same keys
     typed in the wrong layout. Two counted readings (`ns` 195, `ты`) or a word of the lexicon on the
     weaker side (`лун` for `key`) settle nothing; only a neighbour can tell. Symmetric in its two
-    members, as deferred_isolated is.
+    members, as deferred_isolated is, but for one case: a Latin word of the lexicon is settled as the
+    keys of a Russian word that outnumbers it by far (context_action_features.brief_dominant), as the
+    model's known-reply head is asked. `jr` sent alone was labelled with the labelling base's
+    suggestion, as the English lexicon knows `Jr`, against 7 180 counts of `ок` and 13 of `jr`, and the
+    head learned to suggest it (experiment v82 e2).
     """
 
     table = _term_frequency()
@@ -89,7 +94,7 @@ def counted_reading(original: str, alternate: str, group: int, *,
     for strong in (0, 1):
         weak = 1 - strong
         if (counts[strong] >= minimum and counts[strong] >= dominance * counts[weak] and counts[weak] < other_maximum
-                and not models[weak].score((latin, cyrillic)[weak]).known):
+                and (not models[weak].score((latin, cyrillic)[weak]).known or (strong == 1 and brief_dominant(latin, cyrillic)))):
             return strong
     return None
 

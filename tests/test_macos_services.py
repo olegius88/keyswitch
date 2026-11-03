@@ -103,6 +103,16 @@ class ServiceTests(unittest.TestCase):
             MacServices().beep()
         self.assertEqual(sounded, [True])
 
+    def test_the_window_follows_the_systems_dark_appearance(self) -> None:
+        """Tk follows no system appearance itself; the window asks each time it opens."""
+
+        module = types.ModuleType("keyswitch.macos_objc")
+        styles = iter(("Dark", ""))
+        module.interface_style = lambda: next(styles)  # type: ignore[attr-defined]
+        with patch.dict(sys.modules, {"keyswitch.macos_objc": module}):
+            self.assertTrue(MacServices().system_dark_theme())
+            self.assertFalse(MacServices().system_dark_theme())
+
 
 if __name__ == "__main__":
     unittest.main()
