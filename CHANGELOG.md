@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.66.0 — 2026-11-04
+
 - KeySwitch takes about 120 MB less memory: the letter-sequence tables of the spelling model, about a million entries,
   are kept in two compact arrays instead of a million separate objects, and on Linux the memory freed while the models
   load is handed back to the system. After start the engine holds about 300 MB instead of 420 MB (measured on Linux),
