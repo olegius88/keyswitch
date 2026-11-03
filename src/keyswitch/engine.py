@@ -51,6 +51,7 @@ from .early_switch import (
 from .history import HistoryEntry, HistoryStore
 from .indicator import alternate_layout_group, layout_label
 from .language_model import LanguageModel, WordScore
+from .memory_release import release_free_memory
 from .layouts import RU_KEYS, US_KEYS, LayoutPair
 from .lexicon_supplement import supplement_words
 from .learning import LearnedRule, LearningStore, RuleAction
@@ -80,7 +81,7 @@ from .context_access import PlatformFieldReader
 from .constants.units import MILLISECONDS_PER_SECOND
 from .input_context import CONTEXT_TTL, FieldContext, FieldReader
 from .input_delay import InputDelayReport
-from .ortho_model import OrthoEvidence, shape_of
+from .ortho_model import LOCALES as ORTHO_LOCALES, OrthoEvidence, shape_of
 from .prefix_model import PrefixInput, PrefixModel
 from .prefix_schema import VersionedPrefixModel
 from .settings_diagnostics import setting_change, settings_snapshot
@@ -379,6 +380,21 @@ class Hotkey:
         return matches_key and actual == wanted
 
 
+# The group of each script of the orthotactic model, in the order of its locales (ortho_model.LOCALES).
+ORTHO_GROUPS: Final[dict[str, int]] = {script: group for group, script in enumerate(ORTHO_LOCALES)}
+
+
+def default_learning_store(settings: SettingsStore, history: HistoryStore) -> LearningStore:
+    """The switching rules beside the history, as the engine keeps them when it is given none."""
+
+    return LearningStore(
+        history.path.with_name("learning.json"),
+        # Only reads a learning file of an older schema; the setting itself is gone.
+        legacy_confirmations=int(settings.get(
+            "detection.learning_confirmations", LEGACY_RULE_CONFIRMATIONS_REQUIRED)),
+    )
+
+
 @functools.cache
 def _parsed_hotkey(value: str) -> Hotkey:
     """A hotkey of the settings, parsed once for its text: every key event asks for three of them."""
@@ -409,13 +425,14 @@ class KeySwitchEngine:
         self.detector = LanguageDetector(self.models, intent_model)
         self.backend: InputBackend = backend or _default_backend(len(self.models))
         self.backend_label = backend_label
-        self.learning = learning or LearningStore(
-            history.path.with_name("learning.json"),
-            # Only reads a learning file of an older schema; the setting itself is gone.
-            legacy_confirmations=int(settings.get(
-                "detection.learning_confirmations", LEGACY_RULE_CONFIRMATIONS_REQUIRED)),
+        self.learning = learning or default_learning_store(settings, history)
+        # The orthotactic model's dictionaries are these models when they are the two it would load itself.
+        dictionaries = self.models if [model.locale for model in self.models.values()] == list(ORTHO_LOCALES.values()) else None
+        self.context_policy = ContextPolicy(
+            context_reader or PlatformFieldReader(self.backend),
+            known=None if dictionaries is None else (
+                lambda script, word: dictionaries[ORTHO_GROUPS[script]].score(word).known),
         )
-        self.context_policy = ContextPolicy(context_reader or PlatformFieldReader(self.backend))
         self._context_result: ContextResult | None = None
         self.boundary_model: BoundaryModel | None = BoundaryPolicy.default()
         # Typed by the frozen base class: replays and tests substitute schema-one doubles.
@@ -569,6 +586,8 @@ class KeySwitchEngine:
         self._technical_session_event("engine_initialized")
         if self.learning.migrated:
             self._technical_event("learning_rules_migrated", rules=self.learning.migrated)
+        # The models are built: what their parsing left behind goes back to the system.
+        release_free_memory()
 
     @property
     def snapshot(self) -> EngineSnapshot:

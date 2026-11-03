@@ -17,7 +17,8 @@ from .identifier_lexicon import IdentifierLexicon
 from .detector import DetectionDecision, LanguageDetector, LanguageScorer
 from .input_context import FieldContext, FieldReader, InputContext
 from .language_model import LanguageModel
-from .ortho_model import OrthoEvidence, OrthoModel, shape_of
+from .ortho_model import KnownWord, OrthoEvidence, OrthoModel, shape_of
+from .packed_grams import pack_channels
 from .short_words import ISOLATED_SHORT_WORD_REASON, begins_words, is_short_word_override, opens_sentences
 from .word_decision import NOT_A_WORD_REASON
 from .constants.detection import MINIMUM_SHAPED_TOKEN_CHARACTERS, QUOTED_WORD_CLOSING_SIGNS, WORD_QUOTES
@@ -243,11 +244,16 @@ class ContextPolicy:
     # so the parse is shared rather than repeated per instance.
     _shared_ortho: ClassVar[tuple[OrthoModel | None, str] | None] = None
 
-    def __init__(self, reader: FieldReader | None = None) -> None:
+    def __init__(self, reader: FieldReader | None = None, *, known: KnownWord | None = None) -> None:
+        """`known` answers the orthotactic model's dictionary questions with the engine's own models, which it
+        would otherwise find again by normalising the Russian supplement once more (ortho_model._engine_dictionaries)."""
+
         self.stream = InputContext()
         self.model, self.status = ContextModel.try_load()
         if ContextPolicy._shared_ortho is None:
             ContextPolicy._shared_ortho = OrthoModel.try_load()
+            # The same floats in a small part of the memory (packed_grams).
+            pack_channels(ContextPolicy._shared_ortho[0])
         self.ortho, self.ortho_status = ContextPolicy._shared_ortho
         if self.model is not None:
             # Every question to the model asks whether a reading is a known identifier, and scores it with the
@@ -256,6 +262,8 @@ class ContextPolicy:
             # done here, before the keyboard hook starts, and not on the first word typed (ContextModel.load).
             shared_identifiers()
             if self.ortho is not None:
+                if known is not None and self.ortho._known is None:
+                    self.ortho._known = known
                 self.ortho.score(OrthoEvidence("ghbdtn", "lower", "en"))
         self.reader = reader
 

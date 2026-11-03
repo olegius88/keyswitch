@@ -30,7 +30,9 @@ from .engine import (
     EngineSnapshot,
     KeySwitchEngine,
     LearningPrompt,
+    default_learning_store,
 )
+from .engine_loader import LOADING_ACTION, DeferredEngine
 from .history import HistoryEntry, HistoryStore, data_dir, history_limit
 from .indicator import layout_label
 from .learning import RULE_ACTIONS, RULE_MATCHES, InvalidRule, LearnedRule
@@ -604,17 +606,26 @@ class DesktopApplication:
         follow_settings(self.settings)
         self.history = HistoryStore(limit=history_limit(self.settings.get("history.limit", DEFAULT_HISTORY_LIMIT)))
         self.backend = services.backend()
-        self.engine = KeySwitchEngine(
-            self.settings,
-            self.history,
-            backend=self.backend,
-            backend_label=services.backend_label,
-        )
-        self.autostart = services.autostart()
-        self.catalog = services.catalog()
         self.tray: TrayController | None = None
         self._closing = False
         self._events: queue.SimpleQueue[Callable[[], None]] = queue.SimpleQueue()
+        # The engine loads its models while the window is built (engine_loader); the rules are the window's at once.
+        learning = default_learning_store(self.settings, self.history)
+        self.engine = DeferredEngine(
+            lambda: KeySwitchEngine(
+                self.settings,
+                self.history,
+                backend=self.backend,
+                backend_label=services.backend_label,
+                learning=learning,
+            ),
+            learning=learning,
+            enabled=bool(self.settings.get("enabled", True)),
+            post=self._post,
+            background=services.background_engine,
+        )
+        self.autostart = services.autostart()
+        self.catalog = services.catalog()
         self.updates = UpdateManager(
             __version__,
             data_dir() / "updates",
@@ -2195,8 +2206,26 @@ class DesktopApplication:
         except (RuntimeError, OSError) as error:
             return {"error": f"{type(error).__name__}: {error}"}
 
+    def _model_diagnostics(self) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+        """The intent, context and prefix models as the diagnostics name them.
+
+        The About page is built with the window, before the engine has loaded its models (engine_loader): until then,
+        or if loading failed, each model says so instead of the window waiting for them.
+        """
+
+        if not self.engine.ready:
+            status = self.engine.snapshot.last_error or LOADING_ACTION
+            return {"status": status}, {"available": False, "status": status}, {"available": False, "status": status}
+        prefix = self.engine.prefix_model
+        return (
+            self.engine.intent_model_status.as_dict(),
+            {"available": self.engine.context_policy.model is not None, "status": self.engine.context_policy.status},
+            {"available": prefix is not None, "status": "" if prefix is None else prefix.version},
+        )
+
     def _diagnostics(self) -> str:
         probe = self.backend.probe()
+        intent_model, context_model, prefix_model = self._model_diagnostics()
         payload = {
             "keyswitch": __version__,
             "available": probe.available,
@@ -2207,10 +2236,9 @@ class DesktopApplication:
             "layouts": probe.xkb_version,
             "current_group": probe.current_group,
             "current_layout": layout_label(probe.current_group),
-            "intent_model": self.engine.intent_model_status.as_dict(),
+            "intent_model": intent_model,
             "context_model": {
-                "available": self.engine.context_policy.model is not None,
-                "status": self.engine.context_policy.status,
+                **context_model,
                 "mode": self.settings.get("detection.context_policy", "assist"),
                 "read_field": self.settings.get("detection.context_read_field", False),
                 "last_action": self.engine.snapshot.context_action,
@@ -2218,8 +2246,7 @@ class DesktopApplication:
             # The third model, beside the intent model of the baseline and the context model: the one
             # that switches the layout while the word is typed.
             "prefix_model": {
-                "available": self.engine.prefix_model is not None,
-                "status": "" if self.engine.prefix_model is None else self.engine.prefix_model.version,
+                **prefix_model,
                 "early_switch": self.settings.get("detection.early_switch", True),
             },
             "autostart": self._autostart_diagnostics(),
@@ -2313,21 +2340,21 @@ class DesktopApplication:
         self._sync_autostart()
         self._sync_tray()
         self._sync_update_schedule(initial=True)
-        engine_error = ""
         if not self.no_engine:
-            try:
-                self.engine.start()
-            except Exception as error:
-                engine_error = str(error)
-                LOGGER.exception("Не удалось запустить Windows backend")
-                self.error_text.set(engine_error)
+            # Started once its models are loaded; until then the window says so (engine_loader).
+            self.engine.start(self._engine_start_failed)
         self.root.after(EVENT_DRAIN_INITIAL_DELAY_MS, self._drain_events)
-        if self.hidden and self.tray is not None and not engine_error:
+        if self.hidden and self.tray is not None and not self.engine.snapshot.last_error:
             self.root.withdraw()
         else:
             self.present()
         self.root.mainloop()
         return 0
+
+    def _engine_start_failed(self, error: Exception) -> None:
+        LOGGER.error("Не удалось запустить клавиатурный слой", exc_info=error)
+        self.error_text.set(str(error))
+        self.present()
 
     def shutdown(self) -> None:
         if self._closing:

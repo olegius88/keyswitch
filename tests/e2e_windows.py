@@ -268,6 +268,8 @@ def main() -> int:
 
         print("WINDOWS_ENGINE_INIT_START", flush=True)
         application = WindowsApplication(WindowsServices(), hidden=False, no_engine=False)
+        # The engine is built on a worker thread while the window comes up: the scenarios start once it is built.
+        application.engine.engine()
         print("WINDOWS_ENGINE_INIT_OK", flush=True)
         scenario_errors: list[Exception] = []
         completed: list[bool] = []

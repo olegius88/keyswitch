@@ -4,6 +4,14 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- KeySwitch takes about 120 MB less memory: the letter-sequence tables of the spelling model, about a million entries,
+  are kept in two compact arrays instead of a million separate objects, and on Linux the memory freed while the models
+  load is handed back to the system. After start the engine holds about 300 MB instead of 420 MB (measured on Linux),
+  and every decision is the same as before.
+- Windows: the settings window and the tray icon appear right after start, while the language models load in the
+  background. Until they are loaded the window and its diagnostics say «Загрузка языковых моделей…», and switching
+  starts as soon as they are.
+
 ## 0.65.0 — 2026-11-03
 
 - Typo correction: a Russian word of five letters and more with one slip in it (two letters swapped, a letter left

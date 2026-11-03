@@ -60,3 +60,10 @@ INDEPENDENT_FIXTURE_SAMPLE_MAX: Final = 600
 FIRTH_FIXTURE_MARK_EVERY: Final = 7
 # The fixture labels alternate between the two classes.
 FIRTH_FIXTURE_CLASSES: Final = 2
+# Packed gram tables: the letters a fixture's grams cycle through, the first code point of a script
+# with more characters than a byte codes (Cyrillic), the order of a channel, and a backoff weight of a
+# one-letter context.
+PACKED_FIXTURE_LETTERS: Final = 26
+PACKED_FIXTURE_WIDE_FIRST_CODE: Final = 0x400
+PACKED_FIXTURE_ORDER: Final = 2
+PACKED_FIXTURE_BACKOFF: Final = 0.5
