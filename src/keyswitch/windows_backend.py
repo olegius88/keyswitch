@@ -32,11 +32,14 @@ from .constants.timing import (
     MODIFIER_RECHECK_GAP_MS,
     SELECTION_CLIPBOARD_POLL_SECONDS,
     SELECTION_CLIPBOARD_TIMEOUT_SECONDS,
+    SELECTION_PASTE_CONFIRM_SECONDS,
     UNSEEN_INPUT_MIN_TIMES,
+    WINDOWS_LAYOUT_SETTLE_SECONDS,
     WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS,
 )
 from .constants.windows import (
     ALT_KEYS,
+    CF_UNICODETEXT,
     CONSOLE_WINDOW_CLASSES,
     CONTROL_KEYS,
     DWORD_MASK,
@@ -44,6 +47,7 @@ from .constants.windows import (
     LANG_RUSSIAN,
     LOWORD_MASK,
     MODIFIER_KEYS,
+    SLOW_INPUT_FIELD_CLASSES,
     PRIMARY_LANGID_MASK,
     SHIFT_KEYS,
     SUPER_KEYS,
@@ -61,6 +65,7 @@ from .constants.windows import (
     VK_INSERT,
     VK_LCONTROL,
     VK_LEFT,
+    VK_MENU_MASK,
     VK_LMENU,
     VK_LSHIFT,
     VK_LWIN,
@@ -91,10 +96,11 @@ from .constants.windows import (
     VK_SPACE,
     VK_TAB,
     VK_UP,
+    VK_V,
     VK_Z,
 )
 from .russian_text import SECONDS, quantity
-from .selection_commands import SOURCE_CLIPBOARD, SelectedText, SelectionRefused, caret_steps
+from .selection_commands import SOURCE_CLIPBOARD, SOURCE_UIA, SelectedText, SelectionRefused, caret_steps
 
 LOGGER = logging.getLogger(__name__)
 
@@ -370,6 +376,9 @@ class WindowsBackend:
         self._holding = False
         self._held: list[NativeKeyEvent] = []
         self._caps_lock = False
+        # Runs a short job off the hook's thread (_mask_menu): SendInput there would wait for the hook it is in.
+        self._start_job: Callable[[Callable[[], None]], None] = (
+            lambda job: threading.Thread(target=job, daemon=True).start())
         self._pointer_epoch = 0
         self._hold_pointer_epoch = 0
         self._hold_window = 0
@@ -551,6 +560,25 @@ class WindowsBackend:
         self._consumed_keys.add(event.keycode)
         return decision
 
+    def _mask_menu(self) -> None:
+        """Press the mask key (VK_MENU_MASK) while Alt or Win is held under a hotkey key the window does not get.
+
+        Seeing Alt go down and up with no key between, a window opens its menu bar on the release (Win opens the
+        Start menu): after Alt+Pause, Notepad of Windows 11 took the result of the selection hotkey into its menu
+        and left the text as it was (Windows 11 VM, 03.11.2026); with a window whose menu has access keys, the
+        characters typed would have chosen menu items. The key goes off the hook's thread, before the release.
+        """
+
+        mask = (NativeInput(True, virtual_key=VK_MENU_MASK), NativeInput(False, virtual_key=VK_MENU_MASK))
+        self._start_job(lambda: self._send_mask(mask))
+
+    def _send_mask(self, mask: tuple[NativeInput, ...]) -> None:
+        try:
+            self._api.send_inputs(mask)
+        except Exception:
+            # The menu may open on the release; nothing else depends on the mask.
+            LOGGER.info("Клавиша-маска для Alt не отправлена", exc_info=True)
+
     def hold_input(self) -> None:
         """Keep the user's keys back until the next correction has landed."""
 
@@ -698,6 +726,9 @@ class WindowsBackend:
             if self._listener is not None:
                 self._listener(KeyEvent(True, 0, "Pointer", "", ("", ""), -1, 0, native.timestamp))
             return False
+        if native.injected and native.virtual_key == VK_MENU_MASK:
+            # KeySwitch's own mask key (_mask_menu) is no key of the user's.
+            return False
         if not native.injected and not native.replayed:
             with self._hold_lock:
                 prior_release = not native.pressed and native.virtual_key in self._action_prior_keys
@@ -736,6 +767,8 @@ class WindowsBackend:
         )
         repeated_answer = not event.synthetic and event.pressed and event.keycode in self._consumed_keys
         consumed = self._consumes(event)
+        if consumed and event.pressed and not event.synthetic and self._pressed & (ALT_KEYS | SUPER_KEYS):
+            self._mask_menu()
         if consumed == "defer":
             self.hold_input()
             self._deferred_action = native
@@ -896,14 +929,20 @@ class WindowsBackend:
                 # replacement travel in one SendInput call: Windows keeps the
                 # events of a single call together, but lets the user's keys
                 # slip in between separate calls.
-                self._switch_group(target_group)
+                switched = self._switch_group(target_group)
                 if self._holding and (
                     self._pointer_epoch != self._hold_pointer_epoch
                     or (self._api.focused_control() or self._api.foreground_window()) != self._hold_window
                 ):
                     raise WindowsBackendError("Место ввода изменилось до замены; текст не изменён")
+                if switched:
+                    # The keys of the new layout wait for the window's text service (WINDOWS_LAYOUT_SETTLE_SECONDS);
+                    # the user's keys are held meanwhile (hold_input).
+                    self._send_exact(delete_inputs)
+                    late_deleted = True
+                    time.sleep(WINDOWS_LAYOUT_SETTLE_SECONDS)
                 self._send_exact(
-                    delete_inputs
+                    (() if switched else delete_inputs)
                     + replay_inputs
                     + (() if preserve_boundary_layout or kept_tail else boundary_inputs)
                 )
@@ -911,9 +950,11 @@ class WindowsBackend:
                 if kept_tail:
                     # The kept word is typed in its own layout, and the text goes on there.
                     self._switch_group(final_group)
+                    time.sleep(WINDOWS_LAYOUT_SETTLE_SECONDS)
                     self._send_exact(kept_inputs + boundary_inputs)
                 elif preserve_boundary_layout:
                     self._switch_group(literal_group)
+                    time.sleep(WINDOWS_LAYOUT_SETTLE_SECONDS)
                     self._send_exact(boundary_inputs)
                     self._switch_group(target_group)
                 # A partial send is not an all-or-nothing failure; retrying
@@ -1068,10 +1109,13 @@ class WindowsBackend:
 
         Characters typed with KEYEVENTF_UNICODE need no layout, so every character the selection may hold is typed as
         it is; the layout moves to ``final_group`` afterwards. Shift+Left selects the result back, so that another
-        press of a selection hotkey acts on it.
+        press of a selection hotkey acts on it. A field that loses characters typed in a row (SLOW_INPUT_FIELD_CLASSES)
+        gets the result pasted instead, where UI Automation can show it selected (_pasted_selection).
         """
 
-        del selected
+        api = self._api
+        clipboard = api if isinstance(api, WindowsSelectionAPI) else None
+        field = api.focused_control() or api.foreground_window()
         typed = tuple(
             NativeInput(pressed, scan_code=unit, unicode=True)
             for (unit,) in struct.iter_unpack("<H", replacement.encode("utf-16-le"))
@@ -1090,21 +1134,75 @@ class WindowsBackend:
                 or (self._api.focused_control() or self._api.foreground_window()) != self._hold_window
             ):
                 raise SelectionRefused("focus_changed")
-            # One SendInput call keeps the events together: the user's keys cannot land among them.
-            self._send_exact(typed + reselect)
+            if (clipboard is not None and steps is not None and selected.source == SOURCE_UIA
+                    and clipboard.window_class(field) in SLOW_INPUT_FIELD_CLASSES):
+                reselected = self._pasted_selection(clipboard, field, replacement, reselect)
+            else:
+                # One SendInput call keeps the events together: the user's keys cannot land among them.
+                self._send_exact(typed + reselect)
+                reselected = steps is not None
             if final_group is not None:
                 self._switch_group(final_group)
-        return steps is not None
+        return reselected
 
-    def _switch_group(self, group: int) -> None:
+    def _pasted_selection(
+        self, clipboard: WindowsSelectionAPI, field: int, replacement: str, reselect: tuple[NativeInput, ...],
+    ) -> bool:
+        """Paste ``replacement`` with Ctrl+V and select it back, then give the clipboard back what it held.
+
+        The field takes the text when it handles Ctrl+V, at a moment nobody announces: the user's clipboard comes back
+        once UI Automation shows the result selected, or after SELECTION_PASTE_CONFIRM_SECONDS, and only while it still
+        holds the replacement (anything copied meanwhile is the user's). The replacement and the restored data are
+        both kept out of the clipboard history (write_clipboard). A clipboard that cannot be put back as it was is not
+        borrowed at all, and one that could not be put back is an error the status line reports. Says whether the
+        result was seen selected.
+        """
+
+        deadline = time.monotonic() + SELECTION_CLIPBOARD_TIMEOUT_SECONDS
+        saved = _clipboard_call(lambda: clipboard.read_clipboard(CLIPBOARD_SNAPSHOT_MAX_BYTES), deadline)
+        if saved is None:
+            raise SelectionRefused("clipboard_busy")
+        if not saved.complete:
+            raise SelectionRefused("clipboard_unrestorable")
+        ours = ClipboardContents(((CF_UNICODETEXT, (replacement + "\0").encode("utf-16-le")),))
+        if _clipboard_call(lambda: True if clipboard.write_clipboard(ours) else None, deadline) is None:
+            raise SelectionRefused("clipboard_busy")
+        sequence = clipboard.clipboard_sequence()
+        shown = False
+        try:
+            self._send_exact((
+                NativeInput(True, virtual_key=VK_CONTROL), NativeInput(True, virtual_key=VK_V),
+                NativeInput(False, virtual_key=VK_V), NativeInput(False, virtual_key=VK_CONTROL),
+            ) + reselect)
+            reader = self._uia_reader()
+            confirm = time.monotonic() + SELECTION_PASTE_CONFIRM_SECONDS
+            while not shown and time.monotonic() < confirm:
+                time.sleep(SELECTION_CLIPBOARD_POLL_SECONDS)
+                try:
+                    result = self._uia_selection(reader, field)
+                except SelectionRefused:
+                    result = None
+                shown = result is not None and result.text == replacement
+        finally:
+            restored = clipboard.clipboard_sequence() != sequence or _clipboard_call(
+                lambda: True if clipboard.write_clipboard(saved) else None,
+                time.monotonic() + SELECTION_CLIPBOARD_TIMEOUT_SECONDS,
+            ) is not None
+        if not restored:
+            raise WindowsBackendError("Буфер обмена не удалось вернуть: в нём остался вставленный текст")
+        return shown
+
+    def _switch_group(self, group: int) -> bool:
+        """Switch the window's layout to ``group`` and wait for it to say so; whether the layout changed."""
+
         layout = self.layouts[group]
         if self._group_for_layout(self._api.foreground_layout()) == group:
-            return
+            return False
         if not self._api.request_layout(layout):
             raise WindowsBackendError("Окно отклонило запрос смены раскладки")
         deadline = time.monotonic() + WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
             if self._group_for_layout(self._api.foreground_layout()) == group:
-                return
+                return True
             time.sleep(LAYOUT_SWITCH_POLL_SECONDS)
         raise WindowsLayoutSwitchUnconfirmed("Приложение не подтвердило смену раскладки", group)

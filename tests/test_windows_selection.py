@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import itertools
 import struct
 import unittest
+from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
+from fixture_values.clock import WINDOWS_CHORD_LETTER_TIMESTAMP, WINDOWS_CHORD_MODIFIER_TIMESTAMP
+from fixture_values.keys import SCAN_CODE_LEFT_ALT, SCAN_CODE_LEFT_SHIFT, SCAN_CODE_PAUSE
 from fixture_values.keys import FIELD_READER_MATCHING_PROCESS_ID, FIELD_READER_MISMATCHED_PROCESS_ID, WINDOWS_FAKE_HWND
 from fixture_values.platform import RUSSIAN_HKL
 from fixture_values.selection import (
+    SELECTION_FIXTURE_ALWAYS_BUSY_READS,
     SELECTION_FIXTURE_CLIPBOARD_BYTES,
     SELECTION_FIXTURE_CLIPBOARD_FORMAT,
+    SELECTION_FIXTURE_CLOCK_STEP_SECONDS,
     SELECTION_FIXTURE_OTHER_WINDOW,
     SELECTION_FIXTURE_SEQUENCE_BEFORE,
     SELECTION_FIXTURE_SEVERAL_SELECTIONS,
@@ -22,15 +28,22 @@ from keyswitch.constants.windows import (
     UIA_EMBEDDED_OBJECT_CHARACTER,
     UIA_IS_READ_ONLY_ATTRIBUTE_ID,
     VK_CONTROL,
+    VK_LMENU,
+    VK_LSHIFT,
+    VK_MENU_MASK,
+    VK_PAUSE,
     VK_INSERT,
     VK_LEFT,
     VK_SCROLL,
     VK_SHIFT,
+    VK_V,
 )
 from keyswitch.selection_commands import SOURCE_CLIPBOARD, SOURCE_UIA, SelectedText, SelectionRefused
+from keyswitch.constants.windows import CF_UNICODETEXT
 from keyswitch.windows_backend import (
     ClipboardContents,
     NativeInput,
+    NativeKeyEvent,
     WindowsBackend,
     WindowsBackendError,
     WindowsSelectionAPI,
@@ -293,6 +306,130 @@ class WindowsTypingTests(unittest.TestCase):
         self.api.send_count = 0
         with self.assertRaises(WindowsBackendError):
             self.backend.replace_selection(SelectedText("x", SOURCE_UIA), "y", None)
+
+
+PASTE = (NativeInput(True, virtual_key=VK_CONTROL), NativeInput(True, virtual_key=VK_V),
+         NativeInput(False, virtual_key=VK_V), NativeInput(False, virtual_key=VK_CONTROL))
+LEFT = (NativeInput(True, virtual_key=VK_LEFT, extended=True), NativeInput(False, virtual_key=VK_LEFT, extended=True))
+
+
+class ShowingReader(FakeReader):
+    """UI Automation of a field that shows the pasted result selected after ``late`` looks, and runs ``on_read``."""
+
+    def __init__(self, shown: str, late: int = 0) -> None:
+        super().__init__(None)
+        self.shown, self.late = shown, late
+        self.on_read: Callable[[], None] = lambda: None
+
+    def read_selection(self, window: int) -> SelectedText | None:
+        self.windows.append(window)
+        self.on_read()
+        if self.late:
+            self.late -= 1
+            return None
+        return SelectedText(self.shown, SOURCE_UIA)
+
+
+class WindowsPastingTests(unittest.TestCase):
+    """Notepad of Windows 11 (SLOW_INPUT_FIELD_CLASSES) gets the result pasted, and the clipboard back."""
+
+    def setUp(self) -> None:
+        self.api = FakeClipboardAPI()
+        self.api.window_classes[WINDOWS_FAKE_HWND] = "RichEditD2DPT"
+        for target in ("keyswitch.windows_backend.time.sleep", "keyswitch.windows_backend.time.monotonic"):
+            clock = patch(target, side_effect=None if target.endswith("sleep") else itertools.count(0, SELECTION_FIXTURE_CLOCK_STEP_SECONDS))
+            clock.start()
+            self.addCleanup(clock.stop)
+        self.ours = ClipboardContents(((CF_UNICODETEXT, "пр\0".encode("utf-16-le")),))
+
+    def test_the_result_is_pasted_selected_back_and_the_clipboard_given_back(self) -> None:
+        reader = ShowingReader("пр", late=1)
+        self.assertTrue(backend(self.api, reader).replace_selection(SelectedText("gh", SOURCE_UIA), "пр", 1))
+        self.assertEqual(self.api.sent, [PASTE + (NativeInput(True, virtual_key=VK_SHIFT), *LEFT, *LEFT,
+                                                  NativeInput(False, virtual_key=VK_SHIFT))])
+        self.assertEqual(self.api.written, [self.ours, SAVED])
+        self.assertEqual(reader.windows, [WINDOWS_FAKE_HWND, WINDOWS_FAKE_HWND])
+        self.assertEqual(self.api.requests, [RUSSIAN_HKL])
+
+    def test_a_result_never_shown_still_gives_the_clipboard_back_and_is_not_called_selected(self) -> None:
+        reader = ShowingReader("gh")
+        self.assertFalse(backend(self.api, reader).replace_selection(SelectedText("gh", SOURCE_UIA), "пр", None))
+        self.assertEqual(self.api.written, [self.ours, SAVED])
+        refusing = FakeReader(SelectionRefused("read_only"))
+        self.assertFalse(backend(self.api, refusing).replace_selection(SelectedText("gh", SOURCE_UIA), "пр", None))
+
+    def test_something_copied_meanwhile_is_the_user_s_and_stays(self) -> None:
+        reader = ShowingReader("пр")
+
+        def copied() -> None:
+            self.api.sequence += 1
+        reader.on_read = copied
+        self.assertTrue(backend(self.api, reader).replace_selection(SelectedText("gh", SOURCE_UIA), "пр", None))
+        self.assertEqual(self.api.written, [self.ours])
+
+    def test_a_clipboard_that_cannot_be_kept_borrowed_or_given_back(self) -> None:
+        subject = backend(self.api, ShowingReader("пр"))
+        self.api.saved = ClipboardContents((), complete=False)
+        for saved, busy, reason in ((ClipboardContents((), complete=False), 0, "clipboard_unrestorable"),
+                                    (SAVED, SELECTION_FIXTURE_ALWAYS_BUSY_READS, "clipboard_busy")):
+            self.api.saved, self.api.busy_reads = saved, busy
+            with self.assertRaises(SelectionRefused) as caught:
+                subject.replace_selection(SelectedText("gh", SOURCE_UIA), "пр", None)
+            self.assertEqual(caught.exception.reason, reason)
+        self.api.busy_reads = 0
+        self.api.restores = False
+        with self.assertRaises(SelectionRefused) as refused:
+            subject.replace_selection(SelectedText("gh", SOURCE_UIA), "пр", None)
+        self.assertEqual(refused.exception.reason, "clipboard_busy")
+        self.assertEqual(self.api.sent, [])
+
+    def test_a_clipboard_not_given_back_is_an_error(self) -> None:
+        reader = ShowingReader("пр")
+        subject = backend(self.api, reader)
+        writes = iter((True, False))
+        self.api.write_clipboard = lambda contents: next(writes, False)  # type: ignore[method-assign]
+        with self.assertRaises(WindowsBackendError):
+            subject.replace_selection(SelectedText("gh", SOURCE_UIA), "пр", None)
+
+    def test_a_selection_read_from_the_clipboard_or_another_field_is_typed(self) -> None:
+        backend(self.api, ShowingReader("пр")).replace_selection(SelectedText("gh", SOURCE_CLIPBOARD), "пр", None)
+        self.api.window_classes[WINDOWS_FAKE_HWND] = "Edit"
+        backend(self.api, ShowingReader("пр")).replace_selection(SelectedText("gh", SOURCE_UIA), "пр", None)
+        self.assertEqual(self.api.written, [])
+        self.assertTrue(all(sent[0].unicode for sent in self.api.sent))
+
+
+class WindowsMenuMaskTests(unittest.TestCase):
+    """Alt+Pause: the window must not see Alt go down and up alone, or it opens its menu bar."""
+
+    def setUp(self) -> None:
+        self.api = FakeClipboardAPI()
+        self.backend = backend(self.api)
+        self.backend._start_job = lambda job: job()
+        self.events: list[str] = []
+        self.backend.start(lambda event: self.events.append(event.key_name))
+        self.addCleanup(self.backend.stop)
+        self.backend.set_key_filter(lambda event: event.key_name == "Pause")
+        assert self.api.hook_listener is not None
+        self.hook = self.api.hook_listener
+
+    def chord(self, modifier: int, scan_code: int) -> bool:
+        self.hook(NativeKeyEvent(True, modifier, scan_code, False, False, WINDOWS_CHORD_MODIFIER_TIMESTAMP))
+        return self.hook(NativeKeyEvent(True, VK_PAUSE, SCAN_CODE_PAUSE, False, False, WINDOWS_CHORD_LETTER_TIMESTAMP))
+
+    def test_a_key_kept_from_the_window_under_alt_presses_the_mask_key_which_no_one_sees(self) -> None:
+        self.assertTrue(self.chord(VK_LMENU, SCAN_CODE_LEFT_ALT))
+        mask = (NativeInput(True, virtual_key=VK_MENU_MASK), NativeInput(False, virtual_key=VK_MENU_MASK))
+        self.assertEqual(self.api.sent, [mask])
+        self.assertFalse(self.hook(NativeKeyEvent(True, VK_MENU_MASK, 0, False, True, WINDOWS_CHORD_LETTER_TIMESTAMP)))
+        self.assertEqual(self.events, ["Alt_L", "Pause"])
+
+    def test_without_alt_nothing_is_pressed_and_a_failed_mask_is_survived(self) -> None:
+        self.assertTrue(self.chord(VK_LSHIFT, SCAN_CODE_LEFT_SHIFT))
+        self.assertEqual(self.api.sent, [])
+        self.api.send_inputs = MagicMock(side_effect=OSError)  # type: ignore[method-assign]
+        with self.assertLogs("keyswitch.windows_backend", level="INFO"):
+            self.assertTrue(self.chord(VK_LMENU, SCAN_CODE_LEFT_ALT))
 
 
 class WindowsUiAutomationTests(unittest.TestCase):

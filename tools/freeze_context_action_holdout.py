@@ -40,9 +40,9 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from keyswitch.constants.corpus import (
     COMMANDS_PER_ALIAS_FAMILY,
-    DEFAULT_MAX_DOCUMENTS_PER_SOURCE,
     DEFAULT_MAX_SENTENCES_PER_DOCUMENT,
     DETERMINISTIC_DRAW_HEX_DIGITS,
+    HOLDOUT_MAX_DOCUMENTS_PER_SOURCE,
     MAX_TATOEBA_SENTENCE_CHARACTERS,
     TATOEBA_EXPORT_COLUMNS,
     TATOEBA_SAMPLE_PER_MILLE,
@@ -964,7 +964,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--extra-exposure", type=Path, action="append", default=[])
-    parser.add_argument("--max-documents", type=int, default=DEFAULT_MAX_DOCUMENTS_PER_SOURCE)
+    parser.add_argument("--max-documents", type=int, default=HOLDOUT_MAX_DOCUMENTS_PER_SOURCE)
     parser.add_argument("--max-sentences-per-document", type=int, default=DEFAULT_MAX_SENTENCES_PER_DOCUMENT)
     args = parser.parse_args(argv)
     technical = [name for name, value in (("sid", args.sid_directory), ("arch", args.arch_directory),

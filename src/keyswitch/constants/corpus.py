@@ -50,8 +50,12 @@ PRIOR_CONTEXT_TSV_FIELD_COUNT: Final = 4
 PRIOR_CONTEXT_TSV_TEXT_FIELD_INDEX: Final = 2
 # A document holding more than half of all documents' rows is a conflict.
 MAJORITY_DIVISOR: Final = 2
-# Documents sampled per source by default when a corpus or holdout is frozen.
+# Documents sampled per source by default when a corpus is frozen.
 DEFAULT_MAX_DOCUMENTS_PER_SOURCE: Final = 2000
+# Documents sampled per source by default when a holdout (a sealed TEST) is frozen: four times the corpus
+# default, so that the sequence test can fill SEQUENCE_DOCUMENT_CAP_PER_GROUP (protocol version 4); most
+# sampled rows are quarantined as families earlier tests read.
+HOLDOUT_MAX_DOCUMENTS_PER_SOURCE: Final = 8000
 # Sentences taken per sampled document by default when a context-action corpus, fitting set or
 # holdout is frozen.
 DEFAULT_MAX_SENTENCES_PER_DOCUMENT: Final = 12

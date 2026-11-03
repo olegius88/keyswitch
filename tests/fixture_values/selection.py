@@ -24,3 +24,6 @@ SELECTION_FIXTURE_EVENTS_PER_SHIFTED_TAP: Final = 4
 SELECTION_FIXTURE_SCROLL_LOCK_KEYCODE: Final = 78
 # More than one selection in a field (AT-SPI counts them).
 SELECTION_FIXTURE_SEVERAL_SELECTIONS: Final = 2
+# Step of the fake clock of the Windows paste tests, and clipboard reads that answer busy for longer than any wait.
+SELECTION_FIXTURE_CLOCK_STEP_SECONDS: Final = 0.25
+SELECTION_FIXTURE_ALWAYS_BUSY_READS: Final = 256

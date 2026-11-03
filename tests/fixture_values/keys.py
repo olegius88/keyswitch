@@ -252,3 +252,6 @@ WINDOWS_TEXT_CONTROL_THREAD_ID: Final = 4343
 ASYNC_KEY_PRESSED_SINCE_BIT: Final = 1
 # The primary mouse button, as X11 numbers it.
 X11_PRIMARY_BUTTON: Final = 1
+# Scan codes of the left Alt and of Pause (set 1) for the hook events of the Windows menu-mask tests.
+SCAN_CODE_LEFT_ALT: Final = 0x38
+SCAN_CODE_PAUSE: Final = 0x45

@@ -62,11 +62,17 @@ VK_OEM_7: Final = 0xDE
 # A key event that carries a Unicode character in its scan code field (SendInput with
 # KEYEVENTF_UNICODE): remote control and on-screen keyboards type with it.
 VK_PACKET: Final = 0xE7
+# A virtual key that types nothing ("Unassigned", Virtual-Key Codes, Microsoft Learn), pressed while Alt or Win is held
+# under a hotkey key KeySwitch keeps from the window: the window then sees a key between that modifier's press and its
+# release, which would otherwise open its menu bar (the Start menu for Win). AutoHotkey calls such a key the menu mask
+# key (A_MenuMaskKey) and names vkE8 as a good choice.
+VK_MENU_MASK: Final = 0xE8
 # Alphanumeric keys: winuser.h defines no VK_0.. VK_9 / VK_A.. VK_Z constants because their values
 # equal the ASCII digits and upper-case letters.
 VK_0: Final = 0x30
 VK_9: Final = 0x39
 VK_A: Final = 0x41
+VK_V: Final = 0x56
 VK_Z: Final = 0x5A
 # Scroll Lock, whose name a hotkey can use (Punto Switcher transliterates the selection with Alt+Scroll Lock).
 VK_SCROLL: Final = 0x91
@@ -87,6 +93,10 @@ UIA_EDIT_CONTROL_TYPE_ID: Final = 50004
 # IslandWindow.cpp of microsoft/terminal). Typing does not replace text selected in a console, and Ctrl+C there
 # stops the running program when nothing is selected, so the selection hotkeys stay out of them.
 CONSOLE_WINDOW_CLASSES: Final = frozenset(("ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS"))
+# The field of Notepad of Windows 11. Its text service takes keys sent in one burst asynchronously and loses some when
+# they replace a selection: `привет мир` typed over one came out as `привет ` (Windows 11 VM, 03.11.2026), and pasted it
+# was whole. A selection hotkey pastes its result there (WindowsBackend._pasted_selection).
+SLOW_INPUT_FIELD_CLASSES: Final = frozenset(("RichEditD2DPT",))
 # "The maximum length for lpszClassName is 256" (WNDCLASSW): GetClassNameW needs no longer buffer than this and its
 # terminating zero.
 WINDOW_CLASS_NAME_MAX_CHARACTERS: Final = 256

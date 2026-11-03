@@ -498,6 +498,38 @@ class EngineTypoTests(unittest.TestCase):
         planned = self.events(logs.output, "typo_correction_planned")
         self.assertIsInstance(planned[0]["margin"], float)
 
+    def test_an_undo_given_up_leaves_the_correction_and_the_word_is_not_the_user_s_own(self) -> None:
+        self.type("клавиаутра ")
+        self.assertEqual(self.backend.text, "клавиатура ")
+        self.engine._schedule_undo(Z_KEYCODE)
+        # A modifier comes up after the undo key: the undo is given up, and the text stays corrected.
+        self.engine._events.put_nowait(replace(plain_key("Control_L", SYNTHETIC_KEYCODE_BASE, 1, pressed=False),
+                                               synthetic=False))
+        with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+            self.engine._handle(plain_key("z", Z_KEYCODE, 1, pressed=False))
+        self.assertEqual(self.events(logs.output, "correction_aborted")[0]["reason"], "unsafe_input_after_word")
+        self.assertEqual(self.backend.text, "клавиатура ")
+        self.assertNotIn("клавиаутра", self.engine._personal)
+        self.assertEqual(self.events(logs.output, "personal_word_added"), [])
+
+    def test_a_layout_the_user_chose_keeps_the_word_and_its_slip_and_capitals_are_still_fixed(self) -> None:
+        self.settings.set("detection.respect_manual_layout", True)
+        for before, word, want in (("a ", "клавиаутра ", "a клавиатура "), ("a ", "ПРивет ", "a Привет "),
+                                   ("и ", "ghbdtn ", "и ghbdtn ")):
+            group = 0 if word.isascii() else 1
+            self.editor = TypoEditor()
+            self.backend = self.editor
+            self.backend.group = 1 - group
+            self.engine = KeySwitchEngine(self.settings, self.history, self.backend)
+            self.type(before)
+            with self.assertLogs("keyswitch.engine", level="INFO") as logs:
+                self.engine._observe_group(group, source="keystroke")
+                self.backend.group = group
+                self.type(word)
+            self.assertEqual(self.backend.text, want)
+            evaluation = self.events(logs.output, "word_evaluation")[-1]
+            self.assertEqual(evaluation["skipped_reason"], "manual_layout_protected")
+
     def test_a_capital_is_corrected_only_where_a_sentence_begins(self) -> None:
         self.type("Клавиаутра и Клавиаутра. Клавиаутра ")
         self.assertEqual(self.backend.text, "Клавиатура и Клавиаутра. Клавиатура ")

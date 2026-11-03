@@ -65,7 +65,7 @@ DEVCHAT_FIELDS = frozenset({"protocol", "bench", "messages_sha256", "seed", "mes
 DEVCHAT_PAIR_FIELDS = frozenset({"model_version", "sha256"})
 DEVCHAT_COUNT_FIELDS = frozenset({"n", "ok", "errors"})
 DEVCHAT_DISCORDANCE_FIELDS = frozenset({"gains", "losses"})
-AUDITED_SEQUENCE_PROTOCOL_SHA256 = "59b9e6e9d4ca222fb732d9c59d9aac68b6081867fdbfe119f3aa7f7547636fab"
+AUDITED_SEQUENCE_PROTOCOL_SHA256 = "5a16cb2d18528fad2faad36f4016e271f445b5b09ceadaa36d07c21cb3115e1b"
 PROTOCOL: dict[str, object] = {
     "version": CONTEXT_ACTION_SEQUENCE_PROTOCOL_VERSION,
     "document_cap_per_group": SEQUENCE_DOCUMENT_CAP_PER_GROUP, "profiles": list(PROFILES),

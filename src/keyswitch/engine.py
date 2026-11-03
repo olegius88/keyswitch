@@ -1934,6 +1934,9 @@ class KeySwitchEngine:
             self._last_committed_stale = False
         self._symbol_strokes = []
         early_switch_origin = self._early_switch_origin
+        # The layout the user chose, as against an early switch the user undid: both keep the word's layout.
+        chosen_layout = (bool(self.settings.get("detection.respect_manual_layout", True))
+                         and self._manual_layout_group == source_group and not self._early_switch_undone)
         manual_layout_selected = self._word_protected(source_group)
         # An explicit layout selection is the strongest available user intent.
         # It protects exactly one word even when an older learned rule exists.
@@ -2137,6 +2140,22 @@ class KeySwitchEngine:
         else:
             self._log_context_wait("context_wait_cancelled", waiting, "analysis_skipped")
             self._remember_context(application, source_group, typed[:head] + strokes)
+            if (chosen_layout and enabled and trigger_enabled and segmentation_certain and not caret_unknown
+                    and not excluded and self._pending is None and early_switch_origin is None
+                    and not (head or trailing or signs or mention) and shown is None
+                    and not (self._insertion is not None and self._insertion.inside_word)):
+                # The layout the user chose keeps the word in it, but a slip in the word and Shift held one letter
+                # too long belong to no layout: they are fixed as in a word the model kept (`нромально`, `ПРивет`
+                # typed right after switching to the Russian layout).
+                typo = self._typo_plan(CorrectionPlan(
+                    strokes, None if boundary.deferred else boundary, source_group, source_group, original, original,
+                    0.0, application, True, context_field=self._context_field_id()), strokes)
+                if typo is not None:
+                    self._pending = typo
+                    self._learning_prompt_after = None
+                    self._pending_trigger_keycode = boundary.keycode
+                else:
+                    self._fix_double_capitals(plan, boundary)
             # A token the boundary model could not split was not decided at all;
             # the next word may still show what it was (`dc\`` before `тот`).
             if (enabled and trigger_enabled and not manual_layout_protected and not caret_unknown
@@ -5438,12 +5457,6 @@ class KeySwitchEngine:
 
         self._log_pending_dropped("replaced_by_undo")
         self._pending = plan
-        if plan.mode == "undo" and plan.replaced_strokes:
-            # A typo correction typed other keys than the user's: its undo types those back (_undo_of), and the word is
-            # the user's own from now on (personal_words).
-            word = self._text_for_group(plan.strokes, plan.source_group)
-            self._personal.add(word)
-            self._technical_event("personal_word_added", reason="correction_undone", letters=len(word))
         # Undo puts the text back and teaches nothing; a rule that keeps the
         # word comes only from the rule window.
         self._learning_prompt_after = None
@@ -5720,6 +5733,13 @@ class KeySwitchEngine:
             confidence=round(plan.confidence, LOGGED_SCORE_DECIMALS),
             boundary=(None if plan.boundary is None else plan.boundary.key_name),
         )
+        if plan.mode == "undo" and plan.replaced_strokes:
+            # A typo correction typed other keys than the user's: its undo typed those back (_undo_of), and the word is
+            # the user's own from now on (personal_words). Not before the undo lands: one given up (a modifier still
+            # coming up, another window) leaves the correction on screen, and the word would stay uncorrected after.
+            word = self._text_for_group(plan.strokes, plan.source_group)
+            self._personal.add(word)
+            self._technical_event("personal_word_added", reason="correction_undone", letters=len(word))
         if plan.mode in {"mention_shown", "mention_hidden"}:
             # Only the head changed; the word being typed goes on as it was.
             self._mention_shown = self._symbol_strokes[0] if plan.mode == "mention_shown" else None
