@@ -3,8 +3,8 @@
 //!
 //! One thread, the main one, runs the message loop and owns every window and the tray. Other threads (the engine's worker,
 //! the model loader, the settings store) hand it work through `post`, which queues a closure and wakes the loop with a
-//! message. The settings pages are not here yet: the window the tray opens is a small stand-in of the same class, so that
-//! a second start still finds the running program.
+//! message. The window itself, its pages, the learning prompt and the rule window are in `settings_window`,
+//! `learning_prompt` and `rule_editor_dialog`; this file wires them to the engine, the stores and the tray.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -16,35 +16,35 @@ use std::time::Duration;
 
 use ks_config::config::SettingsStore;
 use ks_config::history::{HistoryStore, history_limit};
-use ks_config::indicator::{layout_label, normalize_indicator_style};
+use ks_config::indicator::normalize_indicator_style;
 use ks_config::logsetup::{self, LocalTime};
 use ks_engine::context_access::ReaderFactory;
 use ks_engine::engine_loader::{Build, DeferredEngine, Post};
+use ks_backend::backend::{InputBackend, ScreenAnchor};
+use ks_engine::rule_editor::draft_from_prompt;
 use ks_engine::{CorrectionPlan, EngineSnapshot, KeySwitchEngine, LearningPrompt, engine::default_learning_store};
 use serde_json::Value;
 use windows_sys::Wdk::System::SystemServices::RtlGetVersion;
-use windows_sys::Win32::Foundation::{GENERIC_WRITE, HWND, INVALID_HANDLE_VALUE, LPARAM, LRESULT, RECT, WPARAM};
-use windows_sys::Win32::Graphics::Gdi::{CreateFontW, GetDC, GetDeviceCaps, LOGPIXELSX, ReleaseDC};
+use windows_sys::Win32::Foundation::{GENERIC_WRITE, HWND, INVALID_HANDLE_VALUE, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::Storage::FileSystem::{CreateFileW, FILE_SHARE_WRITE, OPEN_EXISTING, WriteFile};
 use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE};
-use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::SystemInformation::{GetLocalTime, OSVERSIONINFOW};
 use windows_sys::Win32::System::Diagnostics::Debug::MessageBeep;
 use windows_sys::Win32::System::Threading::ExitProcess;
+use windows_sys::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    AdjustWindowRectEx, BS_PUSHBUTTON, ChangeWindowMessageFilterEx, CreateWindowExW, DefWindowProcW, DestroyWindow,
-    DispatchMessageW, GetMessageW, IsDialogMessageW, KillTimer, LoadCursorW, MB_OK, MSG, MSGFLT_ALLOW, PostMessageW,
-    PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SW_HIDE, SW_RESTORE, SetForegroundWindow, SetProcessDPIAware,
-    SetTimer, SetWindowTextW, ShowWindow, TranslateMessage, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_LBUTTONUP, WM_RBUTTONUP,
-    WM_SETFONT, WM_TIMER, WNDCLASSW, WS_CAPTION, WS_CHILD, WS_EX_WINDOWEDGE, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU,
-    WS_TABSTOP, WS_VISIBLE, IDC_ARROW,
+    ChangeWindowMessageFilterEx, DestroyWindow, DispatchMessageW, GetMessageW, KillTimer, MB_OK, MSG, MSGFLT_ALLOW,
+    PostMessageW, PostQuitMessage, RegisterWindowMessageW, SW_HIDE, SW_RESTORE, SetForegroundWindow, SetTimer, ShowWindow,
+    TranslateMessage, WM_APP, WM_CLOSE, WM_DESTROY, WM_LBUTTONUP, WM_RBUTTONUP, WM_TIMER,
 };
 
 use crate::constants::{
-    BACKEND_LABEL, BASE_DPI, ENGINE_STOP_WAIT_SECONDS, SETTINGS_BUTTON_HEIGHT_PIXELS, SETTINGS_BUTTON_WIDTH_PIXELS,
-    SETTINGS_FONT_HEIGHT_PIXELS, SETTINGS_OPEN_FOLDER_LABEL, SETTINGS_WINDOW_CLASS, SETTINGS_WINDOW_CLIENT_HEIGHT_PIXELS,
-    SETTINGS_WINDOW_CLIENT_WIDTH_PIXELS, SETTINGS_WINDOW_MARGIN_PIXELS, SETTINGS_WINDOW_TITLE, SMOKE_UI_QUIT_AFTER_MS,
+    BACKEND_LABEL, ENGINE_STOP_WAIT_SECONDS, LEARNING_PROMPT_SHOW_DELAY_MS, SMOKE_UI_QUIT_AFTER_MS, UPDATE_CHECK_INITIAL_DELAY_MS,
+    UPDATE_CHECK_INTERVAL_MS,
 };
+use crate::learning_prompt;
+use crate::settings_window::{self, Services};
+use crate::windows_ui_model::{NoUpdates, UpdateController, UpdatePhase, UpdateSnapshot};
 use crate::tray::Tray;
 use crate::tray_model::TrayAction;
 use crate::windows_app::{Arguments, VERSION, resource_dir};
@@ -52,13 +52,14 @@ use crate::windows_context::WindowsFieldReader;
 use crate::windows_backend::WindowsBackend;
 use crate::windows_instance::WindowsSingleInstance;
 use crate::windows_native::wide;
-use crate::windows_system::{WindowsAutostartManager, open_directory};
+use crate::windows_system::{WindowsApplicationCatalog, WindowsAutostartManager};
 
 const LOGGER: &str = "keyswitch.desktop_ui";
 const WM_POSTED: u32 = WM_APP + 1;
 const WM_TRAY: u32 = WM_APP + 2;
-const ID_OPEN_FOLDER: usize = 1001;
 const SMOKE_TIMER_ID: usize = 1;
+const PROMPT_TIMER_ID: usize = 2;
+const UPDATE_TIMER_ID: usize = 3;
 
 type Posted = Box<dyn FnOnce() + Send>;
 
@@ -135,7 +136,7 @@ fn platform_description() -> String {
     format!("Windows-{release}-{major}.{minor}.{build}-SP0")
 }
 
-/// The clock and system description of the log, the log sink of this crate, and the process's DPI awareness.
+/// The clock and system description of the log, the log sink of this crate, and the process's DPI awareness (per monitor).
 pub fn install_platform() {
     logsetup::set_local_clock(local_time);
     logsetup::set_platform_description(&platform_description());
@@ -146,8 +147,9 @@ pub fn install_platform() {
         };
         logsetup::log(level, logger, message);
     });
-    // SAFETY: a process-wide switch with no arguments.
-    unsafe { SetProcessDPIAware() };
+    // SAFETY: a process-wide switch; the manifest asks for the same awareness, and a refusal because it is already set is
+    // harmless.
+    unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
 }
 
 /// Standard output or error. A windowed program has none of its own unless it was started with them redirected, so a
@@ -212,15 +214,18 @@ pub fn run_with_instance(arguments: Arguments) -> i32 {
 
 struct App {
     window: HWND,
-    text: HWND,
     settings: Arc<SettingsStore>,
     history: Arc<HistoryStore>,
     engine: Arc<DeferredEngine>,
+    updates: Arc<dyn UpdateController>,
+    enable_updates: bool,
     autostart: Option<WindowsAutostartManager>,
     tray: RefCell<Option<Tray>>,
-    error_text: RefCell<String>,
-    snapshot: RefCell<EngineSnapshot>,
     closing: Cell<bool>,
+    /// The offer waiting for its short delay before it is shown.
+    pending_prompt: RefCell<Option<(LearningPrompt, Option<ScreenAnchor>)>>,
+    prompt_callbacks: Rc<learning_prompt::Callbacks>,
+    last_update_notification: RefCell<String>,
 }
 
 fn setting_bool(settings: &SettingsStore, path: &str, default: bool) -> bool {
@@ -236,6 +241,8 @@ fn setting_bool(settings: &SettingsStore, path: &str, default: bool) -> bool {
 
 impl App {
     fn present(&self) {
+        // Windows does not tell a window that the system went light or dark: one that follows it asks again when shown.
+        settings_window::refresh_theme();
         // SAFETY: the window is ours; SW_RESTORE shows a hidden or minimised window and activates it.
         unsafe {
             ShowWindow(self.window, SW_RESTORE);
@@ -249,38 +256,7 @@ impl App {
     }
 
     fn set_error(&self, text: &str) {
-        *self.error_text.borrow_mut() = text.to_owned();
-        self.refresh_text();
-    }
-
-    /// The stand-in settings window: the engine's status, the version, and where the settings file is.
-    fn refresh_text(&self) {
-        let snapshot = self.snapshot.borrow();
-        let status = if snapshot.enabled && snapshot.running {
-            "Автокоррекция включена"
-        } else if !snapshot.enabled {
-            "Автокоррекция на паузе"
-        } else {
-            "Движок остановлен"
-        };
-        let mut lines = vec![
-            status.to_owned(),
-            format!("Раскладка: {}", layout_label(snapshot.current_group)),
-            format!("Исправлений: {}", snapshot.correction_count),
-            snapshot.last_action.clone(),
-        ];
-        let error = self.error_text.borrow();
-        let error = if error.is_empty() { snapshot.last_error.as_str() } else { error.as_str() };
-        if !error.is_empty() {
-            lines.push(error.to_owned());
-        }
-        lines.push(String::new());
-        lines.push(format!("KeySwitch {VERSION}"));
-        lines.push(format!("Файл настроек: {}", self.settings.path.display()));
-        lines.push("Страницы настроек пока недоступны.".to_owned());
-        let text = wide(&lines.join("\r\n"));
-        // SAFETY: the control is ours and the text is NUL-terminated.
-        unsafe { SetWindowTextW(self.text, text.as_ptr()) };
+        settings_window::set_error(text);
     }
 
     fn apply_snapshot(&self, snapshot: EngineSnapshot) {
@@ -290,8 +266,82 @@ impl App {
             state.enabled = snapshot.enabled;
             tray.set_state(state);
         }
-        *self.snapshot.borrow_mut() = snapshot;
-        self.refresh_text();
+        settings_window::apply_snapshot(&snapshot);
+    }
+
+    fn show_page_and_present(&self, name: &str) {
+        settings_window::show_page(name);
+        self.present();
+    }
+
+    /// `_apply_update_snapshot`'s part that is not drawing: a found update is announced once through the tray.
+    fn apply_update_snapshot(&self, snapshot: UpdateSnapshot) {
+        settings_window::apply_update_snapshot(&snapshot);
+        if snapshot.phase == UpdatePhase::Available && *self.last_update_notification.borrow() != snapshot.available_version {
+            *self.last_update_notification.borrow_mut() = snapshot.available_version.clone();
+            if setting_bool(&self.settings, "general.notifications", true)
+                && let Some(tray) = self.tray.borrow().as_ref()
+            {
+                tray.notify("Доступно обновление KeySwitch", &snapshot.message);
+            }
+        }
+    }
+
+    /// `_sync_update_schedule`: one timer, for the first check after the start and then for each one after it.
+    fn sync_update_schedule(&self, initial: bool) {
+        // SAFETY: the timer belongs to the window made by this thread; killing one that is not set is harmless.
+        unsafe { KillTimer(self.window, UPDATE_TIMER_ID) };
+        let requested = self.enable_updates && !self.closing.get() && setting_bool(&self.settings, "updates.check_automatically", true);
+        if requested {
+            let delay = if initial { UPDATE_CHECK_INITIAL_DELAY_MS } else { UPDATE_CHECK_INTERVAL_MS };
+            // SAFETY: as above.
+            unsafe { SetTimer(self.window, UPDATE_TIMER_ID, delay, None) };
+        }
+    }
+
+    fn automatic_update_check(&self) {
+        // SAFETY: as above.
+        unsafe { KillTimer(self.window, UPDATE_TIMER_ID) };
+        self.updates.check(true, setting_bool(&self.settings, "updates.install_automatically", true));
+        self.sync_update_schedule(false);
+    }
+
+    /// `_schedule_learning_prompt`: the offer is shown a moment after the correction that raised it.
+    fn schedule_learning_prompt(&self, prompt: LearningPrompt, anchor: Option<ScreenAnchor>) {
+        *self.pending_prompt.borrow_mut() = Some((prompt, anchor));
+        // SAFETY: the timer belongs to the window made by this thread; setting it again restarts it.
+        unsafe { SetTimer(self.window, PROMPT_TIMER_ID, LEARNING_PROMPT_SHOW_DELAY_MS, None) };
+    }
+
+    /// `_apply_learning_prompt`: `None` takes the card away; an offer the engine no longer holds is not shown.
+    fn apply_learning_prompt(&self, prompt: Option<(LearningPrompt, Option<ScreenAnchor>)>) {
+        let Some((prompt, anchor)) = prompt else {
+            // SAFETY: as above.
+            unsafe { KillTimer(self.window, PROMPT_TIMER_ID) };
+            self.pending_prompt.borrow_mut().take();
+            if let Some((window, callbacks)) = learning_prompt::hide()
+                && window.is_some()
+            {
+                (callbacks.restore)(window);
+            }
+            return;
+        };
+        if self.engine.learning_prompt().as_ref() != Some(&prompt) {
+            return;
+        }
+        learning_prompt::show(&prompt, anchor, self.prompt_callbacks.clone());
+    }
+
+    /// The installer was started by the update manager's request: the program ends so that it can replace it, or the
+    /// manager is told it failed.
+    fn install_launched(&self, result: Result<(), String>) {
+        match result {
+            Ok(()) => self.shutdown(),
+            Err(error) => {
+                logsetup::error(LOGGER, &format!("Не удалось запустить установщик KeySwitch: {error}"));
+                self.updates.installation_failed(&error);
+            }
+        }
     }
 
     fn announce_correction(&self, plan: &CorrectionPlan) {
@@ -366,13 +416,16 @@ impl App {
     }
 
     fn apply_setting(&self, path: &str, value: &Value) {
+        settings_window::apply_setting(path, value);
         match path {
             "*" => {
                 self.history.set_limit(history_limit(&self.settings.get("history.limit").unwrap_or(Value::Null)));
                 self.sync_autostart(false);
                 self.sync_tray();
                 self.sync_tray_state();
+                self.sync_update_schedule(true);
             }
+            "updates.check_automatically" => self.sync_update_schedule(true),
             "general.autostart" | "general.start_hidden" => self.sync_autostart(true),
             "appearance.show_indicator" => self.sync_tray(),
             "appearance.indicator_style" | "enabled" | "general.sound" | "general.notifications" => self.sync_tray_state(),
@@ -390,8 +443,10 @@ impl App {
 
     fn tray_action(&self, action: TrayAction) {
         match action {
-            // The pages arrive with the settings window: until then each of these opens the stand-in.
-            TrayAction::ShowSettings | TrayAction::ShowHistory | TrayAction::ShowExclusions | TrayAction::ShowAbout => self.present(),
+            TrayAction::ShowSettings => self.present(),
+            TrayAction::ShowHistory => self.show_page_and_present("history"),
+            TrayAction::ShowExclusions => self.show_page_and_present("exclusions"),
+            TrayAction::ShowAbout => self.show_page_and_present("about"),
             TrayAction::SwitchLayout => {
                 if !self.engine.select_alternate_group() {
                     let error = self.engine.snapshot().last_error;
@@ -435,6 +490,7 @@ impl App {
             return;
         }
         CLOSING.store(true, Ordering::SeqCst);
+        self.sync_update_schedule(false);
         let (done, finished) = std::sync::mpsc::channel();
         let engine = self.engine.clone();
         let stopper = std::thread::Builder::new().name("KeySwitchEngineStop".to_owned()).spawn(move || {
@@ -454,34 +510,41 @@ impl App {
 
 // ---------------------------------------------------------------------------------------------------------- the window
 
-unsafe extern "system" fn window_proc(window: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+/// The messages of the frame that are the application's: the queue of posted work, the tray, the timers, closing, and the
+/// shell's notice that Explorer restarted. The rest is the settings window's own.
+fn host_message(window: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
     match message {
         WM_POSTED => {
             drain_posted();
-            0
+            Some(0)
         }
         WM_TRAY => {
             if lparam as u32 == WM_LBUTTONUP || lparam as u32 == WM_RBUTTONUP {
                 // A primary click opens the same complete menu as the secondary one.
                 with_app(|app| app.show_menu());
             }
-            0
-        }
-        WM_COMMAND if (wparam & 0xFFFF) == ID_OPEN_FOLDER => {
-            with_app(|app| {
-                let directory = app.settings.path.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
-                let _ = std::fs::create_dir_all(&directory);
-                if let Err(error) = open_directory(&directory, None) {
-                    app.set_error(&error.to_string());
-                }
-            });
-            0
+            Some(0)
         }
         WM_TIMER if wparam == SMOKE_TIMER_ID => {
             // SAFETY: the timer belongs to this window.
             unsafe { KillTimer(window, SMOKE_TIMER_ID) };
             with_app(|app| app.shutdown());
-            0
+            Some(0)
+        }
+        WM_TIMER if wparam == PROMPT_TIMER_ID => {
+            // SAFETY: as above.
+            unsafe { KillTimer(window, PROMPT_TIMER_ID) };
+            with_app(|app| {
+                let pending = app.pending_prompt.borrow_mut().take();
+                if pending.is_some() {
+                    app.apply_learning_prompt(pending);
+                }
+            });
+            Some(0)
+        }
+        WM_TIMER if wparam == UPDATE_TIMER_ID => {
+            with_app(|app| app.automatic_update_check());
+            Some(0)
         }
         WM_CLOSE => {
             let mut handled = false;
@@ -493,12 +556,13 @@ unsafe extern "system" fn window_proc(window: HWND, message: u32, wparam: WPARAM
                 // SAFETY: the window is ours.
                 unsafe { DestroyWindow(window) };
             }
-            0
+            Some(0)
         }
         WM_DESTROY => {
+            settings_window::destroy_state();
             // SAFETY: ends this thread's message loop.
             unsafe { PostQuitMessage(0) };
-            0
+            Some(0)
         }
         _ if message == TASKBAR_CREATED.load(Ordering::SeqCst) && message != 0 => {
             // Explorer restarted: the shell has forgotten the icon.
@@ -507,115 +571,28 @@ unsafe extern "system" fn window_proc(window: HWND, message: u32, wparam: WPARAM
                     tray.add();
                 }
             });
-            0
+            Some(0)
         }
-        // SAFETY: the default procedure takes the arguments the system gave this one.
-        _ => unsafe { DefWindowProcW(window, message, wparam, lparam) },
+        _ => None,
     }
 }
 
-fn scaled(pixels: i32, dpi: i32) -> i32 {
-    pixels * dpi / BASE_DPI
+/// The window the tray reports to and the update installer's request go through: once the update manager has started the
+/// installer (`launch`), the program ends so that it can replace it.
+pub fn request_install(launch: Box<dyn FnOnce() -> Result<(), String> + Send>) {
+    post(Box::new(move || {
+        let result = launch();
+        with_app(|app| app.install_launched(result));
+    }));
 }
 
-/// The hidden window with its stand-in controls; the text control and the window.
-fn create_window() -> Option<(HWND, HWND)> {
-    // SAFETY: the class and the controls are made on this thread with strings that live through the calls; the screen's
-    // device context is released at once.
+fn register_taskbar_message(window: HWND) {
+    let created = wide("TaskbarCreated");
+    // SAFETY: the name is NUL-terminated; the filter call takes the window and the message by value.
     unsafe {
-        let instance = GetModuleHandleW(null());
-        let class = wide(SETTINGS_WINDOW_CLASS);
-        let description = WNDCLASSW {
-            style: 0,
-            lpfnWndProc: Some(window_proc),
-            cbClsExtra: 0,
-            cbWndExtra: 0,
-            hInstance: instance,
-            hIcon: null_mut(),
-            hCursor: LoadCursorW(null_mut(), IDC_ARROW),
-            hbrBackground: 6 as _, // COLOR_WINDOW + 1
-            lpszMenuName: null(),
-            lpszClassName: class.as_ptr(),
-        };
-        if RegisterClassW(&description) == 0 {
-            return None;
-        }
-        let screen = GetDC(null_mut());
-        let dpi = GetDeviceCaps(screen, LOGPIXELSX as i32);
-        ReleaseDC(null_mut(), screen);
-        let dpi = if dpi > 0 { dpi } else { BASE_DPI };
-        let style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-        let mut frame = RECT {
-            left: 0,
-            top: 0,
-            right: scaled(SETTINGS_WINDOW_CLIENT_WIDTH_PIXELS, dpi),
-            bottom: scaled(SETTINGS_WINDOW_CLIENT_HEIGHT_PIXELS, dpi),
-        };
-        AdjustWindowRectEx(&mut frame, style, 0, WS_EX_WINDOWEDGE);
-        let title = wide(SETTINGS_WINDOW_TITLE);
-        let window = CreateWindowExW(
-            WS_EX_WINDOWEDGE,
-            class.as_ptr(),
-            title.as_ptr(),
-            style,
-            100,
-            100,
-            frame.right - frame.left,
-            frame.bottom - frame.top,
-            null_mut(),
-            null_mut(),
-            instance,
-            null(),
-        );
-        if window.is_null() {
-            return None;
-        }
-        let margin = scaled(SETTINGS_WINDOW_MARGIN_PIXELS, dpi);
-        let width = scaled(SETTINGS_WINDOW_CLIENT_WIDTH_PIXELS, dpi);
-        let height = scaled(SETTINGS_WINDOW_CLIENT_HEIGHT_PIXELS, dpi);
-        let button_height = scaled(SETTINGS_BUTTON_HEIGHT_PIXELS, dpi);
-        let static_class = wide("STATIC");
-        let button_class = wide("BUTTON");
-        let empty = wide("");
-        let text = CreateWindowExW(
-            0,
-            static_class.as_ptr(),
-            empty.as_ptr(),
-            WS_CHILD | WS_VISIBLE,
-            margin,
-            margin,
-            width - 2 * margin,
-            height - 3 * margin - button_height,
-            window,
-            null_mut(),
-            instance,
-            null(),
-        );
-        let label = wide(SETTINGS_OPEN_FOLDER_LABEL);
-        let button = CreateWindowExW(
-            0,
-            button_class.as_ptr(),
-            label.as_ptr(),
-            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON as u32,
-            margin,
-            height - margin - button_height,
-            scaled(SETTINGS_BUTTON_WIDTH_PIXELS, dpi),
-            button_height,
-            window,
-            ID_OPEN_FOLDER as _,
-            instance,
-            null(),
-        );
-        let face = wide("Segoe UI");
-        let font = CreateFontW(-scaled(SETTINGS_FONT_HEIGHT_PIXELS, dpi), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, face.as_ptr());
-        for control in [text, button] {
-            windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW(control, WM_SETFONT, font as usize, 1);
-        }
-        let created = wide("TaskbarCreated");
         TASKBAR_CREATED.store(RegisterWindowMessageW(created.as_ptr()), Ordering::SeqCst);
         // An elevated program is otherwise not told that Explorer restarted.
         ChangeWindowMessageFilterEx(window, TASKBAR_CREATED.load(Ordering::SeqCst), MSGFLT_ALLOW, null_mut());
-        Some((window, text))
     }
 }
 
@@ -671,7 +648,7 @@ fn run_application(hidden: bool, no_engine: bool, quit_after_ms: Option<u32>) ->
     let enabled = setting_bool(&settings, "enabled", true);
     let post_fn: Post = Arc::new(post);
     // The engine loads its models on a background thread while the window and the tray come up.
-    let engine = DeferredEngine::new(engine_builder(settings.clone(), history.clone(), backend, learning.clone()), learning, enabled, post_fn, true);
+    let engine = DeferredEngine::new(engine_builder(settings.clone(), history.clone(), backend.clone(), learning.clone()), learning, enabled, post_fn, true);
     let autostart = match WindowsAutostartManager::new(None, None, None) {
         Ok(manager) => Some(manager),
         Err(error) => {
@@ -679,21 +656,63 @@ fn run_application(hidden: bool, no_engine: bool, quit_after_ms: Option<u32>) ->
             None
         }
     };
-    let Some((window, text)) = create_window() else {
+    // The update manager is the updater's; until it is wired in, nothing is ever found.
+    let updates: Arc<dyn UpdateController> = match ks_updates::UpdateManager::with_opener(
+        VERSION,
+        ks_config::history::data_dir().join("updates"),
+        Arc::new(crate::winhttp::WinHttpOpener),
+    ) {
+        Ok(manager) => Arc::new(manager.with_install_request(Arc::new(|path: &std::path::Path| {
+            let path = path.to_path_buf();
+            request_install(Box::new(move || {
+                crate::winhttp::launch_windows_installer(&path).map_err(|error| error.to_string())
+            }));
+            Ok(())
+        }))),
+        Err(error) => {
+            logsetup::warning(LOGGER, &format!("Обновления недоступны: {error}"));
+            Arc::new(NoUpdates { version: VERSION.to_owned() })
+        }
+    };
+    let input_backend: Arc<dyn InputBackend> = backend;
+    let services = Services {
+        settings: settings.clone(),
+        history: history.clone(),
+        engine: engine.clone(),
+        backend: input_backend.clone(),
+        updates: updates.clone(),
+        catalog: WindowsApplicationCatalog::new(None).ok(),
+        autostart_report: Box::new(crate::windows_app::autostart_status),
+        host: host_message,
+    };
+    let Some(window) = settings_window::create(services) else {
         logsetup::error(LOGGER, "Не удалось создать окно");
         return 1;
     };
+    register_taskbar_message(window);
+    let prompt_engine = engine.clone();
+    let dismiss_engine = engine.clone();
+    let keep_backend = input_backend.clone();
+    let restore_backend = input_backend.clone();
+    let prompt_callbacks = Rc::new(learning_prompt::Callbacks {
+        confirm: Box::new(move |prompt| prompt_engine.confirm_learning_prompt(Some(prompt))),
+        dismiss: Box::new(move |prompt| dismiss_engine.dismiss_learning_prompt(Some(prompt))),
+        keep_inactive: Box::new(move |handle| keep_backend.keep_window_inactive(handle)),
+        restore: Box::new(move |handle| restore_backend.restore_window(handle)),
+    });
     let app = Rc::new(App {
         window,
-        text,
         settings: settings.clone(),
-        history,
+        history: history.clone(),
         engine: engine.clone(),
+        updates: updates.clone(),
+        enable_updates: quit_after_ms.is_none(),
         autostart,
         tray: RefCell::new(None),
-        error_text: RefCell::new(String::new()),
-        snapshot: RefCell::new(engine.snapshot()),
         closing: Cell::new(false),
+        pending_prompt: RefCell::new(None),
+        prompt_callbacks,
+        last_update_notification: RefCell::new(String::new()),
     });
     APP.with(|slot| *slot.borrow_mut() = Some(app.clone()));
     WINDOW.store(window as isize, Ordering::SeqCst);
@@ -702,7 +721,14 @@ fn run_application(hidden: bool, no_engine: bool, quit_after_ms: Option<u32>) ->
         let (path, value) = (path.to_owned(), value.clone());
         post(Box::new(move || with_app(|app| app.apply_setting(&path, &value))));
     }));
-    engine.when_built(Box::new(|engine| {
+    history.subscribe(Arc::new(|| post(Box::new(settings_window::refresh_history))));
+    updates.subscribe(Arc::new(|snapshot: &UpdateSnapshot| {
+        let snapshot = snapshot.clone();
+        post(Box::new(move || with_app(|app| app.apply_update_snapshot(snapshot))));
+    }));
+    let anchor_backend = input_backend.clone();
+    let request_backend = input_backend;
+    engine.when_built(Box::new(move |engine| {
         engine.subscribe(Arc::new(|snapshot: &EngineSnapshot| {
             let snapshot = snapshot.clone();
             post(Box::new(move || with_app(|app| app.apply_snapshot(snapshot))));
@@ -711,14 +737,28 @@ fn run_application(hidden: bool, no_engine: bool, quit_after_ms: Option<u32>) ->
             let plan = plan.clone();
             post(Box::new(move || with_app(|app| app.announce_correction(&plan))));
         }));
-        // The rule window comes with the settings pages: a request for it is logged and nothing opens.
-        engine.subscribe_rule_requests(Arc::new(|prompt: &LearningPrompt| {
-            logsetup::info(LOGGER, &format!("Запрос окна правила (окно ещё не реализовано): {}", prompt.original));
+        engine.subscribe_learning_prompts(Arc::new(move |prompt: Option<&LearningPrompt>| {
+            // The caret is looked for on the engine's thread, while the window the user typed in is still the active one.
+            match prompt.cloned() {
+                None => post(Box::new(|| with_app(|app| app.apply_learning_prompt(None)))),
+                Some(prompt) => {
+                    let anchor = anchor_backend.input_anchor();
+                    post(Box::new(move || with_app(|app| app.schedule_learning_prompt(prompt, anchor))));
+                }
+            }
+        }));
+        engine.subscribe_rule_requests(Arc::new(move |prompt: &LearningPrompt| {
+            // The prompt never took the keyboard, so the window in front is the one the user typed in: it gets the keyboard
+            // back when the rule window closes.
+            let anchor = request_backend.input_anchor();
+            let draft = draft_from_prompt(prompt);
+            post(Box::new(move || settings_window::open_rule_editor(draft, anchor.and_then(|anchor| anchor.window))));
         }));
     }));
 
     app.sync_autostart(false);
     app.sync_tray();
+    app.sync_update_schedule(true);
     if !no_engine {
         // Started once its models are loaded; until then the window says so.
         let _ = engine.start(Arc::new(|error: &str| {
@@ -726,7 +766,6 @@ fn run_application(hidden: bool, no_engine: bool, quit_after_ms: Option<u32>) ->
             post(Box::new(move || with_app(|app| app.engine_start_failed(&error))));
         }));
     }
-    app.refresh_text();
     if let Some(milliseconds) = quit_after_ms {
         // SAFETY: the timer belongs to the window made above.
         unsafe { SetTimer(window, SMOKE_TIMER_ID, milliseconds, None) };
@@ -744,7 +783,7 @@ fn run_application(hidden: bool, no_engine: bool, quit_after_ms: Option<u32>) ->
     unsafe {
         let mut message: MSG = std::mem::zeroed();
         while GetMessageW(&mut message, null_mut(), 0, 0) > 0 {
-            if IsDialogMessageW(window, &message) == 0 {
+            if !settings_window::is_dialog_message(&message) {
                 TranslateMessage(&message);
                 DispatchMessageW(&message);
             }

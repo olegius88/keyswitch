@@ -22,3 +22,13 @@ pub mod windows_native;
 #[cfg(windows)]
 pub mod windows_registry;
 pub mod windows_system;
+pub mod windows_ui_model;
+#[cfg(windows)]
+pub mod learning_prompt;
+#[cfg(windows)]
+pub mod rule_editor_dialog;
+#[cfg(windows)]
+pub mod settings_window;
+#[cfg(windows)]
+pub mod win32_controls;
+pub mod winhttp;

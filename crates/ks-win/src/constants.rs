@@ -322,3 +322,110 @@ pub const SETTINGS_WINDOW_TITLE: &str = "KeySwitch";
 /// The unit of the device's DPI at which sizes are written.
 pub const BASE_DPI: i32 = 96;
 pub const BACKEND_LABEL: &str = "Win32 hook + SendInput";
+
+// ----------------------------------------------------------------------------------------- constants/ui_desktop.py
+// Pixels are at 96 dpi; the window scales them to the monitor's dpi.
+
+pub const PAGE_SCROLL_STEP_PIXELS: i32 = 20;
+pub const WHEEL_STEPS_PER_NOTCH: i32 = 3;
+pub const WHEEL_DELTA: i32 = 120;
+pub const MODIFIED_MARKER_WIDTH_PIXELS: i32 = 3;
+pub const MODIFIED_MARKER_COLUMN_PIXELS: i32 = 12;
+pub const RESET_BUTTON_COLUMN_PIXELS: i32 = 54;
+pub const DESCRIPTION_INDENT_PIXELS: i32 = 24;
+pub const PAGE_PADDING_X_PIXELS: i32 = 30;
+pub const PAGE_CONTENT_PADDING_Y_PIXELS: i32 = 24;
+pub const PAGE_CAPTION_PADDING_TOP_PIXELS: i32 = 3;
+pub const PAGE_CAPTION_PADDING_BOTTOM_PIXELS: i32 = 18;
+pub const PAGE_TITLE_FONT_SIZE_POINTS: i32 = 22;
+pub const CARD_TITLE_FONT_SIZE_POINTS: i32 = 10;
+pub const BRAND_LABEL_FONT_SIZE_POINTS: i32 = 20;
+pub const LABELFRAME_TITLE_FONT_SIZE_POINTS: i32 = 11;
+pub const RESET_BUTTON_FONT_SIZE_POINTS: i32 = 8;
+pub const TEST_ENTRY_FONT_SIZE_POINTS: i32 = 14;
+pub const BASE_FONT_SIZE_POINTS: i32 = 10;
+pub const SETTING_ROW_PADDING_PIXELS: i32 = 5;
+pub const SETTING_CONTROL_PADDING_LEFT_PIXELS: i32 = 16;
+pub const CHOICE_CONTROL_WIDTH_PIXELS: i32 = 170;
+pub const NUMBER_CONTROL_WIDTH_PIXELS: i32 = 90;
+pub const TEXT_CONTROL_WIDTH_PIXELS: i32 = 190;
+pub const NUMBER_DISPLAY_DECIMAL_PLACES: i32 = 2;
+pub const MAIN_WINDOW_WIDTH_PIXELS: i32 = 1080;
+pub const MAIN_WINDOW_HEIGHT_PIXELS: i32 = 760;
+pub const MAIN_WINDOW_MIN_WIDTH_PIXELS: i32 = 900;
+pub const MAIN_WINDOW_MIN_HEIGHT_PIXELS: i32 = 640;
+pub const DESKTOP_SIDEBAR_WIDTH_PIXELS: i32 = 225;
+pub const SIDEBAR_PADDING_X_PIXELS: i32 = 16;
+pub const SIDEBAR_PADDING_Y_PIXELS: i32 = 18;
+pub const SIDEBAR_ITEM_PADDING_X_PIXELS: i32 = 8;
+pub const SIDEBAR_BRAND_PADDING_BOTTOM_PIXELS: i32 = 2;
+pub const SIDEBAR_SUBTITLE_PADDING_BOTTOM_PIXELS: i32 = 18;
+pub const SIDEBAR_SEPARATOR_PADDING_Y_PIXELS: i32 = 16;
+pub const SIDEBAR_STATUS_PADDING_TOP_PIXELS: i32 = 4;
+pub const NAVIGATION_BUTTON_PADDING_X_PIXELS: i32 = 12;
+pub const NAVIGATION_BUTTON_HEIGHT_PIXELS: i32 = 34;
+pub const NAVIGATION_BUTTON_SPACING_PIXELS: i32 = 2;
+pub const SECTION_PADDING_X_PIXELS: i32 = 18;
+pub const SECTION_PADDING_Y_PIXELS: i32 = 14;
+pub const SECTION_BOTTOM_MARGIN_PIXELS: i32 = 14;
+pub const SECTION_TITLE_HEIGHT_PIXELS: i32 = 22;
+pub const STANDARD_GAP_PIXELS: i32 = 8;
+pub const GROUP_GAP_PIXELS: i32 = 10;
+pub const CARD_TITLE_GAP_PIXELS: i32 = 6;
+pub const STATUS_LINE_GAP_PIXELS: i32 = 4;
+pub const TEST_ENTRY_PADDING_TOP_PIXELS: i32 = 12;
+pub const TEST_ENTRY_PADDING_BOTTOM_PIXELS: i32 = 2;
+pub const AUTOCORRECTION_PRIMARY_COLUMN_WEIGHT: i32 = 3;
+pub const AUTOCORRECTION_SECONDARY_COLUMN_WEIGHT: i32 = 2;
+pub const AUTOCORRECTION_COLUMN_GAP_PIXELS: i32 = 14;
+pub const QUIRKS_TOP_MARGIN_PIXELS: i32 = 14;
+pub const MANUAL_SWITCH_NOTE_PADDING_TOP_PIXELS: i32 = 8;
+pub const LAYOUT_LANGUAGE_LABEL_PADDING_TOP_PIXELS: i32 = 2;
+pub const LAYOUT_LANGUAGE_LABEL_PADDING_BOTTOM_PIXELS: i32 = 10;
+pub const APPLICATION_LIST_HEIGHT_ROWS: i32 = 6;
+pub const WORD_LIST_HEIGHT_ROWS: i32 = 5;
+pub const LEARNING_TREE_HEIGHT_ROWS: i32 = 6;
+pub const HISTORY_TREE_MIN_ROWS: i32 = 14;
+pub const HISTORY_TIME_COLUMN_WIDTH_PIXELS: i32 = 165;
+pub const HISTORY_WORD_COLUMN_WIDTH_PIXELS: i32 = 130;
+pub const HISTORY_APPLICATION_COLUMN_WIDTH_PIXELS: i32 = 150;
+pub const HISTORY_CONFIDENCE_COLUMN_WIDTH_PIXELS: i32 = 100;
+pub const LEARNING_WORD_COLUMN_WIDTH_PIXELS: i32 = 150;
+pub const LEARNING_CONDITION_COLUMN_WIDTH_PIXELS: i32 = 200;
+pub const LEARNING_ACTION_COLUMN_WIDTH_PIXELS: i32 = 160;
+pub const DIAGNOSTICS_TEXT_HEIGHT_ROWS: i32 = 15;
+pub const RULE_EDITOR_PATTERN_WIDTH_PIXELS: i32 = 300;
+pub const RULE_EDITOR_TEXT_WRAP_PIXELS: i32 = 340;
+pub const ROW_HEIGHT_PIXELS: i32 = 23;
+pub const BUTTON_HEIGHT_PIXELS: i32 = 26;
+pub const BUTTON_PADDING_X_PIXELS: i32 = 16;
+pub const UPDOWN_WIDTH_PIXELS: i32 = 18;
+
+// ------------------------------------------------------------------------------------------- constants/timing.py
+pub const LEARNING_PROMPT_SHOW_DELAY_MS: u32 = 200;
+pub const APPLICATION_CAPTURE_DELAY_MS: u32 = 3000;
+/// constants/updates.py: the first automatic check after the start, and the interval between checks.
+pub const UPDATE_CHECK_INITIAL_DELAY_MS: u32 = 30_000;
+pub const UPDATE_CHECK_INTERVAL_MS: u32 = 6 * 3600 * 1000;
+
+// ------------------------------------------------------------------------------------ constants/learning_prompt.py
+pub const LEARNING_PROMPT_CARD_PADDING_X_PIXELS: i32 = 16;
+pub const LEARNING_PROMPT_CARD_PADDING_Y_PIXELS: i32 = 12;
+pub const LEARNING_PROMPT_TITLE_FONT_SIZE_POINTS: i32 = 10;
+pub const LEARNING_PROMPT_WORD_FONT_SIZE_POINTS: i32 = 11;
+pub const LEARNING_PROMPT_WORD_PADDING_TOP_PIXELS: i32 = 5;
+pub const LEARNING_PROMPT_WORD_PADDING_BOTTOM_PIXELS: i32 = 2;
+pub const LEARNING_PROMPT_HINT_FONT_SIZE_POINTS: i32 = 9;
+pub const LEARNING_PROMPT_MINIMUM_WIDTH_PIXELS: i32 = 390;
+pub const LEARNING_PROMPT_ANCHOR_GAP_PIXELS: i32 = 12;
+pub const LEARNING_PROMPT_SCREEN_MARGIN_PIXELS: i32 = 8;
+pub const LEARNING_PROMPT_CLASS: &str = "KeySwitchLearningPrompt";
+pub const RULE_EDITOR_CLASS: &str = "KeySwitchRuleEditor";
+pub const PAGE_CLASS: &str = "KeySwitchPage";
+
+// ---------------------------------------------------------------------------- constants/settings_defaults.py (UI)
+pub const HISTORY_LIMIT_SETTING_MIN: f64 = 10.0;
+pub const HISTORY_LIMIT_SETTING_MAX: f64 = 5000.0;
+pub const HISTORY_LIMIT_SETTING_STEP: f64 = 10.0;
+pub const CONFIDENCE_SETTING_STEP: f64 = 0.1;
+pub const PAUSE_DELAY_SETTING_STEP_SECONDS: f64 = 0.1;

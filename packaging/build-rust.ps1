@@ -46,65 +46,6 @@ function Assert-Frozen {
     }
 }
 
-function New-KeySwitchIcon {
-    # The application icon (tools/create_windows_icon.py, which used Pillow): a blue rounded square with KS, as an ICO of
-    # PNG images at the sizes of the Python's export.
-    param([string]$Output)
-    $Sizes = 16, 24, 32, 48, 64, 128, 256
-    function New-RoundedPath([float]$Left, [float]$Top, [float]$Right, [float]$Bottom, [float]$Radius) {
-        $Path = New-Object System.Drawing.Drawing2D.GraphicsPath
-        $D = 2 * $Radius
-        $Path.AddArc($Left, $Top, $D, $D, 180, 90)
-        $Path.AddArc($Right - $D, $Top, $D, $D, 270, 90)
-        $Path.AddArc($Right - $D, $Bottom - $D, $D, $D, 0, 90)
-        $Path.AddArc($Left, $Bottom - $D, $D, $D, 90, 90)
-        $Path.CloseFigure()
-        return $Path
-    }
-    $Master = New-Object System.Drawing.Bitmap 256, 256, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-    $G = [System.Drawing.Graphics]::FromImage($Master)
-    $G.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-    $G.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
-    $Fill = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 35, 92, 190))
-    $G.FillPath($Fill, (New-RoundedPath 8 8 248 248 56))
-    $Pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(70, 255, 255, 255)), 5
-    $G.DrawPath($Pen, (New-RoundedPath 31 31 225 225 40))
-    $Font = New-Object System.Drawing.Font "Arial", 86, ([System.Drawing.FontStyle]::Bold), ([System.Drawing.GraphicsUnit]::Pixel)
-    $Format = New-Object System.Drawing.StringFormat
-    $Format.Alignment = [System.Drawing.StringAlignment]::Center
-    $Format.LineAlignment = [System.Drawing.StringAlignment]::Center
-    $G.DrawString("KS", $Font, [System.Drawing.Brushes]::White, (New-Object System.Drawing.RectangleF 0, 0, 256, 256), $Format)
-    $G.Dispose()
-    $Images = @()
-    foreach ($Size in $Sizes) {
-        $Scaled = New-Object System.Drawing.Bitmap $Size, $Size, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-        $S = [System.Drawing.Graphics]::FromImage($Scaled)
-        $S.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-        $S.DrawImage($Master, 0, 0, $Size, $Size)
-        $S.Dispose()
-        $Stream = New-Object System.IO.MemoryStream
-        $Scaled.Save($Stream, [System.Drawing.Imaging.ImageFormat]::Png)
-        $Images += , $Stream.ToArray()
-        $Scaled.Dispose()
-    }
-    $Master.Dispose()
-    $File = New-Object System.IO.MemoryStream
-    $Writer = New-Object System.IO.BinaryWriter $File
-    $Writer.Write([uint16]0); $Writer.Write([uint16]1); $Writer.Write([uint16]$Sizes.Count)
-    $Offset = 6 + 16 * $Sizes.Count
-    for ($Index = 0; $Index -lt $Sizes.Count; $Index++) {
-        $Size = $Sizes[$Index]
-        $Dimension = if ($Size -ge 256) { 0 } else { $Size }
-        $Writer.Write([byte]$Dimension); $Writer.Write([byte]$Dimension); $Writer.Write([byte]0); $Writer.Write([byte]0)
-        $Writer.Write([uint16]1); $Writer.Write([uint16]32)
-        $Writer.Write([uint32]$Images[$Index].Length); $Writer.Write([uint32]$Offset)
-        $Offset += $Images[$Index].Length
-    }
-    foreach ($Image in $Images) { $Writer.Write($Image) }
-    $Writer.Flush()
-    [System.IO.File]::WriteAllBytes($Output, $File.ToArray())
-}
-
 $ProjectDirectory = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 if (-not $OutputDirectory) {
     $OutputDirectory = Join-Path $ProjectDirectory "dist"
@@ -178,7 +119,8 @@ Copy-Item -LiteralPath (Join-Path $ProjectDirectory "LICENSE") -Destination (Joi
 Assert-Frozen -Path (Join-Path $ModelStage "en_US.lm") -Policy $EnglishPolicy -Label "staged English language model"
 Assert-Frozen -Path (Join-Path $ModelStage "ru_RU.lm") -Policy $RussianPolicy -Label "staged Russian language model"
 $Icon = Join-Path $ResourceStage "keyswitch.ico"
-New-KeySwitchIcon -Output $Icon
+# The icon is drawn once from resources/keyswitch.svg and kept in the repository; the executable embeds the same file.
+Copy-Item -LiteralPath (Join-Path $ProjectDirectory "packaging\windows\keyswitch.ico") -Destination $Icon
 
 # The staged program must run and see its models (the same check the Python build made of its executable).
 $Probe = Join-Path $ProjectDirectory "dist\post-build-diagnostics.json"
@@ -187,6 +129,8 @@ $env:KEYSWITCH_DATA_DIR = Join-Path $ProjectDirectory "dist\post-build-data"
 Remove-Item Env:KEYSWITCH_INTENT_MODEL_PATH -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $env:KEYSWITCH_CONFIG_DIR, $env:KEYSWITCH_DATA_DIR | Out-Null
 $Process = Start-Process -FilePath (Join-Path $Stage "KeySwitch.exe") -ArgumentList "--diagnose" -RedirectStandardOutput $Probe -PassThru
+# Without a handle taken while it runs, Windows PowerShell 5.1 reports no exit code for a -PassThru process.
+$null = $Process.Handle
 if (-not $Process.WaitForExit(30000)) {
     $Process.Kill()
     throw "Post-build diagnostics timed out after 30 seconds"

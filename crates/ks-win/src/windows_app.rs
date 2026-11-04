@@ -89,7 +89,7 @@ pub fn resource_dir() -> PathBuf {
 }
 
 /// What the next logon will really do, so a support report needs no registry editor.
-fn autostart_status() -> Value {
+pub(crate) fn autostart_status() -> Value {
     let status = WindowsAutostartManager::new(None, None, None).and_then(|manager| manager.status());
     match status {
         Ok(status) => json!({
