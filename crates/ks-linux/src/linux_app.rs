@@ -50,7 +50,10 @@ pub struct Arguments {
     pub no_engine: bool,
     /// The engine without a window, until SIGTERM or SIGINT.
     pub headless: bool,
-    pub wayland_input: bool,
+    pub enable_wayland_input: bool,
+    pub disable_wayland_input: bool,
+    /// The input helper this process is to become, with the descriptor of its socket.
+    pub wayland_input_helper: Option<i32>,
 }
 
 /// What argparse does with a command line: the switches, or text to print and a status to end with.
@@ -103,8 +106,8 @@ pub fn parse_arguments(arguments: &[String]) -> Parsed {
                 next
             });
             match value.as_deref() {
-                Some(text) if text.parse::<i64>().is_ok() => {
-                    parsed.wayland_input = true;
+                Some(text) if text.parse::<i32>().is_ok() => {
+                    parsed.wayland_input_helper = text.parse::<i32>().ok();
                     continue;
                 }
                 Some(text) => return error(&format!("argument --wayland-input-helper: invalid int value: '{text}'")),
@@ -121,7 +124,8 @@ pub fn parse_arguments(arguments: &[String]) -> Parsed {
             "--diagnose" => parsed.diagnose = true,
             "--no-engine" => parsed.no_engine = true,
             "--headless" => parsed.headless = true,
-            _ => parsed.wayland_input = true,
+            "--enable-wayland-input" => parsed.enable_wayland_input = true,
+            _ => parsed.disable_wayland_input = true,
         }
     }
     if unrecognized.is_empty() { Parsed::Run(parsed) } else { error(&format!("unrecognized arguments: {}", unrecognized.join(" "))) }
@@ -149,9 +153,12 @@ pub fn resource_dir_from(over: Option<PathBuf>, executable: Option<&Path>, is_di
 
 /// The backend with the readers of this platform: the field reader is built by the engine on its worker, the selection
 /// reader on first use.
+pub fn selection_factory() -> SelectionFactory {
+    Box::new(|process| Box::new(AtspiSelectionReader::new(Box::new(atspi_bus::connect), process)))
+}
+
 pub fn new_backend() -> Arc<X11Backend> {
-    let selection: SelectionFactory = Box::new(|process| Box::new(AtspiSelectionReader::new(Box::new(atspi_bus::connect), process)));
-    Arc::new(X11Backend::new(Box::new(x11_native::connect), Some(selection)))
+    Arc::new(X11Backend::new(Box::new(x11_native::connect), Some(selection_factory())))
 }
 
 /// The report `--diagnose` prints, and whether the keyboard backend is available.
@@ -159,13 +166,19 @@ pub fn diagnostics(resource_dir: &Path) -> (String, bool) {
     let resources = ks_lang::Resources::new(resource_dir);
     let models = resource_dir.join("models");
     let probe = if wayland_session_active() {
-        let session = std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "неизвестно".to_owned());
-        BackendProbe {
-            session_type: session,
-            display: std::env::var("DISPLAY").unwrap_or_default(),
-            error: "Wayland-слой ещё не перенесён в эту сборку".to_owned(),
-            current_group: -1,
-            ..BackendProbe::default()
+        match crate::wayland_native::new_wayland_backend(None) {
+            Ok(backend) => {
+                let probe = backend.probe();
+                backend.close();
+                probe
+            }
+            Err(reason) => BackendProbe {
+                session_type: std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "неизвестно".to_owned()),
+                display: std::env::var("DISPLAY").unwrap_or_default(),
+                error: reason,
+                current_group: -1,
+                ..BackendProbe::default()
+            },
         }
     } else {
         let backend = new_backend();
@@ -217,9 +230,14 @@ pub fn main(arguments: &[String]) -> i32 {
         }
         Parsed::Run(parsed) => parsed,
     };
-    if parsed.wayland_input {
-        write_standard(true, "Доступ к клавиатурам в Wayland ещё не перенесён в эту сборку\n");
-        return 1;
+    if let Some(socket) = parsed.wayland_input_helper {
+        return crate::wayland_native::run_wayland_input_helper(socket);
+    }
+    if parsed.enable_wayland_input {
+        return crate::wayland_access::enable_command();
+    }
+    if parsed.disable_wayland_input {
+        return crate::wayland_access::disable_command();
     }
     crate::platform::install();
     let _ = logsetup::configure_logging(None);
@@ -366,7 +384,7 @@ mod tests {
         assert_eq!(parse(&[]), Parsed::Run(Arguments::default()));
         assert_eq!(parse(&["--hidden", "--diag"]), Parsed::Run(Arguments { hidden: true, diagnose: true, ..Arguments::default() }));
         assert_eq!(parse(&["--headless"]), Parsed::Run(Arguments { headless: true, ..Arguments::default() }));
-        assert_eq!(parse(&["--wayland-input-helper", "5"]), Parsed::Run(Arguments { wayland_input: true, ..Arguments::default() }));
+        assert_eq!(parse(&["--wayland-input-helper", "5"]), Parsed::Run(Arguments { wayland_input_helper: Some(5), ..Arguments::default() }));
         assert!(matches!(parse(&["--wayland-input-helper", "x"]), Parsed::Exit { code: 2, .. }));
     }
 

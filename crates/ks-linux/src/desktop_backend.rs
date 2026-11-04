@@ -30,10 +30,17 @@ fn x11_backend() -> DesktopBackend {
     }
 }
 
-/// The Wayland backend: the native layer builds it. Until that layer is wired in this says so, and the windows run on a
-/// backend that reports it.
+/// The Wayland backend; a session where it cannot be built gets the reason from `new_desktop_backend`.
 fn wayland_backend() -> Result<DesktopBackend, String> {
-    Err("Wayland-слой ещё не перенесён в эту сборку".to_owned())
+    let backend = crate::wayland_native::new_wayland_backend(Some(crate::linux_app::selection_factory()))?;
+    let process_for_window = backend.process_for_window();
+    let placer = backend.clone();
+    Ok(DesktopBackend {
+        input: backend,
+        process_for_window,
+        position_window: Arc::new(move |window, x, y| placer.position_window(window, i64::from(x), i64::from(y))),
+        wayland: true,
+    })
 }
 
 /// The backend of this session. A Wayland session whose backend cannot be built gets one that reports why.
