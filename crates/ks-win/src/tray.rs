@@ -199,7 +199,10 @@ impl Tray {
         let mut data = self.data(flags);
         data.hIcon = self.icon.get();
         if flags & NIF_TIP != 0 {
-            copy_text(&mut data.szTip, &self.state.borrow().title());
+            // A copy: on 32-bit Windows the structure is packed and its fields cannot be borrowed.
+            let mut tip = data.szTip;
+            copy_text(&mut tip, &self.state.borrow().title());
+            data.szTip = tip;
         }
         if flags & NIF_MESSAGE != 0 {
             data.uCallbackMessage = self.callback_message;
@@ -240,8 +243,10 @@ impl Tray {
     /// A balloon notification; the text is cut to what the shell takes.
     pub fn notify(&self, title: &str, message: &str) {
         let mut data = self.data(NIF_INFO);
-        copy_text(&mut data.szInfo, message);
-        copy_text(&mut data.szInfoTitle, title);
+        let (mut info, mut info_title) = (data.szInfo, data.szInfoTitle);
+        copy_text(&mut info, message);
+        copy_text(&mut info_title, title);
+        (data.szInfo, data.szInfoTitle) = (info, info_title);
         // SAFETY: as in `notify_icon`.
         unsafe { Shell_NotifyIconW(NIM_MODIFY, &data) };
     }

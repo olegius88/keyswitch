@@ -322,14 +322,14 @@ const STATE_MODIFIED: isize = 2;
 
 pub fn is_checked(window: HWND) -> bool {
     // SAFETY: reads the word this module stores in the window's user data.
-    unsafe { GetWindowLongPtrW(window, GWLP_USERDATA) & STATE_CHECKED != 0 }
+    unsafe { (GetWindowLongPtrW(window, GWLP_USERDATA) as isize) & STATE_CHECKED != 0 }
 }
 
 pub fn set_checked(window: HWND, checked: bool) {
     // SAFETY: as above, and a repaint request.
     unsafe {
-        let state = GetWindowLongPtrW(window, GWLP_USERDATA) & !STATE_CHECKED;
-        SetWindowLongPtrW(window, GWLP_USERDATA, state | if checked { STATE_CHECKED } else { 0 });
+        let state = (GetWindowLongPtrW(window, GWLP_USERDATA) as isize) & !STATE_CHECKED;
+        SetWindowLongPtrW(window, GWLP_USERDATA, (state | if checked { STATE_CHECKED } else { 0 }) as _);
     }
     invalidate(window);
 }
@@ -338,8 +338,8 @@ pub fn set_checked(window: HWND, checked: bool) {
 pub fn set_modified(window: HWND, modified: bool) {
     // SAFETY: as above.
     unsafe {
-        let state = GetWindowLongPtrW(window, GWLP_USERDATA) & !STATE_MODIFIED;
-        SetWindowLongPtrW(window, GWLP_USERDATA, state | if modified { STATE_MODIFIED } else { 0 });
+        let state = (GetWindowLongPtrW(window, GWLP_USERDATA) as isize) & !STATE_MODIFIED;
+        SetWindowLongPtrW(window, GWLP_USERDATA, (state | if modified { STATE_MODIFIED } else { 0 }) as _);
     }
     invalidate(window);
 }
