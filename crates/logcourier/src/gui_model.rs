@@ -161,9 +161,10 @@ mod tests {
 
     #[test]
     fn the_same_file_is_not_added_twice() {
-        let first = source_from("/var/log/a.log", "a", "5", false, &[]).unwrap();
+        let path = if cfg!(windows) { "C:\\logs\\a.log" } else { "/var/log/a.log" };
+        let first = source_from(path, "a", "5", false, &[]).unwrap();
         assert_eq!(first.rotations, 5);
-        assert!(source_from("/var/log/a.log", "b", "5", false, &[first]).is_err());
+        assert!(source_from(path, "b", "5", false, &[first]).is_err());
         assert!(source_from("relative.log", "b", "5", false, &[]).is_err());
     }
 

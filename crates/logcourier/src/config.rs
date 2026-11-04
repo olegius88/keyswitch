@@ -241,7 +241,7 @@ mod tests {
     fn settings_come_back_as_they_were_written() {
         let root = std::env::temp_dir().join(format!("lc-config-{}", new_id()));
         let mut config = Config { chat_id: "-1001".to_owned(), bot_id: "123".to_owned(), ..Config::default() };
-        config.sources.push(Source::new("/var/log/a.log", "журнал"));
+        config.sources.push(Source::new(if cfg!(windows) { "C:\\logs\\a.log" } else { "/var/log/a.log" }, "журнал"));
         save_config(&root, &config).expect("save");
         assert_eq!(load_config(&root).expect("load"), config);
         let text = std::fs::read_to_string(root.join("config.json")).expect("read");
