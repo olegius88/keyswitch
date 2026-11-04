@@ -1,0 +1,30 @@
+[package]
+name = "ks-linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "ks_linux"
+path = "src/lib.rs"
+
+[[bin]]
+name = "keyswitch"
+path = "src/main.rs"
+
+[dependencies]
+ks-backend.workspace = true
+ks-config.workspace = true
+ks-text.workspace = true
+ks-lang.workspace = true
+ks-context.workspace = true
+ks-engine.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# X11 protocol in pure Rust: no libX11, libXtst or libxkbcommon at run time.
+x11rb = { version = "0.13", default-features = false, features = ["record", "xtest", "xkb"] }
+# The accessibility bus, through the blocking API.
+zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
+# Hunspell is opened at run time, as the Python opens it with ctypes: the program runs without it.
+libloading = "0.8"
+libc = "0.2"
