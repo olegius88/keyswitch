@@ -1,20 +1,20 @@
-# KeySwitch 0.66.0
+# KeySwitch 0.66.1
 
 ## Русский
 
-Этот выпуск — про ресурсы: KeySwitch занимает примерно на 120 МБ меньше памяти, а в Windows окно настроек и значок в трее появляются сразу после запуска, пока языковые модели загружаются в фоне. Распознавание раскладки и модели — те же, что в 0.65.0. Полный перечень — в [CHANGELOG.md](CHANGELOG.md).
+Этот выпуск — про ресурсы: KeySwitch занимает примерно на 120 МБ меньше памяти, пакеты стали меньше, а в Windows окно настроек и значок в трее появляются сразу после запуска, пока языковые модели загружаются в фоне. Распознавание раскладки и модели — те же, что в 0.65.0. Полный перечень — в [CHANGELOG.md](CHANGELOG.md).
 
 ### Файлы выпуска
 
-- `KeySwitch-Setup-0.66.0-x64.exe` — установщик для Windows 10/11 x64. Он не подписан сертификатом издателя: SmartScreen покажет предупреждение.
-- `KeySwitch-0.66.0-windows-x64.zip` — переносимый архив для Windows x64.
-- `KeySwitch-Setup-0.66.0-arm64.exe` — установщик для Windows 11 на ARM. Тоже не подписан сертификатом издателя.
-- `KeySwitch-0.66.0-windows-arm64.zip` — переносимый архив для Windows на ARM.
-- `KeySwitch-Setup-0.66.0-x86.exe` — установщик для 32-битной Windows 10. Тоже не подписан сертификатом издателя.
-- `KeySwitch-0.66.0-windows-x86.zip` — переносимый архив для 32-битной Windows.
-- `keyswitch_0.66.0_amd64.deb` — Ubuntu/Xubuntu, сеанс X11 или Wayland (GNOME, KDE Plasma 6, sway). Если стоит 0.28.0 или новее, эта версия придёт через обычное обновление системы. В сеансе Wayland один раз включите доступ к клавиатурам: `sudo keyswitch --enable-wayland-input` (после этого любая программа этого пользователя может читать все клавиши и набирать свои, как в X11 и Windows; `sudo keyswitch --disable-wayland-input` сразу отбирает доступ); в GNOME после первой установки выйдите из учётной записи и войдите снова: оболочка находит расширение KeySwitch только при входе.
-- `KeySwitch-0.66.0-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее), macOS 13 и новее.
-- `KeySwitch-0.66.0-macos-x86_64.zip` — Mac на процессоре Intel, macOS 13 и новее.
+- `KeySwitch-Setup-0.66.1-x64.exe` — установщик для Windows 10/11 x64. Он не подписан сертификатом издателя: SmartScreen покажет предупреждение.
+- `KeySwitch-0.66.1-windows-x64.zip` — переносимый архив для Windows x64.
+- `KeySwitch-Setup-0.66.1-arm64.exe` — установщик для Windows 11 на ARM. Тоже не подписан сертификатом издателя.
+- `KeySwitch-0.66.1-windows-arm64.zip` — переносимый архив для Windows на ARM.
+- `KeySwitch-Setup-0.66.1-x86.exe` — установщик для 32-битной Windows 10. Тоже не подписан сертификатом издателя.
+- `KeySwitch-0.66.1-windows-x86.zip` — переносимый архив для 32-битной Windows.
+- `keyswitch_0.66.1_amd64.deb` — Ubuntu/Xubuntu, сеанс X11 или Wayland (GNOME, KDE Plasma 6, sway). Если стоит 0.28.0 или новее, эта версия придёт через обычное обновление системы. В сеансе Wayland один раз включите доступ к клавиатурам: `sudo keyswitch --enable-wayland-input` (после этого любая программа этого пользователя может читать все клавиши и набирать свои, как в X11 и Windows; `sudo keyswitch --disable-wayland-input` сразу отбирает доступ); в GNOME после первой установки выйдите из учётной записи и войдите снова: оболочка находит расширение KeySwitch только при входе.
+- `KeySwitch-0.66.1-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее), macOS 13 и новее.
+- `KeySwitch-0.66.1-macos-x86_64.zip` — Mac на процессоре Intel, macOS 13 и новее.
 - `SHA256SUMS` — контрольные суммы всех файлов; сверьте их перед установкой.
 
 Архив для Mac нужен ровно один: сборка для Apple Silicon не запускается на Intel и наоборот.
@@ -30,19 +30,19 @@
 
 ## English
 
-This release is about resources: KeySwitch takes about 120 MB less memory, and on Windows the settings window and the tray icon appear right after start while the language models load in the background. Layout recognition and the models are those of 0.65.0. The full list is in [CHANGELOG.md](CHANGELOG.md).
+This release is about resources: KeySwitch takes about 120 MB less memory, the packages are smaller, and on Windows the settings window and the tray icon appear right after start while the language models load in the background. Layout recognition and the models are those of 0.65.0. The full list is in [CHANGELOG.md](CHANGELOG.md).
 
 ### Release files
 
-- `KeySwitch-Setup-0.66.0-x64.exe` — installer for Windows 10/11 x64. It is not signed with a publisher certificate, so SmartScreen shows a warning.
-- `KeySwitch-0.66.0-windows-x64.zip` — portable archive for Windows x64.
-- `KeySwitch-Setup-0.66.0-arm64.exe` — installer for Windows 11 on Arm. It is not signed with a publisher certificate either.
-- `KeySwitch-0.66.0-windows-arm64.zip` — portable archive for Windows on Arm.
-- `KeySwitch-Setup-0.66.0-x86.exe` — installer for 32-bit Windows 10. It is not signed with a publisher certificate either.
-- `KeySwitch-0.66.0-windows-x86.zip` — portable archive for 32-bit Windows.
-- `keyswitch_0.66.0_amd64.deb` — Ubuntu/Xubuntu on an X11 or Wayland session (GNOME, KDE Plasma 6, sway). With 0.28.0 or newer installed, this version arrives through the ordinary system update. In a Wayland session, enable the access to the keyboards once: `sudo keyswitch --enable-wayland-input` (any program of that user can then read every key and type keys of its own, as on X11 and Windows; `sudo keyswitch --disable-wayland-input` takes the access away at once); in GNOME, log out and back in after the first installation: the shell finds the KeySwitch extension only at login.
-- `KeySwitch-0.66.0-macos-arm64.zip` — Mac with Apple silicon (M1 and later), macOS 13 or newer.
-- `KeySwitch-0.66.0-macos-x86_64.zip` — Mac with an Intel processor, macOS 13 or newer.
+- `KeySwitch-Setup-0.66.1-x64.exe` — installer for Windows 10/11 x64. It is not signed with a publisher certificate, so SmartScreen shows a warning.
+- `KeySwitch-0.66.1-windows-x64.zip` — portable archive for Windows x64.
+- `KeySwitch-Setup-0.66.1-arm64.exe` — installer for Windows 11 on Arm. It is not signed with a publisher certificate either.
+- `KeySwitch-0.66.1-windows-arm64.zip` — portable archive for Windows on Arm.
+- `KeySwitch-Setup-0.66.1-x86.exe` — installer for 32-bit Windows 10. It is not signed with a publisher certificate either.
+- `KeySwitch-0.66.1-windows-x86.zip` — portable archive for 32-bit Windows.
+- `keyswitch_0.66.1_amd64.deb` — Ubuntu/Xubuntu on an X11 or Wayland session (GNOME, KDE Plasma 6, sway). With 0.28.0 or newer installed, this version arrives through the ordinary system update. In a Wayland session, enable the access to the keyboards once: `sudo keyswitch --enable-wayland-input` (any program of that user can then read every key and type keys of its own, as on X11 and Windows; `sudo keyswitch --disable-wayland-input` takes the access away at once); in GNOME, log out and back in after the first installation: the shell finds the KeySwitch extension only at login.
+- `KeySwitch-0.66.1-macos-arm64.zip` — Mac with Apple silicon (M1 and later), macOS 13 or newer.
+- `KeySwitch-0.66.1-macos-x86_64.zip` — Mac with an Intel processor, macOS 13 or newer.
 - `SHA256SUMS` — checksums of every file; verify them before installing.
 
 Exactly one Mac archive is needed: the Apple silicon build does not run on Intel and vice versa.

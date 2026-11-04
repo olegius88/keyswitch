@@ -4,7 +4,15 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
-## 0.66.0 — 2026-11-04
+- Publish everything since 0.65.0. The 0.66.0 section below was tagged, but its release job produced no installer for
+  Windows on Arm: the check of the installed program did not finish there, twice, while it takes half a minute on x64
+  and on x86, and did on Arm with 0.65.0. The executable now ends its process itself once the program has finished,
+  without finalising the interpreter around the engine's loader, and every wait of the check is bounded and names what
+  it waited for. Windows on Arm is built and checked before a release as well.
+
+## 0.66.0 — unpublished, 2026-11-04
+
+These changes were tagged but did not produce a published release. 0.66.1 publishes them.
 
 - KeySwitch takes about 120 MB less memory: the letter-sequence tables of the spelling model, about a million entries,
   are kept in two compact arrays instead of a million separate objects, and on Linux the memory freed while the models
