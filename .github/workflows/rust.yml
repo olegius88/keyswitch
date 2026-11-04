@@ -1,0 +1,81 @@
+name: Rust
+
+on:
+  push:
+    branches: [rust]
+  pull_request:
+    branches: [rust]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  tests:
+    name: Tests (pure logic, every crate that needs no desktop)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain with the Windows target for type checks
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add x86_64-pc-windows-msvc i686-pc-windows-msvc aarch64-pc-windows-msvc
+      - name: Tests
+        run: cargo test -p ks-text -p ks-backend -p ks-config -p ks-lang -p ks-context -p ks-engine -p ks-replay -p ks-updates -p ks-ui -p ks-win
+      - name: Windows code type-checks for every architecture
+        run: |
+          for target in x86_64-pc-windows-msvc i686-pc-windows-msvc aarch64-pc-windows-msvc; do
+            cargo check -p ks-win --target "$target"
+          done
+
+  windows-installer:
+    # Built and run on the architecture it is for: Windows on Arm on an Arm runner, x86 on the x64 image.
+    name: Windows installer (${{ matrix.architecture }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            architecture: x64
+          - runner: windows-11-vs2026-arm
+            architecture: arm64
+          - runner: windows-2025
+            architecture: x86
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Rust and Inno Setup
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add i686-pc-windows-msvc
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup --no-progress -y }
+      - name: Build
+        shell: powershell
+        run: packaging\build-rust.ps1 -OutputDirectory out -Architecture ${{ matrix.architecture }}
+      - name: Install, start and quit, each within a time limit
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem out\KeySwitch-Setup-*.exe).FullName
+          $run = {
+            param($file, $arguments, $limit)
+            $process = Start-Process -FilePath $file -ArgumentList $arguments -PassThru
+            $null = $process.Handle
+            if (-not $process.WaitForExit($limit)) { $process.Kill(); throw "$file $arguments did not finish in $limit ms" }
+            if ($process.ExitCode -ne 0) { throw "$file $arguments exited with $($process.ExitCode)" }
+          }
+          & $run $setup @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") 300000
+          $app = "$env:LOCALAPPDATA\Programs\KeySwitch\KeySwitch.exe"
+          & $run $app @("--version") 60000
+          & $run $app @("--smoke-ui") 120000
+          "$((Get-Item $app).Length) bytes, setup $((Get-Item $setup).Length) bytes"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: KeySwitch-Setup-${{ matrix.architecture }}
+          path: out/KeySwitch-Setup-*.exe
+          retention-days: 14
