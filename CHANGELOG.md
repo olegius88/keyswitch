@@ -4,7 +4,23 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
-## 0.66.0 — 2026-11-04
+- Publish everything since 0.65.0. The 0.66.0 section below was tagged, but its release job produced no installer for
+  Windows on Arm: the check of the installed program did not finish there, twice, while it takes half a minute on x64
+  and on x86, and did on Arm with 0.65.0. The executable now ends its process itself once the program has finished,
+  without finalising the interpreter around the engine's loader, and every wait of the check is bounded and names what
+  it waited for. Windows on Arm is built and checked before a release as well.
+- The packages are smaller. The Windows x64 installer is 31.9 MB instead of 36.8 MB in 0.65.0, its ZIP 41.9 MB instead of
+  52.1 MB and the installed program 90 MB instead of 115 MB; on Arm 30.9 MB and 40.9 MB instead of 33.8 MB and 46.0 MB,
+  on x86 30.2 MB and 39.6 MB instead of 34.0 MB and 48.7 MB; the Debian package 26.5 MB instead of 29.6 MB. KeySwitch's own
+  code stays Python bytecode instead of being compiled to C, which makes the Windows executable 16 MB smaller and the
+  engine build no slower (measured on Linux); docstrings are left out, and the Windows builds carry only the image
+  formats the tray icon uses.
+- On Windows the program's private memory right after start is about 230 MB instead of about 325 MB in 0.65.0, and it
+  commits about 250 MB instead of 350 MB (the built x64 executables in one virtual machine).
+
+## 0.66.0 — unpublished, 2026-11-04
+
+These changes were tagged but did not produce a published release. 0.66.1 publishes them.
 
 - KeySwitch takes about 120 MB less memory: the letter-sequence tables of the spelling model, about a million entries,
   are kept in two compact arrays instead of a million separate objects, and on Linux the memory freed while the models

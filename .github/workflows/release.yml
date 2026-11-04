@@ -804,7 +804,19 @@ jobs:
           $version = (Select-String -Path pyproject.toml -Pattern '^version = "([^"]+)"$').Matches.Groups[1].Value
           $installer = "dist/KeySwitch-Setup-$version-${{ matrix.architecture }}.exe"
           $installRoot = Join-Path $env:RUNNER_TEMP "KeySwitch-installed"
-          $install = Start-Process -FilePath $installer -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$installRoot" -Wait -PassThru
+          # Every wait below is bounded and says what it waited for: a step that reaches its own timeout loses its
+          # log with the runner (0.66.0 on Windows on Arm), and the hang is then anyone's guess.
+          function Wait-Bounded($process, $what) {
+            $null = $process.Handle
+            if (-not $process.WaitForExit(120000)) {
+              Get-Process | Sort-Object CPU -Descending | Select-Object -First 15 Name, Id, CPU | Format-Table | Out-String | Write-Host
+              $process.Kill()
+              throw "$what did not finish in two minutes"
+            }
+            Write-Host ("{0:HH:mm:ss} {1}: exit {2}" -f (Get-Date), $what, $process.ExitCode)
+          }
+          $install = Start-Process -FilePath $installer -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$installRoot" -PassThru
+          Wait-Bounded $install "Installation"
           if ($install.ExitCode -ne 0) { throw "Installer exited with $($install.ExitCode)" }
           $env:KEYSWITCH_CONFIG_DIR = Join-Path $env:RUNNER_TEMP "KeySwitch-smoke-config"
           $env:KEYSWITCH_DATA_DIR = Join-Path $env:RUNNER_TEMP "KeySwitch-smoke-data"
@@ -834,10 +846,11 @@ jobs:
           $diagnosedModel = [System.IO.Path]::GetFullPath([string]$diagnostics.intent_model.path)
           $expectedInstalledModel = [System.IO.Path]::GetFullPath($installedModel)
           if (-not $diagnosedModel.Equals($expectedInstalledModel, [System.StringComparison]::OrdinalIgnoreCase)) { throw "Installed executable did not load its exact in-installation intent model" }
-          $smoke = Start-Process -FilePath (Join-Path $installRoot "KeySwitch.exe") -ArgumentList "--smoke-ui" -Wait -PassThru
+          $smoke = Start-Process -FilePath (Join-Path $installRoot "KeySwitch.exe") -ArgumentList "--smoke-ui" -PassThru
+          Wait-Bounded $smoke "--smoke-ui"
           if ($smoke.ExitCode -ne 0) { throw "Installed executable exited with $($smoke.ExitCode)" }
           $update = Start-Process -FilePath $installer -ArgumentList "/SP-", "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/NORESTARTAPPLICATIONS", "/KEYSWITCHUPDATE=1", "/DIR=$installRoot" -PassThru
-          $update.WaitForExit()
+          Wait-Bounded $update "Auto-update installer"
           if ($update.ExitCode -ne 0) { throw "Auto-update installer exited with $($update.ExitCode)" }
           $keyswitchUpdatedProcess = $null
           for ($attempt = 0; $attempt -lt 40 -and -not $keyswitchUpdatedProcess; $attempt++) {
@@ -869,7 +882,7 @@ jobs:
           if ($reinstall.ExitCode -ne 0) { throw "Installer over the running KeySwitch exited with $($reinstall.ExitCode)" }
           if (-not $keyswitchUpdatedProcess.HasExited) { throw "Installer over the running KeySwitch left it running" }
           Stop-Process -Id $keyswitchUpdatedProcess.Id -Force -ErrorAction SilentlyContinue
-          Wait-Process -Id $keyswitchUpdatedProcess.Id -ErrorAction SilentlyContinue
+          Wait-Process -Id $keyswitchUpdatedProcess.Id -Timeout 30 -ErrorAction SilentlyContinue
           $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
           New-Item -Path $runKey -Force | Out-Null
           New-ItemProperty -Path $runKey -Name "KeySwitch" -Value (Join-Path $installRoot "KeySwitch.exe") -PropertyType String -Force | Out-Null
@@ -878,7 +891,14 @@ jobs:
           # The uninstaller removes a running application too.
           $keyswitchRunning = Start-Process -FilePath (Join-Path $installRoot "KeySwitch.exe") -ArgumentList "--hidden" -PassThru
           Wait-KeySwitchMutex
-          $uninstall = Start-Process -FilePath $uninstaller.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
+          # The uninstaller hands over to a copy of itself in the temporary folder (_iu*.tmp) and exits: it has finished when
+          # that copy has gone too.
+          $uninstall = Start-Process -FilePath $uninstaller.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -PassThru
+          Wait-Bounded $uninstall "Uninstaller"
+          $deadline = (Get-Date).AddMinutes(2)
+          while ((Get-Process -Name "_iu*" -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
+          if (Get-Process -Name "_iu*" -ErrorAction SilentlyContinue) { throw "The uninstaller's copy did not finish in two minutes" }
+          Write-Host ("{0:HH:mm:ss} Uninstaller's copy finished" -f (Get-Date))
           if ($uninstall.ExitCode -ne 0) { throw "Uninstaller exited with $($uninstall.ExitCode)" }
           if (Test-Path (Join-Path $installRoot "KeySwitch.exe")) { throw "Uninstaller left KeySwitch.exe behind" }
           if (-not $keyswitchRunning.HasExited) { throw "Uninstaller left KeySwitch running" }
