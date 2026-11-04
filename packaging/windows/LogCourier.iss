@@ -51,8 +51,28 @@ Source: "{#SourceDir}\LogCourier-cli.exe"; DestDir: "{app}"; Flags: ignoreversio
 Source: "{#SourceDir}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\LogCourier"; Filename: "{app}\LogCourier.exe"
-Name: "{autodesktop}\LogCourier"; Filename: "{app}\LogCourier.exe"; Tasks: desktopicon
+Name: "{group}\LogCourier"; Filename: "{app}\LogCourier.exe"; Parameters: "gui"; WorkingDir: "{app}"
+Name: "{autodesktop}\LogCourier"; Filename: "{app}\LogCourier.exe"; Parameters: "gui"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\LogCourier.exe"; Description: "Запустить LogCourier"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\LogCourier.exe"; Parameters: "gui"; Description: "Запустить LogCourier"; Flags: nowait postinstall skipifsilent
+[Code]
+// Autostart is enabled only in the application UI. Do not remove another
+// portable installation's Run entry, or any config/queue/Credential Locker data.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Command, Executable: String;
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    Executable := ExpandConstant('{app}\LogCourier.exe');
+    if RegQueryStringValue(HKEY_CURRENT_USER,
+      'Software\Microsoft\Windows\CurrentVersion\Run', 'LogCourier', Command) then
+    begin
+      if (CompareText(Command, '"' + Executable + '" gui --minimized') = 0) or
+         (CompareText(Command, Executable + ' gui --minimized') = 0) then
+        RegDeleteValue(HKEY_CURRENT_USER,
+          'Software\Microsoft\Windows\CurrentVersion\Run', 'LogCourier');
+    end;
+  end;
+end;
