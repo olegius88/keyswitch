@@ -177,13 +177,21 @@ fn gui(arguments: &[String]) -> Result<i32> {
     Ok(crate::gui_win::run(arguments.iter().any(|argument| argument == "--minimized")))
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn gui(arguments: &[String]) -> Result<i32> {
+    if arguments.first().map(String::as_str) == Some("self-test") {
+        return crate::gui_gtk::smoke_test(parse_output(&arguments[1..]).as_deref());
+    }
+    Ok(crate::gui_gtk::run(arguments.iter().any(|argument| argument == "--minimized")))
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn gui(_arguments: &[String]) -> Result<i32> {
-    eprintln!("Окно настроек LogCourier на этой системе ещё не перенесено; настройки читаются из config.json.");
+    eprintln!("Окна настроек LogCourier на этой системе нет; настройки читаются из config.json.");
     Ok(1)
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 fn parse_output(arguments: &[String]) -> Option<PathBuf> {
     arguments.iter().position(|argument| argument == "--output").and_then(|index| arguments.get(index + 1)).map(PathBuf::from)
 }

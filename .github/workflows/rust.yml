@@ -119,6 +119,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: rustup toolchain install stable --profile minimal
+      - name: GTK development files
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev
       - run: cargo test -p logcourier
       - run: cargo build --release -p logcourier
       - uses: actions/upload-artifact@v7

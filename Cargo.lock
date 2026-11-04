@@ -1136,6 +1136,7 @@ version = "0.2.0"
 dependencies = [
  "embed-resource",
  "flate2",
+ "gtk4",
  "ks-text",
  "libc",
  "rusqlite",

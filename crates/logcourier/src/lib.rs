@@ -7,6 +7,8 @@ pub mod config;
 pub mod constants;
 pub mod error;
 pub mod gui_model;
+#[cfg(target_os = "linux")]
+pub mod gui_gtk;
 #[cfg(windows)]
 pub mod gui_win;
 pub mod rate_limit;
