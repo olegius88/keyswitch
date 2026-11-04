@@ -9,6 +9,7 @@ license = "GPL-3.0-or-later"
 repository = "https://github.com/olegius88/keyswitch"
 
 [workspace.dependencies]
+ks-backend = { path = "crates/ks-backend" }
 ks-text = { path = "crates/ks-text" }
 ks-lang = { path = "crates/ks-lang" }
 ks-context = { path = "crates/ks-context" }

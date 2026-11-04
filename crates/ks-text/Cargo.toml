@@ -5,3 +5,10 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+# json_dumps works on serde_json::Value; preserve_order keeps the key order of the files, float_roundtrip makes the
+# parsed doubles equal to Python's. Both features come from the workspace entry.
+serde_json.workspace = true
+
+[dev-dependencies]
+# The golden files are gz-compressed; the tests read them (default miniz_oxide backend, no C code).
+flate2.workspace = true

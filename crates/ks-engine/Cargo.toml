@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+ks-backend.workspace = true
 ks-text.workspace = true
 ks-lang.workspace = true
 ks-context.workspace = true
