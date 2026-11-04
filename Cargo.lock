@@ -192,6 +192,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ks-updates"
+version = "0.70.0"
+dependencies = [
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "ks-win"
 version = "0.70.0"
 dependencies = [
@@ -202,6 +210,7 @@ dependencies = [
  "ks-engine",
  "ks-lang",
  "ks-text",
+ "ks-updates",
  "serde_json",
  "windows-sys",
 ]
