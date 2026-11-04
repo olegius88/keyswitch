@@ -748,7 +748,7 @@ class WindowsInstallerLaunchTests(unittest.TestCase):
             ).read_text(encoding="utf-8")
             for required in (
                 "/KEYSWITCHUPDATE=1",
-                "$update.WaitForExit()",
+                'Wait-Bounded $update "Auto-update installer"',
                 "Auto-update installer did not relaunch KeySwitch",
                 "tests/test_updates.py",
                 "*/updates.py",
