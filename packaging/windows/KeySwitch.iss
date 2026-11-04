@@ -50,7 +50,7 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed={#ArchitecturesSupported}
 ArchitecturesInstallIn64BitMode={#ArchitecturesIn64BitMode}
-UninstallDisplayIcon={app}\KeySwitch.exe
+UninstallDisplayIcon={app}\resources\keyswitch.ico
 VersionInfoVersion={#MyAppVersion}.0
 VersionInfoCompany=Oleg Shevchuk
 VersionInfoDescription=KeySwitch installer
@@ -64,12 +64,34 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "Создать ярлык на рабочем столе"; GroupDescription: "Дополнительные ярлыки:"; Flags: unchecked
 
+; The Rust program is one executable and its resources folder. What the Python releases (up to 0.66.1) left in the install
+; folder is removed on an update over them; the settings and data live in %APPDATA% and are not touched.
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\keyswitch"
+Type: filesandordirs; Name: "{app}\PIL"
+Type: filesandordirs; Name: "{app}\licenses"
+Type: files; Name: "{app}\*.pyd"
+Type: files; Name: "{app}\python3*.dll"
+Type: files; Name: "{app}\libcrypto-3.dll"
+Type: files; Name: "{app}\libffi-8.dll"
+Type: files; Name: "{app}\libssl-3.dll"
+Type: files; Name: "{app}\libtommath.dll"
+Type: files; Name: "{app}\tcl90.dll"
+Type: files; Name: "{app}\tcl9tk90.dll"
+Type: files; Name: "{app}\tcl.zip"
+Type: files; Name: "{app}\tk.zip"
+Type: files; Name: "{app}\zlib1.dll"
+Type: files; Name: "{app}\base_library.zip"
+Type: files; Name: "{app}\README.md"
+Type: files; Name: "{app}\README.en.md"
+
 [Files]
-Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourceDir}\KeySwitch.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\resources\*"; DestDir: "{app}\resources"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\KeySwitch"; Filename: "{app}\KeySwitch.exe"
-Name: "{autodesktop}\KeySwitch"; Filename: "{app}\KeySwitch.exe"; Tasks: desktopicon
+Name: "{group}\KeySwitch"; Filename: "{app}\KeySwitch.exe"; IconFilename: "{app}\resources\keyswitch.ico"
+Name: "{autodesktop}\KeySwitch"; Filename: "{app}\KeySwitch.exe"; IconFilename: "{app}\resources\keyswitch.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\KeySwitch.exe"; Description: "Запустить KeySwitch"; Flags: nowait postinstall skipifsilent
@@ -77,7 +99,7 @@ Filename: "{app}\KeySwitch.exe"; Parameters: "--hidden"; Flags: nowait skipifnot
 
 [Code]
 const
-  // The single-instance mutex of the running application (windows_instance_native.MUTEX_NAME).
+  // The single-instance mutex of the running application (constants::MUTEX_NAME of ks-win).
   KeySwitchMutex = 'Local\io.github.olegius88.KeySwitch';
   // An update is installed by the application, which shuts itself down after starting it.
   UpdateExitGraceMilliseconds = 10000;

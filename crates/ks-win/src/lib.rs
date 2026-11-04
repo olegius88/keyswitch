@@ -6,10 +6,17 @@
 //! holds.
 
 pub mod constants;
+#[cfg(windows)]
+pub mod desktop_app;
 pub mod log;
+pub mod tray_icon;
+pub mod tray_model;
+pub mod windows_app;
 pub mod windows_backend;
 #[cfg(windows)]
 pub mod windows_context;
+#[cfg(windows)]
+pub mod tray;
 pub mod windows_instance;
 pub mod windows_native;
 #[cfg(windows)]

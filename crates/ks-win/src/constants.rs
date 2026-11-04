@@ -302,3 +302,23 @@ pub const MUTEX_NAME: &str = r"Local\io.github.olegius88.KeySwitch";
 /// The private window class of the settings window. A second start finds the running program by this class: the title
 /// `KeySwitch` is shared with the learning prompt, which must not be the window brought forward.
 pub const SETTINGS_WINDOW_CLASS: &str = "KeySwitchSettingsWindow";
+
+// -------------------------------------------------------------------------- windows_app.py, desktop_ui.py, tray (this crate)
+
+/// `--smoke-ui` closes the window this long after it is shown (constants/timing.py).
+pub const SMOKE_UI_QUIT_AFTER_MS: u32 = 300;
+/// How long quitting waits for the engine to stop before the process ends anyway: a loader or hook thread that does not
+/// answer must never keep the program from exiting (the installer check of 0.66.0 hung at exit on Windows on Arm).
+pub const ENGINE_STOP_WAIT_SECONDS: f64 = 5.0;
+/// The window the tray icon belongs to, which is also the settings window until the real pages exist.
+pub const SETTINGS_WINDOW_CLIENT_WIDTH_PIXELS: i32 = 560;
+pub const SETTINGS_WINDOW_CLIENT_HEIGHT_PIXELS: i32 = 260;
+pub const SETTINGS_WINDOW_MARGIN_PIXELS: i32 = 16;
+pub const SETTINGS_BUTTON_WIDTH_PIXELS: i32 = 220;
+pub const SETTINGS_BUTTON_HEIGHT_PIXELS: i32 = 30;
+pub const SETTINGS_FONT_HEIGHT_PIXELS: i32 = 15;
+pub const SETTINGS_OPEN_FOLDER_LABEL: &str = "Открыть папку настроек";
+pub const SETTINGS_WINDOW_TITLE: &str = "KeySwitch";
+/// The unit of the device's DPI at which sizes are written.
+pub const BASE_DPI: i32 = 96;
+pub const BACKEND_LABEL: &str = "Win32 hook + SendInput";

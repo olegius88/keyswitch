@@ -19,19 +19,24 @@ ks-text.workspace = true
 ks-lang.workspace = true
 ks-context.workspace = true
 ks-engine.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 # The sequences dumped from the Python are gz-compressed JSON lines.
 flate2.workspace = true
-serde_json.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = [
+    "Wdk_System_SystemServices",
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
     "Win32_System_Com",
     "Win32_System_DataExchange",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_IO",
     "Win32_System_LibraryLoader",
     "Win32_System_Memory",
     "Win32_System_Ole",
@@ -41,5 +46,6 @@ windows-sys = { workspace = true, features = [
     "Win32_System_Variant",
     "Win32_UI_Accessibility",
     "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
