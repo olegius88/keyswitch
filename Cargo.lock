@@ -155,6 +155,7 @@ dependencies = [
  "ks-context",
  "ks-lang",
  "ks-text",
+ "serde_json",
 ]
 
 [[package]]
@@ -173,10 +174,13 @@ dependencies = [
 name = "ks-replay"
 version = "0.70.0"
 dependencies = [
+ "ks-backend",
+ "ks-config",
  "ks-context",
  "ks-engine",
  "ks-lang",
  "ks-text",
+ "serde_json",
 ]
 
 [[package]]

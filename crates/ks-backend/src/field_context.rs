@@ -96,6 +96,11 @@ impl FieldContext {
 /// A reader of the focused field, for one platform.
 pub trait FieldReader: Send + Sync {
     fn read(&self, application: &str, window: i64) -> Option<FieldContext>;
+
+    /// How the reader last fared; `available` lets the engine trust the text around a moved caret.
+    fn status(&self) -> String {
+        "not_requested".to_owned()
+    }
 }
 
 /// Why a platform reader could not answer, as the diagnostics of a reader name it: the failure's class and, where the

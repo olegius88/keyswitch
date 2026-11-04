@@ -6,6 +6,9 @@ license.workspace = true
 
 [dependencies]
 ks-text.workspace = true
+ks-backend.workspace = true
+ks-config.workspace = true
 ks-lang.workspace = true
 ks-context.workspace = true
 ks-engine.workspace = true
+serde_json.workspace = true

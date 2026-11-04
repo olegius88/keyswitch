@@ -10,3 +10,4 @@ ks-backend.workspace = true
 ks-text.workspace = true
 ks-lang.workspace = true
 ks-context.workspace = true
+serde_json.workspace = true
