@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::constants::{ALT_MASK, CONTROL_MASK, LOCK_MASK, SHIFT_MASK, SUPER_MASK};
 use crate::input_delay::{HookGap, InputDelayReport};
-use crate::selected_text::{SelectedText, SelectionRefused};
+use crate::selected_text::{SelectedText, SelectionError, SelectionRefused};
 
 /// What the key filter says about a key: pass it on, consume it, or hold it until the engine decides.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -141,8 +141,10 @@ pub trait InputBackend: Send + Sync {
     fn start(&self, listener: KeyListener) -> Result<(), BackendError>;
     fn set_key_filter(&self, predicate: Option<KeyFilter>);
     fn hold_input(&self);
-    fn release_input(&self) -> i32;
-    fn complete_action(&self, deliver: bool) -> i32;
+    /// Types the held keys again and says how many; a failed send is an error the engine reports.
+    fn release_input(&self) -> Result<i32, BackendError>;
+    /// Delivers a withheld Enter/Tab, or forgets it; says how many key events it sent.
+    fn complete_action(&self, deliver: bool) -> Result<i32, BackendError>;
     fn stop(&self);
     fn close(&self);
     fn current_group(&self) -> Result<i32, BackendError>;
@@ -166,8 +168,8 @@ pub trait InputBackend: Send + Sync {
     }
 
     /// The input the hook did not see since the last call, on backends that can tell.
-    fn take_unseen_input(&self) -> Option<i64> {
-        None
+    fn take_unseen_input(&self) -> Result<Option<i64>, BackendError> {
+        Ok(None)
     }
 
     fn take_input_delay(&self) -> Option<InputDelayReport> {
@@ -184,8 +186,8 @@ pub trait InputBackend: Send + Sync {
     }
 
     /// Reads the selection, or says why it is left as it is.
-    fn read_selection(&self, _application: &str, _window: i64) -> Result<SelectedText, SelectionRefused> {
-        Err(SelectionRefused::new(crate::selected_text::RefusalReason::Unsupported))
+    fn read_selection(&self, _application: &str, _window: i64) -> Result<SelectedText, SelectionError> {
+        Err(SelectionRefused::new(crate::selected_text::RefusalReason::Unsupported).into())
     }
 
     /// Types `replacement` over the selection, leaves the layout in `final_group` (or where it was, for None),
@@ -195,8 +197,8 @@ pub trait InputBackend: Send + Sync {
         _selected: &SelectedText,
         _replacement: &str,
         _final_group: Option<i32>,
-    ) -> Result<bool, SelectionRefused> {
-        Err(SelectionRefused::new(crate::selected_text::RefusalReason::Unsupported))
+    ) -> Result<bool, SelectionError> {
+        Err(SelectionRefused::new(crate::selected_text::RefusalReason::Unsupported).into())
     }
 
     fn input_anchor(&self) -> Option<ScreenAnchor> {

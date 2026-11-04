@@ -1,0 +1,15 @@
+[package]
+name = "ks-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ks-text.workspace = true
+ks-backend.workspace = true
+serde_json.workspace = true
+# The salted hashes of personal_words and the defaults digest of settings_diagnostics.
+sha2.workspace = true
+
+[dev-dependencies]
+flate2.workspace = true

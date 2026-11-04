@@ -1,5 +1,7 @@
 //! What a backend reads of the selection, and why it may leave the selection as it is.
 
+use crate::backend::BackendError;
+
 /// Where the selected text was read; the log names it.
 pub const SOURCE_UIA: &str = "uia";
 pub const SOURCE_CLIPBOARD: &str = "clipboard";
@@ -74,4 +76,24 @@ impl SelectionRefused {
 pub struct SelectedText {
     pub text: String,
     pub source: String,
+}
+
+/// Why a selection hotkey changed nothing: a refusal the log calls `refused`, or a failure of the backend the log calls
+/// `failed` and whose message goes to the status line. The Python raises one or the other through the same call.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SelectionError {
+    Refused(SelectionRefused),
+    Failed(BackendError),
+}
+
+impl From<SelectionRefused> for SelectionError {
+    fn from(refused: SelectionRefused) -> Self {
+        SelectionError::Refused(refused)
+    }
+}
+
+impl From<BackendError> for SelectionError {
+    fn from(error: BackendError) -> Self {
+        SelectionError::Failed(error)
+    }
 }

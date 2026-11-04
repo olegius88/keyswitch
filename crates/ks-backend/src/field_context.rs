@@ -98,6 +98,26 @@ pub trait FieldReader: Send + Sync {
     fn read(&self, application: &str, window: i64) -> Option<FieldContext>;
 }
 
+/// Why a platform reader could not answer, as the diagnostics of a reader name it: the failure's class and, where the
+/// provider gives one, its HRESULT. Numbers and names only: nothing a provider says may carry a character the user typed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReaderFailure {
+    /// `import_error`, `os_error`, `runtime_error` or `provider_error`.
+    pub failure_type: &'static str,
+    pub failure_name: &'static str,
+    pub failure_code: Option<i64>,
+    /// A missing module or a denied right needs a new process: asking again gains nothing.
+    pub permanent: bool,
+}
+
+/// The reader of one platform as the reader of the focused field drives it (Python: `_ManagedReader`). It belongs to
+/// the thread that built it, the engine's worker, so unlike `FieldReader` it says nothing about sharing.
+pub trait ManagedFieldReader {
+    /// The field, None for a field it cannot read, or the reason the provider did not answer.
+    fn read(&self, application: &str, window: i64) -> Result<Option<FieldContext>, ReaderFailure>;
+    fn close(&mut self);
+}
+
 fn first_characters(text: &str, count: usize) -> &str {
     match text.char_indices().nth(count) {
         Some((index, _)) => &text[..index],

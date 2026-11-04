@@ -6,3 +6,13 @@ license.workspace = true
 
 [dependencies]
 ks-text.workspace = true
+# The frequency lists and the orthotactic artifact are parsed through visitors, without a tree of values in between.
+serde.workspace = true
+serde_json.workspace = true
+indexmap.workspace = true
+# `IdentifierLexicon.version` is a digest of the file.
+sha2.workspace = true
+
+[dev-dependencies]
+# The golden files are gz-compressed; the tests read them.
+flate2.workspace = true

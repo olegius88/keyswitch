@@ -8,8 +8,10 @@ pub mod constants;
 pub mod field_context;
 pub mod input_delay;
 pub mod selected_text;
+pub mod system_model;
 
 pub use backend::*;
-pub use field_context::{FieldContext, FieldReader, FieldRole};
+pub use field_context::{FieldContext, FieldReader, FieldRole, ManagedFieldReader, ReaderFailure};
 pub use input_delay::{HookGap, InputDelay, InputDelayReport};
-pub use selected_text::{RefusalReason, SelectedText, SelectionRefused};
+pub use selected_text::{RefusalReason, SelectedText, SelectionError, SelectionRefused};
+pub use system_model::{Application, AutostartStatus};

@@ -4,12 +4,42 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+name = "ks_win"
+path = "src/lib.rs"
+
 [[bin]]
 name = "KeySwitch"
 path = "src/main.rs"
 
 [dependencies]
+ks-backend.workspace = true
+ks-config.workspace = true
 ks-text.workspace = true
 ks-lang.workspace = true
 ks-context.workspace = true
 ks-engine.workspace = true
+
+[dev-dependencies]
+# The sequences dumped from the Python are gz-compressed JSON lines.
+flate2.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_System_Com",
+    "Win32_System_DataExchange",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_UI_Accessibility",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }

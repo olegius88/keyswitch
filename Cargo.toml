@@ -11,6 +11,7 @@ repository = "https://github.com/olegius88/keyswitch"
 [workspace.dependencies]
 ks-backend = { path = "crates/ks-backend" }
 ks-text = { path = "crates/ks-text" }
+ks-config = { path = "crates/ks-config" }
 ks-lang = { path = "crates/ks-lang" }
 ks-context = { path = "crates/ks-context" }
 ks-engine = { path = "crates/ks-engine" }
@@ -22,6 +23,7 @@ unicode-normalization = "0.1"
 sha2 = "0.10"
 miniz_oxide = "0.8"
 flate2 = "1"
+windows-sys = "0.61"
 
 # Size is what this port is for: the smallest code that is still fast enough for one keystroke at a time.
 [profile.release]
