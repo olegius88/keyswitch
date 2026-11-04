@@ -55,7 +55,7 @@ fn build_platform() -> String {
 }
 
 impl EngineCore {
-    pub(crate) fn _technical_session_event(&self, event: &str) {
+    pub fn _technical_session_event(&self, event: &str) {
         technical_event!(
             self.shared, event,
             "keyswitch_version": ks_config::logsetup::VERSION,
@@ -281,7 +281,7 @@ impl EngineCore {
         self.shared.emit_technical(payload);
     }
 
-    pub(crate) fn _log_input_edit(&self, event: &KeyEvent, application: &str) {
+    pub fn _log_input_edit(&self, event: &KeyEvent, application: &str) {
         // Observe editing controls, not printable keystrokes or field contents.
         if !self.shared.technical_logging() || !self.flag("enabled", true) || self._application_excluded(application) {
             return;

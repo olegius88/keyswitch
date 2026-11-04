@@ -110,7 +110,7 @@ impl EngineCore {
         Ok(())
     }
 
-    pub(crate) fn _early_prefix_protection(&mut self, original: &str, source: i64, _target: i64) -> &'static str {
+    pub fn _early_prefix_protection(&mut self, original: &str, source: i64, _target: i64) -> &'static str {
         let key = LanguageDetector::token_key(original);
         if self.words_setting("exclusions.words").iter().any(|word| LanguageDetector::token_key(word).starts_with(&key)) {
             return "excluded_word_prefix";
@@ -132,7 +132,7 @@ impl EngineCore {
         ""
     }
 
-    pub(crate) fn _early_prefix_field(&mut self, original: &str, application: &str) -> (FieldContext, &'static str) {
+    pub fn _early_prefix_field(&mut self, original: &str, application: &str) -> (FieldContext, &'static str) {
         let mut field = self.context_policy.stream.snapshot(original);
         if !self.flag("detection.context_aware", true) {
             field = FieldContext::new(application, self.focus_or_zero().to_string());

@@ -517,7 +517,7 @@ impl EngineCore {
             && !pystr::isspace(first)
     }
 
-    pub(crate) fn _is_boundary(event: &KeyEvent) -> bool {
+    pub fn _is_boundary(event: &KeyEvent) -> bool {
         let name = event.key_name.as_str();
         if WORD_BOUNDARY_KEYS.contains(&name) || ACTION_BOUNDARY_KEYS.contains(&name) {
             return true;

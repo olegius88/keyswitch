@@ -15,7 +15,7 @@ impl EngineCore {
     // If the word accumulated before this key is already recognisable, the
     // key is punctuation and can safely trigger a correction. Otherwise it is
     // retained as a physical stroke (for example `,fpf` -> `база`).
-    pub(crate) fn _ambiguous_key_is_boundary(&mut self, event: &KeyEvent) -> EngineResult<bool> {
+    pub fn _ambiguous_key_is_boundary(&mut self, event: &KeyEvent) -> EngineResult<bool> {
         if self.boundary_model.is_some() {
             // No completed-word classifier gets to cut an unfinished prefix.
             // Retain the key until a hard boundary or an idle evaluation.

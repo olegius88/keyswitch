@@ -82,6 +82,11 @@ impl KeySwitchEngine {
         }
     }
 
+    /// The state, for a replay that drives the engine from its own thread: empty once a worker holds it.
+    pub fn core(&self) -> std::sync::MutexGuard<'_, Option<EngineCore>> {
+        self.core.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     pub fn snapshot(&self) -> EngineSnapshot {
         self.shared.snapshot()
     }
@@ -295,6 +300,18 @@ fn _run(mut core: EngineCore) -> EngineCore {
 }
 
 impl EngineCore {
+    /// What the worker does as it wakes: the settings other threads changed, applied on the engine's own thread.
+    pub fn apply_commands(&mut self) {
+        while let Some(Command::SettingsChanged(path, value)) = self.shared.take_command() {
+            self._settings_changed(&path, &value);
+        }
+    }
+
+    /// The context policy, handed on to the next engine of a replay.
+    pub fn context_policy_out(self) -> ContextPolicy {
+        self.context_policy
+    }
+
     /// `_run_timers`: the eight timers of the live loop. The harness pumps its own five, one by one.
     pub fn _run_timers(&mut self) -> EngineResult<()> {
         self._expire_deferred_action()?;
@@ -317,7 +334,7 @@ impl EngineCore {
     /// input no hook got came in the middle of words in 14 programs, and each time the word, the text before it and
     /// the last correction were forgotten, so Pause found no word to convert. A backend that cannot tell has no
     /// take_unseen_input.
-    fn _report_unseen_input(&mut self) -> EngineResult<()> {
+    pub fn _report_unseen_input(&mut self) -> EngineResult<()> {
         let Some(unseen) = self.backend.take_unseen_input()? else {
             return Ok(());
         };
@@ -336,7 +353,7 @@ impl EngineCore {
     ///
     /// A backend that cannot tell (X11 observes keys after the window has them) has no
     /// take_input_delay; see input_delay.
-    fn _report_input_delay(&mut self) {
+    pub fn _report_input_delay(&mut self) {
         let now = self.monotonic();
         if now < self._input_delay_due {
             return;

@@ -7,7 +7,7 @@ use ks_config::learning::RuleAction;
 
 impl EngineCore {
     // Pause: convert what was typed since the last boundary, or switch.
-    pub(crate) fn _schedule_manual_conversion(&mut self, trigger_keycode: i64) {
+    pub fn _schedule_manual_conversion(&mut self, trigger_keycode: i64) {
         if self._pending.as_ref().is_some_and(|pending| !pending.automatic) && self._strokes.is_empty() && self._symbol_strokes.is_empty() {
             technical_event!(
                 self.shared, "manual_conversion_waiting", "reason": "previous_command_pending",
@@ -449,7 +449,7 @@ impl EngineCore {
         );
     }
 
-    pub(crate) fn _schedule_undo(&mut self, trigger_keycode: i64) {
+    pub fn _schedule_undo(&mut self, trigger_keycode: i64) {
         self._personal_word_settled(false);
         if self._pending.as_ref().is_some_and(|pending| pending.mode == "early") {
             self._log_pending_dropped("replaced_by_undo");
@@ -505,7 +505,7 @@ impl EngineCore {
     /// a space typed after the correction leaves nothing to undo. The bytes of that file are part of sealed
     /// evidence and cannot change. What the hotkey does is the product's, so the hotkey comes here, and
     /// everything other than the spaces is left to `_schedule_undo`.
-    pub(crate) fn _schedule_undo_hotkey(&mut self, trigger_keycode: i64) {
+    pub fn _schedule_undo_hotkey(&mut self, trigger_keycode: i64) {
         let Some((plan, spaces)) = self._undo_past_spaces() else {
             self._schedule_undo(trigger_keycode);
             return;

@@ -34,7 +34,7 @@ impl EngineCore {
         technical_event!(self.shared, "selection_command_scheduled", "command": command.as_str());
     }
 
-    pub(crate) fn _advance_selection_command(&mut self) {
+    pub fn _advance_selection_command(&mut self) {
         let Some(pending) = self._selection_pending else {
             return;
         };
@@ -84,7 +84,7 @@ impl EngineCore {
     }
 
     /// Read the selection, change it and type the result over it; the log gets lengths, never the text.
-    fn _run_selection_command(&mut self, command: SelectionCommand) {
+    pub fn _run_selection_command(&mut self, command: SelectionCommand) {
         let started = self.monotonic();
         let application = self.backend.active_application();
         let focus = self.backend.focused_window();
@@ -100,11 +100,12 @@ impl EngineCore {
         let mut selected: Option<SelectedText> = None;
         let mut plan = SelectionPlan { replacement: String::new(), source_group: None, target_group: None };
         let mut reselected = false;
-        backend.hold_input();
+        let hold = backend.try_hold_input();
+        let hold_failed = hold.is_err();
         let mut outcome: Result<(), SelectionError> = (|| {
-            let read = backend.read_selection(&application, focus.map_or(0, |focus| focus.window))?;
-            let text = checked_selection(&read.text)?.to_owned();
-            selected = Some(read);
+            hold.map_err(SelectionError::Failed)?;
+            selected = Some(backend.read_selection(&application, focus.map_or(0, |focus| focus.window))?);
+            let text = checked_selection(&selected.as_ref().expect("just read").text)?.to_owned();
             let group = backend.current_group().map_err(SelectionError::Failed)?;
             plan = plan_selection(command, &text, i64::from(group), &self._layout_names())?;
             if plan.changes(&text) {
@@ -113,7 +114,9 @@ impl EngineCore {
             }
             Ok(())
         })();
-        if let Err(error) = backend.release_input() {
+        if !hold_failed
+            && let Err(error) = backend.release_input()
+        {
             outcome = Err(SelectionError::Failed(error));
         }
         match outcome {

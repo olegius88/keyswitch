@@ -377,7 +377,12 @@ pub struct ContextModel {
     /// Whether the digit-dot head has weights here: digits with `ю` or `б` typed in the Russian layout are its class.
     pub answers_digit_dot: bool,
     pub tables: std::sync::Arc<TermTables>,
+    /// Answers in place of the weights: a replay asks the model's questions of a recorded run.
+    pub answer: Option<PredictAnswer>,
 }
+
+/// What stands in for `predict` when the answers come from elsewhere.
+pub type PredictAnswer = std::sync::Arc<dyn Fn(&ContextEvidence) -> ContextPrediction + Send + Sync>;
 
 impl ContextModel {
     pub fn new(weights: WeightTable, version: &str, conversion_threshold: f64, tables: std::sync::Arc<TermTables>) -> Self {
@@ -402,6 +407,7 @@ impl ContextModel {
             answers_cyrletter: flags.4,
             answers_digit_dot: flags.5,
             tables,
+            answer: None,
         }
     }
 
@@ -531,6 +537,9 @@ impl ContextModel {
     }
 
     pub fn predict(&self, item: &ContextEvidence) -> ContextPrediction {
+        if let Some(answer) = &self.answer {
+            return answer(item);
+        }
         let Ok(features) = extract_action_features(item, &self.tables) else {
             return self.unsupported();
         };

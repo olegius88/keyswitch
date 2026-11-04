@@ -14,7 +14,7 @@ fn characters_of(strokes: &[&[Stroke]]) -> String {
 }
 
 impl EngineCore {
-    pub(crate) fn _commit_word(&mut self, boundary: &Stroke) -> EngineResult<()> {
+    pub fn _commit_word(&mut self, boundary: &Stroke) -> EngineResult<()> {
         if self._strokes.is_empty() {
             return Ok(());
         }
@@ -519,7 +519,7 @@ impl EngineCore {
     /// `glib`, which would make `GLib` a `Glib`. Terms of this shape (`VMware`, `OAuth`, `JUnit`, `MBps`)
     /// are no words of the lexicon and stay as typed. So does a word the user excluded or one a rule of
     /// theirs names, and a word typed under Caps Lock, where its capitals were not Shift held too long.
-    pub(crate) fn _fix_double_capitals(&mut self, plan: &PlanRef, boundary: &Stroke) -> PlanRef {
+    pub fn _fix_double_capitals(&mut self, plan: &PlanRef, boundary: &Stroke) -> PlanRef {
         let word = plan.original.as_str();
         let group = plan.source_group;
         let split = word.char_indices().nth(DOUBLE_CAPITALS).map_or(word.len(), |(index, _)| index);

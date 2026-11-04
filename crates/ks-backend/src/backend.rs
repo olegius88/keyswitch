@@ -141,6 +141,12 @@ pub trait InputBackend: Send + Sync {
     fn start(&self, listener: KeyListener) -> Result<(), BackendError>;
     fn set_key_filter(&self, predicate: Option<KeyFilter>);
     fn hold_input(&self);
+    /// `hold_input` where it can fail: the correction then ends as any failed injection does. A backend whose hold
+    /// cannot fail has no need of it.
+    fn try_hold_input(&self) -> Result<(), BackendError> {
+        self.hold_input();
+        Ok(())
+    }
     /// Types the held keys again and says how many; a failed send is an error the engine reports.
     fn release_input(&self) -> Result<i32, BackendError>;
     /// Delivers a withheld Enter/Tab, or forgets it; says how many key events it sent.

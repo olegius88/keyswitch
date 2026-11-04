@@ -12,3 +12,4 @@ ks-lang.workspace = true
 ks-context.workspace = true
 ks-engine.workspace = true
 serde_json.workspace = true
+flate2.workspace = true

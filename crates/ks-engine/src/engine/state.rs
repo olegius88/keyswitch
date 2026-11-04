@@ -219,7 +219,7 @@ impl EngineCore {
         );
     }
 
-    pub(crate) fn _observe_group(&mut self, group: i64, source: &str) {
+    pub fn _observe_group(&mut self, group: i64, source: &str) {
         let focus = self._track_focus();
         if !focus.ignore_layout {
             // Any look outside an own window ends the ignored episode, so the

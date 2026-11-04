@@ -174,7 +174,7 @@ impl EngineCore {
 
     /// A correction waiting for its field (_waits_for_field) is tried again once no key is held down; a correction
     /// planned since then supersedes it, and it is given up as an unseen field always was.
-    pub(crate) fn _retry_field_wait(&mut self) {
+    pub fn _retry_field_wait(&mut self) {
         let Some(waiting) = self._field_wait.clone() else {
             return;
         };
@@ -254,7 +254,7 @@ impl EngineCore {
         Some(late)
     }
 
-    pub(crate) fn _maybe_execute_pending(&mut self, event: &KeyEvent) -> EngineResult<()> {
+    pub fn _maybe_execute_pending(&mut self, event: &KeyEvent) -> EngineResult<()> {
         if self._selection_pending.is_some() {
             self._advance_selection_command();
             return Ok(());
@@ -310,7 +310,7 @@ impl EngineCore {
     }
 
     /// `_execute_correction`; what a replay asks to see is noted here, on success, as the plan was asked to run.
-    pub(crate) fn _execute_correction(&mut self, plan: PlanRef, learning_prompt: Option<LearningPrompt>) -> bool {
+    pub fn _execute_correction(&mut self, plan: PlanRef, learning_prompt: Option<LearningPrompt>) -> bool {
         let requested = plan.clone();
         let ok = self._execute_correction_inner(plan, learning_prompt);
         if ok && let Some(executed) = self.executed.as_mut() {
@@ -423,12 +423,15 @@ impl EngineCore {
         let mut held: i64 = 0;
         let mut failure: Option<BackendError> = None;
         let mut unsafe_input = false;
-        self.backend.hold_input();
+        if let Err(error) = self.backend.try_hold_input() {
+            failure = Some(error);
+        }
         let planned: Vec<*const KeyEvent> = plan.strokes.iter().chain(plan.trailing.iter()).map(Arc::as_ptr).collect();
         // Letters of the next word the engine has taken already, and so the observed text too.
         let rolled: String = self._strokes.iter().filter(|stroke| !is_planned(&planned, stroke)).map(|stroke| stroke.character.as_str()).collect();
-        let late = self._collect_late_input(&plan);
+        let late = if failure.is_some() { Some(Vec::new()) } else { self._collect_late_input(&plan) };
         match late.as_ref() {
+            _ if failure.is_some() => {}
             None => {
                 if plan.mode == "early" {
                     // The keys stay queued with the word, and its boundary decides it: each of the 14 early

@@ -86,9 +86,9 @@ pub struct Shared {
     _action_keys: AtomicU8,
     /// Swapped whole when the settings change; the hook only tries it, so it never waits.
     _own_hotkeys: RwLock<Arc<Vec<Hotkey>>>,
-    pub(crate) _typed_events: AtomicI64,
-    pub(crate) _typed_presses: AtomicI64,
-    pub(crate) _input_overflow: AtomicBool,
+    pub _typed_events: AtomicI64,
+    pub _typed_presses: AtomicI64,
+    pub _input_overflow: AtomicBool,
     pub(crate) _running: AtomicBool,
     inbox: Mutex<Inbox>,
     wake: Condvar,
@@ -228,7 +228,7 @@ impl Shared {
         self._input_suspended.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn _test_field_focused(&self) -> bool {
+    pub fn _test_field_focused(&self) -> bool {
         self._test_field_focused.load(Ordering::Relaxed)
     }
 
@@ -327,7 +327,7 @@ impl Shared {
     }
 
     /// `self._events.put(item)`; false when the queue is full.
-    pub(crate) fn put_nowait(&self, item: QueueItem) -> bool {
+    pub fn put_nowait(&self, item: QueueItem) -> bool {
         let mut inbox = locked(&self.inbox);
         if inbox.events.len() >= ENGINE_EVENT_QUEUE_MAX_SIZE {
             return false;
@@ -356,6 +356,11 @@ impl Shared {
             }
             inbox = self.wake.wait_timeout(inbox, deadline - now).unwrap_or_else(PoisonError::into_inner).0;
         }
+    }
+
+    /// A setting another thread changed, for `apply_commands`.
+    pub(crate) fn take_command(&self) -> Option<Command> {
+        locked(&self.inbox).commands.pop_front()
     }
 
     /// `tuple(self._events.queue)`, under the inbox's lock.
@@ -509,7 +514,7 @@ impl Shared {
         true
     }
 
-    pub(crate) fn _show_learning_prompt(&self, prompt: LearningPrompt) {
+    pub fn _show_learning_prompt(&self, prompt: LearningPrompt) {
         let now = (self.clock)();
         let callbacks = {
             let mut guarded = locked(&self.guarded);

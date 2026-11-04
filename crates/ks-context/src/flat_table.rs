@@ -408,6 +408,13 @@ pub struct WeightTable {
     values: Vec<f64>,
 }
 
+impl WeightTable {
+    /// A table with no features: a model whose answers come from elsewhere.
+    pub fn empty() -> WeightTable {
+        WeightTable { index: NameIndex { arena: String::new(), ends: Vec::new(), hashes: Vec::new(), order: Vec::new() }, values: Vec::new() }
+    }
+}
+
 pub const ACTION_COUNT: usize = 4;
 
 impl WeightTable {

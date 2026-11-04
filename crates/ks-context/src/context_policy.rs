@@ -30,6 +30,9 @@ pub const PAUSE_WORD_START_REASON: &str = "на паузе это может б�
 /// A word the action model only suggests converting while the detector converts it (ContextPolicy.decide).
 pub const SUGGESTION_CONFIRMED_REASON: &str = "контекстная модель предлагает другую раскладку, детектор её подтверждает";
 
+/// The schema of the action model: an older model decides by the older rules (`self.model.feature_version`).
+const ACTION_MODEL: i64 = crate::constants::CONTEXT_ACTION_FEATURE_VERSION as i64;
+
 /// An exception the policy raises: a `KeyError` of the detector, or a `ValueError` of the features.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PolicyError {
@@ -507,7 +510,7 @@ impl ContextPolicy {
         let evidence_options = EvidenceOptions {
             literal_tail: options.literal_tail,
             boundary_text: options.boundary_text,
-            ortho: self.ortho.as_deref(),
+            ortho: self.ortho.as_deref().filter(|_| model.feature_version == ACTION_MODEL),
             after_origin: options.after_origin,
             identifiers: None,
             inside: options.inside,
@@ -578,10 +581,12 @@ impl ContextPolicy {
             || (model.answers_resume && resume_question(&baseline.original, alternative, &field.before, &field.after, options.after_origin))
             || (model.answers_cyrletter && cyrletter_question(&baseline.original, alternative, &field.before, trigger))
             || (model.answers_digit_dot && digit_dot_question(&baseline.original, alternative, trigger));
-        let lone = baseline.original.chars().filter(|&c| ucd::isalpha(c)).count() == 1
+        let action_model = model.feature_version == ACTION_MODEL;
+        let lone = action_model
+            && baseline.original.chars().filter(|&c| ucd::isalpha(c)).count() == 1
             && baseline.original.chars().all(|c| ucd::isalpha(c) || ucd::isdigit(c))
             && !learned;
-        let slang = russian_slang(&baseline.original, alternative, baseline.source_group, source.known, tables);
+        let slang = action_model && russian_slang(&baseline.original, alternative, baseline.source_group, source.known, tables);
         let converted = |reason: &str| {
             let mut decision = baseline.clone();
             decision.should_convert = true;
@@ -595,7 +600,7 @@ impl ContextPolicy {
         };
         let decision = if prediction.action == ContextAction::Convert && !slang && (!lone || is_short_word_override(&baseline)) {
             converted("решение контекстной модели")
-        } else if prediction.action == ContextAction::Suggest && baseline.should_convert && !slang && !lone {
+        } else if prediction.action == ContextAction::Suggest && baseline.should_convert && action_model && !slang && !lone {
             // The model leans to the other layout without its threshold's certainty, and the detector, which the model was
             // asked to overrule, converts: two verdicts of the same direction. A word no lexicon holds (`byzpt` for
             // `инязе`, `ntby` for `теин`) was left as typed at a suggestion while the baseline pair converted it, and in

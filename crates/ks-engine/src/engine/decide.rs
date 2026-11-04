@@ -46,7 +46,7 @@ impl EngineCore {
     /// field. The field is read once, as the word begins, and the letters
     /// right before and after the caret say whether this is a new word or the
     /// middle of an existing one (_decide_inside_word).
-    fn _read_insertion(&mut self, event: &Stroke) -> Option<InsertionPoint> {
+    pub fn _read_insertion(&mut self, event: &Stroke) -> Option<InsertionPoint> {
         let reader = self.context_policy.reader.clone().filter(|_| self.flag("detection.context_read_field", false))?;
         let application = self.backend.active_application();
         if self._application_excluded(&application) {
@@ -577,7 +577,7 @@ impl EngineCore {
         }
     }
 
-    pub(crate) fn _remember_context(&mut self, application: &str, group: i64, strokes: &[Stroke]) {
+    pub fn _remember_context(&mut self, application: &str, group: i64, strokes: &[Stroke]) {
         if !self.in_models(group) || strokes.is_empty() || pystr::strip(application).is_empty() || self._application_excluded(application) {
             return;
         }
