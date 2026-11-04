@@ -290,7 +290,7 @@ mod tests {
         }
         let sorted = list.sorted_unique();
         let words: Vec<&str> = sorted.iter().collect();
-        assert_eq!(words, ["", "a", "z", "ё", "я", "\u{ffff}", "\u{1d41a}"]);
+        assert_eq!(words, ["", "a", "z", "я", "ё", "\u{ffff}", "\u{1d41a}"]);
         assert!(sorted.is_sorted_set());
         assert_eq!(sorted.lower_bound("a"), 1);
         assert_eq!(sorted.lower_bound("b"), 2);

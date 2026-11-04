@@ -58,8 +58,6 @@ pub const ORTHO_MAX_ORDER: i64 = 8;
 pub const ORTHO_MAX_SCALE: i64 = 4096;
 /// Largest shortest-scored-token length an artifact may declare.
 pub const ORTHO_MAX_MINIMUM_LENGTH_CHARACTERS: i64 = 32;
-/// A stored backoff weight is a [context, weight] pair.
-pub const ORTHO_BACKOFF_ENTRY_FIELDS: usize = 2;
 /// The artifact schema that carries feature weights, and the number of parts a hyphenated token splits into for the
 /// compound features.
 pub const ORTHO_FEATURE_ARTIFACT_SCHEMA_VERSION: i64 = 2;
