@@ -79,3 +79,29 @@ jobs:
           name: KeySwitch-Setup-${{ matrix.architecture }}
           path: out/KeySwitch-Setup-*.exe
           retention-days: 14
+
+  deb:
+    name: Debian package and the Linux program's tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain and GTK development files
+        run: |
+          rustup toolchain install stable --profile minimal
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev xvfb dbus
+      - name: Tests
+        run: cargo test -p ks-linux
+      - name: Build
+        run: packaging/build-rust-deb.sh out
+      - name: Install and start
+        run: |
+          sudo apt-get install -y ./out/keyswitch_*.deb
+          keyswitch --version
+          xvfb-run -a dbus-run-session -- keyswitch --diagnose | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['intent_model']['available'] and d['context_model']['available'] and d['prefix_model']['available'], d"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: keyswitch-deb
+          path: out/keyswitch_*.deb
+          retention-days: 14
