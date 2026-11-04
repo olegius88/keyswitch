@@ -22,7 +22,19 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-const REFERENCE_TREE: &str = "/mnt/data2/_projects/puntoswitcher";
+/// What a trace says in place of the tree it was recorded in.
+const TREE_MARK: &str = "@TREE@";
+
+/// The tree that holds the resources and the pinned lexicons: this workspace, or the one `KS_REPLAY_TREE` names.
+fn reference_tree() -> std::path::PathBuf {
+    std::env::var_os("KS_REPLAY_TREE").map_or_else(
+        || {
+            let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            workspace.canonicalize().unwrap_or(workspace)
+        },
+        std::path::PathBuf::from,
+    )
+}
 
 #[derive(Clone, Copy)]
 enum Choice {
@@ -251,7 +263,7 @@ fn compare_logs(expected: &[Value], actual: &[String]) -> Option<Difference> {
 
 impl Worker {
     pub fn new() -> Worker {
-        let resources = Resources::new(Path::new(REFERENCE_TREE).join("src/keyswitch/resources"));
+        let resources = Resources::new(reference_tree().join("resources"));
         let (intent_model, intent_model_status) = resources.intent_model();
         let root = std::env::temp_dir().join(format!("ks-trace-{}", std::process::id()));
         std::fs::create_dir_all(&root).expect("a folder for the stores");
@@ -331,7 +343,7 @@ impl Worker {
                 .iter()
                 .map(|locale| {
                     let supplement = self.resources.supplement_words(locale).expect("the packaged supplement");
-                    let roots = vec![Path::new(REFERENCE_TREE).join("model/intent_v1/sources")];
+                    let roots = vec![reference_tree().join("model/intent_v1/sources")];
                     Arc::new(LanguageModel::load(locale, supplement.iter(), &roots, LanguageModel::disabled_speller()))
                 })
                 .collect();
@@ -353,6 +365,7 @@ impl Worker {
         let read = std::fs::File::open(path).ok().and_then(|file| {
             let mut text = String::new();
             GzDecoder::new(file).read_to_string(&mut text).ok()?;
+            let text = text.replace(TREE_MARK, &reference_tree().to_string_lossy());
             serde_json::from_str::<Value>(&text).ok()
         });
         let Some(trace) = read else {

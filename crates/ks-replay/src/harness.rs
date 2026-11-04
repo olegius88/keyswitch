@@ -23,11 +23,16 @@ const FAKE_CLOCK_START_SECONDS: f64 = 1000.0;
 const SIMULATED_KEY_HOLD_SECONDS: f64 = 0.05;
 const SIMULATED_KEY_RELEASE_GAP_SECONDS: f64 = 0.03;
 const MILLISECONDS_PER_SECOND: f64 = 1000.0;
-// The tree that holds the packaged resources and the pinned lexicons; `KS_REPLAY_TREE` names another.
-const REFERENCE_TREE: &str = "/mnt/data2/_projects/puntoswitcher";
 
-fn reference_tree() -> PathBuf {
-    std::env::var_os("KS_REPLAY_TREE").map_or_else(|| PathBuf::from(REFERENCE_TREE), PathBuf::from)
+/// The tree that holds the packaged resources and the pinned lexicons: this workspace, or the one `KS_REPLAY_TREE` names.
+pub fn reference_tree() -> PathBuf {
+    std::env::var_os("KS_REPLAY_TREE").map_or_else(
+        || {
+            let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            workspace.canonicalize().unwrap_or(workspace)
+        },
+        PathBuf::from,
+    )
 }
 
 /// Exact US/RU key pairs shared by context training and physical replay.
@@ -419,7 +424,7 @@ pub struct Bundle {
 
 impl Bundle {
     pub fn load(debug_log: Option<&Path>) -> Bundle {
-        let resources = Resources::new(reference_tree().join("src/keyswitch/resources"));
+        let resources = Resources::new(reference_tree().join("resources"));
         let models = reference_models(&resources);
         let (intent_model, intent_model_status) = resources.intent_model();
         let known = EngineCore::known_of(&models);
