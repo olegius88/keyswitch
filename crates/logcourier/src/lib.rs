@@ -1,6 +1,7 @@
 //! LogCourier: a personal collector of log files into a closed Telegram group.
 pub mod batching;
 pub mod catalog;
+pub mod cli;
 pub mod collector;
 pub mod config;
 pub mod constants;
