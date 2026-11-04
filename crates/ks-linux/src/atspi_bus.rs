@@ -170,4 +170,9 @@ impl AtspiApi for ZbusAtspi {
     fn insert_text(&self, node: &NodeRef, position: i32, text: &str, length: i32) -> AtspiResult<bool> {
         self.call(node, INTERFACE_EDITABLE, "InsertText", &(position, text, length))
     }
+
+    fn character_extents(&self, node: &NodeRef, offset: i32) -> AtspiResult<(i32, i32, i32, i32)> {
+        // `ATSPI_COORD_TYPE_SCREEN` is 0.
+        self.call(node, INTERFACE_TEXT, "GetCharacterExtents", &(offset, 0_u32))
+    }
 }

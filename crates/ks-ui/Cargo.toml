@@ -1,0 +1,17 @@
+[package]
+name = "ks-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "ks_ui"
+path = "src/lib.rs"
+
+[dependencies]
+ks-config.workspace = true
+ks-text.workspace = true
+ks-context.workspace = true
+ks-engine.workspace = true
+ks-updates = { path = "../ks-updates" }
+serde_json.workspace = true

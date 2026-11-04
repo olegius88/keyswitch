@@ -349,7 +349,6 @@ pub const SETTING_CONTROL_PADDING_LEFT_PIXELS: i32 = 16;
 pub const CHOICE_CONTROL_WIDTH_PIXELS: i32 = 170;
 pub const NUMBER_CONTROL_WIDTH_PIXELS: i32 = 90;
 pub const TEXT_CONTROL_WIDTH_PIXELS: i32 = 190;
-pub const NUMBER_DISPLAY_DECIMAL_PLACES: i32 = 2;
 pub const MAIN_WINDOW_WIDTH_PIXELS: i32 = 1080;
 pub const MAIN_WINDOW_HEIGHT_PIXELS: i32 = 760;
 pub const MAIN_WINDOW_MIN_WIDTH_PIXELS: i32 = 900;
@@ -403,10 +402,8 @@ pub const UPDOWN_WIDTH_PIXELS: i32 = 18;
 
 // ------------------------------------------------------------------------------------------- constants/timing.py
 pub const LEARNING_PROMPT_SHOW_DELAY_MS: u32 = 200;
-pub const APPLICATION_CAPTURE_DELAY_MS: u32 = 3000;
 /// constants/updates.py: the first automatic check after the start, and the interval between checks.
 pub const UPDATE_CHECK_INITIAL_DELAY_MS: u32 = 30_000;
-pub const UPDATE_CHECK_INTERVAL_MS: u32 = 6 * 3600 * 1000;
 
 // ------------------------------------------------------------------------------------ constants/learning_prompt.py
 pub const LEARNING_PROMPT_CARD_PADDING_X_PIXELS: i32 = 16;
@@ -424,8 +421,9 @@ pub const RULE_EDITOR_CLASS: &str = "KeySwitchRuleEditor";
 pub const PAGE_CLASS: &str = "KeySwitchPage";
 
 // ---------------------------------------------------------------------------- constants/settings_defaults.py (UI)
-pub const HISTORY_LIMIT_SETTING_MIN: f64 = 10.0;
-pub const HISTORY_LIMIT_SETTING_MAX: f64 = 5000.0;
-pub const HISTORY_LIMIT_SETTING_STEP: f64 = 10.0;
-pub const CONFIDENCE_SETTING_STEP: f64 = 0.1;
-pub const PAUSE_DELAY_SETTING_STEP_SECONDS: f64 = 0.1;
+
+// Shared with the macOS platform: they live in `ks-ui`.
+pub use ks_ui::constants::{
+    APPLICATION_CAPTURE_DELAY_MS, CONFIDENCE_SETTING_STEP, HISTORY_LIMIT_SETTING_MAX, HISTORY_LIMIT_SETTING_MIN,
+    HISTORY_LIMIT_SETTING_STEP, NUMBER_DISPLAY_DECIMAL_PLACES, PAUSE_DELAY_SETTING_STEP_SECONDS, UPDATE_CHECK_INTERVAL_MS,
+};

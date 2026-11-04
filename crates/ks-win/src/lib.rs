@@ -10,7 +10,7 @@ pub mod constants;
 pub mod desktop_app;
 pub mod log;
 pub mod tray_icon;
-pub mod tray_model;
+pub use ks_ui::tray_model;
 pub mod windows_app;
 pub mod windows_backend;
 #[cfg(windows)]
@@ -22,7 +22,7 @@ pub mod windows_native;
 #[cfg(windows)]
 pub mod windows_registry;
 pub mod windows_system;
-pub mod windows_ui_model;
+pub use ks_ui::windows_ui_model;
 #[cfg(windows)]
 pub mod learning_prompt;
 #[cfg(windows)]

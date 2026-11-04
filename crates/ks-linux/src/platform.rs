@@ -46,8 +46,15 @@ pub fn platform_description() -> String {
     format!("{}-{}-{}-with-glibc{glibc}", field(&name.sysname), field(&name.release), field(&name.machine))
 }
 
+/// Asks glibc to return the free pages of its heap to the system.
+fn trim_heap() -> bool {
+    // SAFETY: `malloc_trim` takes a pad size and touches only the allocator's own bookkeeping.
+    unsafe { libc::malloc_trim(0) != 0 }
+}
+
 /// The clock and system description of the log.
 pub fn install() {
+    ks_config::memory_release::set_trim_hook(trim_heap);
     logsetup::set_local_clock(local_time);
     logsetup::set_platform_description(&platform_description());
 }

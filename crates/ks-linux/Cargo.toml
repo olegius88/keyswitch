@@ -28,3 +28,11 @@ zbus = { version = "5", default-features = false, features = ["blocking-api", "a
 # Hunspell is opened at run time, as the Python opens it with ctypes: the program runs without it.
 libloading = "0.8"
 libc = "0.2"
+# The windows: GTK 4 and libadwaita, as the Python's PyGObject windows are. `gdk4-x11` gives the X11 id of a surface.
+gtk = { package = "gtk4", version = "0.11" }
+adw = { package = "libadwaita", version = "0.9", features = ["v1_5"] }
+gdk-x11 = { package = "gdk4-x11", version = "0.11" }
+# Unix signals in the main loop, and the desktop entries of installed applications (both moved out of glib and gio).
+glib-unix = "0.22"
+gio-unix = "0.22"
+ks-updates = { path = "../ks-updates" }

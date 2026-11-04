@@ -22,7 +22,7 @@ use crate::atspi_context::{AtspiFieldReader, AtspiSelectionReader};
 use crate::constants::BACKEND_LABEL;
 use crate::spellcheck::hunspell_speller;
 use crate::wayland_desktop::wayland_session_active;
-use crate::x11_backend::{SelectionFactory, X11Backend};
+use crate::x11_backend::{ProcessForWindow, SelectionFactory, X11Backend};
 use crate::x11_native;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -231,31 +231,60 @@ pub fn main(arguments: &[String]) -> i32 {
     if parsed.headless {
         return crate::platform::run_headless(parsed.no_engine);
     }
-    write_standard(true, "Окна и значок в трее ещё не перенесены в эту сборку; для работы без окна: keyswitch --headless\n");
-    1
+    crate::gtk_app::run(parsed.hidden, parsed.no_engine)
 }
 
-fn setting_bool(settings: &SettingsStore, path: &str, default: bool) -> bool {
-    settings.get(path).map_or(default, |value| match value {
-        Value::Bool(flag) => flag,
+/// Python's truthiness of a setting's value.
+pub fn truthy(value: &Value) -> bool {
+    match value {
+        Value::Bool(flag) => *flag,
         Value::Null => false,
         Value::Number(number) => number.as_f64().is_some_and(|number| number != 0.0),
         Value::String(text) => !text.is_empty(),
         Value::Array(items) => !items.is_empty(),
         Value::Object(map) => !map.is_empty(),
-    })
+    }
+}
+
+pub fn setting_bool(settings: &SettingsStore, path: &str, default: bool) -> bool {
+    settings.get(path).map_or(default, |value| truthy(&value))
+}
+
+fn trim_zeros(text: &str) -> String {
+    if text.contains('.') { text.trim_end_matches('0').trim_end_matches('.').to_owned() } else { text.to_owned() }
+}
+
+/// `format(value, "g")`: six significant digits, no trailing zeros.
+pub fn python_float(value: f64) -> String {
+    if value.is_nan() {
+        return "nan".to_owned();
+    }
+    if value.is_infinite() {
+        return if value > 0.0 { "inf" } else { "-inf" }.to_owned();
+    }
+    if value == 0.0 {
+        return "0".to_owned();
+    }
+    let scientific = format!("{value:.5e}");
+    let (mantissa, exponent) = scientific.split_once('e').unwrap_or((&scientific, "0"));
+    let exponent: i32 = exponent.parse().unwrap_or(0);
+    if !(-4..6).contains(&exponent) {
+        return format!("{}e{}{:02}", trim_zeros(mantissa), if exponent < 0 { '-' } else { '+' }, exponent.abs());
+    }
+    trim_zeros(&format!("{value:.*}", (5 - exponent).max(0) as usize))
 }
 
 /// The engine of this platform, built on the loader's thread: every model is read there.
 pub fn engine_builder(
     settings: Arc<SettingsStore>,
     history: Arc<HistoryStore>,
-    backend: Arc<X11Backend>,
+    backend: Arc<dyn InputBackend>,
+    process_for_window: ProcessForWindow,
     learning: Arc<ks_config::learning::LearningStore>,
 ) -> Build {
     let resources = ks_lang::Resources::with_speller(resource_dir(), hunspell_speller(data_dir()));
     Box::new(move || {
-        let process = backend.process_for_window();
+        let process = process_for_window;
         let factory: ReaderFactory = Arc::new(move || {
             let api = atspi_bus::connect().map_err(|error| error.failure())?;
             Ok(Box::new(AtspiFieldReader::new(api, Some(process.clone()))) as Box<dyn ks_backend::ManagedFieldReader>)
@@ -283,6 +312,7 @@ pub fn run_headless_with(wait_for_signal: &dyn Fn(Duration) -> bool, no_engine: 
         history_limit(&settings.get("history.limit").unwrap_or(Value::from(ks_config::constants::DEFAULT_HISTORY_LIMIT))),
     ));
     let backend = new_backend();
+    let process_for_window = backend.process_for_window();
     let learning = match default_learning_store(&settings, &history) {
         Ok(store) => Arc::new(store),
         Err(error) => {
@@ -293,7 +323,7 @@ pub fn run_headless_with(wait_for_signal: &dyn Fn(Duration) -> bool, no_engine: 
     let enabled = setting_bool(&settings, "enabled", true);
     // No window: what the engine posts to "the window's thread" runs on the thread that posts it.
     let post: Post = Arc::new(|work| work());
-    let engine = DeferredEngine::new(engine_builder(settings, history, backend, learning.clone()), learning, enabled, post, true);
+    let engine = DeferredEngine::new(engine_builder(settings, history, backend, process_for_window, learning.clone()), learning, enabled, post, true);
     let failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
     if !no_engine {
         let flag = failed.clone();
