@@ -6,4 +6,14 @@ license.workspace = true
 
 [dependencies]
 ks-text.workspace = true
+ks-backend.workspace = true
 ks-lang.workspace = true
+# The model files are parsed through visitors into flat tables, without a tree of values in between.
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+indexmap.workspace = true
+miniz_oxide.workspace = true
+
+[dev-dependencies]
+flate2.workspace = true
