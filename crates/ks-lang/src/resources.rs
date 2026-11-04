@@ -4,8 +4,10 @@
 
 use crate::boundary_model::{self, BoundaryModel};
 use crate::boundary_policy::{self, BoundaryPolicy};
+use crate::detector::{LanguageDetector, LanguageScorer, ProtectedTokens};
 use crate::early_switch::PrefixIndex;
 use crate::identifier_lexicon::{self, IdentifierLexicon};
+use crate::intent_model::{IntentModelStatus, LinearNgramModel};
 use crate::language_model::{model_roots, LanguageModel};
 use crate::lexicon_supplement;
 use crate::load_error::LoadError;
@@ -30,6 +32,8 @@ pub struct Resources {
     identifiers: OnceLock<(Option<Arc<IdentifierLexicon>>, String)>,
     boundary_policy: OnceLock<Option<Arc<BoundaryPolicy>>>,
     boundary_model: OnceLock<Option<Arc<BoundaryModel>>>,
+    protected_tokens: OnceLock<Arc<ProtectedTokens>>,
+    intent_model: OnceLock<(Option<Arc<LinearNgramModel>>, IntentModelStatus)>,
 }
 
 impl Resources {
@@ -48,6 +52,8 @@ impl Resources {
             identifiers: OnceLock::new(),
             boundary_policy: OnceLock::new(),
             boundary_model: OnceLock::new(),
+            protected_tokens: OnceLock::new(),
+            intent_model: OnceLock::new(),
         })
     }
 
@@ -146,5 +152,33 @@ impl Resources {
     /// `BoundaryModel.default()`.
     pub fn boundary_model(&self) -> Option<Arc<BoundaryModel>> {
         self.boundary_model.get_or_init(|| BoundaryModel::load(&boundary_model::artifact(&self.resource_dir)).ok().map(Arc::new)).clone()
+    }
+
+    /// `detector.PROTECTED_TOKENS`: read once.
+    pub fn protected_tokens(&self) -> Arc<ProtectedTokens> {
+        self.protected_tokens.get_or_init(|| Arc::new(ProtectedTokens::load(&self.resource_dir))).clone()
+    }
+
+    /// `LinearNgramModel.try_load_default()`, read once: the model of `KEYSWITCH_INTENT_MODEL_PATH` or the packaged one,
+    /// and the status either way.
+    pub fn intent_model(&self) -> (Option<Arc<LinearNgramModel>>, IntentModelStatus) {
+        self.intent_model
+            .get_or_init(|| {
+                let value = std::env::var_os("KEYSWITCH_INTENT_MODEL_PATH").map(|value| value.to_string_lossy().into_owned());
+                let (model, status) = LinearNgramModel::try_load_default(&self.resource_dir, value.as_deref());
+                (model.map(Arc::new), status)
+            })
+            .clone()
+    }
+
+    /// `LanguageDetector({index: LanguageModel.load(locale, supplement_words(locale))}, intent_model)` of the engine:
+    /// group `index` is the model of `locales[index]`.
+    pub fn language_detector(&self, locales: &[&str]) -> Result<LanguageDetector, LoadError> {
+        let mut models: Vec<(i64, Arc<dyn LanguageScorer>)> = Vec::new();
+        for (index, locale) in locales.iter().take(crate::constants::LAYOUT_GROUP_COUNT).enumerate() {
+            models.push((index as i64, self.engine_language_model(locale)?));
+        }
+        let intent: Option<Arc<dyn crate::detector::IntentClassifier>> = self.intent_model().0.map(|model| model as _);
+        LanguageDetector::new(models, intent, self.protected_tokens())
     }
 }

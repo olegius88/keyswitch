@@ -121,3 +121,78 @@ pub const BOUNDARY_FEATURE_NGRAM_SCORE_BOUND: f64 = 3.0;
 pub const BOUNDARY_THRESHOLD_EXCLUSIVE_MIN: f64 = 0.5;
 /// A boundary-v2 artifact larger than this is refused unread.
 pub const BOUNDARY_POLICY_MAX_BYTES: usize = 64 * BYTES_PER_KIBIBYTE;
+
+// ---------------------------------------------------------------- detection.py (the detector and the short words)
+pub const OPENING_LETTER_FOLLOWING_SIGNS: &str = ",.?!:;)-";
+pub const PAUSE_WORD_START_LETTERS: usize = 2;
+pub const PAUSE_WORD_START_MIN_WORDS: u32 = 100;
+pub const NATURAL_SOURCE_MAX_LENGTH: usize = 4;
+pub const CONTEXT_DELTA_MULTIPLIER: f64 = 1.75;
+pub const CONTEXT_TARGET_GROUP_BONUS: f64 = 0.55;
+pub const CONTEXT_SOURCE_GROUP_PENALTY: f64 = 0.3;
+pub const CONFIRMED_RULE_MIN_CONFIDENCE: f64 = 20.0;
+pub const HEURISTIC_KNOWN_TARGET_RELIEF_START_CHARACTERS: usize = 3;
+pub const HEURISTIC_KNOWN_TARGET_RELIEF_PER_CHARACTER: f64 = 0.18;
+pub const HEURISTIC_KNOWN_TARGET_MIN_MARGIN: f64 = 0.65;
+pub const HEURISTIC_SPELL_ONLY_TARGET_EXTRA_MARGIN: f64 = 0.15;
+pub const HEURISTIC_TYPO_DELETION_MIN_CHARACTERS: usize = 5;
+pub const HEURISTIC_TYPO_DELETION_EXTRA_MARGIN: f64 = 0.5;
+pub const HEURISTIC_NGRAM_EXTRA_MARGIN: f64 = 2.4;
+pub const HEURISTIC_NGRAM_RELIEF_START_CHARACTERS: usize = 4;
+pub const HEURISTIC_NGRAM_RELIEF_PER_CHARACTER: f64 = 0.32;
+pub const HEURISTIC_NGRAM_RELIEF_CAP: f64 = 2.0;
+pub const HEURISTIC_NGRAM_AGGRESSIVE_MARGIN_REDUCTION: f64 = 0.75;
+pub const HEURISTIC_NGRAM_MIN_EXTRA_MARGIN: f64 = 0.25;
+pub const HEURISTIC_UNLIKELY_SOURCE_NGRAM_MAX: f64 = -1.1;
+pub const HEURISTIC_UNLIKELY_SOURCE_NGRAM_MAX_AGGRESSIVE: f64 = -0.65;
+pub const HEURISTIC_PLAUSIBLE_TARGET_NGRAM_MIN: f64 = -1.25;
+pub const HEURISTIC_PLAUSIBLE_TARGET_NGRAM_MIN_AGGRESSIVE: f64 = -2.0;
+pub const HEURISTIC_NGRAM_MIN_CHARACTERS: usize = 5;
+pub const HEURISTIC_NGRAM_MIN_CHARACTERS_AGGRESSIVE: usize = 4;
+pub const MAX_CONVERTIBLE_TOKEN_CHARACTERS: usize = 64;
+pub const REPEATED_CHARACTER_RUN: usize = 4;
+pub const TRUSTED_SHORT_WORD_MAX_LENGTH: usize = 2;
+pub const TRUSTED_SHORT_WORD_MINIMUM_FREQUENCY: i64 = 10_000;
+pub const TRUSTED_SHORT_WORD_MINIMUM_RATIO: f64 = 100.0;
+pub const TRUSTED_SHORT_WORD_CONTEXT_RATIO: f64 = 1.0;
+pub const SINGLE_LETTER_CONFIDENCE: f64 = 1.0;
+
+// ---------------------------------------------------------------- keyboard.py
+pub const LAYOUT_GROUP_COUNT: usize = 2;
+
+// ---------------------------------------------------------------- settings_defaults.py (the detector)
+pub const DEFAULT_MINIMUM_WORD_LENGTH: i64 = 3;
+pub const DEFAULT_CONFIDENCE_THRESHOLD: f64 = 2.0;
+
+// ---------------------------------------------------------------- models.py (the intent model)
+pub const INTENT_FEATURE_VERSION: i64 = 5;
+pub const FNV1A64_OFFSET_BASIS: u64 = 0xCBF2_9CE4_8422_2325;
+pub const FNV1A64_PRIME: u64 = 0x0000_0100_0000_01B3;
+pub const INTENT_MEMBERSHIP_FNV_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
+pub const FEATURE_HASH_SIGN_BIT: u64 = 1 << 63;
+pub const INTENT_NGRAM_ORDERS: [i64; 5] = [1, 2, 3, 4, 5];
+pub const INTENT_RAW_TOKEN_MAX_CHARACTERS: usize = 64;
+pub const INTENT_MIN_RUNTIME_TOKEN_CHARACTERS: usize = 5;
+pub const INTENT_MAX_MODEL_FLOAT_MAGNITUDE: f64 = 1_000_000.0;
+pub const INTENT_MODEL_VERSION_MAX_CHARACTERS: usize = 128;
+pub const INTENT_METADATA_MAX_DEPTH: usize = 16;
+pub const INTENT_MAX_FEATURE_GROUP: i64 = 63;
+pub const INTENT_LENGTH_EXACT_MAX_CHARACTERS: usize = 4;
+pub const INTENT_LENGTH_SHORT_MAX_CHARACTERS: usize = 7;
+pub const INTENT_LENGTH_MEDIUM_MAX_CHARACTERS: usize = 11;
+pub const INTENT_LENGTH_LONG_MAX_CHARACTERS: usize = 19;
+
+// ---------------------------------------------------------------- file_formats.py (KSLM)
+pub const KSLM_MAX_CONTAINER_BYTES: usize = 14 * BYTES_PER_MEBIBYTE;
+pub const KSLM_MAX_MANIFEST_BYTES: usize = BYTES_PER_MEBIBYTE;
+pub const KSLM_MAX_PAYLOAD_BYTES: usize = 12 * BYTES_PER_MEBIBYTE;
+pub const KSLM_MAX_FINGERPRINTS: usize = 1 << 20;
+pub const KSLM_SCHEMA_VERSION: i64 = 4;
+pub const KSLM_MIN_MANIFEST_BYTES: usize = 2;
+pub const KSLM_WEIGHT_ENTRY_BYTES: usize = 2;
+pub const KSLM_FINGERPRINT_ENTRY_BYTES: usize = 8;
+pub const KSLM_MAX_DIMENSION_LOG2: u32 = 21;
+pub const KSLM_MAX_DIMENSION: i64 = 1 << KSLM_MAX_DIMENSION_LOG2;
+pub const SHA256_HEX_CHARACTERS: usize = 64;
+pub const INT64_MIN: i128 = -(1 << 63);
+pub const UINT64_MAX: i128 = (1 << 64) - 1;

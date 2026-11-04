@@ -9,8 +9,10 @@
 pub mod boundary_model;
 pub mod boundary_policy;
 pub mod constants;
+pub mod detector;
 pub mod early_switch;
 pub mod identifier_lexicon;
+pub mod intent_model;
 pub mod language_model;
 pub mod lexicon_supplement;
 pub mod load_error;
@@ -18,8 +20,11 @@ pub mod ortho_model;
 pub mod packed_grams;
 pub mod pysum;
 pub mod resources;
+mod script_names;
+pub mod short_words;
 pub mod spellcheck;
 pub mod tables;
+pub mod word_decision;
 
 pub use language_model::{LanguageModel, WordScore};
 pub use load_error::LoadError;
