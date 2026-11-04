@@ -25,7 +25,7 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup target add x86_64-pc-windows-msvc i686-pc-windows-msvc aarch64-pc-windows-msvc
       - name: Tests
-        run: cargo test -p ks-text -p ks-backend -p ks-config -p ks-lang -p ks-context -p ks-engine -p ks-replay -p ks-updates -p ks-ui -p ks-win
+        run: cargo test -p ks-text -p ks-backend -p ks-config -p ks-lang -p ks-context -p ks-engine -p ks-replay -p ks-updates -p ks-ui -p ks-win -p ks-train
       - name: The engine against the recorded traces
         run: cargo test --release -p ks-replay
       - name: Windows code type-checks for every architecture

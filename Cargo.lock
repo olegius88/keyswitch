@@ -1030,6 +1030,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ks-train"
+version = "0.70.0"
+dependencies = [
+ "flate2",
+ "ks-lang",
+ "ks-text",
+ "serde_json",
+]
+
+[[package]]
 name = "ks-ui"
 version = "0.70.0"
 dependencies = [

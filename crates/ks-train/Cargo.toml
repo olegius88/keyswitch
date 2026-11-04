@@ -1,0 +1,13 @@
+[package]
+name = "ks-train"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ks-text.workspace = true
+ks-lang.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+flate2.workspace = true
