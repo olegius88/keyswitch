@@ -373,7 +373,7 @@ pub fn draw_choice(item: &DRAWITEMSTRUCT, brushes: &Brushes, font: HFONT, dpi: i
     let hdc = item.hDC;
     let rect = item.rcItem;
     // SAFETY: reads the state word of the item's window.
-    let state = unsafe { GetWindowLongPtrW(item.hwndItem, GWLP_USERDATA) };
+    let state = unsafe { GetWindowLongPtrW(item.hwndItem, GWLP_USERDATA) } as isize;
     let (checked, modified) = (state & STATE_CHECKED != 0, state & STATE_MODIFIED != 0);
     let size = scaled(16, dpi);
     let top = rect.top + scaled(1, dpi);
