@@ -1,0 +1,8 @@
+[package]
+name = "ks-lang"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ks-text.workspace = true

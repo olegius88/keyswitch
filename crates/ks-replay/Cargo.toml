@@ -1,0 +1,11 @@
+[package]
+name = "ks-replay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ks-text.workspace = true
+ks-lang.workspace = true
+ks-context.workspace = true
+ks-engine.workspace = true

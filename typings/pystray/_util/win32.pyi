@@ -1,2 +1,0 @@
-WM_LBUTTONUP: int
-WM_RBUTTONUP: int

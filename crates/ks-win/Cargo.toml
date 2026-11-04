@@ -1,0 +1,15 @@
+[package]
+name = "ks-win"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "KeySwitch"
+path = "src/main.rs"
+
+[dependencies]
+ks-text.workspace = true
+ks-lang.workspace = true
+ks-context.workspace = true
+ks-engine.workspace = true

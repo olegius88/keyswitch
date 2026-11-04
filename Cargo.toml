@@ -1,0 +1,42 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.70.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/olegius88/keyswitch"
+
+[workspace.dependencies]
+ks-text = { path = "crates/ks-text" }
+ks-lang = { path = "crates/ks-lang" }
+ks-context = { path = "crates/ks-context" }
+ks-engine = { path = "crates/ks-engine" }
+# float_roundtrip: Python parses a JSON number to the nearest double, and serde_json by default may not.
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
+indexmap = "2"
+unicode-normalization = "0.1"
+sha2 = "0.10"
+miniz_oxide = "0.8"
+flate2 = "1"
+
+# Size is what this port is for: the smallest code that is still fast enough for one keystroke at a time.
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Parity runs replay tens of thousands of words: the same code, optimised, with its checks left on.
+[profile.parity]
+inherits = "release"
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+panic = "unwind"
+strip = false
+debug-assertions = true
+overflow-checks = true

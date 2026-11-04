@@ -16,3 +16,5 @@ dist/
 .t/
 /AGENTS.md
 /CLAUDE.md
+/target
+target*/
