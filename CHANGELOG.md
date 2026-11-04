@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.66.1 — 2026-11-04
+
 - Publish everything since 0.65.0. The 0.66.0 section below was tagged, but its release job produced no installer for
   Windows on Arm: the check of the installed program did not finish there, twice, while it takes half a minute on x64
   and on x86, and did on Arm with 0.65.0. The executable now ends its process itself once the program has finished,
