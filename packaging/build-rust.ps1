@@ -155,6 +155,8 @@ if (-not $IsccPath) {
     throw "Inno Setup 6 compiler (ISCC.exe) is required"
 }
 New-Item -ItemType Directory -Force $OutputDirectory | Out-Null
+# Inno Setup resolves a relative output folder against the script, not the current one.
+$OutputDirectory = (Resolve-Path -LiteralPath $OutputDirectory).Path
 Invoke-NativeCommand -Command $IsccPath -Arguments @(
     "/DMyAppVersion=$Version", "/DArch=$Architecture", "/DSourceDir=$Stage", "/DOutputDir=$OutputDirectory",
     "/DSetupIcon=$Icon", (Join-Path $PSScriptRoot "windows\KeySwitch.iss")
