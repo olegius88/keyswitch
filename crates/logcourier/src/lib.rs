@@ -5,6 +5,9 @@ pub mod collector;
 pub mod config;
 pub mod constants;
 pub mod error;
+pub mod gui_model;
+#[cfg(windows)]
+pub mod gui_win;
 pub mod rate_limit;
 pub mod reset;
 pub mod secrets;

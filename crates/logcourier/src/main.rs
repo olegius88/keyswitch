@@ -169,6 +169,26 @@ fn fetch_or_list(command: &str, options: Options) -> Result<i32> {
     Ok(0)
 }
 
+#[cfg(windows)]
+fn gui(arguments: &[String]) -> Result<i32> {
+    if arguments.first().map(String::as_str) == Some("self-test") {
+        let output = parse_output(&arguments[1..]);
+        return logcourier::gui_win::smoke_test(output.as_deref());
+    }
+    Ok(logcourier::gui_win::run(arguments.iter().any(|argument| argument == "--minimized")))
+}
+
+#[cfg(not(windows))]
+fn gui(_arguments: &[String]) -> Result<i32> {
+    eprintln!("Окно настроек LogCourier на этой системе ещё не перенесено; настройки читаются из config.json.");
+    Ok(1)
+}
+
+#[cfg(windows)]
+fn parse_output(arguments: &[String]) -> Option<PathBuf> {
+    arguments.iter().position(|argument| argument == "--output").and_then(|index| arguments.get(index + 1)).map(PathBuf::from)
+}
+
 fn run(arguments: &[String]) -> Result<i32> {
     match arguments.first().map(String::as_str) {
         Some("--version") => {
@@ -185,10 +205,7 @@ fn run(arguments: &[String]) -> Result<i32> {
             Ok(options) => fetch_or_list(command, options),
             Err(message) => Ok(usage(&message)),
         },
-        None | Some("gui" | "self-test") => {
-            eprintln!("Окно настроек LogCourier на Rust ещё не готово; настройки читаются из config.json.");
-            Ok(1)
-        }
+        None | Some("gui" | "self-test") => gui(arguments),
         Some(other) => Ok(usage(&format!("argument command: invalid choice: '{other}'"))),
     }
 }
