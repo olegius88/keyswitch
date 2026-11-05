@@ -137,6 +137,7 @@ mod tests {
         assert_eq!(client.bot_id(), "1");
         assert_eq!(client.call("getMe", Value::Null).unwrap(), Value::Null);
         assert_eq!(client.call("sendMessage", Value::Null).unwrap(), Value::Null);
+        assert_eq!(client.call("sendMessage", Value::Null).unwrap(), Value::Null);
         assert!(now.get() > 100.0, "the second one waited");
         assert_eq!(client.call("deleteMessages", Value::Null).unwrap(), Value::Null);
         assert_eq!(client.send_document("-1", "a", b"x", "c").unwrap(), Value::Null);
