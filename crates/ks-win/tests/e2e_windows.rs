@@ -1,0 +1,501 @@
+//! The real thing on Windows: the low-level hook, then the installed program against an edit control of this process,
+//! keys through SendInput, corrections through SendInput back. Runs with `KS_E2E_BINARY` naming the program; otherwise,
+//! and on other systems, it says so and passes.
+
+#[cfg(not(windows))]
+fn main() {
+    println!("the Windows end-to-end test runs on Windows only, skipped");
+}
+
+#[cfg(windows)]
+fn main() {
+    scenario::main();
+}
+
+#[cfg(windows)]
+mod scenario {
+    use std::path::{Path, PathBuf};
+    use std::process::{Child, Command};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    use ks_config::config::SettingsStore;
+    use ks_config::history::HistoryStore;
+    use ks_config::learning::LearningStore;
+    use ks_win::constants::{VK_BACK, VK_END, VK_HOME, VK_PAUSE, VK_RETURN, VK_SHIFT};
+    use ks_win::windows_backend::{NativeInput, NativeKeyEvent, WindowsAPI};
+    use ks_win::windows_native::NativeWindowsAPI;
+    use serde_json::{Value, json};
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyboardLayout, LoadKeyboardLayoutW, SetFocus};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_WANTRETURN, GetClientRect, GetWindowTextLengthW, GetWindowTextW, IsZoomed, MSG, MoveWindow, PM_REMOVE,
+        PeekMessageW, RegisterClassW, SW_MAXIMIZE, SW_SHOW, ShowWindow, TranslateMessage, WM_SIZE, WNDCLASSW, WS_BORDER, WS_CHILD, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+    };
+
+    const VK_F24: u32 = 0x87;
+    const SCAN_G: u32 = 0x22;
+    const SCAN_H: u32 = 0x23;
+    const SCAN_B: u32 = 0x30;
+    const SCAN_D: u32 = 0x20;
+    const SCAN_T: u32 = 0x14;
+    const SCAN_N: u32 = 0x31;
+    const SCAN_E: u32 = 0x12;
+    const SCAN_L: u32 = 0x26;
+    const SCAN_O: u32 = 0x18;
+    const SCAN_SPACE: u32 = 0x39;
+    const SCAN_ENTER: u32 = 0x1C;
+    const PRIVET: [u32; 6] = [SCAN_G, SCAN_H, SCAN_B, SCAN_D, SCAN_T, SCAN_N];
+    const HELLO: [u32; 5] = [SCAN_H, SCAN_E, SCAN_L, SCAN_L, SCAN_O];
+    const ENGLISH: u32 = 0x409;
+    const RUSSIAN: u32 = 0x419;
+    const STANDARD: u64 = 5_000;
+    const LONG: u64 = 10_000;
+    const PHASE_START: u64 = 100;
+    const PHASE_SETTLE: u64 = 300;
+    const WINDOW_OPENS: u64 = 1_000;
+    const START_ATTEMPTS: u32 = 4;
+    const PROBE_ATTEMPTS: u32 = 3;
+
+    /// A key as a person's: no mark of this program on it.
+    fn user(pressed: bool) -> NativeInput {
+        NativeInput { synthetic: false, ..NativeInput::new(pressed) }
+    }
+
+    fn wide(text: &str) -> Vec<u16> {
+        text.encode_utf16().chain([0]).collect()
+    }
+
+    extern "system" fn window_procedure(window: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        if message == WM_SIZE {
+            let edit = EDIT.load(Ordering::SeqCst);
+            if edit != 0 {
+                let mut area = unsafe { std::mem::zeroed() };
+                // SAFETY: the rectangle is ours and both windows belong to this thread.
+                unsafe {
+                    GetClientRect(window, &mut area);
+                    MoveWindow(edit as HWND, 0, 0, area.right, area.bottom, 1);
+                }
+            }
+        }
+        // SAFETY: the arguments are the ones this window procedure was given.
+        unsafe { DefWindowProcW(window, message, wparam, lparam) }
+    }
+
+    static EDIT: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+    /// The window typed into: a multi-line edit, so that an Enter that reaches it can be seen in its text.
+    struct Editor {
+        window: HWND,
+        edit: HWND,
+        api: Arc<NativeWindowsAPI>,
+        layouts: (i64, i64),
+    }
+
+    impl Editor {
+        fn new(api: Arc<NativeWindowsAPI>) -> Result<Editor, String> {
+            let class = wide("KeySwitchE2E");
+            let title = wide("KeySwitch E2E");
+            let edit_class = wide("EDIT");
+            let empty = wide("");
+            // SAFETY: every pointer stays alive for its call; the handles returned are checked.
+            unsafe {
+                let instance = GetModuleHandleW(std::ptr::null());
+                let mut description: WNDCLASSW = std::mem::zeroed();
+                description.lpfnWndProc = Some(window_procedure);
+                description.hInstance = instance;
+                description.lpszClassName = class.as_ptr();
+                RegisterClassW(&description);
+                let window = CreateWindowExW(0, class.as_ptr(), title.as_ptr(), WS_OVERLAPPEDWINDOW | WS_VISIBLE, 100, 100, 640, 240, std::ptr::null_mut(), std::ptr::null_mut(), instance, std::ptr::null());
+                if window.is_null() {
+                    return Err("the window was not created".to_owned());
+                }
+                let style = WS_CHILD | WS_VISIBLE | WS_BORDER | (ES_MULTILINE | ES_WANTRETURN | ES_AUTOVSCROLL) as u32;
+                let edit = CreateWindowExW(0, edit_class.as_ptr(), empty.as_ptr(), style, 0, 0, 620, 200, window, std::ptr::null_mut(), instance, std::ptr::null());
+                if edit.is_null() {
+                    return Err("the edit control was not created".to_owned());
+                }
+                EDIT.store(edit as isize, Ordering::SeqCst);
+                ShowWindow(window, SW_SHOW);
+                let english = LoadKeyboardLayoutW(wide("00000409").as_ptr(), 0) as isize as i64;
+                let russian = LoadKeyboardLayoutW(wide("00000419").as_ptr(), 0) as isize as i64;
+                if english == 0 || russian == 0 {
+                    return Err("the layouts could not be loaded".to_owned());
+                }
+                Ok(Editor { window, edit, api, layouts: (english, russian) })
+            }
+        }
+
+        fn text(&self) -> String {
+            // SAFETY: the buffer has room for the length asked of the control and its terminator.
+            unsafe {
+                let length = GetWindowTextLengthW(self.edit);
+                let mut buffer = vec![0_u16; length as usize + 2];
+                let written = GetWindowTextW(self.edit, buffer.as_mut_ptr(), buffer.len() as i32);
+                String::from_utf16_lossy(&buffer[..written.max(0) as usize])
+            }
+        }
+
+        fn group(&self) -> i32 {
+            // SAFETY: the layout of this thread, which owns the edit control.
+            let language = unsafe { GetKeyboardLayout(0) } as usize as u32 & 0xffff;
+            match language {
+                ENGLISH => 0,
+                RUSSIAN => 1,
+                _ => -1,
+            }
+        }
+
+        /// Runs this thread's messages until the condition holds or the time is out.
+        fn pump_until(&self, milliseconds: u64, mut condition: impl FnMut(&Editor) -> bool) -> bool {
+            let deadline = Instant::now() + Duration::from_millis(milliseconds);
+            loop {
+                let mut message: MSG = unsafe { std::mem::zeroed() };
+                // SAFETY: the message is ours for the length of the calls.
+                unsafe {
+                    while PeekMessageW(&mut message, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
+                        TranslateMessage(&message);
+                        DispatchMessageW(&message);
+                    }
+                }
+                if condition(self) {
+                    return true;
+                }
+                if Instant::now() >= deadline {
+                    return false;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+
+        fn pump(&self, milliseconds: u64) {
+            self.pump_until(milliseconds, |_| false);
+        }
+
+        fn activate(&self) {
+            self.api.activate_window(self.window as isize as i64);
+            // SAFETY: the edit control belongs to this thread.
+            unsafe {
+                SetFocus(self.edit);
+            }
+        }
+
+        fn maximize(&self) {
+            // SAFETY: the window belongs to this thread.
+            unsafe {
+                ShowWindow(self.window, SW_MAXIMIZE);
+            }
+        }
+
+        fn is_zoomed(&self) -> bool {
+            // SAFETY: the window belongs to this thread.
+            unsafe { IsZoomed(self.window) != 0 }
+        }
+
+        fn send(&self, inputs: &[NativeInput]) -> Result<(), String> {
+            match self.api.send_inputs(inputs) {
+                Ok(count) if count == inputs.len() => Ok(()),
+                other => Err(format!("SendInput took {other:?} of {} events", inputs.len())),
+            }
+        }
+
+        fn scans(&self, codes: &[u32]) -> Result<(), String> {
+            let inputs: Vec<NativeInput> = codes.iter().flat_map(|code| [true, false].map(|pressed| NativeInput { scan_code: *code, ..user(pressed) })).collect();
+            self.send(&inputs)
+        }
+
+        fn virtual_key(&self, key: u32) -> Result<(), String> {
+            self.send(&[NativeInput { virtual_key: key, ..user(true) }, NativeInput { virtual_key: key, ..user(false) }])
+        }
+
+        /// Through the keyboard, so that the engine sees the edit: Home and Shift+End select the line in both layouts.
+        fn clear(&self) -> Result<(), String> {
+            let key = |pressed: bool, virtual_key: u32, extended: bool| NativeInput { virtual_key, extended, ..user(pressed) };
+            self.send(&[key(true, VK_HOME, true), key(false, VK_HOME, true), key(true, VK_SHIFT, false), key(true, VK_END, true), key(false, VK_END, true), key(false, VK_SHIFT, false), key(true, VK_BACK, false), key(false, VK_BACK, false)])?;
+            if self.pump_until(STANDARD, |editor| editor.text().is_empty()) { Ok(()) } else { Err(format!("the field did not clear: {:?}", self.text())) }
+        }
+
+        /// Foreground, an empty field, the layout: everything a phase starts from.
+        fn prepare(&self, group: i32) -> Result<(), String> {
+            self.activate();
+            self.clear()?;
+            let layout = if group == 0 { self.layouts.0 } else { self.layouts.1 };
+            if !self.api.request_layout(layout) {
+                return Err(format!("the layout {group} could not be requested"));
+            }
+            self.pump(PHASE_START);
+            let ready = self.pump_until(STANDARD, |editor| {
+                editor.activate();
+                editor.group() == group
+            });
+            if ready { Ok(()) } else { Err(format!("the layout did not become {group}: it is {}", self.group())) }
+        }
+
+        fn expect(&self, text: &str, group: i32, milliseconds: u64) -> Result<(), String> {
+            if !self.pump_until(milliseconds, |editor| editor.text() == text) {
+                return Err(format!("waited for {text:?}, the field holds {:?}", self.text()));
+            }
+            if self.group() != group {
+                return Err(format!("{text:?} came with the layout {}, not {group}", self.group()));
+            }
+            Ok(())
+        }
+
+        /// Foreground and focus can both hold while injected keys still go nowhere: a lone space proves the field receives.
+        fn probe(&self) -> Result<(), String> {
+            for _ in 0..PROBE_ATTEMPTS {
+                self.activate();
+                self.pump(PHASE_START);
+                self.scans(&[SCAN_SPACE])?;
+                if self.pump_until(STANDARD, |editor| editor.text() == " ") {
+                    return self.clear();
+                }
+            }
+            Err(format!("injected input never reached the field: {:?}", self.text()))
+        }
+    }
+
+    impl Drop for Editor {
+        fn drop(&mut self) {
+            // SAFETY: the window belongs to this thread.
+            unsafe {
+                DestroyWindow(self.window);
+            }
+        }
+    }
+
+    /// The hook sees an injected key, and marks it as foreign to the program.
+    fn hook(api: &Arc<NativeWindowsAPI>) -> Result<(), String> {
+        let events: Arc<Mutex<Vec<NativeKeyEvent>>> = Arc::default();
+        let (ready, received) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+        let (hook_api, listening, marked, seen) = (api.clone(), events.clone(), ready.clone(), received.clone());
+        let thread = std::thread::spawn(move || {
+            let listener = Arc::new(move |event: NativeKeyEvent| {
+                if event.virtual_key == VK_F24 {
+                    seen.store(true, Ordering::SeqCst);
+                }
+                listening.lock().expect("the events").push(event);
+                false
+            });
+            hook_api.run_keyboard_hook(listener, Box::new(move || marked.store(true, Ordering::SeqCst)))
+        });
+        let wait = |flag: &AtomicBool| {
+            let deadline = Instant::now() + Duration::from_millis(STANDARD);
+            while !flag.load(Ordering::SeqCst) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            flag.load(Ordering::SeqCst)
+        };
+        let outcome = (|| {
+            if !wait(&ready) {
+                return Err("WH_KEYBOARD_LL did not become ready".to_owned());
+            }
+            let key = |pressed| NativeInput { virtual_key: VK_F24, synthetic: true, ..user(pressed) };
+            if api.send_inputs(&[key(true), key(false)]).ok() != Some(2) {
+                return Err("SendInput did not accept the F24 sequence".to_owned());
+            }
+            if !wait(&received) {
+                return Err("WH_KEYBOARD_LL did not observe the injected F24".to_owned());
+            }
+            if !events.lock().expect("the events").iter().any(|event| event.virtual_key == VK_F24 && event.injected) {
+                return Err("the injected event was not marked synthetic".to_owned());
+            }
+            Ok(())
+        })();
+        api.stop_keyboard_hook();
+        thread.join().map_err(|_| "the hook thread panicked".to_owned())?.map_err(|error| format!("{error:?}"))?;
+        outcome
+    }
+
+    fn configure(root: &Path, extra: &[(&str, Value)]) -> Result<(), String> {
+        let settings = SettingsStore::new(Some(root.join("config/config.json")));
+        let base = [
+            ("general.autostart", json!(false)),
+            ("appearance.show_indicator", json!(true)),
+            ("general.notifications", json!(false)),
+            ("detection.respect_manual_layout", json!(false)),
+            // Synthetic typing has no gaps between keys; prefix switching would race with the burst here.
+            ("detection.early_switch", json!(false)),
+            ("updates.check_automatically", json!(false)),
+            // The scenario types with SendInput, which Windows marks as injected by another program; the setting
+            // lets the program treat it as typing.
+            ("detection.injected_input", json!(true)),
+        ];
+        for (path, value) in base.iter().cloned().chain(extra.iter().cloned()) {
+            settings.set(path, value, true).map_err(|error| format!("{error:?}"))?;
+        }
+        Ok(())
+    }
+
+    fn start(binary: &Path, root: &Path) -> Result<Child, String> {
+        Command::new(binary).arg("--hidden").env("KEYSWITCH_CONFIG_DIR", root.join("config")).env("KEYSWITCH_DATA_DIR", root.join("data")).spawn().map_err(|error| error.to_string())
+    }
+
+    fn history_of(root: &Path) -> Result<Vec<(String, String)>, String> {
+        let history = HistoryStore::new(Some(root.join("data/history.jsonl")), 200);
+        Ok(history.read(None).map_err(|error| error.to_string())?.into_iter().map(|item| (item.original, item.replacement)).collect())
+    }
+
+    fn pairs(items: &[(&str, &str)]) -> Vec<(String, String)> {
+        items.iter().map(|(a, b)| ((*a).to_owned(), (*b).to_owned())).collect()
+    }
+
+    fn tail(items: Vec<(String, String)>, count: usize) -> Vec<(String, String)> {
+        let skip = items.len().saturating_sub(count);
+        items.into_iter().skip(skip).collect()
+    }
+
+    fn corrections(editor: &Editor, root: &Path) -> Result<(), String> {
+        // The hook comes up after the process: the first word is typed again until the engine answers.
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            editor.prepare(0)?;
+            editor.scans(&PRIVET)?;
+            match editor.expect("привет", 1, LONG) {
+                Ok(()) => break,
+                Err(error) if attempt >= START_ATTEMPTS => return Err(error),
+                Err(_) => editor.pump(PHASE_SETTLE),
+            }
+        }
+        println!("WINDOWS_EN_TO_RU_E2E_OK");
+        editor.pump(PHASE_SETTLE);
+        editor.prepare(1)?;
+        editor.scans(&HELLO)?;
+        editor.scans(&[SCAN_SPACE])?;
+        editor.expect("hello ", 0, LONG)?;
+        let history = tail(history_of(root)?, 2);
+        if history != pairs(&[("ghbdtn", "привет"), ("руддщ", "hello")]) {
+            return Err(format!("unexpected correction history: {history:?}"));
+        }
+        println!("WINDOWS_RU_TO_EN_E2E_OK");
+        editor.pump(PHASE_SETTLE);
+        Ok(())
+    }
+
+    fn learning(editor: &Editor, root: &Path) -> Result<(), String> {
+        let store = LearningStore::new(Some(root.join("data/learning.json")), None).map_err(|error| format!("{error:?}"))?;
+        editor.maximize();
+        editor.prepare(0)?;
+        editor.scans(&HELLO)?;
+        editor.expect("hello", 0, LONG)?;
+        // A double press: the first converts the word, the second offers a rule.
+        editor.virtual_key(VK_PAUSE)?;
+        editor.virtual_key(VK_PAUSE)?;
+        editor.expect("руддщ", 1, LONG)?;
+        editor.pump(WINDOW_OPENS);
+        // Enter on the offer opens the rule window; nothing is stored yet.
+        editor.virtual_key(VK_RETURN)?;
+        editor.pump(WINDOW_OPENS);
+        store.load().map_err(|error| format!("{error:?}"))?;
+        if store.count() != 0 {
+            return Err("a rule was stored before OK in the rule window".to_owned());
+        }
+        println!("WINDOWS_RULE_WINDOW_E2E_OK");
+        // Enter in the rule window is OK.
+        editor.virtual_key(VK_RETURN)?;
+        let stored = editor.pump_until(STANDARD, |_| {
+            let _ = store.load();
+            store.forced_target(0, "hello") == Some(1)
+        });
+        if !stored {
+            return Err(format!("OK in the rule window stored nothing: {:?}", store.rules()));
+        }
+        editor.pump(PHASE_SETTLE);
+        if !editor.is_zoomed() {
+            return Err("the rule offer changed the maximized target window".to_owned());
+        }
+        if editor.text() != "руддщ" {
+            return Err(format!("the rule offer changed the field: {:?}", editor.text()));
+        }
+        println!("WINDOWS_PROMPT_ENTER_NO_LEAK_E2E_OK");
+        Ok(())
+    }
+
+    fn correct_before_enter(editor: &Editor) -> Result<(), String> {
+        editor.prepare(0)?;
+        let inputs: Vec<NativeInput> = PRIVET.iter().chain(&[SCAN_ENTER]).flat_map(|code| [true, false].map(|pressed| NativeInput { scan_code: *code, ..user(pressed) })).collect();
+        editor.send(&inputs)?;
+        if !editor.pump_until(LONG, |editor| editor.text().contains('\n')) {
+            return Err(format!("the intercepted Enter never reached the field: {:?}", editor.text()));
+        }
+        editor.pump(PHASE_SETTLE);
+        if editor.text() != "привет\r\n" {
+            return Err(format!("Enter submitted an uncorrected or duplicate message: {:?}", editor.text()));
+        }
+        println!("WINDOWS_CORRECT_BEFORE_ENTER_E2E_OK");
+        Ok(())
+    }
+
+    fn run(binary: &Path) -> Result<(), String> {
+        let api = Arc::new(NativeWindowsAPI::new());
+        hook(&api)?;
+        println!("WINDOWS_HOOK_E2E_OK");
+        let root: PathBuf = std::env::temp_dir().join(format!("keyswitch-e2e-{}", std::process::id()));
+        std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+        configure(&root, &[])?;
+        let editor = Editor::new(api)?;
+        editor.pump(PHASE_SETTLE);
+        editor.probe()?;
+        let mut child = start(binary, &root)?;
+        let outcome = (|| -> Result<(), String> {
+            corrections(&editor, &root)?;
+            learning(&editor, &root)?;
+            editor.prepare(0)?;
+            editor.scans(&HELLO)?;
+            editor.scans(&[SCAN_SPACE])?;
+            editor.expect("руддщ ", 1, LONG)?;
+            let history = tail(history_of(&root)?, 3);
+            if history != pairs(&[("ghbdtn", "привет"), ("руддщ", "hello"), ("hello", "руддщ")]) {
+                return Err(format!("unexpected learned history: {history:?}"));
+            }
+            println!("WINDOWS_LEARNING_PROMPT_E2E_OK");
+            let _ = child.kill();
+            let _ = child.wait();
+            configure(&root, &[("detection.correct_on_pause", json!(false)), ("detection.correct_on_enter", json!(true))])?;
+            child = start(binary, &root)?;
+            editor.pump(WINDOW_OPENS);
+            // The first word after a start waits for the hook, as above.
+            let mut attempt = 0;
+            loop {
+                attempt += 1;
+                match correct_before_enter(&editor) {
+                    Ok(()) => return Ok(()),
+                    Err(error) if attempt >= START_ATTEMPTS => return Err(error),
+                    Err(_) => {
+                        editor.activate();
+                        editor.send(&[NativeInput { virtual_key: VK_BACK, ..user(true) }, NativeInput { virtual_key: VK_BACK, ..user(false) }])?;
+                        editor.pump(PHASE_SETTLE);
+                    }
+                }
+            }
+        })();
+        let _ = child.kill();
+        let _ = child.wait();
+        if outcome.is_err() {
+            println!("field={:?} group={}", editor.text(), editor.group());
+            if let Ok(log) = std::fs::read_to_string(root.join("data/keyswitch.log")) {
+                println!("{}", log.lines().rev().take(30).collect::<Vec<&str>>().join("\n"));
+            }
+        }
+        drop(editor);
+        let _ = std::fs::remove_dir_all(&root);
+        outcome
+    }
+
+    pub fn main() {
+        let Some(binary) = std::env::var_os("KS_E2E_BINARY") else {
+            println!("KS_E2E_BINARY is not set: no installed program to drive, skipped");
+            return;
+        };
+        match run(Path::new(&binary)) {
+            Ok(()) => println!("WINDOWS_E2E_OK"),
+            Err(error) => {
+                println!("WINDOWS_E2E_FAILED: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
+}

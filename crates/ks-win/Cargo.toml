@@ -12,6 +12,11 @@ path = "src/lib.rs"
 name = "KeySwitch"
 path = "src/main.rs"
 
+# Drives real windows from its own main thread, and says itself when it has nothing to drive.
+[[test]]
+name = "e2e_windows"
+harness = false
+
 [dependencies]
 ks-backend.workspace = true
 ks-config.workspace = true

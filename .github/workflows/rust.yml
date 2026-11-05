@@ -97,6 +97,23 @@ jobs:
           & $run $app @("--version") 60000
           & $run $app @("--smoke-ui") 120000
           "$((Get-Item $app).Length) bytes, setup $((Get-Item $setup).Length) bytes"
+      - name: The installed program against a real window
+        timeout-minutes: 15
+        shell: pwsh
+        run: |
+          $list = New-WinUserLanguageList -Language "en-US"
+          $list.Add("ru-RU")
+          Set-WinUserLanguageList -LanguageList $list -Force
+          $target = @{ x64 = "x86_64-pc-windows-msvc"; arm64 = "aarch64-pc-windows-msvc"; x86 = "i686-pc-windows-msvc" }["${{ matrix.architecture }}"]
+          cargo test --release -p ks-win --test e2e_windows --target $target --no-run
+          $env:KS_E2E_BINARY = "$env:LOCALAPPDATA\Programs\KeySwitch\KeySwitch.exe"
+          cargo test --release -p ks-win --test e2e_windows --target $target
+          if ($LASTEXITCODE -ne 0) {
+            # The window must take the program's layout switch within the engine's window; a starved runner misses it once. A second failure is real.
+            Write-Host "::warning::the Windows end-to-end test failed once, running it a second time"
+            cargo test --release -p ks-win --test e2e_windows --target $target
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - uses: actions/upload-artifact@v7
         with:
           name: KeySwitch-Setup-${{ matrix.architecture }}
