@@ -20,6 +20,7 @@
 //! `apt-build --tree <root> --repository <folder> --package <file>... [--passphrase-file <file>]`, `apt-verify --tree <root> --repository <folder> --expect-version <version> [--public-key <file>]`
 //! `ks-train ortho --tree <root> --fit|--verify|--test|--promote|--inputs [--web-source <file>]|--freeze-inputs [--output <folder>]`
 //! `ks-train base freeze|reconcile|technical|merge|inventory --tree <root> ...`
+//! `ks-train prefix-corpus --tree <root> [--freeze <folder>]`, `ks-train archive --tree <root> [--write]`
 //! `ks-train detector --tree <root> [--sample N] [--dictionary-sample N] [--strict]`
 //! `ks-train fitting --tree <root> --base <folder> --output <folder> --namespace <text> --tatoeba-directory <folder> --tatoeba-language <code>... ...`
 //!
@@ -105,6 +106,23 @@ fn main() {
     if arguments.first().map(String::as_str) == Some("intent") {
         let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
         if let Err(error) = ks_train::intent::command(&root, &arguments) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if arguments.first().map(String::as_str) == Some("archive") {
+        let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
+        if let Err(error) = ks_train::small_tools::archive(&root, arguments.iter().any(|argument| argument == "--write")) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if arguments.first().map(String::as_str) == Some("prefix-corpus") {
+        let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
+        let resources = ks_lang::Resources::new(root.join("resources"));
+        if let Err(error) = ks_train::prefix_corpus::command(&root, &resources, option(&arguments, "--freeze").map(Path::new)) {
             eprintln!("{error}");
             std::process::exit(1);
         }

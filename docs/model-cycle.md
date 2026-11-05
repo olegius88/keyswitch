@@ -26,6 +26,22 @@
 - Модель намерений: см. ниже.
 - Прогоны на движке: `ks-train engine boundary|prefix --tree . --verify|--refresh-runtime`.
 
+## Основа корпуса контекста
+
+Заморозки `holdout` и `fitting` читают основу, собранную один раз из закреплённых открытых источников. Новая основа нужна только при смене источников:
+
+1. `ks-train base freeze --tree . --source-root <деревья UD> --output <ud0> --namespace <имя> --extra-exposure model/context_v1/scenarios.json --extra-exposure model/context_v1/holdout-2.json --extra-exposure model/context_v1/holdout-3.json`.
+2. `ks-train base reconcile --tree . --corpus <ud0> --source-root <деревья UD> --report <файл> --output <ud1>`.
+3. `ks-train base technical --tree . --source-directory <trixie> --ud-corpus <ud1> --extra-exposure model/context_v1/holdout-3.json --output <tech> --preview-report <файл>`.
+4. `ks-train base merge --tree . --base <ud1> --technical <tech> --output <merged>`.
+5. `ks-train base inventory --tree . --output <файл>`: что видела модель префиксов, тест ей отказывает.
+
+Корпус префиксов: `ks-train prefix-corpus --tree .` собирает его заново и сверяет с файлами в `model/prefix_v1`, `--freeze <папка>` пишет новое поколение. Нужна переменная `KEYSWITCH_HUNSPELL_PATH=model/intent_v1/sources/hunspell`.
+
+Входные данные орфографической модели: `ks-train ortho --tree . --inputs` собирает заново токены, ответ словарей и независимые наборы и сверяет их с замороженными файлами, `--web-source <файл>` сверяет ещё и словарь веб-форм с его источником; `--freeze-inputs --output <папка>` пишет новое поколение.
+
+Семейства, которые больше не обучаются (`boundary_v1`, `context_v1`, `context_v2`, `ortho_v2`), лежат как история и как входные данные других шагов. `ks-train archive --tree .` сверяет каждый их файл с `model/archive-sha256.json`.
+
 ## Модель намерений
 
 Модель читает пары «слово в раскладке и оно же в другой», её источник заморожен в `model/intent_v1/sources`: списки слов Onboard и словари Hunspell. Системные словари на результат не влияют.

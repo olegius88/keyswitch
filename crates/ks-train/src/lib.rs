@@ -27,6 +27,7 @@ pub mod ortho;
 pub mod ortho_inputs;
 pub mod physical;
 pub mod prefix;
+pub mod prefix_corpus;
 pub mod rows;
 pub mod promote;
 pub mod receipt;
@@ -43,3 +44,8 @@ pub const DETERMINISTIC_ROUNDING_DECIMALS: i64 = 9;
 pub const LOG_LOSS_PROBABILITY_FLOOR: f64 = 1e-15;
 pub const PROBABILITY_SUM_TOLERANCE: f64 = 1e-8;
 pub const EPOCH_NET_BENEFIT_TOLERANCE: i64 = 2;
+
+/// A record a person opens to read: indented, keys sorted, and a final newline.
+pub fn train_json(value: &serde_json::Value) -> Vec<u8> {
+    (ks_text::json_dumps(value, &ks_text::JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(2)), sort_keys: true, ..ks_text::JsonOptions::default() }) + "\n").into_bytes()
+}

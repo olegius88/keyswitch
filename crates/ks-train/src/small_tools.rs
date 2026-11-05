@@ -508,3 +508,43 @@ pub fn apt_verify(root: &Path, repository: &Path, expected_version: &str, public
     }
     Ok(format!("APT_REPOSITORY_OK uri={} suite={} component={} architecture={} candidate={candidate}", sources.uri, sources.suite, sources.component, sources.architecture))
 }
+
+/// The folders of families that are no longer trained: rejected by their tests or replaced. Their files are history and
+/// inputs of later steps, so they must not move; nothing is computed from them again.
+const ARCHIVED_FOLDERS: [&str; 4] = ["model/boundary_v1", "model/context_v1", "model/context_v2", "model/ortho_v2"];
+const ARCHIVE_RECORD: &str = "model/archive-sha256.json";
+
+fn archived_files(folder: &Path, root: &Path, into: &mut std::collections::BTreeMap<String, String>) -> Result<(), String> {
+    for entry in std::fs::read_dir(folder).map_err(|error| format!("{}: {error}", folder.display()))? {
+        let path = entry.map_err(|error| error.to_string())?.path();
+        if path.is_dir() {
+            archived_files(&path, root, into)?;
+        } else {
+            let name = path.strip_prefix(root).map_err(|error| error.to_string())?.to_string_lossy().replace('\\', "/");
+            into.insert(name, crate::corpus::checksum(&path)?);
+        }
+    }
+    Ok(())
+}
+
+/// `ks-train archive --tree <root> [--write]`: the digest of every archived file, against the record in the repository.
+pub fn archive(root: &Path, write: bool) -> Result<(), String> {
+    let mut files = std::collections::BTreeMap::new();
+    for folder in ARCHIVED_FOLDERS {
+        archived_files(&root.join(folder), root, &mut files)?;
+    }
+    let value = serde_json::json!(files);
+    if write {
+        return std::fs::write(root.join(ARCHIVE_RECORD), crate::train_json(&value)).map_err(|error| error.to_string());
+    }
+    let recorded = crate::corpus::read_json(&root.join(ARCHIVE_RECORD))?;
+    if recorded != value {
+        let empty = serde_json::Map::new();
+        let table = recorded.as_object().unwrap_or(&empty);
+        let changed: Vec<&String> = files.iter().filter(|(name, digest)| table.get(*name).and_then(serde_json::Value::as_str) != Some(digest.as_str())).map(|(name, _)| name).collect();
+        let missing: Vec<&String> = table.keys().filter(|name| !files.contains_key(*name)).collect();
+        return Err(format!("archived files moved: changed {changed:?}, missing {missing:?}"));
+    }
+    println!("{} archived files are as recorded", files.len());
+    Ok(())
+}
